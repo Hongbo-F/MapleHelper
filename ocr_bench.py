@@ -233,6 +233,7 @@ class Run:
     capture: float
     prep: float
     ocr: float
+    ocr_cpu: float  # CPU time this process spent in the OCR call, summed over all its threads
     stages: dict[str, float]
 
     @property
@@ -323,17 +324,18 @@ def main() -> int:
             if args.scale != 1:
                 img = cv2.resize(img, None, fx=args.scale, fy=args.scale, interpolation=cv2.INTER_CUBIC)
             prep_ms = (time.perf_counter() - t) * 1000
-            t = time.perf_counter()
+            t, c = time.perf_counter(), time.process_time()
             out = engine(img)
             ocr_ms = (time.perf_counter() - t) * 1000
-            run = Run(cap_ms, prep_ms, ocr_ms, stage_ms(out))
+            cpu_ms = (time.process_time() - c) * 1000
+            run = Run(cap_ms, prep_ms, ocr_ms, cpu_ms, stage_ms(out))
 
             label = f"warmup {i + 1}" if i < args.warmup else f"run {i - args.warmup + 1:>3}"
             parts = ", ".join(f"{k} {v:.1f}" for k, v in run.stages.items())
             print(
                 f"{label:<10} capture {cap_ms:6.1f}  ocr {ocr_ms:7.1f}"
                 + (f" ({parts})" if parts else "")
-                + f"  total {run.total:7.1f} ms  lines {len(out.txts or ())}"
+                + f"  cpu {cpu_ms:7.1f}  total {run.total:7.1f} ms  lines {len(out.txts or ())}"
             )
             if i >= args.warmup:
                 runs.append(run)
@@ -360,9 +362,14 @@ def main() -> int:
         values = [r.stages[stage] for r in runs if stage in r.stages]
         if len(values) == len(runs):
             print(stats_line(f" {stage}", values))
+    print(stats_line("ocr cpu", [r.ocr_cpu for r in runs]))
     total = [r.total for r in runs]
     print(stats_line("total", total))
     print(f"  => about {1000 / statistics.median(total):.1f} reads per second at the median")
+    print(
+        f"  => OCR keeps about {statistics.median(r.ocr_cpu for r in runs) / statistics.median(r.ocr for r in runs):.1f}"
+        " CPU cores busy while it runs"
+    )
 
     if args.save:
         cv2.imwrite(str(args.save), img)
