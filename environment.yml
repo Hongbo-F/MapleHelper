@@ -1,0 +1,6 @@
+name: maplehelper
+channels:
+  - conda-forge
+dependencies:
+  - python=3.15
+  - pytest

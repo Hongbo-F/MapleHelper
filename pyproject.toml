@@ -1,0 +1,9 @@
+[project]
+name = "maplehelper"
+version = "0.1.0"
+description = "One-button escape combos with an on-screen coach for a MapleStory dart thief"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

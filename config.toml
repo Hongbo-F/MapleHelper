@@ -1,0 +1,41 @@
+# MapleHelper settings. Key names: a-z, 0-9, f1-f12, left/right/up/down, shift, ctrl, alt,
+# space, enter, tab, esc, insert, delete, home, end, pageup, pagedown, ` - = [ ] \ ; ' , . /
+
+# Hotkeys only work while the focused window's title contains this text.
+# Run `python -m maplehelper --debug` and press a key in the game to see its exact title.
+game_window_title = "MapleStory"
+
+# Her in-game Key Config. Leave a skill as "" if she hasn't learned it yet.
+[keys]
+left = "left"
+right = "right"
+jump = "alt"
+attack = "ctrl"
+lucky_seven = "shift"   # "" -> stars are thrown with jump + attack instead
+dark_sight = "insert"
+hp_potion = "delete"
+
+# The button she presses for each combo. These keys are hidden from the game.
+[hotkeys]
+jump_throw = "f1"   # jump, then attack in mid-air so a star is thrown
+back_off = "f2"     # walk away, turn around, throw twice
+hop_back = "f3"     # hop away from a monster that's on top of her, turn, throw twice
+panic = "f4"        # Dark Sight, potion, walk to safety, potion, face the monsters (interrupts others)
+
+[control]
+abort = "esc"       # stops the running combo (Esc still reaches the game too)
+slow_mode = "f12"   # toggles demo speed: pauses before each step so she can read the coach
+
+# Milliseconds. Tune these while watching her character.
+[timing]
+key_press = 40
+air_delay = 120
+throw_gap = 650
+turn_tap = 50
+walk_away = 500
+hop_hold = 350
+cast_delay = 300
+potion_gap = 200
+panic_walk = 1500
+slow_pause = 900
+recap = 3000
