@@ -10,17 +10,15 @@ game_window_title = "MapleStory"
 left = "left"
 right = "right"
 jump = "alt"
-attack = "ctrl"
-lucky_seven = "shift"   # "" -> stars are thrown with jump + attack instead
-dark_sight = "insert"
-hp_potion = "delete"
+attack = "f"
+lucky_seven = "g"   # "" -> stars are thrown with jump + attack instead
 
 # The button she presses for each combo. These keys are hidden from the game.
 [hotkeys]
 jump_throw = "f1"   # jump, then attack in mid-air so a star is thrown
 back_off = "f2"     # walk away, turn around, throw twice
 hop_back = "f3"     # hop away from a monster that's on top of her, turn, throw twice
-panic = "f4"        # Dark Sight, potion, walk to safety, potion, face the monsters (interrupts others)
+jump_back_shot = "f4"  # jump away, turn around in the air, throw at the monster before landing
 
 [control]
 abort = "esc"       # stops the running combo (Esc still reaches the game too)
@@ -34,8 +32,5 @@ throw_gap = 650
 turn_tap = 50
 walk_away = 500
 hop_hold = 350
-cast_delay = 300
-potion_gap = 200
-panic_walk = 1500
 slow_pause = 900
 recap = 3000

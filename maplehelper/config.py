@@ -21,8 +21,6 @@ class GameKeys:
     jump: Key
     attack: Key
     lucky_seven: Key | None = None  # None: throw stars with jump + attack instead
-    dark_sight: Key | None = None
-    hp_potion: Key | None = None
 
 
 @dataclass(frozen=True)
@@ -34,9 +32,6 @@ class Timing:
     turn_tap: int = 50      # tap length that turns her around without walking far
     walk_away: int = 500    # how long "Back Off" walks away
     hop_hold: int = 350     # how long the away arrow stays held during "Hop Back"
-    cast_delay: int = 300   # wait after casting Dark Sight
-    potion_gap: int = 200   # wait after drinking a potion
-    panic_walk: int = 1500  # how long "Panic" walks away while hidden
     slow_pause: int = 900   # slow mode: pause before each step so she can read it
     recap: int = 3000       # how long the full recipe stays on screen after a combo
 

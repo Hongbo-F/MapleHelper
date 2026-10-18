@@ -31,7 +31,6 @@ class Combo:
     name: str                          # used in config.toml [hotkeys]
     title: str                         # shown on the coach overlay
     script: Callable[["Ctx"], None]
-    urgent: bool = False               # may interrupt a combo that is already running
 
 
 class Ctx:
@@ -56,11 +55,12 @@ class Ctx:
         self._title = title
         self._held: set[Key] = set()
 
-    def say(self, text: str) -> None:
-        """Start a new step: show it on the coach. In slow mode, pause so she can read it."""
+    def say(self, text: str, pause: bool = True) -> None:
+        """Start a new step: show it on the coach. In slow mode, pause so she can read it,
+        except for steps that happen mid-move (pause=False), such as while she's in the air."""
         self.recipe.append(text)
         self._display.step(self._title, text)
-        if self._slow:
+        if self._slow and pause:
             self.wait(self.t.slow_pause)
 
     def wait(self, ms: int) -> None:
@@ -99,6 +99,15 @@ class Ctx:
             return f"{k.lucky_seven.label} (Lucky Seven)"
         return f"{k.jump.label} + {k.attack.label} in mid-air"
 
+    @property
+    def air_throw_label(self) -> str:
+        k = self.keys
+        return f"{k.lucky_seven.label} (Lucky Seven)" if k.lucky_seven else k.attack.label
+
+    def air_throw(self) -> None:
+        """While airborne, Lucky Seven or a plain attack both throw a star."""
+        self.tap(self.keys.lucky_seven or self.keys.attack)
+
     def jump_attack(self) -> None:
         """Attacking while airborne throws a star instead of swiping with the claw."""
         self.tap(self.keys.jump)
@@ -129,7 +138,6 @@ class Runner:
         self._queue: queue.SimpleQueue[Combo | None] = queue.SimpleQueue()
         self._lock = threading.Lock()
         self._busy = False
-        self._urgent_queued = False  # an urgent combo is queued or running; nothing may interrupt it
         self._thread = threading.Thread(target=self._work, name="combo-runner", daemon=True)
 
     def start(self) -> None:
@@ -145,11 +153,8 @@ class Runner:
         combo = self.combos[name]
         with self._lock:
             if self._busy:
-                if not combo.urgent or self._urgent_queued:
-                    return False
-                self._abort.set()  # stop the current combo; this one runs right after
+                return False
             self._busy = True
-            self._urgent_queued = self._urgent_queued or combo.urgent
             self._queue.put(combo)
         return True
 
@@ -185,6 +190,4 @@ class Runner:
             except Exception:
                 log.exception("combo %s failed", combo.name)
             with self._lock:
-                if self._queue.empty():
-                    self._busy = False
-                    self._urgent_queued = False
+                self._busy = False

@@ -31,7 +31,7 @@ class Recorder:
 
 def game_keys(**overrides):
     base = dict(left=K("left"), right=K("right"), jump=K("alt"), attack=K("ctrl"),
-                lucky_seven=K("shift"), dark_sight=K("insert"), hp_potion=K("delete"))
+                lucky_seven=K("shift"))
     return GameKeys(**(base | overrides))
 
 
@@ -97,19 +97,31 @@ def test_hop_back_holds_away_arrow_through_the_jump():
     assert combo_keys(rec)[:4] == [("down", "left"), ("down", "alt"), ("up", "alt"), ("up", "left")]
 
 
-def test_panic_hides_heals_walks_away_and_faces_the_monsters_again():
+def test_jump_back_shot_jumps_away_turns_in_the_air_and_throws_at_the_monster():
     rec = Recorder()
-    runner = make_runner(rec)
-    runner.facing = LEFT
-    run(runner, "panic")
-    assert combo_keys(rec) == tap("insert") + tap("delete") + tap("right") + tap("delete") + tap("left")
-    assert runner.facing == LEFT
+    runner = run(make_runner(rec), "jump_back_shot")
+    assert combo_keys(rec) == [("down", "left"), ("down", "alt"), ("up", "alt"), ("up", "left"),
+                               ("down", "right"), ("up", "right"), ("down", "shift"), ("up", "shift")]
+    assert runner.facing == RIGHT
+    assert rec.steps == ["Hold ← + ALT to jump away", "In the air: tap → to face them",
+                         "SHIFT (Lucky Seven) to throw before landing"]
 
 
-def test_panic_skips_skills_that_are_not_bound():
+def test_jump_back_shot_without_lucky_seven_throws_with_plain_attack():
     rec = Recorder()
-    run(make_runner(rec, game_keys(dark_sight=None, hp_potion=None)), "panic")
-    assert combo_keys(rec) == tap("left") + tap("right")
+    run(make_runner(rec, game_keys(lucky_seven=None)), "jump_back_shot")
+    assert combo_keys(rec)[-2:] == tap("ctrl")  # already airborne, so no second jump
+    assert rec.steps[-1] == "CTRL to throw before landing"
+
+
+def test_slow_mode_never_pauses_mid_air():
+    rec = Recorder()
+    runner = make_runner(rec, timing=Timing(**{**vars(ZERO), "slow_pause": 150}))
+    runner.slow = True
+    started = time.perf_counter()
+    run(runner, "jump_back_shot")
+    # One pause (before the jump only); the margin covers Windows timers waking a little early or late.
+    assert 0.13 <= time.perf_counter() - started < 0.28
 
 
 def test_abort_releases_held_keys_and_reports_stopped():
@@ -129,15 +141,14 @@ def test_slow_mode_pauses_before_each_step():
     runner.slow = True
     started = time.perf_counter()
     run(runner, "back_off")
-    assert time.perf_counter() - started >= 3 * 0.03
+    assert time.perf_counter() - started >= 3 * 0.03 * 0.9  # margin: Windows timers can wake a little early
 
 
-def test_busy_runner_ignores_normal_combos_but_urgent_one_interrupts():
+def test_busy_runner_ignores_new_combos_until_the_current_one_ends():
     rec = Recorder()
     combos = [
         Combo("long", "Long", lambda c: c.tap(c.keys.left, 5000)),
         Combo("quick", "Quick", lambda c: c.say("quick")),
-        Combo("panic", "Panic", lambda c: c.say("panic!"), urgent=True),
     ]
     runner = make_runner(rec, combos=combos)
     runner.start()
@@ -145,27 +156,13 @@ def test_busy_runner_ignores_normal_combos_but_urgent_one_interrupts():
         assert runner.trigger("long")
         wait_until(lambda: ("down", "left") in rec.events)
         assert not runner.trigger("quick")
-        assert runner.trigger("panic")
-        assert not runner.trigger("panic")  # already interrupting
-        wait_until(lambda: len(rec.dones) == 2)
-        assert rec.dones == [("Stopped", []), ("Done ✓", ["panic!"])]
+        assert not runner.trigger("long")
+        runner.abort()
+        wait_until(lambda: len(rec.dones) == 1)
+        assert rec.dones == [("Stopped", [])]
         wait_until(lambda: runner.trigger("quick"))  # idle again
-        wait_until(lambda: len(rec.dones) == 3)
+        wait_until(lambda: len(rec.dones) == 2)
         assert rec.dones[-1] == ("Done ✓", ["quick"])
-    finally:
-        runner.stop()
-
-
-def test_urgent_combo_started_from_idle_cannot_be_restarted_mid_way():
-    rec = Recorder()
-    combos = [Combo("panic", "Panic", lambda c: c.tap(c.keys.left, 5000), urgent=True)]
-    runner = make_runner(rec, combos=combos)
-    runner.start()
-    try:
-        assert runner.trigger("panic")
-        wait_until(lambda: ("down", "left") in rec.events)
-        assert not runner.trigger("panic")
-        assert rec.dones == []
     finally:
         runner.stop()
 

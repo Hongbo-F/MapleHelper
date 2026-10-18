@@ -7,7 +7,7 @@ One-button escape combos for a dart thief, with an on-screen coach that narrates
 | F1 | Jump-Throw | Jump, then attack in mid-air so a star is thrown (no claw swipe) |
 | F2 | Back Off & Throw | Walk away, turn around, throw twice |
 | F3 | Hop Back & Throw | Hop away from a monster that's on top of her, turn, throw twice |
-| F4 | Panic: Hide & Heal | Dark Sight, potion, walk to safety, potion, face the monsters again. Interrupts any other combo |
+| F4 | Jump-Back Shot | Jump away, turn around in the air, throw at the monster before landing |
 | Esc | | Stop the running combo |
 | F12 | | Slow / demo mode: pauses before each step so she can read the coach |
 
@@ -29,11 +29,11 @@ Quit with Ctrl+C in that terminal.
 
 ## First run checklist
 
-1. **Match her key config.** Edit `[keys]` in [config.toml](config.toml) to match her in-game Key Config. If she hasn't learned Lucky Seven or Dark Sight yet, set it to `""`. Without Lucky Seven, stars are thrown with jump + attack.
+1. **Match her key config.** Edit `[keys]` in [config.toml](config.toml) to match her in-game Key Config. If she hasn't learned Lucky Seven yet, set it to `""`. Without Lucky Seven, stars are thrown with jump + attack.
 2. **Check the window title.** Run `python -m maplehelper --debug`, press a key in the game, and look at the logged `focused window` title. `game_window_title` must be part of it.
 3. **Play in windowed or borderless mode.** The coach overlay can't draw over exclusive fullscreen.
 4. **If keys don't reach the game,** start the terminal as Administrator. Windows blocks input from normal programs to games that run elevated.
-5. **Tune `[timing]`** while watching her character. `throw_gap` depends on her claw speed, and `walk_away` / `panic_walk` on how far she should run.
+5. **Tune `[timing]`** while watching her character. `throw_gap` depends on her claw speed, `walk_away` on how far she should back off, and `air_delay` / `turn_tap` on when she turns and throws mid-jump.
 
 ## Trying it without the game
 
@@ -61,7 +61,7 @@ def my_combo(c):
     c.throw(3)
 ```
 
-`c.front` / `c.back` are the arrows toward / away from the monsters. `c.keys` holds her bindings and `c.t` the timings. Also available: `c.down`, `c.up`, `c.wait`, `c.jump_attack`.
+`c.front` / `c.back` are the arrows toward / away from the monsters. `c.keys` holds her bindings and `c.t` the timings. Also available: `c.down`, `c.up`, `c.wait`, `c.jump_attack`, `c.air_throw`. Use `c.say(text, pause=False)` for steps that happen mid-air, so slow mode doesn't pause there.
 
 ## How it works
 

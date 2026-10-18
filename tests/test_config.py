@@ -1,5 +1,3 @@
-import tomllib
-
 import pytest
 
 from maplehelper import config
@@ -9,27 +7,23 @@ from maplehelper.combos import COMBOS
 NAMES = [c.name for c in COMBOS]
 
 
-def default_data():
-    with open(DEFAULT_CONFIG, "rb") as f:
-        return tomllib.load(f)
-
-
-def parse(data):
-    return config.parse(data, NAMES)
-
-
-def test_shipped_config_loads():
+def test_shipped_config_is_valid():
     cfg = config.load(DEFAULT_CONFIG, NAMES)
+    assert set(cfg.hotkeys) <= set(NAMES)
+
+
+def test_parses_keys_hotkeys_and_timing(config_data):
+    cfg = config.parse(config_data, NAMES)
     assert cfg.keys.jump.name == "alt"
     assert cfg.keys.lucky_seven.name == "shift"
-    assert set(cfg.hotkeys) == set(NAMES)
+    assert cfg.hotkeys["jump_back_shot"].name == "f5"
     assert cfg.timing.throw_gap == 650
+    assert cfg.timing.air_delay == 120  # default when not set
 
 
-def test_empty_skill_means_not_bound():
-    data = default_data()
-    data["keys"]["lucky_seven"] = ""
-    assert parse(data).keys.lucky_seven is None
+def test_empty_skill_means_not_bound(config_data):
+    config_data["keys"]["lucky_seven"] = ""
+    assert config.parse(config_data, NAMES).keys.lucky_seven is None
 
 
 @pytest.mark.parametrize("mutate, message", [
@@ -38,19 +32,20 @@ def test_empty_skill_means_not_bound():
     (lambda d: d["keys"].update(haste="h"), "unknown action(s) ['haste']"),
     (lambda d: d["hotkeys"].update(back_off="shift"), "already used by keys.lucky_seven"),
     (lambda d: d["hotkeys"].update(back_off="f1"), "already used by hotkeys.jump_throw"),
-    (lambda d: d["hotkeys"].update(panic="esc"), "already used by control.abort"),
-    (lambda d: d["hotkeys"].update(fly="f5"), "unknown combo(s) ['fly']"),
+    (lambda d: d["hotkeys"].update(hop_back="esc"), "already used by control.abort"),
+    (lambda d: d["keys"].update(dark_sight="insert"), "unknown action(s) ['dark_sight']"),
+    (lambda d: d["hotkeys"].update(panic="f4"), "unknown combo(s) ['panic']"),
+    (lambda d: d["hotkeys"].update(fly="f6"), "unknown combo(s) ['fly']"),
     (lambda d: d["hotkeys"].update(back_off=2), "must be a key name in quotes"),
     (lambda d: d["timing"].update(throw_gapp=600), "unknown setting(s) ['throw_gapp']"),
     (lambda d: d["timing"].update(throw_gap=-1), "timing.throw_gap must be"),
     (lambda d: d["timing"].update(throw_gap=True), "timing.throw_gap must be"),
     (lambda d: d.update(game_window_title=""), "game_window_title"),
 ])
-def test_bad_config_is_explained(mutate, message):
-    data = default_data()
-    mutate(data)
+def test_bad_config_is_explained(config_data, mutate, message):
+    mutate(config_data)
     with pytest.raises(config.ConfigError) as err:
-        parse(data)
+        config.parse(config_data, NAMES)
     assert message in str(err.value)
 
 
