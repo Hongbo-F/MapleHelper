@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from .engine import Row
+from .exp_table import EXP_TO_NEXT
 
 # Characters OCR puts where a digit should be, mapped back. Only the common, unambiguous ones: folding
 # letters like S or B too would turn a label stuck to a number into digits.
@@ -41,17 +42,21 @@ _HP = re.compile(rf"\bH\s?P\W*({_NUM})\s*[/\\]\s*({_NUM})", re.I)
 _MP = re.compile(rf"\bM\s?P\W*({_NUM})\s*[/\\]\s*({_NUM})", re.I)
 _EXP = re.compile(rf"\bE\s?X\s?P\W*({_NUM})\s*[\[({{]?\s*(\d{{1,3}}(?:[.,]\d{{1,3}})?)\s*%", re.I)
 _LEVEL = re.compile(r"\bL\s?V\s?\.?\s*(\d{1,3})\b", re.I)
+_LONE_NUMBER = re.compile(r"(\d{1,3})")
+_GAUGE = re.compile(r"\b(?:H\s?P|M\s?P|E\s?X\s?P)\b", re.I)
 
 LEVEL_TOLERANCE = 0.02  # EXP-for-next-level worked out from points / percent must be this close to the table's
 MIN_PERCENT = 1.0       # below this, the two decimals of the percentage are too coarse to pin a level
+MAX_LEVEL = 200
 
 
-def parse_hud(rows: Iterable[Row], exp_table: Mapping[int, int] | None = None) -> HudReading | None:
+def parse_hud(rows: Iterable[Row], exp_table: Mapping[int, int] | None = EXP_TO_NEXT) -> HudReading | None:
     """HP, MP, EXP and level from the bottom bar's lines; None when they don't look like the bar.
 
-    `exp_table` maps level -> EXP needed to reach the next level. With it, the level comes from the EXP
-    (the game's stylized level digits misread often), and a level read from the digits is kept only when the
-    EXP fits it."""
+    `exp_table` maps level -> EXP needed to reach the next level (Classic World's by default; None for none).
+    With it, the level comes from the EXP, because the game's stylized level digits misread often ("19" as
+    "09"). A level read from the digits is kept only when the EXP fits it."""
+    rows = list(rows)
     text = "  ".join(r.text for r in rows)
     hp, mp, exp = _pair(_HP, text), _pair(_MP, text), _EXP.search(text)
     if not hp and not exp:
@@ -67,13 +72,44 @@ def parse_hud(rows: Iterable[Row], exp_table: Mapping[int, int] | None = None) -
     if exp_table and points is not None and percent is not None:
         level = level_from_exp(points, percent, exp_table)
         source = "exp" if level else None
-    if level is None and (m := _LEVEL.search(text)):
-        read = int(m.group(1))
-        fits = not exp_table or points is None or (read in exp_table and points <= exp_table[read])
-        if 1 <= read <= 300 and fits:
-            level, source = read, "read"
+    if level is None and (digits := _level_digits(rows)):
+        for candidate in _level_candidates(digits):
+            if not exp_table or points is None or _exp_fits(candidate, points, percent, exp_table):
+                level, source = candidate, "read"
+                break
 
     return HudReading(*(hp or (None, None)), *(mp or (None, None)), points, percent, level, source)
+
+
+def _level_digits(rows: list[Row]) -> str | None:
+    # The level as drawn: "LV. 19" in one row, or its digits alone in a row left of the HP/MP/EXP gauges.
+    for row in rows:
+        if m := _LEVEL.search(row.text):
+            return m.group(1)
+    gauge = min((r.left for r in rows if _GAUGE.search(r.text)), default=None)
+    for row in rows:
+        if (gauge is None or row.right <= gauge) and (m := _LONE_NUMBER.fullmatch(row.text.strip())):
+            return m.group(1)
+    return None
+
+
+def _level_candidates(digits: str) -> list[int]:
+    # A level never starts with 0: the stylized 1 reads as 0 ("19" as "09", "10" as "00"). Try the repaired
+    # digits first, then the digits as read.
+    tries = ["1" + digits[1:], digits.lstrip("0")] if digits.startswith("0") else [digits]
+    return [int(d) for d in tries if d and 1 <= int(d) <= MAX_LEVEL]
+
+
+def _exp_fits(level: int, points: int, percent: float | None, exp_table: Mapping[int, int]) -> bool:
+    # A level is possible when its requirement holds the points, and (with a percentage) points / percent
+    # lands near it. The percentage shows two decimals, so it can be off by 0.01: more slack the smaller it is.
+    need = exp_table.get(level)
+    if not need or points > need:
+        return False
+    if not percent:
+        return True
+    slack = LEVEL_TOLERANCE + 0.01 / percent
+    return abs(points * 100 / percent - need) <= slack * need
 
 
 def level_from_exp(points: int, percent: float, exp_table: Mapping[int, int]) -> int | None:
@@ -86,10 +122,17 @@ def level_from_exp(points: int, percent: float, exp_table: Mapping[int, int]) ->
 
 
 def _pair(pattern: re.Pattern, text: str) -> tuple[int, int] | None:
-    # "current / max", dropped when it can't be right (current above max).
+    # "current / max", dropped when it can't be right (current above max). The bar writes "HP[642/642]",
+    # and OCR reads the closing "]" as "1" often enough ("HP[642/6421"): with an opening "[" and no closing
+    # one, a trailing 1-like character is that bracket.
     if not (m := pattern.search(text)):
         return None
-    cur, top = _number(m.group(1)), _number(m.group(2))
+    cur_raw, top_raw = m.group(1), m.group(2)
+    opened = "[" in text[m.start():m.start(1)]
+    closed = text[m.end(2):m.end(2) + 1] in ("]", ")")
+    if opened and not closed and len(top_raw) > 1 and top_raw[-1] in "1lIi|":
+        top_raw = top_raw[:-1]
+    cur, top = _number(cur_raw), _number(top_raw)
     if cur is None or top is None or top == 0 or cur > top:
         return None
     return cur, top
@@ -110,7 +153,7 @@ _AMOUNT = re.compile(r"[(\[{]\s*([+t4]?)\s*(\d[\d,.]*)\s*[)\]}]")
 _EARNED = r"e\s?[ae]?\s?r?\s?(?:rn|[nm]){1,2}\s?e?d\b"   # earned, eamed, earmed, eaned, earnd...
 _ITEM = re.compile(rf"^(?P<name>.+?)\s*[xX×]\s*(?P<n>[\dlIi|]{{1,4}})\s*\.?\s*{_EARNED}", re.I)
 _EXP_LINE = re.compile(r"\bE\s?X\s?P\b", re.I)
-_RECEIVED = re.compile(r"(?:re)?cei?v|recei|rece", re.I)
+_RECEIVED = re.compile(r"(?:re)?cei?v|recei|rece|re\w?[ie]{1,2}v", re.I)  # also OCR's reeived, recieved
 _MESOS = re.compile(r"\b(?:m|rn)[e3]s[o0]s?\b|\b(?:m|rn)es\b|meso", re.I)
 _GAINED = re.compile(r"gain|have", re.I)
 

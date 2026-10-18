@@ -54,10 +54,52 @@ def test_hud_level_read_is_kept_only_when_exp_fits():
     assert parse_hud(rows("LV. 7", "HP 50/50"), None).level == 7
 
 
+# With the real Classic World table (the default): level 19 needs 16,680 EXP for level 20.
+
+def test_classic_level_19_from_exp_although_read_as_09():
+    r = parse_hud(rows("LV. 09", "HP 812/900", "MP 300/420", "EXP 13500 [80.93%]"))
+    assert (r.level, r.level_source) == (19, "exp")
+
+
+def test_classic_level_digits_repaired_when_percent_is_too_small():
+    # Right after a level up the percentage is too coarse to pin the level; the read "09" is repaired to 19,
+    # which the EXP fits (9 can't hold 50 EXP at 0.29%).
+    r = parse_hud(rows("LV.09", "HP 812/900", "EXP 50 [0.29%]"))
+    assert (r.level, r.level_source) == (19, "read")
+
+
+def test_classic_level_digits_alone_left_of_the_gauges():
+    bar = [Row("09", 0.9, 30, 20, 18, 20, 40), Row("Rogue", 0.99, 90, 20, 14, 60, 120),
+           Row("HP 812/900", 1.0, 400, 20, 14, 350, 450), Row("EXP 50 [0.29%]", 1.0, 800, 20, 14, 740, 860)]
+    assert parse_hud(bar).level == 19
+
+
+def test_real_bar_read():
+    # What OCR read from the bar in the game (1920x1080 window); the character name is a placeholder.
+    bar = [Row("LV. 09", 0.97, 452, 40, 44, 400, 504), Row("Rogue", 1.0, 541, 30, 30, 508, 574),
+           Row("HP[642/6421", 0.93, 753, 29, 36, 698, 808), Row("MP[516/516]", 0.98, 906, 30, 37, 850, 962),
+           Row("EXP.248[1.49%]", 0.93, 1074, 29, 28, 1010, 1138), Row("Name1", 1.0, 549, 50, 30, 508, 590)]
+    r = parse_hud(bar)
+    assert (r.hp, r.hp_max, r.mp, r.mp_max) == (642, 642, 516, 516)  # "]" read as "1" in 6421
+    assert (r.exp, r.exp_percent) == (248, 1.49)
+    assert (r.level, r.level_source) == (19, "exp")  # the boxed "19" reads as "09"
+
+
+def test_hp_bracket_fix_only_applies_to_an_unclosed_bracket():
+    assert parse_hud(rows("HP[642/6421]")).hp_max == 6421
+    assert parse_hud(rows("HP 642/6421")).hp_max == 6421
+
+
+def test_classic_level_unknown_when_nothing_fits():
+    assert parse_hud(rows("LV. 09", "HP 812/900", "EXP 99999 [0.29%]")).level is None
+
+
 @pytest.mark.parametrize("text, kind, amount, sure", [
     ("You received EXP (+21)", "exp", 21, True),
     ("You received EXP (t21)", "exp", 21, False),
     ("You recel ved EXP [+1,234]", "exp", 1234, True),
+    ("You reeived EXP (+28)", "exp", 28, True),      # read like this in the game
+    ("You recieved EXP (+28)", "exp", 28, True),
     ("You have gained mesos (+27)", "mesos", 27, True),
     ("You have gained rnesos (+27)", "mesos", 27, True),
     ("You have gained mes0s (443)", "mesos", 43, False),  # "+" read as "4"
@@ -90,6 +132,12 @@ def test_loot_item_name_matched_to_known_names():
 def test_other_text_is_not_loot():
     assert parse_loot("Henesys") is None
     assert parse_loot("Quest completed (1/3)") is None
+
+
+@pytest.mark.parametrize("text", ["Name1", "Name2", "米", "Party", "Lv. 19 Rogue"])
+def test_party_panel_lines_are_not_loot(text):
+    # The party panel sits inside the pickup box: member names with HP bars, the leader's icon read as "米".
+    assert parse_loot(text) is None
 
 
 def test_match_name():

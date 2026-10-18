@@ -35,12 +35,19 @@ def scene(h, w):
 
 
 def test_content_box_trims_pillarbox_and_letterbox():
-    picture = np.zeros((100, 200, 3), np.uint8)
-    picture[:, 30:170] = scene(100, 140)
-    assert content_box(picture) == (30, 0, 140, 100)
-    picture = np.zeros((120, 200, 3), np.uint8)
-    picture[10:110] = scene(100, 200)
-    assert content_box(picture) == (0, 10, 200, 100)
+    picture = np.zeros((90, 200, 3), np.uint8)  # a 4:3 game on a wide window
+    picture[:, 40:160] = scene(90, 120)
+    assert content_box(picture) == (40, 0, 120, 90)
+    picture = np.zeros((132, 192, 3), np.uint8)  # a 16:9 game on a taller window
+    picture[12:120] = scene(108, 192)
+    assert content_box(picture) == (0, 12, 192, 108)
+
+
+def test_content_box_keeps_black_beyond_a_narrow_map():
+    # 1920x1080 window, map drawn 400..1520 (black beyond its ends): 1120x1080 is no game shape.
+    picture = np.zeros((108, 192, 3), np.uint8)
+    picture[:, 40:152] = scene(108, 112)
+    assert content_box(picture) == (0, 0, 192, 108)
 
 
 def test_content_box_leaves_a_dark_edge_alone():

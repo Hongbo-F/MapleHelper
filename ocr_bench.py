@@ -282,7 +282,7 @@ def main() -> int:
             return image, 0.0
 
     else:
-        sct = mss.mss()
+        sct = mss.MSS()
         hwnd = None
         if args.window:
             hwnd, title = find_window(args.window)

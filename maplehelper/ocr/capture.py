@@ -122,6 +122,21 @@ def covered(hwnd, box: Box) -> bool:
     return False
 
 
+def visible_part(box: Box, monitors: list[dict], slack: int) -> Box | None:
+    """The part of `box` on the monitor that shows most of it, or None when more than `slack` px of its width or
+    height is off that monitor (a grab gives black there). `monitors` as mss lists them."""
+    x, y, w, h = box
+    best, best_area = None, 0
+    for m in monitors:
+        left, top = max(x, m["left"]), max(y, m["top"])
+        right, bottom = min(x + w, m["left"] + m["width"]), min(y + h, m["top"] + m["height"])
+        if right > left and bottom > top and (right - left) * (bottom - top) > best_area:
+            best, best_area = (left, top, right - left, bottom - top), (right - left) * (bottom - top)
+    if best is None or w - best[2] > slack or h - best[3] > slack:
+        return None
+    return best
+
+
 class GameCapture:
     """Grabs regions of the game's picture. Re-finds the window when it closes, follows it when it moves, and
     re-measures the black bars when its size changes (and every BARS_EVERY_S). Use it from one thread.
@@ -130,6 +145,7 @@ class GameCapture:
     """
 
     BARS_EVERY_S = 30.0
+    OFF_SCREEN_SLACK = 10  # px of the window that may hang off the screen; that strip is just left out
 
     def __init__(self, title: str = "MapleStory"):
         import mss  # imported here so regions/parse stay usable without it
@@ -137,7 +153,7 @@ class GameCapture:
         set_dpi_aware()
         self.title = title
         self.problem: str | None = None
-        self._sct = mss.mss()
+        self._sct = mss.MSS()
         self._screenshot_error = mss.exception.ScreenShotError
         self._hwnd = None
         self._bars: tuple[tuple[int, int], Box] | None = None  # (client size, picture box inside the client)
@@ -155,7 +171,8 @@ class GameCapture:
             return None
         size, now = client[2:], time.monotonic()
         stale = self._bars is None or self._bars[0] != size or now - self._bars_at > self.BARS_EVERY_S
-        if stale and not covered(hwnd, client):
+        # Bars are measured on the whole picture only: an edge cut off by the screen would look like a bar.
+        if stale and self._visible(client, slack=0) == client and not covered(hwnd, client):
             picture = self._shot(client)
             if picture is not None:
                 self._bars, self._bars_at = (size, content_box(picture)), now
@@ -170,8 +187,8 @@ class GameCapture:
         area = self.play_area()
         if area is None:
             return None
-        box = region.box(area) if region else area
-        if not self._on_screen(box):  # a grab gives black where the window hangs off the screen
+        box = self._visible(region.box(area) if region else area)
+        if box is None:
             self.problem = "off screen"
             return None
         if covered(self._hwnd, box):
@@ -195,11 +212,8 @@ class GameCapture:
             self._hwnd, self._bars = find_window(self.title), None
         return self._hwnd
 
-    def _on_screen(self, box: Box) -> bool:
-        # Inside one monitor: the space between two monitors of different sizes is off screen too.
-        x, y, w, h = box
-        return any(m["left"] <= x and m["top"] <= y and x + w <= m["left"] + m["width"] and y + h <= m["top"] + m["height"]
-                   for m in self._sct.monitors[1:])
+    def _visible(self, box: Box, slack: int | None = None) -> Box | None:
+        return visible_part(box, self._sct.monitors[1:], self.OFF_SCREEN_SLACK if slack is None else slack)
 
     def _shot(self, box: Box) -> np.ndarray | None:
         x, y, w, h = box

@@ -128,6 +128,12 @@ class OcrEngine:
                 self._check_providers(ocr)
             return rows_from(out.boxes, out.txts, out.scores, factor)
 
+    def load(self) -> bool:
+        """Loads the models now rather than on the first read, so the loading and its messages (onnxruntime
+        prints some straight to the console) happen at a known time. False when OCR can't load (logged)."""
+        with self._lock:
+            return self._load() is not None
+
     def providers(self) -> dict[str, str]:
         """Which execution provider each loaded model runs on, e.g. {"det": "CUDA", "rec": "CUDA"}."""
         with self._lock:
@@ -139,16 +145,26 @@ class OcrEngine:
                 if self.settings.device == "cuda":
                     _add_conda_dll_dir()
                 from rapidocr import RapidOCR  # imported late: the package stays importable without it
-                self._ocr = RapidOCR(params=self.settings.params())
+                ocr = RapidOCR(params=self.settings.params())
+                # RapidOCR loads each model when first needed, the text model only once something is detected.
+                # Load them all here instead (these loaders are RapidOCR internals: skipped if they're gone).
+                loaders = ["_load_det_model", "_load_rec_model"] + (["_load_cls_model"] if ocr.use_cls else [])
+                for name in loaders:
+                    if loader := getattr(ocr, name, None):
+                        loader()
+                self._ocr = ocr
+                self._check_providers(ocr)
             except Exception as e:
                 self._failed = True
                 log.warning("OCR unavailable: %s", e)
         return self._ocr
 
     def _check_providers(self, ocr) -> None:
-        # The models load on the first read, and RapidOCR falls back to the CPU with only a log line.
-        self._checked_providers = True
+        # RapidOCR falls back to the CPU with only a log line. Checked once both models are loaded.
         found = _session_providers(ocr)
+        if "rec" not in found:
+            return
+        self._checked_providers = True
         if self.settings.device == "cuda" and any(p != "CUDA" for p in found.values()):
             log.warning("CUDA was asked for but OCR runs on %s (driver or CUDA libraries missing?)", found)
 

@@ -56,15 +56,21 @@ PRESETS = {p.name: p for p in (HUD, LOOT)}
 _DARK = 12      # a bar pixel's brightest channel is at most this
 _MIN_BAR = 4    # px: thinner dark edges are just the scene
 _BAR_SLACK = 2  # px: the two bars of a centred picture may differ by this much
+GAME_ASPECTS = (16 / 9, 16 / 10, 4 / 3)  # shapes the game keeps its picture to
+_ASPECT_SLACK = 0.02
 
 
 def content_box(picture: np.ndarray) -> Box:
     """The part of `picture` without the black bars a game adds to keep its aspect ratio (a 16:9 game on an
-    ultrawide screen, or a 4:3 one on 16:9). Only real bars count: nearly black and the same width on both
-    sides; a dark scene touching one edge is left alone."""
+    ultrawide screen, or a 4:3 one on 16:9). Only real bars count: nearly black, the same width on both sides,
+    and leaving a picture of a shape the game draws. A dark scene touching one edge, or black beyond the ends
+    of a map narrower than the window (the interface still spans the window), is left alone."""
+    h, w = picture.shape[:2]
     bright = picture.max(axis=2) if picture.ndim == 3 else picture
     x, cw = _trim(bright.max(axis=0))
     y, ch = _trim(bright.max(axis=1))
+    if (cw, ch) != (w, h) and not any(abs(cw / ch - a) <= _ASPECT_SLACK * a for a in GAME_ASPECTS):
+        return 0, 0, w, h
     return x, y, cw, ch
 
 
