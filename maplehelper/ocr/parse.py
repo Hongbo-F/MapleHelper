@@ -6,8 +6,9 @@ and a value read from a doubtful character is marked unsure, so a caller can wai
 """
 
 import difflib
+import functools
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 
 from .engine import Row
@@ -147,6 +148,8 @@ class LootLine:
     item: str | None = None       # item name as read (or as matched, when names were given)
     quantity: int | None = None
     sure: bool = False            # read with its "+" sign / clean digits; False: a doubtful character was folded
+    cut: bool = False             # `item` is only the start of the name: the game cut it off with "..." and no
+                                  # known name completed it
 
 
 _AMOUNT = re.compile(r"[(\[{]\s*([+t4]?)\s*(\d[\d,.]*)\s*[)\]}]")
@@ -156,19 +159,27 @@ _EXP_LINE = re.compile(r"\bE\s?X\s?P\b", re.I)
 _RECEIVED = re.compile(r"(?:re)?cei?v|recei|rece|re\w?[ie]{1,2}v", re.I)  # also OCR's reeived, recieved
 _MESOS = re.compile(r"\b(?:m|rn)[e3]s[o0]s?\b|\b(?:m|rn)es\b|meso", re.I)
 _GAINED = re.compile(r"gain|have", re.I)
+_CUT = re.compile(r"(?:…|[.,]\s*[.,])[\s.,…]*$")  # the "..." ending a cut-off name, also read as ".." or "…"
 
 
 def parse_loot(text: str, item_names: Iterable[str] | None = None) -> LootLine | None:
     """One pickup message, e.g. "You received EXP (+21)", "You have gained mesos (+27)",
-    "Leaf x1 earned. (Etc)"; None for anything else. With `item_names`, an item's name is matched to them."""
+    "Leaf x1 earned. (Etc)"; None for anything else. With `item_names`, an item's name is matched to them.
+
+    The game cuts long item names off with "..." ("Bubbling's Hug...x1 earned."). Such a name becomes the one
+    known name that starts that way; with no names given, or none or several starting that way, it's kept as
+    read (without the "...") and the line is marked `cut`."""
     text = " ".join(text.split())
     if m := _ITEM.search(text):
-        name = m.group("name").strip(" .,:;-")
+        name = m.group("name").strip(" .,:;-…")
+        cut = bool(_CUT.search(m.group("name")))
         qty_raw = m.group("n")
         qty = _number(qty_raw)
-        if item_names is not None:
-            name = match_name(name, item_names) or name
-        return LootLine("item", item=name, quantity=qty, sure=qty_raw.isdigit())
+        if item_names is not None and name:
+            full = match_prefix(name, item_names) if cut else match_name(name, item_names)
+            if full:
+                name, cut = full, False
+        return LootLine("item", item=name, quantity=qty, sure=qty_raw.isdigit(), cut=cut)
     amount = _AMOUNT.search(text)
     if amount is None:
         return None
@@ -185,6 +196,8 @@ def parse_loot(text: str, item_names: Iterable[str] | None = None) -> LootLine |
 
 NAME_MIN = 0.8      # the best match must score at least this (difflib ratio)...
 NAME_MARGIN = 0.07  # ...and beat the runner-up by this much, or the read is too ambiguous to name
+PREFIX_MIN = 6      # letters and digits a cut-off name needs before its "..." to be completed; fewer is a guess...
+PREFIX_EDITS = 0.2  # ...and the share of them OCR may have misread, dropped or added and the start still fit
 
 _FOLD = str.maketrans({"0": "o", "1": "l", "|": "l", "5": "s"})
 
@@ -197,21 +210,76 @@ def _folded(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", _plain(text).translate(_FOLD).replace("rn", "m"))
 
 
+@functools.lru_cache(maxsize=4)
+def _forms(names: tuple[str, ...]) -> tuple[dict[str, str], tuple[tuple[str, str, str], ...]]:
+    # (plain form -> name, (name, plain, folded) for each name), worked out once per list: the item list is long.
+    forms = tuple((n, _plain(n), _folded(n)) for n in names)
+    exact: dict[str, str] = {}
+    for name, plain, _ in forms:
+        exact.setdefault(plain, name)
+    return exact, forms
+
+
+def _similar(text: str, candidates: Iterable[tuple[str, str]], floor: float) -> Iterator[tuple[str, float]]:
+    # (name, score) for each (name, form) whose form scores at least `floor` against `text`. difflib's cheap
+    # upper bounds skip most forms before the full comparison.
+    m = difflib.SequenceMatcher()
+    m.set_seq2(text)
+    for name, form in candidates:
+        m.set_seq1(form)
+        if m.real_quick_ratio() >= floor and m.quick_ratio() >= floor and (score := m.ratio()) >= floor:
+            yield name, score
+
+
 def match_name(text: str, names: Iterable[str]) -> str | None:
     """The known name `text` was most likely read from; None when no name is clearly the one."""
-    names = list(names)
+    exact, forms = _forms(tuple(names))
     plain = _plain(text)
-    for name in names:
-        if _plain(name) == plain:
-            return name
-    folded = _folded(text)
-    scored = sorted(
-        ((max(difflib.SequenceMatcher(None, plain, _plain(n)).ratio(),
-              difflib.SequenceMatcher(None, folded, _folded(n)).ratio()), n) for n in names),
-        reverse=True,
-    )
+    if plain in exact:
+        return exact[plain]
+    # A name scoring under NAME_MIN - NAME_MARGIN can be neither the match nor a runner-up close enough to
+    # matter, so only names above that are scored.
+    floor, best = NAME_MIN - NAME_MARGIN, {}
+    for read, i in ((plain, 1), (_folded(text), 2)):
+        for name, score in _similar(read, ((f[0], f[i]) for f in forms), floor):
+            best[name] = max(score, best.get(name, 0.0))
+    scored = sorted(((s, n) for n, s in best.items()), reverse=True)
     if not scored or scored[0][0] < NAME_MIN:
         return None
     if len(scored) > 1 and scored[0][0] - scored[1][0] < NAME_MARGIN:
         return None
     return scored[0][1]
+
+
+def match_prefix(text: str, names: Iterable[str]) -> str | None:
+    """The one known name `text` is the start of, for a name the game cut off ("Bubbling's Hug" from
+    "Bubbling's Huge Bubble"); None when no name or several fit.
+
+    A name fits when it's longer than `text` and starts with it, compared as with match_name (case, spaces
+    and punctuation aside, common OCR confusions folded). Only when no name starts with it exactly do misreads
+    count: then a name fits when its start differs from `text` in at most PREFIX_EDITS of its letters."""
+    start = _folded(text)
+    if len(start) < PREFIX_MIN:
+        return None
+    longer = [(name, folded) for name, _, folded in _forms(tuple(names))[1] if len(folded) > len(start)]
+    fits = {name for name, folded in longer if folded.startswith(start)}
+    if not fits:
+        limit = int(len(start) * PREFIX_EDITS)
+        fits = {name for name, folded in longer if _start_edits(start, folded, limit) <= limit}
+    return fits.pop() if len(fits) == 1 else None
+
+
+def _start_edits(text: str, name: str, limit: int) -> int:
+    # The fewest letters changed, dropped or added that turn `text` into the start of `name` (edit distance to
+    # its closest prefix), or limit + 1 once that's sure to be more than `limit`. Unlike difflib's ratio this
+    # is anchored at the start: "Snail Shell" isn't the start of "Red Snail Shell".
+    name = name[:len(text) + limit]
+    prev = list(range(len(name) + 1))
+    for i, c in enumerate(text, 1):
+        row = [i]
+        for j, d in enumerate(name, 1):
+            row.append(min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (c != d)))
+        if min(row) > limit:
+            return limit + 1
+        prev = row
+    return min(prev)

@@ -211,7 +211,8 @@ class LootReport:
         for row, line in found:
             if new[_loot_key(line)] > 0:
                 new[_loot_key(line)] -= 1
-                what = f"{line.item} x{line.quantity}" if line.kind == "item" else f"+{line.amount}"
+                name = f"{line.item}..." if line.cut else line.item  # a cut-off name no known name completed
+                what = f"{name} x{line.quantity}" if line.kind == "item" else f"+{line.amount}"
                 self.console.line(f"{stamp}  {line.kind:<5} {what:<28} {'sure' if line.sure else 'unsure':<6}  \"{row.text}\"")
         self._seen = now
         skipped = f", {len(read.interface)} interface line(s) skipped" if read.interface else ""

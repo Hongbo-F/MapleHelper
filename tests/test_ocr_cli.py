@@ -97,6 +97,12 @@ def test_loot_lists_each_message_when_it_shows_up():
     assert len(listed) == 2
 
 
+def test_loot_shows_a_name_left_cut_off():
+    out = io.StringIO()
+    LootReport(Console(out), show_rows=False)(loot_read(rows("Bubbling's Hug...x1 earned. (Etc)")), "t")
+    assert "item  Bubbling's Hug... x1 " in out.getvalue()
+
+
 def test_interface_lines_are_announced_once():
     out = io.StringIO()
     report = LootReport(Console(out), show_rows=False)

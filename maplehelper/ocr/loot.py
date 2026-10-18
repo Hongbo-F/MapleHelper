@@ -10,11 +10,13 @@ Every RECHECK_S one read goes without the blackout, and spots whose text is gone
 import difflib
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from .engine import OcrEngine, Row
+from .item_names import ITEM_NAMES
 from .parse import LootLine, parse_loot
 from .regions import LOOT, Preset
 
@@ -140,9 +142,12 @@ class LootRead:
 
 
 class LootReader:
-    """OCR of the loot box that returns its pickup messages and learns which text in it is interface."""
+    """OCR of the loot box that returns its pickup messages and learns which text in it is interface.
 
-    def __init__(self, engine: OcrEngine, preset: Preset = LOOT, item_names=None):
+    Item names are matched to `item_names`, which completes the names the game cuts off with "..." (Classic
+    World's item names by default; None for none)."""
+
+    def __init__(self, engine: OcrEngine, preset: Preset = LOOT, item_names: Iterable[str] | None = ITEM_NAMES):
         self.engine, self.preset, self.item_names = engine, preset, item_names
         self.static = StaticText()
 

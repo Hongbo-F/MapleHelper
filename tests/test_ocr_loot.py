@@ -115,3 +115,9 @@ def test_text_that_moves_is_not_interface():
         engine.on_screen = [row("Name1", 100 + 25 * (t % 5), left=200, right=280)]  # never long in one place
         r = read(t)
     assert not r.interface
+
+
+def test_item_names_are_completed_by_default():
+    engine, read, _ = reader()
+    engine.on_screen = [row("Bubbling's Hug...x1 earned. (Etc)", 260, left=180, right=390)]
+    assert [line.item for _, line in read(0).messages] == ["Bubbling's Huge Bubble"]

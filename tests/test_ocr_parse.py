@@ -1,7 +1,8 @@
 import pytest
 
 from maplehelper.ocr.engine import Row
-from maplehelper.ocr.parse import level_from_exp, match_name, parse_hud, parse_loot
+from maplehelper.ocr.item_names import ITEM_NAMES
+from maplehelper.ocr.parse import level_from_exp, match_name, match_prefix, parse_hud, parse_loot
 
 
 def rows(*texts):
@@ -127,6 +128,57 @@ def test_loot_items(text, name, qty, sure):
 def test_loot_item_name_matched_to_known_names():
     line = parse_loot("Bl ue Snai1 She11 x1 earned. (Etc)", ["Blue Snail Shell", "Red Snail Shell"])
     assert line.item == "Blue Snail Shell"
+
+
+# The game cuts long item names off with "..."; with Classic World's item names they're completed.
+
+@pytest.mark.parametrize("text", [
+    "Bubbling's Hug...x1 earned. (Etc)",   # read like this in the game
+    "Bubbling's Hug…x1 earned. (Etc)",
+    "Bubbling's Hug.. x1 earned. (Etc)",
+])
+def test_cut_item_name_is_completed(text):
+    line = parse_loot(text, ITEM_NAMES)
+    assert (line.item, line.quantity, line.cut) == ("Bubbling's Huge Bubble", 1, False)
+
+
+@pytest.mark.parametrize("text", [
+    "Bubbiing's Hug...x1 earned. (Etc)",   # l read as i
+    "Bubblng's Hug...x1 earned. (Etc)",    # a letter dropped
+    "Bubb1ings Hug...xl earned. (Etc)",
+])
+def test_misread_cut_item_name_is_completed(text):
+    assert parse_loot(text, ITEM_NAMES).item == "Bubbling's Huge Bubble"
+
+
+def test_ambiguous_cut_item_name_stays_as_read():
+    # Brown Hard Leather Boots, Pants or Top.
+    line = parse_loot("Brown Hard Lea...x1 earned.", ITEM_NAMES)
+    assert (line.item, line.cut) == ("Brown Hard Lea", True)
+
+
+def test_cut_item_name_is_never_the_name_it_shows():
+    # A name the game cut off is longer than what it shows: not "Dark Brown Stealer" itself.
+    assert parse_loot("Dark Brown Stealer...x1 earned.", ITEM_NAMES).item == "Dark Brown Stealer Pants"
+
+
+def test_cut_item_name_without_names_or_a_match():
+    line = parse_loot("Bubbling's Hug...x1 earned. (Etc)")
+    assert (line.item, line.cut) == ("Bubbling's Hug", True)
+    line = parse_loot("Qwerty Zxcvb...x2 earned.", ITEM_NAMES)
+    assert (line.item, line.quantity, line.cut) == ("Qwerty Zxcvb", 2, True)
+    assert parse_loot("Leaf x1 earned. (Etc)", ITEM_NAMES).cut is False
+
+
+def test_match_prefix():
+    names = ["Blue Snail Shell", "Red Snail Shell", "Snail Shell", "Orange Mushroom Cap"]
+    assert match_prefix("Orange Mush", names) == "Orange Mushroom Cap"
+    assert match_prefix("0range Mushr0", names) == "Orange Mushroom Cap"
+    assert match_prefix("Snail She", names) == "Snail Shell"
+    assert match_prefix("Snail Shell", names) is None  # nothing longer starts with it
+    assert match_prefix("Red Snail Sh", names) == "Red Snail Shell"
+    assert match_prefix("Blue Sn", names) == "Blue Snail Shell"
+    assert match_prefix("Snail", names) is None        # too short to go on
 
 
 def test_other_text_is_not_loot():
