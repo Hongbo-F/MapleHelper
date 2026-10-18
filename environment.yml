@@ -4,3 +4,13 @@ channels:
 dependencies:
   - python=3.15
   - pytest
+  # OCR benchmark (ocr_bench.py). The combo helper itself needs only the standard library.
+  # PyPI has no onnxruntime builds for Python 3.15, so it comes from conda-forge. The CUDA 13.4 build
+  # runs on the GPU (needs an NVIDIA driver with CUDA 13.4+) and also on the CPU.
+  - onnxruntime=1.31.*=*cuda134
+  - numpy
+  - pillow
+  - pip
+  - pip:
+      - rapidocr>=3.10
+      - mss>=10.2
