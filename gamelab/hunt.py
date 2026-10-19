@@ -66,6 +66,7 @@ HIDDEN_FOR = 1.8   # s she keeps throwing at a monster she was throwing at once 
                    # one flinches under its damage numbers and the detector loses it for 1-3 s, and
                    # she used to stop throwing until it showed again
 EMPTY_PATIENCE = 0.4  # s a fight waits when no monster is seen at all (not even out of reach)
+FADING = 1.2       # s a killed monster may still be seen fading out where it died: not thrown at
 JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less the margin) to jump back
 JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
 JB_RUN_MS = 80     # jump back: the arrow away is held this long before the jump, to get her moving
@@ -724,7 +725,7 @@ class Hunter:
                 self.loot(d)
 
     def clear(self, kinds=None, ground: set[int] | None = None, max_kills: int = 10,
-              seconds: float = 120, patience: float = 1.5, approach: bool = True) -> Report:
+              seconds: float = 120, patience: float = 1.5, approach: bool = True, finish: bool = False) -> Report:
         """Fight like a player: a star hits the nearest monster in reach on the side she faces, so
         she keeps throwing toward the side with the most monsters in reach, one throw per attack
         cooldown, looking around during the cooldown, never idle while one is in reach. She keeps
@@ -735,16 +736,23 @@ class Hunter:
         anywhere if None, and any on her own platform. Stops after `max_kills`, after `seconds`, or
         when nothing has been in reach for `patience` seconds (`EMPTY_PATIENCE` when none is seen at
         all). A monster she was throwing at that goes out of sight is still thrown at for
-        `HIDDEN_FOR` seconds: hit, it flinches under its damage numbers, and the detector loses it."""
+        `HIDDEN_FOR` seconds: hit, it flinches under its damage numbers, and the detector loses it.
+        With `finish`, reaching `max_kills` doesn't end the fight while monsters are still in reach:
+        she finishes those (without walking after others), as stopping halfway gave up a good spot.
+        Monsters of other kinds on her platform that come close are in her way, and fought too."""
         deadline, unseen = time.monotonic() + seconds, 0
         thrown: list[list] = []  # [monster, when last seen]: what she's thrown at, kept while hidden
+        dying: list[tuple[Target, float]] = []  # kills, and when: still seen fading out for a moment
         calm_since: float | None = None
         start: int | None = None  # the platform she's on; leaving it means she was knocked off
         exp0 = seen_exp = self.report.exp_kills
         aimed: list[Target] = []  # in reach at the last throw: the dead are found among them
         deaths: list[Drops] = []  # kills on her platform, to sweep up
         last_act, last_hidden = None, False
-        while time.monotonic() < deadline and self.report.exp_kills - exp0 < max_kills:
+        while time.monotonic() < deadline:
+            done = self.report.exp_kills - exp0 >= max_kills
+            if done and not finish:
+                break
             s = self.look()
             if s.where is None or s.platform is None:
                 unseen += 1
@@ -765,8 +773,16 @@ class Hunter:
             here, now = s.platform, time.monotonic()
             wanted = [t for t in s.targets if (kinds is None or t.kind in kinds)
                       and (ground is None or t.platform in ground or t.platform == here.id)]
+            # Any monster coming close on her platform is in her way (a snail too), and fought.
+            wanted += [t for t in s.targets if t not in wanted and t.platform == here.id
+                       and abs(t.x - s.where.x) < TOO_CLOSE + 40]
+            # A kill is still seen fading out for a moment: throwing at it (and then at its "hidden"
+            # ghost) wasted throws after most kills.
+            dying = [(d, t) for d, t in dying if now - t < FADING]
+            fading = [t for t in s.targets if any(_same(d, [t]) is t for d, _ in dying)]
+            wanted = [t for t in wanted if t not in fading]
             for entry in thrown:
-                if (same := _same(entry[0], s.targets)) is not None:
+                if (same := _same(entry[0], [t for t in s.targets if t not in fading])) is not None:
                     entry[0], entry[1] = same, now
             # Her EXP went up since the last look: those are the kills, among what she was throwing at.
             for _ in range(self.report.exp_kills - seen_exp):
@@ -780,6 +796,8 @@ class Hunter:
                 if dead in aimed:
                     aimed.remove(dead)
                 thrown = [e for e in thrown if e[0] is not dead and _same(dead, [e[0]]) is None]
+                dying.append((dead, now))
+                wanted = [t for t in wanted if _same(dead, [t]) is not t]
                 self.report.kills[dead.kind] = self.report.kills.get(dead.kind, 0) + 1
                 drops = Drops(dead.x, dead.y, dead.platform, time.monotonic())
                 (deaths if dead.platform == here.id else self.pending_loot).append(drops)
@@ -788,7 +806,7 @@ class Hunter:
             thrown = [e for e in thrown if now - e[1] < HIDDEN_FOR]
             hidden = [e[0] for e in thrown if e[1] != now]  # not seen this look: still there, hit
             fight = wanted + hidden
-            act = stance(s.where.x, s.where.y, here, fight, approach, self.facing)
+            act = stance(s.where.x, s.where.y, here, fight, approach and not done, self.facing)
             if act[:2] != (last_act or ())[:2] or (hidden and act[0] != "wait" and not last_hidden):
                 self.log(f"  {_describe(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
             last_act, last_hidden = act, bool(hidden)
@@ -811,6 +829,8 @@ class Hunter:
                     self.loot_pending(s)
                 if wanted and not calm_since:
                     self.report.out_of_reach += 1  # there are some, just not reachable from here
+                if done:  # finished what was in reach after the kill count
+                    break
                 calm_since = calm_since or time.monotonic()
                 wait = patience if fight else min(patience, EMPTY_PATIENCE)  # none seen: move on soon
                 if time.monotonic() - calm_since >= wait:
@@ -908,6 +928,17 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Target], approac
         left = [t for t in reach if t.x <= x]
         score = lambda side: (len(side), -min((abs(t.x - x) for t in side), default=1e9))
         return ("throw", RIGHT if score(right) > score(left) else LEFT)
+    # Off her level and too close sideways (right under or over her), a star misses: step away from
+    # it, along her platform, to where it reaches (throwing at it from there used to go on and on).
+    under = [t for t in wanted if t.platform != platform.id and -shots.SHOT_UP <= t.y - y <= shots.SHOT_DOWN
+             and abs(t.x - x) < shots.min_dx(t.y - y)]
+    if under:
+        t = min(under, key=lambda t: abs(t.x - x))
+        away = LEFT if t.x > x else RIGHT
+        goal = t.x + (1 if away == RIGHT else -1) * (shots.min_dx(t.y - y) + 40)
+        goal = min(max(goal, lo), hi)
+        if abs(goal - x) >= 15 and shots.can_shoot(t.x - goal, t.y - y, reach=shots.SHOT_RANGE + 15):
+            return ("back", away, abs(goal - x))
     if approach:
         level = [t for t in wanted if -shots.SHOT_UP <= t.y - y <= shots.SHOT_DOWN]
         if level:
@@ -926,7 +957,7 @@ def _describe(act: tuple, wanted: list[Target], x: float, hidden: list[Target] =
         name = lambda t: f"{t.kind} {t.x - x:+.0f}" + (" hidden" if any(t is h for h in hidden) else "")
         return f"{verb} {act[1]} ({', '.join(name(t) for t in side[:3])})"
     if act[0] in ("back", "approach"):
-        return f"{'stepping back' if act[0] == 'back' else 'closing in'} {act[1]} {act[2]:.0f}"
+        return f"{'stepping away' if act[0] == 'back' else 'closing in'} {act[1]} {act[2]:.0f}"
     return "nothing in reach"
 
 

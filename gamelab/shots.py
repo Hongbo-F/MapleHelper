@@ -24,13 +24,27 @@ MIN_SHOT = 90        # closer than this she swipes with the claw instead of thro
 # isn't measured yet; `python -m gamelab hunt shots` lists what the shot log has seen.
 SHOT_DOWN = 60
 SHOT_UP = 60
+# Off her level a star needs more room sideways: the shot log hit monsters 60 above her 7 of 15 times
+# at 150-199 units (0 of 1 closer), 70% at 200-249, 85% beyond; 60 below, 56% at 100-149, 79% at
+# 150-199, 70-92% beyond. A monster right under or over her isn't hit at all.
+MIN_SHOT_ABOVE = 200  # closest sideways a target 60 above her is worth a throw
+MIN_SHOT_BELOW = 150  # ... and one 60 below
+LEVEL = 15           # within this of her height, a target counts as on her level
 STAR_SPEED = 690     # units/s
 EDGE_MARGIN = 25     # where she stands to shoot: not closer than this to her platform's end
 
 
+def min_dx(dy: float) -> float:
+    """The closest sideways a target dy below (+) or above (-) her is hit: MIN_SHOT on her level,
+    rising to MIN_SHOT_BELOW / MIN_SHOT_ABOVE at 60 below / above."""
+    far = MIN_SHOT_BELOW if dy > 0 else MIN_SHOT_ABOVE
+    off = min(max(abs(dy) - LEVEL, 0.0) / (60 - LEVEL), 1.0)
+    return MIN_SHOT + (far - MIN_SHOT) * off
+
+
 def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE) -> bool:
     """Whether a target dx along (either way) and dy below (+) is hit by a star from where she stands."""
-    return MIN_SHOT <= abs(dx) <= reach and -SHOT_UP <= dy <= SHOT_DOWN
+    return min_dx(dy) <= abs(dx) <= reach and -SHOT_UP <= dy <= SHOT_DOWN
 
 
 @dataclass(frozen=True)
@@ -47,8 +61,8 @@ def coverage(target: Platform, x: float, y: float, reach: float = SHOT_RANGE) ->
     dy = target.y_at(min(max(x, target.left), target.right)) - y
     if not -SHOT_UP <= dy <= SHOT_DOWN:
         return 0.0
-    covered = 0.0
-    for lo, hi in ((x - reach, x - MIN_SHOT), (x + MIN_SHOT, x + reach)):
+    covered, near = 0.0, min_dx(dy)
+    for lo, hi in ((x - reach, x - near), (x + near, x + reach)):
         covered += max(0.0, min(hi, target.right) - max(lo, target.left))
     return covered / max(1.0, target.right - target.left)
 

@@ -179,7 +179,7 @@ def test_down_to_a_platform_a_walk_off_reaches_she_walks_off(model):
     assert "walk_off" in kinds and "jump" not in kinds
 
 
-def _stop(rounds, seen, loot_after=()):
+def _stop(rounds, seen, loot_after=(), elsewhere=(), log=None):
     """A tour stop with faked fights: `rounds` gives each fight's throws, `seen` how many monsters a
     whole-screen look then sees on the platform, `loot_after` the rounds after which drops were
     collected elsewhere. Returns how many fights ran."""
@@ -206,6 +206,10 @@ def _stop(rounds, seen, loot_after=()):
                              look=lambda **k: SimpleNamespace(targets=[pig] * seen[len(fights) - 1]))
     tour.collect_loot = collect
     tour._record = lambda pid, r: None
+    moves = iter(elsewhere)
+    tour.spot_for = lambda pid, left, spot: next(moves, None)
+    if log is not None:
+        tour.log = log.append
     tour.hunt(7, kills=5, seconds=60)
     return len(fights)
 
@@ -245,3 +249,13 @@ def test_grounds_are_ranked_by_exp_and_learn_from_visits(monkeypatch, tmp_path):
     # A visit's kills count by their EXP.
     tour._record(4, Report(kills={"pig": 2, "orange-mushroom": 1}, exp_kills=3))
     assert tour.stats["4"]["exp"] == 41
+
+
+def test_monsters_left_out_of_reach_are_shot_from_another_spot_before_looting():
+    from gamelab.shots import Spot
+    log = []
+    # After the first fight 2 are left out of reach; a spot on platform 9 reaches them: she goes there
+    # and fights again, and only then collects the drops.
+    assert _stop([2, 2, 0], seen=[2, 0, 0], elsewhere=[Spot(9, 300, 0.0, True)], log=log) == 2
+    assert any("over to platform 9" in m for m in log)
+    assert log.index(next(m for m in log if "over to platform 9" in m)) < len(log) - 1

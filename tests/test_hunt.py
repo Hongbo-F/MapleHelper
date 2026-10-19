@@ -109,7 +109,7 @@ def test_coverage_and_spots_prefer_safe_platforms():
     best = shots.spots(model, ground.id)[0]
     assert best.safe and model.platform(best.platform).y_at(best.x) == 500
     assert best.coverage == pytest.approx(shots.coverage(ground, best.x, 500), abs=1e-3)
-    assert best.coverage > 0.5
+    assert best.coverage > 0.35  # off her level the star needs 150-200 units sideways (shots.min_dx)
 
 
 def test_hp_bar_reads_the_green_fraction():
@@ -365,3 +365,27 @@ def test_a_kill_after_she_moved_on_to_the_next_target_still_gets_its_drops(monke
     h.clear(max_kills=1, patience=2.0)
     assert [side for _, side in throws][:2] == [RIGHT, LEFT]  # then at the one on her left
     assert h.report.kills == {"pig": 1} and swept == [700]   # not the one still in plain sight
+
+
+def test_after_the_kill_count_she_finishes_what_is_in_reach(monkeypatch):
+    def kill_at(h, t):
+        if abs(t - 0.6) < 1e-6:
+            h.report.exp_kills += 1
+    looks = [[target(700), target(250)]] * 2 + [[target(250)]] * 3 + [[]] * 5
+    h, throws = _fighter(monkeypatch, looks, on_look=kill_at)
+    h.sweep_after = lambda deaths: None
+    r = h.clear(max_kills=1, patience=2.0, finish=True)
+    assert len(throws) >= 3 and LEFT in [side for _, side in throws]  # the one on the left too
+    assert r.stop == "kill limit"
+    h2, throws2 = _fighter(monkeypatch, looks, on_look=kill_at)
+    h2.sweep_after = lambda deaths: None
+    h2.clear(max_kills=1, patience=2.0)  # without finish: stops at the kill
+    assert len(throws2) < len(throws)
+
+
+def test_a_monster_right_under_her_makes_her_step_away_not_throw():
+    from gamelab.hunt import stance
+    below = target(530, y=560, platform=1)       # 60 below, 30 to the side: a star misses it
+    act = stance(500, 500, PLAT, [below])
+    assert act[:2] == ("back", LEFT) and shots.can_shoot(530 - (500 - act[2]), 60)
+    assert not shots.can_shoot(30, 60) and shots.can_shoot(30 + 150, 60) and not shots.can_shoot(170, -60)

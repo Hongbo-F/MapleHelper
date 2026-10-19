@@ -16,14 +16,18 @@ import random
 import time
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from . import shots
 from .hunt import Hunter, Report, Sight
+from .mapdata import MONSTER_REACH
 from .nav import Navigator
 from .paths import LAB
 from .route import WALK_SPEED
 from .sprites import kind_of
 
-MIN_COVERAGE = 0.4   # shoot from a safe platform only if this much of the hunting platform is in reach
+MIN_COVERAGE = 0.3   # shoot from another platform only if this much of the hunting platform is in reach
+NEAR_BEST = 0.7      # spots reaching at least this share of the best one's count as good: the nearest wins
 LOOT_AGE = 90        # s: drops older than this are left (they vanish, and others may take them)
 GROUNDS = LAB / "grounds.json"  # per map and hunting platform: visits, and the EXP they gave
 WORTH = 0.25         # monsters giving under this share of the map's best EXP aren't hunted: snails, 2 vs 15
@@ -98,18 +102,78 @@ class Tour:
         st["exp"] = round(st["exp"] + exp, 1)
         _save_grounds(self.nav.model.id, self.stats)
 
+    def spot_ok(self, platform: int) -> bool:
+        """Whether she can stand on `platform` to shoot from it: no monster can touch her there
+        (MapModel.safe), or only ones not worth hunting can (the snails on 3, 20 and 22: those she
+        shoots when they come close)."""
+        m = self.nav.model
+        if m.safe(platform):
+            return True
+        if self.worth is None:
+            return False
+        p = m.platform(platform)
+        for q, names in m.monsters_by_platform.items():
+            other = m.platform(q)
+            lo, hi = max(p.left, other.left), min(p.right, other.right)
+            near = q == platform or (lo < hi and 0 < other.y_at((lo + hi) / 2) - p.y_at((lo + hi) / 2) <= MONSTER_REACH)
+            if near and any(kind_of(n) in self.worth for n in names):
+                return False
+        return True
+
     def spot(self, pid: int, on_it: bool = False) -> shots.Spot:
-        """Where to shoot platform `pid` from: the safe spot with the most of it in reach (if enough),
-        else (or if `on_it`) the middle of the platform itself."""
+        """Where to shoot platform `pid` from: a spot on another platform she can stand on (spot_ok)
+        with enough of `pid` in reach; of those about as good as the best, the nearest to her. Coming
+        from below she shoots up from a platform underneath, from above down: it used to be the one
+        above every time. Else (or if `on_it`) the middle of the platform itself."""
         f = self.nav.mover.fix()
         here = f.where.platform
-        for s in ([] if on_it else shots.spots(self.nav.model, pid)):
-            if not s.safe or s.coverage < MIN_COVERAGE:
-                break
-            if here is None or s.platform == here.id or self.nav.planner.plan(here.id, f.where.x, s.platform):
-                return s
+        good = [] if on_it else [sp for sp in shots.spots(self.nav.model, pid) if sp.platform != pid
+                                 and sp.coverage >= MIN_COVERAGE and self.spot_ok(sp.platform)]
+        if good:
+            best = max(sp.coverage for sp in good)
+
+            def cost(sp: shots.Spot) -> float:
+                if here is None or sp.platform == here.id:
+                    return abs(sp.x - f.where.x) / WALK_SPEED
+                t = self.nav.planner.travel(here.id, f.where.x, sp.platform)
+                return 1e6 if t is None else t
+
+            sp = min((sp for sp in good if sp.coverage >= NEAR_BEST * best), key=cost)
+            if cost(sp) < 1e6:
+                return shots.Spot(sp.platform, sp.x, sp.coverage, True)
         p = self.nav.model.platform(pid)
         return shots.Spot(pid, (p.left + p.right) / 2, 1.0, False)
+
+    def spot_for(self, pid: int, left: list, current: shots.Spot) -> shots.Spot | None:
+        """A spot off `pid`, on a platform she can stand on, that reaches more of the monsters `left`
+        on it than where she is, so she keeps shooting from safety instead of going down into the
+        pile. The one reaching the most, then the nearest."""
+        m = self.nav.model
+        f = self.nav.mover.fix()
+
+        def reached(x: float, y: float) -> int:
+            return sum(shots.can_shoot(t.x - x, t.y - y) for t in left)
+
+        cur = m.platform(current.platform)
+        now = reached(current.x, cur.y_at(current.x)) if current.platform != pid else 0
+        best = None
+        for p in m.platforms:
+            if p.id == pid or not self.spot_ok(p.id):
+                continue
+            for x in np.arange(p.left + shots.EDGE_MARGIN, p.right - shots.EDGE_MARGIN + 0.1, 10):
+                n = reached(float(x), p.y_at(float(x)))
+                if n <= now or (best is not None and n < best[0]):
+                    continue
+                if f.where.platform is None:
+                    continue
+                t = (abs(x - f.where.x) / WALK_SPEED if p.id == f.where.platform.id
+                     else self.nav.planner.travel(f.where.platform.id, f.where.x, p.id))
+                if t is not None and (best is None or (n, -t) > (best[0], -best[1])):
+                    best = (n, t, p.id, float(x))
+        if best is None:
+            return None
+        q, p = m.platform(pid), m.platform(best[2])
+        return shots.Spot(best[2], best[3], round(shots.coverage(q, best[3], p.y_at(best[3])), 3), True)
 
     def nearest_safe(self) -> int:
         f = self.nav.mover.settle(3)  # she may still be falling (knocked off a platform)
@@ -155,14 +219,18 @@ class Tour:
         self.h.facing = "right"
 
     def hunt(self, pid: int, kinds=None, kills: int = 5, seconds: float = 90) -> Report:
-        """Shoot platform `pid` clear from the best spot, collecting the drops between rounds."""
+        """Shoot platform `pid` clear like a player keeping the high (or low) ground: from the spot
+        chosen, every monster in reach is killed before anything else (the kill count only decides
+        whether to go after more); monsters left out of reach are shot from another spot that
+        reaches them, if there is one. Only then are the drops collected; she goes onto the platform
+        itself only when no spot reaches what's left. Killing some, then walking down into the rest
+        to pick up the drops, gave up the safe spot."""
         end = time.monotonic() + seconds
         total = Report()
-        on_it = False  # hunt on the platform itself (the safe spot left its monsters out of reach)
+        spot = self.spot(pid)
         arrived = False
-        for _ in range(4):
-            spot = self.spot(pid, on_it)
-            how = "from safe platform" if spot.platform != pid else "on the platform"
+        for _ in range(5):
+            how = "from platform" if spot.platform != pid else "on the platform"
             self.log(f"  shooting platform {pid} {how} {spot.platform} at x {spot.x:.0f} "
                      f"({spot.coverage:.0%} in reach)")
 
@@ -180,8 +248,9 @@ class Tour:
                 self.log("  targets in reach on the way: shooting from here")
             self.h.report = Report()
             # Waiting for respawns looked idle and slowed the sweep: move on soon when nothing's there.
-            r = self.h.clear(kinds, ground={pid}, max_kills=kills - sum(total.kills.values()),
-                             seconds=max(5, end - time.monotonic()), patience=2.0 if spot.safe else 1.0)
+            r = self.h.clear(kinds, ground={pid}, max_kills=max(1, kills - sum(total.kills.values())),
+                             seconds=max(5, end - time.monotonic()), patience=2.0 if spot.safe else 1.0,
+                             finish=True)
             for kind, n in r.kills.items():
                 total.kills[kind] = total.kills.get(kind, 0) + n
             total.throws += r.throws
@@ -190,29 +259,38 @@ class Tour:
             total.exp_kills += r.exp_kills
             total.lost += r.lost
             total.stop = r.stop
-            trips = self.report.loot_trips
-            self.collect_loot()
-            if r.stop.startswith("HP low") or sum(total.kills.values()) >= kills or time.monotonic() >= end:
+            if r.stop.startswith("HP low") or time.monotonic() >= end:
                 break
             if r.stop.startswith("left platform"):
                 continue  # knocked off: go back to the spot
-            # Back to the spot only for monsters still there. Going back up to wait for respawns, after
-            # picking up the drops, looked idle and slowed the sweep: a player moves on.
             s = self.h.look(wide=True)
             left = [t for t in s.targets if t.platform == pid and (kinds is None or t.kind in kinds)]
+            enough = sum(total.kills.values()) >= kills
+            if left and not enough:
+                nxt = self.spot_for(pid, left, spot)
+                if nxt is not None:
+                    self.log(f"  {len(left)} left on platform {pid}, out of reach here: over to platform "
+                             f"{nxt.platform} at x {nxt.x:.0f}")
+                    spot = nxt
+                    continue
+            trips = self.report.loot_trips
+            self.collect_loot()
             if not left:
                 self.log(f"  nothing left on platform {pid}: moving on")
                 break
-            if spot.safe and r.out_of_reach:
-                self.log("  monsters out of reach from the safe spot: hunting on the platform itself")
-                on_it = True
-            elif not r.throws and self.report.loot_trips == trips:
+            if enough:
+                break
+            if not r.throws and self.report.loot_trips == trips:
                 # Nothing thrown and she hasn't moved: going back would only repeat that. In the basin
                 # a whole-screen look saw pigs that the fight's own looks never did, 4 times running.
                 self.log(f"  {len(left)} seen on platform {pid} but none came into reach: moving on")
                 break
+            if spot.platform != pid:
+                self.log(f"  {len(left)} left on platform {pid} that no spot reaches: onto the platform")
+                spot = self.spot(pid, on_it=True)
             else:
                 self.log(f"  {len(left)} still on platform {pid}: back at it")
+        self.collect_loot()
         if arrived:  # what the visit gave, so later sweeps know where the monsters really are
             self._record(pid, total)
         return total
@@ -279,11 +357,10 @@ class Tour:
         return order, total(order)
 
     def _spot_at(self, pid: int) -> tuple[int, float]:
-        """Where she'll stand to hunt platform `pid`: the best safe spot, else its middle."""
+        """Where she'll stand to hunt platform `pid`: the best spot she can stand on, else its middle."""
         for sp in shots.spots(self.nav.model, pid):
-            if sp.safe and sp.coverage >= MIN_COVERAGE:
+            if sp.platform != pid and sp.coverage >= MIN_COVERAGE and self.spot_ok(sp.platform):
                 return sp.platform, sp.x
-            break
         p = self.nav.model.platform(pid)
         return pid, (p.left + p.right) / 2
 
