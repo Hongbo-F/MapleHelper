@@ -162,11 +162,8 @@ class Planner:
         for m in self.moves:
             self.by_src.setdefault(m.src, []).append(m)
 
-    def plan(self, src: int, x: float, dst: int, dst_x: float | None = None,
-             avoid: dict[int, float] | None = None) -> list[Move] | None:
-        """Quickest list of moves from (platform src, x) to platform dst (and walking to dst_x).
-        `avoid` adds seconds for landing on those platforms (e.g. ones monsters spawn on)."""
-        avoid = avoid or {}
+    def plan(self, src: int, x: float, dst: int, dst_x: float | None = None) -> list[Move] | None:
+        """Quickest list of moves from (platform src, x) to platform dst (and walking to dst_x)."""
         start = (src, round(x))
         best = {start: 0.0}
         back: dict[tuple, tuple] = {}
@@ -182,7 +179,7 @@ class Planner:
                     path.append(move)
                 return path[::-1]
             for m in self.by_src.get(pid, []):
-                cost = t + abs(m.x - px) / WALK_SPEED + m.seconds + RISK.get(m.kind, 0.0)                     + (avoid.get(m.dst, 0.0) if m.dst != dst else 0.0)
+                cost = t + abs(m.x - px) / WALK_SPEED + m.seconds + RISK.get(m.kind, 0.0)
                 node = (m.dst, round(m.land_x))
                 if cost < best.get(node, math.inf):
                     best[node] = cost

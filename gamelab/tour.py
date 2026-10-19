@@ -29,13 +29,16 @@ class TourReport:
     visited: list[int] = field(default_factory=list)
     kills: dict[str, int] = field(default_factory=dict)
     throws: int = 0
+    exp_gains: int = 0    # times her EXP went up while hunting at the stops (kills of hers)
+    on_the_way: int = 0   # monsters shot dead while travelling
     rests: int = 0
     loot_trips: int = 0
     stop: str = ""
 
     def __str__(self):
         kills = ", ".join(f"{n} {k}" for k, n in self.kills.items()) or "none"
-        return (f"visited platforms {self.visited}; kills: {kills}; throws: {self.throws}; "
+        return (f"visited platforms {self.visited}; kills: {kills} (EXP gains: {self.exp_gains}), "
+                f"plus {self.on_the_way} on the way; throws: {self.throws}; "
                 f"loot trips: {self.loot_trips}; rests: {self.rests}; ended: {self.stop}")
 
 
@@ -70,7 +73,7 @@ class Tour:
         return shots.Spot(pid, (p.left + p.right) / 2, 1.0, False)
 
     def nearest_safe(self) -> int:
-        f = self.nav.mover.fix()
+        f = self.nav.mover.settle(3)  # she may still be falling (knocked off a platform)
         here = f.where.platform
         if here is not None and here.id in self.safe:
             return here.id
@@ -90,7 +93,11 @@ class Tour:
         """Go to the nearest safe platform, sit on the chair until HP is back, and stand up."""
         pid = self.nearest_safe()
         self.log(f"resting on platform {pid}")
-        trip = self.nav.go(pid)
+        self.nav.hunt_on_way = False  # low on HP: straight there
+        try:
+            trip = self.nav.go(pid)
+        finally:
+            self.nav.hunt_on_way = True
         if trip.result != "arrived":
             self.log(f"  couldn't reach a safe platform ({trip.result}); resting here")
         self.report.rests += 1
@@ -124,6 +131,7 @@ class Tour:
                            and shots.can_shoot(t.x - s.where.x, t.y - s.where.y) for t in s.targets)
 
             trip = self.nav.go(spot.platform, x=spot.x, until=in_reach, seconds=max(20, end - time.monotonic()))
+            self.report.on_the_way += trip.kills
             if trip.result not in ("arrived", "in position"):
                 total.stop = f"didn't get there: {trip.result}"
                 break
@@ -138,6 +146,8 @@ class Tour:
             total.throws += r.throws
             total.loot_runs += r.loot_runs
             total.potions += r.potions
+            total.exp_kills += r.exp_kills
+            total.lost += r.lost
             total.stop = r.stop
             self.collect_loot()
             if r.stop.startswith("HP low") or sum(total.kills.values()) >= kills or time.monotonic() >= end:
@@ -164,6 +174,7 @@ class Tour:
             self.log(f"  collecting drops on platform {d.platform} at x {d.x:.0f}")
             self.report.loot_trips += 1
             trip = self.nav.go(d.platform, x=d.x, seconds=40)
+            self.report.on_the_way += trip.kills
             self.h.pending_loot = rest
             if trip.result != "arrived":
                 self.log(f"    couldn't get there ({trip.result})")
@@ -185,6 +196,7 @@ class Tour:
             for kind, n in result.kills.items():
                 self.report.kills[kind] = self.report.kills.get(kind, 0) + n
             self.report.throws += result.throws
+            self.report.exp_gains += result.exp_kills
             self.log(f"  platform {pid}: {result}")
             if result.stop.startswith("HP low"):
                 self.rest()

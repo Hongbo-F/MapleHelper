@@ -5,6 +5,9 @@ and replan from wherever she actually ends up when a move doesn't land where pla
         ^                                                   |
         +----------- check where she landed  <-  do one move (moves.Mover)
 
+She hunts on the way: before each move, any monster a star reaches from where she stands (on any
+platform) is shot dead first, a few per platform, so travelling earns EXP too.
+
 Monsters knock her back when they touch her, which can throw her off a run-up, a rope or a ledge.
 Before a move that walks along a platform with monsters on it, any monster in the way is shot first
 (she outranges them all). A hit during a move shows as lost HP: the trip notes it and replans from
@@ -15,12 +18,14 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .hunt import TOO_CLOSE, Hunter, Sight
+from . import shots
+from .hunt import TOO_CLOSE, Hunter, Sight, pick_target
 from .mapdata import MapModel
 from .moves import Fix, Mover, describe
 from .route import Move, Planner
 
 GUARD_SECONDS = 15  # longest spent shooting a monster out of the way
+ON_WAY_TRIES = 5    # monsters engaged per platform while passing through (respawns could keep her forever)
 
 
 @dataclass
@@ -29,6 +34,7 @@ class Trip:
     moves: list[str] = field(default_factory=list)
     misses: int = 0       # moves that didn't land where planned (not counting hits)
     hits: int = 0         # moves during which a monster hit her
+    kills: int = 0        # monsters shot dead on the way
 
 
 class Navigator:
@@ -37,9 +43,7 @@ class Navigator:
         self.loc = hunter.localizer
         self.planner = Planner(model)
         self.mover = Mover(hunter, model, self.loc, log)
-        # Routes go around platforms monsters spawn on when there's another way: each fight on the
-        # way costs time and HP. Seconds added per platform, by how many spawn points it has.
-        self.avoid = {pid: 1.5 * n for pid, n in model.spawn_platforms.items()}
+        self.hunt_on_way = True  # shoot monsters in reach between moves (off while going to rest)
 
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Sight], bool] | None = None) -> Trip:
@@ -47,6 +51,7 @@ class Navigator:
         with a look that includes monsters: True ends the trip early ('in position')."""
         trip, deadline = Trip(), time.monotonic() + seconds
         fights = 0  # in a row, without a move between: after a few she moves on regardless
+        tries: dict[int, int] = {}  # platform -> monsters engaged there on the way
         while time.monotonic() < deadline:
             f = self.mover.fix(mobs=True)
             if stop := self.h.health_check(f.sight):
@@ -62,12 +67,18 @@ class Navigator:
                 if here is None:
                     trip.result = "lost: not on any platform"
                     return trip
+            if self.hunt_on_way and tries.get(here.id, 0) < ON_WAY_TRIES and (t := self.in_reach(f)):
+                tries[here.id] = tries.get(here.id, 0) + 1
+                self.log(f"  {t.kind} in reach on platform {t.platform}: shooting it on the way")
+                if self.h.kill(t, seconds=GUARD_SECONDS) == "killed":
+                    trip.kills += 1
+                continue
             if here.id == dst:
                 if x is not None:
                     self.mover.walk_to(x, tolerance=20, f=f)
                 trip.result = "arrived"
                 return trip
-            path = self.planner.plan(here.id, f.where.x, dst, avoid=self.avoid)
+            path = self.planner.plan(here.id, f.where.x, dst)
             if not path:
                 trip.result = f"no route from platform {here.id} to {dst}"
                 return trip
@@ -97,6 +108,12 @@ class Navigator:
                     return trip
         trip.result = "timeout"
         return trip
+
+    def in_reach(self, f: Fix):
+        """The monster to shoot from where she stands, if any is in reach (pick_target's choice)."""
+        s, here = f.sight, f.where.platform
+        reach = [t for t in s.targets if shots.can_shoot(t.x - f.where.x, t.y - f.where.y)]
+        return pick_target(f.where.x, f.where.y, here, reach) if reach else None
 
     def clear_way(self, f: Fix, move: Move) -> bool:
         """Shoot a monster standing on her platform between her and where the move starts (or too

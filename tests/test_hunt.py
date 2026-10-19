@@ -162,3 +162,38 @@ def test_monsters_are_placed_only_on_platforms_they_spawn_on():
     model = mapdata.parse(1, tree, "Test", {}, {"8": "Pig"})
     # Feet read 15 units too high: closer to the safe platform, but pigs only walk the lower one.
     assert monster_platform(model, "pig", 350, 465).y_at(350) == 500
+
+
+def test_finishes_hurt_monsters_first():
+    fresh, hurt = target(700), Target(Mob("pig", 0, 0, 30, 30, 0.9), 750, 500, 0, bar=0.4)
+    assert pick_target(500, 500, Platform(9, [Segment(0, 400, 1000, 400)]), [fresh, hurt]) is hurt
+
+
+class _Eyes:
+    """Hands out prepared looks (no game needed)."""
+    want_ropes = False
+
+    def __init__(self, sights):
+        self.sights = iter(sights)
+
+    def look(self):
+        return next(self.sights)
+
+
+def test_a_kill_is_confirmed_by_her_exp_number_changing():
+    from gamelab import mapdata
+    from gamelab.hunt import Hunter, Sight
+    from maplehelper.config import GameKeys, Timing
+    model = mapdata.parse(1, {"info": {"VRLeft": 0, "VRTop": 0, "VRRight": 2000, "VRBottom": 1000},
+                              "miniMap": {"centerX": 0, "centerY": 0, "mag": 4}}, "Test", {})
+    before = np.zeros((26, 140), bool)
+    after = before.copy()
+    after[5:15, 100:104] = True  # a digit changed
+    looks = [Sight(t, np.zeros((10, 10, 3), np.uint8), None, [], 1.0, 1.0, exp=e)
+             for t, e in ((1.0, before), (1.5, before), (2.0, after), (2.5, after))]
+    h = Hunter(_Eyes(looks), GameKeys.__new__(GameKeys), Timing.__new__(Timing), model, log=lambda m: None)
+    for _ in looks:
+        h.look(mobs=False)
+    assert h.exp_events == [2.0] and h.report.exp_kills == 1
+    assert not h._take_exp(since=2.5)   # gains before she started throwing aren't this target's
+    assert h._take_exp(since=1.8) and h.exp_events == []

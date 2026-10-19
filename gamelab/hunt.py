@@ -42,6 +42,12 @@ UNITS_PER_HALF_PX = SCALE / SCREEN_SCALE  # map units per half-size frame pixel
 # on platforms 32, 30 and 14, the real ends are 21-27 px beyond where the grass seems to end.
 GRASS_OVERHANG = -24
 
+# Her EXP number in the bottom bar ("1,385 [8.30%]"), full-size px: it only changes when she gains
+# EXP, i.e. when a monster she hit dies. It sits on the bar's plain dark background, so its text pixels
+# are identical from look to look otherwise. (The "You received EXP" message at the bottom right was
+# tried first, but it's faint and was missed over a bright background.)
+EXP_NUMBER = (1060, 1030, 1200, 1056)  # x0, y0, x1, y1
+
 # HP and MP bars in the bottom bar, as fractions of the game window (measured at 1920x1080).
 HP_BAR = (707 / 1920, 854 / 1920)
 MP_BAR = (859 / 1920, 1006 / 1920)
@@ -55,6 +61,8 @@ KNOCKBACK_ROOM = 25  # extra room kept from her platform's ends while monsters s
 JUMP_OVER = 80       # how far a jump started from standing carries her (map units)
 MAX_WALK = 300     # longest walk between two looks
 TRACK_SLACK = 85   # how far a target may move between two looks (knockback) and still be the same monster
+SEARCH_SLACK = 150  # ... and how far it's looked for once it has vanished
+LOST_AFTER = 3.0   # s a target may stay unseen (without an EXP message) before she gives up on it
 LOOT_REACH = 60    # drops spread about this far around where the monster died
 # Where monsters are looked for: from this far above her feet to this far below (bodies stick up
 # above their feet, so the band reaches higher than she can shoot).
@@ -106,6 +114,7 @@ class Target:
     x: float              # map units, its feet
     y: float
     platform: int | None  # the platform it walks on (monsters never leave it)
+    bar: float | None = None  # its HP bar (fraction left), shown once it has been hit; None: unhurt
 
     @property
     def kind(self) -> str:
@@ -127,6 +136,7 @@ class Sight:
     how: str = "dot"             # how `where.x` was worked out: 'rope', 'edge' (on screen) or 'dot'
     seen: bool = True            # her screen position from her name tag (False: from the dot and camera)
     targets: list[Target] = field(default_factory=list)
+    exp: np.ndarray | None = None  # text pixels of her EXP number (EXP_NUMBER)
 
     @property
     def floor_y(self) -> int | None:
@@ -142,7 +152,8 @@ class Sight:
         x = self.where.x + (m.x - self.her[0]) * UNITS_PER_HALF_PX
         y = self.where.y + (m.feet_y - self.floor_y) * UNITS_PER_HALF_PX
         p = monster_platform(model, m.kind, x, y)
-        return Target(m, x, p.y_at(x) if p else y, None if p is None else p.id)
+        bar = shots.hp_bar(self.frame, m.x, m.y - m.h // 2)
+        return Target(m, x, p.y_at(x) if p else y, None if p is None else p.id, bar)
 
     def screen_x(self, map_x: float) -> float:
         """Half-size screen x of a map x (at her height)."""
@@ -258,8 +269,11 @@ class Eyes:
             self.tag = self._make_full_tag(full)
         her = self._find_her(full)
         ground = ground_extent(frame, her[0], her[1] - 8) if her else None
-        return Sight(time.monotonic(), frame, her, [], hp, mp, ground, her_dot(full),
-                     find_ropes(full) if self.want_ropes else [])
+        s = Sight(time.monotonic(), frame, her, [], hp, mp, ground, her_dot(full),
+                  find_ropes(full) if self.want_ropes else [])
+        x0, y0, x1, y1 = EXP_NUMBER
+        s.exp = full[y0:y1, x0:x1].max(axis=2) > 150
+        return s
 
     def detect(self, sight: Sight, up: float = LOOK_UP, down: float = LOOK_DOWN) -> list[Mob]:
         """Monsters from `up` map units above her feet to `down` below (her screen position must be known)."""
@@ -318,12 +332,15 @@ class Report:
     potions: int = 0
     throws: int = 0
     out_of_reach: int = 0      # targets seen that she couldn't reach from her platform
+    exp_kills: int = 0         # times her EXP went up: every kill of hers, target or not
+    lost: int = 0              # targets that vanished without her EXP going up (hidden, or killed by others)
     damage_taken: float = 0.0  # fraction of HP lost overall
     stop: str = ""
 
     def __str__(self):
         kills = ", ".join(f"{n} {k}" for k, n in self.kills.items()) or "none"
-        return (f"kills: {kills}; throws: {self.throws}; loot runs: {self.loot_runs}; potions: {self.potions}; "
+        return (f"kills: {kills} (EXP gains: {self.exp_kills}, targets lost: {self.lost}); "
+                f"throws: {self.throws}; loot runs: {self.loot_runs}; potions: {self.potions}; "
                 f"HP lost: {self.damage_taken:.0%}; stopped because: {self.stop}")
 
 
@@ -354,6 +371,8 @@ class Hunter:
         self._lock_until = 0.0
         self._last_hp: float | None = None
         self._last_where: Where | None = None
+        self._exp: np.ndarray | None = None  # last look's EXP number (text pixels)
+        self.exp_events: list[float] = []  # when her EXP went up
         self._pressed = False  # keys sent since the last look (then a move isn't a knockback)
 
     # --- doing ------------------------------------------------------------------------------
@@ -401,15 +420,15 @@ class Hunter:
         time.sleep(MOVEMENT.stop_slide_ms / 1000)
 
     def sweep_loot(self, direction: str, units: float) -> None:
-        """Walk `units` while pressing pick-up every 150 ms, collecting whatever she passes over."""
+        """Walk `units` (0: stay put) while pressing pick-up every 150 ms, collecting whatever she
+        passes over. The walk is exactly `units`: a minimum hold once walked her off a platform."""
         from .moves import hold_ms
         self._wait_lock()
         pick = (self.keys.pick_up or self.keys.attack).name
         arrow = self._arrow(direction)
-        ms = max(300, hold_ms(units))
-        events = [[0, arrow, "down"]]
-        events += [e for t in range(0, ms + 300, 150) for e in ([t, pick, "down"], [t + 40, pick, "up"])]
-        events.append([ms, arrow, "up"])
+        ms = hold_ms(units) if units >= 10 else 0
+        events = [[0, arrow, "down"], [ms, arrow, "up"]] if ms else []
+        events += [e for t in range(0, ms + 450, 150) for e in ([t, pick, "down"], [t + 40, pick, "up"])]
         events.sort(key=lambda e: e[0])
         self._do(events, "loot")
         self.facing = direction
@@ -444,6 +463,11 @@ class Hunter:
         if mobs and s.her is not None and s.where is not None:
             s.mobs = self.eyes.detect(s)
             s.targets = [s.place(m, self.model) for m in s.mobs]
+        if self._exp is not None and s.exp is not None and s.exp.shape == self._exp.shape                 and int((s.exp != self._exp).sum()) >= 3:
+            self.exp_events.append(s.t)
+            self.report.exp_kills += 1
+        self.exp_events = [t for t in self.exp_events if s.t - t < 30]
+        self._exp = s.exp
         if self._last_hp is not None and s.hp < self._last_hp:
             self.report.damage_taken += self._last_hp - s.hp
             self._log_hit(s)
@@ -486,6 +510,7 @@ class Hunter:
         platform = target.platform
         deadline, misses, throws = time.monotonic() + seconds, 0, 0
         gone_since: float | None = None
+        first_throw: float | None = None
         flying: list[dict] = []  # throws whose hit isn't confirmed yet (see _score_shots)
         self.log(f"target: {kind} on platform {platform}")
         while time.monotonic() < deadline:
@@ -498,25 +523,34 @@ class Hunter:
                 continue
             if stop := self.health_check(s):
                 return stop
+            slack = TRACK_SLACK if gone_since is None else SEARCH_SLACK
             found = [t for t in s.targets if t.kind == kind
-                     and abs(t.x - last[0]) <= TRACK_SLACK and abs(t.y - last[1]) <= 40]
+                     and abs(t.x - last[0]) <= slack and abs(t.y - last[1]) <= 40]
             if not found:
                 misses += 1
                 gone_since = gone_since or time.monotonic()
-                # Hit monsters flinch, get knocked back and are covered by damage numbers, so it
-                # only counts as dead after ~1.2 s of not being seen.
-                if misses >= 4 and time.monotonic() - gone_since >= 1.2:
-                    for sh in flying:  # it died, so the throws that had arrived hit it
+                # Dead only if her EXP went up since she started throwing at it. Vanishing alone
+                # isn't enough: hit monsters flinch and hide behind damage numbers, and other
+                # players kill monsters too (about half the "kills" counted by vanishing alone
+                # weren't hers).
+                if first_throw is not None and self._take_exp(first_throw):
+                    for sh in flying:
                         self._log_shot(sh, sh["due"] <= gone_since + 0.2)
+                    self.report.kills[kind] = self.report.kills.get(kind, 0) + 1
+                    self.log(f"{kind} down after {throws} throws")
+                    self.loot(Drops(last[0], last[1], platform, time.monotonic()))
+                    return "killed"
+                if time.monotonic() - gone_since >= LOST_AFTER:
                     if throws:
-                        self.report.kills[kind] = self.report.kills.get(kind, 0) + 1
-                        self.log(f"{kind} down after {throws} throws")
-                        self.loot(Drops(last[0], last[1], platform, time.monotonic()))
-                        return "killed"
+                        self.report.lost += 1
+                        self.log(f"{kind} gone without her EXP going up after {throws} throws: not counted")
                     return "lost"
                 time.sleep(0.15)
                 continue
             misses, gone_since = 0, None
+            # An EXP gain while it's still alive was another monster dying (a star hits the first
+            # monster in its way): it isn't this one's.
+            self.exp_events = [e for e in self.exp_events if s.t - e < 1.5]
             t = min(found, key=lambda t: abs(t.x - last[0]))
             last, platform = (t.x, t.y), t.platform if t.platform is not None else platform
             bar = shots.hp_bar(s.frame, t.mob.x, t.mob.y - t.mob.h // 2)
@@ -538,11 +572,20 @@ class Hunter:
                                    + abs(dx) / shots.STAR_SPEED})
                 self.throw(move[1])
                 throws += 1
+                first_throw = first_throw or time.monotonic()
             elif move[0] == "jump":
                 self.jump_over(move[1])
             else:
                 self.walk(move[1], move[2])
         return "timeout"
+
+    def _take_exp(self, since: float) -> bool:
+        """Use up one EXP gain seen since `since`, if there is one."""
+        for i, t in enumerate(self.exp_events):
+            if t >= since:
+                del self.exp_events[i]
+                return True
+        return False
 
     def _score_shots(self, flying: list[dict], bar: float | None) -> list[dict]:
         """A throw hit when the target's HP bar shows up or drops after the star should have arrived;
@@ -584,12 +627,11 @@ class Hunter:
         """Walk over map x on her platform pressing pick-up: from LOOT_REACH before it to LOOT_REACH past it."""
         dx = x - s.where.x
         direction = RIGHT if dx > 0 else LEFT
-        if abs(dx) > LOOT_REACH:
-            self.walk(direction, min(abs(dx) - LOOT_REACH, s.room(direction)))
-            room = s.room(direction) - (abs(dx) - LOOT_REACH)
-        else:
-            room = s.room(direction)
-        self.sweep_loot(direction, max(20.0, min(2 * LOOT_REACH, room)))
+        step = min(max(0.0, abs(dx) - LOOT_REACH), s.room(direction))
+        if step >= 10:
+            self.walk(direction, step)
+        room = s.room(direction) - step  # never past her platform's end (less the margin)
+        self.sweep_loot(direction, max(0.0, min(2 * LOOT_REACH, room)))
 
     def loot_pending(self, s: Sight | None = None, max_age: float = 90) -> None:
         """Sweep remembered drops that are on her platform (loot() re-queues any still guarded); the
@@ -659,12 +701,15 @@ def _pct(bar: float | None) -> str:
 
 
 def pick_target(x: float, y: float, platform: Platform, targets: list[Target]) -> Target:
-    """Monsters on her platform that are close first (they can reach her), then the nearest one a star
-    reaches from where she stands, then the nearest."""
+    """Monsters on her platform that are close first (they can reach her), then the most hurt one a star
+    reaches from where she stands (finish what was started), then the nearest in reach, then the nearest."""
     near = [t for t in targets if t.platform == platform.id and abs(t.x - x) < shots.SHOT_RANGE]
     if near:
         return min(near, key=lambda t: abs(t.x - x))
     in_reach = [t for t in targets if shots.can_shoot(t.x - x, t.y - y)]
+    hurt = [t for t in in_reach if t.bar is not None]  # finish the ones already hit first
+    if hurt:
+        return min(hurt, key=lambda t: (t.bar, abs(t.x - x)))
     return min(in_reach or targets, key=lambda t: abs(t.x - x) + 2 * abs(t.y - y))
 
 

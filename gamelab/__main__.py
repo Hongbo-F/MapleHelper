@@ -300,7 +300,8 @@ def cmd_nav(args) -> int:
     nav = Navigator(hunter, hunter.model, log=_log)
     window.bring_to_front(cfg.game_window_title)
     trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
-    print(f"{trip.result}: {len(trip.moves)} moves, {trip.misses} landed somewhere else, {trip.hits} hit on the way")
+    print(f"{trip.result}: {len(trip.moves)} moves, {trip.misses} landed somewhere else, {trip.hits} hit on the way, "
+          f"{trip.kills} monsters shot dead on the way")
     return 0
 
 
