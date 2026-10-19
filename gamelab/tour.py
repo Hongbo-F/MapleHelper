@@ -11,6 +11,7 @@ she go down to pick up what dropped, and back up to keep shooting. Otherwise she
 platform itself. On the way there, she starts shooting as soon as a target is in reach.
 """
 
+import json
 import random
 import time
 from dataclasses import dataclass, field
@@ -18,11 +19,17 @@ from dataclasses import dataclass, field
 from . import shots
 from .hunt import Hunter, Report, Sight
 from .nav import Navigator
+from .paths import LAB
 from .route import WALK_SPEED
 from .sprites import kind_of
 
 MIN_COVERAGE = 0.4   # shoot from a safe platform only if this much of the hunting platform is in reach
 LOOT_AGE = 90        # s: drops older than this are left (they vanish, and others may take them)
+GROUNDS = LAB / "grounds.json"  # per map and hunting platform: visits, and the EXP they gave
+WORTH = 0.25         # monsters giving under this share of the map's best EXP aren't hunted: snails, 2 vs 15
+SEEN_SHARE = 0.3     # share of a platform's spawn EXP a visit gives (platform 36: 13-52 of 100), the prior
+PRIOR = 2            # visits the spawn data counts for, against what visits really gave
+MIN_VALUE = 0.15     # grounds expected to give under this share of the best one's EXP per visit are skipped
 
 
 @dataclass
@@ -52,13 +59,44 @@ class Tour:
         self.report = TourReport()
         model = nav.model
         self.safe = [p.id for p in model.platforms if model.safe(p.id) and p.right - p.left >= 120]
+        self.exp = {kind_of(name): e for name, e in model.mob_exp.items()}  # kind -> EXP per kill
+        best = max(self.exp.values(), default=0)
+        self.worth = {k for k, e in self.exp.items() if e >= WORTH * best} or None  # kinds worth hunting
+        self.stats = _load_grounds(model.id)
 
-    def hunting_grounds(self, min_spawns: int = 2) -> list[int]:
-        """Platforms with at least `min_spawns` spawn points, all of monsters `hunt` can recognize (it
-        can't see the others coming, so it would let them walk up and hit her)."""
+    def ground_values(self) -> dict[int, float]:
+        """Expected EXP from a visit, per platform that monsters worth hunting spawn on (all of them
+        ones `hunt` can recognize: it can't see the others coming). The spawn data's guess
+        (SEEN_SHARE of its spawns' EXP) counts as PRIOR visits, blended with what visits really gave.
+        By the data, platforms 34 and 35 spawn slimes, but 11 visits found only snails there."""
         known = set(self.h.eyes.detector.templates)
-        return [pid for pid, names in self.nav.model.monsters_by_platform.items()
-                if len(names) >= min_spawns and all(kind_of(n) in known for n in names)]
+        out = {}
+        for pid, names in self.nav.model.monsters_by_platform.items():
+            kinds = [kind_of(n) for n in names]
+            if not all(k in known for k in kinds):
+                continue
+            prior = SEEN_SHARE * sum(self.exp.get(k, 10) for k in kinds if self.worth is None or k in self.worth)
+            if prior <= 0:
+                continue
+            st = self.stats.get(str(pid), {})
+            out[pid] = (PRIOR * prior + st.get("exp", 0)) / (PRIOR + st.get("visits", 0))
+        return out
+
+    def hunting_grounds(self) -> list[int]:
+        """The platforms worth a visit: expected to give at least MIN_VALUE of the best one's EXP."""
+        values = self.ground_values()
+        best = max(values.values(), default=0)
+        return [pid for pid, v in values.items() if v >= MIN_VALUE * best]
+
+    def _record(self, pid: int, r: Report) -> None:
+        """Remember what a visit to `pid` gave, so the sweep learns where the monsters really are."""
+        exp = sum(self.exp.get(k, 0) * n for k, n in r.kills.items())
+        worth = [self.exp[k] for k in (self.worth or ()) if k in self.exp]
+        exp += max(0, r.exp_kills - sum(r.kills.values())) * (sum(worth) / len(worth) if worth else 0)
+        st = self.stats.setdefault(str(pid), {"visits": 0, "exp": 0})
+        st["visits"] += 1
+        st["exp"] = round(st["exp"] + exp, 1)
+        _save_grounds(self.nav.model.id, self.stats)
 
     def spot(self, pid: int, on_it: bool = False) -> shots.Spot:
         """Where to shoot platform `pid` from: the safe spot with the most of it in reach (if enough),
@@ -121,6 +159,7 @@ class Tour:
         end = time.monotonic() + seconds
         total = Report()
         on_it = False  # hunt on the platform itself (the safe spot left its monsters out of reach)
+        arrived = False
         for _ in range(4):
             spot = self.spot(pid, on_it)
             how = "from safe platform" if spot.platform != pid else "on the platform"
@@ -136,6 +175,7 @@ class Tour:
             if trip.result not in ("arrived", "in position"):
                 total.stop = f"didn't get there: {trip.result}"
                 break
+            arrived = True
             if trip.result == "in position":
                 self.log("  targets in reach on the way: shooting from here")
             self.h.report = Report()
@@ -173,6 +213,8 @@ class Tour:
                 break
             else:
                 self.log(f"  {len(left)} still on platform {pid}: back at it")
+        if arrived:  # what the visit gave, so later sweeps know where the monsters really are
+            self._record(pid, total)
         return total
 
     def collect_loot(self) -> None:
@@ -245,11 +287,17 @@ class Tour:
         p = self.nav.model.platform(pid)
         return pid, (p.left + p.right) / 2
 
-    def run(self, stops: int = 3, kinds=None, kills_per_stop: int = 5, seconds_per_stop: float = 90) -> TourReport:
+    def run(self, stops: int | None = None, kinds=None, kills_per_stop: int = 5,
+            seconds_per_stop: float = 90) -> TourReport:
+        """Sweep the hunting grounds (all of them worth a visit, or the `stops` nearest), hunting the
+        monsters worth it (`kinds`, by default all but those giving little EXP, like snails: they're
+        only shot when in her way)."""
         grounds = self.hunting_grounds()
+        kinds = self.worth if kinds is None else kinds
+        self.nav.kinds = kinds
         f = self.nav.mover.fix()
         here = (f.where.platform.id, f.where.x) if f.where.platform else (grounds[0], 0.0)
-        n = min(stops, len(grounds))
+        n = len(grounds) if stops is None else min(stops, len(grounds))
         order, travel = self.sweep(grounds, n, here)
         blind = sorted(self._order_cost(self.rng.sample(grounds, n), here)[1] for _ in range(9))[4]
         self.log(f"tour: sweep {order}, about {travel:.0f} s of travel ({n} hunting grounds picked at random: "
@@ -288,3 +336,23 @@ class Tour:
             pid = self.nearest_safe()
             self.nav.go(pid)
         self.report.stop = "standing by on a safe platform"
+
+
+def _load_grounds(map_id: int) -> dict:
+    try:
+        return json.loads(GROUNDS.read_text(encoding="utf-8")).get(str(map_id), {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_grounds(map_id: int, stats: dict) -> None:
+    try:
+        everything = json.loads(GROUNDS.read_text(encoding="utf-8")) if GROUNDS.exists() else {}
+    except (OSError, ValueError):
+        everything = {}
+    everything[str(map_id)] = stats
+    try:
+        GROUNDS.parent.mkdir(parents=True, exist_ok=True)
+        GROUNDS.write_text(json.dumps(everything, indent=1), encoding="utf-8")
+    except OSError:
+        pass

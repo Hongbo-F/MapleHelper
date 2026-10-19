@@ -175,10 +175,13 @@ def test_she_throws_toward_the_side_with_more_monsters_in_reach():
     assert stance(500, 500, PLAT, group + [lone]) == ("throw", RIGHT)
 
 
-def test_one_too_close_gets_a_jump_throw_not_a_claw_swipe():
+def test_one_too_close_gets_a_jump_back_throw_not_a_claw_swipe():
     from gamelab.hunt import stance
-    assert stance(500, 500, PLAT, [target(560), target(700)]) == ("jump_throw", RIGHT)
-    assert stance(60, 500, PLAT, [target(110)]) == ("jump_throw", RIGHT)  # cornered too: no crossing
+    # Room behind her: jump away from it and throw back from the air.
+    assert stance(500, 500, PLAT, [target(560), target(700)]) == ("jump_back", RIGHT)
+    # Cornered at the left end, or another monster behind her: straight up. No crossing either way.
+    assert stance(60, 500, PLAT, [target(110)]) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(560), target(400)]) == ("jump_throw", RIGHT)
 
 
 def test_she_keeps_working_the_side_she_faces():
@@ -278,7 +281,7 @@ def _fighter(monkeypatch, looks, on_look=None):
     monkeypatch.setattr(hunt.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(hunt.time, "sleep", lambda s: None)
     h.look, h.health_check = look, lambda s: None
-    h.throw = h.jump_throw = lambda side: throws.append((round(clock[0], 1), side))
+    h.throw = h.jump_throw = h.jump_back = lambda side: throws.append((round(clock[0], 1), side))
     h.sweep_through = lambda s, deaths: None
     return h, throws
 
@@ -311,3 +314,54 @@ def test_with_no_monster_in_sight_she_moves_on_soon(monkeypatch):
     h, throws = _fighter(monkeypatch, far)
     h.clear(patience=2.0, approach=False)
     assert hunt.time.monotonic() >= 2.0 and not throws
+
+
+def test_drops_are_swept_once_she_lands_or_left_to_the_tour(monkeypatch):
+    from types import SimpleNamespace
+    from gamelab.hunt import Drops
+    h, _ = _fighter(monkeypatch, [])
+    swept = []
+    h.sweep_through = lambda s, deaths: swept.append([d.x for d in deaths])
+    air = SimpleNamespace(where=None, platform=None)
+    ground = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT)
+    looks = iter([air, air, ground])
+    h.look = lambda *a, **k: next(looks)
+    deaths = [Drops(600, 500, 0, 0.0), Drops(700, 560, 1, 0.0)]  # one on her platform, one below
+    h.sweep_after(deaths)
+    assert swept == [[600, 700]] and [d.x for d in h.pending_loot] == [700]
+    h.pending_loot, swept[:] = [], []
+    h.look = lambda *a, **k: air  # never lands (on a rope, say): the tour collects them later
+    h.sweep_after(deaths)
+    assert not swept and len(h.pending_loot) == 2
+
+
+def test_she_stands_on_each_pile_pressing_pick_up(monkeypatch):
+    from types import SimpleNamespace
+    from gamelab.hunt import Drops, LOOT_REACH
+    h, _ = _fighter(monkeypatch, [])
+    del h.sweep_through  # the real one
+    did = []
+    h.walk = lambda direction, units, pick=True: did.append(("walk", direction, round(units)))
+    h.pick_here = lambda presses=4: did.append(("pick",))
+    s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT)
+    h.sweep_through(s, [Drops(600, 500, 0, 0.0), Drops(400, 500, 0, 0.0)])
+    # Nearer end first (both 100 away: the first found), over each pile, stopping on it.
+    walks = [d for d in did if d[0] == "walk"]
+    assert did.count(("pick",)) == 2
+    assert sum(u for _, d, u in walks if d == RIGHT) - sum(u for _, d, u in walks if d == LEFT) in (
+        600 + LOOT_REACH - 500, 400 - LOOT_REACH - 500)
+
+
+def test_a_kill_after_she_moved_on_to_the_next_target_still_gets_its_drops(monkeypatch):
+    # She threw at a pig on the right, then turned to one on the left; the right one's death (EXP up)
+    # comes in after that, when the last throw aimed only left.
+    def kill_at(h, t):
+        if abs(t - 1.2) < 1e-6:
+            h.report.exp_kills += 1
+    looks = [[target(700)], [target(450)], [target(450)], [target(450)], [target(450)]]
+    h, throws = _fighter(monkeypatch, looks, on_look=kill_at)
+    swept = []
+    h.sweep_after = lambda deaths: swept.extend(d.x for d in deaths)
+    h.clear(max_kills=1, patience=2.0)
+    assert [side for _, side in throws][:2] == [RIGHT, LEFT]  # then at the one on her left
+    assert h.report.kills == {"pig": 1} and swept == [700]   # not the one still in plain sight

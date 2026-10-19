@@ -90,8 +90,8 @@ def wait(plan_id: str, timeout: float = 120) -> dict:
             raise PlayerError(f"no result after {timeout}s; is the player running? "
                               f"Start it with `python -m gamelab player --elevate` (log: {PLAYER_LOG})")
         time.sleep(0.01)
-    result = json.loads(result_path.read_text(encoding="utf-8"))
-    result_path.unlink()
+    result = _read_result(result_path)
+    result_path.unlink(missing_ok=True)
     if "error" in result:
         (OUTBOX / f"{plan_id}.npz").unlink(missing_ok=True)
         check_alarm()
@@ -102,6 +102,18 @@ def wait(plan_id: str, timeout: float = 120) -> dict:
             result["frames"], result["times"] = data["frames"], data["times"]
         frames_path.unlink()
     return result
+
+
+def _read_result(path, tries: int = 50) -> dict:
+    """A result file, retried for up to ~1 s: just after the player moves it into place, Windows can
+    still hold it locked (a sweep crashed on PermissionError reading one)."""
+    for i in range(tries):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (PermissionError, ValueError):
+            if i == tries - 1:
+                raise
+            time.sleep(0.02)
 
 
 def record(events, *, name, duration_ms, crop, scale, fps=60, lead_ms=100) -> Recording:

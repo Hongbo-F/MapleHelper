@@ -505,7 +505,8 @@ def main(argv=None) -> int:
     s.set_defaults(func=cmd_nav)
 
     s = sub.add_parser("tour", help="hunt the map: visit spawn platforms in random order, clear each, rest when low")
-    s.add_argument("--stops", type=int, default=3, help="how many hunting platforms to visit")
+    s.add_argument("--stops", type=int, default=None,
+                   help="how many hunting platforms to visit (default: every one worth it)")
     s.add_argument("--kills", type=int, default=5, help="kills per stop")
     s.add_argument("--seconds", type=float, default=90, help="time per stop")
     s.add_argument("--kinds", help="only these monsters, e.g. slime,pig")

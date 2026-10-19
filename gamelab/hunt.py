@@ -66,6 +66,11 @@ HIDDEN_FOR = 1.8   # s she keeps throwing at a monster she was throwing at once 
                    # one flinches under its damage numbers and the detector loses it for 1-3 s, and
                    # she used to stop throwing until it showed again
 EMPTY_PATIENCE = 0.4  # s a fight waits when no monster is seen at all (not even out of reach)
+JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less the margin) to jump back
+JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
+JB_RUN_MS = 80     # jump back: the arrow away is held this long before the jump, to get her moving
+JB_TURN_MS = 230   # ... and the arrow toward the monster is pressed this long after the start, in mid-air
+PILE_PRESSES = 4   # pick-up presses standing on a kill's drops: one item per press, and a pig drops several
 LOOT_REACH = 60    # drops spread about this far around where the monster died
 # Where monsters are looked for: from this far above her feet to this far below (bodies stick up
 # above their feet, so the band reaches higher than she can shoot).
@@ -450,6 +455,31 @@ class Hunter:
         self._lock_until = time.monotonic() + (COMBAT.attack_lock_ms + 160) / 1000
         self.report.throws += 1
 
+    def jump_back(self, direction: str) -> None:
+        """At a monster too close to throw at (on `direction`'s side): jump away from it, turn toward it
+        in mid-air and throw. Thrown at point-blank range, from the ground or straight up, stars often
+        missed; from the air she's some 40-60 units farther off, and out of its way. The caller makes
+        sure there's room behind her."""
+        self._wait_lock()
+        key = (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
+        away = self._arrow(LEFT if direction == RIGHT else RIGHT)
+        toward, jump = self._arrow(direction), self.keys.jump.name
+        events = [[0, away, "down"], [JB_RUN_MS, jump, "down"], [JB_RUN_MS + 40, jump, "up"],
+                  [JB_TURN_MS, away, "up"], [JB_TURN_MS, toward, "down"], [JB_TURN_MS + 40, toward, "up"],
+                  [JB_TURN_MS + 60, key, "down"], [JB_TURN_MS + 100, key, "up"]]
+        self._do(events, "jump_back")
+        self.facing = direction
+        # Locked until the attack's lock ends, which is after she lands.
+        self._lock_until = time.monotonic() + (JB_TURN_MS + 60 + COMBAT.attack_lock_ms) / 1000
+        self.report.throws += 1
+
+    def pick_here(self, presses: int = PILE_PRESSES) -> None:
+        """Stand and press pick-up `presses` times, 120 ms apart: one item per press."""
+        if self.keys.pick_up is None:
+            return
+        self._wait_lock()
+        self._do(self._pickups(0, presses * 120, every=120), "pick")
+
     def walk(self, direction: str, units: float, pick: bool = True) -> None:
         """Walk `units` that way, pressing pick-up all the while (anything she passes over is looted)."""
         from .moves import hold_ms
@@ -740,10 +770,15 @@ class Hunter:
                     entry[0], entry[1] = same, now
             # Her EXP went up since the last look: those are the kills, among what she was throwing at.
             for _ in range(self.report.exp_kills - seen_exp):
-                dead = _dead_one(aimed, s.targets, s.where.x)
+                # Among what the last throw aimed at and what she's thrown at lately: the kill can come
+                # in after she's turned to the next one. A kill with no drop spot left its drops.
+                dead = _dead_one(aimed + [e[0] for e in thrown if not any(e[0] is a for a in aimed)],
+                                 s.targets, s.where.x)
                 if dead is None:
+                    self.log("  a kill (EXP up) she can't place: its drops are left")
                     break
-                aimed.remove(dead)
+                if dead in aimed:
+                    aimed.remove(dead)
                 thrown = [e for e in thrown if e[0] is not dead and _same(dead, [e[0]]) is None]
                 self.report.kills[dead.kind] = self.report.kills.get(dead.kind, 0) + 1
                 drops = Drops(dead.x, dead.y, dead.platform, time.monotonic())
@@ -757,13 +792,13 @@ class Hunter:
             if act[:2] != (last_act or ())[:2] or (hidden and act[0] != "wait" and not last_hidden):
                 self.log(f"  {_describe(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
             last_act, last_hidden = act, bool(hidden)
-            if act[0] in ("throw", "jump_throw"):
+            if act[0] in ("throw", "jump_throw", "jump_back"):
                 calm_since = None
                 aimed = [t for t in fight if abs(t.x - s.where.x) <= shots.STAR_REACH
                          and -shots.SHOT_UP <= t.y - s.where.y <= shots.SHOT_DOWN
                          and (t.x > s.where.x) == (act[1] == RIGHT)]
                 thrown += [[t, now] for t in aimed if not any(e[0] is t for e in thrown)]
-                (self.throw if act[0] == "throw" else self.jump_throw)(act[1])
+                {"throw": self.throw, "jump_throw": self.jump_throw, "jump_back": self.jump_back}[act[0]](act[1])
             elif act[0] in ("back", "approach"):
                 calm_since = None
                 self.walk(act[1], act[2])
@@ -783,30 +818,45 @@ class Hunter:
                     return self.report
                 time.sleep(0.1)
         if deaths:
-            s = self.look(mobs=False)
-            if s.where is not None and s.platform is not None:
-                self.sweep_through(s, deaths)
+            self.sweep_after(deaths)
         self.report.stop = "kill limit" if self.report.exp_kills - exp0 >= max_kills else "time limit"
         return self.report
 
+    def sweep_after(self, deaths: list[Drops]) -> None:
+        """Sweep up a fight's drops once it's over. The fight often ends mid-jump (a jump-throw), where
+        a look finds her on no platform, and the sweep used to be skipped: those drops were left. Looks
+        again until she has landed; drops on another platform than hers are left to the tour."""
+        for _ in range(8):
+            s = self.look(mobs=False)
+            if s.where is not None and s.platform is not None:
+                self.sweep_through(s, deaths)
+                self.pending_loot += [d for d in deaths if d.platform != s.platform.id]
+                return
+            time.sleep(0.15)
+        self.pending_loot += deaths
+
     def sweep_through(self, s: Sight, deaths: list[Drops]) -> None:
-        """Walk over every drop spot on her platform in one go, pressing pick-up all the way: to the
-        nearer end of them first, then across to the farther one."""
-        xs = [d.x for d in deaths if d.platform == s.platform.id]
-        if not xs:
-            return
-        lo, hi = min(xs) - LOOT_REACH, max(xs) + LOOT_REACH
-        x = s.where.x
-        first, last = (lo, hi) if abs(x - lo) <= abs(x - hi) else (hi, lo)
+        """Pick up every kill's drops on her platform: from the nearer end of them to the farther one,
+        pressing pick-up all the way, and standing on each pile for PILE_PRESSES presses. A pick-up
+        press takes one item, a pig drops several, and walking past at full speed got one or two."""
         p = s.platform
         clamp = lambda v: min(max(v, p.left + shots.EDGE_MARGIN), p.right - shots.EDGE_MARGIN)
-        first, last = clamp(first), clamp(last)
-        for goal in (first, last):
+        piles = sorted({round(clamp(d.x)) for d in deaths if d.platform == p.id})
+        if not piles:
+            return
+        x = s.where.x
+        if abs(x - piles[-1]) < abs(x - piles[0]):
+            piles.reverse()
+        first, last = piles[0], piles[-1]
+        sign = 1 if last >= first else -1
+        stops = [clamp(first - sign * LOOT_REACH)] + piles + [clamp(last + sign * LOOT_REACH)]
+        for goal in stops:
             d = goal - x
             if abs(d) >= 10:
                 self.walk(RIGHT if d > 0 else LEFT, abs(d))
                 x = goal
-        self.sweep_loot(RIGHT, 0)  # a few more presses where she stopped
+            if goal in piles:
+                self.pick_here()
         self.report.loot_runs += 1
 
 
@@ -828,7 +878,8 @@ def _dead_one(aimed: list[Target], now: list[Target], her_x: float) -> Target | 
 def stance(x: float, y: float, platform: Platform, wanted: list[Target], approach: bool = True,
            facing: str | None = None) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
-    ('jump_throw', side) at one too close for a throw from the ground, ('approach', side, units) to
+    ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
+    air), ('jump_throw', side) the same when cornered (straight up), ('approach', side, units) to
     bring the nearest into reach, or ('wait',). She keeps working the side she faces while it still
     has monsters in reach (switching sides every throw spread the damage over both), and never walks
     past a monster."""
@@ -841,7 +892,15 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Target], approac
     if close:
         on_facing = [t for t in close if side_of(t) == facing]
         nearest = min(on_facing or close, key=lambda t: abs(t.x - x))
-        return ("jump_throw", side_of(nearest))
+        side = side_of(nearest)
+        # Jump away from it and throw back from the air, if there's room behind her and no monster
+        # there; cornered, straight up.
+        back = -1 if side == RIGHT else 1
+        room = (x - lo) if back < 0 else (hi - x)
+        behind = [t for t in mine if 0 < (t.x - x) * back < JUMP_BACK_CLEAR]
+        if room >= JUMP_BACK_ROOM and not behind:
+            return ("jump_back", side)
+        return ("jump_throw", side)
     if reach:
         if facing is not None and any(side_of(t) == facing for t in reach):
             return ("throw", facing)
@@ -861,9 +920,9 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Target], approac
 
 
 def _describe(act: tuple, wanted: list[Target], x: float, hidden: list[Target] = ()) -> str:
-    if act[0] in ("throw", "jump_throw"):
+    if act[0] in ("throw", "jump_throw", "jump_back"):
         side = [t for t in wanted if (t.x > x) == (act[1] == RIGHT)]
-        verb = "throwing" if act[0] == "throw" else "jump-throwing"
+        verb = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back": "jumping back, throwing"}[act[0]]
         name = lambda t: f"{t.kind} {t.x - x:+.0f}" + (" hidden" if any(t is h for h in hidden) else "")
         return f"{verb} {act[1]} ({', '.join(name(t) for t in side[:3])})"
     if act[0] in ("back", "approach"):

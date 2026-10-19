@@ -102,6 +102,7 @@ class MapModel:
     portals: list[Portal]
     spawns: list[Spawn] = field(default_factory=list)
     physics: dict = field(default_factory=dict)
+    mob_exp: dict[str, int] = field(default_factory=dict)  # monster name -> EXP per kill (game data)
 
     # --- where things are -------------------------------------------------------------------
 
@@ -195,7 +196,8 @@ def _platforms(footholds: list[dict]) -> tuple[list[Platform], list[Segment]]:
     return [Platform(i, c) for i, c in enumerate(platforms)], walls
 
 
-def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None) -> MapModel:
+def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None,
+          mob_exp: dict | None = None) -> MapModel:
     info = tree.get("info", {})
     footholds = []
     for layer, groups in (tree.get("foothold") or {}).items():
@@ -218,7 +220,8 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         id=map_id, name=name,
         bounds=(info.get("VRLeft"), info.get("VRTop"), info.get("VRRight"), info.get("VRBottom")),
         minimap={k: mm.get(k) for k in ("width", "height", "centerX", "centerY", "mag")},
-        platforms=platforms, walls=walls, ropes=ropes, portals=portals, spawns=spawns, physics=physics)
+        platforms=platforms, walls=walls, ropes=ropes, portals=portals, spawns=spawns, physics=physics,
+        mob_exp={mob_names.get(i, i): e for i, e in (mob_exp or {}).items()})
 
 
 def _image(map_id: int) -> dict:
@@ -243,17 +246,25 @@ def load(map_id: int) -> MapModel:
     """The map's model, parsed from the game data (cached as JSON next to the other extracts)."""
     cache = CACHE / f"{map_id}.json"
     raw = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
-    if raw is None or "mob_names" not in raw:
+    if raw is None or "mob_exp" not in raw:
         physics = jsonable(Package(COPY / "Map" / "Map_000.wz").image("Physics.img"))
         tree = jsonable(_image(map_id))
         ids = {str(int(s["id"])) for s in (tree.get("life") or {}).values()
                if isinstance(s, dict) and s.get("type") == "m"}
         strings = Package(COPY / "String" / "String_000.wz").image("Mob.img")
         names = {i: (strings.get(i.zfill(7)) or strings.get(i) or {}).get("name", "") for i in ids}
-        raw = {"id": map_id, "name": _map_name(map_id), "tree": tree, "physics": physics, "mob_names": names}
+        raw = {"id": map_id, "name": _map_name(map_id), "tree": tree, "physics": physics, "mob_names": names,
+               "mob_exp": _mob_exp(ids)}
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(raw), encoding="utf-8")
-    return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"])
+    return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"])
+
+
+def _mob_exp(ids: set[str]) -> dict[str, int]:
+    """Monster id -> EXP per kill, from each monster's info in the game data."""
+    from gamedata.canvas import _mob_pack
+    pack = _mob_pack()
+    return {i: int((pack.image(f"Mob/{int(i):07d}.img").get("info") or {}).get("exp") or 0) for i in ids}
 
 
 def render(model: MapModel, path: Path, scale: float = 0.5, marks: list[tuple[float, float, str]] = ()) -> None:

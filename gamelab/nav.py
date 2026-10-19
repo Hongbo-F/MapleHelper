@@ -70,6 +70,7 @@ class Navigator:
                          rng=self.rng if variety else None)
         self.fight = fight          # shoot monsters on the way (hunting tours) instead of avoiding them
         self.hunt_on_way = True     # with `fight`: shoot monsters in reach between moves (off when going to rest)
+        self.kinds: set[str] | None = None  # ... of these kinds only (None: all); any in her way is shot
         self._seen: list[tuple[float, Monster]] = []  # last look's monsters, to tell which way they walk
         self.speeds: dict[str, list[float]] = {}  # kind -> walking speeds seen between looks (units/s)
         self._off = 0  # glances in a row on another platform than planned
@@ -112,7 +113,7 @@ class Navigator:
                 tries[here.id] = tries.get(here.id, 0) + 1
                 self.log(f"  {t.kind} in reach on platform {t.platform}: shooting it on the way")
                 before = self.h.report.exp_kills
-                self.h.clear(max_kills=3, seconds=GUARD_SECONDS, patience=0.3, approach=False)
+                self.h.clear(self.kinds, max_kills=3, seconds=GUARD_SECONDS, patience=0.3, approach=False)
                 trip.kills += self.h.report.exp_kills - before
                 continue
             if here.id == dst:
@@ -348,7 +349,8 @@ class Navigator:
     def in_reach(self, f: Fix):
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice)."""
         s, here = f.sight, f.where.platform
-        reach = [t for t in s.targets if shots.can_shoot(t.x - f.where.x, t.y - f.where.y)]
+        reach = [t for t in s.targets if shots.can_shoot(t.x - f.where.x, t.y - f.where.y)
+                 and (self.kinds is None or t.kind in self.kinds)]
         return pick_target(f.where.x, f.where.y, here, reach) if reach else None
 
     def clear_way(self, f: Fix, move: Move) -> bool:

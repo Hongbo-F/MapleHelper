@@ -205,6 +205,7 @@ def _stop(rounds, seen, loot_after=()):
     tour.h = SimpleNamespace(pending_loot=[], report=Report(), clear=clear,
                              look=lambda **k: SimpleNamespace(targets=[pig] * seen[len(fights) - 1]))
     tour.collect_loot = collect
+    tour._record = lambda pid, r: None
     tour.hunt(7, kills=5, seconds=60)
     return len(fights)
 
@@ -217,3 +218,30 @@ def test_a_stop_moves_on_once_nothing_is_left_there():
 def test_a_stop_goes_back_only_for_monsters_it_can_get_at():
     assert _stop([2, 2, 0, 0], seen=[1, 1, 1, 1]) == 3  # back while throwing; a fight with none moves on
     assert _stop([0, 0, 0], seen=[2, 2, 2]) == 1        # seen from afar, never in reach: no looping
+
+
+def test_grounds_are_ranked_by_exp_and_learn_from_visits(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from gamelab import tour as tour_mod
+    from gamelab.hunt import Report
+    from gamelab.mapdata import MapModel
+    from gamelab.tour import Tour
+    monkeypatch.setattr(tour_mod, "GROUNDS", tmp_path / "grounds.json")
+    spawns = {1: ["Snail", "Snail", "Snail"], 2: ["Pig", "Pig"], 3: ["Slime", "Snail"], 4: ["Pig", "Orange Mushroom"]}
+    model = SimpleNamespace(id=5, mob_exp={"Snail": 2, "Pig": 13, "Slime": 12, "Orange Mushroom": 15},
+                            monsters_by_platform=spawns, platforms=[], safe=lambda pid: False)
+    hunter = SimpleNamespace(eyes=SimpleNamespace(detector=SimpleNamespace(
+        templates={"snail": 0, "pig": 0, "slime": 0, "orange-mushroom": 0})))
+    tour = Tour(hunter, SimpleNamespace(model=model), log=lambda m: None)
+    assert tour.worth == {"pig", "slime", "orange-mushroom"}  # snails: 2 EXP against 15
+    assert sorted(tour.hunting_grounds()) == [2, 3, 4]         # a snail-only platform isn't one
+    # Visits to 3 keep finding nothing worth it (only its snails turn up): it drops out.
+    for _ in range(6):
+        tour._record(3, Report())
+    assert sorted(tour.hunting_grounds()) == [2, 4]
+    # ... and that's remembered for the next tour.
+    again = Tour(hunter, SimpleNamespace(model=model), log=lambda m: None)
+    assert sorted(again.hunting_grounds()) == [2, 4] and again.stats["3"]["visits"] == 6
+    # A visit's kills count by their EXP.
+    tour._record(4, Report(kills={"pig": 2, "orange-mushroom": 1}, exp_kills=3))
+    assert tour.stats["4"]["exp"] == 41

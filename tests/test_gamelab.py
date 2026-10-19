@@ -117,3 +117,23 @@ def test_find_name_tag_prefers_the_one_near_the_middle():
         frame[cy - 9:cy + 9, cx - 40:cx + 40] = 20                     # dark box
         frame[cy - 5:cy + 5, cx - 32:cx + 32:3] = 255                  # white "text" strokes
     assert find_name_tag(frame) == pytest.approx((300, 230), abs=3)
+
+
+def test_a_result_file_still_locked_is_read_again(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    from gamelab import client
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps({"ok": True}), encoding="utf-8")
+    calls = []
+    real = Path.read_text
+
+    def flaky(self, *a, **k):
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError(13, "Permission denied")  # Windows, just after the player's replace
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", flaky)
+    monkeypatch.setattr(client.time, "sleep", lambda s: None)
+    assert client._read_result(path) == {"ok": True} and len(calls) == 3

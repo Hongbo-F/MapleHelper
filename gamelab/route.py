@@ -36,7 +36,8 @@ JUMP_FROM = 33
 # Moving one move at a time, running jumps missed often and this was 1.5 s; chained (flow.py) about
 # one move in 15 lands elsewhere, mostly drops and straight-up jumps timed off.
 RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25}
-ALONG_STEP = 20      # running jumps are tried from every this many units along a platform ...
+ALONG_STEP = 10      # running jumps are tried from every this many units along a platform (20 missed
+                     # the 30-unit window of takeoffs from platform 4 up onto 2, so 2 had no route) ...
 ALONG_SPREAD = 60    # ... and kept this far apart ...
 ALONG_KEEP = 3       # ... up to this many (plus the last) per landing platform
 
