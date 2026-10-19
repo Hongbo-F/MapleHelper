@@ -71,7 +71,8 @@ Other commands (`python -m gamelab -h` lists them all):
 
 | Piece | Does |
 |---|---|
-| `mobs.py` | Finds snails, slimes and pigs. It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates (`assets/mobs/`, cut from screenshots). About 350 ms per look. |
+| `mobs.py` | Finds snails, slimes, pigs and Orange Mushrooms. It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates. About 300 ms per look. |
+| `sprites.py` | Templates for the monsters on the current map, made from the game's own sprites (every stand, move and hit frame) at their on-screen size. They're added to the screenshot cut-outs in `assets/mobs/`, which still catch monsters half hidden in plants. Built on first use and kept with the other extracted data (git-ignored). |
 | `hunt.py` | `Eyes`: finds her (name tag at full resolution), the monsters on her floor, the edges of her platform, HP/MP from the bar colours, and camera scroll. `Hunter`: the objectives. |
 
 What an objective does on its own:
@@ -99,6 +100,7 @@ Navigation is split into modules, each built on the game's own map data (read wi
 In game, on Thicket Around the Beach II:
 - **Navigation:** 21 moves in a row across every move type without a miss, and a 17-move climb from the basin to the top. The fixes that made that work are in `route.py`: the run-up, simulated landings, and the measured walking model.
 - **Tour:** visited the basin, platform 7 and platform 21 in random order, made 5 kills (EXP +64, matching the count), rested from 81% to 97% HP on a safe platform, and stood by.
+- **Upper platforms:** with Orange Mushrooms recognized, two more tours covered 1, 2, 7, 18, 34 and 17. All 4 stops of the second were reached with no navigation misses, for 10 kills including 2 Orange Mushrooms (EXP 700 → 813).
 
 ```bash
 python -m gamelab map
@@ -115,7 +117,9 @@ python -m gamelab tour --stops 3 --kills 5
 - **Recalibrate** after moving the game window, changing maps or changing resolution. Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name.
 - **It sees the screen only after each step,** so it can't react to monsters in real time. Monsters that bump into her knock her off ropes and swallow key presses.
 - **Heights are screen-based,** so they read low when the camera scrolls up with her.
-- **`hunt` needs a 1920×1080 game window,** the size its templates were made at. It knows only snails, slimes and pigs so far. It doesn't navigate between floors (ropes, ledges): that's still the decider's job, with `do` and `act`.
+- **`hunt` needs a 1920×1080 game window,** the size its templates were made at.
+- **Each new monster type needs a colour gate** (`palette` in `mobs.py`) before its game sprites are used. Its templates come from the game data automatically.
+- **Her name tag can be hidden** behind screen widgets at the map's edge, like the party HP box. `hunt` then gives up on that platform after about 3 s.
 - **Camera correction needs ground with a pattern** under her, like a girder or tiles. Plain ground can't be tracked.
 - **Swing detection is tuned to the claw's white/lavender swing effect.** Other weapons or skills may need `SWING_MIN_PIXELS` in `track.py` adjusted.
 - **Lucky Seven costs about 7 MP per cast.** A 32-shot test uses about 220 MP. Use `--regular-attack` for long runs.

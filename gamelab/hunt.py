@@ -27,6 +27,7 @@ from maplehelper.game import COMBAT, MOVEMENT
 
 from . import client, window
 from .mobs import SCALE, Mob, MobDetector
+from .mapdata import SCREEN_SCALE
 from .paths import LAB
 from .terrain import find_ropes, her_dot
 
@@ -98,9 +99,14 @@ class Sight:
     ground: tuple[int, int] | None = None  # screen x range of the ground under her
     dot: tuple[float, float] | None = None  # her minimap dot (terrain.her_dot)
     ropes: list = field(default_factory=list)  # terrain.Rope list, full-size px
+    map_room: tuple[float, float] | None = None  # screen px to her platform's (left, right) end, from the map
 
     def room(self, direction: str) -> float:
-        """Game px she can walk that way before the edge of her ground."""
+        """Game px she can walk that way before the edge of her ground: from the map when her platform
+        is known (exact), else from the ground seen on screen."""
+        if self.map_room is not None:
+            edge = self.map_room[1] if direction == RIGHT else self.map_room[0]
+            return max(0.0, edge - EDGE_MARGIN)
         if self.her is None or self.ground is None:
             return 0.0
         edge = self.ground[1] - self.her[0] if direction == RIGHT else self.her[0] - self.ground[0]
@@ -237,6 +243,7 @@ class Hunter:
         self.eyes, self.keys, self.t, self.log = eyes, keys, timing, log
         self.low_hp, self.potion_hp = low_hp, potion_hp
         self.report = Report()
+        self.localizer = None  # set (e.g. by the Navigator) to know her platform's ends from the map
         self.pending_loot: list[tuple[float, float]] = []  # (world x, when)
         self.skipped: list[float] = []  # world x of monsters she can't reach from her platform
         self._last_potion = 0.0
@@ -297,6 +304,15 @@ class Hunter:
 
     def look(self) -> Sight:
         sight = self.eyes.look()
+        if self.localizer is not None and sight.dot is not None:
+            where = self.localizer.where_dot(sight.dot)
+            if where.platform is not None:
+                p = where.platform
+                sight.map_room = ((where.x - p.left) * SCREEN_SCALE, (p.right - where.x) * SCREEN_SCALE)
+                if sight.her is not None:
+                    # Camera from the map instead of from scrolling scenery (which fails over open sky):
+                    # world x (half-size px) = her map x in screen units + offset from her on screen.
+                    sight.cam = where.x * SCREEN_SCALE / SCALE - sight.her[0]
         if self._last_hp is not None and sight.hp < self._last_hp:
             self.report.damage_taken += self._last_hp - sight.hp
         self._last_hp = sight.hp
@@ -394,13 +410,18 @@ class Hunter:
     def clear_floor(self, kinds=None, max_kills: int = 10, seconds: float = 120, span: float = 900) -> Report:
         """Kill the monsters on her floor, nearest first, looting as she goes. Stays within `span`
         game px of where she started. Stops when the floor stays clear for ~3 s."""
-        deadline, calm = time.monotonic() + seconds, 0
+        deadline, calm, unseen = time.monotonic() + seconds, 0, 0
         start = None
         while time.monotonic() < deadline and sum(self.report.kills.values()) < max_kills:
             sight = self.look()
-            if sight.her is None:
+            if sight.her is None:  # her name tag hidden (e.g. behind the party HP box at the edge)
+                unseen += 1
+                if unseen >= 10:
+                    self.report.stop = "lost sight of her"
+                    return self.report
                 time.sleep(0.3)
                 continue
+            unseen = 0
             if start is None:
                 start = sight.her[0] + sight.cam
             if stop := self.health_check(sight):

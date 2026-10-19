@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from .hunt import Hunter
 from .nav import Navigator
 from .route import WALK_SPEED
+from .sprites import kind_of
 
 
 @dataclass
@@ -42,7 +43,7 @@ class Tour:
         can't see the others coming, so it would let them walk up and hit her)."""
         known = set(self.h.eyes.detector.templates)
         return [pid for pid, names in self.nav.model.monsters_by_platform.items()
-                if len(names) >= min_spawns and all(n.lower() in known for n in names)]
+                if len(names) >= min_spawns and all(kind_of(n) in known for n in names)]
 
     def nearest_safe(self) -> int:
         f = self.nav.mover.fix()

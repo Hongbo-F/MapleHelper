@@ -61,7 +61,7 @@ def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platfor
         if vx and any(w.x1 == w.x2 and min(x, nx) <= w.x1 <= max(x, nx)
                       and min(w.y1, w.y2) - 1 <= ny <= max(w.y1, w.y2) + 1 for w in model.walls):
             nx, vx = x, 0.0  # bumped into a wall
-        if vy > 0 or nvy > 0:
+        if (vy > 0 or nvy > 0) and t > 0:
             for p in model.platforms:
                 if p is skip or not p.covers(nx):
                     continue
@@ -134,8 +134,8 @@ def moves(model: MapModel) -> list[Move]:
                         and land.covers(land_x + sign * LAND_MARGIN * 0.5):
                     out.append(Move("jump", a.id, land.id, start, land_x, direction,
                                     seconds=t + 0.2 + RUN_MS / 1000))
-            # Walking off this end.
-            land, land_x, t = fly(model, edge + sign * 2, a.y_at(edge), sign * WALK_SPEED, 0.0)
+            # Walking off this end (starting just inside it, so a wall rising at the end stops her).
+            land, land_x, t = fly(model, edge - sign * 1, a.y_at(edge) - 1, sign * WALK_SPEED, 0.0)
             if land is not None and land is not a:
                 out.append(Move("walk_off", a.id, land.id, edge - sign * 5, land_x, direction, seconds=0.3 + t))
         # Dropping through (down + jump) to each different platform underneath.

@@ -19,11 +19,13 @@ MAX_VERSION = 10_000
 
 @dataclass
 class Canvas:
-    """A picture: its size, pixel format and properties (origin, delay...). The pixels are left unread."""
+    """A picture: its size, pixel format and properties (origin, delay...). The pixels are left unread;
+    `raw` remembers where they are (buffer, start, end) for gamedata.canvas.pixels()."""
     width: int
     height: int
     fmt: int
     props: dict = field(default_factory=dict)
+    raw: tuple | None = field(default=None, repr=False, compare=False)
 
     def __repr__(self):
         extra = f" {self.props}" if self.props else ""
@@ -179,7 +181,7 @@ class Reader:
             w, p = self._cint(p)
             h, p = self._cint(p)
             fmt, p = self._cint(p)
-            return Canvas(w, h, fmt, props)
+            return Canvas(w, h, fmt, props, (self.data, p, end))
         if typename == "Shape2D#Vector2D":
             x, p = self._cint(p)
             y, p = self._cint(p)

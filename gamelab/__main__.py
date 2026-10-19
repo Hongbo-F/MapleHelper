@@ -190,7 +190,7 @@ def _annotate(sight, path) -> None:
 def cmd_hunt(args) -> int:
     from .hunt import Eyes, Hunter
     cfg, keys, timing = her_setup()
-    eyes = Eyes(cfg.game_window_title, calibration.load().template)
+    eyes = _eyes(getattr(args, 'map', DEFAULT_MAP))
     if args.mode == "look":
         sight = eyes.look()
         her = f"at {sight.her}" if sight.her else "NOT FOUND"
@@ -224,6 +224,14 @@ def cmd_hunt(args) -> int:
     return 0
 
 
+def _eyes(map_id: int):
+    """Eyes on the game, with monster templates for that map (screenshots + the game's sprites)."""
+    from . import mapdata
+    from .hunt import Eyes
+    from .sprites import detector_for
+    return Eyes(her_setup()[0].game_window_title, calibration.load().template, detector_for(mapdata.load(map_id)))
+
+
 def _log(message: str) -> None:
     print(time.strftime("%H:%M:%S"), message, flush=True)
 
@@ -237,7 +245,7 @@ def cmd_map(args) -> int:
     marks = []
     if not args.offline:
         from .hunt import Eyes
-        eyes = Eyes(her_setup()[0].game_window_title, calibration.load().template)
+        eyes = _eyes(args.map)
         s = eyes.look()
         if s.dot:
             w = Localizer(model).where_dot(s.dot)
@@ -256,7 +264,7 @@ def cmd_nav(args) -> int:
     from .hunt import Eyes, Hunter
     from .nav import Navigator
     cfg, keys, timing = her_setup()
-    eyes = Eyes(cfg.game_window_title, calibration.load().template)
+    eyes = _eyes(getattr(args, 'map', DEFAULT_MAP))
     hunter = Hunter(eyes, keys, timing, log=_log)
     nav = Navigator(hunter, mapdata.load(args.map), log=_log)
     window.bring_to_front(cfg.game_window_title)
@@ -272,7 +280,7 @@ def cmd_tour(args) -> int:
     from .nav import Navigator
     from .tour import Tour
     cfg, keys, timing = her_setup()
-    eyes = Eyes(cfg.game_window_title, calibration.load().template)
+    eyes = _eyes(getattr(args, 'map', DEFAULT_MAP))
     hunter = Hunter(eyes, keys, timing, log=_log, low_hp=args.low_hp, potion_hp=args.potion_hp)
     nav = Navigator(hunter, mapdata.load(args.map), log=_log)
     window.bring_to_front(cfg.game_window_title)

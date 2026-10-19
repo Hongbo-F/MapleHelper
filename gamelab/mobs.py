@@ -47,14 +47,25 @@ def palette(kind: str, rgb: np.ndarray, channels=None) -> np.ndarray:
         teal = (r < 90) & (g > 80) & (b > 80) & (g < 170) & (np.abs(g - b) < 40)
         lavender = (r > 140) & (b > 190) & (g > 130) & (b - g > 15)
         return teal | lavender
+    if kind == "orange-mushroom":  # the orange cap (daffodils are yellower: higher green)
+        return (r > 215) & (g > 100) & (g < 175) & (b < 90) & (r - g > 55)
     raise ValueError(f"unknown monster kind {kind!r}")
 
 
+KINDS_WITH_PALETTE = ("pig", "slime", "snail", "orange-mushroom")
+
+
 class MobDetector:
-    def __init__(self, folder: Path = ASSETS, scale: int = SCALE, threshold: float = THRESHOLD):
+    """Templates come from `folders`: PNGs named <kind>_<anything>.png, RGBA at full screen size.
+    gamelab/assets/mobs has cut-outs from screenshots; gamelab.sprites makes them from the game data."""
+
+    def __init__(self, folder: Path | list[Path] = ASSETS, scale: int = SCALE, threshold: float = THRESHOLD):
         self.threshold = threshold
         self.templates: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
-        for path in sorted(folder.glob("*.png")):
+        folders = folder if isinstance(folder, list) else [folder]
+        for path in sorted(p for f in folders for p in f.glob("*.png")):
+            if path.stem.split("_")[0] not in KINDS_WITH_PALETTE:
+                continue
             rgba = np.asarray(Image.open(path).convert("RGBA"))
             h, w = rgba.shape[:2]
             size = (max(1, w // scale), max(1, h // scale))

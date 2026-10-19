@@ -27,6 +27,7 @@ class Navigator:
     def __init__(self, hunter: Hunter, model: MapModel, log=print):
         self.h, self.model, self.log = hunter, model, log
         self.loc = Localizer(model)
+        hunter.localizer = self.loc  # fighting then knows exactly how far she can step on her platform
         self.planner = Planner(model)
         self.mover = Mover(hunter, model, self.loc, log)
 
