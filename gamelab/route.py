@@ -10,6 +10,7 @@ Moves between platforms (all in map units, using the game's physics and her meas
 Walking along a platform links its moves; routes are found with Dijkstra on time.
 """
 
+import bisect
 import heapq
 import math
 from dataclasses import dataclass
@@ -50,26 +51,57 @@ class Move:
     rope_bottom: float | None = None
 
 
+_FLY_CACHE: dict[tuple, tuple] = {}
+_WALLS: dict[int, tuple] = {}
+
+
+def _walls(model: MapModel) -> tuple[list[float], list[tuple[float, float]]]:
+    """The model's vertical walls sorted by x: their xs, and each one's (top, bottom)."""
+    key = id(model)
+    if key not in _WALLS:
+        ws = sorted((w for w in model.walls if w.x1 == w.x2), key=lambda w: w.x1)
+        _WALLS[key] = ([w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws])
+    return _WALLS[key]
+
+
 def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
         dt: float = 0.004, limit: float = 4.0) -> tuple[Platform | None, float, float]:
     """Where she lands from (x, y) moving at (vx, vy) (map units/s, y down): the first platform whose
     surface her feet cross on the way down. Walls stop her sideways. `skip` is a platform she falls
-    through (dropping). Returns (platform, landing x, seconds)."""
-    t = 0.0
+    through (dropping). Returns (platform, landing x, seconds). Results are cached: chains try the
+    same jumps many times over."""
+    key = (id(model), round(x, 2), round(y, 2), vx, vy, None if skip is None else skip.id, dt, limit)
+    if key in _FLY_CACHE:
+        return _FLY_CACHE[key]
+    wall_xs, wall_ys = _walls(model)
+    # Only platforms she could reach in the time: within her sideways travel, at or below the top
+    # of the jump.
+    reach = abs(vx) * limit + 1
+    top = y - (vy * vy / (2 * GRAVITY) if vy < 0 else 0) - 1
+    plats = [q for q in model.platforms if q is not skip and q.right >= x - reach and q.left <= x + reach
+             and max(q.y_at(q.left), q.y_at(q.right)) >= top]
+    t, result = 0.0, None
     while t < limit:
         nx, ny, nvy = x + vx * dt, y + vy * dt, min(vy + GRAVITY * dt, FALL_SPEED)
-        if vx and any(w.x1 == w.x2 and min(x, nx) <= w.x1 <= max(x, nx)
-                      and min(w.y1, w.y2) - 1 <= ny <= max(w.y1, w.y2) + 1 for w in model.walls):
-            nx, vx = x, 0.0  # bumped into a wall
-        if (vy > 0 or nvy > 0) and t > 0:
-            for p in model.platforms:
-                if p is skip or not p.covers(nx):
-                    continue
-                surface = p.y_at(nx)
-                if y <= surface <= ny + 0.01 and ny >= y:
-                    return p, nx, t + dt
+        if vx:
+            lo, hi = (x, nx) if nx >= x else (nx, x)
+            i = bisect.bisect_left(wall_xs, lo)
+            while i < len(wall_xs) and wall_xs[i] <= hi:
+                if wall_ys[i][0] <= ny <= wall_ys[i][1]:
+                    nx, vx = x, 0.0  # bumped into a wall
+                    break
+                i += 1
+        if (vy > 0 or nvy > 0) and t > 0 and ny >= y:
+            for q in plats:
+                if q.covers(nx) and y <= q.y_at(nx) <= ny + 0.01:
+                    result = (q, nx, t + dt)
+                    break
+            if result:
+                break
         x, y, vy, t = nx, ny, nvy, t + dt
-    return None, x, t
+    result = result or (None, x, t)
+    _FLY_CACHE[key] = result
+    return result
 
 
 def air_time(dy_up: float) -> float | None:
@@ -162,8 +194,10 @@ class Planner:
         for m in self.moves:
             self.by_src.setdefault(m.src, []).append(m)
 
-    def plan(self, src: int, x: float, dst: int, dst_x: float | None = None) -> list[Move] | None:
-        """Quickest list of moves from (platform src, x) to platform dst (and walking to dst_x)."""
+    def plan(self, src: int, x: float, dst: int, dst_x: float | None = None,
+             penalty=None) -> list[Move] | None:
+        """Quickest list of moves from (platform src, x) to platform dst (and walking to dst_x).
+        `penalty(move)` adds seconds to a move (e.g. one a monster is in the way of)."""
         start = (src, round(x))
         best = {start: 0.0}
         back: dict[tuple, tuple] = {}
@@ -180,6 +214,8 @@ class Planner:
                 return path[::-1]
             for m in self.by_src.get(pid, []):
                 cost = t + abs(m.x - px) / WALK_SPEED + m.seconds + RISK.get(m.kind, 0.0)
+                if penalty is not None:
+                    cost += penalty(m)
                 node = (m.dst, round(m.land_x))
                 if cost < best.get(node, math.inf):
                     best[node] = cost

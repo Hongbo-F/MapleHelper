@@ -297,11 +297,17 @@ def cmd_nav(args) -> int:
     from .nav import Navigator
     cfg, _, _ = her_setup()
     hunter = _hunter(args)
-    nav = Navigator(hunter, hunter.model, log=_log)
+    nav = Navigator(hunter, hunter.model, log=_log, fight=args.fight)
     window.bring_to_front(cfg.game_window_title)
+    start = time.monotonic()
     trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
-    print(f"{trip.result}: {len(trip.moves)} moves, {trip.misses} landed somewhere else, {trip.hits} hit on the way, "
-          f"{trip.kills} monsters shot dead on the way")
+    print(f"{trip.result} in {time.monotonic() - start:.1f} s: {len(trip.moves)} moves in {trip.chains} chains, "
+          f"{trip.misses} landed somewhere else, {trip.hits} hit on the way, {trip.waits} waits for monsters, "
+          f"{trip.kills} monsters shot dead on the way; time looking {trip.time['look']:.1f} s, "
+          f"thinking {trip.time['think']:.1f} s, moving {trip.time['move']:.1f} s")
+    for kind, v in sorted(nav.speeds.items()):
+        v = sorted(v)
+        print(f"  {kind} speeds seen: median {v[len(v) // 2]:.0f}, 90% {v[int(len(v) * 0.9)]:.0f} units/s ({len(v)})")
     return 0
 
 
@@ -311,7 +317,7 @@ def cmd_tour(args) -> int:
     from .tour import Tour
     cfg, _, _ = her_setup()
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)
-    nav = Navigator(hunter, hunter.model, log=_log)
+    nav = Navigator(hunter, hunter.model, log=_log, fight=True)
     window.bring_to_front(cfg.game_window_title)
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below)
     kinds = set(args.kinds.split(",")) if args.kinds else None
@@ -495,6 +501,7 @@ def main(argv=None) -> int:
     s.add_argument("--x", type=float, help="and walk to this map x on it")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--seconds", type=float, default=180)
+    s.add_argument("--fight", action="store_true", help="shoot monsters on the way instead of avoiding them")
     s.set_defaults(func=cmd_nav)
 
     s = sub.add_parser("tour", help="hunt the map: visit spawn platforms in random order, clear each, rest when low")

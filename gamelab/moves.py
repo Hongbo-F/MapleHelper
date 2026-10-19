@@ -26,9 +26,9 @@ WALK_PX_PER_S = WALK_SPEED * SCREEN_SCALE
 WALK_UNITS_PER_MS = 0.209 / SCREEN_SCALE
 WALK_UNITS_FIXED = 12 / SCREEN_SCALE
 MIN_HOLD_MS = 30
-# While the arrow is still held she's covered 0.149 (t - RUN_LAG) units after t ms (start-up and
-# acceleration): from the run-up tests, a jump pressed 150 ms in took off 7 units along.
-RUN_LAG_MS = 103
+# When to press jump (ms after the arrow, from standing) to lift off `units` along: she's at
+# 0.1485 (t - 120) units after t ms, and lifts off 55 ms after the key (flow.py, measured at 60 fps).
+RUN_LAG_MS = 65
 SLIDE_MS = 220            # after releasing the arrow she slides to a stop within this
 X_TOLERANCE = 8           # map units: close enough when lining up
 ROPE_TOLERANCE = 6        # screen px: close enough to a rope's top to climb down it
@@ -69,11 +69,11 @@ class Mover:
 
     # --- looking ----------------------------------------------------------------------------
 
-    def fix(self, tries: int = 40, mobs: bool = False) -> Fix:
+    def fix(self, tries: int = 40, mobs: bool = False, wide: bool = False) -> Fix:
         """A look at where she is. Waits up to ~10 s for her minimap dot (a window or notification
         popping up over the minimap hides it)."""
         for i in range(tries):
-            s = self.h.look(mobs=mobs)
+            s = self.h.look(mobs=mobs, wide=wide)
             if s.where is not None:
                 return Fix(s.where, s, s.how)
             if i == 3:
@@ -223,6 +223,22 @@ class Mover:
         if lead:
             events += [[t, k.jump.name, "down"], [t + 40, k.jump.name, "up"]]
         self._send(events, "climb")
+
+    def off_rope(self, f: Fix) -> Fix:
+        """She's on a rope (no platform under her dot): climb up onto the platform if she's near its
+        top, else jump off it sideways (towards the side a fall lands on a platform)."""
+        k = self.h.keys
+        x, y = f.where.x, f.where.y
+        rope = min(self.model.ropes, key=lambda r: abs(r.x - x) + (0 if r.top - 10 <= y <= r.bottom + 10 else 1000))
+        if y - rope.top < 70:
+            self._send([[0, k.up.name, "down"], [900, k.up.name, "up"]], "off_rope")
+        else:
+            from .route import WALK_SPEED, fly
+            side = RIGHT if fly(self.model, x + 15, y, WALK_SPEED, -300)[0] is not None else LEFT
+            arrow = self._arrow(side)
+            self._send([[0, arrow, "down"], [30, k.jump.name, "down"], [80, k.jump.name, "up"], [400, arrow, "up"]],
+                       "off_rope")
+        return self.settle(2.5)
 
     def settle(self, seconds: float = 2.0) -> Fix:
         """Look until she's standing still on a platform (or give up and return the last look)."""

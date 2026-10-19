@@ -170,11 +170,20 @@ class Player:
         t0 = time.perf_counter() + lead_ms / 1000
         sent, held, problems = [], set(), []
 
+        cancel = INBOX / f"{plan['id']}.cancel"  # the client cut the plan short: stop pressing
+
         def press_keys():
             for event in plan.get("events", []):
-                if not _sleep_until(t0 + event[0] / 1000, self.alarm):
-                    problems.append(LIE_DETECTOR_ERROR)
-                    return
+                due = t0 + event[0] / 1000
+                while True:
+                    if cancel.exists():
+                        problems.append("cancelled")
+                        return
+                    if not _sleep_until(min(due, time.perf_counter() + 0.015), self.alarm):
+                        problems.append(LIE_DETECTOR_ERROR)
+                        return
+                    if time.perf_counter() >= due:
+                        break
                 if win32.foreground_title() != self.title:
                     problems.append("game left the foreground; stopped pressing keys")
                     return
@@ -207,6 +216,7 @@ class Player:
             presser.join()
             for name in held:
                 win32.send_key(self.allowed[name], False)
+            cancel.unlink(missing_ok=True)
         result = {"sent": sent, "problems": problems, "region": region, "scale": scale, "client": client}
         if self.alarm.is_set():
             result["error"] = LIE_DETECTOR_ERROR
@@ -238,7 +248,7 @@ def serve() -> None:
     if ALARM.exists():
         _log("refusing to start: a Lie Detector alarm hasn't been cleared (python -m gamelab clear-alarm)")
         return
-    for stale in INBOX.glob("*.json"):  # plans left over from an earlier session are never run
+    for stale in [*INBOX.glob("*.json"), *INBOX.glob("*.cancel")]:  # left over from an earlier session
         stale.unlink()
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
     alarm = threading.Event()
@@ -252,7 +262,7 @@ def serve() -> None:
         while not STOP.exists() and not alarm.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:
             plans = sorted(INBOX.glob("*.json"))
             if not plans:
-                time.sleep(0.05)
+                time.sleep(0.01)
                 continue
             path = plans[0]
             try:

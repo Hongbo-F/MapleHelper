@@ -109,7 +109,7 @@ def test_camera_learns_her_spot_only_where_it_isnt_stopped():
 def test_run_timing_and_rope_grab_lead():
     from gamelab.moves import RUN_LAG_MS, grab_lead, run_ms
     from gamelab.route import WALK_SPEED
-    assert run_ms(7) == pytest.approx(150, abs=3)  # the measured run-up: 7 units by 150 ms
+    assert run_ms(7) == pytest.approx(112, abs=3)  # jump key 112 ms in: lifts off 7 units along
     assert run_ms(149) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
     assert grab_lead(41) == pytest.approx(WALK_SPEED * 0.2775, abs=1)  # top of the jump over the rope
     assert grab_lead(120) is None

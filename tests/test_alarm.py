@@ -115,3 +115,22 @@ def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch):
     assert main(["clear-alarm"]) == 0
     assert not alarm_file.exists()
     client.check_alarm()  # no longer raises
+
+
+def test_a_plan_can_be_cut_short_and_lets_go_of_its_keys(tmp_path, monkeypatch):
+    from gamelab import player as player_mod
+    from maplehelper.keys import parse
+    sent = []
+    monkeypatch.setattr(player_mod, "INBOX", tmp_path)
+    monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 1920, "height": 1080})
+    monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "Game")
+    monkeypatch.setattr(player_mod.win32, "send_key", lambda key, down: sent.append((key.name, down)))
+    p = Player({"f": parse("f")}, "Game")
+    threading.Timer(0.1, lambda: (tmp_path / "plan1.cancel").touch()).start()
+    started = time.perf_counter()
+    result = p.run({"id": "plan1", "events": [[0, "f", "down"], [3000, "f", "up"]], "capture": {"lead_ms": 0}})
+    assert time.perf_counter() - started < 1.0
+    assert result["problems"] == ["cancelled"]
+    assert sent == [("f", True), ("f", False)]           # pressed, then let go when cut short
+    assert not (tmp_path / "plan1.cancel").exists()       # the signal is used up

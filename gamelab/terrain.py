@@ -15,7 +15,13 @@ MINIMAP_BOX = (0, 95, 300, 300)  # x0, y0, x1, y1
 def her_dot(full: np.ndarray) -> tuple[float, float] | None:
     """Her yellow dot on the minimap, in game-window pixels (full size), or None if hidden."""
     x0, y0, x1, y1 = MINIMAP_BOX
-    area = full[y0:y1, x0:x1].astype(np.int16)
+    return dot_in_box(full[y0:y1, x0:x1])
+
+
+def dot_in_box(box: np.ndarray) -> tuple[float, float] | None:
+    """Her dot in a capture of just MINIMAP_BOX, in game-window pixels."""
+    x0, y0 = MINIMAP_BOX[:2]
+    area = box.astype(np.int16)
     r, g, b = area[..., 0], area[..., 1], area[..., 2]
     yellow = ((r > 220) & (g > 190) & (b < 90)).astype(np.uint8)
     count, _, stats, centroids = cv2.connectedComponentsWithStats(yellow)

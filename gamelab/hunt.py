@@ -275,11 +275,25 @@ class Eyes:
         s.exp = full[y0:y1, x0:x1].max(axis=2) > 150
         return s
 
+    def glance(self) -> tuple[tuple[float, float] | None, float]:
+        """Just her minimap dot and HP, from two small captures (a few ms): for watching a plan run."""
+        from .terrain import MINIMAP_BOX, dot_in_box
+        area = window.client_rect(window.find_game(self.title))
+        x0, y0, x1, y1 = MINIMAP_BOX
+        box = np.asarray(self.sct.grab({"left": area["left"] + x0, "top": area["top"] + y0,
+                                        "width": x1 - x0, "height": y1 - y0}))[:, :, 2::-1]
+        w, h = area["width"], area["height"]
+        a, b = int(HP_BAR[0] * w), int(HP_BAR[1] * w)
+        row = np.asarray(self.sct.grab({"left": area["left"] + a, "top": area["top"] + int(BAR_ROW * h),
+                                        "width": b - a, "height": 1}))[0, :, 2::-1].astype(np.int16)
+        hp = float(((row[:, 0] > 150) & (row[:, 1] < 90) & (row[:, 2] < 90)).sum()) / max(1, b - a)
+        return dot_in_box(box), hp
+
     def detect(self, sight: Sight, up: float = LOOK_UP, down: float = LOOK_DOWN) -> list[Mob]:
         """Monsters from `up` map units above her feet to `down` below (her screen position must be known)."""
-        feet = sight.floor_y
-        return self.detector.detect(sight.frame, rows=(int(feet - up / UNITS_PER_HALF_PX),
-                                                       int(feet + down / UNITS_PER_HALF_PX)))
+        feet, bottom = sight.floor_y, int(sight.frame.shape[0] * 0.88)  # the bottom bar starts below
+        return self.detector.detect(sight.frame, rows=(max(0, int(feet - up / UNITS_PER_HALF_PX)),
+                                                       min(bottom, int(feet + down / UNITS_PER_HALF_PX))))
 
     def _make_full_tag(self, full) -> np.ndarray:
         """Find her with the half-size template (trying all four ways of halving the frame), then cut
@@ -445,9 +459,10 @@ class Hunter:
 
     # --- looking ----------------------------------------------------------------------------
 
-    def look(self, mobs: bool = True) -> Sight:
+    def look(self, mobs: bool = True, wide: bool = False) -> Sight:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
-        dot and the camera when the tag is hidden; and (if `mobs`) the monsters she could shoot."""
+        dot and the camera when the tag is hidden; and (if `mobs`) the monsters she could shoot, or
+        (if `wide`) every monster on screen."""
         s = self.eyes.look()
         if s.dot is not None:
             s.where = self.localizer.where_dot(s.dot)
@@ -461,7 +476,7 @@ class Hunter:
                 s.her, s.seen = (round(sx / SCALE), round(sy / SCALE) + 8), False
                 s.ground = ground_extent(s.frame, s.her[0], s.her[1] - 8)
         if mobs and s.her is not None and s.where is not None:
-            s.mobs = self.eyes.detect(s)
+            s.mobs = self.eyes.detect(s, up=2000, down=2000) if wide else self.eyes.detect(s)
             s.targets = [s.place(m, self.model) for m in s.mobs]
         if self._exp is not None and s.exp is not None and s.exp.shape == self._exp.shape                 and int((s.exp != self._exp).sum()) >= 3:
             self.exp_events.append(s.t)

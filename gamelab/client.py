@@ -37,6 +37,13 @@ class Recording:
 def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100,
            name="plan", timeout=120) -> dict:
     """Hand a plan to the running player and wait for the result (frames included if recorded)."""
+    plan_id = send(events, fps=fps, duration_ms=duration_ms, crop=crop, scale=scale, focus=focus,
+                   lead_ms=lead_ms, name=name)
+    return wait(plan_id, timeout)
+
+
+def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan") -> str:
+    """Hand a plan to the running player without waiting; returns its id (for wait / cancel)."""
     check_alarm()
     INBOX.mkdir(parents=True, exist_ok=True)
     plan_id = f"{time.strftime('%H%M%S')}_{name}_{uuid.uuid4().hex[:4]}"
@@ -47,7 +54,20 @@ def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, l
     tmp = INBOX / f"{plan_id}.tmp"
     tmp.write_text(json.dumps(plan), encoding="utf-8")
     tmp.replace(INBOX / f"{plan_id}.json")
+    return plan_id
 
+
+def done(plan_id: str) -> bool:
+    return (OUTBOX / f"{plan_id}.json").exists()
+
+
+def cancel(plan_id: str) -> None:
+    """Cut a running plan short: the player stops pressing and lets go of every key it holds."""
+    (INBOX / f"{plan_id}.cancel").touch()
+
+
+def wait(plan_id: str, timeout: float = 120) -> dict:
+    """The result of a plan sent with `send` (frames included if recorded)."""
     result_path = OUTBOX / f"{plan_id}.json"
     end = time.monotonic() + timeout
     while not result_path.exists():
@@ -58,7 +78,7 @@ def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, l
             (INBOX / f"{plan_id}.json").unlink(missing_ok=True)
             raise PlayerError(f"no result after {timeout}s; is the player running? "
                               f"Start it with `python -m gamelab player --elevate` (log: {PLAYER_LOG})")
-        time.sleep(0.05)
+        time.sleep(0.01)
     result = json.loads(result_path.read_text(encoding="utf-8"))
     result_path.unlink()
     if "error" in result:
