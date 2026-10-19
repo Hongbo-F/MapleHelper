@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from maplehelper.ocr.engine import Row
@@ -155,6 +157,22 @@ def test_ambiguous_cut_item_name_stays_as_read():
     # Brown Hard Leather Boots, Pants or Top.
     line = parse_loot("Brown Hard Lea...x1 earned.", ITEM_NAMES)
     assert (line.item, line.cut) == ("Brown Hard Lea", True)
+
+
+def test_item_names_are_the_games():
+    # meowdb tells apart items that share a name with suffixes the game never shows ("Red Potion (Alt)").
+    assert not [n for n in ITEM_NAMES if re.search(r"\((?:Alt(?: \d+)?|Warrior|Magician|Bowman|Thief)\)$", n)]
+    assert {"Red Potion", "Dark Marble", "The Proof of a Hero", "Compensation Box"} <= set(ITEM_NAMES)
+    assert all(n == n.strip() for n in ITEM_NAMES)
+
+
+@pytest.mark.parametrize("text, name", [
+    # Each was several suffixed names on meowdb, so the cut-off name looked ambiguous.
+    ("The Proof of a H...x1 earned. (Etc)", "The Proof of a Hero"),
+    ("Return Scroll - Nea...x1 earned. (Use)", "Return Scroll - Nearest Town"),
+])
+def test_cut_item_name_shared_by_several_items(text, name):
+    assert parse_loot(text, ITEM_NAMES).item == name
 
 
 def test_cut_item_name_is_never_the_name_it_shows():
