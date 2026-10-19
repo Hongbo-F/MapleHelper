@@ -15,6 +15,9 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from maplehelper.engine import LEFT, RIGHT
+
+from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from .physics import (CLIMB_SPEED, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH, WALK_SPEED, fall_time,
                       fly, sure_landing)
@@ -49,7 +52,7 @@ ALONG_STEP = 10      # running jumps are tried from every this many units along 
 ALONG_SPREAD = 60    # ... and kept this far apart ...
 ALONG_KEEP = 3       # ... up to this many (plus the last) per landing platform
 
-SIDES = (("right", 1), ("left", -1))  # a direction and its sign along x
+SIDES = tuple((d, directions.sign(d)) for d in (RIGHT, LEFT))  # a direction and its sign along x
 
 
 @dataclass(frozen=True)

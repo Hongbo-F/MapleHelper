@@ -27,8 +27,9 @@ from PIL import Image
 from gamedata.paths import COPY, OUT
 
 from ..screen import SCALE
+from .kinds import kind_of
 from .match import masked_match, suppress_overlaps
-from .sprites import OPAQUE, kind_of, screen_size
+from .sprites import OPAQUE, screen_size
 
 
 LOOT = OUT / "loot"

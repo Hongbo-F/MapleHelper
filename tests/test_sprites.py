@@ -9,7 +9,7 @@ import pytest
 from gamedata.canvas import pixels
 from gamedata.wz import Canvas
 from gamelab.perception.mobs import palette
-from gamelab.perception.sprites import kind_of
+from gamelab.perception.kinds import kind_of
 
 
 def canvas_bytes(fmt2: int, packed: bytes) -> bytes:

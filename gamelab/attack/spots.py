@@ -16,11 +16,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..localization.mapdata import MONSTER_REACH, MapModel, Platform
+from ..localization.mapdata import MapModel, Platform, runs_under
 from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..motion.physics import WALK_SPEED
-from ..perception.sprites import kind_of
+from ..perception.kinds import kind_of
 from .reach import EDGE_MARGIN, SHOT_DOWN, SHOT_RANGE, SHOT_UP, can_shoot, min_dx
 
 MIN_COVERAGE = 0.3   # shoot from another platform only if this much of the hunting platform is in reach
@@ -37,9 +37,7 @@ class Spot:
     platform: int
     x: float
     coverage: float   # fraction of the target platform's length in reach from there
-    safe: bool        # spots: no monster can reach her on that platform (MapModel.safe). spot, spot_for:
-                      # True for a spot off the target platform (one spot_ok allows), False for the
-                      # middle of the target platform itself (which spot gives coverage 1.0)
+    safe: bool        # no monster can reach her on that platform (MapModel.safe)
 
 
 def coverage(target: Platform, x: float, y: float) -> float:
@@ -77,13 +75,6 @@ def spots(model: MapModel, target: int) -> list[Spot]:
     return sorted(out, key=lambda s: (not s.safe, -s.coverage))
 
 
-def _runs_under(other: Platform, p: Platform) -> bool:
-    """Whether `other` runs under `p` within MONSTER_REACH, judged at the middle of their overlap (as
-    MapModel.safe judges it): monsters walking on `other` can touch her on `p`."""
-    lo, hi = max(p.left, other.left), min(p.right, other.right)
-    return lo < hi and 0 < other.y_at((lo + hi) / 2) - p.y_at((lo + hi) / 2) <= MONSTER_REACH
-
-
 def spot_ok(model: MapModel, platform: int, worth: set[str] | None) -> bool:
     """Whether she can stand on `platform` to shoot from it: no monster can touch her there, or only
     ones not worth hunting can (`worth`: the kinds that are; None: all are)."""
@@ -94,7 +85,7 @@ def spot_ok(model: MapModel, platform: int, worth: set[str] | None) -> bool:
     p = model.platform(platform)
     for q, names in model.monsters_by_platform.items():
         other = model.platform(q)
-        if (q == platform or _runs_under(other, p)) and any(kind_of(n) in worth for n in names):
+        if (q == platform or runs_under(other, p)) and any(kind_of(n) in worth for n in names):
             return False
     return True
 
@@ -131,8 +122,8 @@ def spot(model: MapModel, pid: int, here: Where, travel: Travel, worth: set[str]
 
         sp = min((sp for sp in good if sp.coverage >= NEAR_BEST * best), key=cost)
         if cost(sp) < UNREACHABLE:
-            return Spot(sp.platform, sp.x, sp.coverage, True)
-    return Spot(pid, _middle(model, pid), 1.0, False)
+            return sp
+    return Spot(pid, _middle(model, pid), 1.0, model.safe(pid))
 
 
 def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here: Where, travel: Travel,
@@ -165,7 +156,7 @@ def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here
         return None
     _, _, stand, x = best
     ground, p = model.platform(pid), model.platform(stand)
-    return Spot(stand, x, round(coverage(ground, x, p.y_at(x)), 3), True)
+    return Spot(stand, x, round(coverage(ground, x, p.y_at(x)), 3), model.safe(stand))
 
 
 def spot_at(model: MapModel, pid: int, worth: set[str] | None) -> tuple[int, float]:

@@ -72,6 +72,14 @@ class Platform:
         return min(max(x, self.left), self.right)
 
 
+def runs_under(other: Platform, p: Platform, reach: float = MONSTER_REACH) -> bool:
+    """Whether platform `other` runs under `p` within `reach`, judged at the middle of where they overlap:
+    monsters walking on `other` can touch her standing on `p` (their bodies stick up that far)."""
+    lo, hi = max(p.left, other.left), min(p.right, other.right)  # where they overlap
+    mid = (lo + hi) / 2
+    return lo < hi and 0 < other.y_at(mid) - p.y_at(mid) <= reach
+
+
 @dataclass(frozen=True)
 class Rope:
     """A rope or ladder."""
@@ -153,13 +161,12 @@ class MapModel:
         if pid in self.spawn_platforms:
             return False
         p = self.platform(pid)
-        for q in self.spawn_platforms:
-            other = self.platform(q)
-            lo, hi = max(p.left, other.left), min(p.right, other.right)  # where they overlap
-            mid = (lo + hi) / 2
-            if lo < hi and 0 < other.y_at(mid) - p.y_at(mid) <= reach:
-                return False
-        return True
+        return not any(runs_under(self.platform(q), p, reach) for q in self.spawn_platforms)
+
+    def portal_near(self, p: Platform, x: float, dx: float = 60, dy: float = 40) -> bool:
+        """Whether a portal stands on platform `p` near map x (within `dx` along it and `dy` of its
+        surface): holding up there would take it."""
+        return any(abs(pt.x - x) < dx and abs(pt.y - p.y_at(pt.x)) < dy for pt in self.portals)
 
     @cached_property
     def spawn_platforms(self) -> dict[int, int]:

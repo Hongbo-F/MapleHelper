@@ -254,7 +254,7 @@ class FakeEyes(Eyes):
     def _draw(self, frame: np.ndarray, her: tuple[int, int], x: float, y: float) -> Screen:
         u, floor = UNITS_PER_HALF_PX, her[1] - 8
         screen = Screen()
-        for m, mx, my, alive in self.world.visible_mobs():
+        for m, mx, my, alive in self.world.visible_monsters():
             w, h = round(2 * m.half / u), round(m.height / u)
             cx, feet = round(her[0] + (mx - x) / u), round(floor + (my - y) / u)
             mob = Mob(m.kind, cx, feet - h // 2, w, h, 0.9)

@@ -7,6 +7,7 @@ import time
 import cv2
 import numpy as np
 
+from .. import directions
 from ..attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, min_dx
 from ..localization.mapdata import MapModel
 from .state import State
@@ -222,7 +223,7 @@ class MapView:
         for sign in (-1, 1):
             near, far = x + sign * min_dx(0), x + sign * STAR_REACH
             a, b = self.pt(min(near, far), y - SHOT_UP), self.pt(max(near, far), y + SHOT_DOWN)
-            facing = her.get("facing") == ("right" if sign > 0 else "left")
+            facing = her.get("facing") == directions.toward(sign)
             cv2.rectangle(overlay, a, b, REACH_FACING if facing else REACH_BEHIND, -1)
         cv2.addWeighted(overlay, 0.35, img, 0.65, 0, img)
 
@@ -235,7 +236,7 @@ class MapView:
         x, y = self.pt(her["x"], her["y"] - 8)
         cv2.circle(img, (x, y), 6, HER, -1, cv2.LINE_AA)
         if her.get("facing") in ("left", "right"):
-            d = 1 if her["facing"] == "right" else -1
+            d = directions.sign(her["facing"])
             cv2.arrowedLine(img, (x, y), (x + 14 * d, y), BACKGROUND, 2, cv2.LINE_AA, tipLength=0.5)
         if her.get("seen") is False:
             cv2.circle(img, (x, y), 9, UNSEEN, 1, cv2.LINE_AA)

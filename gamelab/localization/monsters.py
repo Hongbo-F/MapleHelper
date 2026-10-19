@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 
 from ..perception.mobs import Mob
-from ..perception.sprites import kind_of
+from ..perception.kinds import kind_of
 from .mapdata import MapModel, Platform
 
 TRACK_SLACK = 85   # how far a monster may move between two looks (knockback) and still be the same one

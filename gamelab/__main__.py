@@ -385,7 +385,7 @@ def cmd_nav(args) -> int:
 def cmd_tour(args) -> int:
     from .behavior.tour import Tour
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)
-    nav = hunter.navigator(fighting=True)
+    nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
     _record("tour", hunter.model.id)
     window.bring_to_front(_game_title())
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below)
@@ -665,7 +665,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--kills", type=int, default=5, help="kills per stop")
     s.add_argument("--seconds", type=float, default=90, help="time per stop")
     s.add_argument("--kinds", help="only these monsters, e.g. slime,pig")
-    s.add_argument("--seed", type=int, help="random seed for the order (default: random)")
+    s.add_argument("--seed", type=int, help="random seed for the order and the route choices (default: random)")
     s.add_argument("--rest-below", type=float, default=0.5, help="go rest when HP is below this between stops")
     s.add_argument("--potion-hp", type=float, default=0.45, help="drink an HP potion below this while fighting")
     s.add_argument("--low-hp", type=float, default=0.3, help="stop fighting and rest below this")

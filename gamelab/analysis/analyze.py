@@ -7,6 +7,7 @@ import numpy as np
 
 from maplehelper.engine import RIGHT
 
+from .. import directions
 from .recordings import Recording
 from .scroll import world_x
 from .track import airborne, swings, track
@@ -54,7 +55,7 @@ def combos(rec: Recording, starts: list[int], end_ms: int, facing: str, template
     def x_at(t: float) -> float:
         return xs[int(np.argmin(np.abs(times - t)))]
 
-    back_sign = -1 if facing == RIGHT else 1
+    back_sign = -directions.sign(facing)
     front_side = "R" if facing == RIGHT else "L"
     all_swings = swings(rec.frames, rows, template.shape[1])
     spans = airborne(rows)

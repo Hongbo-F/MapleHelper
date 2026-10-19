@@ -263,3 +263,32 @@ def test_monsters_left_out_of_reach_are_shot_from_another_spot_before_looting():
     assert _stop([2, 2, 0], seen=[2, 0, 0], elsewhere=[Spot(9, 300, 0.0, True)], log=log) == 2
     assert any("over to platform 9" in m for m in log)
     assert log.index(next(m for m in log if "over to platform 9" in m)) < len(log) - 1
+
+
+def test_tour_seed_seeds_the_route_choices_too(monkeypatch):
+    """`tour --seed N` seeds the navigator (route weights, takeoff spots) as well as the sweep's order, as
+    the simulator does: the same seed gives the same tour."""
+    import random
+    from types import SimpleNamespace
+
+    from gamelab import __main__ as cli
+    from gamelab.behavior import tour
+    rngs = {}
+
+    class Tour:
+        def __init__(self, hunter, nav, log, rng, rest_below):
+            rngs["tour"] = rng
+
+        def run(self, **kw):
+            return "done"
+
+    hunter = SimpleNamespace(model=SimpleNamespace(id=1),
+                             navigator=lambda fighting, rng=None: rngs.setdefault("nav", rng))
+    monkeypatch.setattr(cli, "_hunter", lambda args, **kw: hunter)
+    monkeypatch.setattr(cli, "_record", lambda command, map_id: None)
+    monkeypatch.setattr(cli, "_game_title", lambda: "game")
+    monkeypatch.setattr(cli.window, "bring_to_front", lambda title: None)
+    monkeypatch.setattr(tour, "Tour", Tour)
+    assert cli.cmd_tour(cli.build_parser().parse_args(["tour", "--seed", "7"])) == 0
+    want = random.Random(7).random()
+    assert rngs["nav"].random() == want and rngs["tour"].random() == want

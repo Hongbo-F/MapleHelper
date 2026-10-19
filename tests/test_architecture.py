@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 PKG = Path(__file__).resolve().parents[1] / "gamelab"
-SHARED = {"paths", "screen", "telemetry", "window"}
+SHARED = {"directions", "paths", "screen", "telemetry", "window"}
 # Each layer and the gamelab layers it may import (besides itself and SHARED).
 ALLOWED = {
     "perception": set(),

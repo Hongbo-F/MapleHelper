@@ -1,7 +1,7 @@
 """Monster templates made from the game's own sprites (gamedata.canvas), drawn the size they appear on
 screen. They're extracted game data, so they're written next to the other extracts (git-ignored).
 
-A monster's kind is its name in lower case with dashes ("orange-mushroom"); `kind_of` maps names.
+A monster's kind is its name in lower case with dashes ("orange-mushroom"; perception.kinds).
 """
 
 from pathlib import Path
@@ -13,16 +13,12 @@ from PIL import Image
 from gamedata.paths import OUT
 
 from ..screen import SCREEN_SCALE
+from .kinds import kind_of
 from .mobs import ASSETS, KINDS_WITH_PALETTE, MobDetector
 
 
 SPRITES = OUT / "sprites"
 OPAQUE = 128  # a game picture's pixel is opaque from this alpha up
-
-
-def kind_of(name: str) -> str:
-    """A monster's or item's kind, from its name in the game: "Orange Mushroom" -> "orange-mushroom"."""
-    return name.strip().lower().replace(" ", "-")
 
 
 def screen_size(picture: np.ndarray) -> tuple[int, int]:

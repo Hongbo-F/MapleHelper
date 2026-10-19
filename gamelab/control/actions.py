@@ -12,6 +12,7 @@ from maplehelper.config import GameKeys
 from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT, MOVEMENT
 
+from .. import directions
 from ..motion.physics import hold_ms
 from . import client
 
@@ -102,7 +103,7 @@ class Actions:
         makes sure there's room behind her."""
         self.wait_lock()
         key = self._attack_key()
-        away = self.arrow(LEFT if direction == RIGHT else RIGHT)
+        away = self.arrow(directions.opposite(direction))
         toward, jump = self.arrow(direction), self.keys.jump.name
         events = [[0, away, "down"], *tap(JB_RUN_MS, jump),
                   [JB_TURN_MS, away, "up"], *tap(JB_TURN_MS, toward),

@@ -14,10 +14,10 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from maplehelper.engine import LEFT, RIGHT
+from maplehelper.engine import RIGHT
 from maplehelper.game import COMBAT
 
-from .. import paths, telemetry
+from .. import directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import TOO_CLOSE, act_text, decide, open_above, pct, pick_target, stance
 from ..localization.monsters import SEARCH_SLACK, TRACK_SLACK, Monster, dead_one, seen_again
@@ -330,76 +330,106 @@ def _in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:
                  else reach.can_shoot(m.x - x, m.y - y, reach.STAR_REACH))]
 
 
+@dataclass
+class KillState:
+    """What kill() keeps between looks."""
+    kind: str
+    last: tuple[float, float]  # where the target was last seen ...
+    platform: int | None       # ... and on which platform (its drops land there)
+    misses: int = 0            # looks in a row without her or it
+    throws: int = 0
+    gone_since: float | None = None   # since when it hasn't been seen
+    first_throw: float | None = None  # when she first threw at it: EXP gains since then can be its kill
+    flying: list[dict] = field(default_factory=list)  # throws whose hit isn't confirmed yet (see _score_shots)
+
+    def seen(self, monsters: list[Monster]) -> list[Monster]:
+        """The `monsters` that can be the target: of its kind, near where it was last seen (searched for
+        further once it's out of sight)."""
+        slack = TRACK_SLACK if self.gone_since is None else SEARCH_SLACK
+        return [m for m in monsters if m.kind == self.kind
+                and abs(m.x - self.last[0]) <= slack and abs(m.y - self.last[1]) <= 40]
+
+
 def kill(h: "Hunter", target: Monster, seconds: float = 30) -> str:
     """Shoot `target` until it dies; then loot (or remember the drops if they're off her
     platform). Returns how it ended: 'killed', 'lost', 'timeout', 'unreachable', or a reason
     to stop (low HP)."""
-    kind, last = target.kind, (target.x, target.y)
-    platform = target.platform
-    deadline, misses, throws = time.monotonic() + seconds, 0, 0  # misses: looks in a row without her or it
-    gone_since: float | None = None
-    first_throw: float | None = None
-    flying: list[dict] = []  # throws whose hit isn't confirmed yet (see _score_shots)
-    h.log(f"target: {kind} on platform {platform}")
+    st = KillState(target.kind, (target.x, target.y), target.platform)
+    deadline = time.monotonic() + seconds
+    h.log(f"target: {st.kind} on platform {st.platform}")
     while time.monotonic() < deadline:
         s = h.look()
         if s.where is None or s.platform is None:
-            misses += 1
-            if misses > 8:
+            st.misses += 1
+            if st.misses > 8:
                 return "lost track of her"
             time.sleep(0.15)
             continue
         if stop := h.health_check(s):
             return stop
-        slack = TRACK_SLACK if gone_since is None else SEARCH_SLACK
-        found = [m for m in s.monsters if m.kind == kind
-                 and abs(m.x - last[0]) <= slack and abs(m.y - last[1]) <= 40]
-        if not found:
-            misses += 1
-            gone_since = gone_since or time.monotonic()
-            # Dead only if her EXP went up since she started throwing at it. Vanishing alone
-            # isn't enough: hit monsters flinch and hide behind damage numbers, and other
-            # players kill monsters too (about half the "kills" counted by vanishing alone
-            # weren't hers).
-            if first_throw is not None and h.take_exp(first_throw):
-                for sh in flying:
-                    _log_shot(sh, sh["due"] <= gone_since + 0.2)
-                h.report.count_kill(kind)
-                h.log(f"{kind} down after {throws} throws")
-                h.looter.collect(DropSpot(last[0], last[1], platform, time.monotonic()))
-                return "killed"
-            if time.monotonic() - gone_since >= LOST_AFTER:
-                if throws:
-                    h.report.lost += 1
-                    h.log(f"{kind} gone without her EXP going up after {throws} throws: not counted")
-                return "lost"
-            time.sleep(0.15)
-            continue
-        misses, gone_since = 0, None
-        # An EXP gain while it's still alive was another monster dying (a star hits the first
-        # monster in its way): it isn't this one's.
-        h.exp_events = [e for e in h.exp_events if s.t - e < 1.5]
-        t = min(found, key=lambda m: abs(m.x - last[0]))
-        last, platform = (t.x, t.y), t.platform if t.platform is not None else platform
-        bar = t.bar
-        flying = _score_shots(flying, bar)
-        threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]
-        act = decide(s.where.x, s.where.y, s.platform, t, threats)
-        h.log(f"  {kind} {t.x - s.where.x:+.0f},{t.y - s.where.y:+.0f} (bar {pct(bar)}), "
-              f"HP {s.hp:.0%}: {' '.join(str(v if isinstance(v, str) else round(v)) for v in act)}")
-        if act[0] == "skip":
-            return "unreachable"
-        if act[0] == "throw":
-            dx, dy = t.x - s.where.x, t.y - s.where.y
-            if reach.can_shoot(dx, dy, reach=reach.STAR_REACH) and act[1] == (RIGHT if dx > 0 else LEFT):
-                flying.append(_shot(s, t, dx, dy))
-            h.actions.throw(act[1])
-            h.report.throws += 1
-            throws += 1
-            first_throw = first_throw or time.monotonic()
-        else:
-            h.actions.walk(act[1], act[2])
+        found = st.seen(s.monsters)
+        ended = _shoot_at(h, st, s, found) if found else _target_gone(h, st)
+        if ended:
+            return ended
     return "timeout"
+
+
+# --- the steps of a kill's look (kill) -----------------------------------------------------------
+
+def _target_gone(h: "Hunter", st: KillState) -> str | None:
+    """The target isn't in this look: 'killed' (and looted) if her EXP went up since she started throwing
+    at it, 'lost' once it's been out of sight LOST_AFTER s; None: look again, after a short wait."""
+    st.misses += 1
+    st.gone_since = st.gone_since or time.monotonic()
+    # Dead only if her EXP went up since she started throwing at it. Vanishing alone
+    # isn't enough: hit monsters flinch and hide behind damage numbers, and other
+    # players kill monsters too (about half the "kills" counted by vanishing alone
+    # weren't hers).
+    if st.first_throw is not None and h.take_exp(st.first_throw):
+        for sh in st.flying:
+            _log_shot(sh, sh["due"] <= st.gone_since + 0.2)
+        h.report.count_kill(st.kind)
+        h.log(f"{st.kind} down after {st.throws} throws")
+        h.looter.collect(DropSpot(st.last[0], st.last[1], st.platform, time.monotonic()))
+        return "killed"
+    if time.monotonic() - st.gone_since >= LOST_AFTER:
+        if st.throws:
+            h.report.lost += 1
+            h.log(f"{st.kind} gone without her EXP going up after {st.throws} throws: not counted")
+        return "lost"
+    time.sleep(0.15)
+    return None
+
+
+def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str | None:
+    """The target is in look `s` (the nearest of those `found`): score the throws in flight by its HP bar,
+    and throw at it or walk (attack.stance.decide). 'unreachable' if no spot on her platform reaches it;
+    None: look again."""
+    st.misses, st.gone_since = 0, None
+    # An EXP gain while it's still alive was another monster dying (a star hits the first
+    # monster in its way): it isn't this one's.
+    h.exp_events = [e for e in h.exp_events if s.t - e < 1.5]
+    t = min(found, key=lambda m: abs(m.x - st.last[0]))
+    st.last, st.platform = (t.x, t.y), t.platform if t.platform is not None else st.platform
+    bar = t.bar
+    st.flying = _score_shots(st.flying, bar)
+    threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]
+    act = decide(s.where.x, s.where.y, s.platform, t, threats)
+    h.log(f"  {st.kind} {t.x - s.where.x:+.0f},{t.y - s.where.y:+.0f} (bar {pct(bar)}), "
+          f"HP {s.hp:.0%}: {' '.join(str(v if isinstance(v, str) else round(v)) for v in act)}")
+    if act[0] == "skip":
+        return "unreachable"
+    if act[0] == "throw":
+        dx, dy = t.x - s.where.x, t.y - s.where.y
+        if reach.can_shoot(dx, dy, reach=reach.STAR_REACH) and act[1] == directions.toward(dx):
+            st.flying.append(_shot(s, t, dx, dy))
+        h.actions.throw(act[1])
+        h.report.throws += 1
+        st.throws += 1
+        st.first_throw = st.first_throw or time.monotonic()
+    else:
+        h.actions.walk(act[1], act[2])
+    return None
 
 
 def _shot(s: Scene, t: Monster, dx: float, dy: float) -> dict:
@@ -455,14 +485,15 @@ class FightOnTheWay:
         self.h.clear(self.kinds, max_kills=3, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False)
         return self.h.report.exp_kills - before
 
-    def clear_way(self, s: Scene, move: Move) -> bool:
+    def clear_way(self, s: Scene, move: Move) -> int | None:
         """Shoot a monster standing on her platform between her and where the move starts (or too
-        close to her), whatever its kind. Returns True if she fought."""
+        close to her), whatever its kind. Returns the kills, or None if nothing was in the way."""
         lo, hi = sorted((s.where.x, move.x))
         in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE]
         if not in_way:
-            return False
+            return None
         m = min(in_way, key=lambda m: abs(m.x - s.where.x))
         self.h.log(f"  {m.kind} in the way at x {m.x:.0f}: shooting it first")
+        before = self.h.report.exp_kills
         self.h.clear(max_kills=2, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False)
-        return True
+        return self.h.report.exp_kills - before

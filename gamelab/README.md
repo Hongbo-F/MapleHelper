@@ -20,7 +20,7 @@ The code is organized like a self-driving car's stack. Each layer is a package, 
   ui            the live mini-map window (reads telemetry)
   sim           an offline game: the stack runs against it with no game and no keys
   analysis      measuring combos in recordings
-  shared        paths, screen geometry, telemetry, the game window
+  shared        paths, screen geometry, left and right (directions), telemetry, the game window
 ```
 
 | Package | Does | Main pieces | May import |
@@ -32,7 +32,7 @@ The code is organized like a self-driving car's stack. Each layer is a package, 
 | `control` | Keys out | `Actions` (her key plans: throws, walking, pick-up, potions, the chair), `Mover` (one move, closed loop), `Navigator` (a route: chains, glances, cut-offs, replans), `client` (plans to the key player), `player` (the key player itself), `alarm` | perception, localization, motion |
 | `behavior` | What to do next | `Hunter` (the agent: senses, actions, a looter, her vitals and health), `fight` (`clear`, `kill`, fighting on the way), `Looter` (sweeps, mop-ups, drops remembered), `Tour` | all of the above |
 | `ui` | The mini-map window | `MapView` (draws a state; pure), `State` (the latest record per topic), sources (live, replay, a planned route), `MapWindow` | localization, motion, attack |
-| `sim` | An offline game | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer`, 50 scenarios, golden traces | everything but ui |
+| `sim` | An offline game | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer`, 51 scenarios, golden traces | everything but ui |
 | `analysis` | Combo tests on recordings | `track`, `scroll`, `analyze`, `calibration`, `recordings` | perception, control |
 
 How a look becomes keys:
@@ -122,7 +122,7 @@ Hunting commands (`hunt clear`/`kill`, `nav`, `tour`) record what they see and p
 
 ## Offline: the simulator and golden traces
 
-`gamelab/sim` is a small game that the whole stack runs against, with no game and no key player. `FakeEyes` answers perception's questions from a simulated world, and `FakePlayer` runs key plans on it on a fake clock. Her body follows the game's physics (the same jump arcs as the planner) and her measured walking and climbing; monsters walk their platforms, touch her (half of the touches are evaded, as measured), die from stars, give EXP and drop loot. 50 scenarios cover navigation (every kind of move, monsters in the way, fighting on the way, cut-off plans), single moves, fights, kills, mop-ups, a full inventory, tours and rests.
+`gamelab/sim` is a small game that the whole stack runs against, with no game and no key player. `FakeEyes` answers perception's questions from a simulated world, and `FakePlayer` runs key plans on it on a fake clock. Her body follows the game's physics (the same jump arcs as the planner) and her measured walking and climbing; monsters walk their platforms, touch her (half of the touches are evaded, as measured), die from stars, give EXP and drop loot. 51 scenarios cover navigation (every kind of move, monsters in the way, fighting on the way, cut-off plans), single moves, fights, kills, mop-ups, a full inventory, tours and rests.
 
 - `python -m gamelab sim tour_run --speed 4` runs a scenario and records it for the mini-map: open `python -m gamelab minimap` first to watch it as it happens.
 - `python -m gamelab.sim.golden check` reruns every scenario and compares it with the golden trace recorded earlier: every key plan, log line and result. A refactor that leaves those byte-identical hasn't changed what she does. `record` rewrites the traces (after an intended change). The traces hold map data, so they stay in `lab/golden` (git-ignored).
@@ -184,7 +184,7 @@ A monster seen on screen goes on the platform its kind spawns on: feet read from
 - **Waiting:** with nothing in reach she walks just close enough to the nearest monster. With monsters seen but out of reach, she waits up to 2 s from a safe platform (1 s on the hunting platform). With none seen at all, she moves on after 0.4 s.
 - **Fighting on the way** (`FightOnTheWay`): before each move, a short burst at whatever a star reaches from where she stands, on any platform: up to 3 kills, never walking after them, up to 5 bursts per platform. It also shoots any monster in the way of a move along a platform. It's turned off while she goes to rest.
 - **Loot** (`looting.py`): each kill's drops are swept when the fight is over, if they fell on her platform (it looks again until she has landed: the fight often ended mid-jump). After the sweep she looks again and goes back for drops still on her platform, standing right on each one, for up to 3 looks. Drops elsewhere are remembered for the tour: her kills', and any seen on other platforms. A remembered spot is forgotten only when two looks 1.5 s apart, 3 s or more after the kill, both see it empty. A drop she has stood on twice that's still there is left alone for 90 s: for mesos that means someone else's drop; for an item it may mean her inventory is full, which the pickup log (OCR) says, or 3 such items in a row. With it full she leaves items and still picks up mesos.
-- **A tour** (`tour.py`) sweeps every platform worth hunting. A platform's worth is the EXP a visit is expected to give: at first 30% of its spawns' EXP (game data), counted as 2 visits, then blended with what each visit really gave (`lab/grounds.json`). Monsters giving under a quarter of the map's best EXP aren't hunted, only shot when in her way (snails give 2, against 12-15). Platforms expected to give under 15% of the best one's are skipped: by the data, 34 and 35 spawn slimes, but 11 visits found only snails there. The order: nearest next by route time, judged with a random ±25%, then tidied to cut travel (2-opt); after each stop the rest of the sweep is planned again from wherever she ended up. At a stop she kills all she can reach from her spot; if some are left out of reach, she moves to another spot that reaches them rather than walking down into them, and only then collects the drops (nearest by route first). She moves on once a whole-screen look sees no monster left. When HP is low, she rests on the chair at the nearest safe platform, and she ends standing by there.
+- **A tour** (`tour.py`) sweeps every platform worth hunting. A platform's worth is the EXP a visit is expected to give: at first 30% of its spawns' EXP (game data), counted as 2 visits, then blended with what each visit really gave (`lab/grounds.json`). Monsters giving under a quarter of the map's best EXP aren't hunted, only shot when in her way (snails give 2, against 12-15). Platforms expected to give under 15% of the best one's are skipped: by the data, 34 and 35 spawn slimes, but 11 visits found only snails there. The order: nearest next by route time, judged with a random ±25%, then tidied to cut travel (2-opt); after each stop the rest of the sweep is planned again from wherever she ended up. At a stop she kills all she can reach from her spot; if some are left out of reach, she moves to another spot that reaches them rather than walking down into them, and only then collects the drops (nearest by route first; drops of monsters shot on the way are kept for the next collection, and none starts a trip after 180 s). She moves on once a whole-screen look sees no monster left. When HP is low, she rests on the chair at the nearest safe platform (on the way there she still drinks potions, but low HP doesn't stop the trip), and she ends standing by there.
 
 ## In game, on Thicket Around the Beach II
 
@@ -198,12 +198,16 @@ A monster seen on screen goes on the platform its kind spawns on: feet read from
 ## Found offline, not fixed yet
 
 The refactor kept these exactly as they were; each is pinned by a golden trace, so fixing one is a deliberate change:
-- **Resting at very low HP doesn't reach a safe platform.** After a stop ends on "HP low" (below `--low-hp`), `Tour.rest` turns off fighting on the way, but `Navigator.go`'s first health check still ends the trip at once, so she sits down where she is, among the monsters (`sim` scenario `tour_rest_hp_low`).
-- **Drops noted during a loot trip are dropped:** `Tour.collect_loot` sets the remembered drops to the rest of its list after each trip, so drops of monsters shot on the way are forgotten (only a later whole-screen look finds them again).
-- Kills made shooting a monster in the way of a move aren't counted in the trip's kills (only those shot in reach between moves).
-- After a plan is cut short, the quick look has no monsters, so fighting on the way is skipped once.
-- `tour --seed` seeds the sweep order but not the navigator's route choices.
 - A trip to drops can spend its whole 60 s shooting monsters on the very platform it's going to (`tour_hunt_basin`).
+- Monsters shot on the trip to rest or to stand by aren't counted in the tour's `on_the_way` (`Tour.rest` and `rest_and_stand_by` don't add the trip's kills; `tour_rest` shoots 7 on its way to 32, and reports none).
+
+Fixed since, each a deliberate change to the scenarios that pinned it (re-recorded, and their `expects` changed to pin the fix):
+- **Resting at very low HP now reaches a safe platform** (`tour_rest_hp_low`). After a stop ended on "HP low" (below `--low-hp`), `Navigator.go`'s first health check ended the trip to rest at once, so she sat down where she was, among the monsters, and in the simulator died there. The trip to rest now checks only for potions (`Hunter.drink_if_low`): she drinks on the way, shoots what's in her way, and rests on the safe platform.
+- **Drops noted during a loot trip are kept** (new scenario `tour_collect_loot_on_the_way`; `tour_run`, `tour_hunt_from_safe_spot`). `Tour.collect_loot` set the remembered drops to the rest of its list after each trip, so the drops of monsters shot on the way were forgotten (only a later whole-screen look found them again). They're now remembered for the next collection (or a fight's sweep) rather than gone after in the same one: going after them at once, every kill on a trip made another trip, and in the simulator three tour scenarios ran out of time shooting respawns. Collections are also capped (`LOOT_SECONDS`, 180 s: no trip starts later than that into one), because where respawns guard the drops, as on 18 below platform 16, going back for them never ended. In `tour_run` one trip now goes to a kept drop first; in `tour_hunt_from_safe_spot` the last collection goes after the kept drops on 18 until the cap (115 s more, 6 more items picked up, 15 more kills).
+- **Kills made shooting a monster in the way of a move count in the trip's kills** (`nav_fight_basin`: 16 -> 18, all of the world's 18; `tour_run`: 74 -> 76 on the way). `FightOnTheWay.clear_way` now returns its kills, as `shoot` does.
+- **`tour --seed` seeds the navigator's route choices too**, not just the sweep order, as the simulator does (no scenario goes through the command; a test pins it).
+
+Checked and kept: after a plan is cut short, the quick look has no monsters, so fighting on the way (and `Tour.hunt`'s stop when a target is in reach) is skipped for one chain. That lets her move on from wherever a hit knocked her first. With a look that sees the monsters there instead, she fought wherever she was knocked to: `nav_fight_across`, 12 s from 12 across to 17, ran out its 180 s (30 kills, knocked off 12 times, once all the way down to 32), and `tour_hunt_platform_12` took 79 s longer.
 
 ## Limits
 

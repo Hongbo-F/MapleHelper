@@ -192,13 +192,13 @@ def test_a_star_kills_gives_exp_and_drops_that_can_be_picked_up(model):
     w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right")
     tap(w, 0.0, "f", 0.04)
     w.advance(0.5)
-    assert w.mobs[0].alive  # the star leaves ~0.52 s after the key
+    assert w.monsters[0].alive  # the star leaves ~0.52 s after the key
     w.advance(0.6)
-    assert not w.mobs[0].alive and w.kills == {"snail": 1} and w.exp == 2
+    assert not w.monsters[0].alive and w.kills == {"snail": 1} and w.exp == 2
     assert int((exp_pixels(0) != exp_pixels(w.exp)).sum()) >= 3
     w.advance(3.0)
     (d,) = w.live_drops()
-    assert d.mesos and abs(d.x - w.mobs[0].died_x) <= 10
+    assert d.mesos and abs(d.x - w.monsters[0].died_x) <= 10
     w.x = d.x + 10
     tap(w, 3.0, "z", 0.04)
     w.advance(3.2)
@@ -210,16 +210,16 @@ def test_a_star_goes_the_way_she_faces_and_not_past_its_reach(model):
     w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="left")
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
-    assert w.mobs[0].alive and w.mobs[0].hp == 1
+    assert w.monsters[0].alive and w.monsters[0].hp == 1
     w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 100 + reach.STAR_REACH + 40)], facing="right"))
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
-    assert w.mobs[0].alive and w.mobs[0].hp == 1
+    assert w.monsters[0].alive and w.monsters[0].hp == 1
 
 
 def still(w):
     """Monsters that stand where they are (for tests that aim at them)."""
-    for m in w.mobs:
+    for m in w.monsters:
         m.speed = 0.0
     return w
 
@@ -231,12 +231,12 @@ def test_a_star_from_the_air_hits_point_blank_and_the_ground_attack_swipes_with_
     tap(w, 0.0, "alt", 0.04)    # a jump-throw: the attack 100 ms after the jump key, in the air
     tap(w, 0.1, "f", 0.04)
     w.advance(1.0)
-    assert not w.mobs[0].alive and w.kills == {"snail": 1}  # +30: a star kills it outright
+    assert not w.monsters[0].alive and w.kills == {"snail": 1}  # +30: a star kills it outright
     w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 340.0), ("Pig", c.id, 500.0)], facing="right"))
     w.invulnerable_ms = 10_000
     tap(w, 0.0, "f", 0.04)      # from the ground, a monster that close takes a claw swipe, not a star
     w.advance(1.0)
-    assert w.mobs[0].hp == pytest.approx(3 - world_mod.CLAW) and w.mobs[1].hp == 3
+    assert w.monsters[0].hp == pytest.approx(3 - world_mod.CLAW) and w.monsters[1].hp == 3
     assert any("claw swipe hits pig #0" in line for line in w.log)
 
 
@@ -247,12 +247,12 @@ def test_a_star_hits_the_first_monster_in_its_path_but_passes_one_right_under_he
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
     # 60 below and 60 along is right under her (reach.min_dx: 150): the star goes over it
-    assert w.mobs[0].alive and not w.mobs[1].alive
+    assert w.monsters[0].alive and not w.monsters[1].alive
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 300.0), ("Snail", c.id, 200.0)]))
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
-    assert [m.alive for m in w.mobs] == [True, False]  # the nearer one takes it
+    assert [m.alive for m in w.monsters] == [True, False]  # the nearer one takes it
 
 
 def test_a_monster_touching_her_hurts_and_knocks_her_back(model, monkeypatch):
@@ -309,9 +309,9 @@ def test_monsters_walk_their_platform_the_same_way_however_often_looked_at(model
     w1, w2 = world(model, b.id, 300.0, monsters="all", seed=3), world(model, b.id, 300.0, monsters="all", seed=3)
     seen = []
     for t in np.arange(0.0, 20.0, 0.37):
-        seen.append(w1.mobs[0].at(float(t)))
-    assert w2.mobs[0].at(19.98) == w1.mobs[0].at(19.98)
-    assert all(b.left + w1.mobs[0].half - 1e-6 <= x <= b.right - w1.mobs[0].half + 1e-6 for x in seen)
+        seen.append(w1.monsters[0].at(float(t)))
+    assert w2.monsters[0].at(19.98) == w1.monsters[0].at(19.98)
+    assert all(b.left + w1.monsters[0].half - 1e-6 <= x <= b.right - w1.monsters[0].half + 1e-6 for x in seen)
     assert max(seen) - min(seen) > 20
 
 
@@ -453,7 +453,7 @@ def test_a_look_places_her_the_monsters_and_the_drops_where_the_world_has_them(m
     s = h.look(loot=True)
     assert s.where.x == pytest.approx(240, abs=1) and s.platform is b and s.hp == 1.0
     (t,) = s.monsters
-    assert t.kind == "snail" and t.platform == b.id and t.x == pytest.approx(w.mobs[0].at(0.0), abs=1.5)
+    assert t.kind == "snail" and t.platform == b.id and t.x == pytest.approx(w.monsters[0].at(0.0), abs=1.5)
     (d,) = s.loot
     assert d.mesos and d.x == pytest.approx(300, abs=1.5) and d.platform == b.id
     assert clock.elapsed > 0  # looking takes time
@@ -484,7 +484,7 @@ def test_noise_rounds_the_dot_hides_her_tag_and_dot_and_makes_stars_miss(model):
                         noise=Noise(miss=0.5)))
         tap(w, 0.0, "f", 0.04)
         w.advance(1.0)
-        outcomes.append(w.mobs[0].hp)
+        outcomes.append(w.monsters[0].hp)
     assert set(outcomes) == {2.0, 3.0}
 
 

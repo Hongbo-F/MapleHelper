@@ -27,7 +27,7 @@ from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
 from ..motion.route import Move
-from ..perception.sprites import kind_of
+from ..perception.kinds import kind_of
 from .fight import Report, add_kills, kills_text
 from .hunter import Hunter
 from .looting import DROPS_LAST, DropSpot
@@ -40,6 +40,8 @@ MIN_REST_WIDTH = 120  # narrower safe platforms aren't rested on
 REST_SECONDS = 120   # longest she sits on the chair waiting for her HP to come back
 GOES_PER_STOP = 5    # trips to a spot and fights there, at most, per stop
 DROP_FALL = 120      # a kill placed on no platform: its drops are fetched from a platform at most this far below
+LOOT_SECONDS = 180   # no loot trip starts this long or longer into a collection (the longest one in the
+                     # simulator's scenarios started its last trip 151 s in)
 UNREACHABLE = 1e6    # s of travel to a hunting ground no route reaches (grounds unreachable from where
                      # she starts are left out of the sweep)
 BLIND_SAMPLES = 9    # random orders of the stops whose median travel is logged, to compare the sweep with
@@ -68,6 +70,18 @@ class TourReport:
         add_kills(self.kills, r.kills)
         self.throws += r.throws
         self.exp_gains += r.exp_kills
+
+
+@dataclass
+class _Stop:
+    """What a stop (Tour.hunt) keeps from one go at it to the next."""
+    pid: int       # the platform hunted
+    kinds: object  # the kinds hunted (None: all)
+    kills: int     # kills wanted (after those, only what's still in reach is finished)
+    end: float     # when its time is up (time.monotonic)
+    spot: Spot     # where she shoots it from, this go
+    total: Report = field(default_factory=Report)  # what the stop did so far
+    arrived: bool = False  # she got to a spot (the visit is recorded)
 
 
 class Tour:
@@ -125,12 +139,12 @@ class Tour:
 
     def spot(self, pid: int, on_it: bool = False) -> Spot:
         """Where to shoot platform `pid` from (attack.spots.spot), from where she is now."""
-        here = self.nav.mover.fix().where
+        here = self.nav.mover.locate().where
         return spots.spot(self.nav.model, pid, here, self.nav.planner.travel, self.worth, on_it)
 
     def spot_for(self, pid: int, left: list[Monster], current: Spot) -> Spot | None:
         """A spot that reaches more of the monsters `left` on `pid` (attack.spots.spot_for)."""
-        here = self.nav.mover.fix().where
+        here = self.nav.mover.locate().where
         return spots.spot_for(self.nav.model, pid, left, current, here, self.nav.planner.travel, self.worth)
 
     # --- resting -------------------------------------------------------------------------------
@@ -161,7 +175,9 @@ class Tour:
         if escort is not None:
             escort.hunting = False  # low on HP: straight there
         try:
-            trip = self.nav.go(pid)
+            # Low HP is why she's going: no reason to stop on the way (potions are still drunk). It used
+            # to end the trip at its first look, and she sat down among the monsters.
+            trip = self.nav.go(pid, health=self.h.drink_if_low)
         finally:
             if escort is not None:
                 escort.hunting = True
@@ -200,76 +216,113 @@ class Tour:
         itself only when no spot reaches what's left. Killing some, then walking down into the rest
         to pick up the drops, gave up the safe spot."""
         end = time.monotonic() + seconds
-        total = Report()
-        spot = self.spot(pid)
-        arrived = False
-
-        def in_reach(s: Scene) -> bool:
-            """Whether to stop on the way to `spot` (the current one): a target is in reach, and she can
-            stand here. On the way to platform 2 her route crosses platform 4, and stopping there put her
-            in its crowd for the whole stop."""
-            here = s.platform
-            if here is None or (here.id != spot.platform and not spots.spot_ok(self.nav.model, here.id, self.worth)):
-                return False
-            return any(m.platform == pid and (kinds is None or m.kind in kinds)
-                       and reach.can_shoot(m.x - s.where.x, m.y - s.where.y) for m in s.monsters)
-
+        st = _Stop(pid, kinds, kills, end, self.spot(pid))
         for _ in range(GOES_PER_STOP):
-            telemetry.emit("tour", stop=pid, spot={"platform": spot.platform, "x": round(spot.x, 1),
-                                                   "coverage": spot.coverage})
-            how = "from platform" if spot.platform != pid else "on the platform"
-            self.log(f"  shooting platform {pid} {how} {spot.platform} at x {spot.x:.0f} "
-                     f"({spot.coverage:.0%} in reach)")
-            trip = self.nav.go(spot.platform, x=spot.x, until=in_reach, seconds=max(20, end - time.monotonic()))
-            self.report.on_the_way += trip.kills
-            if trip.result not in ("arrived", "in position"):
-                total.stop = f"didn't get there: {trip.result}"
+            if not self._go_to_spot(st):
                 break
-            arrived = True
-            if trip.result == "in position":
-                self.log("  targets in reach on the way: shooting from here")
-            self.h.report = Report()
-            # Waiting for respawns looked idle and slowed the sweep: move on soon when nothing's there.
-            r = self.h.clear(kinds, ground={pid}, max_kills=max(1, kills - sum(total.kills.values())),
-                             seconds=max(5, end - time.monotonic()), patience=2.0 if spot.safe else 1.0,
-                             finish=True, far=True)
-            total.add(r)
-            total.stop = r.stop
-            if r.stop.startswith("HP low") or time.monotonic() >= end:
+            r = self._fight(st)
+            if r.stop.startswith("HP low") or time.monotonic() >= st.end:
                 break
             if r.stop.startswith("left platform"):
                 continue  # knocked off: go back to the spot
-            s = self.h.look(wide=True)
-            left = [m for m in s.monsters if m.platform == pid and (kinds is None or m.kind in kinds)]
-            enough = sum(total.kills.values()) >= kills
-            if left and not enough:
-                nxt = self.spot_for(pid, left, spot)
-                if nxt is not None:
-                    self.log(f"  {len(left)} left on platform {pid}, out of reach here: over to platform "
-                             f"{nxt.platform} at x {nxt.x:.0f}")
-                    spot = nxt
-                    continue
-            trips = self.report.loot_trips
-            self.collect_loot()
-            if not left:
-                self.log(f"  nothing left on platform {pid}: moving on")
+            left = self._left_on(st)
+            enough = sum(st.total.kills.values()) >= kills
+            if left and not enough and self._over_to_another_spot(st, left):
+                continue
+            if self._collect_then_done(st, r, left, enough):
                 break
-            if enough:
-                break
-            if not r.throws and self.report.loot_trips == trips:
-                # Nothing thrown and she hasn't moved: going back would only repeat that. In the basin
-                # a whole-screen look saw pigs that the fight's own looks never did, 4 times running.
-                self.log(f"  {len(left)} seen on platform {pid} but none came into reach: moving on")
-                break
-            if spot.platform != pid:
-                self.log(f"  {len(left)} left on platform {pid} that no spot reaches: onto the platform")
-                spot = self.spot(pid, on_it=True)
-            else:
-                self.log(f"  {len(left)} still on platform {pid}: back at it")
+            self._next_spot(st, left)
         self.collect_loot()
-        if arrived:  # what the visit gave, so later sweeps know where the monsters really are
-            self._record(pid, total)
-        return total
+        if st.arrived:  # what the visit gave, so later sweeps know where the monsters really are
+            self._record(pid, st.total)
+        return st.total
+
+    # --- the steps of a stop (hunt) --------------------------------------------------------------
+
+    def _go_to_spot(self, st: _Stop) -> bool:
+        """Over to the stop's spot, stopping on the way as soon as a target is in reach where she can
+        stand (_in_reach). False if she didn't get there (the stop's total.stop says why)."""
+        spot = st.spot
+        telemetry.emit("tour", stop=st.pid, spot={"platform": spot.platform, "x": round(spot.x, 1),
+                                                  "coverage": spot.coverage})
+        how = "from platform" if spot.platform != st.pid else "on the platform"
+        self.log(f"  shooting platform {st.pid} {how} {spot.platform} at x {spot.x:.0f} "
+                 f"({spot.coverage:.0%} in reach)")
+        trip = self.nav.go(spot.platform, x=spot.x, until=lambda s: self._in_reach(st, s),
+                           seconds=max(20, st.end - time.monotonic()))
+        self.report.on_the_way += trip.kills
+        if trip.result not in ("arrived", "in position"):
+            st.total.stop = f"didn't get there: {trip.result}"
+            return False
+        st.arrived = True
+        if trip.result == "in position":
+            self.log("  targets in reach on the way: shooting from here")
+        return True
+
+    def _in_reach(self, st: _Stop, s: Scene) -> bool:
+        """Whether to stop on the way to the stop's (current) spot: a target is in reach, and she can stand
+        here. On the way to platform 2 her route crosses platform 4, and stopping there put her in its
+        crowd for the whole stop."""
+        here = s.platform
+        if here is None or (here.id != st.spot.platform and not spots.spot_ok(self.nav.model, here.id, self.worth)):
+            return False
+        return any(m.platform == st.pid and (st.kinds is None or m.kind in st.kinds)
+                   and reach.can_shoot(m.x - s.where.x, m.y - s.where.y) for m in s.monsters)
+
+    def _fight(self, st: _Stop) -> Report:
+        """Kill all she can reach from here (fight.clear: those in reach are finished after the kill count,
+        far ones too); counted into the stop's total."""
+        self.h.report = Report()
+        # Waiting for respawns looked idle and slowed the sweep: move on soon when nothing's there, sooner
+        # on the platform itself than from a spot off it.
+        off_it = st.spot.platform != st.pid
+        r = self.h.clear(st.kinds, ground={st.pid}, max_kills=max(1, st.kills - sum(st.total.kills.values())),
+                         seconds=max(5, st.end - time.monotonic()), patience=2.0 if off_it else 1.0,
+                         finish=True, far=True)
+        st.total.add(r)
+        st.total.stop = r.stop
+        return r
+
+    def _left_on(self, st: _Stop) -> list[Monster]:
+        """A whole-screen look: the monsters (of the kinds hunted) still on the platform."""
+        s = self.h.look(wide=True)
+        return [m for m in s.monsters if m.platform == st.pid and (st.kinds is None or m.kind in st.kinds)]
+
+    def _over_to_another_spot(self, st: _Stop, left: list[Monster]) -> bool:
+        """A spot that reaches more of the monsters `left`, out of reach from here: if there's one, it's
+        the next go's. True if so."""
+        nxt = self.spot_for(st.pid, left, st.spot)
+        if nxt is None:
+            return False
+        self.log(f"  {len(left)} left on platform {st.pid}, out of reach here: over to platform "
+                 f"{nxt.platform} at x {nxt.x:.0f}")
+        st.spot = nxt
+        return True
+
+    def _collect_then_done(self, st: _Stop, r: Report, left: list[Monster], enough: bool) -> bool:
+        """Collect the drops (collect_loot); then whether the stop is over: nothing `left` on the platform,
+        `enough` kills, or nothing came into reach in fight `r` and she hasn't moved since."""
+        trips = self.report.loot_trips
+        self.collect_loot()
+        if not left:
+            self.log(f"  nothing left on platform {st.pid}: moving on")
+            return True
+        if enough:
+            return True
+        if not r.throws and self.report.loot_trips == trips:
+            # Nothing thrown and she hasn't moved: going back would only repeat that. In the basin
+            # a whole-screen look saw pigs that the fight's own looks never did, 4 times running.
+            self.log(f"  {len(left)} seen on platform {st.pid} but none came into reach: moving on")
+            return True
+        return False
+
+    def _next_spot(self, st: _Stop, left: list[Monster]) -> None:
+        """Monsters are `left` that no spot reaches: from off the platform, onto it; on it, back at them."""
+        if st.spot.platform != st.pid:
+            self.log(f"  {len(left)} left on platform {st.pid} that no spot reaches: onto the platform")
+            st.spot = self.spot(st.pid, on_it=True)
+        else:
+            self.log(f"  {len(left)} still on platform {st.pid}: back at it")
 
     # --- loot --------------------------------------------------------------------------------
 
@@ -277,27 +330,36 @@ class Tour:
         """Go to the drops left on other platforms and pick them up: her kills' (far kills' can lie across
         the map) and any seen on the ground. A whole-screen look first, and again after each trip, notes
         the drops in view and forgets remembered ones seen gone (Looter.remember). The nearest by route
-        goes first. With her inventory full, only to mesos seen."""
+        goes first. With her inventory full, only to mesos seen.
+
+        Drops that fights on the way note during the trips are remembered for the next collection (or
+        a fight's sweep), not gone after in this one: each kill on a trip there would make another
+        trip, and in the sim a whole tour then went on collecting. And no trip starts LOOT_SECONDS or
+        more into a collection: where respawns guard the drops, going back for them never ended."""
         looter = self.h.looter
+        start = time.monotonic()
         self._look_for_loot()
         for d in looter.pending:  # a kill placed on no platform: its drops fell onto the one below
             if d.platform is None and (p := self.nav.model.platform_under(d.x, d.y, reach=DROP_FALL)) is not None:
                 d.platform, d.y = p.id, p.y_at(d.x)
+        later: list[DropSpot] = []  # noted by fights on the way during the trips
         while looter.pending:
+            if time.monotonic() - start >= LOOT_SECONDS:
+                self.log(f"  {LOOT_SECONDS} s collecting drops: the rest is left for later")
+                break
             fresh = [d for d in looter.pending if time.monotonic() - d.since < DROPS_LAST and d.platform is not None
                      and (d.mesos or not looter.inventory_full)]
             looter.pending = []
             if not fresh:
-                return
-            s = self.nav.mover.fix()
+                break
+            s = self.nav.mover.locate()
             fresh.sort(key=lambda d: self._travel_to(s.where, d))
             d, rest = fresh[0], fresh[1:]
             self.log(f"  collecting drops on platform {d.platform} at x {d.x:.0f}")
             self.report.loot_trips += 1
             trip = self.nav.go(d.platform, x=d.x, seconds=60)
             self.report.on_the_way += trip.kills
-            # A known gap: drops that fights on the way noted during the trip are lost here; only those
-            # a later _look_for_loot sees again are kept.
+            later += looter.pending  # these used to be forgotten here (unless a later look saw them again)
             looter.pending = rest
             if trip.result != "arrived":
                 self.log(f"    couldn't get there ({trip.result})")
@@ -306,6 +368,7 @@ class Tour:
                 self.h.clear(ground={d.platform}, max_kills=2, seconds=20)
                 looter.loot_pending()
             self._look_for_loot()
+        looter.pending += later
 
     def _look_for_loot(self) -> None:
         """A look at every platform in view for drops (about 0.2 s), noted for collect_loot."""
@@ -370,7 +433,7 @@ class Tour:
         kinds = self.worth if kinds is None else kinds
         if self.nav.escort is not None:
             self.nav.escort.kinds = kinds
-        s = self.nav.mover.fix()
+        s = self.nav.mover.locate()
         here = (s.where.platform.id, s.where.x) if s.where.platform else (grounds[0], 0.0)
         n = len(grounds) if stops is None else min(stops, len(grounds))
         order, travel = self.sweep(grounds, n, here)
@@ -392,7 +455,7 @@ class Tour:
                 self.rest()
             # Far kills' drops can take her across the map: the rest of the sweep is planned again from
             # wherever she ended up.
-            s = self.nav.mover.fix()
+            s = self.nav.mover.locate()
             if remaining and s.where.platform is not None:
                 remaining = self.sweep(remaining, len(remaining), (s.where.platform.id, s.where.x))[0]
                 telemetry.emit("tour", order=self.report.visited + remaining)

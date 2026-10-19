@@ -82,13 +82,18 @@ class Hunter:
         """Drink if HP is low; returns a reason to stop if it's too low."""
         if s.hp < self.low_hp:
             return f"HP low ({s.hp:.0%})"
+        self.drink_if_low(s)
+        return None
+
+    def drink_if_low(self, s: Scene) -> None:
+        """Drink an HP potion below `potion_hp` (one every POTION_EVERY s at most). The health check on
+        the way to rest: low HP is why she's going, not a reason to stop."""
         if s.hp < self.potion_hp and time.monotonic() - self._last_potion > POTION_EVERY:
             self.log(f"HP {s.hp:.0%}: drinking a potion")
             if self.actions.drink():
                 self._last_potion = time.monotonic()
                 self.report.potions += 1
                 telemetry.emit("event", kind="potion", text=f"potion at {s.hp:.0%} HP")
-        return None
 
     def take_exp(self, since: float) -> bool:
         """Use up one EXP gain seen since `since`, if there is one."""

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from maplehelper.engine import LEFT, RIGHT
 
+from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import MonsterTrack
 from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAND_MARGIN, LAND_SLIDE, RUN_LAG,
@@ -140,9 +141,9 @@ class Keys:
             return
         at = ms(t)
         if self.arrow:
-            self.events.append([at, self.names[_dir_name(self.arrow)], "up"])
+            self.events.append([at, self.names[directions.toward(self.arrow)], "up"])
         if d:
-            self.events.append([at + (1 if self.arrow else 0), self.names[_dir_name(d)], "down"])
+            self.events.append([at + (1 if self.arrow else 0), self.names[directions.toward(d)], "down"])
         self.arrow = d
 
     def press_arrow_early(self, t: float, early: float) -> None:
@@ -186,16 +187,6 @@ def ms(t: float) -> int:
 
 def _sign(v: float) -> int:
     return 1 if v > 0 else -1
-
-
-def _dir_sign(direction: str) -> int:
-    """A move's direction ('left' or 'right') as a sign along x."""
-    return 1 if direction == RIGHT else -1
-
-
-def _dir_name(d: int) -> str:
-    """A sign along x as a direction: the arrow for it."""
-    return RIGHT if d > 0 else LEFT
 
 
 def _start_lag(b: Body, d: int) -> float:
@@ -303,7 +294,7 @@ class Flow:
     def _jump(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
         if variant == "stand":
             return None
-        a, d = b.platform, _dir_sign(m.direction)
+        a, d = b.platform, directions.sign(m.direction)
         edge = a.right if d > 0 else a.left
         if m.takeoff is not None:  # a jump from along the platform (up to 10 units early with rng)
             takeoff = m.takeoff - d * self.pick(0.0, 10.0)
@@ -332,7 +323,7 @@ class Flow:
     def _walk_off(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
         if variant == "stand":
             return None
-        a, d = b.platform, _dir_sign(m.direction)
+        a, d = b.platform, directions.sign(m.direction)
         edge = a.right if d > 0 else a.left
         start = self._runup(b, d, edge, k) if b.run == -d else b
         if start is None:
@@ -428,7 +419,7 @@ class Flow:
         a, top = b.platform, self.model.platform(m.dst)
         rx, gap = m.rope_x, a.y_at(m.rope_x) - m.rope_bottom
         # Out of reach of a jump (and her arms), or by a portal: up there would take it.
-        if gap > APEX + 10 or any(abs(p.x - rx) < 60 and abs(p.y - a.y_at(p.x)) < 40 for p in self.model.portals):
+        if gap > APEX + 10 or self.model.portal_near(a, rx):
             return None
         if abs(rx - b.x) <= 4 and not b.run:
             t, grab_h, ran_to = b.t, min(APEX, max(0.0, gap)), b.x   # straight up under it
@@ -563,7 +554,7 @@ class Flow:
             return None  # off the platform, or she'd come down short of it
         k.set_arrow(b.t, d)
         t_off = self.press_jump(k, t, b)
-        move = Move("hop", a.id, a.id, x_off, lx, _dir_name(d))
+        move = Move("hop", a.id, a.id, x_off, lx, directions.toward(d))
         return Leg(move, b, Body(t_off + ta, lx, a, run=d, landed=True, slack=b.slack + SLACK_PER_LEG),
                    [Span(a.id, b.t, t_off, b.x, x_off)])
 

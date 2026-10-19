@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from maplehelper.engine import LEFT, RIGHT
 
+from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import Monster
 from ..motion.physics import JUMP_HEIGHT
@@ -38,11 +39,6 @@ _THROW_VERBS = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back":
 def _side_of(t: Monster, x: float) -> str:
     """Which side of map x monster `t` is on (LEFT when right at x)."""
     return RIGHT if t.x > x else LEFT
-
-
-def _sign(side: str) -> int:
-    """+1 for RIGHT, -1 for LEFT: which way map x goes on that side."""
-    return 1 if side == RIGHT else -1
 
 
 def _nearest(monsters: list[Monster], x: float) -> Monster:
@@ -107,8 +103,8 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     on_facing = [t for t in close if _side_of(t, x) == facing]
     nearest = _nearest(on_facing or close, x)
     side = _side_of(nearest, x)
-    away = LEFT if side == RIGHT else RIGHT
-    back = _sign(away)
+    away = directions.opposite(side)
+    back = directions.sign(away)
     room = (hi - x) if away == RIGHT else (x - lo)
     behind = [t for t in mine if 0 < (t.x - x) * back < JUMP_BACK_CLEAR]
     if room >= JUMP_BACK_ROOM and not behind and can_jump(x, x + back * JUMP_BACK_SPAN):
@@ -147,7 +143,7 @@ def _step_from_under(x: float, y: float, platform: Platform, wanted: list[Monste
         return None
     t = _nearest(under, x)
     away = LEFT if t.x > x else RIGHT
-    goal = t.x + _sign(away) * (reach.min_dx(t.y - y) + 40)
+    goal = t.x + directions.sign(away) * (reach.min_dx(t.y - y) + 40)
     goal = min(max(goal, lo), hi)
     if abs(goal - x) >= MIN_MOVE and reach.can_shoot(t.x - goal, t.y - y, reach=_goal_reach()):
         return ("back", away, abs(goal - x))
@@ -162,7 +158,7 @@ def _close_in(x: float, y: float, wanted: list[Monster], lo: float, hi: float) -
         return None
     t = _nearest(level, x)
     side = _side_of(t, x)
-    d = _sign(side)
+    d = directions.sign(side)
     goal = min(max(t.x - d * (reach.SHOT_RANGE - 40), lo), hi)
     if (goal - x) * d > MIN_MOVE and reach.can_shoot(t.x - goal, t.y - y, reach=_goal_reach()):
         return ("approach", side, abs(goal - x))
@@ -214,13 +210,13 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
         nearest = _nearest(close, x)
         away = LEFT if nearest.x > x else RIGHT
         room = (hi - x) if away == RIGHT else (x - lo)
-        blocked = any(0 < (t.x - x) * _sign(away) < STEP_AWAY + TOO_CLOSE for t in mine)
+        blocked = any(0 < (t.x - x) * directions.sign(away) < STEP_AWAY + TOO_CLOSE for t in mine)
         if not blocked and room >= STEP_ROOM:
             return ("walk", away, min(STEP_AWAY, room))
         # Cornered: fight from here. Jumping over it put the rest of the group on her other side.
         return ("throw", _side_of(nearest, x))
     if reach.can_shoot(dx, dy):
-        return ("throw", RIGHT if dx > 0 else LEFT)
+        return ("throw", directions.toward(dx))
     if not reach.in_band(dy):
         return ("skip", "not level enough with her platform")
     # Walk to the nearest spot on her platform that has the target in reach (either side of it).
@@ -232,7 +228,7 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
     goal = min(goals, key=lambda g: abs(g - x))
     direction = RIGHT if goal > x else LEFT
     # A monster on her platform in the way gets shot first.
-    ahead = [t for t in threats if 0 < (t.x - x) * _sign(direction) < abs(goal - x) + TOO_CLOSE]
+    ahead = [t for t in threats if 0 < (t.x - x) * directions.sign(direction) < abs(goal - x) + TOO_CLOSE]
     if ahead:
         return ("throw", _side_of(_nearest(ahead, x), x))
     return ("walk", direction, min(abs(goal - x), MAX_WALK))

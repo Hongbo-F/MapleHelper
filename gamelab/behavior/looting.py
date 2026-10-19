@@ -13,8 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from maplehelper.engine import LEFT, RIGHT
-
+from .. import directions
 from ..attack.reach import EDGE_MARGIN
 from ..attack.stance import TOO_CLOSE
 from ..localization.monsters import Monster
@@ -175,7 +174,7 @@ class Looter:
         for goal, pile in stops:
             dx = goal - x
             if abs(dx) >= MIN_WALK:
-                self.h.actions.walk(RIGHT if dx > 0 else LEFT, abs(dx))
+                self.h.actions.walk(directions.toward(dx), abs(dx))
                 x = goal
             if pile:
                 self.h.actions.pick_here()

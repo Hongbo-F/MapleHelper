@@ -305,7 +305,7 @@ def _touring(h, travel=None):
     tour.h, tour.log, tour.report = h, lambda m: None, TourReport()
     here = SimpleNamespace(x=1000, y=500, platform=SimpleNamespace(id=HERS))
     tour.nav = SimpleNamespace(
-        mover=SimpleNamespace(fix=lambda: SimpleNamespace(where=here)),
+        mover=SimpleNamespace(locate=lambda: SimpleNamespace(where=here)),
         planner=SimpleNamespace(travel=lambda a, x, b: (travel or {}).get(b)),
         model=h.model,
         go=lambda pid, x, seconds: trips.append((pid, x)) or SimpleNamespace(result="arrived", kills=0))

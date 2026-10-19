@@ -3,11 +3,11 @@
 
 The physics are the ones gamelab plans with, so a plan that is right on paper works here too:
 
-- on the ground an arrow runs her at physics.WALK_SPEED after a standing start of flow.RUN_LAG; let go,
-  she slides flow.STOP_RUN on over flow.STOP_S (a short input lag, then braking); walking past a
+- on the ground an arrow runs her at physics.WALK_SPEED after a standing start of physics.RUN_LAG; let go,
+  she slides physics.STOP_RUN on over physics.STOP_S (a short input lag, then braking); walking past a
   platform's end she falls, unless a wall rises there;
-- the jump key lifts her off flow.JUMP_LAG later into physics.fly's arc (an exact copy of it, `trajectory`,
-  without its cache); with down held it drops her through the platform flow.DROP_LAG later; a jump key
+- the jump key lifts her off physics.JUMP_LAG later into physics.fly's arc (an exact copy of it, `trajectory`,
+  without its cache); with down held it drops her through the platform physics.DROP_LAG later; a jump key
   in the air is ignored, and so is one inside the attack lock;
 - up held at a rope's foot, or anywhere along it in the air, grabs it; up climbs at flow.ROPE_SPEED onto
   the platform at its top (a short climb-over, flow.CLIMB_OVER), down climbs down at physics.CLIMB_SPEED
@@ -45,25 +45,24 @@ from maplehelper.config import GameKeys
 from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT
 
+from .. import directions
 from ..attack import reach
 from ..control.actions import STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import MapModel, Platform, Rope
 from ..motion import flow
-from ..motion.physics import CLIMB_SPEED, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_SPEED, ROPE_REACH, WALK_SPEED
-from ..perception.sprites import kind_of
+from ..motion.physics import (CLIMB_SPEED, DROP_LAG, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED,
+                              LAND_SLIDE, ROPE_REACH, RUN_LAG, STOP_RUN, WALK_SPEED)
+from ..perception.kinds import kind_of
 
 TICK_MS = 5
 FLY_DT = 0.004           # physics.fly's step: the arc is integrated exactly as the planner does
-RUN_LAG = flow.RUN_LAG
-TURN_EXTRA = flow.TURN_EXTRA
-# Braking with no arrow held: she slides flow.LAND_SLIDE from full speed (as on landing). An arrow let go
-# still counts for RELEASE_LAG, so she stops flow.STOP_RUN on in all (~0.27 s). With the run lag that is
-# physics.py's measured walk: an arrow held t ms moves her ~8.5 + 0.149 t units, a tap under ~30 ms not at all.
-DECEL = WALK_SPEED ** 2 / (2 * flow.LAND_SLIDE)
-RELEASE_LAG = (flow.STOP_RUN - flow.LAND_SLIDE) / WALK_SPEED
-JUMP_LAG = flow.JUMP_LAG
-DROP_LAG = flow.DROP_LAG
+# Her measured lags and slides are physics.py's (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, LAND_SLIDE).
+# Braking with no arrow held: she slides LAND_SLIDE from full speed (as on landing). An arrow let go still
+# counts for RELEASE_LAG, so she stops STOP_RUN on in all (~0.27 s). With the run lag that is physics.py's
+# measured walk: an arrow held t ms moves her ~8.5 + 0.149 t units, a tap under ~30 ms not at all.
+DECEL = WALK_SPEED ** 2 / (2 * LAND_SLIDE)
+RELEASE_LAG = (STOP_RUN - LAND_SLIDE) / WALK_SPEED
 CLIMB_UP = flow.ROPE_SPEED
 CLIMB_DOWN = CLIMB_SPEED
 CLIMB_OVER = flow.CLIMB_OVER
@@ -187,7 +186,7 @@ def trajectory(model: MapModel, x: float, y: float, vx: float, vy: float, skip: 
 # --- monsters ----------------------------------------------------------------------------------------
 
 @dataclass
-class Mob:
+class SimMonster:
     """A monster walking its platform. Its motion is a list of segments drawn from its own rng (walk
     left, walk right or stand, for a while), evaluated lazily, so where it is at a moment doesn't depend
     on how often it was looked at."""
@@ -334,8 +333,8 @@ class World:
             self._grab(min(model.ropes, key=lambda r: abs(r.x - start[1])))
             self.y = min(max(hanging, self.rope.top), self.rope.bottom)
             self.log.clear()
-        self.mobs: list[Mob] = []
-        self.by_platform: dict[int, list[Mob]] = {}
+        self.monsters: list[SimMonster] = []
+        self.by_platform: dict[int, list[SimMonster]] = {}
         self._spawn(monsters)
         self.drops: list[Drop] = [Drop(kind, x, model.platform(pid).y_at(x), pid, 0.0) for kind, pid, x in drops]
 
@@ -354,11 +353,11 @@ class World:
             wanted = list(monsters)
         for i, (name, pid, x) in enumerate(wanted):
             kind = kind_of(name)
-            m = Mob(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
+            m = SimMonster(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
                     monster_data.MONSTER_SPEED.get(kind, 70.0), monster_data.MONSTER_HALF.get(kind, 34.0),
                     monster_data.MONSTER_HEIGHT.get(kind, 46.0), float(HITS.get(kind, 2)), float(HITS.get(kind, 2)))
             m.start(0.0, float(x))
-            self.mobs.append(m)
+            self.monsters.append(m)
             self.by_platform.setdefault(pid, []).append(m)
 
     # --- time -----------------------------------------------------------------------------------------
@@ -477,7 +476,7 @@ class World:
             if self.sitting:
                 self.sitting = False
                 self.can_move_ms = self.ms + int(STAND_UP * 1000)
-            self.go, self.go_ms = (-1 if action == "left" else 1), self.ms
+            self.go, self.go_ms = directions.sign(action), self.ms
         elif action == "jump":
             if self.ms < self.attack_lock_ms or self.liftoff_due:
                 return
@@ -668,7 +667,7 @@ class World:
     # --- monsters and her -------------------------------------------------------------------------------
 
     def _touch(self) -> None:
-        if self.ms < self.invulnerable_ms or not self.mobs or self.dead:
+        if self.ms < self.invulnerable_ms or not self.monsters or self.dead:
             return
         t = self.t
         if self.mode == "ground":
@@ -687,7 +686,7 @@ class World:
                     self._hit_by(m, mx)
                     return
 
-    def _hit_by(self, m: Mob, mx: float) -> None:
+    def _hit_by(self, m: SimMonster, mx: float) -> None:
         self.touches += 1
         self.invulnerable_ms = self.ms + int(INVULNERABLE * 1000)
         if self.chance("evade") < EVADE:
@@ -707,12 +706,12 @@ class World:
         self.liftoff_due = False
         self._launch(away * KNOCK_VX, -KNOCK_VY)
 
-    def in_path(self, facing: str) -> tuple[Mob, float] | None:
+    def in_path(self, facing: str) -> tuple[SimMonster, float] | None:
         """The first live monster a star thrown now that way meets, and where it is: on her side of
         `facing`, within STAR_REACH, in the band SHOT_UP above to SHOT_DOWN below her; on her level at
         any distance (point-blank too), off it only from reach.min_dx sideways."""
-        t, d, best = self.t, (1 if facing == RIGHT else -1), None
-        for m in self.mobs:
+        t, d, best = self.t, directions.sign(facing), None
+        for m in self.monsters:
             if not m.alive:
                 continue
             mx = m.at(t)
@@ -745,7 +744,7 @@ class World:
             return
         self._kill(m, mx, what)
 
-    def _kill(self, m: Mob, mx: float, what: str) -> None:
+    def _kill(self, m: SimMonster, mx: float, what: str) -> None:
         t = self.t
         m.alive, m.died_at, m.died_x = False, t, mx
         self.kills[m.kind] = self.kills.get(m.kind, 0) + 1
@@ -786,10 +785,10 @@ class World:
         t = self.t
         return [d for d in self.drops if not d.gone and d.since <= t < d.since + DROP_LIFE]
 
-    def visible_mobs(self) -> list[tuple[Mob, float, float, bool]]:
+    def visible_monsters(self) -> list[tuple[SimMonster, float, float, bool]]:
         """Every monster that shows: (monster, x, y, alive); killed ones fade out where they died."""
         t, out = self.t, []
-        for m in self.mobs:
+        for m in self.monsters:
             if m.alive:
                 x = m.at(t)
                 out.append((m, x, m.y(x), True))

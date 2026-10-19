@@ -400,7 +400,7 @@ def nav_off_rope_climb(sim):
           expects=(ends("arrived"), sends("mouse", "the mouse is moved when the dot stays hidden"),
                    check("looks and glances without the dot", lambda tr: tr["eyes"]["dot hidden"] >= 5)))
 def nav_dot_hidden(sim):
-    """36 -> 25 with her minimap dot covered (a tooltip) for her first 2 s and again mid-climb: Mover.fix
+    """36 -> 25 with her minimap dot covered (a tooltip) for her first 2 s and again mid-climb: Mover.locate
     keeps looking and moves the mouse after four tries; Navigator.follow goes on without the dot."""
     return _nav(25)(sim)
 
@@ -454,11 +454,14 @@ def nav_monsters_long_way(sim):
 # Navigation with `fight` on (as on tours): monsters in reach are shot on the way.
 
 @scenario((36, 300.0), monsters="all", seed=6,
-          expects=(ends("arrived"), logs("shooting it on the way"),
-                   check("kills on the way", lambda tr: _result(tr, "kills") >= 3)))
+          expects=(ends("arrived"), logs("shooting it on the way"), logs("in the way at x"),
+                   check("kills on the way", lambda tr: _result(tr, "kills") >= 3),
+                   check("the trip counts every kill, those in the way of a move too",
+                         lambda tr: _result(tr, "kills") == sum(tr["world"]["kills"].values()))))
 def nav_fight_basin(sim):
     """Out of the basin up to 25 with `fight` on: the pigs and slimes in reach are shot first (a few
-    fights of a few kills each), then up the two ropes."""
+    fights of a few kills each), and one in the way of a move; then up the two ropes. The trip counts
+    the kills of both (those in the way weren't counted before)."""
     return _nav(25, fight=True)(sim)
 
 
@@ -731,6 +734,26 @@ def tour_collect_loot(sim):
     return {"report": str(tour.report), "pending_loot": [[round(d.x), d.platform] for d in tour.h.looter.pending]}
 
 
+@scenario((16, 585.0), monsters=[("Pig", 18, 300.0)], seed=1, limit=300, drops=(("mesos", 29, 420.0),),
+          expects=(logs("pig in reach on platform 18: shooting it on the way"),
+                   check("the drops of the pig shot on the way are kept",
+                         lambda tr: any(p == 18 for _, p in tr["result"]["kept"])),
+                   logs("collecting drops on platform 18", "the next collection goes for them"),
+                   check("a pig's leather picked up", lambda tr: tr["world"]["picked"].get("leather", 0) >= 1)))
+def tour_collect_loot_on_the_way(sim):
+    """Tour.collect_loot twice, as Tour.hunt calls it: on the trip from 16 to the mesos remembered on 29, she
+    shoots a pig on 18 below on the way. Its drops are kept for the next collection, which picks them up
+    (they used to be forgotten: from 29, 18 is out of view)."""
+    tour = sim.tour_stack()
+    tour.nav.escort.kinds = tour.worth
+    tour.h.looter.pending = [DropSpot(420, 275, 29, sim.clock.now - 10, mesos=True, on_ground=True)]
+    tour.collect_loot()
+    kept = [[round(d.x), d.platform] for d in tour.h.looter.pending]
+    tour.collect_loot()
+    return {"report": str(tour.report), "kept": kept,
+            "pending_loot": [[round(d.x), d.platform] for d in tour.h.looter.pending]}
+
+
 @scenario((36, 300.0), monsters="all", seed=25, limit=900,
           expects=(check("three stops visited", lambda tr: len(tr["result"]["visited"]) == 3),
                    ends("standing by on a safe platform", key="stop"), logs("tour: sweep")))
@@ -776,13 +799,16 @@ def tour_rest_on_safe(sim):
     return _rest(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400, may_die=True,
-          expects=(logs("couldn't reach a safe platform (HP low", "the trip to rest stops at once: HP is too low"),))
+@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
+          expects=(logs("resting on platform 32"), logs("drinking a potion", "a potion on the way"),
+                   no_log("couldn't reach a safe platform", "low HP doesn't end the trip to rest"),
+                   check("rests on 32", lambda tr: tr["world"]["platform"] == 32),
+                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
 def tour_rest_hp_low(sim):
-    """Tour.rest as Tour.run calls it, after a hunt stopped for 'HP low' (under the tour's 30%): the trip to
-    the safe platform ends at once (Navigator.go's first health check: rest() turns off hunting on the
-    way, not that stop), so she sits on the chair in the basin among the monsters, and dies there. A
-    gamelab bug, pinned here until it's fixed."""
+    """Tour.rest as Tour.run calls it, after a hunt stopped for 'HP low' (under the tour's 30%): low HP is
+    why she's going, so it doesn't end the trip (it used to, at its first look, and she sat down in the
+    basin among the monsters and died there). She drinks a potion on the way, shoots what's in her way,
+    and rests on the safe platform 32."""
     return _rest(sim)
 
 
