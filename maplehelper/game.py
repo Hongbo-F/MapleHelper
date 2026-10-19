@@ -109,3 +109,12 @@ MONSTERS = {
 #   ("Squishy Liquid x1 earned (Etc)", "You have gained mesos (+13)").
 # - Chair (d): she sits on The Green Relaxer; tapping an arrow stands her up without moving her.
 # - Kills show up as EXP on the HUD (e.g. 423 -> 435 for a Green Slime).
+# - Moving between platforms (gamelab/route.py, gamelab/moves.py; map layouts come from the game data):
+#   jumping straight up passes through a platform overhead and lands on it (a jump rises 77 map
+#   units); down + jump drops through the platform she stands on; down at a rope's top climbs down it.
+#   Running jumps need a run-up: from 12 units before a platform's end she walked off before the jump
+#   started, from ~35-40 back they land. A platform's real end is ~24 screen px past where its drawn
+#   grass seems to end. Monsters stay on the platform they spawn on, so platforms without spawns are
+#   safe to rest on.
+# - The screen draws the map 1.40625x (1080/768) at a 1920x1080 window; the minimap is the map at
+#   1/16, so one minimap pixel is 11.4 map units.

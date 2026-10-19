@@ -94,7 +94,11 @@ Navigation is split into modules, each built on the game's own map data (read wi
 | `route.py` | **Moves and routes.** Builds every move the physics allows: rope climbs and climb-downs, jumping up through a platform overhead, running jumps (from `jumpSpeed` 555 and gravity 2000: 77 units high, 555 ms in the air, at her measured 149 units/s), walking off an end, and dropping through (↓ + jump). Then finds the quickest route with Dijkstra. |
 | `moves.py` | **Doing a move.** Closed loop: look, act, look again. Her position along a platform is refined on screen from her distance to its visible end, which is good to a couple of units for takeoffs near edges. Ropes are lined up with the rope detected on screen. |
 | `nav.py` | **Navigator.** Plans, does one move, checks which platform she landed on, and replans from there when it isn't the planned one. |
-| `tour.py` | **Hunting tour.** Visits spawn platforms in random order and runs `hunt` on each. When HP is low, it rests on the chair at the nearest platform with no spawns (monsters never leave their own platform), and it ends standing by there. |
+| `tour.py` | **Hunting tour.** Visits spawn platforms in random order and runs `hunt` on each. It only visits platforms where every spawn is a monster `hunt` can recognize. When HP is low, it rests on the chair at the nearest platform with no spawns (monsters never leave their own platform), and it ends standing by there. |
+
+In game, on Thicket Around the Beach II:
+- **Navigation:** 21 moves in a row across every move type without a miss, and a 17-move climb from the basin to the top. The fixes that made that work are in `route.py`: the run-up, simulated landings, and the measured walking model.
+- **Tour:** visited the basin, platform 7 and platform 21 in random order, made 5 kills (EXP +64, matching the count), rested from 81% to 97% HP on a safe platform, and stood by.
 
 ```bash
 python -m gamelab map

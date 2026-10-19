@@ -38,8 +38,11 @@ class Tour:
                      and p.right - p.left >= 120]
 
     def hunting_grounds(self, min_spawns: int = 2) -> list[int]:
-        spots = self.nav.model.spawn_platforms
-        return [pid for pid, n in spots.items() if n >= min_spawns]
+        """Platforms with at least `min_spawns` spawn points, all of monsters `hunt` can recognize (it
+        can't see the others coming, so it would let them walk up and hit her)."""
+        known = set(self.h.eyes.detector.templates)
+        return [pid for pid, names in self.nav.model.monsters_by_platform.items()
+                if len(names) >= min_spawns and all(n.lower() in known for n in names)]
 
     def nearest_safe(self) -> int:
         f = self.nav.mover.fix()

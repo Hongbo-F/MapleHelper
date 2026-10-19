@@ -86,6 +86,7 @@ class Spawn:
     y: float
     left: float
     right: float
+    name: str = ""
 
 
 @dataclass
@@ -131,11 +132,16 @@ class MapModel:
     @cached_property
     def spawn_platforms(self) -> dict[int, int]:
         """Platform id -> number of monster spawn points on it."""
-        out: dict[int, int] = {}
+        return {pid: len(names) for pid, names in self.monsters_by_platform.items()}
+
+    @cached_property
+    def monsters_by_platform(self) -> dict[int, list[str]]:
+        """Platform id -> the names of the monsters spawning on it (one per spawn point)."""
+        out: dict[int, list[str]] = {}
         for s in self.spawns:
             p = self.platform_under(s.x, s.y, reach=60)
             if p:
-                out[p.id] = out.get(p.id, 0) + 1
+                out.setdefault(p.id, []).append(s.name or str(s.mob_id))
         return out
 
 
@@ -174,7 +180,7 @@ def _platforms(footholds: list[dict]) -> tuple[list[Platform], list[Segment]]:
     return [Platform(i, c) for i, c in enumerate(platforms)], walls
 
 
-def parse(map_id: int, tree: dict, name: str, physics: dict) -> MapModel:
+def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None) -> MapModel:
     info = tree.get("info", {})
     footholds = []
     for layer, groups in (tree.get("foothold") or {}).items():
@@ -188,7 +194,9 @@ def parse(map_id: int, tree: dict, name: str, physics: dict) -> MapModel:
     portals = [Portal(p.get("pn", ""), p.get("pt", 0), p["x"], p["y"],
                       None if p.get("tm") in (None, 999999999) else p["tm"])
                for p in (tree.get("portal") or {}).values()]
-    spawns = [Spawn(int(s["id"]), s["x"], s.get("cy", s["y"]), s.get("rx0", s["x"]), s.get("rx1", s["x"]))
+    mob_names = mob_names or {}
+    spawns = [Spawn(int(s["id"]), s["x"], s.get("cy", s["y"]), s.get("rx0", s["x"]), s.get("rx1", s["x"]),
+                    mob_names.get(str(int(s["id"])), ""))
               for s in (tree.get("life") or {}).values() if isinstance(s, dict) and s.get("type") == "m"]
     mm = tree.get("miniMap") or {}
     return MapModel(
@@ -219,14 +227,18 @@ def _map_name(map_id: int) -> str:
 def load(map_id: int) -> MapModel:
     """The map's model, parsed from the game data (cached as JSON next to the other extracts)."""
     cache = CACHE / f"{map_id}.json"
-    if cache.exists():
-        raw = json.loads(cache.read_text(encoding="utf-8"))
-    else:
+    raw = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
+    if raw is None or "mob_names" not in raw:
         physics = jsonable(Package(COPY / "Map" / "Map_000.wz").image("Physics.img"))
-        raw = {"id": map_id, "name": _map_name(map_id), "tree": jsonable(_image(map_id)), "physics": physics}
+        tree = jsonable(_image(map_id))
+        ids = {str(int(s["id"])) for s in (tree.get("life") or {}).values()
+               if isinstance(s, dict) and s.get("type") == "m"}
+        strings = Package(COPY / "String" / "String_000.wz").image("Mob.img")
+        names = {i: (strings.get(i.zfill(7)) or strings.get(i) or {}).get("name", "") for i in ids}
+        raw = {"id": map_id, "name": _map_name(map_id), "tree": tree, "physics": physics, "mob_names": names}
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(raw), encoding="utf-8")
-    return parse(raw["id"], raw["tree"], raw["name"], raw["physics"])
+    return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"])
 
 
 def render(model: MapModel, path: Path, scale: float = 0.5, marks: list[tuple[float, float, str]] = ()) -> None:
