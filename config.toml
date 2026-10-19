@@ -17,20 +17,24 @@ lucky_seven = "g"   # "" -> stars are thrown with jump + attack instead
 [hotkeys]
 jump_throw = "f1"   # jump, then attack in mid-air so a star is thrown
 back_off = "f2"     # walk away, turn around, throw twice
-hop_back = "f3"     # hop away from a monster that's on top of her, turn, throw twice
-jump_back_shot = "f4"  # jump away, turn around in the air, throw at the monster before landing
+hop_back = "f3"     # a jump-back shot, then one more throw
+jump_back_shot = "f4"  # jump away, turn around in the air, throw at the monster (star comes out as she lands)
 
 [control]
 abort = "esc"       # stops the running combo (Esc still reaches the game too)
 slow_mode = "f12"   # toggles demo speed: pauses before each step so she can read the coach
 
-# Milliseconds. Tune these while watching her character.
+# Milliseconds. Measured in game with her claw's regular attack: a jump is airborne ~530 ms, the star
+# comes out ~530 ms after the attack key, and jump/attack presses before ~730 ms after it are ignored.
 [timing]
 key_press = 40
-air_delay = 120
-throw_gap = 650
-turn_tap = 50
+run_up = 100          # Jump-Back Shot: away arrow held this long before the jump (shorter: sometimes jumps straight up)
+air_delay = 60        # away arrow kept held this long after the jump key, then she turns
+turn_lead = 50        # turn arrow held this long before the attack and through it (a quick tap is sometimes ignored)
+throw_gap = 750       # key_press + throw_gap must clear the ~730 ms attack lock; lower it only with a faster claw
+turn_tap = 50         # turning around on the ground (Back Off)
 walk_away = 500
-hop_hold = 350
+buffer_window = 300   # combo button pressed in the last 300 ms of a running combo: runs right after it.
+                      # Pressed earlier: ignored.
 slow_pause = 900
 recap = 3000

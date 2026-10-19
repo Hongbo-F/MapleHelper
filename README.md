@@ -6,12 +6,14 @@ One-button escape combos for a dart thief, with an on-screen coach that narrates
 |---|---|---|
 | F1 | Jump-Throw | Jump, then attack in mid-air so a star is thrown (no claw swipe) |
 | F2 | Back Off & Throw | Walk away, turn around, throw twice |
-| F3 | Hop Back & Throw | Hop away from a monster that's on top of her, turn, throw twice |
-| F4 | Jump-Back Shot | Jump away, turn around in the air, throw at the monster before landing |
-| Esc | | Stop the running combo |
+| F3 | Hop Back & Throw | A Jump-Back Shot, then one more throw |
+| F4 | Jump-Back Shot | Jump away, turn around in the air and attack; the star comes out just as she lands |
+| Esc | | Stop the running combo and cancel any queued one |
 | F12 | | Slow / demo mode: pauses before each step so she can read the coach |
 
-"Away" means away from where she's facing when she presses the button. The helper tracks the last ← / → she pressed.
+"Away" means away from where she's facing when she presses the button. The helper tracks facing from whichever turned her last: her own ← / → press, or a combo's.
+
+A combo button pressed in the last 300 ms of a running combo (`buffer_window`) is queued to start the moment it ends. If she presses several, only the newest is kept. Pressed earlier than that, it's ignored, so mashing at the start of a move does nothing. Pressing F4 again as she lands chains Jump-Back Shots.
 
 When a combo ends, the coach shows the whole recipe, e.g. `Hold ← to walk away · Tap → to turn around · SHIFT (Lucky Seven) ×2`.
 
@@ -33,7 +35,7 @@ Quit with Ctrl+C in that terminal.
 2. **Check the window title.** Run `python -m maplehelper --debug`, press a key in the game, and look at the logged `focused window` title. `game_window_title` must be part of it.
 3. **Play in windowed or borderless mode.** The coach overlay can't draw over exclusive fullscreen.
 4. **If keys don't reach the game,** start the terminal as Administrator. Windows blocks input from normal programs to games that run elevated.
-5. **Tune `[timing]`** while watching her character. `throw_gap` depends on her claw speed, `walk_away` on how far she should back off, and `air_delay` / `turn_tap` on when she turns and throws mid-jump.
+5. **Tune `[timing]` only if her gear changes.** The defaults were measured in game with her claw's regular attack. A jump lasts about 530 ms. The star comes out about 530 ms after the attack key. The game ignores jump and attack presses until about 730 ms after it. So `key_press + throw_gap` must stay above 730. Jump-Back Shot holds the away arrow from `run_up` ms before the jump until `air_delay` ms after it. It then holds the turn arrow `turn_lead` ms before the attack and keeps it held through the attack. Quick taps there were sometimes missed by the game: about 6% of shots jumped straight up or threw the wrong way. The held pattern went 160 for 160 in testing. A faster claw or a speed buff shortens these times. `walk_away` sets how far Back Off walks.
 
 ## Trying it without the game
 

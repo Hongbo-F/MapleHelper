@@ -3,7 +3,7 @@ import pytest
 from maplehelper import config, keys
 from maplehelper.combos import COMBOS
 from maplehelper.controller import Controller
-from maplehelper.engine import LEFT, RIGHT
+from maplehelper.engine import LEFT, RIGHT, STARTED
 
 VK = {name: keys.parse(name).vk for name in ("f1", "f2", "f4", "f5", "f12", "esc", "left", "right", "a")}
 
@@ -17,10 +17,13 @@ class FakeRunner:
 
     def trigger(self, name):
         self.triggered.append(name)
-        return True
+        return STARTED
 
     def abort(self):
         self.aborts += 1
+
+    def note_facing(self, facing):
+        self.facing = facing
 
     def toggle_slow(self):
         self.slow_toggles += 1

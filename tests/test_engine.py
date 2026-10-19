@@ -5,7 +5,7 @@ from dataclasses import fields
 from maplehelper import keys
 from maplehelper.combos import COMBOS
 from maplehelper.config import GameKeys, Timing
-from maplehelper.engine import LEFT, RIGHT, Combo, Runner
+from maplehelper.engine import DROPPED, LEFT, QUEUED, RIGHT, STARTED, Combo, Runner
 
 K = keys.parse
 ZERO = Timing(**{f.name: 0 for f in fields(Timing)})
@@ -91,27 +91,52 @@ def test_jump_throw():
     assert combo_keys(rec) == tap("alt") + tap("ctrl")
 
 
-def test_hop_back_holds_away_arrow_through_the_jump():
+# Facing right: hold ← through the jump, then hold → (the turn) while the attack goes in.
+SHOT_FACING_RIGHT = [("down", "left"), ("down", "alt"), ("up", "alt"), ("up", "left"),
+                     ("down", "right"), ("down", "shift"), ("up", "shift"), ("up", "right")]
+
+
+def test_hop_back_is_a_jump_back_shot_plus_one_more_throw():
     rec = Recorder()
     run(make_runner(rec), "hop_back")
-    assert combo_keys(rec)[:4] == [("down", "left"), ("down", "alt"), ("up", "alt"), ("up", "left")]
+    assert combo_keys(rec) == SHOT_FACING_RIGHT + tap("shift")
 
 
 def test_jump_back_shot_jumps_away_turns_in_the_air_and_throws_at_the_monster():
     rec = Recorder()
     runner = run(make_runner(rec), "jump_back_shot")
-    assert combo_keys(rec) == [("down", "left"), ("down", "alt"), ("up", "alt"), ("up", "left"),
-                               ("down", "right"), ("up", "right"), ("down", "shift"), ("up", "shift")]
+    assert combo_keys(rec) == SHOT_FACING_RIGHT
     assert runner.facing == RIGHT
-    assert rec.steps == ["Hold ← + ALT to jump away", "In the air: tap → to face them",
-                         "SHIFT (Lucky Seven) to throw before landing"]
+    assert rec.steps == ["Hold ← + ALT to jump away", "In the air: hold → to face them",
+                         "SHIFT (Lucky Seven) while still holding →"]
 
 
 def test_jump_back_shot_without_lucky_seven_throws_with_plain_attack():
     rec = Recorder()
     run(make_runner(rec, game_keys(lucky_seven=None)), "jump_back_shot")
-    assert combo_keys(rec)[-2:] == tap("ctrl")  # already airborne, so no second jump
-    assert rec.steps[-1] == "CTRL to throw before landing"
+    assert combo_keys(rec)[-3:] == tap("ctrl") + [("up", "right")]  # already airborne, so no second jump
+    assert rec.steps[-1] == "CTRL while still holding →"
+
+
+def test_jump_back_shot_keeps_the_turn_arrow_held_while_the_attack_starts():
+    recorded = []
+    t = Timing()
+    rec = Recorder()
+    runner = make_runner(rec, timing=t)
+    # Replay on a virtual clock to check the hold lengths that in-game testing settled on.
+    from maplehelper.engine import Ctx, _Silent
+    class Clock(Ctx):
+        now = 0
+        def wait(self, ms):
+            Clock.now += ms
+    ctx = Clock(lambda k, d: recorded.append((Clock.now, k.name, d)), game_keys(), t, RIGHT, False,
+                threading.Event(), _Silent(), "")
+    runner.combos["jump_back_shot"].script(ctx)
+    at = {(name, down): ms for ms, name, down in recorded}
+    assert at[("alt", True)] - at[("left", True)] == t.run_up
+    assert at[("left", False)] - at[("alt", True)] == t.key_press + t.air_delay
+    assert at[("shift", True)] - at[("right", True)] == t.turn_lead
+    assert at[("right", False)] >= at[("shift", False)]
 
 
 def test_slow_mode_never_pauses_mid_air():
@@ -144,30 +169,169 @@ def test_slow_mode_pauses_before_each_step():
     assert time.perf_counter() - started >= 3 * 0.03 * 0.9  # margin: Windows timers can wake a little early
 
 
-def test_busy_runner_ignores_new_combos_until_the_current_one_ends():
+def hold_left(ms):
+    return lambda c: c.tap(c.keys.left, ms)
+
+
+def with_timing(**overrides):
+    return Timing(**{**vars(ZERO), **overrides})
+
+
+QUICK_COMBOS = [Combo("quick", "Quick", lambda c: c.say("quick")), Combo("other", "Other", lambda c: c.say("other"))]
+
+
+def test_expected_length_adds_up_the_combo_waits():
+    t = Timing()
+    runner = make_runner(Recorder(), timing=t)
+    two_throws_after_walking = t.walk_away + t.turn_tap + 2 * (t.key_press + t.throw_gap)
+    assert runner.expected_ms(runner.combos["back_off"]) == two_throws_after_walking
+    runner.slow = True  # one pause per step, 3 steps
+    assert runner.expected_ms(runner.combos["back_off"]) == two_throws_after_walking + 3 * t.slow_pause
+
+
+def test_default_timing_clears_the_measured_attack_lock():
+    t = Timing()
+    assert t.key_press + t.throw_gap >= 730 + 50  # measured lock + margin for frame jitter
+
+
+def test_press_early_in_a_combo_is_dropped():
     rec = Recorder()
-    combos = [
-        Combo("long", "Long", lambda c: c.tap(c.keys.left, 5000)),
-        Combo("quick", "Quick", lambda c: c.say("quick")),
-    ]
-    runner = make_runner(rec, combos=combos)
+    runner = make_runner(rec, timing=with_timing(buffer_window=300),
+                         combos=[Combo("long", "Long", hold_left(800)), *QUICK_COMBOS])
     runner.start()
     try:
-        assert runner.trigger("long")
+        assert runner.trigger("long") == STARTED
+        assert runner.trigger("quick") == DROPPED  # before the combo even started
         wait_until(lambda: ("down", "left") in rec.events)
-        assert not runner.trigger("quick")
-        assert not runner.trigger("long")
+        assert runner.trigger("quick") == DROPPED
+        wait_until(lambda: len(rec.dones) == 1)
+        time.sleep(0.05)
+        assert rec.dones == [("Done ✓", [])]
+    finally:
+        runner.stop()
+
+
+def test_press_near_the_end_is_queued_and_the_newest_press_wins():
+    rec = Recorder()
+    runner = make_runner(rec, timing=with_timing(buffer_window=300),
+                         combos=[Combo("long", "Long", hold_left(600)), *QUICK_COMBOS])
+    runner.start()
+    try:
+        runner.trigger("long")
+        wait_until(lambda: ("down", "left") in rec.events)
+        time.sleep(0.4)  # ~200 ms left
+        assert runner.trigger("quick") == QUEUED
+        assert runner.trigger("other") == QUEUED  # replaces "quick"
+        wait_until(lambda: len(rec.dones) == 2)
+        time.sleep(0.05)  # nothing else may run
+        assert rec.dones == [("Done ✓", []), ("Done ✓", ["other"])]
+    finally:
+        runner.stop()
+
+
+def test_esc_stops_the_combo_and_forgets_the_queued_press():
+    rec = Recorder()
+    runner = make_runner(rec, timing=with_timing(buffer_window=5000),
+                         combos=[Combo("long", "Long", hold_left(3000)), *QUICK_COMBOS])
+    runner.start()
+    try:
+        runner.trigger("long")
+        wait_until(lambda: ("down", "left") in rec.events)
+        assert runner.trigger("quick") == QUEUED
         runner.abort()
         wait_until(lambda: len(rec.dones) == 1)
+        time.sleep(0.05)
         assert rec.dones == [("Stopped", [])]
-        wait_until(lambda: runner.trigger("quick"))  # idle again
+        assert runner.trigger("quick") == STARTED  # idle again
         wait_until(lambda: len(rec.dones) == 2)
         assert rec.dones[-1] == ("Done ✓", ["quick"])
     finally:
         runner.stop()
 
 
-def test_a_failing_combo_still_releases_keys_and_the_runner_keeps_working():
+def test_chained_jump_back_shots_both_jump_away_from_the_monster():
+    rec = Recorder()
+    runner = make_runner(rec, timing=with_timing(throw_gap=300, buffer_window=200))
+    runner.start()
+    try:
+        runner.trigger("jump_back_shot")
+        time.sleep(0.2)  # pressed again as she lands
+        assert runner.trigger("jump_back_shot") == QUEUED
+        wait_until(lambda: len(rec.dones) == 2)
+        clean_start = [("up", "left"), ("up", "right")]
+        assert rec.events == (clean_start + SHOT_FACING_RIGHT) * 2
+    finally:
+        runner.stop()
+
+
+def turn_left_then_wait(c):
+    c.tap(c.keys.left)
+    c.wait(300)
+
+
+def wait_then_turn_left(c):
+    c.wait(300)
+    c.tap(c.keys.left)
+
+
+def test_combo_that_turns_her_updates_facing():
+    rec = Recorder()
+    runner = make_runner(rec, combos=[Combo("turn", "Turn", turn_left_then_wait)])
+    runner.run(runner.combos["turn"])
+    assert runner.facing == LEFT
+
+
+def test_her_arrow_press_during_a_combo_wins_over_an_earlier_combo_turn():
+    rec = Recorder()
+    runner = make_runner(rec, combos=[Combo("turn", "Turn", turn_left_then_wait)])
+    threading.Timer(0.1, runner.note_facing, args=(RIGHT,)).start()
+    runner.run(runner.combos["turn"])
+    assert runner.facing == RIGHT
+
+
+def test_combo_turn_after_her_arrow_press_wins():
+    rec = Recorder()
+    runner = make_runner(rec, combos=[Combo("turn", "Turn", wait_then_turn_left)])
+    threading.Timer(0.1, runner.note_facing, args=(RIGHT,)).start()
+    runner.run(runner.combos["turn"])
+    assert runner.facing == LEFT
+
+
+def test_her_arrow_press_during_a_combo_that_never_turns_is_kept():
+    rec = Recorder()
+    runner = make_runner(rec, combos=[Combo("wait", "Wait", lambda c: c.wait(300))])
+    threading.Timer(0.1, runner.note_facing, args=(LEFT,)).start()
+    runner.run(runner.combos["wait"])
+    assert runner.facing == LEFT
+
+
+class FailingKeyboard(Recorder):
+    """Fails when pressing attack, like SendInput failing mid-combo."""
+
+    def send(self, key, down):
+        if key.name == "ctrl" and down:
+            raise OSError("SendInput failed")
+        super().send(key, down)
+
+
+def test_a_combo_failing_mid_way_still_releases_keys_and_the_runner_keeps_working():
+    rec = FailingKeyboard()
+    runner = make_runner(rec, combos=[Combo("jump_throw", "Jump", lambda c: c.jump_attack()),
+                                      Combo("ok", "OK", lambda c: None)])
+    runner.start()
+    try:
+        runner.trigger("jump_throw")
+        wait_until(lambda: len(rec.dones) == 1)
+        assert combo_keys(rec) == tap("alt")  # jump went out and was released; attack failed
+        assert rec.dones[0][0] == "Error, see console"
+        time.sleep(0.05)
+        assert runner.trigger("ok") == STARTED
+        wait_until(lambda: len(rec.dones) == 2)
+    finally:
+        runner.stop()
+
+
+def test_a_broken_combo_script_fails_before_pressing_any_key():
     rec = Recorder()
 
     def broken(c):
@@ -179,9 +343,7 @@ def test_a_failing_combo_still_releases_keys_and_the_runner_keeps_working():
     try:
         runner.trigger("broken")
         wait_until(lambda: len(rec.dones) == 1)
-        assert ("up", "alt") in rec.events
+        assert combo_keys(rec) == []  # caught by the timing dry run
         assert rec.dones[0][0] == "Error, see console"
-        wait_until(lambda: runner.trigger("ok"))
-        wait_until(lambda: len(rec.dones) == 2)
     finally:
         runner.stop()

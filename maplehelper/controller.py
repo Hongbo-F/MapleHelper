@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from . import keys
 from .config import Config
-from .engine import LEFT, RIGHT, Runner
+from .engine import DROPPED, LEFT, QUEUED, RIGHT, Runner
 
 log = logging.getLogger(__name__)
 
@@ -38,9 +38,9 @@ class Controller:
             return False
 
         if vk == self._left:
-            self._runner.facing = LEFT
+            self._runner.note_facing(LEFT)
         elif vk == self._right:
-            self._runner.facing = RIGHT
+            self._runner.note_facing(RIGHT)
         elif vk == self._abort:
             self._runner.abort()
         elif vk == self._slow:
@@ -50,7 +50,10 @@ class Controller:
         elif vk in self._triggers:
             self._held.add(vk)
             name = self._triggers[vk]
-            if not self._runner.trigger(name):
-                log.info("%s ignored: another combo is still running", name)
+            result = self._runner.trigger(name)
+            if result == QUEUED:
+                log.info("%s queued: runs when the current combo ends", name)
+            elif result == DROPPED:
+                log.info("%s ignored: pressed too early in the current combo", name)
             return True
         return False

@@ -7,6 +7,7 @@ from .engine import Combo, Ctx
 def jump_throw(c: Ctx) -> None:
     c.say(f"{c.keys.jump.label}, then {c.keys.attack.label} in mid-air → star")
     c.jump_attack()
+    c.wait(c.t.throw_gap)  # the combo ends when she can act again, like the others
 
 
 def back_off(c: Ctx) -> None:
@@ -19,30 +20,27 @@ def back_off(c: Ctx) -> None:
 
 
 def hop_back(c: Ctx) -> None:
-    c.say(f"Hold {c.back.label} + {c.keys.jump.label} to hop away")
-    c.down(c.back)
-    c.wait(c.t.key_press)  # already moving when she jumps, so the hop carries her away
-    c.tap(c.keys.jump)
-    c.wait(c.t.hop_hold)
-    c.up(c.back)
-    c.say(f"Tap {c.front.label} to turn around")
-    c.tap(c.front, c.t.turn_tap)
-    c.say(f"{c.throw_label} ×2")
-    c.throw(2)
+    """A Jump-Back Shot, then one more throw once she can act again."""
+    jump_back_shot(c)
+    c.say(f"{c.throw_label} again")
+    c.throw()
 
 
 def jump_back_shot(c: Ctx) -> None:
-    """Jump away from the monster, turn around in the air, and throw at it before landing."""
+    """Jump away from the monster, turn around in the air, and throw at it; the star comes out as she lands."""
     c.say(f"Hold {c.back.label} + {c.keys.jump.label} to jump away")
     c.down(c.back)
-    c.wait(c.t.key_press)  # already moving when she jumps, so the jump carries her away
+    c.wait(c.t.run_up)  # already moving when she jumps, so the jump carries her away
     c.tap(c.keys.jump)
-    c.wait(c.t.air_delay)
+    c.wait(c.t.air_delay)  # keep pushing away through takeoff
     c.up(c.back)  # the jump keeps carrying her backwards after the arrow is released
-    c.say(f"In the air: tap {c.front.label} to face them", pause=False)
-    c.tap(c.front, c.t.turn_tap)
-    c.say(f"{c.air_throw_label} to throw before landing", pause=False)
+    c.say(f"In the air: hold {c.front.label} to face them", pause=False)
+    c.down(c.front)
+    # Right after takeoff the game sometimes ignores a turn, so the arrow stays held through the attack.
+    c.wait(c.t.turn_lead)
+    c.say(f"{c.air_throw_label} while still holding {c.front.label}", pause=False)
     c.air_throw()
+    c.up(c.front)
     c.wait(c.t.throw_gap)
 
 

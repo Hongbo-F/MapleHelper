@@ -1,8 +1,10 @@
 """Runs combos: presses keys with timing, narrates each step, and can be stopped mid-way."""
 
 import logging
+import math
 import queue
 import threading
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
@@ -47,6 +49,7 @@ class Ctx:
         self.front = keys.left if facing == LEFT else keys.right
         self.back = keys.right if facing == LEFT else keys.left
         self.facing = facing  # updated as the combo turns her around
+        self.turned_at = 0    # perf_counter_ns of the combo's last arrow press; 0 if it never turned her
         self.recipe: list[str] = []
         self._send = send
         self._slow = slow
@@ -72,10 +75,9 @@ class Ctx:
             raise Aborted
         self._send(key, True)
         self._held.add(key)
-        if key == self.keys.left:
-            self.facing = LEFT
-        elif key == self.keys.right:
-            self.facing = RIGHT
+        if key in (self.keys.left, self.keys.right):
+            self.facing = LEFT if key == self.keys.left else RIGHT
+            self.turned_at = time.perf_counter_ns()
 
     def up(self, key: Key) -> None:
         self._send(key, False)
@@ -123,6 +125,29 @@ class Ctx:
             self.wait(self.t.throw_gap)
 
 
+class _Silent:
+    def step(self, title: str, text: str) -> None:
+        pass
+
+    def done(self, title: str, text: str, recipe: list[str], linger_ms: int) -> None:
+        pass
+
+
+class _DryRun(Ctx):
+    """Plays a combo script without pressing keys or sleeping, adding up its waits to time it."""
+
+    def __init__(self, keys: GameKeys, timing: Timing, facing: str, slow: bool):
+        super().__init__(lambda key, down: None, keys, timing, facing, slow, threading.Event(), _Silent(), "")
+        self.elapsed_ms = 0
+
+    def wait(self, ms: int) -> None:
+        self.elapsed_ms += ms
+
+
+# What Runner.trigger did with a press.
+STARTED, QUEUED, DROPPED = "started", "queued", "dropped"
+
+
 class Runner:
     """Runs one combo at a time on a worker thread, so the keyboard hook never waits."""
 
@@ -138,56 +163,100 @@ class Runner:
         self._queue: queue.SimpleQueue[Combo | None] = queue.SimpleQueue()
         self._lock = threading.Lock()
         self._busy = False
+        self._buffered: Combo | None = None  # pressed near the end of the running combo; runs right after it
+        self._ends_at = math.inf             # perf_counter time the running combo is expected to end
+        self._her_turn_at = 0                # perf_counter_ns of her last ← / → press
         self._thread = threading.Thread(target=self._work, name="combo-runner", daemon=True)
 
     def start(self) -> None:
         self._thread.start()
 
     def stop(self) -> None:
-        self._abort.set()
+        self.abort()
         self._queue.put(None)
         self._thread.join(timeout=2)
 
-    def trigger(self, name: str) -> bool:
-        """Queue a combo without blocking. Returns False if ignored because one is already running."""
+    def trigger(self, name: str) -> str:
+        """Start a combo without blocking, and return what happened to the press.
+
+        While another combo runs, a press in its last `buffer_window` ms is QUEUED to start the
+        moment it ends (a newer press replaces an older one); an earlier press is DROPPED.
+        """
         combo = self.combos[name]
         with self._lock:
             if self._busy:
-                return False
+                if self._ends_at - time.perf_counter() > self._timing.buffer_window / 1000:
+                    return DROPPED
+                self._buffered = combo
+                return QUEUED
             self._busy = True
+            self._ends_at = math.inf  # until the combo starts and its length is known
+            self._abort.clear()
             self._queue.put(combo)
-        return True
+        return STARTED
 
     def abort(self) -> None:
-        self._abort.set()
+        """Stop the running combo and forget any press waiting to run after it."""
+        with self._lock:
+            self._buffered = None
+            self._abort.set()
+
+    def note_facing(self, facing: str) -> None:
+        """She pressed ← or → herself."""
+        with self._lock:
+            self.facing = facing
+            self._her_turn_at = time.perf_counter_ns()
 
     def toggle_slow(self) -> bool:
         self.slow = not self.slow
         self._display.done("MapleHelper", f"Slow mode {'ON' if self.slow else 'OFF'}", [], 1500)
         return self.slow
 
+    def expected_ms(self, combo: Combo) -> int:
+        """How long the combo takes with the current timings and slow mode."""
+        dry = _DryRun(self._keys, self._timing, self.facing, self.slow)
+        combo.script(dry)
+        return dry.elapsed_ms
+
     def run(self, combo: Combo) -> None:
         """Run one combo to the end (or until aborted) on the calling thread."""
         self._abort.clear()
+        self._run(combo)
+
+    def _run(self, combo: Combo) -> None:
         for key in (self._keys.left, self._keys.right):
             self._send(key, False)  # start clean even if she's holding an arrow
         ctx = Ctx(self._send, self._keys, self._timing, self.facing, self.slow, self._abort, self._display, combo.title)
         ending = "Error, see console"
         try:
+            ends_at = time.perf_counter() + self.expected_ms(combo) / 1000
+            with self._lock:
+                self._ends_at = ends_at
             combo.script(ctx)
             ending = "Done ✓"
         except Aborted:
             ending = "Stopped"
         finally:
             ctx.release_all()
-            self.facing = ctx.facing
+            with self._lock:
+                # Whoever turned her last decides her facing: the combo, or her own arrow press during it.
+                if ctx.turned_at > self._her_turn_at:
+                    self.facing = ctx.facing
             self._display.done(combo.title, ending, ctx.recipe, self._timing.recap)
 
     def _work(self) -> None:
         while (combo := self._queue.get()) is not None:
             try:
-                self.run(combo)
+                self._run(combo)
             except Exception:
                 log.exception("combo %s failed", combo.name)
             with self._lock:
-                self._busy = False
+                if self._buffered:
+                    # Clear the stop flag here, under the lock, so an Esc that arrives from now on
+                    # still stops the buffered combo.
+                    self._abort.clear()
+                    self._ends_at = math.inf
+                    self._queue.put(self._buffered)
+                    self._buffered = None
+                else:
+                    self._busy = False

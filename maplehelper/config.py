@@ -25,13 +25,22 @@ class GameKeys:
 
 @dataclass(frozen=True)
 class Timing:
-    """All values in milliseconds."""
+    """All values in milliseconds. Defaults were measured in game with her claw's regular attack:
+    a jump is airborne ~530 ms, an attack throws its star ~530 ms after the key, and she can't
+    jump or attack again until ~730 ms after the attack key (presses before that are ignored)."""
     key_press: int = 40     # how long a single tap holds the key down
-    air_delay: int = 120    # after jumping, wait this long so the attack happens mid-air
-    throw_gap: int = 650    # time for one throw animation to finish before the next
-    turn_tap: int = 50      # tap length that turns her around without walking far
+    run_up: int = 100       # Jump-Back Shot: hold the away arrow this long before jumping; shorter
+                            # sometimes gives a straight-up jump
+    air_delay: int = 60     # after the jump key: keep holding the away arrow this long (Jump-Back Shot),
+                            # or wait this long before the mid-air attack (Jump-Throw)
+    turn_lead: int = 50     # Jump-Back Shot: hold the turn arrow this long before attacking, and keep it
+                            # held through the attack; a quick tap right after takeoff is sometimes ignored
+    throw_gap: int = 750    # after releasing the attack key, wait this long before the next action
+                            # (key_press + throw_gap must clear the ~730 ms attack lock)
+    turn_tap: int = 50      # tap length that turns her around on the ground without walking far
     walk_away: int = 500    # how long "Back Off" walks away
-    hop_hold: int = 350     # how long the away arrow stays held during "Hop Back"
+    buffer_window: int = 300  # a combo button pressed this close to the end of a running combo is
+                              # queued to run right after it; pressed earlier, it's ignored
     slow_pause: int = 900   # slow mode: pause before each step so she can read it
     recap: int = 3000       # how long the full recipe stays on screen after a combo
 

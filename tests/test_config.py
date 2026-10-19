@@ -18,7 +18,7 @@ def test_parses_keys_hotkeys_and_timing(config_data):
     assert cfg.keys.lucky_seven.name == "shift"
     assert cfg.hotkeys["jump_back_shot"].name == "f5"
     assert cfg.timing.throw_gap == 650
-    assert cfg.timing.air_delay == 120  # default when not set
+    assert cfg.timing.air_delay == config.Timing().air_delay  # default when not set
 
 
 def test_empty_skill_means_not_bound(config_data):
