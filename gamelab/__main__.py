@@ -73,9 +73,10 @@ def cmd_spot(args) -> int:
         with mss.MSS() as sct:
             frame = np.asarray(sct.grab(window.client_rect(hwnd)))[:, :, 2::-1]
     spotter = LieDetectorSpotter()
-    score = spotter.score(frame)
-    print(f"Lie Detector score {score:.3f} (threshold {spotter.threshold}): "
-          f"{'LIE DETECTOR ON SCREEN' if score >= spotter.threshold else 'not on screen'}")
+    scores = spotter.scores(frame)
+    seen = max(scores.values()) >= 1
+    print(f"{'LIE DETECTOR ON SCREEN' if seen else 'not on screen'} (match / threshold, 1 = seen: "
+          + ", ".join(f"{name} {v:.2f}" for name, v in scores.items()) + ")")
     return 0
 
 
@@ -174,53 +175,86 @@ def _annotate(sight, path) -> None:
     d = ImageDraw.Draw(img)
     if sight.her:
         x, y = sight.her
-        d.rectangle([x - 20, y - 40, x + 20, y + 6], outline="cyan", width=2)
-        d.line([0, sight.floor_y, img.width, sight.floor_y], fill="cyan")
-        if sight.ground:
-            d.line([sight.ground[0], sight.floor_y + 3, sight.ground[1], sight.floor_y + 3], fill="lime", width=3)
-    for m in sight.mobs:
-        on = m in sight.on_floor()
+        colour = "cyan" if sight.seen else "magenta"  # magenta: placed from the minimap dot
+        d.rectangle([x - 20, y - 40, x + 20, y + 6], outline=colour, width=2)
+        d.line([0, sight.floor_y, img.width, sight.floor_y], fill=colour)
+    for t in sight.targets:
+        m = t.mob
+        mine = sight.platform is not None and t.platform == sight.platform.id
         d.rectangle([m.x - m.w // 2, m.y - m.h // 2, m.x + m.w // 2, m.y + m.h // 2],
-                    outline="red" if on else "orange", width=2)
-        d.text((m.x - m.w // 2, m.y - m.h // 2 - 11), f"{m.kind} {m.score:.2f}", fill="red" if on else "orange")
+                    outline="red" if mine else "orange", width=2)
+        d.text((m.x - m.w // 2, m.y - m.h // 2 - 11), f"{m.kind} p{t.platform}", fill="red" if mine else "orange")
     d.text((8, img.height - 70), f"HP {sight.hp:.0%}  MP {sight.mp:.0%}", fill="white")
     img.save(path)
 
 
+def _hunter(args, **kw):
+    from . import mapdata
+    from .hunt import Hunter
+    _, keys, timing = her_setup()
+    model = mapdata.load(getattr(args, "map", DEFAULT_MAP))
+    return Hunter(_eyes(model.id), keys, timing, model, log=_log, **kw)
+
+
 def cmd_hunt(args) -> int:
-    from .hunt import Eyes, Hunter
-    cfg, keys, timing = her_setup()
-    eyes = _eyes(getattr(args, 'map', DEFAULT_MAP))
+    from . import shots
+    from .hunt import SHOT_LOG
+    if args.mode == "shots":
+        return _shot_summary(SHOT_LOG)
+    cfg, _, _ = her_setup()
+    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
     if args.mode == "look":
-        sight = eyes.look()
-        her = f"at {sight.her}" if sight.her else "NOT FOUND"
-        print(f"her: {her}; HP {sight.hp:.0%}, MP {sight.mp:.0%}; room to walk: "
-              f"{sight.room('left'):.0f} px left, {sight.room('right'):.0f} px right")
-        for m in sight.mobs:
-            where = "on her floor" if m in sight.on_floor() else "elsewhere"
-            dx = f"{sight.game_dx(m.x):+.0f} px" if sight.her else "?"
-            print(f"  {m.kind} {dx} ({where}, score {m.score})")
-        _annotate(sight, LAB / "hunt_look.png")
+        s = hunter.look()
+        if s.where is None:
+            print("can't find her minimap dot")
+            return 1
+        how = "name tag" if s.seen else "minimap dot + camera (name tag hidden)"
+        p = s.platform
+        print(f"her: map ({s.where.x:.0f}, {s.where.y:.0f}) on platform {p.id if p else None} ({how}); "
+              f"HP {s.hp:.0%}, MP {s.mp:.0%}; room: {s.room('left'):.0f} left, {s.room('right'):.0f} right")
+        for t in s.targets:
+            dx, dy = t.x - s.where.x, t.y - s.where.y
+            reach = "in reach" if shots.can_shoot(dx, dy) else "out of reach"
+            print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({reach}, score {t.mob.score})")
+        _annotate(s, LAB / "hunt_look.png")
         print(LAB / "hunt_look.png")
         return 0
     kinds = set(args.kinds.split(",")) if args.kinds else None
-    hunter = Hunter(eyes, keys, timing, low_hp=args.low_hp, potion_hp=args.potion_hp,
-                    log=lambda s: print(time.strftime("%H:%M:%S"), s, flush=True))
     window.bring_to_front(cfg.game_window_title)
     if args.mode == "kill":
-        sight = eyes.look()
-        targets = sight.on_floor(kinds)
-        if sight.her is None or not targets:
-            print("no target on her floor" if sight.her else "can't see her")
+        s = hunter.look()
+        targets = [t for t in s.targets if kinds is None or t.kind in kinds]
+        if s.where is None or not targets:
+            print("no target in sight" if s.where else "can't find her")
             return 1
         near = args.near if args.near is not None else 0
-        target = min(targets, key=lambda m: abs(sight.game_dx(m.x) - near))
-        hunter.report.stop = hunter.kill(target, sight, seconds=args.seconds)
+        target = min(targets, key=lambda t: abs(t.x - s.where.x - near))
+        hunter.report.stop = hunter.kill(target, seconds=args.seconds)
     else:
-        hunter.clear_floor(kinds, max_kills=args.kills, seconds=args.seconds, span=args.span)
-    final = eyes.look()
+        ground = {int(v) for v in args.ground.split(",")} if args.ground else None
+        hunter.clear(kinds, ground=ground, max_kills=args.kills, seconds=args.seconds)
+    final = hunter.look()
     _annotate(final, LAB / "hunt_end.png")
     print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}")
+    return 0
+
+
+def _shot_summary(path) -> int:
+    """Hits and misses from the shot log, by how far below (+) or above (-) her the target was."""
+    import json
+    if not path.exists():
+        print(f"no shots logged yet ({path})")
+        return 0
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    bands: dict[int, list[int]] = {}
+    for r in rows:
+        b = bands.setdefault(round(r["dy"] / 30) * 30, [0, 0, 0])
+        b[0 if r["hit"] else 1] += 1
+        if r["hit"]:
+            b[2] = max(b[2], abs(r["dx"]))
+    print(f"{len(rows)} throws logged; by height of the target (map units, + = below her):")
+    for dy, (hit, miss, far) in sorted(bands.items()):
+        print(f"  dy {dy:+4d}: {hit} hit, {miss} missed; farthest hit {far} units")
     return 0
 
 
@@ -260,29 +294,23 @@ def cmd_map(args) -> int:
 
 
 def cmd_nav(args) -> int:
-    from . import mapdata
-    from .hunt import Eyes, Hunter
     from .nav import Navigator
-    cfg, keys, timing = her_setup()
-    eyes = _eyes(getattr(args, 'map', DEFAULT_MAP))
-    hunter = Hunter(eyes, keys, timing, log=_log)
-    nav = Navigator(hunter, mapdata.load(args.map), log=_log)
+    cfg, _, _ = her_setup()
+    hunter = _hunter(args)
+    nav = Navigator(hunter, hunter.model, log=_log)
     window.bring_to_front(cfg.game_window_title)
     trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
-    print(f"{trip.result}: {len(trip.moves)} moves, {trip.misses} landed somewhere else")
+    print(f"{trip.result}: {len(trip.moves)} moves, {trip.misses} landed somewhere else, {trip.hits} hit on the way")
     return 0
 
 
 def cmd_tour(args) -> int:
     import random
-    from . import mapdata
-    from .hunt import Eyes, Hunter
     from .nav import Navigator
     from .tour import Tour
-    cfg, keys, timing = her_setup()
-    eyes = _eyes(getattr(args, 'map', DEFAULT_MAP))
-    hunter = Hunter(eyes, keys, timing, log=_log, low_hp=args.low_hp, potion_hp=args.potion_hp)
-    nav = Navigator(hunter, mapdata.load(args.map), log=_log)
+    cfg, _, _ = her_setup()
+    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)
+    nav = Navigator(hunter, hunter.model, log=_log)
     window.bring_to_front(cfg.game_window_title)
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below)
     kinds = set(args.kinds.split(",")) if args.kinds else None
@@ -442,13 +470,16 @@ def main(argv=None) -> int:
     s.set_defaults(func=cmd_do)
 
     s = sub.add_parser("hunt", help="hunting objectives that run on their own (see gamelab/hunt.py)")
-    s.add_argument("mode", choices=["look", "kill", "clear"],
-                   help="look: what she sees now; kill: one monster; clear: her floor, nearest first")
+    s.add_argument("mode", choices=["look", "kill", "clear", "shots"],
+                   help="look: what she sees now; kill: one monster; clear: everything in reach, nearest "
+                        "first; shots: hits and misses so far, by target height (sends no keys)")
     s.add_argument("--kinds", help="only these monsters, e.g. slime,pig")
-    s.add_argument("--near", type=float, help="kill: the target closest to this many px from her (+ = right)")
+    s.add_argument("--near", type=float, help="kill: the target closest to this many map units from her (+ = right)")
+    s.add_argument("--ground", help="clear: only monsters on these platforms (and any on hers), e.g. 17,18")
     s.add_argument("--kills", type=int, default=6, help="clear: stop after this many kills")
     s.add_argument("--seconds", type=float, default=120, help="stop after this long")
-    s.add_argument("--span", type=float, default=900, help="clear: stay within this many px of the start")
+    s.add_argument("--skill", action="store_true", help="throw Lucky Seven instead of the regular attack (MP)")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
     s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
     s.set_defaults(func=cmd_hunt)

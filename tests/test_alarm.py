@@ -46,6 +46,16 @@ def test_spots_the_lie_detector_anywhere_on_screen():
     assert spotter.score(WINDOW) > 0.95
 
 
+def test_spots_the_mouse_mini_game_and_the_truth_booth():
+    # The mini-game was only captured at half size: enlarge it back to the game's size.
+    half = img("lie_detector_minigame_half.png")
+    mini_game = np.asarray(Image.fromarray(half).resize((half.shape[1] * 2, half.shape[0] * 2), Image.BILINEAR))
+    spotter = alarm.LieDetectorSpotter()
+    assert spotter.scores(mini_game)["mini-game"] >= 1
+    assert spotter.seen(mini_game)
+    assert spotter.scores(img("truth_booth_timer.png"))["truth booth"] >= 1
+
+
 @pytest.mark.parametrize("frame", [SCENE, NEAR_MISS, np.zeros((540, 960, 3), np.uint8)])
 def test_ignores_yellow_scenery_and_other_windows(frame):
     assert not alarm.LieDetectorSpotter().seen(frame)

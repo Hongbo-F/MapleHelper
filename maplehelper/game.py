@@ -43,6 +43,15 @@ class Combat:
     lucky_seven_reach_px: int = 375  # observed: killed a snail ~375 window px away, level with her,
                                      # with a platform in between (stars aren't blocked by platforms)
     lucky_seven_stars: int = 2
+    # Regular attack (no MP): measured on Thicket Around the Beach II at 1920x1080.
+    star_flight_px: int = 560     # a star thrown into open air flies this far (400 map units) and vanishes
+    star_hit_px: int = 545        # farthest hit seen: a pig 388 map units away, 60 units below her, on
+                                  # another platform (stars pass platforms; the target band is limited)
+    star_px_per_ms: float = 0.97  # flight speed after the release
+    turn_tap_walks: bool = True   # a turning tap also walks her a few px: don't tap when already facing
+    star_band_units: int = 60     # targets 60 map units below or above her were hit (farther: unmeasured)
+    knockback_units: tuple = (20, 110)  # a monster's touch pushed her 20-21 units on a wide platform,
+                                        # 82-109 on a narrow one (off it); monsters' bodies reach ~55 up
 
 
 @dataclass(frozen=True)

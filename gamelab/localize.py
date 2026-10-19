@@ -5,6 +5,8 @@ rest of the game at 1920x1080, so one minimap pixel is 16 / 1.40625 = 11.4 map u
 above her feet, so the origin below is fitted to where her feet are: measured at map 10000012 by her
 dot on the basin floor (y 575) and right after climbing the rope at x 734 onto platform 30 (y 275),
 which agree within a pixel. `Localizer.anchor` refits it from any spot whose map position is known.
+
+`Camera` places her on screen from her map position, for when her name tag is hidden.
 """
 
 from dataclasses import dataclass
@@ -59,3 +61,47 @@ class Localizer:
     def anchor(self, dot: tuple[float, float], x: float, y: float) -> None:
         """Refit the origin from a dot seen while her feet were at a known map point."""
         self.origin = (dot[0] - (x + self.centre[0]) / self.per_px, dot[1] - (y + self.centre[1]) / self.per_px)
+
+
+VIEW = (1920 / SCREEN_SCALE, 1080 / SCREEN_SCALE)  # map units on screen: 1365 x 768
+
+
+class Camera:
+    """Which part of the map is on screen, so she can be placed on screen from her map position when
+    her name tag can't be seen (e.g. behind the party HP box at the map's edge).
+
+    The camera keeps her at a fixed spot on screen, except that it never shows past the map's edges
+    (its VR bounds): near an edge it stops, and she walks towards the side of the screen. `offset` is
+    where she stands on screen (map units from its top-left corner), learned from looks where both her
+    name tag and her map position are known.
+    """
+
+    def __init__(self, bounds: tuple[float, float, float, float], offset: tuple[float, float] = (674.0, 489.0)):
+        self.bounds = bounds
+        self.offset = offset
+
+    def corner(self, x: float, y: float) -> tuple[float, float]:
+        """Map point at the screen's top-left corner while her feet are at (x, y)."""
+        left, top, right, bottom = self.bounds
+        return (min(max(x - self.offset[0], left), right - VIEW[0]),
+                min(max(y - self.offset[1], top), bottom - VIEW[1]))
+
+    def clamped(self, x: float, y: float) -> tuple[bool, bool]:
+        cx, cy = self.corner(x, y)
+        return abs(cx - (x - self.offset[0])) > 0.5, abs(cy - (y - self.offset[1])) > 0.5
+
+    def to_screen(self, x: float, y: float, at: tuple[float, float]) -> tuple[float, float]:
+        """Full-size screen px of map point (x, y) while her feet are at `at`."""
+        cx, cy = self.corner(*at)
+        return (x - cx) * SCREEN_SCALE, (y - cy) * SCREEN_SCALE
+
+    def learn(self, at: tuple[float, float], screen: tuple[float, float], rate: float = 0.2) -> None:
+        """Her feet at map `at` were seen at full-size screen px `screen`: nudge the offset towards it
+        (in each direction the camera isn't stopped at an edge)."""
+        cx, cy = self.clamped(*at)
+        ox, oy = self.offset
+        if not cx:
+            ox += rate * (screen[0] / SCREEN_SCALE - ox)
+        if not cy:
+            oy += rate * (screen[1] / SCREEN_SCALE - oy)
+        self.offset = (ox, oy)

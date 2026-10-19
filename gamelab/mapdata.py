@@ -16,6 +16,7 @@ from gamedata.paths import COPY, OUT
 from gamedata.wz import Package, jsonable
 
 SCREEN_SCALE = 1080 / 768   # screen px per world unit at a 1920x1080 game window
+MONSTER_REACH = 55          # map units a monster's body reaches above its platform (pigs, mushrooms)
 CACHE = OUT / "maps"         # parsed maps, as JSON (git-ignored, like all extracted game data)
 
 
@@ -128,6 +129,20 @@ class MapModel:
 
     def platform(self, pid: int) -> Platform:
         return self.platforms[pid]
+
+    def safe(self, pid: int, reach: float = MONSTER_REACH) -> bool:
+        """No monster can touch her standing on this platform: none spawn on it (monsters never leave
+        their platform), and no platform they spawn on runs underneath within `reach` (their bodies
+        stick up that far: pigs on platform 1 hit her on platform 0, 42 units above them)."""
+        if self.spawn_platforms.get(pid, 0):
+            return False
+        p = self.platform(pid)
+        for q in self.spawn_platforms:
+            other = self.platform(q)
+            lo, hi = max(p.left, other.left), min(p.right, other.right)
+            if lo < hi and 0 < other.y_at((lo + hi) / 2) - p.y_at((lo + hi) / 2) <= reach:
+                return False
+        return True
 
     @cached_property
     def spawn_platforms(self) -> dict[int, int]:

@@ -1,17 +1,19 @@
-"""Hunting objectives that run on their own: kill one monster, or clear the floor she's on.
+"""Hunting objectives that run on their own: kill one monster, or clear the monsters in reach.
 
 The decider (a person, or Claude) picks objectives; this module makes the small decisions in a
-loop: look at the game, keep the target at Lucky Seven range, face it, throw, step away from
-monsters that get too close, loot each kill straight away (or as soon as no monster stands on the
-drops), drink a potion when HP gets low, and hand control back when HP is too low, the target is
-gone, the floor is clear, or the time is up. Every key goes through the gamelab player, so the
-Lie Detector watchdog stops everything the moment the game's anti-bot check appears.
+loop: look at the game, keep the target at the far end of a star's reach, face it, throw a regular
+attack (Lucky Seven costs MP and isn't needed on these monsters), step away from monsters that get
+close, loot each kill straight away when it fell on her platform (drops elsewhere are remembered for
+the tour to collect), drink a potion when HP gets low, and hand control back when HP is too low, the
+target is gone, nothing is left in reach, or the time is up. Every key goes through the gamelab
+player, so the Lie Detector watchdog stops everything the moment the game's anti-bot check appears.
 
-Coordinates: `Sight` positions are in half-size frame pixels (game window / 2); distances given to
-moves are game-window pixels. `world` x adds the camera scroll, so positions stay comparable while
-the camera follows her.
+Positions are in map units (mapdata), from her minimap dot and her name tag: monsters are placed on
+the map by their offset from her on screen. She's a ranged job, so targets can be on other
+platforms (shots.py): standing where no monster can walk up to her and shooting from there is best.
 """
 
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -20,34 +22,44 @@ import cv2
 import mss
 import numpy as np
 
-from maplehelper.actions import walk_ms
 from maplehelper.config import GameKeys, Timing
 from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT, MOVEMENT
 
-from . import client, window
+from . import client, shots, window
+from .localize import Camera, Localizer, Where
+from .mapdata import SCREEN_SCALE, MapModel, Platform
 from .mobs import SCALE, Mob, MobDetector
-from .mapdata import SCREEN_SCALE
 from .paths import LAB
 from .terrain import find_ropes, her_dot
 
 TAG_FULL = LAB / "tag_template_full.npy"  # her name tag at full resolution (made on first look)
+SHOT_LOG = LAB / "shots.jsonl"            # every throw: where the target was, and whether it was hit
+HIT_LOG = LAB / "hits.jsonl"              # hits taken standing still: how far each pushed her
 GAME_SIZE = (1920, 1080)  # game window size the templates were made at
+UNITS_PER_HALF_PX = SCALE / SCREEN_SCALE  # map units per half-size frame pixel
+# Screen px the drawn ground sticks out past a platform's real end. Negative: measured against ropes
+# on platforms 32, 30 and 14, the real ends are 21-27 px beyond where the grass seems to end.
+GRASS_OVERHANG = -24
 
 # HP and MP bars in the bottom bar, as fractions of the game window (measured at 1920x1080).
 HP_BAR = (707 / 1920, 854 / 1920)
 MP_BAR = (859 / 1920, 1006 / 1920)
 BAR_ROW = 1064 / 1080
 
-# Distances in game-window pixels.
-TOO_CLOSE = 90     # a monster nearer than this is about to bump her: step away first
-BEST_RANGE = (110, 330)  # throw from here; Lucky Seven was seen reaching ~375 px
-STEP_AWAY = 140
-MAX_REACH = 370    # throw at targets this far away if she can't get closer (edge of her platform)
-EDGE_MARGIN = 25   # never walk closer than this to the edge of the ground she's on
-FLOOR_ABOVE = 36   # half-size px: a monster's feet this far above her floor (slimes hop) ...
-FLOOR_BELOW = 14   # ... or this far below still count as on her floor
-TRACK_SLACK = 60   # half-size px a target may move between two looks (knockback) and still be the same monster
+# Distances in map units.
+TOO_CLOSE = 110    # a monster on her platform nearer than this is about to touch her: step away first
+STEP_AWAY = 120
+KNOCKBACK_ROOM = 25  # extra room kept from her platform's ends while monsters share it: standing ~100
+                     # units from an end of platform 12, pigs walking into her knocked her off it
+JUMP_OVER = 80       # how far a jump started from standing carries her (map units)
+MAX_WALK = 300     # longest walk between two looks
+TRACK_SLACK = 85   # how far a target may move between two looks (knockback) and still be the same monster
+LOOT_REACH = 60    # drops spread about this far around where the monster died
+# Where monsters are looked for: from this far above her feet to this far below (bodies stick up
+# above their feet, so the band reaches higher than she can shoot).
+LOOK_UP = shots.SHOT_UP + 80
+LOOK_DOWN = shots.SHOT_DOWN + 15
 
 
 def bars(full: np.ndarray) -> tuple[float, float]:
@@ -87,45 +99,131 @@ def ground_extent(frame: np.ndarray, x: int, floor_y: int) -> tuple[int, int]:
     return scan(-1), scan(1)
 
 
+@dataclass(frozen=True)
+class Target:
+    """A monster placed on the map."""
+    mob: Mob
+    x: float              # map units, its feet
+    y: float
+    platform: int | None  # the platform it walks on (monsters never leave it)
+
+    @property
+    def kind(self) -> str:
+        return self.mob.kind
+
+
 @dataclass
 class Sight:
     t: float
     frame: np.ndarray          # half size
-    her: tuple[int, int] | None  # name tag centre; her feet are just above it
+    her: tuple[int, int] | None  # name tag centre (half-size px); her feet are just above it
     mobs: list[Mob]
     hp: float
     mp: float
-    cam: float                 # camera scroll, half-size px; world x = screen x + cam
     ground: tuple[int, int] | None = None  # screen x range of the ground under her
     dot: tuple[float, float] | None = None  # her minimap dot (terrain.her_dot)
     ropes: list = field(default_factory=list)  # terrain.Rope list, full-size px
-    map_room: tuple[float, float] | None = None  # screen px to her platform's (left, right) end, from the map
-
-    def room(self, direction: str) -> float:
-        """Game px she can walk that way before the edge of her ground: from the map when her platform
-        is known (exact), else from the ground seen on screen."""
-        if self.map_room is not None:
-            edge = self.map_room[1] if direction == RIGHT else self.map_room[0]
-            return max(0.0, edge - EDGE_MARGIN)
-        if self.her is None or self.ground is None:
-            return 0.0
-        edge = self.ground[1] - self.her[0] if direction == RIGHT else self.her[0] - self.ground[0]
-        return max(0.0, SCALE * edge - EDGE_MARGIN)
+    where: Where | None = None   # her map position (minimap dot, snapped to the platform she's on)
+    how: str = "dot"             # how `where.x` was worked out: 'rope', 'edge' (on screen) or 'dot'
+    seen: bool = True            # her screen position from her name tag (False: from the dot and camera)
+    targets: list[Target] = field(default_factory=list)
 
     @property
     def floor_y(self) -> int | None:
         """The ground line she stands on (her name tag hangs just below it)."""
         return None if self.her is None else self.her[1] - 8
 
-    def on_floor(self, kinds=None) -> list[Mob]:
-        if self.her is None:
-            return []
-        return [m for m in self.mobs if -FLOOR_ABOVE <= m.feet_y - self.floor_y <= FLOOR_BELOW
-                and (kinds is None or m.kind in kinds)]
+    @property
+    def platform(self) -> Platform | None:
+        return None if self.where is None else self.where.platform
 
-    def game_dx(self, x: float) -> float:
-        """Game-window pixels from her to screen x (+ = to her right)."""
-        return SCALE * (x - self.her[0])
+    def place(self, m: Mob, model: MapModel) -> Target:
+        """Put a monster seen on screen onto the map, by its offset from her."""
+        x = self.where.x + (m.x - self.her[0]) * UNITS_PER_HALF_PX
+        y = self.where.y + (m.feet_y - self.floor_y) * UNITS_PER_HALF_PX
+        p = monster_platform(model, m.kind, x, y)
+        return Target(m, x, p.y_at(x) if p else y, None if p is None else p.id)
+
+    def screen_x(self, map_x: float) -> float:
+        """Half-size screen x of a map x (at her height)."""
+        return self.her[0] + (map_x - self.where.x) / UNITS_PER_HALF_PX
+
+    def room(self, direction: str, margin: float = shots.EDGE_MARGIN) -> float:
+        """Map units she can walk that way before the end of her platform (less a margin)."""
+        p = self.platform
+        if p is None:
+            return 0.0
+        return max(0.0, (p.right - margin - self.where.x) if direction == RIGHT else (self.where.x - p.left - margin))
+
+
+def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: float = 50) -> Platform | None:
+    """The platform a monster seen at map (x, y) walks on. Monsters never leave the platform they
+    spawn on, so only platforms where its kind spawns count (or any spawn platform, if none fits):
+    feet read from the screen are ~20 units off at times, and a safe platform 42-60 units above a
+    hunting ground once had pigs "on" it, so she backed away from them and off her platform."""
+    from .sprites import kind_of
+    best = None
+    for own_kind in (True, False):
+        for pid, names in model.monsters_by_platform.items():
+            if own_kind and not any(kind_of(n) == kind for n in names):
+                continue
+            p = model.platform(pid)
+            if not p.covers(x, 25):
+                continue
+            gap = abs(p.y_at(min(max(x, p.left), p.right)) - y)
+            if gap <= reach and (best is None or gap < best[0]):
+                best = (gap, p)
+        if best:
+            return best[1]
+    return None
+
+
+def rope_x(where: Where, s: Sight, model: MapModel) -> float | None:
+    """Her x from ropes in view: each is drawn exactly at its map x, and detected to ~2 px."""
+    if s.her is None or not s.ropes:
+        return None
+    her_x = SCALE * s.her[0]
+    estimates = []
+    for seen in s.ropes:
+        for rope in model.ropes:
+            expected = her_x + (rope.x - where.x) * SCREEN_SCALE  # where the dot says it should be
+            if abs(seen.x - expected) <= 40:
+                estimates.append(rope.x - (seen.x - her_x) / SCREEN_SCALE)
+    if not estimates:
+        return None
+    estimates.sort()
+    return estimates[len(estimates) // 2]
+
+
+def edge_x(where: Where, s: Sight) -> float | None:
+    """Her x from the visible end(s) of her platform."""
+    p = where.platform
+    if p is None or s.her is None or s.ground is None:
+        return None
+    her_x = SCALE * s.her[0]
+    left, right = SCALE * s.ground[0] + GRASS_OVERHANG, SCALE * s.ground[1] - GRASS_OVERHANG
+    width = s.frame.shape[1] * SCALE
+    candidates = []
+    if right < width - 12 - GRASS_OVERHANG:  # her platform's right end is on screen
+        candidates.append(p.right - (right - her_x) / SCREEN_SCALE)
+    if left > 12 + GRASS_OVERHANG:
+        candidates.append(p.left + (her_x - left) / SCREEN_SCALE)
+    good = [x for x in candidates if abs(x - where.x) <= 45]  # must agree with the dot roughly
+    return sum(good) / len(good) if good else None
+
+
+def refine(where: Where, s: Sight, model: MapModel) -> tuple[Where, str]:
+    """Her x along her platform, best source first: a rope in view (ropes are drawn exactly at their
+    map x), the visible end of her platform, else the minimap dot (only good to ~11 map units).
+    Both screen sources need her name tag."""
+    p = where.platform
+    if p is None or s.her is None:
+        return where, "dot"
+    for how, x in (("rope", rope_x(where, s, model)), ("edge", edge_x(where, s))):
+        if x is not None and abs(x - where.x) <= 45:
+            x = min(max(x, p.left), p.right)
+            return Where(x, p.y_at(x), p, where.dot), how
+    return where, "dot"
 
 
 class Eyes:
@@ -140,13 +238,12 @@ class Eyes:
         self.small_tag = tag_template  # half-size template from calibration, used to find her once
         self.detector = detector or MobDetector()
         self.sct = mss.MSS()
-        self.cam = 0.0
-        self._strip = None
         self._last: tuple[int, int] | None = None
         self.tag = np.load(TAG_FULL) if TAG_FULL.exists() else None
         self.want_ropes = False  # the navigator turns this on (+~25 ms per look)
 
     def look(self) -> Sight:
+        """HP/MP, her name tag, the ground under her and her minimap dot; no monsters (see `detect`)."""
         if window.foreground_title() != self.title:  # the capture sees whatever window is on top
             window.bring_to_front(self.title)
             time.sleep(0.3)
@@ -160,13 +257,15 @@ class Eyes:
         if self.tag is None:
             self.tag = self._make_full_tag(full)
         her = self._find_her(full)
-        mobs, ground = [], None
-        if her:
-            self._scroll(frame, her)
-            mobs = self.detector.detect(frame, rows=(her[1] - 90, her[1] + 20))
-            ground = ground_extent(frame, her[0], her[1] - 8)
-        return Sight(time.monotonic(), frame, her, mobs, hp, mp, self.cam, ground,
-                     her_dot(full), find_ropes(full) if self.want_ropes else [])
+        ground = ground_extent(frame, her[0], her[1] - 8) if her else None
+        return Sight(time.monotonic(), frame, her, [], hp, mp, ground, her_dot(full),
+                     find_ropes(full) if self.want_ropes else [])
+
+    def detect(self, sight: Sight, up: float = LOOK_UP, down: float = LOOK_DOWN) -> list[Mob]:
+        """Monsters from `up` map units above her feet to `down` below (her screen position must be known)."""
+        feet = sight.floor_y
+        return self.detector.detect(sight.frame, rows=(int(feet - up / UNITS_PER_HALF_PX),
+                                                       int(feet + down / UNITS_PER_HALF_PX)))
 
     def _make_full_tag(self, full) -> np.ndarray:
         """Find her with the half-size template (trying all four ways of halving the frame), then cut
@@ -211,49 +310,57 @@ class Eyes:
         self._last = best[1] if best else self._last
         return best[1] if best else None
 
-    def _scroll(self, frame, her) -> None:
-        """Follow the camera by how far the ground under her moved since the last look."""
-        y0 = min(her[1] + 14, int(frame.shape[0] * 0.88) - 24)
-        strip = cv2.cvtColor(frame[y0:y0 + 24], cv2.COLOR_RGB2GRAY).astype(np.float32)
-        if self._strip is not None and self._strip[0] == y0:
-            win = cv2.createHanningWindow(strip.shape[::-1], cv2.CV_32F)
-            (dx, _), response = cv2.phaseCorrelate(self._strip[1], strip, win)
-            if response > 0.05 and abs(dx) < frame.shape[1] / 3:
-                self.cam -= round(dx * 2) / 2  # scenery moving left = camera moved right
-        self._strip = (y0, strip)
-
 
 @dataclass
 class Report:
     kills: dict[str, int] = field(default_factory=dict)
     loot_runs: int = 0
     potions: int = 0
+    throws: int = 0
+    out_of_reach: int = 0      # targets seen that she couldn't reach from her platform
     damage_taken: float = 0.0  # fraction of HP lost overall
     stop: str = ""
 
     def __str__(self):
         kills = ", ".join(f"{n} {k}" for k, n in self.kills.items()) or "none"
-        return (f"kills: {kills}; loot runs: {self.loot_runs}; potions: {self.potions}; "
+        return (f"kills: {kills}; throws: {self.throws}; loot runs: {self.loot_runs}; potions: {self.potions}; "
                 f"HP lost: {self.damage_taken:.0%}; stopped because: {self.stop}")
 
 
+@dataclass
+class Drops:
+    """Loot left where a monster died, to be collected (by the tour) when it's off her platform."""
+    x: float
+    y: float
+    platform: int | None
+    since: float
+
+
 class Hunter:
-    def __init__(self, eyes: Eyes, keys: GameKeys, timing: Timing, log: Callable[[str], None] = print,
-                 low_hp: float = 0.35, potion_hp: float = 0.5):
-        self.eyes, self.keys, self.t, self.log = eyes, keys, timing, log
+    def __init__(self, eyes: Eyes, keys: GameKeys, timing: Timing, model: MapModel,
+                 log: Callable[[str], None] = print, low_hp: float = 0.35, potion_hp: float = 0.5,
+                 skill: bool = False):
+        self.eyes, self.keys, self.t, self.model, self.log = eyes, keys, timing, model, log
         self.low_hp, self.potion_hp = low_hp, potion_hp
+        self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP)
+        self.localizer = Localizer(model)
+        self.camera = Camera(model.bounds)
+        eyes.want_ropes = True  # ropes in view pin down her x (+~25 ms per look)
         self.report = Report()
-        self.localizer = None  # set (e.g. by the Navigator) to know her platform's ends from the map
-        self.pending_loot: list[tuple[float, float]] = []  # (world x, when)
-        self.skipped: list[float] = []  # world x of monsters she can't reach from her platform
+        self.pending_loot: list[Drops] = []
+        self.skipped: list[tuple[float, float, float]] = []  # map (x, y, when) of monsters out of reach
+        self.facing: str | None = None  # which way she faces (None: unknown), so throws only turn when needed
         self._last_potion = 0.0
         self._lock_until = 0.0
         self._last_hp: float | None = None
+        self._last_where: Where | None = None
+        self._pressed = False  # keys sent since the last look (then a move isn't a knockback)
 
     # --- doing ------------------------------------------------------------------------------
 
     def _do(self, events: list, name: str) -> None:
         client.submit(events, lead_ms=0, focus=True, name=name)
+        self._pressed = True
 
     def _arrow(self, direction: str) -> str:
         return (self.keys.left if direction == LEFT else self.keys.right).name
@@ -263,32 +370,49 @@ class Hunter:
             time.sleep(left)
 
     def throw(self, direction: str) -> None:
-        """Face `direction`, then Lucky Seven (or a plain attack if it isn't bound)."""
+        """Face `direction` (if she isn't already), then throw (regular attack; Lucky Seven if `skill`).
+        Turning taps the arrow, which also walks her a few units: tapping before every throw walked
+        her off the end of a platform after nine throws the same way."""
         self._wait_lock()
-        key = (self.keys.lucky_seven or self.keys.attack).name
-        arrow = self._arrow(direction)
-        self._do([[0, arrow, "down"], [MOVEMENT.tap_turn_ms, arrow, "up"],
-                  [MOVEMENT.tap_turn_ms + 30, key, "down"], [MOVEMENT.tap_turn_ms + 70, key, "up"]], "throw")
+        key = (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
+        events, t = [], 0
+        if self.facing != direction:
+            arrow = self._arrow(direction)
+            events, t = [[0, arrow, "down"], [MOVEMENT.tap_turn_ms, arrow, "up"]], MOVEMENT.tap_turn_ms + 30
+        self._do(events + [[t, key, "down"], [t + 40, key, "up"]], "throw")
+        self.facing = direction
         self._lock_until = time.monotonic() + (COMBAT.attack_lock_ms + 60) / 1000
+        self.report.throws += 1
 
-    def walk(self, direction: str, px: float) -> None:
+    def walk(self, direction: str, units: float) -> None:
+        from .moves import hold_ms
         self._wait_lock()
-        ms = walk_ms(px)
         arrow = self._arrow(direction)
-        self._do([[0, arrow, "down"], [ms, arrow, "up"]], "walk")
+        self._do([[0, arrow, "down"], [hold_ms(units), arrow, "up"]], "walk")
+        self.facing = direction
         time.sleep(MOVEMENT.stop_slide_ms / 1000)
 
-    def sweep_loot(self, direction: str, px: float) -> None:
-        """Walk `px` while pressing pick-up every 150 ms, collecting whatever she passes over."""
+    def jump_over(self, direction: str) -> None:
+        """Jump that way from standing (arrow and jump together), over a monster that's too close."""
+        self._wait_lock()
+        arrow, jump = self._arrow(direction), self.keys.jump.name
+        self._do([[0, arrow, "down"], [10, jump, "down"], [50, jump, "up"], [650, arrow, "up"]], "jump_over")
+        self.facing = direction
+        time.sleep(MOVEMENT.stop_slide_ms / 1000)
+
+    def sweep_loot(self, direction: str, units: float) -> None:
+        """Walk `units` while pressing pick-up every 150 ms, collecting whatever she passes over."""
+        from .moves import hold_ms
         self._wait_lock()
         pick = (self.keys.pick_up or self.keys.attack).name
         arrow = self._arrow(direction)
-        ms = max(300, walk_ms(px))
+        ms = max(300, hold_ms(units))
         events = [[0, arrow, "down"]]
         events += [e for t in range(0, ms + 300, 150) for e in ([t, pick, "down"], [t + 40, pick, "up"])]
         events.append([ms, arrow, "up"])
         events.sort(key=lambda e: e[0])
         self._do(events, "loot")
+        self.facing = direction
         self.report.loot_runs += 1
 
     def drink(self) -> None:
@@ -302,21 +426,46 @@ class Hunter:
 
     # --- looking ----------------------------------------------------------------------------
 
-    def look(self) -> Sight:
-        sight = self.eyes.look()
-        if self.localizer is not None and sight.dot is not None:
-            where = self.localizer.where_dot(sight.dot)
-            if where.platform is not None:
-                p = where.platform
-                sight.map_room = ((where.x - p.left) * SCREEN_SCALE, (p.right - where.x) * SCREEN_SCALE)
-                if sight.her is not None:
-                    # Camera from the map instead of from scrolling scenery (which fails over open sky):
-                    # world x (half-size px) = her map x in screen units + offset from her on screen.
-                    sight.cam = where.x * SCREEN_SCALE / SCALE - sight.her[0]
-        if self._last_hp is not None and sight.hp < self._last_hp:
-            self.report.damage_taken += self._last_hp - sight.hp
-        self._last_hp = sight.hp
-        return sight
+    def look(self, mobs: bool = True) -> Sight:
+        """Her map position from the minimap dot; her screen position from her name tag, or from the
+        dot and the camera when the tag is hidden; and (if `mobs`) the monsters she could shoot."""
+        s = self.eyes.look()
+        if s.dot is not None:
+            s.where = self.localizer.where_dot(s.dot)
+            if s.her is not None:
+                s.where, s.how = refine(s.where, s, self.model)
+        if s.where is not None:
+            if s.her is not None and s.seen:
+                self.camera.learn((s.where.x, s.where.y), (SCALE * s.her[0], SCALE * (s.her[1] - 8)))
+            else:
+                sx, sy = self.camera.to_screen(s.where.x, s.where.y, (s.where.x, s.where.y))
+                s.her, s.seen = (round(sx / SCALE), round(sy / SCALE) + 8), False
+                s.ground = ground_extent(s.frame, s.her[0], s.her[1] - 8)
+        if mobs and s.her is not None and s.where is not None:
+            s.mobs = self.eyes.detect(s)
+            s.targets = [s.place(m, self.model) for m in s.mobs]
+        if self._last_hp is not None and s.hp < self._last_hp:
+            self.report.damage_taken += self._last_hp - s.hp
+            self._log_hit(s)
+        self._last_hp, self._last_where, self._pressed = s.hp, s.where, False
+        return s
+
+    def _log_hit(self, s: Sight) -> None:
+        """A hit while no key was pressed since the last look: how far it pushed her (knockback)."""
+        before = self._last_where
+        if self._pressed or before is None or s.where is None or before.platform is None:
+            return
+        pushed = s.where.x - before.x
+        same = s.platform is not None and s.platform.id == before.platform.id
+        self.log(f"  hit standing still: pushed {pushed:+.0f} units" + ("" if same else
+                 f", off platform {before.platform.id} onto {s.platform.id if s.platform else 'nothing'}"))
+        try:
+            with HIT_LOG.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"pushed": round(pushed, 1), "dy": round(s.where.y - before.y, 1),
+                                    "hp": round(self._last_hp - s.hp, 4), "how": s.how,
+                                    "platform": before.platform.id, "time": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
+        except OSError:
+            pass
 
     def health_check(self, sight: Sight) -> str | None:
         """Drink if HP is low; returns a reason to stop if it's too low."""
@@ -329,119 +478,173 @@ class Hunter:
 
     # --- objectives -------------------------------------------------------------------------
 
-    def kill(self, target: Mob, sight: Sight, seconds: float = 30) -> str:
-        """Attack `target` (as seen in `sight`) until it dies; then loot. Returns how it ended:
-        'killed', 'lost', 'timeout', or a reason to stop (low HP)."""
-        kind, world = target.kind, target.x + sight.cam
-        last_world = world
+    def kill(self, target: Target, seconds: float = 30) -> str:
+        """Shoot `target` until it dies; then loot (or remember the drops if they're off her
+        platform). Returns how it ended: 'killed', 'lost', 'timeout', 'unreachable', or a reason
+        to stop (low HP)."""
+        kind, last = target.kind, (target.x, target.y)
+        platform = target.platform
         deadline, misses, throws = time.monotonic() + seconds, 0, 0
         gone_since: float | None = None
-        self.log(f"target: {kind} {sight.game_dx(target.x):+.0f} px away")
+        flying: list[dict] = []  # throws whose hit isn't confirmed yet (see _score_shots)
+        self.log(f"target: {kind} on platform {platform}")
         while time.monotonic() < deadline:
-            sight = self.look()
-            if sight.her is None:
+            s = self.look()
+            if s.where is None or s.platform is None:
                 misses += 1
-                if misses > 6:
-                    return "lost sight of her"
+                if misses > 8:
+                    return "lost track of her"
+                time.sleep(0.15)
                 continue
-            if stop := self.health_check(sight):
+            if stop := self.health_check(s):
                 return stop
-            found = [m for m in sight.on_floor({kind}) if abs(m.x + sight.cam - last_world) <= TRACK_SLACK]
+            found = [t for t in s.targets if t.kind == kind
+                     and abs(t.x - last[0]) <= TRACK_SLACK and abs(t.y - last[1]) <= 40]
             if not found:
                 misses += 1
                 gone_since = gone_since or time.monotonic()
                 # Hit monsters flinch, get knocked back and are covered by damage numbers, so it
                 # only counts as dead after ~1.2 s of not being seen.
                 if misses >= 4 and time.monotonic() - gone_since >= 1.2:
+                    for sh in flying:  # it died, so the throws that had arrived hit it
+                        self._log_shot(sh, sh["due"] <= gone_since + 0.2)
                     if throws:
                         self.report.kills[kind] = self.report.kills.get(kind, 0) + 1
-                        self.log(f"{kind} down after {throws} throws: looting")
-                        self.loot_at(last_world)
+                        self.log(f"{kind} down after {throws} throws")
+                        self.loot(Drops(last[0], last[1], platform, time.monotonic()))
                         return "killed"
                     return "lost"
                 time.sleep(0.15)
                 continue
             misses, gone_since = 0, None
-            target = min(found, key=lambda m: abs(m.x + sight.cam - last_world))
-            last_world = target.x + sight.cam
-            move = next_move(sight, target)
-            self.log(f"  {kind} {sight.game_dx(target.x):+.0f} px, HP {sight.hp:.0%}: {move[0]} {move[1]}"
-                     + (f" {move[2]:.0f} px" if len(move) > 2 else ""))
+            t = min(found, key=lambda t: abs(t.x - last[0]))
+            last, platform = (t.x, t.y), t.platform if t.platform is not None else platform
+            bar = shots.hp_bar(s.frame, t.mob.x, t.mob.y - t.mob.h // 2)
+            flying = self._score_shots(flying, bar)
+            threats = [o for o in s.targets if o.platform == s.platform.id and o is not t]
+            move = decide(s.where.x, s.where.y, s.platform, t, threats)
+            self.log(f"  {kind} {t.x - s.where.x:+.0f},{t.y - s.where.y:+.0f} (bar {_pct(bar)}), "
+                     f"HP {s.hp:.0%}: {' '.join(str(v if isinstance(v, str) else round(v)) for v in move)}")
             if move[0] == "skip":
-                self.skipped.append(target.x + sight.cam)
+                self.skipped.append((t.x, t.y, time.monotonic()))
+                self.report.out_of_reach += 1
                 return "unreachable"
             if move[0] == "throw":
+                dx, dy = t.x - s.where.x, t.y - s.where.y
+                if shots.can_shoot(dx, dy, reach=shots.STAR_REACH) and move[1] == (RIGHT if dx > 0 else LEFT):
+                    flying.append({"kind": kind, "dx": int(round(dx)), "dy": int(round(dy)), "her": s.platform.id,
+                                   "target": t.platform, "bar": bar, "seen": bool(s.seen),
+                                   "due": time.monotonic() + COMBAT.attack_release_ms / 1000
+                                   + abs(dx) / shots.STAR_SPEED})
                 self.throw(move[1])
                 throws += 1
+            elif move[0] == "jump":
+                self.jump_over(move[1])
             else:
                 self.walk(move[1], move[2])
         return "timeout"
 
-    def loot_at(self, world_x: float, since: float | None = None) -> bool:
-        """Go over the drops at world_x and pick them up, unless a monster stands on them; then
-        they're remembered and collected after a later kill."""
-        sight = self.look()
-        since = since or time.monotonic()
-        if sight.her is None:
-            self.pending_loot.append((world_x, since))
+    def _score_shots(self, flying: list[dict], bar: float | None) -> list[dict]:
+        """A throw hit when the target's HP bar shows up or drops after the star should have arrived;
+        it missed when nothing changed within ~0.9 s of that. Returns the throws still undecided."""
+        now, left = time.monotonic(), []
+        for sh in flying:
+            if now >= sh["due"] - 0.1 and bar is not None and (sh["bar"] is None or bar < sh["bar"] - 0.02):
+                self._log_shot(sh, True)
+            elif now > sh["due"] + 0.9:
+                self._log_shot(sh, False)
+            else:
+                left.append(sh)
+        return left
+
+    def _log_shot(self, shot: dict, hit: bool) -> None:
+        """Keep a record of every throw: the reach of a star is measured from these."""
+        try:
+            with SHOT_LOG.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({**{k: v for k, v in shot.items() if k not in ("bar", "due")}, "hit": bool(hit),
+                                    "time": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
+        except OSError:
+            pass
+
+    def loot(self, drops: Drops) -> bool:
+        """Sweep the drops now if they're on her platform and no monster stands on them; otherwise
+        remember them (pending_loot) for later. Returns True when swept."""
+        s = self.look()
+        if s.where is None or s.platform is None or drops.platform != s.platform.id:
+            self.pending_loot.append(drops)
             return False
-        spot = world_x - sight.cam  # screen x of the drops
-        if any(abs(SCALE * (m.x - spot)) < 110 for m in sight.on_floor()):
+        if any(t.platform == drops.platform and abs(t.x - drops.x) < TOO_CLOSE for t in s.targets):
             self.log("  drops guarded by a monster: later")
-            self.pending_loot.append((world_x, since))
+            self.pending_loot.append(drops)
             return False
-        dx = sight.game_dx(spot)
-        direction = RIGHT if dx > 0 else LEFT
-        if abs(dx) - 50 > sight.room(direction) + 40:
-            self.log("  drops are off her platform: leaving them")
-            return True
-        if abs(dx) > 60:
-            self.walk(direction, min(abs(dx) - 50, sight.room(direction)))
-        self.sweep_loot(direction, min(100, max(30, sight.room(direction) - max(0, abs(dx) - 50))))
+        self.sweep(s, drops.x)
         return True
 
-    def loot_pending(self) -> None:
-        """Try the remembered drops again (loot_at re-queues any that are still guarded)."""
-        queue, self.pending_loot = self.pending_loot, []
-        for world_x, since in queue:
-            if time.monotonic() - since < 90:  # drops vanish after a while
-                self.loot_at(world_x, since)
+    def sweep(self, s: Sight, x: float) -> None:
+        """Walk over map x on her platform pressing pick-up: from LOOT_REACH before it to LOOT_REACH past it."""
+        dx = x - s.where.x
+        direction = RIGHT if dx > 0 else LEFT
+        if abs(dx) > LOOT_REACH:
+            self.walk(direction, min(abs(dx) - LOOT_REACH, s.room(direction)))
+            room = s.room(direction) - (abs(dx) - LOOT_REACH)
+        else:
+            room = s.room(direction)
+        self.sweep_loot(direction, max(20.0, min(2 * LOOT_REACH, room)))
 
-    def clear_floor(self, kinds=None, max_kills: int = 10, seconds: float = 120, span: float = 900) -> Report:
-        """Kill the monsters on her floor, nearest first, looting as she goes. Stays within `span`
-        game px of where she started. Stops when the floor stays clear for ~3 s."""
-        deadline, calm, unseen = time.monotonic() + seconds, 0, 0
-        start = None
+    def loot_pending(self, s: Sight | None = None, max_age: float = 90) -> None:
+        """Sweep remembered drops that are on her platform (loot() re-queues any still guarded); the
+        rest stay remembered. `s` is a recent look, to tell which ones are on her platform."""
+        s = s or self.look(mobs=False)
+        here = None if s.platform is None else s.platform.id
+        fresh = [d for d in self.pending_loot if time.monotonic() - d.since < max_age]  # drops vanish
+        self.pending_loot = [d for d in fresh if d.platform != here]
+        for d in fresh:
+            if d.platform == here:
+                self.loot(d)
+
+    def clear(self, kinds=None, ground: set[int] | None = None, max_kills: int = 10,
+              seconds: float = 120, patience: float = 3.0) -> Report:
+        """Kill monsters (of `kinds`) on the `ground` platforms, or anywhere if None, and any on her own
+        platform: nearest in reach first; walking along her platform to bring others into reach.
+        Stops when nothing has been in reach for `patience` seconds (waiting for respawns)."""
+        deadline, unseen = time.monotonic() + seconds, 0
+        calm_since: float | None = None
+        start: int | None = None  # the platform she's on; leaving it means she was knocked off
         while time.monotonic() < deadline and sum(self.report.kills.values()) < max_kills:
-            sight = self.look()
-            if sight.her is None:  # her name tag hidden (e.g. behind the party HP box at the edge)
+            s = self.look()
+            if s.where is None or s.platform is None:
                 unseen += 1
                 if unseen >= 10:
-                    self.report.stop = "lost sight of her"
+                    self.report.stop = "lost track of her"
                     return self.report
                 time.sleep(0.3)
                 continue
             unseen = 0
-            if start is None:
-                start = sight.her[0] + sight.cam
-            if stop := self.health_check(sight):
+            if stop := self.health_check(s):
                 self.report.stop = stop
                 return self.report
-            here = [m for m in sight.on_floor(kinds)
-                    if abs(SCALE * (m.x + sight.cam - start)) <= span
-                    and not any(abs(m.x + sight.cam - s) < TRACK_SLACK for s in self.skipped)]
+            start = start if start is not None else s.platform.id
+            if s.platform.id != start:
+                self.log(f"  she's on platform {s.platform.id} now, not {start} (knocked off?)")
+                self.report.stop = f"left platform {start}"
+                return self.report
+            now = time.monotonic()
+            self.skipped = [k for k in self.skipped if now - k[2] < 8]  # monsters move: try again later
+            here = [t for t in s.targets if (kinds is None or t.kind in kinds)
+                    and (ground is None or t.platform in ground or t.platform == s.platform.id)
+                    and not any(abs(t.x - x) < TRACK_SLACK and abs(t.y - y) < 40 for x, y, _ in self.skipped)]
             if not here:
-                calm += 1
+                calm_since = calm_since or now
                 if self.pending_loot:
-                    self.loot_pending()
-                if calm >= 6:
-                    self.report.stop = "floor clear"
+                    self.loot_pending(s)
+                if now - calm_since >= patience:
+                    self.report.stop = "nothing left in reach"
                     return self.report
                 time.sleep(0.5)
                 continue
-            calm = 0
-            target = min(here, key=lambda m: abs(m.x - sight.her[0]))
-            outcome = self.kill(target, sight)
+            calm_since = None
+            target = pick_target(s.where.x, s.where.y, s.platform, here)
+            outcome = self.kill(target, seconds=min(30, deadline - time.monotonic()))
             if outcome not in ("killed", "lost", "timeout", "unreachable"):
                 self.report.stop = outcome
                 return self.report
@@ -451,27 +654,62 @@ class Hunter:
         return self.report
 
 
-def next_move(sight: Sight, target: Mob) -> tuple:
-    """What to do about `target` now: ('throw', direction), ('walk', direction, px), or
-    ('skip', reason) when it can't be reached from her platform. Never walks off her ground."""
-    dx = sight.game_dx(target.x)
+def _pct(bar: float | None) -> str:
+    return "-" if bar is None else f"{bar:.0%}"
+
+
+def pick_target(x: float, y: float, platform: Platform, targets: list[Target]) -> Target:
+    """Monsters on her platform that are close first (they can reach her), then the nearest one a star
+    reaches from where she stands, then the nearest."""
+    near = [t for t in targets if t.platform == platform.id and abs(t.x - x) < shots.SHOT_RANGE]
+    if near:
+        return min(near, key=lambda t: abs(t.x - x))
+    in_reach = [t for t in targets if shots.can_shoot(t.x - x, t.y - y)]
+    return min(in_reach or targets, key=lambda t: abs(t.x - x) + 2 * abs(t.y - y))
+
+
+def decide(x: float, y: float, platform: Platform, target: Target, threats: list[Target]) -> tuple:
+    """What to do about `target` from map (x, y) on `platform`: ('throw', direction),
+    ('walk', direction, units), or ('skip', reason) when no spot on her platform is in reach.
+    `threats` are the other monsters on her platform. Never walks off her platform."""
+    dx, dy = target.x - x, target.y - y
     toward = RIGHT if dx > 0 else LEFT
-    others = [sight.game_dx(m.x) for m in sight.on_floor() if m is not target]
-    threats = [d for d in others if abs(d) < TOO_CLOSE]
-    if abs(dx) < TOO_CLOSE or threats:
-        # Step away from whatever is closest, unless that walks into another monster or off the edge.
-        closest = min([dx] + threats, key=abs)
-        direction = LEFT if closest > 0 else RIGHT
-        reach = STEP_AWAY + TOO_CLOSE
-        blocked = any((0 < d < reach) if direction == RIGHT else (-reach < d < 0) for d in others + [dx])
-        step = min(STEP_AWAY, sight.room(direction))
-        if not blocked and step >= 60:
-            return ("walk", direction, step)
-        return ("throw", toward)  # cornered: fight
-    if abs(dx) > BEST_RANGE[1]:
-        if abs(dx) - sight.room(toward) > MAX_REACH:  # even from the edge it'd be too far
-            return ("skip", "out of reach from this platform")
-        step = min(300, abs(dx) - (BEST_RANGE[0] + BEST_RANGE[1]) / 2, sight.room(toward))
-        if step >= 30:
-            return ("walk", toward, step)
-    return ("throw", toward)
+    mine = threats + ([target] if target.platform == platform.id else [])
+    # With monsters on her platform, stay farther from its ends: a hit knocks her back.
+    margin = shots.EDGE_MARGIN + (KNOCKBACK_ROOM if mine else 0)
+    lo, hi = platform.left + margin, platform.right - margin
+    close = [t for t in mine if abs(t.x - x) < TOO_CLOSE]
+    if close:
+        # Step away from whatever is closest, unless that walks into another monster or off the end.
+        nearest = min(close, key=lambda t: abs(t.x - x))
+        away = LEFT if nearest.x > x else RIGHT
+        room = (hi - x) if away == RIGHT else (x - lo)
+        blocked = any(0 < (t.x - x) * (1 if away == RIGHT else -1) < STEP_AWAY + TOO_CLOSE for t in mine)
+        if not blocked and room >= 40:
+            return ("walk", away, min(STEP_AWAY, room))
+        toward_it = RIGHT if nearest.x > x else LEFT
+        if abs(nearest.x - x) < shots.MIN_SHOT:
+            # Cornered, and too close to throw (the claw would only swipe): jump over it if there's
+            # ground beyond it with no other monster there.
+            land = x + (JUMP_OVER if toward_it == RIGHT else -JUMP_OVER)
+            if lo <= land <= hi and not any(abs(t.x - land) < 60 for t in mine if t is not nearest)                     and abs(land - x) > abs(nearest.x - x) + 30:
+                return ("jump", toward_it)
+        return ("throw", toward_it)  # cornered: fight
+    if shots.can_shoot(dx, dy):
+        return ("throw", toward)
+    if not -shots.SHOT_UP <= dy <= shots.SHOT_DOWN:
+        return ("skip", "not level enough with her platform")
+    # Walk to the nearest spot on her platform that has the target in reach (either side of it).
+    goals = [min(max(target.x + d, lo), hi)
+             for d in (-(shots.SHOT_RANGE - 30), -(shots.MIN_SHOT + 60), shots.MIN_SHOT + 60, shots.SHOT_RANGE - 30)]
+    goals = [g for g in goals if shots.can_shoot(target.x - g, dy, reach=shots.SHOT_RANGE + 15)]
+    if not goals:
+        return ("skip", "out of reach from this platform")
+    goal = min(goals, key=lambda g: abs(g - x))
+    direction = RIGHT if goal > x else LEFT
+    # A monster on her platform in the way gets shot first.
+    ahead = [t for t in threats if 0 < (t.x - x) * (1 if direction == RIGHT else -1) < abs(goal - x) + TOO_CLOSE]
+    if ahead:
+        first = min(ahead, key=lambda t: abs(t.x - x))
+        return ("throw", RIGHT if first.x > x else LEFT)
+    return ("walk", direction, min(abs(goal - x), MAX_WALK))
