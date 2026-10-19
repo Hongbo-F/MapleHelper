@@ -22,6 +22,7 @@ def _game_title() -> str:
 
 
 def cmd_player(args) -> int:
+    client.check_alarm()
     if not args.elevate:
         from .player import serve
         serve()
@@ -47,6 +48,34 @@ def cmd_stop(args) -> int:
             return 0
         time.sleep(0.2)
     print("asked the player to stop; it hasn't confirmed (maybe it wasn't running)")
+    return 0
+
+
+def cmd_clear_alarm(args) -> int:
+    from .alarm import clear_alarm
+    info = clear_alarm()
+    if info is None:
+        print("no Lie Detector alarm is set")
+        return 0
+    print(f"cleared the Lie Detector alarm from {info.get('time', '?')} (screenshot: {info.get('screenshot', 'none')})")
+    print("gamelab can be started again. The game flagged automated play once; keep sessions short and supervised.")
+    return 0
+
+
+def cmd_spot(args) -> int:
+    """Check one image, or the game right now, for the Lie Detector (read-only, no keys)."""
+    from .alarm import LieDetectorSpotter
+    if args.image:
+        frame = np.asarray(Image.open(args.image).convert("RGB"))
+    else:
+        import mss
+        hwnd = window.find_game(_game_title())
+        with mss.MSS() as sct:
+            frame = np.asarray(sct.grab(window.client_rect(hwnd)))[:, :, 2::-1]
+    spotter = LieDetectorSpotter()
+    score = spotter.score(frame)
+    print(f"Lie Detector score {score:.3f} (threshold {spotter.threshold}): "
+          f"{'LIE DETECTOR ON SCREEN' if score >= spotter.threshold else 'not on screen'}")
     return 0
 
 
@@ -255,6 +284,11 @@ def main(argv=None) -> int:
     s.add_argument("--elevate", action="store_true", help="start it as administrator via a UAC prompt")
     s.set_defaults(func=cmd_player)
     sub.add_parser("stop", help="stop the player").set_defaults(func=cmd_stop)
+    sub.add_parser("clear-alarm", help="after you've answered a Lie Detector: let gamelab run again"
+                   ).set_defaults(func=cmd_clear_alarm)
+    s = sub.add_parser("spot", help="check the game (or an image) for the Lie Detector; sends no keys")
+    s.add_argument("--image", help="check this screenshot instead of the game")
+    s.set_defaults(func=cmd_spot)
 
     s = sub.add_parser("calibrate", help="find her on screen and save her name tag template")
     s.add_argument("--tag", help="name tag centre X,Y in client pixels, if it isn't found automatically")
@@ -318,10 +352,21 @@ def main(argv=None) -> int:
 
     args = p.parse_args(argv)
     try:
+        if args.cmd in GAME_COMMANDS:
+            client.check_alarm()
         return args.func(args)
+    except client.LieDetectorAlarm as e:
+        print(f"LIE DETECTOR: {e}. gamelab stopped all input and the player shut down.\n"
+              "Answer it in the game yourself. Afterwards, run `python -m gamelab clear-alarm`.")
+        return LIE_DETECTOR_EXIT
     except (client.PlayerError, RuntimeError) as e:
         print(f"error: {e}")
         return 1
+
+
+# Commands that bring the game to the front or send it input; refused while the alarm is set.
+GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo"}
+LIE_DETECTOR_EXIT = 3
 
 
 if __name__ == "__main__":

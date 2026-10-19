@@ -40,6 +40,8 @@ class Combat:
     lucky_seven_mp: int = 8       # level 4 (level 5: 9 MP, 76%)
     lucky_seven_damage_pct: int = 72
     lucky_seven_range: int = 200  # game units (tooltip): hits one enemy in front within this range
+    lucky_seven_reach_px: int = 375  # observed: killed a snail ~375 window px away, level with her,
+                                     # with a platform in between (stars aren't blocked by platforms)
     lucky_seven_stars: int = 2
 
 
@@ -84,9 +86,15 @@ MONSTERS = {
     "snail": Monster("Snail", None, 2, "died to 3 regular attacks or fewer (claw swipe up close)"),
     "slime": Monster("Slime", 6, 12, "died to ~3 Lucky Sevens, or a few hits plus 2 claw swipes; it backs off "
                      "when hit and comes back", ("Squishy Liquid", "Red Potion", "mesos (13)")),
-    "pig": Monster("Pig", 7, None, "bumps into her for 15-16 damage every few seconds; several pigs at once "
-                   "pinned her and survived ~15 attacks; they wander into her path and knock her off ropes"),
+    "pig": Monster("Pig", 7, 13, "bumps into her for 10-16 damage every few seconds; 2-3 Lucky Sevens kill one; "
+                   "several at once pinned her, and they wander into her path and knock her off ropes"),
 }
+
+# The Lie Detector: the game's anti-bot check. After ~10 minutes of gamelab driving her (fighting and
+# looting on the lower ground), a "LIE DETECTOR" window appeared: "13 sec until the Lie Detector
+# mini-game starts. Please find the beautiful Violetta wearing make-up... if you do not enter any
+# answers, you will fail the test!" A person has to answer it; gamelab watches for it, stops all
+# input, pages, and shuts down (gamelab/alarm.py). Keep automated sessions short and supervised.
 
 # Reading the screen:
 # - Violet numbers over her are damage she took; a violet MISS means a monster missed her.

@@ -8,11 +8,21 @@ from dataclasses import dataclass, field
 import numpy as np
 from PIL import Image, ImageDraw
 
-from .paths import INBOX, OUTBOX, PLAYER_LOG, RECORDINGS
+from .paths import ALARM, INBOX, OUTBOX, PLAYER_LOG, RECORDINGS
 
 
 class PlayerError(RuntimeError):
     pass
+
+
+class LieDetectorAlarm(PlayerError):
+    """The game's Lie Detector was seen; gamelab won't send input until the alarm is cleared."""
+
+
+def check_alarm() -> None:
+    from .alarm import alarm_info
+    if info := alarm_info():
+        raise LieDetectorAlarm(f"Lie Detector seen at {info.get('time', '?')}")
 
 
 @dataclass
@@ -27,6 +37,7 @@ class Recording:
 def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100,
            name="plan", timeout=120) -> dict:
     """Hand a plan to the running player and wait for the result (frames included if recorded)."""
+    check_alarm()
     INBOX.mkdir(parents=True, exist_ok=True)
     plan_id = f"{time.strftime('%H%M%S')}_{name}_{uuid.uuid4().hex[:4]}"
     capture = {"fps": fps, "duration_ms": duration_ms, "scale": scale, "lead_ms": lead_ms}
@@ -40,6 +51,9 @@ def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, l
     result_path = OUTBOX / f"{plan_id}.json"
     end = time.monotonic() + timeout
     while not result_path.exists():
+        if (INBOX / f"{plan_id}.json").exists() and ALARM.exists():  # player shut down before taking it
+            (INBOX / f"{plan_id}.json").unlink(missing_ok=True)
+            check_alarm()
         if time.monotonic() > end:
             (INBOX / f"{plan_id}.json").unlink(missing_ok=True)
             raise PlayerError(f"no result after {timeout}s; is the player running? "
@@ -48,6 +62,8 @@ def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, l
     result = json.loads(result_path.read_text(encoding="utf-8"))
     result_path.unlink()
     if "error" in result:
+        (OUTBOX / f"{plan_id}.npz").unlink(missing_ok=True)
+        check_alarm()
         raise PlayerError(result["error"])
     frames_path = OUTBOX / f"{plan_id}.npz"
     if frames_path.exists():

@@ -22,6 +22,13 @@ What keeps the player safe:
 - **Game in front only:** it stops pressing keys if the game leaves the foreground.
 - **Fixed at start:** it loads its code and key list once, when it starts.
 - **Stops itself:** it exits when `lab/STOP` appears or after 3 idle hours.
+- **Stops on the Lie Detector:** the player checks the game screen 4 times a second, idle or not. When MapleStory's Lie Detector (its anti-bot check) appears, it:
+  1. stops all input within about 10 ms, mid-move included, and releases any held keys;
+  2. saves a screenshot and writes `lab/ALARM.json`;
+  3. pages whoever is at the PC with alert sounds and a Windows notification that doesn't take focus from the game;
+  4. shuts down.
+
+  It never tries to answer the test. Until you run `python -m gamelab clear-alarm`, every command that touches the game refuses to run (exit code 3), including starting the player again. When Claude is driving gamelab, it also pushes the alert to your phone.
 
 ## Use
 
@@ -47,6 +54,8 @@ Other commands (`python -m gamelab -h` lists them all):
 | `do walk left 150`, `do climb_rope 300`, `do pick_up 2`, `do rest 40` | Run one move from `maplehelper/actions.py` in the game, recorded |
 | `act right*800 alt 500 @960,540 --record` | Ad-hoc steps: `KEY` tap, `KEY*MS` hold, `KEY+`/`KEY-` press/release, `MS` wait, `@X,Y` move the mouse |
 | `track RECORDING` | Her path through a recording: position, height, world x, jumps |
+| `spot`, `spot --image FILE` | Whether the Lie Detector is on screen now (or in a screenshot); sends no keys |
+| `clear-alarm` | After you've answered a Lie Detector yourself: lets gamelab run again |
 | `lock attack 700 740 780` | Whether a jump that many ms after an attack goes through |
 | `snap` | Screenshot of the game in `lab/snap.png` |
 | `sheet RECORDING --around-her --start 0 --end 1500` | Zoomed contact sheet, to check a recording by eye |

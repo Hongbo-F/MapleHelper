@@ -8,6 +8,9 @@ runs normally and talks to it through files. To keep that safe it only ever:
 - presses keys that config.toml binds to her in-game actions plus a few exploring keys (EXPLORE_KEYS),
   never Enter, and only while the game is in front,
 - moves the mouse pointer inside the game window (never clicks),
+- watches the game for the Lie Detector (the game's anti-bot check) the whole time it runs; if it
+  appears, input stops at once, the player pages whoever is at the PC and shuts down, and it won't
+  start again until `python -m gamelab clear-alarm` (it never tries to answer it),
 - records the game's client area while a plan runs,
 - writes results to gamelab/lab/outbox.
 
@@ -31,7 +34,7 @@ from maplehelper.keys import Key
 from maplehelper.keys import parse as parse_key
 
 from . import window
-from .paths import CONFIG, INBOX, LAB, OUTBOX, PLAYER_LOG, STOP
+from .paths import ALARM, CONFIG, INBOX, LAB, OUTBOX, PLAYER_LOG, STOP
 
 IDLE_LIMIT_S = 3 * 60 * 60
 MAX_EVENTS = 400
@@ -91,17 +94,64 @@ def validate(plan: dict, allowed: dict[str, Key]) -> None:
         raise ValueError("crop must be [x, y, width, height] in client pixels")
 
 
-def _sleep_until(t: float) -> None:
+LIE_DETECTOR_ERROR = "Lie Detector on screen: all input stopped"
+
+
+def _sleep_until(t: float, stop: threading.Event | None = None) -> bool:
+    """Sleep until perf_counter() reaches t. Returns False early if `stop` gets set."""
     while (left := t - time.perf_counter()) > 0:
-        time.sleep(left - 0.002 if left > 0.004 else 0)
+        if stop is not None and stop.is_set():
+            return False
+        time.sleep(min(left - 0.002, 0.01) if left > 0.004 else 0)
+    return stop is None or not stop.is_set()
+
+
+class Watchdog(threading.Thread):
+    """Looks at the game every `interval` seconds, whether or not a plan is running. When the
+    Lie Detector shows up it sets `alarm` first (stopping any keys within ~10 ms, mid-plan too),
+    then records it and pages via on_alarm; the player then shuts down."""
+
+    def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
+                 interval: float = 0.25, on_alarm=None):
+        super().__init__(name="lie-detector-watch", daemon=True)
+        from .alarm import LieDetectorSpotter, raise_alarm
+        self.title = game_title
+        self.alarm = alarm
+        self.spotter = spotter or LieDetectorSpotter()
+        self.grab = grab
+        self.interval = interval
+        self.on_alarm = on_alarm or raise_alarm
+        self.stopped = threading.Event()
+
+    def run(self) -> None:
+        with mss.MSS() as sct:
+            while not self.stopped.is_set():
+                frame = self.grab() if self.grab else self._grab(sct)
+                if frame is not None and self.spotter.seen(frame):
+                    self.alarm.set()
+                    self.on_alarm(frame)
+                    return
+                self.stopped.wait(self.interval)
+
+    def _grab(self, sct):
+        try:
+            client = window.client_rect(window.find_game(self.title))
+        except RuntimeError:
+            return None
+        if client["width"] <= 0 or client["height"] <= 0:  # minimized
+            return None
+        return np.asarray(sct.grab(client))[:, :, 2::-1]  # BGRA -> RGB, full size
 
 
 class Player:
-    def __init__(self, allowed: dict[str, Key], game_title: str):
+    def __init__(self, allowed: dict[str, Key], game_title: str, alarm: threading.Event | None = None):
         self.allowed = allowed
         self.title = game_title
+        self.alarm = alarm or threading.Event()
 
     def run(self, plan: dict) -> dict:
+        if self.alarm.is_set():
+            return {"error": LIE_DETECTOR_ERROR}
         validate(plan, self.allowed)
         hwnd = window.find_game(self.title)
         if plan.get("focus") and win32.foreground_title() != self.title:
@@ -122,7 +172,9 @@ class Player:
 
         def press_keys():
             for event in plan.get("events", []):
-                _sleep_until(t0 + event[0] / 1000)
+                if not _sleep_until(t0 + event[0] / 1000, self.alarm):
+                    problems.append(LIE_DETECTOR_ERROR)
+                    return
                 if win32.foreground_title() != self.title:
                     problems.append("game left the foreground; stopped pressing keys")
                     return
@@ -146,7 +198,8 @@ class Player:
                 with mss.MSS() as sct:
                     start = t0 - lead_ms / 1000
                     for i in range(int(fps * (duration + lead_ms) / 1000)):
-                        _sleep_until(start + i / fps)
+                        if not _sleep_until(start + i / fps, self.alarm):
+                            break
                         shot = np.asarray(sct.grab(region))[::scale, ::scale, 2::-1]  # BGRA -> RGB
                         times.append(round((time.perf_counter() - t0) * 1000, 1))
                         frames.append(shot.copy())
@@ -155,6 +208,8 @@ class Player:
             for name in held:
                 win32.send_key(self.allowed[name], False)
         result = {"sent": sent, "problems": problems, "region": region, "scale": scale, "client": client}
+        if self.alarm.is_set():
+            result["error"] = LIE_DETECTOR_ERROR
         if frames:
             np.savez_compressed(OUTBOX / f"{plan['id']}.npz", frames=np.stack(frames), times=np.array(times))
             result["frames"] = len(frames)
@@ -166,34 +221,52 @@ def _log(msg: str) -> None:
         f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
 
 
+def _answer(path, result: dict) -> str:
+    # Output names come from the sanitized file name, never from the plan's contents.
+    plan_id = "".join(ch for ch in path.stem if ch.isalnum() or ch in "-_")[:64] or "plan"
+    path.unlink(missing_ok=True)
+    tmp = OUTBOX / f"{plan_id}.tmp"
+    tmp.write_text(json.dumps(result), encoding="utf-8")
+    tmp.replace(OUTBOX / f"{plan_id}.json")
+    return plan_id
+
+
 def serve() -> None:
     for d in (LAB, INBOX, OUTBOX):
         d.mkdir(parents=True, exist_ok=True)
     STOP.unlink(missing_ok=True)
+    if ALARM.exists():
+        _log("refusing to start: a Lie Detector alarm hasn't been cleared (python -m gamelab clear-alarm)")
+        return
+    for stale in INBOX.glob("*.json"):  # plans left over from an earlier session are never run
+        stale.unlink()
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
-    player = Player(allowed_keys(cfg.keys), cfg.game_window_title)
+    alarm = threading.Event()
+    player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm)
     win32.enable_dpi_awareness()
-    _log(f"player started; allowed keys {sorted(player.allowed)}")
+    watchdog = Watchdog(cfg.game_window_title, alarm)
+    watchdog.start()
+    _log(f"player started; allowed keys {sorted(player.allowed)}; watching for the Lie Detector")
     idle_since = time.monotonic()
     with win32.precise_timers():
-        while not STOP.exists() and time.monotonic() - idle_since < IDLE_LIMIT_S:
+        while not STOP.exists() and not alarm.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:
             plans = sorted(INBOX.glob("*.json"))
             if not plans:
                 time.sleep(0.05)
                 continue
             path = plans[0]
-            # Output names come from the sanitized file name, never from the plan's contents.
-            plan_id = "".join(ch for ch in path.stem if ch.isalnum() or ch in "-_")[:64] or "plan"
             try:
                 plan = json.loads(path.read_text(encoding="utf-8"))
-                plan["id"] = plan_id
+                plan["id"] = "".join(ch for ch in path.stem if ch.isalnum() or ch in "-_")[:64] or "plan"
                 result = player.run(plan)
             except Exception as e:
                 result = {"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()}
-            path.unlink(missing_ok=True)
-            tmp = OUTBOX / f"{plan_id}.tmp"
-            tmp.write_text(json.dumps(result), encoding="utf-8")
-            tmp.replace(OUTBOX / f"{plan_id}.json")
+            plan_id = _answer(path, result)
             _log(f"ran {plan_id}: {result.get('error') or 'ok'}")
             idle_since = time.monotonic()
+    watchdog.stopped.set()
+    if alarm.is_set():
+        for path in INBOX.glob("*.json"):
+            _answer(path, {"error": LIE_DETECTOR_ERROR})
+        _log("LIE DETECTOR seen: input stopped and the player shut down")
     _log("player stopped")
