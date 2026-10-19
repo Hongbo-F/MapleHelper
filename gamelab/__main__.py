@@ -224,6 +224,65 @@ def cmd_hunt(args) -> int:
     return 0
 
 
+def _log(message: str) -> None:
+    print(time.strftime("%H:%M:%S"), message, flush=True)
+
+
+def cmd_map(args) -> int:
+    """The map's platforms and her position on them (no keys)."""
+    from . import mapdata
+    from .localize import Localizer
+    from .moves import describe
+    model = mapdata.load(args.map)
+    marks = []
+    if not args.offline:
+        from .hunt import Eyes
+        eyes = Eyes(her_setup()[0].game_window_title, calibration.load().template)
+        s = eyes.look()
+        if s.dot:
+            w = Localizer(model).where_dot(s.dot)
+            print(f"she's at map ({w.x:.0f}, {w.y:.0f}) on {describe(w.platform)} (dot {s.dot[0]:.1f},{s.dot[1]:.1f})")
+            marks.append((w.x, w.y, "her"))
+    print(f"{model.name}: {len(model.platforms)} platforms, {len(model.ropes)} ropes; monster spawns by platform:",
+          dict(sorted(model.spawn_platforms.items())))
+    path = LAB / f"map_{args.map}.png"
+    mapdata.render(model, path, marks=marks)
+    print(path)
+    return 0
+
+
+def cmd_nav(args) -> int:
+    from . import mapdata
+    from .hunt import Eyes, Hunter
+    from .nav import Navigator
+    cfg, keys, timing = her_setup()
+    eyes = Eyes(cfg.game_window_title, calibration.load().template)
+    hunter = Hunter(eyes, keys, timing, log=_log)
+    nav = Navigator(hunter, mapdata.load(args.map), log=_log)
+    window.bring_to_front(cfg.game_window_title)
+    trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
+    print(f"{trip.result}: {len(trip.moves)} moves, {trip.misses} landed somewhere else")
+    return 0
+
+
+def cmd_tour(args) -> int:
+    import random
+    from . import mapdata
+    from .hunt import Eyes, Hunter
+    from .nav import Navigator
+    from .tour import Tour
+    cfg, keys, timing = her_setup()
+    eyes = Eyes(cfg.game_window_title, calibration.load().template)
+    hunter = Hunter(eyes, keys, timing, log=_log, low_hp=args.low_hp, potion_hp=args.potion_hp)
+    nav = Navigator(hunter, mapdata.load(args.map), log=_log)
+    window.bring_to_front(cfg.game_window_title)
+    tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below)
+    kinds = set(args.kinds.split(",")) if args.kinds else None
+    report = tour.run(stops=args.stops, kinds=kinds, kills_per_stop=args.kills, seconds_per_stop=args.seconds)
+    print(f"tour done: {report}")
+    return 0
+
+
 def cmd_lock(args) -> int:
     """Press an attack, then jump `d` ms later: from when does the game accept the jump again?"""
     cfg, keys, _ = her_setup()
@@ -386,6 +445,30 @@ def main(argv=None) -> int:
     s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
     s.set_defaults(func=cmd_hunt)
 
+    s = sub.add_parser("map", help="the map's platforms and where she is on them (sends no keys)")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP, help="map id (default: Thicket Around the Beach II)")
+    s.add_argument("--offline", action="store_true", help="don't look at the game, just draw the map")
+    s.set_defaults(func=cmd_map)
+
+    s = sub.add_parser("nav", help="go to a platform: plan a route (ropes, jumps, drops) and follow it")
+    s.add_argument("platform", type=int, help="platform id (see `map`)")
+    s.add_argument("--x", type=float, help="and walk to this map x on it")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--seconds", type=float, default=180)
+    s.set_defaults(func=cmd_nav)
+
+    s = sub.add_parser("tour", help="hunt the map: visit spawn platforms in random order, clear each, rest when low")
+    s.add_argument("--stops", type=int, default=3, help="how many hunting platforms to visit")
+    s.add_argument("--kills", type=int, default=5, help="kills per stop")
+    s.add_argument("--seconds", type=float, default=90, help="time per stop")
+    s.add_argument("--kinds", help="only these monsters, e.g. slime,pig")
+    s.add_argument("--seed", type=int, help="random seed for the order (default: random)")
+    s.add_argument("--rest-below", type=float, default=0.5, help="go rest when HP is below this between stops")
+    s.add_argument("--potion-hp", type=float, default=0.45, help="drink an HP potion below this while fighting")
+    s.add_argument("--low-hp", type=float, default=0.3, help="stop fighting and rest below this")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.set_defaults(func=cmd_tour)
+
     s = sub.add_parser("lock", help="measure how long an attack blocks the next jump")
     s.add_argument("action", choices=["attack", "lucky_seven"])
     s.add_argument("delays", type=int, nargs="+", help="ms after the attack key to press jump")
@@ -435,8 +518,10 @@ def main(argv=None) -> int:
         return 1
 
 
+DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
+
 # Commands that bring the game to the front or send it input; refused while the alarm is set.
-GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt"}
+GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
 LIE_DETECTOR_EXIT = 3
 
 

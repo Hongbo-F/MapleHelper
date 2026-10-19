@@ -28,6 +28,7 @@ from maplehelper.game import COMBAT, MOVEMENT
 from . import client, window
 from .mobs import SCALE, Mob, MobDetector
 from .paths import LAB
+from .terrain import find_ropes, her_dot
 
 TAG_FULL = LAB / "tag_template_full.npy"  # her name tag at full resolution (made on first look)
 GAME_SIZE = (1920, 1080)  # game window size the templates were made at
@@ -95,6 +96,8 @@ class Sight:
     mp: float
     cam: float                 # camera scroll, half-size px; world x = screen x + cam
     ground: tuple[int, int] | None = None  # screen x range of the ground under her
+    dot: tuple[float, float] | None = None  # her minimap dot (terrain.her_dot)
+    ropes: list = field(default_factory=list)  # terrain.Rope list, full-size px
 
     def room(self, direction: str) -> float:
         """Game px she can walk that way before the edge of her ground."""
@@ -135,6 +138,7 @@ class Eyes:
         self._strip = None
         self._last: tuple[int, int] | None = None
         self.tag = np.load(TAG_FULL) if TAG_FULL.exists() else None
+        self.want_ropes = False  # the navigator turns this on (+~25 ms per look)
 
     def look(self) -> Sight:
         if window.foreground_title() != self.title:  # the capture sees whatever window is on top
@@ -155,7 +159,8 @@ class Eyes:
             self._scroll(frame, her)
             mobs = self.detector.detect(frame, rows=(her[1] - 90, her[1] + 20))
             ground = ground_extent(frame, her[0], her[1] - 8)
-        return Sight(time.monotonic(), frame, her, mobs, hp, mp, self.cam, ground)
+        return Sight(time.monotonic(), frame, her, mobs, hp, mp, self.cam, ground,
+                     her_dot(full), find_ropes(full) if self.want_ropes else [])
 
     def _make_full_tag(self, full) -> np.ndarray:
         """Find her with the half-size template (trying all four ways of halving the frame), then cut

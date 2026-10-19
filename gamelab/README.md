@@ -83,6 +83,29 @@ What an objective does on its own:
 
 Kills are counted when the target stays unseen for about 1.2 s. Checked against EXP, this is close to exact.
 
+## Getting around a map
+
+Navigation is split into modules, each built on the game's own map data (read with `gamedata`, kept off git):
+
+| Module | Does |
+|---|---|
+| `mapdata.py` | **Map model.** Platforms (footholds joined end to end), walls, ropes and ladders, portals, monster spawns and the minimap's scale. Everything is in map units; the screen shows them 1.40625× larger at 1920×1080. `python -m gamelab map` draws it with her position. |
+| `localize.py` | **Where she is.** Her minimap dot converts to map coordinates: one minimap pixel is 16/1.40625 = 11.4 units. The dot is snapped to the platform she's standing on. |
+| `route.py` | **Moves and routes.** Builds every move the physics allows: rope climbs and climb-downs, jumping up through a platform overhead, running jumps (from `jumpSpeed` 555 and gravity 2000: 77 units high, 555 ms in the air, at her measured 149 units/s), walking off an end, and dropping through (↓ + jump). Then finds the quickest route with Dijkstra. |
+| `moves.py` | **Doing a move.** Closed loop: look, act, look again. Her position along a platform is refined on screen from her distance to its visible end, which is good to a couple of units for takeoffs near edges. Ropes are lined up with the rope detected on screen. |
+| `nav.py` | **Navigator.** Plans, does one move, checks which platform she landed on, and replans from there when it isn't the planned one. |
+| `tour.py` | **Hunting tour.** Visits spawn platforms in random order and runs `hunt` on each. When HP is low, it rests on the chair at the nearest platform with no spawns (monsters never leave their own platform), and it ends standing by there. |
+
+```bash
+python -m gamelab map
+python -m gamelab nav 35
+python -m gamelab tour --stops 3 --kills 5
+```
+
+1. `map` shows her platform and draws the map to `lab/map_10000012.png`.
+2. `nav` goes to platform 35 (the right cliff top).
+3. `tour` visits 3 hunting platforms in random order, then rests and stands by.
+
 ## Limits
 
 - **Recalibrate** after moving the game window, changing maps or changing resolution. Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name.
