@@ -45,6 +45,14 @@ python -m maplehelper.keyviewer
 
 This opens a stand-in window titled "MapleStory Key Viewer". Focus it, press F1–F4, and it lists every key the combo sent, with timings.
 
+## Testing in the real game
+
+[gamelab](gamelab/README.md) plays combos in the actual game, records it, and checks every jump and throw. Use it after changing a combo or `[timing]`:
+
+```bash
+python -m gamelab combo jump_back_shot --runs 4 --chain 8
+```
+
 ## Tests
 
 ```bash
