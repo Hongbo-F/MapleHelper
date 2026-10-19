@@ -283,6 +283,7 @@ def _fighter(monkeypatch, looks, on_look=None):
     h.look, h.health_check = look, lambda s: None
     h.throw = h.jump_throw = h.jump_back = lambda side: throws.append((round(clock[0], 1), side))
     h.sweep_through = lambda s, deaths: None
+    h.mop_up = lambda stood=None, rounds=0: None  # looking for loot is tested on its own (test_loot.py)
     return h, throws
 
 
@@ -389,3 +390,34 @@ def test_a_monster_right_under_her_makes_her_step_away_not_throw():
     act = stance(500, 500, PLAT, [below])
     assert act[:2] == ("back", LEFT) and shots.can_shoot(530 - (500 - act[2]), 60)
     assert not shots.can_shoot(30, 60) and shots.can_shoot(30 + 150, 60) and not shots.can_shoot(170, -60)
+
+
+def test_with_far_on_she_shoots_monsters_on_any_platform_in_reach(monkeypatch):
+    far_pig = target(700, y=560, platform=7)  # another platform, 60 below and 200 off: in reach
+    h, throws = _fighter(monkeypatch, [[far_pig]] * 3)
+    h.clear(ground={3}, patience=0.5, far=True)
+    assert throws and throws[0][1] == RIGHT
+    h, throws = _fighter(monkeypatch, [[far_pig]] * 3)
+    h.clear(ground={3}, patience=0.5)  # without far: not one of hers
+    assert not throws
+
+
+def test_a_kill_is_matched_to_the_first_monster_in_the_star_path(monkeypatch):
+    # A snail (not hunted) stands between her and the pig she throws at: the star hits the snail,
+    # and the EXP that comes in is the snail's, not the pig's.
+    def kill_at(h, t):
+        if abs(t - 0.6) < 1e-6:
+            h.report.exp_kills += 1
+    snail, pig = target(650, kind="snail"), target(780)
+    looks = [[snail, pig], [pig], [pig]] + [[]] * 6
+    h, throws = _fighter(monkeypatch, looks, on_look=kill_at)
+    h.sweep_after = lambda deaths: None
+    h.clear(kinds={"pig"}, max_kills=1, patience=0.5)
+    assert h.report.kills == {"snail": 1}
+
+
+def test_under_a_low_platform_she_does_not_jump_at_a_monster():
+    from gamelab.hunt import stance
+    # A jump would carry her up onto the platform overhead: step away, or (cornered) throw from the ground.
+    assert stance(500, 500, PLAT, [target(560)], can_jump=lambda a, b: False) == ("back", LEFT, 120)
+    assert stance(60, 500, PLAT, [target(110)], can_jump=lambda a, b: False) == ("throw", RIGHT)

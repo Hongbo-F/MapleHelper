@@ -235,6 +235,11 @@ class Tour:
                      f"({spot.coverage:.0%} in reach)")
 
             def in_reach(s: Sight) -> bool:
+                # Only where she can stand (or the spot itself): on the way to platform 2 her route
+                # crosses platform 4, and stopping there put her in its crowd for the whole stop.
+                here = s.platform
+                if here is None or (here.id != spot.platform and not self.spot_ok(here.id)):
+                    return False
                 return any(t.platform == pid and (kinds is None or t.kind in kinds)
                            and shots.can_shoot(t.x - s.where.x, t.y - s.where.y) for t in s.targets)
 
@@ -250,7 +255,7 @@ class Tour:
             # Waiting for respawns looked idle and slowed the sweep: move on soon when nothing's there.
             r = self.h.clear(kinds, ground={pid}, max_kills=max(1, kills - sum(total.kills.values())),
                              seconds=max(5, end - time.monotonic()), patience=2.0 if spot.safe else 1.0,
-                             finish=True)
+                             finish=True, far=True)
             for kind, n in r.kills.items():
                 total.kills[kind] = total.kills.get(kind, 0) + n
             total.throws += r.throws
@@ -296,18 +301,26 @@ class Tour:
         return total
 
     def collect_loot(self) -> None:
-        """Go to drops left on other platforms (nearest first) and sweep them up."""
+        """Go to the drops left on other platforms and pick them up: her kills' (far kills' can lie across
+        the map) and any seen on the ground. A whole-screen look first, and again after each trip, notes
+        the drops in view and forgets remembered ones seen gone (Hunter.remember_loot). The nearest by
+        route goes first. With her inventory full, only to mesos seen."""
+        self._look_for_loot()
+        for d in self.h.pending_loot:  # a kill placed on no platform: its drops fell onto the one below
+            if d.platform is None and (p := self.nav.model.platform_under(d.x, d.y, reach=120)) is not None:
+                d.platform, d.y = p.id, p.y_at(d.x)
         while self.h.pending_loot:
-            fresh = [d for d in self.h.pending_loot if time.monotonic() - d.since < LOOT_AGE and d.platform is not None]
+            fresh = [d for d in self.h.pending_loot if time.monotonic() - d.since < LOOT_AGE and d.platform is not None
+                     and (d.mesos or not self.h.inventory_full)]
             self.h.pending_loot = []
             if not fresh:
                 return
             f = self.nav.mover.fix()
-            fresh.sort(key=lambda d: abs(d.x - f.where.x) + abs(d.y - f.where.y))
+            fresh.sort(key=lambda d: self._travel_to(f.where, d))
             d, rest = fresh[0], fresh[1:]
             self.log(f"  collecting drops on platform {d.platform} at x {d.x:.0f}")
             self.report.loot_trips += 1
-            trip = self.nav.go(d.platform, x=d.x, seconds=40)
+            trip = self.nav.go(d.platform, x=d.x, seconds=60)
             self.report.on_the_way += trip.kills
             self.h.pending_loot = rest
             if trip.result != "arrived":
@@ -316,6 +329,20 @@ class Tour:
             if not self.h.loot(d):  # guarded: shoot the guard, then try again
                 self.h.clear(ground={d.platform}, max_kills=2, seconds=20)
                 self.h.loot_pending()
+            self._look_for_loot()
+
+    def _look_for_loot(self) -> None:
+        """A look at every platform in view for drops (about 0.2 s), noted for collect_loot."""
+        self.h.remember_loot(self.h.look(mobs=False, wide=True, loot=True))
+
+    def _travel_to(self, where, d) -> float:
+        """Seconds to drops `d` from `where`, by route (straight-line walking if there's no route known)."""
+        here = where.platform
+        if here is not None and here.id != d.platform:
+            t = self.nav.planner.travel(here.id, where.x, d.platform)
+            if t is not None:
+                return t + abs(d.x - where.x) / WALK_SPEED * 0.2
+        return (abs(d.x - where.x) + abs(d.y - where.y)) / WALK_SPEED
 
     def sweep(self, grounds: list[int], stops: int, here: tuple[int, float]) -> tuple[list[int], float]:
         """An order to visit `stops` of the hunting grounds that keeps travelling short, like a player
@@ -379,7 +406,9 @@ class Tour:
         blind = sorted(self._order_cost(self.rng.sample(grounds, n), here)[1] for _ in range(9))[4]
         self.log(f"tour: sweep {order}, about {travel:.0f} s of travel ({n} hunting grounds picked at random: "
                  f"{blind:.0f} s); safe platforms: {self.safe}")
-        for pid in order:
+        left = list(order)
+        while left:
+            pid = left.pop(0)
             if self.h.look(mobs=False).hp < self.rest_below:
                 self.rest()
             self.log(f"heading to platform {pid}")
@@ -392,6 +421,11 @@ class Tour:
             self.log(f"  platform {pid}: {result}")
             if result.stop.startswith("HP low"):
                 self.rest()
+            # Far kills' drops can take her across the map: the rest of the sweep is planned again from
+            # wherever she ended up.
+            f = self.nav.mover.fix()
+            if left and f.where is not None and f.where.platform is not None:
+                left = self.sweep(left, len(left), (f.where.platform.id, f.where.x))[0]
         self.rest_and_stand_by()
         return self.report
 

@@ -17,8 +17,10 @@ import numpy as np
 
 from .mapdata import MapModel, Platform
 
-STAR_REACH = 390     # the farthest hit seen (388); the star flies 400
-SHOT_RANGE = 340     # aim inside this: the target keeps walking during the ~0.5 s wind-up
+# With Keen Eyes maxed (+200 range by the skill data; the 400 above was measured before), stars on her
+# level hit slimes 408, 410 and 452 units off, and missed at 560 and 634 (lab/range_probe.jsonl).
+STAR_REACH = 460     # the farthest hit seen (452); somewhere short of 560 they stop hitting
+SHOT_RANGE = 410     # aim inside this: the target keeps walking during the ~0.5 s wind-up and the flight
 MIN_SHOT = 90        # closer than this she swipes with the claw instead of throwing
 # How far below/above her a target can be and still be hit: 60 both ways measured (hits). Farther
 # isn't measured yet; `python -m gamelab hunt shots` lists what the shot log has seen.

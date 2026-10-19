@@ -59,11 +59,15 @@ class Move:
 
 _FLY_CACHE: dict[tuple, tuple] = {}
 _WALLS: dict[int, tuple] = {}
+# The caches are keyed by id(model), so the models are kept: a freed model's id is reused by the next
+# one, which then got the old one's walls and landings (tests failed depending on their order).
+_MODELS: dict[int, MapModel] = {}
 
 
 def _walls(model: MapModel) -> tuple[list[float], list[tuple[float, float]]]:
     """The model's vertical walls sorted by x: their xs, and each one's (top, bottom)."""
     key = id(model)
+    _MODELS[key] = model
     if key not in _WALLS:
         ws = sorted((w for w in model.walls if w.x1 == w.x2), key=lambda w: w.x1)
         _WALLS[key] = ([w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws])
@@ -77,6 +81,7 @@ def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platfor
     through (dropping). Returns (platform, landing x, seconds). Results are cached: chains try the
     same jumps many times over."""
     key = (id(model), round(x, 2), round(y, 2), vx, vy, None if skip is None else skip.id, dt, limit)
+    _MODELS[id(model)] = model
     if key in _FLY_CACHE:
         return _FLY_CACHE[key]
     wall_xs, wall_ys = _walls(model)

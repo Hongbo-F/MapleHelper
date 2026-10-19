@@ -7,6 +7,8 @@ without zlib's end marker, so they're inflated with a decompress object rather t
 Newer clients keep the pictures out of the data images: a monster's frames in Packs/Mob_00000.ms are
 empty canvases with a `_hash`, and the pixels are at the same path ("stand/0") in the monster's image
 in Mob/_Canvas/_Canvas_000.wz. Frames that repeat another one say so with `_inlink` ("move/2").
+Items are the same: Item/Etc/Etc_000.wz 0400.img holds 1x1 placeholders, and the pictures are at the
+same path in Item/Etc/_Canvas/_Canvas_000.wz. Mesos on the ground are Item/Special 0900.img.
 """
 
 import struct
@@ -78,4 +80,36 @@ def mob_frames(mob_id: int, actions=("stand", "move", "hit1"), copy: Path = COPY
             origin = frame.props.get("origin")
             out.append({"action": action, "index": int(index), "rgba": pixels(picture),
                         "origin": (origin.x, origin.y) if origin is not None else (0, 0)})
+    return out
+
+
+ITEM_FOLDERS = {2: "Consume", 4: "Etc"}  # item id // 1,000,000 -> its folder under Item/
+
+
+@lru_cache(maxsize=None)
+def _item_canvases(folder: str, copy: Path = COPY) -> Package:
+    return Package(copy / "Item" / folder / "_Canvas" / "_Canvas_000.wz")
+
+
+def item_icon(item_id: int, copy: Path = COPY) -> np.ndarray:
+    """An item's picture as it lies on the ground (`iconRaw`: the icon without its inventory shadow), RGBA."""
+    folder = ITEM_FOLDERS.get(item_id // 1_000_000)
+    if folder is None:
+        raise ValueError(f"no item pictures read for item {item_id} yet")
+    entry = _item_canvases(folder, copy).image(f"{item_id // 10_000:04d}.img").get(f"{item_id:08d}") or {}
+    picture = (entry.get("info") or {}).get("iconRaw")
+    if not isinstance(picture, Canvas):
+        raise KeyError(f"item {item_id} has no picture")
+    return pixels(picture)
+
+
+def meso_frames(copy: Path = COPY, kinds=range(4)) -> dict[int, list[np.ndarray]]:
+    """Mesos on the ground, by kind (0 bronze coin, 1 gold coin, 2 bundle of bills, 3 sack; the amount picks
+    the kind), each a list of its spinning animation's frames (RGBA)."""
+    pictures = Package(copy / "Item" / "Special" / "_Canvas" / "_Canvas_000.wz").image("0900.img")
+    out = {}
+    for kind in kinds:
+        frames = (pictures.get(f"0900000{kind}") or {}).get("iconRaw") or {}
+        out[kind] = [pixels(c) for _, c in sorted(frames.items(), key=lambda kv: int(kv[0]))
+                     if isinstance(c, Canvas)]
     return out

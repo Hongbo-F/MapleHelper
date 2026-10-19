@@ -191,9 +191,10 @@ class Mover:
         gap = p.y_at(m.rope_x) - m.rope_bottom  # how far above her feet the rope ends
         climb_ms = int(1000 * (p.y_at(m.rope_x) - m.rope_top) / CLIMB_SPEED) + 500
         dx = m.rope_x - f.where.x
-        if abs(dx) <= 4:
-            self._send([[0, k.up.name, "down"], [40, k.jump.name, "down"], [80, k.jump.name, "up"],
-                        [climb_ms + 350, k.up.name, "up"]], "climb")
+        under = lambda: self._send([[0, k.up.name, "down"], [40, k.jump.name, "down"], [80, k.jump.name, "up"],
+                                    [climb_ms + 350, k.up.name, "up"]], "climb")
+        if abs(dx) <= 6:
+            under()
             return
         sign = 1 if dx > 0 else -1
         walk_in = gap <= 10 and not any(abs(pt.x - m.rope_x) < 60 and abs(pt.y - p.y_at(pt.x)) < 40
@@ -208,7 +209,9 @@ class Mover:
                 back = m.rope_x  # no room to back off: stand under it instead
             f = self.walk_to(back, tolerance=6, f=f)
             if back == m.rope_x:
-                self._climb(m, f)
+                # Under it now (within the walk's 6 units). Calling _climb again here recursed
+                # forever when the walk stopped 5-6 units off, past the 4 it took as "under".
+                under()
                 return
             dx = m.rope_x - f.where.x
             sign, run = (1 if dx > 0 else -1), abs(dx) - lead

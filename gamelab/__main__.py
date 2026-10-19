@@ -184,6 +184,10 @@ def _annotate(sight, path) -> None:
         d.rectangle([m.x - m.w // 2, m.y - m.h // 2, m.x + m.w // 2, m.y + m.h // 2],
                     outline="red" if mine else "orange", width=2)
         d.text((m.x - m.w // 2, m.y - m.h // 2 - 11), f"{m.kind} p{t.platform}", fill="red" if mine else "orange")
+    for loot in sight.loot:
+        it = loot.item
+        d.rectangle([it.x - it.w // 2, it.y - it.h // 2, it.x + it.w // 2, it.y + it.h // 2], outline="yellow", width=2)
+        d.text((it.x - it.w // 2, it.y + it.h // 2 + 2), f"{it.kind} p{loot.platform}", fill="yellow")
     d.text((8, img.height - 70), f"HP {sight.hp:.0%}  MP {sight.mp:.0%}", fill="white")
     img.save(path)
 
@@ -216,6 +220,10 @@ def cmd_hunt(args) -> int:
             dx, dy = t.x - s.where.x, t.y - s.where.y
             reach = "in reach" if shots.can_shoot(dx, dy) else "out of reach"
             print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({reach}, score {t.mob.score})")
+        s.loot = hunter.see_loot(s, wide=True)
+        for d in s.loot:
+            print(f"  drop: {d.item.kind} on platform {d.platform}: {d.x - s.where.x:+.0f}, "
+                  f"{d.y - s.where.y:+.0f} (score {d.item.score})")
         _annotate(s, LAB / "hunt_look.png")
         print(LAB / "hunt_look.png")
         return 0
@@ -233,9 +241,12 @@ def cmd_hunt(args) -> int:
     else:
         ground = {int(v) for v in args.ground.split(",")} if args.ground else None
         hunter.clear(kinds, ground=ground, max_kills=args.kills, seconds=args.seconds)
-    final = hunter.look()
+        hunter.mop_up()  # drops still on her platform: kills the fight couldn't place, or left before
+    final = hunter.look(loot=True)
     _annotate(final, LAB / "hunt_end.png")
-    print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}")
+    left = ", ".join(f"{d.item.kind} at {d.x - final.where.x:+.0f}" for d in final.loot) or "none"
+    print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}; drops left on her platform: {left}"
+          + ("; her inventory is full" if hunter.inventory_full else ""))
     return 0
 
 
