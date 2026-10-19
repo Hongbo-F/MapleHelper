@@ -81,6 +81,9 @@ def validate(plan: dict, allowed: dict[str, Key]) -> None:
         if not (isinstance(t, (int, float)) and last <= t <= MAX_PLAN_MS):
             raise ValueError(f"event times must be sorted and within 0-{MAX_PLAN_MS} ms")
         last = t
+    end = plan.get("end_ms")
+    if end is not None and not (isinstance(end, (int, float)) and last <= end <= MAX_PLAN_MS):
+        raise ValueError(f"end_ms must be after the last event and within {MAX_PLAN_MS} ms")
     cap = plan.get("capture", {})
     fps, duration = cap.get("fps", 0), cap.get("duration_ms", 0)
     if not (0 <= fps <= 60 and 0 <= duration <= MAX_PLAN_MS):
@@ -172,18 +175,22 @@ class Player:
 
         cancel = INBOX / f"{plan['id']}.cancel"  # the client cut the plan short: stop pressing
 
+        def wait(due: float) -> bool:
+            """Until `due`, unless the plan is cancelled or the alarm goes off."""
+            while True:
+                if cancel.exists():
+                    problems.append("cancelled")
+                    return False
+                if not _sleep_until(min(due, time.perf_counter() + 0.015), self.alarm):
+                    problems.append(LIE_DETECTOR_ERROR)
+                    return False
+                if time.perf_counter() >= due:
+                    return True
+
         def press_keys():
             for event in plan.get("events", []):
-                due = t0 + event[0] / 1000
-                while True:
-                    if cancel.exists():
-                        problems.append("cancelled")
-                        return
-                    if not _sleep_until(min(due, time.perf_counter() + 0.015), self.alarm):
-                        problems.append(LIE_DETECTOR_ERROR)
-                        return
-                    if time.perf_counter() >= due:
-                        break
+                if not wait(t0 + event[0] / 1000):
+                    return
                 if win32.foreground_title() != self.title:
                     problems.append("game left the foreground; stopped pressing keys")
                     return
@@ -198,6 +205,8 @@ class Player:
                     win32.send_key(self.allowed[name], kind == "down")
                     (held.add if kind == "down" else held.discard)(name)
                 sent.append([round((time.perf_counter() - t0) * 1000, 1), *event[1:]])
+            if plan.get("end_ms") is not None:  # the plan lasts this long (the next one follows on)
+                wait(t0 + plan["end_ms"] / 1000)
 
         presser = threading.Thread(target=press_keys, name="key-player")
         frames, times = [], []
@@ -248,7 +257,7 @@ def serve() -> None:
     if ALARM.exists():
         _log("refusing to start: a Lie Detector alarm hasn't been cleared (python -m gamelab clear-alarm)")
         return
-    for stale in [*INBOX.glob("*.json"), *INBOX.glob("*.cancel")]:  # left over from an earlier session
+    for stale in [*INBOX.glob("*.json"), *INBOX.glob("*.cancel"), *INBOX.glob("*.running")]:  # left over
         stale.unlink()
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
     alarm = threading.Event()
@@ -265,14 +274,23 @@ def serve() -> None:
                 time.sleep(0.01)
                 continue
             path = plans[0]
+            running = path.with_suffix(".running")
             try:
-                plan = json.loads(path.read_text(encoding="utf-8"))
+                path.replace(running)  # claimed: from now on the client can't withdraw it, only cancel it
+            except OSError:
+                continue  # withdrawn just now
+            try:
+                plan = json.loads(running.read_text(encoding="utf-8"))
                 plan["id"] = "".join(ch for ch in path.stem if ch.isalnum() or ch in "-_")[:64] or "plan"
                 result = player.run(plan)
             except Exception as e:
                 result = {"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()}
-            plan_id = _answer(path, result)
-            _log(f"ran {plan_id}: {result.get('error') or 'ok'}")
+            try:
+                plan_id = _answer(running, result)
+                _log(f"ran {plan_id}: {result.get('error') or 'ok'}")
+            except OSError as e:
+                _log(f"couldn't answer {path.stem}: {e}")
+                running.unlink(missing_ok=True)
             idle_since = time.monotonic()
     watchdog.stopped.set()
     if alarm.is_set():

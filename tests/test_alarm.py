@@ -134,3 +134,19 @@ def test_a_plan_can_be_cut_short_and_lets_go_of_its_keys(tmp_path, monkeypatch):
     assert result["problems"] == ["cancelled"]
     assert sent == [("f", True), ("f", False)]           # pressed, then let go when cut short
     assert not (tmp_path / "plan1.cancel").exists()       # the signal is used up
+
+
+def test_a_plan_can_last_past_its_last_key(tmp_path, monkeypatch):
+    from gamelab import player as player_mod
+    from maplehelper.keys import parse
+    monkeypatch.setattr(player_mod, "INBOX", tmp_path)
+    monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 1920, "height": 1080})
+    monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "Game")
+    monkeypatch.setattr(player_mod.win32, "send_key", lambda key, down: None)
+    p = Player({"f": parse("f")}, "Game")
+    started = time.perf_counter()
+    p.run({"id": "p2", "events": [[0, "f", "down"], [10, "f", "up"]], "end_ms": 300, "capture": {"lead_ms": 0}})
+    assert 0.28 <= time.perf_counter() - started < 0.6
+    with pytest.raises(ValueError):
+        player_mod.validate({"events": [[0, "f", "down"], [500, "f", "up"]], "end_ms": 100}, {"f": parse("f")})

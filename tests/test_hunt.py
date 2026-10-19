@@ -197,3 +197,12 @@ def test_a_kill_is_confirmed_by_her_exp_number_changing():
     assert h.exp_events == [2.0] and h.report.exp_kills == 1
     assert not h._take_exp(since=2.5)   # gains before she started throwing aren't this target's
     assert h._take_exp(since=1.8) and h.exp_events == []
+
+
+def test_touches_show_as_purple_text_above_her():
+    from gamelab.hunt import touch_popup
+    frame = np.full((300, 400, 3), SKY, np.uint8)
+    her = (200, 200)
+    assert touch_popup(frame, her) == 0
+    frame[120:135, 180:220] = (200, 40, 220)  # "MISS" (or damage taken) floating above her head
+    assert touch_popup(frame, her) >= 40

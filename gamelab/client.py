@@ -42,8 +42,10 @@ def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, l
     return wait(plan_id, timeout)
 
 
-def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan") -> str:
-    """Hand a plan to the running player without waiting; returns its id (for wait / cancel)."""
+def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan",
+         end_ms: int | None = None) -> str:
+    """Hand a plan to the running player without waiting; returns its id (for wait / cancel).
+    `end_ms`: the plan lasts this long even after its last key (the next plan starts then)."""
     check_alarm()
     INBOX.mkdir(parents=True, exist_ok=True)
     plan_id = f"{time.strftime('%H%M%S')}_{name}_{uuid.uuid4().hex[:4]}"
@@ -51,6 +53,8 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     if crop:
         capture["crop"] = [int(v) for v in crop]
     plan = {"events": [list(e) for e in events], "capture": capture, "focus": focus}
+    if end_ms is not None:
+        plan["end_ms"] = end_ms
     tmp = INBOX / f"{plan_id}.tmp"
     tmp.write_text(json.dumps(plan), encoding="utf-8")
     tmp.replace(INBOX / f"{plan_id}.json")
@@ -61,9 +65,16 @@ def done(plan_id: str) -> bool:
     return (OUTBOX / f"{plan_id}.json").exists()
 
 
-def cancel(plan_id: str) -> None:
-    """Cut a running plan short: the player stops pressing and lets go of every key it holds."""
-    (INBOX / f"{plan_id}.cancel").touch()
+def cancel(plan_id: str) -> bool:
+    """Cut a plan short: if the player hasn't picked it up it's withdrawn (returns True: no result
+    will come), else the player stops pressing and lets go of every key it holds (wait for its
+    result as usual)."""
+    try:
+        (INBOX / f"{plan_id}.json").unlink()  # the player renames plans it takes, so it's not started
+        return True
+    except FileNotFoundError:
+        (INBOX / f"{plan_id}.cancel").touch()
+        return False
 
 
 def wait(plan_id: str, timeout: float = 120) -> dict:

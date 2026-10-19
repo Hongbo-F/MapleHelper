@@ -13,11 +13,11 @@ predict well enough (climbing down a rope, which needs her lined up on its top) 
 navigator does those on their own, closed loop.
 
 Monsters: she doesn't fight while travelling. Each leg's runs on the ground are checked against the
-monsters seen, which may walk along their platform (in the direction they were seen going, else
-either way) at up to their walking speed. The chain stops before a leg one of them could get in the
-way of; the navigator then routes around it or waits for it to move off. Jumping over them doesn't
-work here: by the game data a pig is 67 units wide and 46 tall, and her jump stays above 46 units
-for only ~52 units of travel.
+monsters seen: where they're walking to (from two looks), or anywhere they could get at their
+walking speed when only one look caught them. A monster in the way of a run is hopped over: a
+running jump timed so the top of the jump is over where it will most likely be, landing on the same
+platform clear of it, as a player does. Where that can't be timed (too close, no room to land), the
+chain stops before that leg and the navigator waits or goes another way.
 
 All positions in map units, times in seconds from the start of the plan.
 """
@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from maplehelper.engine import LEFT, RIGHT
 
 from .mapdata import MapModel, Platform
-from .route import CLIMB_SPEED, GRAVITY, JUMP_FROM, JUMP_SPEED, LAND_MARGIN, WALK_SPEED, Move, fly
+from .route import GRAVITY, JUMP_FROM, JUMP_SPEED, LAND_MARGIN, WALK_SPEED, Move, fly
 
 # Measured on platform 34 with the camera fixed (map edge), 60 fps: from standing, holding an arrow
 # puts her at 148.5 (t - 0.12) units after t s; a jump lifts off 55 ms after the key; after the arrow
@@ -43,22 +43,36 @@ STOP_RUN = 27.0      # units she goes on after the arrow is released at full spe
 STOP_S = 0.3         # ... until she stands still
 AFTER_LANDING = 0.03  # s after a predicted landing before the next jump key (in the air it's ignored)
 SLACK_PER_LEG = 0.025  # s of timing error each predicted landing may add
+MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only makes her sluggish)
 TAP = 0.04           # s a jump/down tap is held
 LAND_SLIDE = 13.0    # units she slides on landing with no arrow held
 MIN_RUNUP = 15.0     # units of run before a running jump from standing
-ROPE_CLEAR = 30      # drop at least this far from a rope hanging below
+ROPE_CLEAR = 30      # drop at least this far from the top of a rope hanging from her platform
 GRAB_LEAD = WALK_SPEED * JUMP_SPEED / GRAVITY  # ~41: jump this far before a rope to be at the top over it
 APEX = JUMP_SPEED ** 2 / (2 * GRAVITY)         # 77 units
-ONTO_TOP = 0.45      # s to climb from a rope's top onto the platform (with some margin)
+# Two climbs traced on the minimap (60 fps): from grabbing the rope to standing on the platform at its
+# top she covers the distance at an effective 130 units/s, the step onto the platform included
+# (predicted 2.64 s and 5.20 s, seen 2.61 s and 5.09 s; a third: 4.49 s, seen 4.41 s). Up is let go a
+# while past the predicted top. Climbing over the top is an animation: with the next arrow already
+# held from just before the top (it does nothing on a rope), she walked off ~0.34 s after arriving;
+# with the arrow pressed after arriving, only ~0.4 s after the press. Jumping off the rope sideways
+# just below the top doesn't help: it has next to no lift (she fell 360 units). So the next move's
+# arrow goes down just before the top, and she's modelled as starting to run 0.35 s after it.
+ROPE_SPEED = 130.0
+UP_EXTRA = 0.35
+CLIMB_OVER = 0.23    # her body after a climb: a standing start this long after the top (+ RUN_LAG = 0.35)
+PRE_ARROW = 0.1      # s before the predicted top that the next move's arrow is pressed
 HER_HALF = 15        # half her body's width
+APEX_T = JUMP_SPEED / GRAVITY  # s from leaving the ground to the top of a jump (0.28)
 MAX_LEGS = 5
-MAX_SECONDS = 6.0
+MAX_SECONDS = 3.5    # a chain this long gets a fresh look before the next one
 
 # Walking speeds (map units/s), from each monster's speed stat in the game data (pig and Orange
 # Mushroom 0, slime -20, snail -65) applied to a base of 70; an upper bound for where they can get.
 MONSTER_SPEED = {"pig": 70.0, "orange-mushroom": 70.0, "slime": 56.0, "snail": 25.0}
 # Half their body width (map units), from the lt/rb of their sprites in the game data.
 MONSTER_HALF = {"pig": 34.0, "orange-mushroom": 32.0, "slime": 28.0, "snail": 19.0}
+MONSTER_HEIGHT = {"pig": 46.0, "orange-mushroom": 55.0, "slime": 41.0, "snail": 26.0}
 TURN_SLACK = 25      # units a monster seen walking one way may still come back (they turn now and then)
 
 
@@ -71,6 +85,7 @@ class Body:
     run: int = 0          # running that way at full speed with the arrow held (+1 right, -1 left), or 0
     landed: bool = False  # she touches down at t (the next jump/drop key must come after that)
     slack: float = 0.0    # how far off t may be by now (prediction errors add up leg by leg)
+    early_arrow: float | None = None  # after a climb: the next arrow may go down this early
 
 
 @dataclass(frozen=True)
@@ -98,17 +113,30 @@ class Leg:
 
 @dataclass(frozen=True)
 class Monster:
-    """A monster seen on a platform: where it is (map x), how fast it can walk, which way it was
-    seen walking (+1/-1, or 0 if unknown) and half its body width."""
+    """A monster seen on a platform: where it was (map x) at plan time `seen` (negative: before the
+    plan starts), how fast it can walk, which way it was seen walking (+1/-1, or 0 if unknown), its
+    measured velocity if two looks caught it, and half its body width."""
     platform: int
     x: float
     speed: float = 70.0
     heading: int = 0
     half: float = 34.0
+    vx: float | None = None
+    seen: float = 0.0
+    height: float = 46.0
+
+    def at(self, t: float, p: Platform) -> float:
+        """Where its centre most likely is at plan time t (walking on as it was, stopping at the ends)."""
+        x = self.x + (self.vx or 0.0) * max(0.0, t - self.seen)
+        return min(max(x, p.left + self.half), p.right - self.half)
 
     def reach(self, t: float, p: Platform) -> tuple[float, float]:
-        """Where its centre can be t s after it was seen (it never leaves its platform)."""
-        go = self.speed * t
+        """Where its centre can be at plan time t (it never leaves its platform)."""
+        dt = max(0.0, t - self.seen)
+        if self.vx is not None:  # seen walking: where it's heading, give or take a turn
+            c, spread = self.at(t, p), TURN_SLACK + 20.0 * dt
+            return max(p.left, c - spread), min(p.right, c + spread)
+        go = self.speed * dt
         lo = self.x - (go if self.heading <= 0 else min(go, TURN_SLACK))
         hi = self.x + (go if self.heading >= 0 else min(go, TURN_SLACK))
         return max(p.left, lo), min(p.right, hi)
@@ -138,13 +166,29 @@ class Keys:
         self.arrow = d
 
     def tap(self, t: float, key: str, hold: float = TAP) -> None:
-        self.events += [[_ms(t), self.names[key], "down"], [_ms(t + hold), self.names[key], "up"]]
+        self.hold(t, t + hold, key)
 
     def hold(self, t0: float, t1: float, key: str) -> None:
-        self.events += [[_ms(t0), self.names[key], "down"], [_ms(t1), self.names[key], "up"]]
+        self.events.append([_ms(t0), self.names[key], "hold", _ms(t1)])
 
     def sorted(self) -> list[list]:
-        return sorted(self.events, key=lambda e: (e[0], e[2] == "down"))
+        """The key events in time order. Overlapping holds of a key merge into one: a key pressed
+        again before an earlier hold of it ends stays down (otherwise the earlier release would let
+        go of the later hold: a second rope climb's up was released 4 ms after it was pressed)."""
+        out = [e for e in self.events if e[2] != "hold"]
+        holds: dict[str, list[list[int]]] = {}
+        for _, name, _, _ in (e for e in self.events if e[2] == "hold"):
+            holds.setdefault(name, [])
+        for e in sorted((e for e in self.events if e[2] == "hold"), key=lambda e: e[0]):
+            spans = holds[e[1]]
+            if spans and e[0] <= spans[-1][1] + 5:
+                spans[-1][1] = max(spans[-1][1], e[3])
+            else:
+                spans.append([e[0], e[3]])
+        for name, spans in holds.items():
+            for a, b in spans:
+                out += [[a, name, "down"], [b, name, "up"]]
+        return sorted(out, key=lambda e: (e[0], e[2] == "down"))
 
 
 def _ms(t: float) -> int:
@@ -188,7 +232,7 @@ class Flow:
     def press_jump(k: Keys, t_off: float, b: Body) -> float:
         """Press jump so she leaves the ground at t_off, or as soon after as she can: never before
         she has landed, since a press in the air is ignored. Returns when she leaves the ground."""
-        press = max(t_off - JUMP_LAG, b.t + (AFTER_LANDING + b.slack if b.landed else 0.0))
+        press = max(t_off - JUMP_LAG, b.t + (AFTER_LANDING + min(b.slack, MAX_SLACK) if b.landed else 0.0))
         k.tap(press, "jump")
         return press + JUMP_LAG
 
@@ -312,9 +356,8 @@ class Flow:
             return None
         a, below = b.platform, self.model.platform(m.dst)
         lo, hi = max(a.left, below.left) + LAND_MARGIN, min(a.right, below.right) - LAND_MARGIN
-        # Not next to a rope hanging below: falling past it with down held, she grabbed it.
-        ys = (a.y_at(m.x), below.y_at(m.x))
-        ropes = [r.x for r in self.model.ropes if r.top < ys[1] and r.bottom > ys[0]]
+        # Not at the top of a rope hanging from her platform: down there climbs onto the rope.
+        ropes = [r.x for r in self.model.ropes if abs(r.top - a.y_at(r.x)) < 15 and a.covers(r.x)]
         clear = [x for x in range(int(lo), int(hi) + 1, 2) if all(abs(x - rx) > ROPE_CLEAR for rx in ropes)]
         if not clear:
             return None
@@ -331,7 +374,7 @@ class Flow:
         land, lx, ta = fly(self.model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a)
         if land is None or land.id != m.dst:
             return None
-        t = max(t, b.t + (AFTER_LANDING + b.slack if b.landed else 0.0))
+        t = max(t, b.t + (AFTER_LANDING + min(b.slack, MAX_SLACK) if b.landed else 0.0))
         k.hold(t, t + 0.18, "down")  # let go as soon as the drop has started
         k.tap(t + 0.1, "jump")
         t_off = t + 0.1 + DROP_LAG
@@ -362,10 +405,9 @@ class Flow:
             t_rope = t + GRAB_LEAD / WALK_SPEED
             grab_h = APEX
             k.set_arrow(t_rope + 0.12, 0)
-        climb = max(0.0, (a.y_at(rx) - grab_h) - m.rope_top) / CLIMB_SPEED
-        t_top = t_rope + climb + ONTO_TOP
-        k.hold(t, t_top, "up")
-        return Leg(m, b, Body(t_top + 0.05, rx, top, 0, False, b.slack + SLACK_PER_LEG),
+        t_top = t_rope + max(0.0, (a.y_at(rx) - grab_h) - m.rope_top) / ROPE_SPEED
+        k.hold(t, t_top + UP_EXTRA, "up")
+        return Leg(m, b, Body(t_top + CLIMB_OVER, rx, top, 0, False, b.slack + SLACK_PER_LEG, t_top - PRE_ARROW),
                    [Span(a.id, b.t, t, b.x, ran_to)])
 
     def _stop_within(self, b: Body, lo: float, hi: float, prefer: float, k: Keys) -> tuple[float, float] | None:
@@ -435,6 +477,74 @@ class Flow:
                     t += 0.05
         return None
 
+    # --- hopping over monsters ------------------------------------------------------------------
+
+    def hop(self, b: Body, mo: Monster, d: int, k: Keys) -> Leg | None:
+        """A running jump over a monster in her way on her platform, landing on the same platform.
+
+        By the body sizes in the game data her jump can't clear a pig or slime outright (only a
+        snail): timed with the top of the jump over them, 6 of 8 hops over slimes walking at her
+        touched them (4 for damage, 2 MISS). So the jump is timed so she can't touch it on the way
+        up: she leaves the ground just outside its reach plus the distance it takes her to climb to
+        its height. Any contact then comes past its middle on the way down, where the knockback (away
+        from the monster) pushes her on instead of back. Timed this way, 7 hops over monsters standing
+        or walking at her took no damage (4 touches were MISS: she's a thief, with high evasion)."""
+        a = b.platform
+        if mo.platform != a.id or not d:
+            return None
+        if mo.vx is not None and mo.vx * d > 10:
+            # Walking away from her, she closes on it at only ~80 units/s: she comes down short of
+            # its middle and gets pushed back (2 of 3 such hops took damage, one pushed back 33 units).
+            return None
+
+        def her_x(t: float) -> float:
+            lag = 0.0 if b.run == d else RUN_LAG + (TURN_EXTRA if b.run == -d else 0.0)
+            return b.x + d * WALK_SPEED * max(0.0, t - b.t - lag)
+
+        closing = WALK_SPEED + max(0.0, -(mo.vx or 0.0) * d)  # how fast the gap shrinks
+        disc = JUMP_SPEED ** 2 - 2 * GRAVITY * mo.height
+        rise = (JUMP_SPEED - disc ** 0.5) / GRAVITY if disc > 0 else APEX_T  # s to clear its height
+        gap = mo.half + HER_HALF + closing * rise + 3   # distance to its middle at takeoff
+        t = b.t
+        while t < b.t + 3.0 and (mo.at(t, a) - her_x(t)) * d > gap:
+            t += 0.01
+        if t >= b.t + 3.0:
+            return None  # it keeps ahead of her
+        earliest = b.t + (AFTER_LANDING + min(b.slack, MAX_SLACK) if b.landed else 0.0) + JUMP_LAG
+        if t < earliest or (mo.at(t, a) - her_x(t)) * d < gap - 15:
+            return None  # already too close to time it
+        x_off = her_x(t)
+        if not a.covers(x_off, -5):
+            return None
+        land, lx, ta = fly(self.model, x_off, a.y_at(x_off), d * WALK_SPEED, -JUMP_SPEED)
+        if land is not a or (lx - mo.at(t + ta, a)) * d < 0:
+            return None  # off the platform, or she'd come down short of it
+        k.set_arrow(b.t, d)
+        t_off = self.press_jump(k, t, b)
+        move = Move("hop", a.id, a.id, x_off, lx, RIGHT if d > 0 else LEFT)
+        return Leg(move, b, Body(t_off + ta, lx, a, d, True, b.slack + SLACK_PER_LEG), [Span(a.id, b.t, t_off, b.x, x_off)])
+
+    def _hop_then(self, m: Move, b: Body, k: Keys, variant: str, monsters: list[Monster],
+                  linger: float) -> tuple[Leg, Leg, Keys] | None:
+        """The move done with a hop over the monster in the way of its run, if that works out."""
+        trial = k.copy()
+        leg = self.leg(m, b, trial, variant)
+        hit = None if leg is None else self.danger(leg, monsters, linger)
+        if hit is None:
+            return None
+        mo, t_hit = hit
+        span = next((sp for sp in leg.spans if sp.platform == mo.platform and sp.t0 - 1e-6 <= t_hit <= sp.t1 + 1e-6), None)
+        d = 0 if span is None or abs(span.x1 - span.x0) < 1 else (1 if span.x1 > span.x0 else -1)
+        hk = k.copy()
+        jump = self.hop(b, mo, d, hk)
+        others = [o for o in monsters if o is not mo]  # it's behind her once she's over it
+        if jump is None or self.danger(jump, others):
+            return None
+        after = self.leg(m, jump.end, hk, variant)
+        if after is None or self.danger(after, others, linger):
+            return None
+        return jump, after, hk
+
     # --- following a chain ---------------------------------------------------------------------
 
     @staticmethod
@@ -443,11 +553,11 @@ class Flow:
         the air, on a rope, or within a moment of a takeoff or landing."""
         margin = 0.12
         for i, leg in enumerate(legs):
-            m0 = margin + leg.start.slack  # timings drift as the chain goes on
+            m0 = margin + min(leg.start.slack, 2 * MAX_SLACK)  # timings drift as the chain goes on
             for sp in leg.spans:
                 if sp.t0 + m0 <= t <= sp.t1 - m0:
                     return sp.platform
-            m1 = margin + leg.end.slack
+            m1 = margin + min(leg.end.slack, 2 * MAX_SLACK)
             nxt = legs[i + 1].spans[0].t0 if i + 1 < len(legs) and legs[i + 1].spans else None
             if leg.end.t + m1 <= t and (nxt is None or t <= nxt - m1) and leg.end.landed:
                 return leg.end.platform.id
@@ -457,11 +567,14 @@ class Flow:
 
     # --- chains ----------------------------------------------------------------------------------
 
-    def chain(self, moves: list[Move], start: Body, monsters=()) -> tuple[list[Leg], Keys, str]:
+    def chain(self, moves: list[Move], start: Body, monsters=(), keep_going: bool = False,
+              hops: bool = True) -> tuple[list[Leg], Keys, str]:
         """As many of `moves` as can be done in one go from `start`: their legs, the keys, and why
         the chain stopped ('done', 'unpredictable', 'monster' or 'long'). Each move is done the way
-        (variant) the next move can follow on from; the chain stops at a move it can't predict, and
-        before a leg a monster could get in the way of."""
+        (variant) the next move can follow on from. A monster in the way of a run is hopped over
+        (`hops`); the chain stops before a leg one could still get in the way of, and at a move it
+        can't predict. With `keep_going`, a chain cut off for length doesn't stop her at its end:
+        the next chain carries on from there."""
         k, legs, b, why = Keys(self.key_names), [], start, "done"
         monsters = list(monsters)
         for i, m in enumerate(moves):
@@ -477,6 +590,13 @@ class Flow:
                 if leg is not None and not self.danger(leg, monsters, linger=1.0 if nxt is None else 0.0):
                     options.append((leg, trial))
             if not options:
+                linger = 1.0 if nxt is None else 0.0
+                hopped = next((h for v in order if hops for h in [self._hop_then(m, b, k, v, monsters, linger)] if h), None)
+                if hopped:
+                    jump, leg, k = hopped
+                    legs += [jump, leg]
+                    b = leg.end
+                    continue
                 why = "monster" if any(self.leg(m, b, k.copy(), v) for v in order) else "unpredictable"
                 break
 
@@ -484,8 +604,14 @@ class Flow:
                 return nxt is None or any(self.leg(nxt, leg.end, Keys(self.key_names), v) for v in self.VARIANTS)
 
             leg, trial = next(((lg, tr) for lg, tr in options if follows(lg)), options[0])
+            if b.early_arrow is not None:  # just climbed: hold the arrow through the climb-over
+                at = _ms(b.t)
+                for e in trial.events:
+                    if e[0] == at and e[2] == "down" and e[1] in (self.key_names[LEFT], self.key_names[RIGHT]):
+                        e[0] = _ms(b.early_arrow)
+                        break
             legs.append(leg)
             k, b = trial, leg.end
-        if legs:
+        if legs and not (keep_going and why == "long"):
             k.set_arrow(b.t, 0)  # stop at the end (she slides a little)
         return legs, k, why

@@ -120,6 +120,15 @@ class MobDetector:
                     hits.append(Mob(kind, x, y_off + y, w, h, round(score, 3)))
         return _suppress(hits)
 
+    def detect_wide(self, frame: np.ndarray, rows: tuple[int, int], band: int = 120, step: int = 90) -> list[Mob]:
+        """Monsters over a tall stretch of the frame, band by band. Over the whole screen, green
+        foliage took all of the slime candidate spots and three slimes in plain view were missed;
+        each band gets its own best spots."""
+        hits = []
+        for y0 in range(rows[0], max(rows[0] + 1, rows[1] - band + step), step):
+            hits += self.detect(frame, rows=(y0, min(rows[1], y0 + band)))
+        return _suppress(hits)
+
     @staticmethod
     def _check(frame, template, cx: int, cy: int, slack: int = 6):
         """Masked colour match of one template centred near (cx, cy): (score, x, y, w, h)."""

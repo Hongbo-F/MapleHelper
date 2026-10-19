@@ -189,6 +189,18 @@ def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: floa
     return None
 
 
+def touch_popup(frame: np.ndarray, her: tuple[int, int]) -> int:
+    """Purple pixels above her head (half-size frame): the "MISS" a thief's evasion shows when a monster
+    touches her without damage, and the numbers of damage she takes, are both purple, and nothing
+    else on screen is. A count of 40+ means a monster touched her."""
+    x, y = her
+    box = frame[max(0, y - 120):max(0, y - 15), max(0, x - 70):x + 70].astype(np.int16)
+    if box.size == 0:
+        return 0
+    r, g, b = box[..., 0], box[..., 1], box[..., 2]
+    return int(((r > 120) & (b > 150) & (g < 110) & (b - g > 80) & (r - g > 50)).sum())
+
+
 def rope_x(where: Where, s: Sight, model: MapModel) -> float | None:
     """Her x from ropes in view: each is drawn exactly at its map x, and detected to ~2 px."""
     if s.her is None or not s.ropes:
@@ -476,7 +488,10 @@ class Hunter:
                 s.her, s.seen = (round(sx / SCALE), round(sy / SCALE) + 8), False
                 s.ground = ground_extent(s.frame, s.her[0], s.her[1] - 8)
         if mobs and s.her is not None and s.where is not None:
-            s.mobs = self.eyes.detect(s, up=2000, down=2000) if wide else self.eyes.detect(s)
+            if wide:
+                s.mobs = self.eyes.detector.detect_wide(s.frame, (0, int(s.frame.shape[0] * 0.88)))
+            else:
+                s.mobs = self.eyes.detect(s)
             s.targets = [s.place(m, self.model) for m in s.mobs]
         if self._exp is not None and s.exp is not None and s.exp.shape == self._exp.shape                 and int((s.exp != self._exp).sum()) >= 3:
             self.exp_events.append(s.t)
