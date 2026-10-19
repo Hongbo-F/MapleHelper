@@ -168,6 +168,62 @@ def cmd_do(args) -> int:
     return 0
 
 
+def _annotate(sight, path) -> None:
+    from PIL import ImageDraw
+    img = Image.fromarray(sight.frame)
+    d = ImageDraw.Draw(img)
+    if sight.her:
+        x, y = sight.her
+        d.rectangle([x - 20, y - 40, x + 20, y + 6], outline="cyan", width=2)
+        d.line([0, sight.floor_y, img.width, sight.floor_y], fill="cyan")
+        if sight.ground:
+            d.line([sight.ground[0], sight.floor_y + 3, sight.ground[1], sight.floor_y + 3], fill="lime", width=3)
+    for m in sight.mobs:
+        on = m in sight.on_floor()
+        d.rectangle([m.x - m.w // 2, m.y - m.h // 2, m.x + m.w // 2, m.y + m.h // 2],
+                    outline="red" if on else "orange", width=2)
+        d.text((m.x - m.w // 2, m.y - m.h // 2 - 11), f"{m.kind} {m.score:.2f}", fill="red" if on else "orange")
+    d.text((8, img.height - 70), f"HP {sight.hp:.0%}  MP {sight.mp:.0%}", fill="white")
+    img.save(path)
+
+
+def cmd_hunt(args) -> int:
+    from .hunt import Eyes, Hunter
+    cfg, keys, timing = her_setup()
+    eyes = Eyes(cfg.game_window_title, calibration.load().template)
+    if args.mode == "look":
+        sight = eyes.look()
+        her = f"at {sight.her}" if sight.her else "NOT FOUND"
+        print(f"her: {her}; HP {sight.hp:.0%}, MP {sight.mp:.0%}; room to walk: "
+              f"{sight.room('left'):.0f} px left, {sight.room('right'):.0f} px right")
+        for m in sight.mobs:
+            where = "on her floor" if m in sight.on_floor() else "elsewhere"
+            dx = f"{sight.game_dx(m.x):+.0f} px" if sight.her else "?"
+            print(f"  {m.kind} {dx} ({where}, score {m.score})")
+        _annotate(sight, LAB / "hunt_look.png")
+        print(LAB / "hunt_look.png")
+        return 0
+    kinds = set(args.kinds.split(",")) if args.kinds else None
+    hunter = Hunter(eyes, keys, timing, low_hp=args.low_hp, potion_hp=args.potion_hp,
+                    log=lambda s: print(time.strftime("%H:%M:%S"), s, flush=True))
+    window.bring_to_front(cfg.game_window_title)
+    if args.mode == "kill":
+        sight = eyes.look()
+        targets = sight.on_floor(kinds)
+        if sight.her is None or not targets:
+            print("no target on her floor" if sight.her else "can't see her")
+            return 1
+        near = args.near if args.near is not None else 0
+        target = min(targets, key=lambda m: abs(sight.game_dx(m.x) - near))
+        hunter.report.stop = hunter.kill(target, sight, seconds=args.seconds)
+    else:
+        hunter.clear_floor(kinds, max_kills=args.kills, seconds=args.seconds, span=args.span)
+    final = eyes.look()
+    _annotate(final, LAB / "hunt_end.png")
+    print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}")
+    return 0
+
+
 def cmd_lock(args) -> int:
     """Press an attack, then jump `d` ms later: from when does the game accept the jump again?"""
     cfg, keys, _ = her_setup()
@@ -318,6 +374,18 @@ def main(argv=None) -> int:
     s.add_argument("--every", type=int, default=4)
     s.set_defaults(func=cmd_do)
 
+    s = sub.add_parser("hunt", help="hunting objectives that run on their own (see gamelab/hunt.py)")
+    s.add_argument("mode", choices=["look", "kill", "clear"],
+                   help="look: what she sees now; kill: one monster; clear: her floor, nearest first")
+    s.add_argument("--kinds", help="only these monsters, e.g. slime,pig")
+    s.add_argument("--near", type=float, help="kill: the target closest to this many px from her (+ = right)")
+    s.add_argument("--kills", type=int, default=6, help="clear: stop after this many kills")
+    s.add_argument("--seconds", type=float, default=120, help="stop after this long")
+    s.add_argument("--span", type=float, default=900, help="clear: stay within this many px of the start")
+    s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
+    s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
+    s.set_defaults(func=cmd_hunt)
+
     s = sub.add_parser("lock", help="measure how long an attack blocks the next jump")
     s.add_argument("action", choices=["attack", "lucky_seven"])
     s.add_argument("delays", type=int, nargs="+", help="ms after the attack key to press jump")
@@ -351,6 +419,9 @@ def main(argv=None) -> int:
     sub.add_parser("list", help="list saved recordings").set_defaults(func=cmd_list)
 
     args = p.parse_args(argv)
+    # Real pixels for window positions and screen captures, whatever the display scaling is set to.
+    from maplehelper.win32 import enable_dpi_awareness
+    enable_dpi_awareness()
     try:
         if args.cmd in GAME_COMMANDS:
             client.check_alarm()
@@ -365,7 +436,7 @@ def main(argv=None) -> int:
 
 
 # Commands that bring the game to the front or send it input; refused while the alarm is set.
-GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo"}
+GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt"}
 LIE_DETECTOR_EXIT = 3
 
 

@@ -3,7 +3,7 @@
 import ctypes
 from ctypes import wintypes
 
-from maplehelper.win32 import foreground_title, kernel32, user32
+from maplehelper.win32 import foreground_title, kernel32, user32  # noqa: F401  (foreground_title re-exported)
 
 user32.FindWindowW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR)
 user32.FindWindowW.restype = wintypes.HWND

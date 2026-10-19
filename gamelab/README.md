@@ -54,6 +54,9 @@ Other commands (`python -m gamelab -h` lists them all):
 | `do walk left 150`, `do climb_rope 300`, `do pick_up 2`, `do rest 40` | Run one move from `maplehelper/actions.py` in the game, recorded |
 | `act right*800 alt 500 @960,540 --record` | Ad-hoc steps: `KEY` tap, `KEY*MS` hold, `KEY+`/`KEY-` press/release, `MS` wait, `@X,Y` move the mouse |
 | `track RECORDING` | Her path through a recording: position, height, world x, jumps |
+| `hunt look` | What she sees now: her position, HP/MP, room to walk on her platform, monsters on her floor (annotated `lab/hunt_look.png`); sends no keys |
+| `hunt clear --kinds slime,pig --kills 6` | Objective: kill the monsters on her floor, nearest first, looting each kill right away |
+| `hunt kill --near -200` | Objective: kill one monster (the one closest to that offset) and loot it |
 | `spot`, `spot --image FILE` | Whether the Lie Detector is on screen now (or in a screenshot); sends no keys |
 | `clear-alarm` | After you've answered a Lie Detector yourself: lets gamelab run again |
 | `lock attack 700 740 780` | Whether a jump that many ms after an attack goes through |
@@ -62,11 +65,30 @@ Other commands (`python -m gamelab -h` lists them all):
 | `check RECORDING` | Whether keys went out on time, and whether the game kept a steady frame rate |
 | `list` | Saved recordings |
 
+## Hunting objectives
+
+`hunt` takes an objective and makes the small decisions itself, looking at the game about 8 times a second. Screen capture needs no admin rights, so only the keys go through the player.
+
+| Piece | Does |
+|---|---|
+| `mobs.py` | Finds snails, slimes and pigs. It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates (`assets/mobs/`, cut from screenshots). About 350 ms per look. |
+| `hunt.py` | `Eyes`: finds her (name tag at full resolution), the monsters on her floor, the edges of her platform, HP/MP from the bar colours, and camera scroll. `Hunter`: the objectives. |
+
+What an objective does on its own:
+- **Range:** keeps the target 110–330 px away, faces it, and throws Lucky Seven.
+- **Spacing:** steps away from any monster within 90 px, unless that walks into another one or off her platform.
+- **Edges:** never walks off her platform, and skips targets she can't reach from it.
+- **Loot:** sweeps each kill's drops right away, pressing pick-up while walking over them. Drops with a monster on them are queued for after a later kill.
+- **Health:** drinks an HP potion below `--potion-hp`, and hands control back below `--low-hp`.
+
+Kills are counted when the target stays unseen for about 1.2 s. Checked against EXP, this is close to exact.
+
 ## Limits
 
 - **Recalibrate** after moving the game window, changing maps or changing resolution. Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name.
 - **It sees the screen only after each step,** so it can't react to monsters in real time. Monsters that bump into her knock her off ropes and swallow key presses.
 - **Heights are screen-based,** so they read low when the camera scrolls up with her.
+- **`hunt` needs a 1920×1080 game window,** the size its templates were made at. It knows only snails, slimes and pigs so far. It doesn't navigate between floors (ropes, ledges): that's still the decider's job, with `do` and `act`.
 - **Camera correction needs ground with a pattern** under her, like a girder or tiles. Plain ground can't be tracked.
 - **Swing detection is tuned to the claw's white/lavender swing effect.** Other weapons or skills may need `SWING_MIN_PIXELS` in `track.py` adjusted.
 - **Lucky Seven costs about 7 MP per cast.** A 32-shot test uses about 220 MP. Use `--regular-attack` for long runs.
