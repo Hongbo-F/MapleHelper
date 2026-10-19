@@ -1,0 +1,177 @@
+"""Where to stand to shoot a platform's monsters: the spots on other platforms that have the most of it
+in reach, and of those, one she can stand on safely and get to quickly.
+
+A spot is good to stand on (`spot_ok`) when no monster can touch her there (MapModel.safe), or only
+ones not worth hunting can (the snails on 3, 20 and 22: those she shoots when they come close). Of the
+spots about as good as the best, she takes the nearest: coming up from the basin she shoots 21, 18 and
+12 from the platforms below them, and from above she shoots down (it used to be the one above every
+time).
+
+`spots` lists the places to shoot a platform from; `spot` picks one for her where she is, `spot_for`
+one that reaches more of the monsters still there, and `spot_at` one for planning a sweep.
+"""
+
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+
+import numpy as np
+
+from ..localization.mapdata import MONSTER_REACH, MapModel, Platform
+from ..localization.monsters import Monster
+from ..localization.pose import Where
+from ..motion.physics import WALK_SPEED
+from ..perception.sprites import kind_of
+from .reach import EDGE_MARGIN, SHOT_DOWN, SHOT_RANGE, SHOT_UP, can_shoot, min_dx
+
+MIN_COVERAGE = 0.3   # shoot from another platform only if this much of the hunting platform is in reach
+NEAR_BEST = 0.7      # spots reaching at least this share of the best one's count as good: the nearest wins
+X_STEP = 10          # map units between the places along a platform tried as spots
+UNREACHABLE = 1e6    # s: what a spot with no route to it costs
+
+Travel = Callable[[int, float, int], float | None]  # seconds from (platform, x) to a platform, None: no route
+
+
+@dataclass(frozen=True)
+class Spot:
+    """Where to stand to shoot at a platform: on `platform` at map x `x`."""
+    platform: int
+    x: float
+    coverage: float   # fraction of the target platform's length in reach from there
+    safe: bool        # spots: no monster can reach her on that platform (MapModel.safe). spot, spot_for:
+                      # True for a spot off the target platform (one spot_ok allows), False for the
+                      # middle of the target platform itself (which spot gives coverage 1.0)
+
+
+def coverage(target: Platform, x: float, y: float) -> float:
+    """Fraction of `target` in reach of a star thrown from (x, y), either way."""
+    dy = target.y_at(min(max(x, target.left), target.right)) - y
+    if not -SHOT_UP <= dy <= SHOT_DOWN:
+        return 0.0
+    covered, near = 0.0, min_dx(dy)
+    for lo, hi in ((x - SHOT_RANGE, x - near), (x + near, x + SHOT_RANGE)):
+        covered += max(0.0, min(hi, target.right) - max(lo, target.left))
+    return covered / max(1.0, target.right - target.left)
+
+
+def _stand_xs(lo: float, hi: float) -> list[float]:
+    """The map x from `lo` to `hi` to try standing at: every X_STEP units (the 0.1 keeps `hi` in)."""
+    return [float(x) for x in np.arange(lo, hi + 0.1, X_STEP)]
+
+
+def spots(model: MapModel, target: int) -> list[Spot]:
+    """Places to shoot platform `target` from, best first: safe ones (no spawns where she stands),
+    then by how much of the target platform is in reach."""
+    ground = model.platform(target)
+    out = []
+    for p in model.platforms:
+        lo, hi = p.left + EDGE_MARGIN, p.right - EDGE_MARGIN
+        if hi < lo:
+            continue
+        best = None  # (coverage, x): the first x of the best coverage on p
+        for x in _stand_xs(lo, hi):
+            c = coverage(ground, x, p.y_at(x))
+            if c > 0 and (best is None or c > best[0] + 1e-9):
+                best = (c, x)
+        if best:
+            out.append(Spot(p.id, best[1], round(best[0], 3), model.safe(p.id)))
+    return sorted(out, key=lambda s: (not s.safe, -s.coverage))
+
+
+def _runs_under(other: Platform, p: Platform) -> bool:
+    """Whether `other` runs under `p` within MONSTER_REACH, judged at the middle of their overlap (as
+    MapModel.safe judges it): monsters walking on `other` can touch her on `p`."""
+    lo, hi = max(p.left, other.left), min(p.right, other.right)
+    return lo < hi and 0 < other.y_at((lo + hi) / 2) - p.y_at((lo + hi) / 2) <= MONSTER_REACH
+
+
+def spot_ok(model: MapModel, platform: int, worth: set[str] | None) -> bool:
+    """Whether she can stand on `platform` to shoot from it: no monster can touch her there, or only
+    ones not worth hunting can (`worth`: the kinds that are; None: all are)."""
+    if model.safe(platform):
+        return True
+    if worth is None:
+        return False
+    p = model.platform(platform)
+    for q, names in model.monsters_by_platform.items():
+        other = model.platform(q)
+        if (q == platform or _runs_under(other, p)) and any(kind_of(n) in worth for n in names):
+            return False
+    return True
+
+
+def _standable(model: MapModel, pid: int, worth: set[str] | None) -> Iterator[Spot]:
+    """spots(model, pid) on other platforms that reach at least MIN_COVERAGE of `pid` and that she can
+    stand on (spot_ok), best first."""
+    return (sp for sp in spots(model, pid)
+            if sp.platform != pid and sp.coverage >= MIN_COVERAGE and spot_ok(model, sp.platform, worth))
+
+
+def _middle(model: MapModel, pid: int) -> float:
+    """The map x of the middle of platform `pid`."""
+    p = model.platform(pid)
+    return (p.left + p.right) / 2
+
+
+def spot(model: MapModel, pid: int, here: Where, travel: Travel, worth: set[str] | None,
+         on_it: bool = False) -> Spot:
+    """Where to shoot platform `pid` from, for her at `here`: a spot on another platform she can stand
+    on with enough of `pid` in reach; of those about as good as the best, the nearest to her. Else (or
+    if `on_it`) the middle of the platform itself."""
+    at = here.platform
+    good = [] if on_it else list(_standable(model, pid, worth))
+    if good:
+        best = max(sp.coverage for sp in good)
+
+        def cost(sp: Spot) -> float:
+            """Seconds to get to `sp` from `here` (UNREACHABLE: no route)."""
+            if at is None or sp.platform == at.id:
+                return abs(sp.x - here.x) / WALK_SPEED
+            t = travel(at.id, here.x, sp.platform)
+            return UNREACHABLE if t is None else t
+
+        sp = min((sp for sp in good if sp.coverage >= NEAR_BEST * best), key=cost)
+        if cost(sp) < UNREACHABLE:
+            return Spot(sp.platform, sp.x, sp.coverage, True)
+    return Spot(pid, _middle(model, pid), 1.0, False)
+
+
+def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here: Where, travel: Travel,
+             worth: set[str] | None) -> Spot | None:
+    """A spot off `pid`, on a platform she can stand on, that reaches more of the monsters `left` on it
+    than where she is (`current`), so she keeps shooting from safety instead of going down into the
+    pile. The one reaching the most, then the nearest. None if there's none, or she isn't on a
+    platform (no telling how far a spot is)."""
+
+    def reached(x: float, y: float) -> int:
+        return sum(can_shoot(t.x - x, t.y - y) for t in left)
+
+    cur = model.platform(current.platform)
+    now = reached(current.x, cur.y_at(current.x)) if current.platform != pid else 0
+    best = None  # (monsters reached, seconds to get there, platform, x)
+    for p in model.platforms:
+        if p.id == pid or not spot_ok(model, p.id, worth):
+            continue
+        for x in _stand_xs(p.left + EDGE_MARGIN, p.right - EDGE_MARGIN):
+            n = reached(x, p.y_at(x))
+            if n <= now or (best is not None and n < best[0]):
+                continue
+            if here.platform is None:
+                continue
+            t = (abs(x - here.x) / WALK_SPEED if p.id == here.platform.id
+                 else travel(here.platform.id, here.x, p.id))
+            if t is not None and (best is None or (n, -t) > (best[0], -best[1])):
+                best = (n, t, p.id, x)
+    if best is None:
+        return None
+    _, _, stand, x = best
+    ground, p = model.platform(pid), model.platform(stand)
+    return Spot(stand, x, round(coverage(ground, x, p.y_at(x)), 3), True)
+
+
+def spot_at(model: MapModel, pid: int, worth: set[str] | None) -> tuple[int, float]:
+    """Where she'll stand to hunt platform `pid` (for planning a sweep): the best spot she can stand on,
+    else its middle."""
+    sp = next(_standable(model, pid, worth), None)
+    if sp is not None:
+        return sp.platform, sp.x
+    return pid, _middle(model, pid)

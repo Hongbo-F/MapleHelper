@@ -1,37 +1,66 @@
-"""gamelab command line. Run `python -m gamelab -h`."""
+"""gamelab's command line (`python -m gamelab -h`): the key player, calibration, exploring and measuring
+moves with recordings, hunting, navigation and tours in the game, the mini-map, and the simulator.
+
+The top of the stack: it may import every layer. Only what many commands share (analysis, control and
+the shared modules) is imported up here; the other layers are imported by the commands that use them.
+"""
 
 import argparse
 import ctypes
+import random
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-from maplehelper.engine import LEFT, RIGHT
 from maplehelper.combos import COMBOS
+from maplehelper.engine import LEFT, RIGHT
 
-from . import analyze, calibration, client, window
+from . import paths, telemetry, window
+from .analysis import analyze, calibration, recordings
+from .analysis.track import airborne, track
+from .control import client
+from .control.timeline import action_events, chain, her_setup
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
-from .timeline import action_events, chain, her_setup
-from .track import airborne, track
+
+DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
+# Commands that bring the game to the front or send it input; refused while the alarm is set.
+GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
+LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command
+
+SW_SHOWMINNOACTIVE = 7  # ShellExecute: start the player minimized, not activated
+SHELL_ERRORS = {5: "the UAC prompt was declined", 2: "python not found", 3: "folder not found"}
+
+TAP_MS = 40             # a key tap: down, and up this much later
+SETTLE_S = 0.6          # rest between recorded runs (lock, combo)
+MOVES_BACK = {"jump_back_shot", "hop_back"}  # combos whose jumps must carry her away
+FACE_MS = 600  # each run first taps the arrow she should face, like her own last arrow press
+SHOT_BAND = 30          # `hunt shots` groups throws by the target's height in bands this tall (map units)
+# `sheet --around-her`: a box around her name tag (x, y from its top-left corner, width, height; she
+# stands above it), shown this many times larger.
+AROUND_HER = (-40, -60, 120, 80)
+AROUND_HER_ZOOM = 3
 
 
 def _game_title() -> str:
     return her_setup()[0].game_window_title
 
 
+# --- the player and the Lie Detector ---------------------------------------------------------------------
+
 def cmd_player(args) -> int:
     client.check_alarm()
     if not args.elevate:
-        from .player import serve
+        from .control.player import serve
         serve()
         return 0
     # ShellExecute "runas" shows the UAC prompt and starts `python -m gamelab player` elevated.
     rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "-X utf8 -m gamelab player",
-                                             str(REPO), 7)  # 7 = minimized, not activated
-    if rc <= 32:
-        reason = {5: "the UAC prompt was declined", 2: "python not found", 3: "folder not found"}.get(rc, "see ShellExecute docs")
+                                             str(REPO), SW_SHOWMINNOACTIVE)
+    if rc <= 32:  # ShellExecute's error codes
+        reason = SHELL_ERRORS.get(rc, "see ShellExecute docs")
         print(f"couldn't start the player as administrator: error {rc} ({reason})")
         return 1
     print(f"player starting as administrator; log: {PLAYER_LOG}")
@@ -52,7 +81,7 @@ def cmd_stop(args) -> int:
 
 
 def cmd_clear_alarm(args) -> int:
-    from .alarm import clear_alarm
+    from .control.alarm import clear_alarm
     info = clear_alarm()
     if info is None:
         print("no Lie Detector alarm is set")
@@ -64,7 +93,7 @@ def cmd_clear_alarm(args) -> int:
 
 def cmd_spot(args) -> int:
     """Check one image, or the game right now, for the Lie Detector (read-only, no keys)."""
-    from .alarm import LieDetectorSpotter
+    from .perception.lie_detector import LieDetectorSpotter
     if args.image:
         frame = np.asarray(Image.open(args.image).convert("RGB"))
     else:
@@ -80,6 +109,8 @@ def cmd_spot(args) -> int:
     return 0
 
 
+# --- calibrating, exploring, recording -------------------------------------------------------------------
+
 def cmd_calibrate(args) -> int:
     window.bring_to_front(_game_title())
     tag = tuple(int(v) for v in args.tag.split(",")) if args.tag else None
@@ -91,14 +122,14 @@ def cmd_calibrate(args) -> int:
 
 def cmd_snap(args) -> int:
     window.bring_to_front(_game_title())
-    frame = client.submit(fps=10, duration_ms=200, scale=args.scale, lead_ms=0, name="snap")["frames"][-1]
+    frame = recordings.screenshot("snap", scale=args.scale)
     path = LAB / "snap.png"
     Image.fromarray(frame).save(path)
     print(path)
     return 0
 
 
-def parse_steps(steps: list[str], tap_ms: int = 40) -> tuple[list, int]:
+def parse_steps(steps: list[str], tap_ms: int = TAP_MS) -> tuple[list, int]:
     """Explore-step mini language -> (plan events, end ms).
 
     KEY       tap the key          KEY*MS   hold it MS ms        KEY+ / KEY-   press / release
@@ -122,6 +153,11 @@ def parse_steps(steps: list[str], tap_ms: int = 40) -> tuple[list, int]:
     return events, t
 
 
+def _tap(key: str, at_ms: int) -> list[list]:
+    """Plan events that tap `key` at `at_ms`."""
+    return [[at_ms, key, "down"], [at_ms + TAP_MS, key, "up"]]
+
+
 def cmd_act(args) -> int:
     """Run a few explore steps, then save a screenshot (and optionally a recording around her)."""
     window.bring_to_front(_game_title())
@@ -129,13 +165,12 @@ def cmd_act(args) -> int:
     duration = end + args.settle
     if args.record:
         cal = calibration.load()
-        rec = client.record(events, name=args.name, duration_ms=duration, crop=cal.crop, scale=cal.scale, fps=30)
+        rec = recordings.record(events, name=args.name, duration_ms=duration, crop=cal.crop, scale=cal.scale, fps=30)
         path = LAB / f"{args.name}_sheet.png"
-        client.contact_sheet(rec.frames, rec.times, path, cols=8, every=args.every)
+        recordings.contact_sheet(rec.frames, rec.times, path, cols=8, every=args.every)
         print(path)
-    if args.record:  # the steps already ran: just take the screenshot
-        frame = client.submit(fps=10, duration_ms=100, scale=args.scale, lead_ms=0, name="act")["frames"][-1]
-    else:  # a few full-size frames while the steps run; only the last is kept
+        frame = recordings.screenshot("act", scale=args.scale, duration_ms=100)  # the steps already ran
+    else:  # a few full-size frames while the steps run (~9 over the run, 2-10 fps); only the last is kept
         fps = max(2, min(10, int(9000 / (duration + 100))))
         frame = client.submit(events, fps=fps, duration_ms=max(duration, 200), scale=args.scale, lead_ms=0,
                               name="act")["frames"][-1]
@@ -148,6 +183,8 @@ def cmd_act(args) -> int:
 def cmd_do(args) -> int:
     """Run one maplehelper.actions move in the game, recording it, then screenshot."""
     from maplehelper.actions import ACTIONS
+
+    from .control.player import MAX_PLAN_MS
     fn, converters = ACTIONS[args.action]
     if len(args.args) > len(converters):
         print(f"{args.action} takes at most {len(converters)} argument(s)")
@@ -155,83 +192,93 @@ def cmd_do(args) -> int:
     values = [conv(v) for conv, v in zip(converters, args.args)]
     cfg, keys, timing = her_setup()
     events, end = action_events(fn, values, args.facing, keys, timing)
-    if events and events[-1][0] > 20_000:
-        print(f"{args.action} would take {events[-1][0] / 1000:.0f} s; gamelab plans are capped at 20 s")
+    if events and events[-1][0] > MAX_PLAN_MS:
+        print(f"{args.action} would take {events[-1][0] / 1000:.0f} s; "
+              f"gamelab plans are capped at {MAX_PLAN_MS // 1000} s")
         return 1
     window.bring_to_front(cfg.game_window_title)
     cal = calibration.load()
-    rec = client.record(events, name=args.name, duration_ms=end + 400, crop=cal.crop, scale=cal.scale, fps=30)
-    client.contact_sheet(rec.frames, rec.times, LAB / f"{args.name}_sheet.png", cols=8, every=args.every)
-    frame = client.submit(fps=10, duration_ms=100, scale=2, lead_ms=0, name="do")["frames"][-1]
-    Image.fromarray(frame).save(LAB / f"{args.name}.png")
+    rec = recordings.record(events, name=args.name, duration_ms=end + 400, crop=cal.crop, scale=cal.scale, fps=30)
+    recordings.contact_sheet(rec.frames, rec.times, LAB / f"{args.name}_sheet.png", cols=8, every=args.every)
+    path = LAB / f"{args.name}.png"
+    Image.fromarray(recordings.screenshot("do", scale=2, duration_ms=100)).save(path)
     print(f"{args.action}{tuple(values)}: {len(events)} key events, {end} ms; "
-          f"saved {LAB / (args.name + '.png')} and recording '{args.name}'")
+          f"saved {path} and recording '{args.name}'")
     return 0
 
 
-def _annotate(sight, path) -> None:
+# --- hunting, the map, navigation, tours -----------------------------------------------------------------
+
+def _box(thing) -> list:
+    """[left, top, right, bottom] of something seen on screen, from its centre (x, y) and size (w, h)."""
+    return [thing.x - thing.w // 2, thing.y - thing.h // 2, thing.x + thing.w // 2, thing.y + thing.h // 2]
+
+
+def _annotate(scene, path) -> None:
+    """Save a look's frame with what it found drawn on: her name tag and floor, the monsters (red on her
+    platform, orange elsewhere), the drops, and her HP and MP."""
     from PIL import ImageDraw
-    img = Image.fromarray(sight.frame)
+    img = Image.fromarray(scene.frame)
     d = ImageDraw.Draw(img)
-    if sight.her:
-        x, y = sight.her
-        colour = "cyan" if sight.seen else "magenta"  # magenta: placed from the minimap dot
+    if scene.tag:
+        x, y = scene.tag
+        colour = "cyan" if scene.tag_seen else "magenta"  # magenta: placed from the minimap dot
         d.rectangle([x - 20, y - 40, x + 20, y + 6], outline=colour, width=2)
-        d.line([0, sight.floor_y, img.width, sight.floor_y], fill=colour)
-    for t in sight.targets:
-        m = t.mob
-        mine = sight.platform is not None and t.platform == sight.platform.id
-        d.rectangle([m.x - m.w // 2, m.y - m.h // 2, m.x + m.w // 2, m.y + m.h // 2],
-                    outline="red" if mine else "orange", width=2)
-        d.text((m.x - m.w // 2, m.y - m.h // 2 - 11), f"{m.kind} p{t.platform}", fill="red" if mine else "orange")
-    for loot in sight.loot:
-        it = loot.item
-        d.rectangle([it.x - it.w // 2, it.y - it.h // 2, it.x + it.w // 2, it.y + it.h // 2], outline="yellow", width=2)
-        d.text((it.x - it.w // 2, it.y + it.h // 2 + 2), f"{it.kind} p{loot.platform}", fill="yellow")
-    d.text((8, img.height - 70), f"HP {sight.hp:.0%}  MP {sight.mp:.0%}", fill="white")
+        d.line([0, scene.floor_y, img.width, scene.floor_y], fill=colour)
+    for monster in scene.monsters:
+        mine = scene.platform is not None and monster.platform == scene.platform.id
+        colour = "red" if mine else "orange"
+        box = _box(monster.mob)
+        d.rectangle(box, outline=colour, width=2)
+        d.text((box[0], box[1] - 11), f"{monster.mob.kind} p{monster.platform}", fill=colour)
+    for loot in scene.loot:
+        box = _box(loot.item)
+        d.rectangle(box, outline="yellow", width=2)
+        d.text((box[0], box[3] + 2), f"{loot.item.kind} p{loot.platform}", fill="yellow")
+    d.text((8, img.height - 70), f"HP {scene.hp:.0%}  MP {scene.mp:.0%}", fill="white")
     img.save(path)
 
 
+def _eyes(model, title: str):
+    """Eyes on the game, with monster templates for that map (screenshots + the game's sprites)."""
+    from .perception.eyes import Eyes
+    from .perception.sprites import detector_for
+    return Eyes(title, calibration.load().template, detector_for(model))
+
+
 def _hunter(args, **kw):
-    from . import mapdata
-    from .hunt import Hunter
-    _, keys, timing = her_setup()
-    model = mapdata.load(getattr(args, "map", DEFAULT_MAP))
-    return Hunter(_eyes(model.id), keys, timing, model, log=_log, **kw)
+    """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way)."""
+    from .behavior.hunter import Hunter
+    from .localization import mapdata
+    cfg, keys, _ = her_setup()
+    model = mapdata.load(args.map)
+    return Hunter(_eyes(model, cfg.game_window_title), keys, model, log=_log, **kw)
+
+
+def _log(message: str) -> None:
+    print(time.strftime("%H:%M:%S"), message, flush=True)
+    telemetry.emit("log", text=message)
+
+
+def _record(command: str, map_id: int) -> None:
+    """Record this run's telemetry (lab/telemetry), for the mini-map to follow live or replay later."""
+    path = telemetry.record_to(command)
+    telemetry.emit("session", map=map_id, command=command, mode="live")
+    _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`)")
 
 
 def cmd_hunt(args) -> int:
-    from . import shots
-    from .hunt import SHOT_LOG
     if args.mode == "shots":
-        return _shot_summary(SHOT_LOG)
-    cfg, _, _ = her_setup()
+        return _shot_summary(paths.SHOT_LOG)
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
     if args.mode == "look":
-        s = hunter.look()
-        if s.where is None:
-            print("can't find her minimap dot")
-            return 1
-        how = "name tag" if s.seen else "minimap dot + camera (name tag hidden)"
-        p = s.platform
-        print(f"her: map ({s.where.x:.0f}, {s.where.y:.0f}) on platform {p.id if p else None} ({how}); "
-              f"HP {s.hp:.0%}, MP {s.mp:.0%}; room: {s.room('left'):.0f} left, {s.room('right'):.0f} right")
-        for t in s.targets:
-            dx, dy = t.x - s.where.x, t.y - s.where.y
-            reach = "in reach" if shots.can_shoot(dx, dy) else "out of reach"
-            print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({reach}, score {t.mob.score})")
-        s.loot = hunter.see_loot(s, wide=True)
-        for d in s.loot:
-            print(f"  drop: {d.item.kind} on platform {d.platform}: {d.x - s.where.x:+.0f}, "
-                  f"{d.y - s.where.y:+.0f} (score {d.item.score})")
-        _annotate(s, LAB / "hunt_look.png")
-        print(LAB / "hunt_look.png")
-        return 0
+        return _hunt_look(hunter)
     kinds = set(args.kinds.split(",")) if args.kinds else None
-    window.bring_to_front(cfg.game_window_title)
+    _record(f"hunt-{args.mode}", hunter.model.id)
+    window.bring_to_front(_game_title())
     if args.mode == "kill":
         s = hunter.look()
-        targets = [t for t in s.targets if kinds is None or t.kind in kinds]
+        targets = [t for t in s.monsters if kinds is None or t.kind in kinds]
         if s.where is None or not targets:
             print("no target in sight" if s.where else "can't find her")
             return 1
@@ -241,12 +288,38 @@ def cmd_hunt(args) -> int:
     else:
         ground = {int(v) for v in args.ground.split(",")} if args.ground else None
         hunter.clear(kinds, ground=ground, max_kills=args.kills, seconds=args.seconds)
-        hunter.mop_up()  # drops still on her platform: kills the fight couldn't place, or left before
+        hunter.looter.mop_up()  # drops still on her platform: kills the fight couldn't place, or left before
     final = hunter.look(loot=True)
     _annotate(final, LAB / "hunt_end.png")
     left = ", ".join(f"{d.item.kind} at {d.x - final.where.x:+.0f}" for d in final.loot) or "none"
     print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}; drops left on her platform: {left}"
-          + ("; her inventory is full" if hunter.inventory_full else ""))
+          + ("; her inventory is full" if hunter.looter.inventory_full else ""))
+    return 0
+
+
+def _hunt_look(hunter) -> int:
+    """`hunt look`: what she sees now, printed and drawn on the frame (no keys)."""
+    from .attack import reach
+    from .localization.scene import find_loot
+    s = hunter.look()
+    if s.where is None:
+        print("can't find her minimap dot")
+        return 1
+    how = "name tag" if s.tag_seen else "minimap dot + camera (name tag hidden)"
+    p = s.platform
+    print(f"her: map ({s.where.x:.0f}, {s.where.y:.0f}) on platform {p.id if p else None} ({how}); "
+          f"HP {s.hp:.0%}, MP {s.mp:.0%}; room: {s.room('left', reach.EDGE_MARGIN):.0f} left, "
+          f"{s.room('right', reach.EDGE_MARGIN):.0f} right")
+    for t in s.monsters:
+        dx, dy = t.x - s.where.x, t.y - s.where.y
+        in_reach = "in reach" if reach.can_shoot(dx, dy) else "out of reach"
+        print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({in_reach}, score {t.mob.score})")
+    s.loot = find_loot(s, hunter.model, hunter.senses.eyes, wide=True)
+    for d in s.loot:
+        print(f"  drop: {d.item.kind} on platform {d.platform}: {d.x - s.where.x:+.0f}, "
+              f"{d.y - s.where.y:+.0f} (score {d.item.score})")
+    _annotate(s, LAB / "hunt_look.png")
+    print(LAB / "hunt_look.png")
     return 0
 
 
@@ -257,9 +330,9 @@ def _shot_summary(path) -> int:
         print(f"no shots logged yet ({path})")
         return 0
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    bands: dict[int, list[int]] = {}
+    bands: dict[int, list[int]] = {}  # band's dy -> [hits, misses, farthest hit's |dx|]
     for r in rows:
-        b = bands.setdefault(round(r["dy"] / 30) * 30, [0, 0, 0])
+        b = bands.setdefault(round(r["dy"] / SHOT_BAND) * SHOT_BAND, [0, 0, 0])
         b[0 if r["hit"] else 1] += 1
         if r["hit"]:
             b[2] = max(b[2], abs(r["dx"]))
@@ -269,32 +342,20 @@ def _shot_summary(path) -> int:
     return 0
 
 
-def _eyes(map_id: int):
-    """Eyes on the game, with monster templates for that map (screenshots + the game's sprites)."""
-    from . import mapdata
-    from .hunt import Eyes
-    from .sprites import detector_for
-    return Eyes(her_setup()[0].game_window_title, calibration.load().template, detector_for(mapdata.load(map_id)))
-
-
-def _log(message: str) -> None:
-    print(time.strftime("%H:%M:%S"), message, flush=True)
-
-
 def cmd_map(args) -> int:
     """The map's platforms and her position on them (no keys)."""
-    from . import mapdata
-    from .localize import Localizer
-    from .moves import describe
+    from .control.mover import platform_text
+    from .localization import mapdata
+    from .localization.pose import Localizer
     model = mapdata.load(args.map)
     marks = []
     if not args.offline:
-        from .hunt import Eyes
-        eyes = _eyes(args.map)
+        client.check_alarm()  # a look brings the game to the front: not while the Lie Detector alarm is up
+        eyes = _eyes(model, _game_title())
         s = eyes.look()
         if s.dot:
             w = Localizer(model).where_dot(s.dot)
-            print(f"she's at map ({w.x:.0f}, {w.y:.0f}) on {describe(w.platform)} (dot {s.dot[0]:.1f},{s.dot[1]:.1f})")
+            print(f"she's at map ({w.x:.0f}, {w.y:.0f}) on {platform_text(w.platform)} (dot {s.dot[0]:.1f},{s.dot[1]:.1f})")
             marks.append((w.x, w.y, "her"))
     print(f"{model.name}: {len(model.platforms)} platforms, {len(model.ropes)} ropes; monster spawns by platform:",
           dict(sorted(model.spawn_platforms.items())))
@@ -305,37 +366,116 @@ def cmd_map(args) -> int:
 
 
 def cmd_nav(args) -> int:
-    from .nav import Navigator
-    cfg, _, _ = her_setup()
     hunter = _hunter(args)
-    nav = Navigator(hunter, hunter.model, log=_log, fight=args.fight)
-    window.bring_to_front(cfg.game_window_title)
+    nav = hunter.navigator(fighting=args.fight)
+    _record("nav", hunter.model.id)
+    window.bring_to_front(_game_title())
     start = time.monotonic()
     trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
     print(f"{trip.result} in {time.monotonic() - start:.1f} s: {len(trip.moves)} moves in {trip.chains} chains, "
           f"{trip.misses} landed somewhere else, {trip.hits} hit on the way, {trip.waits} waits for monsters, "
           f"{trip.kills} monsters shot dead on the way; time looking {trip.time['look']:.1f} s, "
           f"thinking {trip.time['think']:.1f} s, moving {trip.time['move']:.1f} s")
-    for kind, v in sorted(nav.speeds.items()):
+    for kind, v in sorted(nav.tracker.speeds.items()):
         v = sorted(v)
         print(f"  {kind} speeds seen: median {v[len(v) // 2]:.0f}, 90% {v[int(len(v) * 0.9)]:.0f} units/s ({len(v)})")
     return 0
 
 
 def cmd_tour(args) -> int:
-    import random
-    from .nav import Navigator
-    from .tour import Tour
-    cfg, _, _ = her_setup()
+    from .behavior.tour import Tour
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)
-    nav = Navigator(hunter, hunter.model, log=_log, fight=True)
-    window.bring_to_front(cfg.game_window_title)
+    nav = hunter.navigator(fighting=True)
+    _record("tour", hunter.model.id)
+    window.bring_to_front(_game_title())
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below)
     kinds = set(args.kinds.split(",")) if args.kinds else None
     report = tour.run(stops=args.stops, kinds=kinds, kills_per_stop=args.kills, seconds_per_stop=args.seconds)
     print(f"tour done: {report}")
     return 0
 
+
+# --- the mini-map and the simulator ----------------------------------------------------------------------
+
+def cmd_minimap(args) -> int:
+    """The mini-map window: follow the newest run live (the default), replay a recorded one, or show a
+    route planned offline. Sends no keys."""
+    from .localization import mapdata
+    from .ui.render import MapView
+    from .ui.sources import LiveSource, ReplaySource, load, planned
+    from .ui.app import MapWindow
+    views: dict = {}
+
+    def view_for(map_id):
+        map_id = map_id or args.map
+        if map_id not in views:
+            views[map_id] = MapView(mapdata.load(map_id), width=args.width)
+        return views[map_id]
+
+    if args.plan:
+        src, dst = args.plan
+        model = mapdata.load(args.map)
+        p = model.platform(src)
+        x = args.x if args.x is not None else (p.left + p.right) / 2
+        source, live = ReplaySource(planned(model, src, x, dst)), False
+    elif args.replay:
+        source, live = ReplaySource(load(Path(args.replay), args.map), speed=args.speed), False
+    else:
+        source, live = LiveSource(), True
+    position = _beside_game(*view_for(None).size) if live else None
+    MapWindow(view_for, source, live, position=position).run()
+    return 0
+
+
+def _beside_game(width: int, height: int) -> tuple[int, int] | None:
+    """Where the live mini-map goes: beside the game's client area (right, left, else below), on a
+    monitor, and never over it: screen captures see whatever window is on top. None if the game isn't
+    running or is minimized, or there's no such room (then the window manager places it, and it isn't
+    kept on top)."""
+    import mss
+    try:
+        area = window.client_rect(window.find_game(_game_title()))
+    except RuntimeError:
+        return None
+    if area["width"] <= 0 or area["height"] <= 0:
+        return None
+    game = (area["left"], area["top"], area["left"] + area["width"], area["top"] + area["height"])
+    with mss.MSS() as sct:
+        monitors = sct.monitors[1:]
+    gap = 16  # the window's own frame and title bar fit in this
+    for x, y in ((game[2] + gap, game[1]), (game[0] - width - gap, game[1]), (game[0], game[3] + 2 * gap)):
+        box = (x - gap, y - 2 * gap, x + width + gap, y + height + gap)
+        on_screen = any(m["left"] <= box[0] and box[2] <= m["left"] + m["width"]
+                        and m["top"] <= box[1] and box[3] <= m["top"] + m["height"] for m in monitors)
+        over_game = box[0] < game[2] and game[0] < box[2] and box[1] < game[3] and game[1] < box[3]
+        if on_screen and not over_game:
+            return x, y
+    print("no room beside the game for the mini-map: keep it off the game window (captures see what's on top)")
+    return None
+
+
+def cmd_sim(args) -> int:
+    """Run the stack offline on the simulator (gamelab.sim), recorded for the mini-map. No game, no keys."""
+    from .sim import scenarios
+    if args.scenario == "list" or args.scenario not in scenarios.SCENARIOS:
+        if args.scenario != "list":
+            print(f"no scenario {args.scenario!r}; they are:")
+        for name, sc in scenarios.SCENARIOS.items():
+            print(f"  {name:28s} {sc.doc.splitlines()[0] if sc.doc else ''}")
+        return 0 if args.scenario == "list" else 1
+    path = telemetry.record_to(f"sim-{args.scenario}")
+    print(f"telemetry: {path} (watch it with `python -m gamelab minimap`)")
+    try:
+        trace = scenarios.run_scenario(scenarios.SCENARIOS[args.scenario], pace=args.speed or None)
+    finally:
+        telemetry.stop()
+    for line in trace["log"][-15:]:
+        print(" ", line)
+    print(f"{args.scenario}: {trace['result']} ({trace['seconds']:.0f} s simulated, {len(trace['plans'])} key plans)")
+    return 0
+
+
+# --- measuring moves in recordings -----------------------------------------------------------------------
 
 def cmd_lock(args) -> int:
     """Press an attack, then jump `d` ms later: from when does the game accept the jump again?"""
@@ -347,17 +487,13 @@ def cmd_lock(args) -> int:
     cal = calibration.load()
     window.bring_to_front(cfg.game_window_title)
     for d in args.delays:
-        events = [[0, attack.name, "down"], [40, attack.name, "up"], [d, keys.jump.name, "down"], [d + 40, keys.jump.name, "up"]]
-        rec = client.record(events, name=f"lock_{args.action}_{d}", duration_ms=d + 900, crop=cal.crop, scale=cal.scale)
+        events = _tap(attack.name, 0) + _tap(keys.jump.name, d)
+        rec = recordings.record(events, name=f"lock_{args.action}_{d}", duration_ms=d + 900, crop=cal.crop, scale=cal.scale)
         jumped = [s for s in airborne(track(rec.frames, rec.times, cal.template)) if s[0] >= d]
         print(f"jump {d:4d} ms after {args.action}: " +
               (f"airborne at {jumped[0][0]:.0f} ms" if jumped else "IGNORED (still locked)"))
-        time.sleep(0.6)
+        time.sleep(SETTLE_S)
     return 0
-
-
-MOVES_BACK = {"jump_back_shot", "hop_back"}  # combos whose jumps must carry her away
-FACE_MS = 600  # each run first taps the arrow she should face, like her own last arrow press
 
 
 def cmd_combo(args) -> int:
@@ -375,7 +511,7 @@ def cmd_combo(args) -> int:
         events = [[0, front.name, "down"], [timing.turn_tap, front.name, "up"]] + \
                  [[t + FACE_MS, k, kind] for t, k, kind in events]
         starts, end = [s + FACE_MS for s in starts], end + FACE_MS
-        rec = client.record(events, name=f"{args.name}_{run}", duration_ms=end + 600, crop=cal.crop, scale=cal.scale)
+        rec = recordings.record(events, name=f"{args.name}_{run}", duration_ms=end + 600, crop=cal.crop, scale=cal.scale)
         print(f"{rec.name} (facing {facing}, {args.chain} in a row):")
         for i, r in enumerate(analyze.combos(rec, starts, end, facing, cal.template)):
             jumps = ", ".join(f"{j.direction} ({j.dx:+.0f})" for j in r.jumps) or "none"
@@ -386,37 +522,42 @@ def cmd_combo(args) -> int:
                 totals[j.direction] += 1
             totals["front"] += sum(t.toward_front for t in r.throws)
             totals["wrong"] += sum(not t.toward_front for t in r.throws)
-        time.sleep(0.6)
+        time.sleep(SETTLE_S)
     print(f"\njumps: {totals['back']} back, {totals['up']} straight up, {totals['forward']} forward; "
           f"throws: {totals['front']} toward front, {totals['wrong']} wrong way")
     return 0
 
 
+def _around_her(frame: np.ndarray, x: int, y: int) -> np.ndarray:
+    """The AROUND_HER box of a frame, around a name tag whose top-left is (x, y). Cut at the frame's
+    edges, it is padded with black at its right and bottom."""
+    dx, dy, w, h = AROUND_HER
+    out = np.zeros((h, w, 3), np.uint8)
+    src = frame[max(0, y + dy):y + dy + h, max(0, x + dx):x + dx + w]
+    out[:src.shape[0], :src.shape[1]] = src
+    return out
+
+
 def cmd_sheet(args) -> int:
-    rec = client.load(args.recording)
+    rec = recordings.load(args.recording)
     keep = [i for i, t in enumerate(rec.times) if args.start <= t <= args.end][::args.every]
     frames, times = rec.frames[keep], rec.times[keep]
     if args.around_her:
         rows = track(frames, times, calibration.load().template)
-        crops = []
-        for f, (_, x, y, _) in zip(frames, rows):
-            c = np.zeros((80, 120, 3), np.uint8)
-            src = f[max(0, y - 60):y + 20, max(0, x - 40):x + 80]
-            c[:src.shape[0], :src.shape[1]] = src
-            crops.append(c)
-        frames = np.stack(crops)
+        frames = np.stack([_around_her(f, x, y) for f, (_, x, y, _) in zip(frames, rows)])
     path = LAB / f"{args.recording}_sheet.png"
-    client.contact_sheet(frames, times, path, cols=args.cols, every=1, zoom=3 if args.around_her else 1)
+    recordings.contact_sheet(frames, times, path, cols=args.cols, every=1,
+                             zoom=AROUND_HER_ZOOM if args.around_her else 1)
     print(path)
     return 0
 
 
 def cmd_track(args) -> int:
     """Her path through a recording: screen position, height above the start, world x, and jumps."""
-    from .camera import world_x
-    rec = client.load(args.recording)
-    template = calibration.load().template
-    rows = track(rec.frames, rec.times, template)
+    from .analysis.scroll import world_x
+    rec = recordings.load(args.recording)
+    cal = calibration.load()
+    rows = track(rec.frames, rec.times, cal.template)
     xs = world_x(rec.frames, rows)
     rest_y = rows[0][2]
     print("   t ms   screen x,y   height   world x   match")
@@ -424,17 +565,17 @@ def cmd_track(args) -> int:
         t, x, y, score = rows[i]
         print(f"  {t:6.0f}   {x:4d},{y:4d}   {rest_y - y:5d}   {xs[i]:7.1f}   {score:.2f}")
     print("airborne:", [(round(a), round(b) if b else None) for a, b in airborne(rows)])
-    print(f"net world dx {xs[-1] - xs[0]:+.1f} px (recording scale {calibration.load().scale})")
+    print(f"net world dx {xs[-1] - xs[0]:+.1f} px (recording scale {cal.scale})")
     return 0
 
 
 def cmd_check(args) -> int:
-    rec = client.load(args.recording)
+    rec = recordings.load(args.recording)
     lag = analyze.send_lag(rec)
     print(f"keys: {lag['sent']}/{lag['planned']} sent, late by at most {lag['max_ms']:.1f} ms (mean {lag['mean_ms']:.1f})")
     pace = analyze.frame_pacing(rec)
     print(f"game frames: {pace['frames']}, gap median {pace['median_ms']} ms, p95 {pace['p95_ms']} ms, "
-          f"max {pace['max_ms']} ms; gaps over 45 ms (start, length): {pace['long_gaps']}")
+          f"max {pace['max_ms']} ms; gaps over {analyze.LONG_GAP_MS} ms (start, length): {pace['long_gaps']}")
     print("(long gaps while she stands still are just frames that didn't change)")
     return 0
 
@@ -445,7 +586,9 @@ def cmd_list(args) -> int:
     return 0
 
 
-def main(argv=None) -> int:
+# --- the command line ------------------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m gamelab", description="Drive the real game with exact key timelines and measure what happened.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -487,7 +630,7 @@ def main(argv=None) -> int:
     s.add_argument("--every", type=int, default=4)
     s.set_defaults(func=cmd_do)
 
-    s = sub.add_parser("hunt", help="hunting objectives that run on their own (see gamelab/hunt.py)")
+    s = sub.add_parser("hunt", help="hunting objectives that run on their own (see gamelab/behavior/hunter.py)")
     s.add_argument("mode", choices=["look", "kill", "clear", "shots"],
                    help="look: what she sees now; kill: one monster; clear: everything in reach, nearest "
                         "first; shots: hits and misses so far, by target height (sends no keys)")
@@ -515,7 +658,8 @@ def main(argv=None) -> int:
     s.add_argument("--fight", action="store_true", help="shoot monsters on the way instead of avoiding them")
     s.set_defaults(func=cmd_nav)
 
-    s = sub.add_parser("tour", help="hunt the map: visit spawn platforms in random order, clear each, rest when low")
+    s = sub.add_parser("tour", help="hunt the map: sweep the platforms worth hunting (nearest next, varied a "
+                                      "little), clear each, collect the drops, rest when low")
     s.add_argument("--stops", type=int, default=None,
                    help="how many hunting platforms to visit (default: every one worth it)")
     s.add_argument("--kills", type=int, default=5, help="kills per stop")
@@ -527,6 +671,22 @@ def main(argv=None) -> int:
     s.add_argument("--low-hp", type=float, default=0.3, help="stop fighting and rest below this")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_tour)
+
+    s = sub.add_parser("minimap", help="the live mini-map window (or --replay a recorded run, --plan a route); "
+                                         "sends no keys")
+    s.add_argument("--replay", help="a telemetry file (lab/telemetry/*.jsonl) or an older sweep track (.json)")
+    s.add_argument("--speed", type=float, default=1.0, help="replay speed")
+    s.add_argument("--plan", type=int, nargs=2, metavar=("SRC", "DST"), help="show the route between two platforms")
+    s.add_argument("--x", type=float, help="--plan: start at this map x on SRC")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--width", type=int, default=760, help="window width in px")
+    s.set_defaults(func=cmd_minimap)
+
+    s = sub.add_parser("sim", help="run a scenario offline on the simulator, recorded for the mini-map (no game)")
+    s.add_argument("scenario", help="a scenario name, or `list`")
+    s.add_argument("--speed", type=float, default=0,
+                   help="also play it in real time, this many times faster (0: as fast as it computes)")
+    s.set_defaults(func=cmd_sim)
 
     s = sub.add_parser("lock", help="measure how long an attack blocks the next jump")
     s.add_argument("action", choices=["attack", "lucky_seven"])
@@ -559,8 +719,11 @@ def main(argv=None) -> int:
     s.set_defaults(func=cmd_check)
 
     sub.add_parser("list", help="list saved recordings").set_defaults(func=cmd_list)
+    return p
 
-    args = p.parse_args(argv)
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
     # Real pixels for window positions and screen captures, whatever the display scaling is set to.
     from maplehelper.win32 import enable_dpi_awareness
     enable_dpi_awareness()
@@ -575,13 +738,6 @@ def main(argv=None) -> int:
     except (client.PlayerError, RuntimeError) as e:
         print(f"error: {e}")
         return 1
-
-
-DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
-
-# Commands that bring the game to the front or send it input; refused while the alarm is set.
-GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
-LIE_DETECTOR_EXIT = 3
 
 
 if __name__ == "__main__":

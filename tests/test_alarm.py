@@ -9,9 +9,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from gamelab import alarm, client
+from gamelab.control import alarm, client
+from gamelab.perception.lie_detector import LieDetectorSpotter
 from gamelab.__main__ import LIE_DETECTOR_EXIT, main
-from gamelab.player import LIE_DETECTOR_ERROR, Player, Watchdog, _sleep_until
+from gamelab.control.player import LIE_DETECTOR_ERROR, Player, Watchdog, _sleep_until
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -41,7 +42,7 @@ def alarm_file(tmp_path, monkeypatch):
 
 
 def test_spots_the_lie_detector_anywhere_on_screen():
-    spotter = alarm.LieDetectorSpotter()
+    spotter = LieDetectorSpotter()
     assert spotter.seen(scene_with_window())
     assert spotter.score(WINDOW) > 0.95
 
@@ -50,7 +51,7 @@ def test_spots_the_mouse_mini_game_and_the_truth_booth():
     # The mini-game was only captured at half size: enlarge it back to the game's size.
     half = img("lie_detector_minigame_half.png")
     mini_game = np.asarray(Image.fromarray(half).resize((half.shape[1] * 2, half.shape[0] * 2), Image.BILINEAR))
-    spotter = alarm.LieDetectorSpotter()
+    spotter = LieDetectorSpotter()
     assert spotter.scores(mini_game)["mini-game"] >= 1
     assert spotter.seen(mini_game)
     assert spotter.scores(img("truth_booth_timer.png"))["truth booth"] >= 1
@@ -58,7 +59,7 @@ def test_spots_the_mouse_mini_game_and_the_truth_booth():
 
 @pytest.mark.parametrize("frame", [SCENE, NEAR_MISS, np.zeros((540, 960, 3), np.uint8)])
 def test_ignores_yellow_scenery_and_other_windows(frame):
-    assert not alarm.LieDetectorSpotter().seen(frame)
+    assert not LieDetectorSpotter().seen(frame)
 
 
 def test_watchdog_sets_the_alarm_first_then_reports_once():
@@ -110,6 +111,7 @@ def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch):
     with pytest.raises(client.LieDetectorAlarm):
         client.submit([], name="x")
     assert main(["act", "100"]) == LIE_DETECTOR_EXIT  # refused before touching the game
+    assert main(["map"]) == LIE_DETECTOR_EXIT         # its look would bring the game to the front
     assert main(["player", "--elevate"]) == LIE_DETECTOR_EXIT
 
     assert main(["clear-alarm"]) == 0
@@ -118,7 +120,7 @@ def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch):
 
 
 def test_a_plan_can_be_cut_short_and_lets_go_of_its_keys(tmp_path, monkeypatch):
-    from gamelab import player as player_mod
+    from gamelab.control import player as player_mod
     from maplehelper.keys import parse
     sent = []
     monkeypatch.setattr(player_mod, "INBOX", tmp_path)
@@ -137,7 +139,7 @@ def test_a_plan_can_be_cut_short_and_lets_go_of_its_keys(tmp_path, monkeypatch):
 
 
 def test_a_plan_can_last_past_its_last_key(tmp_path, monkeypatch):
-    from gamelab import player as player_mod
+    from gamelab.control import player as player_mod
     from maplehelper.keys import parse
     monkeypatch.setattr(player_mod, "INBOX", tmp_path)
     monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)

@@ -2,9 +2,11 @@
 
 import pytest
 
-from gamelab import mapdata
-from gamelab.localize import Localizer
-from gamelab.route import JUMP_HEIGHT, Planner, air_time
+
+from gamelab.localization.pose import Localizer
+from gamelab.motion.physics import JUMP_HEIGHT, air_time
+from gamelab.motion.route import Planner
+from gamelab.localization import mapdata
 
 #   y 300  [A: 0..200]                 [D: 600..800]   (D is up a rope from C)
 #   y 360           [B: 220..400]
@@ -88,7 +90,7 @@ def test_localizer_round_trip(model):
 
 
 def test_camera_follows_her_but_stops_at_the_map_edges():
-    from gamelab.localize import VIEW, Camera
+    from gamelab.localization.pose import Camera, VIEW
     cam = Camera((0, 0, 3000, 2000), offset=(680, 490))
     assert cam.to_screen(1500, 1000, at=(1500, 1000)) == pytest.approx((680 * 1.40625, 490 * 1.40625))
     # Near the left edge the camera stops at 0, so she's drawn left of her usual spot.
@@ -98,7 +100,7 @@ def test_camera_follows_her_but_stops_at_the_map_edges():
 
 
 def test_camera_learns_her_spot_only_where_it_isnt_stopped():
-    from gamelab.localize import Camera
+    from gamelab.localization.pose import Camera
     cam = Camera((0, 0, 3000, 2000), offset=(680, 490))
     cam.learn((1500, 1000), (700 * 1.40625, 500 * 1.40625), rate=1.0)
     assert cam.offset == pytest.approx((700, 500))
@@ -107,8 +109,9 @@ def test_camera_learns_her_spot_only_where_it_isnt_stopped():
 
 
 def test_run_timing_and_rope_grab_lead():
-    from gamelab.moves import RUN_LAG_MS, grab_lead, run_ms
-    from gamelab.route import WALK_SPEED
+    from gamelab.control.mover import grab_lead
+    from gamelab.motion.physics import RUN_LAG_MS, run_ms
+    from gamelab.motion.physics import WALK_SPEED
     assert run_ms(7) == pytest.approx(112, abs=3)  # jump key 112 ms in: lifts off 7 units along
     assert run_ms(149) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
     assert grab_lead(41) == pytest.approx(WALK_SPEED * 0.2775, abs=1)  # top of the jump over the rope
@@ -138,7 +141,7 @@ def test_route_weights_let_near_equal_routes_take_turns(model):
 
 
 def test_jumps_need_a_sure_landing(model):
-    from gamelab.route import WALK_SPEED, JUMP_SPEED, fly, sure_landing
+    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly, sure_landing
     a = by_y(model, 300, 100)
     land, _, _ = fly(model, 167, 300, WALK_SPEED, -JUMP_SPEED)
     assert land is not None and sure_landing(model, 167, 300, WALK_SPEED, -JUMP_SPEED, land)
@@ -148,7 +151,7 @@ def test_jumps_need_a_sure_landing(model):
 def test_a_tour_sweeps_nearest_first_then_tidies_the_order():
     import random
     from types import SimpleNamespace
-    from gamelab.tour import Tour
+    from gamelab.behavior.tour import Tour
     xs = {1: 100.0, 2: 900.0, 3: 200.0, 4: 800.0}  # grounds along a line; travel = distance
     planner = SimpleNamespace(travel=lambda src, x, dst: abs(xs[dst] - x) / 100)
     tour = Tour.__new__(Tour)
@@ -184,15 +187,16 @@ def _stop(rounds, seen, loot_after=(), elsewhere=(), log=None):
     whole-screen look then sees on the platform, `loot_after` the rounds after which drops were
     collected elsewhere. Returns how many fights ran."""
     from types import SimpleNamespace
-    from gamelab.hunt import Report, Target
-    from gamelab.mobs import Mob
-    from gamelab.shots import Spot
-    from gamelab.tour import Tour, TourReport
+    from gamelab.attack.spots import Spot
+    from gamelab.behavior.fight import Report
+    from gamelab.behavior.tour import Tour, TourReport
+    from gamelab.localization.monsters import Monster
+    from gamelab.perception.mobs import Mob
     tour, fights = Tour.__new__(Tour), []
     tour.log, tour.report = (lambda m: None), TourReport()
     tour.spot = lambda pid, on_it=False: Spot(pid, 100, 1.0, False)
     tour.nav = SimpleNamespace(go=lambda *a, **k: SimpleNamespace(result="arrived", kills=0))
-    pig = Target(Mob("pig", 0, 0, 30, 30, 0.9), 300, 500, 7)
+    pig = Monster(Mob("pig", 0, 0, 30, 30, 0.9), 300, 500, 7)
 
     def clear(*a, **k):
         fights.append(1)
@@ -202,8 +206,8 @@ def _stop(rounds, seen, loot_after=(), elsewhere=(), log=None):
         if len(fights) in loot_after:
             tour.report.loot_trips += 1
 
-    tour.h = SimpleNamespace(pending_loot=[], report=Report(), clear=clear,
-                             look=lambda **k: SimpleNamespace(targets=[pig] * seen[len(fights) - 1]))
+    tour.h = SimpleNamespace(report=Report(), clear=clear,
+                             look=lambda **k: SimpleNamespace(monsters=[pig] * seen[len(fights) - 1]))
     tour.collect_loot = collect
     tour._record = lambda pid, r: None
     moves = iter(elsewhere)
@@ -226,16 +230,16 @@ def test_a_stop_goes_back_only_for_monsters_it_can_get_at():
 
 def test_grounds_are_ranked_by_exp_and_learn_from_visits(monkeypatch, tmp_path):
     from types import SimpleNamespace
-    from gamelab import tour as tour_mod
-    from gamelab.hunt import Report
-    from gamelab.mapdata import MapModel
-    from gamelab.tour import Tour
-    monkeypatch.setattr(tour_mod, "GROUNDS", tmp_path / "grounds.json")
+
+    from gamelab import paths
+    from gamelab.behavior.fight import Report
+    from gamelab.behavior.tour import Tour
+    monkeypatch.setattr(paths, "GROUNDS", tmp_path / "grounds.json")
     spawns = {1: ["Snail", "Snail", "Snail"], 2: ["Pig", "Pig"], 3: ["Slime", "Snail"], 4: ["Pig", "Orange Mushroom"]}
     model = SimpleNamespace(id=5, mob_exp={"Snail": 2, "Pig": 13, "Slime": 12, "Orange Mushroom": 15},
                             monsters_by_platform=spawns, platforms=[], safe=lambda pid: False)
-    hunter = SimpleNamespace(eyes=SimpleNamespace(detector=SimpleNamespace(
-        templates={"snail": 0, "pig": 0, "slime": 0, "orange-mushroom": 0})))
+    hunter = SimpleNamespace(senses=SimpleNamespace(eyes=SimpleNamespace(
+        kinds={"snail", "pig", "slime", "orange-mushroom"})))
     tour = Tour(hunter, SimpleNamespace(model=model), log=lambda m: None)
     assert tour.worth == {"pig", "slime", "orange-mushroom"}  # snails: 2 EXP against 15
     assert sorted(tour.hunting_grounds()) == [2, 3, 4]         # a snail-only platform isn't one
@@ -252,7 +256,7 @@ def test_grounds_are_ranked_by_exp_and_learn_from_visits(monkeypatch, tmp_path):
 
 
 def test_monsters_left_out_of_reach_are_shot_from_another_spot_before_looting():
-    from gamelab.shots import Spot
+    from gamelab.attack.spots import Spot
     log = []
     # After the first fight 2 are left out of reach; a spot on platform 9 reaches them: she goes there
     # and fights again, and only then collects the drops.

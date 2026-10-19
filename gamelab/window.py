@@ -1,9 +1,14 @@
-"""Finding the game window, its client area, and bringing it to the front."""
+"""Finding the game window, its client area, and bringing it to the front; moving the mouse pointer.
+
+The elevated key player imports this: keep its imports to the standard library and maplehelper.win32.
+"""
 
 import ctypes
 from ctypes import wintypes
 
 from maplehelper.win32 import foreground_title, kernel32, user32  # noqa: F401  (foreground_title re-exported)
+
+SW_RESTORE = 9  # ShowWindow: un-minimize
 
 user32.FindWindowW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR)
 user32.FindWindowW.restype = wintypes.HWND
@@ -16,8 +21,6 @@ user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BOOL)
 user32.IsIconic.argtypes = (wintypes.HWND,)
 user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
-
-
 user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
 
 
@@ -27,6 +30,7 @@ def move_cursor(x: int, y: int) -> None:
 
 
 def find_game(title: str) -> int:
+    """The game window's handle (raises if no window has that title)."""
     hwnd = user32.FindWindowW(None, title)
     if not hwnd:
         raise RuntimeError(f"no window titled {title!r}; is the game running?")
@@ -52,7 +56,7 @@ def bring_to_front(title: str) -> bool:
     if foreground_title() == title:
         return True
     if user32.IsIconic(game):
-        user32.ShowWindow(game, 9)  # SW_RESTORE
+        user32.ShowWindow(game, SW_RESTORE)
     me = kernel32.GetCurrentThreadId()
     other = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
     user32.AttachThreadInput(me, other, True)

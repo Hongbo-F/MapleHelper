@@ -7,10 +7,12 @@ from maplehelper import keys
 from maplehelper.config import GameKeys, Timing
 from maplehelper.engine import LEFT, RIGHT
 
-from gamelab.camera import camera_x
-from gamelab.player import allowed_keys, validate
-from gamelab.timeline import chain, combo_events
-from gamelab.track import airborne, find_name_tag
+from gamelab.analysis.scroll import camera_x
+from gamelab.control.player import allowed_keys, validate
+from gamelab.control.timeline import chain, combo_events
+from gamelab.analysis.track import airborne, find_name_tag
+from gamelab.control import client
+import time
 
 K = keys.parse
 GAME_KEYS = GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("f"), lucky_seven=K("g"))
@@ -122,7 +124,7 @@ def test_find_name_tag_prefers_the_one_near_the_middle():
 def test_a_result_file_still_locked_is_read_again(tmp_path, monkeypatch):
     import json
     from pathlib import Path
-    from gamelab import client
+
     path = tmp_path / "plan.json"
     path.write_text(json.dumps({"ok": True}), encoding="utf-8")
     calls = []
@@ -135,5 +137,5 @@ def test_a_result_file_still_locked_is_read_again(tmp_path, monkeypatch):
         return real(self, *a, **k)
 
     monkeypatch.setattr(Path, "read_text", flaky)
-    monkeypatch.setattr(client.time, "sleep", lambda s: None)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
     assert client._read_result(path) == {"ok": True} and len(calls) == 3

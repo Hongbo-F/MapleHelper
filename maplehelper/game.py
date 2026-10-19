@@ -103,7 +103,7 @@ MONSTERS = {
 # looting on the lower ground), a "LIE DETECTOR" window appeared: "13 sec until the Lie Detector
 # mini-game starts. Please find the beautiful Violetta wearing make-up... if you do not enter any
 # answers, you will fail the test!" A person has to answer it; gamelab watches for it, stops all
-# input, pages, and shuts down (gamelab/alarm.py). Keep automated sessions short and supervised.
+# input, pages, and shuts down (gamelab/control/player.py, alarm.py). Keep automated sessions short and supervised.
 
 # Reading the screen:
 # - Violet numbers over her are damage she took; a violet MISS means a monster missed her.
@@ -118,7 +118,7 @@ MONSTERS = {
 #   ("Squishy Liquid x1 earned (Etc)", "You have gained mesos (+13)").
 # - Chair (d): she sits on The Green Relaxer; tapping an arrow stands her up without moving her.
 # - Kills show up as EXP on the HUD (e.g. 423 -> 435 for a Green Slime).
-# - Moving between platforms (gamelab/route.py, gamelab/moves.py; map layouts come from the game data):
+# - Moving between platforms (gamelab/motion/route.py, gamelab/control/mover.py; map layouts come from the game data):
 #   jumping straight up passes through a platform overhead and lands on it (a jump rises 77 map
 #   units); down + jump drops through the platform she stands on; down at a rope's top climbs down it.
 #   Running jumps need a run-up: from 12 units before a platform's end she walked off before the jump

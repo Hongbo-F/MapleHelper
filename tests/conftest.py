@@ -16,3 +16,31 @@ BASE_CONFIG = {
 @pytest.fixture
 def config_data():
     return copy.deepcopy(BASE_CONFIG)
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch, tmp_path):
+    """No test may press a key, touch the game window, send a plan to the player, page anyone, or write
+    under the real gamelab/lab (learned stats, logs, the Lie Detector alarm). A test that needs one of these replaces
+    it with its own fake, which takes precedence."""
+    from maplehelper import win32
+
+    from gamelab import paths, window
+    from gamelab.control import alarm
+    from gamelab.control import client
+    from gamelab.sim.fakes import _write_guards
+
+    def refuse(what):
+        def fn(*a, **k):
+            raise AssertionError(f"{what} called in a test")
+        return fn
+
+    monkeypatch.setattr(win32, "send_key", refuse("maplehelper.win32.send_key"))
+    monkeypatch.setattr(win32, "foreground_title", refuse("maplehelper.win32.foreground_title"))
+    for name in ("bring_to_front", "move_cursor", "find_game", "client_rect", "foreground_title"):
+        monkeypatch.setattr(window, name, refuse(f"gamelab.window.{name}"))
+    monkeypatch.setattr(client, "INBOX", tmp_path / "inbox")  # plans go nowhere a player looks
+    monkeypatch.setattr(client, "OUTBOX", tmp_path / "outbox")
+    monkeypatch.setattr(alarm, "page", refuse("gamelab.control.alarm.page"))
+    for obj, name, value in _write_guards(paths.LAB):
+        monkeypatch.setattr(obj, name, value)
