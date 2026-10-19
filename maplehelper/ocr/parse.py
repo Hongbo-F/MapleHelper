@@ -1,13 +1,15 @@
 """Turning OCR'd lines into game values, tolerant of the ways OCR misreads game text.
 
-OCR on game fonts confuses a few characters often enough to plan for: "+" read as "t" or "4", "1" as
-"l", "I", "i" or "|", "0" as "O" or "o", "m" as "rn". Numbers are folded back where a number is expected,
-and a value read from a doubtful character is marked unsure, so a caller can wait for a clearer read.
+OCR on game fonts confuses a few characters often enough to plan for: "+" read as "t", "4", "-" or "=",
+"1" as "l", "I", "i", "L" or "|", "0" as "O" or "o", "m" as "rn", "..." as "." and accents added to
+letters. Numbers are folded back where a number is expected, and a value read from a doubtful character
+is marked unsure, so a caller can wait for a clearer read.
 """
 
 import difflib
 import functools
 import re
+import unicodedata
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 
@@ -16,13 +18,18 @@ from .exp_table import EXP_TO_NEXT
 
 # Characters OCR puts where a digit should be, mapped back. Only the common, unambiguous ones: folding
 # letters like S or B too would turn a label stuck to a number into digits.
-_DIGIT_FIX = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "i": "1", "|": "1"})
+_DIGIT_FIX = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "i": "1", "L": "1", "|": "1"})
 _NUM = r"\d[\d,.OolIi|]*"  # starts with a real digit; folded by _number()
 
 
 def _number(token: str) -> int | None:
     digits = token.translate(_DIGIT_FIX).replace(",", "").replace(".", "")
     return int(digits) if digits.isdigit() else None
+
+
+def _unaccent(text: str) -> str:
+    # The game's font has no accents; OCR adds them now and then ("mesòs", "récelved", "Lolíco").
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
 # --- the bottom bar ---------------------------------------------------------------------------
@@ -152,14 +159,23 @@ class LootLine:
                                   # known name completed it
 
 
-_AMOUNT = re.compile(r"[(\[{]\s*([+t4]?)\s*(\d[\d,.]*)\s*[)\]}]")
-_EARNED = r"e\s?[ae]?\s?r?\s?(?:rn|[nm]){1,2}\s?e?d\b"   # earned, eamed, earmed, eaned, earnd...
-_ITEM = re.compile(rf"^(?P<name>.+?)\s*[xX×]\s*(?P<n>[\dlIi|]{{1,4}})\s*\.?\s*{_EARNED}", re.I)
-_EXP_LINE = re.compile(r"\bE\s?X\s?P\b", re.I)
+# "(+21)": the sign is any one or two characters ("+" also reads as "-", "=", "±", "*", "-+"), or none; a
+# line cut off right after the number has no ")".
+_AMOUNT = re.compile(r"[(\[{]\s*([+t4]|[^\d\s()\[\]{}]{1,2})?\s*(\d[\d,.]*)\s*([)\]}]|$)")
+_EARNED = (r"(?:e\s?[ae]?\s?r?\s?(?:rn|[nm]){1,2}\s?e?d"  # earned, eamed, earmed, eaned, earnd...
+           r"|[a-z]?e[a-z]{1,5}d)\b")                    # eared, earred, eanad, earnied, ealned, learned...
+# "Leaf x1 earned.": the quantity's "x" can be lost after a cut name's "..." ("Orange Mushroo...51"), and
+# junk read between it and "earned" ("x1-earned", "x1 .earned").
+_ITEM = re.compile(rf"^(?P<name>.+?)\s*(?:[xX×]\s*(?P<n>[\dlIiL|]{{1,4}})|(?<=[\s.…])(?P<d>\d{{1,4}}))"
+                   rf"[\s\-_.,:;~]*{_EARNED}", re.I)
+_EXP_LINE = re.compile(r"E\s?X\s?P\b", re.I)  # no \b before it: the space is often lost ("receivedEXP")
 _RECEIVED = re.compile(r"(?:re)?cei?v|recei|rece|re\w?[ie]{1,2}v", re.I)  # also OCR's reeived, recieved
 _MESOS = re.compile(r"\b(?:m|rn)[e3]s[o0]s?\b|\b(?:m|rn)es\b|meso", re.I)
 _GAINED = re.compile(r"gain|have", re.I)
-_CUT = re.compile(r"(?:…|[.,]\s*[.,])[\s.,…]*$")  # the "..." ending a cut-off name, also read as ".." or "…"
+# The "..." ending a cut-off name, also read as "..", "." or "…" (or a "," ":" ";"); no item name ends in one.
+_CUT = re.compile(r"(?:…|[.,:;])[\s.,…:;]*$")
+
+MESOS_MIN = 0.7  # a 4-7 letter word this close to "mesos" (difflib ratio) is it misread: resos, mesps, mcsos
 
 
 def parse_loot(text: str, item_names: Iterable[str] | None = None) -> LootLine | None:
@@ -169,27 +185,37 @@ def parse_loot(text: str, item_names: Iterable[str] | None = None) -> LootLine |
     The game cuts long item names off with "..." ("Bubbling's Hug...x1 earned."). Such a name becomes the one
     known name that starts that way; with no names given, or none or several starting that way, it's kept as
     read (without the "...") and the line is marked `cut`."""
-    text = " ".join(text.split())
+    text = " ".join(_unaccent(text).split())
     if m := _ITEM.search(text):
         name = m.group("name").strip(" .,:;-…")
         cut = bool(_CUT.search(m.group("name")))
-        qty_raw = m.group("n")
+        qty_raw = m.group("n") or m.group("d")
         qty = _number(qty_raw)
         if item_names is not None and name:
-            full = match_prefix(name, item_names) if cut else match_name(name, item_names)
+            # A name read in full that matches nothing may have lost its "..." and is completed too. A cut name
+            # is never matched whole: "Green Hunter's..." isn't "Green Hunter".
+            full = (match_prefix(name, item_names) if cut
+                    else match_name(name, item_names) or match_prefix(name, item_names))
             if full:
                 name, cut = full, False
         return LootLine("item", item=name, quantity=qty, sure=qty_raw.isdigit(), cut=cut)
     amount = _AMOUNT.search(text)
     if amount is None:
         return None
-    sign, value = amount.group(1), _number(amount.group(2))
-    sure = sign == "+"
+    sign, value, closed = amount.group(1), _number(amount.group(2)), amount.group(3)
+    sure = sign == "+" and bool(closed)  # with no ")", digits may have been cut off too
     if _EXP_LINE.search(text) and _RECEIVED.search(text):
         return LootLine("exp", amount=value, sure=sure)
-    if _MESOS.search(text) and (_GAINED.search(text) or "meso" in text.lower()):
+    if _says_mesos(text) and (_GAINED.search(text) or "meso" in text.lower()):
         return LootLine("mesos", amount=value, sure=sure)
     return None
+
+
+def _says_mesos(text: str) -> bool:
+    if _MESOS.search(text):
+        return True
+    words = re.findall(r"[a-z0-9]{4,7}", text.lower())
+    return any(difflib.SequenceMatcher(None, w, "mesos").ratio() >= MESOS_MIN for w in words)
 
 
 # --- names ------------------------------------------------------------------------------------
@@ -207,7 +233,7 @@ def _plain(text: str) -> str:
 
 
 def _folded(text: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", _plain(text).translate(_FOLD).replace("rn", "m"))
+    return re.sub(r"[^a-z0-9]", "", _plain(_unaccent(text)).translate(_FOLD).replace("rn", "m"))
 
 
 @functools.lru_cache(maxsize=4)

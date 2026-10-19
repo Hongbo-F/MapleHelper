@@ -116,11 +116,48 @@ def test_loot_amounts(text, kind, amount, sure):
         assert (line.kind, line.amount, line.sure) == (kind, amount, sure)
 
 
+# Misreads of the game's font (Noto Sans KR Medium) found by OCR on rendered pickup lines.
+
+@pytest.mark.parametrize("text, kind, amount, sure", [
+    ("You have gained mesos (-56)", "mesos", 56, False),  # "+" read as "-"
+    ("You received EXP (-17)", "exp", 17, False),
+    ("You received EXP (=8)", "exp", 8, False),
+    ("You received EXP (±377)", "exp", 377, False),
+    ("You have gained mesos (*39)", "mesos", 39, False),
+    ("You received EXP (-+12)", "exp", 12, False),
+    ("You received EXP (44)", "exp", 4, False),           # "+" read as "4": the amount is 4
+    ("You received EXP (+4", "exp", 4, False),            # cut off before ")": digits may be missing too
+    ("You received EXP (+", None, None, None),
+    ("You receivedEXP (+50)", "exp", 50, True),           # the space before EXP lost
+    ("You récelved EXP (+21)", "exp", 21, True),          # an accent added
+    ("You have gained mesòs (+13)", "mesos", 13, True),
+    ("You have gained resos (+626)", "mesos", 626, True),
+    ("You have gained rresos (+12)", "mesos", 12, True),
+    ("You have gained mesps (+7)", "mesos", 7, True),
+    ("You have gained mcsos (+30)", "mesos", 30, True),
+    ("You have gained fame (+1)", None, None, None),      # not close enough to "mesos"
+])
+def test_loot_amounts_misread_in_the_games_font(text, kind, amount, sure):
+    line = parse_loot(text)
+    if kind is None:
+        assert line is None
+    else:
+        assert (line.kind, line.amount, line.sure) == (kind, amount, sure)
+
+
 @pytest.mark.parametrize("text, name, qty, sure", [
     ("Leaf x1 earned. (Etc)", "Leaf", 1, True),
     ("Blue Snail Shell xl eamed. (Etc)", "Blue Snail Shell", 1, False),
     ("Wax Doll x12 earmed (Etc)", "Wax Doll", 12, True),
     ("Red Potion ×3 earned.", "Red Potion", 3, True),
+    # Misreads of the game's font:
+    ("Wooden Topx1-earned. (Use)", "Wooden Top", 1, True),       # junk between the quantity and "earned"
+    ("Blue Napoleon x1-earned. (Equip)", "Blue Napoleon", 1, True),
+    ("SledgehammerxL earned. (Equip)", "Sledgehammer", 1, False),  # "1" read as "L"
+    ("Steel Brist x1 eared. (Equip)", "Steel Brist", 1, True),     # "earned" misread
+    ("Green Headbandx1 earhed.(Equip)", "Green Headband", 1, True),
+    ("Yellow Basebal. xl earried. (Equip)", "Yellow Basebal", 1, False),
+    ("Orange Mushroo...51 earned. (Use)", "Orange Mushroo", 51, True),  # the "x" lost after "..."
 ])
 def test_loot_items(text, name, qty, sure):
     line = parse_loot(text)
@@ -151,6 +188,26 @@ def test_cut_item_name_is_completed(text):
 ])
 def test_misread_cut_item_name_is_completed(text):
     assert parse_loot(text, ITEM_NAMES).item == "Bubbling's Huge Bubble"
+
+
+@pytest.mark.parametrize("text, name", [
+    ("Red Mystique P.x1 earned. (Equip)", "Red Mystique Pants"),  # "..." read as "."; not "Red Mystique"
+    ("Dark Piette Pa.x1 earned. (Equip)", "Dark Piette Pants"),
+    ("Red Knuckleves,x1 earned. (Equip)", "Red Knuckleves"),      # "..." read as ","; not "Red Knucklevest"
+    ("Brown Apprenti..X1-eamed (Equip)", "Brown Apprentice Hat"),
+    ("Brown Lolíco A...x1 earned. (Equip)", "Brown Lolico Armor"),  # an accent added
+    ("Bubbling's Hug x1 earned. (Etc)", "Bubbling's Huge Bubble"),  # "..." lost: matches nothing, so completed
+    ("Qld Steel Nord x1 earned. (Equip)", "Old Steel Nordic Helm"),
+])
+def test_cut_item_name_misread_in_the_games_font(text, name):
+    assert parse_loot(text, ITEM_NAMES).item == name
+
+
+@pytest.mark.parametrize("text", ["Green Hunter's..x1 earned. (Equip)", "Green Hunter's.x1 earned. (Equip)"])
+def test_cut_item_name_is_not_matched_whole(text):
+    # Green Hunter's Armor or Pants; "Green Hunter" is a real name but not one this can be.
+    line = parse_loot(text, ITEM_NAMES)
+    assert (line.item, line.cut) == ("Green Hunter's", True)
 
 
 def test_ambiguous_cut_item_name_stays_as_read():
