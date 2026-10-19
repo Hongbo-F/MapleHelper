@@ -76,7 +76,7 @@ Other commands (`python -m gamelab -h` lists them all):
 
 | Piece | Does |
 |---|---|
-| `mobs.py` | Finds snails, slimes, pigs and Orange Mushrooms. It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates. About 300 ms per look. Whole-screen looks go band by band: across the whole screen, green foliage took all of the slime candidate spots and three slimes in plain view were missed. |
+| `mobs.py` | Finds snails, slimes, pigs and Orange Mushrooms. It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates. About 100 ms for the fight's band around her, 300 ms for the whole screen. The first pass ignores windows with almost none of the monster's colour: their normalised score is noise that can reach a perfect 1.0. The frame is also cut to an even size so the half-size mask is an exact shrink. An odd size (the fight's band was 151 rows) smeared faint colour into blank windows. In the basin, those fake matches took all 12 checks per monster type, so the fight never saw the snails and pigs at her level while a whole-screen look did. That's likely also why one pass over the whole screen once missed three slimes in plain view; whole-screen looks still go band by band. |
 | `sprites.py` | Templates for the monsters on the current map, made from the game's own sprites (every stand, move and hit frame) at their on-screen size. They're added to the screenshot cut-outs in `assets/mobs/`, which still catch monsters half hidden in plants. Built on first use and kept with the other extracted data (git-ignored). |
 | `shots.py` | Where a star reaches, and where to stand to shoot a platform: the spots on other platforms that have the most of it in reach, safe ones first. Also reads a monster's HP bar. |
 | `hunt.py` | `Eyes`: her name tag (full resolution), HP/MP from the bar colours, her minimap dot, and the monsters in her shooting band. `Hunter`: places her and the monsters on the map, and runs the objectives. |
@@ -152,7 +152,6 @@ python -m gamelab tour --stops 3 --kills 5
 - **Lucky Seven costs about 7 MP per cast.** A 32-shot test uses about 220 MP. Use `--regular-attack` for long runs. Hunting uses the regular attack unless `--skill` is given.
 - **How far above or below a star reaches** beyond 60 units isn't measured. `hunt shots` sums up the shot log. A hit is read from the target's HP bar, which is sometimes missed, so kills are the surer sign.
 - **Other players** hunt this map too. Platforms are often empty, and stops then end with no kills.
-- **Whole-screen and fight looks can disagree.** In the basin, a whole-screen look saw 2 pigs on her platform that the fight's looks, a narrower band around her, didn't. Why isn't known yet.
 - **EXP from anything else** counts as a kill if it comes just as a target vanishes. In a party, that includes EXP shared from other members' kills.
 - **Don't leave her standing on a spawn platform:** monsters walking into her pushed her off platform 12 while she waited there. Standing in the basin, she was hit about every 10-20 s, pushed about 87 units each time.
 - **Crowded destinations:** sending her without fighting to a platform full of pigs and Orange Mushrooms (17) took a minute of hits and replans.

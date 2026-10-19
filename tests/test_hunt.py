@@ -142,6 +142,27 @@ def test_detector_finds_a_pasted_monster():
     assert abs(found[0].x - (100 + w // 2)) <= 3
 
 
+
+def test_blank_windows_dont_crowd_out_a_monster_in_an_odd_sized_band():
+    # The fight's band was 151 rows. Halving an odd size smeared faint colour into blank windows,
+    # whose silhouette scores came out a fake 1.0 and took every check: in the basin, snails and
+    # pigs at her level were never seen. Here: pig-coloured specks (like flowers), a pig on the right.
+    rgba = np.asarray(Image.open(ASSETS / "pig_0.png"))
+    pig = np.asarray(Image.fromarray(rgba).resize((rgba.shape[1] // 2, rgba.shape[0] // 2)))
+    ph, pw = pig.shape[:2]
+    detector = MobDetector()
+    for seed in range(4):
+        rng = np.random.default_rng(seed)
+        frame = np.full((151, 960, 3), SKY, np.uint8)
+        frame[121:] = GRASS
+        for _ in range(60):
+            y, x = rng.integers(0, 117), rng.integers(0, 700)
+            frame[y:y + rng.integers(2, 9), x:x + rng.integers(2, 12)] = (240, 160, 150)
+        region = frame[121 - ph:121, 760:760 + pw]
+        frame[121 - ph:121, 760:760 + pw] = np.where(pig[..., 3:] > 0, pig[..., :3], region)
+        found = detector.detect(frame, rows=(0, 151))
+        assert any(m.kind == "pig" and abs(m.x - (760 + pw // 2)) <= 4 for m in found), seed
+
 def test_cornered_she_fights_from_where_she_is():
     t = target(PLAT.right - 70)  # she's at the right end, the monster right next to her
     assert decide(PLAT.right - 30, 500, PLAT, t, []) == ("throw", LEFT)  # not jumping to its other side

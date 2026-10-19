@@ -19,6 +19,7 @@ SCALE = 2
 THRESHOLD = 0.6            # masked colour match a spot needs to count as a monster
 SILHOUETTE_THRESHOLD = 0.35  # step 1: a spot worth checking
 MAX_CHECKS = 12            # step 2: best spots checked per monster type
+MIN_COVER = 0.25           # step 1: a spot's window needs this share of the template's own body colour
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,9 @@ class MobDetector:
         if rows:
             y_off = max(0, rows[0])
             frame = frame[y_off:rows[1]]
+        # An even size, so step 1's half-size mask is an exact 2x shrink. An odd one (the fight's band
+        # was 151 rows) smeared faint colour into blank windows, which then scored a perfect 1.0.
+        frame = frame[:frame.shape[0] // 2 * 2, :frame.shape[1] // 2 * 2]
         channels = tuple(frame[..., i].astype(np.int16) for i in range(3))
         coarse_size = (frame.shape[1] // 2, frame.shape[0] // 2)
         hits = []
@@ -97,11 +101,18 @@ class MobDetector:
                 continue
             # Step 1: body-colour silhouettes, at half this frame's size.
             coarse = cv2.resize(colour.astype(np.float32), coarse_size, interpolation=cv2.INTER_AREA)
-            spots = []
+            spots, cover = [], {}
             for i, (_, _, silhouette) in enumerate(templates):
                 if coarse.shape[0] < silhouette.shape[0] or coarse.shape[1] < silhouette.shape[1]:
                     continue
                 res = cv2.matchTemplate(coarse, silhouette, cv2.TM_CCOEFF_NORMED)
+                # A window with next to no body colour has next to no variance, and its normalised score
+                # is noise that can reach 1.0. In the basin, such windows took all MAX_CHECKS checks,
+                # so snails and pigs at her level were never checked.
+                size = silhouette.shape
+                if size not in cover:
+                    cover[size] = cv2.matchTemplate(coarse, np.ones(size, np.float32), cv2.TM_CCORR) / silhouette.size
+                res[cover[size] < MIN_COVER * float(silhouette.mean())] = 0
                 peaks = (res >= SILHOUETTE_THRESHOLD) & (res == cv2.dilate(res, np.ones((3, 3), np.uint8)))
                 for y, x in zip(*np.nonzero(peaks)):
                     spots.append((float(res[y, x]), 2 * x + silhouette.shape[1], 2 * y + silhouette.shape[0], i))
