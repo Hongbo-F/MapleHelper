@@ -421,3 +421,28 @@ def test_under_a_low_platform_she_does_not_jump_at_a_monster():
     # A jump would carry her up onto the platform overhead: step away, or (cornered) throw from the ground.
     assert stance(500, 500, PLAT, [target(560)], can_jump=lambda a, b: False) == ("back", LEFT, 120)
     assert stance(60, 500, PLAT, [target(110)], can_jump=lambda a, b: False) == ("throw", RIGHT)
+
+
+def test_jump_back_turns_and_throws_just_before_landing():
+    from types import SimpleNamespace
+    from gamelab import hunt
+    from gamelab.flow import JUMP_LAG
+    from gamelab.route import air_time
+    key = lambda name: SimpleNamespace(name=name)
+    h = hunt.Hunter.__new__(hunt.Hunter)
+    h.keys = SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), attack=key("f"), lucky_seven=None)
+    h.skill, h.facing, h._lock_until, h.report = False, None, 0.0, hunt.Report()
+    sent = []
+    h._do = lambda events, name: sent.extend(events)
+    h.jump_back(RIGHT)  # the monster is on her right: she jumps left
+    assert [e[0] for e in sent] == sorted(e[0] for e in sent)  # the player refuses unsorted plans
+    at = lambda k, how: next(t for t, name, h_ in sent if name == k and h_ == how)
+    lift = at("alt", "down") + 1000 * JUMP_LAG
+    land = lift + 1000 * air_time(0)
+    apex = lift + 1000 * air_time(0) / 2
+    assert at("left", "down") < at("alt", "down")              # moving away when she jumps
+    lift_off = at("alt", "down") + 1000 * JUMP_LAG
+    assert lift_off < at("right", "down") < at("f", "down") < apex  # turned in the air, then the key
+    leaves = at("f", "down") + hunt.STAR_DELAY_MS               # ... the star leaves ~520 ms later
+    assert 0 <= land - leaves <= 40                            # just before landing
+    assert at("left", "up") <= at("right", "down")             # no longer holding away when she lands

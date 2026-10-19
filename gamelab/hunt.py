@@ -72,7 +72,13 @@ JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less
 JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
 JUMP_BACK_SPAN = 95  # how far a jump back carries her (85 measured)
 JB_RUN_MS = 80     # jump back: the arrow away is held this long before the jump, to get her moving
-JB_TURN_MS = 230   # ... and the arrow toward the monster is pressed this long after the start, in mid-air
+JB_LAND_MS = JB_RUN_MS + 55 + 555  # ... she lands this long after the start (lift-off 55 ms after the
+                                   # key, then 555 ms in the air: jumpSpeed 555, gravity 2000)
+STAR_DELAY_MS = 520  # the star leaves this long after the attack key, in the air or not (recorded at 60
+                     # fps: 515-545 ms with the key at 190, 290, 450 and 610 ms into a jump back)
+JB_TURN_MS = JB_RUN_MS + 60  # the arrow toward the monster: turning as soon as she's off the ground
+JB_THROW_MS = JB_TURN_MS + 25  # the attack key right after, so the star leaves just before she lands
+                               # (165 + 520 = 685): she's as far off as the jump takes her
 PILE_PRESSES = 4   # pick-up presses standing on a kill's drops: one item per press, and a pig drops several
 LOOT_REACH = 60    # drops spread about this far around where the monster died
 PILE_GAP = 15      # drops closer together than this are one pile: picked up standing in one place
@@ -525,20 +531,22 @@ class Hunter:
 
     def jump_back(self, direction: str) -> None:
         """At a monster too close to throw at (on `direction`'s side): jump away from it, turn toward it
-        in mid-air and throw. Thrown at point-blank range, from the ground or straight up, stars often
-        missed; from the air she's some 40-60 units farther off, and out of its way. The caller makes
-        sure there's room behind her."""
+        in mid-air, and throw so the star leaves just before she lands. Thrown at point-blank range, from
+        the ground or straight up, stars often missed; just before landing she's the whole jump away
+        (about 85 units), and out of its way. A star leaves about 520 ms after the attack key, so the
+        key goes in right after lift-off: pressed later, the star left after she had landed. The caller
+        makes sure there's room behind her."""
         self._wait_lock()
         key = (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
         away = self._arrow(LEFT if direction == RIGHT else RIGHT)
         toward, jump = self._arrow(direction), self.keys.jump.name
         events = [[0, away, "down"], [JB_RUN_MS, jump, "down"], [JB_RUN_MS + 40, jump, "up"],
                   [JB_TURN_MS, away, "up"], [JB_TURN_MS, toward, "down"], [JB_TURN_MS + 40, toward, "up"],
-                  [JB_TURN_MS + 60, key, "down"], [JB_TURN_MS + 100, key, "up"]]
-        self._do(events, "jump_back")
+                  [JB_THROW_MS, key, "down"], [JB_THROW_MS + 40, key, "up"]]
+        self._do(sorted(events, key=lambda e: e[0]), "jump_back")  # the player wants them in time order
         self.facing = direction
         # Locked until the attack's lock ends, which is after she lands.
-        self._lock_until = time.monotonic() + (JB_TURN_MS + 60 + COMBAT.attack_lock_ms) / 1000
+        self._lock_until = time.monotonic() + (JB_THROW_MS + COMBAT.attack_lock_ms) / 1000
         self.report.throws += 1
 
     def pick_here(self, presses: int = PILE_PRESSES) -> None:
