@@ -14,7 +14,9 @@ import numpy as np
 from .mapdata import SCREEN_SCALE, MapModel, Platform
 from .terrain import her_dot
 
-DOT_ORIGIN = (64.4, 91.3)  # screen px (full size) where map point (-centerX, -centerY) would put her dot
+# Screen px (full size) where map point (-centerX, -centerY) would put her dot. x refined against
+# ropes in view (the dot read ~8 units right of the rope-based position on three platforms).
+DOT_ORIGIN = (65.1, 91.3)
 
 
 @dataclass

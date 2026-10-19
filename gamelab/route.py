@@ -20,11 +20,20 @@ WALK_SPEED = 149.0       # map units/s: her measured walk (209 screen px/s at 1.
 CLIMB_SPEED = 117.0      # map units/s: measured 0.165 screen px/ms
 JUMP_SPEED = 555.0       # physics: jumpSpeed
 GRAVITY = 2000.0         # physics: gravityAcc
+FALL_SPEED = 670.0       # physics: fallSpeed (terminal)
 JUMP_HEIGHT = JUMP_SPEED ** 2 / (2 * GRAVITY)   # 77 map units
 JUMP_MARGIN = 12         # don't plan jumps that need the last few units of height
 ROPE_REACH = 95          # she can grab a rope that ends this far above her feet (jump + arms)
 LAND_MARGIN = 18         # land at least this far onto a platform
-EDGE_MARGIN = 12         # take off this far before a platform's end
+# Running jumps: she stands RUN_START back from the end, runs, and presses jump RUN_MS later, which
+# (after ~100 ms before she moves) puts the takeoff about JUMP_FROM back. Standing closer, she walked
+# off the end before the jump started (5 of 5 tries); from 30-40 back it landed.
+RUN_START = 40
+RUN_MS = 150
+JUMP_FROM = 33
+# Seconds added to a move's cost for how often it goes wrong: running jumps and walk-offs depend on
+# where she takes off; jumping straight up and climbing never missed in testing.
+RISK = {"jump": 1.5, "walk_off": 1.0, "drop": 0.3}
 
 
 @dataclass(frozen=True)
@@ -39,6 +48,28 @@ class Move:
     rope_x: float | None = None
     rope_top: float | None = None
     rope_bottom: float | None = None
+
+
+def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
+        dt: float = 0.004, limit: float = 4.0) -> tuple[Platform | None, float, float]:
+    """Where she lands from (x, y) moving at (vx, vy) (map units/s, y down): the first platform whose
+    surface her feet cross on the way down. Walls stop her sideways. `skip` is a platform she falls
+    through (dropping). Returns (platform, landing x, seconds)."""
+    t = 0.0
+    while t < limit:
+        nx, ny, nvy = x + vx * dt, y + vy * dt, min(vy + GRAVITY * dt, FALL_SPEED)
+        if vx and any(w.x1 == w.x2 and min(x, nx) <= w.x1 <= max(x, nx)
+                      and min(w.y1, w.y2) - 1 <= ny <= max(w.y1, w.y2) + 1 for w in model.walls):
+            nx, vx = x, 0.0  # bumped into a wall
+        if vy > 0 or nvy > 0:
+            for p in model.platforms:
+                if p is skip or not p.covers(nx):
+                    continue
+                surface = p.y_at(nx)
+                if y <= surface <= ny + 0.01 and ny >= y:
+                    return p, nx, t + dt
+        x, y, vy, t = nx, ny, nvy, t + dt
+    return None, x, t
 
 
 def air_time(dy_up: float) -> float | None:
@@ -77,60 +108,49 @@ def moves(model: MapModel) -> list[Move]:
                                 seconds=(rope.bottom - rope.top) / CLIMB_SPEED + fall_time(below.y_at(rope.x) - rope.bottom),
                                 rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom))
 
+    # Jumps, walk-offs and drops: simulated with the game's physics, so the landing platform is
+    # wherever her feet first cross a platform on the way down (not the one aimed at).
     for a in plats:
+        # Straight up through each platform overhead, where they overlap.
         for b in plats:
-            if a is b:
-                continue
-            # Straight up through b from a, where they overlap.
-            lo, hi = max(a.left, b.left) + LAND_MARGIN, min(a.right, b.right) - LAND_MARGIN
-            if lo <= hi:
-                x = (lo + hi) / 2
-                rise = a.y_at(x) - b.y_at(x)
-                if 8 < rise <= JUMP_HEIGHT - JUMP_MARGIN:
-                    out.append(Move("jump_up", a.id, b.id, x, x, seconds=air_time(rise) + 0.2))
-            # Running jumps off a's ends.
-            for direction, edge, sign in (("right", a.right, 1), ("left", a.left, -1)):
-                takeoff = edge - sign * EDGE_MARGIN
-                near = b.left if sign > 0 else b.right
-                gap = (near - edge) * sign
-                if gap < -LAND_MARGIN:  # b doesn't start beyond this end
-                    continue
-                land_x = near + sign * LAND_MARGIN
-                if not b.covers(land_x):
-                    continue
-                rise = a.y_at(takeoff) - b.y_at(land_x)
-                if rise > JUMP_HEIGHT - JUMP_MARGIN:
-                    continue
-                t = air_time(rise)
-                if t is None or WALK_SPEED * t < (land_x - takeoff) * sign:
-                    continue
-                # Don't plan a jump that would land on something closer underneath first.
-                first = model.platform_below(land_x, b.y_at(land_x) - 1)
-                if rise < 0 and first is not None and first.id != b.id and first.y_at(land_x) < b.y_at(land_x):
-                    continue
-                out.append(Move("jump", a.id, b.id, takeoff, land_x, direction, seconds=t + 0.2))
-
-    for a in plats:
-        for direction, edge, sign in (("right", a.right, 1), ("left", a.left, -1)):
-            x = edge + sign * 25
-            if any(w.x1 == w.x2 and abs(w.x1 - edge) < 30 and min(w.y1, w.y2) < a.y_at(edge) - 5 for w in model.walls):
-                continue  # a wall rises at this end: can't walk off
-            b = landing(x, a.y_at(edge))
-            if b is not None:
-                out.append(Move("walk_off", a.id, b.id, edge - sign * 5, x, direction,
-                                seconds=0.3 + fall_time(b.y_at(x) - a.y_at(edge))))
-        # Drop through to each platform underneath (once per platform, mid-overlap).
-        seen = set()
-        for b in plats:
-            if b is a or b.id in seen:
+            if b is a:
                 continue
             lo, hi = max(a.left, b.left) + LAND_MARGIN, min(a.right, b.right) - LAND_MARGIN
             if lo > hi:
                 continue
             x = (lo + hi) / 2
-            if landing(x, a.y_at(x)) is b:
-                seen.add(b.id)
-                out.append(Move("drop", a.id, b.id, x, x, seconds=0.4 + fall_time(b.y_at(x) - a.y_at(x))))
+            rise = a.y_at(x) - b.y_at(x)
+            if not 8 < rise <= JUMP_HEIGHT - JUMP_MARGIN:
+                continue
+            land, land_x, t = fly(model, x, a.y_at(x), 0.0, -JUMP_SPEED)
+            if land is b:
+                out.append(Move("jump_up", a.id, b.id, x, land_x, seconds=t + 0.2))
+        for direction, edge, sign in (("right", a.right, 1), ("left", a.left, -1)):
+            # Running jump off this end.
+            start, takeoff = edge - sign * RUN_START, edge - sign * JUMP_FROM
+            if a.covers(start):
+                land, land_x, t = fly(model, takeoff, a.y_at(takeoff), sign * WALK_SPEED, -JUMP_SPEED)
+                if land is not None and land is not a and land.covers(land_x - sign * LAND_MARGIN * 0.5) \
+                        and land.covers(land_x + sign * LAND_MARGIN * 0.5):
+                    out.append(Move("jump", a.id, land.id, start, land_x, direction,
+                                    seconds=t + 0.2 + RUN_MS / 1000))
+            # Walking off this end.
+            land, land_x, t = fly(model, edge + sign * 2, a.y_at(edge), sign * WALK_SPEED, 0.0)
+            if land is not None and land is not a:
+                out.append(Move("walk_off", a.id, land.id, edge - sign * 5, land_x, direction, seconds=0.3 + t))
+        # Dropping through (down + jump) to each different platform underneath.
+        seen = set()
+        for b in plats:
+            if b is a:
+                continue
+            lo, hi = max(a.left, b.left) + LAND_MARGIN, min(a.right, b.right) - LAND_MARGIN
+            if lo > hi:
+                continue
+            x = (lo + hi) / 2
+            land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a)
+            if land is not None and land.id not in seen:
+                seen.add(land.id)
+                out.append(Move("drop", a.id, land.id, x, land_x, seconds=0.4 + t))
     return out
 
 
@@ -159,7 +179,7 @@ class Planner:
                     path.append(move)
                 return path[::-1]
             for m in self.by_src.get(pid, []):
-                cost = t + abs(m.x - px) / WALK_SPEED + m.seconds
+                cost = t + abs(m.x - px) / WALK_SPEED + m.seconds + RISK.get(m.kind, 0.0)
                 node = (m.dst, round(m.land_x))
                 if cost < best.get(node, math.inf):
                     best[node] = cost
