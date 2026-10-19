@@ -1,4 +1,5 @@
-"""A hunting tour of a map: visit the platforms monsters spawn on in random order, shoot each one
+"""A hunting tour of a map: sweep the platforms monsters spawn on (nearest next, varied a little, the
+order then tidied to cut travel), shoot each one
 clear, collect the drops, rest on the chair at a safe platform when HP runs low, and finish standing
 by on a safe platform.
 
@@ -183,10 +184,63 @@ class Tour:
                 self.h.clear(ground={d.platform}, max_kills=2, seconds=20)
                 self.h.loot_pending()
 
+    def sweep(self, grounds: list[int], stops: int, here: tuple[int, float]) -> tuple[list[int], float]:
+        """An order to visit `stops` of the hunting grounds that keeps travelling short, like a player
+        sweeping the map: nearest next (by route time from where she'll be, judged with a random
+        +-25% so it isn't the same sweep every time), then improved by swapping stretches of it
+        (2-opt) on the real route times. Returns the order and its travel time (s, by the model)."""
+        spots = {pid: self._spot_at(pid) for pid in grounds}
+        cache: dict[tuple, float] = {}
+
+        def travel(a: tuple[int, float], pid: int) -> float:
+            key = (a[0], round(a[1]), pid)
+            if key not in cache:
+                t = self.nav.planner.travel(a[0], a[1], spots[pid][0])
+                cache[key] = 1e6 if t is None else t
+            return cache[key]
+
+        order, at, left = [], here, [g for g in grounds if travel(here, g) < 1e6]
+        while left and len(order) < stops:
+            nxt = min(left, key=lambda g: travel(at, g) * self.rng.uniform(0.75, 1.25))
+            order.append(nxt)
+            left.remove(nxt)
+            at = spots[nxt]
+
+        def total(seq: list[int]) -> float:
+            t, a = 0.0, here
+            for g in seq:
+                t += travel(a, g)
+                a = spots[g]
+            return t
+
+        better = True
+        while better:
+            better = False
+            for i in range(len(order) - 1):
+                for j in range(i + 1, len(order)):
+                    trial = order[:i] + order[i:j + 1][::-1] + order[j + 1:]
+                    if total(trial) < total(order) - 0.5:
+                        order, better = trial, True
+        return order, total(order)
+
+    def _spot_at(self, pid: int) -> tuple[int, float]:
+        """Where she'll stand to hunt platform `pid`: the best safe spot, else its middle."""
+        for sp in shots.spots(self.nav.model, pid):
+            if sp.safe and sp.coverage >= MIN_COVERAGE:
+                return sp.platform, sp.x
+            break
+        p = self.nav.model.platform(pid)
+        return pid, (p.left + p.right) / 2
+
     def run(self, stops: int = 3, kinds=None, kills_per_stop: int = 5, seconds_per_stop: float = 90) -> TourReport:
         grounds = self.hunting_grounds()
-        order = self.rng.sample(grounds, min(stops, len(grounds)))
-        self.log(f"tour: {order} (safe platforms: {self.safe})")
+        f = self.nav.mover.fix()
+        here = (f.where.platform.id, f.where.x) if f.where.platform else (grounds[0], 0.0)
+        n = min(stops, len(grounds))
+        order, travel = self.sweep(grounds, n, here)
+        blind = sorted(self._order_cost(self.rng.sample(grounds, n), here)[1] for _ in range(9))[4]
+        self.log(f"tour: sweep {order}, about {travel:.0f} s of travel ({n} hunting grounds picked at random: "
+                 f"{blind:.0f} s); safe platforms: {self.safe}")
         for pid in order:
             if self.h.look(mobs=False).hp < self.rest_below:
                 self.rest()
@@ -202,6 +256,14 @@ class Tour:
                 self.rest()
         self.rest_and_stand_by()
         return self.report
+
+    def _order_cost(self, seq: list[int], here: tuple[int, float]) -> tuple[list[int], float]:
+        t, a = 0.0, here
+        for g in seq:
+            spot = self._spot_at(g)
+            t += self.nav.planner.travel(a[0], a[1], spot[0]) or 0.0
+            a = spot
+        return seq, t
 
     def rest_and_stand_by(self) -> None:
         if self.h.look(mobs=False).hp < self.rest_to:

@@ -173,7 +173,7 @@ class Mover:
         sign = 1 if m.direction == RIGHT else -1
         p = self.model.platform(m.src)
         edge = p.right if sign > 0 else p.left
-        takeoff = edge - sign * JUMP_FROM
+        takeoff = m.takeoff if m.takeoff is not None else edge - sign * JUMP_FROM
         run = (takeoff - f.where.x) * sign  # how far she runs before jumping
         if run < 7:  # too close to the end (or past the takeoff): back up to the run-up start first
             f = self.walk_to(m.x, tolerance=6, f=f)

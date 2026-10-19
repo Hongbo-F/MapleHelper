@@ -19,6 +19,7 @@ With `fight` on (hunting tours), monsters in reach are shot dead before each mov
 in the way of a move along her platform are shot first.
 """
 
+import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -50,12 +51,20 @@ class Trip:
 
 
 class Navigator:
-    def __init__(self, hunter: Hunter, model: MapModel, log=print, fight: bool = False):
+    def __init__(self, hunter: Hunter, model: MapModel, log=print, fight: bool = False,
+                 variety: float = 0.35, rng: random.Random | None = None):
         self.h, self.model, self.log = hunter, model, log
         self.loc = hunter.localizer
         self.planner = Planner(model)
         self.mover = Mover(hunter, model, self.loc, log)
-        self.flow = Flow(model, {k: getattr(hunter.keys, k).name for k in ("left", "right", "jump", "up", "down")})
+        self.rng = rng or random.Random()
+        # Like a player, not the same way every time: each trip weighs every move by a random 1 to
+        # 1 + variety, so routes within ~variety of the quickest take turns (the basin's two ropes, a
+        # drop or a walk-off), and moves start from varied spots (flow.Flow's rng).
+        self.variety = variety
+        self._weights: dict[tuple, float] = {}
+        self.flow = Flow(model, {k: getattr(hunter.keys, k).name for k in ("left", "right", "jump", "up", "down")},
+                         rng=self.rng if variety else None)
         self.fight = fight          # shoot monsters on the way (hunting tours) instead of avoiding them
         self.hunt_on_way = True     # with `fight`: shoot monsters in reach between moves (off when going to rest)
         self._seen: list[tuple[float, Monster]] = []  # last look's monsters, to tell which way they walk
@@ -68,6 +77,7 @@ class Navigator:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
         with a look that includes monsters: True ends the trip early ('in position')."""
         trip, deadline = Trip(), time.monotonic() + seconds
+        self._weights = {}  # new weights each trip, kept through its replans
         fights = 0  # in a row, without a move between: after a few she moves on regardless
         tries: dict[int, int] = {}  # platform -> monsters engaged there on the way
         avoid: dict[tuple, float] = {}  # (kind, src, dst, x) of moves a monster was in the way of -> when
@@ -108,7 +118,7 @@ class Navigator:
                 return trip
             now = time.monotonic()
             avoid = {key: t for key, t in avoid.items() if now - t < 4}
-            path = self.planner.plan(here.id, f.where.x, dst,
+            path = self.planner.plan(here.id, f.where.x, dst, weight=self.weight,
                                      penalty=lambda m: AVOID_SECONDS if _key(m) in avoid else 0.0)
             if not path:
                 trip.result = f"no route from platform {here.id} to {dst}"
@@ -266,6 +276,13 @@ class Navigator:
         self._off = 0
         return cut, sent
 
+    def weight(self, m: Move) -> float:
+        """This trip's random weight for a move (see `variety`)."""
+        key = _key(m)
+        if key not in self._weights:
+            self._weights[key] = 1.0 + self.variety * self.rng.random()
+        return self._weights[key]
+
     def recover(self, longest: float = 0.8) -> Fix:
         """Right after a plan was cut short: wait until she's stopped moving (a hit knocks her back
         and she can't be steered for a moment), glancing at her dot, then one look to place her."""
@@ -288,7 +305,7 @@ class Navigator:
             return None
         s = self.h.look(mobs=True, wide=True)
         monsters = self.monsters(s, seen=s.t - starts_at)
-        path = self.planner.plan(end.platform.id, end.x, dst)
+        path = self.planner.plan(end.platform.id, end.x, dst, weight=self.weight)
         if not path:
             return None
         start = Body(0.0, end.x, end.platform, end.run, end.landed, end.slack)

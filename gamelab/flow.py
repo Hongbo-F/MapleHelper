@@ -47,6 +47,7 @@ MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only mak
 TAP = 0.04           # s a jump/down tap is held
 LAND_SLIDE = 13.0    # units she slides on landing with no arrow held
 MIN_RUNUP = 15.0     # units of run before a running jump from standing
+JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
 ROPE_CLEAR = 30      # drop at least this far from the top of a rope hanging from her platform
 GRAB_LEAD = WALK_SPEED * JUMP_SPEED / GRAVITY  # ~41: jump this far before a rope to be at the top over it
 APEX = JUMP_SPEED ** 2 / (2 * GRAVITY)         # 77 units
@@ -200,9 +201,16 @@ def _sign(v: float) -> int:
 
 
 class Flow:
-    def __init__(self, model: MapModel, key_names: dict[str, str]):
+    def __init__(self, model: MapModel, key_names: dict[str, str], rng=None):
         self.model = model
         self.key_names = key_names
+        self.rng = rng  # varies where moves start (None: always the same, e.g. in tests)
+
+    def pick(self, near: float, far: float) -> float:
+        """A spot between `near` (the quickest) and `far`, usually close to `near`; `near` without rng."""
+        if self.rng is None:
+            return near
+        return near + (far - near) * self.rng.random() ** 2
 
     # --- running -----------------------------------------------------------------------------
 
@@ -279,7 +287,10 @@ class Flow:
             return None
         a, d = b.platform, (1 if m.direction == RIGHT else -1)
         edge = a.right if d > 0 else a.left
-        takeoff = edge - d * JUMP_FROM
+        if m.takeoff is not None:  # a jump from along the platform
+            takeoff = m.takeoff - d * (self.pick(0.0, 10.0) if self.rng else 0.0)
+        else:
+            takeoff = edge - d * self.pick(JUMP_FROM, JUMP_FROM_FAR)  # players jump from a little further back too
         if b.run == d and (takeoff - b.x) * d < -2:
             if (edge - b.x) * d <= 12:
                 return None
@@ -341,7 +352,8 @@ class Flow:
             return None
         # Stop anywhere under it and jump straight up.
         lo, hi = max(a.left, q.left) + LAND_MARGIN, min(a.right, q.right) - LAND_MARGIN
-        stop = self._stop_within(b, lo, hi, m.x, k)
+        near = min(max(b.x, lo), hi)
+        stop = self._stop_within(b, lo, hi, self.pick(near, hi if near - lo < hi - near else lo) if self.rng else m.x, k)
         if stop is None:
             return None
         t, x = stop
@@ -362,6 +374,9 @@ class Flow:
         if not clear:
             return None
         prefer = min(clear, key=lambda x: (abs(x - b.x), abs(x - m.x)))
+        if self.rng is not None:  # not always the first spot: somewhere further over it now and then
+            far = max(clear, key=lambda x: abs(x - b.x))
+            prefer = min(clear, key=lambda x: abs(x - self.pick(prefer, far)))
         lo = hi = prefer
         while lo - 2 in clear:
             lo -= 2

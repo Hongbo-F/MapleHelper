@@ -124,3 +124,35 @@ def test_a_platform_just_above_monsters_is_not_safe():
     assert not model.safe(low.id)                      # B's monsters reach 40 units up
     assert model.safe(by_y(model, 500, 400).id)        # C: no spawns, nothing just underneath
     assert not model.safe(by_y(model, 360, 300).id)    # B itself: the snail spawns there
+
+
+def test_route_weights_let_near_equal_routes_take_turns(model):
+    planner = Planner(model)
+    a, c = by_y(model, 300, 100), by_y(model, 500, 400)
+    assert planner.travel(a.id, 100, c.id) > 0
+    # Two ways down from A: walking off its end or dropping through it. Weighting one of them up
+    # makes the other win.
+    first = planner.plan(a.id, 100, c.id)[0]
+    other = planner.plan(a.id, 100, c.id, weight=lambda m: 3.0 if m.kind == first.kind else 1.0)
+    assert other[0].kind != first.kind
+
+
+def test_jumps_need_a_sure_landing(model):
+    from gamelab.route import WALK_SPEED, JUMP_SPEED, fly, sure_landing
+    a = by_y(model, 300, 100)
+    land, _, _ = fly(model, 167, 300, WALK_SPEED, -JUMP_SPEED)
+    assert land is not None and sure_landing(model, 167, 300, WALK_SPEED, -JUMP_SPEED, land)
+    assert not sure_landing(model, 167, 300, WALK_SPEED, -JUMP_SPEED, a)  # it doesn't land back on A
+
+
+def test_a_tour_sweeps_nearest_first_then_tidies_the_order():
+    import random
+    from types import SimpleNamespace
+    from gamelab.tour import Tour
+    xs = {1: 100.0, 2: 900.0, 3: 200.0, 4: 800.0}  # grounds along a line; travel = distance
+    planner = SimpleNamespace(travel=lambda src, x, dst: abs(xs[dst] - x) / 100)
+    tour = Tour.__new__(Tour)
+    tour.nav, tour.rng = SimpleNamespace(planner=planner), random.Random(0)
+    tour._spot_at = lambda pid: (pid, xs[pid])
+    order, travel = tour.sweep([1, 2, 3, 4], 4, (0, 0.0))
+    assert order == [1, 3, 4, 2] and travel == pytest.approx(9.0)
