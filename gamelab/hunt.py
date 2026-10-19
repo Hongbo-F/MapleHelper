@@ -58,11 +58,14 @@ TOO_CLOSE = 110    # a monster on her platform nearer than this is about to touc
 STEP_AWAY = 120
 KNOCKBACK_ROOM = 25  # extra room kept from her platform's ends while monsters share it: standing ~100
                      # units from an end of platform 12, pigs walking into her knocked her off it
-JUMP_OVER = 80       # how far a jump started from standing carries her (map units)
 MAX_WALK = 300     # longest walk between two looks
 TRACK_SLACK = 85   # how far a target may move between two looks (knockback) and still be the same monster
 SEARCH_SLACK = 150  # ... and how far it's looked for once it has vanished
 LOST_AFTER = 3.0   # s a target may stay unseen (without an EXP message) before she gives up on it
+HIDDEN_FOR = 1.8   # s she keeps throwing at a monster she was throwing at once it can't be seen: a hit
+                   # one flinches under its damage numbers and the detector loses it for 1-3 s, and
+                   # she used to stop throwing until it showed again
+EMPTY_PATIENCE = 0.4  # s a fight waits when no monster is seen at all (not even out of reach)
 LOOT_REACH = 60    # drops spread about this far around where the monster died
 # Where monsters are looked for: from this far above her feet to this far below (bodies stick up
 # above their feet, so the band reaches higher than she can shoot).
@@ -429,21 +432,39 @@ class Hunter:
         self._lock_until = time.monotonic() + (COMBAT.attack_lock_ms + 60) / 1000
         self.report.throws += 1
 
-    def walk(self, direction: str, units: float) -> None:
+    def jump_throw(self, direction: str) -> None:
+        """Face `direction`, jump straight up and attack in mid-air: in the air the attack throws a
+        star even at point-blank range, where on the ground the claw only swipes (9-11 damage against
+        30-70 for a star, seen with slimes crowding her in the basin). The macro's F1 combo, with its
+        timing (jump, then the attack 100 ms after the jump key)."""
+        self._wait_lock()
+        key = (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
+        jump = self.keys.jump.name
+        events, t = [], 0
+        if self.facing != direction:
+            arrow = self._arrow(direction)
+            events, t = [[0, arrow, "down"], [MOVEMENT.tap_turn_ms, arrow, "up"]], MOVEMENT.tap_turn_ms + 30
+        events += [[t, jump, "down"], [t + 40, jump, "up"], [t + 100, key, "down"], [t + 140, key, "up"]]
+        self._do(events, "jump_throw")
+        self.facing = direction
+        self._lock_until = time.monotonic() + (COMBAT.attack_lock_ms + 160) / 1000
+        self.report.throws += 1
+
+    def walk(self, direction: str, units: float, pick: bool = True) -> None:
+        """Walk `units` that way, pressing pick-up all the while (anything she passes over is looted)."""
         from .moves import hold_ms
         self._wait_lock()
-        arrow = self._arrow(direction)
-        self._do([[0, arrow, "down"], [hold_ms(units), arrow, "up"]], "walk")
+        arrow, ms = self._arrow(direction), hold_ms(units)
+        events = [[0, arrow, "down"], [ms, arrow, "up"]]
+        if pick and self.keys.pick_up is not None:
+            events += self._pickups(0, ms + 200)
+        self._do(sorted(events, key=lambda e: e[0]), "walk")
         self.facing = direction
         time.sleep(MOVEMENT.stop_slide_ms / 1000)
 
-    def jump_over(self, direction: str) -> None:
-        """Jump that way from standing (arrow and jump together), over a monster that's too close."""
-        self._wait_lock()
-        arrow, jump = self._arrow(direction), self.keys.jump.name
-        self._do([[0, arrow, "down"], [10, jump, "down"], [50, jump, "up"], [650, arrow, "up"]], "jump_over")
-        self.facing = direction
-        time.sleep(MOVEMENT.stop_slide_ms / 1000)
+    def _pickups(self, start: int, end: int, every: int = 150) -> list[list]:
+        name = self.keys.pick_up.name
+        return [e for t in range(start, end, every) for e in ([t, name, "down"], [t + 40, name, "up"])]
 
     def sweep_loot(self, direction: str, units: float) -> None:
         """Walk `units` (0: stay put) while pressing pick-up every 150 ms, collecting whatever she
@@ -603,8 +624,6 @@ class Hunter:
                 self.throw(move[1])
                 throws += 1
                 first_throw = first_throw or time.monotonic()
-            elif move[0] == "jump":
-                self.jump_over(move[1])
             else:
                 self.walk(move[1], move[2])
         return "timeout"
@@ -675,21 +694,34 @@ class Hunter:
                 self.loot(d)
 
     def clear(self, kinds=None, ground: set[int] | None = None, max_kills: int = 10,
-              seconds: float = 120, patience: float = 3.0) -> Report:
-        """Kill monsters (of `kinds`) on the `ground` platforms, or anywhere if None, and any on her own
-        platform: nearest in reach first; walking along her platform to bring others into reach.
-        Stops when nothing has been in reach for `patience` seconds (waiting for respawns)."""
+              seconds: float = 120, patience: float = 1.5, approach: bool = True) -> Report:
+        """Fight like a player: a star hits the nearest monster in reach on the side she faces, so
+        she keeps throwing toward the side with the most monsters in reach, one throw per attack
+        cooldown, looking around during the cooldown, never idle while one is in reach. She keeps
+        them all on one side: one too close makes her step back (or, cornered, fight from where
+        she is), never cross over them. With nothing in reach she walks (if `approach`) just near
+        enough to the nearest, picking up as she goes; then sweeps up what fell on her platform.
+        Kills are her EXP going up. Targets: monsters (of `kinds`) on the `ground` platforms, or
+        anywhere if None, and any on her own platform. Stops after `max_kills`, after `seconds`, or
+        when nothing has been in reach for `patience` seconds (`EMPTY_PATIENCE` when none is seen at
+        all). A monster she was throwing at that goes out of sight is still thrown at for
+        `HIDDEN_FOR` seconds: hit, it flinches under its damage numbers, and the detector loses it."""
         deadline, unseen = time.monotonic() + seconds, 0
+        thrown: list[list] = []  # [monster, when last seen]: what she's thrown at, kept while hidden
         calm_since: float | None = None
         start: int | None = None  # the platform she's on; leaving it means she was knocked off
-        while time.monotonic() < deadline and sum(self.report.kills.values()) < max_kills:
+        exp0 = seen_exp = self.report.exp_kills
+        aimed: list[Target] = []  # in reach at the last throw: the dead are found among them
+        deaths: list[Drops] = []  # kills on her platform, to sweep up
+        last_act, last_hidden = None, False
+        while time.monotonic() < deadline and self.report.exp_kills - exp0 < max_kills:
             s = self.look()
             if s.where is None or s.platform is None:
                 unseen += 1
                 if unseen >= 10:
                     self.report.stop = "lost track of her"
                     return self.report
-                time.sleep(0.3)
+                time.sleep(0.2)
                 continue
             unseen = 0
             if stop := self.health_check(s):
@@ -700,30 +732,143 @@ class Hunter:
                 self.log(f"  she's on platform {s.platform.id} now, not {start} (knocked off?)")
                 self.report.stop = f"left platform {start}"
                 return self.report
-            now = time.monotonic()
-            self.skipped = [k for k in self.skipped if now - k[2] < 8]  # monsters move: try again later
-            here = [t for t in s.targets if (kinds is None or t.kind in kinds)
-                    and (ground is None or t.platform in ground or t.platform == s.platform.id)
-                    and not any(abs(t.x - x) < TRACK_SLACK and abs(t.y - y) < 40 for x, y, _ in self.skipped)]
-            if not here:
-                calm_since = calm_since or now
+            here, now = s.platform, time.monotonic()
+            wanted = [t for t in s.targets if (kinds is None or t.kind in kinds)
+                      and (ground is None or t.platform in ground or t.platform == here.id)]
+            for entry in thrown:
+                if (same := _same(entry[0], s.targets)) is not None:
+                    entry[0], entry[1] = same, now
+            # Her EXP went up since the last look: those are the kills, among what she was throwing at.
+            for _ in range(self.report.exp_kills - seen_exp):
+                dead = _dead_one(aimed, s.targets, s.where.x)
+                if dead is None:
+                    break
+                aimed.remove(dead)
+                thrown = [e for e in thrown if e[0] is not dead and _same(dead, [e[0]]) is None]
+                self.report.kills[dead.kind] = self.report.kills.get(dead.kind, 0) + 1
+                drops = Drops(dead.x, dead.y, dead.platform, time.monotonic())
+                (deaths if dead.platform == here.id else self.pending_loot).append(drops)
+                self.log(f"  {dead.kind} down at x {dead.x:.0f} (platform {dead.platform})")
+            seen_exp = self.report.exp_kills
+            thrown = [e for e in thrown if now - e[1] < HIDDEN_FOR]
+            hidden = [e[0] for e in thrown if e[1] != now]  # not seen this look: still there, hit
+            fight = wanted + hidden
+            act = stance(s.where.x, s.where.y, here, fight, approach, self.facing)
+            if act[:2] != (last_act or ())[:2] or (hidden and act[0] != "wait" and not last_hidden):
+                self.log(f"  {_describe(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
+            last_act, last_hidden = act, bool(hidden)
+            if act[0] in ("throw", "jump_throw"):
+                calm_since = None
+                aimed = [t for t in fight if abs(t.x - s.where.x) <= shots.STAR_REACH
+                         and -shots.SHOT_UP <= t.y - s.where.y <= shots.SHOT_DOWN
+                         and (t.x > s.where.x) == (act[1] == RIGHT)]
+                thrown += [[t, now] for t in aimed if not any(e[0] is t for e in thrown)]
+                (self.throw if act[0] == "throw" else self.jump_throw)(act[1])
+            elif act[0] in ("back", "approach"):
+                calm_since = None
+                self.walk(act[1], act[2])
+            else:
+                if deaths:  # sweep up what fell on her platform, all in one walk
+                    self.sweep_through(s, deaths)
+                    deaths = []
+                    continue
                 if self.pending_loot:
                     self.loot_pending(s)
-                if now - calm_since >= patience:
+                if wanted and not calm_since:
+                    self.report.out_of_reach += 1  # there are some, just not reachable from here
+                calm_since = calm_since or time.monotonic()
+                wait = patience if fight else min(patience, EMPTY_PATIENCE)  # none seen: move on soon
+                if time.monotonic() - calm_since >= wait:
                     self.report.stop = "nothing left in reach"
                     return self.report
-                time.sleep(0.5)
-                continue
-            calm_since = None
-            target = pick_target(s.where.x, s.where.y, s.platform, here)
-            outcome = self.kill(target, seconds=min(30, deadline - time.monotonic()))
-            if outcome not in ("killed", "lost", "timeout", "unreachable"):
-                self.report.stop = outcome
-                return self.report
-            if self.pending_loot:
-                self.loot_pending()
-        self.report.stop = "kill limit" if sum(self.report.kills.values()) >= max_kills else "time limit"
+                time.sleep(0.1)
+        if deaths:
+            s = self.look(mobs=False)
+            if s.where is not None and s.platform is not None:
+                self.sweep_through(s, deaths)
+        self.report.stop = "kill limit" if self.report.exp_kills - exp0 >= max_kills else "time limit"
         return self.report
+
+    def sweep_through(self, s: Sight, deaths: list[Drops]) -> None:
+        """Walk over every drop spot on her platform in one go, pressing pick-up all the way: to the
+        nearer end of them first, then across to the farther one."""
+        xs = [d.x for d in deaths if d.platform == s.platform.id]
+        if not xs:
+            return
+        lo, hi = min(xs) - LOOT_REACH, max(xs) + LOOT_REACH
+        x = s.where.x
+        first, last = (lo, hi) if abs(x - lo) <= abs(x - hi) else (hi, lo)
+        p = s.platform
+        clamp = lambda v: min(max(v, p.left + shots.EDGE_MARGIN), p.right - shots.EDGE_MARGIN)
+        first, last = clamp(first), clamp(last)
+        for goal in (first, last):
+            d = goal - x
+            if abs(d) >= 10:
+                self.walk(RIGHT if d > 0 else LEFT, abs(d))
+                x = goal
+        self.sweep_loot(RIGHT, 0)  # a few more presses where she stopped
+        self.report.loot_runs += 1
+
+
+def _same(t: Target, now: list[Target]) -> Target | None:
+    """The monster in `now` that is `t` seen again (same kind, near where it was), if any."""
+    near = [o for o in now if o.kind == t.kind and abs(o.x - t.x) < TRACK_SLACK and abs(o.y - t.y) < 40]
+    return min(near, key=lambda o: abs(o.x - t.x)) if near else None
+
+
+def _dead_one(aimed: list[Target], now: list[Target], her_x: float) -> Target | None:
+    """Which of the monsters she was throwing at died: one no longer seen (nearest her), else the
+    nearest (it may still be seen fading out)."""
+    gone = [t for t in aimed if not any(o.kind == t.kind and abs(o.x - t.x) < TRACK_SLACK
+                                        and abs(o.y - t.y) < 40 for o in now)]
+    pool = gone or aimed
+    return min(pool, key=lambda t: abs(t.x - her_x)) if pool else None
+
+
+def stance(x: float, y: float, platform: Platform, wanted: list[Target], approach: bool = True,
+           facing: str | None = None) -> tuple:
+    """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
+    ('jump_throw', side) at one too close for a throw from the ground, ('approach', side, units) to
+    bring the nearest into reach, or ('wait',). She keeps working the side she faces while it still
+    has monsters in reach (switching sides every throw spread the damage over both), and never walks
+    past a monster."""
+    mine = [t for t in wanted if t.platform == platform.id]
+    margin = shots.EDGE_MARGIN + (KNOCKBACK_ROOM if mine else 0)
+    lo, hi = platform.left + margin, platform.right - margin
+    side_of = lambda t: RIGHT if t.x > x else LEFT
+    close = [t for t in mine if abs(t.x - x) < shots.MIN_SHOT + 10]
+    reach = [t for t in wanted if shots.can_shoot(t.x - x, t.y - y)]
+    if close:
+        on_facing = [t for t in close if side_of(t) == facing]
+        nearest = min(on_facing or close, key=lambda t: abs(t.x - x))
+        return ("jump_throw", side_of(nearest))
+    if reach:
+        if facing is not None and any(side_of(t) == facing for t in reach):
+            return ("throw", facing)
+        right = [t for t in reach if t.x > x]
+        left = [t for t in reach if t.x <= x]
+        score = lambda side: (len(side), -min((abs(t.x - x) for t in side), default=1e9))
+        return ("throw", RIGHT if score(right) > score(left) else LEFT)
+    if approach:
+        level = [t for t in wanted if -shots.SHOT_UP <= t.y - y <= shots.SHOT_DOWN]
+        if level:
+            t = min(level, key=lambda t: abs(t.x - x))
+            d = 1 if t.x > x else -1
+            goal = min(max(t.x - d * (shots.SHOT_RANGE - 40), lo), hi)
+            if (goal - x) * d > 15 and shots.can_shoot(t.x - goal, t.y - y, reach=shots.SHOT_RANGE + 15):
+                return ("approach", RIGHT if d > 0 else LEFT, abs(goal - x))
+    return ("wait",)
+
+
+def _describe(act: tuple, wanted: list[Target], x: float, hidden: list[Target] = ()) -> str:
+    if act[0] in ("throw", "jump_throw"):
+        side = [t for t in wanted if (t.x > x) == (act[1] == RIGHT)]
+        verb = "throwing" if act[0] == "throw" else "jump-throwing"
+        name = lambda t: f"{t.kind} {t.x - x:+.0f}" + (" hidden" if any(t is h for h in hidden) else "")
+        return f"{verb} {act[1]} ({', '.join(name(t) for t in side[:3])})"
+    if act[0] in ("back", "approach"):
+        return f"{'stepping back' if act[0] == 'back' else 'closing in'} {act[1]} {act[2]:.0f}"
+    return "nothing in reach"
 
 
 def _pct(bar: float | None) -> str:
@@ -762,14 +907,8 @@ def decide(x: float, y: float, platform: Platform, target: Target, threats: list
         blocked = any(0 < (t.x - x) * (1 if away == RIGHT else -1) < STEP_AWAY + TOO_CLOSE for t in mine)
         if not blocked and room >= 40:
             return ("walk", away, min(STEP_AWAY, room))
-        toward_it = RIGHT if nearest.x > x else LEFT
-        if abs(nearest.x - x) < shots.MIN_SHOT:
-            # Cornered, and too close to throw (the claw would only swipe): jump over it if there's
-            # ground beyond it with no other monster there.
-            land = x + (JUMP_OVER if toward_it == RIGHT else -JUMP_OVER)
-            if lo <= land <= hi and not any(abs(t.x - land) < 60 for t in mine if t is not nearest)                     and abs(land - x) > abs(nearest.x - x) + 30:
-                return ("jump", toward_it)
-        return ("throw", toward_it)  # cornered: fight
+        # Cornered: fight from here. Jumping over it put the rest of the group on her other side.
+        return ("throw", RIGHT if nearest.x > x else LEFT)
     if shots.can_shoot(dx, dy):
         return ("throw", toward)
     if not -shots.SHOT_UP <= dy <= shots.SHOT_DOWN:

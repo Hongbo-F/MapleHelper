@@ -63,7 +63,10 @@ class Navigator:
         # drop or a walk-off), and moves start from varied spots (flow.Flow's rng).
         self.variety = variety
         self._weights: dict[tuple, float] = {}
-        self.flow = Flow(model, {k: getattr(hunter.keys, k).name for k in ("left", "right", "jump", "up", "down")},
+        names = {k: getattr(hunter.keys, k).name for k in ("left", "right", "jump", "up", "down")}
+        if hunter.keys.pick_up is not None:
+            names["pick"] = hunter.keys.pick_up.name  # pressed all through her runs: loot on the way
+        self.flow = Flow(model, names,
                          rng=self.rng if variety else None)
         self.fight = fight          # shoot monsters on the way (hunting tours) instead of avoiding them
         self.hunt_on_way = True     # with `fight`: shoot monsters in reach between moves (off when going to rest)
@@ -108,8 +111,9 @@ class Navigator:
             if self.fight and self.hunt_on_way and tries.get(here.id, 0) < ON_WAY_TRIES and (t := self.in_reach(f)):
                 tries[here.id] = tries.get(here.id, 0) + 1
                 self.log(f"  {t.kind} in reach on platform {t.platform}: shooting it on the way")
-                if self.h.kill(t, seconds=GUARD_SECONDS) == "killed":
-                    trip.kills += 1
+                before = self.h.report.exp_kills
+                self.h.clear(max_kills=3, seconds=GUARD_SECONDS, patience=0.3, approach=False)
+                trip.kills += self.h.report.exp_kills - before
                 continue
             if here.id == dst:
                 if x is not None:
@@ -359,7 +363,7 @@ class Navigator:
             return False
         t = min(in_way, key=lambda t: abs(t.x - f.where.x))
         self.log(f"  {t.kind} in the way at x {t.x:.0f}: shooting it first")
-        self.h.kill(t, seconds=GUARD_SECONDS)
+        self.h.clear(max_kills=2, seconds=GUARD_SECONDS, patience=0.3, approach=False)
         return True
 
 

@@ -67,7 +67,9 @@ def test_where_she_should_be_while_a_chain_runs(model):
 
 def test_too_short_a_run_up_steps_back_first(model):
     a, b = by_y(model, 300, 100), by_y(model, 360, 300)
-    jump = next(m for m in Planner(model).moves if m.src == a.id and m.dst == b.id and m.kind == "jump")
+    from gamelab.route import Move
+    # (The planner walks off A to B, it being lower; a jump there still needs its run-up.)
+    jump = Move("jump", a.id, b.id, a.right - 40, 280, "right")
     flow = Flow(model, KEYS)
     k = Keys(KEYS)
     leg = flow.leg(jump, Body(0.0, a.right - 30, a), k, "run")  # 30 from the end: too close to run

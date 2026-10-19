@@ -139,9 +139,9 @@ class Tour:
             if trip.result == "in position":
                 self.log("  targets in reach on the way: shooting from here")
             self.h.report = Report()
-            # From a safe spot, waiting for monsters to respawn or walk into reach costs nothing.
+            # Waiting for respawns looked idle and slowed the sweep: move on soon when nothing's there.
             r = self.h.clear(kinds, ground={pid}, max_kills=kills - sum(total.kills.values()),
-                             seconds=max(5, end - time.monotonic()), patience=10 if spot.safe else 4)
+                             seconds=max(5, end - time.monotonic()), patience=2.0 if spot.safe else 1.0)
             for kind, n in r.kills.items():
                 total.kills[kind] = total.kills.get(kind, 0) + n
             total.throws += r.throws
@@ -150,16 +150,29 @@ class Tour:
             total.exp_kills += r.exp_kills
             total.lost += r.lost
             total.stop = r.stop
+            trips = self.report.loot_trips
             self.collect_loot()
             if r.stop.startswith("HP low") or sum(total.kills.values()) >= kills or time.monotonic() >= end:
                 break
             if r.stop.startswith("left platform"):
                 continue  # knocked off: go back to the spot
+            # Back to the spot only for monsters still there. Going back up to wait for respawns, after
+            # picking up the drops, looked idle and slowed the sweep: a player moves on.
+            s = self.h.look(wide=True)
+            left = [t for t in s.targets if t.platform == pid and (kinds is None or t.kind in kinds)]
+            if not left:
+                self.log(f"  nothing left on platform {pid}: moving on")
+                break
             if spot.safe and r.out_of_reach:
                 self.log("  monsters out of reach from the safe spot: hunting on the platform itself")
                 on_it = True
-            elif not r.throws and not self.h.pending_loot:  # nothing there to shoot: move on
+            elif not r.throws and self.report.loot_trips == trips:
+                # Nothing thrown and she hasn't moved: going back would only repeat that. In the basin
+                # a whole-screen look saw pigs that the fight's own looks never did, 4 times running.
+                self.log(f"  {len(left)} seen on platform {pid} but none came into reach: moving on")
                 break
+            else:
+                self.log(f"  {len(left)} still on platform {pid}: back at it")
         return total
 
     def collect_loot(self) -> None:

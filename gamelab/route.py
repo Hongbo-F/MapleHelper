@@ -186,8 +186,14 @@ def moves(model: MapModel) -> list[Move]:
                         and sure_landing(model, takeoff, a.y_at(takeoff), sign * WALK_SPEED, -JUMP_SPEED, land):
                     out.append(Move("jump", a.id, land.id, start, land_x, direction,
                                     seconds=t + 0.2 + RUN_MS / 1000))
-            # Walking off this end (starting just inside it, so a wall rising at the end stops her).
-            land, land_x, t = fly(model, edge - sign * 1, a.y_at(edge) - 1, sign * WALK_SPEED, 0.0)
+            # Walking off this end: from just inside it when a wall rises there (it stops her), else
+            # from just past it. A cliff dropping from the end (34 down to 36) isn't in her way, but
+            # starting inside it read as bumping into the cliff's top.
+            level = a.y_at(edge)
+            rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
+                         for w in model.walls)
+            land, land_x, t = fly(model, edge + sign * (-1 if rising else 0.5), a.y_at(edge) - 1,
+                                  sign * WALK_SPEED, 0.0)
             if land is not None and land is not a:
                 out.append(Move("walk_off", a.id, land.id, edge - sign * 5, land_x, direction, seconds=0.3 + t))
         # Running jumps from along the platform, not only its ends: a player jumps from wherever that
@@ -212,6 +218,11 @@ def moves(model: MapModel) -> list[Move]:
                     if a.covers(start):
                         out.append(Move("jump", a.id, land_id, start, land_x, direction,
                                         seconds=t + 0.2 + RUN_MS / 1000, takeoff=takeoff))
+        # Down to a platform that walking off an end reaches anyway: walk off, as a player does; a
+        # running jump down there is a needless jump.
+        offs = {(m.direction, m.dst) for m in out if m.kind == "walk_off" and m.src == a.id}
+        out = [m for m in out if not (m.kind == "jump" and m.src == a.id and (m.direction, m.dst) in offs
+                                      and model.platform(m.dst).y_at(m.land_x) > a.y_at(m.x) + 10)]
         # Dropping through (down + jump) to each different platform underneath.
         seen = set()
         for b in plats:

@@ -156,3 +156,64 @@ def test_a_tour_sweeps_nearest_first_then_tidies_the_order():
     tour._spot_at = lambda pid: (pid, xs[pid])
     order, travel = tour.sweep([1, 2, 3, 4], 4, (0, 0.0))
     assert order == [1, 3, 4, 2] and travel == pytest.approx(9.0)
+
+
+def test_she_walks_off_a_cliff_but_not_through_a_wall():
+    # A ledge at y 300 ends in a cliff down to y 450 (one foothold chain, like platforms 34 and 36).
+    # Higher up at the same x, a wall rises at the end of a shelf at y 150.
+    t = tree()
+    t["info"]["VRRight"] = 1400
+    t["foothold"]["1"]["5"] = dict([seg(1, 5, 8, 1000, 300, 1100, 300, 0, 9), seg(1, 5, 9, 1100, 300, 1100, 450, 8, 10),
+                                    seg(1, 5, 10, 1100, 450, 1300, 450, 9, 0)])
+    t["foothold"]["1"]["6"] = dict([seg(1, 6, 11, 1020, 150, 1100, 150, 0, 12), seg(1, 6, 12, 1100, 150, 1100, 100, 11, 0)])
+    m = mapdata.parse(1, t, "Test Map", {})
+    ledge, low, shelf = by_y(m, 300, 1050), by_y(m, 450, 1200), by_y(m, 150, 1050)
+    moves = Planner(m).moves
+    assert any(x.kind == "walk_off" and x.src == ledge.id and x.dst == low.id and x.direction == "right" for x in moves)
+    assert not any(x.kind == "walk_off" and x.src == shelf.id and x.direction == "right" for x in moves)
+
+
+def test_down_to_a_platform_a_walk_off_reaches_she_walks_off(model):
+    a, b = by_y(model, 300, 100), by_y(model, 360, 300)
+    kinds = {m.kind for m in Planner(model).moves if m.src == a.id and m.dst == b.id and m.direction == "right"}
+    assert "walk_off" in kinds and "jump" not in kinds
+
+
+def _stop(rounds, seen, loot_after=()):
+    """A tour stop with faked fights: `rounds` gives each fight's throws, `seen` how many monsters a
+    whole-screen look then sees on the platform, `loot_after` the rounds after which drops were
+    collected elsewhere. Returns how many fights ran."""
+    from types import SimpleNamespace
+    from gamelab.hunt import Report, Target
+    from gamelab.mobs import Mob
+    from gamelab.shots import Spot
+    from gamelab.tour import Tour, TourReport
+    tour, fights = Tour.__new__(Tour), []
+    tour.log, tour.report = (lambda m: None), TourReport()
+    tour.spot = lambda pid, on_it=False: Spot(pid, 100, 1.0, False)
+    tour.nav = SimpleNamespace(go=lambda *a, **k: SimpleNamespace(result="arrived", kills=0))
+    pig = Target(Mob("pig", 0, 0, 30, 30, 0.9), 300, 500, 7)
+
+    def clear(*a, **k):
+        fights.append(1)
+        return Report(throws=rounds[len(fights) - 1], stop="nothing left in reach")
+
+    def collect():
+        if len(fights) in loot_after:
+            tour.report.loot_trips += 1
+
+    tour.h = SimpleNamespace(pending_loot=[], report=Report(), clear=clear,
+                             look=lambda **k: SimpleNamespace(targets=[pig] * seen[len(fights) - 1]))
+    tour.collect_loot = collect
+    tour.hunt(7, kills=5, seconds=60)
+    return len(fights)
+
+
+def test_a_stop_moves_on_once_nothing_is_left_there():
+    assert _stop([3, 3, 3], seen=[0, 0, 0]) == 1                  # cleared: no going back to wait
+    assert _stop([2, 2, 2], seen=[0, 0, 0], loot_after=[1]) == 1  # looted elsewhere: on to the next
+
+
+def test_a_stop_goes_back_only_for_monsters_it_can_get_at():
+    assert _stop([2, 2, 0, 0], seen=[1, 1, 1, 1]) == 3  # back while throwing; a fight with none moves on
+    assert _stop([0, 0, 0], seen=[2, 2, 2]) == 1        # seen from afar, never in reach: no looping

@@ -142,9 +142,36 @@ def test_detector_finds_a_pasted_monster():
     assert abs(found[0].x - (100 + w // 2)) <= 3
 
 
-def test_jumps_over_a_monster_too_close_when_cornered():
+def test_cornered_she_fights_from_where_she_is():
     t = target(PLAT.right - 70)  # she's at the right end, the monster right next to her
-    assert decide(PLAT.right - 30, 500, PLAT, t, []) == ("jump", LEFT)
+    assert decide(PLAT.right - 30, 500, PLAT, t, []) == ("throw", LEFT)  # not jumping to its other side
+
+
+def test_she_throws_toward_the_side_with_more_monsters_in_reach():
+    from gamelab.hunt import stance
+    group = [target(700), target(780)]
+    lone = target(250)
+    assert stance(500, 500, PLAT, group + [lone]) == ("throw", RIGHT)
+
+
+def test_one_too_close_gets_a_jump_throw_not_a_claw_swipe():
+    from gamelab.hunt import stance
+    assert stance(500, 500, PLAT, [target(560), target(700)]) == ("jump_throw", RIGHT)
+    assert stance(60, 500, PLAT, [target(110)]) == ("jump_throw", RIGHT)  # cornered too: no crossing
+
+
+def test_she_keeps_working_the_side_she_faces():
+    from gamelab.hunt import stance
+    lone_right, pair_left = target(700), [target(300), target(250)]
+    assert stance(500, 500, PLAT, [lone_right] + pair_left, facing=RIGHT) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [lone_right] + pair_left) == ("throw", LEFT)
+
+
+def test_she_closes_in_only_as_far_as_needed_and_waits_when_nothing_is_there():
+    from gamelab.hunt import stance
+    act = stance(100, 500, PLAT, [target(900)])
+    assert act[:2] == ("approach", RIGHT) and 900 - (100 + act[2]) == pytest.approx(shots.SHOT_RANGE - 40)
+    assert stance(100, 500, PLAT, []) == ("wait",)
 
 
 def test_monsters_are_placed_only_on_platforms_they_spawn_on():
@@ -206,3 +233,60 @@ def test_touches_show_as_purple_text_above_her():
     assert touch_popup(frame, her) == 0
     frame[120:135, 180:220] = (200, 40, 220)  # "MISS" (or damage taken) floating above her head
     assert touch_popup(frame, her) >= 40
+
+
+def _fighter(monkeypatch, looks, on_look=None):
+    """A Hunter whose looks come from `looks` (lists of targets), 0.3 s apart on a fake clock; her
+    throws are recorded instead of pressed."""
+    from types import SimpleNamespace
+    from gamelab import hunt, mapdata
+    from maplehelper.config import GameKeys, Timing
+    model = mapdata.parse(1, {"info": {"VRLeft": 0, "VRTop": 0, "VRRight": 2000, "VRBottom": 1000},
+                              "miniMap": {"centerX": 0, "centerY": 0, "mag": 4}}, "Test", {})
+    h = hunt.Hunter(_Eyes([]), GameKeys.__new__(GameKeys), Timing.__new__(Timing), model, log=lambda m: None)
+    clock, seq, throws = [0.0], iter(looks), []
+
+    def look(*a, **k):
+        clock[0] += 0.3
+        n = len(throws)
+        if on_look:
+            on_look(h, clock[0])
+        return SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT, hp=1.0,
+                               targets=next(seq, []), throws=n)
+
+    monkeypatch.setattr(hunt.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(hunt.time, "sleep", lambda s: None)
+    h.look, h.health_check = look, lambda s: None
+    h.throw = h.jump_throw = lambda side: throws.append((round(clock[0], 1), side))
+    h.sweep_through = lambda s, deaths: None
+    return h, throws
+
+
+def test_she_keeps_throwing_at_a_monster_hidden_after_a_hit(monkeypatch):
+    from gamelab.hunt import HIDDEN_FOR
+    h, throws = _fighter(monkeypatch, [[target(700)]])  # seen once, then lost under its damage numbers
+    r = h.clear(patience=2.0)
+    assert len(throws) == 1 + round(HIDDEN_FOR / 0.3 - 1) and {side for _, side in throws} == {RIGHT}
+    assert r.stop == "nothing left in reach"
+
+
+def test_her_exp_going_up_ends_the_throws_at_a_hidden_monster(monkeypatch):
+    def kill_at(h, t):
+        if abs(t - 0.9) < 1e-6:
+            h.report.exp_kills += 1
+    h, throws = _fighter(monkeypatch, [[target(700)]], on_look=kill_at)
+    r = h.clear(patience=2.0)
+    assert len(throws) == 2 and r.kills == {"pig": 1}
+
+
+def test_with_no_monster_in_sight_she_moves_on_soon(monkeypatch):
+    from gamelab.hunt import EMPTY_PATIENCE
+    h, throws = _fighter(monkeypatch, [])
+    h.clear(patience=2.0)
+    from gamelab import hunt
+    assert hunt.time.monotonic() <= 0.3 + EMPTY_PATIENCE + 0.3 and not throws
+    # One seen, just out of reach: she waits the full patience for it to walk in.
+    far = [[target(980, y=200)]] * 20
+    h, throws = _fighter(monkeypatch, far)
+    h.clear(patience=2.0, approach=False)
+    assert hunt.time.monotonic() >= 2.0 and not throws

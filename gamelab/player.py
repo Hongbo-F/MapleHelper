@@ -294,6 +294,9 @@ def serve() -> None:
             idle_since = time.monotonic()
     watchdog.stopped.set()
     if alarm.is_set():
+        # Let the watchdog finish recording the alarm and paging: it's a background thread, and
+        # exiting at once killed it mid-write once (no ALARM.json, an empty screenshot).
+        watchdog.join(timeout=20)
         for path in INBOX.glob("*.json"):
             _answer(path, {"error": LIE_DETECTOR_ERROR})
         _log("LIE DETECTOR seen: input stopped and the player shut down")

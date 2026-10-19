@@ -45,6 +45,7 @@ AFTER_LANDING = 0.03  # s after a predicted landing before the next jump key (in
 SLACK_PER_LEG = 0.025  # s of timing error each predicted landing may add
 MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only makes her sluggish)
 TAP = 0.04           # s a jump/down tap is held
+PICK_EVERY = 0.15    # s between pick-up presses while she runs
 LAND_SLIDE = 13.0    # units she slides on landing with no arrow held
 MIN_RUNUP = 15.0     # units of run before a running jump from standing
 JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
@@ -629,4 +630,12 @@ class Flow:
             k, b = trial, leg.end
         if legs and not (keep_going and why == "long"):
             k.set_arrow(b.t, 0)  # stop at the end (she slides a little)
+        if legs and "pick" in self.key_names:
+            # Pick up whatever she runs over, as a player taps the key all the way.
+            for leg in legs:
+                for sp in leg.spans:
+                    t = sp.t0
+                    while t < sp.t1:
+                        k.tap(t, "pick")
+                        t += PICK_EVERY
         return legs, k, why

@@ -77,11 +77,15 @@ def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector") -> dict:
     """Record the alarm (gamelab refuses to run until it's cleared) and page whoever is at the PC."""
     ALARM.parent.mkdir(parents=True, exist_ok=True)
     info = {"reason": reason, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
+    ALARM.write_text(json.dumps(info, indent=1), encoding="utf-8")  # first: everything else may fail
     if frame is not None:
         shot = ALARM.parent / f"lie_detector_{time.strftime('%H%M%S')}.png"
-        Image.fromarray(frame).save(shot)
-        info["screenshot"] = str(shot)
-    ALARM.write_text(json.dumps(info, indent=1), encoding="utf-8")
+        try:
+            Image.fromarray(frame).save(shot)
+            info["screenshot"] = str(shot)
+            ALARM.write_text(json.dumps(info, indent=1), encoding="utf-8")
+        except OSError:
+            pass
     page("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer it in the game yourself.")
     return info
 
