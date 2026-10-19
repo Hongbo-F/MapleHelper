@@ -18,6 +18,14 @@ user32.IsIconic.argtypes = (wintypes.HWND,)
 user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
 
 
+user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
+
+
+def move_cursor(x: int, y: int) -> None:
+    """Move the mouse pointer to screen pixel x, y (no click)."""
+    user32.SetCursorPos(x, y)
+
+
 def find_game(title: str) -> int:
     hwnd = user32.FindWindowW(None, title)
     if not hwnd:

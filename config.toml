@@ -12,6 +12,13 @@ right = "right"
 jump = "alt"
 attack = "f"
 lucky_seven = "g"   # "" -> stars are thrown with jump + attack instead
+up = "up"           # climb
+down = "down"       # climb down / lie down
+pick_up = "z"
+chair = "d"         # The Green Relaxer
+sit = "x"
+hp_potion = "r"     # Meat, ~160 HP
+mp_potion = "t"     # Blue Potion, 200 MP
 
 # The button she presses for each combo. These keys are hidden from the game.
 [hotkeys]

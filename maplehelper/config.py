@@ -21,6 +21,14 @@ class GameKeys:
     jump: Key
     attack: Key
     lucky_seven: Key | None = None  # None: throw stars with jump + attack instead
+    # Used by maplehelper.actions (climbing, looting, resting); None = not bound.
+    up: Key | None = None
+    down: Key | None = None
+    pick_up: Key | None = None
+    chair: Key | None = None
+    sit: Key | None = None
+    hp_potion: Key | None = None
+    mp_potion: Key | None = None
 
 
 @dataclass(frozen=True)

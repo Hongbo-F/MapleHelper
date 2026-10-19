@@ -5,7 +5,9 @@ windows. So this one process runs elevated (one UAC prompt per test session) and
 runs normally and talks to it through files. To keep that safe it only ever:
 
 - reads plans from gamelab/lab/inbox (plain JSON data, never code),
-- presses keys that config.toml binds to her in-game actions, and only while the game is in front,
+- presses keys that config.toml binds to her in-game actions plus a few exploring keys (EXPLORE_KEYS),
+  never Enter, and only while the game is in front,
+- moves the mouse pointer inside the game window (never clicks),
 - records the game's client area while a plan runs,
 - writes results to gamelab/lab/outbox.
 
@@ -26,6 +28,7 @@ from maplehelper import config, win32
 from maplehelper.combos import COMBOS
 from maplehelper.config import GameKeys
 from maplehelper.keys import Key
+from maplehelper.keys import parse as parse_key
 
 from . import window
 from .paths import CONFIG, INBOX, LAB, OUTBOX, PLAYER_LOG, STOP
@@ -36,26 +39,42 @@ MAX_PLAN_MS = 20_000
 MAX_FRAMES = 900
 
 
-def allowed_keys(keys: GameKeys) -> dict[str, Key]:
-    """The keys MapleHelper itself would press: her bound in-game actions."""
-    bound = (getattr(keys, f.name) for f in fields(GameKeys))
-    return {k.name: k for k in bound if k}
+# Beyond the actions bound in config.toml [keys] (moving, climbing, attacking, looting, chair,
+# potions), exploring needs the key bindings window (\) and closing windows (esc).
+EXPLORE_KEYS = ("\\", "esc")
+# Never pressed, whatever the config says: Enter sends whatever is typed in the chat box.
+NEVER_KEYS = {"enter"}
+
+
+def allowed_keys(keys: GameKeys, extra=EXPLORE_KEYS) -> dict[str, Key]:
+    """Her bound in-game actions plus the exploring keys, minus anything in NEVER_KEYS."""
+    bound = [getattr(keys, f.name) for f in fields(GameKeys)] + [parse_key(name) for name in extra]
+    return {k.name: k for k in bound if k and k.name not in NEVER_KEYS}
 
 
 def validate(plan: dict, allowed: dict[str, Key]) -> None:
-    """Raise ValueError unless the plan is well-formed and only uses allowed keys."""
+    """Raise ValueError unless the plan is well-formed and only uses allowed keys.
+
+    Events are [ms, key, 'down'|'up'] or [ms, 'mouse', x, y] (move the cursor to client pixel x, y;
+    there is deliberately no way to click).
+    """
     events = plan.get("events", [])
     if not isinstance(events, list) or len(events) > MAX_EVENTS:
         raise ValueError(f"events must be a list of at most {MAX_EVENTS}")
     last = 0
     for event in events:
-        if not (isinstance(event, list) and len(event) == 3):
-            raise ValueError(f"bad event {event!r}; expected [ms, key, 'down'|'up']")
-        t, name, kind = event
-        if name not in allowed:
-            raise ValueError(f"key {name!r} is not one of her bound keys {sorted(allowed)}")
-        if kind not in ("down", "up"):
-            raise ValueError(f"bad event kind {kind!r}")
+        if isinstance(event, list) and len(event) == 4 and event[1] == "mouse":
+            t, _, x, y = event
+            if not (isinstance(x, int) and isinstance(y, int) and x >= 0 and y >= 0):
+                raise ValueError(f"bad mouse position in {event!r}")
+        elif isinstance(event, list) and len(event) == 3:
+            t, name, kind = event
+            if name not in allowed:
+                raise ValueError(f"key {name!r} is not allowed; allowed: {sorted(allowed)}")
+            if kind not in ("down", "up"):
+                raise ValueError(f"bad event kind {kind!r}")
+        else:
+            raise ValueError(f"bad event {event!r}; expected [ms, key, 'down'|'up'] or [ms, 'mouse', x, y]")
         if not (isinstance(t, (int, float)) and last <= t <= MAX_PLAN_MS):
             raise ValueError(f"event times must be sorted and within 0-{MAX_PLAN_MS} ms")
         last = t
@@ -102,14 +121,22 @@ class Player:
         sent, held, problems = [], set(), []
 
         def press_keys():
-            for t, name, kind in plan.get("events", []):
-                _sleep_until(t0 + t / 1000)
+            for event in plan.get("events", []):
+                _sleep_until(t0 + event[0] / 1000)
                 if win32.foreground_title() != self.title:
                     problems.append("game left the foreground; stopped pressing keys")
                     return
-                win32.send_key(self.allowed[name], kind == "down")
-                (held.add if kind == "down" else held.discard)(name)
-                sent.append([round((time.perf_counter() - t0) * 1000, 1), name, kind])
+                if event[1] == "mouse":
+                    x, y = event[2], event[3]
+                    if x >= client["width"] or y >= client["height"]:
+                        problems.append(f"mouse {x},{y} is outside the game; skipped")
+                        continue
+                    window.move_cursor(client["left"] + x, client["top"] + y)
+                else:
+                    _, name, kind = event
+                    win32.send_key(self.allowed[name], kind == "down")
+                    (held.add if kind == "down" else held.discard)(name)
+                sent.append([round((time.perf_counter() - t0) * 1000, 1), *event[1:]])
 
         presser = threading.Thread(target=press_keys, name="key-player")
         frames, times = [], []

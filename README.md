@@ -45,6 +45,17 @@ python -m maplehelper.keyviewer
 
 This opens a stand-in window titled "MapleStory Key Viewer". Focus it, press F1–F4, and it lists every key the combo sent, with timings.
 
+## What we know about the game
+
+[maplehelper/game.py](maplehelper/game.py) records what was measured and observed in the game:
+- **Movement:** walking speed, jump height and length, climbing speed.
+- **Combat:** the attack lock, and when a throw actually leaves her hand.
+- **Recovery:** chair and potion amounts.
+- **Her key bindings and quick-slot items.**
+- **Monsters met so far,** and how to read the screen.
+
+[maplehelper/actions.py](maplehelper/actions.py) turns that into reusable moves: walk a distance, jump, climb a rope up or down, pick up loot, sit and rest, attack, Lucky Seven, potions. They're built on the same engine as the combos.
+
 ## Testing in the real game
 
 [gamelab](gamelab/README.md) plays combos in the actual game, records it, and checks every jump and throw. Use it after changing a combo or `[timing]`:

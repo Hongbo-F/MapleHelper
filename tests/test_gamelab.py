@@ -21,18 +21,30 @@ def plan(events=(), **capture):
     return {"events": [list(e) for e in events], "capture": {"fps": 30, "duration_ms": 1000, **capture}}
 
 
-def test_allowed_keys_are_her_bound_actions_only():
-    assert sorted(ALLOWED) == ["alt", "f", "g", "left", "right"]
+def test_allowed_keys_are_her_bound_actions_plus_exploring_keys():
+    assert sorted(ALLOWED) == sorted(["alt", "f", "g", "left", "right", "\\", "esc"])
     no_l7 = allowed_keys(GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("f")))
     assert "g" not in no_l7
+    with_loot = allowed_keys(GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("f"),
+                                      up=K("up"), pick_up=K("z"), chair=K("d")))
+    assert {"up", "z", "d"} <= set(with_loot)
+
+
+def test_enter_is_never_allowed_even_if_bound():
+    keys_with_enter = GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("enter"))
+    assert "enter" not in allowed_keys(keys_with_enter, extra=("enter",))
 
 
 def test_valid_plan_passes():
-    validate(plan([[0, "left", "down"], [40, "alt", "down"], [80, "alt", "up"], [80, "left", "up"]]), ALLOWED)
+    validate(plan([[0, "left", "down"], [40, "alt", "down"], [80, "alt", "up"], [80, "left", "up"],
+                   [100, "mouse", 960, 540]]), ALLOWED)
 
 
 @pytest.mark.parametrize("bad, message", [
-    (plan([[0, "r", "down"]]), "not one of her bound keys"),           # e.g. a potion key
+    (plan([[0, "r", "down"]]), "not allowed"),           # e.g. a potion key
+    (plan([[0, "enter", "down"]]), "not allowed"),       # would send the chat box
+    (plan([[0, "mouse", -1, 5]]), "bad mouse position"),
+    (plan([[0, "mouse", 5, 5, "click"]]), "bad event"),  # there is no clicking
     (plan([[50, "alt", "down"], [10, "alt", "up"]]), "sorted"),
     (plan([[0, "alt", "press"]]), "bad event kind"),
     (plan([[0, "alt"]]), "bad event"),
@@ -44,6 +56,21 @@ def test_valid_plan_passes():
 def test_bad_plans_are_rejected(bad, message):
     with pytest.raises(ValueError, match=message):
         validate(bad, ALLOWED)
+
+
+def test_explore_steps_become_plan_events():
+    from gamelab.__main__ import parse_steps
+    events, end = parse_steps(["right*800", "alt", "500", "right+", "alt", "right-", "@960,540", "\\"])
+    assert events == [
+        [0, "right", "down"], [800, "right", "up"],
+        [800, "alt", "down"], [840, "alt", "up"],
+        [1340, "right", "down"],
+        [1340, "alt", "down"], [1380, "alt", "up"],
+        [1380, "right", "up"],
+        [1380, "mouse", 960, 540],
+        [1380, "\\", "down"], [1420, "\\", "up"],
+    ]
+    assert end == 1420
 
 
 def test_timeline_plays_the_real_combo_code():

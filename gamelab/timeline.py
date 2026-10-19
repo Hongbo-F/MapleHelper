@@ -43,6 +43,14 @@ def combo_events(name: str, facing: str, start_ms: int, keys: GameKeys, timing: 
     return clock.events, clock.now
 
 
+def action_events(fn, args, facing: str, keys: GameKeys, timing: Timing) -> tuple[list, int]:
+    """Key events for one maplehelper.actions move (fn(ctx, *args)) starting at 0, and its end time."""
+    clock = _Clock(keys, timing, facing, 0)
+    fn(clock, *args)
+    clock.release_all()
+    return clock.events, clock.now
+
+
 def chain(name: str, facing: str, count: int, keys: GameKeys, timing: Timing) -> tuple[list, list[int], int]:
     """`count` copies of a combo back to back, the way the helper runs a queued press."""
     events, starts, t = [], [], 0

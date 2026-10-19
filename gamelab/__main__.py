@@ -13,7 +13,7 @@ from maplehelper.combos import COMBOS
 
 from . import analyze, calibration, client, window
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
-from .timeline import chain, her_setup
+from .timeline import action_events, chain, her_setup
 from .track import airborne, track
 
 
@@ -53,7 +53,7 @@ def cmd_stop(args) -> int:
 def cmd_calibrate(args) -> int:
     window.bring_to_front(_game_title())
     tag = tuple(int(v) for v in args.tag.split(",")) if args.tag else None
-    cal = calibration.calibrate(tag)
+    cal = calibration.calibrate(tag, fresh=args.fresh)
     print(f"recording crop {cal.crop} (client px), name tag template {cal.template.shape[1]}x{cal.template.shape[0]}")
     print(f"check {LAB / 'calibrate_crop.png'}: her name tag should be near the middle, a bit below centre")
     return 0
@@ -65,6 +65,77 @@ def cmd_snap(args) -> int:
     path = LAB / "snap.png"
     Image.fromarray(frame).save(path)
     print(path)
+    return 0
+
+
+def parse_steps(steps: list[str], tap_ms: int = 40) -> tuple[list, int]:
+    """Explore-step mini language -> (plan events, end ms).
+
+    KEY       tap the key          KEY*MS   hold it MS ms        KEY+ / KEY-   press / release
+    MS        wait MS ms           @X,Y     move the mouse to client pixel X,Y (no click)
+    Steps run one after another; KEY+ / KEY- let a key stay held across later steps (e.g. right+ alt right-).
+    """
+    events, t = [], 0
+    for step in steps:
+        if step.isdigit():
+            t += int(step)
+        elif step.startswith("@"):
+            x, y = (int(v) for v in step[1:].split(","))
+            events.append([t, "mouse", x, y])
+        elif step.endswith(("+", "-")) and len(step) > 1:
+            events.append([t, step[:-1], "down" if step.endswith("+") else "up"])
+        else:
+            name, _, hold = step.partition("*")
+            ms = int(hold) if hold else tap_ms
+            events += [[t, name, "down"], [t + ms, name, "up"]]
+            t += ms
+    return events, t
+
+
+def cmd_act(args) -> int:
+    """Run a few explore steps, then save a screenshot (and optionally a recording around her)."""
+    window.bring_to_front(_game_title())
+    events, end = parse_steps(args.steps)
+    duration = end + args.settle
+    if args.record:
+        cal = calibration.load()
+        rec = client.record(events, name=args.name, duration_ms=duration, crop=cal.crop, scale=cal.scale, fps=30)
+        path = LAB / f"{args.name}_sheet.png"
+        client.contact_sheet(rec.frames, rec.times, path, cols=8, every=args.every)
+        print(path)
+    if args.record:  # the steps already ran: just take the screenshot
+        frame = client.submit(fps=10, duration_ms=100, scale=args.scale, lead_ms=0, name="act")["frames"][-1]
+    else:  # a few full-size frames while the steps run; only the last is kept
+        fps = max(2, min(10, int(9000 / (duration + 100))))
+        frame = client.submit(events, fps=fps, duration_ms=max(duration, 200), scale=args.scale, lead_ms=0,
+                              name="act")["frames"][-1]
+    path = LAB / f"{args.name}.png"
+    Image.fromarray(frame).save(path)
+    print(path)
+    return 0
+
+
+def cmd_do(args) -> int:
+    """Run one maplehelper.actions move in the game, recording it, then screenshot."""
+    from maplehelper.actions import ACTIONS
+    fn, converters = ACTIONS[args.action]
+    if len(args.args) > len(converters):
+        print(f"{args.action} takes at most {len(converters)} argument(s)")
+        return 1
+    values = [conv(v) for conv, v in zip(converters, args.args)]
+    cfg, keys, timing = her_setup()
+    events, end = action_events(fn, values, args.facing, keys, timing)
+    if events and events[-1][0] > 20_000:
+        print(f"{args.action} would take {events[-1][0] / 1000:.0f} s; gamelab plans are capped at 20 s")
+        return 1
+    window.bring_to_front(cfg.game_window_title)
+    cal = calibration.load()
+    rec = client.record(events, name=args.name, duration_ms=end + 400, crop=cal.crop, scale=cal.scale, fps=30)
+    client.contact_sheet(rec.frames, rec.times, LAB / f"{args.name}_sheet.png", cols=8, every=args.every)
+    frame = client.submit(fps=10, duration_ms=100, scale=2, lead_ms=0, name="do")["frames"][-1]
+    Image.fromarray(frame).save(LAB / f"{args.name}.png")
+    print(f"{args.action}{tuple(values)}: {len(events)} key events, {end} ms; "
+          f"saved {LAB / (args.name + '.png')} and recording '{args.name}'")
     return 0
 
 
@@ -142,6 +213,23 @@ def cmd_sheet(args) -> int:
     return 0
 
 
+def cmd_track(args) -> int:
+    """Her path through a recording: screen position, height above the start, world x, and jumps."""
+    from .camera import world_x
+    rec = client.load(args.recording)
+    template = calibration.load().template
+    rows = track(rec.frames, rec.times, template)
+    xs = world_x(rec.frames, rows)
+    rest_y = rows[0][2]
+    print("   t ms   screen x,y   height   world x   match")
+    for i in range(0, len(rows), args.every):
+        t, x, y, score = rows[i]
+        print(f"  {t:6.0f}   {x:4d},{y:4d}   {rest_y - y:5d}   {xs[i]:7.1f}   {score:.2f}")
+    print("airborne:", [(round(a), round(b) if b else None) for a, b in airborne(rows)])
+    print(f"net world dx {xs[-1] - xs[0]:+.1f} px (recording scale {calibration.load().scale})")
+    return 0
+
+
 def cmd_check(args) -> int:
     rec = client.load(args.recording)
     lag = analyze.send_lag(rec)
@@ -170,11 +258,31 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("calibrate", help="find her on screen and save her name tag template")
     s.add_argument("--tag", help="name tag centre X,Y in client pixels, if it isn't found automatically")
+    s.add_argument("--fresh", action="store_true", help="rebuild the name tag template (stand clear of ropes)")
     s.set_defaults(func=cmd_calibrate)
 
     s = sub.add_parser("snap", help="save a screenshot of the game to gamelab/lab/snap.png")
     s.add_argument("--scale", type=int, default=2)
     s.set_defaults(func=cmd_snap)
+
+    s = sub.add_parser("act", help="run explore steps (keys, waits, mouse moves), then screenshot",
+                       description=parse_steps.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    s.add_argument("steps", nargs="+", help="e.g.  right*800  alt  500  up*1500  @960,540  \\\\")
+    s.add_argument("--name", default="act", help="file name for the screenshot / recording")
+    s.add_argument("--settle", type=int, default=400, help="ms to wait after the last step before the screenshot")
+    s.add_argument("--scale", type=int, default=2, help="screenshot downscale")
+    s.add_argument("--record", action="store_true", help="also record her at 30 fps and save a contact sheet")
+    s.add_argument("--every", type=int, default=3, help="contact sheet: keep every Nth frame")
+    s.set_defaults(func=cmd_act)
+
+    from maplehelper.actions import ACTIONS
+    s = sub.add_parser("do", help="run a maplehelper.actions move in the game (walk, climb_rope, pick_up, ...)")
+    s.add_argument("action", choices=sorted(ACTIONS))
+    s.add_argument("args", nargs="*", help="e.g.  walk right 200   climb_rope 300   pick_up 2   rest 100")
+    s.add_argument("--facing", choices=[LEFT, RIGHT], default=RIGHT, help="which way she faces now (stand_up)")
+    s.add_argument("--name", default="do", help="recording / screenshot name")
+    s.add_argument("--every", type=int, default=4)
+    s.set_defaults(func=cmd_do)
 
     s = sub.add_parser("lock", help="measure how long an attack blocks the next jump")
     s.add_argument("action", choices=["attack", "lucky_seven"])
@@ -196,6 +304,11 @@ def main(argv=None) -> int:
     s.add_argument("--cols", type=int, default=8)
     s.add_argument("--around-her", action="store_true", help="zoom in on her instead of the whole crop")
     s.set_defaults(func=cmd_sheet)
+
+    s = sub.add_parser("track", help="print her path through a recording (position, height, world x)")
+    s.add_argument("recording")
+    s.add_argument("--every", type=int, default=3)
+    s.set_defaults(func=cmd_track)
 
     s = sub.add_parser("check", help="key send lag and game frame pacing of a recording")
     s.add_argument("recording")

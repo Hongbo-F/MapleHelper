@@ -8,39 +8,51 @@ import numpy as np
 SWING_MIN_PIXELS = 40
 
 
-def find_name_tag(frame: np.ndarray, near: tuple[int, int] | None = None):
+def _tag_boxes(frame: np.ndarray, scale: int, white_min: int = 215, box_max: int = 110):
+    """(x, y, w, h) of every cluster of white text that sits on a dark box, like a name tag.
+
+    `scale` is how much the frame was downscaled (1 = full size). Text is dilated sideways so a
+    name's letters join into one cluster. A line of text is wide and short, and behind a name the
+    box is dark (median brightest channel under `box_max`); her face, gloves, clouds and other
+    bright scenery fail those checks.
+    """
+    white = (frame.min(axis=2) > white_min).astype(np.uint8)
+    kernel = np.ones((3, max(3, 13 // scale)), np.uint8)  # wide enough to bridge most letter gaps
+    count, _, stats, _ = cv2.connectedComponentsWithStats(cv2.dilate(white, kernel))
+    for x, y, bw, bh, _ in stats[1:count]:
+        if not (25 // scale <= bw <= 180 // scale and 8 // scale <= bh <= 26 // scale and bw >= 2.2 * bh):
+            continue
+        inside = frame[y:y + bh, x:x + bw].reshape(-1, 3)
+        behind = inside[inside.min(axis=1) <= white_min]
+        if len(behind) and np.median(behind.max(axis=1)) < box_max:
+            yield x, y, bw, bh
+
+
+def find_name_tag(frame: np.ndarray, near: tuple[int, int] | None = None, scale: int = 1):
     """Centre (x, y) of the name tag closest to `near` (default: the frame centre), or None.
 
-    Looks for clusters of white text sitting on a dark box, the way MapleStory draws name tags.
+    The bottom tenth of the game window is the HUD (level, HP/MP, chat), never a character.
     """
     h, w = frame.shape[:2]
     nx, ny = near or (w // 2, h // 2)
-    white = (frame.min(axis=2) > 215).astype(np.uint8)
-    dark = frame.max(axis=2) < 80
-    count, _, stats, _ = cv2.connectedComponentsWithStats(cv2.dilate(white, np.ones((3, 9), np.uint8)))
-    best = None
-    for x, y, bw, bh, _ in stats[1:count]:
-        if not (25 <= bw <= 180 and 8 <= bh <= 26):
-            continue
-        box = dark[max(0, y - 3):y + bh + 3, max(0, x - 4):x + bw + 4]
-        if box.size == 0 or box.mean() < 0.3:  # text on a dark box, not on scenery
-            continue
-        cx, cy = x + bw // 2, y + bh // 2
-        dist = abs(cx - nx) + abs(cy - ny)
-        if best is None or dist < best[0]:
-            best = (dist, cx, cy)
-    return (best[1], best[2]) if best else None
+    centres = [(x + bw // 2, y + bh // 2) for x, y, bw, bh in _tag_boxes(frame, scale) if y < 0.9 * h]
+    return min(centres, key=lambda c: abs(c[0] - nx) + abs(c[1] - ny), default=None)
 
 
-def make_template(frame: np.ndarray, centre: tuple[int, int]) -> np.ndarray:
-    """Grayscale name-tag template cut tightly around the white text near `centre`."""
+def make_template(frame: np.ndarray, centre: tuple[int, int], scale: int = 2) -> np.ndarray:
+    """Grayscale name-tag template: the white text in a thin band around `centre`, cut tightly.
+
+    The band (one text line high) keeps her glove, a rope or anything else above or below out.
+    """
     gx, gy = centre
-    x0, y0 = max(0, gx - 60), max(0, gy - 15)
-    patch = frame[y0:gy + 15, x0:gx + 60]
-    ys, xs = np.nonzero(patch.min(axis=2) > 200)
-    if len(xs) < 10:
+    half_h, half_w = 12 // scale, 90 // scale
+    y0, x0 = max(0, gy - half_h), max(0, gx - half_w)
+    band = frame[y0:gy + half_h + 1, x0:gx + half_w + 1]
+    white = band.min(axis=2) > 200
+    rows, cols = np.nonzero(white.any(axis=1))[0], np.nonzero(white.any(axis=0))[0]
+    if len(cols) < 10 // scale:
         raise ValueError(f"no name tag text near {centre}")
-    tag = patch[max(0, ys.min() - 2):ys.max() + 3, max(0, xs.min() - 3):xs.max() + 4]
+    tag = frame[y0 + max(0, rows.min() - 2):y0 + rows.max() + 3, x0 + max(0, cols.min() - 2):x0 + cols.max() + 3]
     return cv2.cvtColor(np.ascontiguousarray(tag), cv2.COLOR_RGB2GRAY)
 
 
