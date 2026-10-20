@@ -844,6 +844,12 @@ def cmd_bodies(args) -> int:
     from .localization import mapdata
     from .localization.senses import Senses
     from .perception.sprites import detector_for
+    if args.tracks:  # the feed's tracks in `watch`'s telemetry
+        for f in args.tracks:
+            print(f"{Path(f).name}:")
+            for line in bodies.tracks_lines(telemetry.read(Path(f))):
+                print("   " + line)
+        return 0
     model = mapdata.load(args.map)
     detector = detector_for(model)
     files = [Path(f) for f in args.files] or bench.saved_frames()
@@ -1198,6 +1204,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("files", nargs="*", help="saved 1920x1080 screenshots (default: bench-look's, from gamelab/lab)")
     s.add_argument("--recordings", nargs="*", help="recordings (names in gamelab/lab/recordings, or .npz files) "
                                                    f"with the camera still (default: {', '.join(BODY_RECORDINGS)})")
+    s.add_argument("--tracks", nargs="+", help="instead: telemetry files of `watch` (.jsonl): each track's velocity "
+                                               "against how its x moved")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_bodies)
 
