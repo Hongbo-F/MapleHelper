@@ -24,7 +24,6 @@ from ..screen import SCALE, SCREEN_SCALE
 from .actions import WALK_PICK_AFTER_MS, Actions, tap
 
 
-WALK_PX_PER_S = WALK_SPEED * SCREEN_SCALE
 SLIDE_MS = 220            # after releasing the arrow she slides to a stop within this
 X_TOLERANCE = 8           # map units: close enough when lining up
 SPOT_TOLERANCE = 6        # map units: close enough to a run-up spot, or under a rope
@@ -128,7 +127,9 @@ class Mover:
             if abs(dx) <= ROPE_TOLERANCE:
                 return s
             arrow = self.actions.arrow(directions.toward(dx))
-            ms = int(1000 * abs(dx) / WALK_PX_PER_S) + (40 if abs(dx) > 20 else 25)
+            # As long as the engine says a nudge that far takes (physics.hold_ms: 13 px, 9 units, is 57 ms).
+            # Timed by her walking speed alone, 13 px was 87 ms, which by the engine walks her 19 units.
+            ms = hold_ms(abs(dx) / SCREEN_SCALE)
             self._send([[0, arrow, "down"], [ms, arrow, "up"]], "nudge")
             time.sleep(0.2)
             s = self.locate()

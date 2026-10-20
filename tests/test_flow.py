@@ -119,3 +119,65 @@ def test_no_hop_over_a_monster_walking_away_from_her(model):
     c = by_y(model, 500, 400)
     away = MonsterTrack(c.id, 420, speed=70.0, half=34.0, vx=70.0)
     assert Flow(model, KEYS).hop(Body(0.0, 100, c), away, 1, Keys(KEYS)) is None
+
+
+# --- her body as the engine moves it (motion.body's closed forms) ----------------------------------
+
+def replayed(k: Keys, until: float, running: bool = False) -> float:
+    """Where body.replay (the engine, step by step) has her at `until` under plan k's arrows, from x 0
+    standing, or running right at full speed (the arrow held from a second before)."""
+    from gamelab.motion import body
+    from gamelab.motion.physics import LAGS, SHOE
+    events = [(-1.0, "right", True)] if running else []
+    events += [(t / 1000, name, how == "down") for t, name, how in k.sorted() if name in ("left", "right")
+               and not (running and t == 0 and how == "down")]
+    points = body.replay(events, until, SHOE, LAGS, start=-1.0 if running else 0.0, dt=0.001).points
+    at_0 = next(x for t, x, _ in points if t >= -1e-9) if running else 0.0
+    return points[-1][1] - at_0
+
+
+def test_she_stops_where_the_engine_says_from_standing_and_running(model):
+    c = by_y(model, 500, 400)
+    flow = Flow(model, KEYS)
+    for running, (lo, hi) in ((False, (38, 42)), (False, (14, 16)), (True, (60, 70)), (True, (30, 31))):
+        k = Keys(KEYS)
+        t, x = flow._stop_within(Body(0.0, 0.0, c, run=int(running)), lo, hi, (lo + hi) / 2, k)
+        assert lo - 0.5 <= x <= hi + 0.5
+        assert replayed(k, t, running) == pytest.approx(x, abs=0.3)          # stopped there ...
+        assert replayed(k, t + 0.5, running) == pytest.approx(x, abs=0.3)    # ... by then
+        assert replayed(k, t - 0.02, running) < x - 0.01                     # (and not long before)
+
+
+def test_a_step_shorter_than_a_tap_isnt_taken(model):
+    from gamelab.motion.flow import STEP_ACCEPT
+    c = by_y(model, 500, 400)
+    flow, k = Flow(model, KEYS), Keys(KEYS)
+    assert flow._stop_within(Body(0.0, 100.0, c), 100 + STEP_ACCEPT - 2, 150, 120, k) == (0.0, 100.0)
+    assert k.sorted() == []  # a tap that short moves her 0 or 7 units in game
+    t, x = flow._stop_within(Body(0.0, 100.0, c), 100 + STEP_ACCEPT + 4, 150, 112, k)
+    assert x == pytest.approx(112, abs=0.3) and [e[1] for e in k.sorted()] == ["right", "right"]
+
+
+def test_a_jump_leaves_with_what_she_has_on_the_ground(model):
+    c = by_y(model, 500, 400)
+    # Landed at 120 units/s with the arrow held (a jump that left so): she speeds up again at 1400 units/s²,
+    # and a jump at once leaves at what she has by then (no kick above 0.8 x 149).
+    landed = Body(1.0, 100.0, c, run=1, landed=True, v=120.0)
+    press, t, x, vx = Flow.liftoff(landed, 1, 1.0)
+    assert press == pytest.approx(landed.ready_at) and vx == pytest.approx(min(149.0, 120 + 1400 * (t - 1.0)))
+    full = 29 / 1400  # s to full speed
+    assert x == pytest.approx(100 + (120 + 149) / 2 * full + 149 * (t - 1.0 - full))
+
+
+def test_a_stop_landing_slides_from_her_landing_speed(model):
+    from gamelab.motion.flow import ARROW_LAG
+    from gamelab.motion.route import Move
+    c = by_y(model, 500, 400)
+    k = Keys(KEYS)
+    k.set_arrow(0.0, 1)
+    m = Move("jump", c.id, c.id, 100, 200, "right")
+    leg = Flow(model, KEYS)._landing(m, Body(0.0, 100.0, c), k, "stop", 1.0, 300.0, c, 1, 127.0, [])
+    assert leg.end.x == pytest.approx(300 + 127 ** 2 / 1600) and leg.end.t == pytest.approx(1.0 + 127 / 800)
+    assert [1000 - ARROW_LAG * 1000, "right", "up"] in k.sorted()  # let go so the game sees it in the air
+    ran = Flow(model, KEYS)._landing(m, Body(0.0, 100.0, c), Keys(KEYS), "run", 1.0, 300.0, c, 1, 127.0, [])
+    assert ran.end.run == 1 and ran.end.v == 127.0 and ran.end.landed

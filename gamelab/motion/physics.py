@@ -36,8 +36,6 @@ LAND_MARGIN = 18         # land at least this far onto a platform
 # jumps: 45-95 ms). A jump key pressed while she's still in the air is ignored, and holding it doesn't jump
 # again on landing.
 RUN_LAG = LAGS.on + WALK_SPEED / (2 * SHOE.acc)  # 0.113 s: a standing start lags full-speed running by this much
-TURN_EXTRA = 0.08    # s more when she was running the other way. (The engine turns her at 1400 units/s²,
-                     # which makes it 0.16; that is the decompile's alone, unmeasured: in-game probe first.)
 JUMP_LAG = LAGS.jump  # 0.067 s from the jump key to leaving the ground
 DROP_LAG = LAGS.drop  # 0.28 s from the jump key (down held) to falling through (0.28-0.34 in 4 drops on the
                       # minimap at 60 fps, whether or not she had just stopped running)
@@ -108,6 +106,14 @@ def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platfor
     through (dropping). Returns (platform, landing x, seconds). The start is rounded (x and y to 0.01
     units, the speeds to 0.1 units/s) and results are cached by it: chains try the same jumps many times
     over."""
+    return flight(model, x, y, vx, vy, skip, dt, limit)[:3]
+
+
+def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
+           dt: float = 0.004, limit: float = 4.0) -> tuple[Platform | None, float, float, float]:
+    """fly's landing, and her sideways speed as she lands: what she left with (with the arrow held, the
+    air does nothing to it), or 0 after a wall stopped her. On the ground she slides on from it, or runs
+    on."""
     serial, walls = _known(model)
     x, y, vx, vy = round(x, 2), round(y, 2), round(vx, 1), round(vy, 1)
     key = (serial, x, y, vx, vy, None if skip is None else skip.id, dt, limit)
@@ -123,8 +129,8 @@ def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platfor
 
 
 def _fly(model: MapModel, walls: tuple[list[float], list[tuple[float, float]]], x: float, y: float, vx: float,
-         vy: float, skip: Platform | None, dt: float, limit: float) -> tuple[Platform | None, float, float]:
-    """fly, worked out (not cached)."""
+         vy: float, skip: Platform | None, dt: float, limit: float) -> tuple[Platform | None, float, float, float]:
+    """flight, worked out (not cached)."""
     wall_xs, wall_ys = walls
     # Only platforms she could reach in the time: within her sideways travel, at or below the top
     # of the jump.
@@ -146,9 +152,9 @@ def _fly(model: MapModel, walls: tuple[list[float], list[tuple[float, float]]], 
         if (vy > 0 or nvy > 0) and t > 0 and ny >= y:
             for q in plats:
                 if q.covers(nx) and y <= q.y_at(nx) <= ny + 0.01:
-                    return q, nx, t + dt
+                    return q, nx, t + dt, vx
         x, y, vy, t = nx, ny, nvy, t + dt
-    return None, x, t
+    return None, x, t, vx
 
 
 def sure_landing(model: MapModel, x: float, y: float, vx: float, vy: float, land: Platform,

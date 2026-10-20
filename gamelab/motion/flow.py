@@ -3,7 +3,9 @@
 A player doesn't stop between moves. She runs along a platform and jumps on the way, keeps running
 when she lands, jumps onto the next platform, jumps at a rope and holds up, and only looks around
 when something unexpected happens. This module predicts her body over time with the game's physics
-(physics.fly) and her measured walking, and writes the keys for a chain of moves as one plan:
+(physics.fly) and her walking as the engine has it (motion.body's closed forms, with the median lags:
+speeding up from standing, running on and sliding after a release, the kick at a jump), and writes the
+keys for a chain of moves as one plan:
 
   body now -> leg 1 (keys, where she'll be when) -> leg 2 -> ... -> one look at the end
 
@@ -29,14 +31,18 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import MonsterTrack
-from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAND_MARGIN, LAND_SLIDE, RUN_LAG,
-                      STOP_RUN, STOP_S, TURN_EXTRA, WALK_SPEED, fly, hold_ms)
+from . import body
+from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
+                      RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms)
 from .route import JUMP_FROM, Move
 
-# Her measured lags and slides (RUN_LAG, TURN_EXTRA, JUMP_LAG, DROP_LAG, STOP_RUN, STOP_S, LAND_SLIDE)
-# describe her body, so they're in physics, with how they were measured (still importable from here).
+# Her measured lags and slides (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, STOP_S, LAND_SLIDE) describe her body,
+# so they're in physics, with how they were measured (still importable from here). Her walk, stops and
+# takeoffs are worked out here from the engine's closed forms (motion.body), from whatever speed she has.
 DROP_SLACK = 0.1     # s of extra timing error a drop adds
-ARROW_LAG = 0.1      # s she runs on after the arrow is released (input lag)
+ARROW_LAG = 0.1      # s before a landing the arrow is let go for her to stop there: the game sees it let go
+                     # 72 ms later (body.Lags, sd 11), so by 2.5 sd it has before she lands, and she slides
+                     # from her landing speed (in the air with no arrow she slows by 1 unit/s² at most)
 AFTER_LANDING = 0.03  # s after a predicted landing before the next jump key (in the air it's ignored)
 SLACK_PER_LEG = 0.025  # s of timing error each predicted landing may add
 MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only makes her sluggish)
@@ -44,7 +50,12 @@ TAP = 0.04           # s a jump/down tap is held
 PICK_EVERY = 0.15    # s between pick-up presses while she runs
 MIN_RUNUP = 15.0     # units of run before a running jump from standing
 JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
-SHORT_STEP = STOP_RUN + 10  # units: closer than this she steps there (a short hold), no run and slide
+# Standing this close to where a move wants her she doesn't step: a step that short is an arrow tap of
+# under 50 ms (physics.hold_ms), and of three 50 ms taps in game two didn't move her and one moved her 7.1
+# units. A longer step from standing is a hold the engine works out, whatever its length (body.hold_for:
+# 1925 (t + 0.012)² units for a hold of t s up to about 95 ms, 7.7 + 149 t beyond), where it used to be a
+# short hold below 35 units (STOP_RUN + 10) and a run with a release above.
+STEP_ACCEPT = 8
 JUST_PASSED = 2      # units: running, a spot she's this little past still counts as reached
 EDGE_ROOM = 5        # units she keeps in from a platform's ends when stepping back or taking off
 ROPE_CLEAR = 30      # drop at least this far from the top of a rope hanging from her platform
@@ -80,10 +91,17 @@ class Body:
     t: float
     x: float
     platform: Platform
-    run: int = 0          # running that way at full speed with the arrow held (+1 right, -1 left), or 0
+    run: int = 0          # running that way with the arrow held (+1 right, -1 left; the game sees it), or 0
     landed: bool = False  # she touches down at t (the next jump/drop key must come after that)
     slack: float = 0.0    # how far off t may be by now (prediction errors add up leg by leg)
     early_arrow: float | None = None  # after a climb: the next arrow may go down this early
+    v: float | None = None  # her speed along the ground (units/s, + right): None for full speed that way if
+                            # `run`, else standing. A jump lands her as fast as she left (and it's the
+                            # kick that decides that), so she can run on from a landing below full speed
+
+    def __post_init__(self):
+        if self.v is None:
+            object.__setattr__(self, "v", self.run * WALK_SPEED)
 
     @property
     def ready_at(self) -> float:
@@ -129,10 +147,6 @@ class Keys:
         k = Keys(self.names)
         k.events, k.arrow = list(self.events), self.arrow
         return k
-
-    def adopt(self, other: "Keys") -> None:
-        """Take over another plan's events and arrow (a trial copy that worked out)."""
-        self.events, self.arrow = other.events, other.arrow
 
     def set_arrow(self, t: float, d: int) -> None:
         """From t, hold the arrow that way (+1 right, -1 left) or none (0): the one held is let go, and
@@ -189,10 +203,46 @@ def _sign(v: float) -> int:
     return 1 if v > 0 else -1
 
 
-def _start_lag(b: Body, d: int) -> float:
-    """How far a run that way from body b lags running at full speed from b.t: none when she already
-    is, a standing start's lag, more when she's turning round."""
-    return 0.0 if b.run == d else RUN_LAG + (TURN_EXTRA if b.run == -d else 0.0)
+def _brake(v: float, tau: float) -> tuple[float, float]:
+    """(how far, speed) with no arrow for tau s from speed v (signed): she brakes to a stop."""
+    if not v:
+        return 0.0, 0.0
+    s, t = _sign(v), min(max(0.0, tau), abs(v) / SHOE.drag)
+    return v * t - s * SHOE.drag * t * t / 2, v - s * SHOE.drag * t
+
+
+def _seen(b: Body, d: int) -> tuple[float, float, float]:
+    """When the game sees arrow d (±1) held, from body b with it pressed at b.t if it wasn't held yet (it
+    sees it LAGS.on later), and where she is and how fast she goes then: running the other way she runs on
+    till then (that arrow, let go at b.t, is seen let go later still), standing she stands."""
+    if d == b.run:
+        return b.t, b.x, b.v
+    if b.run:
+        return (b.t + LAGS.on, b.x + body.run_x(LAGS.on, b.v, b.run, SHOE),
+                body.run_speed(LAGS.on, b.v, b.run, SHOE))
+    dx, v = _brake(b.v, LAGS.on)
+    return b.t + LAGS.on, b.x + dx, v
+
+
+def _ground(b: Body, d: int, t: float) -> tuple[float, float]:
+    """Where she is along b's platform at t, and how fast she goes then (signed), with arrow d held from b.t
+    on (0: none from then; pressed then if it wasn't already): the engine's closed forms (body), with the
+    median lags. The platform's ends aren't looked at."""
+    if not d:  # let go at b.t: she runs on until the game sees that, then brakes
+        dx, v = (body.run_x(LAGS.off, b.v, b.run, SHOE), body.run_speed(LAGS.off, b.v, b.run, SHOE)) \
+            if b.run else (0.0, b.v)
+        tau = t - b.t - (LAGS.off if b.run else 0.0)
+        if tau < 0:
+            return b.x + body.run_x(t - b.t, b.v, b.run, SHOE), body.run_speed(t - b.t, b.v, b.run, SHOE)
+        sx, v = _brake(v, tau)
+        return b.x + dx + sx, v
+    t0, x0, v0 = _seen(b, d)
+    if t < t0:  # the arrow not seen yet: she goes on as she was
+        if b.run:
+            return b.x + body.run_x(t - b.t, b.v, b.run, SHOE), body.run_speed(t - b.t, b.v, b.run, SHOE)
+        dx, v = _brake(b.v, t - b.t)
+        return b.x + dx, v
+    return x0 + body.run_x(t - t0, v0, d, SHOE), body.run_speed(t - t0, v0, d, SHOE)
 
 
 def _tap_pick_up(k: Keys, legs: list[Leg]) -> None:
@@ -224,13 +274,16 @@ class Flow:
     @staticmethod
     def run_to(b: Body, d: int, x: float) -> float | None:
         """When she's at x running that way from body b, the arrow pressed at b.t (None if it's
-        behind her)."""
+        behind her): from standing she starts LAGS.on after the key and speeds up to full speed in 7.9
+        units, running the other way she first runs on, brakes and turns (body.run_time)."""
         dist = (x - b.x) * d
-        if b.run == d:
+        if b.run == d and dist < 0:
             return b.t + dist / WALK_SPEED if dist >= -JUST_PASSED else None
         if dist < 0:
             return None
-        return b.t + _start_lag(b, d) + dist / WALK_SPEED
+        t0, x0, v0 = _seen(b, d)
+        tau = body.run_time((x - x0) * d, v0, d, SHOE)
+        return None if tau is None else t0 + tau
 
     # --- one leg per move ------------------------------------------------------------------------
     #
@@ -243,12 +296,23 @@ class Flow:
     VARIANTS = ("run", "stop", "stand")
 
     @staticmethod
-    def press_jump(k: Keys, t_off: float, b: Body) -> float:
-        """Press jump so she leaves the ground at t_off, or as soon after as she can: never before
-        she has landed, since a press in the air is ignored. Returns when she leaves the ground."""
+    def liftoff(b: Body, d: int, t_off: float) -> tuple[float, float, float, float]:
+        """When to press jump for her to leave the ground at t_off, running that way (d; 0: straight up)
+        from body b with that arrow held from b.t, or as soon after as she can: never before she has landed
+        (a press in the air is ignored). Returns (the press, when she leaves the ground, where, and her
+        sideways speed then: what she has on the ground, with the kick if that's below 0.8 × her walking
+        speed, body.takeoff)."""
         press = max(t_off - JUMP_LAG, b.ready_at)
+        t = press + JUMP_LAG
+        x, v = _ground(b, d, t)
+        return press, t, x, body.takeoff(v, d, SHOE)
+
+    def press_jump(self, k: Keys, b: Body, d: int, t_off: float) -> tuple[float, float, float]:
+        """Press jump for her to leave the ground at t_off (liftoff). Returns when she leaves the ground,
+        where, and her sideways speed then."""
+        press, t, x, vx = self.liftoff(b, d, t_off)
         k.tap(press, "jump")
-        return press + JUMP_LAG
+        return t, x, vx
 
     def leg(self, m: Move, b: Body, k: Keys, variant: str = "run") -> Leg | None:
         """Move m done the `variant` way from body b, its keys added to k; None where that way doesn't
@@ -260,16 +324,17 @@ class Flow:
         return None if plan is None else plan(m, b, k, variant)
 
     def _landing(self, m: Move, b: Body, k: Keys, variant: str, t_land: float, lx: float, land: Platform,
-                 d: int, spans: list[Span]) -> Leg:
-        """End a jump/fall leg: running on (arrow held) or, for 'stop', standing a little further on."""
+                 d: int, v_land: float, spans: list[Span]) -> Leg:
+        """End a jump/fall leg, landing at v_land (signed): running on (arrow held) or, for 'stop',
+        standing a little further on, where she slides to from v_land (13.9 units from full speed)."""
         slack = b.slack + SLACK_PER_LEG
         if variant == "stop" and d:
-            k.set_arrow(t_land - ARROW_LAG, 0)  # takes effect as she lands
-            x = lx + d * LAND_SLIDE
+            k.set_arrow(t_land - ARROW_LAG, 0)  # the game sees it just before she lands
+            x = lx + _sign(v_land) * body.slide(v_land, SHOE)
             if not land.covers(x, -3):  # she'd slide off the end: she stops 3 units in from it
                 x = min(max(x, land.left + 3), land.right - 3)
-            return Leg(m, b, Body(t_land + STOP_S - ARROW_LAG, x, land, slack=slack), spans)
-        return Leg(m, b, Body(t_land, lx, land, run=d, landed=True, slack=slack), spans)
+            return Leg(m, b, Body(t_land + abs(v_land) / SHOE.drag, x, land, slack=slack), spans)
+        return Leg(m, b, Body(t_land, lx, land, run=d, landed=True, slack=slack, v=v_land), spans)
 
     def _runup(self, b: Body, d: int, takeoff: float, k: Keys) -> Body | None:
         """Make sure she can run at `takeoff` going that way: stop if she's running the other way,
@@ -279,7 +344,8 @@ class Flow:
         a = b.platform
         if b.run == -d:  # stop first
             k.set_arrow(b.t, 0)
-            b = Body(b.t + STOP_S, b.x - d * STOP_RUN, a, slack=b.slack)
+            b = Body(b.t + body.stop_time(b.v, SHOE, LAGS), b.x + b.run * body.stop_distance(b.v, SHOE, LAGS), a,
+                     slack=b.slack)
         room = (takeoff - b.x) * d
         if room >= MIN_RUNUP:
             return b
@@ -311,14 +377,15 @@ class Flow:
         if t is None:
             return None
         k.set_arrow(start.t, d)
-        t_off = self.press_jump(k, t, start)
-        takeoff += d * (t_off - t) * WALK_SPEED  # later than planned if she had to land first
+        # Later than planned, and further on, if she had to land first.
+        t_off, takeoff, vx = self.press_jump(k, start, d, t)
         if (edge - takeoff) * d < 3:
             return None
-        land, lx, ta = fly(self.model, takeoff, a.y_at(takeoff), d * WALK_SPEED, -JUMP_SPEED)
+        land, lx, ta, v_land = flight(self.model, takeoff, a.y_at(takeoff), vx, -JUMP_SPEED)
         if land is None or land.id != m.dst:
             return None
-        return self._landing(m, b, k, variant, t_off + ta, lx, land, d, [Span(a.id, b.t, t_off, b.x, takeoff)])
+        return self._landing(m, b, k, variant, t_off + ta, lx, land, d, v_land,
+                             [Span(a.id, b.t, t_off, b.x, takeoff)])
 
     def _walk_off(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
         if variant == "stand":
@@ -331,11 +398,12 @@ class Flow:
         t = self.run_to(start, d, edge)
         if t is None:
             return None
-        land, lx, ta = fly(self.model, edge + d, a.y_at(edge) - 1, d * WALK_SPEED, 0.0)
+        _, v = _ground(start, d, t)  # (from standing close to the end: not yet at full speed)
+        land, lx, ta, v_land = flight(self.model, edge + d, a.y_at(edge) - 1, v, 0.0)
         if land is None or land.id != m.dst:
             return None
         k.set_arrow(start.t, d)
-        return self._landing(m, b, k, variant, t + ta, lx, land, d, [Span(a.id, b.t, t, b.x, edge)])
+        return self._landing(m, b, k, variant, t + ta, lx, land, d, v_land, [Span(a.id, b.t, t, b.x, edge)])
 
     def _jump_up(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
         a, q = b.platform, self.model.platform(m.dst)
@@ -349,16 +417,17 @@ class Flow:
             first = b.x if b.run == d else b.x + d * 15
             x = first
             while a.covers(x, -EDGE_ROOM) and abs(x - first) <= 400:
-                land, lx, ta = fly(self.model, x, a.y_at(x), d * WALK_SPEED, -JUMP_SPEED)
-                if land is q and q.covers(lx - d * LAND_MARGIN) and q.covers(lx + d * 30):
-                    t = self.run_to(b, d, x)
-                    if t is None:
-                        return None
-                    trial = k.copy()
-                    trial.set_arrow(b.t, d)
-                    if abs(self.press_jump(trial, t, b) - t) < 0.02:  # leaves the ground where planned
-                        k.adopt(trial)
-                        return self._landing(m, b, k, variant, t + ta, lx, q, d, [Span(a.id, b.t, t, b.x, x)])
+                t = self.run_to(b, d, x)
+                if t is None:
+                    return None
+                press, t_off, x_off, vx = self.liftoff(b, d, t)
+                if abs(t_off - t) < 0.02:  # leaves the ground where planned
+                    land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED)
+                    if land is q and q.covers(lx - d * LAND_MARGIN) and q.covers(lx + d * 30):
+                        k.set_arrow(b.t, d)
+                        k.tap(press, "jump")
+                        return self._landing(m, b, k, variant, t_off + ta, lx, q, d, v_land,
+                                             [Span(a.id, b.t, t_off, b.x, x_off)])
                 x += d * 5
             return None
         # Stop anywhere under it and jump straight up.
@@ -373,7 +442,7 @@ class Flow:
         land, lx, ta = fly(self.model, x, a.y_at(x), 0.0, -JUMP_SPEED)
         if land is not q:
             return None
-        t = self.press_jump(k, t + JUMP_LAG, Body(t, x, a, landed=b.landed and t == b.t, slack=b.slack))
+        t, _, _ = self.press_jump(k, Body(t, x, a, landed=b.landed and t == b.t, slack=b.slack), 0, t + JUMP_LAG)
         return Leg(m, b, Body(t + ta, lx, q, landed=True, slack=b.slack + SLACK_PER_LEG), [Span(a.id, b.t, t, b.x, x)])
 
     def _drop(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
@@ -423,7 +492,7 @@ class Flow:
             return None
         if abs(rx - b.x) <= 4 and not b.run:
             t, grab_h, ran_to = b.t, min(APEX, max(0.0, gap)), b.x   # straight up under it
-            t_rope = self.press_jump(k, t + JUMP_LAG, b) + 0.15  # grabs it 0.15 s after leaving the ground
+            t_rope = self.press_jump(k, b, 0, t + JUMP_LAG)[0] + 0.15  # grabs it 0.15 s after leaving the ground
         else:
             d = _sign(rx - b.x)
             ran_to = rx - d * GRAB_LEAD
@@ -434,8 +503,8 @@ class Flow:
             if t is None:
                 return None
             k.set_arrow(start.t, d)
-            t = self.press_jump(k, t, start)
-            t_rope = t + GRAB_LEAD / WALK_SPEED
+            t, ran_to, vx = self.press_jump(k, start, d, t)
+            t_rope = t + max(0.0, (rx - ran_to) * d) / max(abs(vx), 1.0)  # over the rope (at the top of the jump)
             grab_h = APEX
             k.set_arrow(t_rope + 0.12, 0)  # let go of the arrow once she's on the rope
         t_top = t_rope + max(0.0, (a.y_at(rx) - grab_h) - m.rope_top) / ROPE_SPEED
@@ -445,46 +514,47 @@ class Flow:
 
     def _stop_within(self, b: Body, lo: float, hi: float, prefer: float, k: Keys) -> tuple[float, float] | None:
         """Bring her to a stop anywhere in [lo, hi] (nearest `prefer` when she has a choice): right
-        away if she's there, by releasing the arrow now if that leaves her there, else at the spot.
-        Returns (when she's stopped, where)."""
+        away if she's there (or standing a tap's step from it, STEP_ACCEPT), by releasing the arrow now
+        if that leaves her there, else at the spot. Returns (when she's stopped, where)."""
         if lo > hi:
             return None
         target = min(max(prefer, lo), hi)
         if not b.run:
-            if lo <= b.x <= hi:
+            if lo - STEP_ACCEPT < b.x < hi + STEP_ACCEPT:
                 return b.t, b.x
-            dist = abs(target - b.x)
-            if dist < SHORT_STEP:  # hold the arrow just long enough (physics.hold_ms)
-                held = hold_ms(dist)
-                d = _sign(target - b.x)
-                k.set_arrow(b.t, d)
-                k.set_arrow(b.t + held / 1000, 0)
-                return b.t + held / 1000 + STOP_S, target
-            return self._stop_at(b, target, k)
-        natural = b.x + b.run * STOP_RUN
+            return self._step(b, target, k)
+        natural = b.x + b.run * body.stop_distance(b.v, SHOE, LAGS)
         if lo <= natural <= hi:
             k.set_arrow(b.t, 0)
-            return b.t + STOP_S, natural
+            return b.t + body.stop_time(b.v, SHOE, LAGS), natural
         if (target - natural) * b.run > 0:  # the spot is further on
             return self._stop_at(b, target, k)
         return None
 
-    def _stop_at(self, b: Body, x: float, k: Keys, tolerance: float = 12) -> tuple[float, float] | None:
-        """Bring her to a stop at x (within tolerance): release the arrow a slide's length early.
+    @staticmethod
+    def _step(b: Body, x: float, k: Keys) -> tuple[float, float]:
+        """From standing, step to x: hold the arrow just long enough (physics.hold_ms, the engine's).
         Returns (when she's stopped, where)."""
-        if abs(x - b.x) <= tolerance and not b.run:
-            return b.t, b.x
+        held = hold_ms(abs(x - b.x))
         d = _sign(x - b.x)
-        if b.run == -d:
-            return None
-        if b.run != d and abs(x - b.x) < SHORT_STEP:
-            return None  # a short shuffle: leave it to the closed loop
-        t = self.run_to(b, d, x - d * STOP_RUN)
-        if t is None:
-            return None
         k.set_arrow(b.t, d)
+        k.set_arrow(b.t + held / 1000, 0)
+        return b.t + body.hold_time(held, SHOE, LAGS), b.x + d * body.hold_distance(held, SHOE, LAGS)
+
+    @staticmethod
+    def _stop_at(b: Body, x: float, k: Keys) -> tuple[float, float] | None:
+        """Running that way, bring her to a stop at x, further on than she'd slide to if let go now:
+        let go of the arrow once she's held it long enough for that (body.held_for: a stop's length
+        early at full speed). Returns (when she's stopped, where)."""
+        d = b.run
+        seen = body.held_for((x - b.x) * d, b.v * d, SHOE)  # how long the game must see it held from now
+        t = b.t + seen - LAGS.off
+        if t < b.t:
+            return None
+        k.set_arrow(b.t, d)  # (held already in this plan; a plan that follows on from a run presses it again)
         k.set_arrow(t, 0)
-        return t + STOP_S, x
+        _, v = _ground(b, d, b.t + seen)
+        return b.t + seen + abs(v) / SHOE.drag, x
 
     # --- monsters ------------------------------------------------------------------------------
 
@@ -531,7 +601,7 @@ class Flow:
             return None
 
         def her_x(t: float) -> float:
-            return b.x + d * WALK_SPEED * max(0.0, t - b.t - _start_lag(b, d))
+            return _ground(b, d, t)[0]
 
         closing = WALK_SPEED + max(0.0, -(mo.vx or 0.0) * d)  # how fast the gap shrinks
         disc = JUMP_SPEED ** 2 - 2 * GRAVITY * mo.height
@@ -543,18 +613,18 @@ class Flow:
         if t >= b.t + HOP_HORIZON:
             return None  # it keeps ahead of her
         earliest = b.ready_at + JUMP_LAG
-        if t < earliest or (mo.at(t, a) - her_x(t)) * d < gap - 15:
+        if t < earliest:
             return None  # already too close to time it
-        x_off = her_x(t)
-        if not a.covers(x_off, -EDGE_ROOM):
-            return None
-        land, lx, ta = fly(self.model, x_off, a.y_at(x_off), d * WALK_SPEED, -JUMP_SPEED)
-        if land is not a or (lx - mo.at(t + ta, a)) * d < 0:
+        press, t_off, x_off, vx = self.liftoff(b, d, t)
+        if (mo.at(t_off, a) - x_off) * d < gap - 15 or not a.covers(x_off, -EDGE_ROOM):
+            return None  # too close by then, or no room
+        land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED)
+        if land is not a or (lx - mo.at(t_off + ta, a)) * d < 0:
             return None  # off the platform, or she'd come down short of it
         k.set_arrow(b.t, d)
-        t_off = self.press_jump(k, t, b)
+        k.tap(press, "jump")
         move = Move("hop", a.id, a.id, x_off, lx, directions.toward(d))
-        return Leg(move, b, Body(t_off + ta, lx, a, run=d, landed=True, slack=b.slack + SLACK_PER_LEG),
+        return Leg(move, b, Body(t_off + ta, lx, a, run=d, landed=True, slack=b.slack + SLACK_PER_LEG, v=v_land),
                    [Span(a.id, b.t, t_off, b.x, x_off)])
 
     def _hop_then(self, m: Move, b: Body, k: Keys, variant: str, monsters: list[MonsterTrack],

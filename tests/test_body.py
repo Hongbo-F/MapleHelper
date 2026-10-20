@@ -111,6 +111,30 @@ def test_holds_follow_the_tap_model():
         assert r.points[-1][1] == pytest.approx(body.hold_distance(ms, SHOE, LAGS), abs=0.5)
 
 
+@pytest.mark.parametrize("v0", [0.0, 60.0, 127.0, 149.0])
+def test_held_for_brings_her_to_rest_where_asked_from_any_speed(v0):
+    # flow plans its stops with it: the game must see the arrow held this long from v0, then she slides.
+    for units in (5.0, 15.0, 21.8, 30.0, 80.0):
+        tau = body.held_for(units, v0, SHOE)
+        v, x = steps(v0, 1, round(tau / 0.0001) * 0.0001, dt=0.0001)
+        if units <= body.slide(v0, SHOE):
+            assert tau == 0  # she slides that far anyway
+            continue
+        assert x + body.slide(v, SHOE) == pytest.approx(units, abs=0.05)
+        assert body.run_speed(tau, v0, 1, SHOE) == pytest.approx(v, abs=0.2)
+    # From standing that is hold_for, the game seeing a hold 12 ms longer than it is.
+    assert body.hold_for(20, SHOE, LAGS) == round(1000 * body.held_for(20, 0.0, SHOE)) - 12
+
+
+def test_a_tap_has_her_standing_still_again_when_hold_time_says():
+    # A 50 ms tap (a turn): seen held 62 ms, 87 units/s when the game sees it let go 122 ms after the key,
+    # braked to a stop 109 ms later.
+    assert body.hold_time(50, SHOE, LAGS) == pytest.approx(0.2305, abs=0.0005)
+    r = body.replay([(0.0, "right", True), (0.05, "right", False)], 0.5, SHOE, LAGS, start=0.0, dt=0.001)
+    last = next(t for (t, x, _), (_, nx, _) in zip(r.points, r.points[1:]) if nx == x and t > 0.1)
+    assert last == pytest.approx(body.hold_time(50, SHOE, LAGS), abs=0.002)
+
+
 # --- the jump ----------------------------------------------------------------------------------------
 
 def test_the_kick():

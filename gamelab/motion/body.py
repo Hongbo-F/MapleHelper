@@ -176,6 +176,11 @@ def run_x(tau: float, v0: float, d: int, shoe: Shoe) -> float:
     return d * _run(d * v0, max(0.0, tau), shoe)[0]
 
 
+def run_speed(tau: float, v0: float, d: int, shoe: Shoe) -> float:
+    """Her speed (signed) tau s after the game sees arrow d held, from speed v0 (signed): run_x's."""
+    return d * _run(d * v0, max(0.0, tau), shoe)[1]
+
+
 def run_time(dist: float, v0: float, d: int, shoe: Shoe) -> float | None:
     """When (s after the game sees arrow d held, from speed v0) she has gone `dist` that way, on her way
     there: turning round, the second time she passes it. None for a spot behind her that she never
@@ -230,18 +235,36 @@ def hold_distance(ms: float, shoe: Shoe, lags: Lags) -> float:
     return s + slide(u, shoe)
 
 
+def hold_time(ms: float, shoe: Shoe, lags: Lags) -> float:
+    """s from an arrow's key going down, held `ms` from standing, until she stands still again (the game
+    sees it let go lags.off after its key, and she brakes from what she reached): 0.23 s for a 50 ms tap,
+    which has her at 87 units/s when the game sees it let go."""
+    _, u = _run(0.0, max(0.0, ms / 1000 + lags.off - lags.on), shoe)
+    return ms / 1000 + lags.off + u / shoe.drag
+
+
+def held_for(units: float, v0: float, shoe: Shoe) -> float:
+    """How long (s) the game must see an arrow held, from speed v0 that way (0 to vmax), for her to come
+    to rest `units` on once it sees it let go (0: she slides that far anyway). From standing, 0.106 s
+    (full speed) has her rest 21.8 units on; each 1/149 s more, a unit more."""
+    vm, a = shoe.vmax, shoe.acc
+    u = min(max(v0, 0.0), vm)
+    if units <= slide(u, shoe):
+        return 0.0
+    at_full = (vm * vm - u * u) / (2 * a) + slide(vm, shoe)  # held until just full speed, then let go
+    if units > at_full:
+        return (vm - u) / a + (units - at_full) / vm
+    # Let go while speeding up: u τ + a τ²/2 of run, then a slide from u + a τ.
+    qa, qb, qc = a / 2 + a * a / (2 * shoe.drag), u + u * a / shoe.drag, slide(u, shoe) - units
+    return (-qb + math.sqrt(qb * qb - 4 * qa * qc)) / (2 * qa)
+
+
 def hold_for(units: float, shoe: Shoe, lags: Lags) -> int:
     """How long (ms) to hold an arrow from standing to move `units` and stop there: hold_distance's
     inverse (39 ms for 5 units, 90 for 20, 284 for 50)."""
     if units <= 0:
         return 0
-    vm, a = shoe.vmax, shoe.acc
-    at_full = vm * vm / (2 * a) + slide(vm, shoe)  # held until just full speed, then let go
-    if units <= at_full:
-        seen = math.sqrt(units / (a / 2 + a * a / (2 * shoe.drag)))
-    else:
-        seen = vm / a + (units - at_full) / vm
-    return max(0, round((seen - (lags.off - lags.on)) * 1000))
+    return max(0, round((held_for(units, 0.0, shoe) - (lags.off - lags.on)) * 1000))
 
 
 def _normal_below(x: float, mean: float, sd: float) -> float:
