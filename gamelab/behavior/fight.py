@@ -37,7 +37,8 @@ HIDDEN_FOR = 1.8   # s she keeps throwing at a monster she was throwing at once 
                    # one flinches under its damage numbers and the detector loses it for 1-3 s, and
                    # she used to stop throwing until it showed again
 EMPTY_PATIENCE = 0.4  # s a fight waits when no monster is seen at all (not even out of reach)
-FADING = 1.2       # s a killed monster may still be seen fading out where it died: not thrown at
+FADING = 1.2       # s a killed monster may still be seen fading out where it died (not thrown at), for a kind
+                   # whose death animation the game data lacks; else as long as that runs (fade_s)
 UNPLACED_LOOKS = 10  # looks in a row that can't place her before a fight gives up on her
 IN_HER_WAY = TOO_CLOSE + 40  # a monster of any kind this close on her platform is in her way: fought too
 THROWS = ("throw", "jump_throw", "jump_back")  # the stances that throw a star (each an Actions method)
@@ -103,9 +104,10 @@ class FightState:
     last_hidden: bool = False      # ... and whether monsters she was throwing at were hidden then
     calm_since: float | None = None  # since when she's had nothing to do (see clear's `patience`)
 
-    def forget_faded(self, now: float) -> None:
-        """Forgets the kills that died FADING s ago or more: they've faded out by `now`."""
-        self.dying = [(d, t) for d, t in self.dying if now - t < FADING]
+    def forget_faded(self, now: float, body: dict[str, MobBody] | None = None) -> None:
+        """Forgets the kills that have faded out by `now`: counted as long ago as their kind's death
+        animation lasts, or longer (fade_s, by `body`)."""
+        self.dying = [(d, t) for d, t in self.dying if now - t < fade_s(d.kind, body)]
 
     def fading(self, monsters: list[Monster]) -> list[Monster]:
         """The `monsters` seen fading out where a kill died (one still in `dying`): not thrown at. A kill
@@ -142,6 +144,16 @@ class FightState:
     def note_throw(self, now: float) -> None:
         """A throw at the monsters in its path (`aimed`): each is kept (once) among those thrown at, seen `now`."""
         self.thrown += [[m, now] for m in self.aimed if not any(e[0] is m for e in self.thrown)]
+
+
+def fade_s(kind: str, body: dict[str, MobBody] | None = None) -> float:
+    """How long a killed monster of `kind` may still be seen fading out where it died, from when her EXP
+    told of its death: its death animation (`body`, the map's game data: MobBody.die_s; a pig 0.66 s, a
+    slime 0.84, a snail 1.26), else FADING. The kill is counted at a look after it died, so that's long
+    enough; with 1.2 s for every kind, a pig walking up to where one had just died was left alone for half
+    a second or more after the dead one was gone."""
+    b = (body or bodies()).get(kind)
+    return b.die_s if b is not None and b.die_s else FADING
 
 
 # What a step of clear()'s loop tells it to do next (None: go on).
@@ -244,7 +256,7 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     monsters seen (but those fading out), and the hidden ones. Those hit lately (st.flinching: their HP
     bar new or lower, or hidden under their damage numbers) may still flinch when her next attack picks."""
     wanted = _wanted(s, kinds, ground, far)
-    st.forget_faded(now)
+    st.forget_faded(now, bodies(h.model))
     fading = st.fading(s.monsters)
     wanted = [m for m in wanted if m not in fading]
     visible = [m for m in s.monsters if m not in fading]

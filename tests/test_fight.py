@@ -256,6 +256,18 @@ def test_a_monster_just_hit_is_in_the_path_as_tall_as_it_flinches():
     assert st.just_hit(seen) == [seen[0], seen[2]]
 
 
+def test_a_kill_is_left_alone_as_long_as_its_death_animation_runs():
+    # Seen fading out where it died for its die1 frames' delays (game data): a pig 0.66 s, a snail 1.26; a
+    # kind the data doesn't have, FADING. Counted from the look that saw her EXP go up.
+    from gamelab.behavior.fight import FADING, FightState, fade_s
+    assert (fade_s("pig"), fade_s("slime"), fade_s("snail"), fade_s("dragon")) == (0.66, 0.84, 1.26, FADING)
+    st = FightState(dying=[(target(600), 10.0), (target(700, kind="snail"), 10.0)])
+    st.forget_faded(10.7)
+    assert [d.kind for d, _ in st.dying] == ["snail"]
+    st.forget_faded(11.3)
+    assert st.dying == []
+
+
 def test_a_kill_on_the_platform_above_during_jump_throws_is_placed_there(monkeypatch):
     # Jump-throwing at a pig beside her (cornered: another pig behind her), the attack picks its target
     # ~49 units up, so a slime on the platform above, 150 to the side, is in its path (from the ground one

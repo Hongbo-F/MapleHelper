@@ -31,8 +31,9 @@ The physics are the ones gamelab plans with, so a plan that is right on paper wo
   of the foothold group of the platform she last stood on, where it crosses the level line reach.SHOT_H
   above her feet (reach.wall_between): from platform 4 a throw at a monster on 2 hits nothing, or a
   monster short of the wall (live, no star from 4 ever reached one on 2). Kills give EXP
-  (model.mob_exp) and, 2 s later, drops on its platform; dead monsters respawn 8 s later where they
-  spawned;
+  (model.mob_exp) and, 2 s later, drops on its platform; a killed monster is seen fading out where it
+  died as long as its death animation runs (MobBody.die_s: a pig 0.66 s, a snail 1.26), and respawns 8 s
+  later where it spawned;
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
   HP potion key gives 30% HP, the chair key sits her down (+3% HP/s) until an arrow stands her up.
 
@@ -98,7 +99,8 @@ HITS = {"pig": 3, "orange-mushroom": 3, "slime": 2, "snail": 1}  # HP in stars
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
 DROP_DELAY = 2.0
 RESPAWN = 8.0
-FADE = 0.8               # s a killed monster is still seen fading out where it died
+FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
+                         # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
 DROP_LIFE = 180.0        # s drops lie before they vanish
 PICK_REACH = 15.0
 POTION_HP = 0.30
@@ -237,6 +239,7 @@ class SimMonster:
     died_x: float = 0.0
     hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden; it flinches)
     flinch_top: float = 54.0   # how tall it is while it flinches
+    fade: float = FADE         # s it's still seen once killed, fading out where it died
     # current motion segment: from t0 at x0, heading d (-1, 0, +1) until t1
     t0: float = 0.0
     x0: float = 0.0
@@ -409,6 +412,7 @@ class World:
                     monster_data.MONSTER_HEIGHT.get(kind, 46.0), float(HITS.get(kind, 2)), float(HITS.get(kind, 2)))
             if kind in bodies:
                 m.flinch_top = bodies[kind].flinch_top
+                m.fade = bodies[kind].die_s or FADE
             m.start(0.0, float(x))
             self.monsters.append(m)
             self.by_platform.setdefault(pid, []).append(m)
@@ -927,7 +931,7 @@ class World:
             if m.alive:
                 x = m.at(t)
                 out.append((m, x, m.y(x), True))
-            elif m.died_at is not None and t - m.died_at < FADE:
+            elif m.died_at is not None and t - m.died_at < m.fade:
                 out.append((m, m.died_x, m.y(m.died_x), False))
         return out
 

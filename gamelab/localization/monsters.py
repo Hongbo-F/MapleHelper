@@ -28,6 +28,10 @@ MONSTER_HEIGHT = {"pig": 46.0, "orange-mushroom": 55.0, "slime": 41.0, "snail": 
 MONSTER_TOP = {"pig": 38.0, "orange-mushroom": 55.0, "slime": 40.0, "snail": 24.0}
 MONSTER_FLINCH_TOP = {"pig": 54.0, "orange-mushroom": 65.0, "slime": 46.0, "snail": 33.0}
 FLINCH_S = 0.6       # s a monster flinches after a hit (its hit1 frame's delay, game data)
+# How long a killed one is still seen, fading out where it died: its die1 frames' delays (game data: a
+# snail 8 x 120 + 300 ms, a slime 3 x 180 + 300, a pig and an Orange Mushroom 2 x 180 + 300; the last frame
+# fades it out).
+MONSTER_DIE_S = {"pig": 0.66, "orange-mushroom": 0.66, "slime": 0.84, "snail": 1.26}
 TURN_SLACK = 25      # units a monster seen walking one way may still come back (they turn now and then)
 
 PLATFORM_SLACK = 25  # map units past a platform's ends a monster seen on screen may still be on it
@@ -56,7 +60,7 @@ class Monster:
 def bodies(model: MapModel | None = None) -> dict[str, MobBody]:
     """Each kind's body (by kind): read from the game data with the map for the monsters it has
     (MapModel.mob_bodies), from the tables above for the rest."""
-    out = {k: MobBody(MONSTER_TOP[k], MONSTER_FLINCH_TOP[k], MONSTER_HALF[k]) for k in MONSTER_TOP}
+    out = {k: MobBody(MONSTER_TOP[k], MONSTER_FLINCH_TOP[k], MONSTER_HALF[k], MONSTER_DIE_S[k]) for k in MONSTER_TOP}
     if model is not None:
         out.update({kind_of(name): b for name, b in model.mob_bodies.items()})
     return out

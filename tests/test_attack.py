@@ -287,12 +287,18 @@ def test_monster_tables_match_the_game_data():
     if not (COPY / "Packs" / "Mob_00000.ms").is_file():
         pytest.skip("needs the game data copy (gamedata/data/copy)")
     data = mapdata._mob_bodies({"2", "7", "8", "9"})  # snail, slime, pig, Orange Mushroom
+    dying = mapdata._mob_die_s({"2", "7", "8", "9"})
     for mob_id, kind in (("2", "snail"), ("7", "slime"), ("8", "pig"), ("9", "orange-mushroom")):
         body = data[mob_id]
         assert body["top"] == monsters.MONSTER_TOP[kind]
         assert body["flinch_top"] == monsters.MONSTER_FLINCH_TOP[kind]
         assert abs(body["half"] - monsters.MONSTER_HALF[kind]) <= 0.5
+        assert dying[mob_id] == monsters.MONSTER_DIE_S[kind]  # its death animation: 0.66 s for a pig
     assert monsters.bodies()["snail"].top == 24  # without a map: the tables
+    assert monsters.bodies()["snail"].die_s == 1.26
+    # The map's cache is read again when it was made before bodies kept their death animations (a key of
+    # its own, so code from before reads the new cache as it did).
+    assert mapdata.load(10000012).mob_bodies["Pig"].die_s == 0.66
 
 
 # --- where to shoot from -------------------------------------------------------------------------------

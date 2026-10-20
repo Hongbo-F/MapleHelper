@@ -118,10 +118,12 @@ class MobBody:
     """A monster's body, from the boxes (lt/rb, map units from its feet) of its frames in the game data
     (Mob/<id>.img): how tall it is at least while it stands or walks (the lowest top of its stand and move
     frames), how tall while it flinches after a hit (hit1), and half its width (its widest stand or move
-    frame)."""
+    frame). And how long it's seen dying, fading out where it died: its die1 frames' delays, in s (0 if
+    the data has none)."""
     top: float
     flinch_top: float
     half: float
+    die_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -279,10 +281,10 @@ def _mob_id(life: dict) -> str:
 
 
 def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None,
-          mob_exp: dict | None = None, mob_bodies: dict | None = None) -> MapModel:
-    """A map's model from its image in the game data (`tree`, as JSON). `mob_names`, `mob_exp` and
-    `mob_bodies` (as _mob_bodies gives them) are keyed by monster id (_mob_id); the model keys EXP and
-    bodies by name."""
+          mob_exp: dict | None = None, mob_bodies: dict | None = None, mob_die_s: dict | None = None) -> MapModel:
+    """A map's model from its image in the game data (`tree`, as JSON). `mob_names`, `mob_exp`,
+    `mob_bodies` (as _mob_bodies gives them) and `mob_die_s` (_mob_die_s) are keyed by monster id
+    (_mob_id); the model keys EXP and bodies by name."""
     info = tree.get("info", {})
     platforms, walls = _platforms(_footholds(tree))
     ropes = [Rope(r["x"], r["y1"], r["y2"], bool(r.get("l")), bool(r.get("uf")))
@@ -301,7 +303,8 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         minimap={k: mm.get(k) for k in ("width", "height", "centerX", "centerY", "mag")},
         platforms=platforms, walls=walls, ropes=ropes, portals=portals, spawns=spawns, physics=physics,
         mob_exp={mob_names.get(i, i): e for i, e in (mob_exp or {}).items()},
-        mob_bodies={mob_names.get(i, i): MobBody(**b) for i, b in (mob_bodies or {}).items()})
+        mob_bodies={mob_names.get(i, i): MobBody(**b, die_s=(mob_die_s or {}).get(i, 0.0))
+                    for i, b in (mob_bodies or {}).items()})
     for p in model.platforms:
         p.walls = tuple(model.walls_of(p.group))
     return model
@@ -329,17 +332,19 @@ def load(map_id: int) -> MapModel:
     """The map's model, parsed from the game data (cached as JSON next to the other extracts)."""
     cache = CACHE / f"{map_id}.json"
     raw = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
-    if raw is None or "mob_bodies" not in raw:  # not cached yet, or cached before EXP or bodies were kept
+    # Not cached yet, or cached before EXP, bodies or their death animations were kept (each a key of its
+    # own, so code from before reads the cache as it did).
+    if raw is None or "mob_die_s" not in raw:
         physics = jsonable(Package(COPY / "Map" / "Map_000.wz").image("Physics.img"))
         tree = jsonable(_image(map_id))
         ids = {_mob_id(s) for s in _monster_lives(tree)}
         names = _mob_names(ids)
         raw = {"id": map_id, "name": _map_name(map_id), "tree": tree, "physics": physics, "mob_names": names,
-               "mob_exp": _mob_exp(ids), "mob_bodies": _mob_bodies(ids)}
+               "mob_exp": _mob_exp(ids), "mob_bodies": _mob_bodies(ids), "mob_die_s": _mob_die_s(ids)}
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(raw), encoding="utf-8")
     return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"],
-                 raw["mob_bodies"])
+                 raw["mob_bodies"], raw["mob_die_s"])
 
 
 def _mob_names(ids: set[str]) -> dict[str, str]:
@@ -356,7 +361,9 @@ def _mob_exp(ids: set[str]) -> dict[str, int]:
 
 
 BODY_ACTIONS = ("stand", "move")  # a monster's frames while it stands or walks ...
-FLINCH_ACTION = "hit1"            # ... and while it flinches after a hit
+FLINCH_ACTION = "hit1"            # ... while it flinches after a hit ...
+DIE_ACTION = "die1"               # ... and while it dies (no boxes: only their delays are read)
+FRAME_DELAY = 100                 # ms a frame lasts when the data gives it no delay (the client's default)
 
 
 def _mob_bodies(ids: set[str]) -> dict[str, dict]:
@@ -383,6 +390,26 @@ def _mob_bodies(ids: set[str]) -> dict[str, dict]:
         top = float(min(-lt.y for lt, _ in body))
         out[i] = {"top": top, "flinch_top": float(max((-lt.y for lt, _ in flinch), default=top)),
                   "half": max(rb.x - lt.x for lt, rb in body) / 2}
+    return out
+
+
+def _mob_die_s(ids: set[str]) -> dict[str, float]:
+    """Monster id -> how long it's seen dying, in s: the delays of its die1 frames in the game data (the
+    last one fades it out: a snail 8 x 120 + 300 ms, a pig 2 x 180 + 300). A monster without them is left
+    out (localization.monsters' table stands in for it)."""
+    from gamedata.canvas import _mob_pack
+    from gamedata.wz import Canvas
+    pack = _mob_pack()
+    out = {}
+    for i in ids:
+        tree = pack.image(f"Mob/{int(i):07d}.img")
+        link = (tree.get("info") or {}).get("link")
+        if link and not tree.get(DIE_ACTION):  # its frames are another monster's
+            tree = pack.image(f"Mob/{int(link):07d}.img")
+        delays = [f.props.get("delay") or FRAME_DELAY for f in (tree.get(DIE_ACTION) or {}).values()
+                  if isinstance(f, Canvas)]
+        if delays:
+            out[i] = sum(delays) / 1000
     return out
 
 
