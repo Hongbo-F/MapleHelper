@@ -312,6 +312,29 @@ def test_monster_tables_match_the_game_data():
     # The map's cache is read again when it was made before bodies kept their death animations (a key of
     # its own, so code from before reads the new cache as it did).
     assert mapdata.load(10000012).mob_bodies["Pig"].die_s == 0.66
+    stats = mapdata._mob_speeds({"2", "7", "8", "9"})
+    assert stats == {"2": -65, "7": -20, "8": 0, "9": 0}
+    for mob_id, kind in (("2", "snail"), ("7", "slime"), ("8", "pig"), ("9", "orange-mushroom")):
+        assert mapdata.mob_walk_speed(stats[mob_id], {"walkSpeed": 125.0}) == monsters.MONSTER_SPEED[kind]
+
+
+def test_monster_speeds_come_with_the_map(tmp_path, monkeypatch):
+    """How fast a monster walks: the map's walkSpeed times 1 + its speed stat / 100. A map cached before the
+    stats were kept gets them added (here from a stand-in for the game data)."""
+    import json
+    tree = {"info": {}, "foothold": {"1": {"1": {"1": {"x1": 0, "y1": 500, "x2": 900, "y2": 500, "prev": 0, "next": 0}}}},
+            "life": {"0": {"type": "m", "id": "2", "x": 600, "y": 500, "cy": 500}}, "miniMap": {}}
+    model = mapdata.parse(1, tree, "Test", {"walkSpeed": 120.0}, {"2": "Snail"}, mob_speeds={"2": -65})
+    assert model.mob_speeds == {"Snail": pytest.approx(42.0)}
+    assert monsters.speeds(model)["snail"] == pytest.approx(42.0) and monsters.speeds()["snail"] == 43.75
+    raw = {"id": 1, "name": "Test", "tree": tree, "physics": {"walkSpeed": 125.0}, "mob_names": {"2": "Snail"},
+           "mob_exp": {"2": 2}, "mob_bodies": {}, "mob_die_s": {}}
+    monkeypatch.setattr(mapdata, "CACHE", tmp_path)
+    (tmp_path / "1.json").write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(mapdata, "_mob_speeds", lambda ids: {i: -65.0 for i in ids})
+    assert mapdata.load(1).mob_speeds == {"Snail": 43.75}
+    assert json.loads((tmp_path / "1.json").read_text(encoding="utf-8"))["mob_speeds"] == {"2": -65.0}
+    assert [p.name for p in tmp_path.iterdir()] == ["1.json"]
 
 
 # --- where to shoot from -------------------------------------------------------------------------------

@@ -26,17 +26,18 @@ on the world's 5 ms tick:
   and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
   her off it sideways (ROPE_JUMP); down and jump on a floor whose foothold forbids it (forbidFallDown)
   does nothing, as on the bottom floor;
-- monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded);
-  a hit that doesn't kill pushes one KNOCK_MOB units back from her and stands it while it flinches
-  (MOB_KNOCKBACK), never off its platform. A monster touches her when its body overlaps hers (HER_HALF
-  either side of her feet, HER_HEIGHT tall): the box of the frame it shows then in the game data, walking,
-  standing or flinching after a hit, turned the way it faces (SimMonster.body), so a hopping slime is off
-  the ground and taller for 38% of its walk. A touch leaves her a second's invulnerability. She evades it
-  (a thief's "MISS": nothing else happens) with a chance inversely proportional to the monster's accuracy
-  (game data: half a pig's touches, four in five of a snail's); the others take a share of her HP by the
-  monster's touch damage (game data: about 1.6% for a pig, 0.3% for a snail, give or take 70%) and knock
-  her back ~58 units (the median logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS).
-  At 0% HP she dies, and the run ends (SimDied);
+- monsters walk their platform as fast as the game data says (monster_data.speeds: 125 units/s for a pig,
+  43.75 for a snail), turning and stopping now and then (seeded); a hit that doesn't kill pushes one
+  KNOCK_MOB units back from her and stands it while it flinches (MOB_KNOCKBACK), never off its platform.
+  A monster touches her when its body overlaps hers (HER_HALF either side of her feet, HER_HEIGHT tall):
+  the box of the frame it shows then in the game data, walking, standing or flinching after a hit, turned
+  the way it faces (SimMonster.body), so a hopping slime is off the ground and taller for 38% of its walk.
+  A touch leaves her a second's invulnerability. She evades it (a thief's "MISS": nothing else happens)
+  with a chance inversely proportional to the monster's accuracy (game data: half a pig's touches, four
+  in five of a snail's); the others take a share of her HP by the monster's touch damage (game data:
+  about 1.6% for a pig, 0.3% for a snail, give or take 70%) and knock her back ~58 units (the median
+  logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS). At 0% HP she dies, and the
+  run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
@@ -361,7 +362,7 @@ class SimMonster:
     platform: Platform
     home: float               # spawn x (where it respawns)
     rng: random.Random
-    speed: float = 70.0
+    speed: float = 125.0
     half: float = 34.0
     height: float = 46.0
     hp_max: float = 1.0        # in stars
@@ -578,13 +579,13 @@ class World:
                     wanted.append((s.name or str(s.mob_id), p.id, s.x))
         else:
             wanted = list(monsters)
-        bodies = monster_data.bodies(self.model)
+        bodies, speeds = monster_data.bodies(self.model), monster_data.speeds(self.model)
         ids = {kind_of(s.name): s.mob_id for s in self.model.spawns if s.name}  # by kind ...
         ids.update({s.name: s.mob_id for s in self.model.spawns if s.name})      # ... and by name
         for i, (name, pid, x) in enumerate(wanted):
             kind = kind_of(name)
             m = SimMonster(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
-                    monster_data.MONSTER_SPEED.get(kind, 70.0), monster_data.MONSTER_HALF.get(kind, 34.0),
+                    speeds.get(kind, monster_data.DEFAULT_SPEED), monster_data.MONSTER_HALF.get(kind, 34.0),
                     monster_data.MONSTER_HEIGHT.get(kind, 46.0), float(HITS.get(kind, 2)), float(HITS.get(kind, 2)))
             if kind in bodies:
                 m.flinch_top = bodies[kind].flinch_top

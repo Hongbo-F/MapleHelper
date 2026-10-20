@@ -422,7 +422,7 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=1,
+@scenario((34, -300.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("looking for a way around"), logs("hop@"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
     """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the
@@ -660,12 +660,13 @@ def hunt_kill_far(sim):
     return _kill_far(sim)
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=4, noise=Noise(miss=0.35),
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=16, noise=Noise(miss=0.35),
           expects=(ends("killed", key="ended"), happens("star misses"),
                    wrote("shots2.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
 def hunt_kill_misses(sim):
     """hunt_kill_far (another seed) with a third of the stars missing: throws scored as misses (no HP bar
-    change within ~0.9 s of the star's arrival), and more throws to kill it."""
+    change within ~0.9 s of the star's arrival), and more throws to kill it. (Seed 16 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 no
+    star missed it.)"""
     return _kill_far(sim)
 
 
@@ -884,18 +885,19 @@ def _hunt_17_pigs(sim):
     return tour.hunt(17, {"pig"}, kills=2, seconds=90)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=1, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=28, limit=400,
           expects=(logs("out of reach here: over to platform"),))
 def tour_hunt_other_spot(sim):
     """Tour.hunt of two pigs on 17 from 14: one dies, the other is out of reach, so over to a spot that
-    reaches it (Tour.spot_for)."""
+    reaches it (Tour.spot_for). (Seed 28 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seeds 1-27 but 17 the other walked into reach first.)"""
     return _hunt_17_pigs(sim)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=4, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=6, limit=400,
           expects=(logs("that no spot reaches: onto the platform"),))
 def tour_hunt_onto_platform(sim):
-    """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself."""
+    """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself.
+    (Seed 6 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 the other walked into reach first.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -912,7 +914,7 @@ def tour_collect_loot(sim):
     return {"report": str(tour.report), "pending_loot": [[round(d.x), d.platform] for d in tour.h.looter.pending]}
 
 
-@scenario((16, 585.0), monsters=[("Pig", 18, 300.0)], seed=1, limit=300, drops=(("mesos", 29, 420.0),),
+@scenario((16, 585.0), monsters=[("Pig", 18, 300.0)], seed=2, limit=300, drops=(("mesos", 29, 420.0),),
           expects=(logs("pig in reach on platform 18: shooting it on the way"),
                    check("the drops of the pig shot on the way are kept",
                          lambda tr: any(p == 18 for _, p in tr["result"]["kept"])),
@@ -921,7 +923,8 @@ def tour_collect_loot(sim):
 def tour_collect_loot_on_the_way(sim):
     """Tour.collect_loot twice, as Tour.hunt calls it: on the trip from 16 to the mesos remembered on 29, she
     shoots a pig on 18 below on the way. Its drops are kept for the next collection, which picks them up
-    (they used to be forgotten: from 29, 18 is out of view)."""
+    (they used to be forgotten: from 29, 18 is out of view). (Seed 2 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 1 the pig walked out
+    of reach before it died.)"""
     tour = sim.tour_stack()
     tour.nav.escort.kinds = tour.worth
     tour.h.looter.pending = [DropSpot(420, 275, 29, sim.clock.now - 10, mesos=True, on_ground=True)]

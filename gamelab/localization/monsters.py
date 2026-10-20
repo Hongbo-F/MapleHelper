@@ -14,9 +14,13 @@ TRACK_SLACK = 85   # how far a monster may move between two looks (knockback) an
 SEARCH_SLACK = 150  # ... and how far it's looked for once it has vanished
 SAME_DY = 40       # ... and how far up or down (map units)
 
-# Walking speeds (map units/s), from each monster's speed stat in the game data (pig and Orange
-# Mushroom 0, slime -20, snail -65) applied to a base of 70; an upper bound for where they can get.
-MONSTER_SPEED = {"pig": 70.0, "orange-mushroom": 70.0, "slime": 56.0, "snail": 25.0}
+# Walking speeds (map units/s): the game's walkSpeed (125) times 1 + each monster's speed stat / 100 (pig and
+# Orange Mushroom 0, slime -20, snail -65; mapdata reads them with the map, MapModel.mob_speeds, and
+# tests/test_attack.py checks this table against it). Measured on recordings with the camera still: snails 42
+# and 45 units/s, pigs 120-128. A base of 70 was used before, a guess 1.79 times too slow: 43% of the speeds
+# the tracker measured in live runs were at that clamp. An upper bound for where they can get.
+MONSTER_SPEED = {"pig": 125.0, "orange-mushroom": 125.0, "slime": 100.0, "snail": 43.75}
+DEFAULT_SPEED = 125.0  # a monster of speed 0 (walkSpeed), for kinds the table and the map don't know
 # Their bodies (map units), from the boxes (lt/rb) of their frames in the game data (Mob/<id>.img; mapdata
 # reads them with the map, MapModel.mob_bodies, and tests/test_attack.py checks these tables against it).
 # Half their width (half their widest stand or move frame), and how tall they are walking (the top of
@@ -79,6 +83,15 @@ def bodies(model: MapModel | None = None) -> dict[str, MobBody]:
     return out
 
 
+def speeds(model: MapModel | None = None) -> dict[str, float]:
+    """How fast each kind walks (units/s): from the game data with the map for the monsters it has
+    (MapModel.mob_speeds), from MONSTER_SPEED for the rest."""
+    out = dict(MONSTER_SPEED)
+    if model is not None:
+        out.update({kind_of(name): v for name, v in model.mob_speeds.items()})
+    return out
+
+
 def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: float = 50) -> Platform | None:
     """The platform a monster seen at map (x, y) walks on. Monsters never leave the platform they
     spawn on, so only platforms where its kind spawns count (or any spawn platform, if none fits):
@@ -110,7 +123,7 @@ def walked(m: Monster, dt: float | None) -> float:
     seen walking: at its kind's speed; else 0 (also without `dt`)."""
     if dt is None or m.pose != "move" or not m.facing:
         return 0.0
-    return m.facing * MONSTER_SPEED.get(m.kind, 70.0) * dt
+    return m.facing * MONSTER_SPEED.get(m.kind, DEFAULT_SPEED) * dt
 
 
 def off_course(x: float, start: float, go: float) -> tuple[float, float]:
@@ -123,11 +136,13 @@ def off_course(x: float, start: float, go: float) -> tuple[float, float]:
 
 
 def seen_again(m: Monster, now: list[Monster], dt: float | None = None) -> Monster | None:
-    """The monster in `now` that is `m` seen again `dt` s later, if any: of those that can be, the nearest
-    to where it was, or, seen walking, to the way it was going (`walked`). Two of a kind close together,
-    walking apart, are told apart by which way they faced."""
-    near = [o for o in now if same(o, m)]
+    """The monster in `now` that is `m` seen again `dt` s later, if any: of those that can be (`same`, or
+    within TRACK_SLACK of the way it was walking), the nearest to where it was, or, seen walking, to the way
+    it was going (`walked`). Two of a kind close together, walking apart, are told apart by which way they
+    faced."""
     go = walked(m, dt)
+    near = [o for o in now if o.kind == m.kind and abs(o.y - m.y) < SAME_DY
+            and off_course(o.x, m.x, go)[0] < TRACK_SLACK]
     return min(near, key=lambda o: off_course(o.x, m.x, go)) if near else None
 
 
@@ -147,7 +162,7 @@ class MonsterTrack:
     (by default a pig's)."""
     platform: int
     x: float
-    speed: float = 70.0
+    speed: float = DEFAULT_SPEED
     heading: int = 0
     half: float = 34.0
     vx: float | None = None
@@ -177,7 +192,9 @@ class Tracker:
     the same platform, within MATCH_DX units, the last look under MATCH_WITHIN s ago): the nearest, or for
     one seen walking, the nearest to the way it was going (off_course)."""
 
-    def __init__(self):
+    def __init__(self, model: MapModel | None = None):
+        """`model`: the map, for how fast its monsters walk (speeds)."""
+        self.walking = speeds(model)  # kind -> how fast it walks (units/s; the game data's)
         self.last: tuple[float, list[MonsterTrack]] = (0.0, [])  # the last look's time, and its tracks
         # kind -> the latest walking speeds seen between looks (units/s), SPEED_SAMPLES at most
         self.speeds: dict[str, deque[float]] = {}
@@ -186,19 +203,21 @@ class Tracker:
         """Tracks for the monsters of a look taken at `t` (time.monotonic). `seen_at`: when that look
         was, in the time of the plan they're for."""
         when, tracks = self.last
-        before = tracks if t - when < MATCH_WITHIN else []
+        # The last look's tracks, each with how far it can have walked since, if it was seen walking.
+        before = [(mo, mo.facing * mo.speed * (t - when)) for mo in tracks] if t - when < MATCH_WITHIN else []
         out = []
         for m in monsters:
             if m.platform is None:
                 continue
-            speed = MONSTER_SPEED.get(m.kind, 70.0)
+            speed = self.walking.get(m.kind, DEFAULT_SPEED)
             heading, vx = 0, None
-            prev = [mo for mo in before if mo.platform == m.platform and abs(mo.x - m.x) < MATCH_DX]
-            if prev:  # the nearest, or to the way it was going if seen walking
-                mo = min(prev, key=lambda mo: off_course(m.x, mo.x, mo.facing * mo.speed * (t - when)))
+            prev = [(mo, go) for mo, go in before if mo.platform == m.platform
+                    and off_course(m.x, mo.x, go)[0] < MATCH_DX]  # within MATCH_DX of where it can be
+            if prev:  # the nearest, or for one seen walking, the nearest to the way it was going
+                mo = min(prev, key=lambda p: off_course(m.x, p[0].x, p[1]))[0]
                 dx = m.x - mo.x
                 heading = (1 if dx > 0 else -1) if abs(dx) > STILL_DX else 0
-                if t - when > MIN_SPEED_DT:  # how fast monsters really walk, for MONSTER_SPEED
+                if t - when > MIN_SPEED_DT:  # how fast monsters really walk (nav's summary)
                     self.speeds.setdefault(m.kind, deque(maxlen=SPEED_SAMPLES)).append(abs(dx) / (t - when))
                     vx = 0.0 if abs(dx) <= STILL_DX else max(-speed, min(speed, dx / (t - when)))
             walking = m.facing if m.pose == "move" else 0

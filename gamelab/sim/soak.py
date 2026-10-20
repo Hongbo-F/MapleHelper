@@ -164,7 +164,7 @@ def soak_frames(meter: Meter) -> dict:
     if model is None or not frames:
         raise SystemExit("needs the map's game data and the saved frames in gamelab/lab")
     eyes = bench.SavedEyes(calibration.load().template, detector_for(model))
-    hunter, tracker = Hunter(eyes, her_setup()[1], model, log=lambda message: None), Tracker()
+    hunter, tracker = Hunter(eyes, her_setup()[1], model, log=lambda message: None), Tracker(model)
     hit_log = paths.HIT_LOG
     with tempfile.TemporaryDirectory(prefix="gamelab-soak-") as tmp:
         paths.HIT_LOG = Path(tmp) / "hits.jsonl"  # her HP changes between frames: "hits"

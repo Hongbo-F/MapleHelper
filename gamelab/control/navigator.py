@@ -193,7 +193,7 @@ class Navigator:
         if actions.keys.pick_up is not None:
             names["pick"] = actions.keys.pick_up.name  # pressed all through her runs: loot on the way
         self.flow = Flow(model, names, rng=self.rng if variety else None)
-        self.tracker = Tracker()  # which way the monsters walk, from look to look
+        self.tracker = Tracker(model)  # which way the monsters walk, from look to look
         self._checked: Scene | None = None  # follow: the last look placing her for the next chain
 
     @property

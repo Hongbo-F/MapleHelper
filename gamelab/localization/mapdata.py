@@ -10,6 +10,7 @@ Game data stays on this computer (gamedata/data, git-ignored); nothing here is c
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -22,6 +23,11 @@ MONSTER_REACH = 55          # map units a monster's body reaches above its platf
 CACHE = OUT / "maps"         # parsed maps, as JSON (git-ignored, like all extracted game data)
 
 FEET_BELOW = 8               # map units her feet may sink below a platform's surface and still stand on it
+# A monster walks at the game's walkSpeed (Physics.img: 125 units/s) times 1 + its speed stat / 100 (Mob/<id>.img
+# info/speed: pigs and Orange Mushrooms 0, slimes -20, snails -65): 125, 125, 100 and 43.75 units/s. Measured on
+# recordings with the camera still: snails 42 and 45 units/s, pigs 120-128 (camera motion taken out), slimes
+# 77-106 (they hop as they go).
+MOB_WALK_SPEED = 125.0       # walkSpeed, when the map's physics don't say
 MIN_FALL = 2                 # a platform must be this far below her to be one she falls onto
 SPAWN_REACH = 60             # how far above its platform a spawn point may be placed
 
@@ -171,6 +177,8 @@ class MapModel:
                                                      # copy, which a test checks against this)
     mob_exp: dict[str, int] = field(default_factory=dict)  # monster name -> EXP per kill (game data)
     mob_bodies: dict[str, MobBody] = field(default_factory=dict)  # monster name -> its body (game data)
+    mob_speeds: dict[str, float] = field(default_factory=dict)    # monster name -> how fast it walks (units/s;
+                                                                  # game data: mob_walk_speed)
 
     # --- where things are -------------------------------------------------------------------
 
@@ -302,10 +310,12 @@ def _mob_id(life: dict) -> str:
 
 
 def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None,
-          mob_exp: dict | None = None, mob_bodies: dict | None = None, mob_die_s: dict | None = None) -> MapModel:
+          mob_exp: dict | None = None, mob_bodies: dict | None = None, mob_die_s: dict | None = None,
+          mob_speeds: dict | None = None) -> MapModel:
     """A map's model from its image in the game data (`tree`, as JSON). `mob_names`, `mob_exp`,
-    `mob_bodies` (as _mob_bodies gives them) and `mob_die_s` (_mob_die_s) are keyed by monster id
-    (_mob_id); the model keys EXP and bodies by name."""
+    `mob_bodies` (as _mob_bodies gives them), `mob_die_s` (_mob_die_s) and `mob_speeds` (speed stats, as
+    _mob_speeds gives them) are keyed by monster id (_mob_id); the model keys EXP, bodies and walking speeds
+    by name."""
     info = tree.get("info", {})
     platforms, walls = _platforms(_footholds(tree))
     ropes = [Rope(r["x"], r["y1"], r["y2"], bool(r.get("l")), bool(r.get("uf")))
@@ -325,10 +335,16 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         platforms=platforms, walls=walls, ropes=ropes, portals=portals, spawns=spawns, physics=physics,
         mob_exp={mob_names.get(i, i): e for i, e in (mob_exp or {}).items()},
         mob_bodies={mob_names.get(i, i): MobBody(**b, die_s=(mob_die_s or {}).get(i, 0.0))
-                    for i, b in (mob_bodies or {}).items()})
+                    for i, b in (mob_bodies or {}).items()},
+        mob_speeds={mob_names.get(i, i): mob_walk_speed(v, physics) for i, v in (mob_speeds or {}).items()})
     for p in model.platforms:
         p.walls = tuple(model.walls_of(p.group))
     return model
+
+
+def mob_walk_speed(stat: float, physics: dict) -> float:
+    """How fast a monster walks (units/s), from its speed stat and the map's physics (MOB_WALK_SPEED)."""
+    return float(physics.get("walkSpeed", MOB_WALK_SPEED)) * (1 + stat / 100)
 
 
 def _image(map_id: int) -> dict:
@@ -361,11 +377,30 @@ def load(map_id: int) -> MapModel:
         ids = {_mob_id(s) for s in _monster_lives(tree)}
         names = _mob_names(ids)
         raw = {"id": map_id, "name": _map_name(map_id), "tree": tree, "physics": physics, "mob_names": names,
-               "mob_exp": _mob_exp(ids), "mob_bodies": _mob_bodies(ids), "mob_die_s": _mob_die_s(ids)}
+               "mob_exp": _mob_exp(ids), "mob_bodies": _mob_bodies(ids), "mob_die_s": _mob_die_s(ids),
+               "mob_speeds": _mob_speeds(ids)}
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(raw), encoding="utf-8")
+    elif "mob_speeds" not in raw:  # cached before speeds were kept: added to it
+        _add_speeds(cache, raw)
     return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"],
-                 raw["mob_bodies"], raw["mob_die_s"])
+                 raw["mob_bodies"], raw["mob_die_s"], raw.get("mob_speeds"))
+
+
+def _add_speeds(cache: Path, raw: dict) -> None:
+    """The monsters' speed stats added to a map cached without them. Without the game data copy they stay
+    out (localization.monsters' table stands in), and the cache as it was. Written whole to a file of its
+    own first, so another process reading the cache meanwhile (the harness's) never sees half of it."""
+    try:
+        raw["mob_speeds"] = _mob_speeds({_mob_id(s) for s in _monster_lives(raw["tree"])})
+    except OSError:
+        return
+    part = cache.with_name(f"{cache.stem}.{os.getpid()}.part")
+    try:
+        part.write_text(json.dumps(raw), encoding="utf-8")
+        os.replace(part, cache)
+    except OSError:  # another process has it open: it's written next time
+        part.unlink(missing_ok=True)
 
 
 def _mob_names(ids: set[str]) -> dict[str, str]:
@@ -379,6 +414,13 @@ def _mob_exp(ids: set[str]) -> dict[str, int]:
     from gamedata.canvas import _mob_pack
     pack = _mob_pack()
     return {i: int((pack.image(f"Mob/{int(i):07d}.img").get("info") or {}).get("exp") or 0) for i in ids}
+
+
+def _mob_speeds(ids: set[str]) -> dict[str, float]:
+    """Monster id -> its speed stat (info/speed: 0 for the game's walkSpeed, -65 for a snail), from the game data."""
+    from gamedata.canvas import _mob_pack
+    pack = _mob_pack()
+    return {i: float((pack.image(f"Mob/{int(i):07d}.img").get("info") or {}).get("speed") or 0) for i in ids}
 
 
 BODY_ACTIONS = ("stand", "move")  # a monster's frames while it stands or walks ...

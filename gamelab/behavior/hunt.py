@@ -176,7 +176,7 @@ class Hunt:
         self._exit_piles: list[Pile] | None = None
         self._exit_reason: str | None = None  # why, kept while she's off the ground and its spot (see `_at_ground`)
         self._no_high_until = 0.0            # after a failed trip back up to the spot, not again for a while
-        self._tracker = Tracker()            # the monsters for the mini-map (the navigator sends none with an escort)
+        self._tracker = Tracker(self.model)  # the monsters for the mini-map (the navigator sends none with an escort)
         self._s: Scene | None = None         # the last look, for the 'hunt' record
         self._seen: Scene | None = None      # the latest look of all (a trip starts from it if it's still fresh)
         self._published = None
