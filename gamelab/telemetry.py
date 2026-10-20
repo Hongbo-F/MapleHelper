@@ -6,9 +6,16 @@ installed (`record_to`), so tests and library use pay nothing. Each line is
 {"t": seconds, "topic": topic, **data}. `t` is wall-clock time (the simulator's fake clock in a
 simulated run), so a replay keeps the original pace.
 
+Files are named for the time a run started and what it is (`<%Y%m%d-%H%M%S>-<name>.jsonl`), so the
+newest sorts last. A run goes on in a new part past MAX_BYTES: a file of its own, named for the time the
+part starts (`...-<name>-part2.jsonl`, always later than the part before), that starts with the run's
+session record marked `continues` (the part before's file name) and `part`. When a run starts, the oldest
+files are deleted: those last written over KEEP_DAYS ago, then more until the rest take at most
+KEEP_BYTES (`prune`).
+
 Topics (map units; producers build the records, ui.state folds them):
 
-  session   map, command, mode (live/sim)                      the command line, the simulator
+  session   map, command, mode (live/sim); continues, part     the command line, the simulator; a new part
   scene     her {x, y, platform, how, seen, facing}, hp, mp,   every look (behavior.hunter, after Senses)
             monsters [{kind, x, y, platform, bar}], loot [{kind, x, y, platform}]
   drops     pending [{x, y, platform, mesos}], inventory_full  every look (behavior.hunter)
@@ -27,6 +34,7 @@ Topics (map units; producers build the records, ui.state folds them):
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -37,6 +45,17 @@ from pathlib import Path
 from .paths import TELEMETRY
 
 FOLDER = TELEMETRY  # one file per run, newest last (git-ignored, like all of lab/)
+STAMP = "%Y%m%d-%H%M%S"  # file names start with the time the run (or the part) started
+# A run's file is continued in a new part past this. Hunting wrote 4.2 MB an hour (72 KB a minute, from
+# the live tours), so a part is hours of play; a continuous feed of 10 looks a second would write 10-15 MB
+# an hour. Parts let the retention below delete a long run a piece at a time, and keep any one file small
+# enough for a replay to load whole.
+MAX_BYTES = 64 * 1024 * 1024
+# What's kept when a run starts: files last written in the last 14 days, and of those at most 2 GB, the
+# newest (38 files and 2.9 MB after the first week of live runs; a continuous feed's could take 240-360 MB
+# a day).
+KEEP_DAYS = 14
+KEEP_BYTES = 2 * 1024 ** 3
 
 _sink: Callable[[dict], None] | None = None
 
@@ -61,38 +80,96 @@ def recording() -> bool:
 
 
 class Recorder:
-    """Appends records to a JSON-lines file, one flushed line each, so a reader can follow along."""
+    """Appends records to a JSON-lines file, one flushed line each, so a reader can follow along. With
+    `max_bytes`, a record that would take the file past it goes into a new part instead (see the top):
+    `path` is then the part being written, and `part` its number."""
 
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, path: Path, max_bytes: int | None = None):
+        self.path, self.max_bytes, self.part = path, max_bytes, 1
         path.parent.mkdir(parents=True, exist_ok=True)
         self._file = path.open("a", encoding="utf-8")
+        self._size = path.stat().st_size  # bytes in the file (lines are ASCII: json.dumps escapes the rest)
         self._lock = threading.Lock()
+        self._session: dict | None = None  # the run's session record, to start each new part with
+        named = re.fullmatch(r"(\d{8}-\d{6})-(.+)", path.stem)
+        self._name = named.group(2) if named else path.stem
+        self._started = int(time.mktime(time.strptime(named.group(1), STAMP))) if named else int(time.time())
 
     def __call__(self, record: dict) -> None:
-        line = json.dumps(record, separators=(",", ":"), default=_plain)
+        line = json.dumps(record, separators=(",", ":"), default=_plain) + "\n"
+        size = len(line) + len(os.linesep) - 1  # written in text mode: "\n" is os.linesep on disk
         with self._lock:
-            if not self._file.closed:
-                self._file.write(line + "\n")
-                self._file.flush()
+            if self._file.closed:
+                return
+            if record.get("topic") == "session" and "continues" not in record:
+                self._session = record
+            if self.max_bytes is not None and self._size and self._size + size > self.max_bytes:
+                self._next_part(record.get("t"))
+            self._file.write(line)
+            self._file.flush()
+            self._size += size
+
+    def _next_part(self, t: float | None) -> None:
+        """Go on in a new file, named for now but always after the part before (so it sorts after it,
+        even within the same second), headed by the run's session record marked as its continuation."""
+        started = max(int(time.time()), self._started + 1)
+        part = self.part + 1
+        path = self.path.with_name(f"{time.strftime(STAMP, time.localtime(started))}-{self._name}-part{part}.jsonl")
+        new = path.open("a", encoding="utf-8")  # if it can't be made, emit stops recording (one warning)
+        self._file.close()
+        before, self._file = self.path, new
+        self.path, self.part, self._started = path, part, started
+        session = {k: v for k, v in (self._session or {"topic": "session"}).items() if k != "t"}
+        line = json.dumps({"t": t, **session, "continues": before.name, "part": part},
+                          separators=(",", ":"), default=_plain) + "\n"
+        self._file.write(line)
+        self._size = len(line) + len(os.linesep) - 1
 
     def close(self) -> None:
         with self._lock:
             self._file.close()
 
 
-def record_to(name: str = "run", folder: Path = FOLDER) -> Path | None:
-    """Start recording to a new file in `folder` (named by the time and `name`); returns its path, or
-    None (with a warning) if it can't be written: the run goes on without telemetry."""
+def record_to(name: str = "run", folder: Path = FOLDER, max_bytes: int | None = MAX_BYTES) -> Path | None:
+    """Start recording to a new file in `folder` (named by the time and `name`), in parts of `max_bytes`,
+    after deleting the oldest files there (`prune`); returns its path, or None (with a warning) if it
+    can't be written: the run goes on without telemetry."""
     global _sink
     stop()
-    path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{name}.jsonl"
+    if gone := prune(folder):
+        print(f"telemetry: deleted the {len(gone)} oldest files in {folder} (older than {KEEP_DAYS} days, "
+              f"or past {KEEP_BYTES / 1024 ** 3:.0f} GB in all)", file=sys.stderr)
+    path = folder / f"{time.strftime(STAMP)}-{name}.jsonl"
     try:
-        _sink = Recorder(path)
+        _sink = Recorder(path, max_bytes)
     except OSError as e:
         print(f"telemetry off: can't write {path} ({e})", file=sys.stderr)
         return None
     return path
+
+
+def prune(folder: Path = FOLDER, keep_days: float | None = None, keep_bytes: int | None = None,
+          now: float | None = None, dry_run: bool = False) -> list[tuple[Path, int]]:
+    """Delete the telemetry files (*.jsonl) in `folder` last written more than `keep_days` (KEEP_DAYS)
+    ago, then the oldest of the rest until they take at most `keep_bytes` (KEEP_BYTES). Returns those
+    deleted (path, bytes), oldest first; with `dry_run`, those it would delete. A file that can't be
+    deleted (a run still writing it) is left, and the next oldest goes instead."""
+    keep_days = KEEP_DAYS if keep_days is None else keep_days
+    keep_bytes = KEEP_BYTES if keep_bytes is None else keep_bytes
+    now = time.time() if now is None else now
+    files = sorted((st.st_mtime, path.name, st.st_size, path) for path, st in files_in(folder))  # oldest first
+    total, gone = sum(size for _, _, size, _ in files), []
+    for mtime, _, size, path in files:
+        if now - mtime <= keep_days * 86400 and total <= keep_bytes:
+            break  # the rest are newer still
+        if not dry_run:
+            try:
+                path.unlink()
+            except OSError:
+                continue
+        total -= size
+        gone.append((path, size))
+    return gone
 
 
 def stop() -> None:
@@ -158,6 +235,22 @@ def newest(folder: Path = FOLDER) -> Path | None:
     except OSError:  # no folder yet (or a file gone while looking: the next look finds the rest)
         return None
     return folder / max(files)[1] if files else None
+
+
+def files_in(folder: Path = FOLDER) -> Iterator[tuple[Path, os.stat_result]]:
+    """Each telemetry file in `folder` and its stat (none if there's no folder; one deleted meanwhile is
+    left out)."""
+    try:
+        with os.scandir(folder) as entries:
+            for e in entries:
+                if e.name.endswith(".jsonl"):
+                    try:
+                        if e.is_file():
+                            yield Path(e.path), e.stat()
+                    except OSError:
+                        continue
+    except OSError:
+        return
 
 
 def _records(lines) -> list[dict]:
