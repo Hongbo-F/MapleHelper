@@ -477,7 +477,9 @@ def nav_fight_basin(sim):
     pushes a monster back: on seed 5 the trip's 180 s ran out on 30 that way. Over 16 seeds 8 meet all of
     this, 7 running out of time. With knocks unsteered and the planner flying her by the engine, 9 meet
     all of it; of the 7 that run out of time, 6 throw 54-88 stars from 30 at a snail on 33 that the
-    simulator's attack can't pick (README, Found offline), the 7th is a pig fight in the basin.)"""
+    simulator's attack can't pick (README, Found offline), the 7th is a pig fight in the basin. With both
+    tracks, from the ground the decisions and the simulator's attack both go by the star's search, which
+    picks a snail 60 below from 246 units off: all 16 of seeds 1-16 meet all of it, at the merge and since.)"""
     return _nav(25, fight=True)(sim)
 
 
@@ -941,7 +943,8 @@ def tour_run(sim):
     HP runs low, and standing by on a safe platform at the end. (Seed 1 since the two tracks came together,
     her body moved by motion.body and her stars picked by the star's search: on seed 6 one of 160 kills
     went uncounted. Over seeds 1-16, 12 meet all of this and 4 miss 1 or 2 of 136-237 kills in the count;
-    none runs out of time, 560-1142 s. Seed 6 since stars from the ground pick by the star's search: on
+    none runs out of time, 560-1142 s. With no jump keyed from a knock, no chain planned in mid-air and the
+    drops clear of the basin's cliffs, still 12: 4 miss 1 or 2 of 122-184, in 587-984 s. Seed 6 since stars from the ground pick by the star's search: on
     seed 8 an EXP gain came in as the stop's fight ended, unplaced, and two kills on the way came between
     two looks. Seed 8 had been since jump-throws come 40 ms after the jump: on seed 25 two kills came
     between two looks once, and two kills raise her EXP number once.) The basin's respawns make its length

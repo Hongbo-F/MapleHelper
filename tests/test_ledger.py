@@ -140,5 +140,8 @@ def test_the_ledger_counts_every_kill_and_places_most_of_them_right(name):
     # track's decisions (kind and platform, within 2.5 s of the world's kill): 72-78% on average over seeds
     # 1-10 of each of these scenarios, 54-87% seed by seed (61-86% before the claw's edge went by the
     # monster's size, with the same averages); the basin's pigs and slimes crowd her, walk through her and
-    # hide when hit.
-    assert len(placed) >= 0.8 * len(kills) and right >= 0.55 * len(placed)
+    # hide when hit. With both tracks, over the pinned seed and seeds 1-10 of each (33 runs): placed
+    # 0.85-1.0, placed right 0.62-0.90 (0.76, 0.86 and 0.83 on the pinned seeds). So the bar placed right is
+    # the attack track's 0.6, not the physics track's 0.55; placed stays at the physics track's 0.8 (0.85 at
+    # least, 0.85-0.89 on 3 of the 33).
+    assert len(placed) >= 0.8 * len(kills) and right >= 0.6 * len(placed)
