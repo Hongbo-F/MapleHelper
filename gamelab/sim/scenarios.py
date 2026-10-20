@@ -113,7 +113,6 @@ class Sim:
 
     def __enter__(self) -> "Sim":
         _import_all()
-        _fresh_caches(self.model)
         self._tmp = tempfile.TemporaryDirectory(prefix="gamelab-sim-")
         self.folder = Path(self._tmp.name)
         self._patch = patched(self.clock, self.player, self.folder)
@@ -175,25 +174,6 @@ class Sim:
 
 
 # --- running -----------------------------------------------------------------------------------------
-
-_BASE_CACHE: dict[int, tuple] = {}
-
-
-def _fresh_caches(model: MapModel) -> None:
-    """physics.fly caches landings by rounded start: a run must not reuse one an earlier run left (it was
-    computed from a slightly different start), so each starts from the same cache: the planner's own."""
-    from ..motion import physics, route
-    cache = physics._FLY_CACHE
-    key = id(model)
-    if key not in _BASE_CACHE or _BASE_CACHE[key][0] is not model:
-        for k in [k for k in cache if k[0] == key]:
-            del cache[k]
-        route.Planner(model)
-        _BASE_CACHE[key] = (model, {k: v for k, v in cache.items() if k[0] == key})  # the model kept: ids get reused
-    for k in [k for k in cache if k[0] == key]:
-        del cache[k]
-    cache.update(_BASE_CACHE[key][1])
-
 
 def _import_all() -> None:
     """Load all of gamelab (subpackages too) before a run, so `patched` points every path of theirs under

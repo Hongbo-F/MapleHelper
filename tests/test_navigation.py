@@ -164,6 +164,47 @@ def test_jumps_need_a_sure_landing(model):
     assert not sure_landing(model, 167, 300, WALK_SPEED, -JUMP_SPEED, a)  # it doesn't land back on A
 
 
+def test_a_landing_is_worked_out_from_the_rounded_start_so_the_cache_never_changes_it(model, monkeypatch):
+    from collections import OrderedDict
+    from gamelab.motion import physics
+    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly
+    monkeypatch.setattr(physics, "_FLY_CACHE", OrderedDict())
+    monkeypatch.setattr(physics, "FLY_CACHE_SIZE", 50)
+    # Two starts that round the same get the same landing, whichever came first: the one from the start rounded.
+    early = fly(model, 166.996, 300, WALK_SPEED, -JUMP_SPEED)
+    physics._FLY_CACHE.clear()
+    late = fly(model, 167.004, 300, WALK_SPEED + 0.04, -JUMP_SPEED)
+    physics._FLY_CACHE.clear()
+    assert early == late == fly(model, 167, 300, WALK_SPEED, -JUMP_SPEED)
+    # The cache keeps the last 50; a landing it let go is worked out again, the same.
+    first = [fly(model, x, 300, WALK_SPEED, -JUMP_SPEED) for x in range(0, 200, 2)]
+    assert len(physics._FLY_CACHE) == 50
+    assert [fly(model, x, 300, WALK_SPEED, -JUMP_SPEED) for x in range(0, 200, 2)] == first
+
+
+def test_a_map_never_gets_the_walls_or_landings_of_one_let_go_before_it(monkeypatch):
+    # Keyed by id(model) alone, a freed model's id went to the next one made, with its walls and landings.
+    from collections import OrderedDict
+    from gamelab.motion import physics
+    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly
+    monkeypatch.setattr(physics, "_MODELS", OrderedDict())
+
+    def lands_on_its_own(i: int) -> None:  # a new map, with B 5 units lower than on map i - 1
+        t = tree()
+        for f in t["foothold"]["1"]["2"].values():
+            f["y1"] = f["y2"] = 360 + 5 * i
+        m = mapdata.parse(1, t, "Test Map", {})
+        land, x, _ = fly(m, 167, 300, WALK_SPEED, -JUMP_SPEED)
+        assert any(land is p for p in m.platforms) and land.y_at(x) == 360 + 5 * i
+
+    for i in range(3 * physics.MODELS_KEPT):
+        lands_on_its_own(i)
+        assert len(physics._MODELS) <= physics.MODELS_KEPT
+    monkeypatch.setattr(physics, "id", lambda o: 1, raising=False)  # each map takes the id of the one before
+    for i in range(3 * physics.MODELS_KEPT, 4 * physics.MODELS_KEPT):
+        lands_on_its_own(i)
+
+
 def test_a_tour_sweeps_nearest_first_then_tidies_the_order():
     import random
     from types import SimpleNamespace

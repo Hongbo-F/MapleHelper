@@ -4,7 +4,9 @@ fall lands (simulated against the map's platforms and walls). All in map units.
 """
 
 import bisect
+import itertools
 import math
+from collections import OrderedDict
 
 from ..localization.mapdata import MapModel, Platform
 from ..screen import SCREEN_SCALE
@@ -50,41 +52,72 @@ JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid
                            # less JB_RUN_MS 80, when the jump key goes down)
 ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fps recordings jump_throw_0 and
                            # _1, keys 100 ms apart: her attack pose first shows 91-110 ms after lift-off)
-_FLY_CACHE: dict[tuple, tuple] = {}  # fly's results by its arguments (the model by id)
-_WALLS: dict[int, tuple] = {}        # _walls' results by id(model)
-# The caches are keyed by id(model), so the models are kept: a freed model's id is reused by the next
-# one, which then got the old one's walls and landings (tests failed depending on their order).
-_MODELS: dict[int, MapModel] = {}
+# fly's landings, the FLY_CACHE_SIZE most recently used. Each is worked out from its start rounded as its
+# key is (x and y to 0.01 units, speeds to 0.1 units/s), so it is a function of the key alone: which call
+# came first, or which landings were dropped, can't change an answer. (Worked out from the exact start, a
+# landing cached by one call was handed to every later one that rounded the same, so the simulator's
+# scenarios each had to start from the same cache to give the same trace.) On this map the planner's own
+# jumps and falls are 2,718 landings (about 1 MB); a 60-minute simulated hunt loop added 1 more.
+FLY_CACHE_SIZE = 20_000  # landings (about 9 MB when full)
+MODELS_KEPT = 4          # maps fly knows at a time (their walls, and the serial numbers keying their landings)
+_FLY_CACHE: OrderedDict[tuple, tuple] = OrderedDict()
+# The last MODELS_KEPT models fly was used on, by id(model): each kept with its serial number (its landings'
+# key) and its walls. Keyed by id(model) alone, a freed model's id was reused by the next one, which then got
+# the old one's walls and landings (tests failed depending on their order). A model is kept while it's in
+# here, so its id can't be taken, and a model seen again after it was let go gets a new serial: no landing
+# cached for another model can ever be handed to it.
+_MODELS: OrderedDict[int, tuple[MapModel, int, tuple]] = OrderedDict()
+_SERIALS = itertools.count()
 
 
-def _walls(model: MapModel) -> tuple[list[float], list[tuple[float, float]]]:
-    """The model's vertical walls sorted by x: their xs, and each one's (top, bottom)."""
-    key = id(model)
-    _MODELS[key] = model
-    if key not in _WALLS:
-        ws = sorted((w for w in model.walls if w.x1 == w.x2), key=lambda w: w.x1)
-        _WALLS[key] = ([w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws])
-    return _WALLS[key]
+def _known(model: MapModel) -> tuple[int, tuple[list[float], list[tuple[float, float]]]]:
+    """The model's serial number, and its vertical walls sorted by x: their xs, and each one's (top, bottom)."""
+    known = _MODELS.get(id(model))
+    if known is not None and known[0] is model:
+        _MODELS.move_to_end(id(model))
+        return known[1], known[2]
+    ws = sorted((w for w in model.walls if w.x1 == w.x2), key=lambda w: w.x1)
+    walls = ([w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws])
+    serial = next(_SERIALS)
+    _MODELS[id(model)] = (model, serial, walls)
+    _MODELS.move_to_end(id(model))
+    if len(_MODELS) > MODELS_KEPT:
+        _MODELS.popitem(last=False)
+    return serial, walls
 
 
 def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
         dt: float = 0.004, limit: float = 4.0) -> tuple[Platform | None, float, float]:
     """Where she lands from (x, y) moving at (vx, vy) (map units/s, y down): the first platform whose
     surface her feet cross on the way down. Walls stop her sideways. `skip` is a platform she falls
-    through (dropping). Returns (platform, landing x, seconds). Results are cached: chains try the
-    same jumps many times over."""
-    key = (id(model), round(x, 2), round(y, 2), vx, vy, None if skip is None else skip.id, dt, limit)
-    _MODELS[id(model)] = model
-    if key in _FLY_CACHE:
-        return _FLY_CACHE[key]
-    wall_xs, wall_ys = _walls(model)
+    through (dropping). Returns (platform, landing x, seconds). The start is rounded (x and y to 0.01
+    units, the speeds to 0.1 units/s) and results are cached by it: chains try the same jumps many times
+    over."""
+    serial, walls = _known(model)
+    x, y, vx, vy = round(x, 2), round(y, 2), round(vx, 1), round(vy, 1)
+    key = (serial, x, y, vx, vy, None if skip is None else skip.id, dt, limit)
+    result = _FLY_CACHE.get(key)
+    if result is not None:
+        _FLY_CACHE.move_to_end(key)
+        return result
+    result = _fly(model, walls, x, y, vx, vy, skip, dt, limit)
+    _FLY_CACHE[key] = result
+    if len(_FLY_CACHE) > FLY_CACHE_SIZE:
+        _FLY_CACHE.popitem(last=False)
+    return result
+
+
+def _fly(model: MapModel, walls: tuple[list[float], list[tuple[float, float]]], x: float, y: float, vx: float,
+         vy: float, skip: Platform | None, dt: float, limit: float) -> tuple[Platform | None, float, float]:
+    """fly, worked out (not cached)."""
+    wall_xs, wall_ys = walls
     # Only platforms she could reach in the time: within her sideways travel, at or below the top
     # of the jump.
     reach = abs(vx) * limit + 1
     top = y - (vy * vy / (2 * GRAVITY) if vy < 0 else 0) - 1
     plats = [q for q in model.platforms if q is not skip and q.right >= x - reach and q.left <= x + reach
              and max(q.y_at(q.left), q.y_at(q.right)) >= top]
-    t, result = 0.0, None
+    t = 0.0
     while t < limit:
         nx, ny, nvy = x + vx * dt, y + vy * dt, min(vy + GRAVITY * dt, FALL_SPEED)
         if vx:
@@ -98,14 +131,9 @@ def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platfor
         if (vy > 0 or nvy > 0) and t > 0 and ny >= y:
             for q in plats:
                 if q.covers(nx) and y <= q.y_at(nx) <= ny + 0.01:
-                    result = (q, nx, t + dt)
-                    break
-            if result:
-                break
+                    return q, nx, t + dt
         x, y, vy, t = nx, ny, nvy, t + dt
-    result = result or (None, x, t)
-    _FLY_CACHE[key] = result
-    return result
+    return None, x, t
 
 
 def sure_landing(model: MapModel, x: float, y: float, vx: float, vy: float, land: Platform,
