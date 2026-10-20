@@ -54,11 +54,27 @@ class Actions:
         self.facing: str | None = None  # which way she faces (None: unknown), so throws only turn when needed
         self.pressed = False  # keys sent since the last look (then a move isn't a knockback)
         self.lock_until = 0.0  # when her last attack stops locking out the next one
+        # Called at every throw with (when its attack key goes down, the way she throws): the kill ledger
+        # (behavior.ledger) matches EXP gains to the stars that could have made them.
+        self.throw_listeners: list = []
 
     def play(self, events: list, name: str) -> None:
-        """Run a key plan (events in time order) and wait until the player has."""
+        """Run a key plan (events in time order) and wait until the player has. Held back first if a jump
+        or attack in it would come inside her attack lock (hold_back)."""
+        self.hold_back(events)
         client.submit(events, lead_ms=0, focus=True, name=name)
         self.pressed = True
+
+    def hold_back(self, events: list) -> None:
+        """Wait just long enough that no jump or attack key in a plan of `events` (starting now) goes down
+        before her attack lock ends: pressed inside it, they're ignored. Every plan that can press them
+        comes through here: Actions' own, the mover's single moves (via play), and the navigator's chains."""
+        locked = {self.keys.jump.name, self.keys.attack.name}
+        if self.keys.lucky_seven is not None:
+            locked.add(self.keys.lucky_seven.name)
+        first = min((e[0] for e in events if len(e) == 3 and e[1] in locked and e[2] == "down"), default=None)
+        if first is not None and (left := self.lock_until - (time.monotonic() + first / 1000)) > 0:
+            time.sleep(left)
 
     def arrow(self, direction: str) -> str:
         """The name of the arrow key for `direction`."""
@@ -77,6 +93,7 @@ class Actions:
         her off the end of a platform after nine throws the same way."""
         self.wait_lock()
         events, t = self._turn(direction)
+        self._thrown(t, direction)
         self.play(events + tap(t, self._attack_key()), "throw")
         self.facing = direction
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
@@ -90,6 +107,7 @@ class Actions:
         events, t = self._turn(direction)
         key, jump = self._attack_key(), self.keys.jump.name
         events += tap(t, jump) + tap(t + JUMP_ATTACK_MS, key)
+        self._thrown(t + JUMP_ATTACK_MS, direction)
         self.play(events, "jump_throw")
         self.facing = direction
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
@@ -108,10 +126,17 @@ class Actions:
         events = [[0, away, "down"], *tap(JB_RUN_MS, jump),
                   [JB_TURN_MS, away, "up"], *tap(JB_TURN_MS, toward),
                   *tap(JB_THROW_MS, key)]
+        self._thrown(JB_THROW_MS, direction)
         self.play(sorted(events, key=lambda e: e[0]), "jump_back")  # the player wants them in time order
         self.facing = direction
         # Locked until the attack's lock ends, which is after she lands.
         self.lock_until = time.monotonic() + (JB_THROW_MS + COMBAT.attack_lock_ms) / 1000
+
+    def _thrown(self, key_ms: int, direction: str) -> None:
+        """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent."""
+        when = time.monotonic() + key_ms / 1000
+        for listener in self.throw_listeners:
+            listener(when, direction)
 
     def _attack_key(self) -> str:
         return (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
@@ -131,7 +156,7 @@ class Actions:
         arrow, ms = self.arrow(direction), hold_ms(units)
         events = [[0, arrow, "down"], [ms, arrow, "up"]]
         if self.keys.pick_up is not None:
-            events += self._pickups(ms + WALK_PICK_AFTER_MS)
+            events += self.pickups(ms + WALK_PICK_AFTER_MS)
         self.play(sorted(events, key=lambda e: e[0]), "walk")
         self.facing = direction
         time.sleep(MOVEMENT.stop_slide_ms / 1000)
@@ -141,10 +166,12 @@ class Actions:
         if self.keys.pick_up is None:
             return
         self.wait_lock()
-        self.play(self._pickups(presses * PILE_EVERY_MS, every=PILE_EVERY_MS), "pick")
+        self.play(self.pickups(presses * PILE_EVERY_MS, every=PILE_EVERY_MS), "pick")
 
-    def _pickups(self, end: int, every: int = WALK_PICK_EVERY_MS) -> list[list]:
-        """Pick-up taps every `every` ms from 0 until `end`."""
+    def pickups(self, end: int, every: int = WALK_PICK_EVERY_MS) -> list[list]:
+        """Pick-up taps every `every` ms from 0 until `end` (none if no pick-up key is bound)."""
+        if self.keys.pick_up is None:
+            return []
         name = self.keys.pick_up.name
         return [e for t in range(0, end, every) for e in tap(t, name)]
 

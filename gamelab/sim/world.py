@@ -108,16 +108,37 @@ class SimDied(Exception):
 class Noise:
     """The real game's errors, all off by default. Each draw is seeded by the world's seed and the
     moment it's for (a star's tick, a release's tick), and the spells are fixed stretches of time, so a
-    run is still the same every time, and a change that only adds or drops a look changes nothing here."""
+    run is still the same every time, and a change that only adds or drops a look changes nothing here
+    (detect_miss is drawn per look, so with it on, an extra look does change what later looks see)."""
     miss: float = 0.0            # chance a star that would hit misses (lab/shots.jsonl: 72.5% of 204 hit)
     walk_jitter: float = 0.0     # units: letting go of an arrow stops her up to this much early or late
     dot_px: bool = False         # her minimap dot read to whole pixels (11.4 map units each), not exact
     tag_hidden: tuple = ()       # (from, to) s since the start: her name tag can't be seen (behind a box)
     dot_hidden: tuple = ()       # (from, to) s: her minimap dot can't be seen (a tooltip over the minimap)
+    hit_hidden: tuple = ()       # (shortest, longest) s a monster hit by a star (and not killed) can't be
+                                 # seen: in game it flinches under its damage numbers and the detector loses
+                                 # it for 1-3 s (README); () off
+    detect_miss: float = 0.0     # chance a look doesn't find a monster that shows (per monster and look)
 
     @staticmethod
     def during(spells: tuple, t: float) -> bool:
         return any(a <= t < b for a, b in spells)
+
+
+@dataclass(frozen=True)
+class Realism:
+    """How busy and how hard the map is. The defaults are the simulator's own world (every spawn point
+    filled, an 8 s respawn, nobody else hunting, endless potions), which is denser and easier than the
+    game: tour_run makes about 143 EXP a minute where a sweep in game made about 76. The other values are
+    knobs for comparing policies in a world closer to the game's; none of them is measured."""
+    respawn: float = RESPAWN     # s from a kill until the monster is back at its spawn point
+    spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
+    rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)
+    rival_owns: float = 15.0     # s a rival's drops can't be picked up by her
+    rival_takes: float = 20.0    # s after landing that a rival picks up its own drops
+    potions: int | None = None   # potions she has (None: endless)
+    lock_arrows: bool = False    # arrows don't move her during the attack lock (unmeasured in game;
+                                 # Actions.walk waits the lock out, the default world lets her walk)
 
 
 @dataclass
@@ -204,6 +225,7 @@ class SimMonster:
     alive: bool = True
     died_at: float | None = None
     died_x: float = 0.0
+    hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden)
     # current motion segment: from t0 at x0, heading d (-1, 0, +1) until t1
     t0: float = 0.0
     x0: float = 0.0
@@ -256,6 +278,9 @@ class Drop:
     platform: int
     since: float        # when it lands (shows) on the ground
     gone: bool = False
+    owner: str = "her"  # "her", or "rival": another player's kill (Realism.rival_every)
+    taken_at: float | None = None  # when it was picked up ...
+    taken_by: str = ""             # ... and by whom ("her" or "rival")
 
     @property
     def mesos(self) -> bool:
@@ -278,7 +303,7 @@ class World:
     def __init__(self, model: MapModel, keys: GameKeys, start: tuple[int, float], seed: int = 1,
                  monsters="all", hp: float = 1.0, inventory_full: bool = False, facing: str = RIGHT,
                  origin: float = 0.0, drops: list[tuple[str, int, float]] = (), hanging: float | None = None,
-                 noise: Noise | None = None):
+                 noise: Noise | None = None, realism: Realism | None = None):
         """Her standing on platform start[0] at x start[1] (or, with `hanging`, on the rope nearest that x,
         her feet at y `hanging`). `monsters`: None, "all" (the map's spawns), a set of platform ids (the
         spawns on those), or [(name, platform, x)]. `drops`: [(kind, platform, x)] lying there already."""
@@ -288,6 +313,14 @@ class World:
         self.seed = seed
         self.rng = random.Random(seed)
         self.noise = noise or Noise()
+        self.realism = realism or Realism()
+        # The knobs draw from rngs of their own, so with them off the world is the same as without them.
+        self._rival_rng = random.Random(f"rival:{seed}")
+        self.potions_left = self.realism.potions
+        self.potions_used = 0
+        self.hp_low = hp                # her lowest HP so far
+        self.kill_log: list[tuple[float, str, int, str]] = []  # (t, kind, platform, "her" or "rival")
+        self.touch_log: list[tuple[float, bool]] = []  # (t, whether it hurt her) for every touch
         self.actions = _actions(keys)
         self.held: dict[str, int] = {}  # action -> ms it went down
         self._events: list[tuple[int, int, Event]] = []
@@ -337,6 +370,8 @@ class World:
         self.by_platform: dict[int, list[SimMonster]] = {}
         self._spawn(monsters)
         self.drops: list[Drop] = [Drop(kind, x, model.platform(pid).y_at(x), pid, 0.0) for kind, pid, x in drops]
+        if self.realism.rival_every > 0 and self.monsters:
+            self._push(self._rival_due(), "rival")
 
     # --- set-up -------------------------------------------------------------------------------------
 
@@ -345,9 +380,12 @@ class World:
             return
         if monsters == "all" or isinstance(monsters, (set, frozenset)):
             wanted = []
+            share = random.Random(f"spawn:{self.seed}")
             for s in self.model.spawns:
                 p = self.model.platform_under(s.x, s.y, reach=60)
                 if p is not None and (monsters == "all" or p.id in monsters):
+                    if self.realism.spawn_share < 1.0 and share.random() >= self.realism.spawn_share:
+                        continue
                     wanted.append((s.name or str(s.mob_id), p.id, s.x))
         else:
             wanted = list(monsters)
@@ -452,8 +490,15 @@ class World:
             self.drops += e.data
         elif e.kind == "respawn":
             m = e.data
-            m.alive, m.hp, m.died_at = True, m.hp_max, None
+            m.alive, m.hp, m.died_at, m.hit_at = True, m.hp_max, None, None
             m.start(self.t, m.home)
+        elif e.kind == "rival":
+            self._rival_kill()
+            self._push(self._rival_due(), "rival")
+        elif e.kind == "rival_takes":
+            for d in e.data:
+                if not d.gone:
+                    d.gone, d.taken_at, d.taken_by = True, self.t, "rival"
 
     def note(self, text: str) -> None:
         self.log.append(f"{self.t:8.3f} {text}")
@@ -518,6 +563,12 @@ class World:
             if ground:
                 self._pick()
         elif action == "potion":
+            if self.potions_left is not None:
+                if self.potions_left <= 0:
+                    self.note("no potion left")
+                    return
+                self.potions_left -= 1
+            self.potions_used += 1
             self.hp = min(1.0, self.hp + POTION_HP)
             self.note("drinks a potion")
         elif action == "chair":
@@ -541,7 +592,8 @@ class World:
         if "down" in self.held and self._grab_from_top():
             return
         lying = "down" in self.held or self.sitting
-        d = 0 if lying else self.arrow()
+        locked = self.realism.lock_arrows and self.ms < self.attack_lock_ms
+        d = 0 if lying or locked else self.arrow()
         start = max(self.go_ms, self.can_move_ms) + int(RUN_LAG * 1000)  # a standing start
         if d:
             if self.vx * d > 0:
@@ -551,7 +603,7 @@ class World:
                     self.vx = d * WALK_SPEED
             else:
                 self.vx = _brake(self.vx, DECEL * dt)
-        elif not lying and self.vx == 0 and self.go and start <= self.ms < self.release_ms + RELEASE_LAG * 1000:
+        elif not lying and not locked and self.vx == 0 and self.go and start <= self.ms < self.release_ms + RELEASE_LAG * 1000:
             self.vx = self.go * WALK_SPEED  # a short tap: let go before she started, she still moves
         elif self.vx and (lying or self.ms >= self.release_ms + RELEASE_LAG * 1000):
             self.vx = _brake(self.vx, DECEL * dt)
@@ -689,11 +741,14 @@ class World:
     def _hit_by(self, m: SimMonster, mx: float) -> None:
         self.touches += 1
         self.invulnerable_ms = self.ms + int(INVULNERABLE * 1000)
-        if self.chance("evade") < EVADE:
+        evaded = self.chance("evade") < EVADE
+        self.touch_log.append((self.t, not evaded))
+        if evaded:
             self.evaded += 1
             self.note(f"touched by {m.kind} #{m.idx} at x {mx:.0f}: MISS")
             return
         self.hp = max(0.0, self.hp - TOUCH_DAMAGE)
+        self.hp_low = min(self.hp_low, self.hp)
         away = 1 if self.x >= mx else -1
         self.note(f"touched by {m.kind} #{m.idx} at x {mx:.0f}: HP {self.hp:.1%}")
         if self.hp <= 1e-9:
@@ -740,6 +795,7 @@ class World:
             return
         m.hp = round(m.hp - (CLAW if swipe else 1.0), 6)
         if m.hp > 1e-9:
+            m.hit_at = self.t
             self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left)")
             return
         self._kill(m, mx, what)
@@ -748,6 +804,7 @@ class World:
         t = self.t
         m.alive, m.died_at, m.died_x = False, t, mx
         self.kills[m.kind] = self.kills.get(m.kind, 0) + 1
+        self.kill_log.append((t, m.kind, m.platform.id, "her"))
         self.exp += self.model.mob_exp.get(m.name, 1)
         self.note(f"{what} kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
         p = m.platform
@@ -756,16 +813,40 @@ class World:
             x = min(max(mx + self.rng.uniform(-10, 10), p.left + 3), p.right - 3)
             drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
-        self._push(self.ms + int(RESPAWN * 1000), "respawn", m)
+        self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
+
+    def _rival_due(self) -> int:
+        """The tick of another player's next kill: every Realism.rival_every s on average."""
+        return self.ms + int(self.realism.rival_every * self._rival_rng.uniform(0.5, 1.5) * 1000)
+
+    def _rival_kill(self) -> None:
+        """Another player kills a monster somewhere on the map: no EXP for her, and drops she can't pick
+        up for Realism.rival_owns s, which the rival takes Realism.rival_takes s after they land."""
+        live = [m for m in self.monsters if m.alive]
+        if not live:
+            return
+        m = live[self._rival_rng.randrange(len(live))]
+        t, mx = self.t, m.at(self.t)
+        m.alive, m.died_at, m.died_x = False, t, mx
+        self.kill_log.append((t, m.kind, m.platform.id, "rival"))
+        self.note(f"another player kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
+        p, drops = m.platform, []
+        for kind in ["mesos"] + ([ITEM_OF[m.kind]] if m.kind in ITEM_OF else []):
+            x = min(max(mx + self._rival_rng.uniform(-10, 10), p.left + 3), p.right - 3)
+            drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY, owner="rival"))
+        self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
+        self._push(self.ms + int((DROP_DELAY + self.realism.rival_takes) * 1000), "rival_takes", drops)
+        self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
 
     def _pick(self) -> None:
         t = self.t
         near = sorted((d for d in self.drops if not d.gone and d.since <= t < d.since + DROP_LIFE
-                       and d.platform == self.plat.id and abs(d.x - self.x) <= PICK_REACH),
+                       and d.platform == self.plat.id and abs(d.x - self.x) <= PICK_REACH
+                       and (d.owner == "her" or t >= d.since + self.realism.rival_owns)),
                       key=lambda d: (abs(d.x - self.x), d.x))
         for d in near:
             if d.mesos or not self.inventory_full:
-                d.gone = True
+                d.gone, d.taken_at, d.taken_by = True, t, "her"
                 self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
                 self.messages.append((t, "You have gained mesos (+15)" if d.mesos else
                                       f"{d.kind.replace('-', ' ').title()} x1 earned. (Etc)"))

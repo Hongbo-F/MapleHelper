@@ -21,7 +21,7 @@ from ..localization.senses import Senses
 from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_SPEED, ROPE_REACH, WALK_SPEED, air_time, fly, hold_ms, run_ms
 from ..motion.route import JUMP_FROM, Move
 from ..screen import SCALE, SCREEN_SCALE
-from .actions import Actions, tap
+from .actions import WALK_PICK_AFTER_MS, Actions, tap
 
 
 WALK_PX_PER_S = WALK_SPEED * SCREEN_SCALE
@@ -108,7 +108,9 @@ class Mover:
             return [], 0
         arrow = self.actions.arrow(directions.toward(dx))
         ms = hold_ms(abs(dx))
-        return [[0, arrow, "down"], [ms, arrow, "up"]], ms + SLIDE_MS
+        # Pick-up pressed all the way, as on every walk (Actions.walk): anything she passes over is looted.
+        events = [[0, arrow, "down"], [ms, arrow, "up"]] + self.actions.pickups(ms + WALK_PICK_AFTER_MS)
+        return events, ms + SLIDE_MS
 
     def line_up_rope(self, rope_x: float) -> Scene:
         """Stand right on top of the rope at map x: walk there, then fine-tune on screen."""

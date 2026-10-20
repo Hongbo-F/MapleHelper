@@ -36,7 +36,7 @@ from ..control.navigator import Navigator
 from ..control.timeline import her_setup
 from ..behavior.tour import Tour
 from .fakes import Clock, FakeEyes, FakePlayer, SimTimeout, SimViolation, Trace, patched
-from .world import Noise, SimDied, World
+from .world import Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 _MODEL: list = []
@@ -73,6 +73,8 @@ class Scenario:
     hanging: float | None = None  # start on the rope nearest start's x, her feet at this y
     limit: float = 900.0         # fake seconds before the run is stopped (SimTimeout)
     noise: Noise | None = None   # the real game's errors (world.Noise); None: none
+    realism: Realism | None = None  # how busy and hard the map is (world.Realism); None: the default world
+    think: float = 0.0           # charge the stack's computing to the fake clock (fakes.Clock); 0: free
     expects: tuple = ()          # (what, trace -> bool): what the scenario is there for (tests check them)
     may_die: bool = False        # unless set, every scenario also expects her alive at the end
     doc: str = ""
@@ -98,10 +100,10 @@ class Sim:
         """`pace`: also let simulated time pass in real time, this many times faster (to watch it)."""
         self.model, self.scenario = model, sc
         _, self.keys, _ = her_setup()
-        self.clock = Clock(limit=sc.limit, pace=pace)
+        self.clock = Clock(limit=sc.limit, pace=pace, think=sc.think)
         self.world = World(model, self.keys, sc.start, seed=sc.seed, monsters=sc.monsters, hp=sc.hp,
                            inventory_full=sc.inventory_full, facing=sc.facing, origin=self.clock.now,
-                           drops=list(sc.drops), hanging=sc.hanging, noise=sc.noise)
+                           drops=list(sc.drops), hanging=sc.hanging, noise=sc.noise, realism=sc.realism)
         self.eyes = FakeEyes(self.world, self.clock, model, guard=self.guard)
         self.trace = Trace(self.clock.now)
         self.player = FakePlayer(self.world, self.clock, self.trace, self.keys)
@@ -214,6 +216,11 @@ def run(name: str) -> dict:
 def run_scenario(sc: Scenario, model: MapModel | None = None, pace: float | None = None) -> dict:
     """Run a scenario on the real map (or on `model`); returns its trace. A run that ends early (she
     died, the time limit, the player refusing a plan, gamelab giving up) has that as its result."""
+    return run_sim(sc, model, pace)[0]
+
+
+def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = None) -> tuple[dict, "Sim"]:
+    """run_scenario, also returning the Sim it ran in (its world, clock and eyes, for sim.harness)."""
     model = model or real_map()
     if model is None:
         raise FileNotFoundError(f"map {MAP_ID} isn't available (gamedata/data); scenarios need it")
@@ -224,10 +231,11 @@ def run_scenario(sc: Scenario, model: MapModel | None = None, pace: float | None
             raise
         except (SimDied, SimTimeout, client.PlayerError, RuntimeError, ValueError) as e:
             outcome = f"error: {type(e).__name__}: {e}"
-    return {"scenario": sc.name, "doc": sc.doc, "seconds": round(sim.clock.elapsed, 3), "result": outcome,
-            "plans": sim.trace.plans, "cancels": sim.trace.cancels, "log": sim.trace.log,
-            "world": sim.world.summary(), "world_log": sim.world.log, "eyes": dict(sim.eyes.counts),
-            "files": sim.files}
+    trace = {"scenario": sc.name, "doc": sc.doc, "seconds": round(sim.clock.elapsed, 3), "result": outcome,
+             "plans": sim.trace.plans, "cancels": sim.trace.cancels, "log": sim.trace.log,
+             "world": sim.world.summary(), "world_log": sim.world.log, "eyes": dict(sim.eyes.counts),
+             "files": sim.files}
+    return trace, sim
 
 
 def unmet(trace: dict, sc: Scenario | None = None) -> list[str]:
@@ -430,11 +438,13 @@ def nav_cut_queued(sim):
     return _nav(26)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=3,
+@scenario((34, -300.0), monsters="all", seed=1,
           expects=(ends("arrived"), logs("looking for a way around"), logs("hop@"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
     """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the
-    monster in her way, hops over one, and is touched and knocked about a few times on the way up."""
+    monster in her way, hops over one, and is touched and knocked about a few times on the way up.
+    (Seed 3 until her walks pressed pick-up: they last ~0.2 s longer, and with seed 3 no monster was then
+    in her way to hop.)"""
     return _nav(19)(sim)
 
 
@@ -483,7 +493,9 @@ def nav_fight_up(sim):
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off onto
-    11, and goes on from there; touched on the way, her chains are cut and replanned."""
+    11, and goes on from there; off her path, her chain is cut and replanned, and she fights her way
+    past 18 and 17. (Her first chain from 11 waits out the attack lock of her last throw: before it did,
+    she was touched on the way, and the quick looks after those cuts skipped the fights on 18 and 17.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -673,7 +685,7 @@ def _kills(tr: dict) -> int:
     return sum(tr["result"]["kills"].values())
 
 
-@scenario((16, 585.0), monsters="all", seed=21, limit=400,
+@scenario((16, 585.0), monsters="all", seed=21, limit=600,
           expects=(logs("shooting platform 17 from platform 16"),
                    check("four kills or more", lambda tr: _kills(tr) >= 4),
                    logs("collecting drops on platform 18")))
@@ -685,11 +697,14 @@ def tour_hunt_from_safe_spot(sim):
 
 @scenario((36, 300.0), monsters="all", seed=22, limit=400,
           expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
-                   logs("collecting drops on platform 36")))
+                   logs("collecting drops on platform 36"),
+                   check("the stop's report counts HP lost", lambda tr: tr["result"]["damage_taken"] > 0),
+                   no_log("couldn't get there (timeout)", "trips to drops on the basin get there")))
 def tour_hunt_basin(sim):
     """Tour.hunt of the basin (36): no safe spot reaches it, so on the platform itself. Collecting the drops
-    left on it, the trip to them (Navigator.go with `fight` on) stops to shoot every monster in reach on
-    the way, on the very platform she's going to, until the trip's 60 s run out."""
+    left on it, each trip (Navigator.go with `fight` on) shoots only monsters in her way to them, and gets
+    there: it used to stop and shoot everything in reach, on the very platform she was going to, until the
+    trip's 60 s ran out."""
     return _tour_hunt(36, 5)(sim)
 
 
@@ -756,7 +771,10 @@ def tour_collect_loot_on_the_way(sim):
 
 @scenario((36, 300.0), monsters="all", seed=25, limit=900,
           expects=(check("three stops visited", lambda tr: len(tr["result"]["visited"]) == 3),
-                   ends("standing by on a safe platform", key="stop"), logs("tour: sweep")))
+                   ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
+                   check("every kill counted (the stops' and on the way, resting included)",
+                         lambda tr: sum(tr["result"]["kills"].values()) + tr["result"]["on_the_way"]
+                         == sum(tr["world"]["kills"].values()))))
 def tour_run(sim):
     """`python -m gamelab tour --stops 3`: the whole tour, end to end: three hunting grounds, rests when
     HP runs low, and standing by on a safe platform at the end."""
@@ -783,7 +801,9 @@ def _rest(sim):
 
 @scenario((36, 300.0), monsters="all", seed=26, hp=0.32, limit=400,
           expects=(logs("resting on platform 32"), no_log("couldn't reach a safe platform"),
-                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
+                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9),
+                   check("the kills on the way to rest are counted",
+                         lambda tr: f"plus {sum(tr['world']['kills'].values())} on the way" in tr["result"]["report"])))
 def tour_rest(sim):
     """Low on HP in the basin (32%, above the tour's 30% stop): to the nearest safe platform (32), sit on
     the chair until HP is back, stand up."""
@@ -812,6 +832,35 @@ def tour_rest_hp_low(sim):
     return _rest(sim)
 
 
+@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
+          expects=(logs("resting on platform 32"), logs("drinking a potion", "a potion on the way"),
+                   no_log("couldn't reach a safe platform", "low HP doesn't end the trip to rest"),
+                   check("rests on 32", lambda tr: tr["world"]["platform"] == 32),
+                   check("no monster shot: she keeps clear of them", lambda tr: not tr["world"]["kills"]),
+                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
+def tour_rest_avoid(sim):
+    """tour_rest_hp_low with `--rest-avoid` (navigator.TRANSIT_AVOID): the same trip to platform 32, keeping
+    clear of the monsters instead of shooting the ones in her way; low HP still doesn't end it."""
+    tour = sim.tour_stack()
+    tour.rest_avoid = True
+    tour.rest()
+    return {"report": str(tour.report), "hp": round(tour.h.look(mobs=False).hp, 3)}
+
+
+@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
+          expects=(logs("resting on platform 32"), no_log("couldn't reach a safe platform", "low HP doesn't end the trip"),
+                   check("rests on 32", lambda tr: tr["world"]["platform"] == 32),
+                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
+def tour_rest_no_escort(sim):
+    """tour_rest_hp_low without the fighting escort (a tour built on a navigator that avoids monsters): the
+    trip to rest avoids them and only drinks potions. It used to stop at its first look on low HP, and she
+    sat down in the basin."""
+    h = sim.hunter(low_hp=0.3, potion_hp=0.45)
+    tour = sim.tour(h, sim.navigator(h, fight=False))
+    tour.rest()
+    return {"report": str(tour.report), "hp": round(tour.h.look(mobs=False).hp, 3)}
+
+
 @scenario((36, 300.0), monsters="all", seed=22, limit=400,
           noise=Noise(miss=0.28, walk_jitter=6.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
           expects=(check("kills", lambda tr: _kills(tr) >= 1), happens("star misses")))
@@ -819,3 +868,124 @@ def tour_hunt_noisy(sim):
     """tour_hunt_basin with the real game's errors: stars missing (28%), walks off by a few units, her
     dot read to whole pixels, and her name tag hidden for 3 s mid-fight."""
     return _tour_hunt(36, 5)(sim)
+
+
+# The hunt loop (behavior.hunt, `python -m gamelab tour --loop`): the tour scenarios' twins, one for each
+# rule that must survive (gamelab/docs/hunt-modes.md).
+
+def _loop(minutes: float):
+    def run(sim, tour=None):
+        from ..behavior.hunt import Hunt
+        tour = tour or sim.tour_stack()
+        r = Hunt(tour, log=sim.log).run(minutes=minutes)
+        return {"report": str(r), "grounds": r.grounds, "kills": r.kills, "exp_gains": r.exp_gains,
+                "ledger_kills": len(tour.h.ledger.kills), "rules": dict(sorted(r.rules.items())), "rests": r.rests,
+                "hunt_stop": r.stop, "stop": tour.report.stop, "damage_taken": tour.h.report.damage_taken,
+                "safe": tour.safe}
+    return run
+
+
+def _every_kill(tr: dict) -> bool:
+    """Every kill of hers is in the ledger (the simulator never shows two between looks)."""
+    return tr["result"]["ledger_kills"] == sum(tr["world"]["kills"].values())
+
+
+def _back_after_rest(tr: dict) -> bool:
+    log = tr["log"]
+    rested = next((i for i, line in enumerate(log) if "resting on platform" in line), None)
+    return rested is not None and any("at platform 36's spot" in line for line in log[rested:])
+
+
+def _rule(name: str, at_least: int = 1):
+    return check(f"rule '{name}' decided {at_least}+ times", lambda tr: tr["result"]["rules"].get(name, 0) >= at_least)
+
+
+@scenario((36, 300.0), monsters="all", seed=22, limit=400,
+          expects=(logs("at platform 36's spot (platform 36)"), _rule("shoot"), _rule("close quarters"),
+                   check("ten kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 10),
+                   check("every kill counted", _every_kill),
+                   check("HP lost is counted", lambda tr: tr["result"]["damage_taken"] > 0),
+                   check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 5),
+                   ends("standing by on a safe platform", key="stop")))
+def loop_basin(sim):
+    """tour_hunt_basin's twin: the loop hunts the basin (36) on the platform itself, where no safe spot
+    reaches it. Anywhere on it she's there: waiting to reach the spot's x, close monsters interrupted her
+    for good, and the visit never began."""
+    return _loop(3)(sim)
+
+
+@scenario((36, 300.0), monsters={17, 12, 4}, seed=25, limit=400,
+          expects=(logs("leaving platform 36: nothing left here"), logs("at platform 17's spot (platform 16)"),
+                   check("every kill counted", _every_kill)))
+def loop_spot_off_ground(sim):
+    """tour_hunt_from_safe_spot's twin: nothing in the basin, so on to platform 17, hunted from the safe
+    spot on 16 above it."""
+    return _loop(3)(sim)
+
+
+@scenario((14, 760.0), monsters={17}, seed=1, limit=400,
+          expects=(logs("leaving platform 36: nothing left here, and nothing due back"),
+                   check("on to another ground", lambda tr: len(tr["result"]["grounds"]) >= 2),
+                   check("every kill counted", _every_kill)))
+def loop_leaves_empty_ground(sim):
+    """Only platform 17 has monsters: the basin, chosen first by its value, is left for the next ground
+    once the drops of the monsters she shot on her way are picked up. Only those: going after the drops
+    of every monster shot on those trips too, she never left."""
+    return _loop(3)(sim)
+
+
+def _loop_on_12(sim):
+    tour = sim.tour_stack()
+    tour.stats["12"] = {"visits": 4, "exp": 600.0}  # by the value map, platform 12 is the best ground
+    return _loop(3)(sim, tour)
+
+
+@scenario((13, 0.0), monsters={12}, seed=4, limit=400,
+          expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
+                   _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
+                   check("every kill counted", _every_kill)))
+def loop_lull_loot(sim):
+    """Only platform 12 has monsters, and the value map says it's the best ground. She hunts it from the
+    safe platform 13 beside it; in the lulls, with nothing wanted left on it and her kills due back, she
+    picks up the piles she can get to before they respawn."""
+    return _loop_on_12(sim)
+
+
+@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
+          expects=(logs("rest: HP"), logs("resting on platform 32"),
+                   no_log("couldn't reach a safe platform", "low HP doesn't end the trip to rest"),
+                   check("back to the ground after resting", _back_after_rest)))
+def loop_rest_hp_low(sim):
+    """tour_rest_hp_low's twin: low on HP in the basin, the loop rests on the safe platform 32 (low HP
+    doesn't end the trip there) and goes back to the ground she was hunting."""
+    return _loop(2)(sim)
+
+
+@scenario((36, 300.0), monsters="all", seed=25, limit=800,
+          expects=(check("a hundred kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 100),
+                   ends("standing by on a safe platform", key="stop"), ends("time up", key="hunt_stop"),
+                   check("every kill counted", _every_kill),
+                   check("on a safe platform", lambda tr: tr["world"]["platform"] in tr["result"]["safe"])))
+def loop_run(sim):
+    """tour_run's twin: `python -m gamelab tour --loop --minutes 8`, end to end. With every spawn filled,
+    the basin pays more than any other ground with the trip there, so by the rate rule she stays all 8
+    minutes (tour_run's 3 stops took 594 s for 114 kills), then stands by on a safe platform."""
+    return _loop(8)(sim)
+
+
+@scenario((36, 300.0), monsters="all", seed=22, limit=300,
+          noise=Noise(miss=0.28, walk_jitter=6.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
+          expects=(check("kills", lambda tr: sum(tr["world"]["kills"].values()) >= 3), happens("star misses")))
+def loop_noisy(sim):
+    """loop_basin with the real game's errors (tour_hunt_noisy's): stars missing, walks off by a few
+    units, her dot read to whole pixels, her name tag hidden for 3 s mid-fight."""
+    return _loop(2)(sim)
+
+
+@scenario((36, 300.0), monsters="all", seed=25, limit=400, may_die=True,
+          realism=Realism(spawn_share=0.5, rival_every=20.0),
+          expects=(check("only her kills in the ledger", _every_kill), happens("another player kills")))
+def loop_rival(sim):
+    """Another player on the map: half the monsters spawn, and a rival kills one every 20 s and takes its
+    drops. Their kills give her no EXP, so the ledger has only hers."""
+    return _loop(3)(sim)

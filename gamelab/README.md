@@ -95,6 +95,8 @@ Other commands (`python -m gamelab -h` lists them all):
 | `map`, `map --offline` | The map's platforms and her position on them (`lab/map_<id>.png`); sends no keys |
 | `nav 35`, `nav 35 --fight` | Go to platform 35; with `--fight`, shoot monsters on the way instead of avoiding them |
 | `tour --stops 3 --kills 5` | A hunting sweep of the map, then rest and stand by |
+| `tour --loop --minutes 20` | The hunt loop instead of the sweep's stops (`docs/hunt-modes.md`; simulator-tested only): one decision after every look, for 20 minutes, then rest and stand by |
+| `tour --rest-avoid` | On the trips to rest and to stand by, keep clear of monsters instead of shooting the ones in the way (simulator-tested only) |
 | `minimap` | The live mini-map window, following the run in progress; see below |
 | `minimap --replay FILE`, `minimap --plan 36 2` | Replay a recorded run, or show the route between two platforms; no game needed |
 | `sim SCENARIO --speed 4` | Run the stack offline on the simulator, recorded for the mini-map; `sim list` names the scenarios |
@@ -117,17 +119,20 @@ Other commands (`python -m gamelab -h` lists them all):
 - **Motion planning:** the planned route (cyan: arcs for jumps, arrows for climbs and drops) and the chain of moves in the running key plan (magenta: where she runs, and where each move lands).
 - **Attack:** where a star reaches from her (the band either side, brighter on the side she faces), the monsters the last throw aimed at (red rings), and the fight's last decision.
 - **The tour:** its stops in order, the current one, the spot she shoots it from, the safe platforms (teal) and the hunting grounds (bright green). Below the map, the latest log lines.
+- **The hunt loop** (`tour --loop`): the grounds visited, the current one and its spot; under the map, the rule that decided the last step, the objective, her EXP rate on this ground and the rate to beat elsewhere; on it, the piles in its drop store (hers bright, others' dim, expected ones small, urgent ones red).
 
 Hunting commands (`hunt clear`/`kill`, `nav`, `tour`) record what they see and plan to `lab/telemetry/<time>-<command>.jsonl` (`gamelab/telemetry.py`). The window follows the newest of those files, so it can be opened before or during a run. Live, the window never takes focus from the game: the player only presses keys while the game is in front, and screen captures see whatever is on top. So it goes beside the game window when the screen has room, and clicks on it don't activate it. A replay (`--replay FILE`, also last night's `lab/sweep_track.json`) is an ordinary window: space pauses, + and - change the speed, and the arrow keys jump 10 s.
 
 ## Offline: the simulator and golden traces
 
-`gamelab/sim` is a small game that the whole stack runs against, with no game and no key player. `FakeEyes` answers perception's questions from a simulated world, and `FakePlayer` runs key plans on it on a fake clock. Her body follows the game's physics (the same jump arcs as the planner) and her measured walking and climbing; monsters walk their platforms, touch her (half of the touches are evaded, as measured), die from stars, give EXP and drop loot. 51 scenarios cover navigation (every kind of move, monsters in the way, fighting on the way, cut-off plans), single moves, fights, kills, mop-ups, a full inventory, tours and rests.
+`gamelab/sim` is a small game that the whole stack runs against, with no game and no key player. `FakeEyes` answers perception's questions from a simulated world, and `FakePlayer` runs key plans on it on a fake clock. Her body follows the game's physics (the same jump arcs as the planner) and her measured walking and climbing; monsters walk their platforms, touch her (half of the touches are evaded, as measured), die from stars, give EXP and drop loot. 61 scenarios cover navigation (every kind of move, monsters in the way, fighting on the way, cut-off plans), single moves, fights, kills, mop-ups, a full inventory, tours and rests (with and without the fighting escort), and the hunt loop (`loop_*`: the basin, a spot off the ground, leaving an empty ground, lull loot, a rest, 8 minutes end to end, the game's errors, another player).
 
 - `python -m gamelab sim tour_run --speed 4` runs a scenario and records it for the mini-map: open `python -m gamelab minimap` first to watch it as it happens.
 - `python -m gamelab.sim.golden check` reruns every scenario and compares it with the golden trace recorded earlier: every key plan, log line and result. A refactor that leaves those byte-identical hasn't changed what she does. `record` rewrites the traces (after an intended change). The traces hold map data, so they stay in `lab/golden` (git-ignored).
 
 The move into the layers above was checked this way: all 50 traces stayed identical, apart from two counters that were never read (`Report.out_of_reach`, `Hunter.skipped`), which were removed.
+
+**Comparing policies** (`python -m gamelab.sim.harness`): `run POLICY` hunts 20 simulated minutes on each of 10 world seeds (`tour`, `loop`, or `loop-avoid`), and `compare BASE CAND` applies the bar seed by seed: more EXP a minute on 8 of 10 seeds and none more than 10% worse, at least the drops share, no more HP lost, no death. What a run gave is read from the simulated world, not from her own reports. Preset `game` adds the game's errors (27.5% of stars miss, hit monsters hidden for 1-3 s, 10% of looks miss a monster), 60% of spawns filled, another player killing a monster every 25 s, and 60 potions; `plain` is the simulator's own crowded world; `--think 1` also charges the stack's real computing time to the clock (those runs aren't repeatable). `rests` compares trips to rest at low HP with and without `--rest-avoid`. Runs are saved in `lab/harness` (git-ignored).
 
 Tests can't press keys, page anyone or write under `gamelab/lab` (`tests/conftest.py` stops them), and the simulator refuses to run unless its fakes are in place.
 
@@ -178,6 +183,9 @@ A monster seen on screen goes on the platform its kind spawns on: feet read from
 
 ## Behavior
 
+- **The ledger and the drop store** (`ledger.py`): every EXP gain is a kill, placed on the monster that was first in the path of one of her throws in the last 2.5 s (preferring one that has gone). A placed kill's drops become an expected pile there, and looks that searched for loot confirm or forget piles; a pile no kill of hers explains is someone else's.
+- **The hunt loop** (`hunt.py`, `tour --loop`): instead of the tour's stops, loot trips and fights on the way, one decision after every look, by the first of these rules that applies: close quarters; back to the high ground; an urgent pile (about to vanish, close); shoot what's in reach; in passing (while travelling, 15 s per platform); a pile on her platform; a better spot; lull loot (nothing left on the ground and her kills due back); wait; and, leaving, the piles left then and the next ground. She leaves a ground by the rate rule: her EXP rate there below 80% of the best other ground's (the trip there included), or nothing left and nothing due back (the fast exit; that ground is skipped for 2 minutes). Objectives (a spot, a pile) are suspended by higher rules, not ended, and dropped after 60 s, suspensions included. Visits are recorded with their length in `lab/grounds.json`. The numbers are guesses tuned in the simulator (`docs/hunt-modes.md`).
+
 - **The hunter** (`hunter.py`) keeps count after every look, whoever took it: a kill counts only when her EXP number goes up (counting a vanished target as dead was wrong about half the time: hit monsters flinch and hide behind damage numbers, and other players kill monsters too). It drinks an HP potion below `--potion-hp` and hands control back below `--low-hp`.
 - **A fight** (`fight.py`, `clear`): one throw per attack cooldown, with a look during each. She never walks past a monster. A monster of any kind that comes close on her own platform is in her way and fought, snails included. Reaching a stop's kill count doesn't end a fight while monsters are still in reach. On a tour she also shoots monsters worth hunting on any platform in reach. A star hits the first monster in its path, whatever its kind, so kills are matched against everything in the path, not just what she was aiming at.
 - **Hidden monsters:** a monster she was throwing at is still thrown at for 1.8 s after it drops out of sight (hit, it flinches under its damage numbers, and the detector loses it for 1-3 s). A kill is still seen fading out for about a second; what's seen where a kill just died is left alone for 1.2 s.
@@ -197,9 +205,7 @@ A monster seen on screen goes on the platform its kind spawns on: feet read from
 
 ## Found offline, not fixed yet
 
-The refactor kept these exactly as they were; each is pinned by a golden trace, so fixing one is a deliberate change:
-- A trip to drops can spend its whole 60 s shooting monsters on the very platform it's going to (`tour_hunt_basin`).
-- Monsters shot on the trip to rest or to stand by aren't counted in the tour's `on_the_way` (`Tour.rest` and `rest_and_stand_by` don't add the trip's kills; `tour_rest` shoots 7 on its way to 32, and reports none).
+None left from the refactor (each fixed below).
 
 Fixed since, each a deliberate change to the scenarios that pinned it (re-recorded, and their `expects` changed to pin the fix):
 - **Resting at very low HP now reaches a safe platform** (`tour_rest_hp_low`). After a stop ended on "HP low" (below `--low-hp`), `Navigator.go`'s first health check ended the trip to rest at once, so she sat down where she was, among the monsters, and in the simulator died there. The trip to rest now checks only for potions (`Hunter.drink_if_low`): she drinks on the way, shoots what's in her way, and rests on the safe platform.
@@ -207,7 +213,32 @@ Fixed since, each a deliberate change to the scenarios that pinned it (re-record
 - **Kills made shooting a monster in the way of a move count in the trip's kills** (`nav_fight_basin`: 16 -> 18, all of the world's 18; `tour_run`: 74 -> 76 on the way). `FightOnTheWay.clear_way` now returns its kills, as `shoot` does.
 - **`tour --seed` seeds the navigator's route choices too**, not just the sweep order, as the simulator does (no scenario goes through the command; a test pins it).
 
-Checked and kept: after a plan is cut short, the quick look has no monsters, so fighting on the way (and `Tour.hunt`'s stop when a target is in reach) is skipped for one chain. That lets her move on from wherever a hit knocked her first. With a look that sees the monsters there instead, she fought wherever she was knocked to: `nav_fight_across`, 12 s from 12 across to 17, ran out its 180 s (30 kills, knocked off 12 times, once all the way down to 32), and `tour_hunt_platform_12` took 79 s longer.
+Fixed on 2026-10-19 as step 1 of `docs/hunt-modes.md`, one change each, before the new hunt loop, so it isn't credited with them:
+- **The report adds up HP lost** (`tour_hunt_basin`, `tour_hunt_noisy`, `tour_run`): `Report.add` left `damage_taken` out, so every stop said "HP lost: 0%".
+- **Every kill counts**: the trips to rest and to stand by, and the fights guarding drops, now add their kills to the tour's `on_the_way` (`tour_rest`: 0 -> 7 on the way; `tour_run` now reports all 114 of the world's kills).
+- **No jump or attack inside the attack lock**: every plan that presses jump or attack is held back just enough that the key comes after her last attack's 730 ms lock (`Actions.hold_back`, used by `Actions.play`, so the mover's single moves too, and by the navigator's chains). Pressed inside the lock, a jump is ignored. This happened in 4 scenarios, by 2 to 494 ms (`nav_fight_up`, `nav_fight_across`, `tour_hunt_from_safe_spot`, `tour_hunt_platform_12`). In `nav_fight_across` the timing then differs enough that she isn't touched on her way to 18.
+- **The mover's walks press pick-up** (the walk to an x after a trip, the walk before a jump up or a drop), as `Actions.walk` does, every 150 ms and through the slide after. Walks last about 0.2 s longer. 17 scenarios changed; `tour_run` picks up 189 items instead of 152, and the basin ends `tour_hunt_basin` with no drops left. `nav_monsters_staircase` moved to seed 1, because with seed 3 no monster was in her way to hop any more.
+- **A trip to drops gets there** (`tour_hunt_basin`, now pinned to have no "couldn't get there (timeout)"). On the platform she's going to, the navigator no longer fires bursts at whatever is in reach (a loot trip to the basin's own drops used to spend its whole 60 s on that). It only shoots a monster between her and the x she's sent to (`clear_way`, at most 3 fights in a row), then walks there. 8 scenarios changed. `tour_hunt_from_safe_spot` now needs just over 400 s, so its limit is 600 s.
+
+In the simulator's game-like world (`python -m gamelab.sim.harness`, preset `game`, 10 seeds of 20 minutes), these fixes took today's tour from 90 to 85 EXP a minute. It now picks up 95% of its drops instead of 94%, and loses less HP (2.6 instead of 2.8 bars). Its loot trips run out their 60 s 31 times instead of 64, but clearing the way to a drop now hits its 3-in-a-row cap 52 times instead of 11.
+
+**The hunt loop in the simulator** (`tour --loop`, step 5 of `docs/hunt-modes.md`; not tried in game yet). Against the fixed tour above, preset `game`, 20 simulated minutes a seed:
+
+| | tour | loop |
+|---|---|---|
+| EXP a minute, 10 seeds (20 seeds) | 84.8 (85.7) | 114.2 (117.7) |
+| better on | | 9 of 10 (19 of 20) seeds |
+| worst seed | | -35% (seed 7, both) |
+| drops picked up a run | 185 (195) | 250 (266) |
+| share of her drops picked up | 95.3% (95.6%) | 95.2% (95.8%) |
+| HP lost (bars of 1.4%) | 2.6 (2.7) | 2.5 (2.5) |
+| deaths | 0 | 0 |
+
+With `--think 1` (the stack's real computing time charged): 80.8 -> 116.8 EXP a minute, better on all 10 seeds, 95.8% of drops: it passes the whole bar. With the knobs on, it misses one point: seed 7 (start on platform 24), 48 EXP a minute against the tour's 74. There it hunts 17 from the spot on 16, which pays best by the rate rule, but is knocked off it again and again, and the climbs back and the trips for piles on the way keep it from judging the ground (leaving is decided only when no other rule fires). Seed 7 swung between 44 and 85 EXP a minute across variants of the loop that differ in nothing it should care about; the share of drops picked up also moves by about 3 points between such variants (one started 0.2 s later). In the crowded `plain` world: 133 -> 208 EXP a minute and 336 drops a run against 299, but only 69% of its drops: with monsters always in reach, shooting comes first and piles are gone for only when about to vanish or when the ground empties.
+
+**`--rest-avoid`** (step 7; `python -m gamelab.sim.harness rests`): 40 trips to rest at 28% HP from the hunting grounds, preset `game`. Keeping clear of monsters, she lost 1.6% HP a trip instead of 6.2%, and got there in 6.1 s instead of 28.5 s, with no deaths either way. The trips that shoot their way through made 120 kills on the way; the avoiding ones made none. It stays an option until it's checked in game.
+
+Checked and kept: after a plan is cut short, the quick look has no monsters, so fighting on the way (and `Tour.hunt`'s stop when a target is in reach) is skipped for one chain. That lets her move on from wherever a hit knocked her first. With a look that sees the monsters there instead, she fought wherever she was knocked to: `nav_fight_across` (then 12 s from 12 across to 17) ran out its 180 s (30 kills, knocked off 12 times, once all the way down to 32), and `tour_hunt_platform_12` took 79 s longer.
 
 ## Limits
 

@@ -388,8 +388,16 @@ def cmd_tour(args) -> int:
     nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
     _record("tour", hunter.model.id)
     window.bring_to_front(_game_title())
-    tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below)
+    tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below,
+                rest_avoid=args.rest_avoid)
     kinds = set(args.kinds.split(",")) if args.kinds else None
+    if args.loop:  # the hunt loop (gamelab/docs/hunt-modes.md): one decision per look, for --minutes
+        from .behavior.hunt import Hunt
+        if kinds is not None:
+            tour.worth = kinds
+        report = Hunt(tour, log=_log).run(minutes=args.minutes)
+        print(f"hunt done: {report}")
+        return 0
     report = tour.run(stops=args.stops, kinds=kinds, kills_per_stop=args.kills, seconds_per_stop=args.seconds)
     print(f"tour done: {report}")
     return 0
@@ -667,8 +675,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--kinds", help="only these monsters, e.g. slime,pig")
     s.add_argument("--seed", type=int, help="random seed for the order and the route choices (default: random)")
     s.add_argument("--rest-below", type=float, default=0.5, help="go rest when HP is below this between stops")
+    s.add_argument("--rest-avoid", action="store_true",
+                   help="on the trips to rest and to stand by, keep clear of monsters instead of shooting the ones "
+                        "in the way (simulator-tested only)")
     s.add_argument("--potion-hp", type=float, default=0.45, help="drink an HP potion below this while fighting")
     s.add_argument("--low-hp", type=float, default=0.3, help="stop fighting and rest below this")
+    s.add_argument("--loop", action="store_true",
+                   help="hunt with the hunt loop instead of the sweep's stops (gamelab/docs/hunt-modes.md)")
+    s.add_argument("--minutes", type=float, default=20, help="with --loop: how long to hunt, then stand by")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_tour)
 

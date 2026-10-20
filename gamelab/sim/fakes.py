@@ -70,15 +70,34 @@ class SimViolation(RuntimeError):
     """Something tried to reach the real game (a window, a key) during a simulated run."""
 
 
-class SimTimeout(RuntimeError):
-    """A simulated run went past its time limit."""
+class SimTimeout(BaseException):
+    """A simulated run went past its time limit. Not an Exception: a loop that recovers from errors
+    (`except Exception`) must not catch it and spin on, since every later step raises it again."""
 
 
 class Clock:
-    def __init__(self, start: float = START, limit: float | None = None, pace: float | None = None):
+    def __init__(self, start: float = START, limit: float | None = None, pace: float | None = None,
+                 think: float = 0.0):
         self.start = self.now = start
         self.limit = limit  # s after the start; going past it raises SimTimeout
         self.pace = pace    # if set, simulated time also passes in real time, this many times faster
+        # Thinking is free on the fake clock: only looks, glances, plans and sleeps take time. With `think`
+        # set, the stack's own computing between two of those (measured with the real perf_counter) is
+        # charged too, times `think` (1.0: as fast as this computer). Off by default: it makes runs vary.
+        self.think = think
+        self._mark: float | None = None
+
+    def charge(self) -> None:
+        """Charge the stack's computing since the last fake call (only with `think` set)."""
+        if self.think and self._mark is not None:
+            spent = _REAL["perf_counter"]() - self._mark
+            self._mark = None
+            self.advance_to(self.now + spent * self.think)
+
+    def mark(self) -> None:
+        """A fake call is over: the stack's own computing starts here."""
+        if self.think:
+            self._mark = _REAL["perf_counter"]()
 
     @property
     def elapsed(self) -> float:
@@ -96,7 +115,9 @@ class Clock:
         return self.now
 
     def sleep(self, seconds: float) -> None:
+        self.charge()
         self.advance_to(self.now + max(0.0, seconds))
+        self.mark()
 
     def time(self) -> float:
         return EPOCH + self.elapsed
@@ -187,6 +208,7 @@ class FakeEyes(Eyes):
     def _now(self) -> None:
         if self.guard is not None:
             self.guard()
+        self.clock.charge()
         self.world.advance(self.clock.now)
 
     def her_on_screen(self) -> tuple[int, int]:
@@ -255,6 +277,8 @@ class FakeEyes(Eyes):
         u, floor = UNITS_PER_HALF_PX, her[1] - 8
         screen = Screen()
         for m, mx, my, alive in self.world.visible_monsters():
+            if self._unseen(m, alive):
+                continue
             w, h = round(2 * m.half / u), round(m.height / u)
             cx, feet = round(her[0] + (mx - x) / u), round(floor + (my - y) / u)
             mob = Mob(m.kind, cx, feet - h // 2, w, h, 0.9)
@@ -271,6 +295,17 @@ class FakeEyes(Eyes):
             if 0 <= cx - iw // 2 and cx + iw // 2 <= FRAME[1] and 0 <= item.y - ih // 2 and bottom <= PLAY_BOTTOM:
                 screen.items.append(item)
         return screen
+
+    def _unseen(self, m, alive: bool) -> bool:
+        """Whether this look misses monster `m` though it shows: hit and hiding under its damage numbers
+        (Noise.hit_hidden), or just not found (Noise.detect_miss). Both are drawn per monster from the
+        world's seeded chances, the hiding once per hit."""
+        noise, w = self.noise, self.world
+        if alive and noise.hit_hidden and m.hit_at is not None:
+            lo, hi = noise.hit_hidden
+            if w.t < m.hit_at + lo + (hi - lo) * w.chance(f"hide:{m.idx}", int(round(m.hit_at * 1000))):
+                return True
+        return bool(noise.detect_miss) and w.chance(f"see:{m.idx}") < noise.detect_miss
 
     def _ropes(self, her: tuple[int, int], x: float, y: float) -> list[ScreenRope]:
         """Ropes in view as terrain.find_ropes reports them: full-size px, at least 90 px of them showing."""
@@ -337,6 +372,7 @@ class FakePlayer:
     def send(self, events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan",
              end_ms: int | None = None) -> str:
         from ..control.player import validate
+        self.clock.charge()
         events = [list(e) for e in events]
         capture = {"fps": fps, "duration_ms": duration_ms, "scale": scale, "lead_ms": lead_ms}
         plan = {"events": events, "capture": capture, "focus": focus}
@@ -353,6 +389,7 @@ class FakePlayer:
         self.plans[p.id] = p
         self.order.append(p)
         self._schedule(p, self._after(p))
+        self.clock.mark()
         return p.id
 
     def submit(self, events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100,
@@ -368,7 +405,9 @@ class FakePlayer:
         p = self.plans[plan_id]
         if p.state == "withdrawn":
             raise client.PlayerError(f"plan {plan_id} was withdrawn: no result will come")
+        self.clock.charge()
         self.clock.advance_to(p.end + RESULT_LATENCY)
+        self.clock.mark()
         if p.error:
             raise client.PlayerError(p.error)
         return {"sent": [[round(e[0]), *e[1:]] for e in p.events],

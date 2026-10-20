@@ -16,8 +16,10 @@ route planner so a way around is taken if there is one, else she waits for the m
 (a few looks), and then goes anyway. A hit during a move shows as lost HP: she replans from wherever
 she was pushed to, without counting it as a missed move.
 
-With an escort (hunting tours: behavior.fight.FightOnTheWay), monsters in reach are shot dead before
-each move instead, and any in the way of a move along her platform are shot first.
+With an escort (hunting tours: behavior.fight.FightOnTheWay), each trip has a mode (go(mode=...)):
+`hunt` (the default) shoots what's in reach before each chain and any monster in the way of a move along
+her platform; `transit` (the trip to rest) only shoots what's in the way, and low HP is no reason to stop
+(potions are still drunk). Without an escort the mode is `avoid`, as described above.
 """
 
 import random
@@ -52,10 +54,18 @@ OFF_PATH = 3         # glances off the planned path (counting 2 where the leg do
 STILL = 0.6          # minimap px: a dot that moved less than this on both axes has stopped
 HIT = 0.004          # HP lost (fraction) that counts as a hit
 
+# How a trip treats monsters (Navigator.go's `mode`).
+AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
+HUNT = "hunt"        # the escort shoots what's in reach before each chain, and what's in the way of a move
+TRANSIT = "transit"  # the escort shoots only what's in the way; low HP doesn't stop the trip (potions go on)
+TRANSIT_AVOID = "transit-avoid"  # as avoid (no escort, ways around monsters), and as transit, low HP doesn't
+                                 # stop the trip (`tour --rest-avoid`: the trips to rest and to stand by)
+MODES = (AVOID, HUNT, TRANSIT, TRANSIT_AVOID)
+FIGHTING = (HUNT, TRANSIT)  # the modes the escort fights in
+
 
 class Escort(Protocol):
     """Fighting on the way (behavior.fight.FightOnTheWay): what the navigator asks between moves."""
-    hunting: bool   # shoot monsters in reach between moves (off when going to rest)
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach."""
@@ -63,8 +73,9 @@ class Escort(Protocol):
     def shoot(self) -> int:
         """Fight what's in reach for a moment; returns the kills."""
 
-    def clear_way(self, s: Scene, move: Move) -> int | None:
-        """Shoot a monster in the way of `move` on her platform; the kills, or None if none was in the way."""
+    def clear_way(self, s: Scene, x: float) -> int | None:
+        """Shoot a monster on her platform in her way to map x (where her next move starts, or where she's
+        sent to on arrival); the kills, or None if none was in the way."""
 
 
 @dataclass
@@ -89,9 +100,19 @@ class _Running(NamedTuple):
 
 
 @dataclass
-class _TripState:
-    """What a trip (Navigator._go) keeps from one look to the next."""
+class TripState:
+    """A trip in progress (Navigator.begin, then Navigator.step until it's over): where it goes and how,
+    and what it keeps from one look to the next."""
+    dst: int
+    x: float | None = None
+    deadline: float = 0.0  # time.monotonic() it times out at
+    max_misses: int = 6
+    until: Callable[[Scene], bool] | None = None
+    health: Callable[[Scene], str | None] = lambda s: None
+    mode: str = AVOID
     trip: Trip = field(default_factory=Trip)  # how it's going so far (returned at the end)
+    weights: dict[tuple, float] = field(default_factory=dict)  # its random move weights, kept through its replans
+    over: bool = False
     fights: int = 0      # clearing the way, in a row without a move between (see MAX_FIGHTS)
     tries: dict[int, int] = field(default_factory=dict)  # platform -> monsters engaged there on the way
     # (kind, src, dst, x) of moves a monster was in the way of -> when: rebuilt at every plan, less
@@ -103,7 +124,7 @@ class _TripState:
 
     def end(self, result: str) -> Trip:
         """The trip, over: `result` says how it ended."""
-        self.trip.result = result
+        self.trip.result, self.over = result, True
         return self.trip
 
 
@@ -111,13 +132,17 @@ class Navigator:
     """Gets her onto a platform: plans the route, chains its moves, and replans from wherever she ends up."""
 
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
-                 health: Callable[[Scene], str | None] | None = None, escort: Escort | None = None,
+                 health: Callable[[Scene], str | None] | None = None,
+                 potions: Callable[[Scene], None] | None = None, escort: Escort | None = None,
                  variety: float = 0.35, rng: random.Random | None = None):
-        """`health(scene)` returns a reason to stop (low HP), and may drink a potion; `escort` fights
-        on the way (without one she avoids monsters instead)."""
+        """`health(scene)` returns a reason to stop (low HP), and may drink a potion; `potions(scene)` only
+        drinks (transit trips); `escort` fights on the way (without one she avoids monsters instead)."""
         self.senses, self.actions, self.model, self.log = senses, actions, model, log
         self.health = health or (lambda s: None)
+        self.potions = potions or (lambda s: None)
         self.escort = escort
+        self.mode = HUNT if escort is not None else AVOID  # a trip's mode unless go() says otherwise
+        self._mode = self.mode                             # the running trip's
         self.planner = Planner(model)
         self.mover = Mover(senses, actions, model, log)
         self.rng = rng or random.Random()
@@ -134,65 +159,93 @@ class Navigator:
 
     @property
     def fight(self) -> bool:
-        """Fighting on the way (with an escort) rather than avoiding monsters."""
-        return self.escort is not None
+        """Fighting on the way (the escort's hunt or transit mode) rather than avoiding monsters."""
+        return self._mode in FIGHTING
 
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
-           until: Callable[[Scene], bool] | None = None,
-           health: Callable[[Scene], str | None] | None = None) -> Trip:
+           until: Callable[[Scene], bool] | None = None, *, mode: str | None = None) -> Trip:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
-        with a look that includes monsters: True ends the trip early ('in position'). `health` replaces
-        the navigator's own health check for this trip (on the way to rest, low HP is no reason to stop)."""
-        trip = self._go(dst, x, seconds, max_misses, until, health or self.health)
-        telemetry.emit("trip", dst=dst, result=trip.result)
+        with a look that includes monsters: True ends the trip early ('in position'). `mode` (AVOID, HUNT
+        or TRANSIT; the navigator's own by default) says how the trip treats monsters."""
+        st = self.begin(dst, x, seconds, max_misses, until, mode=mode)
+        while not st.over:
+            self.step(st)
+        return st.trip
+
+    def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
+              until: Callable[[Scene], bool] | None = None, *, mode: str | None = None) -> TripState:
+        """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time."""
+        mode = mode or self.mode
+        if mode not in MODES or (mode in FIGHTING and self.escort is None):
+            raise ValueError(f"no {mode!r} trip without an escort" if mode in MODES else f"unknown mode {mode!r}")
+        # Transit: low HP is why she's going (to rest), so potions only.
+        health = self.potions if mode in (TRANSIT, TRANSIT_AVOID) else self.health
+        return TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode)
+
+    def step(self, st: TripState) -> Trip | None:
+        """One pass of trip `st`: a look, then what it calls for (stop, get off a rope, shoot what's in
+        reach or in the way, arrive, wait for a monster, or carry out a chain of moves or one move).
+        Returns the trip once it's over (and sends its 'trip' record), else None."""
+        if st.over:
+            return st.trip
+        self._mode, self._weights = st.mode, st.weights
+        try:
+            trip = self._pass(st)
+        finally:
+            self._mode = self.mode
+        if trip is not None:
+            telemetry.emit("trip", dst=st.dst, result=trip.result)
         return trip
 
-    def _go(self, dst: int, x: float | None, seconds: float, max_misses: int,
-            until: Callable[[Scene], bool] | None, health: Callable[[Scene], str | None]) -> Trip:
-        st, deadline = _TripState(), time.monotonic() + seconds
-        self._weights = {}  # new weights each trip, kept through its replans
-        while time.monotonic() < deadline:
-            # Look, and deal with what's here.
-            s, looked = self._look(st)
-            if stop := self._reason_to_stop(s, until, health):
-                return st.end(stop)
-            s = self._onto_platform(s)
-            if s.where.platform is None:
-                return st.end("lost: not on any platform")
-            if self._shoot_on_the_way(st, s):
-                continue  # look again after the fight
-            if s.where.platform.id == dst:
-                if x is not None:
-                    self.mover.walk_to(x, tolerance=ARRIVE_TOLERANCE, s=s)
-                return st.end("arrived")
+    def _pass(self, st: TripState) -> Trip | None:
+        if not time.monotonic() < st.deadline:
+            return st.end("timeout")
+        # Look, and deal with what's here.
+        s, looked = self._look(st)
+        if stop := self._reason_to_stop(s, st.until, st.health):
+            return st.end(stop)
+        s = self._onto_platform(s)
+        if s.where.platform is None:
+            return st.end("lost: not on any platform")
+        if s.where.platform.id == st.dst:
+            # There: only a monster between her and the x she's sent to is shot first. Bursts at
+            # whatever is in reach here (as on the way) took whole trips: a 60 s trip to drops on the
+            # basin spent all of it shooting respawns there (tour_hunt_basin).
+            if st.x is not None and self._clear_the_way(st, s, st.x):
+                return None  # look again after the fight
+            if st.x is not None:
+                self.mover.walk_to(st.x, tolerance=ARRIVE_TOLERANCE, s=s)
+            return st.end("arrived")
+        if self._shoot_on_the_way(st, s):
+            return None  # look again after the fight
 
-            # Plan the route, and chain as many of its moves as can be predicted.
-            path, planned_at = self._plan(st, s, dst)
-            if not path:
-                return st.end(f"no route from platform {s.where.platform.id} to {dst}")
-            if self._clear_the_way(st, s, path[0]):
-                continue  # look again after the fight
-            monsters = self._chain_monsters(st, s)
-            st.quick = False
-            legs, keys, why = self._chain(st, s, path, monsters, looked)
-            if self._wait_for_monster(st, s, path[0], monsters, legs, why, planned_at):
-                continue  # look again: for a way around, or once she's waited a moment
+        # Plan the route, and chain as many of its moves as can be predicted.
+        path, planned_at = self._plan(st, s, st.dst)
+        if not path:
+            return st.end(f"no route from platform {s.where.platform.id} to {st.dst}")
+        if self._clear_the_way(st, s, path[0].x):
+            return None  # look again after the fight
+        monsters = self._chain_monsters(st, s)
+        st.quick = False
+        legs, keys, why = self._chain(st, s, path, monsters, looked)
+        if self._wait_for_monster(st, s, path[0], monsters, legs, why, planned_at):
+            return None  # look again: for a way around, or once she's waited a moment
 
-            # Move: the chain in one plan, or else the first move on its own.
-            hp = s.hp
-            if legs:
-                moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, dst)
-            else:
-                moved, planned, after = self._carry_out_move(st, s, path)
-            if self._note_landing(st.trip, moved, planned, after, hp):  # a miss
-                st.trip.misses += 1
-                if st.trip.misses >= max_misses:
-                    return st.end("too many misses")
-        return st.end("timeout")
+        # Move: the chain in one plan, or else the first move on its own.
+        hp = s.hp
+        if legs:
+            moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, st.dst)
+        else:
+            moved, planned, after = self._carry_out_move(st, s, path)
+        if self._note_landing(st.trip, moved, planned, after, hp):  # a miss
+            st.trip.misses += 1
+            if st.trip.misses >= st.max_misses:
+                return st.end("too many misses")
+        return None
 
-    # --- the steps of a trip (_go) ---------------------------------------------------------------
+    # --- the steps of a pass (_pass) ---------------------------------------------------------------
 
-    def _look(self, st: _TripState) -> tuple[Scene, float]:
+    def _look(self, st: TripState) -> tuple[Scene, float]:
         """A look at her: a quick one right after a chain was cut short (the monsters already seen will
         do), else one that includes the monsters (the whole screen when avoiding them). Returns it and
         when it was over (thinking is counted from then)."""
@@ -212,19 +265,21 @@ class Navigator:
             return "in position"
         return None
 
-    def _shoot_on_the_way(self, st: _TripState, s: Scene) -> bool:
-        """With a hunting escort: shoot a monster in reach from where she stands, ON_WAY_TRIES times at
-        most per platform (respawns could keep her there forever). True if she fought."""
+    def _shoot_on_the_way(self, st: TripState, s: Scene) -> bool:
+        """In hunt mode: shoot a monster in reach from where she stands, ON_WAY_TRIES times at most per
+        platform (respawns could keep her there forever). True if she fought."""
         here = s.where.platform
-        if self.fight and self.escort.hunting and st.tries.get(here.id, 0) < ON_WAY_TRIES \
+        if self._mode == HUNT and st.tries.get(here.id, 0) < ON_WAY_TRIES \
                 and (mob := self.escort.target(s)):
             st.tries[here.id] = st.tries.get(here.id, 0) + 1
             self.log(f"  {mob.kind} in reach on platform {mob.platform}: shooting it on the way")
             st.trip.kills += self.escort.shoot()
+            if st.tries[here.id] == ON_WAY_TRIES:
+                telemetry.emit("event", kind="backstop", text=f"ON_WAY_TRIES: no more bursts on platform {here.id}")
             return True
         return False
 
-    def _plan(self, st: _TripState, s: Scene, dst: int) -> tuple[list[Move], float]:
+    def _plan(self, st: TripState, s: Scene, dst: int) -> tuple[list[Move], float]:
         """The route from where she stands to `dst` (empty if there's none), and when it was planned. A
         move a monster was in the way of less than AVOID_MEMORY_S ago costs extra, so a way around wins
         if there is one."""
@@ -236,19 +291,22 @@ class Navigator:
             telemetry.emit("route", **route_record(dst, path))
         return path, now
 
-    def _clear_the_way(self, st: _TripState, s: Scene, move: Move) -> bool:
-        """With an escort: shoot a monster in the way of `move` (the route's first) on her platform, up to
-        MAX_FIGHTS times in a row without a move between; its kills count in the trip's. True if she fought."""
+    def _clear_the_way(self, st: TripState, s: Scene, x: float) -> bool:
+        """With an escort: shoot a monster on her platform in her way to map x (where the route's first move
+        starts, or where she's sent to on arrival), up to MAX_FIGHTS times in a row without a move between;
+        its kills count in the trip's. True if she fought."""
         if not self.fight:
             return False
-        if st.fights < MAX_FIGHTS and (kills := self.escort.clear_way(s, move)) is not None:
+        if st.fights < MAX_FIGHTS and (kills := self.escort.clear_way(s, x)) is not None:
             st.fights += 1
             st.trip.kills += kills
             return True
+        if st.fights >= MAX_FIGHTS:
+            telemetry.emit("event", kind="backstop", text="MAX_FIGHTS: moving on past the monster in the way")
         st.fights = 0
         return False
 
-    def _chain_monsters(self, st: _TripState, s: Scene) -> list:
+    def _chain_monsters(self, st: TripState, s: Scene) -> list:
         """The monsters the chain keeps clear of: none with an escort (it fights them instead); after a
         quick look, the last look's, moved on by the time since; else this look's, tracked from look to
         look (which way they walk)."""
@@ -262,7 +320,7 @@ class Navigator:
             telemetry.emit("monsters", **tracks_record(monsters, self.model))
         return monsters
 
-    def _chain(self, st: _TripState, s: Scene, path: list[Move], monsters: list, looked: float) -> tuple:
+    def _chain(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float) -> tuple:
         """As many of the route's moves as can be predicted, chained from where she stands (flow.chain:
         the legs, their keys, and why the chain ended). The time since the look (`looked`) counts as
         thinking."""
@@ -273,7 +331,7 @@ class Navigator:
         st.trip.time["think"] += time.monotonic() - looked
         return legs, keys, why
 
-    def _wait_for_monster(self, st: _TripState, s: Scene, move: Move, monsters: list, legs: list[Leg],
+    def _wait_for_monster(self, st: TripState, s: Scene, move: Move, monsters: list, legs: list[Leg],
                           why: str, planned_at: float) -> bool:
         """A monster in the way of the first move (nothing chained because of it): look for a way around
         (the move costs extra from `planned_at` on), else wait for it to go, WAIT_LOOKS looks at most.
@@ -292,7 +350,7 @@ class Navigator:
         st.waited = 0
         return False
 
-    def _carry_out_chain(self, st: _TripState, s: Scene, path: list[Move], legs: list[Leg], keys, why: str,
+    def _carry_out_chain(self, st: TripState, s: Scene, path: list[Move], legs: list[Leg], keys, why: str,
                          dst: int) -> tuple[list[Move], Platform, Scene]:
         """The chain in one plan, followed on by those planned on the move (follow). Returns the moves
         made, the platform she should have ended on, and a look once it's over. Cut short, she replans
@@ -312,7 +370,7 @@ class Navigator:
         st.quick = bool(cut)
         return [leg.move for leg in legs], legs[-1].end.platform, after
 
-    def _carry_out_move(self, st: _TripState, s: Scene, path: list[Move]) -> tuple[list[Move], Platform, Scene]:
+    def _carry_out_move(self, st: TripState, s: Scene, path: list[Move]) -> tuple[list[Move], Platform, Scene]:
         """The route's first move on its own, closed loop (control.mover). Returns it (as a list), the
         platform it goes to, and a look once it's done."""
         move = path[0]
@@ -391,6 +449,9 @@ class Navigator:
                                end_ms=max(last, ms(chain_legs[-1].end.t)))
 
         more = why == "long" and not self.fight
+        # Right after a throw, a jump pressed inside the attack lock is ignored: the chain waits just
+        # enough. (A chain queued on the move starts when this one ends, past any lock.)
+        self.actions.hold_back(keys.sorted())
         current = _Running(send(legs, keys, why), legs, time.monotonic() + PLAN_START_S, more)
         self._sent_plans = [current.plan_id]  # every plan this chain sent: cancelled if anything fails
         self.actions.pressed = True

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 TRAIL = 240   # her last positions drawn as a trail
 LOG_LINES = 9
-LATEST = ("route", "chain", "monsters", "stance", "drops")  # topics kept as their latest record
+LATEST = ("route", "chain", "monsters", "stance", "drops", "hunt")  # topics kept as their latest record
 
 
 @dataclass
@@ -21,6 +21,7 @@ class State:
     stance: dict | None = None     # the fight's last decision
     drops: dict | None = None      # drops remembered for later
     tour: dict | None = None       # the sweep's order, current stop and spot
+    hunt: dict | None = None       # the hunt loop's current rule and objective
     trail: deque = field(default_factory=lambda: deque(maxlen=TRAIL))
     logs: deque = field(default_factory=lambda: deque(maxlen=LOG_LINES))
 

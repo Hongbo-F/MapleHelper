@@ -77,6 +77,20 @@ def test_the_mini_map_draws_her_where_the_map_puts_her():
     assert not np.array_equal(img, empty)
 
 
+def test_the_hunt_loop_s_piles_and_rates_are_drawn():
+    m = model()
+    view = MapView(m, width=400)
+    c = by_y(m, 500, 400)
+    s = State()
+    s.apply({"topic": "hunt", "t": 1.0, "mode": "hunt", "rule": "urgent pile", "objective": f"pile on {c.id}",
+             "ground": c.id, "rate_here": 0.42, "rate_to_beat": [0.7, 3],
+             "piles": [{"x": 300, "y": 500, "platform": c.id, "status": "seen", "hers": True, "urgent": True}]})
+    img = view.draw(s)
+    x, y = view.pt(300, 500 - 4)
+    assert tuple(img[y - 5, x]) == (230, 60, 60)  # the urgent pile's box (DANGER), its top edge
+    assert not np.array_equal(img, view.draw(State()))
+
+
 def test_a_replay_plays_records_at_their_own_pace_and_can_seek():
     now = [0.0]
     records = [{"topic": "log", "t": 100.0 + i, "text": str(i)} for i in range(5)]

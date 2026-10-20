@@ -22,7 +22,6 @@ from ..attack import reach
 from ..attack.stance import TOO_CLOSE, act_text, decide, open_above, pct, pick_target, stance
 from ..localization.monsters import SEARCH_SLACK, TRACK_SLACK, Monster, dead_one, seen_again
 from ..localization.scene import Scene
-from ..motion.route import Move
 from .looting import DropSpot
 
 if TYPE_CHECKING:
@@ -74,13 +73,14 @@ class Report:
         self.kills[kind] = self.kills.get(kind, 0) + 1
 
     def add(self, other: "Report") -> None:
-        """Count another report's kills, throws, loot runs, potions, EXP gains and lost targets in."""
+        """Count another report's kills, throws, loot runs, potions, EXP gains, lost targets and HP lost in."""
         add_kills(self.kills, other.kills)
         self.throws += other.throws
         self.loot_runs += other.loot_runs
         self.potions += other.potions
         self.exp_kills += other.exp_kills
         self.lost += other.lost
+        self.damage_taken += other.damage_taken
 
 
 @dataclass
@@ -470,8 +470,8 @@ class FightOnTheWay:
 
     def __init__(self, h: "Hunter"):
         self.h = h
-        self.hunting = True   # shoot monsters in reach between moves (off when going to rest)
-        self.kinds: set[str] | None = None  # ... of these kinds only (None: all); any in her way is shot
+        self.kinds: set[str] | None = None  # shoot monsters in reach of these kinds only (None: all); any
+                                            # in her way is shot
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice)."""
@@ -485,10 +485,11 @@ class FightOnTheWay:
         self.h.clear(self.kinds, max_kills=3, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False)
         return self.h.report.exp_kills - before
 
-    def clear_way(self, s: Scene, move: Move) -> int | None:
-        """Shoot a monster standing on her platform between her and where the move starts (or too
-        close to her), whatever its kind. Returns the kills, or None if nothing was in the way."""
-        lo, hi = sorted((s.where.x, move.x))
+    def clear_way(self, s: Scene, x: float) -> int | None:
+        """Shoot a monster standing on her platform between her and map x (where her next move starts, or
+        where she's sent to), or too close to her, whatever its kind. Returns the kills, or None if nothing
+        was in the way."""
+        lo, hi = sorted((s.where.x, x))
         in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE]
         if not in_way:
             return None

@@ -18,7 +18,9 @@ Topics (map units; producers build the records, ui.state folds them):
   monsters  list [{platform, x, vx, heading, reach}]           control.navigator (avoiding monsters)
   trip      dst, result                                        control.navigator, at every trip's end
   stance    act, text, aimed [{kind, x, y}]                    behavior.fight, each look of a fight
-  tour      order, safe, grounds / stop, spot                  behavior.tour
+  tour      order, safe, grounds / stop, spot                  behavior.tour (stop, spot: also behavior.hunt)
+  hunt      mode, rule, objective, ground, piles [{x, platform,   behavior.hunt, when the rule changes
+            status, hers}]
   event     kind (kill, hit, potion, rest), text               behavior
   log       text                                               every log line
 """

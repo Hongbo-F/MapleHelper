@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from .. import paths, telemetry
 from ..attack import reach, spots
 from ..attack.spots import Spot
-from ..control.navigator import Navigator
+from ..control.navigator import AVOID, TRANSIT, TRANSIT_AVOID, Navigator
 from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..localization.scene import Scene
@@ -54,7 +54,7 @@ class TourReport:
     kills: dict[str, int] = field(default_factory=dict)
     throws: int = 0
     exp_gains: int = 0    # times her EXP went up while hunting at the stops (kills of hers)
-    on_the_way: int = 0   # monsters shot dead while travelling
+    on_the_way: int = 0   # monsters shot dead while travelling (to rest and to stand by too) or guarding drops
     rests: int = 0
     loot_trips: int = 0
     stop: str = ""
@@ -88,8 +88,11 @@ class Tour:
     """A hunting tour with a hunter and her (fighting) navigator; `run` sweeps the map."""
 
     def __init__(self, hunter: Hunter, nav: Navigator, log=print, rng: random.Random | None = None,
-                 rest_below: float = 0.5, rest_to: float = 0.9):
+                 rest_below: float = 0.5, rest_to: float = 0.9, rest_avoid: bool = False):
+        """`rest_avoid`: the trips to rest and to stand by keep clear of monsters instead of shooting the
+        ones in the way (`tour --rest-avoid`; navigator.TRANSIT_AVOID)."""
         self.h, self.nav, self.log = hunter, nav, log
+        self.rest_avoid = rest_avoid
         self.rng = rng or random.Random()
         self.rest_below, self.rest_to = rest_below, rest_to
         self.report = TourReport()
@@ -137,6 +140,16 @@ class Tour:
         st["exp"] = round(st["exp"] + exp, 1)
         _save_grounds(self.nav.model.id, self.stats)
 
+    def record_visit(self, pid: int, exp: float, seconds: float) -> None:
+        """Remember what a visit of the hunt loop to `pid` gave, and how long it lasted (behavior.hunt reads
+        EXP per visit and the average timed visit from them)."""
+        st = self.stats.setdefault(str(pid), {"visits": 0, "exp": 0})
+        st["visits"] += 1
+        st["exp"] = round(st["exp"] + exp, 1)
+        st["timed"] = st.get("timed", 0) + 1
+        st["seconds"] = round(st.get("seconds", 0.0) + seconds, 1)
+        _save_grounds(self.nav.model.id, self.stats)
+
     def spot(self, pid: int, on_it: bool = False) -> Spot:
         """Where to shoot platform `pid` from (attack.spots.spot), from where she is now."""
         here = self.nav.mover.locate().where
@@ -171,16 +184,12 @@ class Tour:
         most), and stand up."""
         pid = self.nearest_safe()
         self.log(f"resting on platform {pid}")
-        escort = self.nav.escort
-        if escort is not None:
-            escort.hunting = False  # low on HP: straight there
-        try:
-            # Low HP is why she's going: no reason to stop on the way (potions are still drunk). It used
-            # to end the trip at its first look, and she sat down among the monsters.
-            trip = self.nav.go(pid, health=self.h.drink_if_low)
-        finally:
-            if escort is not None:
-                escort.hunting = True
+        # Low on HP: straight there, shooting only what's in the way. Low HP is why she's going, so it's no
+        # reason to stop on the way (potions are still drunk): it used to end the trip at its first look,
+        # and she sat down among the monsters.
+        telemetry.emit("event", kind="rest_trip", text=f"to platform {pid} to rest")
+        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT))
+        self.report.on_the_way += trip.kills
         if trip.result != "arrived":
             self.log(f"  couldn't reach a safe platform ({trip.result}); resting here")
         self.report.rests += 1
@@ -195,16 +204,28 @@ class Tour:
                 break
         self.h.actions.stand()
 
-    def rest_and_stand_by(self) -> None:
+    def rest_and_stand_by(self, mode: str | None = None) -> None:
         """The tour's end: over to the nearest safe platform, resting there first (and staying seated)
-        if her HP is under `rest_to`."""
+        if her HP is under `rest_to`. `mode`: the trip's (the navigator's own by default: the tour's bursts;
+        the hunt loop's is transit)."""
         if self.h.look(mobs=False).hp < self.rest_to:
             self.rest()
             self.h.actions.sit()  # stay seated while standing by
         else:
             pid = self.nearest_safe()
-            self.nav.go(pid)
+            self.report.on_the_way += self.nav.go(pid, mode=self._calm_mode(mode)).kills
         self.report.stop = "standing by on a safe platform"
+
+    def _calm_mode(self, mode: str | None) -> str | None:
+        """The mode of a trip to rest (`mode` TRANSIT) or to stand by (`mode` None: the navigator's own, or
+        TRANSIT): TRANSIT_AVOID with `rest_avoid`. Without an escort there's no fighting: the trip to rest
+        is TRANSIT_AVOID (avoiding monsters, and potions only: low HP is why she's going), the trip to
+        stand by AVOID."""
+        if self.rest_avoid:
+            return TRANSIT_AVOID
+        if self.nav.escort is None:
+            return TRANSIT_AVOID if mode == TRANSIT else AVOID
+        return mode
 
     # --- a stop ----------------------------------------------------------------------------------
 
@@ -232,6 +253,8 @@ class Tour:
             if self._collect_then_done(st, r, left, enough):
                 break
             self._next_spot(st, left)
+        else:
+            telemetry.emit("event", kind="backstop", text=f"GOES_PER_STOP: {GOES_PER_STOP} goes at platform {pid}")
         self.collect_loot()
         if st.arrived:  # what the visit gave, so later sweeps know where the monsters really are
             self._record(pid, st.total)
@@ -346,6 +369,7 @@ class Tour:
         while looter.pending:
             if time.monotonic() - start >= LOOT_SECONDS:
                 self.log(f"  {LOOT_SECONDS} s collecting drops: the rest is left for later")
+                telemetry.emit("event", kind="backstop", text=f"LOOT_SECONDS: {LOOT_SECONDS} s collecting drops")
                 break
             fresh = [d for d in looter.pending if time.monotonic() - d.since < DROPS_LAST and d.platform is not None
                      and (d.mesos or not looter.inventory_full)]
@@ -363,9 +387,13 @@ class Tour:
             looter.pending = rest
             if trip.result != "arrived":
                 self.log(f"    couldn't get there ({trip.result})")
+                if trip.result == "timeout":
+                    telemetry.emit("event", kind="backstop", text="loot trip: 60 s run out")
                 continue
             if not looter.collect(d):  # guarded: shoot the guard, then try again
+                before = self.h.report.exp_kills
                 self.h.clear(ground={d.platform}, max_kills=2, seconds=20)
+                self.report.on_the_way += self.h.report.exp_kills - before
                 looter.loot_pending()
             self._look_for_loot()
         looter.pending += later

@@ -566,3 +566,21 @@ def test_a_telemetry_failure_stops_recording_not_the_run():
     finally:
         telemetry._sink = before
     assert recorded == plain
+
+
+def _stepped_go(self, dst, x=None, seconds=180, max_misses=6, until=None, *, mode=None):
+    """Navigator.go written out as the hunt loop drives a trip: begin(), then step() until it's over."""
+    st = self.begin(dst, x, seconds, max_misses, until, mode=mode)
+    while (trip := self.step(st)) is None:
+        pass
+    return trip
+
+
+@pytest.mark.parametrize("name", [n for n in scenarios.SCENARIOS if n.startswith("nav_")])
+def test_a_trip_stepped_one_pass_at_a_time_is_the_same_trip(name, monkeypatch):
+    if scenarios.real_map() is None:
+        pytest.skip("needs the real map's data")
+    from gamelab.control.navigator import Navigator
+    want = scenarios.as_json(scenarios.run(name))
+    monkeypatch.setattr(Navigator, "go", _stepped_go)
+    assert scenarios.as_json(scenarios.run(name)) == want

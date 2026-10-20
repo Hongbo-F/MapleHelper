@@ -71,6 +71,7 @@ class MapView:
         self._route(on_map, state.route)
         self._chain(on_map, state.chain)
         self._drops(on_map, state.drops)
+        self._piles(on_map, state.hunt)
         scene = state.scene or {}
         her = state.her()
         if her is not None:
@@ -216,6 +217,17 @@ class MapView:
             x, y = self.pt(d["x"], d["y"] - 4)
             cv2.rectangle(img, (x - 4, y - 4), (x + 4, y + 4), LOOT if d.get("mesos") else DROPS, 1)
 
+    def _piles(self, img, hunt: dict | None) -> None:
+        """The hunt loop's drop store: her piles bright, others' dim, expected ones (not seen yet) small,
+        urgent ones red."""
+        for d in (hunt or {}).get("piles") or []:
+            if d.get("platform") is None or d.get("y") is None:
+                continue
+            x, y = self.pt(d["x"], d["y"] - 4)
+            r = 3 if d.get("status") == "expected" else 5
+            colour = DANGER if d.get("urgent") else (DROPS if d.get("hers") else DIM)
+            cv2.rectangle(img, (x - r, y - r), (x + r, y + r), colour, 1)
+
     def _reach(self, img, her: dict) -> None:
         """Where a star from her reaches: a band on each side, the side she faces brighter."""
         x, y = her["x"], her["y"]
@@ -266,6 +278,17 @@ class MapView:
             line += 16
         if state.chain:
             cv2.putText(img, f"moving: {state.chain.get('text', '')}", (10, line), FONT, 0.38, CHAIN, 1, cv2.LINE_AA)
+            line += 16
+        hunt = state.hunt
+        if hunt:  # the hunt loop's current rule and objective (behavior.hunt)
+            what = hunt.get("objective") or f"platform {hunt.get('ground')}"
+            rates = ""
+            if hunt.get("rate_here") is not None:
+                rates = f"  ({hunt['rate_here']:.2f} EXP/s here"
+                best = hunt.get("rate_to_beat")
+                rates += f", {best[0]:.2f} at platform {best[1]})" if best else ")"
+            cv2.putText(img, f"hunt: {hunt.get('rule', '')} - {what}{rates}", (10, line), FONT, 0.38, TEXT, 1,
+                        cv2.LINE_AA)
             line += 16
         for text in list(state.logs)[-max(0, (self.size[1] - line) // 15):]:
             cv2.putText(img, text[:110], (10, line), FONT, 0.36, DIM, 1, cv2.LINE_AA)

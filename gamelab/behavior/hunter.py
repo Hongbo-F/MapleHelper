@@ -35,6 +35,7 @@ from ..localization.senses import Senses
 from ..perception.eyes import Eyes
 from . import fight
 from .fight import Report
+from .ledger import DropStore, Ledger
 from .looting import Looter
 
 EXP_CHANGED = 3     # pixels of her EXP number that must differ from the last look's for an EXP gain
@@ -54,11 +55,16 @@ class Hunter:
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
         self.exp_events: list[float] = []  # when her EXP went up (the last EXP_MEMORY s)
+        self.exp_gains = 0  # times her EXP went up, ever (reports are replaced; this isn't)
         self._exp: np.ndarray | None = None  # the last look's EXP number (text pixels)
         self._last_hp: float | None = None
         self._last_where: Where | None = None
         self._last_potion = 0.0
-        self.senses.listeners += [self._vitals, self._publish]
+        # The hunt's bookkeeping from every look and throw (behavior.ledger): read by nothing that decides yet.
+        self.drops = DropStore()
+        self.ledger = Ledger(self, self.drops)
+        self.senses.listeners += [self._vitals, self._publish, self.ledger.on_look, self.drops.on_look]
+        self.actions.throw_listeners.append(self.ledger.on_throw)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:
         """A look (Senses.look); drops are looked for as her inventory allows (only mesos when it's full)."""
@@ -76,7 +82,8 @@ class Hunter:
         """A navigator for her: `fighting`, she shoots monsters on the way (hunting tours) instead of
         avoiding them."""
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
-                         escort=fight.FightOnTheWay(self) if fighting else None, rng=rng)
+                         potions=self.drink_if_low, escort=fight.FightOnTheWay(self) if fighting else None,
+                         rng=rng)
 
     def health_check(self, s: Scene) -> str | None:
         """Drink if HP is low; returns a reason to stop if it's too low."""
@@ -111,6 +118,7 @@ class Hunter:
         if _exp_changed(self._exp, s.exp):
             self.exp_events.append(s.t)
             self.report.exp_kills += 1
+            self.exp_gains += 1
         self.exp_events = [t for t in self.exp_events if s.t - t < EXP_MEMORY]
         self._exp = s.exp
         if self._last_hp is not None and s.hp < self._last_hp:

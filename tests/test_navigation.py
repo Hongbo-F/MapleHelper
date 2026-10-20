@@ -253,6 +253,12 @@ def test_grounds_are_ranked_by_exp_and_learn_from_visits(monkeypatch, tmp_path):
     # A visit's kills count by their EXP.
     tour._record(4, Report(kills={"pig": 2, "orange-mushroom": 1}, exp_kills=3))
     assert tour.stats["4"]["exp"] == 41
+    # The hunt loop's visits also say how long they lasted (its rate rule reads the average).
+    tour.record_visit(2, 26.0, 40.0)
+    tour.record_visit(2, 13.0, 20.0)
+    assert {k: tour.stats["2"][k] for k in ("visits", "exp", "timed", "seconds")} == \
+        {"visits": 2, "exp": 39.0, "timed": 2, "seconds": 60.0}
+    assert Tour(hunter, SimpleNamespace(model=model), log=lambda m: None).stats["2"]["seconds"] == 60.0
 
 
 def test_monsters_left_out_of_reach_are_shot_from_another_spot_before_looting():
@@ -276,7 +282,7 @@ def test_tour_seed_seeds_the_route_choices_too(monkeypatch):
     rngs = {}
 
     class Tour:
-        def __init__(self, hunter, nav, log, rng, rest_below):
+        def __init__(self, hunter, nav, log, rng, rest_below, rest_avoid=False):
             rngs["tour"] = rng
 
         def run(self, **kw):
@@ -292,3 +298,58 @@ def test_tour_seed_seeds_the_route_choices_too(monkeypatch):
     assert cli.cmd_tour(cli.build_parser().parse_args(["tour", "--seed", "7"])) == 0
     want = random.Random(7).random()
     assert rngs["nav"].random() == want and rngs["tour"].random() == want
+
+
+def test_a_trip_mode_needs_an_escort_unless_it_avoids_monsters(model):
+    """go(mode=...): avoid (no escort), hunt (the escort's bursts and monsters in the way) or transit (the
+    trip to rest); hunting or transit without an escort, or an unknown mode, is refused before any key."""
+    from types import SimpleNamespace
+
+    from gamelab.control.navigator import AVOID, HUNT, TRANSIT, Navigator
+    key = lambda name: SimpleNamespace(name=name)
+    keys = SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), up=key("up"), down=key("down"),
+                           pick_up=None)
+    alone = Navigator(None, SimpleNamespace(keys=keys), model)
+    escorted = Navigator(None, SimpleNamespace(keys=keys), model, escort=SimpleNamespace())
+    assert (alone.mode, escorted.mode) == (AVOID, HUNT) and not alone.fight and escorted.fight
+    for mode in (HUNT, TRANSIT, "sneak"):
+        with pytest.raises(ValueError):
+            alone.go(0, mode=mode)
+    with pytest.raises(ValueError):
+        escorted.go(0, mode="sneak")
+
+
+def test_the_trips_to_rest_and_stand_by_keep_their_modes():
+    """Tour._calm_mode: to rest, transit with an escort and transit-avoid without one (low HP never ends
+    the trip either way: it did without an escort, and she sat down among the monsters); to stand by, the
+    navigator's own mode (the tour's), or avoid; with rest_avoid, transit-avoid both ways."""
+    from types import SimpleNamespace
+
+    from gamelab.behavior.tour import Tour
+    from gamelab.control.navigator import AVOID, TRANSIT, TRANSIT_AVOID
+    tour = object.__new__(Tour)
+    tour.rest_avoid = False
+    tour.nav = SimpleNamespace(escort=SimpleNamespace())
+    assert (tour._calm_mode(TRANSIT), tour._calm_mode(None)) == (TRANSIT, None)
+    tour.nav = SimpleNamespace(escort=None)
+    assert (tour._calm_mode(TRANSIT), tour._calm_mode(None)) == (TRANSIT_AVOID, AVOID)
+    tour.rest_avoid = True
+    assert tour._calm_mode(TRANSIT) == tour._calm_mode(None) == TRANSIT_AVOID
+
+
+def test_transit_with_avoidance_keeps_clear_of_monsters_and_only_drinks_potions(model):
+    """TRANSIT_AVOID (`tour --rest-avoid`): no escort needed, no fighting on the way, and low HP doesn't end
+    the trip (potions only, as in transit)."""
+    from types import SimpleNamespace
+
+    from gamelab.control.navigator import TRANSIT_AVOID, Navigator
+    key = lambda name: SimpleNamespace(name=name)
+    keys = SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), up=key("up"), down=key("down"),
+                           pick_up=None)
+    health, potions = (lambda s: "HP low"), (lambda s: None)
+    for escort in (None, SimpleNamespace()):
+        nav = Navigator(None, SimpleNamespace(keys=keys), model, health=health, potions=potions, escort=escort)
+        st = nav.begin(0, mode=TRANSIT_AVOID)
+        assert st.mode == TRANSIT_AVOID and st.health is potions
+        nav._mode = st.mode
+        assert not nav.fight

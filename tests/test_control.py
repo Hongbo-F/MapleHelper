@@ -47,3 +47,29 @@ def test_a_throw_turns_her_only_when_she_faces_the_other_way():
 def test_no_potion_key_means_no_potion():
     sent = []
     assert actions(sent).drink() is False and not sent
+
+
+def test_a_plan_with_a_jump_waits_out_the_attack_lock_and_one_without_doesnt(monkeypatch):
+    """A jump (or attack) pressed inside the 730 ms attack lock is ignored, so every plan that presses one
+    is held back just enough: a jump 200 ms into the plan, with 0.5 s of lock left, waits 0.3 s."""
+    from gamelab.control import actions as actions_mod
+    now, slept = [100.0], []
+    monkeypatch.setattr(actions_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(actions_mod.time, "sleep", lambda s: slept.append(round(s, 3)))
+    a = actions([])
+    a.lock_until = 100.5
+    a.hold_back([[0, "right", "down"], [200, "alt", "down"], [240, "alt", "up"]])
+    a.hold_back([[0, "right", "down"], [400, "right", "up"]])        # no jump: nothing to wait for
+    a.hold_back([[0, "right", "down"], [600, "alt", "down"]])        # its jump comes after the lock anyway
+    assert slept == [0.3]
+
+
+def test_the_movers_walks_press_pick_up_as_every_walk_does():
+    """Walking to an x (after a trip, before a jump up or a drop) presses pick-up every 150 ms and on
+    through the slide, like Actions.walk: anything she passes over is looted."""
+    from gamelab.control.actions import WALK_PICK_AFTER_MS, WALK_PICK_EVERY_MS
+    from gamelab.control.mover import Mover
+    events, _ = Mover(None, actions([]), None).walk_events(150.0, tolerance=8)
+    picks = [e[0] for e in events if e[1] == "z" and e[2] == "down"]
+    release = next(e[0] for e in events if e[1] == "right" and e[2] == "up")
+    assert picks[0] == 0 and picks[1] == WALK_PICK_EVERY_MS and release < picks[-1] < release + WALK_PICK_AFTER_MS
