@@ -1,6 +1,7 @@
 """Results of simulated hunts, and A/B comparisons of hunting policies on the same seeds.
 
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
+                                             [--feed] [--costs coded|measured]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
     python -m gamelab.sim.harness rests [--trips 40]            trips to rest at low HP, transit vs --rest-avoid
@@ -54,6 +55,16 @@ PRESETS = {
              Realism(spawn_share=0.6, rival_every=25.0, potions=60)),
 }
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
+# What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
+# the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
+# measured them offline: a look placing her 16.0 ms of computing plus the wait for a frame (5.6 ms median with
+# the screen changing) and its copy (2.0), her band 32.0 ms more, the whole screen 122.0, a strip of drops
+# about 8 (her platform's 14.6). Glances keep their pace (Eyes.GLANCE_EVERY_S). With `--feed`, her looks come
+# from the feed, whose own costs are localization.feed.COSTS.
+COSTS = {
+    "coded": {},
+    "measured": {"LOOK_S": 0.024, "LOOK_LAG": 0.006, "DETECT_S": 0.032, "DETECT_WIDE_S": 0.122, "LOOT_S": 0.008},
+}
 
 
 # --- policies ------------------------------------------------------------------------------------------
@@ -86,26 +97,41 @@ POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid}
 
 # --- one run -------------------------------------------------------------------------------------------
 
-def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0):
+def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
+             feed: bool = False):
     """The Scenario for one run: the policy hunting from START_AT[seed] in world `seed` until the horizon.
-    `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a little)."""
+    `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a little);
+    `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed)."""
     from . import scenarios
     noise, realism = PRESETS[preset]
     fn = POLICIES[policy]
     return scenarios.Scenario(f"{policy}:{preset}:{seed}", fn, START_AT[seed % len(START_AT)], monsters="all",
                               seed=seed, limit=minutes * 60, noise=noise, realism=realism, may_die=True,
-                              think=think)
+                              think=think, feed=feed)
 
 
-def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0) -> dict:
-    """Run one hunt and return what it gave (outcomes)."""
+def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
+            feed: bool = False, costs: str = "coded") -> dict:
+    """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS)."""
     from .. import telemetry
-    from . import scenarios
-    with telemetry.captured() as records:
-        trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think))
+    from . import fakes, scenarios
+    before = {name: getattr(fakes, name) for name in COSTS[costs]}
+    try:
+        for name, value in COSTS[costs].items():
+            setattr(fakes, name, value)
+        with telemetry.captured() as records:
+            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed))
+    finally:
+        for name, value in before.items():
+            setattr(fakes, name, value)
     out = outcomes(sim.world, records, minutes * 60)
-    out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think,
+    out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=feed, costs=costs,
                result=str(trace["result"])[:120])
+    if feed:
+        f = trace["feed"]
+        out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
+                              "senses": f["senses"], "tracker": f["tracker"]}
+    out["looks"] = sim.eyes.counts["looks"]
     return out
 
 
@@ -168,8 +194,9 @@ def _rest_trips(records: list[dict]) -> list[tuple[float, float]]:
 
 # --- many runs -----------------------------------------------------------------------------------------
 
-def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0) -> list[dict]:
-    args = [(policy, k, preset, minutes, think) for k in range(1, seeds + 1)]
+def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
+             feed: bool = False, costs: str = "coded") -> list[dict]:
+    args = [(policy, k, preset, minutes, think, feed, costs) for k in range(1, seeds + 1)]
     if jobs <= 1:
         return [run_one(*a) for a in args]
     from gamelab.sim import harness  # by its module name, so worker processes can find it (not __main__)
@@ -387,7 +414,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--jobs", type=int, default=1)
     r.add_argument("--think", type=float, default=0.0,
                    help="charge the stack's computing to the fake clock, times this (1: this computer's speed)")
-    r.add_argument("--save", help="name to save the results under (default: POLICY-PRESET)")
+    r.add_argument("--save", help="name to save the results under (default: POLICY-PRESET, then -feed and -COSTS)")
+    r.add_argument("--feed", action="store_true", help="her looks and glances from a continuous feed (SyncFeed)")
+    r.add_argument("--costs", choices=sorted(COSTS), default="coded",
+                   help="what the simulator's looks take: coded (the fakes' own), measured (today's)")
     c = sub.add_parser("compare")
     c.add_argument("baseline")
     c.add_argument("candidate")
@@ -412,9 +442,10 @@ def main(argv: list[str] | None = None) -> int:
         ok, lines = (compare_rest if args.bar == "rest" else compare)(load(args.baseline), load(args.candidate))
         print("\n".join(lines))
         return 0 if ok else 1
-    results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think)
+    results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs)
     print(table(results))
-    name = args.save or f"{args.policy}-{args.preset}"
+    name = args.save or (f"{args.policy}-{args.preset}" + ("-feed" if args.feed else "")
+                         + (f"-{args.costs}" if args.costs != "coded" else ""))
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
     return 0
