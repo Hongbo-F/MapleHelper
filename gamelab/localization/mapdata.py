@@ -81,8 +81,11 @@ class Platform:
         flag, 1,340 forbid it all along, 757 nowhere and 3 in part."""
         return all(s.no_drop for s in self.segments)
 
-    def drop_ok(self, x: float) -> bool:
-        """Whether she can drop through it at x (the foothold there doesn't forbid it)."""
+    def drop_ok(self, x: float, room: float = 0.0) -> bool:
+        """Whether she can drop through it at x (the foothold there doesn't forbid it), and, with `room`,
+        anywhere within that of x (no foothold that forbids it reaches nearer)."""
+        if room > 0 and any(s.no_drop for s in self.segments if s.x1 < x + room and s.x2 > x - room):
+            return False
         for s in self.segments:
             if s.x1 <= x <= s.x2:
                 return not s.no_drop

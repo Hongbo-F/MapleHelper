@@ -34,7 +34,7 @@ from ..localization.monsters import MonsterTrack
 from . import body
 from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
                       RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms, sure_jump_ms)
-from .route import JUMP_FROM, Move
+from .route import DROP_STEP, JUMP_FROM, ROPE_CLEAR, Move, drop_clear, drop_spots
 
 # Her measured lags and slides (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, STOP_S, LAND_SLIDE) describe her body,
 # so they're in physics, with how they were measured (still importable from here). Her walk, stops and
@@ -58,8 +58,8 @@ JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far be
 STEP_ACCEPT = 8
 JUST_PASSED = 2      # units: running, a spot she's this little past still counts as reached
 EDGE_ROOM = 5        # units she keeps in from a platform's ends when stepping back or taking off
-ROPE_CLEAR = 30      # drop at least this far from the top of a rope hanging from her platform
-DROP_STEP = 2        # units between the drop spots tried
+# Drops: at least route.ROPE_CLEAR (30) from the top of a rope hanging from her platform, and route.DROP_ROOM
+# (8) from a foothold that forbids it; spots every route.DROP_STEP units (route.drop_spots).
 DROP_JUMP_AFTER = 0.1  # s after down that a drop's jump goes in ...
 DROP_DOWN_HOLD = 0.18  # ... and down is let go (as soon as the drop has started)
 GRAB_LEAD = WALK_SPEED * JUMP_SPEED / GRAVITY  # ~41: jump this far before a rope to be at the top over it
@@ -455,13 +455,9 @@ class Flow:
         if variant != "run":
             return None
         a, below = b.platform, self.model.platform(m.dst)
-        lo, hi = max(a.left, below.left) + LAND_MARGIN, min(a.right, below.right) - LAND_MARGIN
-        # Not at the top of a rope hanging from her platform (its top within 15 units of it): down there
-        # climbs onto the rope.
-        ropes = [r.x for r in self.model.ropes if abs(r.top - a.y_at(r.x)) < 15 and a.covers(r.x)]
-        # Nor where its foothold forbids dropping through (forbidFallDown).
-        clear = [x for x in range(int(lo), int(hi) + 1, DROP_STEP)
-                 if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and a.drop_ok(x)]
+        # Not at the top of a rope hanging from her platform (down there climbs onto the rope), nor where its
+        # foothold forbids dropping through (forbidFallDown), or near one.
+        clear = drop_spots(self.model, a, below)
         if not clear:
             return None
         prefer = min(clear, key=lambda x: (abs(x - b.x), abs(x - m.x)))
@@ -477,6 +473,11 @@ class Flow:
         while run_hi + DROP_STEP in spots:
             run_hi += DROP_STEP
         stop = self._stop_within(b, run_lo, run_hi, prefer, k)
+        if stop is not None and not drop_clear(self.model, a, stop[1]):
+            # Standing a tap's step outside the stretch (STEP_ACCEPT) does for other moves, not here: within
+            # ROPE_CLEAR of a rope's top (down there climbs onto it). She steps into the stretch first, to its
+            # nearest end.
+            stop = self._step(b, min(max(b.x, run_lo), run_hi), k)
         if stop is None:
             return None
         t, x = stop

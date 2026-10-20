@@ -20,7 +20,7 @@ from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..motion.body import ROPE_GROUP
 from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_SPEED, ROPE_REACH, WALK_SPEED, air_time, fly, hold_ms, run_ms
-from ..motion.route import JUMP_FROM, Move
+from ..motion.route import JUMP_FROM, Move, drop_clear, drop_spots
 from ..screen import SCALE, SCREEN_SCALE
 from .actions import WALK_PICK_AFTER_MS, Actions, tap
 
@@ -172,9 +172,17 @@ class Mover:
         time.sleep(0.3)  # then settle looks for her standing still
 
     def _drop(self, m: Move, s: Scene) -> None:
-        """Walk to the drop spot (unless she's there) and drop through her platform: down + jump."""
+        """Walk to the drop spot (unless she's there) and drop through her platform: down + jump. Within 20
+        units of the move's spot is close enough, unless a drop there wouldn't go through (by a rope's top,
+        or on a foothold that forbids it): then to the nearest spot that would (route.drop_spots)."""
         down, jump = self.actions.keys.down.name, self.actions.keys.jump.name
-        events, t = self.walk_events(m.x - s.where.x, 20)
+        a, here = self.model.platform(m.src), s.where.x
+        dx, tolerance = m.x - here, 20
+        if abs(dx) <= tolerance and not drop_clear(self.model, a, here):
+            spots = drop_spots(self.model, a, self.model.platform(m.dst))
+            if spots:
+                dx, tolerance = min(spots, key=lambda x: abs(x - here)) - here, 0
+        events, t = self.walk_events(dx, tolerance)
         self._send(events + [[t, down, "down"], *tap(t + 120, jump), [t + 320, down, "up"]], "drop")
         time.sleep(0.3)  # then settle looks for her standing still
 

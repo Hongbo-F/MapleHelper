@@ -58,6 +58,33 @@ def test_a_drop_is_made_only_where_the_floor_lets_her_through():
     assert leg.spans[-1].x1 > 150
 
 
+def test_a_drop_isnt_made_a_taps_step_off_where_it_goes_through():
+    # Standing within STEP_ACCEPT of where a move wants her does for other moves, not for a drop: on a
+    # foothold that forbids it the drop does nothing, and by a rope's top down climbs onto the rope. She
+    # steps in first, to where it goes through (route.drop_spots), and in the world she drops onto C.
+    from gamelab.motion import route
+    from gamelab.motion.route import Move
+    from gamelab.sim.world import World
+    from test_sim import KEYS as WORLD_KEYS
+    t = tree()
+    t["foothold"]["1"]["1"]["2"]["forbidFallDown"] = 1  # A's 100..200 forbids it, 0..100 doesn't
+    m = mapdata.parse(1, t, "Test Map", {})
+    a, c, d = by_y(m, 300, 100), by_y(m, 500, 400), by_y(m, 300, 700)  # D: a rope hangs from it at 700
+    for here, top, floor in ((101.0, a, c), (104.0, a, c), (107.0, a, c), (110.0, a, c), (676.0, d, c), (724.0, d, c)):
+        k = Keys(KEYS)
+        leg = Flow(m, KEYS).leg(Move("drop", top.id, floor.id, here, here), Body(0.0, here, top), k)
+        x = leg.spans[-1].x1
+        assert leg.end.platform is floor and route.drop_clear(m, top, x) and abs(x - here) > 1, here
+        w = World(m, WORLD_KEYS, (top.id, here), monsters=None)
+        for ms, name, how in k.sorted():
+            w.key(ms / 1000, name, how == "down")
+        w.advance(leg.end.t + 1.0)
+        assert w.plat is floor and w.mode == "ground", here
+    # Standing where it goes through, she drops there.
+    leg = Flow(m, KEYS).leg(Move("drop", a.id, c.id, 90, 90), Body(0.0, 90.0, a), Keys(KEYS))
+    assert leg.spans[-1].x1 == 90
+
+
 def test_chains_stop_where_a_monster_could_get_in_the_way(model):
     c, d = by_y(model, 500, 400), by_y(model, 300, 700)
     path = Planner(model).plan(c.id, 200, d.id)

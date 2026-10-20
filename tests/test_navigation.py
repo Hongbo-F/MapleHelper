@@ -88,6 +88,11 @@ def test_a_floor_that_forbids_dropping_through_it_gets_no_drop(model):
     t["foothold"]["1"]["1"]["2"]["forbidFallDown"] = 1  # A's 100..200
     a = by_y(mapdata.parse(1, t, "Test Map", {}), 300, 100)
     assert not a.no_drop and a.drop_ok(50) and a.drop_ok(100) and not a.drop_ok(150) and not a.drop_ok(250)
+    # ... and not near it: where she stands to drop is good to a few units.
+    assert a.drop_ok(92, room=8) and not a.drop_ok(93, room=8) and not a.drop_ok(100, room=8)
+    # The drop onto C goes from the nearest spot to the middle of their overlap (100) clear of it.
+    [drop] = [x for x in Planner(mapdata.parse(1, t, "Test Map", {})).moves if x.kind == "drop" and x.src == a.id]
+    assert drop.x == 92
 
 
 def test_platform_lookups(model):

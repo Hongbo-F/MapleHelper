@@ -127,3 +127,26 @@ def test_a_jump_throw_that_turns_her_jumps_once_the_turns_tap_has_stopped_walkin
     a.lock_until = 0.0
     a.jump_throw(RIGHT)
     assert [e[1] for e in sent[0][1]] == ["alt", "alt", "f", "f"] and sent[0][1][0][0] == 0
+
+
+def test_the_movers_drop_steps_off_a_spot_where_it_wouldnt_go_through(monkeypatch):
+    """Within 20 units of the move's spot does for the mover's drop, unless a drop there wouldn't go through
+    (on a foothold that forbids it, or by a rope's top): then it walks to the nearest spot that would."""
+    from gamelab.control import mover as mover_mod
+    from gamelab.localization import mapdata
+    from gamelab.motion.route import Move
+    from test_navigation import by_y, tree
+    monkeypatch.setattr(mover_mod.time, "sleep", lambda s: None)
+    t = tree()
+    t["foothold"]["1"]["1"]["2"]["forbidFallDown"] = 1  # A's 100..200
+    m = mapdata.parse(1, t, "Test Map", {})
+    a, c = by_y(m, 300, 100), by_y(m, 500, 400)
+    sent = []
+    acts = actions(sent)
+    acts.keys.down = SimpleNamespace(name="down")
+    mover = mover_mod.Mover(None, acts, m)
+    for here, walks in ((104.0, {"left"}), (90.0, set())):
+        sent.clear()
+        mover._drop(Move("drop", a.id, c.id, 92.0, 92.0), SimpleNamespace(where=SimpleNamespace(x=here)))
+        (_, events), = sent
+        assert {name for _, name, how in events if name in ("left", "right") and how == "down"} == walks, here

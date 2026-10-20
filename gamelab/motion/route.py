@@ -50,6 +50,13 @@ DROP_EXTRA_S = 0.4
 # Moving one move at a time, running jumps missed often and this was 1.5 s; chained (flow.py) about
 # one move in 15 lands elsewhere, mostly drops and straight-up jumps timed off.
 RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25}
+# Where she drops: down on a rope's top climbs onto the rope, and on a foothold that forbids it (forbidFallDown)
+# the drop does nothing. So not within ROPE_CLEAR of the top of a rope hanging from her platform, nor within
+# DROP_ROOM of a foothold that forbids it: where she stands to drop is good to about that (flow.STEP_ACCEPT,
+# the units within which a plan takes her as standing where it wants her; the mover's walks).
+ROPE_CLEAR = 30
+DROP_ROOM = 8
+DROP_STEP = 2        # units between the drop spots tried
 ALONG_STEP = 10      # running jumps are tried from every this many units along a platform (20 missed
                      # the 30-unit window of takeoffs from platform 4 up onto 2, so 2 had no route) ...
 ALONG_SPREAD = 60    # ... and kept this far apart ...
@@ -203,13 +210,38 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
         x = _overlap_middle(a, b)
         if x is None:
             continue
-        if not a.drop_ok(x):
-            continue  # the game won't drop her through it there (forbidFallDown)
+        if not a.drop_ok(x, DROP_ROOM):  # the game won't drop her through it there (forbidFallDown), or near
+            lo, hi = max(a.left, b.left) + LAND_MARGIN, min(a.right, b.right) - LAND_MARGIN
+            ok = [s for s in range(math.ceil(lo), math.floor(hi) + 1, DROP_STEP) if a.drop_ok(s, DROP_ROOM)]
+            if not ok:
+                continue
+            x = float(min(ok, key=lambda s: abs(s - x)))  # the nearest spot where it will
         land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a, group=a.group)
         if land is not None and land.id not in seen:
             seen.add(land.id)
             out.append(Move("drop", a.id, land.id, x, land_x, seconds=DROP_EXTRA_S + t))
     return out
+
+
+def rope_tops(model: MapModel, a: Platform) -> list[float]:
+    """The xs of the ropes hanging from platform a (their tops within 15 units of it)."""
+    return [r.x for r in model.ropes if abs(r.top - a.y_at(r.x)) < 15 and a.covers(r.x)]
+
+
+def drop_clear(model: MapModel, a: Platform, x: float) -> bool:
+    """Whether down + jump at x drops her through platform a: not within ROPE_CLEAR of a rope's top (down
+    there climbs onto it), nor on a foothold that forbids it."""
+    return a.drop_ok(x) and all(abs(x - rx) > ROPE_CLEAR for rx in rope_tops(model, a))
+
+
+def drop_spots(model: MapModel, a: Platform, below: Platform) -> list[int]:
+    """Where on a she can drop through it onto `below`: every DROP_STEP units where they overlap (LAND_MARGIN
+    in from the ends), not within ROPE_CLEAR of a rope's top, nor within DROP_ROOM of a foothold that
+    forbids dropping."""
+    lo, hi = max(a.left, below.left) + LAND_MARGIN, min(a.right, below.right) - LAND_MARGIN
+    ropes = rope_tops(model, a)
+    return [x for x in range(int(lo), int(hi) + 1, DROP_STEP)
+            if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and a.drop_ok(x, DROP_ROOM)]
 
 
 def _overlap_middle(a: Platform, b: Platform) -> float | None:
