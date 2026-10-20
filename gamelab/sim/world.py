@@ -18,7 +18,9 @@ The physics are the ones gamelab plans with, so a plan that is right on paper wo
   ~58 units (the median logged push). At 0% HP she dies, and the run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
-  that monster (attack.reach). On the ground, the nearest monster on her level (reach.LEVEL) whose body
+  that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
+  whether its damage shows when it gets there isn't measured, so the shot log allows for both:
+  behavior.fight.LANDS_FROM_S). On the ground, the nearest monster on her level (reach.LEVEL) whose body
   reaches into the claw's swing (reach.CLAW_FAR ahead of her, reach.CLAW_DOWN below to reach.CLAW_UP
   above her feet) is swiped (a fifth of a star's damage); else the star's search picks (reach.search_band:
   of the monsters whose body overlaps one of its bands, the first band's, the nearest of those), so off

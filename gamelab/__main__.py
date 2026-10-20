@@ -329,7 +329,7 @@ def _hunt_look(hunter) -> int:
 
 def _shot_summary(path) -> int:
     """Hits and misses from a shot log, by how far below (+) or above (-) her the target was (throws left
-    undecided, in flight before the one that killed it, aside)."""
+    undecided aside: in flight before the one that killed it, or one of two that may have made a bar drop)."""
     import json
     if not path.exists():
         print(f"no shots logged yet ({path})")

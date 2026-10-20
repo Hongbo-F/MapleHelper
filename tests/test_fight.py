@@ -317,8 +317,10 @@ def test_the_shot_log_keeps_where_she_and_the_target_were_and_the_wall_rule():
 
 
 def test_the_shot_log_keeps_what_was_in_front_then_and_at_the_pick():
-    # Every monster on the side she throws, at the throw and at the first look after it (about when the
-    # attack picked its target), so which one the search could pick can be fitted from the log alone.
+    # Every monster on the side she throws, at the throw and at the first look that places her after it (about
+    # when the attack picked its target), whether the target is seen in it or not (a hit one is often hidden
+    # under its damage numbers), and when that look was, so which one the search could pick can be fitted
+    # from the log alone.
     from gamelab.behavior.fight import _note_pick, _shot
     from test_attack import step_map
     model, a, b, _ = step_map()
@@ -329,55 +331,103 @@ def test_the_shot_log_keeps_what_was_in_front_then_and_at_the_pick():
     assert [(m["kind"], m["x"], m.get("target", False)) for m in sh["front"]] == [("pig", 300, True),
                                                                                   ("snail", 150, False)]
     assert sh["y"] == 500 and "pick" not in sh
-    later = SimpleNamespace(where=SimpleNamespace(x=104, y=500), monsters=[target(290, 440, platform=b.id)])
-    _note_pick([sh], later, later.monsters[0])
-    assert sh["pick"]["x"] == 104 and sh["pick"]["front"] == [{"kind": "pig", "x": 290, "y": 440, "platform": b.id,
-                                                               "bar": None, "target": True}]
+    _note_pick([sh], SimpleNamespace(where=None, monsters=[], t=sh["key"] + 0.05), None)
+    assert "pick" not in sh  # a look that doesn't place her
+    later = SimpleNamespace(where=SimpleNamespace(x=104, y=500), monsters=[target(290, 440, platform=b.id)],
+                            t=sh["key"] + 0.1)
+    _note_pick([sh], later, None)  # the target not seen in it
+    assert sh["pick"]["x"] == 104 and sh["pick"]["t"] == 0.1
+    assert sh["pick"]["front"] == [{"kind": "pig", "x": 290, "y": 440, "platform": b.id, "bar": None}]
     first = sh["pick"]
-    _note_pick([sh], SimpleNamespace(where=SimpleNamespace(x=200, y=500), monsters=[]), None)
+    _note_pick([sh], SimpleNamespace(where=SimpleNamespace(x=200, y=500), monsters=[], t=sh["key"] + 0.9), None)
     assert sh["pick"] is first  # the first look after the throw only
 
 
-def test_a_kill_is_credited_to_one_throw_in_the_shot_log(monkeypatch, tmp_path):
-    # Three throws in flight when the target is gone and her EXP has gone up: the last one due before it was
-    # gone is the kill; the one before it may have hit it too (undecided); the one due after missed it. (The
-    # old log, lab/shots.jsonl, made every throw due by then a hit.) Seen without the HP bar it had, it was
-    # dying already: the kill is the last throw due before that.
+def _throw_at(key: float, due: float, bar=None) -> dict:
+    """A throw in flight for the shot log's scoring (fight._shot's fields that it goes by)."""
+    return {"kind": "pig", "dx": 200, "dy": 0, "bar": bar, "key": key, "before_t": key, "due": due,
+            "looks": [(key, bar)]}
+
+
+def _logged(path) -> list[dict]:
     import json
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_kill_is_credited_to_one_throw_in_the_shot_log(monkeypatch, tmp_path):
+    # Three throws in flight when the target is gone and her EXP has gone up: the last one whose star can have
+    # landed by then is the kill; the one before it may have hit it too (undecided); the one whose damage
+    # can't show yet (under 0.47 s after its key) missed it. (The old log, lab/shots.jsonl, made every throw
+    # due by then a hit.) Seen without the HP bar it had, it was dying already: the kill is the last throw
+    # that can have landed before that.
     from gamelab import paths
     from gamelab.behavior import fight
-    monkeypatch.setattr(paths, "SHOT_LOG", tmp_path / "shots2.jsonl")
+    log = tmp_path / "shots2.jsonl"
+    monkeypatch.setattr(paths, "SHOT_LOG", log)
     monkeypatch.setattr(time, "monotonic", lambda: 10.0)
     monkeypatch.setattr(time, "sleep", lambda s: None)
     h = hunter()
     h.take_exp = lambda since: True
     h.looter.collect = lambda spot: None
-    st = fight.KillState("pig", (700, 500), 0, first_throw=8.0,
-                         flying=[{"kind": "pig", "dx": 200, "dy": 0, "due": due} for due in (9.0, 9.9, 10.5)])
-    assert fight._target_gone(h, st) == "killed"
-    rows = [json.loads(line) for line in (tmp_path / "shots2.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert [r["hit"] for r in rows] == [None, True, False]
-    st = fight.KillState("pig", (700, 500), 0, first_throw=8.0, had_bar=True, dying_since=9.0,
-                         flying=[{"kind": "pig", "dx": 200, "dy": 0, "due": due} for due in (8.5, 9.1, 9.9)])
-    assert fight._target_gone(h, st) == "killed"
-    rows = [json.loads(line) for line in (tmp_path / "shots2.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert [r["hit"] for r in rows[3:]] == [None, True, False]
+
+    def gone(flying: list, **kw) -> list:
+        st = fight.KillState("pig", (700, 500), 0, first_throw=7.0, flying=flying, **kw)
+        n = len(_logged(log))
+        assert fight._target_gone(h, st) == "killed"
+        return [r["hit"] for r in _logged(log)[n:]]
+
+    assert gone([_throw_at(k, k + 0.8) for k in (8.0, 8.8, 9.6)]) == [None, True, False]
+    assert gone([_throw_at(k, k + 0.7) for k in (7.6, 8.4, 9.2)], had_bar=True, dying_since=9.0) == [None, True, False]
+    # The last one that can have landed was a far throw, not due yet when it was seen dying: its star may have
+    # killed it (the simulator lands a star's damage at its release) or found it dead (if the game shows the
+    # damage when the star gets there). Neither is credited. Alone, it's the kill.
+    assert gone([_throw_at(8.0, 8.6), _throw_at(8.8, 9.95)], had_bar=True, dying_since=9.4) == [None, None]
+    assert gone([_throw_at(8.8, 9.95)], had_bar=True, dying_since=9.4) == [True]
+    row = _logged(log)[-1]
+    assert (row["due_s"], row["decided_s"], row["bars"]) == (1.15, 0.6, [[0.0, None]])
+    assert not {"key", "due", "looks", "decided", "before_t"} & set(row)
 
 
 def test_a_bar_drop_is_credited_to_the_throw_whose_star_made_it(monkeypatch, tmp_path):
     # Two throws in flight at an unhurt pig. The first star lands (the bar shows, 70% left) before the second
-    # one is due: the second is scored from that bar, so when the bar stays at 70% it missed. Scored from
-    # the bar at its throw (none), it took the first one's hit.
-    import json
+    # one's damage can show: the second is scored from that bar, so when the bar stays at 70% it missed (once
+    # it's been seen 0.3 s past its due time). Scored from the bar at its throw (none), it took the first
+    # one's hit.
     from gamelab import paths
     from gamelab.behavior import fight
-    monkeypatch.setattr(paths, "SHOT_LOG", tmp_path / "shots2.jsonl")
-    clock = [1.2]
-    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
-    flying = [{"kind": "pig", "dx": 200, "dy": 0, "bar": None, "due": due} for due in (1.0, 1.7)]
-    flying = fight._score_shots(flying, 0.7)
-    for t in (1.8, 2.7):
-        clock[0] = t
-        flying = fight._score_shots(flying, 0.7)
-    rows = [json.loads(line) for line in (tmp_path / "shots2.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert [r["hit"] for r in rows] == [True, False] and flying == []
+    log = tmp_path / "shots2.jsonl"
+    monkeypatch.setattr(paths, "SHOT_LOG", log)
+    flying = [_throw_at(0.0, 1.0)]
+    fight._score_shots(flying, None, now=0.05)
+    flying.append(_throw_at(0.85, 1.7))
+    for t, bar in ((1.2, 0.7), (1.85, 0.7)):
+        fight._score_shots(flying, bar, now=t)
+    assert [r["hit"] for r in _logged(log)] == [True]  # the second not seen long enough after it was due
+    fight._score_shots(flying, 0.7, now=2.7)
+    rows = _logged(log)
+    assert [r["hit"] for r in rows] == [True, False] and all("hit" in sh for sh in flying)
+    assert rows[1]["bars"] == [[0.0, None], [0.35, 0.7], [1.0, 0.7], [1.85, 0.7]]
+
+
+def test_one_bar_drop_two_throws_that_may_have_made_it_are_undecided(monkeypatch, tmp_path):
+    # A far throw that missed, then one that hit, the fight looking once a throw (right after each key): the
+    # look after the first was due came before its star had surely landed (0.3 s past due), and the next one
+    # sees the second's hit. Either star can have made that drop (shown at the release, or when it gets
+    # there): both undecided. (The hit wasn't bounded in time: the miss was logged a hit, 15 of 93 misses
+    # over two scenarios' seeds.) Seen unchanged long enough after it was due, a throw missed whatever else
+    # was in flight.
+    from gamelab import paths
+    from gamelab.behavior import fight
+    log = tmp_path / "shots2.jsonl"
+    monkeypatch.setattr(paths, "SHOT_LOG", log)
+    for last in (0.67, None):
+        flying = [_throw_at(0.0, 0.965)]
+        fight._score_shots(flying, None, now=0.05)
+        flying.append(_throw_at(0.8, 1.765))
+        for t, bar in ((0.85, None), (1.65, last)):
+            fight._score_shots(flying, bar, now=t)
+        if last is not None:
+            assert [r["hit"] for r in _logged(log)] == [None, None]
+    assert [r["hit"] for r in _logged(log)[2:]] == [False]
