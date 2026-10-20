@@ -162,14 +162,14 @@ class OldView(MapView):
     def _old_reach(self, img, her):
         import cv2
         from gamelab import directions
-        from gamelab.attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, clear_span, min_dx
+        from gamelab.attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, clear_span, shot_dx
         from gamelab.ui.render import REACH_BEHIND, REACH_FACING
         x, y = her["x"], her["y"]
         pid = her.get("platform")
         stops = clear_span(self.model.platform(pid), x, y) if pid is not None and self._known(pid) else None
         overlay = img.copy()
         for sign in (-1, 1):
-            near, far = x + sign * min_dx(0), x + sign * STAR_REACH
+            near, far = x + sign * shot_dx(0), x + sign * STAR_REACH
             if stops is not None:
                 far = max(far, stops[0]) if sign < 0 else min(far, stops[1])
                 if (far - near) * sign <= 0:
@@ -718,3 +718,17 @@ def test_the_page_s_clock_follows_the_run(tmp_path):
     live = Feed(lambda map_id: MapView(m, width=300), LiveSource(tmp_path), live=True)
     live.step()
     assert abs(live.clock()[0] - time.time()) < 0.1
+
+
+def test_the_page_s_map_cuts_the_reach_band_where_the_window_does():
+    # The page cuts her band with the walls map.json gives each platform, as MapView._reach does with
+    # attack.reach.clear_span: on the step map, A's step wall (x 200) and none of B's to the right.
+    from test_attack import step_map
+    from gamelab.attack.reach import SHOT_H, clear_span
+    m, a, b, _ = step_map()
+    from gamelab.ui import web
+    payload = web.map_payload(MapView(m, width=400))
+    assert payload["reach"]["shot_h"] == SHOT_H
+    line = 500 - SHOT_H
+    xs = [x for x, top, bottom in payload["stops"][a.id] if top <= line < bottom]
+    assert min(v for v in xs if v >= 20) == clear_span(a, 20, 500)[1] == 200

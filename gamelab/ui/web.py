@@ -43,7 +43,8 @@ from urllib.parse import parse_qs, urlparse
 
 import cv2
 
-from ..attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, min_dx
+from ..attack import reach
+from ..attack.reach import SHOT_DOWN, SHOT_H, SHOT_UP, STAR_REACH, shot_dx
 from .render import JUMP_ARC, KIND, REACH_ALPHA, STYLE, MapView
 from .state import LATEST, TRAIL, State
 
@@ -343,7 +344,11 @@ def map_payload(view: MapView) -> dict:
         "portals": [[p.x, p.y] for p in m.portals],
         "style": {name: _hex(c) for name, c in STYLE.items()},
         "kind": {name: _hex(c) for name, c in KIND.items()},
-        "reach": {"star": STAR_REACH, "up": SHOT_UP, "down": SHOT_DOWN, "min": min_dx(0), "alpha": REACH_ALPHA},
+        "reach": {"star": STAR_REACH, "up": SHOT_UP, "down": SHOT_DOWN, "min": shot_dx(0), "alpha": REACH_ALPHA,
+                  "shot_h": SHOT_H},
+        # per platform, the walls of its foothold group that stop a star (attack.reach.clear_span): x, top, bottom
+        "stops": [[[w.x1, min(w.y1, w.y2), max(w.y1, w.y2)] for w in p.walls] if reach.WALLS_BLOCK else []
+                  for p in m.platforms],
         "jump_arc": JUMP_ARC, "zoom": ZOOM, "around": AROUND,
     }
 
@@ -995,10 +1000,22 @@ function draw(v, her, at, when) {
   }
   // where a star from her reaches (_reach), from where she's drawn
   if (her) {
-    const R = M.reach;
+    const R = M.reach, pid = her.platform;
+    let lo = -Infinity, hi = Infinity;  // cut short by a wall of her platform's foothold group (clear_span)
+    if (known(pid) && M.stops) {
+      const segs = M.platforms[pid], line = at[1] - R.shot_h;
+      const a = Math.min(Math.max(at[0], segs[0][0] + 1), segs[segs.length - 1][2] - 1);
+      for (const [wx, top, bottom] of M.stops[pid] || []) {
+        if (!(top <= line && line < bottom)) continue;
+        if (wx <= a) lo = Math.max(lo, wx);
+        if (wx >= a) hi = Math.min(hi, wx);
+      }
+    }
     ctx.globalAlpha = R.alpha;
     for (const sign of [-1, 1]) {
-      const near = at[0] + sign * R.min, far = at[0] + sign * R.star;
+      const near = at[0] + sign * R.min;
+      const far = sign < 0 ? Math.max(at[0] - R.star, lo) : Math.min(at[0] + R.star, hi);
+      if ((far - near) * sign <= 0) continue;
       const a = P(Math.min(near, far), at[1] - R.up), b = P(Math.max(near, far), at[1] + R.down);
       ctx.fillStyle = her.facing === (sign > 0 ? "right" : "left") ? C.reach_facing : C.reach_behind;
       ctx.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
