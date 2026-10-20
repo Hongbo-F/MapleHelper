@@ -52,3 +52,9 @@ recap = 3000
 [character]
 speed = 119.2
 jump = 100
+
+# How gamelab captures the game: "dxgi" (desktop duplication: each frame as the screen shows it, about 2 ms
+# for the game's window) or "mss" (a GDI copy that waits for the screen's next frame: 17 ms and more).
+# DXGI falls back to mss by itself whenever it can't be used.
+[capture]
+method = "dxgi"
