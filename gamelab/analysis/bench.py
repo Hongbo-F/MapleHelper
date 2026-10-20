@@ -89,10 +89,14 @@ class FrontEyes(Eyes):
 
 
 class Timer:
-    """Named stages, timed: each `time` call adds a sample."""
+    """Named stages, timed: each `time` call adds a sample. Also counts of things seen (`count`)."""
 
     def __init__(self):
         self.samples: dict[str, list[float]] = {}
+        self.counts: dict[str, int] = {}
+
+    def count(self, name: str, n: int) -> None:
+        self.counts[name] = self.counts.get(name, 0) + n
 
     def time(self, name: str, fn: Callable):
         t0 = time.perf_counter()
@@ -107,7 +111,7 @@ class Timer:
             xs = sorted(xs)
             lines.append(f"{name:40s} {len(xs):5d} {1000 * statistics.median(xs):8.2f} "
                          f"{1000 * xs[int(0.9 * (len(xs) - 1))]:8.2f} {1000 * xs[0]:8.2f}")
-        return lines
+        return lines + [f"{name}: {n}" for name, n in self.counts.items()]
 
 
 def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDetectorSpotter) -> None:
@@ -122,13 +126,18 @@ def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDete
     if tag is not None:
         timer.time("ground under her", lambda: ground_extent(half, tag[0], tag[1] - TAG_BELOW_FEET))
     dot = timer.time("minimap dot", lambda: her_dot(full))
-    timer.time("ropes: whole screen", lambda: find_ropes(full))
+    whole = timer.time("ropes: whole screen", lambda: find_ropes(full))
     if eyes.rope_columns is not None:  # Senses gives where the map's ropes can show
-        columns = eyes.rope_columns(dot, tag)
-        timer.time("ropes: where the map's can show", lambda: find_ropes(full, columns))
+        columns = eyes.rope_columns(dot, tag) or []
+        near = timer.time("ropes: where the map's can show", lambda: find_ropes(full, columns))
+        inside = [r for r in whole if any(x0 <= r.x < x1 for x0, x1 in columns)]
+        timer.count("ropes seen where the map's can show", len(inside))
+        timer.count("... of them missed by the search there", sum(not any(abs(r.x - n.x) <= 2 for n in near)
+                                                                  for r in inside))
     x0, y0, x1, y1 = EXP_NUMBER
     timer.time("EXP number", lambda: full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
     timer.time("Lie Detector check (the player's)", lambda: spotter.seen(full))
+    timer.time("glance (her dot and HP)", eyes.glance)
     obs = timer.time("Eyes.look", eyes.look)
     if obs.tag is None:
         return
@@ -145,9 +154,13 @@ def run(eyes: Eyes, band: tuple[float, float], looks: dict[str, Callable], frame
     timer, spotter = Timer(), LieDetectorSpotter()
 
     def once(t: Timer) -> None:
+        tag = eyes.name_tag
+        finds, missed = tag.looks, tag.missed
         stages(eyes, t, band, spotter)
         for name, look in looks.items():
             t.time(name, look)
+        t.count("name tag looks", tag.looks - finds)
+        t.count("... of them not near where she was last", tag.missed - missed)
 
     if frames is None:
         once(Timer())  # the first look loads templates and starts threads: not timed

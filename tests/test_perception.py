@@ -81,7 +81,7 @@ def test_name_tag_found_near_where_she_was_as_by_the_whole_search(tmp_path):
         full = with_tags(tag, corner, (1500, 250))  # and her name in someone's list, far away
         whole = finder.search(full)  # what the whole play area gives (the search before)
         assert finder.find(full) == whole == centre(corner, tag)
-        assert i == 0 or finder._looks % FULL_EVERY  # these came from the window
+        assert i == 0 or finder.looks % FULL_EVERY  # these came from the window
     assert finder.search(full, finder._near(full.shape)) == centre((1010, 560), tag)
 
 
@@ -93,6 +93,7 @@ def test_name_tag_searched_everywhere_once_she_leaves_the_window(tmp_path):
     assert finder.find(with_tags(tag, (300, 800), (900, 600))) == centre((900, 600), tag)  # back: nearest wins
     assert finder.find(tiled_scene()) is None  # hidden
     assert finder._last == centre((900, 600), tag)
+    assert (finder.looks, finder.missed) == (4, 3)
 
 
 def test_name_tag_window_rules_out_the_minimap(tmp_path):

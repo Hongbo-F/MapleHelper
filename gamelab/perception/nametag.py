@@ -46,7 +46,8 @@ class NameTag:
         self.path = path      # where the full-size template is kept
         self.full = np.load(path) if path.exists() else None
         self._last: tuple[int, int] | None = None
-        self._looks = 0
+        self.looks = 0   # finds so far ...
+        self.missed = 0  # ... and how many of them didn't find her near where she was (the whole play area searched)
 
     def find(self, full: np.ndarray) -> tuple[int, int] | None:
         """Centre of her name tag in a full-size frame, in half-size frame pixels (None: not on screen).
@@ -56,10 +57,11 @@ class NameTag:
         it isn't there (and every FULL_EVERY looks)."""
         if self.full is None:
             self.full = self._cut(full)
-        self._looks += 1
+        self.looks += 1
         found = None
-        if self._last is not None and self._looks % FULL_EVERY:
+        if self._last is not None and self.looks % FULL_EVERY:
             found = self.search(full, self._near(full.shape))
+            self.missed += found is None
         if found is None:
             found = self.search(full)
         if found is not None:

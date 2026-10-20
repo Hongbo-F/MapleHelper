@@ -109,7 +109,7 @@ Other commands (`python -m gamelab -h` lists them all):
 | `lock attack 700 740 780` | Whether a jump that many ms after an attack goes through |
 | `snap` | Screenshot of the game in `lab/snap.png` |
 | `spot`, `spot --image FILE` | Whether the Lie Detector is on screen now (or in a screenshot); sends no keys |
-| `bench-look [FILES]`, `bench-look --live --n 100` | Each stage of a look timed (median, p90, fastest): on saved 1920×1080 screenshots (by default 17 in `lab`), or on the game as it is on screen. Live it refuses unless the game is in front already, and never brings it forward; sends no keys |
+| `bench-look [FILES]`, `bench-look --live --n 100` | Each stage of a look timed (median, p90, fastest): on saved 1920×1080 screenshots (by default 17 in `lab`), or on the game as it is on screen. Also counted: looks that didn't find her name tag near where it was, and ropes on the whole screen that the search where the map's ropes can show missed. Live it refuses unless the game is in front already, and never brings it forward; sends no keys |
 | `clear-alarm` | After you've answered a Lie Detector yourself: lets gamelab run again |
 
 ## The mini-map
