@@ -5,7 +5,7 @@ the simulator's world, gamelab.sim.world: this is what the stack sees of a world
 Every frame: her place (the same look as Senses.look takes: her name tag, HP and MP, the ground, her minimap
 dot, ropes), her EXP gains and HP drops (events, each at the frame it showed), and each monster tracked
 re-found around where it should be (Eyes.refind: the template that matched it last, else its kind's).
-Monsters not tracked yet are searched for on a schedule: her band every BAND_EVERY frames, the whole screen
+Monsters not tracked yet are searched for on a schedule: her band every BAND_EVERY_S, the whole screen
 every WIDE_EVERY_S; the drops only when asked (or, for `watch`, on a schedule of their own). A consumer can
 ask for any of those on the next frame (`Asks`). The tracker (localization.tracking) keeps each monster's
 id, velocity, facing, bar and state, and tells what happened to them.
@@ -34,7 +34,10 @@ from .tracking import DYING, HIDDEN, LIVE, Event, MonsterTracker, Track, View, o
 # with it every monster's) would step by up to a minimap pixel (11.4 units) from frame to frame, which the
 # tracker would take for walking. In the columns where the map's ropes can show it's 8.6 ms of a look's 16.
 ROPES_EVERY = 1
-BAND_EVERY = 6        # frames between searches of her band for monsters not tracked yet: 5 a second at 30 Hz
+# s between searches of her band for monsters not followed yet, 5 a second. By time, not frames: counted every 6th
+# frame, a feed slower than 30 frames a second (on the saved frames, 18 with the searches) searched it less often
+# than a look's freshness needs (feed.MOBS_FRESH_S), so every look asked for one, and half the frames searched it.
+BAND_EVERY_S = 0.2
 WIDE_EVERY_S = 1.0    # s between searches of the whole screen (122 ms each, bench-look)
 LOOT_EVERY_S = 0.5    # `watch`: s between searches for the drops on her platform ...
 LOOT_WIDE_EVERY_S = 2.0  # ... and on every platform in view
@@ -46,7 +49,7 @@ HIT_MERGE_S = 0.2     # a drop this soon after the last is the same hit, if the 
 class Schedule:
     """How often the step searches without being asked."""
     ropes_every: int = ROPES_EVERY       # frames
-    band_every: int = BAND_EVERY         # frames
+    band_s: float | None = BAND_EVERY_S  # s (None: only when asked)
     wide_s: float | None = WIDE_EVERY_S  # s (None: only when asked)
     loot_s: float | None = None          # s (None: only when asked)
     loot_wide_s: float | None = None
@@ -173,7 +176,8 @@ class WorldStep:
                 if m is not None:
                     refound[tr.id] = s.place(m, self.model, self.eyes.bar(s, m))
             wide = asks.wide or (sch.wide_s is not None and (self.wide_at is None or t - self.wide_at >= sch.wide_s))
-            band = asks.band or self.seq % sch.band_every == 0
+            band = asks.band or (sch.band_s is not None and (
+                self.band_at is None or t - self.band_at >= sch.band_s - 1e-6))
             if wide or band:
                 found = self.senses.search(s, wide=wide)
                 self.band_at = t

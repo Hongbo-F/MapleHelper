@@ -778,7 +778,7 @@ def cmd_bench_look(args) -> int:
     # follows re-found, and with what a frame may also be asked for. Each frame is looked at several times in
     # a row, as a still scene; the whole-screen one finds the monsters the others then re-find.
     step = WorldStep(Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)),
-                     schedule=Schedule(band_every=10 ** 9, wide_s=None))
+                     schedule=Schedule(band_s=None, wide_s=None))
 
     def frame_step(asks=None):
         full = eyes._capture()

@@ -47,7 +47,7 @@ def test_a_look_is_never_handed_a_frame_from_before_it_asked():
     assert not fresh(state(1, 9.99), want) and fresh(state(2, 10.0), want)
     assert not fresh(WorldState(3, 10.5, False), want)  # the game wasn't on screen
     band = Asks(after=10.0, band=True)
-    assert fresh(state(4, 10.1, band_at=9.95), band) and not fresh(state(5, 10.1, band_at=9.8), band)
+    assert fresh(state(4, 10.1, band_at=9.95), band) and not fresh(state(5, 10.1, band_at=9.75), band)
     assert not fresh(state(6, 10.1, band_at=10.1), Asks(after=10.0, wide=True))
     loot = Asks(after=10.0, loot=True)
     assert not fresh(state(7, 10.1), loot) and fresh(state(8, 10.1, loot=[]), loot)
@@ -126,7 +126,7 @@ def test_what_a_look_asks_is_searched_on_the_next_frame(sync):
 def test_the_loop_does_what_was_asked_on_the_first_frame_at_its_time():
     model = small_map()
     eyes = Drawn(model)
-    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(band_every=1000, wide_s=None))
+    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(band_s=None, wide_s=None))
     frames = [np.zeros((4, 4, 3), np.uint8)] * 12
 
     class Eyes2:

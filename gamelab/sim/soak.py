@@ -229,11 +229,12 @@ def soak_feed(meter: Meter) -> dict:
                                                (reach.LOOK_UP, reach.LOOK_DOWN), HOLD))
     if not client.alive:
         raise SystemExit(f"the feed didn't start: {client.why}")
-    child, n, missed, events, glanced = [], 0, 0, 0, 0
+    child, n, missed, events, glanced, waits = [], 0, 0, 0, 0, {"band": [], "loot": [], "wide": []}
     try:
         while not meter.due() and client.alive:
             now = time.monotonic()
             st = client.latest(feed.wanted(now, True, n % 30 == 0, n % 5 == 0, False))
+            waits["wide" if n % 30 == 0 else "loot" if n % 5 == 0 else "band"].append(time.monotonic() - now)
             missed += st is None
             if st is not None:
                 client.frame_of(st)
@@ -251,7 +252,10 @@ def soak_feed(meter: Meter) -> dict:
         client.close()
     warm = meter.warm[0] if meter.warm else 0.0
     points = [(t, b) for t, b in child if t >= warm and b is not None]
-    return {"looks asked": n, "not given in time": missed, "glances": glanced, "events drained": events,
+    ms = {k: sorted(v) for k, v in waits.items() if v}
+    return {"looks asked": n, "the wait for one (median, p90 ms)": ", ".join(
+                f"{k} {1000 * v[len(v) // 2]:.0f}, {1000 * v[int(0.9 * (len(v) - 1))]:.0f}" for k, v in ms.items()),
+            "not given in time": missed, "glances": glanced, "events drained": events,
             "dropped events": client.dropped, "child's frames": (client.bye or {}).get("frames"),
             "child's private bytes": _trend(points) if len(points) >= 2 else "not read"}
 

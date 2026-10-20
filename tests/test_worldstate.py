@@ -86,13 +86,16 @@ def frames(step: WorldStep, n: int, start: float = 100.0, asks=None, each=None) 
     return out
 
 
-def test_her_band_every_6th_frame_the_whole_screen_once_a_second(step):
+def test_her_band_5_times_a_second_the_whole_screen_once_a_second(step):
     states = frames(step, 3 * FPS)
     assert step.counts["frames"] == 90 and step.counts["placed"] == 90
     wide = [s.seq for s in states if s.work["wide"]]
     band = [s.seq for s in states if s.work["band"]]
     assert wide == [1, 31, 61]  # the first frame, then every 1 s
-    assert band == [k for k in range(6, 91, 6) if k not in wide]
+    assert band == [k for k in range(7, 91, 6) if k not in wide]  # 0.2 s after the last search of it
+    slow = WorldStep(Senses(step.eyes, step.model, band=(100, 100)))
+    tenth = [slow.step(lambda ropes, t=t: step.eyes.frame(t, ropes), t) for t in (100 + k / 10 for k in range(20))]
+    assert [s.seq for s in tenth if s.work["band"]] == [k for k in range(3, 21, 2) if k != 11]  # (11: the screen)
     for s in states:  # each state says when her band and the screen were last searched
         assert s.band_at == max(states[k - 1].t for k in wide + band if k <= s.seq)
         assert s.wide_at == max(states[k - 1].t for k in wide if k <= s.seq)
@@ -100,7 +103,7 @@ def test_her_band_every_6th_frame_the_whole_screen_once_a_second(step):
 
 def test_what_is_asked_is_done_on_the_next_frame(step):
     states = frames(step, 12, asks={2: Asks(band=True), 3: Asks(wide=True), 4: Asks(loot=True)})
-    assert [s.seq for s in states if s.work["band"]] == [3, 6, 12]
+    assert [s.seq for s in states if s.work["band"]] == [3, 10]  # asked, then 0.2 s after the screen's (4)
     assert [s.seq for s in states if s.work["wide"]] == [1, 4]
     assert [s.seq for s in states if s.loot is not None] == [5]  # drops only when asked (no schedule here)
 

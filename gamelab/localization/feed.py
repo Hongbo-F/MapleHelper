@@ -45,8 +45,9 @@ from .worldstate import Asks, Schedule, WorldState, WorldStep, to_scene
 HZ = 30.0            # frames a second the feed looks at (the game shows 60; a look takes 16 ms, a band search 32)
 RING_SLOTS = 4       # half-size frames kept in shared memory: at 30 Hz the newest 133 ms
 FRAME_SHAPE = (540, 960, 3)
-MOBS_FRESH_S = 0.25  # a look's monsters: her band searched at most this long before its frame (it's searched every
-                     # 0.2 s: worldstate.BAND_EVERY frames at HZ)
+MOBS_FRESH_S = 0.3   # a look's monsters: her band searched at most this long before its frame. It's searched every
+                     # 0.2 s (worldstate.BAND_EVERY_S), and the frame after that and the search itself take about 0.1 s
+                     # more: with 0.25, on the saved frames a third of the frames searched it, every look asking.
 WIDE_FRESH_S = 0.5   # ... the whole screen (it's searched every second; tracked monsters are re-found every frame)
 FEED_WAIT_S = 0.6    # s a look waits for the feed before it takes the look itself (the whole screen with every
                      # drop in view takes ~0.25 s)
@@ -259,6 +260,17 @@ def wanted(after: float, mobs: bool, wide: bool, loot: bool, mesos_only: bool) -
                 mesos_only=mesos_only)
 
 
+def to_ask(want: Asks, newest: WorldState | None, frame_s: float = 1.0 / HZ) -> Asks:
+    """What to ask of the next frame for a look that wants `want`: only what the next frame wouldn't have fresh
+    anyway, judging by the newest state (a look with the drops asked for her band too, though it was searched
+    a moment before, and a third of the frames searched it)."""
+    soon = want.after + frame_s
+    stale = lambda at, fresh_s: newest is None or at is None or soon - at > fresh_s
+    return Asks(want.after, band=want.band and stale(newest and newest.band_at, MOBS_FRESH_S),
+                wide=want.wide and stale(newest and newest.wide_at, WIDE_FRESH_S), loot=want.loot,
+                loot_wide=want.loot_wide, mesos_only=want.mesos_only)
+
+
 def fresh(st: WorldState, want: Asks) -> bool:
     """Whether state `st` is good for a look that wants `want`: shown at `want.after` or later, and fresh as
     the look needs (see the top). One where she isn't placed is as good as a look would be."""
@@ -407,7 +419,7 @@ class FeedClient(Feed):
                     return None
                 seq = newest.seq if newest is not None else 0
                 if seq != asked:  # nothing fresh as of the newest state: asked (again) of the next frame
-                    self._send("ask", want)
+                    self._send("ask", to_ask(want, newest))
                     asked = seq
                 self._cond.wait(left)
 
@@ -520,7 +532,9 @@ class SyncFeed(Feed):
                     self._seen_seq = max(self._seen_seq, st.seq)
                     return st
             if not any(fresh(st, want) for _, st in self.states):
-                self.asks = want.merge(self.asks) if self.asks is not None else want
+                newest = self.states[-1][1] if self.states else None
+                ask = to_ask(want, newest, 1.0 / self.hz)
+                self.asks = ask.merge(self.asks) if self.asks is not None else ask
             if now >= deadline:
                 return None
             pending = [ready for ready, st in self.states if ready > now and fresh(st, want)]
