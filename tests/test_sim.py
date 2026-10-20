@@ -686,6 +686,33 @@ def test_a_monster_touches_her_by_its_body_as_it_faces(model):
         assert w.touches == int(touched), facing
 
 
+def test_a_hit_pushes_a_monster_back_and_stands_it_while_it_flinches(model, monkeypatch):
+    c = plat(model, 500, 400)
+
+    def shot(push):
+        monkeypatch.setattr(world_mod, "MOB_KNOCKBACK", push)
+        w = world(model, c.id, 300.0, monsters=[("Pig", c.id, 600.0)], facing="right")
+        m = w.monsters[0]
+        m.t0, m.x0, m.d, m.t1 = 0.0, 600.0, -1, 1e9  # walking at her for good
+        tap(w, 0.0, "f", 0.04)
+        w.advance(0.53)
+        return m
+
+    m = shot(True)
+    hit = m.hit_at
+    at_hit = 600.0 - m.speed * hit
+    assert m.hp == 2 and hit == pytest.approx(0.52)  # a star (of 3) lands 520 ms after the key
+    assert m.at(hit + 0.125) == pytest.approx(at_hit + 9)  # pushed away from her ...
+    assert m.at(hit + 0.3) == m.at(hit + 0.59) == pytest.approx(at_hit + 18)  # ... 18 units, then it stands
+    assert m.d == 0
+    m = shot(False)  # without: it walks on through the hit
+    assert m.at(hit + 0.3) == pytest.approx(600.0 - m.speed * (hit + 0.3))
+    w = world(model, c.id, 700.0, monsters=[("Pig", c.id, 800.0)])
+    m = w.monsters[0]
+    m.knock(0.0, 1)
+    assert m.at(0.5) == m.hi  # at its platform's end it stays on it
+
+
 def test_she_evades_some_touches_and_dies_at_no_hp(model, monkeypatch):
     c = plat(model, 500, 400)
     monkeypatch.setattr(world_mod, "EVADE", 1.0)

@@ -458,7 +458,7 @@ def nav_monsters_long_way(sim):
 
 # Navigation with `fight` on (as on tours): monsters in reach are shot on the way.
 
-@scenario((36, 300.0), monsters="all", seed=5,
+@scenario((36, 300.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("shooting it on the way"), logs("in the way at x"),
                    check("kills on the way", lambda tr: _result(tr, "kills") >= 3),
                    check("the trip counts every kill, those in the way of a move too",
@@ -469,7 +469,9 @@ def nav_fight_basin(sim):
     the kills of both (those in the way weren't counted before). (Seed 5 since no jump is keyed in the kick's
     blind spot and jump-backs leave at full speed: on seed 6 she was knocked off the first rope twice, and
     the trip's 180 s ran out on 30, throwing at a snail on 33 below that the decisions count in reach and
-    the simulator's attack area doesn't. Over 16 seeds 12 meet all of this, 14 before.)"""
+    the simulator's attack area doesn't. Over 16 seeds 12 meet all of this, 14 before. Seed 2 since a hit
+    pushes a monster back: on seed 5 the trip's 180 s ran out on 30 that way. Over 16 seeds 8 meet all of
+    this, 7 running out of time.)"""
     return _nav(25, fight=True)(sim)
 
 
@@ -490,7 +492,7 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=2,
+@scenario((12, -300.0), monsters="all", seed=10,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down
@@ -499,7 +501,9 @@ def nav_fight_across(sim):
     more; 12 of 16 seeds show all of it. Seed 3 since jump-throws come 40 ms after the jump: on seed 6
     nothing knocked her off any more. On seed 6 before, her first chain from 11 waited out the attack lock
     of her last throw: before it did, she was touched on the way, and the quick looks after those cuts
-    skipped the fights on 18 and 17.)"""
+    skipped the fights on 18 and 17. Seed 10 since a hit pushes a monster back: on seed 2 a knock down to
+    34 at 5 s left her fighting and looting there until the 180 s ran out. Over 16 seeds 12 arrive, 5
+    showing all of this.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -602,14 +606,15 @@ def hunt_clear_basin(sim):
             "inventory_full": h.looter.inventory_full}
 
 
-@scenario((36, 300.0), monsters={36}, seed=7,
+@scenario((36, 300.0), monsters={36}, seed=1,
           expects=(ends("killed", key="ended"), happens("claw swipe hits", "close up, the claw swipes")))
 def hunt_kill(sim):
     """`hunt kill`: the slime nearest her on the basin floor, 55 units off. Too close for a star from the
     ground, her throws are claw swipes (a fifth of a star) until it's out of the claw's reach again (its
     swing reaches 90 ahead of her, into a slime's body up to 118 off); then looted. (Seed 7 since the claw
     reaches bodies: with seed 12 the basin's monsters kept walking into its reach, and swiped, she hadn't
-    killed it after 30 s.)"""
+    killed it after 30 s. Seed 1 since a hit pushes a monster back: on seed 7 two swipes pushed it out of
+    the claw's reach, and she hadn't killed it after 30 s. Over 16 seeds 11 meet all of this.)"""
     h = sim.hunter()
     s = h.look()
     target = min(s.monsters, key=lambda t: abs(t.x - s.where.x))

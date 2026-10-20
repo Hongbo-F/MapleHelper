@@ -25,15 +25,16 @@ on the world's 5 ms tick:
   and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
   her off it sideways (ROPE_JUMP); down and jump on a floor whose foothold forbids it (forbidFallDown)
   does nothing, as on the bottom floor;
-- monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded).
-  A monster touches her when its body overlaps hers (HER_HALF either side of her feet, HER_HEIGHT tall):
-  the box of the frame it shows then in the game data, walking, standing or flinching after a hit,
-  turned the way it faces (SimMonster.body), so a hopping slime is off the ground and taller for 38% of
-  its walk. A touch leaves her a second's invulnerability. She evades it (a thief's "MISS": nothing else
-  happens) with a chance inversely proportional to the monster's accuracy (game data: half a pig's
-  touches, four in five of a snail's); the others take a share of her HP by the monster's touch damage
-  (game data: about 1.6% for a pig, 0.3% for a snail, give or take 70%) and knock her back ~58 units (the
-  median logged push). At 0% HP she dies, and the run ends (SimDied);
+- monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded);
+  a hit that doesn't kill pushes one KNOCK_MOB units back from her and stands it while it flinches
+  (MOB_KNOCKBACK), never off its platform. A monster touches her when its body overlaps hers (HER_HALF
+  either side of her feet, HER_HEIGHT tall): the box of the frame it shows then in the game data, walking,
+  standing or flinching after a hit, turned the way it faces (SimMonster.body), so a hopping slime is off
+  the ground and taller for 38% of its walk. A touch leaves her a second's invulnerability. She evades it
+  (a thief's "MISS": nothing else happens) with a chance inversely proportional to the monster's accuracy
+  (game data: half a pig's touches, four in five of a snail's); the others take a share of her HP by the
+  monster's touch damage (game data: about 1.6% for a pig, 0.3% for a snail, give or take 70%) and knock
+  her back ~58 units (the median logged push). At 0% HP she dies, and the run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
@@ -141,6 +142,19 @@ INVULNERABLE = 1.0
 # (hits.jsonl's pushes on her own level: quartiles 21 / 58 / 87 units).
 KNOCK_VX, KNOCK_VY = 180.0, 220.0
 HITS = {"pig": 3, "orange-mushroom": 3, "slime": 2, "snail": 1}  # HP in stars
+# A hit that doesn't kill (a star or a swipe) pushes the monster KNOCK_MOB units away from her over
+# KNOCK_MOB_S, and it stands in its hit1 frame until monster_data.FLINCH_S after the hit (0.6 s, that
+# frame's delay); then it walks or stands as its own draws say. In the game data `pushed` is 1 for all four
+# kinds: any damage pushes them. Measured once: a slime walking at her, swiped on the basin floor
+# (lab/recordings/do_attack2, static camera, 30 fps), went 13 half-px (18 units) back over about 0.25 s
+# and stood about 0.6 s before it walked at her again; a pig hit in `fight1` lost about 80 units of its
+# walk (moving camera, so no distance). One sample, so False puts the monsters back to walking through
+# hits. Pushed from where it turns (its body at the platform's end), a monster stays on its platform:
+# none is pushed off an end (pigs have been seen on platforms where none spawn; how they get there isn't
+# known).
+MOB_KNOCKBACK = True
+KNOCK_MOB = 18.0
+KNOCK_MOB_S = 0.25
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
 DROP_DELAY = 2.0
 RESPAWN = 8.0
@@ -336,6 +350,7 @@ class SimMonster:
     t1: float = 0.0
     facing: int = -1           # the way it faced when it last stopped walking (-1: left, as it's drawn) ...
     anim0: float = 0.0         # ... and when it began to stand or walk (its animation's start)
+    pushed: tuple[float, float] | None = None  # a hit's (when, from x): pushed from there to x0 (knock)
 
     @property
     def lo(self) -> float:
@@ -346,7 +361,7 @@ class SimMonster:
         return max(self.lo, self.platform.right - self.half)
 
     def start(self, t: float, x: float) -> None:
-        self.t0, self.x0, self.anim0 = t, min(max(x, self.lo), self.hi), t
+        self.t0, self.x0, self.anim0, self.pushed = t, min(max(x, self.lo), self.hi), t, None
         self._draw()
 
     def _draw(self) -> None:
@@ -357,6 +372,8 @@ class SimMonster:
     def _fold(self, t: float) -> tuple[float, int]:
         """Where it is at t within the current segment, and which way it's then going (bouncing at the ends)."""
         if not self.d:
+            if self.pushed is not None and self.pushed[0] == self.t0 and t < self.t0 + KNOCK_MOB_S:
+                return self.pushed[1] + (self.x0 - self.pushed[1]) * (t - self.t0) / KNOCK_MOB_S, 0
             return self.x0, 0
         span = self.hi - self.lo
         if span <= 0:
@@ -368,14 +385,25 @@ class SimMonster:
     def at(self, t: float) -> float:
         while t >= self.t1:
             (x, d), walked = self._fold(self.t1), self.d
+            flinched = self.pushed is not None and self.pushed[0] == self.t0
             self.t0, self.x0, self.facing = self.t1, x, d or self.facing
             self._draw()
-            if bool(self.d) != bool(walked):  # from walking to standing or back: that animation starts
+            if flinched or bool(self.d) != bool(walked):  # its stand or walk starts over (after a hit too)
                 self.anim0 = self.t0
         return self._fold(t)[0]
 
     def y(self, x: float) -> float:
         return self.platform.y_at(x)
+
+    def knock(self, t: float, away: int) -> None:
+        """Hit at t, from her side: pushed KNOCK_MOB units `away` (+1/-1) over KNOCK_MOB_S, as far as its
+        walk goes, standing until FLINCH_S after the hit (it faces the way it did). Its walk after is drawn
+        then, as at the end of any of its segments."""
+        self.at(t)
+        x, d = self._fold(t)
+        self.pushed, self.anim0, self.facing = (t, x), t, d or self.facing
+        self.t0, self.x0, self.d = t, min(max(x + away * KNOCK_MOB, self.lo), self.hi), 0
+        self.t1 = t + monster_data.FLINCH_S
 
     def body(self, t: float, flinching: bool = False) -> tuple[float, float, float, float]:
         """Its body at t: from `lo` to `hi` sideways of its feet and from `bottom` to `top` above them. With
@@ -1022,6 +1050,8 @@ class World:
         m.hp = round(m.hp - (CLAW if swipe else 1.0), 6)
         if m.hp > 1e-9:
             m.hit_at = self.t
+            if MOB_KNOCKBACK:
+                m.knock(self.t, 1 if mx >= self.x else -1)
             self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left)")
             return
         self._kill(m, mx, what)
