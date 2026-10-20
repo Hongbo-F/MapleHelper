@@ -45,7 +45,7 @@ from ..perception.terrain import ScreenRope
 from ..screen import SCALE
 from ..screen import UNITS_PER_HALF_PX
 from ..screen import SCREEN_SCALE
-from .world import Noise, World, exp_pixels
+from .world import POSE_SPELL_S, Noise, World, exp_pixels
 
 START = 10_000.0          # the fake clock's start (monotonic() is never near 0 in real runs)
 EPOCH = 1_800_000_000.0   # what time.time() reads at the start (a fixed date, for strftime)
@@ -337,6 +337,8 @@ class FakeEyes(Eyes):
             way, walking = m.faces(self.world.t) if alive else (m.facing, False)
             pose = ("hit1" if m.hit_at is not None and self.world.t - m.hit_at < FLINCH_S
                     else "move" if walking else "stand") if alive else ""
+            if pose in ("move", "stand") and self._pose_wrong(m):
+                pose = "stand" if pose == "move" else "move"
             mob = Mob(m.kind, cx, feet - h // 2, w, h, 0.9, float(cx), float(feet), way, pose)
             if not (0 <= cx - w // 2 and cx + w // 2 <= FRAME[1]
                     and 0 <= mob.y - h // 2 and mob.y + h // 2 <= PLAY_BOTTOM):
@@ -351,6 +353,11 @@ class FakeEyes(Eyes):
             if 0 <= cx - iw // 2 and cx + iw // 2 <= FRAME[1] and 0 <= item.y - ih // 2 and bottom <= PLAY_BOTTOM:
                 screen.items.append(item)
         return screen
+
+    def _pose_wrong(self, m) -> bool:
+        """Whether monster `m`'s pose reads wrong now (Noise.pose_wrong), drawn per monster for each spell."""
+        w = self.world
+        return bool(self.noise.pose_wrong) and w.chance(f"pose:{m.idx}", int(w.t // POSE_SPELL_S)) < self.noise.pose_wrong
 
     def _unseen(self, m, alive: bool) -> bool:
         """Whether this look misses monster `m` though it shows: hit and hiding under its damage numbers

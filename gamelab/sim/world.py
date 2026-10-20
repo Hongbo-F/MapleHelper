@@ -176,6 +176,7 @@ DROP_DELAY = 2.0
 RESPAWN = 8.0
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
                          # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
+POSE_SPELL_S = 1.0       # s a monster's pose reads right or wrong at a time (Noise.pose_wrong)
 DROP_LIFE = 180.0        # s drops lie before they vanish
 PICK_REACH = 15.0
 POTION_HP = 0.30
@@ -224,6 +225,11 @@ class Noise:
                                  # seen: in game it flinches under its damage numbers and the detector loses
                                  # it for 1-3 s (README); () off
     detect_miss: float = 0.0     # chance a look doesn't find a monster that shows (per monster and look)
+    pose_wrong: float = 0.0      # share of the time a monster's pose reads wrong (walking as standing, standing
+                                 # as walking), in spells of POSE_SPELL_S drawn per monster: in game the template
+                                 # that matched said so for 18% of the sightings of monsters walking and 22% of
+                                 # those standing (3 recordings with the camera still), mostly a frame at a time
+                                 # but for up to 1.4 s on end, most of the time wrong in such long stretches
 
     @staticmethod
     def during(spells: tuple, t: float) -> bool:

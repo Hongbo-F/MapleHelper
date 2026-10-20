@@ -41,6 +41,38 @@ def test_a_hit_monster_hides_for_a_while_and_a_look_can_miss_one(model):
     assert Hunter(FakeEyes(w, clock, model), KEYS, model, log=lambda m: None).look().monsters == []
 
 
+def test_a_monsters_pose_can_read_wrong_in_spells_as_the_templates_do_in_game(model):
+    b = plat(model, 360, 300)
+
+    def poses(wrong: float, looks: int = 40) -> list[str]:
+        clock = Clock()
+        w = World(model, KEYS, (b.id, 240.0), monsters=[("Pig", b.id, 380.0)], origin=clock.now,
+                  noise=Noise(pose_wrong=wrong))
+        w.invulnerable_ms = 10 ** 9  # it walks into her: no touches
+        h = Hunter(FakeEyes(w, clock, model), KEYS, model, log=lambda m: None)
+        out = []
+        for _ in range(looks):
+            out.append(h.look().monsters[0].pose)
+            clock.advance_to(clock.now + 0.4)
+        return out
+    right = poses(0.0)
+    assert set(right) == {"move", "stand"}  # (it walks and stops)
+    assert all(a != b for a, b in zip(right, poses(1.0)))  # always wrong: walking as standing, and back
+    wrong = [a != b for a, b in zip(right, poses(0.25))]
+    assert 0.1 <= sum(wrong) / len(wrong) <= 0.45 and poses(0.25) == poses(0.25)  # seeded
+    # Drawn once a spell, for each monster.
+    w = World(model, KEYS, (b.id, 240.0), monsters=[("Pig", b.id, 380.0), ("Pig", b.id, 300.0)],
+              noise=Noise(pose_wrong=0.25))
+    eyes = FakeEyes(w, Clock(), model)
+    for m in w.monsters:
+        draws = []
+        for k in range(200):
+            w.ms = round(k * 1000 * world_mod.POSE_SPELL_S / 4)
+            draws.append(eyes._pose_wrong(m))
+        assert all(len(set(draws[i:i + 4])) == 1 for i in range(0, 200, 4))
+        assert 0.15 <= sum(draws) / len(draws) <= 0.35
+
+
 def test_another_player_kills_monsters_and_its_drops_are_not_hers_for_a_while(model):
     c = plat(model, 500, 400)
     w = world(model, c.id, 300.0, monsters=[("Snail", c.id, 310.0)],
@@ -76,7 +108,7 @@ def test_potions_run_out_and_arrows_can_be_locked_during_an_attack(model):
 
 
 def test_the_knobs_are_off_by_default_and_spawn_share_thins_the_monsters():
-    assert Noise() == Noise(hit_hidden=(), detect_miss=0.0)
+    assert Noise() == Noise(hit_hidden=(), detect_miss=0.0, pose_wrong=0.0)
     assert Realism().respawn == world_mod.RESPAWN and Realism().rival_every == 0 and Realism().potions is None
     if not scenarios.available():
         pytest.skip("needs the real map's data")
