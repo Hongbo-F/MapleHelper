@@ -362,3 +362,22 @@ def test_a_kill_is_credited_to_one_throw_in_the_shot_log(monkeypatch, tmp_path):
     assert fight._target_gone(h, st) == "killed"
     rows = [json.loads(line) for line in (tmp_path / "shots2.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [r["hit"] for r in rows[3:]] == [None, True, False]
+
+
+def test_a_bar_drop_is_credited_to_the_throw_whose_star_made_it(monkeypatch, tmp_path):
+    # Two throws in flight at an unhurt pig. The first star lands (the bar shows, 70% left) before the second
+    # one is due: the second is scored from that bar, so when the bar stays at 70% it missed. Scored from
+    # the bar at its throw (none), it took the first one's hit.
+    import json
+    from gamelab import paths
+    from gamelab.behavior import fight
+    monkeypatch.setattr(paths, "SHOT_LOG", tmp_path / "shots2.jsonl")
+    clock = [1.2]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    flying = [{"kind": "pig", "dx": 200, "dy": 0, "bar": None, "due": due} for due in (1.0, 1.7)]
+    flying = fight._score_shots(flying, 0.7)
+    for t in (1.8, 2.7):
+        clock[0] = t
+        flying = fight._score_shots(flying, 0.7)
+    rows = [json.loads(line) for line in (tmp_path / "shots2.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["hit"] for r in rows] == [True, False] and flying == []

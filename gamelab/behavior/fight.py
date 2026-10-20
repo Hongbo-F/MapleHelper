@@ -582,9 +582,10 @@ def _note_pick(flying: list[dict], s: Scene, target: Monster) -> None:
 
 
 def _score_shots(flying: list[dict], bar: float | None, dying: bool = False) -> list[dict]:
-    """A throw hit when the target's HP bar shows up or drops after the star should have arrived;
-    it missed when nothing changed within ~0.9 s of that. While it's `dying` (seen without the bar it had)
-    every throw waits for the kill (_target_gone). Returns the throws still undecided."""
+    """A throw hit when the target's HP bar shows up or drops after the star should have arrived, from
+    the last bar seen before then (a throw keyed before the one ahead of it landed was credited with that
+    one's hit); it missed when nothing changed within ~0.9 s of that. While it's `dying` (seen without the
+    bar it had) every throw waits for the kill (_target_gone). Returns the throws still undecided."""
     if dying:
         return flying
     now, left = time.monotonic(), []
@@ -594,6 +595,8 @@ def _score_shots(flying: list[dict], bar: float | None, dying: bool = False) -> 
         elif now > sh["due"] + 0.9:
             _log_shot(sh, False)
         else:
+            if now < sh["due"] - 0.1 and bar is not None:
+                sh["bar"] = bar  # what its star finds when it lands
             left.append(sh)
     return left
 
