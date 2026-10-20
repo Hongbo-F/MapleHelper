@@ -638,3 +638,60 @@ def test_the_tracker_keeps_only_the_latest_speeds_of_each_kind():
         tracker.update(0.5 * i, [Monster(Mob("pig", 0, 0, 30, 30, 0.9), x, 500, 7)])
     v = tracker.speeds["pig"]
     assert len(v) == n and list(v)[-50:] == [60.0] * 50 and list(v)[:-50] == [40.0] * (n - 50)
+
+
+def walker(x: float, facing: int = 0, pose: str = "move", kind: str = "pig", platform: int = 7):
+    from gamelab.localization.monsters import Monster
+    from gamelab.perception.mobs import Mob
+    return Monster(Mob(kind, 0, 0, 30, 30, 0.9, facing=facing, pose=pose), x, 500, platform, None, facing, pose)
+
+
+def test_a_monster_seen_walking_heads_the_way_it_faces_from_its_first_sighting(monkeypatch):
+    from gamelab.localization import monsters
+    from gamelab.localization.mapdata import Platform, Segment
+    from gamelab.localization.monsters import TURN_SLACK, Tracker
+    p = Platform(7, [Segment(0, 500, 1000, 500)])
+    right, standing, unknown = Tracker().update(10.0, [walker(400, 1), walker(600, 1, "stand"), walker(800)])
+    assert (right.heading, right.vx, right.facing) == (1, None, 1)
+    lo, hi = right.reach(1.0, p)
+    assert lo == 400 - TURN_SLACK and hi == pytest.approx(400 + right.speed)  # it spreads forward
+    assert standing.heading == unknown.heading == 0  # facing that way, but not walking; or not known
+    assert standing.reach(1.0, p) == pytest.approx((600 - standing.speed, 600 + standing.speed))
+    tracker = Tracker()
+    tracker.update(10.0, [walker(400, 1)])
+    again, = tracker.update(10.1, [walker(403, 1)])  # too soon to tell from the looks: still its facing
+    assert (again.heading, again.vx) == (1, None)
+    again, = tracker.update(10.5, [walker(395, 1)])  # seen walking back (a knock back): the looks win
+    assert again.heading == -1 and again.vx < 0
+    monkeypatch.setattr(monsters, "FACING_HEADING", False)  # as before: a heading takes two looks
+    assert Tracker().update(10.0, [walker(400, 1)])[0].heading == 0
+
+
+def test_two_of_a_kind_walking_apart_are_told_apart_by_which_way_they_face():
+    from gamelab.localization.monsters import Tracker, seen_again
+    # Two pigs 60 apart walk past each other: a second later each is nearer where the other was.
+    a, b = walker(400, 1), walker(460, -1)
+    tracker = Tracker()
+    tracker.update(10.0, [a, b])
+    speed = tracker.last[1][0].speed
+    a2, b2 = walker(400 + 0.8 * speed, 1), walker(460 - 0.8 * speed, -1)  # they've crossed
+    ta, tb = tracker.update(11.0, [a2, b2])
+    assert ta.vx > 0 and tb.vx < 0  # each matched to itself, not to the other
+    assert seen_again(a, [b2, a2], dt=1.0) is a2 and seen_again(b, [a2, b2], dt=1.0) is b2
+    # Not known to be walking: the nearest, as before (each taken for the other).
+    still_a, still_b = walker(400), walker(460)
+    tracker = Tracker()
+    tracker.update(10.0, [still_a, still_b])
+    ta, tb = tracker.update(11.0, [walker(a2.x), walker(b2.x)])
+    assert ta.vx <= 0 <= tb.vx
+    assert seen_again(still_a, [b2, a2], dt=1.0) is b2
+
+
+def test_a_walker_that_stopped_is_still_matched_to_itself():
+    from gamelab.localization.monsters import Tracker, seen_again
+    a, b = walker(400, 1), walker(480, 0, "stand")
+    tracker = Tracker()
+    tracker.update(10.0, [a, b])
+    a2, b2 = walker(405, 1, "stand"), walker(480, 0, "stand")  # a stopped just after the look
+    assert [t.vx for t in tracker.update(10.7, [a2, b2])] == [0.0, 0.0]
+    assert seen_again(a, [b2, a2], dt=0.7) is a2

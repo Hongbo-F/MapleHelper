@@ -42,6 +42,12 @@ MATCH_WITHIN = 2.0   # s: an older last look is no help
 MATCH_DX = 90        # map units a monster may have moved since, on the same platform
 STILL_DX = 6         # ... and moved at most this: standing still (or turning)
 MIN_SPEED_DT = 0.2   # s between looks before its speed is worth measuring
+# A monster seen walking (a move frame matched it) heads the way it faces, when looks can't tell yet (seen for
+# the first time, or the last look too recent): its reach spreads forward, and only TURN_SLACK back. Offline,
+# the facing of the template that matched was the way the monster moved in 192 of 199 stretches of 0.6 s
+# where it walked (`bodies` on two recordings with the camera still; the misses at turns). Not checked in
+# game: False goes back to waiting for a second look.
+FACING_HEADING = True
 # Speeds kept per kind (Tracker.speeds, for `nav`'s summary), the latest: one a monster a look, so kept
 # all, a look every frame would add about 110,000 an hour (4 MB); 400 is a few minutes' worth even at 1.4
 # looks a second, and enough for the summary's median and 90th percentile.
@@ -99,10 +105,30 @@ def same(a: Monster, b: Monster) -> bool:
     return a.kind == b.kind and abs(a.x - b.x) < TRACK_SLACK and abs(a.y - b.y) < SAME_DY
 
 
-def seen_again(m: Monster, now: list[Monster]) -> Monster | None:
-    """The monster in `now` that is `m` seen again, if any (the nearest that can be)."""
+def walked(m: Monster, dt: float | None) -> float:
+    """How far monster `m` can have walked `dt` s after it was seen, the way it faced (+ right), if it was
+    seen walking: at its kind's speed; else 0 (also without `dt`)."""
+    if dt is None or m.pose != "move" or not m.facing:
+        return 0.0
+    return m.facing * MONSTER_SPEED.get(m.kind, 70.0) * dt
+
+
+def off_course(x: float, start: float, go: float) -> tuple[float, float]:
+    """How far map x is from where a monster seen at `start` can be after walking up to `go` units (+ right,
+    - left; it may have stopped on the way), then how far from where it would be had it walked all the way:
+    what sightings are matched by, the least first. Two walking past each other are each matched to
+    themselves, and one that stopped too. With `go` 0, the nearest to `start`."""
+    lo, hi = min(start, start + go), max(start, start + go)
+    return max(lo - x, 0.0, x - hi), abs(x - start - go)
+
+
+def seen_again(m: Monster, now: list[Monster], dt: float | None = None) -> Monster | None:
+    """The monster in `now` that is `m` seen again `dt` s later, if any: of those that can be, the nearest
+    to where it was, or, seen walking, to the way it was going (`walked`). Two of a kind close together,
+    walking apart, are told apart by which way they faced."""
     near = [o for o in now if same(o, m)]
-    return min(near, key=lambda o: abs(o.x - m.x)) if near else None
+    go = walked(m, dt)
+    return min(near, key=lambda o: off_course(o.x, m.x, go)) if near else None
 
 
 def dead_one(aimed: list[Monster], now: list[Monster], her_x: float) -> Monster | None:
@@ -127,6 +153,7 @@ class MonsterTrack:
     vx: float | None = None
     seen_at: float = 0.0
     height: float = 46.0
+    facing: int = 0       # which way it faced, seen walking (1 right, -1 left; 0: not known, or standing)
 
     def at(self, t: float, p: Platform) -> float:
         """Where its centre most likely is at plan time t (walking on as it was, stopping at the ends)."""
@@ -147,7 +174,8 @@ class MonsterTrack:
 
 class Tracker:
     """Which way the monsters walk, and how fast: each look's monsters matched to the last look's (on
-    the same platform, within MATCH_DX units, the last look under MATCH_WITHIN s ago)."""
+    the same platform, within MATCH_DX units, the last look under MATCH_WITHIN s ago): the nearest, or for
+    one seen walking, the nearest to the way it was going (off_course)."""
 
     def __init__(self):
         self.last: tuple[float, list[MonsterTrack]] = (0.0, [])  # the last look's time, and its tracks
@@ -166,15 +194,18 @@ class Tracker:
             speed = MONSTER_SPEED.get(m.kind, 70.0)
             heading, vx = 0, None
             prev = [mo for mo in before if mo.platform == m.platform and abs(mo.x - m.x) < MATCH_DX]
-            if prev:
-                mo = min(prev, key=lambda mo: abs(mo.x - m.x))
+            if prev:  # the nearest, or to the way it was going if seen walking
+                mo = min(prev, key=lambda mo: off_course(m.x, mo.x, mo.facing * mo.speed * (t - when)))
                 dx = m.x - mo.x
                 heading = (1 if dx > 0 else -1) if abs(dx) > STILL_DX else 0
                 if t - when > MIN_SPEED_DT:  # how fast monsters really walk, for MONSTER_SPEED
                     self.speeds.setdefault(m.kind, deque(maxlen=SPEED_SAMPLES)).append(abs(dx) / (t - when))
                     vx = 0.0 if abs(dx) <= STILL_DX else max(-speed, min(speed, dx / (t - when)))
+            walking = m.facing if m.pose == "move" else 0
+            if FACING_HEADING and not heading and vx is None:  # looks can't tell yet: the way it faces walking
+                heading = walking
             out.append(MonsterTrack(m.platform, m.x, speed, heading, MONSTER_HALF.get(m.kind, 34.0), vx, seen_at,
-                                    MONSTER_HEIGHT.get(m.kind, 46.0)))
+                                    MONSTER_HEIGHT.get(m.kind, 46.0), walking))
         self.last = (t, out)
         return out
 

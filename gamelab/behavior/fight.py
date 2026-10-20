@@ -142,7 +142,7 @@ class FightState:
     def follow(self, visible: list[Monster], now: float) -> None:
         """The monsters she threw at that are among those `visible` again: where they are, seen `now`."""
         for entry in self.thrown:
-            if (again := seen_again(entry[0], visible)) is not None:
+            if (again := seen_again(entry[0], visible, now - entry[1])) is not None:
                 entry[0], entry[1] = again, now
 
     def forget_hidden(self, now: float) -> None:
