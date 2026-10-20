@@ -6,7 +6,8 @@ A fight is a loop of looks: each look, attack.stance decides what to do about th
 EXP going up after she started throwing at something: vanishing alone isn't one (hit monsters flinch
 and hide behind damage numbers, and other players kill monsters too). A star hits the first monster
 in its path, whatever its kind, so a kill is matched against everything in the path of the throw: from
-a jump, as high as she is when the attack picks its target (attack.reach).
+a jump, as high as she is when the attack picks its target, and short of any wall of her foothold group
+(attack.reach).
 Kills are counted in the hunter's Report; their drops go to her Looter (behavior.looting).
 """
 
@@ -293,7 +294,7 @@ def _wanted(s: Scene, kinds, ground: set[int] | None, far: bool) -> list[Monster
     here, x, y = s.platform.id, s.where.x, s.where.y
     wanted = [m for m in s.monsters if (kinds is None or m.kind in kinds)
               and (ground is None or m.platform in ground or m.platform == here
-                   or (far and reach.can_shoot(m.x - x, m.y - y)))]
+                   or (far and reach.can_hit(s.platform, x, y, m)))]
     wanted += [m for m in s.monsters if m not in wanted and m.platform == here and abs(m.x - x) < IN_HER_WAY]
     return wanted
 
@@ -332,15 +333,17 @@ def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None 
     what the attack's area takes in from as high as she is when it picks its target (reach.in_area, by
     how tall each kind is at least: `tops`): monsters on the platform above too, as far as a star
     reaches, but none that stays under its floor (a snail beside her: an EXP gain then came from one of
-    those above)."""
+    those above). None behind a wall of her foothold group (reach.wall_to: from 4, those on 2)."""
     x, y, here = s.where.x, s.where.y, s.platform.id
     ahead = [m for m in monsters if (m.x > x) == (side == RIGHT)]
     if gap_ms is None:
         return [m for m in ahead if (abs(m.x - x) <= reach.STAR_REACH if m.platform == here
-                                     else reach.can_shoot(m.x - x, m.y - y, reach.STAR_REACH))]
+                                     else reach.can_shoot(m.x - x, m.y - y, reach.STAR_REACH))
+                and reach.wall_to(s.platform, x, y, m) is None]
     rise, tops = reach.air_rise(gap_ms), tops or MONSTER_TOP
     return [m for m in ahead
-            if reach.in_area(abs(m.x - x), m.y - y, tops.get(m.kind, MONSTER_TOP["pig"]), rise)]
+            if reach.in_area(abs(m.x - x), m.y - y, tops.get(m.kind, MONSTER_TOP["pig"]), rise)
+            and reach.wall_to(s.platform, x, y, m, rise) is None]
 
 
 @dataclass
@@ -498,7 +501,7 @@ class FightOnTheWay:
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice)."""
-        in_reach = [m for m in s.monsters if reach.can_shoot(m.x - s.where.x, m.y - s.where.y)
+        in_reach = [m for m in s.monsters if reach.can_hit(s.platform, s.where.x, s.where.y, m)
                     and (self.kinds is None or m.kind in self.kinds)]
         return pick_target(s.where.x, s.where.y, s.platform, in_reach) if in_reach else None
 

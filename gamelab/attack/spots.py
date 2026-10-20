@@ -1,5 +1,6 @@
 """Where to stand to shoot a platform's monsters: the spots on other platforms that have the most of it
-in reach, and of those, one she can stand on safely and get to quickly.
+in reach, and of those, one she can stand on safely and get to quickly. In reach counts only what no wall
+of her foothold group stands in front of (reach.wall_in_way): from platform 4, nothing on 2.
 
 A spot is good to stand on (`spot_ok`) when no monster can touch her there (MapModel.safe), or only
 ones not worth hunting can (the snails on 3, 20 and 22: those she shoots when they come close). Of the
@@ -21,7 +22,7 @@ from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..motion.physics import WALK_SPEED
 from ..perception.kinds import kind_of
-from .reach import EDGE_MARGIN, SHOT_DOWN, SHOT_RANGE, SHOT_UP, can_shoot, min_dx
+from .reach import EDGE_MARGIN, SHOT_DOWN, SHOT_RANGE, SHOT_UP, can_hit, clear_span, min_dx
 
 MIN_COVERAGE = 0.3   # shoot from another platform only if this much of the hunting platform is in reach
 NEAR_BEST = 0.7      # spots reaching at least this share of the best one's count as good: the nearest wins
@@ -40,13 +41,15 @@ class Spot:
     safe: bool        # no monster can reach her on that platform (MapModel.safe)
 
 
-def coverage(target: Platform, x: float, y: float) -> float:
-    """Fraction of `target` in reach of a star thrown from (x, y), either way."""
+def coverage(target: Platform, x: float, y: float, here: Platform | None = None) -> float:
+    """Fraction of `target` in reach of a star thrown from (x, y), either way: on platform `here`, only as
+    far as the walls of its foothold group let a star (reach.clear_span)."""
     dy = target.y_at(min(max(x, target.left), target.right)) - y
     if not -SHOT_UP <= dy <= SHOT_DOWN:
         return 0.0
     covered, near = 0.0, min_dx(dy)
-    for lo, hi in ((x - SHOT_RANGE, x - near), (x + near, x + SHOT_RANGE)):
+    left, right = clear_span(here, x, y)
+    for lo, hi in ((max(x - SHOT_RANGE, left), x - near), (x + near, min(x + SHOT_RANGE, right))):
         covered += max(0.0, min(hi, target.right) - max(lo, target.left))
     return covered / max(1.0, target.right - target.left)
 
@@ -67,7 +70,7 @@ def spots(model: MapModel, target: int) -> list[Spot]:
             continue
         best = None  # (coverage, x): the first x of the best coverage on p
         for x in _stand_xs(lo, hi):
-            c = coverage(ground, x, p.y_at(x))
+            c = coverage(ground, x, p.y_at(x), p)
             if c > 0 and (best is None or c > best[0] + 1e-9):
                 best = (c, x)
         if best:
@@ -133,17 +136,19 @@ def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here
     pile. The one reaching the most, then the nearest. None if there's none, or she isn't on a
     platform (no telling how far a spot is)."""
 
-    def reached(x: float, y: float) -> int:
-        return sum(can_shoot(t.x - x, t.y - y) for t in left)
+    on = {t.platform: model.platform(t.platform) for t in left if t.platform is not None}
+
+    def reached(p: Platform, x: float, y: float) -> int:
+        return sum(can_hit(p, x, y, t, target=on.get(t.platform)) for t in left)
 
     cur = model.platform(current.platform)
-    now = reached(current.x, cur.y_at(current.x)) if current.platform != pid else 0
+    now = reached(cur, current.x, cur.y_at(current.x)) if current.platform != pid else 0
     best = None  # (monsters reached, seconds to get there, platform, x)
     for p in model.platforms:
         if p.id == pid or not spot_ok(model, p.id, worth):
             continue
         for x in _stand_xs(p.left + EDGE_MARGIN, p.right - EDGE_MARGIN):
-            n = reached(x, p.y_at(x))
+            n = reached(p, x, p.y_at(x))
             if n <= now or (best is not None and n < best[0]):
                 continue
             if here.platform is None:
@@ -156,7 +161,7 @@ def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here
         return None
     _, _, stand, x = best
     ground, p = model.platform(pid), model.platform(stand)
-    return Spot(stand, x, round(coverage(ground, x, p.y_at(x)), 3), model.safe(stand))
+    return Spot(stand, x, round(coverage(ground, x, p.y_at(x), p), 3), model.safe(stand))
 
 
 def spot_at(model: MapModel, pid: int, worth: set[str] | None) -> tuple[int, float]:

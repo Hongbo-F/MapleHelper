@@ -312,7 +312,8 @@ def _hunt_look(hunter) -> int:
           f"{s.room('right', reach.EDGE_MARGIN):.0f} right")
     for t in s.monsters:
         dx, dy = t.x - s.where.x, t.y - s.where.y
-        in_reach = "in reach" if reach.can_shoot(dx, dy) else "out of reach"
+        in_reach = ("in reach" if reach.can_hit(p, s.where.x, s.where.y, t)
+                    else "behind a wall" if reach.can_shoot(dx, dy) else "out of reach")
         print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({in_reach}, score {t.mob.score})")
     s.loot = find_loot(s, hunter.model, hunter.senses.eyes, wide=True)
     for d in s.loot:

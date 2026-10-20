@@ -317,3 +317,49 @@ def test_what_stops_a_star_on_the_real_map():
                                (2, 200, 4, (300, 450)), (22, 16, 21, (-150, -300))):
         for tx in txs:
             assert reach.wall_in_way(p(her), x, p(her).y_at(x), tx, target=p(there)) is None, (her, x, there, tx)
+
+
+def test_she_doesnt_throw_at_or_walk_for_a_monster_behind_a_wall_of_her_group(monkeypatch):
+    model, a, b, c = step_map()
+    up = target(300, 440, platform=b.id)  # up on B: in reach by distance from A at 100, behind the step
+    assert decide(100, 500, a, up, []) == ("skip", "behind a wall of her platform's foothold group")
+    assert stance(100, 500, a, [up]) == ("wait",)
+    assert pick_target(100, 500, a, [up, target(390, 440, platform=b.id, bar=0.5)]) is up  # none in reach: nearest
+    # Down from B the star gets there: thrown, from B, at the monster on A.
+    assert decide(300, 440, b, target(100, 500, platform=a.id), []) == ("throw", LEFT)
+    # Where to shoot B from: nothing of it from A (half of it by distance).
+    assert spots.coverage(b, 100, 500, a) == 0 and spots.coverage(b, 100, 500) == pytest.approx(0.5)
+    # With the rule off (an in-game probe), as before.
+    monkeypatch.setattr(reach, "WALLS_BLOCK", False)
+    assert decide(100, 500, a, up, []) == ("throw", RIGHT) and stance(100, 500, a, [up]) == ("throw", RIGHT)
+
+
+def test_no_spot_on_platform_4_for_platform_2():
+    """On the real map (skipped without its parsed game data): by distance a spot on 4 (x 244) has 40% of
+    platform 2 in reach, but it's all behind the step wall; 2 is shot from itself."""
+    if not (mapdata.CACHE / "10000012.json").is_file():
+        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
+    model = mapdata.load(10000012)
+    assert [sp.platform for sp in spots.spots(model, 2)] == [2]
+    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244)) == pytest.approx(0.398, abs=0.002)
+    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244), model.platform(4)) == 0
+
+
+def test_a_monster_seen_past_its_platforms_end_is_placed_on_it():
+    # Read from the screen, a pig seems 15 units past the right end of the platform it walks on: it's put
+    # at the end (past the step at the end of platform 2 one would seem in front of the wall it's behind).
+    import numpy as np
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    from gamelab.screen import UNITS_PER_HALF_PX
+    tree = {"info": {"VRLeft": 0, "VRTop": 0, "VRRight": 2000, "VRBottom": 1000},
+            "foothold": {"1": {"2": {"2": _fh(200, 500, 900, 500)}}},
+            "life": {"0": {"type": "m", "id": "8", "x": 600, "y": 500, "cy": 500, "rx0": 250, "rx1": 880}},
+            "miniMap": {"width": 2000, "height": 1000, "centerX": 0, "centerY": 0, "mag": 4}}
+    model = mapdata.parse(1, tree, "Test", {}, {"8": "Pig"})
+    s = Scene(t=0.0, frame=np.zeros((10, 10, 3), np.uint8), tag=(500, 300), hp=1.0, mp=1.0,
+              where=Where(800.0, 500.0, model.platforms[0], (0.0, 0.0)))
+    seen = Mob("pig", round(500 + 115 / UNITS_PER_HALF_PX), s.floor_y - 15, 40, 30, 0.9)
+    assert s.map_x(seen.x) > 910
+    m = s.place(seen, model, None)
+    assert (m.x, m.y, m.platform) == (900, 500, model.platforms[0].id)

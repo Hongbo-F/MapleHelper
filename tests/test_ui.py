@@ -162,12 +162,18 @@ class OldView(MapView):
     def _old_reach(self, img, her):
         import cv2
         from gamelab import directions
-        from gamelab.attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, min_dx
+        from gamelab.attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, clear_span, min_dx
         from gamelab.ui.render import REACH_BEHIND, REACH_FACING
         x, y = her["x"], her["y"]
+        pid = her.get("platform")
+        stops = clear_span(self.model.platform(pid), x, y) if pid is not None and self._known(pid) else None
         overlay = img.copy()
         for sign in (-1, 1):
             near, far = x + sign * min_dx(0), x + sign * STAR_REACH
+            if stops is not None:
+                far = max(far, stops[0]) if sign < 0 else min(far, stops[1])
+                if (far - near) * sign <= 0:
+                    continue
             a, b = self.pt(min(near, far), y - SHOT_UP), self.pt(max(near, far), y + SHOT_DOWN)
             facing = her.get("facing") == directions.toward(sign)
             cv2.rectangle(overlay, a, b, REACH_FACING if facing else REACH_BEHIND, -1)
@@ -228,6 +234,21 @@ def test_the_part_around_her_is_drawn_in_place():
     assert same.mean() > 0.999  # only lines cut by the part's edges are antialiased differently
     x, y = zoomed.pt(400, 500 - 8)
     assert tuple(part[y - top, x - left - 3]) == HER == tuple(whole[y - top, x - left - 3])
+
+
+def test_the_reach_band_stops_at_a_wall_of_her_foothold_group():
+    # The step map of test_attack: on A, below the step at x 200, facing B. Her band stops at the wall:
+    # the map left of it is tinted, right of it (over B, 60 above her: in the band by distance) it isn't.
+    from test_attack import step_map
+    m, a, b, _ = step_map()
+    view = MapView(m, width=400)
+    s = State()
+    s.apply({"topic": "scene", "t": 1.0, "her": {"x": 20, "y": 500, "platform": a.id, "facing": "right"},
+             "hp": 1.0, "mp": 1.0, "monsters": []})
+    img, bare = view.draw(s), view.draw(State())
+    for x, tinted in ((150, True), (260, False), (350, False)):
+        px, py = view.pt(x, 470)
+        assert (not np.array_equal(img[py, px], bare[py, px])) == tinted, x
 
 
 def test_a_replay_plays_records_at_their_own_pace_and_can_seek():

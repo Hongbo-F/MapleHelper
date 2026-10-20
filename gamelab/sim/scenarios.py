@@ -674,6 +674,26 @@ def fight_snail_short_platform(sim):
     return {"report": str(r)}
 
 
+THROWS = ("throw", "jump_throw", "jump_back")  # the key plans that attack (control.actions)
+
+
+@scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
+                                ("Orange Mushroom", 2, 200.0)], seed=1, limit=60,
+          expects=(check("no throw from platform 4", lambda tr: not any(p[1] in THROWS for p in tr["plans"])),
+                   check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
+                   check("she moves on: nothing in reach",
+                         lambda tr: "nothing left in reach" in _result(tr, "report"))))
+def fight_step_wall(sim):
+    """She's on platform 4 at x 520, nothing on it, Orange Mushrooms up on 2: 60 above her, 320-440 along,
+    behind the step wall that joins 2 and 4 (one foothold group). By distance they're in reach, but no star
+    from 4 gets past that wall (live: 0 of 3 in the shot log, 0 of 5 in the telemetry, all 4 kills of 40
+    throws on 4): she doesn't throw at them, and moves on. With the old decisions she threw left at them
+    for the whole fight, and every star hit nothing."""
+    h = sim.hunter()
+    r = h.clear(max_kills=3, seconds=20)
+    return {"report": str(r)}
+
+
 @scenario((36, 500.0), drops=(("mesos", 36, 560.0), ("leather", 36, 620.0), ("mesos", 36, 700.0),
                                ("mesos", 32, 600.0)),
           expects=(ends([], key="pending_loot"),

@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 from .. import directions
-from ..attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, min_dx
+from ..attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, clear_span, min_dx
 from ..localization.mapdata import MapModel
 from .state import State
 
@@ -265,7 +265,8 @@ class MapView:
             cv2.rectangle(img, (x - r, y - r), (x + r, y + r), colour, 1)
 
     def _reach(self, img, her: dict) -> None:
-        """Where a star from her reaches: a band on each side, the side she faces brighter.
+        """Where a star from her reaches: a band on each side, the side she faces brighter, cut short by a
+        wall of her platform's foothold group (attack.reach.clear_span: on 4, at the step up to 2).
 
         Blended into the rows the bands cover only: blending the whole picture (it comes out unchanged
         outside the bands) was a third of a 900-px picture's time and over half of a 2250-px one's. Whole
@@ -277,11 +278,17 @@ class MapView:
         top, bottom = self.pt(x, y - SHOT_UP)[1], self.pt(x, y + SHOT_DOWN)[1]
         if bottom < 0 or top >= h:
             return
+        pid = her.get("platform")
+        stops = clear_span(self.model.platform(pid), x, y) if pid is not None and self._known(pid) else None
         first = max(top, 0) if bottom < h - 1 else 0  # down to the last row: the picture's own last px
         rows = img[first:min(bottom + 2, h)]
         overlay = rows.copy()
         for sign in (-1, 1):
             near, far = x + sign * min_dx(0), x + sign * STAR_REACH
+            if stops is not None:
+                far = max(far, stops[0]) if sign < 0 else min(far, stops[1])
+                if (far - near) * sign <= 0:
+                    continue
             (ax, ay), (bx, by) = self.pt(min(near, far), y - SHOT_UP), self.pt(max(near, far), y + SHOT_DOWN)
             facing = her.get("facing") == directions.toward(sign)
             cv2.rectangle(overlay, (ax, ay - first), (bx, by - first), REACH_FACING if facing else REACH_BEHIND, -1)

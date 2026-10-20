@@ -58,10 +58,15 @@ class Scene(Observation):
         return None if self.where is None else self.where.platform
 
     def place(self, m: Mob, model: MapModel, bar: float | None) -> Monster:
-        """Put a monster seen on screen onto the map, by its offset from her."""
+        """Put a monster seen on screen onto the map, by its offset from her: onto the platform it walks on,
+        and never past that platform's ends (read from the screen, one can seem up to PLATFORM_SLACK past
+        one; past the step at the end of platform 2, it would seem in front of the wall it's behind)."""
         x, y = self.map_x(m.x), self.map_y(m.feet_y)
         p = monster_platform(model, m.kind, x, y)
-        return Monster(m, x, y if p is None else p.y_at(x), None if p is None else p.id, bar)
+        if p is None:
+            return Monster(m, x, y, None, bar)
+        x = p.clamp(x)
+        return Monster(m, x, p.y_at(x), p.id, bar)
 
     # Half-size screen px <-> map units, by the offset from her (the camera doesn't scale, so offsets
     # from her hold anywhere on screen).

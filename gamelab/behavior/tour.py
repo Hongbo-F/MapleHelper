@@ -290,7 +290,7 @@ class Tour:
         if here is None or (here.id != st.spot.platform and not spots.spot_ok(self.nav.model, here.id, self.worth)):
             return False
         return any(m.platform == st.pid and (st.kinds is None or m.kind in st.kinds)
-                   and reach.can_shoot(m.x - s.where.x, m.y - s.where.y) for m in s.monsters)
+                   and reach.can_hit(here, s.where.x, s.where.y, m) for m in s.monsters)
 
     def _fight(self, st: _Stop) -> Report:
         """Kill all she can reach from here (fight.clear: those in reach are finished after the kill count,

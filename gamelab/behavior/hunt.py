@@ -271,10 +271,9 @@ class Hunt:
         # visit. Shooting (rule 3) is only from where she can stand, or on the ground or its spot.
         safe_here = here in (v.ground, v.spot.platform) or self._standable(here)
         if not leaving and here not in (v.ground, v.spot.platform) and time.monotonic() >= self._no_high_until \
-                and not (safe_here and any(m.platform == v.ground and reach.can_shoot(m.x - s.where.x, m.y - s.where.y)
-                                           for m in targets)):
+                and not (safe_here and any(m.platform == v.ground and self._hits(s, m) for m in targets)):
             return self._to_spot(v.spot, "back to spot")
-        if safe_here and any(reach.can_shoot(m.x - s.where.x, m.y - s.where.y) or (m.platform == here) for m in targets):
+        if safe_here and any(self._hits(s, m) or (m.platform == here) for m in targets):
             act = self._stance(s, targets, visible, hidden, approach=True, log=False)
             if act[0] != "wait":
                 return self._shoot(s, targets, visible, hidden, now, "shoot", approach=True)
@@ -369,6 +368,12 @@ class Hunt:
         self.h.looter.pending.clear()  # drops are the drop store's here (behavior.ledger)
         return targets, visible, hidden
 
+    @staticmethod
+    def _hits(s: Scene, m: Monster) -> bool:
+        """Whether a star from where she stands in look `s` hits `m` (reach.can_hit: in reach, and no wall of
+        her foothold group in the way)."""
+        return reach.can_hit(s.platform, s.where.x, s.where.y, m)
+
     def _standable(self, pid: int) -> bool:
         v = self.visit
         return spots.spot_ok(self.model, pid, self.kinds) or (v is not None and pid == v.ground == v.spot.platform)
@@ -456,7 +461,7 @@ class Hunt:
         """Rule 4: a wanted target in reach while travelling, with this platform's budget not spent."""
         if self.obj is None or self.obj.passing.get(s.platform.id, 0.0) >= PASSING_S:
             return False
-        return any(reach.can_shoot(m.x - s.where.x, m.y - s.where.y) for m in targets)
+        return any(self._hits(s, m) for m in targets)
 
     def _passing_shot(self, s: Scene, targets, visible, hidden, now: float) -> None:
         t0 = time.monotonic()
@@ -584,12 +589,12 @@ class Hunt:
         left = [m for m in s.monsters if m.platform == v.ground and (self.kinds is None or m.kind in self.kinds)]
         if not left:
             return None
-        now_n = sum(reach.can_shoot(m.x - s.where.x, m.y - s.where.y) for m in left)
+        now_n = sum(self._hits(s, m) for m in left)
         nxt = spots.spot_for(self.model, v.ground, left, v.spot, s.where, self.nav.planner.travel, self.kinds)
         if nxt is None:
             return None
         p = self.model.platform(nxt.platform)
-        n = sum(reach.can_shoot(m.x - nxt.x, m.y - p.y_at(nxt.x)) for m in left)
+        n = sum(reach.can_hit(p, nxt.x, p.y_at(nxt.x), m) for m in left)
         travel = (abs(nxt.x - s.where.x) / WALK_SPEED if nxt.platform == s.platform.id
                   else self.nav.planner.travel(s.platform.id, s.where.x, nxt.platform))
         if travel is None or travel > SPOT_TRAVEL or not (n >= now_n + SPOT_MORE or n >= SPOT_TIMES * max(now_n, 1)):
@@ -750,8 +755,7 @@ class Hunt:
         Judged from the look the trip stopped on (`_interrupt` said so to it a moment ago)."""
         s = o.trip.last if o.trip is not None and o.trip.last is not None else self.h.look()
         return (s.platform is not None and self._standable(s.platform.id)
-                and any(m.platform == o.ground and reach.can_shoot(m.x - s.where.x, m.y - s.where.y)
-                        for m in s.monsters))
+                and any(m.platform == o.ground and self._hits(s, m) for m in s.monsters))
 
     def _interrupt(self, s: Scene) -> bool:
         """Asked before every chain of a trip: whether a rule calls for her here (close quarters, a target in
@@ -765,7 +769,7 @@ class Hunt:
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):
             return True  # not worth it any more (`_pass` drops it)
         wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
-        in_reach = [m for m in wanted if reach.can_shoot(m.x - x, m.y - s.where.y)]
+        in_reach = [m for m in wanted if self._hits(s, m)]
         if in_reach and o is not None and o.passing.get(here, 0.0) < PASSING_S:
             return True
         if o is not None and o.kind == "spot" and self._standable(here) \

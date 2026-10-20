@@ -102,11 +102,13 @@ class Ledger:
 
 def in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:
     """The monsters a star thrown that way from where she stands in look `s` can meet, nearest first:
-    on her platform within its reach, elsewhere where a star can hit (attack.reach)."""
+    on her platform within its reach, elsewhere where a star can hit (attack.reach), and none behind a
+    wall of her foothold group (a kill after a throw from 4 isn't put on a monster on 2)."""
     x, y, here = s.where.x, s.where.y, s.platform.id
     out = [m for m in monsters if (m.x > x) == (side == RIGHT)
            and (abs(m.x - x) <= reach.STAR_REACH if m.platform == here
-                else reach.can_shoot(m.x - x, m.y - y, reach.STAR_REACH))]
+                else reach.can_shoot(m.x - x, m.y - y, reach.STAR_REACH))
+           and reach.wall_to(s.platform, x, y, m) is None]
     return sorted(out, key=lambda m: abs(m.x - x))
 
 
