@@ -51,7 +51,9 @@ on the world's 5 ms tick:
 
 `Noise` (off by default) adds the errors of the real game, each one seeded and tied to the moment it
 happens, not to how often anything was looked at: stars that miss, walks that stop a few units early or
-late, her minimap dot read to whole pixels, and spells when her name tag or her dot can't be seen.
+late, lags spread as measured (so a jump keyed 80 ms after the arrow leaves with the kick or without it,
+and a short tap can be lost), her minimap dot read to whole pixels, and spells when her name tag or her
+dot can't be seen.
 
 Time is kept in whole milliseconds on a 5 ms tick, so the state at any moment depends only on the key
 events, never on when or how often it was looked at.
@@ -132,11 +134,14 @@ class SimDied(Exception):
 @dataclass(frozen=True)
 class Noise:
     """The real game's errors, all off by default. Each draw is seeded by the world's seed and the
-    moment it's for (a star's tick, a release's tick), and the spells are fixed stretches of time, so a
+    moment it's for (a star's tick, a key's tick), and the spells are fixed stretches of time, so a
     run is still the same every time, and a change that only adds or drops a look changes nothing here
     (detect_miss is drawn per look, so with it on, an extra look does change what later looks see)."""
     miss: float = 0.0            # chance a star that would hit misses (lab/shots.jsonl: 72.5% of 204 hit)
     walk_jitter: float = 0.0     # units: letting go of an arrow stops her up to this much early or late
+    lag_sd: float = 0.0          # the lags' spread around their medians, times the measured one (body.Lags:
+                                 # sd 10 ms for an arrow pressed, 11 let go, 12 for a jump), drawn for each
+                                 # key; 1: as measured. 0: every lag is its median
     dot_px: bool = False         # her minimap dot read to whole pixels (11.4 map units each), not exact
     tag_hidden: tuple = ()       # (from, to) s since the start: her name tag can't be seen (behind a box)
     dot_hidden: tuple = ()       # (from, to) s: her minimap dot can't be seen (a tooltip over the minimap)
@@ -492,6 +497,14 @@ class World:
             return 0
         return directions.sign(max(self.seen, key=self.seen.get))
 
+    def _lag(self, what: str, median: float, sd: float) -> float:
+        """s from a key going out (`what`, at this tick) to the game acting on it: the measured median
+        (body.Lags), spread by Noise.lag_sd times the measured sd, drawn for that key and tick."""
+        if not self.noise.lag_sd:
+            return median
+        z = random.Random(f"lag:{what}:{self.seed}:{self.ms}").gauss(0.0, 1.0)
+        return max(0.0, median + max(-3.0, min(3.0, z)) * sd * self.noise.lag_sd)
+
     def _seen_later(self, action: str, down: bool, at: float, lag: float) -> None:
         """The game sees arrow `action` go down/up `lag` s after clock time `at`. One key's changes are
         seen in the order they happen: let go and pressed again at once, it stays held."""
@@ -516,7 +529,7 @@ class World:
     def _pressed(self, action: str, at: float) -> None:
         ground = self.mode == "ground"
         if action in ("left", "right"):
-            self._seen_later(action, True, at, LAGS.on)
+            self._seen_later(action, True, at, self._lag(action, LAGS.on, LAGS.sd_on))
         elif action == "jump":
             if self.ms < self.attack_lock_ms:
                 return
@@ -530,7 +543,7 @@ class World:
                 return
             # It's taken Lags.jump later, wherever she is then (_liftoff): pressed just before she lands,
             # it jumps her once she has.
-            self._push(self.ms_of(at + LAGS.jump), "liftoff", self.mode)
+            self._push(self.ms_of(at + self._lag("jump", LAGS.jump, LAGS.sd_jump)), "liftoff", self.mode)
         elif action == "attack":
             if self.ms < self.attack_lock_ms or self.mode == "rope":
                 return
@@ -565,7 +578,7 @@ class World:
 
     def _released(self, action: str, at: float) -> None:
         if action in ("left", "right"):
-            lag = LAGS.off
+            lag = self._lag(f"{action} up", LAGS.off, LAGS.sd_off)
             if self.noise.walk_jitter and not {"left", "right"} & self.held.keys():
                 # letting go of the last arrow: she runs on a little longer or stops a little sooner
                 lag += (2 * self.chance("walk") - 1) * self.noise.walk_jitter / WALK_SPEED

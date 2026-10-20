@@ -45,7 +45,7 @@ START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12
 # (nothing about respawns, other players or potions is measured), chosen to be harder than "plain".
 PRESETS = {
     "plain": (Noise(), Realism()),
-    "game": (Noise(miss=0.275, walk_jitter=6.0, dot_px=True, hit_hidden=(1.0, 3.0), detect_miss=0.1),
+    "game": (Noise(miss=0.275, walk_jitter=6.0, lag_sd=1.0, dot_px=True, hit_hidden=(1.0, 3.0), detect_miss=0.1),
              Realism(spawn_share=0.6, rival_every=25.0, potions=60)),
 }
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting

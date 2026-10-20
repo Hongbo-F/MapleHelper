@@ -991,11 +991,11 @@ def tour_rest_no_escort(sim):
 
 
 @scenario((36, 300.0), monsters="all", seed=22, limit=400,
-          noise=Noise(miss=0.28, walk_jitter=6.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
+          noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
           expects=(check("kills", lambda tr: _kills(tr) >= 1), happens("star misses")))
 def tour_hunt_noisy(sim):
-    """tour_hunt_basin with the real game's errors: stars missing (28%), walks off by a few units, her
-    dot read to whole pixels, and her name tag hidden for 3 s mid-fight."""
+    """tour_hunt_basin with the real game's errors: stars missing (28%), walks off by a few units, the
+    lags spread as measured, her dot read to whole pixels, and her name tag hidden for 3 s mid-fight."""
     return _tour_hunt(36, 5)(sim)
 
 
@@ -1104,11 +1104,11 @@ def loop_run(sim):
 
 
 @scenario((36, 300.0), monsters="all", seed=22, limit=300,
-          noise=Noise(miss=0.28, walk_jitter=6.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
+          noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
           expects=(check("kills", lambda tr: sum(tr["world"]["kills"].values()) >= 3), happens("star misses")))
 def loop_noisy(sim):
     """loop_basin with the real game's errors (tour_hunt_noisy's): stars missing, walks off by a few
-    units, her dot read to whole pixels, her name tag hidden for 3 s mid-fight."""
+    units, the lags spread, her dot read to whole pixels, her name tag hidden for 3 s mid-fight."""
     return _loop(2)(sim)
 
 

@@ -128,6 +128,16 @@ def test_taps_move_her_as_long_as_the_game_sees_them_held(model):
         w.advance(2.0)
         assert 100 - w.x == pytest.approx(body.hold_distance(hold * 1000, physics.SHOE, physics.LAGS), abs=1)
         assert w.facing == "left"
+    # With the lags spread (three times as measured, to see it in a few seeds), a tap the game sees let go
+    # before it saw it pressed is lost: it turns her without moving her.
+    moved = []
+    for seed in range(30):
+        w = world(model, c.id, 100.0, seed=seed, noise=Noise(lag_sd=3.0))
+        tap(w, 0.0, "left", 0.02)
+        w.advance(2.0)
+        assert w.facing == "left"
+        moved.append(100 - w.x)
+    assert min(moved) == 0 and max(moved) > 3
 
 
 def test_a_jump_from_standing_gets_the_kick_unless_she_is_nearly_at_full_speed(model):
@@ -141,6 +151,16 @@ def test_a_jump_from_standing_gets_the_kick_unless_she_is_nearly_at_full_speed(m
         tap(w, gap or 0.0, "alt", 0.04)
         w.advance((gap or 0.0) + 0.1)
         assert w.mode == "air" and w.flight.speeds[0][0] == pytest.approx(vx, abs=0.01), gap
+    # Keyed 80 ms after the arrow, as the jump-back is, the lags' spread makes it two outcomes: kicked to
+    # full speed, or not kicked just below it (the five recorded: 121, 124, 127, 142 and 146 units/s).
+    speeds = []
+    for seed in range(40):
+        w = world(model, c.id, 100.0, seed=seed, noise=Noise(lag_sd=1.0))
+        w.key(0.0, "right", True)
+        tap(w, 0.08, "alt", 0.04)
+        w.advance(0.3)
+        speeds.append(w.flight.speeds[0][0])
+    assert min(speeds) < 130 and max(speeds) == 149.0 and sum(v == 149.0 for v in speeds) >= 10
 
 
 def test_in_the_air_the_opposite_arrow_brakes_her_and_her_own_does_nothing(model):
@@ -730,7 +750,7 @@ def _synthetic(sim):
 def test_a_scenario_gives_the_same_trace_every_time(model):
     c = plat(model, 500, 400)
     sc = scenarios.Scenario("synthetic", _synthetic, (c.id, 100.0), monsters="all", seed=2, limit=200,
-                            noise=Noise(dot_px=True, walk_jitter=4.0, miss=0.3))
+                            noise=Noise(dot_px=True, walk_jitter=4.0, miss=0.3, lag_sd=1.0))
     first, second = scenarios.run_scenario(sc, model), scenarios.run_scenario(sc, model)
     assert first["result"]["result"] == "arrived" and first["plans"]
     assert first == second
