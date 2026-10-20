@@ -9,7 +9,7 @@ from gamelab.localization import mapdata
 from gamelab.sim import fakes, harness, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.fakes import Clock, FakeEyes, SimTimeout
-from gamelab.sim.world import DROP_LIFE, TOUCH_DAMAGE, Noise, Realism, World
+from gamelab.sim.world import DROP_LIFE, Noise, Realism, World
 
 from test_sim import KEYS, plat, still, tap, tree
 
@@ -140,13 +140,14 @@ def test_outcomes_are_read_from_the_world(model):
 def test_hp_lost_on_the_trips_to_rest_is_counted_between_their_events(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0))
-    w.touch_log = [(5.0, True), (12.0, True), (13.0, False), (30.0, True)]
+    w.touch_log = [(5.0, 0.014), (12.0, 0.02), (13.0, 0.0), (30.0, 0.01)]  # (t, the HP it took: 0 evaded)
     t0 = 1000.0
     records = [{"topic": "session", "t": t0}, {"topic": "event", "kind": "rest_trip", "t": t0 + 10.0},
                {"topic": "event", "kind": "rest", "t": t0 + 20.0}, {"topic": "event", "kind": "rest_trip", "t": t0 + 25.0}]
     out = harness.outcomes(w, records, 60.0)
     assert out["rest_trips"] == 2  # the last one still going at the end
-    assert out["rest_hp_lost"] == pytest.approx(2 * TOUCH_DAMAGE)  # at 12 s and 30 s; 13 s was evaded
+    assert out["rest_hp_lost"] == pytest.approx(0.03)  # at 12 s and 30 s; 13 s was evaded
+    assert out["hp_lost"] == pytest.approx(0.044)
     base = [dict(_result(k, 50.0), rest_hp_lost=0.05, rest_trips=2) for k in range(1, 11)]
     assert harness.compare_rest(base, [dict(r, rest_hp_lost=0.02) for r in base])[0]
     assert not harness.compare_rest(base, [dict(r, rest_hp_lost=0.08) for r in base])[0]

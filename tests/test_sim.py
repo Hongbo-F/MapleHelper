@@ -28,6 +28,7 @@ from maplehelper.keys import parse as K
 from gamelab.attack import reach
 from gamelab.behavior import hunter
 from gamelab.localization import monsters
+from gamelab.perception.kinds import kind_of
 
 KEYS = GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("f"), up=K("up"), down=K("down"),
                 pick_up=K("z"), chair=K("d"), hp_potion=K("r"))
@@ -587,6 +588,40 @@ def test_a_monster_touching_her_hurts_and_knocks_her_back(model, monkeypatch):
     w.advance(0.9)  # invulnerable for a second
     assert w.touches == 1 and w.plat is c and w.vx == 0
     assert 45 <= 400 - w.x <= 70  # knocked back ~58 units, away from it (lab/hits.jsonl's median push)
+
+
+def test_a_touch_takes_hp_by_the_monsters_touch_damage_and_is_evaded_by_its_accuracy(model, monkeypatch):
+    monkeypatch.setattr(world_mod, "evade_chance", lambda info: 0.0)
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 420.0)]))
+    w.monsters[0].info = world_mod.MobInfo(pad=15.0, acc=54.0)
+    w.advance(0.05)
+    (t, took), = w.touch_log
+    assert took == pytest.approx(world_mod.touch_damage(w.monsters[0].info, w.chance("damage", round(t * 1000))))
+    assert w.hp == pytest.approx(1 - took)
+    pig, snail = world_mod.MobInfo(15.0, 54.0), world_mod.MobInfo(3.0, 33.0)
+    # 0.68 of PADamage over her 642 HP, give or take 70% (lab/hits.jsonl): 1.6% a pig, 0.3% a snail
+    assert world_mod.touch_damage(pig, 0.5) == pytest.approx(15 * 0.68 / 642)
+    assert world_mod.touch_damage(pig, 0.0) == pytest.approx(0.3 * 15 * 0.68 / 642)
+    assert world_mod.touch_damage(snail, 0.5) < 0.004 < 0.014 < world_mod.touch_damage(pig, 0.5)
+    assert world_mod.touch_damage(None, 0.9) == world_mod.TOUCH_DAMAGE  # no game data: the logged median
+    monkeypatch.undo()
+    assert world_mod.evade_chance(pig) == pytest.approx(0.5)  # as logged hopping over pigs
+    assert world_mod.evade_chance(snail) == pytest.approx(27 / 33)
+    assert world_mod.evade_chance(None) == world_mod.EVADE
+
+
+def test_the_game_data_gives_each_kind_its_touch_damage_and_accuracy():
+    m = scenarios.real_map()
+    if m is None:
+        pytest.skip("the map's game data isn't on this computer")
+    infos = {kind_of(s.name): world_mod.mob_info(s.mob_id) for s in m.spawns}
+    if any(i is None for i in infos.values()):
+        pytest.skip("the monsters' game data isn't on this computer")
+    assert {k: (i.pad, i.acc) for k, i in infos.items()} == {
+        "snail": (3, 33), "slime": (13, 53), "pig": (15, 54), "orange-mushroom": (17, 62)}
+    w = World(m, KEYS, (36, 300.0), monsters="all")
+    assert {mo.kind: mo.info for mo in w.monsters} == infos
 
 
 def test_she_evades_some_touches_and_dies_at_no_hp(model, monkeypatch):

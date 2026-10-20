@@ -11,7 +11,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
 
   exp_per_min      EXP she got, per minute of the horizon (a death stops the count)
   kills, rival     her kills, and another player's (Realism.rival_every)
-  hp_lost, hp_low  HP lost to touches (1.4% each), and her lowest HP; potions; died_at
+  hp_lost, hp_low  HP lost to touches (each as the world took it: by the monster's touch damage), and
+                   her lowest HP; potions; died_at
+  touches, hurt    monsters touching her, and those of the touches she didn't evade
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
                    the share she picked up
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
@@ -34,7 +36,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 
 from ..paths import LAB, REPO
-from .world import DROP_LIFE, TOUCH_DAMAGE, Noise, Realism
+from .world import DROP_LIFE, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -120,7 +122,9 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "exp_per_min": round(world.exp / (horizon / 60), 2),
         "kills": len(mine),
         "rival": sum(1 for k in world.kill_log if k[3] == "rival"),
-        "hp_lost": round((world.touches - world.evaded) * TOUCH_DAMAGE, 3),
+        "hp_lost": round(sum(hp for _, hp in world.touch_log), 3),
+        "touches": world.touches,
+        "hurt": world.touches - world.evaded,
         "hp_low": round(world.hp_low, 3),
         "potions": world.potions_used,
         "died_at": world.died_at,
@@ -130,8 +134,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "stuck_s": round(sum(max(0.0, g - IDLE_GRACE) for g in gaps), 1),
         "rests": sum(1 for r in events if r.get("kind") == "rest"),
         "rest_trips": len(trips),
-        "rest_hp_lost": round(TOUCH_DAMAGE * sum(1 for t, hurt in world.touch_log
-                                                 if hurt and t <= end and any(a <= t <= b for a, b in trips)), 3),
+        "rest_hp_lost": round(sum(hp for t, hp in world.touch_log
+                                  if t <= end and any(a <= t <= b for a, b in trips)), 3),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
 
@@ -283,8 +287,8 @@ REST_HP = 0.28  # under the hunter's 30%: the trip a stop on low HP starts
 
 def rest_trip(avoid: bool, k: int) -> dict:
     """One trip to rest from REST_FROM[k], at REST_HP, in world 100 + k of the game preset: the touches that
-    hurt her on the way (from the 'rest_trip' event to the 'rest' one: not while she sits), how long the
-    trip took (None if it never ended), and whether she died."""
+    hurt her on the way (from the 'rest_trip' event to the 'rest' one: not while she sits) and the HP they
+    took, how long the trip took (None if it never ended), and whether she died."""
     from .. import telemetry
     from . import scenarios
     noise, realism = PRESETS["game"]
@@ -300,7 +304,8 @@ def rest_trip(avoid: bool, k: int) -> dict:
         _, sim = scenarios.run_sim(sc)
     w = sim.world
     a, b = (_rest_trips(records) or [(0.0, float("inf"))])[0]
-    return {"avoid": avoid, "k": k, "hurt": sum(1 for t, hurt in w.touch_log if hurt and a <= t <= b),
+    return {"avoid": avoid, "k": k, "hurt": sum(1 for t, hp in w.touch_log if hp and a <= t <= b),
+            "hp_lost": sum(hp for t, hp in w.touch_log if a <= t <= b),
             "dead": w.dead, "seconds": round(b - a, 1) if b != float("inf") else None,
             "kills": sum(1 for t, _, _, who in w.kill_log if who == "her" and a <= t <= b)}
 
@@ -323,7 +328,7 @@ def rest_trials(trips: int, jobs: int = 1) -> tuple[bool, list[str]]:
     for avoid in (False, True):
         rs = [r for r in res if r["avoid"] == avoid]
         done = [r["seconds"] for r in rs if r["seconds"] is not None]
-        means[avoid] = statistics.fmean(r["hurt"] for r in rs) * TOUCH_DAMAGE
+        means[avoid] = statistics.fmean(r["hp_lost"] for r in rs)
         lines.append(f"{'avoid' if avoid else 'transit'}: HP lost {means[avoid]:.1%} a trip, "
                      f"{statistics.fmean(done) if done else float('nan'):.1f} s, deaths {sum(r['dead'] for r in rs)}, "
                      f"kills on the way {sum(r['kills'] for r in rs)}, not there in time {len(rs) - len(done)}")

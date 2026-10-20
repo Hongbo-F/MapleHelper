@@ -26,9 +26,11 @@ on the world's 5 ms tick:
   her off it sideways (ROPE_JUMP); down and jump on a floor whose foothold forbids it (forbidFallDown)
   does nothing, as on the bottom floor;
 - monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded). A
-  touch leaves her a second's invulnerability; she evades half of them (a thief's "MISS": nothing
-  else happens), the others take 1.4% HP (the median of the lab's 118 logged hits) and knock her back
-  ~58 units (the median logged push). At 0% HP she dies, and the run ends (SimDied);
+  touch leaves her a second's invulnerability. She evades it (a thief's "MISS": nothing else happens) with
+  a chance inversely proportional to the monster's accuracy (game data: half a pig's touches, four in
+  five of a snail's); the others take a share of her HP by the monster's touch damage (game data: about
+  1.6% for a pig, 0.3% for a snail, give or take 70%) and knock her back ~58 units (the median logged
+  push). At 0% HP she dies, and the run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
@@ -63,12 +65,16 @@ events, never on when or how often it was looked at.
 """
 
 import bisect
+import functools
+import json
 import math
+import os
 import random
 from dataclasses import dataclass
 
 import numpy as np
 
+from gamedata.paths import OUT
 from maplehelper.config import GameKeys
 from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT
@@ -104,11 +110,28 @@ HER_HALF = flow.HER_HALF
 HER_HEIGHT = 55.0
 STAR_DELAY = STAR_DELAY_MS / 1000
 ATTACK_LOCK = COMBAT.attack_lock_ms / 1000
-# A touch: lab/hits.jsonl's 118 hits took 1-4 px of the 147 px HP bar (0.7-2.7%), 2 px (1.4%) the median.
-TOUCH_DAMAGE = 0.014
-# A thief's evasion: about half the touches show "MISS" and take nothing, without a knockback (lab/hop_log
-# and hop_log2: 7 misses, 6 with damage). Seeded by the touch's tick, like Noise.
-EVADE = 0.5
+# Her HP: her HP bar read "HP[642/642]" in game (2026-10-18, at level 19; maplehelper.ocr.parse's test).
+MAX_HP = 642.0
+# A touch takes TOUCH_SHARE of the monster's touch damage (PADamage in the game data: snail 3, slime 13,
+# pig 15, Orange Mushroom 17) from her HP, give or take TOUCH_SPREAD of that (uniform, seeded by the
+# touch's tick, like Noise). Fitted to lab/hits.jsonl: its 100 hits of up to 5 px on the basin and platform
+# 21, where only pigs and slimes spawn, took 1 px of the 147 px HP bar 30 times, 2 px 32, 3 px 28, 4 px 9
+# and 5 px once (2.19 px on average: 9.6 HP, 0.68 of their PADamage); ±70% gives 26 / 33 / 30 / 9 / 0
+# (and 2 too small to show). So a pig takes 1.6% of her HP on average, a slime 1.4%, an Orange Mushroom
+# 1.8%, a snail 0.3%. How the game takes her defence off isn't known: a share of PADamage is the simplest
+# form that fits, and no touch by a snail or an Orange Mushroom alone has been logged.
+TOUCH_SHARE = 0.68
+TOUCH_SPREAD = 0.7
+TOUCH_DAMAGE = 0.014     # a touch by a monster without game data: the logged hits' median (2 px, 1.4%)
+# A thief's evasion: a touch shows "MISS" and takes nothing, without a knockback, with a chance of
+# EVADE_ACC over the monster's accuracy (acc in the game data: snail 33, slime 53, pig 54, Orange Mushroom
+# 62). Inversely proportional is the form MapleStory's dodge rule is usually given in (not measured here).
+# Fitted to the 13 touches logged hopping over monsters (lab/hop_log and hop_log2: 7 MISS, 6 with damage),
+# pigs by their speed (most walked at the tracker's 70 units/s clamp, which only pigs and Orange Mushrooms
+# reach): a pig's touches are evaded half the time, a slime's 51%, an Orange Mushroom's 44%, a snail's 82%.
+# Seeded by the touch's tick, like Noise.
+EVADE_ACC = 27.0
+EVADE = 0.5              # ... a monster without game data
 INVULNERABLE = 1.0
 # Its knockback: ~40 units in the air (0.22 s) and a ~19-unit slide on landing, ~58 in all on flat ground
 # (hits.jsonl's pushes on her own level: quartiles 21 / 58 / 87 units).
@@ -176,6 +199,59 @@ class Realism:
 
 # --- monsters ----------------------------------------------------------------------------------------
 
+MOBS = OUT / "mobs"      # what the simulator reads of each monster from the game data, cached as JSON (as
+                         # mapdata caches maps): the simulator runs the same off the caches alone
+
+
+@dataclass(frozen=True)
+class MobInfo:
+    """A monster as the game data has it: how much a touch by it takes (PADamage, before her defence) and
+    its accuracy (acc), which her evasion goes against."""
+    pad: float
+    acc: float
+
+
+@functools.lru_cache(maxsize=None)
+def mob_info(mob_id: int) -> MobInfo | None:
+    """Monster `mob_id`'s MobInfo, from the game data (cached in MOBS), or None where there's none."""
+    cache = MOBS / f"{mob_id:07d}.json"
+    raw = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else None
+    if raw is None:
+        raw = _read_mob(mob_id)
+        if raw is None:
+            return None
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        part = cache.with_suffix(f".{os.getpid()}.part")  # whole, or not there: harness workers read it too
+        part.write_text(json.dumps(raw), encoding="utf-8")
+        os.replace(part, cache)
+    return MobInfo(raw["pad"], raw["acc"])
+
+
+def _read_mob(mob_id: int) -> dict | None:
+    """MobInfo's fields for monster `mob_id`, from its image in the game data copy (None without it)."""
+    try:
+        from gamedata.canvas import _mob_pack
+        info = _mob_pack().image(f"Mob/{mob_id:07d}.img").get("info") or {}
+    except (OSError, KeyError, ValueError):  # no copy of the game data, or no such monster in it
+        return None
+    return {"pad": float(info.get("PADamage") or 0), "acc": float(info.get("acc") or 0)}
+
+
+def touch_damage(info: MobInfo | None, u: float) -> float:
+    """The share of her HP a touch by a monster with `info` takes, `u` in [0, 1) placing it within the
+    spread (TOUCH_SHARE of its touch damage, give or take TOUCH_SPREAD)."""
+    if info is None or info.pad <= 0:
+        return TOUCH_DAMAGE
+    return info.pad * TOUCH_SHARE * (1 + TOUCH_SPREAD * (2 * u - 1)) / MAX_HP
+
+
+def evade_chance(info: MobInfo | None) -> float:
+    """The chance she evades a touch by a monster with `info`: EVADE_ACC over its accuracy."""
+    if info is None or info.acc <= 0:
+        return EVADE
+    return min(1.0, EVADE_ACC / info.acc)
+
+
 @dataclass
 class SimMonster:
     """A monster walking its platform. Its motion is a list of segments drawn from its own rng (walk
@@ -198,6 +274,7 @@ class SimMonster:
     hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden; it flinches)
     flinch_top: float = 54.0   # how tall it is while it flinches
     fade: float = FADE         # s it's still seen once killed, fading out where it died
+    info: MobInfo | None = None  # its touch damage and accuracy (game data), if known
     # current motion segment: from t0 at x0, heading d (-1, 0, +1) until t1
     t0: float = 0.0
     x0: float = 0.0
@@ -292,7 +369,7 @@ class World:
         self.potions_used = 0
         self.hp_low = hp                # her lowest HP so far
         self.kill_log: list[tuple[float, str, int, str]] = []  # (t, kind, platform, "her" or "rival")
-        self.touch_log: list[tuple[float, bool]] = []  # (t, whether it hurt her) for every touch
+        self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.actions = _actions(keys)
         self.held: dict[str, int] = {}  # action -> ms it went down
         self._events: list[tuple[int, int, Event]] = []
@@ -367,6 +444,8 @@ class World:
         else:
             wanted = list(monsters)
         bodies = monster_data.bodies(self.model)
+        ids = {kind_of(s.name): s.mob_id for s in self.model.spawns if s.name}  # by kind ...
+        ids.update({s.name: s.mob_id for s in self.model.spawns if s.name})      # ... and by name
         for i, (name, pid, x) in enumerate(wanted):
             kind = kind_of(name)
             m = SimMonster(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
@@ -375,6 +454,8 @@ class World:
             if kind in bodies:
                 m.flinch_top = bodies[kind].flinch_top
                 m.fade = bodies[kind].die_s or FADE
+            mob_id = ids.get(name, ids.get(kind))
+            m.info = None if mob_id is None else mob_info(int(mob_id))
             m.start(0.0, float(x))
             self.monsters.append(m)
             self.by_platform.setdefault(pid, []).append(m)
@@ -759,13 +840,14 @@ class World:
     def _hit_by(self, m: SimMonster, mx: float) -> None:
         self.touches += 1
         self.invulnerable_ms = self.ms + int(INVULNERABLE * 1000)
-        evaded = self.chance("evade") < EVADE
-        self.touch_log.append((self.t, not evaded))
+        evaded = self.chance("evade") < evade_chance(m.info)
+        damage = 0.0 if evaded else touch_damage(m.info, self.chance("damage"))
+        self.touch_log.append((self.t, damage))
         if evaded:
             self.evaded += 1
             self.note(f"touched by {m.kind} #{m.idx} at x {mx:.0f}: MISS")
             return
-        self.hp = max(0.0, self.hp - TOUCH_DAMAGE)
+        self.hp = max(0.0, self.hp - damage)
         self.hp_low = min(self.hp_low, self.hp)
         away = 1 if self.x >= mx else -1
         self.note(f"touched by {m.kind} #{m.idx} at x {mx:.0f}: HP {self.hp:.1%}")
