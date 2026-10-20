@@ -201,9 +201,15 @@ def _without_needless_jumps(model: MapModel, a: Platform, mine: list[Move]) -> l
 
 
 def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
-    """Dropping through a (down + jump) to each different platform underneath."""
+    """Dropping through a (down + jump) onto each platform underneath, from the middle of where the two
+    overlap (LAND_MARGIN in from both ends), if that's where she lands. Taken from the overlap with any
+    platform, the first that landed her on one won: 27 -> 36 dropped from the middle of 27's overlap with 2
+    (above it), 6 units from the basin's cliff at 36's left end, and 33 -> 36 from its overlap with 1, 6
+    from the cliff at its right end. In the air there, the walls of 36's group don't stop her (body.
+    OWN_GROUP_WALLS), and a touch's knock carried her through them and out of the map (harness, tour seed
+    25 and loop seed 19). Where something else is under the middle (28 under 27's overlap with 36), there's
+    no drop: the stretch between is no wider than her slop (from 27, 12 units at that cliff)."""
     out: list[Move] = []
-    seen = set()
     for b in model.platforms:
         if b is a:
             continue
@@ -217,9 +223,8 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
                 continue
             x = float(min(ok, key=lambda s: abs(s - x)))  # the nearest spot where it will
         land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a, group=a.group)
-        if land is not None and land.id not in seen:
-            seen.add(land.id)
-            out.append(Move("drop", a.id, land.id, x, land_x, seconds=DROP_EXTRA_S + t))
+        if land is b:
+            out.append(Move("drop", a.id, b.id, x, land_x, seconds=DROP_EXTRA_S + t))
     return out
 
 

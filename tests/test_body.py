@@ -384,6 +384,23 @@ def test_the_planners_moves_land_where_the_engine_has_them(own_group, monkeypatc
 
 
 @REAL
+def test_a_drop_lands_her_well_inside_the_platform_it_lands_on():
+    """Every drop goes from the middle of where her platform overlaps the one it lands on (LAND_MARGIN in from
+    both ends). Taken from its overlap with any platform, 27 -> 36 went from 27's overlap with 2 (above it), 6
+    units from the basin's cliff at 36's left end, and 33 -> 36 from 6 units off its right one. In the air there
+    the walls of 36's group don't stop her (body.OWN_GROUP_WALLS), and a touch's knock carried her through them
+    and out of the map (harness, tour seed 25 and loop seed 19). From 27 only the 12 units by that cliff drop
+    her onto 36 (28 is under the rest), so 27 has no drop to 36."""
+    m = scenarios.real_map()
+    drops = [mv for mv in route.moves(m) if mv.kind == "drop"]
+    for mv in drops:
+        q = m.platform(mv.dst)
+        assert q.left + physics.LAND_MARGIN <= mv.land_x <= q.right - physics.LAND_MARGIN, mv
+    into_basin = {mv.src: mv.x for mv in drops if mv.dst == 36}
+    assert 27 not in into_basin and into_basin[33] == 906 and into_basin[31] == 225
+
+
+@REAL
 def test_off_platform_3s_right_end_she_goes_through_platform_1s_wall_onto_17():
     # Three times out of three in game (telemetry, 2026-10-20), landing at 1,005-1,015 by her dot.
     m = scenarios.real_map()
