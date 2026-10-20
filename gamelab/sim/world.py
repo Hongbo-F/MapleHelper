@@ -25,7 +25,10 @@ The physics are the ones gamelab plans with, so a plan that is right on paper wo
   takes a star. Bodies are as tall as their kind (monster_data.MONSTER_HEIGHT), and taller while they
   flinch after a hit (monster_data.FLINCH_S, flinch tops from the game data). From the ground a monster
   off her level (reach.LEVEL) is picked only from reach.min_dx sideways (right under or over her isn't
-  hit). So a jump throw's attack, starting 46 units up, passes over a snail. Kills give EXP
+  hit). So a jump throw's attack, starting 46 units up, passes over a snail. Neither the claw nor a star
+  gets past a wall of the foothold group of the platform she last stood on, where it crosses the level
+  line reach.SHOT_H above her feet (reach.wall_between): from platform 4 a throw at a monster on 2 hits
+  nothing, or a monster short of the wall (live, no star from 4 ever reached one on 2). Kills give EXP
   (model.mob_exp) and, 2 s later, drops on its platform; dead monsters respawn 8 s later where they
   spawned;
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
@@ -336,6 +339,7 @@ class World:
         p = model.platform(start[0])
         self.mode = "ground"            # ground | air | rope
         self.plat: Platform | None = p
+        self.last_plat: Platform = p    # the platform she last stood on: its foothold group's walls stop stars
         self.rope: Rope | None = None
         self.flight: Flight | None = None
         self.flight_ms = 0
@@ -660,7 +664,7 @@ class World:
         # her sideways speed at landing (0 if a wall stopped her)
         (x0, _), (x1, _) = f.path[-2] if len(f.path) > 1 else f.path[-1], f.path[-1]
         vx = self.vx if abs(x1 - x0) > 1e-9 else 0.0
-        self.mode, self.plat, self.flight = "ground", q, None
+        self.mode, self.plat, self.flight, self.last_plat = "ground", q, None, q
         self.x, self.y = x, q.y_at(x)
         d = self.arrow()
         if d and vx * d > 0:
@@ -712,7 +716,7 @@ class World:
                             if p.covers(r.x, 4) and abs(p.y_at(r.x) - r.top) <= 20), None)
                 if top is not None and r.from_platform:
                     self._leave_rope()
-                    self.mode, self.plat = "ground", top
+                    self.mode, self.plat, self.last_plat = "ground", top, top
                     self.x = min(max(r.x, top.left), top.right)
                     self.y, self.vx = top.y_at(self.x), 0.0
                     self.can_move_ms = self.ms + int(CLIMB_OVER * 1000)
@@ -779,7 +783,9 @@ class World:
     def nearest_in(self, facing: str, far: float, down: float, up: float) -> SimMonster | None:
         """The live monster nearest her whose body reaches into a box on her `facing` side, from her to
         `far` ahead and `down` below to `up` above her feet (reach.reaches_into). On the ground, one off
-        her level is taken only from reach.min_dx sideways: right under or over her, it isn't hit."""
+        her level is taken only from reach.min_dx sideways: right under or over her, it isn't hit. One
+        behind a wall of the foothold group she last stood on isn't either (reach.wall_between, from her
+        height now)."""
         t, d, best = self.t, directions.sign(facing), None
         for m in self.monsters:
             if not m.alive:
@@ -789,6 +795,8 @@ class World:
             if not reach.reaches_into(ahead, dy, self.top(m), m.half, far, down, up):
                 continue
             if self.mode == "ground" and abs(dy) > reach.LEVEL and ahead < reach.min_dx(dy):
+                continue
+            if reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
                 continue
             if best is None or abs(ahead) < best[0]:
                 best = (abs(ahead), m)

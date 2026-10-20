@@ -317,6 +317,27 @@ def test_a_star_hits_the_first_monster_in_its_path_but_passes_one_right_under_he
     assert [m.alive for m in w.monsters] == [True, False]  # the nearer one takes it
 
 
+def test_a_wall_of_her_own_foothold_group_stops_the_star(model):
+    # The step map of test_attack: she's on A (y 500), below the step wall at 200 joining it to B (y 440,
+    # the same group). From the ground the star doesn't get past the wall: an Orange Mushroom up on B, 220
+    # along and 60 above (in reach by distance), isn't hit, and nothing else is.
+    from test_attack import step_map
+    steps, a, b, _ = step_map()
+    w = still(world(steps, a.id, 100.0, monsters=[("Orange Mushroom", b.id, 320.0)], facing="right"))
+    tap(w, 0.0, "f", 0.04)
+    w.advance(1.0)
+    assert w.monsters[0].hp == 3 and any("star thrown right: no hit" in line for line in w.log)
+    # Jumping, the line it runs at rises with her: keyed 100 ms after the jump the attack starts 46 up, its
+    # line 74 above the platform, over the step's top (60). And from up on B a star goes down past the wall.
+    w = still(world(steps, a.id, 150.0, monsters=[("Orange Mushroom", b.id, 360.0)], facing="right"))
+    _jump_throw(w)
+    assert w.monsters[0].hp == 2
+    w = still(world(steps, b.id, 300.0, monsters=[("Orange Mushroom", a.id, 90.0)], facing="left"))
+    tap(w, 0.0, "f", 0.04)
+    w.advance(1.0)
+    assert w.monsters[0].hp == 2
+
+
 def test_a_monster_touching_her_hurts_and_knocks_her_back(model, monkeypatch):
     monkeypatch.setattr(world_mod, "EVADE", 0.0)
     c = plat(model, 500, 400)
