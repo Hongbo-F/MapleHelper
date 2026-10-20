@@ -326,6 +326,9 @@ def knocked_jump(h: "Hunter", s: Scene, act: tuple) -> bool:
     nothing was overhead was checked where she was at the look, 55 units back) and landed her 0.4 units from
     31's end, which the next throw's turn walked her off, and out of the map."""
     if act[0] in JUMPS and h.knocked(s):
+        if h.knock_waited != h.hit_at:  # logged once a knock
+            h.knock_waited = h.hit_at
+            h.log("    hit: the jump waits for the knock to end")
         time.sleep(STEADY_WAIT_S)
         return True
     return False
