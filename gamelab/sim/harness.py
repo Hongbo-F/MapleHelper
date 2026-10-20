@@ -13,6 +13,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
   kills, rival     her kills, and another player's (Realism.rival_every)
   hp_lost, hp_low  HP lost to touches (each as the world took it: by the monster's touch damage), and
                    her lowest HP; potions; died_at
+  fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
+                   counts against the bar as a death does
   touches, hurt    monsters touching her, and those of the touches she didn't evade
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
                    the share she picked up
@@ -47,7 +49,8 @@ START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12
 # (nothing about respawns, other players or potions is measured), chosen to be harder than "plain".
 PRESETS = {
     "plain": (Noise(), Realism()),
-    "game": (Noise(miss=0.275, walk_jitter=6.0, lag_sd=1.0, dot_px=True, hit_hidden=(1.0, 3.0), detect_miss=0.1),
+    "game": (Noise(miss=0.275, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, hit_hidden=(1.0, 3.0),
+                   detect_miss=0.1),
              Realism(spawn_share=0.6, rival_every=25.0, potions=60)),
 }
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
@@ -109,6 +112,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
 def outcomes(world, records: list[dict], horizon: float) -> dict:
     """What a run gave, from the simulated world (and the telemetry it recorded)."""
     end = min(horizon, world.died_at) if world.died_at is not None else horizon
+    if world.fell_out_at is not None:
+        end = min(end, world.fell_out_at)
     mine = [k for k in world.kill_log if k[3] == "her"]
     drops = [d for d in world.drops if d.owner == "her" and d.since <= horizon]
     known = [d for d in drops if d.taken_by == "her" or d.since + DROP_LIFE <= horizon]
@@ -128,6 +133,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "hp_low": round(world.hp_low, 3),
         "potions": world.potions_used,
         "died_at": world.died_at,
+        "fell_out_at": world.fell_out_at,
         "drops": len(drops),
         "drops_share": round(len(picked) / len(known), 3) if known else None,
         "longest_idle": round(max(gaps, default=0.0), 1),
@@ -175,8 +181,8 @@ def _run_one_args(a: tuple) -> dict:
     return run_one(*a)
 
 
-COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "died_at", "drops_share",
-           "longest_idle", "stuck_s", "rests", "rest_hp_lost")
+COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "died_at", "fell_out_at",
+           "drops_share", "longest_idle", "stuck_s", "rests", "rest_hp_lost")
 
 
 def table(results: list[dict]) -> str:
@@ -193,8 +199,8 @@ def table(results: list[dict]) -> str:
 
 def _mean(results: list[dict], key: str):
     vals = [r[key] for r in results if isinstance(r.get(key), (int, float))]
-    if key == "died_at":
-        return sum(1 for r in results if r.get(key) is not None)  # deaths
+    if key in ("died_at", "fell_out_at"):
+        return sum(1 for r in results if r.get(key) is not None)  # deaths, falls out of the map
     return round(statistics.fmean(vals), 3) if vals else None
 
 
@@ -217,7 +223,7 @@ def _paired(base: list[dict], cand: list[dict]) -> tuple[list[dict], list[dict]]
 def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     """Whether `cand` passes the bar against `base` (seed by seed, over the seeds both have: MIN_PAIRS at
     least), and why: better EXP a minute on at least 8 of 10 seeds and no seed more than 10% worse; at
-    least the drops share on average; no more HP lost on average; no death."""
+    least the drops share on average; no more HP lost on average; no death, and no fall out of the map."""
     every = cand  # deaths count on every seed, compared or not: "no death" isn't a comparison
     base, cand = _paired(base, cand)
     if len(cand) < MIN_PAIRS:
@@ -239,6 +245,10 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     deaths = sum(1 for r in every if r.get("died_at") is not None)
     lines.append(f"deaths: {deaths}")
     ok &= deaths == 0
+    fell = [r["seed"] for r in every if r.get("fell_out_at") is not None]
+    if fell:
+        lines.append(f"fell out of the map: seed(s) {', '.join(map(str, fell))}")
+    ok &= not fell
     lines.append("PASSES the bar" if ok else "does NOT pass the bar")
     return ok, lines
 

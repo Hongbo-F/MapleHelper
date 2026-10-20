@@ -22,7 +22,7 @@ from gamelab.paths import LAB
 from gamelab.sim import fakes, golden, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.fakes import Clock, FakeEyes, FakePlayer, SimViolation, Trace, patched
-from gamelab.sim.world import DROP_LIFE, Noise, SimDied, World, exp_pixels
+from gamelab.sim.world import DROP_LIFE, Noise, SimDied, SimFellOut, World, exp_pixels
 from maplehelper.config import GameKeys
 from maplehelper.keys import parse as K
 from gamelab.attack import reach
@@ -279,7 +279,7 @@ def test_a_running_jump_lands_where_the_engine_and_the_planner_say(model):
     assert w.x == pytest.approx(g.land_x + body.slide(g.vx_land, physics.SHOE), abs=0.01)  # 13 units on
 
 
-def test_a_jump_key_the_game_takes_in_the_air_is_ignored(model):
+def test_a_jump_key_pressed_in_the_air_is_ignored(model, monkeypatch):
     c = plat(model, 500, 400)
     w = world(model, c.id, 300.0)
     tap(w, 0.0, "alt", 0.04)  # lifts off at 0.07 s, lands at 0.625
@@ -290,14 +290,16 @@ def test_a_jump_key_the_game_takes_in_the_air_is_ignored(model):
     assert w.flight is flight
     w.advance(2.0)
     assert w.plat is c and w.x == 300
-    # Pressed 25 ms before she lands, the game takes it 42 ms after: she jumps again.
-    w = world(model, c.id, 300.0)
-    tap(w, 0.0, "alt", 0.04)
-    tap(w, 0.6, "alt", 0.04)
-    w.advance(0.66)
-    assert w.mode == "ground"
-    w.advance(0.7)
-    assert w.mode == "air"
+    # Pressed 25 ms before she lands: lost, as one pressed earlier (world.JUMP_TAKEN_LATE off) ...
+    for late, again in ((False, False), (True, True)):
+        monkeypatch.setattr(world_mod, "JUMP_TAKEN_LATE", late)
+        w = world(model, c.id, 300.0)
+        tap(w, 0.0, "alt", 0.04)
+        tap(w, 0.6, "alt", 0.04)
+        w.advance(0.66)
+        assert w.mode == "ground"
+        w.advance(0.7)
+        assert (w.mode == "air") == again  # ... or taken 42 ms after she landed, when the game acts on it
 
 
 def test_down_and_jump_drops_through_onto_the_platform_below(model):
@@ -594,6 +596,64 @@ def test_a_monster_touching_her_hurts_and_knocks_her_back(model, monkeypatch):
     w.advance(0.9)  # invulnerable for a second
     assert w.touches == 1 and w.plat is c and w.vx == 0
     assert 45 <= 400 - w.x <= 70  # knocked back ~58 units, away from it (lab/hits.jsonl's median push)
+
+
+def test_the_arrow_she_holds_doesnt_steer_a_knocks_flight(model, monkeypatch):
+    # The logged pushes (~58 units) were all taken with no key pressed; what an arrow does to the flight
+    # isn't measured, so it does nothing until she lands (world.KNOCK_STEERS); by the engine's air steering
+    # the arrow toward the monster would brake her at 200 units/s².
+    monkeypatch.setattr(world_mod, "EVADE", 0.0)
+    c = plat(model, 500, 400)
+
+    def landed(arrow: str | None) -> float:
+        w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 420.0)]))
+        if arrow:
+            w.key(0.0, arrow, True)
+        w.advance(0.05)
+        assert w.touches == 1 and w.mode == "air"
+        while w.mode == "air":
+            w.advance(w.t + 0.005)
+        return w.x
+
+    free = landed(None)
+    assert landed("right") == free and landed("left") == free  # toward it, away from it: as with none
+    monkeypatch.setattr(world_mod, "KNOCK_STEERS", True)
+    assert landed("right") > free + 2  # braked toward the monster: she lands nearer it
+
+
+def test_falling_below_the_lowest_floor_ends_the_run_named():
+    # Two ledges with nothing under the gap: walked off the first, she falls past every floor. The run
+    # ends there (SimFellOut, a SimDied), where she used to hang in the air at the end of her flight's 4 s.
+    t = tree()
+    t["foothold"] = {"1": {"1": dict([seg(1, 0, 300, 200, 300)]), "2": dict([seg(2, 400, 300, 600, 300)])}}
+    t["ladderRope"], t["life"] = {}, {}
+    m = mapdata.parse(1, t, "Test Map", {})
+    w = world(m, plat(m, 300, 100).id, 150.0)
+    w.key(0.0, "right", True)
+    with pytest.raises(SimFellOut):
+        w.advance(30.0)
+    assert w.fell_out_at < 1.0 and w.y > 300 and "falls out of the map" in w.log[-1]
+    assert w.summary()["fell_out_at"] == w.fell_out_at
+    with pytest.raises(SimDied):  # whatever looks next finds the run over
+        w.advance(31.0)
+
+
+def test_a_short_tap_can_be_lost_turning_her_without_walking_her(model):
+    # Of five taps of 20-50 ms recorded, three moved her 0 (Noise.tap_lost): the lag spread alone loses
+    # almost none of them.
+    c = plat(model, 500, 400)
+    moved, turned = [], []
+    for seed in range(40):
+        w = world(model, c.id, 400.0, seed=seed, noise=Noise(tap_lost=0.6), facing="right")
+        tap(w, 0.1, "left", 0.04)
+        w.advance(1.0)
+        moved.append(w.x < 399)
+        turned.append(w.facing == "left")
+    assert all(turned) and 0.2 < 1 - sum(moved) / 40 < 0.9
+    w = world(model, c.id, 400.0, noise=Noise(tap_lost=1.0))
+    tap(w, 0.1, "left", 0.2)  # longer than TAP_LOST_MS: walks her
+    w.advance(1.0)
+    assert w.x < 380
 
 
 def test_a_touch_takes_hp_by_the_monsters_touch_damage_and_is_evaded_by_its_accuracy(model, monkeypatch):

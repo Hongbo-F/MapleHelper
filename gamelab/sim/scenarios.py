@@ -444,7 +444,7 @@ def nav_monsters_basin(sim):
     return _nav(33)(sim)
 
 
-@scenario((21, -300.0), monsters="all", seed=9,
+@scenario((21, -300.0), monsters="all", seed=7,
           expects=(ends("arrived"), logs("waiting for the monster to move off")))
 def nav_monsters_long_way(sim):
     """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way. (Seed
@@ -454,7 +454,9 @@ def nav_monsters_long_way(sim):
     since the simulator moves her by the engine: on seed 4 nothing was in her way to wait for; over 16
     seeds all arrive, 3 of them after a wait, where 15 and 3 did just before. Seed 9 since no jump is keyed
     in the kick's blind spot and jump-backs leave at full speed: on seed 5 nothing was in her way to wait
-    for; over 16 seeds 14 arrive, 2 of them after a wait, where 15 and 6 did just before.)"""
+    for; over 16 seeds 14 arrive, 2 of them after a wait, where 15 and 6 did just before. Seed 7 since the
+    arrow she holds doesn't steer a knock's flight: on seed 9 nothing was in her way to wait for; over 16
+    seeds all arrive, 4 of them after a wait, where 5 did just before.)"""
     return _nav(2)(sim)
 
 
@@ -839,7 +841,7 @@ def tour_hunt_from_safe_spot(sim):
     return _tour_hunt(17, 4)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=22, limit=400,
+@scenario((36, 300.0), monsters="all", seed=1, limit=400,
           expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
                    logs("collecting drops on platform 36"),
                    check("the stop's report counts HP lost", lambda tr: tr["result"]["damage_taken"] > 0),
@@ -848,7 +850,9 @@ def tour_hunt_basin(sim):
     """Tour.hunt of the basin (36): no safe spot reaches it, so on the platform itself. Collecting the drops
     left on it, each trip (Navigator.go with `fight` on) shoots only monsters in her way to them, and gets
     there: it used to stop and shoot everything in reach, on the very platform she was going to, until the
-    trip's 60 s ran out."""
+    trip's 60 s ran out. (Seed 1 since the arrow she holds doesn't steer a knock's flight: on seed 22 the
+    fight's own sweeps picked up every drop, so no trip went to collect any. Over 16 seeds all 16 meet all
+    of this, as just before.)"""
     return _tour_hunt(36, 5)(sim)
 
 
@@ -1011,11 +1015,12 @@ def tour_rest_no_escort(sim):
 
 
 @scenario((36, 300.0), monsters="all", seed=22, limit=400,
-          noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
+          noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, tag_hidden=((20.0, 23.0),)),
           expects=(check("kills", lambda tr: _kills(tr) >= 1), happens("star misses")))
 def tour_hunt_noisy(sim):
     """tour_hunt_basin with the real game's errors: stars missing (28%), walks off by a few units, the
-    lags spread as measured, her dot read to whole pixels, and her name tag hidden for 3 s mid-fight."""
+    lags spread as measured, short taps lost (60%), her dot read to whole pixels, and her name tag hidden
+    for 3 s mid-fight."""
     return _tour_hunt(36, 5)(sim)
 
 
@@ -1126,11 +1131,12 @@ def loop_run(sim):
 
 
 @scenario((36, 300.0), monsters="all", seed=22, limit=300,
-          noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, dot_px=True, tag_hidden=((20.0, 23.0),)),
+          noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, tag_hidden=((20.0, 23.0),)),
           expects=(check("kills", lambda tr: sum(tr["world"]["kills"].values()) >= 3), happens("star misses")))
 def loop_noisy(sim):
     """loop_basin with the real game's errors (tour_hunt_noisy's): stars missing, walks off by a few
-    units, the lags spread, her dot read to whole pixels, her name tag hidden for 3 s mid-fight."""
+    units, the lags spread, short taps lost, her dot read to whole pixels, her name tag hidden for 3 s
+    mid-fight."""
     return _loop(2)(sim)
 
 

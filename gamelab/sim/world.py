@@ -13,13 +13,14 @@ on the world's 5 ms tick:
 - the jump key lifts her off Lags.jump (67 ms) later, if she's on the ground then, with the kick: below
   0.8 × her speed toward the arrow it sees, she gets that much more (body.takeoff). With down held it
   drops her through the platform physics.DROP_LAG later. A jump key that comes inside the attack lock is
-  ignored, and so is one the game takes while she's in the air;
+  ignored, and so is one pressed while she's in the air (JUMP_TAKEN_LATE: or one the game takes then);
 - in the air she flies body.fly's arc with the arrow the game sees, flown again from where she is when
   that arrow changes: the opposite one brakes her at 200 units/s², the one she flies with does nothing,
   and none drags her at 1 (100 once she falls at the cap). Only the walls of her foothold group stop her
   (body.OWN_GROUP_WALLS: the group of the platform she last stood on; off a rope, none), and the map's
   sides. She lands with the speed she has and slides on, unless an attack is playing: that stops her
-  (jump-backs and jump-throws slid 1.4-2.9 units in game);
+  (jump-backs and jump-throws slid 1.4-2.9 units in game). Below the map's lowest floor she has fallen out
+  of the map, and the run ends there (SimFellOut);
 - up held at a rope's foot, or anywhere along it in the air, grabs it; up climbs at flow.ROPE_SPEED onto
   the platform at its top (a short climb-over, flow.CLIMB_OVER), down climbs down at physics.CLIMB_SPEED
   and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
@@ -34,7 +35,8 @@ on the world's 5 ms tick:
   (a thief's "MISS": nothing else happens) with a chance inversely proportional to the monster's accuracy
   (game data: half a pig's touches, four in five of a snail's); the others take a share of her HP by the
   monster's touch damage (game data: about 1.6% for a pig, 0.3% for a snail, give or take 70%) and knock
-  her back ~58 units (the median logged push). At 0% HP she dies, and the run ends (SimDied);
+  her back ~58 units (the median logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS).
+  At 0% HP she dies, and the run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
@@ -61,9 +63,9 @@ on the world's 5 ms tick:
 
 `Noise` (off by default) adds the errors of the real game, each one seeded and tied to the moment it
 happens, not to how often anything was looked at: stars that miss, walks that stop a few units early or
-late, lags spread as measured (so a jump keyed 80 ms after the arrow leaves with the kick or without it,
-and a short tap can be lost), her minimap dot read to whole pixels, and spells when her name tag or her
-dot can't be seen.
+late, lags spread as measured (so a jump keyed 80 ms after the arrow leaves with the kick or without it),
+short arrow taps that turn her without walking her, her minimap dot read to whole pixels, and spells when
+her name tag or her dot can't be seen.
 
 Time is kept in whole milliseconds on a 5 ms tick, so the state at any moment depends only on the key
 events, never on when or how often it was looked at.
@@ -113,6 +115,13 @@ ROPE_JUMP_SHOE = True
 ROPE_JUMP = ((SHOE.rope_vx * SHOE.vmax, SHOE.rope_vy * SHOE.vjump) if ROPE_JUMP_SHOE else (WALK_SPEED, 220.0))
 HER_HALF = flow.HER_HALF
 HER_HEIGHT = 55.0
+# A jump key the game takes in the air does nothing. When it takes one isn't measured: the 18 jumps recorded
+# lifted off 45-95 ms after their key, and a key pressed while she was in the air (or held from before) never
+# jumped her again on landing. Taken when it acts on it (Lags.jump after the key, as the world's clock
+# counts), a key pressed in the last 67 ms of a fall jumps her once she lands; taken as the key goes out,
+# it is lost. False takes it as the key goes out, as the simulator did before it ran on the engine: the
+# harsher of the two for a plan that presses the next jump early, so a plan that copes here copes in game.
+JUMP_TAKEN_LATE = False
 STAR_DELAY = STAR_DELAY_MS / 1000
 ATTACK_LOCK = COMBAT.attack_lock_ms / 1000
 # Her HP: her HP bar read "HP[642/642]" in game (2026-10-18, at level 19; maplehelper.ocr.parse's test).
@@ -139,7 +148,13 @@ EVADE_ACC = 27.0
 EVADE = 0.5              # ... a monster without game data
 INVULNERABLE = 1.0
 # Its knockback: ~40 units in the air (0.22 s) and a ~19-unit slide on landing, ~58 in all on flat ground
-# (hits.jsonl's pushes on her own level: quartiles 21 / 58 / 87 units).
+# (hits.jsonl's pushes on her own level: quartiles 21 / 58 / 87 units). Those are all hits with no key
+# pressed since the look before (Hunter._log_hit), so what an arrow held does to the flight isn't measured.
+# By the engine's air steering the opposite arrow would brake it at 200 units/s² (45 units on flat ground
+# instead of 56, toward the monster) and the one held away would carry her on, landing at full speed (65).
+# False: the arrow does nothing until she lands, as the fit had it (and the simulator before it ran on the
+# engine); on the ground it walks her as ever.
+KNOCK_STEERS = False
 KNOCK_VX, KNOCK_VY = 180.0, 220.0
 HITS = {"pig": 3, "orange-mushroom": 3, "slime": 2, "snail": 1}  # HP in stars
 # A hit that doesn't kill (a star or a swipe) pushes the monster KNOCK_MOB units away from her over
@@ -175,6 +190,16 @@ class SimDied(Exception):
     """Her HP reached 0: she's dead, and a simulated run ends there (nothing she does counts any more)."""
 
 
+class SimFellOut(SimDied):
+    """She fell below the map's lowest floor (a knock or a flight through a wall of another foothold group
+    with nothing under it): she'd fall for good, and a simulated run ends there, named, not left standing
+    still in the air for the rest of it. What the game does then isn't known (the map's bottom isn't a
+    floor in its data)."""
+
+
+TAP_LOST_MS = 50         # an arrow tap this short (as sent) can be lost (Noise.tap_lost)
+
+
 @dataclass(frozen=True)
 class Noise:
     """The real game's errors, all off by default. Each draw is seeded by the world's seed and the
@@ -185,7 +210,12 @@ class Noise:
     walk_jitter: float = 0.0     # units: letting go of an arrow stops her up to this much early or late
     lag_sd: float = 0.0          # the lags' spread around their medians, times the measured one (body.Lags:
                                  # sd 10 ms for an arrow pressed, 11 let go, 12 for a jump), drawn for each
-                                 # key; 1: as measured. 0: every lag is its median
+                                 # key; 1: as measured. 0: every lag is its median. (Spread alone, few taps
+                                 # are lost, seen let go before they're seen pressed: of 200 taps, 36 of 20
+                                 # ms moved her under half a unit, 5 of 39 ms, none of 50 ms)
+    tap_lost: float = 0.0        # chance an arrow tap of TAP_LOST_MS or less turns her without walking her
+                                 # (the game sees it pressed, then let go at once): in the recordings, of
+                                 # five taps of 20-50 ms, three moved her 0 (0.6; research 4.7)
     dot_px: bool = False         # her minimap dot read to whole pixels (11.4 map units each), not exact
     tag_hidden: tuple = ()       # (from, to) s since the start: her name tag can't be seen (behind a box)
     dot_hidden: tuple = ()       # (from, to) s: her minimap dot can't be seen (a tooltip over the minimap)
@@ -473,7 +503,7 @@ class World:
         self.kill_log: list[tuple[float, str, int, str]] = []  # (t, kind, platform, "her" or "rival")
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.actions = _actions(keys)
-        self.held: dict[str, int] = {}  # action -> ms it went down
+        self.held: dict[str, float] = {}  # action -> the clock time it went down (as sent)
         self._events: list[tuple[int, int, Event]] = []
         self._seq = 0
         self.log: list[str] = []        # notable world events, for the trace
@@ -488,6 +518,9 @@ class World:
         self.flight_arrow = 0           # ... flown with this arrow held ...
         self.flight_skip: Platform | None = None  # ... through this platform (dropping)
         self.group = p.group            # her foothold group: the walls of it stop her in the air (body.fly)
+        self.knocked = False            # in the air from a monster's touch (KNOCK_STEERS)
+        self.fell_out_at: float | None = None  # when she fell below the map's lowest floor (SimFellOut)
+        self.bottom = max(max(q.y_at(q.left), q.y_at(q.right)) for q in model.platforms)  # its lowest floor
         self._walls: dict = {}          # foothold group -> the walls that stop her with it (body.Walls)
         self.x, self.y = float(start[1]), p.y_at(start[1])
         self.vx = self.vy = 0.0         # her speed (units/s; y down)
@@ -578,8 +611,10 @@ class World:
         """Run the world up to clock time `clock_t` (whole ticks at or before it). Raises SimDied once
         she's dead: whatever looks next finds the run over."""
         end = int(math.floor(((clock_t - self.origin) * 1000) / TICK_MS + 1e-6)) * TICK_MS
-        while self.ms < end and not self.dead:
+        while self.ms < end and not self.dead and self.fell_out_at is None:
             self._tick()
+        if self.fell_out_at is not None:
+            raise SimFellOut(f"she fell out of the map at {self.fell_out_at:.3f} s (x {self.x:.0f})")
         if self.dead:
             raise SimDied(f"she died at {self.died_at:.3f} s ({self.touches} touches)")
 
@@ -630,14 +665,13 @@ class World:
                 return
             if e.kind == "down":
                 if action not in self.held:
-                    self.held[action] = self.ms
-                    self._pressed(action, self._sent(e))
-            elif self.held.pop(action, None) is not None:
-                self._released(action, self._sent(e))
+                    self.held[action] = self._sent(e)
+                    self._pressed(action, self.held[action])
+            elif (since := self.held.pop(action, None)) is not None:
+                self._released(action, self._sent(e), since)
         elif e.kind == "release":
             for action in list(self.held):
-                del self.held[action]
-                self._released(action, self._sent(e))
+                self._released(action, self._sent(e), self.held.pop(action))
         elif e.kind == "seen":
             self._seen(*e.data)
         elif e.kind == "liftoff":
@@ -729,8 +763,10 @@ class World:
                 if ground:
                     self._push(self.ms + int(DROP_LAG * 1000), "drop", self.plat.id)
                 return
-            # It's taken Lags.jump later, wherever she is then (_liftoff): pressed just before she lands,
-            # it jumps her once she has.
+            if self.mode == "air" and not JUMP_TAKEN_LATE:
+                return  # pressed in the air: lost
+            # It lifts her off Lags.jump later, if she's on the ground then (_liftoff); with JUMP_TAKEN_LATE,
+            # one pressed just before she lands jumps her once she has.
             self._push(self.ms_of(at + self._lag("jump", LAGS.jump, LAGS.sd_jump)), "liftoff", self.mode)
         elif action == "attack":
             if self.ms < self.attack_lock_ms or self.mode == "rope":
@@ -764,8 +800,14 @@ class World:
                 self.sitting = not self.sitting
                 self.note("sits on the chair" if self.sitting else "stands up from the chair")
 
-    def _released(self, action: str, at: float) -> None:
+    def _released(self, action: str, at: float, since: float) -> None:
+        """Key `action`, down since clock time `since`, let go at clock time `at`."""
         if action in ("left", "right"):
+            if (self.noise.tap_lost and (at - since) * 1000 <= TAP_LOST_MS + 1e-6 and action in self._seen_due
+                    and self.chance("tap") < self.noise.tap_lost):
+                # A short tap lost: the game sees it let go as it sees it pressed (it turns her), so it doesn't walk her.
+                self._push(self._seen_due[action], "seen", (action, False))
+                return
             lag = self._lag(f"{action} up", LAGS.off, LAGS.sd_off)
             if self.noise.walk_jitter and not {"left", "right"} & self.held.keys():
                 # letting go of the last arrow: she runs on a little longer or stops a little sooner
@@ -812,11 +854,16 @@ class World:
         return body.fly(self.model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls,
                         sides=self.sides, dt=TICK_MS / 1000, path=True, airborne=airborne)
 
+    def _steer(self) -> int:
+        """The arrow that steers her in the air: the one the game sees, but none in a knock's flight (unless
+        KNOCK_STEERS)."""
+        return 0 if self.knocked and not KNOCK_STEERS else self.arrow()
+
     def _launch(self, vx: float, vy: float, from_ms: int) -> None:
         """Into the air from where she is, at (vx, vy), from tick `from_ms` (this one, or the next when it
         happens after this tick's motion)."""
         y = self.y if self.mode != "ground" else self.plat.y_at(self.x)
-        d = self.arrow()
+        d = self._steer()
         self._fly(self._flight(self.x, y, vx, vy, d), from_ms, d)
 
     def _fly(self, f: body.Flight, from_ms: int, arrow: int, skip: Platform | None = None) -> None:
@@ -831,6 +878,7 @@ class World:
         was pressed on, with an arrow, it jumps her off sideways. Anywhere else it does nothing."""
         d = self.arrow()
         if self.mode == "ground" and pressed_on != "rope":
+            self.knocked = False
             self._launch(body.takeoff(self.vx, d, SHOE), -SHOE.vjump, self.ms)
         elif self.mode == "rope" and pressed_on == "rope" and d:
             self._leave_rope()
@@ -838,18 +886,30 @@ class World:
 
     def _air(self) -> None:
         f = self.flight
-        d = self.arrow()
+        d = self._steer()
         if d != self.flight_arrow:  # the game sees another arrow: she flies on from here with it
             k = min(max(0, (self.ms - self.flight_ms) // TICK_MS), len(f.path) - 1)
             (x, y), (vx, vy) = f.path[k], f.speeds[k]
             f = self._flight(x, y, vx, vy, d, skip=self.flight_skip, airborne=k > 0)
             self._fly(f, self.ms, d, self.flight_skip)
         k = (self.ms + TICK_MS - self.flight_ms) // TICK_MS
-        if f.platform is not None and k >= len(f.path) - 1:
-            self._land(f.platform, f.land_x, f.vx_land)
-            return
+        if k >= len(f.path) - 1:
+            if f.platform is not None:
+                self._land(f.platform, f.land_x, f.vx_land)
+                return
+            # No floor under her within the flight's 4 s (a long fall): she flies on from where it ends.
+            (x, y), (vx, vy) = f.path[-1], f.speeds[-1]
+            f = self._flight(x, y, vx, vy, d, skip=self.flight_skip, airborne=True)
+            self._fly(f, self.ms, d, self.flight_skip)
+            k = 1
         k = min(k, len(f.path) - 1)
         (self.x, self.y), (self.vx, self.vy) = f.path[k], f.speeds[k]
+        if f.platform is None and self.y > self.bottom:  # below the map's lowest floor, with none to land on
+            self.fell_out_at = self.t
+            self.held.clear()
+            self.seen.clear()
+            self.note(f"falls out of the map at x {self.x:.0f} (below its lowest floor)")
+            return
         if "up" in self.held and self.ms - self.left_rope_ms >= REGRAB_AFTER * 1000:
             for r in self.model.ropes:
                 if abs(self.x - r.x) <= GRAB_X and r.top <= self.y and self.y - ARMS <= r.bottom:
@@ -861,7 +921,7 @@ class World:
         ground brakes her (or runs on, with the arrow), except while an attack plays: it stops her. Five
         jump-backs and jump-throws landing during their attack slid 1.4-2.9 units, where braking alone
         has 7.6-11.7 (research: 60 fps recordings)."""
-        self.mode, self.plat, self.flight, self.last_plat, self.group = "ground", q, None, q, q.group
+        self.mode, self.plat, self.flight, self.last_plat, self.group, self.knocked = "ground", q, None, q, q.group, False
         self.x, self.y = x, q.y_at(x)
         start, end = self.attack_ms
         self.vx, self.vy = (0.0 if start <= self.ms < end else vx), 0.0
@@ -889,6 +949,7 @@ class World:
 
     def _grab(self, r: Rope) -> None:
         self.mode, self.rope, self.plat, self.flight, self.group = "rope", r, None, None, body.ROPE_GROUP
+        self.knocked = False
         self.x, self.y, self.vx, self.vy = r.x, min(max(self.y, r.top), r.bottom), 0.0, 0.0
         self.sitting = False
         self.note(f"grabs the rope at x {r.x:.0f}")
@@ -964,6 +1025,7 @@ class World:
             return
         if self.mode == "rope":
             self._leave_rope()
+        self.knocked = True
         self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
 
     def flinching(self, m: SimMonster) -> bool:
@@ -1144,7 +1206,7 @@ class World:
         return {"x": round(self.x, 1), "y": round(self.y, 1), "mode": self.mode, "dead": self.dead,
                 "platform": None if self.plat is None else self.plat.id, "hp": round(self.hp, 3),
                 "exp": self.exp, "kills": dict(sorted(self.kills.items())), "touches": self.touches,
-                "evaded": self.evaded,
+                "evaded": self.evaded, **({"fell_out_at": round(self.fell_out_at, 3)} if self.fell_out_at else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
 
