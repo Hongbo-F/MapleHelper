@@ -475,7 +475,9 @@ def nav_fight_basin(sim):
     the trip's 180 s ran out on 30, throwing at a snail on 33 below that the decisions count in reach and
     the simulator's attack area doesn't. Over 16 seeds 12 meet all of this, 14 before. Seed 2 since a hit
     pushes a monster back: on seed 5 the trip's 180 s ran out on 30 that way. Over 16 seeds 8 meet all of
-    this, 7 running out of time.)"""
+    this, 7 running out of time. With knocks unsteered and the planner flying her by the engine, 9 meet
+    all of it; of the 7 that run out of time, 6 throw 54-88 stars from 30 at a snail on 33 that the
+    simulator's attack can't pick (README, Found offline), the 7th is a pig fight in the basin.)"""
     return _nav(25, fight=True)(sim)
 
 
@@ -917,7 +919,7 @@ def tour_collect_loot_on_the_way(sim):
             "pending_loot": [[round(d.x), d.platform] for d in tour.h.looter.pending]}
 
 
-@scenario((36, 300.0), monsters="all", seed=6, limit=1200,
+@scenario((36, 300.0), monsters="all", seed=6, limit=1500,
           expects=(check("three stops visited", lambda tr: len(tr["result"]["visited"]) == 3),
                    ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
                    check("every kill counted (the stops' and on the way, resting included)",
@@ -930,7 +932,21 @@ def tour_run(sim):
     the way came between two looks. Seed 8 had been since jump-throws come 40 ms after the jump: on seed 25
     two kills came between two looks once, and two kills raise her EXP number once.) The basin's respawns
     make its length chaotic: on world seeds 1-16 it took 470-1190 s, before stars picked by the search and
-    since, so the limit is 1200 s."""
+    since.
+
+    On the physics branch (her body by motion.body) it met all of this on few seeds, and its seed moved
+    from 8 to 9, 8, 9, 5, 9 and 1 there; looked into rather than moved again, it was the limit and the
+    kill count:
+    - Time: that world gave more kills than the branch's base did (seeds 1-16: 165 a tour on average
+      against 149), at the same 2.9 s of loot collecting each (480 s a tour against 433), so tours took
+      longer (806 s against 769 on average, capped at 900 s; uncapped, the longest took 1,300). At 900
+      s, 7 of 16 ran out of time; the limit is 1500 s now, a backstop.
+    - The kill count: every one of her kills raises her EXP number at a look (on seeds 3, 5 and 7, 116,
+      153 and 164 gains for as many kills, none two to a look), but a stop counts a kill by kind only when
+      its fight tells that gain apart, and some come as a fight ends or in the sweep after it (fight.py's
+      f0ea98d and 52683f4 tell those apart; with them on that branch the count held on 11 of 16 seeds
+      instead of 5), or at a look of a loot collection's own (Tour.collect_loot's locate, a trip's
+      recover), which nothing counts."""
     tour = sim.tour_stack()
     return tour.run(stops=3, kills_per_stop=5, seconds_per_stop=90)
 
