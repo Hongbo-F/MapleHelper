@@ -3,7 +3,8 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
 
 - **The ledger** (`Ledger`): every EXP gain the hunter sees (at most one a look: her EXP number only says
   it changed) is a kill. It's placed (kind, platform, where) when a star of hers explains it: the first
-  monster in the path of a throw made in the last STAR_WINDOW s, preferring one that's gone from view.
+  monster in the path of a throw made in the last STAR_WINDOW s (or, with none, that long before the look
+  before, as the gain came after it), preferring one that's gone from view.
   A gain no throw explains (party EXP, or a kill seen only from a look without monsters) still counts,
   credited to where she is, but has no place and so no drops.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
@@ -67,6 +68,7 @@ class Ledger:
         self._accounted = hunter.exp_gains  # gains already in the ledger
         self._throws: list[_Throw] = []
         self._last: Scene | None = None     # the last look that searched for monsters
+        self._looked: float | None = None   # when the last look of all was
 
     @property
     def placed(self) -> list[Kill]:
@@ -79,8 +81,11 @@ class Ledger:
         self._throws.append(_Throw(when, side, path))
 
     def on_look(self, s: Scene) -> None:
-        """After every look (after the hunter's own count): each new EXP gain becomes a kill."""
-        self._throws = [th for th in self._throws if s.t - th.t <= STAR_WINDOW]
+        """After every look (after the hunter's own count): each new EXP gain becomes a kill. Throws are kept
+        STAR_WINDOW s, or that long before the look before if it's older: a gain seen now came after it."""
+        since = s.t if self._looked is None else min(s.t, self._looked)
+        self._looked = s.t
+        self._throws = [th for th in self._throws if since - th.t <= STAR_WINDOW]
         new, self._accounted = self.h.exp_gains - self._accounted, self.h.exp_gains
         for _ in range(new):
             self.kills.append(self._place(s))
@@ -88,9 +93,15 @@ class Ledger:
             self._last = s
 
     def _place(self, s: Scene) -> Kill:
-        """The kill a gain seen in look `s` was: the first monster in a recent throw's path, preferring
-        one not seen any more (the newest throw first), else unplaced."""
-        firsts = [(th, th.path[0]) for th in reversed(self._throws) if th.path]
+        """The kill a gain seen in look `s` was: the first monster in the path of a throw made in the last
+        STAR_WINDOW s, preferring one not seen any more (the newest throw first); with none, of a throw made
+        up to STAR_WINDOW s before the look before, which the gain came after; else unplaced. A fight's last
+        star often lands after its last look, and the walks and pick-ups of the sweep after it take no look
+        for up to 7 s: in the simulator, 2 of tour_hunt_basin's 61 kills went unplaced that way, and 9 of 58
+        once its monsters walked as fast as in the game. Going back that far for every gain placed more
+        kills on the wrong monster (458 of 612 right in 10 scenarios, against 437 of 628)."""
+        recent = [th for th in self._throws if s.t - th.t <= STAR_WINDOW and th.path]
+        firsts = [(th, th.path[0]) for th in reversed(recent or self._throws) if th.path]
         if s.searched:
             gone = [(th, m) for th, m in firsts if not any(same(o, m) for o in s.monsters)]
             firsts = gone or firsts

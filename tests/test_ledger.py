@@ -62,6 +62,37 @@ def test_a_gain_no_throw_explains_counts_without_a_place_or_drops():
     assert not k.placed and ledger.placed == [] and store.piles == []
 
 
+def test_a_gain_seen_long_after_its_star_is_placed_by_a_throw_before_the_look_before():
+    """A fight's last star can land after its last look, and the sweep after it takes no look for seconds:
+    the gain came after the look before the one that saw it, so a throw up to STAR_WINDOW before that one
+    explains it; but a throw in the last STAR_WINDOW s comes first."""
+    from gamelab.behavior.ledger import STAR_WINDOW, _Throw
+    from gamelab.localization.monsters import Monster
+    from gamelab.perception.mobs import Mob
+
+    def seen(kind, x):
+        return Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, 500.0, 3)
+
+    h = _Hunter()
+    ledger = Ledger(h)
+    ledger._throws.append(_Throw(10.0, "right", [seen("pig", 400.0)]))
+    ledger.on_look(_look(10.5))                       # the fight's last look: its star still flying
+    h.exp_gains = 1
+    ledger.on_look(_look(10.5 + 2 * STAR_WINDOW))     # the next, after the sweep: the gain
+    assert [(k.kind, k.x) for k in ledger.kills] == [("pig", 400.0)]
+
+    h, pig = _Hunter(), seen("pig", 300.0)
+    ledger = Ledger(h)
+    ledger._throws.append(_Throw(9.0, "right", [seen("snail", 600.0)]))
+    ledger.on_look(_look(11.2))
+    ledger._throws.append(_Throw(11.4, "right", [pig]))
+    h.exp_gains = 1
+    s = _look(11.6)
+    s.monsters, s.searched = [seen("pig", 305.0)], True  # the snail is gone from view, the pig isn't
+    ledger.on_look(s)
+    assert [k.kind for k in ledger.kills] == ["pig"]  # the recent throw's, though the old one's is gone
+
+
 def test_a_pile_is_forgotten_only_after_two_empty_looks_apart_and_settled():
     store = DropStore()
     store.on_kill(Kill(0.0, "pig", 3, 500.0, 300.0, 3))
