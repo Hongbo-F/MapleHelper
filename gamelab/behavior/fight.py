@@ -172,15 +172,18 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
     deadline = time.monotonic() + seconds
     exp_at_start = report.exp_kills
     st = FightState(exp_counted=exp_at_start)
+    placed = None  # the last look that placed her
     while time.monotonic() < deadline:
         enough = report.exp_kills - exp_at_start >= max_kills
         if enough and not finish:
             break
         s = h.look()
         if (step := _place_and_check(h, st, s)) == _OVER:
+            _count_late(h, st, placed)
             return report
         if step == _AGAIN:
             continue
+        placed = s
         now = time.monotonic()  # read once a look: hidden ones are told by it
         fight, visible, hidden = _targets(h, st, s, kinds, ground, far, now)
         act = _take_stance(h, st, s, fight, visible, hidden, approach and not enough)
@@ -188,6 +191,7 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
             return report
         if step == _DONE:
             break
+    _count_late(h, st, placed)
     if st.kill_spots:
         h.looter.sweep_after(st.kill_spots)
     report.stop = "kill limit" if report.exp_kills - exp_at_start >= max_kills else "time limit"
@@ -195,6 +199,16 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
 
 
 # --- the steps of a fight's look (clear) ---------------------------------------------------------
+
+def _count_late(h: "Hunter", st: FightState, placed: Scene | None) -> None:
+    """At the end of a fight: her EXP gains its own looks didn't tell apart as kills (seen by a sweep's
+    looks before it ended at the kill count, or by the look it ended on: knocked off, low HP), told apart
+    from its last look that placed her (`placed`). Else they were missing from its kills by kind, what a
+    tour's stop sums up."""
+    if h.report.exp_kills > st.exp_counted and placed is not None:
+        _count_kills(h, st, placed, [], h.report.exp_kills - st.exp_counted, time.monotonic())
+        st.exp_counted = h.report.exp_kills
+
 
 def _place_and_check(h: "Hunter", st: FightState, s: Scene) -> str | None:
     """Whether the fight goes on with look `s`: _AGAIN (after a short wait) if it can't place her, and

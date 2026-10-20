@@ -163,6 +163,27 @@ def test_after_the_kill_count_she_finishes_what_is_in_reach(monkeypatch):
     assert len(throws2) < len(throws)
 
 
+def test_a_kill_seen_while_she_sweeps_up_still_counts(monkeypatch):
+    # Her EXP goes up again during the sweep after a kill (a star in flight killed the other pig), seen by a
+    # look of the sweep's: the fight ends at its kill count there, and that kill is still told apart (the
+    # tour's stops sum up the kills by kind, and missed it).
+    def kill_at(h, t):
+        if abs(t - 0.6) < 1e-6:
+            h.report.exp_kills += 1
+    looks = [[target(700), target(800)], [target(800)]] + [[]] * 20
+    h, throws = _fighter(monkeypatch, looks, on_look=kill_at)
+    swept = []
+
+    def sweep(s, deaths):
+        swept.append([d.x for d in deaths])
+        h.report.exp_kills += 1
+    h.looter.sweep_through = sweep
+    h.looter.sweep_after = lambda deaths: swept.append([d.x for d in deaths])
+    r = h.clear(max_kills=2, patience=2.0)
+    assert r.exp_kills == 2 and r.kills == {"pig": 2} and r.stop == "kill limit"
+    assert swept == [[700], [800]]  # the second one's drops are swept up too
+
+
 def test_with_far_on_she_shoots_monsters_on_any_platform_in_reach(monkeypatch):
     far_pig = target(700, y=560, platform=7)  # another platform, 60 below and 200 off: in reach
     h, throws = _fighter(monkeypatch, [[far_pig]] * 3)
