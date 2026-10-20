@@ -308,6 +308,7 @@ def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_ga
                       (player_client, "send"), (player_client, "submit"), (player_client, "cancel")):
         monkeypatch.setattr(obj, name, lambda *a, _n=name, **k: touched.append(_n))
     monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
+    monkeypatch.setattr(feed, "quiet", lambda: None)  # not the test process's priority
     model = small_map()
     eyes = Drawn(model)
 

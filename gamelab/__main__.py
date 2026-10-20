@@ -881,6 +881,7 @@ def cmd_watch(args) -> int:
     and pages whoever is at the PC (the player keeps its own watchdog regardless)."""
     from .localization import feed, worldstate
     from .perception.lie_detector import LieDetectorSpotter
+    feed.quiet()  # below normal priority, as the feed's child runs
     runner = _watch_runner(args)
     model, band = runner.step.model, runner.step.senses.band
     path = telemetry.record_to("watch", telemetry.FOLDER)

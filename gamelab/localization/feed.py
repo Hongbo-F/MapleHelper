@@ -185,9 +185,7 @@ def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bo
 def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: float = HZ) -> None:
     """The child process: builds its runner with `make()`, then runs it, frames into the ring and states down
     `states`, asks and throws read from `requests`, until asked to stop or the stack's end of a pipe closes."""
-    _below_normal()
-    import cv2
-    cv2.setNumThreads(1)  # the monster search's own threads do the work; OpenCV's 24 on top only cost
+    quiet()
     try:
         runner = make()
         ring = Ring(ring_name)
@@ -231,12 +229,17 @@ def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: floa
         ring.close()
 
 
-def _below_normal() -> None:
+def quiet() -> None:
+    """This process at below-normal priority (the game keeps its frame pacing), and OpenCV on one thread: the
+    monster search's own threads do the work, and OpenCV's 24 on top only cost (a 1920x1080 conversion took
+    25 ms of CPU across them)."""
     if sys.platform == "win32":
         k = ctypes.windll.kernel32
         k.GetCurrentProcess.restype = ctypes.c_void_p
         k.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_uint)
         k.SetPriorityClass(k.GetCurrentProcess(), BELOW_NORMAL)
+    import cv2
+    cv2.setNumThreads(1)
 
 
 def _priority() -> int | None:
