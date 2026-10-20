@@ -213,6 +213,40 @@ def test_route_weights_let_near_equal_routes_take_turns(model):
     assert other[0].kind != first.kind
 
 
+def test_route_times_from_one_search_are_each_platforms_own_search(model):
+    """Planner.times searches to every platform at once: the same seconds as a search for each, from x
+    rounded as a search starts; kept, and the oldest start goes past TIMES_KEPT."""
+    from gamelab.motion import route
+    planner = Planner(model)
+    for p in model.platforms:
+        for x in (p.left, p.left + 10.4, (p.left + p.right) / 2, p.right - 0.6, p.right):
+            times = planner.times(p.id, x)
+            for q in model.platforms:
+                found = planner._search(p.id, x, q.id, None, None)
+                assert planner.travel(p.id, x, q.id) == (None if found is None else found[1])
+                assert times.get(q.id) == (None if found is None else found[1])
+    assert planner.times(0, 10.4) is planner.times(0, 9.6)  # both start from x 10
+    planner._times.clear()
+    for x in range(route.TIMES_KEPT + 1):
+        planner.times(0, x)
+    assert len(planner._times) == route.TIMES_KEPT and (0, 0) not in planner._times
+
+
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_route_times_on_the_real_map_are_each_platforms_own_search():
+    import random
+    from gamelab.sim import scenarios
+    model = scenarios.real_map()
+    planner, rng = Planner(model), random.Random(1)
+    for _ in range(60):
+        p = rng.choice(model.platforms)
+        x = rng.uniform(p.left, p.right)
+        for q in model.platforms:
+            found = planner._search(p.id, x, q.id, None, None)
+            assert planner.travel(p.id, x, q.id) == (None if found is None else found[1])
+
+
 def test_jumps_need_a_sure_landing(model):
     from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly, sure_landing
     a = by_y(model, 300, 100)

@@ -357,6 +357,14 @@ def test_coverage_and_spots_prefer_safe_platforms():
     assert best.safe and model.platform(best.platform).y_at(best.x) == 500
     assert best.coverage == pytest.approx(spots.coverage(ground, best.x, 500), abs=1e-3)
     assert best.coverage > 0.35  # off her level the star needs 150-200 units sideways (reach.min_dx)
+    # Worked out once per map: the same as working them out again, and a list of its own each time.
+    assert spots.spots(model, ground.id) == spots._spots(model, ground.id)
+    first = spots.spots(model, ground.id)
+    first.clear()
+    assert spots.spots(model, ground.id) == spots._spots(model, ground.id) != []
+    other = mapdata.parse(1, tree, "Test", {})  # another map's are its own
+    assert spots.spots(other, ground.id) == spots._spots(other, ground.id)
+    assert spots._KEPT[id(other)][0] is other
 
 
 def test_monsters_are_placed_only_on_platforms_they_spawn_on():
@@ -442,6 +450,19 @@ def test_walls_block_can_be_switched_off_for_probes(monkeypatch):
     assert reach.wall_in_way(a, 100, 500, 300) is None and reach.can_hit(a, 100, 500, target(300, 440, platform=b.id))
     assert reach.clear_span(a, 100, 500) == (-math.inf, math.inf)
     assert reach.wall_between(a, 100, 500, 300) is not None  # what the shot log records either way
+
+
+def test_spots_are_worked_out_again_when_walls_are_switched(monkeypatch):
+    """spots keeps its answers per map, platform and wall switch (reach.WALLS_BLOCK): a probe that switches
+    what stops a star gets the spots of its own rule, and switched back, the ones before."""
+    model, a, b, c = step_map()
+    on = spots.spots(model, b.id)
+    assert a.id not in [sp.platform for sp in on]  # nothing of B from A: the step wall is in the way
+    monkeypatch.setattr(reach, "WALLS_BLOCK", False)
+    off = spots.spots(model, b.id)
+    assert a.id in [sp.platform for sp in off] and off == spots._spots(model, b.id)
+    monkeypatch.setattr(reach, "WALLS_BLOCK", True)
+    assert spots.spots(model, b.id) == on
 
 
 def test_what_stops_a_star_on_the_real_map():

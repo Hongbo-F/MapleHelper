@@ -68,6 +68,7 @@ ALONG_STEP = 10      # running jumps are tried from every this many units along 
                      # the 30-unit window of takeoffs from platform 4 up onto 2, so 2 had no route) ...
 ALONG_SPREAD = 60    # ... and kept this far apart ...
 ALONG_KEEP = 3       # ... up to this many (plus the last) per landing platform
+TIMES_KEPT = 256     # Planner.times: starts whose route times to every platform are kept (a few KB each)
 
 SIDES = tuple((d, directions.sign(d)) for d in (RIGHT, LEFT))  # a direction and its sign along x
 
@@ -306,6 +307,7 @@ class Planner:
         self.by_src: dict[int, list[Move]] = {}
         for m in self.moves:
             self.by_src.setdefault(m.src, []).append(m)
+        self._times: dict[tuple[int, int], dict[int, float]] = {}  # travel's, by where from (TIMES_KEPT)
 
     def plan(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
              weight: Callable[[Move], float] | None = None) -> list[Move] | None:
@@ -318,8 +320,43 @@ class Planner:
 
     def travel(self, src: int, x: float, dst: int) -> float | None:
         """Seconds the quickest route from (platform src, x) to platform dst takes (by the model)."""
-        found = self._search(src, x, dst, None, None)
-        return None if found is None else found[1]
+        return self.times(src, x).get(dst)
+
+    def times(self, src: int, x: float) -> dict[int, float]:
+        """Seconds the quickest route from (platform src, x) to each platform it can get to takes: one
+        search to every platform (the same numbers as a search for each, which stops at its platform),
+        kept for the TIMES_KEPT starts asked for last. A search starts from x rounded (`_search`), so
+        that's the start. The hunt loop asks for the route time to each hunting ground after most looks,
+        from where she stands: 0.7 ms a search, against 1.6 for one to every platform."""
+        start = (src, round(x))
+        found = self._times.pop(start, None)
+        if found is None:
+            found = self._every(*start)
+            if len(self._times) >= TIMES_KEPT:
+                del self._times[next(iter(self._times))]  # the one asked for longest ago
+        self._times[start] = found
+        return found
+
+    def _every(self, src: int, px: int) -> dict[int, float]:
+        """`_search` without a goal, to the end: each platform's cost, as `_search` would return it for
+        that platform (the first time a node on it comes off the heap). No penalty, no weights."""
+        best = {(src, px): 0.0}
+        heap = [(0.0, (src, px))]
+        out: dict[int, float] = {}
+        while heap:
+            t, (pid, px) = heapq.heappop(heap)
+            if t > best.get((pid, px), math.inf):
+                continue
+            if pid not in out:
+                out[pid] = t
+            for m in self.by_src.get(pid, []):
+                step = abs(m.x - px) / WALK_SPEED + m.seconds + RISK.get(m.kind, 0.0)
+                cost = t + step
+                node = (m.dst, round(m.land_x))
+                if cost < best.get(node, math.inf):
+                    best[node] = cost
+                    heapq.heappush(heap, (cost, node))
+        return out
 
     def _search(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None,
                 weight: Callable[[Move], float] | None) -> tuple[list[Move], float] | None:
