@@ -50,26 +50,25 @@ def test_a_half_written_line_waits_for_the_rest(tmp_path):
     assert [r["text"] for r in follow.poll()] == ["b"]
 
 
-def test_the_newest_run_is_the_latest_started(tmp_path):
+def test_the_newest_run_is_the_one_written_to_last(tmp_path):
     import os
     assert telemetry.newest(tmp_path / "none yet") is None and telemetry.newest(tmp_path) is None
-    older, later = tmp_path / "20261020-013922-tour.jsonl", tmp_path / "20261020-014546-tour.jsonl"
-    for path in (later, older):
+    # When the clocks go back (here 2026-11-01, 02:00 PDT -> 01:00 PST), a run started at 01:10 PST is
+    # named before the one started at 01:50 PDT twenty minutes earlier: the one in progress still wins.
+    finished, running = tmp_path / "20261101-015000-tour.jsonl", tmp_path / "20261101-011000-tour.jsonl"
+    for path in (finished, running):
         path.write_text("", encoding="utf-8")
-    os.utime(later, (1_792_000_000, 1_792_000_000))
-    os.utime(older, (1_793_000_000, 1_793_000_000))  # the older run written to last: its name still loses
+    os.utime(finished, (1_793_523_300, 1_793_523_300))  # last written at 01:55 PDT
+    os.utime(running, (1_793_524_210, 1_793_524_210))  # 01:10 PST, still writing
     (tmp_path / "notes.txt").write_text("", encoding="utf-8")
-    assert telemetry.newest(tmp_path) == later
-    same = tmp_path / "20261020-014546-nav.jsonl"  # started in the same second: the one written last
-    same.write_text("", encoding="utf-8")
-    os.utime(same, (1_791_000_000, 1_791_000_000))
-    assert telemetry.newest(tmp_path) == later
-    untimed = tmp_path / "bench.jsonl"  # not named by a time: by when it was last written
-    untimed.write_text("", encoding="utf-8")
-    os.utime(untimed, (1_900_000_000, 1_900_000_000))
-    assert telemetry.newest(tmp_path) == untimed
-    os.utime(untimed, (1_700_000_000, 1_700_000_000))
-    assert telemetry.newest(tmp_path) == later
+    os.utime(tmp_path / "notes.txt", (1_900_000_000, 1_900_000_000))  # not telemetry
+    assert telemetry.newest(tmp_path) == running
+    bench = tmp_path / "bench.jsonl"  # named any way at all: by when it was written to
+    bench.write_text("", encoding="utf-8")
+    os.utime(bench, (1_793_524_220, 1_793_524_220))
+    assert telemetry.newest(tmp_path) == bench
+    os.utime(bench, (1_700_000_000, 1_700_000_000))
+    assert telemetry.newest(tmp_path) == running
 
 
 def test_live_source_looks_for_a_newer_run_once_a_second(tmp_path):
@@ -80,10 +79,10 @@ def test_live_source_looks_for_a_newer_run_once_a_second(tmp_path):
     src = LiveSource(tmp_path, clock=lambda: now[0])
     fresh, records = src.poll()
     assert fresh and [r["text"] for r in records] == ["a"]
+    with first.open("a", encoding="utf-8") as f:  # its last line, then a newer run starts
+        f.write('{"topic": "log", "t": 1.5, "text": "a2"}\n')
     (tmp_path / "20261020-020000-tour.jsonl").write_text('{"topic": "log", "t": 2.0, "text": "b"}\n',
                                                           encoding="utf-8")
-    with first.open("a", encoding="utf-8") as f:
-        f.write('{"topic": "log", "t": 1.5, "text": "a2"}\n')
     now[0] = 100.5  # the file it follows is still read on every poll; the folder isn't looked through
     fresh, records = src.poll()
     assert not fresh and [r["text"] for r in records] == ["a2"]

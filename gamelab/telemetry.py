@@ -145,46 +145,19 @@ class Follower:
 
 
 def newest(folder: Path = FOLDER) -> Path | None:
-    """The most recently started telemetry file, if any.
+    """The telemetry file written to last (the run in progress, while there is one), if any.
 
-    `record_to` names each file by the second it started, so the names are compared, not the files: the
-    window and the web page look for a newer run every second, and reading names only takes 0.09 ms with
-    38 files and 2.9 ms with 1000, where stat-ing every file took 1.0 ms and 36 ms. Runs started in the
-    same second, and files not named by a time, go by when they were last written."""
+    The window and the web page look for a newer run every second. On Windows os.scandir has each file's
+    last write without a call per file: 0.10 ms with 40 files and 2.9 ms with 1000, where Path.glob and a
+    stat of each took 1.2 ms and 44 ms. Comparing the names `record_to` gives was no faster (3.3 ms with
+    1000) and is wrong once a year: they're in local time, so in the hour that repeats when the clocks go
+    back, a finished run's name sorts after the one in progress."""
     try:
         with os.scandir(folder) as entries:
-            names = [e.name for e in entries if e.name.endswith(".jsonl")]
-    except OSError:  # no folder yet
+            files = [(e.stat().st_mtime, e.name) for e in entries if e.name.endswith(".jsonl")]
+    except OSError:  # no folder yet (or a file gone while looking: the next look finds the rest)
         return None
-    timed = [n for n in names if _stamped(n)]
-    candidates = [n for n in names if not _stamped(n)]  # untimed: by when they were last written
-    if timed:
-        last = max(timed)[:15]
-        candidates += [n for n in timed if n.startswith(last)]
-    if len(candidates) <= 1:
-        return folder / candidates[0] if candidates else None
-
-    def when(name: str) -> tuple[float, float]:
-        try:
-            written = (folder / name).stat().st_mtime
-        except OSError:
-            written = 0.0
-        started = _started(name) if _stamped(name) else None
-        return (written if started is None else started, written)
-    return folder / max(candidates, key=when)
-
-
-def _stamped(name: str) -> bool:
-    """Whether a file is named as `record_to` names them: by the time it started (`%Y%m%d-%H%M%S-...`)."""
-    return len(name) >= 15 and name[:8].isdigit() and name[8] == "-" and name[9:15].isdigit()
-
-
-def _started(name: str) -> float | None:
-    """When the run in a file `record_to` named started (None: not a real time)."""
-    try:
-        return time.mktime(time.strptime(name[:15], "%Y%m%d-%H%M%S"))
-    except (ValueError, OverflowError):
-        return None
+    return folder / max(files)[1] if files else None
 
 
 def _records(lines) -> list[dict]:
