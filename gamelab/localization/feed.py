@@ -206,7 +206,7 @@ def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: floa
             if msg[0] == "stop":
                 return asks, True
             if msg[0] == "ask":
-                asks = msg[1].merge(asks) if asks is not None else msg[1]
+                asks = msg[1] if asks is None else asks.merge(msg[1])  # the older first: the newer's mesos_only
             elif msg[0] == "throw":
                 runner.step.throw(*msg[1:])
 
@@ -534,7 +534,7 @@ class SyncFeed(Feed):
             if not any(fresh(st, want) for _, st in self.states):
                 newest = self.states[-1][1] if self.states else None
                 ask = to_ask(want, newest, 1.0 / self.hz)
-                self.asks = ask.merge(self.asks) if self.asks is not None else ask
+                self.asks = ask if self.asks is None else self.asks.merge(ask)
             if now >= deadline:
                 return None
             pending = [ready for ready, st in self.states if ready > now and fresh(st, want)]

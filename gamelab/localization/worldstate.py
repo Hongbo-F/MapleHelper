@@ -69,6 +69,8 @@ class Asks:
     mesos_only: bool = False  # (only mesos: her inventory is full)
 
     def merge(self, other: "Asks | None") -> "Asks":
+        """This ask and a newer one (`other`) in one: everything either wants, from the sooner time, and the
+        newer's mesos_only (her inventory may have filled or freed since)."""
         if other is None:
             return self
         return Asks(min(self.after, other.after), self.band or other.band, self.wide or other.wide,

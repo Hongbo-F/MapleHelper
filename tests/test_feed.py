@@ -123,6 +123,18 @@ def test_what_a_look_asks_is_searched_on_the_next_frame(sync):
     assert f.counts["asked"] == 1
 
 
+def test_asks_waiting_together_keep_what_each_wants_and_the_newest_mesos_only(sync):
+    older, newer = Asks(10.0, band=True, loot=True), Asks(10.2, loot=True, mesos_only=True)
+    merged = older.merge(newer)
+    assert (merged.after, merged.band, merged.loot, merged.mesos_only) == (10.0, True, True, True)
+    assert not newer.merge(Asks(10.3, loot=True)).mesos_only  # her inventory freed up meanwhile
+    # The sync feed merges a look's ask into the one still waiting, the newer last.
+    f, clock, eyes = sync
+    f.asks = Asks(clock.now + 1.0, loot=True)
+    assert f.latest(Asks(clock.now + 1.0, loot=True, mesos_only=True), timeout=0.0) is None
+    assert f.asks.loot and f.asks.mesos_only
+
+
 def test_the_loop_does_what_was_asked_on_the_first_frame_at_its_time():
     model = small_map()
     eyes = Drawn(model)
