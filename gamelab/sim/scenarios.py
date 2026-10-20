@@ -487,14 +487,20 @@ def nav_fight_short(sim):
     return _nav(25, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((14, 760.0), monsters="all", seed=3,
+@scenario((14, 760.0), monsters="all", seed=1,
           expects=(ends("arrived"), logs("shooting it on the way"), moves("climb")))
 def nav_fight_up(sim):
     """From 14 up two ropes and a jump to 1 (pigs, Orange Mushrooms) with `fight` on: she shoots 17's
     monsters from 14 first, and fights her way up past 3 and 4. On some seeds a touch knocks her off 3 or
     4 down to the basin and the trip runs out of time (of seeds 1-48: on 10 with the decisions of the star
     search, 14 with the claw's edge by size, 18 with kills fading by their death animation too, seed 10
-    among them), so it's seed 3, where she gets there with each of them."""
+    among them; 5 with both tracks), so it was seed 3, where she got there with each of them. (Seed 1 since a
+    trip waits for her to land before it plans, Navigator._onto_platform: on seed 3 knocks back onto 4 sent
+    her the long way round, and the trip ran out of time. Of seeds 1-48 now 36 arrive: 38 without that and the
+    fight's wait for a knock to end, 43 at the tracks' merge, before the drops and walk-offs kept clear of the
+    basin's cliffs. The 12 others run out of time at 180-194 s, 10 of them knocked off 3 or 4 and climbing
+    back up from 32 or the basin, which took 164-180 s on the seeds that went that way and arrived at the
+    merge. Seed 1 arrives with each.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 

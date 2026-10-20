@@ -225,8 +225,10 @@ class Navigator:
         health = self.potions if mode in (TRANSIT, TRANSIT_AVOID) else self.health
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
-        # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them).
-        if scene is not None and scene.searched and (mode in FIGHTING or scene.wide) and self.fresh(scene):
+        # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
+        # one that shows her standing (_onto_platform).
+        if scene is not None and scene.searched and (mode in FIGHTING or scene.wide) and self.fresh(scene) \
+                and standing(scene):
             st.fresh = scene
         return st
 
@@ -444,10 +446,17 @@ class Navigator:
         return [move], self.model.platform(move.dst), after
 
     def _onto_platform(self, s: Scene) -> Scene:
-        """`s` if she's on a platform; else (falling, or hanging on a rope) a look once she's landed or
-        got off the rope, whose platform is None if that didn't work either."""
+        """`s` if she's standing on a platform; else (in the air, or hanging on a rope) a look once she's
+        landed or got off the rope, whose platform is None if that didn't work either. In the air over a
+        platform her dot puts her on it: a chain planned from there as if she stood ran its first steps in
+        the air. In the harness (loop, seed 30) a trip right after a jump throw ran for a drop from 33 onto
+        35 mostly in mid-jump, dropped 30 units short, onto the basin by its cliff, and a pig's knock took
+        her through the cliff and out of the map."""
         if s.where.platform is not None:
-            return s
+            if standing(s):
+                return s
+            self.mover.settle(2)  # in the air: once she's landed and stopped, a look with the monsters
+            return self.mover.locate(mobs=True, wide=not self.fight)
         s = self.mover.settle(2)
         if s.where.platform is None:  # hanging on a rope
             self.log(f"  on a rope at x {s.where.x:.0f}: getting off")
@@ -771,11 +780,17 @@ class Navigator:
         her on a platform she was still falling past), or her name tag hidden and the dot on `p`."""
         while True:
             s = self._checked = self.senses.look(mobs=False)
-            standing = not s.tag_seen or s.ground is None or s.ground[1] - s.ground[0] >= MIN_GROUND_PX
-            if s.where is not None and s.where.platform is not None and s.where.platform.id == p.id and standing:
+            if s.where is not None and s.where.platform is not None and s.where.platform.id == p.id and standing(s):
                 return s
             if time.monotonic() >= until:
                 return None
+
+
+def standing(s: Scene) -> bool:
+    """Whether look `s` shows her standing, as far as it tells: ground under her feet on screen (in the air
+    there's none: the minimap dot alone puts her on a platform she's falling past or jumping over), unless her
+    name tag is hidden or no ground was read."""
+    return not s.tag_seen or s.ground is None or s.ground[1] - s.ground[0] >= MIN_GROUND_PX
 
 
 def _no_follow(why: str) -> None:
