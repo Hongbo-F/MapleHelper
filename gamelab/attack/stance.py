@@ -112,7 +112,7 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     platform), the nearest one deciding (on the side she faces, if any is): jump away from it and throw
     back from the air, if there's room behind her and no monster there; cornered, straight up. Each only
     if the attack starts low enough in the jump to pick that kind (reach.air_hits, by how tall it is at
-    least: `tops`). A jump throw's starts ~49 units up, over a snail: at most one of 45 jump-throws at
+    least: `tops`). A jump throw's starts 42-49 units up, over a snail: at most one of 45 jump-throws at
     snails hurt one, and monsters on the platform above took the stars. One too short for either is shot
     from the ground: from STAR_SURE away if she can step back that far (a star), else from where she is
     (the claw swipes it: weak, but every swipe hits)."""
