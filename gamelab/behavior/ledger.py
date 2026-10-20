@@ -7,9 +7,10 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   A gain no throw explains (party EXP, or a kill seen only from a look without monsters) still counts,
   credited to where she is, but has no place and so no drops.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
-  first seen), when it was last seen, whether a kill of hers explains it, and its status. Piles are
-  forgotten as the Looter forgets them: never before SETTLE after the kill, and only after two empty looks
-  EMPTY_LOOKS apart, because monsters are drawn over drops.
+  first seen), when it was last seen, whether a kill of hers explains it, and its status. A pile is gone
+  as the Looter forgets drops: never before SETTLE after the kill, and only after two empty looks
+  EMPTY_LOOKS apart, because monsters are drawn over drops. Gone piles are dropped from the store
+  GONE_KEEP_S later; what the hunt loop counts of them is kept in counters (`gone_tried`).
 
 Step 4 of gamelab/docs/hunt-modes.md: these are observers. Nothing reads them to decide yet; the
 simulator checks them against its world (tests/test_ledger.py), and the hunt loop will read them.
@@ -28,6 +29,10 @@ from .looting import EMPTY_LOOKS, LOOT_REACH, SETTLE, standing
 STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be its kill: 520 ms to the
                    # release, up to 0.65 s of flight (434 units at 690 a second), and up to a look later
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
+# s a pile seen gone stays in the store before it's dropped. Nothing reads a gone pile but the hunt loop's
+# count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
+# forever, every kill added a pile, and every look went through all of them.
+GONE_KEEP_S = 300.0
 
 
 @dataclass
@@ -128,18 +133,27 @@ class Pile:
     last_seen: float | None = None
     empty_since: float | None = None  # when a look first saw it empty (see EMPTY_LOOKS)
     status: str = "expected"  # expected (a kill's, not seen yet) | seen | gone (seen empty twice)
-    tries: int = 0            # times the hunt loop went for it
+    tries: int = 0            # times the hunt loop went for it (DropStore.tried)
+    gone_at: float | None = None  # when it was seen gone
 
 
 @dataclass
 class DropStore:
     """Every pile she knows of. Fed by placed kills (Ledger) and by every look that searched for loot."""
-    piles: list[Pile] = field(default_factory=list)
+    piles: list[Pile] = field(default_factory=list)  # the piles not gone, and those gone in the last GONE_KEEP_S
+    gone_tried: int = 0  # piles the hunt loop went for that looks have seen gone, ever (dropped ones too)
 
     @property
     def known(self) -> list[Pile]:
         """The piles not gone."""
         return [p for p in self.piles if p.status != "gone"]
+
+    def tried(self, p: Pile) -> None:
+        """The hunt loop went for pile `p` (or gave up on it): one more try. A pile can be tried after a
+        look saw it gone (a trip to it then ends), so it's counted in `gone_tried` from its first try."""
+        if p.status == "gone" and not p.tries:
+            self.gone_tried += 1
+        p.tries += 1
 
     def on_kill(self, kill: Kill) -> None:
         if kill.platform is not None:
@@ -152,6 +166,7 @@ class DropStore:
         the ground)."""
         if not s.looked:
             return
+        self.piles = [p for p in self.piles if p.gone_at is None or s.t - p.gone_at <= GONE_KEEP_S]
         seen, ground = list(s.loot), not looting.STANDING_ONLY or standing(s)
         for p in self.known:
             if any(_in_pile(p, d) for d in seen):
@@ -161,7 +176,8 @@ class DropStore:
                 if p.empty_since is None:
                     p.empty_since = s.t
                 elif s.t - p.empty_since >= EMPTY_LOOKS:
-                    p.status = "gone"
+                    p.status, p.gone_at = "gone", s.t
+                    self.gone_tried += p.tries > 0
         for d in seen:
             if not any(_in_pile(p, d) for p in self.known):
                 self.piles.append(Pile(d.x, d.y, d.platform, s.t, hers=False, mesos=d.mesos, last_seen=s.t,

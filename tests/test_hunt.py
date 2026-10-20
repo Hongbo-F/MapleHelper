@@ -102,7 +102,7 @@ def test_kills_count_for_the_visit_only_on_its_ground_or_from_it_and_its_spot():
     h.kinds = {"pig", "slime"}
     h.report, h.obj, h._fs_key, h._gone, h._kills_seen = HuntReport(), None, None, 0, 0
     h.h.report = SimpleNamespace(exp_kills=0)
-    h.h.drops.piles = []
+    h.h.drops.gone_tried = 0
     h.h.ledger = SimpleNamespace(kills=[Kill(now, "pig", 36, 500.0, 575.0, 36),   # on the ground: hers
                                         Kill(now, "slime", 17, 900.0, -335.0, 17)])  # on 17, while she's on 17
     h._book(SimpleNamespace(platform=SimpleNamespace(id=17)))

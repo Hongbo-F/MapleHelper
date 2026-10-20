@@ -191,7 +191,7 @@ class Hunt:
         if self.nav.escort is not None:
             self.nav.escort.kinds = self.kinds
         self._kills_seen = len(self.h.ledger.kills)
-        self._gone = sum(1 for p in self.h.drops.piles if p.tries and p.status == "gone")
+        self._gone = self.h.drops.gone_tried
         self._progress = start
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds())
         self._next_ground(self.nav.mover.settle())
@@ -349,7 +349,7 @@ class Hunt:
             self._progress = time.monotonic()
         # A pick-up is progress once a look sees the pile she went for gone (standing on one proves
         # nothing: someone else's, or a full inventory). Counted so, the stuck guard can fire.
-        gone = sum(1 for p in self.h.drops.piles if p.tries and p.status == "gone")
+        gone = self.h.drops.gone_tried
         if gone > self._gone:
             self._gone, self._progress = gone, time.monotonic()
         key = (s.platform.id, id(self.obj))
@@ -529,7 +529,7 @@ class Hunt:
         return None
 
     def _tried(self, pile: Pile) -> None:
-        pile.tries += 1
+        self.h.drops.tried(pile)
         self.report.piles += 1
 
     def _travel_to_pile(self, s: Scene, p: Pile) -> float:

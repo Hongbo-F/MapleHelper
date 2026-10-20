@@ -469,6 +469,13 @@ The tour is better on 6 of 10 seeds, the worst seed 5 (fell out of the map: Fixe
 
 Checked and kept: after a plan is cut short, the quick look has no monsters, so fighting on the way (and `Tour.hunt`'s stop when a target is in reach) is skipped for one chain. That lets her move on from wherever a hit knocked her first. With a look that sees the monsters there instead, she fought wherever she was knocked to: `nav_fight_across` (then 12 s from 12 across to 17) ran out its 180 s (30 kills, knocked off 12 times, once all the way down to 32), and `tour_hunt_platform_12` took 79 s longer.
 
+## Memory and disk
+
+A hunt runs for hours, and perception is to run all the time, so what the stack keeps has to stay bounded.
+
+- **Monster speeds:** `Tracker.speeds` (what `nav` sums up as the speeds seen) keeps the latest 400 of each kind (`SPEED_SAMPLES` in `localization/monsters.py`). Kept all, one a monster a look, a look every frame would add about 110,000 an hour.
+- **The drop store** (`behavior/ledger.py`) drops a pile 5 minutes after looks have seen it gone (`GONE_KEEP_S`); kept for ever, every kill added one, and every look went through all of them. The hunt loop's count of the piles she went for that were seen gone (its progress, for the stuck guard) is kept apart (`DropStore.gone_tried`), so it decides exactly as before. In the simulator's hunt loop (preset `game`, seeds 0-2, 20 minutes each) the store ended with 77, 82 and 112 piles instead of 280, 257 and 338 (at most 90-123 at a time), with the same EXP and the same counts after every look. Piles never seen gone, on platforms she didn't look at again, stay: 6-20 at the end of those runs.
+
 ## Limits
 
 - **Recalibrate** after moving the game window, changing maps or changing resolution. Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name.
