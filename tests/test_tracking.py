@@ -79,6 +79,31 @@ def test_its_speed_within_a_fifth_after_half_a_second_and_turning_with_it():
     assert vx[45] < -100  # the frame after it turned: the move frame faces the other way
 
 
+def test_a_pose_sets_its_speed_only_while_its_sightings_agree(monkeypatch):
+    # In game the pose is the matched template's, wrong for about a fifth of the sightings and for up to 1.4 s
+    # on end: a pig standing in move frames isn't taken to walk, nor one walking in stand frames to stand.
+    standing = [([sighting(900.0, facing=1, pose="move")], view()) for _ in range(30)]
+    tracker = MonsterTracker()
+    run(tracker, standing)
+    tr = tracker.tracks[1]
+    assert abs(tr.vx) < 5 and abs(tr.x - 900) < 1 and abs(tracker.predicted(tr, 101.5) - 900) < 5
+    tracker = MonsterTracker()
+    run(tracker, walk(800, 125, 0.5) + walk(800 + 125 * 0.5, 125, 0.5, pose="stand"))
+    assert tracker.tracks[1].vx > 100  # it went on walking
+    # One setting off in move frames walks its speed once it's moved FADE_MOVE (10 units: 0.08 s for a pig).
+    tracker = MonsterTracker()
+    vx = []
+    for k, frame in enumerate(standing + walk(900, 125, 0.5, start=0.0)):
+        run(tracker, [frame], start=100.0 + k / FPS)
+        vx.append(tracker.tracks[1].vx)
+    assert vx[29 + 4] == 125.0 and vx[29 + 1] < 60
+    # Without the gate the pose alone decides, as before.
+    monkeypatch.setattr(tracking, "POSE_GATE_S", None)
+    tracker = MonsterTracker()
+    run(tracker, standing)
+    assert tracker.tracks[1].vx == 125.0
+
+
 def test_two_walking_past_each_other_keep_their_ids():
     tracker = MonsterTracker()
     frames = [([sighting(700 + 125 * k / FPS), sighting(1000 - 125 * k / FPS, facing=-1)], view())

@@ -85,6 +85,19 @@ SPEED_CLAMP = 1.2   # x its kind's speed: the most the filter may say it walks (
 # recordings with the camera still; the misses at turns). A flinching one (hit1), knocked back, goes by the
 # filter.
 POSE_VELOCITY = True
+# ... but only while its sightings agree (POSE_GATE_S): a move frame's speed while it left a FADE_MOVE box in
+# the last POSE_GATE_S (or was first seen that recently), a stand frame's stop while it didn't. In game the
+# pose is the frame of the template that matched, wrong for 18% of the sightings of monsters walking and 22%
+# of those standing, for up to 1.4 s on end (`bodies` on 3 recordings with the camera still), and a standing
+# pig in a move frame was followed at 125 units/s, its track ahead of it. Over 7 simulated runs (feed_tour_
+# hunt_basin, feed_loop_basin, feed_loop_rival, and 4 minutes of preset game: the loop on seeds 3 and 5, the
+# tour on 2 and 4) the deaths judged someone else's that weren't, and tracks "lost in a crowd":
+#                              poses right    20% wrong (Noise.pose_wrong, 1 s spells)
+#   the filter alone           41, 46         41, 46
+#   the pose alone (None)      10, 7          34, 36
+#   gated, 0.25 s              13, 5          12, 19   (0.15 s: 12, 19 and 15, 22; 0.4 s: 16, 7 and 13, 28)
+# Her kills were judged right about as often every way (88-93%). Not checked in game.
+POSE_GATE_S: float | None = 0.25
 LONG_GAP_S = 1.0    # a track seen again after longer than this starts its velocity afresh
 FRAME_SLACK = 0.05  # s: a monster last seen this little before a gain went out of sight as it died
 FADE_MOVE = 10.0    # units a monster fading where it died may seem to move: a sighting farther off is another one
@@ -323,9 +336,13 @@ class MonsterTracker:
             r = m.x - predicted
             tr.x = predicted + ALPHA * r
             tr.vx = max(-SPEED_CLAMP * speed, min(SPEED_CLAMP * speed, tr.vx + BETA * r / dt))
-        if POSE_VELOCITY and m.pose == "move" and m.facing:
+        # Whether its sightings say it walks: it left a FADE_MOVE box in the last POSE_GATE_S, or was first seen
+        # that recently (nothing says yet that it stands). None: the pose alone decides.
+        walks = None if POSE_GATE_S is None else (
+            tr.still_x is None or abs(m.x - tr.still_x) > FADE_MOVE or t - tr.still_since < POSE_GATE_S)
+        if POSE_VELOCITY and m.pose == "move" and m.facing and walks is not False:
             tr.vx = m.facing * speed
-        elif POSE_VELOCITY and m.pose == "stand":
+        elif POSE_VELOCITY and m.pose == "stand" and not walks:
             tr.vx = 0.0
         tr.y, tr.mob = m.y, m.mob
         if m.platform is not None:
