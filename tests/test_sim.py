@@ -15,7 +15,7 @@ import pytest
 from gamelab import paths
 from gamelab.control import client
 from gamelab.localization import mapdata
-from gamelab.motion import physics
+from gamelab.motion import body, physics
 from gamelab.behavior.hunter import Hunter
 from gamelab.motion.physics import hold_ms
 from gamelab.paths import LAB
@@ -109,7 +109,7 @@ def test_a_short_tap_still_moves_her_and_a_very_short_one_does_not(model):
     w = world(model, c.id, 100.0)
     tap(w, 0.0, "right", 0.107)
     w.advance(2.0)
-    assert w.x - 100 == pytest.approx(8.5 + 0.149 * 107, abs=4)  # moves.py's measured walk
+    assert w.x - 100 == pytest.approx(body.hold_distance(107, physics.SHOE, physics.LAGS), abs=1.5)  # 23.7
     w = world(model, c.id, 100.0)
     tap(w, 0.0, "right", 0.02)
     w.advance(2.0)
@@ -120,16 +120,16 @@ def test_a_running_jump_lands_where_route_fly_says(model):
     a, b = plat(model, 300, 100), plat(model, 360, 300)
     w = world(model, a.id, 40.0)
     w.key(0.0, "right", True)
-    tap(w, 0.93, "alt", 0.04)  # lifts off 55 ms later, ~170: down onto B
-    w.advance(1.0)
+    tap(w, 0.93, "alt", 0.04)  # lifts off JUMP_LAG (67 ms) later, ~170: down onto B
+    w.advance(1.01)
     assert w.mode == "air"
     x0, y0 = w.flight.path[0]
-    assert x0 == pytest.approx(40 + physics.WALK_SPEED * (0.985 - RUN_LAG), abs=1)
+    assert x0 == pytest.approx(40 + physics.WALK_SPEED * (0.93 + physics.JUMP_LAG - RUN_LAG), abs=1)
     land, land_x, seconds = physics.fly(model, x0, y0, physics.WALK_SPEED, -physics.JUMP_SPEED)
-    w.key(1.0, "right", False)
+    w.key(1.01, "right", False)
     w.advance(3.0)
     assert land is b and w.plat is b
-    assert w.x == pytest.approx(land_x + 13, abs=1.5)  # landing with no arrow held: she slides on ~13
+    assert w.x == pytest.approx(land_x + physics.LAND_SLIDE, abs=1.5)  # landing with no arrow held: 13.9 on
 
 
 def test_a_jump_key_in_the_air_is_ignored(model):
@@ -233,7 +233,7 @@ def _jump_throw(w, gap: float = 0.1):
 
 
 def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model):
-    # The attack picks its target when it starts, as it lifts off 55 ms after its key: 100 ms after the
+    # The attack picks its target when it starts, JUMP_LAG after its key as a jump lifts off: 100 ms after the
     # jump key she's 46 units up, and the area it picks from starts 19 below her feet, over a snail.
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))

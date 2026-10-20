@@ -183,6 +183,32 @@ def test_walls_and_the_maps_sides_stop_her(model):
     assert open_sky.platform is None and open_sky.land_x == 850  # past the wall's top: the side stops her
 
 
+def test_a_step_through_a_platforms_corner_lands_on_it(model):
+    # Falling at 180 units/s sideways onto B (220..400, y 360) from 5 units above: she lands on it exactly
+    # when her arc crosses its surface by its end, even when the step that does it ends past the end.
+    b = by_y(model, 360, 300)
+    leaks = 0
+    for i in range(300):
+        x0 = 386 + i * 0.01
+        cross = x0 + 180 * (2 * 5 / 2000) ** 0.5  # where the arc comes down through y 360
+        f = body.fly(model, x0, 355.0, 180.0, 0.0, shoe=SHOE, arrow=1)
+        if abs(cross - 400) > 0.02:
+            assert (f.platform is b) == (cross < 400), x0
+        if (cross < 400) and physics.fly(model, x0, 355.0, 180.0, 0.0)[0] is not b:
+            leaks += 1  # physics.fly checks only where each step ends
+    assert leaks > 20
+
+
+@REAL
+def test_a_knock_in_the_air_by_the_basins_end_lands_in_the_basin():
+    # Harness tour seed 10: knocked mid jump-throw at x 887, 46 units up, she went through the corner of
+    # 36's right end (951) under the foot of the wall above it, and fell out of the map for good.
+    m = scenarios.real_map()
+    f = body.fly(m, 887.45, 529.46, 180.0, -220.0, shoe=physics.SHOE)
+    assert f.platform.id == 36 and 950 < f.land_x <= 951
+    assert physics.fly(m, 887.45, 529.46, 180.0, -220.0)[0] is None
+
+
 def test_long_falls_with_the_arrow_let_go_land_shorter():
     t = tree()
     t["foothold"]["5"] = {"9": dict([seg(1, 9, 30, -2000, 1000, 3000, 1000)])}  # a floor 500 below C
@@ -222,7 +248,8 @@ def test_the_planners_moves_fly_the_same_with_the_arrow_held():
             level = a.y_at(edge)
             rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
                          for w in m.walls)
-            start, arrow, skip = (edge + sign * (-1 if rising else 0.5), level - 1, sign * physics.WALK_SPEED, 0.0), sign, None
+            x = edge + sign * (-1 if rising else 0.5)
+            start, arrow, skip = (x, level - 1, sign * physics.WALK_SPEED, 0.0), sign, None
         else:
             continue
         f = body.fly(m, *start, shoe=physics.SHOE, arrow=arrow, skip=skip, walls=walls)

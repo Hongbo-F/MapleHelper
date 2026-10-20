@@ -29,7 +29,7 @@ Each throw is a line of lab/probe_geometry.jsonl: the probe, how she threw (and 
 after the jump key, `gap_ms`), whether the wall rule was on, where she stood and her foothold group, the
 target, every monster in front at the throw (`front`, walls or not) and at the first look after it, about
 when the attack picked its target (`pick`: that look's frame is taken once the throw's key plan is done,
-about when the attack starts, ~55 ms after its key), the rule's verdict on the target (`clear`), her EXP
+about when the attack starts, ~67 ms after its key), the rule's verdict on the target (`clear`), her EXP
 gains from the key to the end (`exp`), and for every monster in front then its `evidence`: its HP bar
 before the star could land, every bar seen after (with when, from the star's due time), the looks it
 wasn't seen in, and whether it was still there at the end.

@@ -66,7 +66,7 @@ END_WATCH = 0.1      # s before a plan with nothing queued after it ends: glance
 END_POLL_S = 0.005   # ... this closely (noticed late, the next look and plan came ~70 ms later)
 FRESH_S = 0.3        # s a look stays good enough to plan from, if no key plan was sent since
 AFTER_STILL_S = 0.35  # s at most waited for her to stand still after a chain, before the next pass's look
-                      # (a stop slides her ~0.27 s; knocked about, she isn't held up longer)
+                      # (a stop slides her ~0.26 s; knocked about, she isn't held up longer)
 PLAN_START_S = 0.015  # a chain's plan is taken to start this long after it's sent
 GLANCE_S = 0.03      # between glances at her dot while a plan runs, or while she recovers
 OFF_PATH = 3         # glances off the planned path (counting 2 where the leg doesn't go) that cut a plan short

@@ -1,6 +1,7 @@
-"""Her physics: the game's jump, gravity and fall speeds, her measured walking (with its lags and
-slides) and climbing (and how long to hold an arrow to walk or run a distance), and where a jump or
-fall lands (simulated against the map's platforms and walls). All in map units.
+"""Her physics as the planner takes it: the game's jump, gravity and fall speeds, her walking (with its
+lags and slides) and climbing (and how long to hold an arrow to walk or run a distance), and where a
+jump or fall lands (simulated against the map's platforms and walls). All in map units. The walk, the
+jump and their lags come from motion.body, the engine that moves her as the game does.
 """
 
 import bisect
@@ -13,7 +14,6 @@ from maplehelper import config
 from . import body
 from ..localization.mapdata import MapModel, Platform
 from ..paths import CONFIG
-from ..screen import SCREEN_SCALE
 
 # Her stats (config.toml [character]), and how the game moves her with them: motion.body's engine, its
 # shoe from the game's Physics.img and its lags measured.
@@ -21,35 +21,41 @@ CHARACTER = config.character(CONFIG)
 SHOE = body.Shoe.from_physics(body.PHYSICS_IMG, CHARACTER.speed, CHARACTER.jump)
 LAGS = body.Lags()
 
-WALK_SPEED = 149.0       # map units/s: her measured walk (209 screen px/s at 1.40625 px per unit)
+WALK_SPEED = SHOE.vmax   # map units/s: 125 x SPEED/100, 149 at her 119.2 (measured 148-151: 209 screen px/s)
 CLIMB_SPEED = 117.0      # map units/s: measured 0.165 screen px/ms
-JUMP_SPEED = 555.0       # physics: jumpSpeed
-GRAVITY = 2000.0         # physics: gravityAcc
-FALL_SPEED = 670.0       # physics: fallSpeed (terminal)
+JUMP_SPEED = SHOE.vjump  # physics: jumpSpeed x JUMP/100 (555)
+GRAVITY = SHOE.gravity   # physics: gravityAcc (2000)
+FALL_SPEED = SHOE.fall   # physics: fallSpeed (670, terminal)
 JUMP_HEIGHT = JUMP_SPEED ** 2 / (2 * GRAVITY)   # 77 map units
 ROPE_REACH = 95          # she can grab a rope that ends this far above her feet (jump + arms)
 LAND_MARGIN = 18         # land at least this far onto a platform
-# Measured on platform 34 with the camera fixed (map edge), 60 fps: from standing, holding an arrow
-# puts her at 148.5 (t - 0.12) units after t s; a jump lifts off 55 ms after the key; after the arrow
-# is released she runs on ~0.1 s (input lag) and slides, stopping ~27 units on, ~0.3 s later. A jump
-# key pressed while she's still in the air is ignored, and holding it doesn't jump again on landing.
-RUN_LAG = 0.12       # s: a standing start lags full-speed running by this much
-TURN_EXTRA = 0.08    # s more when she was running the other way
-JUMP_LAG = 0.055     # s from the jump key to leaving the ground
-DROP_LAG = 0.28      # s from the jump key (down held) to falling through (0.28-0.34 in 4 drops on the
-                     # minimap at 60 fps, whether or not she had just stopped running)
-STOP_RUN = 27.0      # units she goes on after the arrow is released at full speed ...
-STOP_S = 0.3         # ... until she stands still
-LAND_SLIDE = 13.0    # units she slides on landing with no arrow held
-# Measured: holding an arrow for t ms moves her ~(12 + 0.209 t) screen px including the slide after
-# release, i.e. 8.5 + 0.149 t map units. Shorter than ~30 ms barely registers.
-WALK_UNITS_PER_MS = 0.209 / SCREEN_SCALE
-WALK_UNITS_FIXED = 12 / SCREEN_SCALE
+# Her walk and jump in the planner's terms, from the engine with the median lags (body.Lags; the 60 and 30
+# fps recordings). From standing the game sees an arrow 60 ms after the key and speeds her up at 1400
+# units/s² to full speed, so after t s she's 149 (t - 0.113) units along. Let go, she runs on until the
+# game sees the release (72 ms), then brakes at 800 units/s². A jump lifts off 67 ms after its key (18
+# jumps: 45-95 ms). A jump key pressed while she's still in the air is ignored, and holding it doesn't jump
+# again on landing.
+RUN_LAG = LAGS.on + WALK_SPEED / (2 * SHOE.acc)  # 0.113 s: a standing start lags full-speed running by this much
+TURN_EXTRA = 0.08    # s more when she was running the other way. (The engine turns her at 1400 units/s²,
+                     # which makes it 0.16; that is the decompile's alone, unmeasured: in-game probe first.)
+JUMP_LAG = LAGS.jump  # 0.067 s from the jump key to leaving the ground
+DROP_LAG = LAGS.drop  # 0.28 s from the jump key (down held) to falling through (0.28-0.34 in 4 drops on the
+                      # minimap at 60 fps, whether or not she had just stopped running)
+STOP_RUN = body.stop_distance(WALK_SPEED, SHOE, LAGS)  # 24.6 units she goes on after the arrow is released at
+                                                        # full speed (measured 23.4-28.1) ...
+STOP_S = body.stop_time(WALK_SPEED, SHOE, LAGS)        # ... until she stands still, 0.26 s later
+LAND_SLIDE = body.slide(WALK_SPEED, SHOE)              # 13.9 units she slides on landing with no arrow held
+# Holding an arrow t ms from standing moves her 7.7 + 0.149 t map units, the slide after release included,
+# once t is past about 95 ms (she has reached full speed by then: the game sees a hold 12 ms longer than it
+# is); a shorter hold, 1925 (t/1000 + 0.012)² (body.hold_distance, hold_ms). Taps of 50 ms or less are
+# bimodal in game: of three, two moved her 0 and one 7.1. Shorter than MIN_HOLD_MS isn't sent.
+WALK_UNITS_PER_MS = WALK_SPEED / 1000
+WALK_UNITS_FIXED = body.hold_distance(1000, SHOE, LAGS) - WALK_SPEED  # 7.7
 MIN_HOLD_MS = 30
 # When to press jump (ms after the arrow, from standing) to lift off `units` along: she's at
-# 0.1485 (t - 120) units after t ms, and lifts off 55 ms after the key (JUMP_LAG), so
-# RUN_LAG_MS = RUN_LAG - JUMP_LAG (measured at 60 fps).
-RUN_LAG_MS = 65
+# 0.149 (t - 113) units after t ms, and lifts off 67 ms after the key (JUMP_LAG), so
+# RUN_LAG_MS = RUN_LAG - JUMP_LAG (46).
+RUN_LAG_MS = round((RUN_LAG - JUMP_LAG) * 1000)
 # Attacks from a jump (control.actions times her key plans with these; attack.reach works out what such an
 # attack can hit). An attack picks its target when it starts, about JUMP_LAG after its key, the same input
 # lag as a jump's lift-off: so when it starts she has been in the air for about as long as the attack key
@@ -181,10 +187,21 @@ def fall_time(dy: float) -> float:
 
 
 def hold_ms(units: float) -> int:
-    """How long to hold an arrow to walk `units` map units and come to rest there."""
-    return max(MIN_HOLD_MS, round((units - WALK_UNITS_FIXED) / WALK_UNITS_PER_MS))
+    """How long to hold an arrow to walk `units` map units and come to rest there (body.hold_for: 39 ms
+    for 5 units, 90 for 20, 284 for 50), MIN_HOLD_MS at least."""
+    return max(MIN_HOLD_MS, body.hold_for(units, SHOE, LAGS))
 
 
 def run_ms(units: float) -> int:
-    """How long after pressing the arrow (from standing) she's `units` along, still running."""
-    return round(units / WALK_UNITS_PER_MS + RUN_LAG_MS) if units > 0 else 0
+    """How long after pressing the arrow (from standing) to press jump to lift off `units` along, still
+    running; never in the kick's blind spot, though (body.jump_window_ok: keyed there, the jump finds her
+    just below full speed and leaves at 119-149; keyed 93 ms after the arrow, 22% leave below 134, the 10%
+    slower that route.sure_landing allows). So a run-up shorter than about 12 units is keyed about 120 ms
+    in and lifts her off up to 11 units along, at full speed: within the 12 units early or late every
+    route jump allows."""
+    if units <= 0:
+        return 0
+    t = round(units / WALK_UNITS_PER_MS + RUN_LAG_MS)
+    while not body.jump_window_ok(t, SHOE, LAGS):
+        t += 1
+    return t

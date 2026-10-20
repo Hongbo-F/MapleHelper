@@ -30,7 +30,7 @@ from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import MonsterTrack
 from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAND_MARGIN, LAND_SLIDE, RUN_LAG,
-                      STOP_RUN, STOP_S, TURN_EXTRA, WALK_SPEED, fly)
+                      STOP_RUN, STOP_S, TURN_EXTRA, WALK_SPEED, fly, hold_ms)
 from .route import JUMP_FROM, Move
 
 # Her measured lags and slides (RUN_LAG, TURN_EXTRA, JUMP_LAG, DROP_LAG, STOP_RUN, STOP_S, LAND_SLIDE)
@@ -237,7 +237,7 @@ class Flow:
     # Each move can be done a few ways ("variants"); the chain picks the one the next move can follow:
     #   run      keep running when she lands (the arrow stays held);
     #   stop     the same jump, but the arrow is let go just before she lands, so she stands still
-    #            ~13 units on (for a next move that needs her standing, or going the other way);
+    #            ~14 units on (for a next move that needs her standing, or going the other way);
     #   stand    (jump_up) stop under the platform above and jump straight up.
 
     VARIANTS = ("run", "stop", "stand")
@@ -454,9 +454,8 @@ class Flow:
             if lo <= b.x <= hi:
                 return b.t, b.x
             dist = abs(target - b.x)
-            if dist < SHORT_STEP:  # hold the arrow just long enough (walking model)
-                # ms, by the measured walk (8.5 + 0.1486 per ms: physics.hold_ms's model, rounded)
-                held = max(30.0, (dist - 8.5) / 0.1486)
+            if dist < SHORT_STEP:  # hold the arrow just long enough (physics.hold_ms)
+                held = hold_ms(dist)
                 d = _sign(target - b.x)
                 k.set_arrow(b.t, d)
                 k.set_arrow(b.t + held / 1000, 0)

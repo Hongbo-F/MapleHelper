@@ -70,10 +70,12 @@ from ..perception.kinds import kind_of
 
 TICK_MS = 5
 FLY_DT = 0.004           # physics.fly's step: the arc is integrated exactly as the planner does
-# Her measured lags and slides are physics.py's (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, LAND_SLIDE).
-# Braking with no arrow held: she slides LAND_SLIDE from full speed (as on landing). An arrow let go still
-# counts for RELEASE_LAG, so she stops STOP_RUN on in all (~0.27 s). With the run lag that is physics.py's
-# measured walk: an arrow held t ms moves her ~8.5 + 0.149 t units, a tap under ~30 ms not at all.
+# Her lags and slides are physics.py's (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, LAND_SLIDE), which come from
+# motion.body's engine. Braking with no arrow held: she slides LAND_SLIDE from full speed (as on landing,
+# at 800 units/s²). An arrow let go still counts for RELEASE_LAG (72 ms), so she stops STOP_RUN on in all
+# (~0.26 s). With the run lag that is the engine's walk for holds of 95 ms or more (7.7 + 0.149 t units for
+# t ms); shorter ones it sees as quickly started and braked (1925 (t/1000 + 0.012)², body.hold_distance),
+# here a tap under 41 ms doesn't move her and a longer one moves her at least 14 units.
 DECEL = WALK_SPEED ** 2 / (2 * LAND_SLIDE)
 RELEASE_LAG = (STOP_RUN - LAND_SLIDE) / WALK_SPEED
 CLIMB_UP = flow.ROPE_SPEED

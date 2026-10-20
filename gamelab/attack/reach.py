@@ -9,7 +9,7 @@ A regular attack throws one star straight ahead. Measured in game (Thicket Aroun
 - it leaves her ~530 ms after the key and flies ~690 units/s;
 - right next to a monster, the claw swipes instead of throwing (weak, and the monster can touch her).
 
-What an attack hits is picked when it starts, about 55 ms after its key, not when the star flies (the
+What an attack hits is picked when it starts, about 67 ms after its key, not when the star flies (the
 star is only a picture), by the monsters' bodies (their boxes in the game data, localization.monsters).
 On the ground the claw's swing is looked at first: a monster on her level whose body reaches into it is
 swiped (`claw_takes`), so her decisions count on a star at one only from farther off, by its size

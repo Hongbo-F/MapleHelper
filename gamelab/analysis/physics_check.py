@@ -245,7 +245,8 @@ def main(argv=None) -> int:
         return 2
     keys = her_key_names()
     lags = body.Lags()
-    head = "| Recording | before x / y | steps x / y | engine x / y |" + (" fitted x / y (on off jump ms) |" if args.fit else "")
+    head = "| Recording | before x / y | steps x / y | engine x / y |"
+    head += " fitted x / y (on off jump ms) |" if args.fit else ""
     print(head + " end x seen | before | steps | engine |")
     print("|---" * (head.count("|") - 1 + 4) + "|")
     rows = []

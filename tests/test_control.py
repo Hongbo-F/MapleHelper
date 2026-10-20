@@ -6,7 +6,7 @@ from maplehelper.engine import RIGHT
 
 from gamelab.control.actions import STAR_DELAY_MS, Actions
 from gamelab.motion.flow import JUMP_LAG
-from gamelab.motion.physics import air_time
+from gamelab.motion.physics import LAGS, air_time
 
 
 def actions(sent: list) -> Actions:
@@ -27,7 +27,8 @@ def test_jump_back_turns_and_throws_just_before_landing():
     land = lift + 1000 * air_time(0)
     apex = lift + 1000 * air_time(0) / 2
     assert at("left", "down") < at("alt", "down")              # moving away when she jumps
-    assert lift < at("right", "down") < at("f", "down") < apex  # turned in the air, then the key
+    assert lift < at("right", "down") + 1000 * LAGS.on         # the game sees the turn once she's off the ground
+    assert at("right", "down") < at("f", "down") < apex        # turned in the air, then the key
     leaves = at("f", "down") + STAR_DELAY_MS                    # ... the star leaves ~520 ms later
     assert 0 <= land - leaves <= 40                            # just before landing
     assert at("left", "up") <= at("right", "down")             # no longer holding away when she lands

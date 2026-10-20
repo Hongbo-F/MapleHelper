@@ -296,13 +296,31 @@ class Flight:
     path: tuple[tuple[float, float], ...] = field(default=(), repr=False)
 
 
+def _lands_at(q, x: float, y: float, nx: float, ny: float) -> float | None:
+    """Where a step down from (x, y) to (nx, ny) puts her feet on platform q (None: it doesn't): where it
+    ends, if q is under that and the step went through its surface; or, if the step starts over q and ends
+    past its end, where it went through q's surface before the end. Checked only where the step ends, a
+    knock in the air took her through the basin's corner (36's right end, under the foot of the wall
+    above it) and out of the map (harness, tour seed 10)."""
+    if q.covers(nx):
+        return nx if y <= q.y_at(nx) <= ny + 0.01 else None
+    if nx == x or not q.covers(x):
+        return None
+    end = q.right if nx > x else q.left
+    before = y - q.y_at(x)                                    # above the surface: below 0
+    after = y + (ny - y) * (end - x) / (nx - x) - q.y_at(end)  # at the end: at or below it
+    if before > 0 or after < -0.01:
+        return None
+    return x + (end - x) * (-before / (after - before) if after > before else 1.0)
+
+
 def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: int = 0, skip=None,
         walls: Walls | None = None, sides: tuple[float, float] | None = None, dt: float = TICK,
         limit: float = 4.0, path: bool = False) -> Flight:
     """Where she lands from (x, y) moving at (vx, vy) with `arrow` held all the way: the first platform
-    whose surface her feet cross on the way down. Walls stop her sideways (`walls`: the model's, worked
-    out each call if not given; `sides`: the map's left and right limits, which stop her too). `skip`
-    is a platform she falls through (dropping). Not cached."""
+    whose surface her feet cross on the way down (_lands_at). Walls stop her sideways (`walls`: the
+    model's, worked out each call if not given; `sides`: the map's left and right limits, which stop her
+    too). `skip` is a platform she falls through (dropping). Not cached."""
     wall_xs, wall_ys = walls if walls is not None else vertical_walls(model.walls)
     # Only platforms she could reach in the time: within her sideways travel, at or below the top of the jump.
     reach = max(abs(vx), shoe.air_speed if arrow else 0.0) * limit + 1
@@ -326,10 +344,11 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
                 nx, nvx = min(max(nx, sides[0]), sides[1]), 0.0
         if (vy > 0 or nvy > 0) and t > 0 and ny >= y:
             for q in plats:
-                if q.covers(nx) and y <= q.y_at(nx) <= ny + 0.01:
+                at = _lands_at(q, x, y, nx, ny)
+                if at is not None:
                     if points is not None:
-                        points.append((nx, q.y_at(nx)))
-                    return Flight(q, nx, t + dt, nvx, tuple(points or ()))
+                        points.append((at, q.y_at(at)))
+                    return Flight(q, at, t + dt, nvx, tuple(points or ()))
         x, y, vx, vy, t = nx, ny, nvx, nvy, t + dt
         if points is not None:
             points.append((x, y))

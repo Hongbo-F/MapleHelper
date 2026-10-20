@@ -128,8 +128,12 @@ def test_run_timing_and_rope_grab_lead():
     from gamelab.control.mover import grab_lead
     from gamelab.motion.physics import RUN_LAG_MS, run_ms
     from gamelab.motion.physics import WALK_SPEED
-    assert run_ms(7) == pytest.approx(112, abs=3)  # jump key 112 ms in: lifts off 7 units along
+    assert RUN_LAG_MS == 46  # she's 149 (t - 0.113) along t s in, and lifts off 67 ms after the key
+    assert run_ms(30) == pytest.approx(247, abs=1)  # jump key 247 ms in: lifts off 30 units along
     assert run_ms(149) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
+    # 7 units along is 93 ms in, in the kick's blind spot (she'd leave just below full speed): a little
+    # later instead, at full speed, 11 units along.
+    assert run_ms(7) == 118 and run_ms(10) == 118 and run_ms(12) == 127
     assert grab_lead(41) == pytest.approx(WALK_SPEED * 0.2775, abs=1)  # top of the jump over the rope
     assert grab_lead(120) is None
 
