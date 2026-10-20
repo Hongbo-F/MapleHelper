@@ -1,13 +1,28 @@
 """The mini-map as a web page, to watch a run from a phone on the same network: `python -m gamelab web`.
 
 A small HTTP server (standard library only) follows the run's telemetry as the window does (a run live,
-or a recorded one replayed), draws the map with render.MapView, and serves:
+or a recorded one replayed) and pushes it to the page as it comes; the page draws the map itself, on a
+canvas, layer for layer as render.MapView draws it for the window:
 
     /             the page: the map, and what she's doing as text (HP and MP, the hunt loop's rule, the
-                  fight, the moves, the latest log lines), refreshed a few times a second
-    /frame.jpg    the map as of the latest record (?view=her: zoomed in around her, for a phone's screen)
-    /state.json   the text
+                  fight, the moves, the latest log lines)
+    /events       the stream (Server-Sent Events): a snapshot of the state first, then the records as
+                  they're read (every 25 ms), what changed in the text (at most 5 times a second), and a
+                  ping after 5 s of quiet
+    /map.json     the map: its platforms, walls, ropes and portals, with the colours and the reach the
+                  window draws them with (from render.py, so the two can't drift apart)
     /control      replays only (POST action=pause|faster|slower|back|on): play, speed, jump 10 s
+    /frame.jpg    the map drawn here (?view=her: zoomed in around her), /state.json the text, and
+    /clock.json   the run's clock: the page doesn't need them (tests, a quick look, no JavaScript, and
+                  the page's ?debug=1 times its round trips with the last)
+
+Why push records and draw on the phone: the page used to fetch the text every 400 ms, then a 40 KB JPEG
+of the map. That showed 1.6 pictures a second, 280 ms old on average on this computer (540 at worst) and
+43% of her positions, for 45-70 KB/s. Pushed, every record reaches the page in about 20 ms, for about
+2 KB/s, and the phone draws her gliding between her positions at its screen's frame rate. EventSource and
+the canvas both work in iOS Safari. A stream that has gone quiet (Safari can leave one dead behind a
+locked screen) is opened again, and every stream starts with a snapshot, so nothing needs resuming.
+(WebRTC would need packages the standard library doesn't have, for nothing a LAN needs.)
 
 It only reads telemetry: it sends no keys and never touches the game. Every request needs the key printed
 at the start (?k=..., then a cookie), so nobody else on the network can watch.
@@ -22,34 +37,63 @@ from collections import deque
 from collections.abc import Callable
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import islice
 from urllib.parse import parse_qs, urlparse
 
 import cv2
 
-from .render import MapView
-from .state import State
+from ..attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, min_dx
+from .render import JUMP_ARC, KIND, REACH_ALPHA, STYLE, MapView
+from .state import LATEST, TRAIL, State
 
-POLL_S = 0.1     # how often the telemetry is read
-LOG_KEEP = 40    # log lines the page shows
-SEEK_S = 10.0    # a replay's jump back or on
+POLL_S = 0.025          # how often the telemetry is read: on average a record waits half of it (at 0.1 s,
+                        # records reached the page 58 ms after they were written; at 0.025 s, 21 ms)
+LOG_KEEP = 40           # log lines the page shows
+SEEK_S = 10.0           # a replay's jump back or on
 JPEG_QUALITY = 80
-ZOOM = 2.5       # "around her": the map drawn this much bigger, and the part around her cut out ...
-AROUND = 0.8     # ... as tall as this share of its width
+ZOOM = 2.5              # "around her": the map drawn this much bigger, and the part around her cut out ...
+AROUND = 0.8            # ... as tall as this share of its width
+RING = 4096             # records kept for the streams: a stream further behind gets a snapshot instead
+HEARTBEAT_S = 5.0       # a stream with nothing to send pings this often (the page reopens one 12.5 s quiet)
+MAX_STREAMS = 16        # past this many, the oldest stream ends (a phone locked and unlocked leaves one)
+STATUS_EVERY_S = 0.2    # what changed in the text goes to a stream at most this often
+HANDLER_TIMEOUT_S = 30  # a connection quiet this long (a phone gone mid-request, a stream stuck) is closed
+OWN_CLOCK_S = 5.0       # records stamped within this of this computer's clock come from a run on it
+
+
+class Cursor:
+    """How far one stream has got: the last record it was sent (`seq`, of `epoch`), and the text it was
+    last sent, of which version and when (monotonic s). Setting `ended` ends the stream."""
+
+    def __init__(self):
+        self.seq, self.epoch = 0, -1
+        self.version, self.status_at, self.text = -1, float("-inf"), {}
+        self.ended = False
 
 
 class Feed:
     """The run's state, kept up to date from `source` (sources.LiveSource or ReplaySource) by a thread,
-    and the map drawn from it with the view `view_for(map id)` gives (None: the map to start with)."""
+    and what the page needs of it: the records for its streams, the text, the map, and the map drawn here
+    with the view `view_for(map id)` gives (None: the map to start with)."""
 
     def __init__(self, view_for: Callable[[int | None], MapView], source, live: bool):
         self.view_for, self.source, self.live = view_for, source, live
         self.state = State()
         self.view = view_for(None)
         self.logs: deque[str] = deque(maxlen=LOG_KEEP)
-        self.version = 0                 # goes up with every change: the page reloads the map then
+        self.version = 0                 # goes up with every change (the text is made again then)
         self.lock = threading.Lock()
-        self._jpeg: dict[str, tuple[int, bytes]] = {}  # view -> (version, picture)
-        self._zoomed: dict[int, MapView] = {}           # map id -> the view "around her" is cut from
+        self.cond = threading.Condition(self.lock)   # the streams wait on it
+        self.ring: deque[tuple[int, dict]] = deque(maxlen=RING)  # (seq, record): the records for the streams
+        self.seq = 0                     # the number of the last record read
+        self.epoch = 0                   # goes up when the state starts over (a newer run, a replay's jump)
+        self._text: tuple[int, dict] = (-1, {})          # (version, the text without the log lines)
+        self._maps: dict[int, bytes] = {}                 # map id -> map.json
+        self._jpeg: dict[str, tuple[int, bytes]] = {}     # view -> (version, picture)
+        self._zoomed: dict[int, MapView] = {}             # map id -> the view "around her" is cut from
+        self._read: tuple[float, float] | None = None     # live: (the newest record's t, monotonic s when read)
+        self._own_clock = True                            # ... stamped with this computer's clock
+        self._pace, self._pace_from = 1.0, None           # ... the run's seconds a second, measured since
         self._stop = threading.Event()
 
     def start(self) -> None:
@@ -61,7 +105,7 @@ class Feed:
     def _run(self) -> None:
         while not self._stop.is_set():
             self.step()
-            time.sleep(POLL_S)
+            self._stop.wait(POLL_S)
 
     def step(self) -> None:
         """Read what the source has, and apply it."""
@@ -69,18 +113,159 @@ class Feed:
         if not (fresh or records):
             return
         with self.lock:
-            if fresh:  # a newer run started
-                self.state, self.logs = State(), deque(maxlen=LOG_KEEP)
-            self._apply(records)
+            if fresh:  # a newer run started: the page starts over too
+                self._restart(records)
+            else:
+                self._apply(records)
 
     def _apply(self, records: list[dict]) -> None:
+        """Fold new records into the state, and hand them to the streams (the lock held)."""
+        self._fold(records)
+        for r in records:
+            self.seq += 1
+            self.ring.append((self.seq, r))
+        self.version += 1
+        self.cond.notify_all()
+
+    def _restart(self, records: list[dict]) -> None:
+        """Start the state over from `records` (the lock held): the streams send a snapshot."""
+        self.state, self.logs = State(), deque(maxlen=LOG_KEEP)
+        self.ring.clear()
+        self.epoch += 1
+        self._read, self._own_clock, self._pace, self._pace_from = None, True, 1.0, None
+        self._fold(records)
+        self.version += 1
+        self.cond.notify_all()
+
+    def _fold(self, records: list[dict]) -> None:
         for r in records:
             self.state.apply(r)
             if r.get("topic") in ("log", "event"):
                 self.logs.append(r.get("text") or r.get("kind", ""))
         if self.state.map is not None and self.state.map != getattr(self.view.model, "id", None):
             self.view = self.view_for(self.state.map)
-        self.version += 1
+        if self.live:
+            self._timed(records)
+
+    def _timed(self, records: list[dict]) -> None:
+        """Note when the newest record was read, for clock()."""
+        t = next((r["t"] for r in reversed(records) if isinstance(r.get("t"), (int, float))), None)
+        if t is None:
+            return
+        now = time.monotonic()
+        self._own_clock = abs(t - time.time()) < OWN_CLOCK_S
+        if self._pace_from is None:
+            self._pace_from = (t, now)
+        elif now - self._pace_from[1] >= 2.0:
+            t0, at = self._pace_from
+            self._pace = min(max((t - t0) / (now - at), 0.0), 64.0)
+            self._pace_from = (t, now)
+        self._read = (t, now)
+
+    def clock(self) -> tuple[float, float]:
+        """(the run's time now, how fast it goes in its seconds a second): the page draws her by it,
+        between her positions. A replay: where it is, at its speed (0 while paused). Live, a run on this
+        computer: this computer's clock. A simulated run's records carry the simulator's own clock (a
+        fixed date), so there it's the newest record's time, moved on at the pace the records came at."""
+        if not self.live:
+            src = self.source
+            return src.t0 + src.pos, (0.0 if src.paused else float(src.speed))
+        if self._read is None or self._own_clock:
+            return time.time(), 1.0
+        t, at = self._read
+        return t + (time.monotonic() - at) * self._pace, self._pace
+
+    # --- the page's stream -------------------------------------------------------------------------
+
+    def updates(self, cursor: Cursor, timeout: float) -> tuple[str, dict] | None:
+        """What a stream sends next, waiting up to `timeout` s for something to send:
+        ("snapshot", ...) first, when the state started over (a newer run, a replay's jump), and when the
+        stream fell behind the ring; ("update", {seq, now, rate, records, status?}): the records since
+        its last, those a later one of the same topic replaces left out, and what changed in the text
+        (at most every STATUS_EVERY_S); else ("ping", {now, rate}). None once the cursor has ended."""
+        deadline = time.monotonic() + timeout
+        with self.cond:
+            while not cursor.ended:
+                if cursor.epoch != self.epoch or (self.ring and self.ring[0][0] > cursor.seq + 1):
+                    return "snapshot", self._snapshot(cursor)
+                now = time.monotonic()
+                new = self.seq - cursor.seq
+                text_due = cursor.version != self.version and now >= cursor.status_at + STATUS_EVERY_S
+                if new or text_due:
+                    clock, rate = self.clock()
+                    out = {"seq": self.seq, "now": clock, "rate": rate,
+                           "records": _coalesce([r for _, r in islice(reversed(self.ring), new)][::-1])}
+                    cursor.seq = self.seq
+                    if text_due:
+                        text = self._status()
+                        changed = {k: v for k, v in text.items() if cursor.text.get(k, ...) != v}
+                        if changed:
+                            out["status"] = changed
+                        cursor.version, cursor.status_at, cursor.text = self.version, now, text
+                    return "update", out
+                if now >= deadline:
+                    clock, rate = self.clock()
+                    return "ping", {"now": clock, "rate": rate}
+                wait = deadline - now
+                if cursor.version != self.version:  # the text, once it may go
+                    wait = min(wait, cursor.status_at + STATUS_EVERY_S - now)
+                self.cond.wait(wait)
+        return None
+
+    def _snapshot(self, cursor: Cursor) -> dict:
+        """Everything a page starts from (the lock held): the records the state keeps (the session, the
+        tour so far, the latest of each other topic), her trail, the log lines and the text."""
+        s = self.state
+        records = [r for r in (s.session, s.tour, *(getattr(s, topic) for topic in LATEST), s.scene) if r]
+        clock, rate = self.clock()
+        text = self._status()
+        cursor.seq, cursor.epoch = self.seq, self.epoch
+        cursor.version, cursor.status_at, cursor.text = self.version, time.monotonic(), text
+        return {"epoch": self.epoch, "seq": self.seq, "now": clock, "rate": rate, "map": s.map, "t": s.t,
+                "records": records, "trail": list(s.trail), "logs": list(self.logs), "status": text}
+
+    # --- the text, the map, the picture ------------------------------------------------------------
+
+    def status(self) -> dict:
+        """What the page shows as text (/state.json)."""
+        with self.lock:
+            return {**self._status(), "logs": list(self.logs)[::-1]}  # the newest first
+
+    def _status(self) -> dict:
+        """The text without the log lines (the lock held; made once per version), with a replay's place."""
+        if self._text[0] != self.version:
+            s = self.state
+            scene = s.scene or {}
+            her = s.her()
+            hunt = s.hunt or {}
+            self._text = (self.version, {
+                "version": self.version, "live": self.live, "t": s.t or None, "map": s.map,
+                "run": s.session.get("scenario") or s.session.get("command"), "mode": s.session.get("mode"),
+                "her": None if her is None else {k: her.get(k) for k in ("x", "y", "platform", "how")},
+                "hp": scene.get("hp"), "mp": scene.get("mp"),
+                "monsters": len(scene.get("monsters") or []), "loot": len(scene.get("loot") or []),
+                "fight": (s.stance or {}).get("text") or (s.stance or {}).get("act"),
+                "moving": (s.chain or {}).get("text"),
+                "hunt": None if not hunt else {k: hunt.get(k) for k in
+                                               ("rule", "objective", "ground", "rate_here", "rate_to_beat")},
+                "stop": (s.tour or {}).get("stop"),
+            })
+        text = self._text[1]
+        if self.live:
+            return text
+        src = self.source
+        end = src.records[-1].get("t", 0.0) - src.t0 if src.records else 0.0
+        return {**text, "replay": {"paused": src.paused, "speed": src.speed, "pos": round(src.pos, 1),
+                                   "length": round(end, 1), "start": src.t0}}
+
+    def map_json(self) -> bytes:
+        """/map.json: the map the page draws now (made once per map)."""
+        with self.lock:
+            view = self.view
+        key = view.model.id
+        if key not in self._maps:
+            self._maps[key] = _json(map_payload(view))
+        return self._maps[key]
 
     def frame(self, view: str = "all") -> bytes:
         """The map (without the window's text panel: the page has it as text), as a JPEG: all of it, or
@@ -113,33 +298,6 @@ class Feed:
         top = min(max(y - h // 2, 0), zoomed.map_h - h)
         return zoomed.draw(self.state, crop=(left, top, w, h))
 
-    def status(self) -> dict:
-        """What the page shows as text."""
-        with self.lock:
-            s = self.state
-            scene = s.scene or {}
-            her = s.her()
-            hunt = s.hunt or {}
-            out = {
-                "version": self.version, "live": self.live, "t": s.t or None, "map": s.map,
-                "run": s.session.get("scenario") or s.session.get("command"), "mode": s.session.get("mode"),
-                "her": None if her is None else {k: her.get(k) for k in ("x", "y", "platform", "how")},
-                "hp": scene.get("hp"), "mp": scene.get("mp"),
-                "monsters": len(scene.get("monsters") or []), "loot": len(scene.get("loot") or []),
-                "fight": (s.stance or {}).get("text") or (s.stance or {}).get("act"),
-                "moving": (s.chain or {}).get("text"),
-                "hunt": None if not hunt else {k: hunt.get(k) for k in
-                                               ("rule", "objective", "ground", "rate_here", "rate_to_beat")},
-                "stop": (s.tour or {}).get("stop"),
-                "logs": list(self.logs)[::-1],  # the newest first
-            }
-            if not self.live:
-                src = self.source
-                end = src.records[-1].get("t", 0.0) - src.t0 if src.records else 0.0
-                out["replay"] = {"paused": src.paused, "speed": src.speed, "pos": round(src.pos, 1),
-                                 "length": round(end, 1)}
-            return out
-
     def control(self, action: str) -> bool:
         """A replay's controls. False if there's no such action (or this isn't a replay)."""
         if self.live:
@@ -153,23 +311,67 @@ class Feed:
             elif action == "slower":
                 src.speed = max(src.speed / 2, 0.125)
             elif action in ("back", "on"):
-                records = src.seek(SEEK_S if action == "on" else -SEEK_S)
-                self.state, self.logs = State(), deque(maxlen=LOG_KEEP)
-                self._apply(records)
+                self._restart(src.seek(SEEK_S if action == "on" else -SEEK_S))
             else:
                 return False
             self.version += 1
+            self.cond.notify_all()  # the clock's rate changed: the streams say so at once
         return True
 
 
+def _coalesce(records: list[dict]) -> list[dict]:
+    """Records for a stream, in order, without those a later one replaces: of the topics the state keeps
+    only the latest of (state.LATEST), the last one. Every position (her trail), log line and the rest
+    stays, so the page's state comes out the same."""
+    last = {r.get("topic"): i for i, r in enumerate(records) if r.get("topic") in LATEST}
+    keep = set(last.values())
+    return [r for i, r in enumerate(records) if r.get("topic") not in LATEST or i in keep]
+
+
+def map_payload(view: MapView) -> dict:
+    """What the page draws the map with: the map (platform ids are their index), the view's bounds and
+    margin (MapView: map units, px), and the window's colours and reach."""
+    m = view.model
+    return {
+        "id": m.id, "name": m.name,
+        "x0": view.x0, "x1": view.x1, "y0": view.y0, "y1": view.y1, "margin": view.margin,
+        "platforms": [[[s.x1, s.y1, s.x2, s.y2] for s in p.segments] for p in m.platforms],
+        "walls": [[w.x1, w.y1, w.x2, w.y2] for w in m.walls],
+        "ropes": [[r.x, r.top, r.bottom] for r in m.ropes],
+        "portals": [[p.x, p.y] for p in m.portals],
+        "style": {name: _hex(c) for name, c in STYLE.items()},
+        "kind": {name: _hex(c) for name, c in KIND.items()},
+        "reach": {"star": STAR_REACH, "up": SHOT_UP, "down": SHOT_DOWN, "min": min_dx(0), "alpha": REACH_ALPHA},
+        "jump_arc": JUMP_ARC, "zoom": ZOOM, "around": AROUND,
+    }
+
+
+def _hex(rgb: tuple[int, int, int]) -> str:
+    return "#%02x%02x%02x" % rgb
+
+
+def _json(value) -> bytes:
+    """Compact JSON (on one line, as an event's data must be); numpy numbers as plain ones."""
+    return json.dumps(value, separators=(",", ":"), default=float).encode("utf-8")
+
+
+def _event(kind: str, data: dict) -> bytes:
+    """One Server-Sent Event: an update is the page's `message` (with its last record's number as id),
+    the others are named."""
+    head = b"id: %d\n" % data["seq"] if kind == "update" else b"event: %s\n" % kind.encode()
+    return head + b"data: " + _json(data) + b"\n\n"
+
+
 class WebServer(ThreadingHTTPServer):
-    """The HTTP server: `feed`'s page, map and text, for requests with `key`."""
+    """The HTTP server: `feed`'s page, stream, map and text, for requests with `key`."""
 
     daemon_threads = True
 
     def __init__(self, feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None):
         self.feed = feed
         self.key = key or secrets.token_urlsafe(8)
+        self.stopping = threading.Event()
+        self.streams: list[Cursor] = []  # the open streams, oldest first (changed under feed.lock)
         super().__init__((host, port), _Handler)
 
     @property
@@ -183,6 +385,30 @@ class WebServer(ThreadingHTTPServer):
         if host in ("127.0.0.1", "localhost"):
             return [local]
         return [local] + [f"http://{ip}:{self.port}/?k={self.key}" for ip in lan_addresses()]
+
+    def open_stream(self) -> Cursor:
+        cursor = Cursor()
+        with self.feed.cond:
+            cursor.ended = self.stopping.is_set()
+            self.streams.append(cursor)
+            while len(self.streams) > MAX_STREAMS:  # each locking of a phone can leave a dead one open
+                self.streams.pop(0).ended = True
+            self.feed.cond.notify_all()
+        return cursor
+
+    def close_stream(self, cursor: Cursor) -> None:
+        with self.feed.cond:
+            if cursor in self.streams:
+                self.streams.remove(cursor)
+
+    def end_streams(self) -> None:
+        """End every stream, now and from now on (their threads leave at once: stopping the server
+        doesn't stop them)."""
+        with self.feed.cond:
+            self.stopping.set()
+            for cursor in self.streams:
+                cursor.ended = True
+            self.feed.cond.notify_all()
 
 
 def lan_addresses() -> list[str]:
@@ -206,6 +432,10 @@ def lan_addresses() -> list[str]:
 
 class _Handler(BaseHTTPRequestHandler):
     server: WebServer
+    protocol_version = "HTTP/1.1"   # keep-alive: the page's few requests share a connection (each used to
+                                    # open its own); every reply says its length, the stream closes at its end
+    timeout = HANDLER_TIMEOUT_S     # a connection gone quiet frees its thread
+    disable_nagle_algorithm = True  # small events go out at once, not held back for the phone's ACK
 
     def log_message(self, format, *args) -> None:  # quiet: the console shows the run's URLs only
         pass
@@ -237,17 +467,32 @@ class _Handler(BaseHTTPRequestHandler):
         feed = self.server.feed
         if url.path == "/":
             cookie = f"gk={self.server.key}; Path=/; SameSite=Strict; Max-Age=2592000"
-            page = PAGE.replace("__KEY__", json.dumps(self.server.key)).replace(
-                "__URLS__", json.dumps(self.server.urls()))
-            self._send(200, page.encode("utf-8"), "text/html; charset=utf-8", {"Set-Cookie": cookie})
+            self._send(200, page(self.server.key, self.server.urls()), "text/html; charset=utf-8",
+                       {"Set-Cookie": cookie})
+        elif url.path == "/events":
+            self._stream()
+        elif url.path == "/map.json":
+            self._send(200, feed.map_json(), "application/json")
         elif url.path == "/frame.jpg":
             self._send(200, feed.frame(query.get("view", ["all"])[0]), "image/jpeg")
         elif url.path == "/state.json":
-            self._send(200, json.dumps(feed.status()).encode("utf-8"), "application/json")
+            self._send(200, _json(feed.status()), "application/json")
+        elif url.path == "/clock.json":
+            with feed.lock:
+                now, rate = feed.clock()
+            self._send(200, _json({"now": now, "rate": rate}), "application/json")
         else:
             self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:
+        try:  # a body left unread would be taken for the next request on the connection
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if 0 < length <= 65536:
+            self.rfile.read(length)
+        elif length:
+            self.close_connection = True
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if not self._allowed(query):
@@ -258,6 +503,31 @@ class _Handler(BaseHTTPRequestHandler):
             return
         ok = self.server.feed.control(query.get("action", [""])[0])
         self._send(200 if ok else 400, b"ok" if ok else b"no such control", "text/plain")
+
+    def _stream(self) -> None:
+        """/events: a snapshot, then what comes, each event in one write (with Nagle off, it goes out at
+        once), until the page goes, the server stops or too many streams are open. Its own thread waits
+        for each, so a slow phone holds up nothing else."""
+        server = self.server
+        cursor = server.open_stream()
+        self.close_connection = True
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            first = b"retry: 1000\n"  # how soon the browser tries again by itself when the stream drops
+            while True:
+                got = server.feed.updates(cursor, HEARTBEAT_S)
+                if got is None:
+                    return
+                self.wfile.write(first + _event(*got))
+                first = b""
+        except OSError:  # the page went
+            pass
+        finally:
+            server.close_stream(cursor)
 
 
 def start(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None,
@@ -277,6 +547,7 @@ def start(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None =
 
 
 def stop(server: WebServer) -> None:
+    server.end_streams()
     server.feed.stop()
     server.shutdown()
     server.server_close()
@@ -293,6 +564,16 @@ def serve(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None =
         pass
     finally:
         stop(server)
+
+
+def page(key: str, urls: list[str]) -> bytes:
+    """The page, with what it needs from here written in: the key and the addresses, and the state's
+    topics and lengths, so its copy of State.apply keeps what this one keeps."""
+    out = PAGE
+    for name, value in (("__KEY__", key), ("__URLS__", urls), ("__LATEST__", list(LATEST)), ("__TRAIL__", TRAIL),
+                        ("__LOG_KEEP__", LOG_KEEP), ("__HEARTBEAT_S__", HEARTBEAT_S)):
+        out = out.replace(name, json.dumps(value).replace("<", "\\u003c"))
+    return out.encode("utf-8")
 
 
 PAGE = r"""<!doctype html>
@@ -322,9 +603,13 @@ PAGE = r"""<!doctype html>
   .views button { min-height: 36px; padding: 0 14px; border: 0; background: var(--card); color: var(--dim);
                   font-size: 14px; }
   .views button.on { background: var(--line); color: var(--text); }
-  .map { position: relative; border-radius: 10px; overflow: hidden; background: #000; }
+  .map { position: relative; border-radius: 10px; overflow: hidden; background: #000; min-height: 120px; }
+  .map canvas { display: block; width: 100%; height: 0; }
   .map img { display: block; width: 100%; height: auto; }
   .map .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); }
+  .map .debug { position: absolute; left: 6px; top: 6px; max-width: calc(100% - 12px); margin: 0; padding: 4px 6px;
+                border-radius: 4px; background: rgba(0, 0, 0, .7); color: var(--text); pointer-events: none;
+                font: 11px/1.35 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
   .bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
   .bar { background: var(--card); border-radius: 8px; padding: 8px 10px; }
   .bar .label { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); }
@@ -352,6 +637,7 @@ PAGE = r"""<!doctype html>
     .bars { margin-top: 0; }
   }
 </style>
+<noscript><style>.map .empty { display: none; }</style></noscript>
 </head>
 <body>
 <header>
@@ -365,7 +651,10 @@ PAGE = r"""<!doctype html>
       <div class="views" role="group" aria-label="map view">
         <button data-v="her" id="v-her">Around her</button><button data-v="all" id="v-all">Whole map</button>
       </div>
-      <div class="map"><img id="map" alt="the map"><div class="empty" id="empty">waiting for a run...</div></div>
+      <div class="map"><canvas id="map" role="img" aria-label="the map"></canvas>
+        <div class="empty" id="empty">waiting for a run...</div><pre class="debug" id="debug" hidden></pre>
+        <noscript><img src="frame.jpg" alt="the map when the page was opened (JavaScript is off: reload for a newer one)"></noscript>
+      </div>
       <div class="controls" id="controls">
         <button data-a="back" aria-label="back 10 s">&laquo; 10 s</button>
         <button data-a="pause" id="play">Pause</button>
@@ -396,40 +685,332 @@ PAGE = r"""<!doctype html>
   <ol class="log" id="log"></ol>
 </main>
 <script>
+"use strict";
 const KEY = __KEY__, URLS = __URLS__;
+// From gamelab/ui/state.py and web.py, so this copy of State.apply keeps what the server's keeps.
+const LATEST = __LATEST__, TRAIL = __TRAIL__, LOG_KEEP = __LOG_KEEP__, HEARTBEAT_S = __HEARTBEAT_S__;
+const params = new URLSearchParams(location.search);
+const DEBUG = params.get("debug") === "1";
+// Her position is drawn this long (s of the run) behind its clock, so there's a next position to glide
+// to: they come every 67 ms (84 at p75) while she moves. ?delay=0 draws the newest one.
+const DELAY = params.has("delay") ? Math.max(0, Number(params.get("delay")) || 0) : 0.1;
+const GAP = 0.6;  // her positions further apart than this (s) aren't glided between: she's held, then moved
 const $ = id => document.getElementById(id);
-let version = -1, loading = false, wanted = -1, failures = 0;
-let view = "all";
+const withKey = path => path + (path.includes("?") ? "&" : "?") + "k=" + encodeURIComponent(KEY);
+
+// --- the state: the records folded as the server folds them -----------------------------------------
+
+function blank() {
+  return {t: 0, map: null, session: {}, scene: null, route: null, chain: null, monsters: null, stance: null,
+          drops: null, tour: null, hunt: null, trail: [], logs: []};
+}
+let S = blank(), status = {};
+let rev = 0;                                  // goes up with every change to the map's state: drawn again
+let textChanged = true, logsChanged = true;
+
+function keep(list, item, max) { list.push(item); if (list.length > max) list.splice(0, list.length - max); }
+function moved(t, x, y) {   // her trail: [x, y, t], in time order
+  const trail = S.trail;
+  let i = trail.length;
+  while (i > 0 && trail[i - 1][2] > t) i--;
+  trail.splice(i, 0, [x, y, t]);
+  if (trail.length > TRAIL) trail.splice(0, trail.length - TRAIL);
+}
+// State.apply (gamelab/ui/state.py), and the Feed's log lines (web.py)
+function apply(r) {
+  const topic = r.topic;
+  if ("t" in r) S.t = r.t;
+  if (LATEST.includes(topic)) S[topic] = r;
+  else if (topic === "session") { S.session = r; if ("map" in r) S.map = r.map; }
+  else if (topic === "scene") { S.scene = r; const her = r.her || {}; if (her.x != null) moved(r.t, her.x, her.y); }
+  else if (topic === "glance") { if (r.x != null) moved(r.t, r.x, r.y); }
+  else if (topic === "tour") S.tour = Object.assign({}, S.tour || {}, r);
+  else if (topic === "trip") S.route = S.chain = null;
+  if (topic === "log" || topic === "event") { keep(S.logs, r.text || r.kind || "", LOG_KEEP); logsChanged = true; }
+}
+function herState() {   // State.her: the last look's, moved on by any glance since
+  const her = (S.scene || {}).her;
+  if (!her || her.x == null) return null;
+  if (!S.trail.length) return her;
+  const last = S.trail[S.trail.length - 1];
+  return Object.assign({}, her, {x: last[0], y: last[1]});
+}
+function herAt(t) {     // where she was at the run's time t: glided between the positions either side
+  const trail = S.trail;
+  let i = trail.length - 1;
+  if (i < 0) return null;
+  if (t == null || !(t < trail[i][2])) return trail[i];
+  while (i > 0 && trail[i - 1][2] > t) i--;
+  if (i === 0) return trail[0];
+  const a = trail[i - 1], b = trail[i];
+  if (b[2] - a[2] > GAP) return a;
+  const f = (t - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, t];
+}
+
+// The run's clock: its time at the last message, moved on at its rate (1 live, a replay's speed, 0 while
+// paused). The message that took the least time to come wins; the others only pull it back slowly.
+let clock = null;
+function setClock(m) {
+  if (m.now == null) return;
+  const rate = m.rate == null ? 1 : m.rate, base = m.now - rate * performance.now() / 1000;
+  if (!clock || clock.rate !== rate || Math.abs(base - clock.base) > 1) clock = {rate, base};
+  else clock.base = Math.max(base, clock.base - 0.005);
+}
+function runNow() { return clock ? clock.base + clock.rate * performance.now() / 1000 : null; }
+
+function snapshot(s) {
+  S = blank();
+  for (const r of s.records) apply(r);
+  S.trail = s.trail.map(p => [p[0], p[1], -Infinity]);
+  S.logs = s.logs.slice();
+  S.t = s.t;
+  status = s.status || {};
+  clock = null;
+  setClock(s);
+  camera = null;
+  rev++; textChanged = logsChanged = true;
+  wantMap();
+}
+function update(u) {
+  setClock(u);
+  for (const r of u.records) apply(r);
+  if (u.records.length) rev++;
+  if (u.status) { Object.assign(status, u.status); textChanged = true; }
+  wantMap();
+}
+
+// --- the stream, kept open ---------------------------------------------------------------------------
+
+const net = {msgs: 0, bytes: 0, opens: 0, restarts: 0, rtt: null};
+let es = null, lastMsg = performance.now();
+function heard(e) { lastMsg = performance.now(); net.msgs++; net.bytes += e.data.length + 20; }
+function quiet() { return performance.now() - lastMsg; }
+function lost() { return !es || es.readyState !== 1 || quiet() > 2 * HEARTBEAT_S * 1000; }
+function connect(byPage) {
+  if (es) es.close();
+  if (byPage) net.restarts++;
+  lastMsg = performance.now();
+  es = new EventSource(withKey("events"));
+  es.onopen = () => { net.opens++; textChanged = true; };
+  es.onerror = () => { textChanged = true; };   // the browser tries again by itself (retry: 1000)
+  es.addEventListener("snapshot", e => { heard(e); snapshot(JSON.parse(e.data)); });
+  es.addEventListener("ping", e => { heard(e); setClock(JSON.parse(e.data)); });
+  es.onmessage = e => { heard(e); update(JSON.parse(e.data)); };
+}
+// iOS Safari can leave a stream dead behind a locked screen or a page in the background, still "open"
+// and with no error: one quiet for 2.5 pings' time is opened again, and so is one quiet for over a
+// ping's time when the page is shown again.
+setInterval(() => { if (quiet() > 2.5 * HEARTBEAT_S * 1000) connect(true); wantMap(); }, 1000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && quiet() > (HEARTBEAT_S + 1) * 1000) connect(true);
+});
+window.addEventListener("pageshow", e => { if (e.persisted) connect(true); });
+
+let M = null, C = null, mapAsked = -1e9, mapLoading = false;
+function wantMap() {   // the map once, and again when the run moves to another
+  if (mapLoading || (M && (S.map == null || S.map === M.id)) || performance.now() - mapAsked < 2000) return;
+  mapLoading = true;
+  mapAsked = performance.now();
+  fetch(withKey("map.json"), {cache: "no-store"})
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(m => { M = m; C = m.style; rev++; })
+    .catch(() => {})
+    .finally(() => { mapLoading = false; });
+}
+
+// --- drawing: layer for layer as gamelab/ui/render.py's MapView.draw ---------------------------------
+
+const cv = $("map"), ctx = cv.getContext("2d");
+let view = "all", camera = null, lastKey = "", lastFrame = 0;
+const perf = {frames: 0, drawn: 0, ms: []};
 try { view = localStorage.getItem("gamelab-view") || (window.innerWidth < 700 ? "her" : "all"); }
 catch (e) { view = window.innerWidth < 700 ? "her" : "all"; }
 
-function setView(v) {
-  view = v;
-  try { localStorage.setItem("gamelab-view", v); } catch (e) {}
-  $("v-her").classList.toggle("on", v === "her");
-  $("v-all").classList.toggle("on", v === "all");
-  version = -1; loadFrame();
+function yAt(pid, x) {   // Platform.y_at
+  const segs = M.platforms[pid];
+  for (const [x1, y1, x2, y2] of segs) if (x1 <= x && x <= x2) return x2 === x1 ? y1 : y1 + (x - x1) / (x2 - x1) * (y2 - y1);
+  return x < segs[0][0] ? segs[0][1] : segs[segs.length - 1][3];
 }
+function known(pid) { return Number.isInteger(pid) && pid >= 0 && pid < M.platforms.length; }
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  perf.frames++;
+  const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.25) : 0;
+  lastFrame = now;
+  const W = cv.clientWidth;
+  if (!M || !C || !W) return;
+  const dpr = window.devicePixelRatio || 1;
+  const u = Math.min(1, Math.max(0.6, W / 760));   // one px of the window's 760-px picture, in css px
+  const margin = M.margin * u, fit = (W - 2 * margin) / (M.x1 - M.x0);
+  const her = herState(), t = runNow();
+  const when = t == null ? null : t - DELAY * Math.max(clock.rate, 1);
+  const at = her ? (herAt(when) || [her.x, her.y]) : null;
+  let k = fit, H = Math.round((M.y1 - M.y0) * k + 2 * margin), left = 0, top = 0;
+  if (view === "her" && at) {   // ZOOM times bigger, the part around her (MapView's crop), followed smoothly
+    k = fit * M.zoom;
+    const mapW = (M.x1 - M.x0) * k + 2 * margin, mapH = (M.y1 - M.y0) * k + 2 * margin;
+    H = Math.round(Math.min(W * M.around, mapH));
+    const x = (at[0] - M.x0) * k + margin, y = (at[1] - M.y0) * k + margin;
+    const gx = Math.min(Math.max(x - W / 2, 0), mapW - W), gy = Math.min(Math.max(y - H / 2, 0), mapH - H);
+    if (!camera || camera.k !== k || Math.hypot(gx - camera.x, gy - camera.y) > W) camera = {k, x: gx, y: gy};
+    else {
+      const f = 1 - Math.exp(-dt / 0.08);
+      camera.x += (gx - camera.x) * f; camera.y += (gy - camera.y) * f;
+    }
+    left = camera.x; top = camera.y;
+  } else camera = null;
+  const key = [rev, W, H, dpr, view, at && at[0].toFixed(2), at && at[1].toFixed(2), left.toFixed(1), top.toFixed(1)].join();
+  if (key === lastKey) return;   // nothing moved: nothing to draw
+  lastKey = key;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  }
+  cv.style.height = H + "px";
+  const t0 = performance.now();
+  draw({k, ox: margin - M.x0 * k - left, oy: margin - M.y0 * k - top, u, W, H, dpr}, her, at, when);
+  perf.drawn++;
+  keep(perf.ms, performance.now() - t0, 240);
+  $("empty").style.display = "none";
+}
+
+function draw(v, her, at, when) {
+  const {k, ox, oy, u} = v;
+  const X = x => x * k + ox, Y = y => y * k + oy, P = (x, y) => [X(x), Y(y)];
+  const font = Math.max(7, 11 * u) + "px system-ui, sans-serif";
+  ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.lineCap = ctx.lineJoin = "round";
+  ctx.fillStyle = C.background;
+  ctx.fillRect(0, 0, v.W, v.H);
+  function stroke(colour, width, path) {
+    ctx.strokeStyle = colour; ctx.lineWidth = width * u; ctx.beginPath(); path(); ctx.stroke();
+  }
+  function seg(x1, y1, x2, y2) { ctx.moveTo(X(x1), Y(y1)); ctx.lineTo(X(x2), Y(y2)); }
+  function platform(pid, colour, width) { stroke(colour, width, () => { for (const s of M.platforms[pid]) seg(...s); }); }
+  function circle(p, r, colour, width) {   // width < 0: filled (as OpenCV's thickness)
+    ctx.beginPath(); ctx.arc(p[0], p[1], r * u, 0, 2 * Math.PI);
+    if (width < 0) { ctx.fillStyle = colour; ctx.fill(); }
+    else { ctx.strokeStyle = colour; ctx.lineWidth = width * u; ctx.stroke(); }
+  }
+  function box(p, r, colour, width) {      // cv2.rectangle from p - r to p + r
+    if (width < 0) { ctx.fillStyle = colour; ctx.fillRect(p[0] - (r + .5) * u, p[1] - (r + .5) * u, (2 * r + 1) * u, (2 * r + 1) * u); }
+    else { ctx.strokeStyle = colour; ctx.lineWidth = width * u; ctx.strokeRect(p[0] - r * u, p[1] - r * u, 2 * r * u, 2 * r * u); }
+  }
+  function arrow(a, b, colour, width, tip) {   // cv2.arrowedLine
+    const size = Math.hypot(b[0] - a[0], b[1] - a[1]) * tip, angle = Math.atan2(a[1] - b[1], a[0] - b[0]);
+    stroke(colour, width, () => {
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      for (const turn of [Math.PI / 4, -Math.PI / 4]) {
+        ctx.moveTo(b[0] + size * Math.cos(angle + turn), b[1] + size * Math.sin(angle + turn)); ctx.lineTo(b[0], b[1]);
+      }
+    });
+  }
+  function label(text, p, colour) {
+    ctx.fillStyle = colour; ctx.font = font; ctx.fillText(text, p[0], p[1]);
+  }
+
+  // the map (MapView._draw_base)
+  stroke(C.wall, 1, () => { for (const w of M.walls) seg(...w); });
+  stroke(C.rope, 1, () => { for (const [x, t, b] of M.ropes) seg(x, t, x, b); });
+  stroke(C.platform, 2, () => { for (const p of M.platforms) for (const s of p) seg(...s); });
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  M.platforms.forEach((segs, pid) => { const p = P(segs[0][0], segs[0][1]); label(String(pid), [p[0], p[1] - 4 * u], C.dim); });
+  for (const [x, y] of M.portals) circle(P(x, y), 4, C.portal, 1);
+  // the tour's platforms (_platform_roles)
+  const tour = S.tour || {};
+  for (const pid of tour.safe || []) if (known(pid)) platform(pid, C.safe, 2);
+  for (const pid of tour.grounds || []) if (known(Math.trunc(Number(pid)))) platform(Math.trunc(Number(pid)), C.ground, 3);
+  // the tour's stops and spot (_tour)
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  (tour.order || []).forEach((pid, i) => {
+    if (!known(pid)) return;
+    const segs = M.platforms[pid], mid = (segs[0][0] + segs[segs.length - 1][2]) / 2, p = P(mid, yAt(pid, mid));
+    const current = pid === tour.stop, c = [p[0], p[1] + 12 * u];
+    circle(c, 8, current ? C.her : C.ground, current ? -1 : 1);
+    label(String(i + 1), c, current ? C.background : C.ground);
+  });
+  const spot = tour.spot;
+  if (spot && known(spot.platform == null ? -1 : spot.platform)) {
+    const p = P(spot.x, yAt(spot.platform, spot.x)), y = p[1] - 6 * u, r = 6 * u;
+    stroke(C.her, 2, () => { ctx.moveTo(p[0], y - r); ctx.lineTo(p[0] + r, y); ctx.lineTo(p[0], y + r); ctx.lineTo(p[0] - r, y); ctx.closePath(); });
+  }
+  // monsters as the planner predicts them (_monsters)
+  stroke(C.danger, 2, () => {
+    for (const mo of (S.monsters || {}).list || []) {
+      const pid = mo.platform, reach = mo.reach;
+      if (reach && reach.length && pid != null && known(pid)) {
+        const y = yAt(pid, (reach[0] + reach[1]) / 2) - 3; seg(reach[0], y, reach[1], y);
+      }
+    }
+  });
+  // the route (_route, _arc)
+  ((S.route || {}).moves || []).forEach((mv, i) => {
+    if (!(known(mv.src) && known(mv.dst))) return;
+    const a = P(mv.x, yAt(mv.src, mv.x)), b = P(mv.land_x, yAt(mv.dst, mv.land_x));
+    if (mv.kind === "jump" || mv.kind === "walk_off" || mv.kind === "hop") {
+      const lift = Math.max(8 * u, M.jump_arc * k);
+      stroke(C.route, 1, () => { ctx.moveTo(a[0], a[1]); ctx.quadraticCurveTo((a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - 2 * lift, b[0], b[1]); });
+      circle(b, 2, C.route, -1);
+    } else arrow(a, b, C.route, 1, 0.15);
+    if (i === 0) circle(a, 3, C.route, -1);
+  });
+  // the chain in the running key plan (_chain)
+  for (const leg of (S.chain || {}).legs || []) {
+    stroke(C.chain, 3, () => { for (const [pid, x0, x1] of leg.spans || []) if (known(pid)) seg(x0, yAt(pid, x0) - 6, x1, yAt(pid, x1) - 6); });
+    const end = leg.end;
+    if (end && known(end.platform == null ? -1 : end.platform)) circle(P(end.x, yAt(end.platform, end.x) - 6), 3, C.chain, -1);
+  }
+  // drops remembered (_drops), the hunt loop's piles (_piles)
+  for (const d of (S.drops || {}).pending || []) if (d.platform != null) box(P(d.x, d.y - 4), 4, d.mesos ? C.loot : C.drops, 1);
+  for (const d of (S.hunt || {}).piles || []) {
+    if (d.platform == null || d.y == null) continue;
+    box(P(d.x, d.y - 4), d.status === "expected" ? 3 : 5, d.urgent ? C.danger : d.hers ? C.drops : C.dim, 1);
+  }
+  // where a star from her reaches (_reach), from where she's drawn
+  if (her) {
+    const R = M.reach;
+    ctx.globalAlpha = R.alpha;
+    for (const sign of [-1, 1]) {
+      const near = at[0] + sign * R.min, far = at[0] + sign * R.star;
+      const a = P(Math.min(near, far), at[1] - R.up), b = P(Math.max(near, far), at[1] + R.down);
+      ctx.fillStyle = her.facing === (sign > 0 ? "right" : "left") ? C.reach_facing : C.reach_behind;
+      ctx.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // the monsters in the last look, those aimed at ringed (_monsters_seen), and the drops seen (_loot)
+  const aimed = new Set(((S.stance || {}).aimed || []).map(a => Math.round(a.x) + "," + Math.round(a.y)));
+  const scene = S.scene || {};
+  for (const mo of scene.monsters || []) {
+    const p = P(mo.x, mo.y - 12);
+    circle(p, 4, M.kind[mo.kind] || C.text, -1);
+    if (aimed.has(Math.round(mo.x) + "," + Math.round(mo.y))) circle(p, 8, C.danger, 1);
+    if (mo.bar != null) stroke(C.mob_hp, 2, () => { ctx.moveTo(p[0] - 6 * u, p[1] - 7 * u); ctx.lineTo(p[0] + (Math.trunc(12 * mo.bar) - 6) * u, p[1] - 7 * u); });
+  }
+  for (const d of scene.loot || []) box(P(d.x, d.y - 4), 2, C.loot, -1);
+  // her trail, up to where she's drawn (_trail), and her (_her)
+  const trail = [];
+  for (const p of S.trail) if (when == null || !(p[2] > when)) trail.push(p);
+  if (her) trail.push(at);
+  if (trail.length >= 2) stroke(C.her_trail, 1, () => { trail.forEach((p, i) => { i ? ctx.lineTo(X(p[0]), Y(p[1] - 4)) : ctx.moveTo(X(p[0]), Y(p[1] - 4)); }); });
+  if (her) {
+    const p = P(at[0], at[1] - 8);
+    circle(p, 6, C.her, -1);
+    if (her.facing === "left" || her.facing === "right") arrow(p, [p[0] + 14 * u * (her.facing === "right" ? 1 : -1), p[1]], C.background, 2, 0.5);
+    if (her.seen === false) circle(p, 9, C.unseen, 1);
+  }
+}
+
+// --- the text ----------------------------------------------------------------------------------------
 
 function pct(v) { return v == null ? "-" : Math.round(v * 100) + "%"; }
-function clock(t) { return t ? new Date(t * 1000).toLocaleTimeString([], {hour12: false}) : "--:--:--"; }
+function clockText(t) { return t ? new Date(t * 1000).toLocaleTimeString([], {hour12: false}) : "--:--:--"; }
 function text(id, v) { $(id).textContent = v == null || v === "" ? "-" : v; }
 
-function loadFrame() {
-  if (loading || wanted === version || wanted < 0) return;
-  loading = true;
-  const v = wanted;
-  const img = new Image();
-  img.onload = () => { $("map").src = img.src; $("empty").style.display = "none"; version = v; loading = false; loadFrame(); };
-  img.onerror = () => { loading = false; };
-  img.src = "frame.jpg?k=" + encodeURIComponent(KEY) + "&view=" + view + "&v=" + v;
-}
-
 function show(s) {
-  const dot = $("dot");
-  dot.className = "dot " + (s.live ? "live" : "replay");
-  text("title", (s.run ? s.run : "gamelab") + (s.map != null ? " · map " + s.map : "") + (s.live ? "" : " · replay"));
-  $("time").textContent = clock(s.t);
+  text("title", (s.run ? s.run : "gamelab") + (s.map != null ? " · map " + s.map : "") + (s.replay ? " · replay" : ""));
   $("hp").style.width = s.hp == null ? "0" : Math.round(s.hp * 100) + "%";
   $("mp").style.width = s.mp == null ? "0" : Math.round(s.mp * 100) + "%";
   text("hpv", pct(s.hp)); text("mpv", pct(s.mp));
@@ -443,35 +1024,62 @@ function show(s) {
   }
   $("rates").textContent = rates;
   text("fight", s.fight); text("moving", s.moving);
-  text("where", s.her ? "x " + Math.round(s.her.x) + " · platform " + (s.her.platform ?? "?") + " (" + (s.her.how || "?") + ")"
-                     + " · " + s.monsters + " monsters, " + s.loot + " drops in view" : "lost");
-  const log = $("log"); log.replaceChildren();
-  for (const line of s.logs) { const li = document.createElement("li"); li.textContent = line; log.appendChild(li); }
+  text("where", s.her ? "x " + Math.round(s.her.x) + " · platform " + (s.her.platform == null ? "?" : s.her.platform) +
+                        " (" + (s.her.how || "?") + ") · " + s.monsters + " monsters, " + s.loot + " drops in view" : "lost");
   if (s.replay) {
     $("controls").style.display = "flex";
     $("play").textContent = s.replay.paused ? "Play" : "Pause";
-    $("pos").textContent = (s.replay.paused ? "paused · " : "") + "×" + s.replay.speed + " · " +
-                           Math.round(s.replay.pos) + " / " + Math.round(s.replay.length) + " s";
   }
-  if (s.version !== wanted) { wanted = s.version; loadFrame(); }
 }
 
-async function tick() {
-  try {
-    const r = await fetch("state.json?k=" + encodeURIComponent(KEY), {cache: "no-store"});
-    if (!r.ok) throw new Error(r.status);
-    show(await r.json());
-    failures = 0;
-  } catch (e) {
-    if (++failures > 2) $("dot").className = "dot lost";
+function tick() {   // 4 times a second: the text, the log, the clock
+  if (textChanged) { show(status); textChanged = false; }
+  if (logsChanged) {
+    const log = $("log"); log.replaceChildren();
+    for (let i = S.logs.length - 1; i >= 0; i--) { const li = document.createElement("li"); li.textContent = S.logs[i]; log.appendChild(li); }
+    logsChanged = false;
   }
-  setTimeout(tick, document.hidden ? 2000 : 400);
+  $("dot").className = "dot " + (lost() ? "lost" : status.replay ? "replay" : "live");
+  $("time").textContent = clockText(S.t);
+  const r = status.replay;
+  if (r) {
+    const t = runNow(), pos = t == null || r.start == null ? r.pos : Math.min(Math.max(t - r.start, 0), r.length);
+    $("pos").textContent = (r.paused ? "paused · " : "") + "×" + r.speed + " · " + Math.round(pos) + " / " + Math.round(r.length) + " s";
+  }
+  if (!M) $("empty").textContent = lost() && quiet() > 3000 ? "can't reach the mini-map: trying again..." : "waiting for a run...";
 }
 
+// ?debug=1: how fast it draws, what comes over the network, and how old the data on screen is
+let was = {t: performance.now(), frames: 0, drawn: 0, msgs: 0, bytes: 0};
+function debug() {
+  const now = performance.now(), dt = (now - was.t) / 1000;
+  const ms = perf.ms.slice().sort((a, b) => a - b), q = f => ms.length ? ms[Math.floor(f * (ms.length - 1))].toFixed(2) : "-";
+  const t = runNow(), age = t == null || !S.t ? "-" : Math.round((t - S.t) * 1000);
+  $("debug").textContent =
+    "fps " + ((perf.frames - was.frames) / dt).toFixed(0) + ", drawn " + ((perf.drawn - was.drawn) / dt).toFixed(0) + "/s\n" +
+    "draw ms p50 " + q(.5) + " p90 " + q(.9) + " max " + (ms.length ? ms[ms.length - 1].toFixed(2) : "-") + "\n" +
+    "msgs " + ((net.msgs - was.msgs) / dt).toFixed(1) + "/s, " + ((net.bytes - was.bytes) / dt / 1024).toFixed(2) +
+    " KiB/s, " + (net.bytes / 1024).toFixed(0) + " KiB\n" +
+    "reconnects " + Math.max(0, net.opens - 1) + " (" + net.restarts + " by the page)\n" +
+    "data age " + age + " ms + rtt/2 " + (net.rtt == null ? "-" : Math.round(net.rtt / 2)) + " ms\n" +
+    "her " + Math.round(DELAY * 1000) + " ms behind, canvas " + cv.width + "x" + cv.height + " at " +
+    +(window.devicePixelRatio || 1).toFixed(2) + "x";
+  was = {t: now, frames: perf.frames, drawn: perf.drawn, msgs: net.msgs, bytes: net.bytes};
+  const sent = performance.now();
+  fetch(withKey("clock.json"), {cache: "no-store"}).then(r => r.arrayBuffer()).then(() => { net.rtt = performance.now() - sent; }).catch(() => {});
+}
+
+function setView(v) {
+  view = v;
+  try { localStorage.setItem("gamelab-view", v); } catch (e) {}
+  $("v-her").classList.toggle("on", v === "her");
+  $("v-all").classList.toggle("on", v === "all");
+  camera = null; lastKey = "";
+}
 for (const b of document.querySelectorAll(".views button")) b.addEventListener("click", () => setView(b.dataset.v));
 setView(view);
 for (const b of document.querySelectorAll("#controls button")) {
-  b.addEventListener("click", () => fetch("control?k=" + encodeURIComponent(KEY) + "&action=" + b.dataset.a, {method: "POST"}));
+  b.addEventListener("click", () => fetch(withKey("control?action=" + b.dataset.a), {method: "POST"}));
 }
 
 // On a computer, show how to open it on a phone: the network address, and a QR code to scan.
@@ -485,7 +1093,12 @@ if (lan && window.matchMedia("(min-width: 900px)").matches && ["127.0.0.1", "loc
   s.onerror = () => { $("qr").style.display = "none"; };
   document.head.appendChild(s);
 }
+if (DEBUG) { $("debug").hidden = false; setInterval(debug, 1000); }
+wantMap();
+connect(false);
+setInterval(tick, 250);
 tick();
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>

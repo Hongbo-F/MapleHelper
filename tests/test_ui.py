@@ -378,3 +378,273 @@ def test_the_web_page_can_be_served_in_the_background_and_stopped():
         assert lines[1] == f"  http://127.0.0.1:{server.port}/?k=k" and len(lines) == 2  # this computer only
     finally:
         stop(server)
+
+
+# --- the page's stream (Server-Sent Events) -----------------------------------------------------------
+
+def run_records(m) -> list[dict]:
+    c = by_y(m, 500, 400)
+    return [{"topic": "session", "t": 100.0, "map": 1, "command": "tour", "mode": "live"},
+            {"topic": "scene", "t": 100.5, "her": {"x": 400, "y": 500, "platform": c.id, "how": "tag"}, "hp": 0.8,
+             "mp": 1.0, "monsters": [], "loot": []},
+            {"topic": "hunt", "t": 100.6, "rule": "shoot", "ground": c.id},
+            {"topic": "log", "t": 100.7, "text": "pig down"},
+            {"topic": "log", "t": 102.0, "text": "later"},
+            {"topic": "glance", "t": 102.1, "x": 420, "y": 500},
+            {"topic": "log", "t": 130.0, "text": "much later"}]
+
+
+def replay_feed(m, now: list[float]):
+    from gamelab.ui.web import Feed
+    feed = Feed(lambda map_id: MapView(m, width=300), ReplaySource(run_records(m), clock=lambda: now[0]), live=False)
+    now[0] = 1.0  # one second in: the first four records
+    feed.step()
+    return feed
+
+
+class Served:
+    """A feed's page served on 127.0.0.1 (any free port) while in a `with`."""
+
+    def __init__(self, feed, key: str = "secret"):
+        import threading
+        from gamelab.ui.web import WebServer
+        self.server = WebServer(feed, host="127.0.0.1", port=0, key=key)
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+
+    def __enter__(self):
+        return self.server
+
+    def __exit__(self, *exc):
+        from gamelab.ui.web import stop
+        stop(self.server)
+
+
+def open_stream(server, path: str = "/events?k=secret", headers: dict | None = None):
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    conn.request("GET", path, headers=headers or {})
+    return conn, conn.getresponse()
+
+
+def read_event(resp) -> tuple[str, dict, str | None]:
+    """One Server-Sent Event of a stream: (its name, its data, its id)."""
+    import json
+    kind, data, ident = "message", [], None
+    while True:
+        line = resp.readline()
+        if not line:
+            raise EOFError("the stream ended")
+        line = line.decode("utf-8").rstrip("\r\n")
+        if not line:
+            if data:
+                return kind, json.loads("\n".join(data)), ident
+            continue
+        name, _, value = line.partition(":")
+        value = value[1:] if value.startswith(" ") else value
+        if name == "event":
+            kind = value
+        elif name == "data":
+            data.append(value)
+        elif name == "id":
+            ident = value
+
+
+def test_the_page_streams_a_snapshot_then_the_new_records():
+    m = model()
+    now = [0.0]
+    feed = replay_feed(m, now)
+    with Served(feed) as server:
+        conn, resp = open_stream(server)
+        assert resp.status == 200 and resp.getheader("Content-Type") == "text/event-stream"
+        kind, snap, _ = read_event(resp)
+        assert kind == "snapshot" and snap["map"] == 1 and snap["now"] == 101.0 and snap["rate"] == 1.0
+        assert {r["topic"] for r in snap["records"]} == {"session", "scene", "hunt"}
+        assert snap["trail"] == [[400, 500]] and snap["logs"] == ["pig down"]
+        assert snap["status"]["hp"] == 0.8 and snap["status"]["her"]["platform"] == by_y(m, 500, 400).id
+        now[0] = 2.5
+        feed.step()
+        kind, update, ident = read_event(resp)
+        assert kind == "message" and [r["topic"] for r in update["records"]] == ["log", "glance"]
+        assert ident == str(update["seq"]) == str(feed.seq) and update["now"] == 102.5
+        while "status" not in update:  # what changed in the text follows within STATUS_EVERY_S
+            kind, update, _ = read_event(resp)
+        assert update["status"]["her"]["x"] == 420 and "hp" not in update["status"]  # HP didn't change
+        conn.close()
+
+
+def test_the_stream_and_the_map_need_the_key():
+    m = model()
+    feed = replay_feed(m, [0.0])
+    with Served(feed) as server:
+        for path in ("/events", "/map.json", "/clock.json"):
+            conn, resp = open_stream(server, path)
+            assert resp.status == 403
+            conn.close()
+            conn, resp = open_stream(server, path, {"Cookie": "gk=secret"})
+            assert resp.status == 200
+            conn.close()
+
+
+def test_a_seek_or_a_new_run_restarts_the_stream_with_a_snapshot(tmp_path):
+    import urllib.request
+    from gamelab.ui.sources import LiveSource
+    from gamelab.ui.web import Feed
+    m = model()
+    feed = replay_feed(m, [0.0])
+    with Served(feed) as server:
+        conn, resp = open_stream(server)
+        assert read_event(resp)[0] == "snapshot"
+        urllib.request.urlopen(urllib.request.Request(
+            f"http://127.0.0.1:{server.port}/control?k=secret&action=on", method="POST"))
+        kind, snap, _ = read_event(resp)
+        assert kind == "snapshot" and snap["logs"] == ["pig down", "later"]  # 11 s in
+        conn.close()
+    first = tmp_path / "20261020-010000-tour.jsonl"
+    first.write_text('{"topic": "log", "t": 1.0, "text": "a"}\n', encoding="utf-8")
+    now = [0.0]
+    feed = Feed(lambda map_id: MapView(m, width=300), LiveSource(tmp_path, clock=lambda: now[0]), live=True)
+    feed.step()
+    with Served(feed) as server:
+        conn, resp = open_stream(server)
+        kind, snap, _ = read_event(resp)
+        assert kind == "snapshot" and snap["logs"] == ["a"]
+        (tmp_path / "20261020-020000-tour.jsonl").write_text('{"topic": "log", "t": 2.0, "text": "b"}\n',
+                                                              encoding="utf-8")
+        now[0] = 1.5
+        feed.step()
+        kind, snap, _ = read_event(resp)
+        assert kind == "snapshot" and snap["logs"] == ["b"]
+        conn.close()
+
+
+def test_a_client_that_fell_behind_gets_a_snapshot(monkeypatch):
+    from gamelab.ui import web
+    monkeypatch.setattr(web, "RING", 8)
+    m = model()
+    now = [0.0]
+    records = [{"topic": "log", "t": float(i), "text": str(i)} for i in range(30)]
+    feed = web.Feed(lambda map_id: MapView(m, width=300), ReplaySource(records, clock=lambda: now[0]), live=False)
+    behind, keeping_up = web.Cursor(), web.Cursor()
+    assert feed.updates(behind, 0)[0] == "snapshot" and feed.updates(keeping_up, 0)[0] == "snapshot"
+    assert feed.updates(keeping_up, 0)[0] == "ping"  # nothing new
+    sent = -1
+    for t in range(1, 21):
+        now[0] = float(t)
+        feed.step()
+        if t % 4 == 0:  # 4 or 5 records since its last: all still kept
+            kind, update = feed.updates(keeping_up, 0)
+            assert kind == "update" and [r["text"] for r in update["records"]] == [str(i) for i in range(sent + 1, t + 1)]
+            sent = t
+    assert feed.updates(behind, 0)[0] == "snapshot"  # 20 records on: they're no longer all kept
+
+
+def test_a_backlog_keeps_every_position_but_only_the_latest_plan():
+    from gamelab.ui.web import _coalesce
+    records = [{"topic": "route", "t": 1.0, "dst": 3, "moves": []},
+               {"topic": "glance", "t": 1.1, "x": 10, "y": 500},
+               {"topic": "scene", "t": 1.2, "her": {"x": 12, "y": 500, "platform": 2}, "hp": 0.9},
+               {"topic": "chain", "t": 1.25, "text": "first"},
+               {"topic": "log", "t": 1.3, "text": "off"},
+               {"topic": "glance", "t": 1.4, "x": 20, "y": 500},
+               {"topic": "route", "t": 1.5, "dst": 4, "moves": []},
+               {"topic": "trip", "t": 1.55, "result": "arrived"},
+               {"topic": "chain", "t": 1.6, "text": "second"},
+               {"topic": "scene", "t": 1.7, "her": {"x": 30, "y": 500, "platform": 4}, "hp": 0.8},
+               {"topic": "glance", "t": 1.8, "x": 35, "y": 500}]
+    kept = _coalesce(records)
+    assert [r["topic"] for r in kept] == ["glance", "scene", "log", "glance", "route", "trip", "chain", "scene",
+                                         "glance"]
+    whole, merged = State(), State()
+    for r in records:
+        whole.apply(r)
+    for r in kept:
+        merged.apply(r)
+    assert merged.her() == whole.her() and list(merged.trail) == list(whole.trail) and len(whole.trail) == 5
+    assert merged.route == whole.route is None and merged.chain == whole.chain and merged.chain["text"] == "second"
+
+
+def test_stopping_the_server_ends_its_streams():
+    import threading
+    import time
+    from gamelab.ui.web import HEARTBEAT_S, Feed, start, stop
+    m = model()
+    feed = Feed(lambda map_id: MapView(m, width=300), ReplaySource(run_records(m)), live=False)
+    before = set(threading.enumerate())
+    server = start(feed, host="127.0.0.1", port=0, key="secret", announce=lambda line: None)
+    conn, resp = open_stream(server)
+    assert read_event(resp)[0] == "snapshot"
+    began = time.monotonic()
+    stop(server)
+    try:
+        while True:
+            read_event(resp)
+    except EOFError:
+        pass
+    assert time.monotonic() - began < HEARTBEAT_S + 1
+    conn.close()
+    for _ in range(40):  # its handler thread is gone (and the feed's)
+        left = [t for t in threading.enumerate() if t not in before and t.is_alive()]
+        if not left:
+            break
+        time.sleep(0.05)
+    assert not left, left
+
+
+def test_the_page_s_map_matches_the_window_s():
+    import http.client
+    import json
+    from gamelab.attack.reach import STAR_REACH
+    m = model()
+    view = MapView(m, width=300)
+    feed = replay_feed(m, [0.0])
+    with Served(feed) as server:
+        conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+        conn.request("GET", "/map.json?k=secret")
+        payload = json.loads(conn.getresponse().read())
+        conn.request("GET", "/state.json?k=secret")  # the same connection (HTTP/1.1 keep-alive)
+        assert json.loads(conn.getresponse().read())["hp"] == 0.8
+        conn.close()
+    assert (payload["id"], payload["x0"], payload["x1"], payload["y0"], payload["y1"], payload["margin"]) == \
+        (1, view.x0, view.x1, view.y0, view.y1, view.margin)
+    assert payload["platforms"] == [[[s.x1, s.y1, s.x2, s.y2] for s in p.segments] for p in m.platforms]
+    assert len(payload["walls"]) == len(m.walls) and payload["ropes"] == [[r.x, r.top, r.bottom] for r in m.ropes]
+    assert payload["style"]["her"] == "#%02x%02x%02x" % HER and payload["kind"]["pig"] == "#ff96aa"
+    assert payload["reach"]["star"] == STAR_REACH and payload["zoom"] == 2.5
+
+
+def test_the_page_folds_records_as_the_state_does():
+    import json
+    import re
+    import urllib.request
+    from gamelab.ui import state
+    from gamelab.ui.web import LOG_KEEP
+    m = model()
+    with Served(replay_feed(m, [0.0])) as server:
+        page = urllib.request.urlopen(f"http://127.0.0.1:{server.port}/?k=secret").read().decode("utf-8")
+    assert f"const LATEST = {json.dumps(list(state.LATEST))}, TRAIL = {state.TRAIL}, LOG_KEEP = {LOG_KEEP}" in page
+    assert 'const KEY = "secret"' in page and not re.search(r"__[A-Z_]+__", page)  # every blank filled in
+
+
+def test_the_page_s_clock_follows_the_run(tmp_path):
+    import time
+    from gamelab.ui.sources import LiveSource
+    from gamelab.ui.web import Feed
+    m = model()
+    now = [0.0]
+    feed = replay_feed(m, now)
+    assert feed.clock() == (101.0, 1.0)
+    feed.control("faster")
+    assert feed.clock() == (101.0, 2.0)
+    feed.control("pause")
+    assert feed.clock() == (101.0, 0.0)
+    path = tmp_path / "20261020-010000-sim-tour_run.jsonl"
+    path.write_text('{"topic": "log", "t": 1800000012.5, "text": "a"}\n', encoding="utf-8")  # the simulator's clock
+    live = Feed(lambda map_id: MapView(m, width=300), LiveSource(tmp_path), live=True)
+    assert abs(live.clock()[0] - time.time()) < 1  # nothing read yet: this computer's clock
+    live.step()
+    t, rate = live.clock()
+    assert 1800000012.5 <= t < 1800000013.5 and rate == 1.0
+    path.write_text(f'{{"topic": "log", "t": {time.time():.3f}, "text": "a"}}\n', encoding="utf-8")  # a run here
+    live = Feed(lambda map_id: MapView(m, width=300), LiveSource(tmp_path), live=True)
+    live.step()
+    assert abs(live.clock()[0] - time.time()) < 0.1
