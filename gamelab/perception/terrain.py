@@ -17,6 +17,11 @@ ROPE_GAP = (6, 40)     # pieces of one rope: at most this far apart across (cent
 ROPE_RGB = ((140, 235), (125, 215), (95, 180))
 ROPE_RED_OVER_BLUE = (20, 70)  # ... red this much above blue ...
 ROPE_RED_GREEN = 30            # ... and red and green at most this far apart
+# Px (across, down) around the rope colour's pixels that the shapes are worked on in (_ropes_in). Closing
+# (9 rows by 3) and opening (31 by 1) can't reach more than 4 + 15 rows and 1 column past the colour's own
+# pixels, and an erosion next to the box's edge must see only what the whole strip has there, nothing: 2
+# columns and 19 rows would do.
+CROP_PAD = (4, 32)
 
 
 def ground_extent(frame: np.ndarray, x: int, floor_y: int) -> tuple[int, int]:
@@ -87,14 +92,37 @@ def find_ropes(full: np.ndarray, columns: list[tuple[int, int]] | None = None) -
 
 
 def _ropes_in(strip: np.ndarray, x0: int) -> list[ScreenRope]:
-    """The ropes in a strip of the screen whose left edge is at x0."""
-    mask = _rope_pixels(strip)
+    """The ropes in a strip of the screen whose left edge is at x0. The strip is copied out of the screen
+    first: OpenCV split a strip viewed in place 8 times slower (2.9 ms a look against 0.4). After the colour
+    test the shapes are made only in the box around its pixels (CROP_PAD; on the saved frames 58% of a
+    strip), and connected only in the box around what's left of them (9%): the same shapes as in the whole
+    strip, connected in 0.1 ms a strip instead of 0.4."""
+    mask = _rope_pixels(np.ascontiguousarray(strip))
+    bx, by, bw, bh = cv2.boundingRect(mask)
+    if not bw:
+        return []
+    h, w = mask.shape
+    px, py = CROP_PAD
+    left, top = _even(bx - px), _even(by - py)
+    mask = mask[top:min(h, by + bh + py), left:min(w, bx + bw + px)]
     # Join the twisted strands vertically, then keep only tall, narrow shapes.
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((31, 1), np.uint8))
-    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
-    return [ScreenRope(int(x0 + x + w // 2), int(y), int(y + rh)) for x, y, w, rh, area in stats[1:count]
+    sx, sy, sw, sh = cv2.boundingRect(mask)  # the shapes are connected in their own box: the same shapes
+    if not sw:
+        return []
+    sw, sh, sx, sy = sw + sx % 2, sh + sy % 2, _even(sx), _even(sy)
+    left, top = left + sx, top + sy
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask[sy:sy + sh, sx:sx + sw])
+    return [ScreenRope(int(x0 + left + x + w // 2), int(top + y), int(top + y + rh))
+            for x, y, w, rh, area in stats[1:count]
             if rh >= MIN_ROPE_LENGTH and w <= MAX_ROPE_WIDTH and area >= rh * MIN_ROPE_FILL]
+
+
+def _even(n: int) -> int:
+    """n rounded down to even, at least 0: a box cut from the strip starting on an even row and column, the
+    shapes are connected in the same order as in the whole strip (OpenCV labels 2 by 2 pixel blocks)."""
+    return max(0, n - n % 2)
 
 
 def _spans(columns: list[tuple[int, int]], width: int) -> list[tuple[int, int]]:

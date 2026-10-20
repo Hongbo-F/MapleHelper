@@ -187,6 +187,31 @@ def test_ropes_searched_only_in_columns():
     assert find_ropes(full, [(-100, -10), (1950, 2000)]) == find_ropes(full, []) == []
 
 
+def whole_strip_ropes(strip, x0):
+    """terrain._ropes_in as it was: the shapes made and connected over the whole strip."""
+    mask = cv2.morphologyEx(rope_mask(strip).astype(np.uint8) * 255, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((31, 1), np.uint8))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    return [ScreenRope(int(x0 + x + w // 2), int(y), int(y + rh)) for x, y, w, rh, area in stats[1:count]
+            if rh >= 90 and w <= 12 and area >= rh * 1.5]
+
+
+def test_rope_shapes_made_in_their_box_are_the_whole_strips():
+    from gamelab.perception.terrain import _ropes_in
+    rng = np.random.default_rng(3)
+    for k in range(400):
+        h, w = rng.integers(40, 400), rng.integers(5, 140)
+        strip = np.empty((h, w, 3), np.uint8)
+        strip[...] = rng.integers(0, 256, 3)
+        for _ in range(rng.integers(0, 6)):  # rope-coloured strokes, some at the strip's edges
+            x, y = rng.integers(0, w), rng.integers(0, h)
+            strip[y:y + rng.integers(1, 200), x:x + rng.integers(1, 6)] = (190, 170, 130)
+        strip[rng.random((h, w)) < rng.choice([0, 0.01, 0.05, 0.2])] = ROPE  # and specks
+        assert _ropes_in(strip, 1000) == whole_strip_ropes(strip, 1000), k
+    full = with_ropes((300, 100, 700), (705, 50, 400))
+    assert _ropes_in(full[:972, 650:760], 650) == whole_strip_ropes(full[:972, 650:760], 650) != []
+
+
 def test_bars_read_the_fill_fraction():
     full = np.zeros((1080, 1920, 3), np.uint8)
     full[1060:1069, 707:707 + 121] = (220, 30, 30)  # HP 121/147 px = 523/642 in game
