@@ -194,19 +194,22 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
     _count_late(h, st, placed)
     if st.kill_spots:
         h.looter.sweep_after(st.kill_spots)
+        # Its looks may see another kill: counted, its drops left. Left to the tour, they sent it on loot
+        # trip after loot trip (tour_run: 16 instead of 6, 1185 s instead of 708).
+        _count_late(h, st, placed, drops=False)
     report.stop = "kill limit" if report.exp_kills - exp_at_start >= max_kills else "time limit"
     return report
 
 
 # --- the steps of a fight's look (clear) ---------------------------------------------------------
 
-def _count_late(h: "Hunter", st: FightState, placed: Scene | None) -> None:
+def _count_late(h: "Hunter", st: FightState, placed: Scene | None, drops: bool = True) -> None:
     """At the end of a fight: her EXP gains its own looks didn't tell apart as kills (seen by a sweep's
-    looks before it ended at the kill count, or by the look it ended on: knocked off, low HP), told apart
-    from its last look that placed her (`placed`). Else they were missing from its kills by kind, what a
-    tour's stop sums up."""
+    looks, before it ended at the kill count or in the sweep after it, or by the look it ended on: knocked
+    off, low HP), told apart from its last look that placed her (`placed`). Else they were missing from its
+    kills by kind, what a tour's stop sums up. Their drops are kept (see _count_kills) only with `drops`."""
     if h.report.exp_kills > st.exp_counted and placed is not None:
-        _count_kills(h, st, placed, [], h.report.exp_kills - st.exp_counted, time.monotonic())
+        _count_kills(h, st, placed, [], h.report.exp_kills - st.exp_counted, time.monotonic(), drops)
         st.exp_counted = h.report.exp_kills
 
 
@@ -339,11 +342,11 @@ def _wanted(s: Scene, kinds, ground: set[int] | None, far: bool) -> list[Monster
 
 
 def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], gains: int,
-                 now: float) -> list[Monster]:
+                 now: float, drops: bool = True) -> list[Monster]:
     """Her EXP went up `gains` times since the last look: those are the kills, among what she was
     throwing at (the last throw's path, and what she's thrown at lately: a kill can come in after she's
     turned to the next one). Each kill's drops go to the sweep after the fight (on her platform) or to
-    the tour. Returns `wanted` without the dead."""
+    the tour (unless not `drops`). Returns `wanted` without the dead."""
     here = s.platform.id
     for _ in range(gains):
         dead = dead_one(st.aimed + [e[0] for e in st.thrown if not any(e[0] is a for a in st.aimed)],
@@ -357,8 +360,9 @@ def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], g
         st.dying.append((dead, now))
         wanted = [m for m in wanted if seen_again(dead, [m]) is not m]
         h.report.count_kill(dead.kind)
-        drops = DropSpot(dead.x, dead.y, dead.platform, time.monotonic())
-        (st.kill_spots if dead.platform == here else h.looter.pending).append(drops)
+        if drops:
+            spot = DropSpot(dead.x, dead.y, dead.platform, time.monotonic())
+            (st.kill_spots if dead.platform == here else h.looter.pending).append(spot)
         h.log(f"  {dead.kind} down at x {dead.x:.0f} (platform {dead.platform})")
         telemetry.emit("event", kind="kill", text=f"{dead.kind} down on platform {dead.platform}",
                        x=round(dead.x, 1), y=round(dead.y, 1))

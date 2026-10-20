@@ -182,6 +182,19 @@ def test_a_kill_seen_while_she_sweeps_up_still_counts(monkeypatch):
     r = h.clear(max_kills=2, patience=2.0)
     assert r.exp_kills == 2 and r.kills == {"pig": 2} and r.stop == "kill limit"
     assert swept == [[700], [800]]  # the second one's drops are swept up too
+    # The same seen by the sweep after the fight (at its kill count after the first): counted, its drops left.
+    h, throws = _fighter(monkeypatch, looks, on_look=kill_at)
+    h.looter.sweep_through = lambda s, deaths: None
+    swept = []
+
+    def sweep_after(deaths):
+        swept.append([d.x for d in deaths])
+        if len(swept) == 1:
+            h.report.exp_kills += 1
+    h.looter.sweep_after = sweep_after
+    r = h.clear(max_kills=1, patience=2.0)
+    assert r.exp_kills == 2 and r.kills == {"pig": 2} and swept == [[700]]
+    assert h.looter.pending == []  # its drops are left (going after them made loot trip after loot trip)
 
 
 def test_with_far_on_she_shoots_monsters_on_any_platform_in_reach(monkeypatch):
