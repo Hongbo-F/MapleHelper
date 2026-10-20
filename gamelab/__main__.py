@@ -26,6 +26,14 @@ from .control.timeline import action_events, chain, her_setup
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
 
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
+# `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes at
+# 10 a second (257 bytes each: 9 MB an hour) and tracks twice a second keep a day of watching under 400 MB,
+# inside the 2 GB telemetry keeps (telemetry.KEEP_BYTES).
+WATCH_SCENE_S = 0.1
+WATCH_TRACKS_S = 0.5
+WATCH_STATUS_S = 10.0
+WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for it (the player checks 4 a second)
+WATCH_EVENTS = ("died", "exp_gain")  # tracker events published as telemetry 'event' records (and hits, new ones)
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
 # subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
 GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
@@ -253,13 +261,47 @@ def _eyes(model, title: str):
     return Eyes(title, calibration.load().template, detector_for(model))
 
 
+_FEEDS: list = []  # continuous feeds started by this command (--feed), closed when it ends
+
+
 def _hunter(args, **kw):
-    """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way)."""
+    """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way); with
+    `--feed`, her looks and glances from a continuous feed (localization.feed: the game looked at every frame
+    in a process of its own)."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
     cfg, keys, _ = her_setup()
     model = mapdata.load(args.map)
-    return Hunter(_eyes(model, cfg.game_window_title), keys, model, log=_log, **kw)
+    feed = _feed(model, cfg.game_window_title) if getattr(args, "feed", False) else None
+    return Hunter(_eyes(model, cfg.game_window_title), keys, model, log=_log, feed=feed, **kw)
+
+
+def _feed(model, title: str):
+    """A continuous feed of the game for this command (its child process; closed when the command ends), or
+    None if it can't start (the command then looks for itself)."""
+    import functools
+
+    from .attack import reach
+    from .localization import feed
+    client = feed.FeedClient(functools.partial(feed.screen_world, model.id, title, calibration.load().template,
+                                               (reach.LOOK_UP, reach.LOOK_DOWN)))
+    if not client.alive:
+        _log(f"feed: {client.why}; looking without it")
+        client.close()
+        return None
+    _FEEDS.append(client)
+    _log(f"feed: the game looked at {client.hz:.0f} times a second in process {client.hello['pid']} "
+         f"(below normal priority: {client.hello['priority'] == feed.BELOW_NORMAL})")
+    return client
+
+
+def _close_feeds() -> None:
+    while _FEEDS:
+        client = _FEEDS.pop()
+        bye = client.bye or {}
+        client.close()
+        print(f"feed: {bye.get('frames', '?')} frames, {bye.get('placed', '?')} placing her, "
+              f"{bye.get('band', '?')} band and {bye.get('wide', '?')} whole-screen searches; {client.why or ''}")
 
 
 def _log(message: str) -> None:
@@ -725,12 +767,28 @@ def cmd_bench_look(args) -> int:
             return 1
         frames = bench.load(files)
         eyes = bench.SavedEyes(template, detector_for(model))
+    from .localization.worldstate import Asks, Schedule, WorldStep
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
+    # The continuous feed's step on the same frames (localization.worldstate): her place and every monster it
+    # follows re-found, and with what a frame may also be asked for. Each frame is looked at several times in
+    # a row, as a still scene; the whole-screen one finds the monsters the others then re-find.
+    step = WorldStep(Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)),
+                     schedule=Schedule(band_every=10 ** 9, wide_s=None))
+
+    def frame_step(asks=None):
+        full = eyes._capture()
+        return step.step(lambda ropes: eyes.look_at(full, None, ropes), time.monotonic(), True, asks)
     looks = {"Senses.look: no monsters": lambda: senses.look(mobs=False),
              "Senses.look: her band": lambda: senses.look(),
              "Senses.look: band + loot on her platform": lambda: senses.look(loot=True),
-             "Senses.look: whole screen + all loot": lambda: senses.look(wide=True, loot=True)}
+             "Senses.look: whole screen + all loot": lambda: senses.look(wide=True, loot=True),
+             "feed step: her place, monsters re-found": frame_step,
+             "feed step: ... and her band searched": lambda: frame_step(Asks(band=True)),
+             "feed step: ... and the whole screen": lambda: frame_step(Asks(wide=True))}
     timer = bench.run(eyes, senses.band, looks, frames, reps=args.reps, n=args.n)
+    timer.count("feed step: monsters re-found", step.counts["re-found"])
+    timer.count("... of the re-finds", step.counts["re-finds"])
+    timer.count("... that tried the kind's whole set", step.counts["fallbacks"])
     where = f"{args.n} live captures" if frames is None else f"{len(frames)} saved frames x {args.reps}"
     print(f"{where}; OpenCV {cv2.__version__}, {cv2.getNumThreads()} threads"
           + ("" if frames is None else "; the grab itself (16.7 ms with mss, about 2 with DXGI) isn't included"))
@@ -799,6 +857,97 @@ def cmd_bodies(args) -> int:
     return 0
 
 
+# --- watching the game, no command running -------------------------------------------------------------
+
+def _watch_runner(args):
+    """What `watch` looks with: the game on screen (never brought to the front), her throws unknown (played
+    by hand), drops searched on a schedule of their own."""
+    from .attack import reach
+    from .localization import feed, worldstate
+    return feed.screen_world(args.map, _game_title(), calibration.load().template, (reach.LOOK_UP, reach.LOOK_DOWN),
+                             throws=False, schedule=worldstate.WATCH)
+
+
+def cmd_watch(args) -> int:
+    """The game looked at every frame with no command running, as `--feed` does for one: her place, the
+    monsters tracked (ids, facing, HP bars, deaths and who killed them), her EXP gains and hits, published as
+    telemetry for the mini-map. It never sends a key and never brings the game to the front: a frame the
+    game isn't wholly showing isn't read. With --lie-detector it also checks the screen for the Lie Detector
+    and pages whoever is at the PC (the player keeps its own watchdog regardless)."""
+    from .localization import feed, worldstate
+    from .perception.lie_detector import LieDetectorSpotter
+    runner = _watch_runner(args)
+    model, band = runner.step.model, runner.step.senses.band
+    path = telemetry.record_to("watch", telemetry.FOLDER)
+    telemetry.emit("session", map=model.id, command="watch", mode="watch")
+    print(f"watching the game {args.hz:.0f} times a second; telemetry: {path} (the mini-map follows it); Ctrl+C stops")
+    spotter = LieDetectorSpotter() if args.lie_detector else None
+    started = time.monotonic()
+    until = started + args.minutes * 60 if args.minutes else None
+    w = {"scene": -1e9, "tracks": -1e9, "status": started, "lie": -1e9, "visible": None, "loot": [], "frames": 0,
+         "seen": 0, "alarm": False}
+
+    def emit(st: worldstate.WorldState, frame) -> None:
+        now = time.monotonic()
+        w["frames"] += 1
+        if st.visible != w["visible"]:
+            w["visible"] = st.visible
+            _log("the game is on screen: watching" if st.visible else f"not watching: {st.why} (nothing is read)")
+        if st.visible:
+            w["seen"] += 1
+            for e in st.events:
+                if e.kind in WATCH_EVENTS or (e.kind == "hp_drop" and e.data.get("new")):
+                    telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)
+                if e.kind == "died":
+                    _log(f"  {e.data['kind']} #{e.track} died on platform {e.data['platform']}: "
+                         + ("hers" if e.data["cause"] == "hers" else "someone else's"))
+            if st.loot is not None:
+                w["loot"] = st.loot
+            if now - w["scene"] >= WATCH_SCENE_S:
+                w["scene"] = now
+                s = worldstate.to_scene(st, model, band, mobs=True, wide=True)
+                s.loot = w["loot"]
+                telemetry.emit("scene", **s.record())
+            if now - w["tracks"] >= WATCH_TRACKS_S:
+                w["tracks"] = now
+                telemetry.emit("tracks", list=[tr.record() for tr in st.tracks], frames=st.seq)
+            if spotter is not None and frame.full is not None and now - w["lie"] >= WATCH_LIE_DETECTOR_S:
+                w["lie"] = now
+                if spotter.seen(frame.full) and not w["alarm"]:
+                    w["alarm"] = True
+                    _lie_detector_seen(frame.full)
+        if now - w["status"] >= WATCH_STATUS_S:
+            c, rate = runner.step.tracker.counts, w["frames"] / max(1e-9, now - w["status"])
+            live = [tr for tr in st.tracks if tr.state != "dead"]
+            print(f"{time.strftime('%H:%M:%S')} {rate:.1f} frames a second ({w['seen']} with the game on screen); "
+                  f"{len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'",
+                  flush=True)
+            w["status"], w["frames"], w["seen"] = now, 0, 0
+
+    def poll(wait: float):
+        time.sleep(wait)
+        return None, False
+
+    try:
+        feed.run(runner, args.hz, poll, emit, until)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        telemetry.stop()
+    print(f"watched {time.monotonic() - started:.0f} s: {runner.step.counts['frames']} frames "
+          f"({runner.step.counts['not visible']} not showing the game); deaths {runner.step.tracker.counts}")
+    return 0
+
+
+def _lie_detector_seen(frame) -> None:
+    """The Lie Detector seen while watching: the alarm (gamelab refuses to send keys until it's cleared) and a
+    page, once; nothing is pressed."""
+    from .control import alarm
+    _log("LIE DETECTOR on screen: answer it yourself; gamelab won't send keys until `clear-alarm`")
+    if alarm.alarm_info() is None:
+        alarm.raise_alarm(frame, "lie_detector (seen by watch)")
+
+
 # --- what gamelab keeps on disk --------------------------------------------------------------------------
 
 def cmd_lab_usage(args) -> int:
@@ -814,6 +963,12 @@ def cmd_lab_usage(args) -> int:
 
 
 # --- the command line ------------------------------------------------------------------------------------
+
+def feed_arg(s) -> None:
+    s.add_argument("--feed", action="store_true",
+                   help="looks and glances from a continuous feed: the game looked at every frame in a process of its "
+                        "own (not tried in game yet)")
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m gamelab", description="Drive the real game with exact key timelines and measure what happened.")
@@ -870,6 +1025,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
     s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
+    feed_arg(s)
     s.set_defaults(func=cmd_hunt)
 
     s = sub.add_parser("probe", help="in-game probes of what a star hits: list them, run one, score their log")
@@ -911,6 +1067,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--seconds", type=float, default=180)
     s.add_argument("--fight", action="store_true", help="shoot monsters on the way instead of avoiding them")
+    feed_arg(s)
     s.set_defaults(func=cmd_nav)
 
     s = sub.add_parser("tour", help="hunt the map: sweep the platforms worth hunting (nearest next, varied a "
@@ -931,7 +1088,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="hunt with the hunt loop instead of the sweep's stops (gamelab/docs/hunt-modes.md)")
     s.add_argument("--minutes", type=float, default=20, help="with --loop: how long to hunt, then stand by")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    feed_arg(s)
     s.set_defaults(func=cmd_tour)
+
+    s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "
+                                     "followed, deaths and who killed them), for the mini-map; never sends keys or "
+                                     "brings the game forward")
+    s.add_argument("--hz", type=float, default=30.0, help="frames a second looked at")
+    s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
+    s.add_argument("--lie-detector", action="store_true",
+                   help="also check the screen for the Lie Detector and page whoever is at the PC")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.set_defaults(func=cmd_watch)
 
     def map_args(s, web_only: bool) -> None:
         """The mini-map's options (`minimap`, and `web`, which is `minimap --web-only`)."""
@@ -1049,6 +1217,8 @@ def main(argv=None) -> int:
     except (client.PlayerError, RuntimeError) as e:
         print(f"error: {e}")
         return 1
+    finally:
+        _close_feeds()
 
 
 if __name__ == "__main__":

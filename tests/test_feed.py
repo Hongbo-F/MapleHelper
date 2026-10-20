@@ -295,3 +295,61 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
         "from the feed": 2, "taken here": 1, "glances from the feed": 2}
     senses.glance()
     assert eyes.glances == 1
+
+
+def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_game_forward(monkeypatch, tmp_path):
+    from maplehelper import win32
+
+    from gamelab import __main__ as cli, telemetry, window
+    from gamelab.control import client as player_client
+    from gamelab.localization import worldstate
+    touched = []
+    for obj, name in ((win32, "send_key"), (window, "bring_to_front"), (window, "move_cursor"),
+                      (player_client, "send"), (player_client, "submit"), (player_client, "cancel")):
+        monkeypatch.setattr(obj, name, lambda *a, _n=name, **k: touched.append(_n))
+    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
+    model = small_map()
+    eyes = Drawn(model)
+
+    def runner(args):
+        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
+        frames = ListFrames([np.zeros((4, 4, 3), np.uint8)])
+        return feed.Runner(frames, _Look(eyes), step)
+    monkeypatch.setattr(cli, "_watch_runner", runner)
+    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30"]) == 0
+    assert touched == []
+    (path,) = tmp_path.glob("*-watch.jsonl")
+    records = telemetry.read(path)
+    topics = {r["topic"] for r in records}
+    assert {"session", "scene", "tracks", "log"} <= topics
+    assert records[0]["mode"] == "watch"
+    scenes = [r for r in records if r["topic"] == "scene"]
+    assert 5 <= len(scenes) <= 25 and scenes[-1]["monsters"][0]["kind"] == "pig"  # 10 a second for ~1.8 s
+    assert [t["kind"] for t in next(r for r in records if r["topic"] == "tracks")["list"]] == ["pig"]
+
+
+def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_start(monkeypatch):
+    from gamelab import __main__ as cli
+    from gamelab.analysis import calibration
+    for cmd in (["hunt", "clear", "--feed"], ["nav", "35", "--feed"], ["tour", "--loop", "--feed"]):
+        assert cli.build_parser().parse_args(cmd).feed
+    assert not cli.build_parser().parse_args(["tour"]).feed
+    started = []
+
+    class Client:
+        def __init__(self, make, alive):
+            self.make, self.alive, self.why, self.hz, self.bye = make, alive, "" if alive else "no game", 30.0, None
+            self.hello = {"pid": 1, "priority": feed.BELOW_NORMAL}
+            started.append(self)
+
+        def close(self):
+            self.alive = False
+    monkeypatch.setattr(calibration, "load", lambda: type("Cal", (), {"template": np.zeros((10, 36), np.uint8)}))
+    monkeypatch.setattr(feed, "FeedClient", lambda make: Client(make, True))
+    model = small_map()
+    client = cli._feed(model, "MapleStory")
+    assert client is started[0] and cli._FEEDS == [client] and client.make.func is feed.screen_world
+    cli._close_feeds()
+    assert cli._FEEDS == [] and not client.alive
+    monkeypatch.setattr(feed, "FeedClient", lambda make: Client(make, False))
+    assert cli._feed(model, "MapleStory") is None and cli._FEEDS == []

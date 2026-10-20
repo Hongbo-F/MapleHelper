@@ -131,6 +131,22 @@ def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[floa
     return Runner(frames, eyes, WorldStep(Senses(eyes, model, band), throws, schedule), title)
 
 
+def saved_world(files: list[str], map_id: int, template: np.ndarray, band: tuple[float, float], hold: int = 30,
+                schedule: Schedule = Schedule()) -> Runner:
+    """Saved screenshots (full-size game frames) for a screen, each `hold` frames in a row, round and round:
+    the feed run offline (`python -m gamelab.sim.soak feed`)."""
+    from PIL import Image
+
+    from ..perception.frames import ListFrames
+    from ..perception.sprites import detector_for
+    from . import mapdata
+    model = mapdata.load(map_id)
+    frames = [np.asarray(Image.open(f).convert("RGB")) for f in files]
+    eyes = Eyes("saved frames", template, detector_for(model), screen=object())  # it's handed its frames
+    return Runner(ListFrames([f for f in frames for _ in range(hold)]), eyes, WorldStep(Senses(eyes, model, band),
+                                                                                        schedule=schedule))
+
+
 def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bool]],
         emit: Callable[[WorldState, Frame], None], until: float | None = None) -> None:
     """Frame after frame, `hz` a second: `poll(wait)` waits up to `wait` s for what's asked (asks, stop), and
