@@ -56,6 +56,13 @@ RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25}
 # the units within which a plan takes her as standing where it wants her; the mover's walks).
 ROPE_CLEAR = 30
 DROP_ROOM = 8
+# Nor where she comes down within KNOCK_CARRY of an end of the platform below with nothing under it (void_ends:
+# on this map 36's, the basin's cliffs). In the air from another block she keeps its foothold group, whose walls
+# don't stop her (body.OWN_GROUP_WALLS), and a touch's knock as she comes down carries her up to this far sideways
+# before she lands (the simulator's knock, 180 units/s and 220 up, given as high as the tallest body here reaches,
+# an Orange Mushroom's 67: 0.39 s in the air). In the harness, knocks off drops from 31 at 185 (56 from 36's left
+# cliff) and from 33 at 907 (44 from its right one) carried her through the cliff and out of the map.
+KNOCK_CARRY = 70
 DROP_STEP = 2        # units between the drop spots tried
 ALONG_STEP = 10      # running jumps are tried from every this many units along a platform (20 missed
                      # the 30-unit window of takeoffs from platform 4 up onto 2, so 2 had no route) ...
@@ -208,7 +215,9 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
     from the cliff at its right end. In the air there, the walls of 36's group don't stop her (body.
     OWN_GROUP_WALLS), and a touch's knock carried her through them and out of the map (harness, tour seed
     25 and loop seed 19). Where something else is under the middle (28 under 27's overlap with 36), there's
-    no drop: the stretch between is no wider than her slop (from 27, 12 units at that cliff)."""
+    no drop: the stretch between is no wider than her slop (from 27, 12 units at that cliff). Where the game
+    won't drop her through a (forbidFallDown), or a knock could take her past a cliff of b (KNOCK_CARRY), she
+    drops from the nearest spot to the middle clear of both."""
     out: list[Move] = []
     for b in model.platforms:
         if b is a:
@@ -216,9 +225,11 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
         x = _overlap_middle(a, b)
         if x is None:
             continue
-        if not a.drop_ok(x, DROP_ROOM):  # the game won't drop her through it there (forbidFallDown), or near
+        cliffs = void_ends(model, b)
+        if not (a.drop_ok(x, DROP_ROOM) and _clear_of(cliffs, x)):
             lo, hi = max(a.left, b.left) + LAND_MARGIN, min(a.right, b.right) - LAND_MARGIN
-            ok = [s for s in range(math.ceil(lo), math.floor(hi) + 1, DROP_STEP) if a.drop_ok(s, DROP_ROOM)]
+            ok = [s for s in range(math.ceil(lo), math.floor(hi) + 1, DROP_STEP)
+                  if a.drop_ok(s, DROP_ROOM) and _clear_of(cliffs, s)]
             if not ok:
                 continue
             x = float(min(ok, key=lambda s: abs(s - x)))  # the nearest spot where it will
@@ -233,20 +244,35 @@ def rope_tops(model: MapModel, a: Platform) -> list[float]:
     return [r.x for r in model.ropes if abs(r.top - a.y_at(r.x)) < 15 and a.covers(r.x)]
 
 
-def drop_clear(model: MapModel, a: Platform, x: float) -> bool:
+def drop_clear(model: MapModel, a: Platform, x: float, below: Platform | None = None) -> bool:
     """Whether down + jump at x drops her through platform a: not within ROPE_CLEAR of a rope's top (down
-    there climbs onto it), nor on a foothold that forbids it."""
-    return a.drop_ok(x) and all(abs(x - rx) > ROPE_CLEAR for rx in rope_tops(model, a))
+    there climbs onto it), nor on a foothold that forbids it; and onto `below` (if given), not within
+    KNOCK_CARRY of a cliff of it (void_ends)."""
+    return a.drop_ok(x) and all(abs(x - rx) > ROPE_CLEAR for rx in rope_tops(model, a)) \
+        and (below is None or _clear_of(void_ends(model, below), x))
 
 
 def drop_spots(model: MapModel, a: Platform, below: Platform) -> list[int]:
     """Where on a she can drop through it onto `below`: every DROP_STEP units where they overlap (LAND_MARGIN
     in from the ends), not within ROPE_CLEAR of a rope's top, nor within DROP_ROOM of a foothold that
-    forbids dropping."""
+    forbids dropping, nor within KNOCK_CARRY of a cliff of `below` (void_ends)."""
     lo, hi = max(a.left, below.left) + LAND_MARGIN, min(a.right, below.right) - LAND_MARGIN
-    ropes = rope_tops(model, a)
+    ropes, cliffs = rope_tops(model, a), void_ends(model, below)
     return [x for x in range(int(lo), int(hi) + 1, DROP_STEP)
-            if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and a.drop_ok(x, DROP_ROOM)]
+            if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and a.drop_ok(x, DROP_ROOM) and _clear_of(cliffs, x)]
+
+
+def void_ends(model: MapModel, q: Platform) -> list[float]:
+    """The ends of platform q past which nothing is under her, inside the map's sides (which stop her): past
+    one, a fall goes below the map's lowest floor. On this map 36's two, the basin's cliffs."""
+    lo, hi = min(p.left for p in model.platforms), max(p.right for p in model.platforms)
+    return [end for end, out in ((q.left, -1), (q.right, 1))
+            if lo <= end + out <= hi and model.platform_below(end + out, q.y_at(end)) is None]
+
+
+def _clear_of(cliffs: list[float], x: float) -> bool:
+    """Whether landing at x keeps KNOCK_CARRY from each of `cliffs` (void_ends)."""
+    return all(abs(x - c) >= KNOCK_CARRY for c in cliffs)
 
 
 def _overlap_middle(a: Platform, b: Platform) -> float | None:

@@ -473,7 +473,7 @@ class Flow:
         while run_hi + DROP_STEP in spots:
             run_hi += DROP_STEP
         stop = self._stop_within(b, run_lo, run_hi, prefer, k)
-        if stop is not None and not drop_clear(self.model, a, stop[1]):
+        if stop is not None and not drop_clear(self.model, a, stop[1], below):
             # Standing a tap's step outside the stretch (STEP_ACCEPT) does for other moves, not here: within
             # ROPE_CLEAR of a rope's top (down there climbs onto it). She steps into the stretch first, to its
             # nearest end.

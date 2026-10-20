@@ -165,7 +165,15 @@ class Mover:
         time.sleep(0.45)  # then settle looks for her standing still
 
     def _walk_off(self, m: Move, s: Scene) -> None:
-        """Walk off the end of her platform, on to where she lands."""
+        """Walk off the end of her platform, on to where she lands: from MIN_RUN in from the end at least, so she
+        leaves it at full speed (7.9 units after the game sees the arrow), as the route has her. From 0.4 units
+        in she left 31's left end at 35 units/s, came down past 34's end and through the basin's cliff below it,
+        out of the map (harness, tour seed 3)."""
+        sign = directions.sign(m.direction)
+        p = self.model.platform(m.src)
+        edge = p.right if sign > 0 else p.left
+        if (edge - s.where.x) * sign < MIN_RUN:  # too close to the end for a run-up: back off first
+            s = self.walk_to(edge - sign * (MIN_RUN + RUN_UP_SPARE), tolerance=SPOT_TOLERANCE, s=s)
         arrow = self.actions.arrow(m.direction)
         ms = hold_ms(abs(m.land_x - s.where.x) + 20)
         self._send([[0, arrow, "down"], [ms, arrow, "up"]], "walk_off")
@@ -174,12 +182,13 @@ class Mover:
     def _drop(self, m: Move, s: Scene) -> None:
         """Walk to the drop spot (unless she's there) and drop through her platform: down + jump. Within 20
         units of the move's spot is close enough, unless a drop there wouldn't go through (by a rope's top,
-        or on a foothold that forbids it): then to the nearest spot that would (route.drop_spots)."""
+        or on a foothold that forbids it) or would come down by a cliff of the platform below (route.KNOCK_CARRY):
+        then to the nearest spot that would do (route.drop_spots)."""
         down, jump = self.actions.keys.down.name, self.actions.keys.jump.name
-        a, here = self.model.platform(m.src), s.where.x
+        a, here, below = self.model.platform(m.src), s.where.x, self.model.platform(m.dst)
         dx, tolerance = m.x - here, 20
-        if abs(dx) <= tolerance and not drop_clear(self.model, a, here):
-            spots = drop_spots(self.model, a, self.model.platform(m.dst))
+        if abs(dx) <= tolerance and not drop_clear(self.model, a, here, below):
+            spots = drop_spots(self.model, a, below)
             if spots:
                 dx, tolerance = min(spots, key=lambda x: abs(x - here)) - here, 0
         events, t = self.walk_events(dx, tolerance)

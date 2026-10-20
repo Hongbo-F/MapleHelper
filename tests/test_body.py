@@ -390,14 +390,19 @@ def test_a_drop_lands_her_well_inside_the_platform_it_lands_on():
     units from the basin's cliff at 36's left end, and 33 -> 36 from 6 units off its right one. In the air there
     the walls of 36's group don't stop her (body.OWN_GROUP_WALLS), and a touch's knock carried her through them
     and out of the map (harness, tour seed 25 and loop seed 19). From 27 only the 12 units by that cliff drop
-    her onto 36 (28 is under the rest), so 27 has no drop to 36."""
+    her onto 36 (28 is under the rest), so 27 has no drop to 36. Nor does one come down within KNOCK_CARRY (70)
+    of those cliffs, 36's ends, the only ends here with nothing under them: dropped from 33 at 907, 44 from the
+    right one, a pig's knock still took her through it."""
     m = scenarios.real_map()
+    assert [(q.id, end) for q in m.platforms for end in route.void_ends(m, q)] == [(36, 129), (36, 951)]
     drops = [mv for mv in route.moves(m) if mv.kind == "drop"]
     for mv in drops:
         q = m.platform(mv.dst)
         assert q.left + physics.LAND_MARGIN <= mv.land_x <= q.right - physics.LAND_MARGIN, mv
+        assert all(abs(mv.land_x - end) >= route.KNOCK_CARRY for end in route.void_ends(m, q)), mv
     into_basin = {mv.src: mv.x for mv in drops if mv.dst == 36}
-    assert 27 not in into_basin and into_basin[33] == 906 and into_basin[31] == 225
+    assert 27 not in into_basin and into_basin[33] == 881 and into_basin[31] == 225
+    assert route.drop_spots(m, m.platform(33), m.platform(36)) == [879, 881]
 
 
 @REAL
