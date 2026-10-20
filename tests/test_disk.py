@@ -38,6 +38,27 @@ def test_a_long_run_goes_on_in_parts_that_sort_after_it_and_say_what_they_contin
     assert telemetry.newest(tmp_path) == parts[-1]
 
 
+def test_a_run_left_going_deletes_the_oldest_telemetry_as_it_goes_on_in_new_parts(tmp_path, monkeypatch, capsys):
+    # watch writes about 16 MB an hour for as long as it's left running: pruning only when a run starts
+    # would let the folder grow without bound.
+    monkeypatch.setattr(telemetry, "KEEP_BYTES", 1000)
+    path = telemetry.record_to("watch", folder=tmp_path, max_bytes=400)
+    old = _make(tmp_path, "20260901-120000-tour.jsonl", telemetry.KEEP_DAYS + 1, 10, time.time())
+    try:
+        telemetry.emit("session", map=1, command="watch", mode="watch")
+        for i in range(40):
+            telemetry.emit("log", text=f"line {i:02d} " + "x" * 30)
+        writing = telemetry._sink.path
+    finally:
+        telemetry.stop()
+    parts = sorted(tmp_path.glob("*.jsonl"))
+    assert not old.exists() and not path.exists()  # the old run's file, then this run's first parts
+    assert writing in parts and sum(p.stat().st_size for p in parts) <= 1000 + 400
+    assert "oldest files" in capsys.readouterr().err
+    # The part being written is never deleted, even past the cap.
+    assert telemetry.prune(tmp_path, keep_bytes=0, spare=writing) and parts[-1].exists()
+
+
 def test_the_oldest_telemetry_goes_first_by_age_then_past_the_size_cap(tmp_path):
     now = time.time()
     old = _make(tmp_path, "20260901-120000-tour.jsonl", 20, 100, now)

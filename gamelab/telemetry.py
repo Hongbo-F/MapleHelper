@@ -9,9 +9,10 @@ simulated run), so a replay keeps the original pace.
 Files are named for the time a run started and what it is (`<%Y%m%d-%H%M%S>-<name>.jsonl`), so the
 newest sorts last. A run goes on in a new part past MAX_BYTES: a file of its own, named for the time the
 part starts (`...-<name>-part2.jsonl`, always later than the part before), that starts with the run's
-session record marked `continues` (the part before's file name) and `part`. When a run starts, the oldest
-files are deleted: those last written over KEEP_DAYS ago, then more until the rest take at most
-KEEP_BYTES (`prune`).
+session record marked `continues` (the part before's file name) and `part`. When a run starts, and each
+time one goes on in a new part, the oldest files are deleted: those last written over KEEP_DAYS ago, then
+more until the rest take at most KEEP_BYTES (`prune`; never the part being written). So a run left going
+for days (`watch`) keeps the folder bounded too.
 
 Topics (map units; producers build the records, ui.state folds them):
 
@@ -51,9 +52,9 @@ STAMP = "%Y%m%d-%H%M%S"  # file names start with the time the run (or the part) 
 # an hour. Parts let the retention below delete a long run a piece at a time, and keep any one file small
 # enough for a replay to load whole.
 MAX_BYTES = 64 * 1024 * 1024
-# What's kept when a run starts: files last written in the last 14 days, and of those at most 2 GB, the
-# newest (38 files and 2.9 MB from the first two days of live runs; a continuous feed's could take
-# 240-360 MB a day).
+# What's kept when a run starts or goes on in a new part: files last written in the last 14 days, and of those
+# at most 2 GB, the newest (38 files and 2.9 MB from the first two days of live runs; `watch` writes about
+# 400 MB a day).
 KEEP_DAYS = 14
 KEEP_BYTES = 2 * 1024 ** 3
 
@@ -124,6 +125,7 @@ class Recorder:
                           separators=(",", ":"), default=_plain) + "\n"
         self._file.write(line)
         self._size = len(line) + len(os.linesep) - 1
+        _prune(self.path.parent, spare=self.path)  # a run going for days deletes the oldest as it goes
 
     def close(self) -> None:
         with self._lock:
@@ -136,9 +138,7 @@ def record_to(name: str = "run", folder: Path = FOLDER, max_bytes: int | None = 
     can't be written: the run goes on without telemetry."""
     global _sink
     stop()
-    if gone := prune(folder):
-        print(f"telemetry: deleted the {len(gone)} oldest files in {folder} (older than {KEEP_DAYS} days, "
-              f"or past {KEEP_BYTES / 1024 ** 3:.0f} GB in all)", file=sys.stderr)
+    _prune(folder)
     path = folder / f"{time.strftime(STAMP)}-{name}.jsonl"
     try:
         _sink = Recorder(path, max_bytes)
@@ -149,11 +149,12 @@ def record_to(name: str = "run", folder: Path = FOLDER, max_bytes: int | None = 
 
 
 def prune(folder: Path = FOLDER, keep_days: float | None = None, keep_bytes: int | None = None,
-          now: float | None = None, dry_run: bool = False) -> list[tuple[Path, int]]:
+          now: float | None = None, dry_run: bool = False, spare: Path | None = None) -> list[tuple[Path, int]]:
     """Delete the telemetry files (*.jsonl) in `folder` last written more than `keep_days` (KEEP_DAYS)
     ago, then the oldest of the rest until they take at most `keep_bytes` (KEEP_BYTES). Returns those
     deleted (path, bytes), oldest first; with `dry_run`, those it would delete. A file that can't be
-    deleted (a run still writing it) is left, and the next oldest goes instead."""
+    deleted (a run still writing it) is left, and the next oldest goes instead; `spare` (the part being
+    written) is never deleted."""
     keep_days = KEEP_DAYS if keep_days is None else keep_days
     keep_bytes = KEEP_BYTES if keep_bytes is None else keep_bytes
     now = time.time() if now is None else now
@@ -162,6 +163,8 @@ def prune(folder: Path = FOLDER, keep_days: float | None = None, keep_bytes: int
     for mtime, _, size, path in files:
         if now - mtime <= keep_days * 86400 and total <= keep_bytes:
             break  # the rest are newer still
+        if spare is not None and path.name == spare.name:
+            continue
         if not dry_run:
             try:
                 path.unlink()
@@ -170,6 +173,13 @@ def prune(folder: Path = FOLDER, keep_days: float | None = None, keep_bytes: int
         total -= size
         gone.append((path, size))
     return gone
+
+
+def _prune(folder: Path, spare: Path | None = None) -> None:
+    """`prune`, saying so when it deletes anything."""
+    if gone := prune(folder, spare=spare):
+        print(f"telemetry: deleted the {len(gone)} oldest files in {folder} (older than {KEEP_DAYS} days, "
+              f"or past {KEEP_BYTES / 1024 ** 3:.0f} GB in all)", file=sys.stderr)
 
 
 def stop() -> None:

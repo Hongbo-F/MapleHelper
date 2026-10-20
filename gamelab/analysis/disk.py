@@ -1,7 +1,7 @@
 """What gamelab keeps under gamelab/lab, by kind, and how much (`python -m gamelab lab-usage`). It only
 reads. Recordings and screenshots are measurement evidence and are never deleted for you; telemetry is
-pruned when a run starts (telemetry.prune: 14 days, 2 GB), and `lab-usage --prune-telemetry` applies the
-same now.
+pruned when a run starts or goes on in a new part (telemetry.prune: 14 days, 2 GB), and `lab-usage
+--prune-telemetry` applies the same now.
 """
 
 import os
