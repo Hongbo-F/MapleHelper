@@ -42,7 +42,8 @@ Where the loop differs from the design below, each change was made because the s
   - potions are out after two misses in a row, and back if one works; she still presses the key (a false alarm costs nothing that way);
   - a pile trip ends when the pile is seen gone or can't be picked up (not at its guessed age: that lost 6% of the drops in the simulator, where drops last twice as long);
   - each rule is counted once per pass.
-- **Not built:** chains planned on the move in hunt mode (her chains still end in a full stop, as with today's escort), the whole-screen loot look 3 s after each kill, and "the same objective dropped 3 times" in the stuck guard.
+- **Built since (2026-10-20):** chains follow on in every trip mode (README, Control: "A route"). The navigator's look about 0.9 s before a chain lands asks the loop's `_interrupt` (rules 1-4, an urgent pile, low HP) on where the chain ends; if nothing fires, the next chain is queued from a look placing her once she has landed, else she stops there as before. A trip starts from the loop's last look when it's fresh.
+- **Not built:** the whole-screen loot look 3 s after each kill, and "the same objective dropped 3 times" in the stuck guard.
 
 Tried and dropped, because they were worse in the A/B runs: no shooting at all once she has decided to leave (one seed halved), skipping piles among monsters on platforms she can't stand on (the `plain` world's drops share fell from 91% to 77%), and an objective clock without suspensions.
 

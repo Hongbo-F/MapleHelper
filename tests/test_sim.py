@@ -595,7 +595,7 @@ def test_real_map_scenarios_show_what_they_are_there_for(name):
 
 @REAL
 def test_a_real_map_scenario_is_deterministic():
-    assert scenarios.run("nav_cut_queued") == scenarios.run("nav_cut_queued")
+    assert scenarios.run("nav_monsters_long_way") == scenarios.run("nav_monsters_long_way")
 
 
 @REAL

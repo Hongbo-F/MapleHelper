@@ -497,15 +497,18 @@ class FightOnTheWay:
         self.h.clear(self.kinds, max_kills=3, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False)
         return self.h.report.exp_kills - before
 
-    def clear_way(self, s: Scene, x: float) -> int | None:
-        """Shoot a monster standing on her platform between her and map x (where her next move starts, or
-        where she's sent to), or too close to her, whatever its kind. Returns the kills, or None if nothing
-        was in the way."""
+    def in_way(self, s: Scene, x: float) -> Monster | None:
+        """The monster nearest her standing on her platform between her and map x (where her next move
+        starts, or where she's sent to), or too close to her, whatever its kind (None if there's none)."""
         lo, hi = sorted((s.where.x, x))
         in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE]
-        if not in_way:
+        return min(in_way, key=lambda m: abs(m.x - s.where.x)) if in_way else None
+
+    def clear_way(self, s: Scene, x: float) -> int | None:
+        """Shoot the monster in her way to map x (in_way). Returns the kills, or None if nothing was in
+        the way."""
+        if (m := self.in_way(s, x)) is None:
             return None
-        m = min(in_way, key=lambda m: abs(m.x - s.where.x))
         self.h.log(f"  {m.kind} in the way at x {m.x:.0f}: shooting it first")
         before = self.h.report.exp_kills
         self.h.clear(max_kills=2, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False)

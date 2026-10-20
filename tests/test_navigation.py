@@ -353,3 +353,111 @@ def test_transit_with_avoidance_keeps_clear_of_monsters_and_only_drinks_potions(
         assert st.mode == TRANSIT_AVOID and st.health is potions
         nav._mode = st.mode
         assert not nav.fight
+
+
+def _navigator(model, escort=None):
+    from types import SimpleNamespace
+
+    from gamelab.control.navigator import Navigator
+    key = lambda name: SimpleNamespace(name=name)
+    keys = SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), up=key("up"), down=key("down"),
+                           pick_up=None)
+    return Navigator(None, SimpleNamespace(keys=keys, sent_at=0.0), model, escort=escort)
+
+
+def test_a_chain_runs_on_past_its_end_only_as_far_as_the_next_move_and_the_monsters_allow(model):
+    """Navigator._tail: a chain another may follow runs on long enough after she's back on the ground for a
+    look placing her and the next chain's plan (CHECK_AFTER + CHECK_LEAD): standing, or running on with the
+    arrow held if that leaves RUN_ON_ROOM before the next move; not at all when her last run along the
+    platform already leaves time for it. With no room for it (short of the next move, no next move, or a
+    monster in the way of the run on), None: she stops where the chain ends."""
+    from gamelab.control.navigator import CHECK_AFTER, CHECK_LEAD, RUN_ON_ROOM
+    from gamelab.localization.monsters import MonsterTrack
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.physics import WALK_SPEED
+    from gamelab.motion.route import Move
+    a, c = by_y(model, 300, 100), by_y(model, 500, 400)
+    nav = _navigator(model)
+    need = CHECK_AFTER + CHECK_LEAD
+    landing = Leg(Move("walk_off", a.id, c.id, 195, 230, "right"), Body(0.0, 150, a), Body(1.0, 240, c, run=1, landed=True),
+                  [Span(a.id, 0.0, 0.3, 150, 195)])
+    far, near = Move("walk_off", c.id, a.id, 700, 700, "right"), Move("walk_off", c.id, a.id, 300, 300, "right")
+    assert nav._tail([landing], [landing.move, far]) == pytest.approx(need)  # room enough: the whole need
+    assert 300 - 240 - RUN_ON_ROOM < need * WALK_SPEED
+    assert nav._tail([landing], [landing.move, near]) is None  # the next move is too close to run on
+    assert nav._tail([landing], [landing.move]) is None  # no next move: nothing to run on for
+    standing = Leg(landing.move, landing.start, Body(1.0, 240, c, run=0, landed=True), landing.spans)
+    assert nav._tail([standing], [standing.move]) == pytest.approx(need)
+    pig = MonsterTrack(c.id, 240 + WALK_SPEED * need + 30, speed=0.0)
+    assert nav._tail([landing], [landing.move, far], [pig]) is None  # it would run her into it
+    running = Leg(Move("walk_off", c.id, a.id, 700, 700, "right"), Body(0.0, 240, c, run=1),
+                  Body(1.0, 389, c, run=1), [Span(c.id, 0.0, 1.0, 240, 389)])
+    assert nav._tail([running], [running.move, far]) == 0.0  # she's on the ground long before its end
+
+
+def test_a_trip_starts_from_the_callers_look_while_it_still_shows_where_she_is(model, monkeypatch):
+    """Navigator.begin(scene=...): the first pass uses the caller's last look (one look less before she sets
+    off) if no key plan was sent since and it's fresh, with the monsters the mode looks for."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from gamelab.control.navigator import AVOID, FRESH_S, HUNT
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    c = by_y(model, 500, 400)
+    t = 100.0
+    look = Scene(t=t, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0, where=Where(400, 500, c, (0, 0)),
+                 searched=True)
+    escorted = _navigator(model, escort=SimpleNamespace())
+    clock = {"now": t + 0.1}
+    import gamelab.control.navigator as nv
+    monkeypatch.setattr(nv.time, "monotonic", lambda: clock["now"])
+    assert escorted.begin(c.id, mode=HUNT, scene=look).fresh is look
+    escorted.actions.sent_at = t + 0.05  # a plan went out after it
+    assert escorted.begin(c.id, mode=HUNT, scene=look).fresh is None
+    escorted.actions.sent_at, clock["now"] = 0.0, t + FRESH_S + 0.1  # too old
+    assert escorted.begin(c.id, mode=HUNT, scene=look).fresh is None
+    clock["now"] = t + 0.1
+    alone = _navigator(model)
+    assert alone.begin(c.id, mode=AVOID, scene=look).fresh is None  # avoiding: only a whole-screen look will do
+    look.wide = True
+    assert alone.begin(c.id, mode=AVOID, scene=look).fresh is look
+
+
+def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(model, monkeypatch):
+    """Navigator._watch: once the next chain is queued (after the look placing her), a hit cuts the running
+    plan short and withdraws the queued one before it starts; the legs sent leave out the withdrawn chain's."""
+    from types import SimpleNamespace
+
+    import gamelab.control.navigator as nv
+    from gamelab.localization.pose import Localizer
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.route import Move
+    c = by_y(model, 500, 400)
+    nav = _navigator(model)
+    localizer = Localizer(model)
+    hp = {"now": 1.0}
+    nav.senses = SimpleNamespace(eyes=SimpleNamespace(glance=lambda: (localizer.to_dot(150, 500), hp["now"])),
+                                 localizer=localizer)
+    nav.flow.expected = lambda legs, t: c.id
+    walk = Leg(Move("walk_off", c.id, c.id, 300, 300, "right"), Body(0.0, 100, c, run=1), Body(0.5, 175, c, run=1),
+               [Span(c.id, 0.0, 0.5, 100, 175)])
+    more = Leg(walk.move, Body(0.0, 175, c, run=1), Body(0.5, 250, c, run=1), [Span(c.id, 0.0, 0.5, 175, 250)])
+    calls = {"cancel": [], "wait": []}
+    monkeypatch.setattr(nv.client, "done", lambda pid: False)
+    monkeypatch.setattr(nv.client, "cancel", lambda pid: calls["cancel"].append(pid) or pid == "queued")
+    monkeypatch.setattr(nv.client, "wait", lambda pid, timeout=120: calls["wait"].append(pid) or {})
+    start = nv.time.monotonic()
+    monkeypatch.setattr(nav, "_look_ahead", lambda st, running, dst: nv._Ahead(None))
+    monkeypatch.setattr(nav, "_check_at", lambda running: start)
+
+    def queue_next(st, running, ahead, dst, send):
+        hp["now"] = 0.5  # hit right after the next chain was queued
+        return nv._Running("queued", [more], running.ends, False)
+    monkeypatch.setattr(nav, "_queue_next", queue_next)
+    nav._sent_plans = ["running"]
+    running = nv._Running("running", [walk], start, True, 0.2)
+    cut, sent = nav._watch(running, 1.0, by_y(model, 300, 100).id, send=None, st=SimpleNamespace())
+    assert cut.startswith("hit") and sent == [walk]
+    assert calls["cancel"] == ["running", "queued"] and calls["wait"] == ["running"]  # the queued one withdrawn

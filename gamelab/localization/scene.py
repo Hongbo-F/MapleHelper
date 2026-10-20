@@ -44,6 +44,7 @@ class Scene(Observation):
                                   # on screen once she's placed)
     monsters: list[Monster] = field(default_factory=list)  # monsters seen, placed on the map
     searched: bool = False        # monsters were looked for (an empty `monsters` then means none was seen)
+    wide: bool = False            # ... on the whole screen (else only in the band around her level)
     loot: list[Loot] = field(default_factory=list)         # drops seen on the ground (find_loot)
     looked: list[tuple[int, float, float]] = field(default_factory=list)  # where loot was looked for:
                                                                           # (platform, map x from, to)

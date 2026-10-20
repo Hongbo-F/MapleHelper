@@ -55,6 +55,7 @@ class Actions:
         self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP)
         self.facing: str | None = None  # which way she faces (None: unknown), so throws only turn when needed
         self.pressed = False  # keys sent since the last look (then a move isn't a knockback)
+        self.sent_at = 0.0     # when the last key plan was sent (a look older than that may be out of date)
         self.lock_until = 0.0  # when her last attack stops locking out the next one
         # Called at every throw with (when its attack key goes down, the way she throws): the kill ledger
         # (behavior.ledger) matches EXP gains to the stars that could have made them.
@@ -64,6 +65,7 @@ class Actions:
         """Run a key plan (events in time order) and wait until the player has. Held back first if a jump
         or attack in it would come inside her attack lock (hold_back)."""
         self.hold_back(events)
+        self.sent_at = time.monotonic()
         client.submit(events, lead_ms=0, focus=True, name=name)
         self.pressed = True
 

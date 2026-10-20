@@ -34,7 +34,7 @@ class Senses:
         if mobs and s.tag is not None and s.where is not None:
             seen = self.eyes.monsters_wide(s) if wide else self.eyes.monsters(s, *self.band)
             s.monsters = [s.place(m, self.model, self.eyes.bar(s, m)) for m in seen]
-            s.searched = True
+            s.searched, s.wide = True, wide
         if loot:
             s.loot = find_loot(s, self.model, self.eyes, wide, mesos_only)
         for listener in self.listeners:

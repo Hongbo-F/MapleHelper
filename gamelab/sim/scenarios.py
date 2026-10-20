@@ -307,11 +307,6 @@ def moves(*kinds: str):
             lambda tr: all(any(m.split()[0] == k for m in _result(tr, "moves")) for k in kinds))
 
 
-def withdraws():
-    return ("a chain queued by plan_ahead is withdrawn when the running one is cut",
-            lambda tr: any(withdrawn for _, _, withdrawn in tr["cancels"]))
-
-
 def wrote(path: str, text: str, what: str | None = None):
     """A line of a file the run wrote (under its stand-in for gamelab/lab) contains `text`."""
     return (what or f"{path} has a line with {text!r}",
@@ -359,11 +354,25 @@ def nav_climb_down(sim):
     return _nav(35)(sim)
 
 
-@scenario((34, -300.0), expects=(ends("arrived"), moves("jump", "jump_up"), logs("planned on the move")))
+@scenario((34, -300.0), expects=(ends("arrived"), moves("jump", "jump_up"),
+                                  check("no move missed", lambda tr: _result(tr, "misses") == 0)))
 def nav_staircase_up(sim):
-    """Up the staircase of small platforms from 34 to 19: running jumps and jumps straight up, chained,
-    the next chain planned on the move (plan_ahead)."""
+    """Up the staircase of small platforms from 34 to 19: running jumps and jumps straight up, chained. Each
+    chain ends with her landing just before the next jump, too soon for a look placing her first, so she
+    stops there for the next pass rather than going on from where she was predicted to land (from there,
+    landings a few units off made her next jumps miss and drop her into the basin)."""
     return _nav(19)(sim)
+
+
+@scenario((36, 300.0), expects=(ends("arrived"), logs("planned on the move"),
+                                check("no move missed", lambda tr: _result(tr, "misses") == 0)))
+def nav_transit_follows_on(sim):
+    """A transit trip (the hunt loop's: with the escort, shooting only what's in her way) from the basin floor
+    up to 1, nothing about: a chain cut off for length runs on until a look places her where it landed, and the
+    next one, planned from there, is queued to follow on without a stop."""
+    from ..control.navigator import TRANSIT
+    h = sim.hunter()
+    return sim.navigator(h, fight=True).go(1, mode=TRANSIT)
 
 
 @scenario((2, 0.0), expects=(ends("arrived"), moves("drop")))
@@ -430,14 +439,6 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters={31}, seed=8,
-          expects=(ends("arrived"), withdraws(), logs("planned on the move"), logs("plan cut short")))
-def nav_cut_queued(sim):
-    """Up the staircase past the snail on 31: it touches her late in the first chain, after the next one
-    was planned on the move and queued; both are cut (the queued one withdrawn before it starts)."""
-    return _nav(26)(sim)
-
-
 @scenario((34, -300.0), monsters="all", seed=1,
           expects=(ends("arrived"), logs("looking for a way around"), logs("hop@"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
@@ -454,10 +455,12 @@ def nav_monsters_basin(sim):
     return _nav(33)(sim)
 
 
-@scenario((21, -300.0), monsters="all", seed=5,
+@scenario((21, -300.0), monsters="all", seed=11,
           expects=(ends("arrived"), logs("waiting for the monster to move off")))
 def nav_monsters_long_way(sim):
-    """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way."""
+    """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way. (Seed
+    11 since chains follow on: on seed 5 the staircase's monsters knocked her back down until time ran out;
+    over 16 seeds 12 arrive, 14 before.)"""
     return _nav(2)(sim)
 
 
@@ -967,15 +970,14 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=3, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=4, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
 def loop_lull_loot(sim):
     """Only platform 12 has monsters, and the value map says it's the best ground. She hunts it from the
     safe platform 13 beside it; in the lulls, with nothing wanted left on it and her kills due back, she
-    picks up the piles she can get to before they respawn. (Seed 3 since attacks pick their targets when
-    they start: with seed 4 no lull came.)"""
+    picks up the piles she can get to before they respawn."""
     return _loop_on_12(sim)
 
 

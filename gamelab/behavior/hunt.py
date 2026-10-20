@@ -177,6 +177,7 @@ class Hunt:
         self._no_high_until = 0.0            # after a failed trip back up to the spot, not again for a while
         self._tracker = Tracker()            # the monsters for the mini-map (the navigator sends none with an escort)
         self._s: Scene | None = None         # the last look, for the 'hunt' record
+        self._seen: Scene | None = None      # the latest look of all (a trip starts from it if it's still fresh)
         self._published = None
 
     # --- the loop ------------------------------------------------------------------------------------
@@ -309,7 +310,7 @@ class Hunt:
 
     def _look(self) -> Scene:
         """A look at the band around her, with her platform's drops."""
-        s = self.h.look(mobs=True, wide=False, loot=True)
+        s = self._seen = self.h.look(mobs=True, wide=False, loot=True)
         if telemetry.recording() and s.where is not None:
             telemetry.emit("monsters", **tracks_record(self._tracker.update(s.t, s.monsters), self.model))
         return s
@@ -318,7 +319,7 @@ class Hunt:
         """A whole-screen look (monsters and drops on every platform in view), at most every WIDE_EVERY s."""
         if time.monotonic() - self._wide_at < WIDE_EVERY:
             return s
-        wide = self.h.look(mobs=True, wide=True, loot=True)
+        wide = self._seen = self.h.look(mobs=True, wide=True, loot=True)
         if wide.where is None or wide.platform is None:  # dot hidden, or in the air: it searched no monsters
             return s
         self._wide_at = time.monotonic()
@@ -728,7 +729,7 @@ class Hunt:
         self._note(rule)
         o = self.obj
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
-                                until=self._interrupt, mode=TRANSIT)
+                                until=self._interrupt, mode=TRANSIT, scene=self._seen)
         o.trip.weights = o.weights
         chains = o.trip.trip.chains
         while not o.trip.over:
@@ -745,8 +746,9 @@ class Hunt:
         return self._drop_objective(o, result)
 
     def _on_spot(self, o: Objective) -> bool:
-        """Stopped 'in position' where she can stand with targets of the ground in reach: as good as there."""
-        s = self.h.look()
+        """Stopped 'in position' where she can stand with targets of the ground in reach: as good as there.
+        Judged from the look the trip stopped on (`_interrupt` said so to it a moment ago)."""
+        s = o.trip.last if o.trip is not None and o.trip.last is not None else self.h.look()
         return (s.platform is not None and self._standable(s.platform.id)
                 and any(m.platform == o.ground and reach.can_shoot(m.x - s.where.x, m.y - s.where.y)
                         for m in s.monsters))

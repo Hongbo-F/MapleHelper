@@ -614,7 +614,9 @@ class Flow:
             if i >= MAX_LEGS or b.t > MAX_SECONDS:
                 why = "long"
                 break
-            nxt = moves[i + 1] if i + 1 < len(moves) and i + 1 < MAX_LEGS else None
+            # The last leg is done the way the next move can follow on from: from this chain, or (keep_going)
+            # from the next one, planned on the move. Done the stop way, the next chain started from standing.
+            nxt = moves[i + 1] if i + 1 < len(moves) and (keep_going or i + 1 < MAX_LEGS) else None
             order = ("stop", "run", "stand") if nxt is None else self.VARIANTS
             linger = END_LINGER if nxt is None else 0.0
             options = []
