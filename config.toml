@@ -45,3 +45,10 @@ buffer_window = 300   # combo button pressed in the last 300 ms of a running com
                       # Pressed earlier: ignored.
 slow_pause = 900
 recap = 3000
+
+# Her stats, in % as the stat window shows them: how fast the game walks her (125 units/s x SPEED/100)
+# and how high it jumps her (JUMP 100: 77 units). gamelab plans every move with them, so change them
+# when gear or Haste does. 119.2 is measured (she walks 149 units/s); her stat window would say exactly.
+[character]
+speed = 119.2
+jump = 100

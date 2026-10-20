@@ -41,12 +41,27 @@ def test_empty_skill_means_not_bound(config_data):
     (lambda d: d["timing"].update(throw_gap=-1), "timing.throw_gap must be"),
     (lambda d: d["timing"].update(throw_gap=True), "timing.throw_gap must be"),
     (lambda d: d.update(game_window_title=""), "game_window_title"),
+    (lambda d: d.update(character={"speed": "fast"}), "character.speed must be her SPEED stat"),
+    (lambda d: d.update(character={"jump": 0}), "character.jump must be"),
+    (lambda d: d.update(character={"jump": True}), "character.jump must be"),
+    (lambda d: d.update(character={"luck": 4}), "unknown stat(s) ['luck']"),
 ])
 def test_bad_config_is_explained(config_data, mutate, message):
     mutate(config_data)
     with pytest.raises(config.ConfigError) as err:
         config.parse(config_data, NAMES)
     assert message in str(err.value)
+
+
+def test_her_stats_default_to_the_measured_ones(config_data, tmp_path):
+    assert config.parse(config_data, NAMES).character == config.Character(speed=119.2, jump=100)
+    config_data["character"] = {"speed": 125}  # Haste
+    assert config.parse(config_data, NAMES).character == config.Character(speed=125.0, jump=100.0)
+    # gamelab's physics reads just this table, before anything else
+    path = tmp_path / "config.toml"
+    path.write_text("[character]\nspeed = 130\njump = 110\n")
+    assert config.character(path) == config.Character(130, 110)
+    assert config.character(tmp_path / "nope.toml") == config.Character()
 
 
 def test_missing_file_is_explained(tmp_path):

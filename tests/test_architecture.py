@@ -21,7 +21,7 @@ ALLOWED = {
     "control": {"perception", "localization", "motion"},
     "behavior": {"perception", "localization", "motion", "attack", "control"},
     "ui": {"localization", "motion", "attack"},
-    "analysis": {"perception", "control"},
+    "analysis": {"perception", "motion", "control"},
     "sim": {"perception", "localization", "motion", "attack", "control", "behavior", "analysis"},
 }
 

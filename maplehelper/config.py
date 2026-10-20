@@ -1,8 +1,8 @@
-"""Loads config.toml: her in-game keys, the buttons that trigger combos, and timings."""
+"""Loads config.toml: her in-game keys, the buttons that trigger combos, timings, and her stats."""
 
 import tomllib
 from collections.abc import Iterable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from . import keys
@@ -54,6 +54,16 @@ class Timing:
 
 
 @dataclass(frozen=True)
+class Character:
+    """Her stats that set how the game moves her, in % as the stat window shows them. The game walks her
+    at 125 units/s x SPEED/100 and jumps her at 555 units/s x JUMP/100 (its Physics.img), counting
+    SPEED from 80 to 140 and JUMP from 80 to 123. Gear and Haste raise them. gamelab plans her moves
+    with them (gamelab.motion.physics)."""
+    speed: float = 119.2    # measured: she walks 148-151 units/s (149 = 125 x 1.192)
+    jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
+
+
+@dataclass(frozen=True)
 class Config:
     game_window_title: str
     keys: GameKeys
@@ -61,6 +71,7 @@ class Config:
     abort: Key
     slow_mode: Key
     timing: Timing
+    character: Character = field(default_factory=Character)
 
 
 def load(path: str | Path, combo_names: Iterable[str]) -> Config:
@@ -91,7 +102,21 @@ def parse(data: dict, combo_names: Iterable[str]) -> Config:
     slow_mode = _key("control.slow_mode", control.get("slow_mode", "f12"))
 
     _check_collisions(game_keys, hotkeys, abort, slow_mode)
-    return Config(title, game_keys, hotkeys, abort, slow_mode, _timing(_table(data, "timing")))
+    return Config(title, game_keys, hotkeys, abort, slow_mode, _timing(_table(data, "timing")),
+                  _character(_table(data, "character")))
+
+
+def character(path: str | Path) -> Character:
+    """Just her stats ([character]), for gamelab's physics, which needs them before anything else is
+    loaded: the defaults if the file isn't there."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        return Character()
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"{path}: {e}") from None
+    return _character(_table(data, "character"))
 
 
 def _table(data: dict, name: str) -> dict:
@@ -129,6 +154,17 @@ def _timing(table: dict) -> Timing:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ConfigError(f"timing.{name} must be a whole number of milliseconds >= 0, got {value!r}")
     return Timing(**table)
+
+
+def _character(table: dict) -> Character:
+    known = {f.name for f in fields(Character)}
+    if unknown := set(table) - known:
+        raise ConfigError(f"[character] has unknown stat(s) {sorted(unknown)}; known: {sorted(known)}")
+    for name, value in table.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise ConfigError(f"character.{name} must be her {name.upper()} stat in % (a number above 0), "
+                              f"got {value!r}")
+    return Character(**{name: float(value) for name, value in table.items()})
 
 
 def _check_collisions(game_keys: GameKeys, hotkeys: dict[str, Key], abort: Key, slow_mode: Key) -> None:

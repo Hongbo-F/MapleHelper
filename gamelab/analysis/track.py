@@ -78,6 +78,24 @@ def best_match(frame: np.ndarray, template: np.ndarray) -> tuple[tuple[int, int]
     return (x, y), score
 
 
+def peak(a: float, b: float, c: float) -> float:
+    """Where a parabola through three scores a pixel apart peaks, from the middle one (0 if it doesn't)."""
+    den = a - 2 * b + c
+    return 0.0 if den >= 0 else 0.5 * (a - c) / den
+
+
+def fine_match(frame: np.ndarray, template: np.ndarray) -> tuple[float, float, float]:
+    """best_match to a fraction of a pixel: the top-left (x, y) where a parabola through the scores
+    either side of the best one peaks, and its score. Her name tag moves smoothly, so this tracks her
+    to about 0.2 px (0.3 map units in a half-size frame) where whole pixels would step."""
+    gray = cv2.cvtColor(np.ascontiguousarray(frame), cv2.COLOR_RGB2GRAY)
+    r = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
+    _, score, _, (x, y) = cv2.minMaxLoc(r)
+    fx = peak(r[y, x - 1], r[y, x], r[y, x + 1]) if 0 < x < r.shape[1] - 1 else 0.0
+    fy = peak(r[y - 1, x], r[y, x], r[y + 1, x]) if 0 < y < r.shape[0] - 1 else 0.0
+    return x + fx, y + fy, float(score)
+
+
 def track(frames, times, template: np.ndarray) -> list[tuple[float, int, int, float]]:
     """(t_ms, x, y, match score) of the name tag's top-left corner in every frame."""
     rows = []

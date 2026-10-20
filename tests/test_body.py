@@ -1,0 +1,246 @@
+"""The movement engine (motion.body): her shoe from the game's Physics.img, one step on the ground and in
+the air, the jump's kick, the closed forms the planner uses against the steps they stand for, and flights
+over a map. The numbers are the measured ones (gamelab/README.md, Motion planning); a small made-up map
+needs no game data, the real map's tests are skipped without it."""
+
+import random
+
+import pytest
+
+from gamelab.localization import mapdata
+from gamelab.motion import body, physics, route
+from gamelab.motion.body import Lags, Shoe
+from gamelab.sim import scenarios
+
+from test_navigation import by_y, seg, tree
+
+SHOE = Shoe.from_physics(body.PHYSICS_IMG, speed=119.2, jump=100)  # config.toml's defaults
+LAGS = Lags()
+REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
+
+
+@pytest.fixture
+def model():
+    return mapdata.parse(1, tree(), "Test Map", {})
+
+
+def steps(v, d, seconds, dt=body.TICK):
+    """(speed, distance) after `seconds` of ground_step with arrow d, from speed v."""
+    x = 0.0
+    for _ in range(round(seconds / dt)):
+        v, dx = body.ground_step(v, d, SHOE, dt)
+        x += dx
+    return v, x
+
+
+# --- her shoe ----------------------------------------------------------------------------------------
+
+@REAL
+def test_the_physics_is_the_game_datas():
+    assert scenarios.real_map().physics == body.PHYSICS_IMG
+
+
+def test_her_shoe_from_physics_img_and_her_stats():
+    assert SHOE.vmax == pytest.approx(149.0)  # 125 x 1.192: she walks 148-151 units/s in the recordings
+    assert (SHOE.acc, SHOE.drag, SHOE.vjump, SHOE.gravity, SHOE.fall) == (1400, 800, 555, 2000, 670)
+    assert (SHOE.air_acc, SHOE.air_drag, SHOE.air_drag_fall) == (200, 1, 100)
+    assert SHOE.air_speed == pytest.approx(8.93, abs=0.01)
+    # The game counts SPEED up to 140% and JUMP up to 123% (Haste can't take her past them).
+    hasted = Shoe.from_physics(body.PHYSICS_IMG, speed=160, jump=130)
+    assert hasted.vmax == pytest.approx(175) and hasted.vjump == pytest.approx(555 * 1.23)
+
+
+def test_physics_takes_her_stats_from_the_config():
+    assert physics.SHOE == Shoe.from_physics(body.PHYSICS_IMG, physics.CHARACTER.speed, physics.CHARACTER.jump)
+
+
+# --- on the ground --------------------------------------------------------------------------------------
+
+def test_a_standing_start_speeds_up_at_1400_then_runs_at_149():
+    v, x = steps(0.0, 1, 0.105)
+    assert v == pytest.approx(147, abs=0.1) and x == pytest.approx(7.7, abs=0.1)  # 1400 t, 700 t²
+    assert steps(0.0, 1, 0.11)[0] == SHOE.vmax  # full speed 0.106 s after the game sees the arrow
+    # From the key: the arrow is seen LAGS.on later, so she's 149 (t - 0.113) along for t past ~0.17 s.
+    r = body.replay([(0.0, "right", True)], 1.0, SHOE, LAGS, start=0.0)
+    for t, x, y in r.points:
+        if t >= 0.2:
+            assert x == pytest.approx(149 * (t - 0.113), abs=0.3) and y == 0
+    assert r.takeoffs == []
+
+
+def test_letting_go_she_goes_on_24_6_units():
+    assert body.slide(149, SHOE) == pytest.approx(13.9, abs=0.05)  # 149²/1600, on landing too
+    assert body.stop_distance(149, SHOE, LAGS) == pytest.approx(24.6, abs=0.2)  # measured 23.4-28.1
+    assert body.stop_time(149, SHOE, LAGS) == pytest.approx(0.26, abs=0.005)
+    r = body.replay([(0.0, "right", True), (1.0, "right", False)], 2.0, SHOE, LAGS, start=0.0)
+    at_release = next(x for t, x, _ in r.points if t >= 1.0)
+    assert r.points[-1][1] - at_release == pytest.approx(24.6, abs=0.8)  # within a step's travel
+
+
+def test_turning_round_brakes_and_turns_at_1400():
+    # From full speed one way to full speed the other: 0.21 s, going 7.9 units on first.
+    assert body.run_time(0.0, -149, 1, SHOE) == pytest.approx(0.213, abs=0.001)
+    assert body.run_x(0.1064, -149, 1, SHOE) == pytest.approx(-7.93, abs=0.01)
+    v, x = steps(-149.0, 1, 0.215)
+    assert v == SHOE.vmax and x == pytest.approx(0.3, abs=0.5)
+
+
+@pytest.mark.parametrize("v0, d", [(0.0, 1), (60.0, 1), (-149.0, 1), (149.0, -1), (200.0, 1), (149.0, 1)])
+def test_run_x_and_run_time_are_the_steps_closed_form(v0, d):
+    for tau in (0.03, 0.08, 0.15, 0.4, 1.0):
+        v, x = steps(v0, d, tau)
+        assert body.run_x(tau, v0, d, SHOE) == pytest.approx(x, abs=0.05)
+        dist = d * body.run_x(tau, v0, d, SHOE)
+        if v * d > 0:  # on her way there (turning round, she first passes it going the other way)
+            assert body.run_time(dist, v0, d, SHOE) == pytest.approx(tau, abs=1e-6)
+
+
+def test_holds_follow_the_tap_model():
+    # The game sees a hold 12 ms longer than it is (off - on), and she brakes from what she reached.
+    assert body.hold_distance(50, SHOE, LAGS) == pytest.approx(1925 * 0.062 ** 2, abs=0.05)  # 7.4; game: 7.1 once
+    assert body.hold_distance(300, SHOE, LAGS) == pytest.approx(7.74 + 0.149 * 300, abs=0.05)
+    assert body.hold_distance(-20, SHOE, LAGS) == 0
+    assert body.hold_for(5, SHOE, LAGS) == pytest.approx(39, abs=1)
+    assert body.hold_for(50, SHOE, LAGS) == pytest.approx(283, abs=2)
+    for units in (2, 5, 12, 20, 21.8, 30, 50, 120):
+        # (whole ms: half a ms is up to 0.2 units around full speed, where she's quickest to brake from)
+        assert body.hold_distance(body.hold_for(units, SHOE, LAGS), SHOE, LAGS) == pytest.approx(units, abs=0.25)
+    for ms in (30, 60, 90, 150, 400):  # the closed form is what the steps give (1 ms steps: a release can
+        # come up to a step late, and around 100 ms each ms held is 0.4 units)
+        r = body.replay([(0.0, "right", True), (ms / 1000, "right", False)], 1.5, SHOE, LAGS, start=0.0, dt=0.001)
+        assert r.points[-1][1] == pytest.approx(body.hold_distance(ms, SHOE, LAGS), abs=0.5)
+
+
+# --- the jump ----------------------------------------------------------------------------------------
+
+def test_the_kick():
+    assert body.takeoff(0, 1, SHOE) == pytest.approx(119.2)    # from standing: 0.8 x 149
+    assert body.takeoff(23.3, 1, SHOE) == pytest.approx(142.5)  # jb_k190: the arrow seen a step before
+    assert body.takeoff(100, 1, SHOE) == 149                    # kicked past full speed: capped
+    assert body.takeoff(130, 1, SHOE) == 130                    # jb_k165/450: just below full speed, no kick
+    assert body.takeoff(149, 1, SHOE) == 149
+    assert body.takeoff(-149, 1, SHOE) == pytest.approx(-29.8)  # running the other way
+    assert body.takeoff(60, 0, SHOE) == 60                      # no arrow: as she was going
+
+
+def test_a_jump_keyed_in_the_kicks_blind_spot_is_flagged():
+    # 80 ms after the arrow (the jump-back's timing): 35% of jumps leave below 140 (three of five did).
+    assert body.short_takeoff_chance(80, SHOE, LAGS) == pytest.approx(0.35, abs=0.02)
+    assert body.short_takeoff_chance(40, SHOE, LAGS) == pytest.approx(0.03, abs=0.01)
+    assert body.short_takeoff_chance(0, SHOE, LAGS) == pytest.approx(0.69, abs=0.02)  # often not seen yet
+    assert [body.jump_window_ok(g, SHOE, LAGS) for g in (0, 20, 40, 50, 60, 80, 100, 112, 130, 166)] == \
+        [False, False, True, True, False, False, False, False, True, True]
+
+
+def test_a_jump_key_in_the_air_is_ignored_and_holding_it_doesnt_jump_again():
+    events = [(0.0, "jump", True), (0.04, "jump", False), (0.3, "jump", True), (0.9, "jump", False)]  # held_jump
+    r = body.replay(events, 1.5, SHOE, LAGS, start=0.0)
+    assert len(r.takeoffs) == 1 and r.takeoffs[0][0] == pytest.approx(0.067, abs=body.TICK) and r.takeoffs[0][2] == 0
+    top = min(y for _, _, y in r.points)
+    assert top == pytest.approx(-77.0, abs=0.1) and r.points[-1][2] == 0  # 555²/4000 up, and back down
+
+
+# --- in the air ----------------------------------------------------------------------------------------
+
+def air(vx, vy, d, seconds):
+    for _ in range(round(seconds / body.TICK)):
+        vx, vy, _, _ = body.air_step(vx, vy, d, SHOE)
+    return vx, vy
+
+
+def test_steering_in_the_air_brakes_at_200_and_never_speeds_her_up():
+    assert air(149.0, -555.0, -1, 0.04)[0] == pytest.approx(149 - 8, abs=0.5)  # the jump-backs: -4 to -15
+    assert air(149.0, -555.0, 1, 0.3)[0] == 149       # the arrow she runs with: nothing (jb_k450: 124 -> 124)
+    assert air(0.0, -555.0, 1, 0.3)[0] == pytest.approx(SHOE.air_speed)  # straight up: a drift of 8.9
+    assert 148 <= air(149.0, -555.0, 0, 0.555)[0] < 149  # no arrow: 1 unit/s² of drag
+    vx, vy = air(149.0, 670.0, 0, 0.1)
+    assert vy == 670 and vx == pytest.approx(139, abs=0.01)  # at the fall cap: 100 units/s²
+
+
+def test_a_running_jump_lands_where_the_arc_says_to_a_step(model):
+    a, b = by_y(model, 500, 400), by_y(model, 360, 300)
+    f = body.fly(model, 500, 500, 149.0, -555.0, shoe=SHOE, arrow=1)
+    exact = 500 + 149 * 0.555  # flat: 2 x 555 / 2000 s in the air
+    assert f.platform is a and exact <= f.land_x <= exact + 149 * body.TICK
+    assert f.vx_land == 149 and f.seconds == pytest.approx(0.555, abs=body.TICK)
+    braked = body.fly(model, 500, 500, 149.0, -555.0, shoe=SHOE, arrow=-1)
+    assert braked.land_x == pytest.approx(f.land_x - 200 * 0.555 ** 2 / 2, abs=1)  # 30.8 shorter
+    assert braked.vx_land == pytest.approx(149 - 200 * 0.555, abs=1.5)
+    # Off A's end down onto B, 60 lower: her arc crosses B's surface on the way down.
+    down = body.fly(model, 150, 300, 149.0, -555.0, shoe=SHOE, arrow=1, path=True)
+    assert down.platform is b and down.land_x == pytest.approx(150 + 149 * 0.648, abs=1)
+    assert down.path[0] == (150, 300) and down.path[-1] == (down.land_x, 360)
+    assert len(down.path) == round(down.seconds / body.TICK) + 1
+
+
+def test_walls_and_the_maps_sides_stop_her(model):
+    c = by_y(model, 500, 400)
+    f = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, arrow=0)
+    assert f.platform is c and 799 < f.land_x < 800 and f.vx_land == 0  # up against the wall at 800
+    walls = body.vertical_walls(model.walls)
+    assert walls == ([0, 800], [(399, 501), (399, 501)])
+    open_sky = body.fly(model, 790, 380, 149.0, -555.0, shoe=SHOE, walls=([], []), sides=(-100, 850))
+    assert open_sky.platform is None and open_sky.land_x == 850  # past the wall's top: the side stops her
+
+
+def test_long_falls_with_the_arrow_let_go_land_shorter():
+    t = tree()
+    t["foothold"]["5"] = {"9": dict([seg(1, 9, 30, -2000, 1000, 3000, 1000)])}  # a floor 500 below C
+    m = mapdata.parse(1, t, "Test Map", {})
+    held = body.fly(m, 801, 499, 149.0, 0.0, shoe=SHOE, arrow=1, walls=([], []))
+    free = body.fly(m, 801, 499, 149.0, 0.0, shoe=SHOE, arrow=0, walls=([], []))
+    assert held.platform is free.platform is not None
+    # At the fall cap (670, reached 0.335 s and 112 units down) the air drags her at 100 units/s² with no
+    # arrow: 0.58 s more down to the floor, 16.8 units shorter.
+    assert held.land_x - free.land_x == pytest.approx(16.9, abs=1)
+    assert held.vx_land == 149 and free.vx_land == pytest.approx(149 - 0.3 - 58, abs=1.5)
+
+
+@REAL
+def test_the_planners_moves_fly_the_same_with_the_arrow_held():
+    """Every jump, jump up and drop the route planner found with physics.fly lands on the same platform
+    with the engine, and so does every walk-off but one. The arcs differ only by the integration: the
+    engine moves her by the mean of the step's two speeds, as the client does, physics.fly by the
+    speed at its start, which lifts her about a unit higher at the top (78.1 for 77.0). And where a wall
+    stops a walk-off, the arrow held pushes her on at 8.9 units/s below its foot, as the client's air
+    steering does: off platform 3 she clears the foot of platform 1's wall and lands on 17, not in the
+    basin (36), as terrain research expects for another reason (a probe in game for later)."""
+    m = scenarios.real_map()
+    walls = body.vertical_walls(m.walls)
+    far, other = [], []
+    for mv in route.moves(m):
+        a, sign = m.platform(mv.src), 1 if mv.direction == "right" else -1
+        edge = a.right if sign > 0 else a.left
+        if mv.kind == "jump":
+            x = mv.takeoff if mv.takeoff is not None else edge - sign * route.JUMP_FROM
+            start, arrow, skip = (x, a.y_at(x), sign * physics.WALK_SPEED, -physics.JUMP_SPEED), sign, None
+        elif mv.kind == "jump_up":
+            start, arrow, skip = (mv.x, a.y_at(mv.x), 0.0, -physics.JUMP_SPEED), 0, None
+        elif mv.kind == "drop":
+            start, arrow, skip = (mv.x, a.y_at(mv.x) + 1, 0.0, 0.0), 0, a
+        elif mv.kind == "walk_off":
+            level = a.y_at(edge)
+            rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
+                         for w in m.walls)
+            start, arrow, skip = (edge + sign * (-1 if rising else 0.5), level - 1, sign * physics.WALK_SPEED, 0.0), sign, None
+        else:
+            continue
+        f = body.fly(m, *start, shoe=physics.SHOE, arrow=arrow, skip=skip, walls=walls)
+        _, old_x, _ = physics.fly(m, *start, skip)
+        if f.platform is None or f.platform.id != mv.dst:
+            other.append((mv.kind, mv.src, mv.dst, f.platform and f.platform.id))
+        elif abs(f.land_x - old_x) > (1.1 if mv.kind == "jump" else 0.5):
+            far.append((mv.kind, mv.src, mv.dst))
+    assert other == [("walk_off", 3, 36, 17)]
+    assert sorted(far) == [("walk_off", 13, 20), ("walk_off", 19, 24), ("walk_off", 22, 34)]  # the wall push
+
+
+def test_physics_fly_and_body_fly_land_alike_on_random_running_jumps(model):
+    rng = random.Random(0)
+    for _ in range(50):
+        x = rng.uniform(0, 800)
+        sign = rng.choice((-1, 1))
+        land, lx, _ = physics.fly(model, x, 500, sign * 149.0, -555.0)
+        f = body.fly(model, x, 500, sign * 149.0, -555.0, shoe=SHOE, arrow=sign)
+        assert f.platform is land
+        assert f.land_x == pytest.approx(lx, abs=1.1)

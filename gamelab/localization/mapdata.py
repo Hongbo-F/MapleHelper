@@ -148,8 +148,8 @@ class MapModel:
     ropes: list[Rope]
     portals: list[Portal]
     spawns: list[Spawn] = field(default_factory=list)
-    physics: dict = field(default_factory=dict)      # the game's Physics.img (kept, not read: motion.physics
-                                                     # has the values it needs as constants)
+    physics: dict = field(default_factory=dict)      # the game's Physics.img (motion.body.PHYSICS_IMG is a
+                                                     # copy, which a test checks against this)
     mob_exp: dict[str, int] = field(default_factory=dict)  # monster name -> EXP per kill (game data)
     mob_bodies: dict[str, MobBody] = field(default_factory=dict)  # monster name -> its body (game data)
 

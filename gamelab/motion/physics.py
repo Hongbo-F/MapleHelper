@@ -8,9 +8,18 @@ import itertools
 import math
 from collections import OrderedDict
 
+from maplehelper import config
+
+from . import body
 from ..localization.mapdata import MapModel, Platform
+from ..paths import CONFIG
 from ..screen import SCREEN_SCALE
 
+# Her stats (config.toml [character]), and how the game moves her with them: motion.body's engine, its
+# shoe from the game's Physics.img and its lags measured.
+CHARACTER = config.character(CONFIG)
+SHOE = body.Shoe.from_physics(body.PHYSICS_IMG, CHARACTER.speed, CHARACTER.jump)
+LAGS = body.Lags()
 
 WALK_SPEED = 149.0       # map units/s: her measured walk (209 screen px/s at 1.40625 px per unit)
 CLIMB_SPEED = 117.0      # map units/s: measured 0.165 screen px/ms
