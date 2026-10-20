@@ -45,6 +45,9 @@ MAX_EVENTS = 400
 MAX_PLAN_MS = 20_000
 MAX_FRAMES = 900
 LIE_DETECTOR_ERROR = "Lie Detector on screen: all input stopped"
+# Past this, the player's log becomes player.log.1 (the one before goes) when the player starts. It writes
+# about 40 bytes a plan, some 150 KB an hour of hunting, and was never cut: 5 MB is about 30 hours.
+LOG_MAX_BYTES = 5 * 1024 * 1024
 
 # Beyond the actions bound in config.toml [keys] (moving, climbing, attacking, looting, chair,
 # potions), exploring needs the key bindings window (\) and closing windows (esc).
@@ -251,6 +254,16 @@ def _log(msg: str) -> None:
         f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
 
 
+def _rotate_log(limit: int = LOG_MAX_BYTES) -> None:
+    """Past `limit` bytes the log is moved to player.log.1, replacing the one before, and a new one starts
+    (only when the player starts, so a log is never moved while it's written)."""
+    try:
+        if PLAYER_LOG.stat().st_size > limit:
+            PLAYER_LOG.replace(PLAYER_LOG.with_name(PLAYER_LOG.name + ".1"))
+    except OSError:
+        pass  # no log yet, or it can't be moved now: it goes on
+
+
 def _answer(path, result: dict) -> str:
     """Write a plan's result to the outbox (atomically) in place of the plan file at `path`; returns
     the plan id."""
@@ -268,6 +281,7 @@ def serve() -> None:
     Detector or 3 idle hours."""
     for d in (LAB, INBOX, OUTBOX):
         d.mkdir(parents=True, exist_ok=True)
+    _rotate_log()
     STOP.unlink(missing_ok=True)
     if ALARM.exists():
         _log("refusing to start: a Lie Detector alarm hasn't been cleared (python -m gamelab clear-alarm)")

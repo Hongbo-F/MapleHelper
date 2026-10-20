@@ -1,5 +1,6 @@
 """What gamelab leaves on disk stays bounded (README: Memory and disk): a long run's telemetry goes on in
-parts, and the oldest telemetry is deleted when a run starts. All in temp folders."""
+parts, the oldest telemetry is deleted when a run starts, and the player's log is moved aside when the
+player starts. All in temp folders."""
 
 import os
 import time
@@ -59,3 +60,20 @@ def test_a_run_starts_by_deleting_telemetry_older_than_two_weeks(tmp_path, capsy
     telemetry.stop()
     assert not old.exists() and recent.exists() and path.exists()
     assert "deleted the 1 oldest" in capsys.readouterr().err
+
+
+def test_the_player_moves_its_log_aside_when_it_starts_past_5_mb(tmp_path, monkeypatch):
+    from gamelab.control import player
+    log, older = tmp_path / "player.log", tmp_path / "player.log.1"
+    monkeypatch.setattr(player, "PLAYER_LOG", log)
+    player._rotate_log()  # no log yet: nothing to do
+    log.write_text("12:00:00 player started\n", encoding="utf-8")
+    player._rotate_log()
+    assert log.exists() and not older.exists()
+    older.write_text("the one before\n", encoding="utf-8")
+    log.write_bytes(b"x" * (player.LOG_MAX_BYTES + 1))
+    player._rotate_log()
+    assert not log.exists() and older.stat().st_size == player.LOG_MAX_BYTES + 1
+    player._log("player started")
+    assert log.read_text(encoding="utf-8").endswith(" player started\n")
+
