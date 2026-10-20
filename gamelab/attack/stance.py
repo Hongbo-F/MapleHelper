@@ -2,10 +2,11 @@
 close in. Pure decisions from map positions; the fight loop (behavior.fight) carries them out.
 
 `stance` is the policy for a group (fight.clear, what tours use) and `decide` the one for a single
-target (fight.kill, `hunt kill`). Their thresholds differ: a monster on her platform is too close
-within MIN_SHOT + 10 for stance and TOO_CLOSE for decide, and stance closes in to SHOT_RANGE - 40 of
-a target where decide walks to the nearest of SHOT_RANGE - 30 and MIN_SHOT + 60 from it (off her level,
-a band past reach.shot_dx), either side.
+target (fight.kill, `hunt kill`). Both take a monster on her platform as too close while a throw from the
+ground at it would be a claw swipe, by its size (`close_to`, reach.claw_edge: a pig within 136 units, a
+snail within 121), decide at least within TOO_CLOSE; stance closes in to SHOT_RANGE - 40 of a target where
+decide walks to the nearest of SHOT_RANGE - 30 and 20 past the claw's edge from it (off her level, a band
+past reach.shot_dx), either side.
 `pick_target` says which monster to shoot first, `open_above` whether a jump keeps her on her
 platform, and `act_text` and `pct` word it for the log. Thresholds built on reach's constants are
 read from reach at call time, and so are the attacks' timings (physics.JUMP_ATTACK_MS and
@@ -80,7 +81,7 @@ def open_above(model: MapModel, platform: Platform, x0: float, x1: float) -> boo
 
 def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approach: bool = True,
            facing: str | None = None, can_jump: Callable[[float, float], bool] | None = None,
-           tops: dict[str, float] | None = None) -> tuple:
+           tops: dict[str, float] | None = None, halves: dict[str, float] | None = None) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units) to step away,
@@ -88,14 +89,16 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     she faces while it still has monsters in reach (switching sides every throw spread the damage over
     both), and never walks past a monster. `can_jump(x0, x1)` says whether jumping over that stretch
     keeps her on her platform: under a platform within her jump height, a jump lands her up on it.
-    `tops`: how tall each kind is at least (the map's game data; MONSTER_TOP by default)."""
+    A monster on her platform is too close for a throw from the ground while the claw would swipe it
+    (close_to). `tops`: how tall each kind is at least, `halves`: half its width (the map's game data,
+    localization.monsters.bodies; MONSTER_TOP and MONSTER_HALF by default)."""
     can_jump = can_jump or (lambda a, b: True)
     mine = [t for t in wanted if t.platform == platform.id]
     lo, hi = _stand_limits(platform, crowded=bool(mine))
-    close = [t for t in mine if abs(t.x - x) < reach.MIN_SHOT + 10]  # too close to throw at
+    close = [t for t in mine if close_to(t, x, halves)]  # a throw from the ground would be a claw swipe
     in_reach = [t for t in wanted if reach.can_hit(platform, x, y, t)]
     if close:
-        return _close_quarters(x, close, mine, facing, lo, hi, can_jump, tops or MONSTER_TOP)
+        return _close_quarters(x, close, mine, facing, lo, hi, can_jump, tops or MONSTER_TOP, halves)
     if in_reach:
         return ("throw", _throw_side(x, in_reach, facing))
     act = _step_from_under(x, y, platform, wanted, lo, hi)
@@ -111,16 +114,31 @@ def air_gap(act: str) -> float | None:
     return {"jump_throw": physics.JUMP_ATTACK_MS, "jump_back": physics.JUMP_BACK_ATTACK_MS}.get(act)
 
 
+def half_of(kind: str, halves: dict[str, float] | None = None) -> float:
+    """Half a monster's width by its kind: from `halves` (the map's game data) if it has the kind, else
+    MONSTER_HALF, else a pig's (reach.body_of)."""
+    return (halves or {}).get(kind, reach.body_of(kind)[1])
+
+
+def close_to(t: Monster, x: float, halves: dict[str, float] | None = None) -> bool:
+    """Whether monster `t` (on her level) is too close to map x for a throw from the ground at it to be a
+    star: the claw would swipe it (reach.claw_edge, by half its width: `halves`, as half_of). By its middle
+    alone (a star from 100 units, whatever the kind), the claw swiped pigs, slimes and Orange Mushrooms she
+    counted on a star for, out to 118-124 units off (in the simulator, as the game data has the swing)."""
+    return abs(t.x - x) < reach.claw_edge(half_of(t.kind, halves))
+
+
 def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing: str | None, lo: float,
-                    hi: float, can_jump: Callable[[float, float], bool], tops: dict[str, float]) -> tuple:
+                    hi: float, can_jump: Callable[[float, float], bool], tops: dict[str, float],
+                    halves: dict[str, float] | None = None) -> tuple:
     """A monster on her platform too close for a throw from the ground (`close`; `mine`: all on her
     platform), the nearest one deciding (on the side she faces, if any is): jump away from it and throw
     back from the air, if there's room behind her and no monster there; cornered, straight up. Each only
     if the attack starts low enough in the jump to pick that kind (reach.air_hits, by how tall it is at
     least: `tops`). A jump throw's starts 42-49 units up, over a snail: at most one of 45 jump-throws at
     snails hurt one, and monsters on the platform above took the stars. One too short for either is shot
-    from the ground: from STAR_SURE away if she can step back that far (a star), else from where she is
-    (the claw swipes it: weak, but every swipe hits)."""
+    from the ground: from reach.star_sure away if she can step back that far (a star; by half its width,
+    `halves`), else from where she is (the claw swipes it: weak, but every swipe hits)."""
     on_facing = [t for t in close if _side_of(t, x) == facing]
     nearest = _nearest(on_facing or close, x)
     side = _side_of(nearest, x)
@@ -133,7 +151,7 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
             and can_jump(x, x + back * JUMP_BACK_SPAN)):
         return ("jump_back", side)
     if not reach.air_hits(top, physics.JUMP_ATTACK_MS):
-        step = reach.STAR_SURE - abs(nearest.x - x)
+        step = reach.star_sure(half_of(nearest.kind, halves)) - abs(nearest.x - x)
         if room >= step and not behind:
             return ("back", away, step)
         return ("throw", side)
@@ -228,15 +246,17 @@ def pick_target(x: float, y: float, platform: Platform, targets: list[Monster]) 
     return min(in_reach or targets, key=lambda t: abs(t.x - x) + 2 * abs(t.y - y))
 
 
-def decide(x: float, y: float, platform: Platform, target: Monster, threats: list[Monster]) -> tuple:
+def decide(x: float, y: float, platform: Platform, target: Monster, threats: list[Monster],
+           halves: dict[str, float] | None = None) -> tuple:
     """What to do about `target` from map (x, y) on `platform`: ('throw', direction),
     ('walk', direction, units), or ('skip', reason) when no spot on her platform is in reach (or the
     target is behind a wall of her foothold group from all of them). `threats` are the other monsters on
-    her platform. Never walks off her platform."""
+    her platform. Never walks off her platform. One on her platform is too close within TOO_CLOSE, or
+    while the claw would swipe it (close_to: by half its width, `halves`, as half_of)."""
     dx, dy = target.x - x, target.y - y
     mine = threats + ([target] if target.platform == platform.id else [])
     lo, hi = _stand_limits(platform, crowded=bool(mine))
-    close = [t for t in mine if abs(t.x - x) < TOO_CLOSE]
+    close = [t for t in mine if abs(t.x - x) < TOO_CLOSE or close_to(t, x, halves)]
     if close:
         # Step away from whatever is closest, unless that walks into another monster or off the end.
         nearest = _nearest(close, x)
@@ -252,10 +272,12 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
     if not reach.in_band(dy):
         return ("skip", "not level enough with her platform")
     # Walk to the nearest spot on her platform that has the target in reach (either side of it): near it,
-    # MIN_SHOT + 60 off, or off her level one band of the star's search past where it first picks the
-    # target (reach.shot_dx, by its kind: a pig standing needs that band more than one walking).
+    # 20 past where the claw would swipe it (reach.claw_edge, by its size; it was MIN_SHOT + 60, 150, for
+    # every kind), or off her level one band of the star's search past where it first picks the target
+    # (reach.shot_dx, by its kind: a pig standing needs that band more than one walking).
     far = reach.SHOT_RANGE - 30
-    near = max(reach.MIN_SHOT + 60, reach.shot_dx(dy, target.kind) + reach.SEARCH_STEP)
+    near = max(reach.claw_edge(half_of(target.kind, halves)) + 20,
+               reach.shot_dx(dy, target.kind) + reach.SEARCH_STEP)
     goals = [min(max(target.x + d, lo), hi) for d in (-far, -near, near, far)]
     goals = [g for g in goals if reach.can_shoot(target.x - g, dy, reach=_goal_reach(), kind=target.kind)]
     if not goals:

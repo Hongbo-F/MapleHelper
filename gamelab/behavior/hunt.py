@@ -6,7 +6,8 @@ monster coming into reach or a pile of drops changes the next step at once.
 After each look, the first rule that applies decides (the design's numbering; at a ground they're tried
 in the order listed, 6 before 3):
 
-   1  close quarters   a target on her platform within 100: stance's answer (jump back, jump-throw, step back)
+   1  close quarters   a target on her platform the claw would swipe (stance.close_to, by its size: a pig
+                       within 136, a snail within 121): stance's answer (jump back, jump-throw, step back)
    2  high ground      on a platform she can't safely stand on, with a spot that reaches her ground: back up;
                        also back to the spot from any other platform (after a pile there), unless the
                        ground is in reach from it or she's leaving
@@ -41,7 +42,7 @@ from dataclasses import dataclass, field
 from .. import telemetry
 from ..attack import reach, spots
 from ..attack.spots import Spot
-from ..attack.stance import open_above, stance
+from ..attack.stance import close_to, open_above, stance
 from ..control.navigator import TRANSIT, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.scene import Scene
@@ -52,7 +53,6 @@ from .ledger import Pile
 from .looting import DROPS_LAST, DropSpot
 from .tour import PRIOR
 
-CLOSE = reach.MIN_SHOT + 10   # rule 1: a target this close on her platform (stance's own threshold)
 IN_HER_WAY = fight.IN_HER_WAY  # any monster this close on her platform is a target, whatever its kind
 PASSING_S = 15.0       # rule 4: s of shooting per platform per objective while passing through
 PILE_NEAR = 150        # rule 5: drops on her platform this close are picked up from where she is
@@ -157,6 +157,7 @@ class Hunt:
         self.obj: Objective | None = None
         self.stack: list[Objective] = []    # suspended objectives, the latest last
         self.fs = FightState()
+        self._tops, self._halves = fight.body_sizes(self.model)  # each kind's size (game data), for stance
         self._fs_key = None
         self._owe_move = False               # cut short: move on (one chain) before shooting
         self._skip: dict[int, float] = {}    # ground -> until when it's skipped
@@ -234,8 +235,7 @@ class Hunt:
             self._arrived(o)
         now = time.monotonic()
         targets, visible, hidden = self._targets(s, now)
-        here, x = s.platform.id, s.where.x
-        if any(m.platform == here and abs(m.x - x) < CLOSE for m in targets):
+        if self._close_quarters(s, targets):
             return self._shoot(s, targets, visible, hidden, now, "close quarters", approach=False)
         if self._owe_move and self.obj is not None:
             return self._travel("move on first")
@@ -432,12 +432,18 @@ class Hunt:
 
     # --- shooting -----------------------------------------------------------------------------------
 
+    def _close_quarters(self, s: Scene, monsters) -> bool:
+        """Rule 1: one of `monsters` on her platform is as close as stance's own threshold (close_to: the
+        claw would swipe it, by its size)."""
+        return any(m.platform == s.platform.id and close_to(m, s.where.x, self._halves) for m in monsters)
+
     def _stance(self, s: Scene, targets, visible, hidden, approach: bool, log: bool = True) -> tuple:
         if log:
             return fight._take_stance(self.h, self.fs, s, targets, visible, hidden, approach)
         here = s.platform
         return stance(s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
-                      can_jump=lambda a, b: open_above(self.model, here, a, b))
+                      can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops,
+                      halves=self._halves)
 
     def _shoot(self, s: Scene, targets, visible, hidden, now: float, rule: str, approach: bool) -> None:
         """One step of stance's answer: a throw (fight's bookkeeping kept), or a walk."""
@@ -762,8 +768,8 @@ class Hunt:
         reach she may shoot, an urgent pile, low HP)."""
         if s.hp < self.h.low_hp:
             return True
-        here, x = s.platform.id, s.where.x
-        if any(m.platform == here and abs(m.x - x) < CLOSE for m in s.monsters):
+        here = s.platform.id
+        if self._close_quarters(s, s.monsters):
             return True
         o = self.obj
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):

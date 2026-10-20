@@ -19,7 +19,7 @@ The physics are the ones gamelab plans with, so a plan that is right on paper wo
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach). On the ground, the nearest monster on her level (reach.LEVEL) whose body
-  reaches into the claw's swing (reach.MIN_SHOT ahead of her, reach.CLAW_DOWN below to reach.CLAW_UP
+  reaches into the claw's swing (reach.CLAW_FAR ahead of her, reach.CLAW_DOWN below to reach.CLAW_UP
   above her feet) is swiped (a fifth of a star's damage); else the star's search picks (reach.search_band:
   of the monsters whose body overlaps one of its bands, the first band's, the nearest of those), so off
   her level a star needs room sideways, by the monster's body (right under or over her, none is hit).
@@ -826,7 +826,7 @@ class World:
         level its swing reaches; else the star's search picks (nearest_star). In the air, the nearest in
         the attack's area takes the star."""
         if self.mode == "ground":
-            target = self.nearest_in(self.facing, reach.MIN_SHOT, reach.CLAW_DOWN, reach.CLAW_UP, level=True)
+            target = self.nearest_in(self.facing, reach.CLAW_FAR, reach.CLAW_DOWN, reach.CLAW_UP, level=True)
             swipe = target is not None
             if target is None:
                 target = self.nearest_star(self.facing)

@@ -12,10 +12,12 @@ A regular attack throws one star straight ahead. Measured in game (Thicket Aroun
 What an attack hits is picked when it starts, about 55 ms after its key, not when the star flies (the
 star is only a picture), by the monsters' bodies (their boxes in the game data, localization.monsters).
 On the ground the claw's swing is looked at first: a monster on her level whose body reaches into it is
-swiped (`claw_takes`). Else the star's target search (`search_band`): bands SEARCH_STEP wide from
-SEARCH_START ahead of her out to STAR_RANGE, band k a window from SEARCH_FLOOR0 - SEARCH_GROW k to
-SEARCH_TOP0 + SEARCH_GROW k above her feet, so it opens one unit up and one down for every four ahead; the
-star goes to a monster whose body overlaps the first band any body does, the nearest of those. Off her
+swiped (`claw_takes`), so her decisions count on a star at one only from farther off, by its size
+(`claw_edge`: a pig from 136 units, a snail from 121). Else the star's target search (`search_band`):
+bands SEARCH_STEP wide from SEARCH_START ahead of her out to STAR_RANGE, band k a window from
+SEARCH_FLOOR0 - SEARCH_GROW k to SEARCH_TOP0 + SEARCH_GROW k above her feet, so it opens one unit up and
+one down for every four ahead; the star goes to a monster whose body overlaps the first band any body
+does, the nearest of those. Off her
 level a star so needs room sideways, the more the farther off her level and the smaller the monster
 (`min_dx`, by its body: `body_of`): 60 below her an Orange Mushroom is picked from 113 units, a pig from
 151, a slime from 177, a snail from 246; 60 above, each kind from 191-207. The search is MapleStory
@@ -65,7 +67,8 @@ STAR_RANGE = 400
 STAR_REACH = STAR_RANGE + max(MONSTER_HALF.values())  # 434: the farthest off (by its middle) a star picks
                      # the widest kind, a pig: what can be in a throw's path (kill matching)
 SHOT_RANGE = 410     # aim inside this: the target keeps walking during the ~0.5 s wind-up and the flight
-MIN_SHOT = 90        # closer than this she swipes with the claw instead of throwing
+MIN_SHOT = 90        # closer than this (middle to middle) the claw swipes any monster on her level (CLAW_FAR);
+                     # a bigger one farther off too (claw_edge)
 # How far below/above her a target can be and still be hit: 60 both ways measured (hits). Farther
 # isn't measured yet; `python -m gamelab hunt shots` lists what the shot log has seen.
 SHOT_DOWN = 60
@@ -96,11 +99,20 @@ AREA_UP = 65
 AIR_MARGIN = 6       # how far into the area a body must reach for an attack from a jump to pick it surely:
                      # about one frame of her climb when a jump throw's attack starts
 # The claw's swings (game data: the claw's afterImage, swordOL: swingO1-O3 and stabO1) reach from 17 below
-# to 62 above her feet, and 73-102 ahead of her (MIN_SHOT is taken as their reach).
+# to 62 above her feet, and 73-102 ahead of her (taken as CLAW_FAR, as the simulator's swing has it). A
+# monster on her level whose body reaches into them is swiped: from up to CLAW_FAR plus half its width off
+# by its middle (a pig 124, a snail 109), so a throw from the ground at it is a star only from farther off
+# (claw_edge). Deciding by the middle (a star from 100 units, whatever the kind), 23% of the simulator's
+# swipes came 90-160 units off, and swipes were 40% of the hunt loop's hits, each a fifth of a star's
+# damage; by the body they fell by a third (20 seeds). Unmeasured in game: how far off a pig is still
+# swiped (by the swings' boxes, 107-136).
+CLAW_FAR = MIN_SHOT
 CLAW_DOWN = 17
 CLAW_UP = 62
-STAR_SURE = 125      # from this far on, a throw from the ground surely throws a star at a snail: the widest
-                     # swing (swingO3) reaches 102 ahead of her, and half a snail is 19
+CLAW_MARGIN = 12     # kept past the swing's reach, for a monster walking at her while the attack starts (a pig,
+                     # 125 units/s by the game data, walks 12 in 0.1 s). In the simulator 6 cut the swipes as
+                     # much, but gained less in the hunt loop (+1.8% EXP a minute against +5.6%; +1.6% against
+                     # +3.2% with the game data's walking speeds), and about the same on the tour.
 # What stops a star (see above). The level line runs SHOT_H above her feet: anything from 1 to 59 fits the
 # logs (on this map it matters only for steps lower than 60, and there are none), and 28 is where the
 # client's target search is centred (MeowDB, Lucky Seven: 28 above her feet).
@@ -189,7 +201,8 @@ def max_dx(half: float = PIG[1]) -> float:
 
 def shot_dx(dy: float, kind: str | None = None) -> float:
     """The closest sideways a throw from the ground at a monster of `kind` dy below (+) her throws a star
-    that picks it: min_dx by its body (body_of), and never closer than MIN_SHOT (closer, the claw swipes)."""
+    that picks it: min_dx by its body (body_of), and never closer than MIN_SHOT (closer, the claw swipes;
+    on her own platform her decisions keep a bigger monster out to claw_edge)."""
     return max(MIN_SHOT, min_dx(dy, *body_of(kind)))
 
 
@@ -203,11 +216,28 @@ def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE, kind: str | None 
 def claw_takes(ahead: float, dy: float, top: float, half: float) -> bool:
     """Whether the claw's swing takes a monster `ahead` in front of her (its middle), its feet dy below
     hers, `top` tall and `half` wide either side: on her level (LEVEL), its body reaching into the swing
-    (MIN_SHOT ahead of her, CLAW_DOWN below to CLAW_UP above her feet). Off her level it isn't counted on,
+    (CLAW_FAR ahead of her, CLAW_DOWN below to CLAW_UP above her feet). Off her level it isn't counted on,
     though the swings' boxes reach 17 below her feet: in the telemetry of 2026-10-20 an Orange Mushroom 60
     below her and 91 off, its body in them, was passed over by 4 throws (from 2, with the step wall down to
     4 in the swing too, so this settles nothing), and the decisions never planned on it."""
-    return abs(dy) <= LEVEL and reaches_into(ahead, dy, top, half, MIN_SHOT, CLAW_DOWN, CLAW_UP)
+    return abs(dy) <= LEVEL and reaches_into(ahead, dy, top, half, CLAW_FAR, CLAW_DOWN, CLAW_UP)
+
+
+def claw_edge(half: float) -> float:
+    """How far off (middle to middle) a monster on her level `half` wide either side has to be for a throw
+    from the ground not to be a claw swipe: its body clear of the swing (CLAW_FAR), CLAW_MARGIN to spare. A
+    pig 136, an Orange Mushroom 134, a slime 130, a snail 121 (half widths 34, 32, 28, 19)."""
+    return CLAW_FAR + half + CLAW_MARGIN
+
+
+def star_sure(half: float) -> float:
+    """How far off she steps back to for a star from the ground at a monster on her level `half` wide either
+    side: 3 past claw_edge, so a step that comes up a little short still clears it."""
+    return claw_edge(half) + 3
+
+
+STAR_SURE = star_sure(MONSTER_HALF["snail"])  # 124: a snail's (it was 125, from the widest swing, 102, and
+                                              # half a snail, 19)
 
 
 def ground_pick(ahead: float, dy: float, top: float, half: float) -> tuple | None:

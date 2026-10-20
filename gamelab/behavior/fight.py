@@ -226,15 +226,23 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     return wanted + hidden, visible, hidden
 
 
+def body_sizes(model: MapModel | None) -> tuple[dict[str, float], dict[str, float]]:
+    """How tall each kind is at least, and half its width, by kind (localization.monsters.bodies: the map's
+    game data): what stance and decide go by."""
+    body = bodies(model)
+    return {kind: b.top for kind, b in body.items()}, {kind: b.half for kind, b in body.items()}
+
+
 def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], visible: list[Monster],
                  hidden: list[Monster], approach: bool) -> tuple:
-    """What to do about the monsters to `fight` (attack.stance), walking up to them only if `approach`.
-    For a throw, everything in the star's path is kept (st.aimed): a kill is matched against it."""
+    """What to do about the monsters to `fight` (attack.stance, by each kind's size), walking up to them
+    only if `approach`. For a throw, everything in the star's path is kept (st.aimed): a kill is matched
+    against it."""
     here = s.platform
     body = bodies(h.model)  # each kind's body (game data)
-    tops = {kind: b.top for kind, b in body.items()}  # how tall each kind is at least
+    tops, halves = body_sizes(h.model)
     act = stance(s.where.x, s.where.y, here, fight, approach, h.actions.facing,
-                 can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops)
+                 can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
@@ -451,7 +459,7 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
     _note_pick(st.flying, s, t)
     st.flying = _score_shots(st.flying, bar, st.dying_since is not None)
     threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]
-    act = decide(s.where.x, s.where.y, s.platform, t, threats)
+    act = decide(s.where.x, s.where.y, s.platform, t, threats, body_sizes(h.model)[1])
     h.log(f"  {st.kind} {t.x - s.where.x:+.0f},{t.y - s.where.y:+.0f} (bar {pct(bar)}), "
           f"HP {s.hp:.0%}: {' '.join(str(v if isinstance(v, str) else round(v)) for v in act)}")
     if act[0] == "skip":

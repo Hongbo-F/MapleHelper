@@ -187,7 +187,7 @@ These are today's rules (`_wanted`, `IN_HER_WAY`, `clear_way`).
 
 | # | Rule | When | What she does | Bounds |
 |---|---|---|---|---|
-| 1 | Close quarters | a target on her platform within 100 | `stance`'s answer: jump back if there's 110 units of room and open sky; else jump and throw; else step back; else throw from the ground | always on, also during rules 5, 6 and 8; right after a cut, only stepping away |
+| 1 | Close quarters | a target on her platform the claw would swipe (`stance.close_to`, by its size: a pig within 136, a snail within 121; 100 for every kind before) | `stance`'s answer: jump back if there's 110 units of room and open sky; else jump and throw; else step back; else throw from the ground | always on, also during rules 5, 6 and 8; right after a cut, only stepping away |
 | 2 | Back to the high ground | she's on a platform that isn't standable, and a standable spot reaches her current ground | one chain toward the spot, shooting only rule 1 and rule 4 targets | applies after a knock-off and after looting below a spot |
 | 3 | Shoot | a target in reach, and she's on her spot or standable | `stance`: throw (the side she faces while it has targets), step out from under a monster right below or above her, or close in along her platform | walks of at most 300 (stance's own walks aren't capped today) |
 | 4 | In passing | a target in reach while she's on another platform that isn't standable, or a monster in the way of her next move | throw from where she is; no walking after targets | 15 s of shooting per platform per objective, counted on the objective's clock |

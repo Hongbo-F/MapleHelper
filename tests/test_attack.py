@@ -129,6 +129,32 @@ def test_under_a_low_platform_she_does_not_jump_at_a_monster():
     assert stance(60, 500, PLAT, [target(110)], can_jump=lambda a, b: False) == ("throw", RIGHT)
 
 
+def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_monsters_size():
+    # The claw's swing (90 ahead of her) takes a body that reaches into it: a pig up to 124 off by its
+    # middle, a snail up to 109. Her decisions count on a star 12 past that (reach.claw_edge).
+    edge = {kind: reach.claw_edge(half) for kind, half in monsters.MONSTER_HALF.items()}
+    assert edge == {"pig": 136, "orange-mushroom": 134, "slime": 130, "snail": 121}
+    assert reach.claw_takes(124, 0, 46, 34) and not reach.claw_takes(125, 0, 46, 34)
+    assert reach.star_sure(19) == reach.STAR_SURE == 124 and reach.star_sure(34) == 139
+    # A pig 115 away on her platform isn't a throw from the ground (the claw would swipe it, where by its
+    # middle she used to count on a star from 100): a jump back with room behind her, straight up with a
+    # monster there; one target (decide) she steps away from. From 140 it's a star.
+    pig = target(615)
+    assert stance(500, 500, PLAT, [pig]) == ("jump_back", RIGHT)
+    assert stance(500, 500, PLAT, [pig, target(350)]) == ("jump_throw", RIGHT)
+    assert decide(500, 500, PLAT, pig, []) == ("walk", LEFT, 120)
+    assert stance(500, 500, PLAT, [target(640)]) == ("throw", RIGHT)
+    assert decide(500, 500, PLAT, target(640), []) == ("throw", RIGHT)
+    # A snail 115 away is too close as well (121), one 125 away isn't; by the map's game data (half 18.5)
+    # one 120.8 away isn't either (120.5). A slime 125 away is (130), an Orange Mushroom 135 away isn't (134).
+    assert stance(500, 500, PLAT, [target(615, kind="snail")]) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(625, kind="snail")]) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(620.8, kind="snail")]) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(620.8, kind="snail")], halves={"snail": 18.5}) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(625, kind="slime")]) == ("jump_back", RIGHT)
+    assert stance(500, 500, PLAT, [target(635, kind="orange-mushroom")]) == ("throw", RIGHT)
+
+
 # --- the star's search from the ground -------------------------------------------------------------------
 
 def test_the_star_search_opens_one_in_four():
@@ -233,7 +259,7 @@ def test_with_the_attack_keyed_late_a_cornered_snail_is_shot_from_the_ground(mon
     # With room behind her: never a jump back (its attack starts too high too), but a step back to where a
     # throw from the ground is a star, and then the star.
     act = stance(500, 500, PLAT, [target(560, kind="snail")])
-    assert act == ("back", LEFT, reach.STAR_SURE - 60)
+    assert act == ("back", LEFT, reach.star_sure(monsters.MONSTER_HALF["snail"]) - 60)
     assert stance(500 - act[2], 500, PLAT, [target(560, kind="snail")]) == ("throw", RIGHT)
     # Another monster behind her: no step back either.
     assert stance(500, 500, PLAT, [target(560, kind="snail"), target(400)]) == ("throw", RIGHT)
