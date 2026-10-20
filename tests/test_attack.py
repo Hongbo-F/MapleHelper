@@ -1,6 +1,6 @@
 """Attack decisions from map positions: where a star reaches, which monster first, what to do about the
-monsters around her, what an attack from a jump can hit, what stops a star, and where to stand to shoot
-a platform."""
+monsters around her, what the star's search from the ground picks, what an attack from a jump can hit,
+what stops a star, and where to stand to shoot a platform."""
 
 import math
 
@@ -127,6 +127,19 @@ def test_under_a_low_platform_she_does_not_jump_at_a_monster():
     # A jump would carry her up onto the platform overhead: step away, or (cornered) throw from the ground.
     assert stance(500, 500, PLAT, [target(560)], can_jump=lambda a, b: False) == ("back", LEFT, 120)
     assert stance(60, 500, PLAT, [target(110)], can_jump=lambda a, b: False) == ("throw", RIGHT)
+
+
+# --- the star's search from the ground -------------------------------------------------------------------
+
+def test_the_star_search_opens_one_in_four():
+    # Bands 20 wide from 65 ahead of her out to 400, each one's window 5 higher and 5 lower than the last.
+    assert reach.window(0) == (12, reach.SEARCH_TOP0) and reach.window(16) == (-68, reach.SEARCH_TOP0 + 80)
+    assert reach.band_of(64) is None and reach.band_of(65) == 0 and reach.band_of(84.9) == 0
+    assert reach.band_of(400) == 16 and reach.band_of(401) is None and reach.BANDS == 17
+    # A body across several bands is taken in the first whose window it reaches into: 30 to 70 above her
+    # feet, from 80 to 150 ahead (bands 0-4), it's under band 2's top (31), not band 1's (26).
+    assert reach.search_band(80, 150, 30, 70) == 2
+    assert reach.search_band(10, 60, 0, 40) is None and reach.search_band(405, 440, 0, 40) is None
 
 
 # --- what an attack from a jump can hit ----------------------------------------------------------------

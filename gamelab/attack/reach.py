@@ -17,6 +17,14 @@ monster's body is its box in the game data, localization.monsters): in 45 jump-t
 units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60 above took the
 stars. On the ground the claw's swing is looked at first: a monster whose body reaches into it is swiped.
 
+From the ground, the star finds its target by a stepped search (`search_band`): bands SEARCH_STEP wide
+from SEARCH_START ahead of her out to STAR_RANGE, band k a window from SEARCH_FLOOR0 - SEARCH_GROW k to
+SEARCH_TOP0 + SEARCH_GROW k above her feet, so it opens one unit up and one down for every four ahead; the
+star goes to a monster whose body overlaps the first band any body does, the nearest of those. It's
+MapleStory Classic's (this game), as meowdb's Lucky Seven page draws it; the shot log and the live tours'
+telemetry agree with its shape, and fit its floor exactly but not its top (SEARCH_TOP0). Nothing goes by
+it yet: the simulator's world picks by the area above, and her decisions by min_dx's ramp.
+
 What stops a star is the walls of her own foothold group (mapdata.Segment.group: a floating block's floor
 and the walls hanging from its ends, or platforms joined by a step), where they cross a level line SHOT_H
 above her feet (higher in a jump): `wall_in_way`. Floors never stop one, and nor do the walls of any
@@ -46,6 +54,11 @@ from ..motion import physics
 # With Keen Eyes maxed (+200 range by the skill data; the 400 above was measured before), stars on her
 # level hit slimes 408, 410 and 452 units off, and missed at 560 and 634 (lab/range_probe.jsonl).
 STAR_REACH = 460     # the farthest hit seen (452); somewhere short of 560 they stop hitting
+# ... though by the skill data a star reaches 400 to the near side of a monster's body: 200 for her claw
+# (Lucky Seven's text: "within 200 range in front") and 200 more with Keen Eyes maxed (its `range`). The 452
+# slime walked ~25 closer by the time the attack started, and in the tours' telemetry none was hit at 445
+# or 472.
+STAR_RANGE = 400
 SHOT_RANGE = 410     # aim inside this: the target keeps walking during the ~0.5 s wind-up and the flight
 MIN_SHOT = 90        # closer than this she swipes with the claw instead of throwing
 # How far below/above her a target can be and still be hit: 60 both ways measured (hits). Farther
@@ -59,6 +72,17 @@ MIN_SHOT_ABOVE = 200  # closest sideways a target 60 above her is worth a throw
 MIN_SHOT_BELOW = 150  # ... and one 60 below
 OFF_LEVEL_DY = 60    # the height those two were measured at (60 above / below her)
 LEVEL = 15           # within this of her height, a target counts as on her level
+# The star's target search from the ground (see above): its bands, and their windows above her feet.
+SEARCH_START = 65    # the first band starts this far ahead of her (closer, on the ground the claw swipes)
+SEARCH_STEP = 20     # each band is this wide ...
+SEARCH_GROW = 5      # ... and its window this much higher and lower than the one before (1 in 4)
+SEARCH_FLOOR0 = 12   # the first band's window from this far above her feet (meowdb's, and the logs' fit) ...
+SEARCH_TOP0 = 21     # ... to this far. meowdb draws 44 (12 to 44: 28 +- 16); fitted to the shot log and the
+                     # telemetry the top is 21 (95% about 16-28; 44 is 6.2 log-likelihood worse, and each
+                     # prefers the lower top on its own). Too low a top only skips chances above her (a pig
+                     # 60 above is picked from 191 units, from 111 with 44), never throws at nothing.
+                     # Unmeasured in game: throws from 13 at 12 (60 above her), 110-200 units off, settle it.
+BANDS = math.ceil((STAR_RANGE - SEARCH_START) / SEARCH_STEP)  # 17: the last one 15 wide
 STAR_SPEED = 690     # units/s
 EDGE_MARGIN = 25     # where she stands to shoot: not closer than this to her platform's end
 # Where a look searches for monsters: from this far above her feet to this far below (bodies stick up
@@ -106,6 +130,46 @@ def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE) -> bool:
     terrain aside (can_hit: with it)."""
     return min_dx(dy) <= abs(dx) <= reach and in_band(dy)
 
+
+# --- the star's target search, from the ground ---------------------------------------------------------
+
+def window(k: int) -> tuple[float, float]:
+    """Band k's window: from how far above her feet (its floor) to how far (its top)."""
+    return SEARCH_FLOOR0 - SEARCH_GROW * k, SEARCH_TOP0 + SEARCH_GROW * k
+
+
+def band_of(ahead: float) -> int | None:
+    """The band `ahead` units in front of her is in (None: short of SEARCH_START, or past STAR_RANGE)."""
+    if not SEARCH_START <= ahead <= STAR_RANGE:
+        return None
+    return min(BANDS - 1, int((ahead - SEARCH_START) // SEARCH_STEP))
+
+
+def search_band(near: float, far: float, bottom: float, top: float) -> int | None:
+    """The first band a body overlaps, from `near` to `far` ahead of her and from `bottom` to `top` above
+    her feet (body_box). None if the search doesn't pick it."""
+    if far < SEARCH_START or near > STAR_RANGE or far < near:
+        return None
+    for k in range(band_of(max(near, SEARCH_START)), band_of(min(far, STAR_RANGE)) + 1):
+        floor, roof = window(k)
+        if bottom < roof and top > floor:
+            return k
+    return None
+
+
+def body_box(ahead: float, dy: float, top: float, half: float, lift: float = 0.0) -> tuple:
+    """A monster's body as the search sees it, (near, far, bottom, top): its middle `ahead` in front of
+    her, its feet `dy` below hers (+ below), `top` tall and `half` wide either side, raised `lift` off its
+    feet (a slime in mid-hop: 10-17)."""
+    return ahead - half, ahead + half, lift - dy, top - dy
+
+
+def picks(ahead: float, dy: float, top: float, half: float, lift: float = 0.0) -> bool:
+    """Whether the star's search from the ground picks this body (body_box), terrain aside."""
+    return search_band(*body_box(ahead, dy, top, half, lift)) is not None
+
+
+# --- what stops a star ---------------------------------------------------------------------------------
 
 def _crosses(w: Segment, line: float) -> bool:
     """Whether wall `w` crosses the level line at map y `line` (a wall split into footholds, end to end,
