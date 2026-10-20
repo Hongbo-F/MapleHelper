@@ -10,19 +10,27 @@ from .. import telemetry
 
 
 class LiveSource:
-    """The newest telemetry file in a folder, followed as it grows; a newer run's file replaces it."""
+    """The newest telemetry file in a folder, followed as it grows; a newer run's file replaces it. The
+    file is read on every poll, but the folder looked through at most once every `rescan_s`: the web page
+    polls 40 times a second, and a new run is still picked up within a second."""
 
-    def __init__(self, folder: Path = telemetry.FOLDER):
-        self.folder = folder
+    def __init__(self, folder: Path = telemetry.FOLDER, rescan_s: float = 1.0,
+                 clock: Callable[[], float] = time.monotonic):
+        self.folder, self.rescan_s, self._clock = folder, rescan_s, clock
         self.path: Path | None = None
         self._follower: telemetry.Follower | None = None
+        self._scanned: float | None = None  # when the folder was last looked through
 
     def poll(self) -> tuple[bool, list[dict]]:
         """(whether a new run started, the records since the last poll)."""
-        newest = telemetry.newest(self.folder)
-        fresh = newest is not None and newest != self.path
-        if fresh:
-            self.path, self._follower = newest, telemetry.Follower(newest)
+        fresh = False
+        now = self._clock()
+        if self._scanned is None or now - self._scanned >= self.rescan_s:
+            self._scanned = now
+            newest = telemetry.newest(self.folder)
+            fresh = newest is not None and newest != self.path
+            if fresh:
+                self.path, self._follower = newest, telemetry.Follower(newest)
         return fresh, (self._follower.poll() if self._follower else [])
 
 
