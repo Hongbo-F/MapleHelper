@@ -724,8 +724,10 @@ def cmd_bench_look(args) -> int:
     timer = bench.run(eyes, senses.band, looks, frames, reps=args.reps, n=args.n)
     where = f"{args.n} live captures" if frames is None else f"{len(frames)} saved frames x {args.reps}"
     print(f"{where}; OpenCV {cv2.__version__}, {cv2.getNumThreads()} threads"
-          + ("" if frames is None else "; the grab itself (16.7 ms with mss) isn't included"))
+          + ("" if frames is None else "; the grab itself (16.7 ms with mss, about 2 with DXGI) isn't included"))
     print("\n".join(timer.table()))
+    if frames is None:
+        print(eyes.screen.summary())
     return 0
 
 

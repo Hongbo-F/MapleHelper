@@ -1,6 +1,7 @@
 """Capturing the screen (gamelab.capture) without the screen: desktop duplication's COM calls are faked, so
 what's tested is what's made of their answers: the black first frame, frames shown after a look began, a
-duplication lost and started again, and the fall back to mss."""
+duplication lost and started again, and the fall back to mss. And Eyes taking a glance's two boxes from one
+frame, at the old pace."""
 
 import time
 
@@ -10,6 +11,8 @@ import pytest
 from gamelab import capture
 from gamelab.capture import (DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_WAIT_TIMEOUT, FIRST_FRAME_S,
                              FRESH_WAIT_S, RETRY_S, S_OK, CaptureError, Grabber)
+from gamelab.perception import eyes as eyes_module
+from gamelab.perception.eyes import GLANCE_EVERY_S, Eyes
 
 AREA = {"left": 0, "top": 0, "width": 1920, "height": 1080}
 TIMEOUT = (DXGI_ERROR_WAIT_TIMEOUT, 0, None)
@@ -292,3 +295,62 @@ def test_a_bad_method_in_config_is_refused(tmp_path):
 
 def test_the_repos_config_says_dxgi():
     assert capture.configured_method() == "dxgi"
+
+
+# --- Eyes on a grabber ---------------------------------------------------------------------------------
+
+class RecordingScreen:
+    """A screen whose shots record how they were asked for."""
+
+    def __init__(self, clock: Clock):
+        self.clock, self.asked = clock, []
+        self.bgra = np.zeros((1080, 1920, 4), np.uint8)
+        self.bgra[150:156, 100:106] = (40, 230, 240, 255)  # her yellow minimap dot (BGR)
+        self.bgra[1062:1066, 707:800] = (30, 30, 220, 255)  # some HP left
+
+    def shot(self, area, after=None, at=None):
+        self.asked.append((after, at))
+        if at is not None:
+            self.clock.now = max(self.clock.now, at)
+        from gamelab.analysis.bench import SavedShot
+        return SavedShot(self.bgra, area)
+
+
+class GameEyes(Eyes):
+    def _client_area(self):
+        return dict(AREA)
+
+    def _to_front(self):
+        pass
+
+
+def test_a_glance_takes_both_boxes_from_one_shot_at_the_old_pace(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(eyes_module.time, "monotonic", clock)
+    screen = RecordingScreen(clock)
+    eyes = GameEyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object(), screen=screen)
+    dot, hp = eyes.glance()
+    assert dot is not None and 0 < hp < 1 and len(screen.asked) == 1 and screen.asked[0][1] <= clock.now
+    clock.now += 0.03  # the navigator's sleep between glances
+    eyes.glance()
+    assert screen.asked[1] == (None, pytest.approx(100.0 + GLANCE_EVERY_S))
+    clock.now += 1.0  # a glance long after: at once
+    begun = clock.now
+    eyes.glance()
+    assert screen.asked[2][1] <= begun
+
+
+def test_a_look_asks_for_a_frame_shown_after_it_began(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(eyes_module.time, "monotonic", clock)
+    screen = RecordingScreen(clock)
+    eyes = GameEyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object(), screen=screen)
+    full = eyes._capture()
+    assert screen.asked == [(100.0, None)] and full.shape == (1080, 1920, 3) and full.flags.c_contiguous
+    assert eyes.seen_at is not None
+
+
+def test_eyes_share_the_processs_grabber():
+    a = Eyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object())
+    b = Eyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object())
+    assert a.screen is b.screen is capture.shared()

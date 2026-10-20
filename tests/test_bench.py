@@ -41,7 +41,7 @@ def test_saved_frames_go_through_the_capture_path_and_touch_no_window(tmp_path, 
     eyes.show(cv2.cvtColor(full, cv2.COLOR_RGB2BGRA))
     assert np.array_equal(eyes._capture(), full)
     assert eyes.look().tag == ((900 + 36) // 2, (600 + 10) // 2)
-    timer = bench.run(eyes, (100, 100), {"a look": eyes.look}, frames=[("frame", eyes.sct.bgra)], reps=2)
+    timer = bench.run(eyes, (100, 100), {"a look": eyes.look}, frames=[("frame", eyes.screen.bgra)], reps=2)
     assert len(timer.samples["a look"]) == 2 and len(timer.samples["name tag"]) == 2
     assert timer.table()[0].startswith("stage")
 

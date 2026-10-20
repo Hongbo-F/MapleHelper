@@ -4,7 +4,9 @@ key and never brings the game to the front, and it refuses to run unless the gam
 
 Saved frames go through the same capture path as the game's: each is turned back into the BGRA picture a
 screen capture gives, and Eyes converts that as it would a capture. What offline numbers leave out is the
-grab itself: mss waits for the compositor's next frame, 16.7 ms whatever the size of the box.
+grab itself: mss waits for the compositor's next frame, 16.7 ms whatever the size of the box; DXGI desktop
+duplication waits for the next frame the screen shows, and copying the game's 1920x1080 off the graphics
+card takes about 2 ms.
 
 A frame is timed `reps` times in a row (after one look at it that isn't timed), as a run of looks at a
 scene that barely changes from one to the next.
@@ -19,7 +21,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .. import window
+from .. import capture, window
 from ..paths import LAB
 from ..perception.eyes import EXP_TEXT, TAG_BELOW_FEET, Eyes
 from ..perception.hud import EXP_NUMBER, bars
@@ -52,14 +54,26 @@ def load(paths: list[Path]) -> list[tuple[str, np.ndarray]]:
 
 
 class SavedScreen:
-    """Stands in for mss: a grab of a box of the frame on show (`bgra`), a picture of its own like a grab."""
+    """Stands in for the screen (capture.Grabber): shots of the frame on show (`bgra`), at once."""
 
     def __init__(self):
         self.bgra: np.ndarray | None = None
 
-    def grab(self, box: dict[str, int]) -> np.ndarray:
-        x, y = box["left"], box["top"]
-        return np.ascontiguousarray(self.bgra[y:y + box["height"], x:x + box["width"]])
+    def shot(self, area: capture.Area, after: float | None = None, at: float | None = None) -> capture.Shot:
+        return SavedShot(self.bgra, area)
+
+
+class SavedShot(capture.Shot):
+    """Boxes of a saved frame, each a picture of its own like a capture's."""
+
+    def __init__(self, bgra: np.ndarray, area: capture.Area):
+        super().__init__(area, time.monotonic())
+        self.bgra = bgra
+
+    def crops(self, boxes, convert=None):
+        x0, y0 = self.area["left"], self.area["top"]
+        views = [self.bgra[y0 + y:y0 + y + h, x0 + x:x0 + x + w] for x, y, w, h in boxes]
+        return [np.ascontiguousarray(v) if convert is None else convert(v) for v in views]
 
 
 class SavedEyes(Eyes):
@@ -69,13 +83,13 @@ class SavedEyes(Eyes):
         super().__init__("saved frames", tag_template, detector, screen=SavedScreen())
 
     def show(self, bgra: np.ndarray) -> None:
-        self.sct.bgra = bgra
+        self.screen.bgra = bgra
 
     def _to_front(self) -> None:
         pass
 
     def _client_area(self) -> dict[str, int]:
-        h, w = self.sct.bgra.shape[:2]
+        h, w = self.screen.bgra.shape[:2]
         return {"left": 0, "top": 0, "width": w, "height": h}
 
 
@@ -98,10 +112,13 @@ class Timer:
     def count(self, name: str, n: int) -> None:
         self.counts[name] = self.counts.get(name, 0) + n
 
+    def add(self, name: str, seconds: float) -> None:
+        self.samples.setdefault(name, []).append(seconds)
+
     def time(self, name: str, fn: Callable):
         t0 = time.perf_counter()
         out = fn()
-        self.samples.setdefault(name, []).append(time.perf_counter() - t0)
+        self.add(name, time.perf_counter() - t0)
         return out
 
     def table(self) -> list[str]:
@@ -118,6 +135,8 @@ def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDete
     """Each part of a look once, on what `eyes` captures now; then Eyes.look and the questions about it
     (`band`: map units above and below her feet searched for monsters)."""
     full = timer.time("capture (frame as RGB)", eyes._capture)
+    if not isinstance(eyes, SavedEyes):  # live: how long ago the screen showed it
+        timer.add("capture: the frame's age once RGB", time.monotonic() - eyes.seen_at)
     timer.time("HP and MP bars", lambda: bars(full))
     half = timer.time("half size", lambda: cv2.resize(full, (full.shape[1] // SCALE, full.shape[0] // SCALE),
                                                       interpolation=cv2.INTER_AREA))
