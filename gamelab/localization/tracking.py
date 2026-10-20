@@ -14,7 +14,8 @@ A track not seen in a frame:
   when it comes back (`back`);
 - on screen but unseen for MISSING_S: `hidden`. Hit, a monster flinches under its damage numbers and the
   detector loses it for 1-3 s; one back within HIDE_S is the same one;
-- hidden for longer than HIDE_S: `dead`, killed by someone else (`died`, cause "other"): no EXP gain of hers
+- hidden for longer than HIDE_S (counted from her last attack its way, when her throws are told: every hit
+  renews its damage numbers): `dead`, killed by someone else (`died`, cause "other"): no EXP gain of hers
   explains it. Unless it went out of sight right beside another of its kind, or a new one was seen where it
   was meanwhile: in a crowd of one kind, tracks lose their monsters to each other, so such a track is let go
   without a death (`lost in a crowd`).
@@ -61,6 +62,9 @@ EDGE_PX = 24        # half-size px from the play area's side: a new monster this
 SPAWN_NEAR = 60.0   # units: a new monster this close to a spawn point of its kind (on its platform), away from the
                     # screen's edges, spawned there
 STAR_WINDOW = 2.5   # s after a throw's key that a kill or a hit can be its star's (behavior.ledger.STAR_WINDOW)
+HIT_AFTER_S = 1.2   # s after a throw's key that its star may hit at the latest (it leaves 0.52 s after the key and
+                    # flies up to 0.7 s): a monster hidden under her damage numbers stays hidden HIDE_S from then. In
+                    # the simulator's game-like world a slime clawed every 0.85 s hid for 5 s and was taken for dead
 # Units a throw can reach ahead of her: 460 to a body's edge (attack.reach: the farthest hit counted on, and the
 # target is whatever body reaches into the attack's area), so its middle up to about 30 more, and a monster
 # walking in during the half second before the star leaves (a slime killed 417 units off was 470 off at the key).
@@ -372,7 +376,7 @@ class MonsterTracker:
             tr.crowded = tr.crowded or any(
                 o.kind == tr.kind and o.id != tr.id and o.state in (LIVE, DYING) and beside(o.mob, tr.mob)
                 for o in self.tracks.values())
-        if tr.state == HIDDEN and dt > HIDE_S:
+        if tr.state == HIDDEN and t - max(tr.last_seen, self._last_hit(tr)) > HIDE_S:
             if tr.crowded:
                 self.counts["lost in a crowd"] += 1
                 del self.tracks[tr.id]
@@ -400,6 +404,10 @@ class MonsterTracker:
             else:
                 self.counts["gains unexplained"] += 1
         self.gains = left
+
+    def _last_hit(self, tr: Track) -> float:
+        """When her last attack its way could have hit it (none: never)."""
+        return max((th.t + HIT_AFTER_S for th in self.throws if tr.id in th.aimed), default=-1e18)
 
     def _aimed(self, tr: Track, g: float) -> bool:
         if self.throws_known:
