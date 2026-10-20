@@ -794,9 +794,11 @@ def cmd_bench_look(args) -> int:
     timer.count("feed step: monsters re-found", step.counts["re-found"])
     timer.count("... of the re-finds", step.counts["re-finds"])
     timer.count("... that tried the kind's whole set", step.counts["fallbacks"])
+    from .perception import kernels
     where = f"{args.n} live captures" if frames is None else f"{len(frames)} saved frames x {args.reps}"
     print(f"{where}; OpenCV {cv2.__version__}, {cv2.getNumThreads()} threads"
           + ("" if frames is None else "; the grab itself (16.7 ms with mss, about 2 with DXGI) isn't included"))
+    print("C kernels: " + ("in use" if kernels.lib() is not None else f"not in use ({kernels.why}): numpy instead"))
     print("\n".join(timer.table()))
     if frames is None:
         print(eyes.screen.summary())

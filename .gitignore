@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 gamelab/lab/
 .claude/worktrees/
+
+# Native kernels built from gamelab/perception/kernels.c on first use
+gamelab/perception/build/
