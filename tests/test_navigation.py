@@ -650,6 +650,8 @@ def test_a_monster_seen_walking_heads_the_way_it_faces_from_its_first_sighting(m
     from gamelab.localization import monsters
     from gamelab.localization.mapdata import Platform, Segment
     from gamelab.localization.monsters import TURN_SLACK, Tracker
+    assert not monsters.FACING_HEADING  # off by default: keeping clear of monsters went worse in the simulator
+    monkeypatch.setattr(monsters, "FACING_HEADING", True)
     p = Platform(7, [Segment(0, 500, 1000, 500)])
     right, standing, unknown = Tracker().update(10.0, [walker(400, 1), walker(600, 1, "stand"), walker(800)])
     assert (right.heading, right.vx, right.facing) == (1, None, 1)
@@ -668,7 +670,7 @@ def test_a_monster_seen_walking_heads_the_way_it_faces_from_its_first_sighting(m
 
 
 def test_two_of_a_kind_walking_apart_are_told_apart_by_which_way_they_face():
-    from gamelab.localization.monsters import MONSTER_SPEED, Tracker, seen_again
+    from gamelab.localization.monsters import Tracker
     # Two pigs 60 apart walk past each other: a second later each is nearer where the other was.
     a, b = walker(400, 1), walker(460, -1)
     tracker = Tracker()
@@ -676,17 +678,20 @@ def test_two_of_a_kind_walking_apart_are_told_apart_by_which_way_they_face():
     a2, b2 = walker(470, 1), walker(390, -1)  # they've crossed
     ta, tb = tracker.update(11.0, [a2, b2])
     assert (ta.vx, tb.vx) == (70.0, -70.0)  # each matched to itself, not to the other
-    assert seen_again(a, [b2, a2], dt=1.0) is a2 and seen_again(b, [a2, b2], dt=1.0) is b2
     # Not known to be walking: the nearest, as before (each taken for the other, as if they'd hardly moved).
     still_a, still_b = walker(400), walker(460)
     tracker = Tracker()
     tracker.update(10.0, [still_a, still_b])
     ta, tb = tracker.update(11.0, [walker(a2.x), walker(b2.x)])
     assert (ta.vx, tb.vx) == (10.0, -10.0)
-    assert seen_again(still_a, [b2, a2], dt=1.0) is b2
-    # Walking farther than TRACK_SLACK in the time since, it can still be the same one.
-    assert seen_again(a, [walker(400 + 0.9 * MONSTER_SPEED["pig"], 1)], dt=1.0) is not None
-    assert seen_again(still_a, [walker(400 + 0.9 * MONSTER_SPEED["pig"])], dt=1.0) is None
+    # Walking farther than MATCH_DX since the last look, it can still be the same one.
+    tracker = Tracker()
+    tracker.update(10.0, [a])
+    far = walker(400 + 0.9 * tracker.last[1][0].speed, 1)
+    assert tracker.update(11.0, [far])[0].vx > 0
+    tracker = Tracker()
+    tracker.update(10.0, [still_a])
+    assert tracker.update(11.0, [walker(far.x)])[0].vx is None  # not known to be walking: a new one
 
 
 def test_a_walker_that_stopped_is_still_matched_to_itself():

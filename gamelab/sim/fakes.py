@@ -33,6 +33,7 @@ from maplehelper.config import GameKeys
 
 from ..control import client
 from ..localization.mapdata import MapModel
+from ..localization.monsters import FLINCH_S
 from ..localization.pose import GRASS_OVERHANG
 from ..localization.pose import Camera, Localizer
 from ..paths import LAB
@@ -281,7 +282,12 @@ class FakeEyes(Eyes):
                 continue
             w, h = round(2 * m.half / u), round(m.height / u)
             cx, feet = round(her[0] + (mx - x) / u), round(floor + (my - y) / u)
-            mob = Mob(m.kind, cx, feet - h // 2, w, h, 0.9)
+            # Where its feet are, which way it faces and what it's doing, as the templates tell (a dying
+            # one's frames aren't among them): walking, standing, or flinching after a hit.
+            way, walking = m.faces(self.world.t) if alive else (m.facing, False)
+            pose = ("hit1" if m.hit_at is not None and self.world.t - m.hit_at < FLINCH_S
+                    else "move" if walking else "stand") if alive else ""
+            mob = Mob(m.kind, cx, feet - h // 2, w, h, 0.9, float(cx), float(feet), way, pose)
             if not (0 <= cx - w // 2 and cx + w // 2 <= FRAME[1]
                     and 0 <= mob.y - h // 2 and mob.y + h // 2 <= PLAY_BOTTOM):
                 continue

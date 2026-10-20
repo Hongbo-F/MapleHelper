@@ -1097,3 +1097,28 @@ def test_a_trip_stepped_one_pass_at_a_time_is_the_same_trip(name, monkeypatch):
     want = scenarios.as_json(scenarios.run(name))
     monkeypatch.setattr(Navigator, "go", _stepped_go)
     assert scenarios.as_json(scenarios.run(name)) == want
+
+
+def test_a_simulated_monster_faces_the_way_it_last_walked():
+    """What FakeEyes reports as a monster's facing: the way it walks, turned at its platform's ends, and
+    while it stands, the way it last walked."""
+    import random
+
+    from gamelab.localization.mapdata import Platform, Segment
+    m = world_mod.SimMonster(0, "Pig", "pig", Platform(0, [Segment(0, 500, 400, 500)]), 200.0, random.Random(3),
+                             speed=125.0)
+    m.start(0.0, 200.0)
+    walked = stood = 0
+    last = None
+    for i in range(1, 2000):
+        t = i * 0.01
+        x = m.at(t)
+        way, walking = m.faces(t)
+        if last is not None and walking and abs(x - last) > 0.5 and m.lo + 2 < x < m.hi - 2:  # not mid-bounce
+            assert (x > last) == (way > 0)
+            walked += 1
+        if not walking:
+            assert way == m.facing and way in (1, -1)
+            stood += 1
+        last = x
+    assert walked > 300 and stood > 300

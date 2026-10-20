@@ -423,6 +423,12 @@ class SimMonster:
                 self.anim0 = self.t0
         return self._fold(t)[0]
 
+    def faces(self, t: float) -> tuple[int, bool]:
+        """Which way it faces at t (+1 right, -1 left), and whether it's walking then (standing or flinching:
+        the way it faced, `facing`). `at(t)` first."""
+        way = self._fold(t)[1]
+        return way or self.facing, bool(way)
+
     def y(self, x: float) -> float:
         return self.platform.y_at(x)
 

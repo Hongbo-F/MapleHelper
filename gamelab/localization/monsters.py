@@ -54,12 +54,16 @@ MATCH_WITHIN = 2.0   # s: an older last look is no help
 MATCH_DX = 90        # map units a monster may have moved since, on the same platform
 STILL_DX = 6         # ... and moved at most this: standing still (or turning)
 MIN_SPEED_DT = 0.2   # s between looks before its speed is worth measuring
-# A monster seen walking (a move frame matched it) heads the way it faces, when looks can't tell yet (seen for
-# the first time, or the last look too recent): its reach spreads forward, and only TURN_SLACK back. Offline,
-# the facing of the template that matched was the way the monster moved in 192 of 199 stretches of 0.6 s
-# where it walked (`bodies` on two recordings with the camera still; the misses at turns). Not checked in
-# game: False goes back to waiting for a second look.
-FACING_HEADING = True
+# True: a monster seen walking (a move frame matched it) heads the way it faces when looks can't tell yet
+# (seen for the first time, or the last look too recent), so the move planner spreads its reach forward and
+# only TURN_SLACK back. The facing itself is right: the template's was the way the monster moved in 192 of
+# 199 stretches of 0.6 s where it walked (`bodies` on two recordings with the camera still; the misses at
+# turns). But monsters turn, and at 125 units/s TURN_SLACK is 0.2 s of walking back: in the simulator, with
+# its monsters showing which way they face, keeping clear of them went worse with it (nav_monsters_long_way
+# on 16 seeds: 11 arrived against 13, in 114 s against 85 on average, touched 28.5 times against 19.8; rest
+# trips with --rest-avoid 1.20 touches against 1.15). So off, until the planner's turn allowance is worked out
+# per second; fights don't use it (no difference in the tour or the hunt loop).
+FACING_HEADING = False
 # Speeds kept per kind (Tracker.speeds, for `nav`'s summary), the latest: one a monster a look, so kept
 # all, a look every frame would add about 110,000 an hour (4 MB); 400 is a few minutes' worth even at 1.4
 # looks a second, and enough for the summary's median and 90th percentile.
@@ -133,32 +137,23 @@ def same(a: Monster, b: Monster) -> bool:
     return a.kind == b.kind and abs(a.x - b.x) < TRACK_SLACK and abs(a.y - b.y) < SAME_DY
 
 
-def walked(m: Monster, dt: float | None) -> float:
-    """How far monster `m` can have walked `dt` s after it was seen, the way it faced (+ right), if it was
-    seen walking: at its kind's speed; else 0 (also without `dt`)."""
-    if dt is None or m.pose != "move" or not m.facing:
-        return 0.0
-    return m.facing * MONSTER_SPEED.get(m.kind, DEFAULT_SPEED) * dt
-
-
 def off_course(x: float, start: float, go: float) -> tuple[float, float]:
     """How far map x is from where a monster seen at `start` can be after walking up to `go` units (+ right,
     - left; it may have stopped on the way), then how far from where it would be had it walked all the way:
-    what sightings are matched by, the least first. Two walking past each other are each matched to
+    what the tracker matches sightings by, the least first. Two walking past each other are each matched to
     themselves, and one that stopped too. With `go` 0, the nearest to `start`."""
     lo, hi = min(start, start + go), max(start, start + go)
     return max(lo - x, 0.0, x - hi), abs(x - start - go)
 
 
-def seen_again(m: Monster, now: list[Monster], dt: float | None = None) -> Monster | None:
-    """The monster in `now` that is `m` seen again `dt` s later, if any: of those that can be (`same`, or
-    within TRACK_SLACK of the way it was walking), the nearest to where it was, or, seen walking, to the way
-    it was going (`walked`). Two of a kind close together, walking apart, are told apart by which way they
-    faced."""
-    go = walked(m, dt)
-    near = [o for o in now if o.kind == m.kind and abs(o.y - m.y) < SAME_DY
-            and off_course(o.x, m.x, go)[0] < TRACK_SLACK]
-    return min(near, key=lambda o: off_course(o.x, m.x, go)) if near else None
+def seen_again(m: Monster, now: list[Monster]) -> Monster | None:
+    """The monster in `now` that is `m` seen again, if any (the nearest that can be). Not by the way it
+    faced, as the tracker does: these are the monsters she threw at (fight.FightState), and a monster hit
+    flinches and is knocked back rather than walking on. Matched to the way it faced, for up to the 1.8 s
+    one stays hidden under its damage numbers, the hunt loop in the simulator lost 6.4% of its EXP a minute
+    (20 seeds; better on 7), though the tour gained 4.0%."""
+    near = [o for o in now if same(o, m)]
+    return min(near, key=lambda o: abs(o.x - m.x)) if near else None
 
 
 def dead_one(aimed: list[Monster], now: list[Monster], her_x: float) -> Monster | None:
