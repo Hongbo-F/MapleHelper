@@ -589,3 +589,37 @@ def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(mode
     cut, sent = nav._watch(running, 1.0, by_y(model, 300, 100).id, send=None, st=SimpleNamespace())
     assert cut.startswith("hit") and sent == [walk]
     assert calls["cancel"] == ["running", "queued"] and calls["wait"] == ["running"]  # the queued one withdrawn
+
+
+def test_a_look_searches_for_ropes_where_the_maps_ropes_can_show(model, tmp_path, monkeypatch):
+    """Ropes are looked for only around where her minimap dot puts the map's ropes on screen (ROPE_PAD):
+    she's placed by the rope there as with the whole screen searched, and a rope-coloured post elsewhere
+    isn't searched."""
+    import numpy as np
+
+    from gamelab import paths
+    from gamelab.analysis import bench
+    from gamelab.localization import senses
+    rng = np.random.default_rng(0)
+    tag = np.full((20, 72), 40, np.uint8)
+    tag[5:15, 4:68] = np.where(rng.random((10, 64)) < 0.45, 235, 40)
+    np.save(tmp_path / "tag.npy", tag)
+    monkeypatch.setattr(paths, "TAG_FULL", tmp_path / "tag.npy")
+    full = np.full((1080, 1920, 3), (90, 150, 230), np.uint8)  # sky
+    full[590:610, 924:996] = tag[..., None]                  # her name tag, centre (960, 600)
+    dot = Localizer(model).to_dot(500, 500)                  # she's on C at x 500 ...
+    full[round(dot[1]) - 2:round(dot[1]) + 3, round(dot[0]) - 2:round(dot[0]) + 3] = (255, 230, 40)  # ... her dot
+    for x in (300, 1243):  # the map's rope at 700 shows at about 1239; nothing is at 300 on the map
+        full[200:900, x - 2:x + 2] = (200, 180, 140)
+    bgra = np.dstack([full[..., ::-1], np.full((1080, 1920), 255, np.uint8)])
+
+    def look():
+        eyes = bench.SavedEyes(tag[::2, ::2])
+        eyes.show(bgra)
+        return senses.Senses(eyes, model, (100, 100)).look(mobs=False)
+
+    near = look()
+    monkeypatch.setattr(senses, "ROPE_PAD", None)
+    whole = look()
+    assert [r.x for r in near.ropes] == [1243] and [r.x for r in whole.ropes] == [300, 1243]
+    assert near.how == whole.how == "rope" and near.where.x == whole.where.x == pytest.approx(700 - 283 / 1.40625)

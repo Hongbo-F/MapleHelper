@@ -13,6 +13,10 @@ MIN_ROPE_LENGTH = 90   # px of a rope that must show for it to count
 MAX_ROPE_WIDTH = 12    # px wide at most ...
 MIN_ROPE_FILL = 1.5    # ... and on average at least (its area over its length)
 ROPE_GAP = (6, 40)     # pieces of one rope: at most this far apart across (centres) and down (px)
+# A rope's light strands (greyish beige): red, green and blue each in these ranges (from, to) ...
+ROPE_RGB = ((140, 235), (125, 215), (95, 180))
+ROPE_RED_OVER_BLUE = (20, 70)  # ... red this much above blue ...
+ROPE_RED_GREEN = 30            # ... and red and green at most this far apart
 
 
 def ground_extent(frame: np.ndarray, x: int, floor_y: int) -> tuple[int, int]:
@@ -48,23 +52,28 @@ class ScreenRope:
 
 def rope_mask(rgb: np.ndarray) -> np.ndarray:
     """Pixels with the colour of a rope's light strands (greyish beige)."""
-    r, g, b = (rgb[..., i].astype(np.int16) for i in range(3))
-    return ((r >= 140) & (r <= 235) & (g >= 125) & (g <= 215) & (b >= 95) & (b <= 180)
-            & (r - b >= 20) & (r - b <= 70) & (np.abs(r - g) <= 30))
+    return _rope_pixels(rgb) > 0
 
 
-def find_ropes(full: np.ndarray) -> list[ScreenRope]:
-    """Ropes and ladders: long, thin, vertical runs of rope colour (strands may break up a little)."""
-    h = int(full.shape[0] * ROPE_ROWS)
-    mask = rope_mask(full[:h]).astype(np.uint8)
-    # Join the twisted strands vertically, then keep only tall, narrow shapes.
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((31, 1), np.uint8))
-    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+def _rope_pixels(rgb: np.ndarray) -> np.ndarray:
+    """rope_mask as OpenCV makes it, 255 where it's set (uint8): 6 ms over the screen against 16 with numpy's
+    int16 tests, and the same pixels. Red minus blue saturates at 0 below zero, which fails its test as a
+    negative difference would."""
+    r, g, b = cv2.split(rgb)
+    (r0, r1), (g0, g1), (b0, b1) = ROPE_RGB
+    colour = cv2.inRange(rgb, (r0, g0, b0), (r1, g1, b1))
+    red_over_blue = cv2.inRange(cv2.subtract(r, b), *ROPE_RED_OVER_BLUE)
+    red_green = cv2.inRange(cv2.absdiff(r, g), 0, ROPE_RED_GREEN)
+    return cv2.bitwise_and(cv2.bitwise_and(colour, red_over_blue), red_green)
+
+
+def find_ropes(full: np.ndarray, columns: list[tuple[int, int]] | None = None) -> list[ScreenRope]:
+    """Ropes and ladders: long, thin, vertical runs of rope colour (strands may break up a little).
+    `columns`: only these ranges of x (from, to; full-size px) are searched; None: the whole screen."""
+    h, width = int(full.shape[0] * ROPE_ROWS), full.shape[1]
     ropes = []
-    for x, y, w, rh, area in stats[1:count]:
-        if rh >= MIN_ROPE_LENGTH and w <= MAX_ROPE_WIDTH and area >= rh * MIN_ROPE_FILL:
-            ropes.append(ScreenRope(int(x + w // 2), int(y), int(y + rh)))
+    for x0, x1 in [(0, width)] if columns is None else _spans(columns, width):
+        ropes += _ropes_in(full[:h, x0:x1], x0)
     # One rope can split into pieces where something passes in front: merge pieces in one column.
     ropes.sort(key=lambda r: (r.x, r.top))
     merged: list[ScreenRope] = []
@@ -75,3 +84,27 @@ def find_ropes(full: np.ndarray) -> list[ScreenRope]:
         else:
             merged.append(rope)
     return merged
+
+
+def _ropes_in(strip: np.ndarray, x0: int) -> list[ScreenRope]:
+    """The ropes in a strip of the screen whose left edge is at x0."""
+    mask = _rope_pixels(strip)
+    # Join the twisted strands vertically, then keep only tall, narrow shapes.
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((31, 1), np.uint8))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    return [ScreenRope(int(x0 + x + w // 2), int(y), int(y + rh)) for x, y, w, rh, area in stats[1:count]
+            if rh >= MIN_ROPE_LENGTH and w <= MAX_ROPE_WIDTH and area >= rh * MIN_ROPE_FILL]
+
+
+def _spans(columns: list[tuple[int, int]], width: int) -> list[tuple[int, int]]:
+    """Ranges of x on a screen this wide, overlapping ones joined (so a rope in two is found once)."""
+    spans: list[tuple[int, int]] = []
+    for x0, x1 in sorted((max(0, int(a)), min(width, int(b))) for a, b in columns):
+        if x1 <= x0:
+            continue
+        if spans and x0 <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], x1))
+        else:
+            spans.append((x0, x1))
+    return spans

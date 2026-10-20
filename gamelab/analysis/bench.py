@@ -121,8 +121,11 @@ def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDete
     timer.time("name tag: whole play area", lambda: eyes.name_tag.search(full))
     if tag is not None:
         timer.time("ground under her", lambda: ground_extent(half, tag[0], tag[1] - TAG_BELOW_FEET))
-    timer.time("minimap dot", lambda: her_dot(full))
-    timer.time("ropes (whole screen)", lambda: find_ropes(full))
+    dot = timer.time("minimap dot", lambda: her_dot(full))
+    timer.time("ropes: whole screen", lambda: find_ropes(full))
+    if eyes.rope_columns is not None:  # Senses gives where the map's ropes can show
+        columns = eyes.rope_columns(dot, tag)
+        timer.time("ropes: where the map's can show", lambda: find_ropes(full, columns))
     x0, y0, x1, y1 = EXP_NUMBER
     timer.time("EXP number", lambda: full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
     timer.time("Lie Detector check (the player's)", lambda: spotter.seen(full))

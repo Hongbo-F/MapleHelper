@@ -3,6 +3,7 @@ monster detector on pictures."""
 
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 from PIL import Image
@@ -14,7 +15,7 @@ from gamelab.perception.hud import BAR_ROW, HP_BAR, bars, hp_fill, touch_popup
 from gamelab.perception.minimap import MINIMAP_BOX, dot_in_box
 from gamelab.perception.nametag import FULL_EVERY, NameTag
 from gamelab.perception.mobs import ASSETS, MobDetector
-from gamelab.perception.terrain import ground_extent
+from gamelab.perception.terrain import ROPE_GAP, ScreenRope, find_ropes, ground_extent, rope_mask
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SKY = (60, 140, 230)
@@ -109,6 +110,77 @@ def test_name_tag_whole_search_every_so_often(tmp_path, monkeypatch):
     for _ in range(2 * FULL_EVERY):
         assert finder.find(full) == centre((900, 600), tag)
     assert boxes.count(None) == 3  # the first look, and every FULL_EVERY-th
+
+
+def every_colour():
+    """Every RGB colour: 16 pictures of 16 reds x 256 greens x 256 blues."""
+    g, b = np.meshgrid(np.arange(256, dtype=np.uint8), np.arange(256, dtype=np.uint8), indexing="ij")
+    for r0 in range(0, 256, 16):
+        picture = np.empty((16 * 256, 256, 3), np.uint8)
+        picture[..., 0] = np.repeat(np.arange(r0, r0 + 16, dtype=np.uint8), 256)[:, None]
+        picture[..., 1] = np.tile(g, (16, 1))
+        picture[..., 2] = np.tile(b, (16, 1))
+        yield picture
+
+
+def numpy_rope_mask(rgb):
+    """terrain.rope_mask as it was: numpy's tests on int16 copies."""
+    r, g, b = (rgb[..., i].astype(np.int16) for i in range(3))
+    return ((r >= 140) & (r <= 235) & (g >= 125) & (g <= 215) & (b >= 95) & (b <= 180)
+            & (r - b >= 20) & (r - b <= 70) & (np.abs(r - g) <= 30))
+
+
+def numpy_find_ropes(full):
+    """terrain.find_ropes as it was, on the numpy mask, over the whole screen."""
+    mask = numpy_rope_mask(full[:int(full.shape[0] * 0.9)]).astype(np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((31, 1), np.uint8))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    ropes = sorted((ScreenRope(int(x + w // 2), int(y), int(y + rh)) for x, y, w, rh, area in stats[1:count]
+                    if rh >= 90 and w <= 12 and area >= rh * 1.5), key=lambda r: (r.x, r.top))
+    merged = []
+    for rope in ropes:
+        last = merged[-1] if merged else None
+        if last and abs(last.x - rope.x) <= ROPE_GAP[0] and rope.top - last.bottom <= ROPE_GAP[1]:
+            merged[-1] = ScreenRope((last.x + rope.x) // 2, last.top, max(last.bottom, rope.bottom))
+        else:
+            merged.append(rope)
+    return merged
+
+
+ROPE = (200, 180, 140)  # a rope's light strands
+
+
+def with_ropes(*ropes: tuple[int, int, int]) -> np.ndarray:
+    """The tiled scene with twisted ropes drawn at x from top to bottom (full-size px)."""
+    full = tiled_scene()
+    for x, top, bottom in ropes:
+        for y in range(top, bottom, 8):  # strands crossing: 6 px of rope, 2 of gap, 4 then 3 px wide
+            full[y:y + 6, x - 2:x + 2] = ROPE
+            full[y + 3:y + 6, x - 1:x + 2] = (150, 130, 100)
+    return full
+
+
+def test_rope_mask_matches_numpys_on_every_colour():
+    for picture in every_colour():
+        assert np.array_equal(rope_mask(picture), numpy_rope_mask(picture))
+    scene = tiled_scene()
+    assert np.array_equal(rope_mask(scene[:, 7:900]), numpy_rope_mask(scene[:, 7:900]))  # a strip, not contiguous
+
+
+def test_ropes_on_the_whole_screen_as_before():
+    for full in (tiled_scene(), with_ropes((300, 100, 700), (705, 50, 400), (705, 430, 800), (1245, 200, 900))):
+        assert find_ropes(full) == numpy_find_ropes(full)
+    assert [r.x for r in find_ropes(full)] == [300, 705, 1245]  # the rope broken at 400-430 is one
+
+
+def test_ropes_searched_only_in_columns():
+    full = with_ropes((300, 100, 700), (705, 50, 400), (705, 430, 800), (1245, 200, 900))
+    whole = find_ropes(full)
+    near = find_ropes(full, [(1190, 1300)])
+    assert near == [r for r in whole if r.x == 1245]
+    assert find_ropes(full, [(1190, 1300), (1250, 1350), (650, 760)]) == [r for r in whole if r.x in (705, 1245)]
+    assert find_ropes(full, [(-100, -10), (1950, 2000)]) == find_ropes(full, []) == []
 
 
 def test_bars_read_the_fill_fraction():

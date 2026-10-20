@@ -9,10 +9,20 @@ the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is 
 from collections.abc import Callable
 
 from ..perception.eyes import TAG_BELOW_FEET, Eyes
-from ..screen import SCALE
+from ..perception.terrain import MAX_ROPE_WIDTH
+from ..screen import SCALE, SCREEN_SCALE
 from .mapdata import MapModel
-from .pose import Camera, Localizer, refine
+from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
 from .scene import Scene, find_loot
+
+# Full-size px either side of where her minimap dot puts each of the map's ropes on screen that a look
+# searches for ropes: all `pose.rope_x` can use (a rope within ROPE_MATCH_PX of there, up to MAX_ROPE_WIDTH
+# wide). 8.8 ms a look (median, bench-look), against 13.9 for the whole screen. On 17 saved frames the
+# ropes seen were 0-20 px from there (her dot 0-14.5 map units off), the same ropes as on the whole
+# screen, and she was placed the same. The mover's line-up on a rope looks 70 px around where the map
+# puts it from her refined position: the same ropes while her dot is within about 30 units. None
+# searches the whole screen.
+ROPE_PAD: int | None = ROPE_MATCH_PX + MAX_ROPE_WIDTH
 
 
 class Senses:
@@ -22,7 +32,8 @@ class Senses:
         self.localizer = Localizer(model)
         self.camera = Camera(model.bounds)
         self.listeners: list[Callable[[Scene], None]] = []
-        eyes.want_ropes = True  # ropes in view pin down her x (+~25 ms per look)
+        eyes.want_ropes = True  # ropes in view pin down her x
+        eyes.rope_columns = self._rope_columns
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False) -> Scene:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
@@ -40,6 +51,17 @@ class Senses:
         for listener in self.listeners:
             listener(s)
         return s
+
+    def _rope_columns(self, dot: tuple[float, float] | None, tag: tuple[int, int] | None) -> list[tuple[int, int]] | None:
+        """Where a look searches for ropes (ranges of x, full-size px): around where her dot puts the map's
+        ropes on screen (ROPE_PAD). With no dot or no name tag, ropes can't place her: nowhere."""
+        if ROPE_PAD is None:
+            return None
+        if dot is None or tag is None:
+            return []
+        where, her_x = self.localizer.where_dot(dot), SCALE * tag[0]
+        xs = (her_x + (rope.x - where.x) * SCREEN_SCALE for rope in self.model.ropes)
+        return [(int(x) - ROPE_PAD, int(x) + ROPE_PAD + 1) for x in xs]
 
     def _place_her(self, s: Scene) -> None:
         """Her map position (`s.where`, `s.how`) from her minimap dot, refined on screen. Then, with her

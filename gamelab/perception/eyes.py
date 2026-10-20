@@ -8,6 +8,7 @@ frame through Eyes (`monsters`, `items`, `bar`) instead of reading pixels itself
 """
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import cv2
@@ -67,7 +68,11 @@ class Eyes:
         self._loot = loot
         self.sct = screen or mss.MSS()
         self.name_tag = NameTag(tag_template, paths.TAG_FULL)
-        self.want_ropes = False  # Senses turns this on (+~25 ms per look)
+        self.want_ropes = False  # Senses turns this on
+        # Where ropes are looked for, from her minimap dot and her name tag's centre: ranges of x on screen
+        # (full-size px; None: the whole screen). Senses works them out from the map's ropes.
+        self.rope_columns: Callable[[tuple[float, float] | None, tuple[int, int] | None],
+                                    list[tuple[int, int]] | None] | None = None
 
     def look(self) -> Observation:
         """HP/MP, her name tag, the ground under her and her minimap dot; no monsters (`monsters`)."""
@@ -76,10 +81,13 @@ class Eyes:
         frame = cv2.resize(full, (full.shape[1] // SCALE, full.shape[0] // SCALE), interpolation=cv2.INTER_AREA)
         tag = self.name_tag.find(full)
         ground = ground_extent(frame, tag[0], tag[1] - TAG_BELOW_FEET) if tag else None
+        dot = her_dot(full)
+        ropes = []
+        if self.want_ropes:
+            ropes = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None)
         x0, y0, x1, y1 = EXP_NUMBER
-        return Observation(t=time.monotonic(), frame=frame, tag=tag, hp=hp, mp=mp, ground=ground, dot=her_dot(full),
-                           ropes=find_ropes(full) if self.want_ropes else [],
-                           exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
+        return Observation(t=time.monotonic(), frame=frame, tag=tag, hp=hp, mp=mp, ground=ground, dot=dot,
+                           ropes=ropes, exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from two small captures (a few ms): for watching a plan run."""
