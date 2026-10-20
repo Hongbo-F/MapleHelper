@@ -6,7 +6,8 @@ The models, each with fixed lags:
 - before: what the planner and the simulator modelled before motion.body (physics.py's constants then):
   standing, she runs at full speed RUN_LAG after the arrow; let go, she runs on, then brakes evenly;
   in the air her sideways speed never changes;
-- steps: that model with physics.py's constants now (the simulator's, until it runs on the engine);
+- steps: that model with physics.py's constants now (how the simulator moved her until it ran on the
+  engine);
 - engine: motion.body.replay, with the median lags (body.Lags). `--fit` adds the engine with its lags
   fitted to each recording, which shows what is left once the lags' spread is taken out.
 
@@ -134,8 +135,8 @@ NOW = Steps(walk=physics.WALK_SPEED, run_lag=physics.RUN_LAG, jump_lag=physics.J
 
 
 def steps(events, until: float, m: Steps, *, start: float = -0.1, dt: float = 0.001, floors=()) -> np.ndarray:
-    """The step model's (t, x, y) under a key timeline on flat ground, as the simulator moved her (sim/world:
-    _ground, _land, the arc with no air control)."""
+    """The step model's (t, x, y) under a key timeline on flat ground, as the simulator moved her before it
+    ran on the engine (sim/world's _ground and _land then, the arc with no air control)."""
     decel = m.walk ** 2 / (2 * m.land_slide)
     release_lag = (m.stop_run - m.land_slide) / m.walk
     jumps = sorted(t + m.jump_lag for t, a, down in events if a == "jump" and down)

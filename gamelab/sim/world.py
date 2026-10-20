@@ -1,17 +1,27 @@
 """A deterministic stand-in for the game: her body, the monsters, stars, drops, HP and EXP on a real map
 (mapdata.MapModel), in map units, driven by key events on a fake clock (see sim.fakes).
 
-The physics are the ones gamelab plans with, so a plan that is right on paper works here too:
+Her body moves as the game moves it, by motion.body's engine (the one the planner's constants come from),
+on the world's 5 ms tick:
 
-- on the ground an arrow runs her at physics.WALK_SPEED after a standing start of physics.RUN_LAG; let go,
-  she slides physics.STOP_RUN on over physics.STOP_S (a short input lag, then braking); walking past a
-  platform's end she falls, unless a wall rises there;
-- the jump key lifts her off physics.JUMP_LAG later into physics.fly's arc (an exact copy of it, `trajectory`,
-  without its cache); with down held it drops her through the platform physics.DROP_LAG later; a jump key
-  in the air is ignored, and so is one inside the attack lock;
+- the game sees an arrow pressed body.Lags.on (60 ms) after its key and let go Lags.off (72 ms) after,
+  so a tap is as long as the game sees it (12 ms longer), and she turns when it sees the press; of the
+  arrows it sees held, the one pressed last counts;
+- on the ground the arrow it sees speeds her up at 1400 units/s² to physics.WALK_SPEED (turning her round
+  the same way), and none brakes her at 800 (body.ground_step); walking past a platform's end she falls,
+  unless a wall rises there;
+- the jump key lifts her off Lags.jump (67 ms) later, if she's on the ground then, with the kick: below
+  0.8 × her speed toward the arrow it sees, she gets that much more (body.takeoff). With down held it
+  drops her through the platform physics.DROP_LAG later. A jump key that comes inside the attack lock is
+  ignored, and so is one the game takes while she's in the air;
+- in the air she flies body.fly's arc with the arrow the game sees, flown again from where she is when
+  that arrow changes: the opposite one brakes her at 200 units/s², the one she flies with does nothing,
+  and none drags her at 1 (100 once she falls at the cap). She lands with the speed she has and slides on,
+  unless an attack is playing: that stops her (jump-backs and jump-throws slid 1.4-2.9 units in game);
 - up held at a rope's foot, or anywhere along it in the air, grabs it; up climbs at flow.ROPE_SPEED onto
   the platform at its top (a short climb-over, flow.CLIMB_OVER), down climbs down at physics.CLIMB_SPEED
-  and lets go at its bottom; down on a rope's top grabs it from above;
+  and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
+  her off it sideways (ROPE_JUMP);
 - monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded). A
   touch leaves her a second's invulnerability; she evades half of them (a thief's "MISS": nothing
   else happens), the others take 1.4% HP (the median of the lab's 118 logged hits) and knock her back
@@ -63,29 +73,28 @@ from ..attack import reach
 from ..control.actions import STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import MapModel, Platform, Rope
-from ..motion import flow
-from ..motion.physics import (CLIMB_SPEED, DROP_LAG, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED,
-                              LAND_SLIDE, ROPE_REACH, RUN_LAG, STOP_RUN, WALK_SPEED)
+from ..motion import body, flow
+from ..motion.physics import CLIMB_SPEED, DROP_LAG, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE, WALK_SPEED
 from ..perception.kinds import kind_of
 
-TICK_MS = 5
-FLY_DT = 0.004           # physics.fly's step: the arc is integrated exactly as the planner does
-# Her lags and slides are physics.py's (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, LAND_SLIDE), which come from
-# motion.body's engine. Braking with no arrow held: she slides LAND_SLIDE from full speed (as on landing,
-# at 800 units/s²). An arrow let go still counts for RELEASE_LAG (72 ms), so she stops STOP_RUN on in all
-# (~0.26 s). With the run lag that is the engine's walk for holds of 95 ms or more (7.7 + 0.149 t units for
-# t ms); shorter ones it sees as quickly started and braked (1925 (t/1000 + 0.012)², body.hold_distance),
-# here a tap under 41 ms doesn't move her and a longer one moves her at least 14 units.
-DECEL = WALK_SPEED ** 2 / (2 * LAND_SLIDE)
-RELEASE_LAG = (STOP_RUN - LAND_SLIDE) / WALK_SPEED
+TICK_MS = 5              # the world's tick, which is also the engine's step (body.TICK)
 CLIMB_UP = flow.ROPE_SPEED
 CLIMB_DOWN = CLIMB_SPEED
-CLIMB_OVER = flow.CLIMB_OVER
+# A climb ends in an animation onto the platform at the rope's top: flow.CLIMB_OVER is how long after the
+# top she makes a standing start, which the game then sees an arrow already held for Lags.on later. So she
+# stands still for both (0.29 s), and with the arrow held from before the top is running at full speed 0.35
+# s after it, as in the two climbs traced on the minimap (flow).
+CLIMB_OVER = flow.CLIMB_OVER + LAGS.on
 ARMS = ROPE_REACH - JUMP_HEIGHT  # she grabs a rope this far above her feet
 GRAB_X = 10.0            # ... within this of its x
 ROPE_TOP_REACH = 15.0    # down grabs a rope whose top is within this of her platform
 REGRAB_AFTER = 0.3       # s after leaving a rope before up grabs one again
-ROPE_JUMP_VY = 220.0     # jumping off a rope sideways: next to no lift
+# Jumping off a rope sideways: the decompile's 1.3 × her walking speed out and half a jump's speed up
+# (194 and 277 units/s: Shoe.rope_vx, rope_vy). The one rope jump traced on the minimap (`ropejump`) went
+# 178 ± 18 units/s sideways and rose about 16-20 units, which fits these better than what the simulator
+# used before (149 out, 220 up: a 12-unit rise), by about 2 sd: weak, so False puts those back.
+ROPE_JUMP_SHOE = True
+ROPE_JUMP = ((SHOE.rope_vx * SHOE.vmax, SHOE.rope_vy * SHOE.vjump) if ROPE_JUMP_SHOE else (WALK_SPEED, 220.0))
 HER_HALF = flow.HER_HALF
 HER_HEIGHT = 55.0
 STAR_DELAY = STAR_DELAY_MS / 1000
@@ -155,69 +164,6 @@ class Realism:
     potions: int | None = None   # potions she has (None: endless)
     lock_arrows: bool = False    # arrows don't move her during the attack lock (unmeasured in game;
                                  # Actions.walk waits the lock out, the default world lets her walk)
-
-
-@dataclass
-class Flight:
-    """An arc through the air (physics.fly's integration, sampled): where it lands and when."""
-    platform: Platform | None
-    land_x: float
-    seconds: float
-    path: list[tuple[float, float]]
-
-    def at(self, tau: float) -> tuple[float, float]:
-        i = tau / FLY_DT
-        k = min(int(i), len(self.path) - 1)
-        if k + 1 >= len(self.path):
-            return self.path[-1]
-        f = i - k
-        (x0, y0), (x1, y1) = self.path[k], self.path[k + 1]
-        return x0 + (x1 - x0) * f, y0 + (y1 - y0) * f
-
-
-_WALLS: dict[int, tuple] = {}
-
-
-def _walls(model: MapModel) -> tuple[list[float], list[tuple[float, float]]]:
-    key = id(model)
-    if key not in _WALLS:
-        ws = sorted((w for w in model.walls if w.x1 == w.x2), key=lambda w: w.x1)
-        _WALLS[key] = (model, [w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws])
-    return _WALLS[key][1], _WALLS[key][2]
-
-
-def trajectory(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
-               limit: float = 4.0, sides: tuple[float, float] | None = None) -> Flight:
-    """physics.fly, step for step (the same integration, so she lands exactly where the planner says),
-    keeping the path. Not cached. `sides`: the map's left and right limits, which stop her like walls
-    (physics.fly has none: the planner never jumps at the map's edges)."""
-    dt = FLY_DT
-    wall_xs, wall_ys = _walls(model)
-    reach = abs(vx) * limit + 1
-    top = y - (vy * vy / (2 * GRAVITY) if vy < 0 else 0) - 1
-    plats = [q for q in model.platforms if q is not skip and q.right >= x - reach and q.left <= x + reach
-             and max(q.y_at(q.left), q.y_at(q.right)) >= top]
-    t, path = 0.0, [(x, y)]
-    while t < limit:
-        nx, ny, nvy = x + vx * dt, y + vy * dt, min(vy + GRAVITY * dt, FALL_SPEED)
-        if vx:
-            lo, hi = (x, nx) if nx >= x else (nx, x)
-            i = bisect.bisect_left(wall_xs, lo)
-            while i < len(wall_xs) and wall_xs[i] <= hi:
-                if wall_ys[i][0] <= ny <= wall_ys[i][1]:
-                    nx, vx = x, 0.0
-                    break
-                i += 1
-            if sides is not None and not sides[0] <= nx <= sides[1]:
-                nx, vx = min(max(nx, sides[0]), sides[1]), 0.0
-        if (vy > 0 or nvy > 0) and t > 0 and ny >= y:
-            for q in plats:
-                if q.covers(nx) and y <= q.y_at(nx) <= ny + 0.01:
-                    path.append((nx, q.y_at(nx)))
-                    return Flight(q, nx, t + dt, path)
-        x, y, vy, t = nx, ny, nvy, t + dt
-        path.append((x, y))
-    return Flight(None, x, t, path)
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -350,17 +296,20 @@ class World:
         self.plat: Platform | None = p
         self.last_plat: Platform = p    # the platform she last stood on: its foothold group's walls stop stars
         self.rope: Rope | None = None
-        self.flight: Flight | None = None
-        self.flight_ms = 0
+        self.flight: body.Flight | None = None  # in the air: the arc she's on (body.fly, with its path) ...
+        self.flight_ms = 0              # ... from this tick (its first point) ...
+        self.flight_arrow = 0           # ... flown with this arrow held ...
+        self.flight_skip: Platform | None = None  # ... through this platform (dropping)
+        self._walls = body.vertical_walls(model.walls)
         self.x, self.y = float(start[1]), p.y_at(start[1])
-        self.vx = 0.0
+        self.vx = self.vy = 0.0         # her speed (units/s; y down)
         self.facing = facing
-        self.go = 0                     # the arrow that starts her running (a standing start) ...
-        self.go_ms = 0                  # ... once this tick comes (run lag), even if it's let go before
-        self.release_ms = -10_000       # when the arrow was let go
-        self.can_move_ms = 0            # standing start: not before this (landing, climb-over, chair)
+        self.seen: dict[str, int] = {}  # the arrows the game sees held -> the order it saw them pressed in
+        self._seen_count = 0
+        self._seen_due: dict[str, int] = {}  # each arrow's latest change the game is yet to see (its tick)
+        self.still_ms = 0               # she can't move before this tick (climbing over a rope's top, standing up)
         self.left_rope_ms = -10_000
-        self.liftoff_due = False
+        self.attack_ms = (-10_000, -10_000)  # the last attack's animation: from its start to its lock's end
         self.sitting = False
         self.hp = hp
         self.mp = 1.0
@@ -490,22 +439,23 @@ class World:
             if e.kind == "down":
                 if action not in self.held:
                     self.held[action] = self.ms
-                    self._pressed(action)
+                    self._pressed(action, self._sent(e))
             elif self.held.pop(action, None) is not None:
-                self._released(action)
+                self._released(action, self._sent(e))
         elif e.kind == "release":
             for action in list(self.held):
                 del self.held[action]
-                self._released(action)
+                self._released(action, self._sent(e))
+        elif e.kind == "seen":
+            self._seen(*e.data)
         elif e.kind == "liftoff":
-            self.liftoff_due = False
-            if self.mode == "ground":
-                self._launch(self.vx, -JUMP_SPEED)
+            self._liftoff(e.data)
         elif e.kind == "drop":
             if self.mode == "ground" and self.plat is not None and self.plat.id == e.data:
-                f = self._trajectory(self.x, self.y + 1, 0.0, 0.0, skip=self.plat)
+                d = self.arrow()
+                f = self._flight(self.x, self.y + 1, self.vx, 0.0, d, skip=self.plat)
                 if f.platform is not None:
-                    self._fly(f, 0.0)
+                    self._fly(f, self.ms, d, skip=self.plat)
                     self.note(f"drops through platform {e.data}")
         elif e.kind == "aim":
             self._aim(e.data)
@@ -525,54 +475,68 @@ class World:
                 if not d.gone:
                     d.gone, d.taken_at, d.taken_by = True, self.t, "rival"
 
+    def _sent(self, e: Event) -> float:
+        """The clock time key event `e` went out: when it was sent for (its lags count from then, not from
+        the tick it falls on), or now, for one sent for a moment already past."""
+        now = self.origin + self.ms / 1000
+        return e.at if e.at > now - TICK_MS / 1000 else now
+
     def note(self, text: str) -> None:
         self.log.append(f"{self.t:8.3f} {text}")
 
     # --- keys -------------------------------------------------------------------------------------------
 
     def arrow(self) -> int:
-        """The arrow that counts (the later pressed, if both are held), as -1/0/+1."""
-        left, right = self.held.get("left"), self.held.get("right")
-        if left is None and right is None:
+        """The arrow the game sees held (the one it saw pressed later, if both are), as -1/0/+1."""
+        if not self.seen:
             return 0
-        if right is None or (left is not None and left > right):
-            return -1
-        return 1
+        return directions.sign(max(self.seen, key=self.seen.get))
 
-    def _pressed(self, action: str) -> None:
+    def _seen_later(self, action: str, down: bool, at: float, lag: float) -> None:
+        """The game sees arrow `action` go down/up `lag` s after clock time `at`. One key's changes are
+        seen in the order they happen: let go and pressed again at once, it stays held."""
+        ms = max(self.ms_of(at + lag), self._seen_due.get(action, -10_000))
+        self._seen_due[action] = ms
+        self._push(ms, "seen", (action, down))
+
+    def _seen(self, action: str, down: bool) -> None:
+        """The game sees an arrow go down (she turns that way, and it stands her up from the chair) or up."""
+        if self.dead:
+            return
+        if not down:
+            self.seen.pop(action, None)
+            return
+        self._seen_count += 1
+        self.seen[action] = self._seen_count
+        self.facing = LEFT if action == "left" else RIGHT
+        if self.sitting:
+            self.sitting = False
+            self.still_ms = self.ms + int(STAND_UP * 1000)
+
+    def _pressed(self, action: str, at: float) -> None:
         ground = self.mode == "ground"
         if action in ("left", "right"):
-            self.facing = LEFT if action == "left" else RIGHT
-            if self.sitting:
-                self.sitting = False
-                self.can_move_ms = self.ms + int(STAND_UP * 1000)
-            self.go, self.go_ms = directions.sign(action), self.ms
+            self._seen_later(action, True, at, LAGS.on)
         elif action == "jump":
-            if self.ms < self.attack_lock_ms or self.liftoff_due:
+            if self.ms < self.attack_lock_ms:
                 return
-            if self.mode == "rope":
-                d = self.arrow()
-                if d:
-                    self._leave_rope()
-                    self._launch(d * WALK_SPEED, -ROPE_JUMP_VY)
-                return
-            if not ground:
-                return  # in the air: ignored
-            if self.sitting:
+            if ground and self.sitting:
                 self.sitting = False
-                self.can_move_ms = self.ms + int(STAND_UP * 1000)
+                self.still_ms = self.ms + int(STAND_UP * 1000)
                 return
-            if "down" in self.held:
-                self._push(self.ms + int(DROP_LAG * 1000), "drop", self.plat.id)
-            else:
-                self.liftoff_due = True
-                self._push(self.ms + int(round(JUMP_LAG * 1000)), "liftoff")
+            if "down" in self.held and self.mode != "rope":  # on the ground: a drop; in the air: nothing
+                if ground:
+                    self._push(self.ms + int(DROP_LAG * 1000), "drop", self.plat.id)
+                return
+            # It's taken Lags.jump later, wherever she is then (_liftoff): pressed just before she lands,
+            # it jumps her once she has.
+            self._push(self.ms_of(at + LAGS.jump), "liftoff", self.mode)
         elif action == "attack":
             if self.ms < self.attack_lock_ms or self.mode == "rope":
                 return
             self.attack_lock_ms = self.ms + int(ATTACK_LOCK * 1000)
             self.sitting = False
-            self._push(self.ms + int(round(JUMP_LAG * 1000)), "aim", self.ms)  # it starts then (_aim)
+            self._push(self.ms_of(at + JUMP_LAG), "aim", self.ms)  # it starts then (_aim)
         elif action == "up":
             if ground:
                 for pt in self.portals:
@@ -599,12 +563,13 @@ class World:
                 self.sitting = not self.sitting
                 self.note("sits on the chair" if self.sitting else "stands up from the chair")
 
-    def _released(self, action: str) -> None:
-        if action in ("left", "right") and self.arrow() == 0:
-            self.release_ms = self.ms
-            if self.noise.walk_jitter:  # she runs on a little longer or stops a little sooner
-                off = (2 * self.chance("walk") - 1) * self.noise.walk_jitter
-                self.release_ms += int(round(off / WALK_SPEED * 1000))
+    def _released(self, action: str, at: float) -> None:
+        if action in ("left", "right"):
+            lag = LAGS.off
+            if self.noise.walk_jitter and not {"left", "right"} & self.held.keys():
+                # letting go of the last arrow: she runs on a little longer or stops a little sooner
+                lag += (2 * self.chance("walk") - 1) * self.noise.walk_jitter / WALK_SPEED
+            self._seen_later(action, False, at, lag)
 
     # --- her motion -------------------------------------------------------------------------------------
 
@@ -616,23 +581,11 @@ class World:
             return
         lying = "down" in self.held or self.sitting
         locked = self.realism.lock_arrows and self.ms < self.attack_lock_ms
-        d = 0 if lying or locked else self.arrow()
-        start = max(self.go_ms, self.can_move_ms) + int(RUN_LAG * 1000)  # a standing start
-        if d:
-            if self.vx * d > 0:
-                self.vx = d * WALK_SPEED
-            elif self.vx == 0:
-                if self.ms >= start:
-                    self.vx = d * WALK_SPEED
-            else:
-                self.vx = _brake(self.vx, DECEL * dt)
-        elif not lying and not locked and self.vx == 0 and self.go and start <= self.ms < self.release_ms + RELEASE_LAG * 1000:
-            self.vx = self.go * WALK_SPEED  # a short tap: let go before she started, she still moves
-        elif self.vx and (lying or self.ms >= self.release_ms + RELEASE_LAG * 1000):
-            self.vx = _brake(self.vx, DECEL * dt)
-        if not self.vx:
+        d = 0 if lying or locked or self.ms < self.still_ms else self.arrow()
+        if not d and not self.vx:
             return
-        nx = self.x + self.vx * dt
+        v, dx = body.ground_step(self.vx, d, SHOE, dt)
+        nx = self.x + dx
         if nx > p.right or nx < p.left:
             right = nx > p.right
             edge = p.right if right else p.left
@@ -640,49 +593,71 @@ class World:
                 self.x, self.vx = edge, 0.0
                 self.y = p.y_at(self.x)
                 return
-            self._fly(self._trajectory(nx, p.y_at(edge) - 1, self.vx, 0.0), self.vx)
+            # off the end: in the air from the end of this tick
+            self._fly(self._flight(nx, p.y_at(edge) - 1, v, 0.0, d), self.ms + TICK_MS, d)
             return
-        self.x, self.y = nx, p.y_at(nx)
+        self.x, self.y, self.vx = nx, p.y_at(nx), v
 
-    def _trajectory(self, x: float, y: float, vx: float, vy: float, skip: Platform | None = None) -> Flight:
-        return trajectory(self.model, x, y, vx, vy, skip, sides=self.sides)
+    def _flight(self, x: float, y: float, vx: float, vy: float, arrow: int, skip: Platform | None = None,
+                airborne: bool = False) -> body.Flight:
+        """Her arc from (x, y) at (vx, vy) with `arrow` held: body.fly's, step by step on the world's tick,
+        with the map's sides stopping her like walls (the planner never jumps at them)."""
+        return body.fly(self.model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=self._walls,
+                        sides=self.sides, dt=TICK_MS / 1000, path=True, airborne=airborne)
 
-    def _launch(self, vx: float, vy: float) -> None:
+    def _launch(self, vx: float, vy: float, from_ms: int) -> None:
+        """Into the air from where she is, at (vx, vy), from tick `from_ms` (this one, or the next when it
+        happens after this tick's motion)."""
         y = self.y if self.mode != "ground" else self.plat.y_at(self.x)
-        self._fly(self._trajectory(self.x, y, vx, vy), vx)
+        d = self.arrow()
+        self._fly(self._flight(self.x, y, vx, vy, d), from_ms, d)
 
-    def _fly(self, f: Flight, vx: float) -> None:
-        self.mode, self.plat, self.rope, self.flight, self.flight_ms = "air", None, None, f, self.ms
-        self.vx = vx if f.path and len(f.path) > 1 else 0.0
+    def _fly(self, f: body.Flight, from_ms: int, arrow: int, skip: Platform | None = None) -> None:
+        self.mode, self.plat, self.rope, self.flight, self.flight_ms = "air", None, None, f, from_ms
+        self.flight_arrow, self.flight_skip = arrow, skip
+        self.vx, self.vy = f.speeds[0]
         self.sitting = False
+
+    def _liftoff(self, pressed_on: str) -> None:
+        """The game takes a jump key pressed while she was `pressed_on` ground, in the air or on a rope:
+        on the ground it jumps her, with the kick toward the arrow it sees (body.takeoff); on the rope it
+        was pressed on, with an arrow, it jumps her off sideways. Anywhere else it does nothing."""
+        d = self.arrow()
+        if self.mode == "ground" and pressed_on != "rope":
+            self._launch(body.takeoff(self.vx, d, SHOE), -SHOE.vjump, self.ms)
+        elif self.mode == "rope" and pressed_on == "rope" and d:
+            self._leave_rope()
+            self._launch(d * ROPE_JUMP[0], -ROPE_JUMP[1], self.ms)
 
     def _air(self) -> None:
         f = self.flight
-        tau = (self.ms + TICK_MS - self.flight_ms) / 1000
-        if f.platform is not None and tau >= f.seconds:
-            self._land(f.platform, f.land_x)
+        d = self.arrow()
+        if d != self.flight_arrow:  # the game sees another arrow: she flies on from here with it
+            k = min(max(0, (self.ms - self.flight_ms) // TICK_MS), len(f.path) - 1)
+            (x, y), (vx, vy) = f.path[k], f.speeds[k]
+            f = self._flight(x, y, vx, vy, d, skip=self.flight_skip, airborne=k > 0)
+            self._fly(f, self.ms, d, self.flight_skip)
+        k = (self.ms + TICK_MS - self.flight_ms) // TICK_MS
+        if f.platform is not None and k >= len(f.path) - 1:
+            self._land(f.platform, f.land_x, f.vx_land)
             return
-        self.x, self.y = f.at(tau)
+        k = min(k, len(f.path) - 1)
+        (self.x, self.y), (self.vx, self.vy) = f.path[k], f.speeds[k]
         if "up" in self.held and self.ms - self.left_rope_ms >= REGRAB_AFTER * 1000:
             for r in self.model.ropes:
                 if abs(self.x - r.x) <= GRAB_X and r.top <= self.y and self.y - ARMS <= r.bottom:
                     self._grab(r)
                     return
 
-    def _land(self, q: Platform, x: float) -> None:
-        f = self.flight
-        # her sideways speed at landing (0 if a wall stopped her)
-        (x0, _), (x1, _) = f.path[-2] if len(f.path) > 1 else f.path[-1], f.path[-1]
-        vx = self.vx if abs(x1 - x0) > 1e-9 else 0.0
+    def _land(self, q: Platform, x: float, vx: float) -> None:
+        """Down on platform q at x, going sideways at vx (0 if a wall stopped her): she slides on as the
+        ground brakes her (or runs on, with the arrow), except while an attack plays: it stops her. Five
+        jump-backs and jump-throws landing during their attack slid 1.4-2.9 units, where braking alone
+        has 7.6-11.7 (research: 60 fps recordings)."""
         self.mode, self.plat, self.flight, self.last_plat = "ground", q, None, q
         self.x, self.y = x, q.y_at(x)
-        d = self.arrow()
-        if d and vx * d > 0:
-            self.vx = d * WALK_SPEED
-        else:
-            self.vx = vx
-            self.go, self.release_ms = d, -10_000  # no arrow: she slides to a stop at once
-            self.can_move_ms = max(self.can_move_ms, self.ms)
+        start, end = self.attack_ms
+        self.vx, self.vy = (0.0 if start <= self.ms < end else vx), 0.0
 
     def _grab_from_ground(self) -> bool:
         """Up at a rope's foot: onto it."""
@@ -707,9 +682,8 @@ class World:
 
     def _grab(self, r: Rope) -> None:
         self.mode, self.rope, self.plat, self.flight = "rope", r, None, None
-        self.x, self.y, self.vx = r.x, min(max(self.y, r.top), r.bottom), 0.0
+        self.x, self.y, self.vx, self.vy = r.x, min(max(self.y, r.top), r.bottom), 0.0, 0.0
         self.sitting = False
-        self.liftoff_due = False
         self.note(f"grabs the rope at x {r.x:.0f}")
 
     def _leave_rope(self) -> None:
@@ -729,15 +703,14 @@ class World:
                     self.mode, self.plat, self.last_plat = "ground", top, top
                     self.x = min(max(r.x, top.left), top.right)
                     self.y, self.vx = top.y_at(self.x), 0.0
-                    self.can_move_ms = self.ms + int(CLIMB_OVER * 1000)
-                    self.go = self.arrow()
+                    self.still_ms = self.ms + int(round(CLIMB_OVER * 1000))
                     self.note(f"climbs onto platform {top.id}")
         elif "down" in self.held and "up" not in self.held:
             self.y += CLIMB_DOWN * dt
             if self.y >= r.bottom:
                 self.y = r.bottom
                 self._leave_rope()
-                self._fly(self._trajectory(r.x, r.bottom, 0.0, 0.0), 0.0)
+                self._launch(0.0, 0.0, self.ms + TICK_MS)  # falling from the end of this tick
 
     # --- monsters and her -------------------------------------------------------------------------------
 
@@ -777,12 +750,12 @@ class World:
         if self.hp <= 1e-9:
             self.dead, self.died_at = True, self.t
             self.held.clear()
+            self.seen.clear()
             self.note("HP 0: she died")
             return
         if self.mode == "rope":
             self._leave_rope()
-        self.liftoff_due = False
-        self._launch(away * KNOCK_VX, -KNOCK_VY)
+        self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
 
     def top(self, m: SimMonster) -> float:
         """How tall monster `m` is now: as tall as its kind, taller while it flinches after a hit."""
@@ -833,6 +806,7 @@ class World:
         lands STAR_DELAY after the key (_attack). On the ground, the claw swipes the nearest monster on her
         level its swing reaches; else the star's search picks (nearest_star). In the air, the nearest in
         the attack's area takes the star."""
+        self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
         if self.mode == "ground":
             target = self.nearest_in(self.facing, reach.CLAW_FAR, reach.CLAW_DOWN, reach.CLAW_UP, level=True)
             swipe = target is not None
@@ -970,12 +944,6 @@ def _wall_at(model: MapModel, p: Platform, edge: float) -> bool:
     level = p.y_at(edge)
     return any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
                for w in model.walls)
-
-
-def _brake(v: float, by: float) -> float:
-    if abs(v) <= by:
-        return 0.0
-    return v - by if v > 0 else v + by
 
 
 def exp_pixels(exp: int) -> np.ndarray:

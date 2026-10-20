@@ -15,14 +15,14 @@ import pytest
 from gamelab import paths
 from gamelab.control import client
 from gamelab.localization import mapdata
-from gamelab.motion import body, physics
+from gamelab.motion import body, flow, physics
 from gamelab.behavior.hunter import Hunter
 from gamelab.motion.physics import hold_ms
 from gamelab.paths import LAB
 from gamelab.sim import fakes, golden, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.fakes import Clock, FakeEyes, FakePlayer, SimViolation, Trace, patched
-from gamelab.sim.world import DROP_LIFE, RUN_LAG, Noise, SimDied, World, exp_pixels, trajectory
+from gamelab.sim.world import DROP_LIFE, Noise, SimDied, World, exp_pixels
 from maplehelper.config import GameKeys
 from maplehelper.keys import parse as K
 from gamelab.attack import reach
@@ -79,63 +79,168 @@ def tap(w, t, name, hold):
 
 # --- physics -----------------------------------------------------------------------------------------
 
-def test_the_arc_is_route_fly_step_for_step(model):
+def test_her_arc_is_the_engines_and_lands_where_the_planner_says(model):
+    # The world flies her by body.fly; the planner still predicts with physics.fly (its own step rule,
+    # a unit higher at the top): with the arrow she jumps with held, as the planner's moves do, the same
+    # platforms a unit or so apart. (Let go, a long fall at the fall cap drags her back: 2.5 units shorter
+    # from B's end down to C.)
     a, b, c = plat(model, 300, 100), plat(model, 360, 300), plat(model, 500, 400)
     for x, y, vx, vy, skip in [(150, 300, 149.0, -555.0, None), (201, 299, 149.0, 0.0, None),
                                (390, 360, 149.0, -555.0, None), (300, 361, 0.0, 0.0, b),
                                (700, 500, -149.0, -555.0, None), (20, 500, -149.0, -555.0, None),
                                (100, 301, 0.0, 0.0, a)]:
         want = physics.fly(model, x, y, vx, vy, skip)
-        got = trajectory(model, x, y, vx, vy, skip)
-        assert (got.platform, got.land_x, got.seconds) == want
+        got = body.fly(model, x, y, vx, vy, shoe=physics.SHOE, skip=skip, arrow=(vx > 0) - (vx < 0))
+        assert got.platform is want[0] and got.land_x == pytest.approx(want[1], abs=1.5)
+        assert got.seconds == pytest.approx(want[2], abs=0.02)
     assert c is not None
+    # A jump straight up from standing in the world: body.fly's arc, step by step on the world's tick.
+    w = world(model, c.id, 300.0)
+    tap(w, 0.0, "alt", 0.04)
+    w.advance(0.1)
+    f = body.fly(model, 300.0, 500.0, 0.0, -physics.SHOE.vjump, shoe=physics.SHOE, path=True)
+    assert w.flight.path == f.path and w.flight.platform is f.platform is c
 
 
-def test_walking_matches_the_measured_walk(model):
+def test_walking_is_the_engines(model):
+    # The game sees the arrow 60 ms after the key and speeds her up at 1400 units/s²; let go, it sees that
+    # 72 ms later and brakes her at 800 (body.run_x, body.hold_distance).
     c = plat(model, 500, 400)
     for ms in (300, 600, 1000):
         w = world(model, c.id, 100.0)
         tap(w, 0.0, "right", ms / 1000)
         if ms == 1000:
-            w.advance(0.6)
-            assert w.x - 100 == pytest.approx(physics.WALK_SPEED * (0.6 - RUN_LAG), abs=1.5)  # flow's run model
+            for t in (0.05, 0.1, 0.15, 0.3, 0.6):
+                w.advance(t)
+                assert w.x - 100 == pytest.approx(body.run_x(t - physics.LAGS.on, 0.0, 1, physics.SHOE), abs=0.01)
+            assert w.x - 100 == pytest.approx(physics.WALK_SPEED * (0.6 - physics.RUN_LAG), abs=0.5)  # flow's run model
         w.advance(3.0)
         assert w.vx == 0 and w.mode == "ground"
-        assert abs(hold_ms(w.x - 100) - ms) <= 25  # moves.hold_ms: the hold for what she walked
+        assert w.x - 100 == pytest.approx(body.hold_distance(ms, physics.SHOE, physics.LAGS), abs=1)
+        assert abs(hold_ms(w.x - 100) - ms) <= 10  # physics.hold_ms: the hold for what she walked
 
 
-def test_a_short_tap_still_moves_her_and_a_very_short_one_does_not(model):
+def test_taps_move_her_as_long_as_the_game_sees_them_held(model):
     c = plat(model, 500, 400)
-    w = world(model, c.id, 100.0)
-    tap(w, 0.0, "right", 0.107)
-    w.advance(2.0)
-    assert w.x - 100 == pytest.approx(body.hold_distance(107, physics.SHOE, physics.LAGS), abs=1.5)  # 23.7
-    w = world(model, c.id, 100.0)
-    tap(w, 0.0, "right", 0.02)
-    w.advance(2.0)
-    assert w.x == 100 and w.facing == "right"
+    for hold in (0.107, 0.05, 0.02):  # 23.7, 7.4 and 2.0 units by the engine
+        w = world(model, c.id, 100.0)
+        tap(w, 0.0, "left", hold)
+        w.advance(2.0)
+        assert 100 - w.x == pytest.approx(body.hold_distance(hold * 1000, physics.SHOE, physics.LAGS), abs=1)
+        assert w.facing == "left"
 
 
-def test_a_running_jump_lands_where_route_fly_says(model):
+def test_a_jump_from_standing_gets_the_kick_unless_she_is_nearly_at_full_speed(model):
+    # Her sideways speed leaving the ground (body.takeoff) with the arrow pressed `gap` s before the jump key:
+    # the game sees the arrow 60 ms after its key and the jump 67 ms after its own.
+    c = plat(model, 500, 400)
+    for gap, vx in ((None, 0.0), (0.0, 14 + 119.2), (0.045, 149.0), (0.08, 126.0), (0.2, 149.0)):
+        w = world(model, c.id, 100.0)
+        if gap is not None:
+            w.key(0.0, "right", True)
+        tap(w, gap or 0.0, "alt", 0.04)
+        w.advance((gap or 0.0) + 0.1)
+        assert w.mode == "air" and w.flight.speeds[0][0] == pytest.approx(vx, abs=0.01), gap
+
+
+def test_in_the_air_the_opposite_arrow_brakes_her_and_her_own_does_nothing(model):
+    c = plat(model, 500, 400)
+
+    def jump(then):
+        w = world(model, c.id, 100.0)
+        w.key(0.0, "right", True)
+        tap(w, 0.5, "alt", 0.04)    # at full speed: lifts off at 0.57, lands about 0.555 s later
+        then(w)
+        w.advance(1.0)
+        assert w.mode == "air"
+        return w
+
+    held = jump(lambda w: None)
+    braked = jump(lambda w: tap(w, 0.7, "left", 0.04))
+    let_go = jump(lambda w: w.key(0.55, "right", False))
+    assert held.vx == 149.0  # the arrow she flies with does nothing at speed
+    # left seen from 0.76 s to 0.815 (on the tick): 55 ms at 200 units/s²
+    assert held.vx - braked.vx == pytest.approx(200 * 0.055, abs=0.1) and braked.facing == "left"
+    assert held.vx - let_go.vx == pytest.approx(1 * (1.0 - 0.625), abs=0.01)  # no arrow: 1 unit/s² of drag
+
+
+def test_landing_while_an_attack_plays_stops_her(model):
+    c = plat(model, 500, 400)
+
+    def jump(attack: bool):
+        w = world(model, c.id, 100.0)
+        w.key(0.0, "right", True)
+        tap(w, 0.5, "alt", 0.04)
+        w.key(0.6, "right", False)  # let go in the air: she'd slide 13.9 on landing
+        if attack:
+            tap(w, 0.6, "f", 0.04)  # its animation plays until 1.33 s; she lands at 1.13
+        w.advance(1.12)
+        assert w.mode == "air"
+        land_x = w.flight.land_x
+        w.advance(3.0)
+        return w, land_x
+
+    (slid, at), (stopped, at2) = jump(False), jump(True)
+    assert slid.x - at == pytest.approx(physics.LAND_SLIDE, abs=0.5)
+    assert stopped.x == at2 and at2 == pytest.approx(at, abs=0.01)
+
+
+def test_after_a_climb_she_runs_off_as_the_minimap_traced_it(model):
+    # The arrow held from before the top: she stands still through the climb-over (flow.CLIMB_OVER) and the
+    # game's lag for the arrow, then speeds up: at full speed 0.35 s after the top, as flow plans it.
+    c, d = plat(model, 500, 400), plat(model, 300, 700)
+    w = World(model, KEYS, (c.id, 700.0), monsters=None, hanging=400.0)
+    w.key(0.0, "up", True)
+    w.key(0.5, "right", True)  # the top comes 100 / 130 = 0.77 s in
+    w.advance(1.0)
+    top = next(float(line.split()[0]) for line in w.log if "climbs onto platform" in line)
+    w.advance(top + 0.6)
+    # flow's model: a standing start (RUN_LAG, 0.113 s) CLIMB_OVER (0.23 s) after the top
+    assert w.plat is d and w.x - 700 == pytest.approx(physics.WALK_SPEED * (0.6 - flow.CLIMB_OVER - physics.RUN_LAG), abs=0.3)
+
+
+def test_a_rope_side_jump_goes_out_fast_with_a_little_lift(model):
+    c = plat(model, 500, 400)
+    w = World(model, KEYS, (c.id, 700.0), monsters=None, hanging=400.0)
+    tap(w, 0.0, "alt", 0.04)
+    w.advance(0.3)
+    assert w.mode == "rope"  # no arrow: the jump key does nothing on a rope
+    w.key(0.3, "left", True)
+    tap(w, 0.33, "alt", 0.04)  # seen at 0.36 and 0.4 (on the ticks)
+    w.advance(0.41)
+    assert w.mode == "air"
+    assert w.flight.speeds[0] == pytest.approx((-1.3 * physics.WALK_SPEED, -0.5 * physics.JUMP_SPEED))
+    w.advance(3.0)
+    assert w.plat is c and w.x < 700 - 100
+
+
+def test_a_running_jump_lands_where_the_engine_and_the_planner_say(model):
     a, b = plat(model, 300, 100), plat(model, 360, 300)
     w = world(model, a.id, 40.0)
     w.key(0.0, "right", True)
-    tap(w, 0.93, "alt", 0.04)  # lifts off JUMP_LAG (67 ms) later, ~170: down onto B
+    tap(w, 0.93, "alt", 0.04)  # lifts off JUMP_LAG (67 ms) later, on the tick at 1.0 s: down onto B
     w.advance(1.01)
     assert w.mode == "air"
     x0, y0 = w.flight.path[0]
-    assert x0 == pytest.approx(40 + physics.WALK_SPEED * (0.93 + physics.JUMP_LAG - RUN_LAG), abs=1)
+    assert x0 - 40 == pytest.approx(physics.WALK_SPEED * (1.0 - physics.RUN_LAG), abs=0.5)
+    f = body.fly(model, x0, y0, physics.WALK_SPEED, -physics.JUMP_SPEED, shoe=physics.SHOE, arrow=1)
     land, land_x, seconds = physics.fly(model, x0, y0, physics.WALK_SPEED, -physics.JUMP_SPEED)
-    w.key(1.01, "right", False)
+    assert f.platform is land is b and f.land_x == pytest.approx(land_x, abs=1.5)
+    w.key(1.01, "right", False)  # let go in the air: the game sees it at 1.085 s, and she flies on from there
+    w.advance(1.1)
+    g = w.flight
+    assert g.platform is b and g.land_x == pytest.approx(f.land_x, abs=0.5)
+    # ... with no arrow: dragged at 1 unit/s², and at 100 for the last few steps, falling at the cap (670)
+    assert 140 < g.vx_land < 146
     w.advance(3.0)
-    assert land is b and w.plat is b
-    assert w.x == pytest.approx(land_x + physics.LAND_SLIDE, abs=1.5)  # landing with no arrow held: 13.9 on
+    assert w.plat is b and w.vx == 0
+    assert w.x == pytest.approx(g.land_x + body.slide(g.vx_land, physics.SHOE), abs=0.01)  # 13 units on
 
 
-def test_a_jump_key_in_the_air_is_ignored(model):
+def test_a_jump_key_the_game_takes_in_the_air_is_ignored(model):
     c = plat(model, 500, 400)
     w = world(model, c.id, 300.0)
-    tap(w, 0.0, "alt", 0.04)
+    tap(w, 0.0, "alt", 0.04)  # lifts off at 0.07 s, lands at 0.625
     tap(w, 0.3, "alt", 0.04)
     w.advance(0.3)
     flight = w.flight
@@ -143,6 +248,14 @@ def test_a_jump_key_in_the_air_is_ignored(model):
     assert w.flight is flight
     w.advance(2.0)
     assert w.plat is c and w.x == 300
+    # Pressed 25 ms before she lands, the game takes it 42 ms after: she jumps again.
+    w = world(model, c.id, 300.0)
+    tap(w, 0.0, "alt", 0.04)
+    tap(w, 0.6, "alt", 0.04)
+    w.advance(0.66)
+    assert w.mode == "ground"
+    w.advance(0.7)
+    assert w.mode == "air"
 
 
 def test_down_and_jump_drops_through_onto_the_platform_below(model):
