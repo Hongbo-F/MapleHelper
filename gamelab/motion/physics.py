@@ -8,6 +8,7 @@ game does.
 import bisect
 import itertools
 import math
+import os
 from collections import OrderedDict
 
 from maplehelper import config
@@ -17,8 +18,20 @@ from ..localization.mapdata import MapModel, Platform
 from ..paths import CONFIG
 
 # Her stats (config.toml [character]), and how the game moves her with them: motion.body's engine, its
-# shoe from the game's Physics.img and its lags measured.
-CHARACTER = config.character(CONFIG)
+# shoe from the game's Physics.img and its lags measured. With FIXED_STATS set in the environment, the
+# measured defaults (config.Character()) whatever the file says: the tests set it (tests/conftest.py), and
+# the simulator's golden traces and harness restart themselves with it, so editing [character] for her gear
+# changes neither what they check nor what they compare. (`python -m gamelab sim`, for watching, takes the
+# file's, as the hunt does.)
+FIXED_STATS = "GAMELAB_FIXED_STATS"
+
+
+def stats(path=CONFIG, environ=os.environ) -> config.Character:
+    """Her stats: config.toml's [character], or the measured defaults when FIXED_STATS is set."""
+    return config.Character() if environ.get(FIXED_STATS) else config.character(path)
+
+
+CHARACTER = stats()
 SHOE = body.Shoe.from_physics(body.PHYSICS_IMG, CHARACTER.speed, CHARACTER.jump)
 LAGS = body.Lags()
 
@@ -37,6 +50,10 @@ LAND_MARGIN = 18         # land at least this far onto a platform
 # jumps: 45-95 ms). A jump key pressed while she's still in the air is ignored, and holding it doesn't jump
 # again on landing.
 RUN_LAG = LAGS.on + WALK_SPEED / (2 * SHOE.acc)  # 0.113 s: a standing start lags full-speed running by this much
+# ... and a start from running the other way at full speed lags a standing one by this much more: braking
+# and turning at 1400 units/s² (body.run_time; the decompile's, unmeasured). It was 0.08 s, from a loose
+# measurement. Nothing plans with it now (flow turns her by body.run_time): it is kept for its name.
+TURN_EXTRA = body.run_time(100.0, -WALK_SPEED, 1, SHOE) - body.run_time(100.0, 0.0, 1, SHOE)  # 0.16 s
 JUMP_LAG = LAGS.jump  # 0.067 s from the jump key to leaving the ground
 DROP_LAG = LAGS.drop  # 0.28 s from the jump key (down held) to falling through (0.28-0.34 in 4 drops on the
                       # minimap at 60 fps, whether or not she had just stopped running)

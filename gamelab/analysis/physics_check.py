@@ -48,6 +48,9 @@ CASES = {
     "held_jump": (1.2, ()), "jumpup": (1.05, ()), "do_ledge2": (1.35, ()),
 }
 NOTES = {"chain": "another player's name tag covers hers at the end", "do_ledge2": "moving camera, 30 fps"}
+# Set aside in a second mean: do_ledge2's camera comes out only to about 15% (moving at 30 fps), and its
+# x errors (15.2 / 14.8 / 5.9 units) make most of the difference in x between the models in the mean of all.
+SET_ASIDE = ("do_ledge2",)
 
 
 @dataclass
@@ -276,13 +279,16 @@ def main(argv=None) -> int:
         if name in NOTES:
             line += f" ({NOTES[name]})"
         print(line)
-        rows.append(row)
-    if rows:
-        a = np.array(rows)
-        mean, median = a.mean(axis=0), np.median(a, axis=0)
-        cells = " | ".join(f"{mean[i]:.2f} ({median[i]:.2f}) / {mean[i + 1]:.2f} ({median[i + 1]:.2f})"
-                           for i in range(0, a.shape[1], 2))
-        print(f"| **mean (median)** | {cells} |")
+        rows.append((name, row))
+    kept = [row for name, row in rows if name not in SET_ASIDE]
+    for label, chosen in (("mean (median)", [row for _, row in rows]),
+                          (f"without {', '.join(SET_ASIDE)}", kept if len(kept) < len(rows) else [])):
+        if chosen:
+            a = np.array(chosen)
+            mean, median = a.mean(axis=0), np.median(a, axis=0)
+            cells = " | ".join(f"{mean[i]:.2f} ({median[i]:.2f}) / {mean[i + 1]:.2f} ({median[i + 1]:.2f})"
+                               for i in range(0, a.shape[1], 2))
+            print(f"| **{label}** | {cells} |")
     return 0
 
 

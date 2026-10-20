@@ -7,6 +7,8 @@ import random
 
 import pytest
 
+from maplehelper import config
+
 from gamelab.localization import mapdata
 from gamelab.motion import body, physics, route
 from gamelab.motion.body import Lags, Shoe
@@ -52,6 +54,22 @@ def test_her_shoe_from_physics_img_and_her_stats():
 
 def test_physics_takes_her_stats_from_the_config():
     assert physics.SHOE == Shoe.from_physics(body.PHYSICS_IMG, physics.CHARACTER.speed, physics.CHARACTER.jump)
+
+
+def test_the_tests_take_her_measured_stats_whatever_the_config_says(tmp_path):
+    # Editing config.toml's [character] for her gear mustn't break the tests, change the golden traces or
+    # the harness's runs: those take the measured stats (FIXED_STATS); the hunt takes the file's.
+    assert physics.CHARACTER == config.Character()
+    f = tmp_path / "config.toml"
+    f.write_text("[character]\nspeed = 125\njump = 110\n", encoding="utf-8")
+    assert physics.stats(f, environ={}) == config.Character(speed=125, jump=110)
+    assert physics.stats(f, environ={physics.FIXED_STATS: "1"}) == config.Character()
+
+
+def test_turning_from_a_run_lags_a_standing_start_by_the_braking():
+    # Kept for its name: from full speed the other way she brakes 0.106 s at 1400 (7.9 units on), then
+    # speeds up as from standing.
+    assert physics.TURN_EXTRA == pytest.approx(1.5 * 149 / 1400, abs=1e-3)
 
 
 # --- on the ground --------------------------------------------------------------------------------------

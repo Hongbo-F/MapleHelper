@@ -18,7 +18,10 @@ Where it comes from:
 
 With these fixed lags the engine follows 18 tracked recordings to 2.49 units RMS in x and 1.58 in y,
 where the model it replaces (a standing start that switches to full speed, an even slide, nothing in
-the air) is off by 3.20 and 2.72 (`python -m gamelab.analysis.physics_check`).
+the air) is off by 3.20 and 2.72 (`python -m gamelab.analysis.physics_check`). Most of the gain in x is
+one recording's, do_ledge2 (a moving camera at 30 fps, which the research set aside): without it the
+engine is off by 2.28 and 1.45, the model it replaces by 2.49 and 2.76, and that model with today's lags
+and slides already by 2.46 in x. The gain is in y: the jump's lag, and her arc in the air.
 """
 
 import bisect
@@ -289,7 +292,7 @@ def short_takeoff_chance(gap_ms: float, shoe: Shoe, lags: Lags, slower: float = 
 
 def jump_window_ok(gap_ms: float, shoe: Shoe, lags: Lags, risk: float = 0.05) -> bool:
     """Whether a jump keyed gap_ms after the arrow, from standing, surely leaves at full speed (at most
-    `risk` that it's short): 35-52 ms (the kick), or 120 ms and later (full speed by then). The
+    `risk` that it's short): 34-52 ms (the kick), or 118 ms and later (full speed by then). The
     jump-back keys it 80 ms after the arrow: a 35% chance of leaving short, and three of the five
     recorded left at 121-127."""
     return short_takeoff_chance(gap_ms, shoe, lags) <= risk

@@ -10,7 +10,8 @@ recorded trace), 2 when nothing could be run (no game data for the map on this c
 
 The traces hold map-derived data, so they stay in gamelab/lab (git-ignored), like all game data.
 Runs are made with PYTHONHASHSEED=0 (the command restarts itself with it), so nothing depends on the
-order Python happens to keep a set of strings in.
+order Python happens to keep a set of strings in, and with her stats as measured (physics.FIXED_STATS), so
+nothing depends on what config.toml's [character] says.
 """
 
 import json
@@ -119,8 +120,10 @@ def _short(value, limit: int = 300) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if os.environ.get("PYTHONHASHSEED") != "0":  # the same set order in every run
-        env = dict(os.environ, PYTHONHASHSEED="0")
+    from ..motion.physics import FIXED_STATS
+    # The same set order in every run, and her stats as measured, not as config.toml has them.
+    if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1":
+        env = dict(os.environ, PYTHONHASHSEED="0", **{FIXED_STATS: "1"})
         return subprocess.call([sys.executable, "-X", "utf8", "-m", "gamelab.sim.golden", *argv], env=env,
                                cwd=str(REPO))
     if not argv or argv[0] not in ("record", "check", "list"):

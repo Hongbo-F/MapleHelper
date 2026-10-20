@@ -539,14 +539,14 @@ def move_climb_down(sim):
                    ends(36, key="landed", what="down the rope after all")))
 def move_climb_down_nudge(sim):
     """Mover.do with walks a few units off: the walk stops 5 units (7 px) from the rope's top, and
-    Mover.line_up_rope nudges her by the rope on screen. Each nudge is timed by walking speed alone (plus
-    25 ms): a 58 ms nudge for 5 units moves her 9 by the engine's tap model, 4 past the rope's top. That's
-    inside the 6 px tolerance, so she climbs down after the one nudge. (Seed 14 since the walk's lags came
-    from motion.body: on seed 7 the walk now stops close enough not to nudge. Until the simulator moved
-    her by the engine, any tap that moved her at all moved her at least ~14 units, so that nudge went 23
-    px, and she swung from side to side of the rope three times before pressing down; over 16 seeds 1
-    nudged then, and 1 now.) Timing nudges by walking speed alone is still a gamelab bug (physics.hold_ms
-    has the engine's hold), pinned here until it's fixed."""
+    Mover.line_up_rope nudges her by the rope on screen, held as physics.hold_ms says: 39 ms for 5 units,
+    which by the engine moves her 5.8 here, a unit past the rope's top. That's inside the 6 px tolerance,
+    so she climbs down after the one nudge. (Seed 14 since the walk's lags came from motion.body: on seed
+    7 the walk now stops close enough not to nudge. Until the simulator moved her by the engine, any tap
+    that moved her at all moved her at least ~14 units, so that nudge went 23 px, and she swung from side
+    to side of the rope three times before pressing down; over 16 seeds 1 nudged then, and 1 now. Until
+    the mover held its nudges as hold_ms says, they were timed by her walking speed alone, plus 25 ms: 58
+    ms for 5 units, which moved her 9, 4 past the rope's top.)"""
     return _one_move(sim, "climb_down", 30, 36)
 
 

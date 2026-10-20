@@ -1,6 +1,11 @@
 import copy
+import os
 
 import pytest
+
+# Her stats as measured, not config.toml's [character] (gamelab.motion.physics.FIXED_STATS): set before
+# anything imports gamelab, which works out her walk and jumps from them once, when it's first imported.
+os.environ["GAMELAB_FIXED_STATS"] = "1"
 
 # A fixed config for tests, so editing config.toml for her keys never breaks them.
 BASE_CONFIG = {

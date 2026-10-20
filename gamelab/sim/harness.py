@@ -23,7 +23,7 @@ What a run gave is read from the simulated world, not from the bot's own reports
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
-PYTHONHASHSEED=0, as golden traces are.
+PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
 """
 
 import argparse
@@ -361,8 +361,10 @@ def check() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if os.environ.get("PYTHONHASHSEED") != "0":  # the same set order in every run
-        env = dict(os.environ, PYTHONHASHSEED="0")
+    from ..motion.physics import FIXED_STATS
+    # The same set order in every run, and her stats as measured, not as config.toml has them.
+    if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1":
+        env = dict(os.environ, PYTHONHASHSEED="0", **{FIXED_STATS: "1"})
         return subprocess.call([sys.executable, "-X", "utf8", "-m", "gamelab.sim.harness", *argv], env=env,
                                cwd=str(REPO))
     p = argparse.ArgumentParser(prog="python -m gamelab.sim.harness")
