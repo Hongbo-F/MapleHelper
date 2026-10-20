@@ -9,8 +9,13 @@ shares the colour (leaves, clouds). Frames are game-window pictures downscaled b
 The matches run on a few threads (OpenCV lets go of Python's lock while it matches). Which spots step 2
 checks doesn't depend on what the checks find, so they're all picked first, and the answers are the same
 as one thread's, in the same order.
+
+A monster found says which template matched it, and so what that template's folder knows of it (INDEX,
+CUTOUTS): where its feet are in the picture, which way it faces (the game's sprites face left; a flipped
+template faces right), and its frame and pose.
 """
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,28 +40,57 @@ COARSE = 2                   # step 1 works at 1/COARSE of the frame's size
 CHECK_SLACK = 6              # step 2 looks this far (px) around a spot, so spots closer than this are one
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
 THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the whole screen 250 -> 117 (8 are no faster)
+# What a folder of templates may say about them, by file name: where the monster's feet are in each picture
+# ("origin", in the picture's own px, of its size "w" x "h"), which way it faces ("faces_right"; the game's
+# sprites face left), its frame in the game data ("frame": "move/2") and that frame's body box ("lt", "rb").
+INDEX = "index.json"      # the game's sprites (sprites.build)
+CUTOUTS = "cutouts.json"  # the screenshot cut-outs, matched against the sprites (sprites.cutout_origins)
 
 
 @dataclass(frozen=True)
 class Mob:
-    """A monster seen on screen, in frame pixels (half size)."""
+    """A monster seen on screen, in frame pixels (half size): the template that matched it, and what that
+    template knows of it. The template's centre and bottom aren't the monster's feet: a sprite stands on its
+    origin, up to 8.5 map units off its picture's centre, and a slime's hop frames end 10 units above its
+    feet; the screenshot cut-outs were cropped 9.5 units above a pig's feet and 14 below a slime's. Where the
+    template knows its origin (`ox`, `feet`), that is where the monster stands."""
     kind: str
-    x: int        # centre
+    x: int        # the template's centre
     y: int
     w: int
     h: int
     score: float
+    ox: float | None = None    # where its feet are: x ... (None: the template doesn't know)
+    feet: float | None = None  # ... and y
+    facing: int = 0            # which way it faces: 1 right, -1 left (0: not known)
+    pose: str = ""             # what it's doing: "stand", "move" (walking) or "hit1" (flinching); "": not known
+    frame: str = ""            # the frame of its animation that matched ("move/2"), if known
+    template: str = ""         # the picture that matched (its file's name: "pig_move2", "pig_1")
 
     @property
-    def feet_y(self) -> int:
-        return self.y + self.h // 2
+    def foot_x(self) -> float:
+        """The x it stands at: its origin's, else the template's centre."""
+        return self.x if self.ox is None else self.ox
+
+    @property
+    def feet_y(self) -> float:
+        """The y it stands at: its origin's, else the template's bottom."""
+        return self.y + self.h // 2 if self.feet is None else self.feet
 
 
 class MobTemplate(NamedTuple):
-    """One monster picture (one pose, facing one way), at frame size."""
+    """One monster picture (one pose, facing one way), at frame size, and what its folder says of it (INDEX,
+    CUTOUTS)."""
     rgb: np.ndarray         # its colours
     mask3: np.ndarray       # where the picture is (uint8, one copy per colour channel)
     silhouette: np.ndarray  # its body colour, at 1/COARSE size (step 1)
+    origin: tuple[float, float] | None = None  # where the monster's feet are, from its top-left (frame px)
+    facing: int = 0         # which way the monster faces in it: 1 right, -1 left, 0 not known
+    frame: str = ""         # its frame in the game data ("move/2")
+    pose: str = ""          # that frame's action: "stand", "move" or "hit1"
+    box: tuple[float, float, float, float] | None = None  # its body (left, top, right, bottom), map units
+                                                          # from its feet, y up negative, facing applied
+    name: str = ""          # its file's name, without ".png"
 
 
 def split_channels(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -99,14 +133,42 @@ def palette(kind: str, rgb: np.ndarray, channels=None) -> np.ndarray:
     return PALETTES[kind](r, g, b)
 
 
+def read_meta(folders: list[Path]) -> dict[str, dict]:
+    """What these folders say about their templates (INDEX, CUTOUTS), by file name."""
+    out: dict[str, dict] = {}
+    for folder in folders:
+        for name in (INDEX, CUTOUTS):
+            if (folder / name).is_file():
+                out.update(json.loads((folder / name).read_text(encoding="utf-8")))
+    return out
+
+
+def _known(entry: dict | None, size: tuple[int, int], flip: bool) -> tuple:
+    """What a template's entry (INDEX, CUTOUTS) says of it at frame size `size` (height, width), as drawn or
+    flipped: MobTemplate's origin, facing, frame, pose and box. Without an origin, nothing is known."""
+    if not entry or entry.get("origin") is None:
+        return None, 0, "", "", None
+    th, tw = size
+    ox, oy = entry["origin"][0] * tw / entry["w"], entry["origin"][1] * th / entry["h"]
+    right = bool(entry.get("faces_right")) != flip
+    box = None
+    if entry.get("lt") and entry.get("rb"):  # the game's boxes are for a monster facing left
+        (left, top), (r, bottom) = entry["lt"], entry["rb"]
+        box = (-r, top, -left, bottom) if right else (left, top, r, bottom)
+    frame = entry.get("frame", "")
+    return (tw - ox if flip else ox, oy), 1 if right else -1, frame, frame.split("/")[0], box
+
+
 class MobDetector:
     """Templates come from `folder` (or a list of folders): PNGs named <kind>_<anything>.png, RGBA at full
     screen size. gamelab/assets/mobs has cut-outs from screenshots; sprites.py makes them from the game data.
+    What the folders say about their templates (INDEX, CUTOUTS) comes along, and `meta` (by file name) on top.
     `threads`: how many matches run at once (1: all on the caller's thread)."""
 
-    def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS):
+    def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None):
         self.templates: dict[str, list[MobTemplate]] = {}
         folders = folder if isinstance(folder, list) else [folder]
+        meta = {**read_meta(folders), **(meta or {})}
         for path in sorted(p for f in folders for p in f.glob("*.png")):
             kind = path.stem.split("_")[0]
             if kind not in KINDS_WITH_PALETTE:
@@ -122,7 +184,8 @@ class MobDetector:
                 silhouette = (palette(kind, t) & (m > 0)).astype(np.float32)
                 coarse = cv2.resize(silhouette, (max(1, t.shape[1] // COARSE), max(1, t.shape[0] // COARSE)),
                                     interpolation=cv2.INTER_AREA)
-                self.templates.setdefault(kind, []).append(MobTemplate(t, np.dstack([m] * 3), coarse))
+                self.templates.setdefault(kind, []).append(MobTemplate(
+                    t, np.dstack([m] * 3), coarse, *_known(meta.get(path.name), t.shape[:2], flip), path.stem))
         if not self.templates:
             raise RuntimeError(f"no monster templates in {folder}")
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
@@ -172,11 +235,19 @@ class MobDetector:
             checks += [(kind, templates[i], cx, cy) for cx, cy, i in _to_check(spots)]
         results = run(lambda c: _check(frame, c[1], c[2], c[3]), checks)
         hits = []
-        for (kind, *_), result in zip(checks, results):
+        for (kind, template, *_), result in zip(checks, results):
             if result and result[0] >= THRESHOLD:
                 score, x, y, w, h = result
-                hits.append(Mob(kind, x, y_off + y, w, h, round(score, 3)))
+                hits.append(_seen(kind, template, x, y_off + y, w, h, round(score, 3)))
         return suppress_overlaps(hits)
+
+
+def _seen(kind: str, t: MobTemplate, x: int, y: int, w: int, h: int, score: float) -> Mob:
+    """The monster template `t` matched, centred at (x, y): where it stands, if the template knows."""
+    ox = feet = None
+    if t.origin is not None:  # the window's top-left (the centre is that plus half the size, rounded down)
+        ox, feet = round(x - w // 2 + t.origin[0], 2), round(y - h // 2 + t.origin[1], 2)
+    return Mob(kind, x, y, w, h, score, ox, feet, t.facing, t.pose, t.frame, t.name)
 
 
 def _one_opencv_thread() -> None:

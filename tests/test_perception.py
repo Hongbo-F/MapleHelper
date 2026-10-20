@@ -16,7 +16,7 @@ from gamelab.perception.hud import BAR_ROW, HP_BAR, bars, hp_fill, touch_popup
 from gamelab.perception.minimap import MINIMAP_BOX, dot_in_box
 from gamelab.perception.nametag import FULL_EVERY, NameTag
 from gamelab.perception.match import suppress_overlaps
-from gamelab.perception.mobs import ASSETS, MobDetector
+from gamelab.perception.mobs import ASSETS, INDEX, MobDetector, read_meta
 from gamelab.perception.sprites import SPRITES
 from gamelab.perception.terrain import ROPE_GAP, ScreenRope, find_ropes, ground_extent, rope_mask
 
@@ -238,6 +238,43 @@ def test_detector_finds_a_pasted_monster():
     found = MobDetector().detect(frame)
     assert [m.kind for m in found] == ["pig"]
     assert abs(found[0].x - (100 + w // 2)) <= 3
+    if (SPRITES / "cutouts.json").is_file():  # where the cut-outs' monsters stand, from the game's sprites
+        found = MobDetector(meta=read_meta([SPRITES])).detect(frame)
+        assert found[0].facing == 1 and found[0].frame == "move/2"  # pig_0 is a pig hopping right
+
+
+def paste(frame: np.ndarray, rgba: np.ndarray, left: int, top: int) -> None:
+    """Draw a half-size RGBA picture onto a frame, its top-left at (left, top)."""
+    h, w = rgba.shape[:2]
+    region = frame[top:top + h, left:left + w]
+    frame[top:top + h, left:left + w] = np.where(rgba[..., 3:] > 0, rgba[..., :3], region)
+
+
+def test_detector_reports_where_the_feet_are_and_which_way_it_faces(tmp_path):
+    # A picture whose feet aren't under its middle (a sprite's origin), facing left as the game's sprites do.
+    rgba = np.asarray(Image.open(ASSETS / "pig_0.png"))
+    Image.fromarray(rgba).save(tmp_path / "pig_move9.png")
+    (tmp_path / INDEX).write_text('{"pig_move9.png": {"origin": [20, 60], "w": 104, "h": 64, "frame": "move/9",'
+                                  ' "lt": [-30, -40], "rb": [40, 0]}}', encoding="utf-8")
+    small = np.asarray(Image.fromarray(rgba).resize((52, 32)))  # half size
+    detector = MobDetector(tmp_path, threads=1)
+    for flip, facing, feet_x in ((False, -1, 10), (True, 1, 52 - 10)):
+        frame = np.full((200, 300, 3), SKY, np.uint8)
+        frame[150:] = GRASS
+        paste(frame, small[:, ::-1] if flip else small, 120, 120)
+        found = detector.detect(frame)
+        assert [(m.kind, m.facing, m.pose, m.frame, m.template) for m in found] == [
+            ("pig", facing, "move", "move/9", "pig_move9")]
+        assert abs(found[0].foot_x - (120 + feet_x)) <= 1 and abs(found[0].feet_y - (120 + 30)) <= 1
+        assert abs(found[0].x - (120 + 26)) <= 1  # its centre, as before
+    boxes = {t.facing: t.box for t in detector.templates["pig"]}
+    assert boxes == {-1: (-30, -40, 40, 0), 1: (-40, -40, 30, 0)}  # the game's boxes face left
+
+
+def test_a_template_with_nothing_known_stands_on_its_centre_and_bottom():
+    found = MobDetector(threads=1).detect(with_monsters(("snail_8", 400, 300, False)))
+    assert [(m.ox, m.feet, m.facing, m.pose) for m in found] == [(None, None, 0, "")]
+    assert (found[0].foot_x, found[0].feet_y) == (found[0].x, found[0].y + found[0].h // 2)
 
 
 def test_blank_windows_dont_crowd_out_a_monster_in_an_odd_sized_band():
@@ -260,6 +297,11 @@ def test_blank_windows_dont_crowd_out_a_monster_in_an_odd_sized_band():
         found = detector.detect(frame, rows=(0, 151))
         assert any(m.kind == "pig" and abs(m.x - (760 + pw // 2)) <= 4 for m in found), seed
         assert serial.detect(frame, rows=(0, 151)) == found
+
+
+def core(found: list) -> list:
+    """Detections as the detector gave them before templates said what they knew (box and score)."""
+    return [(m.kind, m.x, m.y, m.w, m.h, m.score) for m in found]
 
 
 def old_detect(detector: MobDetector, frame: np.ndarray, rows=None) -> list:
@@ -335,10 +377,12 @@ def test_monsters_searched_on_threads_are_found_as_before():
     for frame in frames:
         for rows in (None, (250, 401), (380, 501)):  # the whole frame, an odd band, another
             old = old_detect(one, frame, rows)
-            assert one.detect(frame, rows) == six.detect(frame, rows) == old
+            assert one.detect(frame, rows) == six.detect(frame, rows)
+            assert core(six.detect(frame, rows)) == core(old)
             found += len(old)
         old = old_detect_wide(one, frame, (0, 486))
-        assert one.detect_wide(frame, (0, 486)) == six.detect_wide(frame, (0, 486)) == old
+        assert one.detect_wide(frame, (0, 486)) == six.detect_wide(frame, (0, 486))
+        assert core(six.detect_wide(frame, (0, 486))) == core(old)
         found += len(old)
     assert found >= 10
 
@@ -350,8 +394,9 @@ def test_monsters_in_saved_screenshots_found_as_before():
     for name in ("z2_shoot1.png", "z2_down.png", "after_rest.png", "closeup.png"):
         full = np.asarray(Image.open(paths.LAB / name).convert("RGB"))
         frame = cv2.resize(full, (960, 540), interpolation=cv2.INTER_AREA)
-        assert six.detect(frame, (230, 381)) == one.detect(frame, (230, 381)) == old_detect(one, frame, (230, 381))
-        assert six.detect_wide(frame, (0, 486)) == old_detect_wide(one, frame, (0, 486))
+        assert six.detect(frame, (230, 381)) == one.detect(frame, (230, 381))
+        assert core(six.detect(frame, (230, 381))) == core(old_detect(one, frame, (230, 381)))
+        assert core(six.detect_wide(frame, (0, 486))) == core(old_detect_wide(one, frame, (0, 486)))
 
 
 def test_window_cover_from_the_integral_image_is_the_tm_ccorr_sum():

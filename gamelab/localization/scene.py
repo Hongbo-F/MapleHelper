@@ -58,15 +58,16 @@ class Scene(Observation):
         return None if self.where is None else self.where.platform
 
     def place(self, m: Mob, model: MapModel, bar: float | None) -> Monster:
-        """Put a monster seen on screen onto the map, by its offset from her: onto the platform it walks on,
-        and never past that platform's ends (read from the screen, one can seem up to PLATFORM_SLACK past
-        one; past the step at the end of platform 2, it would seem in front of the wall it's behind)."""
-        x, y = self.map_x(m.x), self.map_y(m.feet_y)
+        """Put a monster seen on screen onto the map, by its offset from her: where it stands (its origin,
+        when the template that matched knows it; else the template's centre and bottom), onto the platform it
+        walks on, and never past that platform's ends (read from the screen, one can seem up to PLATFORM_SLACK
+        past one; past the step at the end of platform 2, it would seem in front of the wall it's behind)."""
+        x, y = self.map_x(m.foot_x), self.map_y(m.feet_y)
         p = monster_platform(model, m.kind, x, y)
         if p is None:
-            return Monster(m, x, y, None, bar)
+            return Monster(m, x, y, None, bar, m.facing, m.pose)
         x = p.clamp(x)
-        return Monster(m, x, p.y_at(x), p.id, bar)
+        return Monster(m, x, p.y_at(x), p.id, bar, m.facing, m.pose)
 
     # Half-size screen px <-> map units, by the offset from her (the camera doesn't scale, so offsets
     # from her hold anywhere on screen).
@@ -96,7 +97,9 @@ class Scene(Observation):
             "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen}
         return {"her": her, "hp": round(self.hp, 3), "mp": round(self.mp, 3),
                 "monsters": [{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1), "platform": m.platform,
-                              "bar": None if m.bar is None else round(m.bar, 2)} for m in self.monsters],
+                              "bar": None if m.bar is None else round(m.bar, 2),
+                              **({"facing": m.facing} if m.facing else {})}  # left out when not known
+                             for m in self.monsters],
                 "loot": [{"kind": d.item.kind, "x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform}
                          for d in self.loot]}
 

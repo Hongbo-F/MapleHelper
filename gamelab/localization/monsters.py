@@ -56,6 +56,8 @@ class Monster:
     y: float
     platform: int | None  # the platform it walks on (monsters never leave it)
     bar: float | None = None  # its HP bar (fraction left), shown once it has been hit; None: unhurt
+    facing: int = 0       # which way it faces: 1 right, -1 left, 0 not known (Mob.facing)
+    pose: str = ""        # "stand", "move" (walking) or "hit1" (flinching); "": not known (Mob.pose)
 
     @property
     def kind(self) -> str:

@@ -59,8 +59,11 @@ def _mob_canvases(copy: Path = COPY) -> Package:
 
 
 def mob_frames(mob_id: int, actions=("stand", "move", "hit1"), copy: Path = COPY) -> list[dict]:
-    """A monster's frames: [{"action", "index", "rgba", "origin": (x, y)}], one per distinct picture.
-    `origin` is the point (in the picture) that sits on the monster's position, i.e. at its feet."""
+    """A monster's frames: [{"action", "index", "rgba", "origin": (x, y), "lt", "rb", "head", "delay"}], one
+    per distinct picture. `origin` is the point (in the picture) that sits on the monster's position, i.e. at
+    its feet. `lt` and `rb` are the corners of its body's box and `head` its head, from its feet (map units,
+    y negative upward; None where the frame has none), and `delay` how long the frame shows (ms, or None).
+    The pictures face left."""
     name = f"{mob_id:07d}.img"
     info = _mob_pack(copy).image(f"Mob/{name}")
     pictures = _mob_canvases(copy).image(name)
@@ -77,10 +80,18 @@ def mob_frames(mob_id: int, actions=("stand", "move", "hit1"), copy: Path = COPY
             picture = (pictures.get(src_action) or {}).get(src_index)
             if not isinstance(picture, Canvas):
                 continue
-            origin = frame.props.get("origin")
+            props = frame.props
+            delay = props.get("delay")  # an int, or a string in some monsters' data ("200")
             out.append({"action": action, "index": int(index), "rgba": pixels(picture),
-                        "origin": (origin.x, origin.y) if origin is not None else (0, 0)})
+                        "origin": _point(props.get("origin")) or (0, 0), "lt": _point(props.get("lt")),
+                        "rb": _point(props.get("rb")), "head": _point(props.get("head")),
+                        "delay": int(delay) if delay is not None and str(delay).lstrip("-").isdigit() else None})
     return out
+
+
+def _point(vector) -> tuple[int, int] | None:
+    """A vector property (origin, lt, rb, head) as (x, y)."""
+    return None if vector is None else (vector.x, vector.y)
 
 
 ITEM_FOLDERS = {2: "Consume", 4: "Etc"}  # item id // 1,000,000 -> its folder under Item/

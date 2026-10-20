@@ -484,3 +484,28 @@ def test_a_monster_seen_past_its_platforms_end_is_placed_on_it():
     assert s.map_x(seen.x) > 910
     m = s.place(seen, model, None)
     assert (m.x, m.y, m.platform) == (900, 500, model.platforms[0].id)
+def test_a_monster_is_placed_where_its_feet_are():
+    """Scene.place puts a monster where the template that matched says its feet are (its origin), not at
+    the template's centre and bottom; and the look's telemetry says which way it faces."""
+    import numpy as np
+
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    from gamelab.screen import UNITS_PER_HALF_PX as U
+    tree = {
+        "info": {"VRLeft": 0, "VRTop": 0, "VRRight": 2000, "VRBottom": 1000},
+        "foothold": {"1": {"1": {"1": {"x1": 0, "y1": 500, "x2": 1000, "y2": 500, "prev": 0, "next": 0}}}},
+        "life": {"0": {"type": "m", "id": "8", "x": 600, "y": 500, "cy": 500, "rx0": 50, "rx1": 950}},
+        "miniMap": {"width": 2000, "height": 1000, "centerX": 0, "centerY": 0, "mag": 4},
+    }
+    model = mapdata.parse(1, tree, "Test", {}, {"8": "Pig"})
+    s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(400, 308), hp=1.0, mp=1.0,
+              where=Where(300.0, 500.0, model.platform(0), (0, 0)))  # her feet at y 300 on screen
+    centred = s.place(Mob("pig", 500, 280, 46, 30, 0.9), model, None)
+    assert centred.x == pytest.approx(300 + 100 * U) and centred.facing == 0
+    hop = Mob("pig", 500, 280, 46, 30, 0.9, ox=507.0, feet=301.5, facing=1, pose="move", frame="move/2")
+    placed = s.place(hop, model, None)  # its feet 7 px right of the picture's middle, below the picture
+    assert placed.x == pytest.approx(300 + 107 * U) and placed.y == 500 and placed.platform == 0
+    assert (placed.facing, placed.pose) == (1, "move")
+    s.monsters = [centred, placed]
+    assert [("facing" in m, m.get("facing")) for m in s.record()["monsters"]] == [(False, None), (True, 1)]

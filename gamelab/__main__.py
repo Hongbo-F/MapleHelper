@@ -229,9 +229,15 @@ def _annotate(scene, path) -> None:
     for monster in scene.monsters:
         mine = scene.platform is not None and monster.platform == scene.platform.id
         colour = "red" if mine else "orange"
-        box = _box(monster.mob)
+        mob = monster.mob
+        box = _box(mob)
         d.rectangle(box, outline=colour, width=2)
-        d.text((box[0], box[1] - 11), f"{monster.mob.kind} p{monster.platform}", fill=colour)
+        d.text((box[0], box[1] - 11), f"{mob.kind} p{monster.platform}", fill=colour)
+        x, y = mob.foot_x, mob.feet_y  # where it stands, and an arrow the way it faces
+        d.ellipse([x - 2, y - 2, x + 2, y + 2], fill=colour)
+        if mob.facing:
+            d.line([x, y - 4, x + 10 * mob.facing, y - 4], fill=colour, width=2)
+            d.polygon([(x + 14 * mob.facing, y - 4), (x + 9 * mob.facing, y - 8), (x + 9 * mob.facing, y)], fill=colour)
     for loot in scene.loot:
         box = _box(loot.item)
         d.rectangle(box, outline="yellow", width=2)
@@ -317,7 +323,9 @@ def _hunt_look(hunter) -> int:
         dx, dy = t.x - s.where.x, t.y - s.where.y
         in_reach = ("in reach" if reach.can_hit(p, s.where.x, s.where.y, t)
                     else "behind a wall" if reach.can_shoot(dx, dy, kind=t.kind) else "out of reach")
-        print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({in_reach}, score {t.mob.score})")
+        facing = {1: ", facing right", -1: ", facing left"}.get(t.facing, "")
+        frame = f", {t.mob.template} ({t.mob.frame})" if t.mob.frame else f", {t.mob.template}"
+        print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({in_reach}, score {t.mob.score}{facing}{frame})")
     s.loot = find_loot(s, hunter.model, hunter.senses.eyes, wide=True)
     for d in s.loot:
         print(f"  drop: {d.item.kind} on platform {d.platform}: {d.x - s.where.x:+.0f}, "
@@ -758,6 +766,39 @@ def cmd_bench_capture(args) -> int:
     return 0
 
 
+BODY_RECORDINGS = ("stand_snail", "walk_snail")  # she stands still while snails walk: the camera is still
+
+
+def cmd_bodies(args) -> int:
+    """Where the monster detector puts monsters: their feet against the platform's surface on saved
+    screenshots, and their x from frame to frame on recordings (analysis/bodies.py). Offline: no game, no
+    keys."""
+    from .analysis import bench, bodies
+    from .attack import reach
+    from .localization import mapdata
+    from .localization.senses import Senses
+    from .perception.sprites import detector_for
+    model = mapdata.load(args.map)
+    detector = detector_for(model)
+    files = [Path(f) for f in args.files] or bench.saved_frames()
+    eyes = bench.SavedEyes(calibration.load().template, detector)
+    senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
+
+    def look_at(bgra):
+        def look():
+            eyes.show(bgra)
+            return senses.look(wide=True)
+        return look
+
+    scenes = [(name, look_at(bgra)) for name, bgra in bench.load(files)]
+    names = BODY_RECORDINGS if args.recordings is None else args.recordings
+    found = [Path(r) if Path(r).suffix else RECORDINGS / f"{r}.npz" for r in names]
+    print("\n".join(bodies.run(scenes, model, [p for p in found if p.exists()], detector)))
+    if missing := [str(p) for p in found if not p.exists()]:
+        print(f"recordings not found: {', '.join(missing)}")
+    return 0
+
+
 # --- what gamelab keeps on disk --------------------------------------------------------------------------
 
 def cmd_lab_usage(args) -> int:
@@ -975,6 +1016,13 @@ def build_parser() -> argparse.ArgumentParser:
                                              "game as it is on screen; never brings it forward; no keys")
     s.add_argument("--n", type=int, default=100, help="rounds")
     s.set_defaults(func=cmd_bench_capture)
+    s = sub.add_parser("bodies", help="where the monster detector puts monsters' feet on saved screenshots, and "
+                                      "their x from frame to frame on recordings (offline; no game, no keys)")
+    s.add_argument("files", nargs="*", help="saved 1920x1080 screenshots (default: bench-look's, from gamelab/lab)")
+    s.add_argument("--recordings", nargs="*", help="recordings (names in gamelab/lab/recordings, or .npz files) "
+                                                   f"with the camera still (default: {', '.join(BODY_RECORDINGS)})")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.set_defaults(func=cmd_bodies)
 
     s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, screenshots, "
                                          "telemetry, harness runs, golden traces), by kind; deletes nothing")
