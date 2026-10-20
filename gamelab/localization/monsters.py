@@ -3,6 +3,7 @@
 (MonsterTrack, for planning moves around it).
 """
 
+from collections import deque
 from dataclasses import dataclass
 
 from ..perception.mobs import Mob
@@ -41,6 +42,10 @@ MATCH_WITHIN = 2.0   # s: an older last look is no help
 MATCH_DX = 90        # map units a monster may have moved since, on the same platform
 STILL_DX = 6         # ... and moved at most this: standing still (or turning)
 MIN_SPEED_DT = 0.2   # s between looks before its speed is worth measuring
+# Speeds kept per kind (Tracker.speeds, for `nav`'s summary), the latest: one a monster a look, so kept
+# all, a look every frame would add about 110,000 an hour (4 MB); 400 is a few minutes' worth even at 1.4
+# looks a second, and enough for the summary's median and 90th percentile.
+SPEED_SAMPLES = 400
 
 
 @dataclass(frozen=True)
@@ -144,7 +149,8 @@ class Tracker:
 
     def __init__(self):
         self.last: tuple[float, list[MonsterTrack]] = (0.0, [])  # the last look's time, and its tracks
-        self.speeds: dict[str, list[float]] = {}  # kind -> walking speeds seen between looks (units/s)
+        # kind -> the latest walking speeds seen between looks (units/s), SPEED_SAMPLES at most
+        self.speeds: dict[str, deque[float]] = {}
 
     def update(self, t: float, monsters: list[Monster], seen_at: float = 0.0) -> list[MonsterTrack]:
         """Tracks for the monsters of a look taken at `t` (time.monotonic). `seen_at`: when that look
@@ -163,7 +169,7 @@ class Tracker:
                 dx = m.x - mo.x
                 heading = (1 if dx > 0 else -1) if abs(dx) > STILL_DX else 0
                 if t - when > MIN_SPEED_DT:  # how fast monsters really walk, for MONSTER_SPEED
-                    self.speeds.setdefault(m.kind, []).append(abs(dx) / (t - when))
+                    self.speeds.setdefault(m.kind, deque(maxlen=SPEED_SAMPLES)).append(abs(dx) / (t - when))
                     vx = 0.0 if abs(dx) <= STILL_DX else max(-speed, min(speed, dx / (t - when)))
             out.append(MonsterTrack(m.platform, m.x, speed, heading, MONSTER_HALF.get(m.kind, 34.0), vx, seen_at,
                                     MONSTER_HEIGHT.get(m.kind, 46.0)))

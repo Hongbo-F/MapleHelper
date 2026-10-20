@@ -623,3 +623,18 @@ def test_a_look_searches_for_ropes_where_the_maps_ropes_can_show(model, tmp_path
     whole = look()
     assert [r.x for r in near.ropes] == [1243] and [r.x for r in whole.ropes] == [300, 1243]
     assert near.how == whole.how == "rope" and near.where.x == whole.where.x == pytest.approx(700 - 283 / 1.40625)
+
+
+def test_the_tracker_keeps_only_the_latest_speeds_of_each_kind():
+    """Tracker.speeds is for `nav`'s summary: a look every frame would add one a monster each time, so
+    only the latest SPEED_SAMPLES are kept."""
+    from gamelab.localization import monsters
+    from gamelab.localization.monsters import Monster, Tracker
+    from gamelab.perception.mobs import Mob
+    tracker, n, x = Tracker(), monsters.SPEED_SAMPLES, 300.0
+    for i in range(n + 51):  # a pig pacing back and forth, a look every 0.5 s ...
+        if i:  # ... 20 units the other way each time (40 units/s), and over the last 50 looks 30 (60 units/s)
+            x += (20 if i <= n else 30) * (1 if i % 2 else -1)
+        tracker.update(0.5 * i, [Monster(Mob("pig", 0, 0, 30, 30, 0.9), x, 500, 7)])
+    v = tracker.speeds["pig"]
+    assert len(v) == n and list(v)[-50:] == [60.0] * 50 and list(v)[:-50] == [40.0] * (n - 50)
