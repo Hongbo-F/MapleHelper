@@ -37,10 +37,15 @@ from .paths import CONFIG
 
 METHODS = ("dxgi", "mss")
 # A look waits this long at most for a frame shown after it began, as mss waited for the compositor's next
-# frame. The game draws one every 16.7 ms; when none comes, nothing on screen has changed since the frame
-# held, which is then the screen as it is. AcquireNextFrame's waits end on Windows' 15.6 ms timer ticks:
-# with nothing changing, a timeout of 1-15 ms took 16 ms, 17-20 ms took 31 and 50 ms took 63.
-FRESH_WAIT_S = 0.015
+# frame: a frame of the game's (one every 16.7 ms) and the ~2 ms a frame comes after the time it was shown
+# (present times were about 2 ms older than the frame's arrival, on the desktop), and a little more. When
+# none comes by then, nothing on screen has changed since the frame held, which is then the screen as it
+# is. 15 ms was shorter than a frame: against a duplication presenting every 16.7 ms with frames arriving
+# 0-2 ms late, 6-18% of looks were handed the frame shown 1-3 ms before they began (tests/test_capture.py).
+# AcquireNextFrame's waits end on Windows' 15.6 ms timer ticks: with nothing changing, a timeout of 1-15 ms
+# took 16 ms, 17-20 ms took 31 and 50 ms took 63; a frame that comes ends the wait at once. So a look at a
+# screen where nothing moves takes 31 ms, not 16; the game's screen always moves.
+FRESH_WAIT_S = 0.020
 # After duplicating starts: how long to wait for the first real frame (on the desktop it came 12 ms after
 # the black one, even with nothing on screen changing).
 FIRST_FRAME_S = 0.25

@@ -155,6 +155,51 @@ def test_with_nothing_shown_after_a_look_began_the_screen_is_the_frame_held():
     assert 101.0 + FRESH_WAIT_S <= clock.now < 101.0 + FRESH_WAIT_S + 0.002  # waited, but no longer
 
 
+class Game60:
+    """A duplication of a screen the game draws on: a frame shown every 1/60 s, coming LAG s after it was
+    shown; a wait that no frame ends lasts the timer's whole 15.6 ms ticks (as measured: a 1-15 ms timeout
+    took 16 ms, 17-20 ms took 31), one a frame comes in ends then."""
+    PERIOD, TICK = 1 / 60, 0.015625
+
+    def __init__(self, clock: Clock, lag: float):
+        self.clock, self.lag, self.taken, self.desktop = clock, lag, -1, (0, 0, 1920, 1080)
+
+    def acquire(self, timeout_ms: int):
+        newest = int((self.clock.now - self.lag) // self.PERIOD)  # the newest frame come in by now
+        if newest > self.taken:
+            self.taken = newest
+            return S_OK, newest + 1  # (0 is the black first frame's)
+        if timeout_ms:
+            comes = (self.taken + 1) * self.PERIOD + self.lag
+            ticks = self.TICK * max(1, -(-timeout_ms / 1000 // self.TICK))
+            if comes <= self.clock.now + ticks:
+                self.clock.now, self.taken = comes, self.taken + 1
+                return S_OK, self.taken + 1
+            self.clock.now += ticks
+        return DXGI_ERROR_WAIT_TIMEOUT, 0
+
+    def to_monotonic(self, n: int) -> float:
+        return (n - 1) * self.PERIOD
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("lag", [0.0, 0.001, 0.002])
+def test_a_look_at_the_game_always_gets_a_frame_shown_after_it_began(lag):
+    # With a 15 ms wait, 6-18% of these looks were handed the frame shown 1-3 ms before they began.
+    import random
+    rng = random.Random(1)
+    clock = Clock(100.0)
+    dup = capture.Duplicator((0, 0), opener=lambda point: Game60(clock, lag), clock=clock)
+    dup.advance()
+    for _ in range(2000):
+        clock.now += rng.uniform(0.02, 0.3)
+        began = clock.now
+        assert dup.advance(began) >= began
+        assert clock.now - began <= 1 / 60 + lag + 1e-9  # the next frame, no later
+
+
 @pytest.mark.parametrize("hr", [DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_INVALID_CALL])
 def test_a_lost_duplication_is_started_again(hr):
     clock = Clock()
