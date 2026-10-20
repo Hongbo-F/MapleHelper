@@ -195,3 +195,31 @@ def test_a_harness_run_with_the_feed_and_todays_look_costs():
     assert rec["frames"] > 0 and rec["senses"]["from the feed"] > 0 and out["looks"] == rec["senses"]["taken here"]
     blocking = harness.run_one("loop", 1, "game", minutes=0.5, costs="measured")
     assert "feed_record" not in blocking and blocking["looks"] > 0
+
+
+def test_the_stacks_computing_is_timed_between_its_calls_and_the_run_is_as_it_was():
+    """sim.latency times the stack's own computing between two calls to the game, by the call that ended
+    it, without charging it to the fake clock: the run is the harness's own."""
+    from gamelab.sim import latency
+    if not scenarios.available():
+        pytest.skip("needs the real map's data")
+    found, (timed,) = latency.measure("loop", [1], 0.5)
+    assert timed == harness.run_one("loop", 1, "game", minutes=0.5)
+    assert found.times["send"] and found.times["_now"] and min(min(xs) for xs in found.times.values()) >= 0
+    assert fakes.Clock.charge is Clock.charge and Clock.charge.__module__ == "gamelab.sim.fakes"  # put back
+    lines = found.table()
+    assert lines[0].startswith("before") and lines[-1].startswith("any call")
+    assert sum(int(line.split()[-6]) for line in lines[1:-1]) == int(lines[-1].split()[-6])
+
+
+def test_stretches_are_timed_from_a_mark_to_the_next_charge():
+    from gamelab.sim import latency
+    s = latency.Stretches()
+    s.charge("send")  # nothing marked yet: nothing timed
+    s.mark()
+    s.charge("send")
+    s.charge("send")  # charged once per mark
+    s.mark()
+    s.charge("_now")
+    assert [len(s.times[k]) for k in ("send", "_now")] == [1, 1]
+    assert [line.split()[0] for line in s.table()[1:]] == ["a", "a", "any"]
