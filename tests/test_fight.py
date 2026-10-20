@@ -190,7 +190,7 @@ def test_a_kill_is_matched_to_the_first_monster_in_the_star_path(monkeypatch):
 def test_a_jump_throw_aims_at_the_platform_above_and_over_a_snail_beside_her():
     # She's on PLAT (y 500) at x 500; a platform 60 above runs to her left. A jump throw's attack picks
     # its target ~49 units up: the slimes up there are in its area at any distance a star reaches (on
-    # the ground, one 60 above needs 200 sideways), and the snail 30 away on her own platform is under it.
+    # the ground, one 60 above needs 197 sideways), and the snail 30 away on her own platform is under it.
     from gamelab.behavior.fight import _in_path
     from gamelab.motion.physics import JUMP_ATTACK_MS
     late = 100  # the attack keyed 100 ms after the jump (now JUMP_ATTACK_MS is 40: see the end)
@@ -211,7 +211,7 @@ def test_a_jump_throw_aims_at_the_platform_above_and_over_a_snail_beside_her():
 def test_a_kill_on_the_platform_above_during_jump_throws_is_placed_there(monkeypatch):
     # Jump-throwing at a pig beside her (cornered: another pig behind her), the attack picks its target
     # ~49 units up, so a slime on the platform above, 150 to the side, is in its path (from the ground one
-    # 60 above needs 200): when it dies, the kill is placed there, not on the pig still in plain sight.
+    # 60 above needs 197): when it dies, the kill is placed there, not on the pig still in plain sight.
     def kill_at(h, t):
         if abs(t - 0.6) < 1e-6:
             h.report.exp_kills += 1

@@ -22,7 +22,7 @@ from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..motion.physics import WALK_SPEED
 from ..perception.kinds import kind_of
-from .reach import EDGE_MARGIN, SHOT_DOWN, SHOT_RANGE, SHOT_UP, can_hit, clear_span, min_dx
+from .reach import EDGE_MARGIN, SHOT_DOWN, SHOT_RANGE, SHOT_UP, body_of, can_hit, clear_span, max_dx, shot_dx
 
 MIN_COVERAGE = 0.3   # shoot from another platform only if this much of the hunting platform is in reach
 NEAR_BEST = 0.7      # spots reaching at least this share of the best one's count as good: the nearest wins
@@ -41,15 +41,16 @@ class Spot:
     safe: bool        # no monster can reach her on that platform (MapModel.safe)
 
 
-def coverage(target: Platform, x: float, y: float, here: Platform | None = None) -> float:
-    """Fraction of `target` in reach of a star thrown from (x, y), either way: on platform `here`, only as
-    far as the walls of its foothold group let a star (reach.clear_span)."""
+def coverage(target: Platform, x: float, y: float, here: Platform | None = None, kind: str | None = None) -> float:
+    """Fraction of `target` in reach of a star thrown from (x, y), either way, at a monster of `kind` (by
+    its body, reach.shot_dx; a pig by default): on platform `here`, only as far as the walls of its
+    foothold group let a star (reach.clear_span)."""
     dy = target.y_at(min(max(x, target.left), target.right)) - y
     if not -SHOT_UP <= dy <= SHOT_DOWN:
         return 0.0
-    covered, near = 0.0, min_dx(dy)
+    covered, near, far = 0.0, shot_dx(dy, kind), min(SHOT_RANGE, max_dx(body_of(kind)[1]))
     left, right = clear_span(here, x, y)
-    for lo, hi in ((max(x - SHOT_RANGE, left), x - near), (x + near, min(x + SHOT_RANGE, right))):
+    for lo, hi in ((max(x - far, left), x - near), (x + near, min(x + far, right))):
         covered += max(0.0, min(hi, target.right) - max(lo, target.left))
     return covered / max(1.0, target.right - target.left)
 

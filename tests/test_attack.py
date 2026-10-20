@@ -142,6 +142,67 @@ def test_the_star_search_opens_one_in_four():
     assert reach.search_band(10, 60, 0, 40) is None and reach.search_band(405, 440, 0, 40) is None
 
 
+def test_min_dx_is_where_the_search_first_picks_a_body():
+    # The closed form against the search itself, every half unit sideways, for each kind's body (and a pig
+    # flinching): from min_dx out to max_dx, its near side within 400.
+    for dy in (-120, -60, -42, -20, 0, 20, 42, 60, 120):
+        for top, half in ((26, 18.5), (41, 28.5), (46, 34.5), (55, 32), (54, 34)):
+            picked = [a / 2 for a in range(0, 1000) if reach.picks(a / 2, dy, top, half)]
+            if not picked:
+                assert reach.min_dx(dy, top, half) == math.inf, (dy, top)
+                continue
+            assert abs(picked[0] - reach.min_dx(dy, top, half)) <= 0.5, (dy, top)
+            assert picked[-1] == reach.max_dx(half), (dy, top)
+
+
+def test_off_level_a_star_needs_more_room_the_smaller_the_monster():
+    # By the game data's bodies (walking: MONSTER_HEIGHT; half widths 18.5-34.5), 60 below her:
+    body = {"pig": mapdata.MobBody(38, 54, 34.5), "slime": mapdata.MobBody(40, 46, 28.5),
+            "orange-mushroom": mapdata.MobBody(55, 65, 32), "snail": mapdata.MobBody(24, 33, 18.5)}
+    below = {k: reach.min_dx(60, *reach.body_of(k, body)) for k in body}
+    assert below == {"pig": 150.5, "slime": 176.5, "orange-mushroom": 113, "snail": 246.5}
+    assert reach.min_dx(-60, *reach.body_of("pig", body)) == 190.5
+    assert reach.min_dx(0, *reach.body_of("pig", body)) == 30.5 and reach.max_dx(34.5) == 434.5
+    # A pig flinching after a hit (54 tall) is picked from 111, one standing (38) from 171. 120 above her
+    # none is.
+    assert reach.min_dx(60, 54, 34) == 111 and reach.min_dx(60, 38, 34) == 171
+    assert all(reach.min_dx(-120, *reach.body_of(k)) == math.inf for k in body)
+    # Her decisions: never closer than the claw's reach, and a kind she doesn't know is taken as a pig.
+    assert reach.shot_dx(0) == reach.MIN_SHOT and reach.shot_dx(60, "orange-mushroom") == 113
+    assert reach.shot_dx(60, "dragon") == reach.shot_dx(60, "pig") == 151
+    assert reach.can_shoot(120, 60, kind="orange-mushroom") and not reach.can_shoot(120, 60)
+    assert not reach.can_shoot(170, 60, kind="slime") and reach.can_shoot(180, 60, kind="slime")
+    assert reach.can_shoot(410, 0, kind="snail") and not reach.can_shoot(420, 0, reach=500, kind="snail")
+
+
+def test_from_the_ground_the_claw_first_then_the_search_band_by_band():
+    # The claw's swing takes what it reaches on her level (90 ahead, into a pig's body up to 124 off), not
+    # an Orange Mushroom right under her, 60 below.
+    assert reach.claw_takes(120, 0, 46, 34) and not reach.claw_takes(130, 0, 46, 34)
+    assert not reach.claw_takes(60, 60, 55, 32)
+    # Then the search, its first band first: a slime 60 below 200 along (band 7) before a pig on her level
+    # 300 along (band 10); one 60 below 150 along isn't picked at all (it needs 177).
+    assert reach.ground_pick(30, 0, 26, 19) == (0, 30)
+    assert reach.ground_pick(200, 60, 41, 28) == (8, 200) < reach.ground_pick(300, 0, 46, 34) == (11, 300)
+    assert reach.ground_pick(150, 60, 41, 28) is None
+    # An attack from a jump keeps to the area fixed to her feet: as high as she is then, a pig 60 above her
+    # 100 along is in it; from the ground, the search doesn't pick it (it needs 191).
+    assert reach.in_area(100, -60, 46, rise=reach.air_rise(physics.JUMP_ATTACK_MS), half=34)
+    assert not reach.in_area(100, -60, 46, half=34)
+
+
+def test_off_level_she_gives_a_star_the_room_its_kind_needs():
+    # 60 below her: an Orange Mushroom 130 along is thrown at, and so is a pig 160 along; a slime 160 along
+    # isn't (it needs 177): she steps back 40 past where it's picked, or (one target) walks to a band past it.
+    mushroom = target(630, 560, platform=1, kind="orange-mushroom")
+    assert decide(500, 500, PLAT, mushroom, []) == ("throw", RIGHT) and stance(500, 500, PLAT, [mushroom]) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(660, 560, platform=1)]) == ("throw", RIGHT)
+    slime = target(660, 560, platform=1, kind="slime")
+    assert stance(500, 500, PLAT, [slime]) == ("back", LEFT, pytest.approx(177 + 40 - 160))
+    move = decide(500, 500, PLAT, slime, [])
+    assert move[:2] == ("walk", LEFT) and 660 - (500 - move[2]) == pytest.approx(177 + reach.SEARCH_STEP)
+
+
 # --- what an attack from a jump can hit ----------------------------------------------------------------
 
 def test_an_attack_keyed_late_in_a_jump_starts_too_high_for_a_snail():
@@ -340,21 +401,22 @@ def test_she_doesnt_throw_at_or_walk_for_a_monster_behind_a_wall_of_her_group(mo
     assert pick_target(100, 500, a, [up, target(390, 440, platform=b.id, bar=0.5)]) is up  # none in reach: nearest
     # Down from B the star gets there: thrown, from B, at the monster on A.
     assert decide(300, 440, b, target(100, 500, platform=a.id), []) == ("throw", LEFT)
-    # Where to shoot B from: nothing of it from A (half of it by distance).
-    assert spots.coverage(b, 100, 500, a) == 0 and spots.coverage(b, 100, 500) == pytest.approx(0.5)
+    # Where to shoot B from: nothing of it from A (by distance, from 191 sideways for a pig 60 above: 109 of
+    # its 200 units).
+    assert spots.coverage(b, 100, 500, a) == 0 and spots.coverage(b, 100, 500) == pytest.approx(0.545)
     # With the rule off (an in-game probe), as before.
     monkeypatch.setattr(reach, "WALLS_BLOCK", False)
     assert decide(100, 500, a, up, []) == ("throw", RIGHT) and stance(100, 500, a, [up]) == ("throw", RIGHT)
 
 
 def test_no_spot_on_platform_4_for_platform_2():
-    """On the real map (skipped without its parsed game data): by distance a spot on 4 (x 244) has 40% of
+    """On the real map (skipped without its parsed game data): by distance a spot on 4 (x 244) has 41% of
     platform 2 in reach, but it's all behind the step wall; 2 is shot from itself."""
     if not (mapdata.CACHE / "10000012.json").is_file():
         pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
     model = mapdata.load(10000012)
     assert [sp.platform for sp in spots.spots(model, 2)] == [2]
-    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244)) == pytest.approx(0.398, abs=0.002)
+    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244)) == pytest.approx(0.415, abs=0.002)
     assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244), model.platform(4)) == 0
 
 

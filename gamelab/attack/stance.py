@@ -4,14 +4,16 @@ close in. Pure decisions from map positions; the fight loop (behavior.fight) car
 `stance` is the policy for a group (fight.clear, what tours use) and `decide` the one for a single
 target (fight.kill, `hunt kill`). Their thresholds differ: a monster on her platform is too close
 within MIN_SHOT + 10 for stance and TOO_CLOSE for decide, and stance closes in to SHOT_RANGE - 40 of
-a target where decide walks to the nearest of SHOT_RANGE - 30 and MIN_SHOT + 60 from it, either side.
+a target where decide walks to the nearest of SHOT_RANGE - 30 and MIN_SHOT + 60 from it (off her level,
+a band past reach.shot_dx), either side.
 `pick_target` says which monster to shoot first, `open_above` whether a jump keeps her on her
 platform, and `act_text` and `pct` word it for the log. Thresholds built on reach's constants are
 read from reach at call time, and so are the attacks' timings (physics.JUMP_ATTACK_MS and
 JUMP_BACK_ATTACK_MS): whether a jump throw or a jump back can hit a kind follows from them.
 A monster behind a wall of her own foothold group (reach.wall_in_way: one on platform 2 for her on 4)
 is out of reach from anywhere on her platform: neither policy throws at it, or walks along her platform
-for it.
+for it. Off her level, how much room a star needs sideways goes by the monster's kind (reach.shot_dx: the
+star's search picks a small or a short one from farther off).
 """
 
 from collections.abc import Callable
@@ -161,15 +163,16 @@ def _throw_side(x: float, in_reach: list[Monster], facing: str | None) -> str:
 def _step_from_under(x: float, y: float, platform: Platform, wanted: list[Monster], lo: float,
                      hi: float) -> tuple | None:
     """Off her level and too close sideways (right under or over her), a star misses: step away from
-    the nearest such monster, along her platform, to where a star reaches it (throwing at it from
-    right over it used to go on and on). None if there's none, or no such step."""
+    the nearest such monster, along her platform, to where a star reaches it (reach.shot_dx, by its
+    kind; throwing at it from right over it used to go on and on). None if there's none, or no such
+    step."""
     under = [t for t in wanted if t.platform != platform.id and reach.in_band(t.y - y)
-             and abs(t.x - x) < reach.min_dx(t.y - y) and reach.wall_to(platform, x, y, t) is None]
+             and abs(t.x - x) < reach.shot_dx(t.y - y, t.kind) and reach.wall_to(platform, x, y, t) is None]
     if not under:
         return None
     t = _nearest(under, x)
     away = LEFT if t.x > x else RIGHT
-    goal = t.x + directions.sign(away) * (reach.min_dx(t.y - y) + 40)
+    goal = t.x + directions.sign(away) * (reach.shot_dx(t.y - y, t.kind) + 40)
     goal = min(max(goal, lo), hi)
     if abs(goal - x) >= MIN_MOVE and reach.can_hit(platform, goal, y, t, reach=_goal_reach()):
         return ("back", away, abs(goal - x))
@@ -248,10 +251,13 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
         return ("throw", directions.toward(dx))
     if not reach.in_band(dy):
         return ("skip", "not level enough with her platform")
-    # Walk to the nearest spot on her platform that has the target in reach (either side of it).
-    far, near = reach.SHOT_RANGE - 30, reach.MIN_SHOT + 60
+    # Walk to the nearest spot on her platform that has the target in reach (either side of it): near it,
+    # MIN_SHOT + 60 off, or off her level one band of the star's search past where it first picks the
+    # target (reach.shot_dx, by its kind: a pig standing needs that band more than one walking).
+    far = reach.SHOT_RANGE - 30
+    near = max(reach.MIN_SHOT + 60, reach.shot_dx(dy, target.kind) + reach.SEARCH_STEP)
     goals = [min(max(target.x + d, lo), hi) for d in (-far, -near, near, far)]
-    goals = [g for g in goals if reach.can_shoot(target.x - g, dy, reach=_goal_reach())]
+    goals = [g for g in goals if reach.can_shoot(target.x - g, dy, reach=_goal_reach(), kind=target.kind)]
     if not goals:
         return ("skip", "out of reach from this platform")
     goals = [g for g in goals if reach.wall_to(platform, g, y, target) is None]

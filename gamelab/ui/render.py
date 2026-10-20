@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 from .. import directions
-from ..attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, clear_span, min_dx
+from ..attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, clear_span, shot_dx
 from ..localization.mapdata import MapModel
 from .state import State
 
@@ -284,7 +284,7 @@ class MapView:
         rows = img[first:min(bottom + 2, h)]
         overlay = rows.copy()
         for sign in (-1, 1):
-            near, far = x + sign * min_dx(0), x + sign * STAR_REACH
+            near, far = x + sign * shot_dx(0), x + sign * STAR_REACH
             if stops is not None:
                 far = max(far, stops[0]) if sign < 0 else min(far, stops[1])
                 if (far - near) * sign <= 0:

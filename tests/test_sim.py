@@ -303,9 +303,10 @@ def test_a_star_hits_the_first_monster_in_its_path_but_passes_one_right_under_he
                     facing="right"))
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
-    # 60 below and 60 along is right under her (reach.min_dx: 150): the star goes over it
+    # 60 below and 60 along is right under her (the star's search picks an Orange Mushroom from 113
+    # sideways), and the claw doesn't swipe off her level: the star goes over it to the next one.
     assert w.monsters[0].hp == 3 and w.monsters[1].hp == 2
-    # A snail 60 below isn't hit at all: its body (26 tall) stays under the area (19 below her feet).
+    # A snail 60 below and 190 along isn't hit: it's picked only from 246 (26 tall, its top 34 below her feet).
     w = still(world(model, a.id, 190.0, monsters=[("Snail", b.id, 380.0)], facing="right"))
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
@@ -315,6 +316,40 @@ def test_a_star_hits_the_first_monster_in_its_path_but_passes_one_right_under_he
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
     assert [m.alive for m in w.monsters] == [True, False]  # the nearer one takes it
+
+
+def test_the_star_search_picks_by_body(model):
+    # A (y 300) is 60 above B (y 360). From A a pig on B is picked from 151 units sideways (walking, 46 tall:
+    # its far side in the band whose window takes it in), an Orange Mushroom from 113; from B, a pig up on A
+    # from 191.
+    a, b, c = plat(model, 300, 100), plat(model, 360, 300), plat(model, 500, 400)
+
+    def throw(w):
+        tap(w, 0.0, "f", 0.04)
+        w.advance(1.0)
+        return w.monsters[0].hp
+
+    for x, hp in ((330.0, 3), (355.0, 2)):  # 140 and 165 along
+        assert throw(still(world(model, a.id, 190.0, monsters=[("Pig", b.id, x)], facing="right"))) == hp, x
+    assert throw(still(world(model, a.id, 190.0, monsters=[("Orange Mushroom", b.id, 310.0)], facing="right"))) == 2
+    for her, hp in ((346.0, 3), (366.0, 2)):  # 180 and 200 along
+        assert throw(still(world(model, b.id, her, monsters=[("Pig", a.id, 166.0)], facing="left"))) == hp, her
+    # On her level, out to 400 to its near side: a pig 430 along (its near side 396) is hit, one 440 along isn't.
+    for x, hp in ((530.0, 2), (540.0, 3)):
+        assert throw(still(world(model, c.id, 100.0, monsters=[("Pig", c.id, x)], facing="right"))) == hp, x
+
+
+def test_a_flinching_pig_below_is_picked_closer(model):
+    # Hit, a pig flinches 54 tall for 0.6 s: 60 below her the search picks it from 111 sideways, not 151.
+    a, b = plat(model, 300, 100), plat(model, 360, 300)
+    w = still(world(model, a.id, 190.0, monsters=[("Pig", b.id, 315.0)], facing="right"))  # 125 along
+    tap(w, 0.0, "f", 0.04)
+    w.advance(1.0)
+    assert w.monsters[0].hp == 3 and any("star thrown right: no hit" in line for line in w.log)
+    w.monsters[0].hit_at = w.t  # as if a star had hit it just now
+    tap(w, 1.0, "f", 0.04)
+    w.advance(2.0)
+    assert w.monsters[0].hp == 2
 
 
 def test_a_wall_of_her_own_foothold_group_stops_the_star(model):

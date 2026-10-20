@@ -25,7 +25,7 @@ from ..localization.scene import Loot, Scene
 from .looting import EMPTY_LOOKS, LOOT_REACH, SETTLE
 
 STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be its kill: 520 ms to the
-                   # release, up to 0.7 s of flight (460 units at 690 a second), and up to a look later
+                   # release, up to 0.65 s of flight (434 units at 690 a second), and up to a look later
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
 
 
@@ -101,15 +101,18 @@ class Ledger:
 
 
 def in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:
-    """The monsters a star thrown that way from where she stands in look `s` can meet, nearest first:
-    on her platform within its reach, elsewhere where a star can hit (attack.reach), and none behind a
-    wall of her foothold group (a kill after a throw from 4 isn't put on a monster on 2)."""
-    x, y, here = s.where.x, s.where.y, s.platform.id
-    out = [m for m in monsters if (m.x > x) == (side == RIGHT)
-           and (abs(m.x - x) <= reach.STAR_REACH if m.platform == here
-                else reach.can_shoot(m.x - x, m.y - y, reach.STAR_REACH))
-           and reach.wall_to(s.platform, x, y, m) is None]
-    return sorted(out, key=lambda m: abs(m.x - x))
+    """The monsters an attack from the ground that way from where she stands in look `s` can take, in the
+    order it takes them (attack.reach.ground_pick, by each kind's body: the claw's swing on her level
+    first, then the star's search, its first band first, the nearest in it), and none behind a wall of
+    her foothold group (a kill after a throw from 4 isn't put on a monster on 2)."""
+    x, y = s.where.x, s.where.y
+    out = []
+    for m in monsters:
+        if (m.x > x) == (side == RIGHT) and reach.wall_to(s.platform, x, y, m) is None:
+            order = reach.ground_pick(abs(m.x - x), m.y - y, *reach.body_of(m.kind))
+            if order is not None:
+                out.append((order, m))
+    return [m for _, m in sorted(out, key=lambda om: om[0])]
 
 
 @dataclass

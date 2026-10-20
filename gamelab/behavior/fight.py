@@ -6,8 +6,9 @@ A fight is a loop of looks: each look, attack.stance decides what to do about th
 EXP going up after she started throwing at something: vanishing alone isn't one (hit monsters flinch
 and hide behind damage numbers, and other players kill monsters too). A star hits the first monster
 in its path, whatever its kind, so a kill is matched against everything in the path of the throw: from
-a jump, as high as she is when the attack picks its target, and short of any wall of her foothold group
-(attack.reach).
+the ground, what the claw or the star's search can pick by each monster's body; from a jump, what the
+attack's area takes in as high as she is when it picks its target; and short of any wall of her foothold
+group (attack.reach).
 Kills are counted in the hunter's Report; their drops go to her Looter (behavior.looting).
 """
 
@@ -22,7 +23,7 @@ from maplehelper.game import COMBAT
 from .. import directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import TOO_CLOSE, act_text, air_gap, decide, open_above, pct, pick_target, stance
-from ..localization.mapdata import MapModel
+from ..localization.mapdata import MapModel, MobBody
 from ..localization.monsters import (MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster, bodies, dead_one,
                                      seen_again)
 from ..localization.scene import Scene
@@ -230,7 +231,8 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     """What to do about the monsters to `fight` (attack.stance), walking up to them only if `approach`.
     For a throw, everything in the star's path is kept (st.aimed): a kill is matched against it."""
     here = s.platform
-    tops = {kind: b.top for kind, b in bodies(h.model).items()}  # how tall each kind is (game data)
+    body = bodies(h.model)  # each kind's body (game data)
+    tops = {kind: b.top for kind, b in body.items()}  # how tall each kind is at least
     act = stance(s.where.x, s.where.y, here, fight, approach, h.actions.facing,
                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
@@ -239,7 +241,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     st.last_act, st.last_hidden = act, bool(hidden)
     throwing = act[0] in THROWS
     if throwing:
-        st.aimed = _in_path(s, act[1], visible + hidden, air_gap(act[0]), tops)
+        st.aimed = _in_path(s, act[1], visible + hidden, air_gap(act[0]), body)
     if telemetry.recording():
         telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden),
                        aimed=[{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1)} for m in st.aimed]
@@ -327,23 +329,30 @@ def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], g
 
 
 def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None = None,
-             tops: dict[str, float] | None = None) -> list[Monster]:
+             body: dict[str, MobBody] | None = None) -> list[Monster]:
     """Everything in a star's path that way, whatever its kind: a snail in front of a far pig takes the
-    star (and its EXP isn't the pig's kill). From a jump (the attack keyed `gap_ms` after the jump key),
-    what the attack's area takes in from as high as she is when it picks its target (reach.in_area, by
-    how tall each kind is at least: `tops`): monsters on the platform above too, as far as a star
-    reaches, but none that stays under its floor (a snail beside her: an EXP gain then came from one of
-    those above). None behind a wall of her foothold group (reach.wall_to: from 4, those on 2)."""
-    x, y, here = s.where.x, s.where.y, s.platform.id
+    star (and its EXP isn't the pig's kill). From the ground, what the claw's swing or the star's search
+    can pick (reach.ground_pick, by each kind's body walking: reach.body_of, half its width from `body`,
+    the map's game data): on her platform and off it, a monster off her level only as close as the
+    search picks it. From a jump (the attack keyed `gap_ms` after the jump key), what the attack's area
+    takes in from as high as she is when it picks its target (reach.in_area, by how tall each kind is at
+    least, `body`'s top): monsters on the platform above too, as far as a star reaches, but none that
+    stays under its floor (a snail beside her: an EXP gain then came from one of those above). None
+    behind a wall of her foothold group (reach.wall_to: from 4, those on 2)."""
+    x, y = s.where.x, s.where.y
+    body = body or bodies()
     ahead = [m for m in monsters if (m.x > x) == (side == RIGHT)]
     if gap_ms is None:
-        return [m for m in ahead if (abs(m.x - x) <= reach.STAR_REACH if m.platform == here
-                                     else reach.can_shoot(m.x - x, m.y - y, reach.STAR_REACH))
+        return [m for m in ahead
+                if reach.ground_pick(abs(m.x - x), m.y - y, *reach.body_of(m.kind, body)) is not None
                 and reach.wall_to(s.platform, x, y, m) is None]
-    rise, tops = reach.air_rise(gap_ms), tops or MONSTER_TOP
-    return [m for m in ahead
-            if reach.in_area(abs(m.x - x), m.y - y, tops.get(m.kind, MONSTER_TOP["pig"]), rise)
-            and reach.wall_to(s.platform, x, y, m, rise) is None]
+    rise, out = reach.air_rise(gap_ms), []
+    for m in ahead:
+        b = body.get(m.kind)  # how tall it is at least, and half its width (a pig's if unknown)
+        top, half = (b.top, b.half) if b is not None else (MONSTER_TOP["pig"], reach.PIG[1])
+        if reach.in_area(abs(m.x - x), m.y - y, top, rise, half)                 and reach.wall_to(s.platform, x, y, m, rise) is None:
+            out.append(m)
+    return out
 
 
 @dataclass
@@ -437,7 +446,7 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
         return "unreachable"
     if act[0] == "throw":
         dx, dy = t.x - s.where.x, t.y - s.where.y
-        if reach.can_shoot(dx, dy, reach=reach.STAR_REACH) and act[1] == directions.toward(dx):
+        if reach.can_shoot(dx, dy, reach=reach.STAR_REACH, kind=t.kind) and act[1] == directions.toward(dx):
             st.flying.append(_shot(s, t, dx, dy, h.model))
         h.actions.throw(act[1])
         h.report.throws += 1

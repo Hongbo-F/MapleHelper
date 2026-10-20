@@ -18,17 +18,19 @@ The physics are the ones gamelab plans with, so a plan that is right on paper wo
   ~58 units (the median logged push). At 0% HP she dies, and the run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
-  that monster (attack.reach). On the ground, the nearest monster whose body reaches into the claw's
-  swing (reach.MIN_SHOT ahead of her, reach.CLAW_DOWN below to reach.CLAW_UP above her feet) is swiped
-  (a fifth of a star's damage); else, the nearest whose body reaches into the attack's area
-  (reach.STAR_REACH ahead, reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is then)
-  takes a star. Bodies are as tall as their kind (monster_data.MONSTER_HEIGHT), and taller while they
-  flinch after a hit (monster_data.FLINCH_S, flinch tops from the game data). From the ground a monster
-  off her level (reach.LEVEL) is picked only from reach.min_dx sideways (right under or over her isn't
-  hit). So a jump throw's attack, starting 46 units up, passes over a snail. Neither the claw nor a star
-  gets past a wall of the foothold group of the platform she last stood on, where it crosses the level
-  line reach.SHOT_H above her feet (reach.wall_between): from platform 4 a throw at a monster on 2 hits
-  nothing, or a monster short of the wall (live, no star from 4 ever reached one on 2). Kills give EXP
+  that monster (attack.reach). On the ground, the nearest monster on her level (reach.LEVEL) whose body
+  reaches into the claw's swing (reach.MIN_SHOT ahead of her, reach.CLAW_DOWN below to reach.CLAW_UP
+  above her feet) is swiped (a fifth of a star's damage); else the star's search picks (reach.search_band:
+  of the monsters whose body overlaps one of its bands, the first band's, the nearest of those), so off
+  her level a star needs room sideways, by the monster's body (right under or over her, none is hit).
+  In the air, the nearest whose body reaches into the attack's area (its near side within
+  reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is
+  then) takes a star. Bodies are as tall as their kind walking (monster_data.MONSTER_HEIGHT), and taller
+  while they flinch after a hit (monster_data.FLINCH_S, flinch tops from the game data). So a jump
+  throw's attack, starting 46 units up, passes over a snail. Neither the claw nor a star gets past a wall
+  of the foothold group of the platform she last stood on, where it crosses the level line reach.SHOT_H
+  above her feet (reach.wall_between): from platform 4 a throw at a monster on 2 hits nothing, or a
+  monster short of the wall (live, no star from 4 ever reached one on 2). Kills give EXP
   (model.mob_exp) and, 2 s later, drops on its platform; dead monsters respawn 8 s later where they
   spawned;
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
@@ -780,12 +782,11 @@ class World:
             return max(m.height, m.flinch_top)
         return m.height
 
-    def nearest_in(self, facing: str, far: float, down: float, up: float) -> SimMonster | None:
+    def nearest_in(self, facing: str, far: float, down: float, up: float, level: bool = False) -> SimMonster | None:
         """The live monster nearest her whose body reaches into a box on her `facing` side, from her to
-        `far` ahead and `down` below to `up` above her feet (reach.reaches_into). On the ground, one off
-        her level is taken only from reach.min_dx sideways: right under or over her, it isn't hit. One
-        behind a wall of the foothold group she last stood on isn't either (reach.wall_between, from her
-        height now)."""
+        `far` ahead and `down` below to `up` above her feet (reach.reaches_into); with `level`, only one
+        on her level (reach.LEVEL: the claw's swing, as reach.claw_takes). Not one behind a wall of the
+        foothold group she last stood on (reach.wall_between, from her height now)."""
         t, d, best = self.t, directions.sign(facing), None
         for m in self.monsters:
             if not m.alive:
@@ -794,7 +795,7 @@ class World:
             ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
             if not reach.reaches_into(ahead, dy, self.top(m), m.half, far, down, up):
                 continue
-            if self.mode == "ground" and abs(dy) > reach.LEVEL and ahead < reach.min_dx(dy):
+            if level and abs(dy) > reach.LEVEL:
                 continue
             if reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
                 continue
@@ -802,16 +803,36 @@ class World:
                 best = (abs(ahead), m)
         return None if best is None else best[1]
 
+    def nearest_star(self, facing: str) -> SimMonster | None:
+        """The live monster the star's search from the ground picks on her `facing` side: of those whose
+        body overlaps one of its bands (reach.search_band), the first band's, the nearest of those. Not
+        one behind a wall of the foothold group she last stood on (reach.wall_between)."""
+        t, d, best = self.t, directions.sign(facing), None
+        for m in self.monsters:
+            if not m.alive:
+                continue
+            mx = m.at(t)
+            ahead = (mx - self.x) * d
+            k = reach.search_band(*reach.body_box(ahead, m.y(mx) - self.y, self.top(m), m.half))
+            if k is None or reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
+                continue
+            if best is None or (k, abs(ahead)) < best[0]:
+                best = ((k, abs(ahead)), m)
+        return None if best is None else best[1]
+
     def _aim(self, key_ms: int) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
-        lands STAR_DELAY after the key (_attack). On the ground, the claw swipes the nearest monster its
-        swing reaches; else the nearest in the attack's area takes the star."""
-        target = None
+        lands STAR_DELAY after the key (_attack). On the ground, the claw swipes the nearest monster on her
+        level its swing reaches; else the star's search picks (nearest_star). In the air, the nearest in
+        the attack's area takes the star."""
         if self.mode == "ground":
-            target = self.nearest_in(self.facing, reach.MIN_SHOT, reach.CLAW_DOWN, reach.CLAW_UP)
-        swipe = target is not None
-        if target is None:
-            target = self.nearest_in(self.facing, reach.STAR_REACH, reach.AREA_DOWN, reach.AREA_UP)
+            target = self.nearest_in(self.facing, reach.MIN_SHOT, reach.CLAW_DOWN, reach.CLAW_UP, level=True)
+            swipe = target is not None
+            if target is None:
+                target = self.nearest_star(self.facing)
+        else:
+            target = self.nearest_in(self.facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP)
+            swipe = False
         self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe))
 
     def _attack(self, facing: str, m: SimMonster | None, swipe: bool) -> None:

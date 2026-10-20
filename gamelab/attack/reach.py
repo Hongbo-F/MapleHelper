@@ -1,5 +1,5 @@
-"""Where her stars reach: how far, how far below and above her, how close is too close, and what an
-attack from a jump can hit.
+"""Where her stars reach: how far, how far below and above her, how close is too close, what an attack
+from the ground or from a jump picks, and what stops a star.
 
 A regular attack throws one star straight ahead. Measured in game (Thicket Around the Beach II):
 - in open air the star flew 400 map units (560 screen px) before vanishing;
@@ -10,20 +10,23 @@ A regular attack throws one star straight ahead. Measured in game (Thicket Aroun
 - right next to a monster, the claw swipes instead of throwing (weak, and the monster can touch her).
 
 What an attack hits is picked when it starts, about 55 ms after its key, not when the star flies (the
-star is only a picture): the nearest monster whose body reaches into an area fixed to her feet, from
-AREA_DOWN below them to AREA_UP above, up to STAR_REACH ahead. From a jump the area is as high as she is
-then. A jump throw's attack starts 42-49 units up, so its area passes over a snail (24-26 tall; a
-monster's body is its box in the game data, localization.monsters): in 45 jump-throws at snails 3-77
-units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60 above took the
-stars. On the ground the claw's swing is looked at first: a monster whose body reaches into it is swiped.
-
-From the ground, the star finds its target by a stepped search (`search_band`): bands SEARCH_STEP wide
-from SEARCH_START ahead of her out to STAR_RANGE, band k a window from SEARCH_FLOOR0 - SEARCH_GROW k to
+star is only a picture), by the monsters' bodies (their boxes in the game data, localization.monsters).
+On the ground the claw's swing is looked at first: a monster on her level whose body reaches into it is
+swiped (`claw_takes`). Else the star's target search (`search_band`): bands SEARCH_STEP wide from
+SEARCH_START ahead of her out to STAR_RANGE, band k a window from SEARCH_FLOOR0 - SEARCH_GROW k to
 SEARCH_TOP0 + SEARCH_GROW k above her feet, so it opens one unit up and one down for every four ahead; the
-star goes to a monster whose body overlaps the first band any body does, the nearest of those. It's
-MapleStory Classic's (this game), as meowdb's Lucky Seven page draws it; the shot log and the live tours'
-telemetry agree with its shape, and fit its floor exactly but not its top (SEARCH_TOP0). Nothing goes by
-it yet: the simulator's world picks by the area above, and her decisions by min_dx's ramp.
+star goes to a monster whose body overlaps the first band any body does, the nearest of those. Off her
+level a star so needs room sideways, the more the farther off her level and the smaller the monster
+(`min_dx`, by its body: `body_of`): 60 below her an Orange Mushroom is picked from 113 units, a pig from
+151, a slime from 177, a snail from 246; 60 above, each kind from 191-207. The search is MapleStory
+Classic's (this game), as meowdb's Lucky Seven page draws it; the shot log and the live tours' telemetry
+agree with its shape, and fit its floor exactly but not its top (SEARCH_TOP0). From a jump it doesn't fit
+(40 ms after the jump, stars killed snails 36-66 units away, closer than a search starting 65 ahead
+picks), so an attack from a jump keeps to the area that does: a box fixed to her feet, as high as she is
+then (`in_area`), from AREA_DOWN below them to AREA_UP above, STAR_RANGE ahead. A jump throw's attack
+keyed 100 ms after the jump started 42-49 units up, its area over a snail (24-26 tall): in 45 jump-throws
+at snails 3-77 units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60
+above took the stars.
 
 What stops a star is the walls of her own foothold group (mapdata.Segment.group: a floating block's floor
 and the walls hanging from its ends, or platforms joined by a step), where they cross a level line SHOT_H
@@ -33,7 +36,9 @@ flag for it (306 map images: a foothold has its ends, its neighbours and `piece`
 `forbidFallDown`); the rule is fitted to the live logs of 2026-10-18 to 10-20:
 - from platform 4, no star reached a monster on 2, 60 above her behind the step wall joining the two
   (group (3, 63)), in 3 sessions: 0 of 3 in the shot log, every kill of 40 throws on 4 (sweep log 9),
-  0 of 5 in the telemetry (Orange Mushrooms on 2 in view, no HP bar, for 4 s of throwing);
+  0 of 5 in the telemetry (Orange Mushrooms on 2 in view, no HP bar, for 4 s of throwing). The search
+  alone picks them there (286-392 units off when the attacks started, 60 above): it's the wall that stops
+  those stars;
 - in the same logs, stars 60 up past the side wall of the block above (another group, from 25 below
   to 60 above her feet) hit: 19 -> 18 13 of 13 decided, 3 -> 1 15 of 19; and stars down past her own
   block's hanging wall (14 -> 17, 25 deep) hit 81%;
@@ -47,31 +52,24 @@ All in map units; dy is the target's feet minus hers (+ = below her).
 
 import math
 
-from ..localization.mapdata import Platform, Segment
-from ..localization.monsters import Monster
+from ..localization.mapdata import MobBody, Platform, Segment
+from ..localization.monsters import MONSTER_HALF, MONSTER_HEIGHT, Monster
 from ..motion import physics
 
-# With Keen Eyes maxed (+200 range by the skill data; the 400 above was measured before), stars on her
-# level hit slimes 408, 410 and 452 units off, and missed at 560 and 634 (lab/range_probe.jsonl).
-STAR_REACH = 460     # the farthest hit seen (452); somewhere short of 560 they stop hitting
-# ... though by the skill data a star reaches 400 to the near side of a monster's body: 200 for her claw
-# (Lucky Seven's text: "within 200 range in front") and 200 more with Keen Eyes maxed (its `range`). The 452
-# slime walked ~25 closer by the time the attack started, and in the tours' telemetry none was hit at 445
-# or 472.
+# How far a star reaches: 200 for her claw (Lucky Seven's text: "within 200 range in front", skill data)
+# and 200 more with Keen Eyes maxed (its `range`), to the near side of a monster's body. On her level,
+# stars hit slimes 408, 410 and 452 units off by their middle at the look before the throw (the 452 one
+# walking ~25 closer by the pick) and missed at 421, 560 and 634 (lab/range_probe.jsonl); in the live
+# tours' telemetry none was hit at 445 or 472.
 STAR_RANGE = 400
+STAR_REACH = STAR_RANGE + max(MONSTER_HALF.values())  # 434: the farthest off (by its middle) a star picks
+                     # the widest kind, a pig: what can be in a throw's path (kill matching)
 SHOT_RANGE = 410     # aim inside this: the target keeps walking during the ~0.5 s wind-up and the flight
 MIN_SHOT = 90        # closer than this she swipes with the claw instead of throwing
 # How far below/above her a target can be and still be hit: 60 both ways measured (hits). Farther
 # isn't measured yet; `python -m gamelab hunt shots` lists what the shot log has seen.
 SHOT_DOWN = 60
 SHOT_UP = 60
-# Off her level a star needs more room sideways: the shot log hit monsters 60 above her 7 of 15 times
-# at 150-199 units (0 of 1 closer), 70% at 200-249, 85% beyond; 60 below, 56% at 100-149, 79% at
-# 150-199, 70-92% beyond. A monster right under or over her isn't hit at all.
-MIN_SHOT_ABOVE = 200  # closest sideways a target 60 above her is worth a throw
-MIN_SHOT_BELOW = 150  # ... and one 60 below
-OFF_LEVEL_DY = 60    # the height those two were measured at (60 above / below her)
-LEVEL = 15           # within this of her height, a target counts as on her level
 # The star's target search from the ground (see above): its bands, and their windows above her feet.
 SEARCH_START = 65    # the first band starts this far ahead of her (closer, on the ground the claw swipes)
 SEARCH_STEP = 20     # each band is this wide ...
@@ -83,15 +81,16 @@ SEARCH_TOP0 = 21     # ... to this far. meowdb draws 44 (12 to 44: 28 +- 16); fi
                      # 60 above is picked from 191 units, from 111 with 44), never throws at nothing.
                      # Unmeasured in game: throws from 13 at 12 (60 above her), 110-200 units off, settle it.
 BANDS = math.ceil((STAR_RANGE - SEARCH_START) / SEARCH_STEP)  # 17: the last one 15 wide
+LEVEL = 15           # within this of her height, a target counts as on her level
 STAR_SPEED = 690     # units/s
 EDGE_MARGIN = 25     # where she stands to shoot: not closer than this to her platform's end
 # Where a look searches for monsters: from this far above her feet to this far below (bodies stick up
 # above their feet, so the band reaches higher than she can shoot).
 LOOK_UP = SHOT_UP + 80
 LOOK_DOWN = SHOT_DOWN + 15
-# The area an attack picks its target in (see above). Its floor is fitted to the live throws of
-# 2026-10-19 (jump-throws missed snails; throws from the ground hit pigs, slimes and Orange Mushrooms 60
-# below her): 18-21 below her feet. Of its top, only that monsters 60 above her are in it is known.
+# The area an attack from a jump picks its target in (see above). Its floor is fitted to the live throws
+# of 2026-10-19 (jump-throws missed snails; throws from the ground hit pigs, slimes and Orange Mushrooms
+# 60 below her): 18-21 below her feet. Of its top, only that monsters 60 above her are in it is known.
 AREA_DOWN = 19
 AREA_UP = 65
 AIR_MARGIN = 6       # how far into the area a body must reach for an attack from a jump to pick it surely:
@@ -110,25 +109,12 @@ SHOT_H = 28
 # probe can measure it (the shot log has the rule's verdict either way; the simulator's world keeps to the
 # rule regardless).
 WALLS_BLOCK = True
+PIG = (MONSTER_HEIGHT["pig"], MONSTER_HALF["pig"])  # the body of a kind no one knows (body_of)
 
 
 def in_band(dy: float) -> bool:
     """Whether a target dy below (+) or above (-) her is level enough with her for a star to hit."""
     return -SHOT_UP <= dy <= SHOT_DOWN
-
-
-def min_dx(dy: float) -> float:
-    """The closest sideways a target dy below (+) or above (-) her is hit: MIN_SHOT on her level,
-    rising to MIN_SHOT_BELOW / MIN_SHOT_ABOVE at OFF_LEVEL_DY below / above."""
-    far = MIN_SHOT_BELOW if dy > 0 else MIN_SHOT_ABOVE
-    off = min(max(abs(dy) - LEVEL, 0.0) / (OFF_LEVEL_DY - LEVEL), 1.0)
-    return MIN_SHOT + (far - MIN_SHOT) * off
-
-
-def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE) -> bool:
-    """Whether a target dx along (either way) and dy below (+) is hit by a star from where she stands,
-    terrain aside (can_hit: with it)."""
-    return min_dx(dy) <= abs(dx) <= reach and in_band(dy)
 
 
 # --- the star's target search, from the ground ---------------------------------------------------------
@@ -167,6 +153,71 @@ def body_box(ahead: float, dy: float, top: float, half: float, lift: float = 0.0
 def picks(ahead: float, dy: float, top: float, half: float, lift: float = 0.0) -> bool:
     """Whether the star's search from the ground picks this body (body_box), terrain aside."""
     return search_band(*body_box(ahead, dy, top, half, lift)) is not None
+
+
+def body_of(kind: str | None, bodies: dict[str, MobBody] | None = None) -> tuple[float, float]:
+    """How tall a monster of `kind` is walking, and half its width: what the search goes by. Half its
+    width from `bodies` (the map's game data, localization.monsters.bodies) where it has the kind, else
+    from MONSTER_HALF; its height from MONSTER_HEIGHT (the game data keeps only how tall a kind is at
+    least, as a pig stands: 38 against 46 walking, which 60 below her is 171 units sideways against 151),
+    or for a kind the table lacks, that least height. A kind neither knows is taken as a pig."""
+    b = (bodies or {}).get(kind)
+    top = MONSTER_HEIGHT.get(kind, b.top if b is not None else PIG[0])
+    half = b.half if b is not None else MONSTER_HALF.get(kind, PIG[1])
+    return top, half
+
+
+def min_dx(dy: float, top: float = PIG[0], half: float = PIG[1], lift: float = 0.0) -> float:
+    """The closest sideways (middle to middle) the search picks a monster dy below (+) or above (-) her
+    feet, `top` tall and `half` wide either side, raised `lift` off its feet (default: a walking pig): its
+    far side has to reach the first band whose window takes in its body. Infinite if none does. On her
+    level, 65 less its half width; the claw swipes that close (shot_dx)."""
+    t, b = top - dy, lift - dy  # its top and its bottom, above her feet
+    k = 0
+    if t <= SEARCH_FLOOR0:      # under the first window: wait for the floor to come down to it
+        k = max(k, math.floor((SEARCH_FLOOR0 - t) / SEARCH_GROW) + 1)
+    if b >= SEARCH_TOP0:        # over it: wait for the top to come up
+        k = max(k, math.floor((b - SEARCH_TOP0) / SEARCH_GROW) + 1)
+    return math.inf if k >= BANDS else SEARCH_START + SEARCH_STEP * k - half
+
+
+def max_dx(half: float = PIG[1]) -> float:
+    """The farthest (by its middle) the search picks a monster `half` wide either side: its near side
+    within STAR_RANGE."""
+    return STAR_RANGE + half
+
+
+def shot_dx(dy: float, kind: str | None = None) -> float:
+    """The closest sideways a throw from the ground at a monster of `kind` dy below (+) her throws a star
+    that picks it: min_dx by its body (body_of), and never closer than MIN_SHOT (closer, the claw swipes)."""
+    return max(MIN_SHOT, min_dx(dy, *body_of(kind)))
+
+
+def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE, kind: str | None = None) -> bool:
+    """Whether a throw from where she stands hits a monster of `kind` (default: a pig) dx along (either
+    way) and dy below (+) with a star: in band, from shot_dx sideways out to `reach`, and no farther than
+    the search picks it (max_dx). Terrain aside (can_hit: with it)."""
+    return in_band(dy) and shot_dx(dy, kind) <= abs(dx) <= min(reach, max_dx(body_of(kind)[1]))
+
+
+def claw_takes(ahead: float, dy: float, top: float, half: float) -> bool:
+    """Whether the claw's swing takes a monster `ahead` in front of her (its middle), its feet dy below
+    hers, `top` tall and `half` wide either side: on her level (LEVEL), its body reaching into the swing
+    (MIN_SHOT ahead of her, CLAW_DOWN below to CLAW_UP above her feet). Off her level it isn't counted on,
+    though the swings' boxes reach 17 below her feet: in the telemetry of 2026-10-20 an Orange Mushroom 60
+    below her and 91 off, its body in them, was passed over by 4 throws (from 2, with the step wall down to
+    4 in the swing too, so this settles nothing), and the decisions never planned on it."""
+    return abs(dy) <= LEVEL and reaches_into(ahead, dy, top, half, MIN_SHOT, CLAW_DOWN, CLAW_UP)
+
+
+def ground_pick(ahead: float, dy: float, top: float, half: float) -> tuple | None:
+    """Where a monster (as in claw_takes) comes in the order an attack from the ground takes them, the
+    least first, or None if it can't take it: the claw's swing first (the nearest it reaches), then the
+    star's search (the first band, the nearest in it). Terrain aside."""
+    if claw_takes(ahead, dy, top, half):
+        return 0, abs(ahead)
+    k = search_band(*body_box(ahead, dy, top, half))
+    return None if k is None else (1 + k, abs(ahead))
 
 
 # --- what stops a star ---------------------------------------------------------------------------------
@@ -217,9 +268,10 @@ def wall_to(platform: Platform | None, x: float, y: float, m: Monster, rise: flo
 
 def can_hit(platform: Platform | None, x: float, y: float, m: Monster, reach: float = SHOT_RANGE,
             rise: float = 0.0, target: Platform | None = None) -> bool:
-    """Whether a star from map (x, y) on `platform` hits monster `m`: in reach (can_shoot), and no wall of
-    her foothold group in the way (wall_to; `rise`: her height in a jump, `target`: m's platform)."""
-    return can_shoot(m.x - x, m.y - y, reach) and wall_to(platform, x, y, m, rise, target) is None
+    """Whether a star from map (x, y) on `platform` hits monster `m`: in reach by its kind (can_shoot), and
+    no wall of her foothold group in the way (wall_to; `rise`: her height in a jump, `target`: m's
+    platform)."""
+    return can_shoot(m.x - x, m.y - y, reach, m.kind) and wall_to(platform, x, y, m, rise, target) is None
 
 
 def clear_span(platform: Platform | None, x: float, y: float, rise: float = 0.0) -> tuple[float, float]:
@@ -233,6 +285,8 @@ def clear_span(platform: Platform | None, x: float, y: float, rise: float = 0.0)
     return max((v for v in xs if v <= a), default=-math.inf), min((v for v in xs if v >= a), default=math.inf)
 
 
+# --- what an attack from a jump picks --------------------------------------------------------------------
+
 def reaches_into(ahead: float, dy: float, top: float, half: float, far: float, down: float, up: float) -> bool:
     """Whether a monster's body reaches into a box in front of her: from her (0) to `far` ahead, `down`
     below to `up` above her feet. The monster's middle is `ahead` units in front of her, its feet `dy`
@@ -241,11 +295,14 @@ def reaches_into(ahead: float, dy: float, top: float, half: float, far: float, d
 
 
 def in_area(ahead: float, dy: float, top: float, rise: float = 0.0, half: float = 0.0) -> bool:
-    """Whether an attack can pick a monster `ahead` units in front of her, its feet `dy` below hers as she
-    stands (+ below), its body `top` tall (and `half` wide either side), when it starts with her `rise`
-    units up in a jump: its body reaches into the area then (AREA_DOWN to AREA_UP about her feet, up to
-    STAR_REACH ahead)."""
-    return reaches_into(ahead, dy + rise, top, half, STAR_REACH, AREA_DOWN, AREA_UP)
+    """Whether an attack's star can pick a monster `ahead` units in front of her (its middle), its feet `dy`
+    below hers as she stands (+ below), its body `top` tall (and `half` wide either side), when the attack
+    starts with her `rise` units up in a jump: its body reaches into the area then (AREA_DOWN to AREA_UP
+    about her feet, its near side within STAR_RANGE ahead). From the ground (`rise` 0), the star's search
+    picks it (picks)."""
+    if rise == 0:
+        return picks(ahead, dy, top, half)
+    return reaches_into(ahead, dy + rise, top, half, STAR_RANGE, AREA_DOWN, AREA_UP)
 
 
 def air_rise(gap_ms: float) -> float:
