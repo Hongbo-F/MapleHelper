@@ -743,15 +743,16 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
                          lambda tr: all("pick" in r and r["evidence"] and r["looks"] >= 5 for r in _probe_rows(tr))),
-                   check("hits only from 188 off, and misses closer",
-                         lambda tr: all(d >= 188 for d, s in _shown(tr) if s)
+                   check("a hit, hits only from 188 off, and misses closer",
+                         lambda tr: any(s for _, s in _shown(tr)) and all(d >= 188 for d, s in _shown(tr) if s)
                          and any(s is False and d < 180 for d, s in _shown(tr))),
                    happens("star thrown left: no hit")))
 def probe_top(sim):
     """`probe run top-60`: from 13 at a lone pig on 12, 60 above her, 110-200 units off sideways. The world's
     search window has reach's top (21 above her feet in the first band), so a star picks the pig only from 191
-    units: most throws hit nothing. Each throw waits for its evidence before the next, and the log has where the
-    pig was at the pick and what it showed (`probe score` fits the top to it: tests/test_probe.py)."""
+    units: most throws hit nothing (on seed 1 one hits, 196 off at the pick; with none, the fit wouldn't bound
+    the top from below). Each throw waits for its evidence before the next, and the log has where the pig was at
+    the pick and what it showed (`probe score` fits the top to it: tests/test_probe.py)."""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
@@ -768,7 +769,9 @@ def probe_step_up(sim):
     60 above her behind the step wall of her own foothold group (the wall rule off for the run, so she throws
     at it). The world stops a star at that wall where it crosses the line 28 above her feet, higher in a jump:
     from the ground every star hits nothing; jumping back the attack starts 44 up, its line over the step's
-    top, and every star hits."""
+    top, and every star hits. Jumping back she throws at one only up to 375 off at the look (probe.JUMP_BACK_OUT:
+    the jump back has carried her 25 units out by the pick); thrown at 387-394, on 3 of seeds 1-16 a star missed
+    one that was out of reach by then."""
     h = sim.hunter()
     nav = sim.navigator(h)
     p = probe.adjust(probe.PROBES["step-up"], x=260.0, throws=6)
@@ -786,7 +789,9 @@ def probe_air(sim):
     """`probe run air --throws 12`: jump throws at a lone snail on her own platform (22), about 40 units off,
     closer than the star's search picks it from (its far side short of 65). The attack picks by the area when
     it starts (26 up): the snail's in it, and each star kills it (one star kills a snail here). A kill is seen
-    fading out for 1.26 s, so the evidence waits for it to be gone."""
+    fading out for 1.26 s, so the evidence waits for it to be gone. She takes her place facing right, so no
+    jump throw turns her: with the turn's tap walking her 8 units on, the snail came back 32 off, touched her,
+    and on 6 of seeds 1-16 a knock spoiled a throw (a jump keyed from a look mid-knock, lost in the air)."""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["air"], throws=12), seconds=300))
 

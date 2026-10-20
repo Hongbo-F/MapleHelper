@@ -21,7 +21,9 @@ EVIDENCE_S after the star was due (longer while the target is hidden, up to HIDD
 flinches under its damage numbers for 1-3 s). So one throw's evidence is never another's, and a monster
 hit by one has stopped flinching (0.6 s, taller) when the next attack picks. A monster of a kind the
 probe doesn't throw at that comes close on her platform is fought off first (behavior.fight.clear, her
-platform only); knocked off her place, she walks or goes back to it. What her decisions take as stopping
+platform only); knocked off her place, she walks or goes back to it, the last walk the way she throws, so
+that no throw turns her (a turn's tap walks her on). Nor does she walk or throw from a look a touch's knock
+may still be moving her in (Hunter.knocked). What her decisions take as stopping
 a star (reach.WALLS_BLOCK: the counting of who's in front, and the fights) is switched for the run: off
 for the probes that measure it, so it throws at monsters behind such a wall too.
 
@@ -68,11 +70,11 @@ from .. import directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import JUMP_BACK_SPAN, open_above, pct
 from ..control import client
-from ..control.actions import STAR_DELAY_MS
+from ..control.actions import JB_RUN_MS, JB_THROW_MS, JB_TURN_MS, STAR_DELAY_MS, TAP_MS
 from ..localization.mapdata import MapModel, MobBody
 from ..localization.monsters import Monster, bodies, same
 from ..localization.scene import Scene
-from ..motion import physics
+from ..motion import body, physics
 from .fight import GUARD_PATIENCE, GUARD_SECONDS, IN_HER_WAY, UNPLACED_LOOKS
 
 if TYPE_CHECKING:
@@ -86,6 +88,8 @@ FRONT_UP = reach.LOOK_UP  # ... from this far above her feet (140: the search's 
 FRONT_DOWN = 140     # ... to this far below (the search's lowest floor is 68 below her feet, and the tallest body
                      # here, an Orange Mushroom, 67). A look searches only LOOK_DOWN (75) below her, unless wide.
 STAND_SLACK = 20     # she walks back to her place when she's farther off it than this (a jump back carries her 85)
+APPROACH = 12        # ... or faces the other way: then she comes at it walking the way she throws, from at least
+                     # this far behind it (a 67 ms hold: no tap short enough to be lost, under 50 ms)
 EVIDENCE_S = 0.9     # s after a star was due that a throw's evidence is gathered (as fight._score_shots: a miss) ...
 HIDDEN_MAX_S = 2.5   # ... and up to this long while its target is hidden (under its damage numbers: 1-3 s)
 EARLY_S = 0.15       # a target seen this long before its star was due, or later, has been seen since (`over`)
@@ -201,6 +205,24 @@ PROBES = {p.name: p for p in (
 )}
 
 
+def _jump_back_out() -> float:
+    """How far a jump back has carried her when its attack picks its target (JUMP_LAG after the attack key), by the
+    engine with the median lags: control.actions' plan (the arrow away, the jump JB_RUN_MS after it, the turn at
+    JB_TURN_MS), replayed on flat ground."""
+    events = [(0.0, "left", True), (JB_RUN_MS / 1000, "jump", True), (JB_TURN_MS / 1000, "left", False),
+              (JB_TURN_MS / 1000, "right", True), ((JB_TURN_MS + TAP_MS) / 1000, "right", False)]
+    picks = (JB_THROW_MS + physics.JUMP_LAG * 1000) / 1000
+    return -body.replay(events, picks, physics.SHOE, physics.LAGS).points[-1][1]
+
+
+# A jump back's target, as far off as a probe's range reaches at the look, is this much farther off when the attack
+# picks (25 units, with the jump keyed 130 ms after the arrow), and it may walk on meanwhile: from 4 at 2 (step-up,
+# 200-400 off) jump backs at Orange Mushrooms 387-394 off at the look were 434-445 off at the pick, past a star's
+# reach (an Orange Mushroom's to 432 by its middle), and missed for that, not for the wall. So a jump back's range
+# ends this much nearer.
+JUMP_BACK_OUT = _jump_back_out()
+
+
 def adjust(probe: Probe, *, x: float | None = None, dx: tuple[float, float] | None = None, style: str | None = None,
            throws: int | None = None, walls: bool | None = None) -> Probe:
     """`probe` with what's given changed (a range sideways given applies to every kind)."""
@@ -281,7 +303,8 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
     deadline = time.monotonic() + seconds
     flying: _Flying | None = None
     unplaced = 0
-    ranges = ", ".join(f"{k} {lo:.0f}-{hi:.0f}" for k in probe.kinds for lo, hi in (probe.range_of(k),))
+    out = JUMP_BACK_OUT if probe.style == "jump_back" else 0.0
+    ranges = ", ".join(f"{k} {lo:.0f}-{hi - out:.0f}" for k in probe.kinds for lo, hi in (probe.range_of(k),))
     h.log(f"probe {probe.name} ({probe.asks}): on {probe.platform} at x {probe.x:.0f}, {probe.style} {probe.side} "
           f"at monsters on {', '.join(map(str, probe.at))} ({ranges} units off); the wall rule "
           f"{'on' if reach.WALLS_BLOCK else 'off'}")
@@ -312,6 +335,9 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
             flying = None
             if report.throws >= probe.throws or time.monotonic() >= deadline:
                 break
+        if h.knocked(s):  # a touch's knock may still be moving her: neither a walk nor a throw from this look
+            time.sleep(WAIT_S)
+            continue
         if (stop := _to_place(h, nav, probe, s)) is not None:
             if stop:
                 report.stop = stop
@@ -333,17 +359,26 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
 
 
 def _to_place(h: "Hunter", nav: "Navigator", probe: Probe, s: Scene) -> str | None:
-    """Get her back to her place if she's off it: go there (the navigator) when she's on another platform,
-    walk when she's more than STAND_SLACK off her x. None: she's there; "": she moved (look again); else
+    """Get her back to her place, facing the way she throws: go there (the navigator) when she's on another
+    platform; walk when she's more than STAND_SLACK off her x or faces the other way, the last walk toward the
+    way she throws, from APPROACH behind her place at least. None: she's there; "": she moved (look again); else
     why she can't get there."""
     if s.platform.id != probe.platform:
         h.log(f"  on platform {s.platform.id}: going back to {probe.platform} at x {probe.x:.0f}")
         trip = nav.go(probe.platform, x=probe.x, scene=s)
         return "" if trip.result in ("arrived", "in position") else f"couldn't get to her place: {trip.result}"
     off = probe.x - s.where.x
-    if abs(off) <= STAND_SLACK:
+    if abs(off) <= STAND_SLACK and h.actions.facing == probe.side:
         return None
-    h.actions.walk(directions.toward(off), abs(off))
+    # Facing the way she throws, no throw turns her: the turn's arrow tap walks her on (7.4 units for 50 ms), and
+    # within STAND_SLACK nothing walked her back. In the simulator from x 30 on 22 (`probe run air`), the jump
+    # throws after the first came from x 38, 32 units from where the snail came back: inside the 33 it touches her
+    # from, and a touch that wasn't evaded knocked her 45 back.
+    ahead = off * directions.sign(probe.side)  # how far her place is ahead of her, the way she throws
+    if ahead >= APPROACH:
+        h.actions.walk(probe.side, ahead)
+    else:  # past her place, at it or just short of it: back off first, to come at it the way she throws
+        h.actions.walk(directions.opposite(probe.side), APPROACH - ahead)
     return ""
 
 
@@ -380,12 +415,13 @@ def in_front(s: Scene, side: str, rise: float = 0.0, walls: bool = True) -> list
 
 def choose(s: Scene, probe: Probe, crowd: int = 0) -> Monster | None:
     """What to throw at in look `s`, if anything: the nearest monster in front of her (in_front) that the probe
-    throws at (its kind, its platform, its middle in range sideways), when it's the only one in front (or
-    with at most `crowd` others)."""
+    throws at (its kind, its platform, its middle in range sideways: for a jump back, its far end JUMP_BACK_OUT
+    nearer), when it's the only one in front (or with at most `crowd` others)."""
     front = in_front(s, probe.side, rise_of(probe.style))
     x = s.where.x
+    out = JUMP_BACK_OUT if probe.style == "jump_back" else 0.0  # she's that much farther off when it picks
     fits = [m for m in front if m.kind in probe.kinds and m.platform in probe.at
-            and probe.range_of(m.kind)[0] <= abs(m.x - x) <= probe.range_of(m.kind)[1]]
+            and probe.range_of(m.kind)[0] <= abs(m.x - x) <= probe.range_of(m.kind)[1] - out]
     if not fits or len(front) > 1 + crowd:
         return None
     return min(fits, key=lambda m: abs(m.x - x))

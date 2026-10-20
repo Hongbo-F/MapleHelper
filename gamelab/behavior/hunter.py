@@ -41,6 +41,10 @@ from .looting import Looter
 EXP_CHANGED = 3     # pixels of her EXP number that must differ from the last look's for an EXP gain
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
+# s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
+# (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
+# from a look in that time comes while she's in the air (and is lost) or still sliding, from where she no longer is.
+KNOCK_S = 0.45
 
 
 class Hunter:
@@ -59,6 +63,7 @@ class Hunter:
         self._exp: np.ndarray | None = None  # the last look's EXP number (text pixels)
         self._last_hp: float | None = None
         self._last_where: Where | None = None
+        self.hit_at: float | None = None  # the time of the last look that saw her HP drop (a touch)
         self._last_potion = 0.0
         # The hunt's bookkeeping from every look and throw (behavior.ledger): read by nothing that decides yet.
         self.drops = DropStore()
@@ -84,6 +89,11 @@ class Hunter:
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
                          potions=self.drink_if_low, escort=fight.FightOnTheWay(self) if fighting else None,
                          rng=rng)
+
+    def knocked(self, s: Scene) -> bool:
+        """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it)
+        saw her HP drop."""
+        return self.hit_at is not None and 0 <= s.t - self.hit_at < KNOCK_S
 
     def health_check(self, s: Scene) -> str | None:
         """Drink if HP is low; returns a reason to stop if it's too low."""
@@ -123,6 +133,7 @@ class Hunter:
         self._exp = s.exp
         if self._last_hp is not None and s.hp < self._last_hp:
             self.report.damage_taken += self._last_hp - s.hp
+            self.hit_at = s.t
             telemetry.emit("event", kind="hit", text=f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
             self._log_hit(s)
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False

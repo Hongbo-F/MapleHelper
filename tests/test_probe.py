@@ -15,6 +15,7 @@ from gamelab.attack import reach
 from gamelab.behavior import probe
 from gamelab.behavior.probe import Probe, choose, outcomes, shown
 from gamelab.control import alarm, client
+from gamelab.localization.monsters import bodies
 from gamelab.sim import scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.world import Noise
@@ -124,11 +125,12 @@ def _rows(trace: dict) -> list[dict]:
 @REAL
 def test_the_scorer_finds_the_window_top_the_world_has(monkeypatch):
     # From 13 at a lone pig on 12, 60 above her, 110-200 off: with the window's top at 21 the star picks it
-    # only from 191, with meowdb's 44 from 111. Each world's log fits its own top and rules out the other.
+    # only from 191, with meowdb's 44 from 111. Each world's log fits its own top and rules out the other. With
+    # no hit at all the fit would be flat down to 0, not bounding the top from below (the scenario expects one).
     model = scenarios.real_map()
     rows = _rows(scenarios.run("probe_top"))
     low = probe.fit_top0(rows, model)
-    assert low.holds(21) and not low.holds(44) and low.fits[1] <= 30
+    assert low.holds(21) and not low.holds(44) and low.fits[0] >= 16 and low.fits[1] <= 30
     assert "SEARCH_TOP0: fits" in probe.score(rows, model)
     monkeypatch.setattr(reach, "SEARCH_TOP0", 44)
     high = probe.fit_top0(_rows(scenarios.run("probe_top")), model)
@@ -177,10 +179,13 @@ def test_the_scorer_checks_the_wall_rule_and_its_line(monkeypatch):
 def test_the_scorer_tells_the_area_of_an_attack_from_a_jump_from_the_search():
     # Jump throws at a snail about 40 units off: the world's attack picks by the area, and the snail dies to
     # every star; the search (from 65 ahead, as from the ground or from as high as she is) wouldn't pick it.
-    # With her body moved by motion.body a jump throw goes straight up, so she keeps to x 30-31, and on the
-    # last of the 12 the snail had walked to 53 off (inside the probe's 35-85): all but that one are 38-45.
+    # She takes her place facing the way she throws, so no jump throw turns her (a turn's tap walked her 8 units
+    # on, to 32 off where the snail came back, and it touched her) and each goes straight up from x 30: the
+    # snail is 40 off at all but the first, before which it walked on to 67 off (inside the probe's 35-85) while
+    # she took her place.
     rows = _rows(scenarios.run("probe_air"))
-    assert sum(35 <= abs(r["dx"]) <= 50 for r in rows) >= len(rows) - 1 and all(abs(r["dx"]) <= 60 for r in rows)
+    assert {r["x"] for r in rows} == {30.0} and all(35 <= abs(r["dx"]) <= 85 for r in rows)
+    assert sum(35 <= abs(r["dx"]) <= 50 for r in rows) >= len(rows) - 1
     lls = probe.air_lls(rows, scenarios.real_map())
     assert lls["area"] > max(lls["search"], lls["ground"]) + 5
 
@@ -236,13 +241,18 @@ def test_the_scorer_tells_the_claw_s_swipes_from_stars_by_the_bar_they_take():
 @REAL
 def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     # The game's hit monsters hide under their damage numbers for 1-3 s: the evidence waits up to
-    # HIDDEN_MAX_S for the target to show again. With meowdb's top in the world, every throw at the pig hits
-    # it: none may be read as a miss (seen again with its bar unchanged), and most are read as hits.
+    # HIDDEN_MAX_S for the target to show again. With meowdb's top in the world, a star picks the pig from 111
+    # units off: none of the throws its attack took may be read as a miss (seen again with its bar unchanged),
+    # and most are read as hits. One throw is at a pig 112 off that walked to 100 off by the pick: the world's
+    # star missed it, and so it's read.
     monkeypatch.setattr(reach, "SEARCH_TOP0", 44)
     sc = dataclasses.replace(scenarios.SCENARIOS["probe_top"], noise=Noise(hit_hidden=(1.0, 3.0)))
     trace = scenarios.run_scenario(sc)
-    told = [s for r in _rows(trace) for e, s in outcomes(r) if e["target"]]
-    assert len(told) == 30 and False not in told and told.count(True) >= 20
+    model = scenarios.real_map()
+    body = bodies(model)
+    told = [(r, s) for r in _rows(trace) for e, s in outcomes(r) if e["target"]]
+    assert len(told) == 30 and [s for _, s in told].count(True) >= 20
+    assert all(probe.taken(r, model, body, top0=44) is None for r, s in told if s is False)
     assert any(r["looks"] > 12 for r in _rows(trace))  # looked on past EVIDENCE_S for a hidden one
 
 
@@ -278,8 +288,8 @@ def test_a_probe_waiting_for_a_lone_monster_stops_once_the_alarm_is_up(alarm_fil
         if len(looks) == 3:  # the player raises it between two looks
             alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "now"}), encoding="utf-8")
         return scene(x=100.0, platform=a)
-    h = SimpleNamespace(model=model, actions=SimpleNamespace(skill=True), log=lambda m: None, look=look,
-                        health_check=lambda s: None)
+    h = SimpleNamespace(model=model, actions=SimpleNamespace(skill=True, facing=RIGHT), log=lambda m: None, look=look,
+                        health_check=lambda s: None, knocked=lambda s: False)
     monkeypatch.setattr(time, "sleep", lambda s: None)
     monkeypatch.setattr(reach, "WALLS_BLOCK", True)
     with pytest.raises(client.LieDetectorAlarm):
