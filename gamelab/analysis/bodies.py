@@ -6,7 +6,8 @@
   ground are left out, as her own height then shifts every monster seen.
 - **x from frame to frame, on recordings** (half-size frames, the camera still: she stands): each monster
   followed from frame to frame, how far its x strays from a straight line through its neighbours' (within
-  ±0.3 s), by the template's centre and by its origin; and how often the way it faces is the way it moves.
+  ±0.3 s), by the template's centre and by its origin; how often the way it faces is the way it moves; and
+  how fast each kind walks (the game data says 125 units/s for a pig, 43.75 for a snail).
 
 Saved recordings at 30-60 frames a second are the evidence here: a monster's x jumped up to 10 units
 between frames as the winning template changed from a sprite to a cut-out whose picture is off-centre.
@@ -128,10 +129,11 @@ def residuals(ts: np.ndarray, xs: np.ndarray) -> list[float]:
 
 def recording(frames: np.ndarray, times: np.ndarray, detector: MobDetector) -> dict:
     """On one recording (half-size frames, times in ms): x's stray (map units) by the template's centre and by
-    where the feet are, and facing against motion, over the monsters seen in MIN_TRACK frames or more."""
+    where the feet are, facing against motion, and how fast each kind walked (units/s, where it walked), over
+    the monsters seen in MIN_TRACK frames or more."""
     found = [detector.detect(np.ascontiguousarray(f)) for f in frames]
     ts_all = np.asarray(times, float) / 1000
-    centre, feet, agree, moving, n = [], [], 0, 0, 0
+    centre, feet, agree, moving, n, speeds = [], [], 0, 0, 0, {}
     for track in link(found):
         if len(track) < MIN_TRACK:
             continue
@@ -142,14 +144,19 @@ def recording(frames: np.ndarray, times: np.ndarray, detector: MobDetector) -> d
         xs = np.array([m.foot_x for _, m in track], float)
         for k, (_, m) in enumerate(track):
             near = (ts >= ts[k] - FIT_S) & (ts <= ts[k] + FIT_S)
-            if near.sum() < FIT_MIN or not m.facing:
+            if near.sum() < FIT_MIN:
                 continue
             v = _slope(ts[near], xs[near]) * UNITS_PER_HALF_PX
-            if abs(v) > MOVING:
+            if abs(v) <= MOVING:
+                continue
+            speeds.setdefault(m.kind, []).append(abs(v))
+            if m.facing:
                 moving += 1
                 agree += (v > 0) == (m.facing > 0)
     return {"detections": sum(len(f) for f in found), "followed": n, "centre": _spread(centre),
-            "origin": _spread(feet), "moving": moving, "facing_agrees": agree}
+            "origin": _spread(feet), "moving": moving, "facing_agrees": agree,
+            "speeds": {k: (len(v), round(float(np.median(v)), 1), round(float(np.percentile(v, 75)), 1))
+                       for k, v in sorted(speeds.items())}}
 
 
 def _spread(res: list[float]) -> dict:
@@ -186,4 +193,6 @@ def run(scenes: list[tuple[str, Callable]], model, recordings: list[Path], detec
                      f"line, by the template's centre: rms {c.get('rms', '-')}, p95 {c.get('p95', '-')}, max "
                      f"{c.get('max', '-')}; by its feet: rms {o.get('rms', '-')}, p95 {o.get('p95', '-')}, max "
                      f"{o.get('max', '-')} (units); facing the way it moved {r['facing_agrees']} of {r['moving']}")
+        lines += [f"   {kind} walking: {med} units/s (median of {k} stretches; 75th percentile {p75})"
+                  for kind, (k, med, p75) in r["speeds"].items()]
     return lines

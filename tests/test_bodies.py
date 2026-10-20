@@ -35,3 +35,17 @@ def test_feet_against_the_platform_they_were_put_on():
     scene = SimpleNamespace(monsters=[monster], map_y=lambda y: 500.0 + (y - 105) * 1.4)
     row, = bodies.feet_rows(scene, model)
     assert row["cutout"] and row["bottom"] == pytest.approx(0.0) and row["origin"] == pytest.approx(1.4)
+
+
+def test_a_recording_gives_how_fast_each_kind_walked(monkeypatch):
+    """A pig walking right at 125 units/s, then standing: its speed where it walked, and its facing."""
+    from gamelab.screen import UNITS_PER_HALF_PX
+    times = np.arange(60) * 1000 / 30  # 2 s at 30 frames a second
+    xs = [100 + min(t, 1000) / 1000 * 125 / UNITS_PER_HALF_PX for t in times]
+    frames = [[Mob("pig", round(x), 50, 30, 20, 0.9, ox=x, feet=60.0, facing=1, pose="move")] for x in xs]
+    detector = SimpleNamespace(detect=lambda f: frames[int(f[0, 0, 0])])
+    pictures = np.zeros((60, 2, 2, 3), np.uint8)
+    pictures[:, 0, 0, 0] = np.arange(60)
+    r = bodies.recording(pictures, times, detector)
+    n, median, _ = r["speeds"]["pig"]
+    assert median == pytest.approx(125, abs=1) and r["facing_agrees"] == r["moving"] == n > 15
