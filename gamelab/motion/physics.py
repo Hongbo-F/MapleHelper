@@ -54,6 +54,20 @@ MIN_HOLD_MS = 30
 # 0.149 (t - 113) units after t ms, and lifts off 67 ms after the key (JUMP_LAG), so
 # RUN_LAG_MS = RUN_LAG - JUMP_LAG (46).
 RUN_LAG_MS = round((RUN_LAG - JUMP_LAG) * 1000)
+# A jump from standing, keyed t ms after the arrow, leaves at full speed only outside the kick's blind spot
+# (body.jump_window_ok): keyed 35-52 ms after it, the kick takes her from the 30-80 units/s she has reached
+# to full speed; keyed 118 ms or more after it, she has reached full speed herself; in between she leaves
+# at 119-149 (three of the five jump-backs recorded at 60 fps, keyed 80 ms after the arrow, left at 121-127).
+# Full speed by running rests on the walk the recordings fit (1400 units/s², the lags); full speed by the
+# kick from a near standstill rests on the decompile and one recording (jb_k190: the arrow seen a step
+# before the jump, at 23 units/s, and it left at 142). So the planner times jumps from standing for the
+# first only, until an in-game sweep of the gap (probe P1) shows the kick: True lets it key them 35-52 ms
+# after the arrow too, lifting off within 2 units of where she stands, and keys the jump-back 40 ms after its
+# arrow (control.actions.JB_RUN_MS), not 130.
+KICK_JUMPS = False
+# ms after the arrow (from standing) at which the jump, by the median lags, finds her at the kick's limit
+# (0.8 × her walking speed): the blind spot is around and after it (78).
+_KICK_ENDS_MS = (SHOE.kick * SHOE.vmax / SHOE.acc - (LAGS.jump - LAGS.on)) * 1000
 # Attacks from a jump (control.actions times her key plans with these; attack.reach works out what such an
 # attack can hit). An attack picks its target when it starts, about JUMP_LAG after its key, the same input
 # lag as a jump's lift-off: so when it starts she has been in the air for about as long as the attack key
@@ -61,8 +75,8 @@ RUN_LAG_MS = round((RUN_LAG - JUMP_LAG) * 1000)
 JUMP_ATTACK_MS = 40        # a jump throw's attack key comes this long after the jump key. In game on 2026-10-20,
                            # at a snail 20-60 units away: keyed 100 ms after the jump (the macro's F1 combo), the
                            # star went over it; keyed 40 ms after, a star hit it for 78 and killed it
-JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid-air (actions.JB_THROW_MS 165
-                           # less JB_RUN_MS 80, when the jump key goes down)
+JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid-air (actions.JB_THROW_MS 215
+                           # less JB_RUN_MS 130, when the jump key goes down)
 ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fps recordings jump_throw_0 and
                            # _1, keys 100 ms apart: her attack pose first shows 91-110 ms after lift-off)
 # fly's landings, the FLY_CACHE_SIZE most recently used. Each is worked out from its start rounded as its
@@ -157,13 +171,19 @@ def _fly(model: MapModel, walls: tuple[list[float], list[tuple[float, float]]], 
     return None, x, t, vx
 
 
+# A route jump has to land on its platform at this share of her walking speed too: a jump the mover keys
+# from standing (control.mover, MIN_RUN on) leaves slower than 0.85 × 149 (127) only with the lags 2.8 sd
+# off (0.3%), and one keyed in the kick's blind spot leaves at 119-149 (0.8-1 ×).
+SLOW_TAKEOFF = 0.85
+
+
 def sure_landing(model: MapModel, x: float, y: float, vx: float, vy: float, land: Platform,
                  slop: float = 12.0) -> bool:
     """Whether a jump from (x, y) still lands on `land` if she leaves the ground `slop` units early or
-    late, or 10% slower: a jump down from platform 25 meant for the basin landed on platform 33,
-    whose edge its arc passed close by."""
+    late, or 10% slower, or as slow as SLOW_TAKEOFF: a jump down from platform 25 meant for the basin
+    landed on platform 33, whose edge its arc passed close by."""
     sign = 1 if vx > 0 else -1 if vx < 0 else 0
-    for dx, k in ((-slop, 1.0), (slop, 1.0), (0.0, 0.9)):
+    for dx, k in ((-slop, 1.0), (slop, 1.0), (0.0, 0.9), (0.0, SLOW_TAKEOFF)):
         x0 = x + sign * dx
         got, _, _ = fly(model, x0, y, vx * k, vy)
         if got is not land:
@@ -198,16 +218,27 @@ def hold_ms(units: float) -> int:
     return max(MIN_HOLD_MS, body.hold_for(units, SHOE, LAGS))
 
 
-def run_ms(units: float) -> int:
-    """How long after pressing the arrow (from standing) to press jump to lift off `units` along, still
-    running; never in the kick's blind spot, though (body.jump_window_ok: keyed there, the jump finds her
-    just below full speed and leaves at 119-149; keyed 93 ms after the arrow, 22% leave below 134, the 10%
-    slower that route.sure_landing allows). So a run-up shorter than about 12 units is keyed about 120 ms
-    in and lifts her off up to 11 units along, at full speed: within the 12 units early or late every
-    route jump allows."""
-    if units <= 0:
-        return 0
-    t = round(units / WALK_UNITS_PER_MS + RUN_LAG_MS)
-    while not body.jump_window_ok(t, SHOE, LAGS):
+def sure_jump_ms(gap: float) -> float:
+    """The soonest a jump from standing can be keyed, `gap` ms after the arrow or later, and surely leave
+    the ground at full speed (KICK_JUMPS above): 118 ms after the arrow for any gap up to that, the gap
+    itself from there on."""
+    def sure(t: float) -> bool:
+        return body.jump_window_ok(t, SHOE, LAGS) and (KICK_JUMPS or t >= _KICK_ENDS_MS)
+    if gap >= 0 and sure(gap):
+        return gap
+    t = max(0, math.ceil(gap))
+    while not sure(t):
         t += 1
     return t
+
+
+def run_ms(units: float) -> int:
+    """How long after pressing the arrow (from standing) to press jump to lift off `units` along, still
+    running; never in the kick's blind spot, though (sure_jump_ms: keyed there, the jump finds her just
+    below full speed and leaves at 119-149; keyed 93 ms after the arrow, 22% leave below 134, the 10% slower
+    that route.sure_landing allows). So a run-up shorter than about 12 units is keyed 118 ms in and lifts
+    her off up to 11 units along, at full speed: within the 12 units early or late every route jump
+    allows."""
+    if units <= 0:
+        return 0
+    return sure_jump_ms(round(units / WALK_UNITS_PER_MS + RUN_LAG_MS))

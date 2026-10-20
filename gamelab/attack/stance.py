@@ -39,7 +39,7 @@ MAX_WALK = 300     # longest walk between two looks
 MIN_MOVE = 15      # stance: a shorter step or approach isn't worth it
 JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less the margin) to jump back
 JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
-JUMP_BACK_SPAN = 95  # how far a jump back carries her (85 measured)
+JUMP_BACK_SPAN = 95  # how far a jump back carries her (by the engine 86-94 units, control.actions.JB_RUN_MS)
 
 _THROW_VERBS = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back": "jumping back, throwing"}
 

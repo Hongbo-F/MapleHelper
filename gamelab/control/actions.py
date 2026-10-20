@@ -13,7 +13,7 @@ from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT, MOVEMENT
 
 from .. import directions
-from ..motion.physics import JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS, hold_ms
+from ..motion.physics import JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS, KICK_JUMPS, hold_ms
 from . import client
 
 TAP_MS = 40          # a key tap: released this long after it's pressed
@@ -28,12 +28,35 @@ THROW_LOCK_EXTRA_MS = 60
 JUMP_THROW_LOCK_EXTRA_MS = 160
 
 # A jump back: run away a moment, jump, turn toward the monster in mid-air and throw.
-JB_RUN_MS = 80     # the arrow away is held this long before the jump, to get her moving
+# The arrow away is held this long before the jump, to get her moving. Keyed 80 ms after the arrow, the jump
+# came in the kick's blind spot (physics.sure_jump_ms): just below full speed she gets no kick, and three of
+# the five recorded at 60 fps left at 121-127 units/s (one at 142, the arrow seen late and kicked; one at 146).
+# In the simulator, with the lags spread as measured, 29% left below 140 and landed 68-89 units away. Keyed
+# 130 ms after it she has reached full speed herself (1400 units/s² from 60 ms after the arrow, as the standing
+# starts recorded at 60 fps fit), runs 12 units first, and lands 86-94 units away (90 at the median lags), the
+# jump 50 ms later. 40 ms after the arrow would leave at full speed too, by the kick from 66 units/s, within 2
+# units of where she stands (79 units away in all): that rests on the decompile and one recording (jb_k190),
+# so it waits for the in-game sweep of the gap (probe P1), which physics.KICK_JUMPS stands for. In the
+# simulator's game-like world (40 seeds of 20 minutes), keyed at 130 she made 3% less EXP a minute than at 80
+# (124 and 88 against 127 and 91, hunt loop and tour: the plan is 50 ms longer) and picked up 2 points more of
+# her drops; keyed at 40 she made as much as at 80.
+JB_RUN_MS = 40 if KICK_JUMPS else 130
 STAR_DELAY_MS = 520  # the star leaves this long after the attack key, in the air or not (recorded at 60
                      # fps: 515-545 ms with the key at 190, 290, 450 and 610 ms into a jump back)
 JB_TURN_MS = JB_RUN_MS + 60  # the arrow toward the monster: turning as soon as she's off the ground
-JB_THROW_MS = JB_RUN_MS + JUMP_BACK_ATTACK_MS  # the attack key right after (165), so the star leaves just
-                               # before she lands (165 + 520 = 685; she lands 80 + 55 + 555 = 690 ms in)
+JB_THROW_MS = JB_RUN_MS + JUMP_BACK_ATTACK_MS  # the attack key right after (215), so the star leaves just
+                               # before she lands (215 + 520 = 735; she lands 130 + 67 + 555 = 752 ms in)
+# A jump throw that turns her first: the turn's arrow tap (MOVEMENT.tap_turn_ms) walks her, and a jump that
+# lifts off before she has stopped carries that speed into the air (the arrow is let go by then: no kick).
+# Keyed TURN_SETTLE_MS (30) after the tap, the jump lifted off with her at 71 units/s and came down 44 units
+# toward the monster in the simulator (40 with the lags spread, 69 at p90; in game, snail_jt100b, a 20 ms tap
+# then a jump, drifted 20). By the engine a 50 ms tap has her standing still 231 ms after its press
+# (body.hold_time), so the jump key goes in once she is, the lags' spread allowed for: 205 ms after the tap,
+# lifting off 272 ms after it. She then comes down where the tap walked her, 8 units on (16 at p90 with the
+# lags spread). Taps that short are bimodal in game (two of three 50 ms taps didn't move her at all), so
+# half of these waits may be for nothing: an in-game look at jump-throws that turn decides (0 puts back the
+# jump TURN_SETTLE_MS after the tap).
+JUMP_THROW_TURN_MS = 205
 
 # Picking up: one item per press.
 PILE_PRESSES = 4      # presses standing on a kill's drops: a pig drops several
@@ -107,9 +130,12 @@ class Actions:
         star even at point-blank range, where on the ground the claw only swipes (9-11 damage against
         30-70 for a star, seen with slimes crowding her in the basin). The attack key comes JUMP_ATTACK_MS
         (40 ms) after the jump key, while she's still low: the macro's F1 combo times it at 100 ms, and an
-        attack starting that high in the jump went over a snail."""
+        attack starting that high in the jump went over a snail. Turning first, the jump waits for the
+        turn's tap to stop walking her (JUMP_THROW_TURN_MS), so it goes straight up."""
         self.wait_lock()
         events, t = self._turn(direction)
+        if events:  # turned: the jump waits until the tap's walk has stopped (JUMP_THROW_TURN_MS)
+            t = max(t, JUMP_THROW_TURN_MS)
         key, jump = self._attack_key(), self.keys.jump.name
         events += tap(t, jump) + tap(t + JUMP_ATTACK_MS, key)
         self._thrown(t + JUMP_ATTACK_MS, direction)
@@ -121,7 +147,7 @@ class Actions:
         """At a monster too close to throw at (on `direction`'s side): jump away from it, turn toward it
         in mid-air, and throw so the star leaves just before she lands. Thrown at point-blank range, from
         the ground or straight up, stars often missed; just before landing she's the whole jump away
-        (about 85 units), and out of its way. A star leaves about 520 ms after the attack key, so the
+        (about 90 units), and out of its way. A star leaves about 520 ms after the attack key, so the
         key goes in right after lift-off: pressed later, the star left after she had landed. The caller
         makes sure there's room behind her."""
         self.wait_lock()

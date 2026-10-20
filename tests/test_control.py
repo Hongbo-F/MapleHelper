@@ -88,3 +88,42 @@ def test_the_movers_walks_press_pick_up_as_every_walk_does():
     picks = [e[0] for e in events if e[1] == "z" and e[2] == "down"]
     release = next(e[0] for e in events if e[1] == "right" and e[2] == "up")
     assert picks[0] == 0 and picks[1] == WALK_PICK_EVERY_MS and release < picks[-1] < release + WALK_PICK_AFTER_MS
+
+
+def test_no_jump_in_her_key_plans_is_keyed_in_the_kicks_blind_spot():
+    """A jump keyed 55-117 ms after the arrow, from standing, finds her just below full speed: no kick, and
+    she leaves at 119-149 units/s (three of the five jump-backs recorded at 60 fps, keyed 80 ms after the
+    arrow, left at 121-127)."""
+    from gamelab.control import actions as actions_mod
+    from gamelab.control.mover import MIN_RUN
+    from gamelab.motion import body
+    from gamelab.motion.physics import LAGS, SHOE, run_ms, sure_jump_ms
+    sent = []
+    actions(sent).jump_back(RIGHT)
+    (_, events), = sent
+    at = lambda k, how: next(t for t, name, h_ in events if name == k and h_ == how)
+    gap = at("alt", "down") - at("left", "down")
+    assert gap == actions_mod.JB_RUN_MS and sure_jump_ms(gap) == gap and body.short_takeoff_chance(gap, SHOE, LAGS) <= 0.01
+    # The mover's shortest run-up is keyed as its length says (not put off), outside the blind spot.
+    assert run_ms(MIN_RUN) == round(MIN_RUN / 0.149 + 46) and body.jump_window_ok(run_ms(MIN_RUN), SHOE, LAGS)
+
+
+def test_a_jump_throw_that_turns_her_jumps_once_the_turns_tap_has_stopped_walking_her():
+    from maplehelper.game import MOVEMENT
+    from gamelab.control.actions import JUMP_THROW_TURN_MS
+    from gamelab.motion import body
+    from gamelab.motion.physics import SHOE
+    sent = []
+    a = actions(sent)
+    a.facing = "left"
+    a.jump_throw(RIGHT)
+    (_, events), = sent
+    at = lambda k, how: next(t for t, name, h_ in events if name == k and h_ == how)
+    assert at("right", "down") == 0 and at("right", "up") == MOVEMENT.tap_turn_ms
+    lift = at("alt", "down") / 1000 + JUMP_LAG
+    assert at("alt", "down") == JUMP_THROW_TURN_MS and lift > body.hold_time(MOVEMENT.tap_turn_ms, SHOE, LAGS) + 0.03
+    # Facing the right way already, no tap, and the jump goes at once.
+    sent.clear()
+    a.lock_until = 0.0
+    a.jump_throw(RIGHT)
+    assert [e[1] for e in sent[0][1]] == ["alt", "alt", "f", "f"] and sent[0][1][0][0] == 0

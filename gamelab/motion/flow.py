@@ -33,7 +33,7 @@ from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import MonsterTrack
 from . import body
 from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
-                      RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms)
+                      RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms, sure_jump_ms)
 from .route import JUMP_FROM, Move
 
 # Her measured lags and slides (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, STOP_S, LAND_SLIDE) describe her body,
@@ -48,7 +48,7 @@ SLACK_PER_LEG = 0.025  # s of timing error each predicted landing may add
 MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only makes her sluggish)
 TAP = 0.04           # s a jump/down tap is held
 PICK_EVERY = 0.15    # s between pick-up presses while she runs
-MIN_RUNUP = 15.0     # units of run before a running jump from standing
+MIN_RUNUP = 15.0     # units of run before a running jump from standing (keyed 147 ms after the arrow: full speed)
 JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
 # Standing this close to where a move wants her she doesn't step: a step that short is an arrow tap of
 # under 50 ms (physics.hold_ms), and of three 50 ms taps in game two didn't move her and one moved her 7.1
@@ -299,10 +299,15 @@ class Flow:
     def liftoff(b: Body, d: int, t_off: float) -> tuple[float, float, float, float]:
         """When to press jump for her to leave the ground at t_off, running that way (d; 0: straight up)
         from body b with that arrow held from b.t, or as soon after as she can: never before she has landed
-        (a press in the air is ignored). Returns (the press, when she leaves the ground, where, and her
-        sideways speed then: what she has on the ground, with the kick if that's below 0.8 × her walking
-        speed, body.takeoff)."""
+        (a press in the air is ignored), and with the arrow pressed at b.t never in the kick's blind spot
+        (physics.sure_jump_ms: keyed there she'd leave at 119-149 units/s, short of where she's meant to
+        land). Turning round first, she gets to a standstill |v|/1400 s later than standing would.
+        Returns (the press, when she leaves the ground, where, and her sideways speed then: what she has
+        on the ground, with the kick if that's below 0.8 × her walking speed, body.takeoff)."""
         press = max(t_off - JUMP_LAG, b.ready_at)
+        if d and b.run != d:  # a new arrow: how soon after it the jump comes decides how fast she leaves
+            turn = abs(b.v) / SHOE.acc if b.run == -d else 0.0
+            press = b.t + turn + sure_jump_ms((press - b.t - turn) * 1000) / 1000
         t = press + JUMP_LAG
         x, v = _ground(b, d, t)
         return press, t, x, body.takeoff(v, d, SHOE)
@@ -377,7 +382,7 @@ class Flow:
         if t is None:
             return None
         k.set_arrow(start.t, d)
-        # Later than planned, and further on, if she had to land first.
+        # Later than planned, and further on, if she had to land first or wait out the kick's blind spot.
         t_off, takeoff, vx = self.press_jump(k, start, d, t)
         if (edge - takeoff) * d < 3:
             return None
@@ -615,7 +620,7 @@ class Flow:
         earliest = b.ready_at + JUMP_LAG
         if t < earliest:
             return None  # already too close to time it
-        press, t_off, x_off, vx = self.liftoff(b, d, t)
+        press, t_off, x_off, vx = self.liftoff(b, d, t)  # (from standing: maybe later, out of the kick's blind spot)
         if (mo.at(t_off, a) - x_off) * d < gap - 15 or not a.covers(x_off, -EDGE_ROOM):
             return None  # too close by then, or no room
         land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED)

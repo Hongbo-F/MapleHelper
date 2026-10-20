@@ -205,6 +205,27 @@ def test_landing_while_an_attack_plays_stops_her(model):
     assert stopped.x == at2 and at2 == pytest.approx(at, abs=0.01)
 
 
+def test_a_jump_back_leaves_at_full_speed_and_lands_about_90_units_away(model):
+    # control.actions' key plan, on the engine with the lags spread as measured: keyed 130 ms after the arrow
+    # the jump is past the kick's blind spot (at 80 ms, 29% left below 140 and landed 68-89 units away).
+    from gamelab.control import actions
+    c = plat(model, 500, 400)
+    events = [[0, "right", "down"], *actions.tap(actions.JB_RUN_MS, "alt"), [actions.JB_TURN_MS, "right", "up"],
+              *actions.tap(actions.JB_TURN_MS, "left"), *actions.tap(actions.JB_THROW_MS, "f")]
+    lands, speeds = [], []
+    for seed in range(30):
+        w = world(model, c.id, 300.0, facing="left", seed=seed, noise=Noise(lag_sd=1.0))
+        for t, name, how in sorted(events, key=lambda e: e[0]):
+            w.key(t / 1000, name, how == "down")
+        while w.mode == "ground" and w.t < 0.4:
+            w.advance(w.t + 0.005)
+        speeds.append(w.flight.speeds[0][0])  # as she leaves the ground (the turn's arrow then brakes her)
+        w.advance(1.5)
+        lands.append(w.x - 300)
+    assert min(speeds) >= 0.94 * physics.WALK_SPEED
+    assert 84 <= min(lands) and max(lands) <= 97 and sorted(lands)[15] == pytest.approx(90, abs=1)
+
+
 def test_after_a_climb_she_runs_off_as_the_minimap_traced_it(model):
     # The arrow held from before the top: she stands still through the climb-over (flow.CLIMB_OVER) and the
     # game's lag for the arrow, then speeds up: at full speed 0.35 s after the top, as flow plans it.

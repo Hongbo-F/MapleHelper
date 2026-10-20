@@ -158,6 +158,24 @@ def test_a_step_shorter_than_a_tap_isnt_taken(model):
     assert x == pytest.approx(112, abs=0.3) and [e[1] for e in k.sorted()] == ["right", "right"]
 
 
+def test_a_jump_from_standing_is_never_keyed_in_the_kicks_blind_spot(model):
+    from gamelab.motion.physics import LAGS, SHOE, WALK_SPEED
+    from gamelab.motion import body
+    c = by_y(model, 500, 400)
+    standing = Body(0.0, 100.0, c)
+    # Meant to leave the ground 147 ms after the arrow (the key 80 ms after it): put off to 118 ms, when
+    # she's almost at full speed, so she leaves at full speed (a jump back used to be keyed at 80 ms: three
+    # of five left at 121-127).
+    press, t, x, vx = Flow.liftoff(standing, 1, 0.08 + JUMP_LAG)
+    assert press == pytest.approx(0.118) and vx == WALK_SPEED and t == pytest.approx(0.118 + JUMP_LAG)
+    assert x == pytest.approx(100 + body.run_x(t - LAGS.on, 0.0, 1, SHOE), abs=1e-6)
+    # Keyed later, it's as planned; running already, any time (the arrow was seen long ago).
+    assert Flow.liftoff(standing, 1, 0.2 + JUMP_LAG)[0] == pytest.approx(0.2)
+    assert Flow.liftoff(Body(0.0, 100.0, c, run=1), 1, 0.05 + JUMP_LAG)[:2] == pytest.approx((0.05, 0.05 + JUMP_LAG))
+    # Straight up (no arrow): she leaves where she stands, with no sideways speed.
+    assert Flow.liftoff(standing, 0, 0.0)[2:] == (100.0, 0.0)
+
+
 def test_a_jump_leaves_with_what_she_has_on_the_ground(model):
     c = by_y(model, 500, 400)
     # Landed at 120 units/s with the arrow held (a jump that left so): she speeds up again at 1400 units/s²,

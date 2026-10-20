@@ -138,6 +138,32 @@ def test_run_timing_and_rope_grab_lead():
     assert grab_lead(120) is None
 
 
+def test_a_jump_from_standing_is_keyed_where_it_surely_leaves_at_full_speed(monkeypatch):
+    from gamelab.motion import body, physics
+    from gamelab.motion.physics import LAGS, SHOE, sure_jump_ms
+    # Up to 118 ms after the arrow the jump is put off to then (the kick's blind spot ends there); later is
+    # as it comes. Every gap it gives leaves short at most 5% of the time.
+    assert [sure_jump_ms(g) for g in (0, 40, 80, 117.2, 118, 130, 200)] == [118, 118, 118, 118, 118, 130, 200]
+    assert all(body.short_takeoff_chance(sure_jump_ms(g), SHOE, LAGS) <= 0.05 for g in range(0, 300, 7))
+    # With the kick trusted (probe P1), 35-52 ms after the arrow will do too: full speed from where she stands.
+    monkeypatch.setattr(physics, "KICK_JUMPS", True)
+    assert [sure_jump_ms(g) for g in (0, 40, 52, 53, 80)] == [34, 40, 52, 118, 118]
+
+
+def test_a_route_jump_lands_even_if_she_leaves_15_percent_slow(model, monkeypatch):
+    # (as a jump the mover keys from standing can, rarely: physics.SLOW_TAKEOFF)
+    from gamelab.motion import physics
+    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly, sure_landing
+    b = by_y(model, 360, 300)
+    lands = lambda x, k=1.0: fly(model, x, 300, k * WALK_SPEED, -JUMP_SPEED)[0] is b
+    # Takeoffs from A onto B that land 12 units early or late and 10% slow, but not 15% slow.
+    edge = [x for x in range(100, 200) if lands(x - 12) and lands(x + 12) and lands(x, 0.9) and not lands(x, 0.85)]
+    assert edge
+    assert not sure_landing(model, edge[0], 300, WALK_SPEED, -JUMP_SPEED, b)
+    monkeypatch.setattr(physics, "SLOW_TAKEOFF", 0.9)
+    assert sure_landing(model, edge[0], 300, WALK_SPEED, -JUMP_SPEED, b)
+
+
 def test_a_platform_just_above_monsters_is_not_safe():
     t = tree()
     # A small platform 40 units above B (where the snail spawns), and C/D far from any spawn.
