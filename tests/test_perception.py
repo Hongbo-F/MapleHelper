@@ -12,6 +12,7 @@ from gamelab.perception import hud
 from gamelab.perception.eyes import rgb_of
 from gamelab.perception.hud import BAR_ROW, HP_BAR, bars, hp_fill, touch_popup
 from gamelab.perception.minimap import MINIMAP_BOX, dot_in_box
+from gamelab.perception.nametag import FULL_EVERY, NameTag
 from gamelab.perception.mobs import ASSETS, MobDetector
 from gamelab.perception.terrain import ground_extent
 
@@ -36,6 +37,78 @@ def test_captures_are_rgb_pictures_of_their_own_with_the_same_pixels():
     assert eyes.glance() == old and old[0] is not None and old[1] > 0
     row = bgra[5:6, :50]
     assert np.array_equal(rgb_of(row), row[:, :, 2::-1])
+
+
+def tiled_scene() -> np.ndarray:
+    """A 1920x1080 RGB frame tiled from the saved game scene (daffodils, leaves, sky)."""
+    scene = np.asarray(Image.open(FIXTURES / "game_scene.png").convert("RGB"))
+    return np.ascontiguousarray(np.tile(scene, (5, 4, 1))[:1080, :1920])
+
+
+def made_up_tag(seed: int = 0) -> np.ndarray:
+    """A name tag (grey, full size): white letters on a dark box."""
+    rng = np.random.default_rng(seed)
+    tag = np.full((20, 72), 40, np.uint8)
+    tag[5:15, 4:68] = np.where(rng.random((10, 64)) < 0.45, 235, 40)
+    return tag
+
+
+def with_tags(tag: np.ndarray, *corners: tuple[int, int]) -> np.ndarray:
+    """The tiled scene with the tag pasted at these top-left corners (full-size px)."""
+    full = tiled_scene()
+    for x, y in corners:
+        full[y:y + tag.shape[0], x:x + tag.shape[1]] = tag[..., None]
+    return full
+
+
+def name_tag_finder(tmp_path, tag: np.ndarray) -> NameTag:
+    np.save(tmp_path / "tag.npy", tag)
+    return NameTag(tag[::2, ::2], tmp_path / "tag.npy")
+
+
+def centre(corner: tuple[int, int], tag: np.ndarray) -> tuple[int, int]:
+    return (corner[0] + tag.shape[1] // 2) // 2, (corner[1] + tag.shape[0] // 2) // 2
+
+
+def test_name_tag_found_near_where_she_was_as_by_the_whole_search(tmp_path):
+    tag = made_up_tag()
+    finder = name_tag_finder(tmp_path, tag)
+    for i, corner in enumerate([(900, 600), (907, 596), (930, 640), (1010, 560)]):  # she walks and falls
+        full = with_tags(tag, corner, (1500, 250))  # and her name in someone's list, far away
+        whole = finder.search(full)  # what the whole play area gives (the search before)
+        assert finder.find(full) == whole == centre(corner, tag)
+        assert i == 0 or finder._looks % FULL_EVERY  # these came from the window
+    assert finder.search(full, finder._near(full.shape)) == centre((1010, 560), tag)
+
+
+def test_name_tag_searched_everywhere_once_she_leaves_the_window(tmp_path):
+    tag = made_up_tag()
+    finder = name_tag_finder(tmp_path, tag)
+    assert finder.find(with_tags(tag, (900, 600))) == centre((900, 600), tag)
+    assert finder.find(with_tags(tag, (1300, 600))) == centre((1300, 600), tag)  # 400 px away: the fallback
+    assert finder.find(with_tags(tag, (300, 800), (900, 600))) == centre((900, 600), tag)  # back: nearest wins
+    assert finder.find(tiled_scene()) is None  # hidden
+    assert finder._last == centre((900, 600), tag)
+
+
+def test_name_tag_window_rules_out_the_minimap(tmp_path):
+    # Near the top left the window reaches into the minimap, where her name shows too.
+    tag = made_up_tag()
+    finder = name_tag_finder(tmp_path, tag)
+    assert finder.find(with_tags(tag, (400, 360))) == centre((400, 360), tag)
+    assert finder.find(with_tags(tag, (200, 250))) is None  # only in the minimap now
+
+
+def test_name_tag_whole_search_every_so_often(tmp_path, monkeypatch):
+    tag = made_up_tag()
+    finder = name_tag_finder(tmp_path, tag)
+    full = with_tags(tag, (900, 600))
+    boxes = []
+    search = finder.search
+    monkeypatch.setattr(finder, "search", lambda f, box=None: boxes.append(box) or search(f, box))
+    for _ in range(2 * FULL_EVERY):
+        assert finder.find(full) == centre((900, 600), tag)
+    assert boxes.count(None) == 3  # the first look, and every FULL_EVERY-th
 
 
 def test_bars_read_the_fill_fraction():

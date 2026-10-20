@@ -118,6 +118,7 @@ def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDete
     half = timer.time("half size", lambda: cv2.resize(full, (full.shape[1] // SCALE, full.shape[0] // SCALE),
                                                       interpolation=cv2.INTER_AREA))
     tag = timer.time("name tag", lambda: eyes.name_tag.find(full))
+    timer.time("name tag: whole play area", lambda: eyes.name_tag.search(full))
     if tag is not None:
         timer.time("ground under her", lambda: ground_extent(half, tag[0], tag[1] - TAG_BELOW_FEET))
     timer.time("minimap dot", lambda: her_dot(full))
