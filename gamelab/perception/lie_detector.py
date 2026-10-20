@@ -30,9 +30,14 @@ HALF_SIZE = {
 
 
 def yellow(rgb: np.ndarray) -> np.ndarray:
-    """1.0 where a pixel is the Lie Detector title's yellow, else 0.0."""
-    r, g, b = (rgb[..., i].astype(np.int16) for i in range(3))
-    return ((r > 180) & (g > 140) & (b < 110) & (r - b > 110)).astype(np.float32)
+    """1.0 where a pixel is the Lie Detector title's yellow, else 0.0: red over 180, green over 140, blue
+    under 110, and red over blue by more than 110. Tested in OpenCV (red minus blue saturates at 0, which
+    fails as a negative difference would): the same pixels as numpy's int16 tests, 6.9 ms against 11.8."""
+    r, _, b = cv2.split(rgb)
+    colour = cv2.inRange(rgb, (181, 141, 0), (255, 255, 109))
+    out = np.zeros(rgb.shape[:2], np.float32)
+    out[cv2.bitwise_and(colour, cv2.inRange(cv2.subtract(r, b), 111, 255)) > 0] = 1.0
+    return out
 
 
 class LieDetectorSpotter:

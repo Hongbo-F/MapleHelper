@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 from gamelab.control import alarm, client
+from gamelab.perception import lie_detector
 from gamelab.perception.lie_detector import LieDetectorSpotter
 from gamelab.__main__ import LIE_DETECTOR_EXIT, main
 from gamelab.control.player import LIE_DETECTOR_ERROR, Player, Watchdog, _sleep_until
@@ -60,6 +61,48 @@ def test_spots_the_mouse_mini_game_and_the_truth_booth():
 @pytest.mark.parametrize("frame", [SCENE, NEAR_MISS, np.zeros((540, 960, 3), np.uint8)])
 def test_ignores_yellow_scenery_and_other_windows(frame):
     assert not LieDetectorSpotter().seen(frame)
+
+
+def numpy_yellow(rgb):
+    """lie_detector.yellow as it was: numpy's tests on int16 copies."""
+    r, g, b = (rgb[..., i].astype(np.int16) for i in range(3))
+    return ((r > 180) & (g > 140) & (b < 110) & (r - b > 110)).astype(np.float32)
+
+
+def test_the_title_yellow_is_the_same_as_numpys_on_every_colour():
+    g, b = np.meshgrid(np.arange(256, dtype=np.uint8), np.arange(256, dtype=np.uint8), indexing="ij")
+    for r0 in range(0, 256, 16):
+        picture = np.empty((16 * 256, 256, 3), np.uint8)
+        picture[..., 0] = np.repeat(np.arange(r0, r0 + 16, dtype=np.uint8), 256)[:, None]
+        picture[..., 1], picture[..., 2] = np.tile(g, (16, 1)), np.tile(b, (16, 1))
+        new = lie_detector.yellow(picture)
+        assert new.dtype == np.float32 and np.array_equal(new, numpy_yellow(picture))
+
+
+def test_spotter_scores_are_the_same_as_with_numpys_yellow(monkeypatch):
+    half = img("lie_detector_minigame_half.png")
+    mini_game = np.asarray(Image.fromarray(half).resize((half.shape[1] * 2, half.shape[0] * 2), Image.BILINEAR))
+    frames = [scene_with_window(), WINDOW, mini_game, img("truth_booth_timer.png"), SCENE, NEAR_MISS,
+              np.zeros((540, 960, 3), np.uint8)]
+    new = [LieDetectorSpotter().scores(f) for f in frames]
+    monkeypatch.setattr(lie_detector, "yellow", numpy_yellow)
+    old = LieDetectorSpotter()
+    assert new == [old.scores(f) for f in frames]
+
+
+def test_watchdog_grabs_the_game_as_an_rgb_picture_of_its_own(monkeypatch):
+    from gamelab.control import player as player_mod
+    rng = np.random.default_rng(0)
+    bgra = rng.integers(0, 256, (1080, 1920, 4), np.uint8)
+    monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 1920, "height": 1080})
+
+    class Screen:
+        def grab(self, box):
+            return bgra
+
+    frame = Watchdog("MapleStory", threading.Event(), spotter=object())._grab(Screen())
+    assert frame.flags.c_contiguous and np.array_equal(frame, bgra[:, :, 2::-1])
 
 
 def test_watchdog_sets_the_alarm_first_then_reports_once():

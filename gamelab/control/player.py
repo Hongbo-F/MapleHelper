@@ -27,6 +27,7 @@ import time
 import traceback
 from dataclasses import fields
 
+import cv2
 import mss
 import numpy as np
 
@@ -146,7 +147,8 @@ class Watchdog(threading.Thread):
             return None
         if client_area["width"] <= 0 or client_area["height"] <= 0:  # minimized
             return None
-        return np.asarray(sct.grab(client_area))[:, :, 2::-1]  # BGRA -> RGB, full size
+        # RGB, full size, a picture of its own: viewed as RGB in place, every OpenCV call on it copied it first
+        return cv2.cvtColor(np.asarray(sct.grab(client_area)), cv2.COLOR_BGRA2RGB)
 
 
 class Player:
