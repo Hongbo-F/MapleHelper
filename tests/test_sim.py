@@ -322,7 +322,13 @@ def test_walking_off_an_end_falls_and_a_wall_stops_her(model):
     w = world(model, c.id, 700.0)
     w.key(0.0, "right", True)
     w.advance(2.0)
-    assert w.plat is c and w.x == 800 and w.mode == "ground"
+    assert w.plat is c and w.x == pytest.approx(800, abs=1e-5) and w.mode == "ground"  # (a hair inside the end)
+    # Against it, a jump the other way leaves it.
+    w.key(2.0, "right", False)
+    tap(w, 2.2, "left", 0.25)  # let go in the air: what she goes is the jump's (and the slide's)
+    tap(w, 2.35, "alt", 0.04)
+    w.advance(3.5)
+    assert w.plat is c and w.x < 800 - 60
 
 
 def test_down_and_jump_on_a_floor_that_forbids_it_does_nothing():

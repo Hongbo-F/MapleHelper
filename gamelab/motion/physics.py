@@ -1,11 +1,10 @@
 """Her physics as the planner takes it: the game's jump, gravity and fall speeds, her walking (with its
 lags and slides) and climbing (and how long to hold an arrow to walk or run a distance), and where a
-jump or fall lands (simulated against the map's platforms and the walls of her foothold group). All in
-map units. The walk, the jump and their lags come from motion.body, the engine that moves her as the
-game does.
+jump or fall lands (flown by motion.body's engine against the map's platforms and the walls of her
+foothold group, as the simulator flies her). All in map units. The walk, the jump and their lags come
+from motion.body, the engine that moves her as the game does.
 """
 
-import bisect
 import itertools
 import math
 import os
@@ -102,7 +101,7 @@ ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fp
 # came first, or which landings were dropped, can't change an answer. (Worked out from the exact start, a
 # landing cached by one call was handed to every later one that rounded the same, so the simulator's
 # scenarios each had to start from the same cache to give the same trace.) On this map the planner's own
-# jumps and falls are 2,718 landings (about 1 MB); a 60-minute simulated hunt loop added 1 more.
+# jumps and falls are 3,128 landings (about 1.4 MB), and the 8-minute simulated hunt loop loop_run adds none.
 FLY_CACHE_SIZE = 20_000  # landings (about 9 MB when full)
 MODELS_KEPT = 4          # maps fly knows at a time (their walls, and the serial numbers keying their landings)
 _FLY_CACHE: OrderedDict[tuple, tuple] = OrderedDict()
@@ -131,64 +130,43 @@ def _known(model: MapModel, group) -> tuple[int, body.Walls]:
 
 
 def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
-        dt: float = 0.004, limit: float = 4.0, group=body.EVERY_WALL) -> tuple[Platform | None, float, float]:
+        dt: float = body.TICK, limit: float = 4.0, group=body.EVERY_WALL,
+        arrow: int | None = None) -> tuple[Platform | None, float, float]:
     """Where she lands from (x, y) moving at (vx, vy) (map units/s, y down): the first platform whose
     surface her feet cross on the way down. Walls stop her sideways: those of foothold `group` (the
     platform's she leaves, Platform.group; body.ROPE_GROUP off a rope), unless body.OWN_GROUP_WALLS is
     off; by default every wall. `skip` is a platform she falls through (dropping). Returns (platform,
     landing x, seconds). The start is rounded (x and y to 0.01 units, the speeds to 0.1 units/s) and
     results are cached by it: chains try the same jumps many times over."""
-    return flight(model, x, y, vx, vy, skip, dt, limit, group)[:3]
+    return flight(model, x, y, vx, vy, skip, dt, limit, group, arrow)[:3]
 
 
 def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
-           dt: float = 0.004, limit: float = 4.0, group=body.EVERY_WALL) -> tuple[Platform | None, float, float, float]:
-    """fly's landing, and her sideways speed as she lands: what she left with (with the arrow held, the
-    air does nothing to it), or 0 after a wall stopped her. On the ground she slides on from it, or runs
-    on."""
+           dt: float = body.TICK, limit: float = 4.0, group=body.EVERY_WALL,
+           arrow: int | None = None) -> tuple[Platform | None, float, float, float]:
+    """fly's landing, and her sideways speed as she lands. Flown by the engine (body.fly), the one
+    integration the simulator flies her by too, with `arrow` held all the way: by default the way she
+    leaves (none straight up), as a plan holds it. Held, it does nothing to her speed at the speeds she
+    jumps with (it steers toward 8.9 units/s at most); none, and the air drags her a little (a lot at the
+    fall cap). Her speed as she lands is 0 after a wall stopped her. On the ground she slides on from it,
+    or runs on."""
     if not body.OWN_GROUP_WALLS:
         group = body.EVERY_WALL  # (one set of landings, whatever group is asked for)
     serial, walls = _known(model, group)
     x, y, vx, vy = round(x, 2), round(y, 2), round(vx, 1), round(vy, 1)
-    key = (serial, group, x, y, vx, vy, None if skip is None else skip.id, dt, limit)
+    if arrow is None:
+        arrow = (vx > 0) - (vx < 0)
+    key = (serial, group, x, y, vx, vy, arrow, None if skip is None else skip.id, dt, limit)
     result = _FLY_CACHE.get(key)
     if result is not None:
         _FLY_CACHE.move_to_end(key)
         return result
-    result = _fly(model, walls, x, y, vx, vy, skip, dt, limit)
+    f = body.fly(model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls, dt=dt, limit=limit)
+    result = (f.platform, f.land_x, f.seconds, f.vx_land)
     _FLY_CACHE[key] = result
     if len(_FLY_CACHE) > FLY_CACHE_SIZE:
         _FLY_CACHE.popitem(last=False)
     return result
-
-
-def _fly(model: MapModel, walls: tuple[list[float], list[tuple[float, float]]], x: float, y: float, vx: float,
-         vy: float, skip: Platform | None, dt: float, limit: float) -> tuple[Platform | None, float, float, float]:
-    """flight, worked out (not cached)."""
-    wall_xs, wall_ys = walls
-    # Only platforms she could reach in the time: within her sideways travel, at or below the top
-    # of the jump.
-    reach = abs(vx) * limit + 1
-    top = y - (vy * vy / (2 * GRAVITY) if vy < 0 else 0) - 1
-    plats = [q for q in model.platforms if q is not skip and q.right >= x - reach and q.left <= x + reach
-             and max(q.y_at(q.left), q.y_at(q.right)) >= top]
-    t = 0.0
-    while t < limit:
-        nx, ny, nvy = x + vx * dt, y + vy * dt, min(vy + GRAVITY * dt, FALL_SPEED)
-        if vx:
-            lo, hi = (x, nx) if nx >= x else (nx, x)
-            i = bisect.bisect_left(wall_xs, lo)
-            while i < len(wall_xs) and wall_xs[i] <= hi:
-                if wall_ys[i][0] <= ny <= wall_ys[i][1]:
-                    nx, vx = x, 0.0  # bumped into a wall
-                    break
-                i += 1
-        if (vy > 0 or nvy > 0) and t > 0 and ny >= y:
-            for q in plats:
-                if q.covers(nx) and y <= q.y_at(nx) <= ny + 0.01:
-                    return q, nx, t + dt, vx
-        x, y, vy, t = nx, ny, nvy, t + dt
-    return None, x, t, vx
 
 
 # A route jump has to land on its platform at this share of her walking speed too: a jump the mover keys

@@ -791,7 +791,9 @@ class World:
             right = nx > p.right
             edge = p.right if right else p.left
             if self._blocked[p.id][1 if right else 0]:
-                self.x, self.vx = edge, 0.0
+                # Against the wall, a hair inside the end: on her side of it, so a flight from here (even one
+                # flown on in mid-air, with another arrow) goes into it only toward it (body.fly).
+                self.x, self.vx = edge - (1e-6 if right else -1e-6), 0.0
                 self.y = p.y_at(self.x)
                 return
             # off the end: in the air from the end of this tick

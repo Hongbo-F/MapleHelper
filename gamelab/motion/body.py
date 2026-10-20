@@ -370,6 +370,19 @@ def _lands_at(q, x: float, y: float, nx: float, ny: float) -> float | None:
     return x + (end - x) * (-before / (after - before) if after > before else 1.0)
 
 
+def _side_at(platforms, x: float, y: float) -> int:
+    """Which side of a wall at exactly x she is on, standing at (x, y): at the right end of the platform
+    under her feet she's on its left (-1), at its left end on its right (+1); 0 if neither (along a
+    platform, or in the air: there a wall at her x stops her either way)."""
+    for q in platforms:
+        if q.covers(x) and abs(q.y_at(x) - y) <= 1.5:
+            if x == q.right:
+                return -1
+            if x == q.left:
+                return 1
+    return 0
+
+
 def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: int = 0, skip=None,
         group=EVERY_WALL, walls: Walls | None = None, sides: tuple[float, float] | None = None,
         dt: float = TICK, limit: float = 4.0, path: bool = False, airborne: bool = False) -> Flight:
@@ -377,14 +390,20 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
     whose surface her feet cross on the way down (_lands_at), whatever its group. Walls stop her sideways:
     `walls`, or else those that stop her with foothold `group` (walls_for: the group of the platform she
     leaves; by default every wall), worked out each call; `sides`, the map's left and right limits, stop
-    her too. `skip` is a platform she falls through (dropping). A flight leaving the ground can't land on
-    its first step; one carried on from mid-air (`airborne`) can. Not cached."""
+    her too. A wall at exactly her start, at the end of the platform she stands on (where a wall stops
+    her walking), stops her only going into it: she's on her platform's side of it, and a jump away from
+    it leaves (counted as in her way both ways, she went straight up against it). `skip` is a platform
+    she falls through (dropping). A flight leaving the ground can't land on its first step; one carried on
+    from mid-air (`airborne`) can. Not cached."""
     wall_xs, wall_ys = walls if walls is not None else vertical_walls(walls_for(model, group))
     # Only platforms she could reach in the time: within her sideways travel, at or below the top of the jump.
     reach = max(abs(vx), shoe.air_speed if arrow else 0.0) * limit + 1
     top = y - (vy * vy / (2 * shoe.gravity) if vy < 0 else 0) - 1
     plats = [q for q in model.platforms if q is not skip and q.right >= x - reach and q.left <= x + reach
              and max(q.y_at(q.left), q.y_at(q.right)) >= top]
+    x0 = x
+    i = bisect.bisect_left(wall_xs, x)
+    side = _side_at(model.platforms, x, y) if i < len(wall_xs) and wall_xs[i] == x and not airborne else 0
     points = [(x, y)] if path else None
     speeds = [(vx, vy)] if path else None
     t = 0.0
@@ -395,7 +414,8 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
             lo, hi = (x, nx) if nx > x else (nx, x)
             i = bisect.bisect_left(wall_xs, lo)
             while i < len(wall_xs) and wall_xs[i] <= hi:
-                if wall_ys[i][0] <= ny <= wall_ys[i][1]:
+                if wall_ys[i][0] <= ny <= wall_ys[i][1] and not (side and wall_xs[i] == x == x0
+                                                                 and (nx - x) * side > 0):
                     nx, nvx = x, 0.0  # bumped into a wall
                     break
                 i += 1
