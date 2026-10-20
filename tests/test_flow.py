@@ -43,6 +43,21 @@ def test_a_rope_is_grabbed_on_the_run(model):
     assert legs[-1].end.platform is d and legs[-1].end.x == 700
 
 
+def test_a_drop_is_made_only_where_the_floor_lets_her_through():
+    from gamelab.motion.route import Move
+    t = tree()
+    t["foothold"]["1"]["1"]["2"]["forbidFallDown"] = 1  # A's 100..200 forbids it, 0..100 doesn't
+    m = mapdata.parse(1, t, "Test Map", {})
+    a, c = by_y(m, 300, 100), by_y(m, 500, 400)
+    move = Move("drop", a.id, c.id, 100, 100)
+    leg = Flow(m, KEYS).leg(move, Body(0.0, 180, a), Keys(KEYS))
+    assert leg is not None and leg.end.platform is c and leg.spans[-1].x1 < 100.5 and leg.end.x < 100.5
+    plain = mapdata.parse(1, tree(), "Test Map", {})  # without the flag she drops near where she stands
+    a, c = by_y(plain, 300, 100), by_y(plain, 500, 400)
+    leg = Flow(plain, KEYS).leg(Move("drop", a.id, c.id, 100, 100), Body(0.0, 180, a), Keys(KEYS))
+    assert leg.spans[-1].x1 > 150
+
+
 def test_chains_stop_where_a_monster_could_get_in_the_way(model):
     c, d = by_y(model, 500, 400), by_y(model, 300, 700)
     path = Planner(model).plan(c.id, 200, d.id)

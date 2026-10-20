@@ -68,6 +68,28 @@ def test_platforms_and_walls_keep_their_foothold_group(model):
     assert [(w.x1, w.y1, w.y2) for w in m.walls_of((2, 7))] == [(1100, 300, 240)]
 
 
+def test_a_floor_that_forbids_dropping_through_it_gets_no_drop(model):
+    # forbidFallDown (on 14,197 footholds in 51 of the game data's maps, none on this one): the game won't
+    # drop her through that foothold, so no drop through it is planned.
+    assert not any(p.no_drop for p in model.platforms)
+    a = by_y(model, 300, 100)
+    assert any(x.kind == "drop" and x.src == a.id for x in Planner(model).moves)
+    t = tree()
+    for f in t["foothold"]["1"]["1"].values():  # A, both its footholds
+        f["forbidFallDown"] = 1
+    m = mapdata.parse(1, t, "Test Map", {})
+    a, c = by_y(m, 300, 100), by_y(m, 500, 400)
+    assert a.no_drop and not a.drop_ok(100) and not c.no_drop and c.drop_ok(400)
+    moves = Planner(m).moves
+    assert not any(x.kind == "drop" and x.src == a.id for x in moves)
+    assert any(x.kind == "walk_off" and x.src == a.id for x in moves)  # she still gets down off its ends
+    # One foothold of the two: only along that one (3 platforms of the 2,100 on those maps are like this).
+    t = tree()
+    t["foothold"]["1"]["1"]["2"]["forbidFallDown"] = 1  # A's 100..200
+    a = by_y(mapdata.parse(1, t, "Test Map", {}), 300, 100)
+    assert not a.no_drop and a.drop_ok(50) and a.drop_ok(100) and not a.drop_ok(150) and not a.drop_ok(250)
+
+
 def test_platform_lookups(model):
     c = by_y(model, 500, 400)
     assert model.platform_under(400, 490).id == c.id

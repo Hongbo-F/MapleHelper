@@ -32,12 +32,14 @@ class Segment:
     the map image (foothold/<layer>/<group>/<id>). Each floating block is one group: its floor and the
     walls hanging from its ends; steps joined by a wall share one. The client's collisions go by it
     (walls of another group are passed through in the air), and so, by the live logs, does what stops a
-    star (attack.reach)."""
+    star (attack.reach). `no_drop`: the game won't drop her through this foothold (forbidFallDown, on
+    14,197 footholds in 51 of the 306 map images; none on this map)."""
     x1: float
     y1: float
     x2: float
     y2: float
     group: tuple[int, int] | None = field(default=None, compare=False, repr=False)
+    no_drop: bool = field(default=False, compare=False, repr=False)
 
     def y_at(self, x: float) -> float:
         if self.x2 == self.x1:
@@ -71,6 +73,20 @@ class Platform:
     def group(self) -> tuple[int, int] | None:
         """Its footholds' (layer, group) (Segment.group): platforms joined by a step wall share one."""
         return self.segments[0].group
+
+    @property
+    def no_drop(self) -> bool:
+        """None of it can be dropped through (every foothold forbids it: Segment.no_drop). In the game
+        data a platform's footholds almost always agree: of 2,100 platforms on the 51 maps that have the
+        flag, 1,340 forbid it all along, 757 nowhere and 3 in part."""
+        return all(s.no_drop for s in self.segments)
+
+    def drop_ok(self, x: float) -> bool:
+        """Whether she can drop through it at x (the foothold there doesn't forbid it)."""
+        for s in self.segments:
+            if s.x1 <= x <= s.x2:
+                return not s.no_drop
+        return not (self.segments[0] if x < self.left else self.segments[-1]).no_drop
 
     def y_at(self, x: float) -> float:
         for s in self.segments:
@@ -228,14 +244,15 @@ class MapModel:
 # --- reading the game data ------------------------------------------------------------------------
 
 def _footholds(tree: dict) -> list[dict]:
-    """Every foothold in a map image, flattened: its layer, group and id, its ends, and its neighbours'
-    ids ("0": none)."""
+    """Every foothold in a map image, flattened: its layer, group and id, its ends, its neighbours' ids
+    ("0": none), and whether it forbids falling through it."""
     out = []
     for layer, groups in (tree.get("foothold") or {}).items():
         for group, segs in groups.items():
             for sid, s in segs.items():
                 out.append({"layer": layer, "group": group, "id": sid, **{k: s[k] for k in ("x1", "y1", "x2", "y2")},
-                            "prev": str(s.get("prev", 0)), "next": str(s.get("next", 0))})
+                            "prev": str(s.get("prev", 0)), "next": str(s.get("next", 0)),
+                            "no_drop": bool(s.get("forbidFallDown"))})
     return out
 
 
@@ -245,7 +262,8 @@ def _platforms(footholds: list[dict]) -> tuple[list[Platform], list[Segment]]:
     by_key = {(f["layer"], f["group"], f["id"]): f for f in footholds}
 
     def segment(f: dict) -> Segment:
-        return Segment(f["x1"], f["y1"], f["x2"], f["y2"], (int(f["layer"]), int(f["group"])))
+        return Segment(f["x1"], f["y1"], f["x2"], f["y2"], (int(f["layer"]), int(f["group"])),
+                       f.get("no_drop", False))
 
     walls = [segment(f) for f in footholds if f["x1"] == f["x2"]]
     walkable = {k for k, f in by_key.items() if f["x2"] > f["x1"]}

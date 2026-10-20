@@ -6,7 +6,7 @@ Moves between platforms (all in map units, using the game's physics and her meas
 - jump_up: straight up through a platform overhead (floating platforms can be jumped through from below);
 - jump: a running jump off one platform's end onto another (up, level or down);
 - walk_off: walk off a platform's end and fall onto the platform below;
-- drop: down + jump to fall through the platform she stands on.
+- drop: down + jump to fall through the platform she stands on (not where its foothold forbids it).
 In the air only walls of the foothold group she leaves stop her (body.OWN_GROUP_WALLS). Walking along a
 platform links its moves; routes are found with Dijkstra on time.
 """
@@ -203,6 +203,8 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
         x = _overlap_middle(a, b)
         if x is None:
             continue
+        if not a.drop_ok(x):
+            continue  # the game won't drop her through it there (forbidFallDown)
         land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a, group=a.group)
         if land is not None and land.id not in seen:
             seen.add(land.id)

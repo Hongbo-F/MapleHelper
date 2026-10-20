@@ -324,6 +324,20 @@ def test_walking_off_an_end_falls_and_a_wall_stops_her(model):
     assert w.plat is c and w.x == 800 and w.mode == "ground"
 
 
+def test_down_and_jump_on_a_floor_that_forbids_it_does_nothing():
+    t = tree()
+    for f in t["foothold"]["1"]["1"].values():  # A
+        f["forbidFallDown"] = 1
+    m = mapdata.parse(1, t, "Test Map", {})
+    a = plat(m, 300, 100)
+    w = world(m, a.id, 100.0)
+    w.key(0.0, "down", True)
+    tap(w, 0.1, "alt", 0.04)
+    w.key(0.3, "down", False)
+    w.advance(2.0)
+    assert w.plat is a and w.mode == "ground" and w.x == 100
+
+
 def test_in_the_air_only_walls_of_her_foothold_group_stop_her(monkeypatch):
     # A ledge L (0..200, y 300), and 12 units past its right end the wall hanging 85 units under the left end
     # of a block H (212..600, y 240) of another group, as off platform 3's right end on the real map; F is

@@ -459,7 +459,9 @@ class Flow:
         # Not at the top of a rope hanging from her platform (its top within 15 units of it): down there
         # climbs onto the rope.
         ropes = [r.x for r in self.model.ropes if abs(r.top - a.y_at(r.x)) < 15 and a.covers(r.x)]
-        clear = [x for x in range(int(lo), int(hi) + 1, DROP_STEP) if all(abs(x - rx) > ROPE_CLEAR for rx in ropes)]
+        # Nor where its foothold forbids dropping through (forbidFallDown).
+        clear = [x for x in range(int(lo), int(hi) + 1, DROP_STEP)
+                 if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and a.drop_ok(x)]
         if not clear:
             return None
         prefer = min(clear, key=lambda x: (abs(x - b.x), abs(x - m.x)))

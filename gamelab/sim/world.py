@@ -23,7 +23,8 @@ on the world's 5 ms tick:
 - up held at a rope's foot, or anywhere along it in the air, grabs it; up climbs at flow.ROPE_SPEED onto
   the platform at its top (a short climb-over, flow.CLIMB_OVER), down climbs down at physics.CLIMB_SPEED
   and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
-  her off it sideways (ROPE_JUMP);
+  her off it sideways (ROPE_JUMP); down and jump on a floor whose foothold forbids it (forbidFallDown)
+  does nothing, as on the bottom floor;
 - monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded). A
   touch leaves her a second's invulnerability; she evades half of them (a thief's "MISS": nothing
   else happens), the others take 1.4% HP (the median of the lab's 118 logged hits) and knock her back
@@ -459,7 +460,8 @@ class World:
         elif e.kind == "liftoff":
             self._liftoff(e.data)
         elif e.kind == "drop":
-            if self.mode == "ground" and self.plat is not None and self.plat.id == e.data:
+            if self.mode == "ground" and self.plat is not None and self.plat.id == e.data \
+                    and self.plat.drop_ok(self.x):
                 d = self.arrow()
                 f = self._flight(self.x, self.y + 1, self.vx, 0.0, d, skip=self.plat)
                 if f.platform is not None:
