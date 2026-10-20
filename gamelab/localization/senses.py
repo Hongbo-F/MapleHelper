@@ -52,7 +52,8 @@ class Senses:
             listener(s)
         return s
 
-    def _rope_columns(self, dot: tuple[float, float] | None, tag: tuple[int, int] | None) -> list[tuple[int, int]] | None:
+    def _rope_columns(self, dot: tuple[float, float] | None,
+                      tag: tuple[int, int] | None) -> list[tuple[int, int]] | None:
         """Where a look searches for ropes (ranges of x, full-size px): around where her dot puts the map's
         ropes on screen (ROPE_PAD). With no dot or no name tag, ropes can't place her: nowhere."""
         if ROPE_PAD is None:

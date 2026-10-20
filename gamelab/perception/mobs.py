@@ -5,8 +5,13 @@ RGBA with the alpha as mask) and a colour test for its body. Step 1 matches each
 silhouette against the frame's body-colour mask (one fast single-channel pass over the frame). Step 2
 checks only the best few spots with the full masked colour template, which rejects scenery that merely
 shares the colour (leaves, clouds). Frames are game-window pictures downscaled by SCALE.
+
+The matches run on a few threads (OpenCV lets go of Python's lock while it matches). Which spots step 2
+checks doesn't depend on what the checks find, so they're all picked first, and the answers are the same
+as one thread's, in the same order.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -29,6 +34,7 @@ MIN_BODY_PIXELS = 20         # a monster type is looked for only where this many
 COARSE = 2                   # step 1 works at 1/COARSE of the frame's size
 CHECK_SLACK = 6              # step 2 looks this far (px) around a spot, so spots closer than this are one
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
+THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the whole screen 250 -> 117 (8 are no faster)
 
 
 @dataclass(frozen=True)
@@ -95,9 +101,10 @@ def palette(kind: str, rgb: np.ndarray, channels=None) -> np.ndarray:
 
 class MobDetector:
     """Templates come from `folder` (or a list of folders): PNGs named <kind>_<anything>.png, RGBA at full
-    screen size. gamelab/assets/mobs has cut-outs from screenshots; sprites.py makes them from the game data."""
+    screen size. gamelab/assets/mobs has cut-outs from screenshots; sprites.py makes them from the game data.
+    `threads`: how many matches run at once (1: all on the caller's thread)."""
 
-    def __init__(self, folder: Path | list[Path] = ASSETS):
+    def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS):
         self.templates: dict[str, list[MobTemplate]] = {}
         folders = folder if isinstance(folder, list) else [folder]
         for path in sorted(p for f in folders for p in f.glob("*.png")):
@@ -118,9 +125,27 @@ class MobDetector:
                 self.templates.setdefault(kind, []).append(MobTemplate(t, np.dstack([m] * 3), coarse))
         if not self.templates:
             raise RuntimeError(f"no monster templates in {folder}")
+        self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         """Monsters in `frame` (RGB, game window / SCALE). `rows` limits the search to a band."""
+        return self._detect(frame, rows, self._map)
+
+    def detect_wide(self, frame: np.ndarray, rows: tuple[int, int]) -> list[Mob]:
+        """Monsters over a tall stretch of the frame, band by band. Over the whole screen, green
+        foliage took all of the slime candidate spots and three slimes in plain view were missed;
+        each band gets its own best spots. The bands are searched at once, each on one thread."""
+        # A band starts every WIDE_STEP rows until one reaches rows[1] (it's cut short there); always one.
+        starts = range(rows[0], max(rows[0] + 1, rows[1] - WIDE_BAND + WIDE_STEP), WIDE_STEP)
+        bands = self._map(lambda y0: self._detect(frame, (y0, min(rows[1], y0 + WIDE_BAND)), _serial), starts)
+        return suppress_overlaps([hit for band in bands for hit in band])
+
+    def _map(self, fn, items) -> list:
+        """fn of each item, in order: on the pool, or here with one thread."""
+        return list(self._pool.map(fn, items)) if self._pool else [fn(item) for item in items]
+
+    def _detect(self, frame: np.ndarray, rows: tuple[int, int] | None, run) -> list[Mob]:
+        """detect, with `run(fn, items)` doing the matches (on the pool, or one after another)."""
         y_off = 0
         if rows:
             y_off = max(0, rows[0])
@@ -130,67 +155,87 @@ class MobDetector:
         frame = frame[:frame.shape[0] // COARSE * COARSE, :frame.shape[1] // COARSE * COARSE]
         channels = split_channels(frame)
         coarse_size = (frame.shape[1] // COARSE, frame.shape[0] // COARSE)
-        hits = []
+        kinds = []  # (kind, its templates, its body colour at 1/COARSE size, that colour's cover)
         for kind, templates in self.templates.items():
             colour = palette(kind, frame, channels)
             if colour.sum() < MIN_BODY_PIXELS:
                 continue
             coarse = cv2.resize(colour.astype(np.float32), coarse_size, interpolation=cv2.INTER_AREA)
-            spots = _candidates(coarse, templates)
-            hits += _confirm(frame, kind, templates, spots, y_off)
-        return suppress_overlaps(hits)
-
-    def detect_wide(self, frame: np.ndarray, rows: tuple[int, int]) -> list[Mob]:
-        """Monsters over a tall stretch of the frame, band by band. Over the whole screen, green
-        foliage took all of the slime candidate spots and three slimes in plain view were missed;
-        each band gets its own best spots."""
+            kinds.append((kind, templates, coarse, Cover(coarse)))
+        # Step 1, every template of every kind; then the spots each kind checks; then step 2, all at once.
+        jobs = [(coarse, cover, t, i) for _, templates, coarse, cover in kinds for i, t in enumerate(templates)]
+        found = run(lambda job: _spots(*job), jobs)
+        checks, start = [], 0
+        for kind, templates, _, _ in kinds:
+            spots = sorted((s for f in found[start:start + len(templates)] for s in f), reverse=True)
+            start += len(templates)
+            checks += [(kind, templates[i], cx, cy) for cx, cy, i in _to_check(spots)]
+        results = run(lambda c: _check(frame, c[1], c[2], c[3]), checks)
         hits = []
-        # A band starts every WIDE_STEP rows until one reaches rows[1] (it's cut short there); always one.
-        for y0 in range(rows[0], max(rows[0] + 1, rows[1] - WIDE_BAND + WIDE_STEP), WIDE_STEP):
-            hits += self.detect(frame, rows=(y0, min(rows[1], y0 + WIDE_BAND)))
+        for (kind, *_), result in zip(checks, results):
+            if result and result[0] >= THRESHOLD:
+                score, x, y, w, h = result
+                hits.append(Mob(kind, x, y_off + y, w, h, round(score, 3)))
         return suppress_overlaps(hits)
 
 
-def _candidates(coarse: np.ndarray, templates: list[MobTemplate]) -> list[tuple[float, int, int, int]]:
-    """Step 1: where each template's body-colour silhouette matches the frame's body colour (`coarse`,
-    at 1/COARSE size). Best first: (score, centre x and y in the frame, index of the template)."""
-    spots, cover = [], {}
-    for i, template in enumerate(templates):
-        silhouette = template.silhouette
-        if coarse.shape[0] < silhouette.shape[0] or coarse.shape[1] < silhouette.shape[1]:
-            continue
-        res = cv2.matchTemplate(coarse, silhouette, cv2.TM_CCOEFF_NORMED)
-        # A window with next to no body colour has next to no variance, and its normalised score
-        # is noise that can reach 1.0. In the basin, such windows took all MAX_CHECKS checks,
-        # so snails and pigs at her level were never checked.
-        size = silhouette.shape
-        if size not in cover:
-            cover[size] = cv2.matchTemplate(coarse, np.ones(size, np.float32), cv2.TM_CCORR) / silhouette.size
-        res[cover[size] < MIN_COVER * float(silhouette.mean())] = 0
-        peaks = (res >= SILHOUETTE_THRESHOLD) & (res == cv2.dilate(res, np.ones((3, 3), np.uint8)))
-        for y, x in zip(*np.nonzero(peaks)):
-            spots.append((float(res[y, x]), COARSE * x + COARSE * silhouette.shape[1] // 2,
-                          COARSE * y + COARSE * silhouette.shape[0] // 2, i))
-    spots.sort(reverse=True)
-    return spots
+def _one_opencv_thread() -> None:
+    """Each of the pool's threads runs its matches by itself. With OpenCV's own threads as well (24 here),
+    the whole screen took 141 ms instead of 117 (and without the pool, 307 instead of 250). OpenCV's thread
+    count is the process's, not a thread's, so this sets it for the whole look: the half-size frame takes
+    0.8 ms instead of 0.4, and the look without monsters is no slower (bench-look)."""
+    cv2.setNumThreads(1)
 
 
-def _confirm(frame: np.ndarray, kind: str, templates: list[MobTemplate], spots: list[tuple[float, int, int, int]],
-             y_off: int) -> list[Mob]:
-    """Step 2: the full masked colour check of the template that found each of the best spots (at most
-    MAX_CHECKS, none within CHECK_SLACK of one already checked). `y_off`: the frame's first row on screen."""
-    hits, checked = [], []
+def _serial(fn, items) -> list:
+    return [fn(item) for item in items]
+
+
+class Cover:
+    """How much of each window of the frame has a kind's body colour, from the colour's integral image:
+    one pass over the frame, then four lookups a window (a TM_CCORR with a template of ones did the
+    same sums, one pass per template size)."""
+
+    def __init__(self, coarse: np.ndarray):
+        self.integral = cv2.integral(coarse, sdepth=cv2.CV_64F)
+        self._sums: dict[tuple[int, int], np.ndarray] = {}
+
+    def sums(self, h: int, w: int) -> np.ndarray:
+        """The body colour in each h x w window, by its top-left corner (the shape of a match's result)."""
+        out = self._sums.get((h, w))
+        if out is None:  # two threads may both work it out: the same numbers either way
+            ii = self.integral
+            out = self._sums[(h, w)] = ii[h:, w:] - ii[:-h, w:] - ii[h:, :-w] + ii[:-h, :-w]
+        return out
+
+
+def _spots(coarse: np.ndarray, cover: Cover, template: MobTemplate, i: int) -> list[tuple[float, int, int, int]]:
+    """Step 1 for one template (index `i`): where its body-colour silhouette matches the frame's body
+    colour (`coarse`, at 1/COARSE size): (score, centre x and y in the frame, i) of each spot."""
+    silhouette = template.silhouette
+    if coarse.shape[0] < silhouette.shape[0] or coarse.shape[1] < silhouette.shape[1]:
+        return []
+    res = cv2.matchTemplate(coarse, silhouette, cv2.TM_CCOEFF_NORMED)
+    # A window with next to no body colour has next to no variance, and its normalised score
+    # is noise that can reach 1.0. In the basin, such windows took all MAX_CHECKS checks,
+    # so snails and pigs at her level were never checked.
+    res[cover.sums(*silhouette.shape) / silhouette.size < MIN_COVER * float(silhouette.mean())] = 0
+    peaks = (res >= SILHOUETTE_THRESHOLD) & (res == cv2.dilate(res, np.ones((3, 3), np.uint8)))
+    return [(float(res[y, x]), COARSE * x + COARSE * silhouette.shape[1] // 2,
+             COARSE * y + COARSE * silhouette.shape[0] // 2, i) for y, x in zip(*np.nonzero(peaks))]
+
+
+def _to_check(spots: list[tuple[float, int, int, int]]) -> list[tuple[int, int, int]]:
+    """Step 2's spots (centre x, y, template), best first: at most MAX_CHECKS, none within CHECK_SLACK of
+    one already picked."""
+    picked = []
     for _, cx, cy, i in spots:
-        if len(checked) >= MAX_CHECKS:
+        if len(picked) >= MAX_CHECKS:
             break
-        if any(abs(cx - x) < CHECK_SLACK and abs(cy - y) < CHECK_SLACK for x, y in checked):
+        if any(abs(cx - x) < CHECK_SLACK and abs(cy - y) < CHECK_SLACK for x, y, _ in picked):
             continue
-        checked.append((cx, cy))
-        found = _check(frame, templates[i], cx, cy)
-        if found and found[0] >= THRESHOLD:
-            score, x, y, w, h = found
-            hits.append(Mob(kind, x, y_off + y, w, h, round(score, 3)))
-    return hits
+        picked.append((cx, cy, i))
+    return picked
 
 
 def _check(frame: np.ndarray, template: MobTemplate, cx: int, cy: int):
@@ -204,5 +249,3 @@ def _check(frame: np.ndarray, template: MobTemplate, cx: int, cy: int):
         return None
     _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, tpl, mask))
     return float(score), x0 + x + tw // 2, y0 + y + th // 2, tw, th
-
-

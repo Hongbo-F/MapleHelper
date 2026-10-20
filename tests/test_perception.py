@@ -8,13 +8,16 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from gamelab import paths
 from gamelab.analysis import bench
-from gamelab.perception import hud
+from gamelab.perception import hud, mobs
 from gamelab.perception.eyes import rgb_of
 from gamelab.perception.hud import BAR_ROW, HP_BAR, bars, hp_fill, touch_popup
 from gamelab.perception.minimap import MINIMAP_BOX, dot_in_box
 from gamelab.perception.nametag import FULL_EVERY, NameTag
+from gamelab.perception.match import suppress_overlaps
 from gamelab.perception.mobs import ASSETS, MobDetector
+from gamelab.perception.sprites import SPRITES
 from gamelab.perception.terrain import ROPE_GAP, ScreenRope, find_ropes, ground_extent, rope_mask
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -243,7 +246,7 @@ def test_blank_windows_dont_crowd_out_a_monster_in_an_odd_sized_band():
     rgba = np.asarray(Image.open(ASSETS / "pig_0.png"))
     pig = np.asarray(Image.fromarray(rgba).resize((rgba.shape[1] // 2, rgba.shape[0] // 2)))
     ph, pw = pig.shape[:2]
-    detector = MobDetector()
+    detector, serial = MobDetector(), MobDetector(threads=1)
     for seed in range(4):
         rng = np.random.default_rng(seed)
         frame = np.full((151, 960, 3), SKY, np.uint8)
@@ -255,3 +258,110 @@ def test_blank_windows_dont_crowd_out_a_monster_in_an_odd_sized_band():
         frame[121 - ph:121, 760:760 + pw] = np.where(pig[..., 3:] > 0, pig[..., :3], region)
         found = detector.detect(frame, rows=(0, 151))
         assert any(m.kind == "pig" and abs(m.x - (760 + pw // 2)) <= 4 for m in found), seed
+        assert serial.detect(frame, rows=(0, 151)) == found
+
+
+def old_detect(detector: MobDetector, frame: np.ndarray, rows=None) -> list:
+    """MobDetector.detect as it was: on one thread, the windows' body colour summed by a TM_CCORR with a
+    template of ones, and each kind's spots checked as they were picked."""
+    y_off = 0
+    if rows:
+        y_off = max(0, rows[0])
+        frame = frame[y_off:rows[1]]
+    frame = frame[:frame.shape[0] // mobs.COARSE * mobs.COARSE, :frame.shape[1] // mobs.COARSE * mobs.COARSE]
+    channels = mobs.split_channels(frame)
+    hits = []
+    for kind, templates in detector.templates.items():
+        colour = mobs.palette(kind, frame, channels)
+        if colour.sum() < mobs.MIN_BODY_PIXELS:
+            continue
+        coarse = cv2.resize(colour.astype(np.float32), (frame.shape[1] // 2, frame.shape[0] // 2),
+                            interpolation=cv2.INTER_AREA)
+        spots, cover = [], {}
+        for i, t in enumerate(templates):
+            sil = t.silhouette
+            if coarse.shape[0] < sil.shape[0] or coarse.shape[1] < sil.shape[1]:
+                continue
+            res = cv2.matchTemplate(coarse, sil, cv2.TM_CCOEFF_NORMED)
+            if sil.shape not in cover:
+                cover[sil.shape] = cv2.matchTemplate(coarse, np.ones(sil.shape, np.float32), cv2.TM_CCORR) / sil.size
+            res[cover[sil.shape] < mobs.MIN_COVER * float(sil.mean())] = 0
+            peaks = (res >= mobs.SILHOUETTE_THRESHOLD) & (res == cv2.dilate(res, np.ones((3, 3), np.uint8)))
+            spots += [(float(res[y, x]), 2 * x + 2 * sil.shape[1] // 2, 2 * y + 2 * sil.shape[0] // 2, i)
+                      for y, x in zip(*np.nonzero(peaks))]
+        spots.sort(reverse=True)
+        checked = []
+        for _, cx, cy, i in spots:
+            if len(checked) >= mobs.MAX_CHECKS:
+                break
+            if any(abs(cx - x) < mobs.CHECK_SLACK and abs(cy - y) < mobs.CHECK_SLACK for x, y in checked):
+                continue
+            checked.append((cx, cy))
+            found = mobs._check(frame, templates[i], cx, cy)
+            if found and found[0] >= mobs.THRESHOLD:
+                score, x, y, w, h = found
+                hits.append(mobs.Mob(kind, x, y_off + y, w, h, round(score, 3)))
+    return suppress_overlaps(hits)
+
+
+def old_detect_wide(detector: MobDetector, frame: np.ndarray, rows) -> list:
+    hits = []
+    for y0 in range(rows[0], max(rows[0] + 1, rows[1] - mobs.WIDE_BAND + mobs.WIDE_STEP), mobs.WIDE_STEP):
+        hits += old_detect(detector, frame, (y0, min(rows[1], y0 + mobs.WIDE_BAND)))
+    return suppress_overlaps(hits)
+
+
+def with_monsters(*placed: tuple[str, int, int, bool]) -> np.ndarray:
+    """The tiled scene at half size, with cut-outs (name, left x, feet y, flipped) pasted on it."""
+    full = tiled_scene()
+    frame = np.ascontiguousarray(cv2.resize(full, (960, 540), interpolation=cv2.INTER_AREA))
+    for name, x, feet, flip in placed:
+        rgba = np.asarray(Image.open(ASSETS / f"{name}.png"))
+        small = np.asarray(Image.fromarray(rgba).resize((rgba.shape[1] // 2, rgba.shape[0] // 2)))
+        small = small[:, ::-1] if flip else small
+        h, w = small.shape[:2]
+        region = frame[feet - h:feet, x:x + w]
+        frame[feet - h:feet, x:x + w] = np.where(small[..., 3:] > 0, small[..., :3], region)
+    return frame
+
+
+def test_monsters_searched_on_threads_are_found_as_before():
+    frames = [with_monsters(("pig_0", 100, 420, False), ("slime_4", 400, 300, True), ("snail_8", 700, 460, False),
+                            ("pig_2", 800, 200, True), ("snail_10", 300, 470, True)),
+              with_monsters(), np.full((540, 960, 3), SKY, np.uint8)]
+    one, six = MobDetector(threads=1), MobDetector(threads=6)
+    found = 0
+    for frame in frames:
+        for rows in (None, (250, 401), (380, 501)):  # the whole frame, an odd band, another
+            old = old_detect(one, frame, rows)
+            assert one.detect(frame, rows) == six.detect(frame, rows) == old
+            found += len(old)
+        old = old_detect_wide(one, frame, (0, 486))
+        assert one.detect_wide(frame, (0, 486)) == six.detect_wide(frame, (0, 486)) == old
+        found += len(old)
+    assert found >= 10
+
+
+@pytest.mark.skipif(not (paths.LAB / "z2_shoot1.png").exists(), reason="needs saved game screenshots (gamelab/lab)")
+def test_monsters_in_saved_screenshots_found_as_before():
+    folders = [ASSETS] + ([SPRITES] if any(SPRITES.glob("*.png")) else [])
+    one, six = MobDetector(folders, threads=1), MobDetector(folders, threads=6)
+    for name in ("z2_shoot1.png", "z2_down.png", "after_rest.png", "closeup.png"):
+        full = np.asarray(Image.open(paths.LAB / name).convert("RGB"))
+        frame = cv2.resize(full, (960, 540), interpolation=cv2.INTER_AREA)
+        assert six.detect(frame, (230, 381)) == one.detect(frame, (230, 381)) == old_detect(one, frame, (230, 381))
+        assert six.detect_wide(frame, (0, 486)) == old_detect_wide(one, frame, (0, 486))
+
+
+def test_window_cover_from_the_integral_image_is_the_tm_ccorr_sum():
+    frame = with_monsters(("pig_0", 100, 420, False), ("slime_4", 400, 300, True))
+    detector = MobDetector(threads=1)
+    for kind, templates in detector.templates.items():
+        colour = mobs.palette(kind, frame).astype(np.float32)
+        coarse = cv2.resize(colour, (480, 270), interpolation=cv2.INTER_AREA)
+        cover = mobs.Cover(coarse)
+        for t in templates:
+            h, w = t.silhouette.shape
+            ccorr = cv2.matchTemplate(coarse, np.ones((h, w), np.float32), cv2.TM_CCORR)
+            assert cover.sums(h, w).shape == ccorr.shape
+            assert np.abs(cover.sums(h, w) - ccorr).max() / (h * w) < 1e-4
