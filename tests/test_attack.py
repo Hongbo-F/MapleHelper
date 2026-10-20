@@ -198,6 +198,19 @@ def test_off_level_a_star_needs_more_room_the_smaller_the_monster():
     assert reach.shot_dx(60, "dragon") == reach.shot_dx(60, "pig") == 151
     assert reach.can_shoot(120, 60, kind="orange-mushroom") and not reach.can_shoot(120, 60)
     assert not reach.can_shoot(170, 60, kind="slime") and reach.can_shoot(180, 60, kind="slime")
+
+
+def test_between_her_level_and_60_below_her_decisions_keep_to_the_old_ramp(monkeypatch):
+    # 42 below her (0 -> 1) the search picks a pig or an Orange Mushroom from 90, a slime from 97, but the only
+    # throws logged there missed pigs 124-125 off and an Orange Mushroom 91 off. Her decisions keep to the old
+    # ramp there (126) until a probe settles it; the search alone with the switch off. 60 below, and above
+    # her, the search alone either way.
+    assert reach.ramp_dx(42) == 126 and reach.ramp_dx(15) == reach.ramp_dx(60) == reach.ramp_dx(-42) == 0
+    assert [reach.shot_dx(42, k) for k in ("pig", "orange-mushroom", "slime", "snail")] == [126, 126, 126, 166]
+    assert not reach.can_shoot(120, 42, kind="pig") and reach.can_shoot(130, 42, kind="pig")
+    assert reach.shot_dx(60, "orange-mushroom") == 113 and reach.shot_dx(-42, "pig") == 131
+    monkeypatch.setattr(reach, "RAMP_BELOW", False)
+    assert [reach.shot_dx(42, k) for k in ("pig", "orange-mushroom", "slime", "snail")] == [90, 90, 97, 166]
     assert reach.can_shoot(410, 0, kind="snail") and not reach.can_shoot(420, 0, reach=500, kind="snail")
 
 

@@ -183,6 +183,54 @@ def test_the_scorer_tells_the_area_of_an_attack_from_a_jump_from_the_search():
     assert lls["area"] > max(lls["search"], lls["ground"]) + 5
 
 
+def _probe_run(name: str, start: tuple, monsters: list, throws: int = 20) -> list[dict]:
+    """A simulated run of probe `name` (its log's rows), from `start` with `monsters` placed."""
+    def run(sim):
+        h = sim.hunter()
+        return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES[name], throws=throws), seconds=400))
+    return _rows(scenarios.run_scenario(scenarios.Scenario(f"probe_{name}", run, start, monsters=monsters, limit=500)))
+
+
+@REAL
+def test_the_scorer_tells_the_search_from_the_old_ramp_42_below_her(monkeypatch):
+    # From 0 at a lone pig on 1, 42 below her, 70-160 off: the world's search picks it from 71 by its middle; the old
+    # ramp (reach.RAMP_BELOW, what her decisions keep to there) from 126. Each world's log fits its own.
+    model = scenarios.real_map()
+    run = lambda: _probe_run("below-42", (0, 1222.0), [("Pig", 1, 1110.0)])  # noqa: E731
+    rows = run()
+    assert len(probe.below(rows)) == 20
+    lls = probe.ramp_lls(rows, model)
+    assert lls["the search"] > lls["the search, the old ramp below her"] + 5
+    assert "the search, the old ramp below her" in probe.score(rows, model)
+    ramp_world = SimpleNamespace(**{k: getattr(reach, k) for k in dir(reach) if not k.startswith("__")})
+
+    def search_band(near, far, bottom, top, *a, **k):  # none below her closer by its middle than the ramp
+        return None if (near + far) / 2 < reach.ramp_dx(-bottom) else reach.search_band(near, far, bottom, top, *a, **k)
+    ramp_world.search_band = search_band
+    monkeypatch.setattr(world_mod, "reach", ramp_world)
+    rows = run()
+    monkeypatch.undo()
+    lls = probe.ramp_lls(rows, model)
+    assert lls["the search, the old ramp below her"] > lls["the search"] + 5
+
+
+@REAL
+def test_the_scorer_tells_the_claw_s_swipes_from_stars_by_the_bar_they_take():
+    # On 21 at a lone pig, then a lone slime, walking at her 95-160 off: the world's claw swipes a body that reaches
+    # into its 90 units, a pig out to 124 by its middle and a slime to 118, for a fifth of a star's damage (a pig's
+    # bar by 7%, a slime's by 10%); stars from there. Down at 4, 60 below her, the world's claw (on her level only)
+    # swipes nothing.
+    for kind, edge in (("Pig", 124), ("Slime", 118.5)):
+        table = probe.claw_table(_probe_run("claw-edge", (21, -225.0), [(kind, 21, -90.0)]))
+        claw = [lo for (_, _, dy, lo), g in table.items() if g["claw"]]
+        star = [lo for (_, _, dy, lo), g in table.items() if g["star"]]  # a kill can be either
+        assert claw and star and max(claw) < edge <= max(star) + 10 and min(star) >= edge - 10, (kind, table)
+    rows = _probe_run("claw-down", (3, 716.0), [("Pig", 4, 620.0)])
+    table = probe.claw_table(rows)
+    assert sum(g["throws"] for g in table.values()) == 20 and not any(g["claw"] for g in table.values())
+    assert all(dy == 60 for _, _, dy, _ in table) and "the claw's" in probe.score(rows, scenarios.real_map())
+
+
 @REAL
 def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     # The game's hit monsters hide under their damage numbers for 1-3 s: the evidence waits up to

@@ -86,6 +86,15 @@ SEARCH_TOP0 = 21     # ... to this far. meowdb draws 44 (12 to 44: 28 +- 16); fi
                      # (`python -m gamelab probe run top-60`, then `probe score`: behavior.probe).
 BANDS = math.ceil((STAR_RANGE - SEARCH_START) / SEARCH_STEP)  # 17: the last one 15 wide
 LEVEL = 15           # within this of her height, a target counts as on her level
+# Between her level and 60 below her the search is unchecked, and the only throws logged there go against it:
+# from 0 at 1 (42 below), the shot log of 2026-10-18 has 3 misses in 4 at pigs 124-125 off and a miss at an
+# Orange Mushroom 91 off, where the search picks both from 90 (what else was in front wasn't logged then). Its
+# fit rests on the throws 60 off her level. So below her, between the two, her decisions keep at least to the
+# old ramp (ramp_dx: MIN_SHOT on her level to RAMP_FAR 60 below, a pig 42 below from 126 instead of 90) until
+# a probe settles it (`python -m gamelab probe run below-42`, then `probe score`). False: the search alone.
+# Above her nothing goes against the search. On this map only 0 -> 1 is that far apart.
+RAMP_BELOW = True
+RAMP_FAR = 150       # the old ramp's end, 60 below her (fitted to the shot log before the search)
 STAR_SPEED = 690     # units/s
 EDGE_MARGIN = 25     # where she stands to shoot: not closer than this to her platform's end
 # Where a look searches for monsters: from this far above her feet to this far below (bodies stick up
@@ -106,7 +115,8 @@ AIR_MARGIN = 6       # how far into the area a body must reach for an attack fro
 # (claw_edge). Deciding by the middle (a star from 100 units, whatever the kind), 23% of the simulator's
 # swipes came 90-160 units off, and swipes were 40% of the hunt loop's hits, each a fifth of a star's
 # damage; by the body they fell by a third (20 seeds). Unmeasured in game: how far off a pig is still
-# swiped (by the swings' boxes, 107-136).
+# swiped (by the swings' boxes, 107-136): `python -m gamelab probe run claw-edge`, then `probe score` (a swipe
+# takes 7-10% of a pig's or a slime's bar, a star 23-61%).
 CLAW_FAR = MIN_SHOT
 CLAW_DOWN = 17
 CLAW_UP = 62
@@ -208,11 +218,20 @@ def max_dx(half: float = PIG[1]) -> float:
     return STAR_RANGE + half
 
 
+def ramp_dx(dy: float) -> float:
+    """The old ramp's closest sideways for a target dy below her (+), between her level and SHOT_DOWN: from
+    MIN_SHOT at LEVEL to RAMP_FAR at SHOT_DOWN (RAMP_BELOW). 0 anywhere else."""
+    if not LEVEL < dy < SHOT_DOWN:
+        return 0.0
+    return MIN_SHOT + (RAMP_FAR - MIN_SHOT) * (dy - LEVEL) / (SHOT_DOWN - LEVEL)
+
+
 def shot_dx(dy: float, kind: str | None = None) -> float:
     """The closest sideways a throw from the ground at a monster of `kind` dy below (+) her throws a star
     that picks it: min_dx by its body (body_of), and never closer than MIN_SHOT (closer, the claw swipes;
-    on her own platform her decisions keep a bigger monster out to claw_edge)."""
-    return max(MIN_SHOT, min_dx(dy, *body_of(kind)))
+    on her own platform her decisions keep a bigger monster out to claw_edge), nor than the old ramp between
+    her level and 60 below her (ramp_dx, while RAMP_BELOW)."""
+    return max(MIN_SHOT, min_dx(dy, *body_of(kind)), ramp_dx(dy) if RAMP_BELOW else 0.0)
 
 
 def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE, kind: str | None = None) -> bool:
@@ -225,10 +244,12 @@ def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE, kind: str | None 
 def claw_takes(ahead: float, dy: float, top: float, half: float) -> bool:
     """Whether the claw's swing takes a monster `ahead` in front of her (its middle), its feet dy below
     hers, `top` tall and `half` wide either side: on her level (LEVEL), its body reaching into the swing
-    (CLAW_FAR ahead of her, CLAW_DOWN below to CLAW_UP above her feet). Off her level it isn't counted on,
-    though the swings' boxes reach 17 below her feet: in the telemetry of 2026-10-20 an Orange Mushroom 60
-    below her and 91 off, its body in them, was passed over by 4 throws (from 2, with the step wall down to
-    4 in the swing too, so this settles nothing), and the decisions never planned on it."""
+    (CLAW_FAR ahead of her, CLAW_DOWN below to CLAW_UP above her feet). Off her level it isn't counted on
+    (nor swiped in the simulator), though the swings' boxes reach 17 below her feet: in the telemetry of
+    2026-10-20 an Orange Mushroom 60 below her and 91 off, its body in them, was passed over by 4 throws, as
+    a claw on her level only has it, but from 2, with the step wall down to 4 in the swing too, so it doesn't
+    settle it; the decisions never planned on it either. Unmeasured in game: `python -m gamelab probe run
+    claw-down` (from 3 at 4) settles it, and `claw-edge` how far off the claw swipes on her level."""
     return abs(dy) <= LEVEL and reaches_into(ahead, dy, top, half, CLAW_FAR, CLAW_DOWN, CLAW_UP)
 
 

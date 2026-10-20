@@ -3,9 +3,11 @@ of attack.reach shows, throws only when a single monster can take the star, and 
 question can be settled from the log alone (`score`).
 
 The questions (attack.reach, gamelab/README.md): the target search's window, its top (SEARCH_TOP0: 21
-fitted to the logs, 44 as meowdb draws it) and its floor by kind; whether an attack from a jump picks by
-the area or by the search; and what stops a star (the walls of her own foothold group where they cross a
-level line SHOT_H above her feet, against a line from her to the target's feet, or every wall). A `Probe`
+fitted to the logs, 44 as meowdb draws it) and its floor by kind, and the search between her level and 60
+below her (against the old ramp her decisions keep to there, RAMP_BELOW); whether an attack from a jump
+picks by the area or by the search; what stops a star (the walls of her own foothold group where they
+cross a level line SHOT_H above her feet, against a line from her to the target's feet, or every wall);
+and how far the claw swipes, on her level (CLAW_FAR, CLAW_MARGIN) and off it (claw_takes). A `Probe`
 is a place on Thicket Around the Beach II (the platform she stands on, her x, the way she throws), the
 monsters it throws at (their kinds, their platforms, how far off sideways by their middle), and how she
 throws: from the ground, a jump throw or a jump back, always with the regular attack.
@@ -43,8 +45,12 @@ before), or can't tell (hidden). Then:
 - what stops a star: the rule against no walls, every wall at the same line, and a line from her to the
   target's feet through her group's walls, over every throw, with what each attack picks (the search
   from the ground, the area from a jump); and the line's height (SHOT_H), raised in a jump (reach.air_rise);
+- between her level and 60 below her: the search alone against the search with the old ramp (none closer by
+  its middle than reach.ramp_dx);
 - from a jump: the area (reach.in_area) against the search, from as high as she is then and from the ground
-  she jumped from, and the hits by how far off the target was.
+  she jumped from, and the hits by how far off the target was;
+- the claw: the claw probes' hits by how far off the target was, each the claw's or a star's by how much of
+  its bar it took (under CLAW_DROP: the claw's).
 """
 
 import json
@@ -102,6 +108,9 @@ A_MIN = 0.3          # a monster the attack takes shows a hit at least this ofte
 F_MAX = 0.2          # one it doesn't take shows one at most this often (the telemetry's monsters behind her,
                      # which no star can hit: 7.6% of 224)
 RATE_FLOOR = 0.02    # and neither rate quite 0 or 1
+CLAW_DROP = 0.15     # a hit that takes less of its target's HP bar than this was the claw's: 9-11 damage against a
+                     # star's 30-70, of a pig's 128 HP (game data) 7-9% against 23-55%, of a slime's 115 8-10%
+                     # against 26-61%
 
 
 @dataclass(frozen=True)
@@ -162,6 +171,28 @@ PROBES = {p.name: p for p in (
           ("pig", "orange-mushroom"), (200, 400), walls=False, source="terrain 2, geometry P5's second",
           expect="by the level line hits; by a line to the feet none from x 50 (it crosses the step wall about "
                  "30 down); again with --x 195 --dx 160-250: hits by either"),
+    # 42 below her, between her level and the 60 the search was fitted to: 0 is 1's only such neighbour. Facing
+    # left from 25 inside 0's left end, 1 runs on 336 units ahead of her (monsters on 1 can touch her on 0: their
+    # bodies reach 38-55 up).
+    Probe("below-42", "the search between her level and 60 below her, against the old ramp (reach.RAMP_BELOW)",
+          0, 1222.0, LEFT, (1,), ("pig", "orange-mushroom", "snail"), (70, 160), by_kind=(("snail", (130, 220)),),
+          throws=30, source="review of the search",
+          expect="42 below her, by the search a pig is hit from 90 units (110 standing), an Orange Mushroom at "
+                 "any (33 by its body), a snail from 166; by the old ramp every kind from 126. The shot log missed "
+                 "pigs 124-125 off 3 times of 4 and an Orange Mushroom 91 off there"),
+    # The claw's reach (reach.CLAW_FAR, CLAW_MARGIN), told by how much of the bar a hit takes (CLAW_DROP). On her
+    # level, in the middle of 21 (two slimes and a pig spawn there; 174 units to either end, past a knockback).
+    Probe("claw-edge", "how far off the claw still swipes, by kind (reach.CLAW_FAR, CLAW_MARGIN, claw_edge)", 21,
+          -225.0, RIGHT, (21,), ("pig", "slime"), (95, 160), throws=40, source="bodies D",
+          expect="by the swing's boxes (73-102 ahead, taken as 90) and the bodies, swipes (a small bar drop: 9-11 "
+                 "damage of a pig's 128 HP) up to about 124 off a pig and 118 off a slime, stars from there; her "
+                 "decisions count on a star from 136 and 130 (claw_edge)"),
+    # The claw off her level: its swings reach 17 below her feet, into a walking pig's or an Orange Mushroom's
+    # body 60 below her (46 and 55 tall), not a slime's (41). From 35 inside 3's left end, at 4.
+    Probe("claw-down", "whether the claw swipes a monster off her level (reach.claw_takes: on her level only)", 3,
+          716.0, LEFT, (4,), ("pig", "orange-mushroom"), (60, 125), source="bodies D",
+          expect="if the claw keeps to her level, no hit at a pig (the search picks one 60 below from 151) and stars at "
+                 "Orange Mushrooms from 113; if it swipes off her level, small bar drops at both within about 124"),
     Probe("hanging-wall", "a level line or a line to the feet, down past her own block's hanging wall", 14, 730.0,
           RIGHT, (17,), ("pig", "orange-mushroom", "slime"), (180, 360), walls=False, source="terrain 3",
           expect="by the level line hits at every distance; by a line to the feet none from 198 units on (from x 730 "
@@ -569,18 +600,21 @@ def _rise(row: dict) -> float:
 
 
 def _key(row: dict, e: dict, body: dict[str, MobBody], top0: float | None = None, floor0: float | None = None,
-         air: str = "area") -> tuple | None:
+         air: str = "area", ramp: bool = False) -> tuple | None:
     """Where monster `e` comes in the order the throw's attack takes them (the least first), or None if it
     can't take it, terrain aside: from the ground the claw (on her level) then the search's bands (`top0`,
-    `floor0`: the first window's edges); from a jump (`air`) the area ("area", reach.in_area), or the search
-    from as high as she is then ("search"), or from the ground she jumped from ("ground"). Bodies as the
-    fight goes by them (fight._in_path)."""
+    `floor0`: the first window's edges; with `ramp`, none below her closer by its middle than the old ramp,
+    reach.ramp_dx); from a jump (`air`) the area ("area", reach.in_area), or the search from as high as she is
+    then ("search"), or from the ground she jumped from ("ground"). Bodies as the fight goes by them
+    (fight._in_path)."""
     x, y = _her(row)
     ahead, dy = (e["x"] - x) * directions.sign(row["side"]), e["y"] - y
     top, half = reach.body_of(e["kind"], body)
     if row["gap_ms"] is None:
         if reach.claw_takes(ahead, dy, top, half):
             return 0, abs(ahead)
+        if ramp and abs(ahead) < reach.ramp_dx(dy):
+            return None
         k = reach.search_band(*reach.body_box(ahead, dy, top, half), top0=top0, floor0=floor0)
         return None if k is None else (1 + k, abs(ahead))
     rise = _rise(row)
@@ -749,6 +783,62 @@ def air_lls(rows: list[dict], model: MapModel) -> dict[str, float]:
     return {air: likelihood(use, lambda r, a=air: taken(r, model, body, air=a))[0] for air in AIR_MODELS}
 
 
+def below(rows: list[dict]) -> list[dict]:
+    """The throws from the ground at a target between her level and 60 below her (where reach.RAMP_BELOW holds)."""
+    return [r for r in ground(rows) if reach.ramp_dx(r["target"]["y"] - _her(r)[1]) > 0]
+
+
+def ramp_lls(rows: list[dict], model: MapModel) -> dict[str, float]:
+    """The search alone against the search with the old ramp below her (reach.RAMP_BELOW), over those throws."""
+    body, use = bodies(model), below(rows)
+    return {"the search": likelihood(use, lambda r: taken(r, model, body))[0],
+            "the search, the old ramp below her": likelihood(use, lambda r: taken(r, model, body, ramp=True))[0]}
+
+
+def drop(e: dict, exp: int, only_gone: bool) -> float | None:
+    """How much of its HP bar a monster of a throw's evidence lost, if it showed a hit (`shown`): from its bar before
+    (full if none) to the lowest after; the whole of what was left if it was killed. None: no hit, or can't tell."""
+    if not shown(e, exp, only_gone):
+        return None
+    before = 1.0 if e["bar_before"] is None else e["bar_before"]
+    seen = [b for _, b in e["after"] if b is not None]
+    if exp and e["gone"] and only_gone:
+        return before
+    return before - min(seen) if seen else None
+
+
+CLAW_COUNTS = ("throws", "claw", "star", "killed", "no hit", "can't tell")
+
+
+def claw_table(rows: list[dict]) -> dict[tuple, dict[str, int]]:
+    """The claw probes' throws (named claw-*) by (probe, the target's kind, its height below her (+), how far off it
+    was at the pick in 10-unit bins): how many (CLAW_COUNTS), and what the target showed: a hit the claw's (under
+    CLAW_DROP of its bar) or a star's, killed (either), no hit, or can't tell."""
+    table: dict[tuple, dict[str, int]] = {}
+    for row in rows:
+        if not row["probe"].startswith("claw"):
+            continue
+        target, s = _target(row)
+        if target is None:
+            continue
+        gone = [e for e in row["evidence"] if e["gone"]]
+        d = drop(target, row.get("exp", 0), len(gone) == 1)
+        killed = bool(row.get("exp")) and target["gone"] and len(gone) == 1
+        x, y = _her(row)
+        key = (row["probe"], target["kind"], round(target["y"] - y), int(abs(target["x"] - x) // 10) * 10)
+        g = table.setdefault(key, dict.fromkeys(CLAW_COUNTS, 0))
+        g["throws"] += 1
+        g["can't tell" if s is None else "no hit" if s is False else "killed" if killed
+          else "claw" if d < CLAW_DROP else "star"] += 1
+    return table
+
+
+def claw_lines(rows: list[dict]) -> list[str]:
+    """claw_table, as text."""
+    return [f"  {name} {kind} {dy:+d} {lo}-{lo + 10}: " + ", ".join(f"{k} {g[k]}" for k in CLAW_COUNTS)
+            for (name, kind, dy, lo), g in sorted(claw_table(rows).items())]
+
+
 def _target(row: dict) -> tuple[dict | None, bool | None]:
     found = [(e, s) for e, s in outcomes(row) if e["target"]]
     return found[0] if found else (None, None)
@@ -790,6 +880,15 @@ def score(rows: list[dict], model: MapModel) -> str:
     lines.append("The search's window, from the throws from the ground:")
     lines.append("  " + _fit_text(fit_top0(rows, model), reach.SEARCH_TOP0, ("meowdb's", MEOWDB_TOP0)))
     lines.append("  " + _fit_text(fit_floor0(rows, model), reach.SEARCH_FLOOR0))
+    if under := below(rows):
+        lines.append(f"Between her level and 60 below her, from {len(under)} throws (log-likelihood; reach.RAMP_BELOW "
+                     f"is {'on' if reach.RAMP_BELOW else 'off'}):")
+        for name, ll in sorted(ramp_lls(rows, model).items(), key=lambda kv: -kv[1]):
+            lines.append(f"  {name}: {ll:.2f}")
+    if claws := claw_lines(rows):
+        lines.append(f"The claw, by the target's kind, its height (+ below her) and how far off it was at the pick "
+                     f"(a hit under {CLAW_DROP:.0%} of its bar is the claw's):")
+        lines += claws
     lines.append("What stops a star, from every throw (log-likelihood, higher fits better):")
     for name, ll in sorted(terrain_lls(rows, model).items(), key=lambda kv: -kv[1]):
         lines.append(f"  {name}: {ll:.2f}")
