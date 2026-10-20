@@ -24,8 +24,8 @@ from .. import directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import TOO_CLOSE, act_text, air_gap, decide, open_above, pct, pick_target, stance
 from ..localization.mapdata import MapModel, MobBody
-from ..localization.monsters import (MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster, bodies, dead_one,
-                                     seen_again)
+from ..localization.monsters import (MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster, bodies,
+                                     dead_one, seen_again)
 from ..localization.scene import Scene
 from .looting import DropSpot
 
@@ -94,6 +94,7 @@ class FightState:
     thrown: list[list] = field(default_factory=list)  # [monster, when last seen]: thrown at, kept while hidden
     dying: list[tuple[Monster, float]] = field(default_factory=list)  # kills, and when: seen fading out a moment
     aimed: list[Monster] = field(default_factory=list)  # in the star's path at the last throw
+    flinching: list[Monster] = field(default_factory=list)  # hit lately, so maybe still flinching (just_hit)
     kill_spots: list[DropSpot] = field(default_factory=list)  # where kills on her platform died: swept after
     exp_counted: int = 0  # her EXP gains (Report.exp_kills) already told apart as kills
     unseen: int = 0       # looks in a row that couldn't place her (see UNPLACED_LOOKS)
@@ -111,6 +112,17 @@ class FightState:
         is still seen for a moment, and throwing at it (and then at its "hidden" ghost) wasted throws
         after most kills."""
         return [m for m in monsters if any(seen_again(d, [m]) is m for d, _ in self.dying)]
+
+    def just_hit(self, visible: list[Monster]) -> list[Monster]:
+        """The monsters she threw at whose HP bar shows up or drops in this look (`visible`; before
+        `follow`): hit since they were last seen, so maybe still flinching, taller (for FLINCH_S, 0.6 s,
+        localization.monsters), when her next attack picks its target."""
+        out = []
+        for m, _ in self.thrown:
+            again = seen_again(m, visible)
+            if again is not None and again.bar is not None and (m.bar is None or again.bar < m.bar - 0.02):
+                out.append(again)
+        return out
 
     def follow(self, visible: list[Monster], now: float) -> None:
         """The monsters she threw at that are among those `visible` again: where they are, seen `now`."""
@@ -212,17 +224,20 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
              now: float) -> tuple[list[Monster], list[Monster], list[Monster]]:
     """What's there to fight: the monsters wanted and seen (not fading out where a kill died), less
     the kills her EXP tells of; plus those she threw at that are hidden now. Returns those, the
-    monsters seen (but those fading out), and the hidden ones."""
+    monsters seen (but those fading out), and the hidden ones. Those hit lately (st.flinching: their HP
+    bar new or lower, or hidden under their damage numbers) may still flinch when her next attack picks."""
     wanted = _wanted(s, kinds, ground, far)
     st.forget_faded(now)
     fading = st.fading(s.monsters)
     wanted = [m for m in wanted if m not in fading]
     visible = [m for m in s.monsters if m not in fading]
+    hit = st.just_hit(visible)
     st.follow(visible, now)
     wanted = _count_kills(h, st, s, wanted, h.report.exp_kills - st.exp_counted, now)
     st.exp_counted = h.report.exp_kills
     st.forget_hidden(now)  # only after _count_kills: this look's kill may still be one of these
     hidden = st.hidden(now)
+    st.flinching = hit + hidden
     return wanted + hidden, visible, hidden
 
 
@@ -249,7 +264,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     st.last_act, st.last_hidden = act, bool(hidden)
     throwing = act[0] in THROWS
     if throwing:
-        st.aimed = _in_path(s, act[1], visible + hidden, air_gap(act[0]), body)
+        st.aimed = _in_path(s, act[1], visible + hidden, air_gap(act[0]), body, st.flinching)
     if telemetry.recording():
         telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden),
                        aimed=[{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1)} for m in st.aimed]
@@ -337,7 +352,7 @@ def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], g
 
 
 def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None = None,
-             body: dict[str, MobBody] | None = None) -> list[Monster]:
+             body: dict[str, MobBody] | None = None, flinching: list[Monster] = ()) -> list[Monster]:
     """Everything in a star's path that way, whatever its kind: a snail in front of a far pig takes the
     star (and its EXP isn't the pig's kill). From the ground, what the claw's swing or the star's search
     can pick (reach.ground_pick, by each kind's body walking: reach.body_of, half its width from `body`,
@@ -345,20 +360,26 @@ def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None 
     search picks it. From a jump (the attack keyed `gap_ms` after the jump key), what the attack's area
     takes in from as high as she is when it picks its target (reach.in_area, by how tall each kind is at
     least, `body`'s top): monsters on the platform above too, as far as a star reaches, but none that
-    stays under its floor (a snail beside her: an EXP gain then came from one of those above). None
-    behind a wall of her foothold group (reach.wall_to: from 4, those on 2)."""
+    stays under its floor (a snail beside her: an EXP gain then came from one of those above). Those of
+    `flinching` (hit lately, FightState.just_hit) as tall as they flinch (`body`'s flinch_top): a pig 60
+    below her is picked from 111 units then, from 151 walking. None behind a wall of her foothold group
+    (reach.wall_to: from 4, those on 2)."""
     x, y = s.where.x, s.where.y
     body = body or bodies()
     ahead = [m for m in monsters if (m.x > x) == (side == RIGHT)]
-    if gap_ms is None:
-        return [m for m in ahead
-                if reach.ground_pick(abs(m.x - x), m.y - y, *reach.body_of(m.kind, body)) is not None
-                and reach.wall_to(s.platform, x, y, m) is None]
-    rise, out = reach.air_rise(gap_ms), []
+    rise, out = (0.0 if gap_ms is None else reach.air_rise(gap_ms)), []
     for m in ahead:
-        b = body.get(m.kind)  # how tall it is at least, and half its width (a pig's if unknown)
-        top, half = (b.top, b.half) if b is not None else (MONSTER_TOP["pig"], reach.PIG[1])
-        if reach.in_area(abs(m.x - x), m.y - y, top, rise, half) and reach.wall_to(s.platform, x, y, m, rise) is None:
+        b = body.get(m.kind)  # its body (a pig's if unknown)
+        walking, half = reach.body_of(m.kind, body)
+        least = b.top if b is not None else MONSTER_TOP["pig"]
+        top = walking if gap_ms is None else least  # what each attack's pick goes by (see above)
+        if any(m is f for f in flinching):
+            top = max(top, b.flinch_top if b is not None else MONSTER_FLINCH_TOP["pig"])
+        if gap_ms is None:
+            picked = reach.ground_pick(abs(m.x - x), m.y - y, top, half) is not None
+        else:
+            picked = reach.in_area(abs(m.x - x), m.y - y, top, rise, half)
+        if picked and reach.wall_to(s.platform, x, y, m, rise) is None:
             out.append(m)
     return out
 

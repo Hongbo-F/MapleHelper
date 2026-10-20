@@ -208,6 +208,20 @@ def test_a_jump_throw_aims_at_the_platform_above_and_over_a_snail_beside_her():
     assert _in_path(s, LEFT, seen, JUMP_ATTACK_MS)[0] is snail
 
 
+def test_a_monster_just_hit_is_in_the_path_as_tall_as_it_flinches():
+    # A pig 60 below her and 130 along: walking (46 tall) the star's search from the ground picks it only
+    # from 151, but just hit it flinches 54 tall for 0.6 s and is picked from 111.
+    from gamelab.behavior.fight import FightState, _in_path
+    s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT)
+    pig = target(630, 560, platform=1)
+    assert _in_path(s, RIGHT, [pig]) == [] and _in_path(s, RIGHT, [pig], flinching=[pig]) == [pig]
+    # Just hit: thrown at, and its HP bar new or lower than when it was last seen (not one whose bar stayed).
+    st = FightState(thrown=[[target(630, 560, platform=1), 1.0], [target(700, 560, platform=1, bar=0.5), 1.0],
+                            [target(300, bar=0.6), 1.0]])
+    seen = [target(632, 560, platform=1, bar=0.7), target(702, 560, platform=1, bar=0.5), target(300, bar=0.3)]
+    assert st.just_hit(seen) == [seen[0], seen[2]]
+
+
 def test_a_kill_on_the_platform_above_during_jump_throws_is_placed_there(monkeypatch):
     # Jump-throwing at a pig beside her (cornered: another pig behind her), the attack picks its target
     # ~49 units up, so a slime on the platform above, 150 to the side, is in its path (from the ground one
