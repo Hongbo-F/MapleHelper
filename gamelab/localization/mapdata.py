@@ -1,5 +1,6 @@
 """A map's layout, read from the game's own data (gamedata): platforms, walls, ropes, portals, monster
-spawns and the minimap's scale, in the game's map units ("world" units: x to the right, y downward).
+spawns (and each monster's EXP and body) and the minimap's scale, in the game's map units ("world" units:
+x to the right, y downward).
 Also which platforms monsters can reach (`MapModel.safe`), and a picture of the map (`render`).
 
 The screen shows the world 1080/768 = 1.40625x larger at a 1920x1080 window (the game lays out a
@@ -100,6 +101,17 @@ class Portal:
 
 
 @dataclass(frozen=True)
+class MobBody:
+    """A monster's body, from the boxes (lt/rb, map units from its feet) of its frames in the game data
+    (Mob/<id>.img): how tall it is at least while it stands or walks (the lowest top of its stand and move
+    frames), how tall while it flinches after a hit (hit1), and half its width (its widest stand or move
+    frame)."""
+    top: float
+    flinch_top: float
+    half: float
+
+
+@dataclass(frozen=True)
 class Spawn:
     mob_id: int
     x: float
@@ -124,6 +136,7 @@ class MapModel:
     physics: dict = field(default_factory=dict)      # the game's Physics.img (kept, not read: motion.physics
                                                      # has the values it needs as constants)
     mob_exp: dict[str, int] = field(default_factory=dict)  # monster name -> EXP per kill (game data)
+    mob_bodies: dict[str, MobBody] = field(default_factory=dict)  # monster name -> its body (game data)
 
     # --- where things are -------------------------------------------------------------------
 
@@ -236,9 +249,10 @@ def _mob_id(life: dict) -> str:
 
 
 def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None,
-          mob_exp: dict | None = None) -> MapModel:
-    """A map's model from its image in the game data (`tree`, as JSON). `mob_names` and `mob_exp` are
-    keyed by monster id (_mob_id); the model keys EXP by name."""
+          mob_exp: dict | None = None, mob_bodies: dict | None = None) -> MapModel:
+    """A map's model from its image in the game data (`tree`, as JSON). `mob_names`, `mob_exp` and
+    `mob_bodies` (as _mob_bodies gives them) are keyed by monster id (_mob_id); the model keys EXP and
+    bodies by name."""
     info = tree.get("info", {})
     platforms, walls = _platforms(_footholds(tree))
     ropes = [Rope(r["x"], r["y1"], r["y2"], bool(r.get("l")), bool(r.get("uf")))
@@ -256,7 +270,8 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         bounds=(info.get("VRLeft"), info.get("VRTop"), info.get("VRRight"), info.get("VRBottom")),
         minimap={k: mm.get(k) for k in ("width", "height", "centerX", "centerY", "mag")},
         platforms=platforms, walls=walls, ropes=ropes, portals=portals, spawns=spawns, physics=physics,
-        mob_exp={mob_names.get(i, i): e for i, e in (mob_exp or {}).items()})
+        mob_exp={mob_names.get(i, i): e for i, e in (mob_exp or {}).items()},
+        mob_bodies={mob_names.get(i, i): MobBody(**b) for i, b in (mob_bodies or {}).items()})
 
 
 def _image(map_id: int) -> dict:
@@ -281,16 +296,17 @@ def load(map_id: int) -> MapModel:
     """The map's model, parsed from the game data (cached as JSON next to the other extracts)."""
     cache = CACHE / f"{map_id}.json"
     raw = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
-    if raw is None or "mob_exp" not in raw:  # not cached yet, or cached before EXP was kept
+    if raw is None or "mob_bodies" not in raw:  # not cached yet, or cached before EXP or bodies were kept
         physics = jsonable(Package(COPY / "Map" / "Map_000.wz").image("Physics.img"))
         tree = jsonable(_image(map_id))
         ids = {_mob_id(s) for s in _monster_lives(tree)}
         names = _mob_names(ids)
         raw = {"id": map_id, "name": _map_name(map_id), "tree": tree, "physics": physics, "mob_names": names,
-               "mob_exp": _mob_exp(ids)}
+               "mob_exp": _mob_exp(ids), "mob_bodies": _mob_bodies(ids)}
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(raw), encoding="utf-8")
-    return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"])
+    return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"],
+                 raw["mob_bodies"])
 
 
 def _mob_names(ids: set[str]) -> dict[str, str]:
@@ -304,6 +320,37 @@ def _mob_exp(ids: set[str]) -> dict[str, int]:
     from gamedata.canvas import _mob_pack
     pack = _mob_pack()
     return {i: int((pack.image(f"Mob/{int(i):07d}.img").get("info") or {}).get("exp") or 0) for i in ids}
+
+
+BODY_ACTIONS = ("stand", "move")  # a monster's frames while it stands or walks ...
+FLINCH_ACTION = "hit1"            # ... and while it flinches after a hit
+
+
+def _mob_bodies(ids: set[str]) -> dict[str, dict]:
+    """Monster id -> its body (MobBody's fields), from the boxes (lt/rb: from its feet, y up negative) of
+    its frames in the game data. A monster whose frames have no boxes is left out (localization.monsters'
+    tables stand in for it)."""
+    from gamedata.canvas import _mob_pack
+    from gamedata.wz import Canvas
+    pack = _mob_pack()
+    out = {}
+    for i in ids:
+        tree = pack.image(f"Mob/{int(i):07d}.img")
+        link = (tree.get("info") or {}).get("link")
+        if link and not tree.get("stand"):  # its frames are another monster's
+            tree = pack.image(f"Mob/{int(link):07d}.img")
+
+        def boxes(actions: tuple[str, ...]) -> list:
+            return [(f.props["lt"], f.props["rb"]) for a in actions for f in (tree.get(a) or {}).values()
+                    if isinstance(f, Canvas) and f.props.get("lt") is not None and f.props.get("rb") is not None]
+
+        body, flinch = boxes(BODY_ACTIONS), boxes((FLINCH_ACTION,))
+        if not body:
+            continue
+        top = float(min(-lt.y for lt, _ in body))
+        out[i] = {"top": top, "flinch_top": float(max((-lt.y for lt, _ in flinch), default=top)),
+                  "half": max(rb.x - lt.x for lt, rb in body) / 2}
+    return out
 
 
 # --- a picture of the map -------------------------------------------------------------------------

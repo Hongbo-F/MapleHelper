@@ -16,13 +16,18 @@ The physics are the ones gamelab plans with, so a plan that is right on paper wo
   touch leaves her a second's invulnerability; she evades half of them (a thief's "MISS": nothing
   else happens), the others take 1.4% HP (the median of the lab's 118 logged hits) and knock her back
   ~58 units (the median logged push). At 0% HP she dies, and the run ends (SimDied);
-- the attack key throws a star actions.STAR_DELAY_MS later that hits the first monster in its path on the
-  side she faces (attack.reach): within reach.STAR_REACH, and in the band
-  reach.SHOT_UP above to reach.SHOT_DOWN below her; on her level (reach.LEVEL) at any distance, off it
-  only from reach.min_dx sideways (right under or over her isn't hit). Pressed on the ground with a
-  monster on her level closer than reach.MIN_SHOT in front, the claw swipes it instead (a fifth of a
-  star's damage). Kills give EXP (model.mob_exp) and, 2 s later, drops on its platform; dead monsters
-  respawn 8 s later where they spawned;
+- the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
+  jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
+  that monster (attack.reach). On the ground, the nearest monster whose body reaches into the claw's
+  swing (reach.MIN_SHOT ahead of her, reach.CLAW_DOWN below to reach.CLAW_UP above her feet) is swiped
+  (a fifth of a star's damage); else, the nearest whose body reaches into the attack's area
+  (reach.STAR_REACH ahead, reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is then)
+  takes a star. Bodies are as tall as their kind (monster_data.MONSTER_HEIGHT), and taller while they
+  flinch after a hit (monster_data.FLINCH_S, flinch tops from the game data). From the ground a monster
+  off her level (reach.LEVEL) is picked only from reach.min_dx sideways (right under or over her isn't
+  hit). So a jump throw's attack, starting 46 units up, passes over a snail. Kills give EXP
+  (model.mob_exp) and, 2 s later, drops on its platform; dead monsters respawn 8 s later where they
+  spawned;
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
   HP potion key gives 30% HP, the chair key sits her down (+3% HP/s) until an arrow stands her up.
 
@@ -225,7 +230,8 @@ class SimMonster:
     alive: bool = True
     died_at: float | None = None
     died_x: float = 0.0
-    hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden)
+    hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden; it flinches)
+    flinch_top: float = 54.0   # how tall it is while it flinches
     # current motion segment: from t0 at x0, heading d (-1, 0, +1) until t1
     t0: float = 0.0
     x0: float = 0.0
@@ -389,11 +395,14 @@ class World:
                     wanted.append((s.name or str(s.mob_id), p.id, s.x))
         else:
             wanted = list(monsters)
+        bodies = monster_data.bodies(self.model)
         for i, (name, pid, x) in enumerate(wanted):
             kind = kind_of(name)
             m = SimMonster(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
                     monster_data.MONSTER_SPEED.get(kind, 70.0), monster_data.MONSTER_HALF.get(kind, 34.0),
                     monster_data.MONSTER_HEIGHT.get(kind, 46.0), float(HITS.get(kind, 2)), float(HITS.get(kind, 2)))
+            if kind in bodies:
+                m.flinch_top = bodies[kind].flinch_top
             m.start(0.0, float(x))
             self.monsters.append(m)
             self.by_platform.setdefault(pid, []).append(m)
@@ -484,6 +493,8 @@ class World:
                 if f.platform is not None:
                     self._fly(f, 0.0)
                     self.note(f"drops through platform {e.data}")
+        elif e.kind == "aim":
+            self._aim(e.data)
         elif e.kind == "star":
             self._attack(*e.data)
         elif e.kind == "loot":
@@ -547,9 +558,7 @@ class World:
                 return
             self.attack_lock_ms = self.ms + int(ATTACK_LOCK * 1000)
             self.sitting = False
-            # In the air (or about to lift off) it's always a star; on the ground the claw may swipe.
-            air = self.mode == "air" or self.liftoff_due
-            self._push(self.ms + int(STAR_DELAY * 1000), "star", (self.facing, air))
+            self._push(self.ms + int(round(JUMP_LAG * 1000)), "aim", self.ms)  # it starts then (_aim)
         elif action == "up":
             if ground:
                 for pt in self.portals:
@@ -761,34 +770,50 @@ class World:
         self.liftoff_due = False
         self._launch(away * KNOCK_VX, -KNOCK_VY)
 
-    def in_path(self, facing: str) -> tuple[SimMonster, float] | None:
-        """The first live monster a star thrown now that way meets, and where it is: on her side of
-        `facing`, within STAR_REACH, in the band SHOT_UP above to SHOT_DOWN below her; on her level at
-        any distance (point-blank too), off it only from reach.min_dx sideways."""
+    def top(self, m: SimMonster) -> float:
+        """How tall monster `m` is now: as tall as its kind, taller while it flinches after a hit."""
+        if m.hit_at is not None and self.t - m.hit_at < monster_data.FLINCH_S:
+            return max(m.height, m.flinch_top)
+        return m.height
+
+    def nearest_in(self, facing: str, far: float, down: float, up: float) -> SimMonster | None:
+        """The live monster nearest her whose body reaches into a box on her `facing` side, from her to
+        `far` ahead and `down` below to `up` above her feet (reach.reaches_into). On the ground, one off
+        her level is taken only from reach.min_dx sideways: right under or over her, it isn't hit."""
         t, d, best = self.t, directions.sign(facing), None
         for m in self.monsters:
             if not m.alive:
                 continue
             mx = m.at(t)
-            dx, dy = (mx - self.x) * d, m.y(mx) - self.y
-            if dx < 0 or dx > reach.STAR_REACH or not -reach.SHOT_UP <= dy <= reach.SHOT_DOWN:
+            ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
+            if not reach.reaches_into(ahead, dy, self.top(m), m.half, far, down, up):
                 continue
-            if abs(dy) > reach.LEVEL and dx < reach.min_dx(dy):
-                continue  # right under or over her: the star passes it
-            if best is None or dx < best[0]:
-                best = (dx, m, mx)
-        return None if best is None else (best[1], best[2])
+            if self.mode == "ground" and abs(dy) > reach.LEVEL and ahead < reach.min_dx(dy):
+                continue
+            if best is None or abs(ahead) < best[0]:
+                best = (abs(ahead), m)
+        return None if best is None else best[1]
 
-    def _attack(self, facing: str, air: bool) -> None:
-        """The attack key's effect, STAR_DELAY after it: a star at the first monster in its path, or,
-        pressed on the ground with one on her level closer than MIN_SHOT in front, a claw swipe at it."""
-        first = self.in_path(facing)
-        if first is None:
+    def _aim(self, key_ms: int) -> None:
+        """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
+        lands STAR_DELAY after the key (_attack). On the ground, the claw swipes the nearest monster its
+        swing reaches; else the nearest in the attack's area takes the star."""
+        target = None
+        if self.mode == "ground":
+            target = self.nearest_in(self.facing, reach.MIN_SHOT, reach.CLAW_DOWN, reach.CLAW_UP)
+        swipe = target is not None
+        if target is None:
+            target = self.nearest_in(self.facing, reach.STAR_REACH, reach.AREA_DOWN, reach.AREA_UP)
+        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe))
+
+    def _attack(self, facing: str, m: SimMonster | None, swipe: bool) -> None:
+        """The attack's damage, STAR_DELAY after its key: on the monster it picked when it started (_aim),
+        a claw swipe or a star."""
+        if m is None or not m.alive:
             self.note(f"star thrown {facing}: no hit")
             return
-        m, mx = first
+        mx = m.at(self.t)
         dx = mx - self.x
-        swipe = not air and abs(dx) < reach.MIN_SHOT and abs(m.y(mx) - self.y) <= reach.LEVEL
         what = "claw swipe" if swipe else "star"
         if not swipe and self.noise.miss and self.chance("miss") < self.noise.miss:
             self.note(f"star misses {m.kind} #{m.idx} at {dx:+.0f}")

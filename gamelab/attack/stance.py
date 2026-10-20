@@ -7,7 +7,8 @@ within MIN_SHOT + 10 for stance and TOO_CLOSE for decide, and stance closes in t
 a target where decide walks to the nearest of SHOT_RANGE - 30 and MIN_SHOT + 60 from it, either side.
 `pick_target` says which monster to shoot first, `open_above` whether a jump keeps her on her
 platform, and `act_text` and `pct` word it for the log. Thresholds built on reach's constants are
-read from reach at call time.
+read from reach at call time, and so are the attacks' timings (physics.JUMP_ATTACK_MS and
+JUMP_BACK_ATTACK_MS): whether a jump throw or a jump back can hit a kind follows from them.
 """
 
 from collections.abc import Callable
@@ -16,7 +17,8 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
-from ..localization.monsters import Monster
+from ..localization.monsters import MONSTER_TOP, Monster
+from ..motion import physics
 from ..motion.physics import JUMP_HEIGHT
 from . import reach
 
@@ -72,21 +74,23 @@ def open_above(model: MapModel, platform: Platform, x0: float, x1: float) -> boo
 
 
 def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approach: bool = True,
-           facing: str | None = None, can_jump: Callable[[float, float], bool] | None = None) -> tuple:
+           facing: str | None = None, can_jump: Callable[[float, float], bool] | None = None,
+           tops: dict[str, float] | None = None) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units) to step away,
     ('approach', side, units) to bring the nearest into reach, or ('wait',). She keeps working the side
     she faces while it still has monsters in reach (switching sides every throw spread the damage over
     both), and never walks past a monster. `can_jump(x0, x1)` says whether jumping over that stretch
-    keeps her on her platform: under a platform within her jump height, a jump lands her up on it."""
+    keeps her on her platform: under a platform within her jump height, a jump lands her up on it.
+    `tops`: how tall each kind is at least (the map's game data; MONSTER_TOP by default)."""
     can_jump = can_jump or (lambda a, b: True)
     mine = [t for t in wanted if t.platform == platform.id]
     lo, hi = _stand_limits(platform, crowded=bool(mine))
     close = [t for t in mine if abs(t.x - x) < reach.MIN_SHOT + 10]  # too close to throw at
     in_reach = [t for t in wanted if reach.can_shoot(t.x - x, t.y - y)]
     if close:
-        return _close_quarters(x, close, mine, facing, lo, hi, can_jump)
+        return _close_quarters(x, close, mine, facing, lo, hi, can_jump, tops or MONSTER_TOP)
     if in_reach:
         return ("throw", _throw_side(x, in_reach, facing))
     act = _step_from_under(x, y, platform, wanted, lo, hi)
@@ -95,11 +99,23 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     return act or ("wait",)
 
 
+def air_gap(act: str) -> float | None:
+    """How long after its jump key a stance's attack key comes ('jump_throw', 'jump_back'; physics), or
+    None for a throw from the ground: how high she is when the attack picks its target follows from it
+    (reach.air_rise)."""
+    return {"jump_throw": physics.JUMP_ATTACK_MS, "jump_back": physics.JUMP_BACK_ATTACK_MS}.get(act)
+
+
 def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing: str | None, lo: float,
-                    hi: float, can_jump: Callable[[float, float], bool]) -> tuple:
+                    hi: float, can_jump: Callable[[float, float], bool], tops: dict[str, float]) -> tuple:
     """A monster on her platform too close for a throw from the ground (`close`; `mine`: all on her
-    platform): jump away from the nearest (on the side she faces, if any is) and throw back from the
-    air, if there's room behind her and no monster there; cornered, straight up."""
+    platform), the nearest one deciding (on the side she faces, if any is): jump away from it and throw
+    back from the air, if there's room behind her and no monster there; cornered, straight up. Each only
+    if the attack starts low enough in the jump to pick that kind (reach.air_hits, by how tall it is at
+    least: `tops`). A jump throw's starts ~49 units up, over a snail: at most one of 45 jump-throws at
+    snails hurt one, and monsters on the platform above took the stars. One too short for either is shot
+    from the ground: from STAR_SURE away if she can step back that far (a star), else from where she is
+    (the claw swipes it: weak, but every swipe hits)."""
     on_facing = [t for t in close if _side_of(t, x) == facing]
     nearest = _nearest(on_facing or close, x)
     side = _side_of(nearest, x)
@@ -107,8 +123,15 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     back = directions.sign(away)
     room = (hi - x) if away == RIGHT else (x - lo)
     behind = [t for t in mine if 0 < (t.x - x) * back < JUMP_BACK_CLEAR]
-    if room >= JUMP_BACK_ROOM and not behind and can_jump(x, x + back * JUMP_BACK_SPAN):
+    top = tops.get(nearest.kind, MONSTER_TOP["pig"])  # a kind of unknown size: a pig's
+    if (reach.air_hits(top, physics.JUMP_BACK_ATTACK_MS) and room >= JUMP_BACK_ROOM and not behind
+            and can_jump(x, x + back * JUMP_BACK_SPAN)):
         return ("jump_back", side)
+    if not reach.air_hits(top, physics.JUMP_ATTACK_MS):
+        step = reach.STAR_SURE - abs(nearest.x - x)
+        if room >= step and not behind:
+            return ("back", away, step)
+        return ("throw", side)
     if can_jump(x, x):
         return ("jump_throw", side)
     # A platform just overhead: a jump lands her on it (on 20, five jump-throws at a snail put

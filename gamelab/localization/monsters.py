@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from ..perception.mobs import Mob
 from ..perception.kinds import kind_of
-from .mapdata import MapModel, Platform
+from .mapdata import MapModel, MobBody, Platform
 
 TRACK_SLACK = 85   # how far a monster may move between two looks (knockback) and still be the same one
 SEARCH_SLACK = 150  # ... and how far it's looked for once it has vanished
@@ -16,9 +16,18 @@ SAME_DY = 40       # ... and how far up or down (map units)
 # Walking speeds (map units/s), from each monster's speed stat in the game data (pig and Orange
 # Mushroom 0, slime -20, snail -65) applied to a base of 70; an upper bound for where they can get.
 MONSTER_SPEED = {"pig": 70.0, "orange-mushroom": 70.0, "slime": 56.0, "snail": 25.0}
-# Half their body width (map units), from the lt/rb of their sprites in the game data.
+# Their bodies (map units), from the boxes (lt/rb) of their frames in the game data (Mob/<id>.img; mapdata
+# reads them with the map, MapModel.mob_bodies, and tests/test_attack.py checks these tables against it).
+# Half their width (half their widest stand or move frame), and how tall they are walking (the top of
+# their first move frame): touches and hops go by these.
 MONSTER_HALF = {"pig": 34.0, "orange-mushroom": 32.0, "slime": 28.0, "snail": 19.0}
 MONSTER_HEIGHT = {"pig": 46.0, "orange-mushroom": 55.0, "slime": 41.0, "snail": 26.0}
+# How tall they are at least while they stand or walk (the lowest top of those frames: pig stand/2, slime
+# move/1, snail move/3), and while they flinch after a hit (hit1): what an attack can pick goes by these
+# (attack.reach), and a snail is far shorter than the others.
+MONSTER_TOP = {"pig": 38.0, "orange-mushroom": 55.0, "slime": 40.0, "snail": 24.0}
+MONSTER_FLINCH_TOP = {"pig": 54.0, "orange-mushroom": 65.0, "slime": 46.0, "snail": 33.0}
+FLINCH_S = 0.6       # s a monster flinches after a hit (its hit1 frame's delay, game data)
 TURN_SLACK = 25      # units a monster seen walking one way may still come back (they turn now and then)
 
 PLATFORM_SLACK = 25  # map units past a platform's ends a monster seen on screen may still be on it
@@ -42,6 +51,15 @@ class Monster:
     @property
     def kind(self) -> str:
         return self.mob.kind
+
+
+def bodies(model: MapModel | None = None) -> dict[str, MobBody]:
+    """Each kind's body (by kind): read from the game data with the map for the monsters it has
+    (MapModel.mob_bodies), from the tables above for the rest."""
+    out = {k: MobBody(MONSTER_TOP[k], MONSTER_FLINCH_TOP[k], MONSTER_HALF[k]) for k in MONSTER_TOP}
+    if model is not None:
+        out.update({kind_of(name): b for name, b in model.mob_bodies.items()})
+    return out
 
 
 def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: float = 50) -> Platform | None:

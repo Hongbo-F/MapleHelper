@@ -39,6 +39,15 @@ MIN_HOLD_MS = 30
 # 0.1485 (t - 120) units after t ms, and lifts off 55 ms after the key (JUMP_LAG), so
 # RUN_LAG_MS = RUN_LAG - JUMP_LAG (measured at 60 fps).
 RUN_LAG_MS = 65
+# Attacks from a jump (control.actions times her key plans with these; attack.reach works out what such an
+# attack can hit). An attack picks its target when it starts, about JUMP_LAG after its key, the same input
+# lag as a jump's lift-off: so when it starts she has been in the air for about as long as the attack key
+# came after the jump key.
+JUMP_ATTACK_MS = 100       # a jump throw's attack key comes this long after the jump key (the macro's F1 combo)
+JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid-air (actions.JB_THROW_MS 165
+                           # less JB_RUN_MS 80, when the jump key goes down)
+ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fps recordings jump_throw_0 and
+                           # _1, keys 100 ms apart: her attack pose first shows 91-110 ms after lift-off)
 _FLY_CACHE: dict[tuple, tuple] = {}  # fly's results by its arguments (the model by id)
 _WALLS: dict[int, tuple] = {}        # _walls' results by id(model)
 # The caches are keyed by id(model), so the models are kept: a freed model's id is reused by the next
@@ -109,6 +118,14 @@ def sure_landing(model: MapModel, x: float, y: float, vx: float, vy: float, land
         if got is not land:
             return False
     return True
+
+
+def jump_rise(ms: float) -> float:
+    """How high her feet are above the ground she jumped from, `ms` after the jump key of a jump straight
+    up: still on it until lift-off (JUMP_LAG), then the game's arc (77 units up 277 ms after lift-off,
+    back down 555 ms after it)."""
+    t = ms / 1000 - JUMP_LAG
+    return max(0.0, JUMP_SPEED * t - GRAVITY * t * t / 2) if t > 0 else 0.0
 
 
 def air_time(dy_up: float) -> float | None:

@@ -224,32 +224,94 @@ def still(w):
     return w
 
 
-def test_a_star_from_the_air_hits_point_blank_and_the_ground_attack_swipes_with_the_claw(model):
+def _jump_throw(w, gap: float = 0.1):
+    """A jump-throw from where she stands: the jump key, and the attack key `gap` s after it."""
+    w.invulnerable_ms = 10_000  # no touches in the way
+    tap(w, 0.0, "alt", 0.04)
+    tap(w, gap, "f", 0.04)
+    w.advance(1.0)
+
+
+def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model):
+    # The attack picks its target when it starts, as it lifts off 55 ms after its key: 100 ms after the
+    # jump key she's 46 units up, and the area it picks from starts 19 below her feet, over a snail.
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))
-    w.invulnerable_ms = 10_000  # no touches in the way
-    tap(w, 0.0, "alt", 0.04)    # a jump-throw: the attack 100 ms after the jump key, in the air
-    tap(w, 0.1, "f", 0.04)
+    _jump_throw(w)
+    assert w.monsters[0].alive and w.monsters[0].hp == 1 and any("star thrown right: no hit" in l for l in w.log)
+    w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 330.0)], facing="right"))
+    _jump_throw(w)
+    assert w.monsters[0].hp == 2  # a pig is tall enough: a star
+    # The attack 40 ms after the jump key starts 21 up: a star kills the snail.
+    w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))
+    _jump_throw(w, 0.04)
+    assert not w.monsters[0].alive and w.kills == {"snail": 1}
+
+
+def test_the_ground_attack_swipes_what_the_claw_reaches(model):
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))
+    w.invulnerable_ms = 10_000
+    tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
-    assert not w.monsters[0].alive and w.kills == {"snail": 1}  # +30: a star kills it outright
+    assert w.monsters[0].hp == pytest.approx(1 - world_mod.CLAW)  # a snail beside her: swiped, every time
     w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 340.0), ("Pig", c.id, 500.0)], facing="right"))
     w.invulnerable_ms = 10_000
     tap(w, 0.0, "f", 0.04)      # from the ground, a monster that close takes a claw swipe, not a star
     w.advance(1.0)
     assert w.monsters[0].hp == pytest.approx(3 - world_mod.CLAW) and w.monsters[1].hp == 3
     assert any("claw swipe hits pig #0" in line for line in w.log)
+    # The swing reaches 90 ahead of her, into a pig's body (34 either side) up to 124 off: a star beyond.
+    for x, swiped in ((420.0, True), (430.0, False)):
+        w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, x)], facing="right"))
+        tap(w, 0.0, "f", 0.04)
+        w.advance(1.0)
+        assert w.monsters[0].hp == pytest.approx(3 - (world_mod.CLAW if swiped else 1)), x
+
+
+def test_a_flinching_snail_is_tall_enough_for_a_jump_throw(model):
+    # Hit, a snail flinches for 0.6 s, 33 units tall: the jump-throw right after a claw swipe gets it.
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))
+    w.invulnerable_ms = 10_000
+    tap(w, 0.0, "f", 0.04)          # swiped at 0.52 s
+    tap(w, 0.75, "alt", 0.04)       # after the attack lock: the jump, and the attack 100 ms later
+    tap(w, 0.85, "f", 0.04)         # (it starts at 0.905 s, while the snail still flinches)
+    w.advance(2.0)
+    assert not w.monsters[0].alive and any("star kills snail" in line for line in w.log)
+
+
+def test_a_jump_throw_at_a_snail_hits_an_orange_mushroom_on_the_platform_above(model):
+    # She's on B with a snail beside her, A 60 above to her left: the jump-throw's attack, picking its
+    # target 46 units up, goes over the snail to the mushroom up there, however close to the side.
+    a, b = plat(model, 300, 100), plat(model, 360, 300)
+    w = still(world(model, b.id, 300.0, monsters=[("Snail", b.id, 270.0), ("Orange Mushroom", a.id, 150.0)],
+                    facing="left"))
+    _jump_throw(w)
+    assert w.monsters[0].hp == 1 and w.monsters[1].hp == 2
+    # From the ground the claw swipes the snail, and the mushroom (60 above, 150 to the side) is left alone.
+    w = still(world(model, b.id, 300.0, monsters=[("Snail", b.id, 270.0), ("Orange Mushroom", a.id, 150.0)],
+                    facing="left"))
+    tap(w, 0.0, "f", 0.04)
+    w.advance(1.0)
+    assert w.monsters[0].hp == pytest.approx(1 - world_mod.CLAW) and w.monsters[1].hp == 3
 
 
 def test_a_star_hits_the_first_monster_in_its_path_but_passes_one_right_under_her(model):
     a, b = plat(model, 300, 100), plat(model, 360, 300)  # B is 60 below A, to its right
-    w = still(world(model, a.id, 190.0, monsters=[("Snail", b.id, 250.0), ("Snail", b.id, 380.0)],
+    w = still(world(model, a.id, 190.0, monsters=[("Orange Mushroom", b.id, 250.0), ("Orange Mushroom", b.id, 380.0)],
                     facing="right"))
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
     # 60 below and 60 along is right under her (reach.min_dx: 150): the star goes over it
-    assert w.monsters[0].alive and not w.monsters[1].alive
+    assert w.monsters[0].hp == 3 and w.monsters[1].hp == 2
+    # A snail 60 below isn't hit at all: its body (26 tall) stays under the area (19 below her feet).
+    w = still(world(model, a.id, 190.0, monsters=[("Snail", b.id, 380.0)], facing="right"))
+    tap(w, 0.0, "f", 0.04)
+    w.advance(1.0)
+    assert w.monsters[0].hp == 1
     c = plat(model, 500, 400)
-    w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 300.0), ("Snail", c.id, 200.0)]))
+    w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0), ("Snail", c.id, 250.0)]))
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
     assert [m.alive for m in w.monsters] == [True, False]  # the nearer one takes it

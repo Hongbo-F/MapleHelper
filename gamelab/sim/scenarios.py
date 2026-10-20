@@ -589,11 +589,14 @@ def hunt_clear_basin(sim):
             "inventory_full": h.looter.inventory_full}
 
 
-@scenario((36, 300.0), monsters={36}, seed=12,
+@scenario((36, 300.0), monsters={36}, seed=7,
           expects=(ends("killed", key="ended"), happens("claw swipe hits", "close up, the claw swipes")))
 def hunt_kill(sim):
     """`hunt kill`: the slime nearest her on the basin floor, 55 units off. Too close for a star from the
-    ground, her throws are claw swipes (a fifth of a star) until it's far enough again; then looted."""
+    ground, her throws are claw swipes (a fifth of a star) until it's out of the claw's reach again (its
+    swing reaches 90 ahead of her, into a slime's body up to 118 off); then looted. (Seed 7 since the claw
+    reaches bodies: with seed 12 the basin's monsters kept walking into its reach, and swiped, she hadn't
+    killed it after 30 s.)"""
     h = sim.hunter()
     s = h.look()
     target = min(s.monsters, key=lambda t: abs(t.x - s.where.x))
@@ -641,6 +644,30 @@ def hunt_kill_tag_hidden(sim):
     """hunt_kill_far with her name tag hidden for the first 4 s (behind a box): she's placed on screen
     by the camera from her map position (Hunter.look), and the monsters by their offset from there."""
     return _kill_far(sim)
+
+
+def _first(lines: list[str], text: str) -> float:
+    """When the first of a trace's log lines (or world_log's) with `text` came (s; infinity if none did)."""
+    return next((float(line.split()[0]) for line in lines if text in line), float("inf"))
+
+
+@scenario((22, 100.0), monsters=[("Snail", 22, 60.0), ("Slime", 21, -150.0), ("Slime", 21, -300.0)], seed=12,
+          limit=60,
+          expects=(check("the snail dies within 15 s", lambda tr: _first(tr["world_log"], "kills snail") <= 15),
+                   check("she stays on platform 22", lambda tr: tr["world"]["platform"] == 22),
+                   no_log("knocked off?"),
+                   check("no 'snail down' before the snail really dies",
+                         lambda tr: _first(tr["log"], "snail down") >= _first(tr["world_log"], "kills snail"))))
+def fight_snail_short_platform(sim):
+    """A snail beside her on platform 22 (168 units wide), slimes on 21, 60 above to the left. A jump throw's
+    attack starts 46 units up, over the snail: it used to jump-throw at it, and the stars went to the slimes
+    up there; their EXP was taken for the snail's ("snail down"), and the live snail was then left alone as
+    a dying one. Now it's shot from the ground: with no room to step back to where that throws a star, the
+    claw swipes it, five times. (In about 2 seeds of 5 the snail walks into her first, and a touch knocks
+    her off the end of 22: she stands 29 units from it.)"""
+    h = sim.hunter()
+    r = h.clear(max_kills=1, seconds=20, approach=False)
+    return {"report": str(r)}
 
 
 @scenario((36, 500.0), drops=(("mesos", 36, 560.0), ("leather", 36, 620.0), ("mesos", 36, 700.0),
@@ -940,14 +967,15 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=4, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=3, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
 def loop_lull_loot(sim):
     """Only platform 12 has monsters, and the value map says it's the best ground. She hunts it from the
     safe platform 13 beside it; in the lulls, with nothing wanted left on it and her kills due back, she
-    picks up the piles she can get to before they respawn."""
+    picks up the piles she can get to before they respawn. (Seed 3 since attacks pick their targets when
+    they start: with seed 4 no lull came.)"""
     return _loop_on_12(sim)
 
 

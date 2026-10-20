@@ -1,5 +1,5 @@
 """Attack decisions from map positions: where a star reaches, which monster first, what to do about the
-monsters around her, and where to stand to shoot a platform."""
+monsters around her, what an attack from a jump can hit, and where to stand to shoot a platform."""
 
 import pytest
 
@@ -7,9 +7,10 @@ from maplehelper.engine import LEFT, RIGHT
 
 from gamelab.attack import reach, spots
 from gamelab.attack.stance import TOO_CLOSE, decide, pick_target, stance
-from gamelab.localization import mapdata
+from gamelab.localization import mapdata, monsters
 from gamelab.localization.mapdata import Platform, Segment
 from gamelab.localization.monsters import Monster, monster_platform
+from gamelab.motion import physics
 from gamelab.perception.mobs import Mob
 
 PLAT = Platform(0, [Segment(0, 500, 1000, 500)])      # her platform
@@ -123,6 +124,67 @@ def test_under_a_low_platform_she_does_not_jump_at_a_monster():
     # A jump would carry her up onto the platform overhead: step away, or (cornered) throw from the ground.
     assert stance(500, 500, PLAT, [target(560)], can_jump=lambda a, b: False) == ("back", LEFT, 120)
     assert stance(60, 500, PLAT, [target(110)], can_jump=lambda a, b: False) == ("throw", RIGHT)
+
+
+# --- what an attack from a jump can hit ----------------------------------------------------------------
+
+def test_a_jump_throw_attack_starts_too_high_for_a_snail():
+    # She's 49 units up when a jump throw's attack picks its target (100 ms after the jump key, plus the
+    # lags), so its area's floor is 30 up: a snail (24 at least) is under it, the others reach into it.
+    assert reach.air_floor(physics.JUMP_ATTACK_MS) == pytest.approx(30.3, abs=0.1)
+    assert reach.air_floor(physics.JUMP_BACK_ATTACK_MS) == pytest.approx(25.1, abs=0.1)
+    assert reach.air_floor(40) == pytest.approx(6.7, abs=0.1)
+    tops = monsters.MONSTER_TOP
+    for gap in (physics.JUMP_ATTACK_MS, physics.JUMP_BACK_ATTACK_MS):
+        assert not reach.air_hits(tops["snail"], gap)
+        assert tops["snail"] < reach.air_floor(gap) + reach.AIR_MARGIN
+    assert all(reach.air_hits(tops[k], physics.JUMP_ATTACK_MS) for k in ("pig", "slime", "orange-mushroom"))
+    assert all(reach.air_hits(top, 40) for top in tops.values())  # keyed 40 ms after the jump: all of them
+
+
+def test_a_cornered_snail_is_shot_from_the_ground_never_from_a_jump():
+    snail = target(110, kind="snail")
+    # Cornered at the left end (no room to step back far enough for a star): from where she is, the claw
+    # swipes it, and every swipe hits. A jump throw's attack would go over it.
+    assert stance(60, 500, PLAT, [snail]) == ("throw", RIGHT)
+    assert stance(60, 500, PLAT, [snail], can_jump=lambda a, b: False) == ("throw", RIGHT)
+    # With room behind her: never a jump back (its attack starts too high too), but a step back to where a
+    # throw from the ground is a star, and then the star.
+    act = stance(500, 500, PLAT, [target(560, kind="snail")])
+    assert act == ("back", LEFT, reach.STAR_SURE - 60)
+    assert stance(500 - act[2], 500, PLAT, [target(560, kind="snail")]) == ("throw", RIGHT)
+    # Another monster behind her: no step back either.
+    assert stance(500, 500, PLAT, [target(560, kind="snail"), target(400)]) == ("throw", RIGHT)
+    # Pigs, slimes and Orange Mushrooms as before.
+    for kind in ("pig", "slime", "orange-mushroom"):
+        assert stance(500, 500, PLAT, [target(560, kind=kind)]) == ("jump_back", RIGHT)
+        assert stance(60, 500, PLAT, [target(110, kind=kind)]) == ("jump_throw", RIGHT)
+
+
+def test_an_attack_keyed_sooner_after_the_jump_gets_jump_throws_at_snails_back(monkeypatch):
+    # Everything follows from the attack's timing: at 40 ms the jump throw's attack starts low enough.
+    monkeypatch.setattr(physics, "JUMP_ATTACK_MS", 40)
+    assert stance(60, 500, PLAT, [target(110, kind="snail")]) == ("jump_throw", RIGHT)
+    # Never a jump back at a snail: its attack has to come after the turn in mid-air (85 ms).
+    assert stance(500, 500, PLAT, [target(560, kind="snail")]) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(560)]) == ("jump_back", RIGHT)
+    # The kinds' sizes can come from the map's game data instead of the tables.
+    assert stance(60, 500, PLAT, [target(110, kind="snail")], tops={"snail": 5.0}) == ("throw", RIGHT)
+
+
+def test_monster_tables_match_the_game_data():
+    """localization.monsters' tables against the boxes of the monsters' frames in the game data (as
+    mapdata reads them with the map). Skipped without the game data copy."""
+    from gamedata.paths import COPY
+    if not (COPY / "Packs" / "Mob_00000.ms").is_file():
+        pytest.skip("needs the game data copy (gamedata/data/copy)")
+    data = mapdata._mob_bodies({"2", "7", "8", "9"})  # snail, slime, pig, Orange Mushroom
+    for mob_id, kind in (("2", "snail"), ("7", "slime"), ("8", "pig"), ("9", "orange-mushroom")):
+        body = data[mob_id]
+        assert body["top"] == monsters.MONSTER_TOP[kind]
+        assert body["flinch_top"] == monsters.MONSTER_FLINCH_TOP[kind]
+        assert abs(body["half"] - monsters.MONSTER_HALF[kind]) <= 0.5
+    assert monsters.bodies()["snail"].top == 24  # without a map: the tables
 
 
 # --- where to shoot from -------------------------------------------------------------------------------

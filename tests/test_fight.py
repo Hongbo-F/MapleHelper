@@ -186,6 +186,41 @@ def test_a_kill_is_matched_to_the_first_monster_in_the_star_path(monkeypatch):
     assert h.report.kills == {"snail": 1}
 
 
+def test_a_jump_throw_aims_at_the_platform_above_and_over_a_snail_beside_her():
+    # She's on PLAT (y 500) at x 500; a platform 60 above runs to her left. A jump throw's attack picks
+    # its target ~49 units up: the slimes up there are in its area at any distance a star reaches (on
+    # the ground, one 60 above needs 200 sideways), and the snail 30 away on her own platform is under it.
+    from gamelab.behavior.fight import _in_path
+    from gamelab.motion.physics import JUMP_ATTACK_MS
+    s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT)
+    snail = target(470, kind="snail")
+    near_slime, far_slime = target(350, y=440, platform=5, kind="slime"), target(300, y=440, platform=5, kind="slime")
+    too_far = target(30, y=440, platform=5, kind="slime")  # 470 away: past the star's reach
+    seen = [snail, near_slime, far_slime, too_far]
+    assert _in_path(s, LEFT, seen, JUMP_ATTACK_MS) == [near_slime, far_slime]
+    assert _in_path(s, LEFT, seen) == [snail, far_slime]  # a throw from the ground: as before
+    # A pig beside her is tall enough for the jump throw's attack.
+    pig = target(470)
+    assert _in_path(s, LEFT, [pig, near_slime], JUMP_ATTACK_MS) == [pig, near_slime]
+
+
+def test_a_kill_on_the_platform_above_during_jump_throws_is_placed_there(monkeypatch):
+    # Jump-throwing at a pig beside her (cornered: another pig behind her), the attack picks its target
+    # ~49 units up, so a slime on the platform above, 150 to the side, is in its path (from the ground one
+    # 60 above needs 200): when it dies, the kill is placed there, not on the pig still in plain sight.
+    def kill_at(h, t):
+        if abs(t - 0.6) < 1e-6:
+            h.report.exp_kills += 1
+    pig, behind, slime = target(470), target(600), target(350, y=440, platform=5, kind="slime")
+    h, throws = _fighter(monkeypatch, [[pig, behind, slime]] + [[pig, behind]] * 5, on_look=kill_at)
+    h.looter.sweep_after = lambda deaths: None
+    logged = []
+    h.log = logged.append
+    h.clear(max_kills=1, patience=0.5)
+    assert any("jump-throwing left" in line for line in logged) and throws[0][1] == LEFT
+    assert h.report.kills == {"slime": 1}
+
+
 def test_hidden_monsters_are_told_by_the_one_time_read_per_look(monkeypatch):
     # A clock that moves on with every read: a monster seen in this look must not count as hidden
     # (the fight reads the time once per look; a second read would make every monster a "hidden" ghost).

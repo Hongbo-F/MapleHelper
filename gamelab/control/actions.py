@@ -13,12 +13,15 @@ from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT, MOVEMENT
 
 from .. import directions
-from ..motion.physics import hold_ms
+from ..motion.physics import JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS, hold_ms
 from . import client
 
 TAP_MS = 40          # a key tap: released this long after it's pressed
 TURN_SETTLE_MS = 30  # after the arrow tap that turns her, before the next key
-JUMP_ATTACK_MS = 100  # a jump throw's attack key comes this long after the jump key (the macro's F1 combo)
+# A jump throw's attack key comes JUMP_ATTACK_MS after its jump key, and a jump back's JUMP_BACK_ATTACK_MS
+# after its own (both in motion.physics: attack.reach reads them too, since how high she is when the attack
+# starts decides what it can hit).
+
 # Margin past her attack lock (COMBAT.attack_lock_ms, counted from when the plan is done) before the
 # next attack: after a throw, and after a jump throw.
 THROW_LOCK_EXTRA_MS = 60
@@ -29,9 +32,8 @@ JB_RUN_MS = 80     # the arrow away is held this long before the jump, to get he
 STAR_DELAY_MS = 520  # the star leaves this long after the attack key, in the air or not (recorded at 60
                      # fps: 515-545 ms with the key at 190, 290, 450 and 610 ms into a jump back)
 JB_TURN_MS = JB_RUN_MS + 60  # the arrow toward the monster: turning as soon as she's off the ground
-JB_THROW_MS = JB_TURN_MS + 25  # the attack key right after, so the star leaves just before she lands
-                               # (165 + 520 = 685; she lands 80 + 55 + 555 = 690 ms in): she's as far
-                               # off as the jump takes her
+JB_THROW_MS = JB_RUN_MS + JUMP_BACK_ATTACK_MS  # the attack key right after (165), so the star leaves just
+                               # before she lands (165 + 520 = 685; she lands 80 + 55 + 555 = 690 ms in)
 
 # Picking up: one item per press.
 PILE_PRESSES = 4      # presses standing on a kill's drops: a pig drops several

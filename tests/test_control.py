@@ -33,6 +33,20 @@ def test_jump_back_turns_and_throws_just_before_landing():
     assert at("left", "up") <= at("right", "down")             # no longer holding away when she lands
 
 
+def test_the_attack_keys_come_as_long_after_the_jump_keys_as_attack_reach_reckons():
+    # attack.reach works out what an attack from a jump hits from these gaps (motion.physics): the key
+    # plans must keep to them.
+    from gamelab.motion.physics import JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS
+    for method, gap in (("jump_throw", JUMP_ATTACK_MS), ("jump_back", JUMP_BACK_ATTACK_MS)):
+        sent = []
+        a = actions(sent)
+        a.facing = RIGHT
+        getattr(a, method)(RIGHT)
+        (_, events), = sent
+        at = lambda k: next(t for t, name, h_ in events if name == k and h_ == "down")
+        assert at("f") - at("alt") == gap, method
+
+
 def test_a_throw_turns_her_only_when_she_faces_the_other_way():
     sent = []
     a = actions(sent)
