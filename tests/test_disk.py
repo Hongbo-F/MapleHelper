@@ -1,6 +1,6 @@
 """What gamelab leaves on disk stays bounded (README: Memory and disk): a long run's telemetry goes on in
-parts, the oldest telemetry is deleted when a run starts, and the player's log is moved aside when the
-player starts. All in temp folders."""
+parts, the oldest telemetry is deleted when a run starts, the player's log is moved aside when the player
+starts, and no cancel file stays in the inbox once its plan is over. All in temp folders."""
 
 import os
 import time
@@ -77,3 +77,20 @@ def test_the_player_moves_its_log_aside_when_it_starts_past_5_mb(tmp_path, monke
     player._log("player started")
     assert log.read_text(encoding="utf-8").endswith(" player started\n")
 
+
+def test_no_cancel_file_stays_in_the_inbox_once_its_plan_is_over():
+    from gamelab.control import client  # tests/conftest.py points its inbox and outbox at a temp folder
+    client.INBOX.mkdir(parents=True)
+    client.OUTBOX.mkdir(parents=True)
+    # Cut short while it runs: the player stops and answers; once the result is read, the cancel goes too.
+    (client.INBOX / "p1.running").touch()
+    assert client.cancel("p1") is False and (client.INBOX / "p1.cancel").exists()
+    (client.INBOX / "p1.running").unlink()  # answered (control.player._answer)
+    (client.OUTBOX / "p1.json").write_text('{"sent": [], "problems": ["cancelled"]}', encoding="utf-8")
+    assert client.wait("p1", timeout=1)["problems"] == ["cancelled"]
+    assert list(client.INBOX.iterdir()) == [] and list(client.OUTBOX.iterdir()) == []
+    # Cut short once it's over (its result read already): nothing to tell the player.
+    assert client.cancel("p1") is False and list(client.INBOX.iterdir()) == []
+    # Not taken yet: withdrawn.
+    (client.INBOX / "p2.json").write_text("{}", encoding="utf-8")
+    assert client.cancel("p2") is True and list(client.INBOX.iterdir()) == []

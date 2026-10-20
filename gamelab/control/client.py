@@ -65,12 +65,15 @@ def done(plan_id: str) -> bool:
 def cancel(plan_id: str) -> bool:
     """Cut a plan short: if the player hasn't picked it up it's withdrawn (returns True: no result
     will come), else the player stops pressing and lets go of every key it holds (wait for its
-    result as usual)."""
+    result as usual). A plan that is over already is left as it is: no cancel file is made for it."""
     try:
         (INBOX / f"{plan_id}.json").unlink()  # the player renames plans it takes, so it's not started
         return True
     except FileNotFoundError:
-        (INBOX / f"{plan_id}.cancel").touch()
+        # It renames a plan to .running when it takes it, and deletes that only once its keys are let go
+        # of: without it, the plan is over (a cancel made then was never read, and stayed in the inbox).
+        if (INBOX / f"{plan_id}.running").exists():
+            (INBOX / f"{plan_id}.cancel").touch()
         return False
 
 
@@ -91,6 +94,8 @@ def wait(plan_id: str, timeout: float = 120) -> dict:
         time.sleep(POLL_S)
     result = _read_result(result_path)
     result_path.unlink(missing_ok=True)
+    # The plan is over: a cancel the player didn't use up (it came as the plan ended) would stay for good.
+    (INBOX / f"{plan_id}.cancel").unlink(missing_ok=True)
     if "error" in result:
         frames_path.unlink(missing_ok=True)
         check_alarm()
