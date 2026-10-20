@@ -1,6 +1,6 @@
 """The fight loop (behavior.fight.clear) on prepared looks and a fake clock: hidden monsters, kills
-from her EXP, the kill count, far targets, the star's path, what the shot log keeps; and the hunter
-counting EXP gains."""
+from her EXP, the kill count, far targets, the star's path, what the shot log keeps (and which throw a
+kill is credited to); and the hunter counting EXP gains."""
 
 import time
 from types import SimpleNamespace
@@ -248,9 +248,57 @@ def test_the_shot_log_keeps_where_she_and_the_target_were_and_the_wall_rule():
     from gamelab.behavior.fight import _shot
     from test_attack import step_map
     model, a, b, _ = step_map()
-    up = _shot(SimpleNamespace(where=SimpleNamespace(x=100, y=500), platform=a, tag_seen=True),
+    up = _shot(SimpleNamespace(where=SimpleNamespace(x=100, y=500), platform=a, tag_seen=True, monsters=[]),
                target(300, 440, platform=b.id), 200, -60, model)
     assert (up["x"], up["tx"], up["her_group"], up["clear"]) == (100, 300, [1, 1], False)
-    down = _shot(SimpleNamespace(where=SimpleNamespace(x=300, y=440), platform=b, tag_seen=True),
+    down = _shot(SimpleNamespace(where=SimpleNamespace(x=300, y=440), platform=b, tag_seen=True, monsters=[]),
                  target(100, 500, platform=a.id), -200, 60, model)
     assert down["clear"] and down["her"] == b.id and down["target"] == a.id
+
+
+def test_the_shot_log_keeps_what_was_in_front_then_and_at_the_pick():
+    # Every monster on the side she throws, at the throw and at the first look after it (about when the
+    # attack picked its target), so which one the search could pick can be fitted from the log alone.
+    from gamelab.behavior.fight import _note_pick, _shot
+    from test_attack import step_map
+    model, a, b, _ = step_map()
+    pig, behind, snail = (target(300, 440, platform=b.id), target(20, 500, platform=a.id, kind="snail"),
+                          target(150, 500, platform=a.id, kind="snail"))
+    s = SimpleNamespace(where=SimpleNamespace(x=100, y=500), platform=a, tag_seen=True, monsters=[pig, behind, snail])
+    sh = _shot(s, pig, 200, -60, model)
+    assert [(m["kind"], m["x"], m.get("target", False)) for m in sh["front"]] == [("pig", 300, True),
+                                                                                  ("snail", 150, False)]
+    assert sh["y"] == 500 and "pick" not in sh
+    later = SimpleNamespace(where=SimpleNamespace(x=104, y=500), monsters=[target(290, 440, platform=b.id)])
+    _note_pick([sh], later, later.monsters[0])
+    assert sh["pick"]["x"] == 104 and sh["pick"]["front"] == [{"kind": "pig", "x": 290, "y": 440, "platform": b.id,
+                                                               "bar": None, "target": True}]
+    first = sh["pick"]
+    _note_pick([sh], SimpleNamespace(where=SimpleNamespace(x=200, y=500), monsters=[]), None)
+    assert sh["pick"] is first  # the first look after the throw only
+
+
+def test_a_kill_is_credited_to_one_throw_in_the_shot_log(monkeypatch, tmp_path):
+    # Three throws in flight when the target is gone and her EXP has gone up: the last one due before it was
+    # gone is the kill; the one before it may have hit it too (undecided); the one due after missed it. (The
+    # old log, lab/shots.jsonl, made every throw due by then a hit.) Seen without the HP bar it had, it was
+    # dying already: the kill is the last throw due before that.
+    import json
+    from gamelab import paths
+    from gamelab.behavior import fight
+    monkeypatch.setattr(paths, "SHOT_LOG", tmp_path / "shots2.jsonl")
+    monkeypatch.setattr(time, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    h = hunter()
+    h.take_exp = lambda since: True
+    h.looter.collect = lambda spot: None
+    st = fight.KillState("pig", (700, 500), 0, first_throw=8.0,
+                         flying=[{"kind": "pig", "dx": 200, "dy": 0, "due": due} for due in (9.0, 9.9, 10.5)])
+    assert fight._target_gone(h, st) == "killed"
+    rows = [json.loads(line) for line in (tmp_path / "shots2.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["hit"] for r in rows] == [None, True, False]
+    st = fight.KillState("pig", (700, 500), 0, first_throw=8.0, had_bar=True, dying_since=9.0,
+                         flying=[{"kind": "pig", "dx": 200, "dy": 0, "due": due} for due in (8.5, 9.1, 9.9)])
+    assert fight._target_gone(h, st) == "killed"
+    rows = [json.loads(line) for line in (tmp_path / "shots2.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["hit"] for r in rows[3:]] == [None, True, False]

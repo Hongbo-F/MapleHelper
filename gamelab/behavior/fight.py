@@ -350,7 +350,7 @@ def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None 
     for m in ahead:
         b = body.get(m.kind)  # how tall it is at least, and half its width (a pig's if unknown)
         top, half = (b.top, b.half) if b is not None else (MONSTER_TOP["pig"], reach.PIG[1])
-        if reach.in_area(abs(m.x - x), m.y - y, top, rise, half)                 and reach.wall_to(s.platform, x, y, m, rise) is None:
+        if reach.in_area(abs(m.x - x), m.y - y, top, rise, half) and reach.wall_to(s.platform, x, y, m, rise) is None:
             out.append(m)
     return out
 
@@ -366,6 +366,8 @@ class KillState:
     gone_since: float | None = None   # since when it hasn't been seen
     first_throw: float | None = None  # when she first threw at it: EXP gains since then can be its kill
     flying: list[dict] = field(default_factory=list)  # throws whose hit isn't confirmed yet (see _score_shots)
+    had_bar: bool = False      # its HP bar has been seen (it was hit) ...
+    dying_since: float | None = None  # ... and since when it's been seen without it: dying, fading out
 
     def seen(self, monsters: list[Monster]) -> list[Monster]:
         """The `monsters` that can be the target: of its kind, near where it was last seen (searched for
@@ -411,8 +413,13 @@ def _target_gone(h: "Hunter", st: KillState) -> str | None:
     # players kill monsters too (about half the "kills" counted by vanishing alone
     # weren't hers).
     if st.first_throw is not None and h.take_exp(st.first_throw):
+        # One star killed it: the last due before it died (its bar gone, else before it was gone: a kill is
+        # seen fading out for 0.7-1.3 s). Those due before that may have hit it too (a hit one hides under
+        # its damage numbers): undecided. Those due after it missed it.
+        landed = [sh for sh in st.flying if sh["due"] <= (st.dying_since or st.gone_since) + 0.2]
+        kill = max(landed, key=lambda sh: sh["due"], default=None)
         for sh in st.flying:
-            _log_shot(sh, sh["due"] <= st.gone_since + 0.2)
+            _log_shot(sh, True if sh is kill else None if any(sh is o for o in landed) else False)
         h.report.count_kill(st.kind)
         h.log(f"{st.kind} down after {st.throws} throws")
         h.looter.collect(DropSpot(st.last[0], st.last[1], st.platform, time.monotonic()))
@@ -437,7 +444,12 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
     t = min(found, key=lambda m: abs(m.x - st.last[0]))
     st.last, st.platform = (t.x, t.y), t.platform if t.platform is not None else st.platform
     bar = t.bar
-    st.flying = _score_shots(st.flying, bar)
+    if bar is not None:
+        st.had_bar, st.dying_since = True, None
+    elif st.had_bar and st.dying_since is None:
+        st.dying_since = time.monotonic()  # its bar gone: it died, and fades out where it died
+    _note_pick(st.flying, s, t)
+    st.flying = _score_shots(st.flying, bar, st.dying_since is not None)
     threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]
     act = decide(s.where.x, s.where.y, s.platform, t, threats)
     h.log(f"  {st.kind} {t.x - s.where.x:+.0f},{t.y - s.where.y:+.0f} (bar {pct(bar)}), "
@@ -446,9 +458,22 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
         return "unreachable"
     if act[0] == "throw":
         dx, dy = t.x - s.where.x, t.y - s.where.y
+        shot = None
         if reach.can_shoot(dx, dy, reach=reach.STAR_REACH, kind=t.kind) and act[1] == directions.toward(dx):
-            st.flying.append(_shot(s, t, dx, dy, h.model))
-        h.actions.throw(act[1])
+            shot = _shot(s, t, dx, dy, h.model)
+        keyed = []  # when the attack key goes down: after her last attack's lock, up to 0.7 s from now
+
+        def on_throw(when: float, side: str) -> None:
+            keyed.append(when)
+        h.actions.throw_listeners.append(on_throw)
+        try:
+            h.actions.throw(act[1])
+        finally:
+            h.actions.throw_listeners.remove(on_throw)
+        if shot is not None:
+            if keyed:  # its star is due that long after the key
+                shot["due"] += keyed[0] - shot["at"]
+            st.flying.append(shot)
         h.report.throws += 1
         st.throws += 1
         st.first_throw = st.first_throw or time.monotonic()
@@ -459,25 +484,50 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
 
 def _shot(s: Scene, t: Monster, dx: float, dy: float, model: MapModel | None = None) -> dict:
     """A throw at `t` (`dx`, `dy` from her), to be scored: what the shot log keeps, its HP bar before
-    the throw, and when the star should hit (`due`: the attack's release, then the star's flight). The log
-    also keeps where she and it were (map x), her foothold group, and whether a wall of it stood in the
-    way (`clear`: reach.wall_between, whether or not her decisions keep to it), so what stops a star can
-    be checked from it."""
+    the throw, and when the star should hit (`due`: the attack's release, then the star's flight, after `at`,
+    when its key goes down: now, until _shoot_at knows better). The log also keeps where she and it were
+    (map x), her foothold group, and whether a wall of it stood in the way (`clear`: reach.wall_between,
+    whether or not her decisions keep to it), so what stops a star can be checked from it; and every monster
+    in front of her then (`front`), and where they were at the next look, about when the attack picked its
+    target (`pick`, _note_pick), so which one it could pick can be fitted from the log alone."""
     here = s.platform
     on = here if t.platform == here.id else None  # the target's platform, if known
     if on is None and model is not None and t.platform is not None:
         on = model.platform(t.platform)
     clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on) is None
+    now = time.monotonic()
     return {"kind": t.kind, "dx": int(round(dx)), "dy": int(round(dy)), "her": here.id,
             "target": t.platform, "bar": t.bar, "seen": bool(s.tag_seen),
             "x": int(round(s.where.x)), "tx": int(round(t.x)),
             "her_group": list(here.group) if here.group is not None else None, "clear": clear,
-            "due": time.monotonic() + COMBAT.attack_release_ms / 1000 + abs(dx) / reach.STAR_SPEED}
+            "y": int(round(s.where.y)), "front": _front(s, directions.toward(dx), t),
+            "at": now, "due": now + COMBAT.attack_release_ms / 1000 + abs(dx) / reach.STAR_SPEED}
 
 
-def _score_shots(flying: list[dict], bar: float | None) -> list[dict]:
+def _front(s: Scene, side: str, target: Monster | None = None) -> list[dict]:
+    """The monsters in look `s` on her `side`, as the shot log keeps them: kind, map x and y, platform, HP
+    bar, and whether it's the one thrown at."""
+    x = s.where.x
+    return [{"kind": m.kind, "x": int(round(m.x)), "y": int(round(m.y)), "platform": m.platform, "bar": m.bar,
+             **({"target": True} if m is target else {})}
+            for m in s.monsters if (m.x > x) == (side == RIGHT)]
+
+
+def _note_pick(flying: list[dict], s: Scene, target: Monster) -> None:
+    """The first look after each throw in flight, about when its attack picked its target (the look
+    starts once the throw's key plan is done): where she and the monsters in front were then."""
+    for sh in flying:
+        if "pick" not in sh:
+            sh["pick"] = {"x": int(round(s.where.x)), "y": int(round(s.where.y)),
+                          "front": _front(s, directions.toward(sh["dx"]) if sh["dx"] else RIGHT, target)}
+
+
+def _score_shots(flying: list[dict], bar: float | None, dying: bool = False) -> list[dict]:
     """A throw hit when the target's HP bar shows up or drops after the star should have arrived;
-    it missed when nothing changed within ~0.9 s of that. Returns the throws still undecided."""
+    it missed when nothing changed within ~0.9 s of that. While it's `dying` (seen without the bar it had)
+    every throw waits for the kill (_target_gone). Returns the throws still undecided."""
+    if dying:
+        return flying
     now, left = time.monotonic(), []
     for sh in flying:
         if now >= sh["due"] - 0.1 and bar is not None and (sh["bar"] is None or bar < sh["bar"] - 0.02):
@@ -489,11 +539,13 @@ def _score_shots(flying: list[dict], bar: float | None) -> list[dict]:
     return left
 
 
-def _log_shot(shot: dict, hit: bool) -> None:
-    """Keep a record of every throw (lab/shots.jsonl): the reach of a star is measured from these."""
+def _log_shot(shot: dict, hit: bool | None) -> None:
+    """Keep a record of every throw (lab/shots2.jsonl): the reach of a star is measured from these. `hit`
+    None: undecided (a throw in flight before the one that killed it)."""
     try:
         with paths.SHOT_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({**{k: v for k, v in shot.items() if k not in ("bar", "due")}, "hit": bool(hit),
+            f.write(json.dumps({**{k: v for k, v in shot.items() if k not in ("bar", "due", "at")},
+                                "hit": None if hit is None else bool(hit),
                                 "time": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
     except OSError:
         pass

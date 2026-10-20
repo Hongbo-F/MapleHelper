@@ -195,7 +195,8 @@ def test_off_level_she_gives_a_star_the_room_its_kind_needs():
     # 60 below her: an Orange Mushroom 130 along is thrown at, and so is a pig 160 along; a slime 160 along
     # isn't (it needs 177): she steps back 40 past where it's picked, or (one target) walks to a band past it.
     mushroom = target(630, 560, platform=1, kind="orange-mushroom")
-    assert decide(500, 500, PLAT, mushroom, []) == ("throw", RIGHT) and stance(500, 500, PLAT, [mushroom]) == ("throw", RIGHT)
+    assert decide(500, 500, PLAT, mushroom, []) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [mushroom]) == ("throw", RIGHT)
     assert stance(500, 500, PLAT, [target(660, 560, platform=1)]) == ("throw", RIGHT)
     slime = target(660, 560, platform=1, kind="slime")
     assert stance(500, 500, PLAT, [slime]) == ("back", LEFT, pytest.approx(177 + 40 - 160))

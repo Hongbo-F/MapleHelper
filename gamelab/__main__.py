@@ -269,7 +269,9 @@ def _record(command: str, map_id: int) -> None:
 
 def cmd_hunt(args) -> int:
     if args.mode == "shots":
-        return _shot_summary(paths.SHOT_LOG)
+        for path in (paths.OLD_SHOT_LOG, paths.SHOT_LOG):
+            _shot_summary(path)
+        return 0
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
     if args.mode == "look":
         return _hunt_look(hunter)
@@ -325,7 +327,8 @@ def _hunt_look(hunter) -> int:
 
 
 def _shot_summary(path) -> int:
-    """Hits and misses from the shot log, by how far below (+) or above (-) her the target was."""
+    """Hits and misses from a shot log, by how far below (+) or above (-) her the target was (throws left
+    undecided, in flight before the one that killed it, aside)."""
     import json
     if not path.exists():
         print(f"no shots logged yet ({path})")
@@ -333,11 +336,15 @@ def _shot_summary(path) -> int:
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     bands: dict[int, list[int]] = {}  # band's dy -> [hits, misses, farthest hit's |dx|]
     for r in rows:
+        if r["hit"] is None:
+            continue
         b = bands.setdefault(round(r["dy"] / SHOT_BAND) * SHOT_BAND, [0, 0, 0])
         b[0 if r["hit"] else 1] += 1
         if r["hit"]:
             b[2] = max(b[2], abs(r["dx"]))
-    print(f"{len(rows)} throws logged; by height of the target (map units, + = below her):")
+    undecided = sum(1 for r in rows if r["hit"] is None)
+    print(f"{path.name}: {len(rows)} throws logged ({undecided} undecided); by height of the target (map units, "
+          f"+ = below her):")
     for dy, (hit, miss, far) in sorted(bands.items()):
         print(f"  dy {dy:+4d}: {hit} hit, {miss} missed; farthest hit {far} units")
     return 0

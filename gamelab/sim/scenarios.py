@@ -634,7 +634,7 @@ def hunt_kill_far(sim):
 
 @scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=4, noise=Noise(miss=0.35),
           expects=(ends("killed", key="ended"), happens("star misses"),
-                   wrote("shots.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
+                   wrote("shots2.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
 def hunt_kill_misses(sim):
     """hunt_kill_far (another seed) with a third of the stars missing: throws scored as misses (no HP bar
     change within ~0.9 s of the star's arrival), and more throws to kill it."""
