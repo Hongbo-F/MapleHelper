@@ -288,12 +288,14 @@ def vertical_walls(segments) -> Walls:
 class Flight:
     """Where an arc through the air ends: the platform (None: none within the time), where, after how
     long, and her sideways speed as she lands (0 after a wall stopped her). `path`: her (x, y) after
-    every step from the start, when asked for."""
+    every step from the start, when asked for, and `speeds` her (vx, vy) then (a flight can be carried
+    on from any step of it, with another arrow: the simulator does when the arrow changes mid-air)."""
     platform: object
     land_x: float
     seconds: float
     vx_land: float
     path: tuple[tuple[float, float], ...] = field(default=(), repr=False)
+    speeds: tuple[tuple[float, float], ...] = field(default=(), repr=False)
 
 
 def _lands_at(q, x: float, y: float, nx: float, ny: float) -> float | None:
@@ -316,11 +318,12 @@ def _lands_at(q, x: float, y: float, nx: float, ny: float) -> float | None:
 
 def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: int = 0, skip=None,
         walls: Walls | None = None, sides: tuple[float, float] | None = None, dt: float = TICK,
-        limit: float = 4.0, path: bool = False) -> Flight:
+        limit: float = 4.0, path: bool = False, airborne: bool = False) -> Flight:
     """Where she lands from (x, y) moving at (vx, vy) with `arrow` held all the way: the first platform
     whose surface her feet cross on the way down (_lands_at). Walls stop her sideways (`walls`: the
     model's, worked out each call if not given; `sides`: the map's left and right limits, which stop her
-    too). `skip` is a platform she falls through (dropping). Not cached."""
+    too). `skip` is a platform she falls through (dropping). A flight leaving the ground can't land on
+    its first step; one carried on from mid-air (`airborne`) can. Not cached."""
     wall_xs, wall_ys = walls if walls is not None else vertical_walls(model.walls)
     # Only platforms she could reach in the time: within her sideways travel, at or below the top of the jump.
     reach = max(abs(vx), shoe.air_speed if arrow else 0.0) * limit + 1
@@ -328,6 +331,7 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
     plats = [q for q in model.platforms if q is not skip and q.right >= x - reach and q.left <= x + reach
              and max(q.y_at(q.left), q.y_at(q.right)) >= top]
     points = [(x, y)] if path else None
+    speeds = [(vx, vy)] if path else None
     t = 0.0
     while t < limit:
         nvx, nvy, dx, dy = air_step(vx, vy, arrow, shoe, dt)
@@ -342,17 +346,19 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
                 i += 1
             if sides is not None and not sides[0] <= nx <= sides[1]:
                 nx, nvx = min(max(nx, sides[0]), sides[1]), 0.0
-        if (vy > 0 or nvy > 0) and t > 0 and ny >= y:
+        if (vy > 0 or nvy > 0) and (t > 0 or airborne) and ny >= y:
             for q in plats:
                 at = _lands_at(q, x, y, nx, ny)
                 if at is not None:
                     if points is not None:
                         points.append((at, q.y_at(at)))
-                    return Flight(q, at, t + dt, nvx, tuple(points or ()))
+                        speeds.append((nvx, nvy))
+                    return Flight(q, at, t + dt, nvx, tuple(points or ()), tuple(speeds or ()))
         x, y, vx, vy, t = nx, ny, nvx, nvy, t + dt
         if points is not None:
             points.append((x, y))
-    return Flight(None, x, t, vx, tuple(points or ()))
+            speeds.append((vx, vy))
+    return Flight(None, x, t, vx, tuple(points or ()), tuple(speeds or ()))
 
 
 # --- a key timeline on flat ground ------------------------------------------------------------------

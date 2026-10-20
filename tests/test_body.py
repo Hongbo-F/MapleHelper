@@ -173,6 +173,20 @@ def test_a_running_jump_lands_where_the_arc_says_to_a_step(model):
     assert len(down.path) == round(down.seconds / body.TICK) + 1
 
 
+def test_a_flight_carried_on_from_any_step_is_the_same_flight(model):
+    # The simulator flies her on from where she is when the arrow the game sees changes: carried on with
+    # the same arrow, from any step (its speeds kept with its path), a flight lands where it did, when it did.
+    a, b = by_y(model, 500, 400), by_y(model, 360, 300)
+    for x, vx, arrow in ((150.0, 149.0, 1), (150.0, 149.0, 0), (500.0, -120.0, -1)):
+        f = body.fly(model, x, 300 if x == 150 else 500, vx, -555.0, shoe=SHOE, arrow=arrow, path=True)
+        assert len(f.speeds) == len(f.path) and f.platform in (a, b)
+        for k in range(1, len(f.path) - 1, 7):
+            (x1, y1), (vx1, vy1) = f.path[k], f.speeds[k]
+            g = body.fly(model, x1, y1, vx1, vy1, shoe=SHOE, arrow=arrow, airborne=True)
+            assert g.platform is f.platform and g.land_x == pytest.approx(f.land_x, abs=1e-6), k
+            assert k * body.TICK + g.seconds == pytest.approx(f.seconds, abs=1e-6) and g.vx_land == pytest.approx(f.vx_land)
+
+
 def test_walls_and_the_maps_sides_stop_her(model):
     c = by_y(model, 500, 400)
     f = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, arrow=0)
