@@ -1,6 +1,7 @@
 """What gamelab leaves on disk stays bounded (README: Memory and disk): a long run's telemetry goes on in
 parts, the oldest telemetry is deleted when a run starts, the player's log is moved aside when the player
-starts, and no cancel file stays in the inbox once its plan is over. All in temp folders."""
+starts, no cancel file stays in the inbox once its plan is over, and `lab-usage` tells what's there. All in
+temp folders."""
 
 import os
 import time
@@ -94,3 +95,29 @@ def test_no_cancel_file_stays_in_the_inbox_once_its_plan_is_over():
     # Not taken yet: withdrawn.
     (client.INBOX / "p2.json").write_text("{}", encoding="utf-8")
     assert client.cancel("p2") is True and list(client.INBOX.iterdir()) == []
+
+
+def test_lab_usage_sizes_each_kind_and_deletes_only_old_telemetry_when_asked(tmp_path, monkeypatch, capsys):
+    from gamelab import paths
+    from gamelab.__main__ import main
+    from gamelab.analysis import disk
+    now = time.time()
+    for folder in ("recordings", "telemetry", "harness", "golden", "inbox"):
+        (tmp_path / folder).mkdir()
+    _make(tmp_path / "recordings", "chain.npz", 1, 5000, now)
+    _make(tmp_path, "snap.png", 1, 3000, now)
+    old = _make(tmp_path / "telemetry", "20260901-120000-tour.jsonl", 20, 100, now)
+    new = _make(tmp_path / "telemetry", "20261019-120000-tour.jsonl", 1, 200, now)
+    _make(tmp_path / "golden", "nav_up.json", 1, 50, now)
+    _make(tmp_path / "inbox", "120000_plan_ab12.cancel", 1, 0, now)
+    _make(tmp_path, "player.log", 1, 40, now)
+    got = {u.kind: (u.files, u.bytes) for u in disk.usage(tmp_path)}
+    assert got == {"recordings": (1, 5000), "screenshots": (1, 3000), "telemetry": (2, 300), "harness runs": (0, 0),
+                   "golden traces": (1, 50), "player inbox, outbox": (1, 0), "other": (1, 40)}
+    monkeypatch.setattr(paths, "LAB", tmp_path)
+    assert main(["lab-usage"]) == 0
+    out = capsys.readouterr().out
+    assert "due to go now: 1 files (100 B)" in out and old.exists()  # told, not deleted
+    assert main(["lab-usage", "--prune-telemetry"]) == 0
+    assert "deleted 1 telemetry files (100 B)" in capsys.readouterr().out
+    assert not old.exists() and new.exists() and (tmp_path / "recordings" / "chain.npz").exists()

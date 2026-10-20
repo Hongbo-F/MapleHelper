@@ -758,6 +758,20 @@ def cmd_bench_capture(args) -> int:
     return 0
 
 
+# --- what gamelab keeps on disk --------------------------------------------------------------------------
+
+def cmd_lab_usage(args) -> int:
+    """What gamelab keeps under gamelab/lab, by kind. It deletes nothing, unless --prune-telemetry: then the
+    telemetry a run starting now would delete (last written over 14 days ago, then the oldest past 2 GB)."""
+    from .analysis import disk
+    lab = paths.LAB
+    if args.prune_telemetry:
+        gone = telemetry.prune(lab / "telemetry")
+        print(f"deleted {len(gone)} telemetry files ({disk.size(sum(b for _, b in gone))})")
+    print("\n".join(disk.report(lab)))
+    return 0
+
+
 # --- the command line ------------------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -961,6 +975,13 @@ def build_parser() -> argparse.ArgumentParser:
                                              "game as it is on screen; never brings it forward; no keys")
     s.add_argument("--n", type=int, default=100, help="rounds")
     s.set_defaults(func=cmd_bench_capture)
+
+    s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, screenshots, "
+                                         "telemetry, harness runs, golden traces), by kind; deletes nothing")
+    s.add_argument("--prune-telemetry", action="store_true",
+                   help="delete the telemetry a run starting now would (last written over 14 days ago, then "
+                        "the oldest past 2 GB in all); recordings and screenshots are never deleted")
+    s.set_defaults(func=cmd_lab_usage)
     return p
 
 
