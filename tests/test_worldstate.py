@@ -2,6 +2,8 @@
 few frames, the whole screen once a second, what's asked on the next frame), the freshness stamps, the
 monsters re-found every frame, her EXP gains and hits as events, and the Scene a look would have given."""
 
+import time
+
 import numpy as np
 import pytest
 
@@ -42,6 +44,14 @@ class Drawn(Eyes):
         self.mobs: list[Mob] = []
         self.drops: list[Item] = []
         self.hp, self.exp = 1.0, 0
+
+    def look(self) -> Observation:
+        self.looks = getattr(self, "looks", 0) + 1
+        return self.frame(time.monotonic(), self.want_ropes)
+
+    def glance(self):
+        self.glances = getattr(self, "glances", 0) + 1
+        return self.loc.to_dot(1000, 500), self.hp
 
     def frame(self, t: float, ropes: bool) -> Observation:
         frame = np.empty((540, 960, 3), np.uint8).view(Frame)

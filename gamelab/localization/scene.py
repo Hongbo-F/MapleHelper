@@ -50,6 +50,8 @@ class Scene(Observation):
     loot: list[Loot] = field(default_factory=list)         # drops seen on the ground (find_loot)
     looked: list[tuple[int, float, float]] = field(default_factory=list)  # where loot was looked for:
                                                                           # (platform, map x from, to)
+    events: list | None = None    # with a continuous feed, what it saw happen since the last look, frame by
+                                  # frame (tracking.Event: her EXP gains, hits, monsters' deaths); None: no feed
 
     @classmethod
     def of(cls, obs: Observation) -> "Scene":

@@ -274,3 +274,24 @@ def test_screen_frames_never_bring_the_game_forward_and_say_when_it_isnt_showing
         f = frames.next(time.monotonic())
         assert not f.visible and f.full is None and why in f.why
         game[change[0]] = before
+
+
+def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
+    from gamelab.perception.eyes import GLANCE_EVERY_S
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    eyes.mobs = [pig(1100)]
+    clock.sleep(0.5)
+    asked = clock.now
+    s = senses.look()
+    assert s.t >= asked and s.searched and [m.kind for m in s.monsters] == ["pig"]
+    assert [e.kind for e in s.events] == ["appeared"]  # what the feed saw since: once
+    assert senses.look(mobs=False).events == [] and getattr(eyes, "looks", 0) == 0
+    a, b = senses.glance(), senses.glance()
+    assert senses.counts["glances from the feed"] == 2 and senses._glanced - asked >= GLANCE_EVERY_S - 1e-9
+    f.alive = False  # the feed's gone: the look is taken here, as without one
+    s = senses.look()
+    assert eyes.looks == 1 and s.events is None and senses.counts == {
+        "from the feed": 2, "taken here": 1, "glances from the feed": 2}
+    senses.glance()
+    assert eyes.glances == 1

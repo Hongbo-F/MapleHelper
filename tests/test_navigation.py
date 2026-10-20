@@ -566,7 +566,7 @@ def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(mode
     nav = _navigator(model)
     localizer = Localizer(model)
     hp = {"now": 1.0}
-    nav.senses = SimpleNamespace(eyes=SimpleNamespace(glance=lambda: (localizer.to_dot(150, 500), hp["now"])),
+    nav.senses = SimpleNamespace(glance=lambda: (localizer.to_dot(150, 500), hp["now"]), wait_frame=nv.time.sleep,
                                  localizer=localizer)
     nav.flow.expected = lambda legs, t: c.id
     walk = Leg(Move("walk_off", c.id, c.id, 300, 300, "right"), Body(0.0, 100, c, run=1), Body(0.5, 175, c, run=1),

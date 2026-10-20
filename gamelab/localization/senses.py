@@ -4,11 +4,18 @@ is on screen when her name tag is hidden (the camera), and where the monsters an
 
 Every look anyone takes goes through `Senses.look`, and the listeners run after each one, in order:
 the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there.
+
+With a continuous feed (localization.feed: the game looked at every frame in a process of its own), a look
+is the feed's state of the first frame shown after it was asked for, with what it needs fresh (see
+feed.fresh), and the events since the last look come with it (Scene.events); glances come from the feed's
+newest frames. When the feed can't give one (the game not in front, the feed gone or too slow), the look or
+glance is taken here as without it. Without a feed (the default) nothing changes.
 """
 
+import time
 from collections.abc import Callable
 
-from ..perception.eyes import TAG_BELOW_FEET, Eyes, Observation
+from ..perception.eyes import GLANCE_EVERY_S, TAG_BELOW_FEET, Eyes, Observation
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import SCALE, SCREEN_SCALE
 from .mapdata import MapModel
@@ -27,29 +34,62 @@ ROPE_PAD: int | None = ROPE_MATCH_PX + MAX_ROPE_WIDTH
 
 
 class Senses:
-    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float]):
-        """`band`: how far above and below her feet (map units) a look searches for monsters."""
+    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None):
+        """`band`: how far above and below her feet (map units) a look searches for monsters. `feed`: a
+        continuous feed to take looks and glances from (localization.feed.Feed), or None."""
         self.eyes, self.model, self.band = eyes, model, band
+        self.feed = feed
         self.localizer = Localizer(model)
         self.camera = Camera(model.bounds)
         self.listeners: list[Callable[[Scene], None]] = []
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
+        self._glanced = -1e18  # the frame time of the last glance from the feed
+        self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0}
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False) -> Scene:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
         dot and the camera when the tag is hidden; (if `mobs`) the monsters she could shoot, or (if
         `wide`) every monster on screen; and (if `loot`) the drops on her platform, or (if `wide`) on
         every platform in view (only mesos if `mesos_only`)."""
-        s = self.place(self.eyes.look())
-        if mobs and s.tag is not None and s.where is not None:
-            s.monsters = self.search(s, wide)
-            s.searched, s.wide = True, wide
-        if loot:
-            s.loot = find_loot(s, self.model, self.eyes, wide, mesos_only)
+        s = None
+        if self.feed is not None and self.feed.alive:
+            s = self.feed.look(self, mobs, wide, loot, mesos_only)
+        if s is None:
+            s = self.place(self.eyes.look())
+            if mobs and s.tag is not None and s.where is not None:
+                s.monsters = self.search(s, wide)
+                s.searched, s.wide = True, wide
+            if loot:
+                s.loot = find_loot(s, self.model, self.eyes, wide, mesos_only)
+            if self.feed is not None:
+                self.counts["taken here"] += 1
+        else:
+            self.counts["from the feed"] += 1
+        if self.feed is not None:
+            s.events = self.feed.drain_events() if self.feed.alive else None
         for listener in self.listeners:
             listener(s)
         return s
+
+    def glance(self) -> tuple[tuple[float, float] | None, float]:
+        """Her minimap dot and HP (Eyes.glance): with a feed, from its newest frame shown GLANCE_EVERY_S after
+        the last glance's at the soonest, so what the navigator makes of two glances in a row (her dot
+        standing still) holds as without it."""
+        if self.feed is not None and self.feed.alive:
+            st = self.feed.glance(self._glanced + GLANCE_EVERY_S)
+            if st is not None:
+                self._glanced = st.t
+                self.counts["glances from the feed"] += 1
+                return st.dot, st.hp
+        return self.eyes.glance()
+
+    def wait_frame(self, timeout: float) -> None:
+        """Until the feed's next frame comes, `timeout` s at most; without a feed, `timeout` s."""
+        if self.feed is not None and self.feed.alive:
+            self.feed.wait_frame(timeout)
+        else:
+            time.sleep(timeout)
 
     def place(self, obs: Observation) -> Scene:
         """A look placed on the map: where she is (see _place_her); no monsters or drops yet."""

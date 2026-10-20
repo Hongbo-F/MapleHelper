@@ -51,10 +51,11 @@ class Hunter:
     """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
-                 low_hp: float = 0.35, potion_hp: float = 0.5, skill: bool = False):
+                 low_hp: float = 0.35, potion_hp: float = 0.5, skill: bool = False, feed=None):
+        """`feed`: a continuous feed for her looks and glances (localization.feed), told of her throws."""
         self.model, self.log = model, log
         self.low_hp, self.potion_hp = low_hp, potion_hp
-        self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN))
+        self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.actions = Actions(keys, skill)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
@@ -71,6 +72,8 @@ class Hunter:
         self.ledger = Ledger(self, self.drops)
         self.senses.listeners += [self._vitals, self._publish, self.ledger.on_look, self.drops.on_look]
         self.actions.throw_listeners.append(self.ledger.on_throw)
+        if feed is not None:  # whose kills are whose (localization.tracking)
+            self.actions.throw_listeners.append(feed.throw)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:
         """A look (Senses.look); drops are looked for as her inventory allows (only mesos when it's full)."""
@@ -125,15 +128,23 @@ class Hunter:
 
     def _vitals(self, s: Scene) -> None:
         """Her EXP number changed since the last look: a kill of hers. Her HP dropped: a hit (logged
-        with how far it pushed her when no key was pressed)."""
-        if exp_changed(self._exp, s.exp):
+        with how far it pushed her when no key was pressed). With a feed, from what it saw frame by frame
+        (s.events): two gains between two looks are two kills, and the HP lost is every drop's, a potion
+        drunk between them or not."""
+        if s.events is None:
+            gains = int(exp_changed(self._exp, s.exp))
+            lost = 0.0 if self._last_hp is None or s.hp >= self._last_hp else self._last_hp - s.hp
+        else:
+            gains = sum(1 for e in s.events if e.kind == "exp_gain")
+            lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
+        for _ in range(gains):
             self.exp_events.append(s.t)
             self.report.exp_kills += 1
             self.exp_gains += 1
         self.exp_events = [t for t in self.exp_events if s.t - t < EXP_MEMORY]
         self._exp = s.exp
-        if self._last_hp is not None and s.hp < self._last_hp:
-            self.report.damage_taken += self._last_hp - s.hp
+        if lost > 0 and self._last_hp is not None:
+            self.report.damage_taken += lost
             self.hit_at = s.t
             telemetry.emit("event", kind="hit", text=f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
             self._log_hit(s)

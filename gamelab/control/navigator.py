@@ -599,8 +599,8 @@ class Navigator:
                 if due < 2 * GLANCE_S:  # the look placing her is due before a glance would be over: wait for it
                     time.sleep(max(0.0, due))
                     continue
-            time.sleep(GLANCE_S)
-            dot, now_hp = self.senses.eyes.glance()
+            self.senses.wait_frame(GLANCE_S)
+            dot, now_hp = self.senses.glance()
             if dot is not None and telemetry.recording():
                 gx, gy = self.senses.localizer.to_map(dot)
                 telemetry.emit("glance", x=round(gx, 1), y=round(gy, 1), hp=round(now_hp, 3))
@@ -658,13 +658,13 @@ class Navigator:
         the monsters, if `mobs`; on the whole screen, if `wide`)."""
         end, last = time.monotonic() + longest, None
         while time.monotonic() < end:
-            dot, _ = self.senses.eyes.glance()
+            dot, _ = self.senses.glance()
             if dot is not None and _still(dot, last):
                 w = self.senses.localizer.where_dot(dot)
                 if w.platform is not None:
                     break
             last = dot
-            time.sleep(GLANCE_S)
+            self.senses.wait_frame(GLANCE_S)
         return self.mover.locate(mobs=mobs, wide=wide)
 
     # --- chains that follow on (follow) ------------------------------------------------------------
