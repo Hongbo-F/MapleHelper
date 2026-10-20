@@ -131,3 +131,50 @@ def test_an_old_sweep_track_replays_as_her_positions(tmp_path):
     for r in load(path, map_id=1):
         s.apply(r)
     assert s.map == 1 and s.her()["x"] == 110 and len(s.trail) == 2
+
+
+def test_the_web_page_serves_the_map_and_the_text_with_its_key_only():
+    import json
+    import threading
+    import urllib.error
+    import urllib.request
+
+    from gamelab.ui.sources import ReplaySource
+    from gamelab.ui.web import Feed, WebServer
+    m = model()
+    c = by_y(m, 500, 400)
+    records = [{"topic": "session", "t": 0.0, "map": 1, "command": "tour", "mode": "live"},
+               {"topic": "scene", "t": 0.5, "her": {"x": 400, "y": 500, "platform": c.id, "how": "tag"}, "hp": 0.8,
+                "mp": 1.0, "monsters": [{"kind": "pig", "x": 600, "y": 500, "platform": c.id}], "loot": []},
+               {"topic": "hunt", "t": 0.6, "rule": "shoot", "objective": None, "ground": c.id, "rate_here": 0.5},
+               {"topic": "log", "t": 0.7, "text": "pig down"},
+               {"topic": "log", "t": 30.0, "text": "much later"}]
+    now = [0.0]
+    feed = Feed(lambda map_id: MapView(m, width=300), ReplaySource(records, clock=lambda: now[0]), live=False)
+    now[0] = 1.0
+    feed.step()
+    server = WebServer(feed, host="127.0.0.1", port=0, key="secret")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.port}"
+    try:
+        try:
+            urllib.request.urlopen(base + "/state.json")
+            raise AssertionError("served without its key")
+        except urllib.error.HTTPError as e:
+            assert e.code == 403
+        page = urllib.request.urlopen(base + "/?k=secret")
+        assert b"gamelab mini-map" in page.read() and "gk=secret" in page.headers["Set-Cookie"]
+        s = json.load(urllib.request.urlopen(base + "/state.json?k=secret"))
+        assert s["hp"] == 0.8 and s["hunt"]["rule"] == "shoot" and s["logs"] == ["pig down"]
+        assert s["her"]["platform"] == c.id and s["monsters"] == 1 and s["replay"]["length"] == 30.0
+        jpeg = urllib.request.urlopen(base + "/frame.jpg?k=secret").read()
+        assert jpeg[:2] == bytes([0xFF, 0xD8])  # a JPEG
+        req = urllib.request.Request(base + "/control?k=secret&action=on", method="POST")
+        assert urllib.request.urlopen(req).status == 200  # 10 s on: still before "much later"
+        req = urllib.request.Request(base + "/control?k=secret&action=pause", method="POST")
+        urllib.request.urlopen(req)
+        s2 = json.load(urllib.request.urlopen(base + "/state.json?k=secret"))
+        assert s2["replay"]["paused"] and s2["replay"]["pos"] == 11.0 and s2["version"] > s["version"]
+    finally:
+        server.shutdown()
+        server.server_close()

@@ -264,7 +264,7 @@ def _record(command: str, map_id: int) -> None:
     """Record this run's telemetry (lab/telemetry), for the mini-map to follow live or replay later."""
     path = telemetry.record_to(command)
     telemetry.emit("session", map=map_id, command=command, mode="live")
-    _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`)")
+    _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`, or `web` on a phone)")
 
 
 def cmd_hunt(args) -> int:
@@ -405,13 +405,10 @@ def cmd_tour(args) -> int:
 
 # --- the mini-map and the simulator ----------------------------------------------------------------------
 
-def cmd_minimap(args) -> int:
-    """The mini-map window: follow the newest run live (the default), replay a recorded one, or show a
-    route planned offline. Sends no keys."""
+def _map_views(args):
+    """The mini-map's map views, one per map, made when first needed: `view_for(map id)` (None: --map)."""
     from .localization import mapdata
     from .ui.render import MapView
-    from .ui.sources import LiveSource, ReplaySource, load, planned
-    from .ui.app import MapWindow
     views: dict = {}
 
     def view_for(map_id):
@@ -419,19 +416,42 @@ def cmd_minimap(args) -> int:
         if map_id not in views:
             views[map_id] = MapView(mapdata.load(map_id), width=args.width)
         return views[map_id]
+    return view_for
 
+
+def _map_source(args):
+    """What the mini-map shows: (source, live): the newest run live (the default), a recorded one
+    replayed (--replay), or a route planned offline (--plan)."""
+    from .localization import mapdata
+    from .ui.sources import LiveSource, ReplaySource, load, planned
     if args.plan:
         src, dst = args.plan
         model = mapdata.load(args.map)
         p = model.platform(src)
         x = args.x if args.x is not None else (p.left + p.right) / 2
-        source, live = ReplaySource(planned(model, src, x, dst)), False
-    elif args.replay:
-        source, live = ReplaySource(load(Path(args.replay), args.map), speed=args.speed), False
-    else:
-        source, live = LiveSource(), True
+        return ReplaySource(planned(model, src, x, dst)), False
+    if args.replay:
+        return ReplaySource(load(Path(args.replay), args.map), speed=args.speed), False
+    return LiveSource(), True
+
+
+def cmd_minimap(args) -> int:
+    """The mini-map window: follow the newest run live (the default), replay a recorded one, or show a
+    route planned offline. Sends no keys."""
+    from .ui.app import MapWindow
+    view_for = _map_views(args)
+    source, live = _map_source(args)
     position = _beside_game(*view_for(None).size) if live else None
     MapWindow(view_for, source, live, position=position).run()
+    return 0
+
+
+def cmd_web(args) -> int:
+    """The mini-map as a web page, for a phone on the same Wi-Fi: the same runs as `minimap` (live, --replay
+    or --plan). Only reads telemetry: sends no keys, never touches the game."""
+    from .ui.web import Feed, serve
+    source, live = _map_source(args)
+    serve(Feed(_map_views(args), source, live), host=args.host, port=args.port, key=args.key)
     return 0
 
 
@@ -472,7 +492,7 @@ def cmd_sim(args) -> int:
             print(f"  {name:28s} {sc.doc.splitlines()[0] if sc.doc else ''}")
         return 0 if args.scenario == "list" else 1
     path = telemetry.record_to(f"sim-{args.scenario}")
-    print(f"telemetry: {path} (watch it with `python -m gamelab minimap`)")
+    print(f"telemetry: {path} (watch it with `python -m gamelab minimap`, or `web` on a phone)")
     try:
         trace = scenarios.run_scenario(scenarios.SCENARIOS[args.scenario], pace=args.speed or None)
     finally:
@@ -695,6 +715,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--width", type=int, default=760, help="window width in px")
     s.set_defaults(func=cmd_minimap)
+
+    s = sub.add_parser("web", help="the mini-map as a web page, to watch from a phone on the same Wi-Fi "
+                                   "(live, --replay or --plan, as minimap); sends no keys")
+    s.add_argument("--replay", help="a telemetry file (lab/telemetry/*.jsonl) or an older sweep track (.json)")
+    s.add_argument("--speed", type=float, default=1.0, help="replay speed")
+    s.add_argument("--plan", type=int, nargs=2, metavar=("SRC", "DST"), help="show the route between two platforms")
+    s.add_argument("--x", type=float, help="--plan: start at this map x on SRC")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--width", type=int, default=900, help="the map picture's width in px")
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--host", default="0.0.0.0",
+                   help="the address to serve on: 0.0.0.0 (the default) for a phone on the network, 127.0.0.1 for "
+                        "this computer only")
+    s.add_argument("--key", help="the key the page's address needs (default: a new random one each time; give one "
+                                 "to keep a phone bookmark working)")
+    s.set_defaults(func=cmd_web)
 
     s = sub.add_parser("sim", help="run a scenario offline on the simulator, recorded for the mini-map (no game)")
     s.add_argument("scenario", help="a scenario name, or `list`")
