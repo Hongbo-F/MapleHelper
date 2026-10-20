@@ -40,7 +40,7 @@ from ..paths import LAB
 from ..perception.eyes import Eyes, Observation
 from ..perception.loot import Item
 from ..perception.match import suppress_overlaps
-from ..perception.mobs import Mob
+from ..perception.mobs import REFIND_PAD, Mob
 from ..perception.terrain import ScreenRope
 from ..screen import SCALE
 from ..screen import UNITS_PER_HALF_PX
@@ -163,6 +163,19 @@ class FakeDetector:
                  if m.kind in self.templates and top <= m.y - m.h // 2 and m.y + m.h // 2 <= bottom]
         return suppress_overlaps(found)
 
+    def refind(self, frame: np.ndarray, box: tuple[int, int, int, int], kind: str, template: str = "",
+               facing: int = 0, bounds: tuple[int, int, int, int] | None = None, fallback: bool = True) -> Mob | None:
+        """A monster drawn of that kind wholly inside the window around `box` (REFIND_PAD), nearest its middle
+        (what the template that matched it last would find there: `fallback` makes no difference)."""
+        bx0, by0, bx1, by1 = bounds or (0, 0, frame.shape[1], frame.shape[0])
+        x0, y0 = max(bx0, box[0] - REFIND_PAD), max(by0, box[1] - REFIND_PAD)
+        x1, y1 = min(bx1, box[2] + REFIND_PAD), min(by1, box[3] + REFIND_PAD)
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        found = [m for m in getattr(frame, "screen", Screen()).mobs
+                 if m.kind == kind and x0 <= m.x - m.w // 2 and m.x + m.w // 2 <= x1
+                 and y0 <= m.y - m.h // 2 and m.y + m.h // 2 <= y1]
+        return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
+
     def detect_wide(self, frame: np.ndarray, rows: tuple[int, int], band: int = 120, step: int = 90) -> list[Mob]:
         if self.clock is not None:
             self.clock.sleep(DETECT_WIDE_S)
@@ -201,6 +214,7 @@ class FakeEyes(Eyes):
         self.want_ropes = False
         self.guard = guard
         self.counts = {"looks": 0, "glances": 0, "tag hidden": 0, "dot hidden": 0}  # for the trace
+        self.frame_counts = {"frames": 0, "tag hidden": 0, "dot hidden": 0}  # the feed's frames (observe)
 
     @property
     def noise(self) -> Noise:
@@ -221,11 +235,11 @@ class FakeEyes(Eyes):
     def _hp(self) -> float:
         return round(self.world.hp * 147) / 147  # the bar is 147 px long
 
-    def _dot(self) -> tuple[float, float] | None:
+    def _dot(self, counts: dict | None = None) -> tuple[float, float] | None:
         """Her minimap dot as minimap.her_dot reads it: exact, or (Noise.dot_px) to whole pixels; None
-        while something covers the minimap (Noise.dot_hidden)."""
+        while something covers the minimap (Noise.dot_hidden), counted in `counts` (her looks' by default)."""
         if Noise.during(self.noise.dot_hidden, self.world.t):
-            self.counts["dot hidden"] += 1
+            (self.counts if counts is None else counts)["dot hidden"] += 1
             return None
         dot = self.loc.to_dot(*self.world.her())
         return (float(round(dot[0])), float(round(dot[1]))) if self.noise.dot_px else dot
@@ -233,18 +247,33 @@ class FakeEyes(Eyes):
     def look(self) -> Observation:
         self._now()
         self.counts["looks"] += 1
+        s = self._observation(self.clock.now + LOOK_LAG, self.want_ropes, self.counts)
+        self.clock.sleep(LOOK_S)
+        return s
+
+    def observe(self, ropes: bool | None = None) -> Observation:
+        """The screen now as a look sees it, without the time a look takes: the continuous feed's frames
+        (localization.feed.SyncFeed, whose own process pays for them). Not one of her looks: counted apart
+        (`frame_counts`)."""
+        if self.guard is not None:
+            self.guard()
+        self.world.advance(self.clock.now)
+        self.frame_counts["frames"] += 1
+        return self._observation(self.clock.now, self.want_ropes if ropes is None else ropes, self.frame_counts)
+
+    def _observation(self, t: float, ropes: bool, counts: dict) -> Observation:
+        """What the screen shows now (the world advanced to the clock), as taken at `t`."""
         w, (x, y) = self.world, self.world.her()
         her = self.her_on_screen()
         frame = np.empty(FRAME + (3,), np.uint8).view(Frame)
         frame[:] = SKY
         frame.screen = self._draw(frame, her, x, y)
-        ropes = self._ropes(her, x, y) if self.want_ropes else []
+        found = self._ropes(her, x, y) if ropes else []
         seen = not Noise.during(self.noise.tag_hidden, w.t)
-        self.counts["tag hidden"] += not seen
-        s = Observation(t=self.clock.now + LOOK_LAG, frame=frame, tag=her if seen else None, hp=self._hp(), mp=w.mp,
-                        ground=self._ground(her) if seen else None, dot=self._dot(), ropes=ropes)
+        counts["tag hidden"] += not seen
+        s = Observation(t=t, frame=frame, tag=her if seen else None, hp=self._hp(), mp=w.mp,
+                        ground=self._ground(her) if seen else None, dot=self._dot(counts), ropes=found)
         s.exp = exp_pixels(w.exp)
-        self.clock.sleep(LOOK_S)
         return s
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
@@ -515,7 +544,8 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
         for name in ("send_key", "foreground_title"):
             if hasattr(win32, name):
                 put(win32, name, refuse(f"maplehelper.win32.{name}"))
-        for name in ("bring_to_front", "find_game", "client_rect", "foreground_title", "move_cursor"):
+        for name in ("bring_to_front", "find_game", "client_rect", "foreground_title", "move_cursor", "shows",
+                     "minimized"):
             if hasattr(window, name):
                 put(window, name, refuse(f"gamelab.window.{name}"))
         from ..analysis import recordings

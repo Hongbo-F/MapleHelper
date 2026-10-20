@@ -8,10 +8,11 @@ the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is 
 
 from collections.abc import Callable
 
-from ..perception.eyes import TAG_BELOW_FEET, Eyes
+from ..perception.eyes import TAG_BELOW_FEET, Eyes, Observation
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import SCALE, SCREEN_SCALE
 from .mapdata import MapModel
+from .monsters import Monster
 from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
 from .scene import Scene, find_loot
 
@@ -40,17 +41,27 @@ class Senses:
         dot and the camera when the tag is hidden; (if `mobs`) the monsters she could shoot, or (if
         `wide`) every monster on screen; and (if `loot`) the drops on her platform, or (if `wide`) on
         every platform in view (only mesos if `mesos_only`)."""
-        s = Scene.of(self.eyes.look())
-        self._place_her(s)
+        s = self.place(self.eyes.look())
         if mobs and s.tag is not None and s.where is not None:
-            seen = self.eyes.monsters_wide(s) if wide else self.eyes.monsters(s, *self.band)
-            s.monsters = [s.place(m, self.model, self.eyes.bar(s, m)) for m in seen]
+            s.monsters = self.search(s, wide)
             s.searched, s.wide = True, wide
         if loot:
             s.loot = find_loot(s, self.model, self.eyes, wide, mesos_only)
         for listener in self.listeners:
             listener(s)
         return s
+
+    def place(self, obs: Observation) -> Scene:
+        """A look placed on the map: where she is (see _place_her); no monsters or drops yet."""
+        s = Scene.of(obs)
+        self._place_her(s)
+        return s
+
+    def search(self, s: Scene, wide: bool = False) -> list[Monster]:
+        """The monsters in a placed look's band around her (or, if `wide`, on the whole screen), placed on the
+        map with their HP bars (her screen position must be known)."""
+        seen = self.eyes.monsters_wide(s) if wide else self.eyes.monsters(s, *self.band)
+        return [s.place(m, self.model, self.eyes.bar(s, m)) for m in seen]
 
     def _rope_columns(self, dot: tuple[float, float] | None,
                       tag: tuple[int, int] | None) -> list[tuple[int, int]] | None:
