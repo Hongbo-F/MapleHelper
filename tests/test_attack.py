@@ -532,3 +532,61 @@ def test_a_monster_is_placed_where_its_feet_are():
     assert (placed.facing, placed.pose) == (1, "move")
     s.monsters = [centred, placed]
     assert [("facing" in m, m.get("facing")) for m in s.record()["monsters"]] == [(False, None), (True, 1)]
+
+
+def test_a_monster_with_its_feet_on_a_platform_goes_on_it_whatever_spawns_there(monkeypatch):
+    """Monsters leave the platforms they spawn on (a pig on 26 in after_rest.png). With its feet from the
+    template's origin and her on the ground, a monster goes on the platform right under its feet; otherwise
+    the spawn rule stands (feet from a template's bottom were up to 20 units off)."""
+    import numpy as np
+
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    from gamelab.screen import UNITS_PER_HALF_PX as U
+    tree = {
+        "info": {"VRLeft": 0, "VRTop": 0, "VRRight": 2000, "VRBottom": 1000},
+        "foothold": {"1": {
+            "1": {"1": {"x1": 300, "y1": 460, "x2": 520, "y2": 460, "prev": 0, "next": 0}},  # no spawns, 40 above
+            "2": {"2": {"x1": 0, "y1": 500, "x2": 1000, "y2": 500, "prev": 0, "next": 0}},   # pigs spawn here
+        }},
+        "life": {"0": {"type": "m", "id": "8", "x": 600, "y": 500, "cy": 500, "rx0": 50, "rx1": 950}},
+        "miniMap": {"width": 2000, "height": 1000, "centerX": 0, "centerY": 0, "mag": 4},
+    }
+    model = mapdata.parse(1, tree, "Test", {}, {"8": "Pig"})
+    high, low = model.platform_under(400, 450), model.platform_under(700, 490)
+    assert monster_platform(model, "pig", 400, 461, exact=True) is high      # its feet 1 unit below it
+    assert monster_platform(model, "pig", 400, 461) is low                   # the spawn rule
+    assert monster_platform(model, "pig", 400, 480, exact=True) is low       # 20 off: nothing that close
+    monkeypatch.setattr(monsters, "FEET_SNAP", None)
+    assert monster_platform(model, "pig", 400, 461, exact=True) is low
+    monkeypatch.undo()
+    s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(400, 308), hp=1.0, mp=1.0, ground=(300, 500),
+              where=Where(300.0, 500.0, low, (0, 0)))  # she stands on the ground, her feet at y 300 on screen
+    feet = 300 + (461 - 500) / U
+    pig = Mob("pig", 470, round(feet) - 15, 46, 30, 0.9, ox=470.0, feet=feet)
+    assert s.grounded and s.place(pig, model, None).platform == high.id
+    assert s.place(Mob("pig", 470, round(feet) - 15, 46, 30, 0.9), model, None).platform == low.id  # its bottom
+    s.ground = (400, 402)  # in the air: no ground under her
+    assert not s.grounded and s.place(pig, model, None).platform == low.id
+
+
+def test_the_pig_off_its_spawn_platform_in_after_rest_is_put_where_it_stands():
+    """after_rest.png (a saved frame of the game): a pig walks platform 26, which spawns nothing. By the spawn
+    rule it went nowhere (60 units under it there's no pig platform); by where its feet are, on 26."""
+    from pathlib import Path
+
+    from gamedata.paths import COPY
+    from gamelab import paths
+    from gamelab.analysis import bench, calibration
+    from gamelab.localization.senses import Senses
+    from gamelab.perception.sprites import detector_for
+    frame = paths.LAB / "after_rest.png"
+    if not frame.is_file() or not paths.CALIBRATION.is_file() or not (COPY / "Packs" / "Mob_00000.ms").is_file():
+        pytest.skip("needs the saved frame and calibration (gamelab/lab) and the game data copy")
+    model = mapdata.load(10000012)
+    eyes = bench.SavedEyes(calibration.load().template, detector_for(model))
+    eyes.show(bench.load([Path(frame)])[0][1])
+    s = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)).look(wide=True)
+    pigs = [m for m in s.monsters if m.kind == "pig"]
+    assert s.grounded and [m.platform for m in pigs] == [26] and 26 not in model.spawn_platforms
+    assert abs(pigs[0].y - model.platform(26).y_at(pigs[0].x)) < 1

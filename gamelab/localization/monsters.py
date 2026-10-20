@@ -40,6 +40,14 @@ MONSTER_DIE_S = {"pig": 0.66, "orange-mushroom": 0.66, "slime": 0.84, "snail": 1
 TURN_SLACK = 25      # units a monster seen walking one way may still come back (they turn now and then)
 
 PLATFORM_SLACK = 25  # map units past a platform's ends a monster seen on screen may still be on it
+# Monsters do leave the platforms they spawn on (after_rest.png: a pig on platform 26, which spawns nothing;
+# live runs had pigs placed on the snails' 20 and 22, 9 times, as the nearest spawn platform). With its feet
+# read from the template's origin while she stands on the ground (Mob.feet, Scene.grounded), a monster goes
+# on whatever platform's surface is within FEET_SNAP of them: such feet were -1.4 to +2.5 units from the
+# surface on 15 saved frames (`bodies`; +7.7 for a pig whose hop frame matched though it walked), against
+# -8.5 to +16.4 by the template's bottom. Otherwise, or with none that close, the spawn rule
+# (monster_platform). Not checked in game: None keeps to the spawn rule.
+FEET_SNAP: float | None = 12
 
 # Matching a look's monsters to the last look's (Tracker).
 MATCH_WITHIN = 2.0   # s: an older last look is no help
@@ -64,7 +72,7 @@ class Monster:
     mob: Mob
     x: float              # map units, its feet
     y: float
-    platform: int | None  # the platform it walks on (monsters never leave it)
+    platform: int | None  # the platform it walks on (None: none near its feet)
     bar: float | None = None  # its HP bar (fraction left), shown once it has been hit; None: unhurt
     facing: int = 0       # which way it faces: 1 right, -1 left, 0 not known (Mob.facing)
     pose: str = ""        # "stand", "move" (walking) or "hit1" (flinching); "": not known (Mob.pose)
@@ -92,11 +100,18 @@ def speeds(model: MapModel | None = None) -> dict[str, float]:
     return out
 
 
-def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: float = 50) -> Platform | None:
-    """The platform a monster seen at map (x, y) walks on. Monsters never leave the platform they
-    spawn on, so only platforms where its kind spawns count (or any spawn platform, if none fits):
-    feet read from the screen are ~20 units off at times, and a safe platform 42-60 units above a
-    hunting ground once had pigs "on" it, so she backed away from them and off her platform."""
+def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: float = 50,
+                     exact: bool = False) -> Platform | None:
+    """The platform a monster seen at map (x, y) walks on. With `exact` feet (FEET_SNAP), any platform
+    whose surface is that close. Else only platforms where its kind spawns count (or any spawn platform,
+    if none fits): feet read from the bottom of a template were ~20 units off at times, and a safe
+    platform 42-60 units above a hunting ground once had pigs "on" it, so she backed away from them and
+    off her platform."""
+    if exact and FEET_SNAP is not None:
+        near = [(abs(p.y_at(p.clamp(x)) - y), p.id) for p in model.platforms if p.covers(x, PLATFORM_SLACK)]
+        near = [g for g in near if g[0] <= FEET_SNAP]
+        if near:
+            return model.platform(min(near)[1])
     best = None
     for own_kind in (True, False):
         for pid, names in model.monsters_by_platform.items():

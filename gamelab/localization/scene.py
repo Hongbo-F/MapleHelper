@@ -19,6 +19,8 @@ from .pose import Where
 STRIP_PAD = 4    # a strip reaches this far past each end of its ground
 MIN_STRIP = 12   # narrower ones (cut short by the screen's side or the minimap) aren't searched
 SAME_ITEM = 4    # items this close (across and down) are one item, found in two platforms' strips
+GROUNDED_PX = 6  # half-size px of ground under her feet that show she's standing on it (in the air: none;
+                 # navigator.MIN_GROUND_PX)
 
 
 @dataclass(frozen=True)
@@ -57,13 +59,23 @@ class Scene(Observation):
     def platform(self) -> Platform | None:
         return None if self.where is None else self.where.platform
 
+    @property
+    def grounded(self) -> bool:
+        """Whether she stands on the ground in this look: her name tag seen, on a platform, with ground under
+        her feet. In the air every monster's y is off by her height above where her dot puts her (up to her
+        77-unit jump)."""
+        g = self.ground
+        return self.tag_seen and self.platform is not None and g is not None and g[1] - g[0] >= GROUNDED_PX
+
     def place(self, m: Mob, model: MapModel, bar: float | None) -> Monster:
         """Put a monster seen on screen onto the map, by its offset from her: where it stands (its origin,
-        when the template that matched knows it; else the template's centre and bottom), onto the platform it
-        walks on, and never past that platform's ends (read from the screen, one can seem up to PLATFORM_SLACK
-        past one; past the step at the end of platform 2, it would seem in front of the wall it's behind)."""
+        when the template that matched knows it; else the template's centre and bottom). With its origin
+        known and her on the ground, on whatever platform is right under its feet; else on the platform it
+        walks on (monster_platform). Never past that platform's ends (read from the screen, one can seem up to
+        PLATFORM_SLACK past one; past the step at the end of platform 2, it would seem in front of the wall
+        it's behind)."""
         x, y = self.map_x(m.foot_x), self.map_y(m.feet_y)
-        p = monster_platform(model, m.kind, x, y)
+        p = monster_platform(model, m.kind, x, y, exact=m.feet is not None and self.grounded)
         if p is None:
             return Monster(m, x, y, None, bar, m.facing, m.pose)
         x = p.clamp(x)

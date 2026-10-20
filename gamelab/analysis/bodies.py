@@ -23,7 +23,6 @@ import numpy as np
 from ..perception.mobs import Mob, MobDetector
 from ..screen import UNITS_PER_HALF_PX
 
-GROUNDED_PX = 6       # half-size px of ground under her feet that show she's standing (navigator.MIN_GROUND_PX)
 # Saved screenshots where she's off the ground though the look can't tell (the basin's dirt walls behind her
 # read as ground): in closeup.png her name tag is 9 px above where she stands, and every monster reads 5-15
 # units low.
@@ -35,12 +34,6 @@ FIT_MIN = 7           # ... and how many it needs
 MOVING = 12.0         # units/s: slower than this, a monster isn't walking (for its facing)
 MIN_TRACK = 15        # detections a monster needs to count on a recording
 FACING = {1: "right", -1: "left", 0: "?"}
-
-
-def grounded(scene) -> bool:
-    """Whether she stands on the ground in a placed look (Scene): her tag seen, on a platform, ground under her."""
-    g = scene.ground
-    return scene.tag_seen and scene.platform is not None and g is not None and g[1] - g[0] >= GROUNDED_PX
 
 
 def is_cutout(mob: Mob) -> bool:
@@ -174,7 +167,7 @@ def run(scenes: list[tuple[str, Callable]], model, recordings: list[Path], detec
     rows, skipped = [], []
     for name, look in scenes:
         s = look()
-        if name in AIRBORNE or not grounded(s):
+        if name in AIRBORNE or not s.grounded:
             skipped.append(name)
             continue
         rows += [dict(r, image=name) for r in feet_rows(s, model)]

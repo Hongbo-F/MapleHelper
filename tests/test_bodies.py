@@ -32,9 +32,6 @@ def test_feet_against_the_platform_they_were_put_on():
     model = SimpleNamespace(platform=lambda pid: platform)
     mob = Mob("pig", 200, 90, 46, 30, 0.9, ox=203.0, feet=106.0, facing=-1, pose="move", template="pig_2")
     monster = SimpleNamespace(mob=mob, kind="pig", platform=3, x=0.0)
-    scene = SimpleNamespace(monsters=[monster], map_y=lambda y: 500.0 + (y - 105) * 1.4, ground=(10, 40),
-                            tag_seen=True, platform=platform)
+    scene = SimpleNamespace(monsters=[monster], map_y=lambda y: 500.0 + (y - 105) * 1.4)
     row, = bodies.feet_rows(scene, model)
     assert row["cutout"] and row["bottom"] == pytest.approx(0.0) and row["origin"] == pytest.approx(1.4)
-    assert bodies.grounded(scene)
-    assert not bodies.grounded(SimpleNamespace(scene.__dict__ | {"ground": (20, 22)}))  # in the air
