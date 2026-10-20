@@ -26,9 +26,9 @@ from .control.timeline import action_events, chain, her_setup
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
 
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
-# `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes at
-# 10 a second (257 bytes each: 9 MB an hour) and tracks twice a second keep a day of watching under 400 MB,
-# inside the 2 GB telemetry keeps (telemetry.KEEP_BYTES).
+# `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes 10
+# times a second and tracks twice a second: on the saved frames a scene was 276 bytes and the tracks 845, so
+# about 16 MB an hour, 400 MB a day: the 2 GB telemetry keeps (telemetry.KEEP_BYTES) hold 5 days of it.
 WATCH_SCENE_S = 0.1
 WATCH_TRACKS_S = 0.5
 WATCH_STATUS_S = 10.0
@@ -283,8 +283,12 @@ def _feed(model, title: str):
 
     from .attack import reach
     from .localization import feed
-    client = feed.FeedClient(functools.partial(feed.screen_world, model.id, title, calibration.load().template,
-                                               (reach.LOOK_UP, reach.LOOK_DOWN)))
+    try:
+        client = feed.FeedClient(functools.partial(feed.screen_world, model.id, title, calibration.load().template,
+                                                   (reach.LOOK_UP, reach.LOOK_DOWN)))
+    except Exception as e:  # it couldn't even be started: the command goes on without
+        _log(f"feed: couldn't start it ({type(e).__name__}: {e}); looking without it")
+        return None
     if not client.alive:
         _log(f"feed: {client.why}; looking without it")
         client.close()
@@ -301,7 +305,8 @@ def _close_feeds() -> None:
         bye = client.bye or {}
         client.close()
         print(f"feed: {bye.get('frames', '?')} frames, {bye.get('placed', '?')} placing her, "
-              f"{bye.get('band', '?')} band and {bye.get('wide', '?')} whole-screen searches; {client.why or ''}")
+              f"{bye.get('band', '?')} band and {bye.get('wide', '?')} whole-screen searches; "
+              f"{client.served} looks and glances from it, {client.refused} taken without it; {client.why or ''}")
 
 
 def _log(message: str) -> None:

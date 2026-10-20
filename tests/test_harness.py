@@ -182,3 +182,16 @@ def test_a_short_harness_run_on_the_real_map():
     out = harness.run_one("tour", 1, "game", minutes=1.0)
     assert out["policy"] == "tour" and "SimTimeout" in out["result"] and out["exp_per_min"] >= 0
     assert set(harness.COLUMNS) - {"seed"} <= set(out)
+
+
+def test_a_harness_run_with_the_feed_and_todays_look_costs():
+    if not scenarios.available():
+        pytest.skip("needs the real map's data")
+    from gamelab.sim import fakes
+    coded = fakes.LOOK_S
+    out = harness.run_one("loop", 1, "game", minutes=0.5, feed=True, costs="measured")
+    assert out["feed"] and out["costs"] == "measured" and fakes.LOOK_S == coded  # put back after the run
+    rec = out["feed_record"]
+    assert rec["frames"] > 0 and rec["senses"]["from the feed"] > 0 and out["looks"] == rec["senses"]["taken here"]
+    blocking = harness.run_one("loop", 1, "game", minutes=0.5, costs="measured")
+    assert "feed_record" not in blocking and blocking["looks"] > 0

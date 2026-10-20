@@ -339,6 +339,7 @@ def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_s
     class Client:
         def __init__(self, make, alive):
             self.make, self.alive, self.why, self.hz, self.bye = make, alive, "" if alive else "no game", 30.0, None
+            self.served = self.refused = 0
             self.hello = {"pid": 1, "priority": feed.BELOW_NORMAL}
             started.append(self)
 

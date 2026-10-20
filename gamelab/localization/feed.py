@@ -108,7 +108,7 @@ class Ring:
 @dataclass
 class Runner:
     """What the feed looks with: its frames (perception.frames: the screen, or a list), the eyes that read
-    them (Eyes.look_at), and the world step; and, for `watch`, what else to do with each frame."""
+    them (Eyes.look_at), and the world step."""
     frames: object                 # .next(after) -> Frame | None
     eyes: Eyes
     step: WorldStep
@@ -221,6 +221,12 @@ def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: floa
         states.send(("bye", runner.step.counts))
     except (EOFError, BrokenPipeError, OSError):
         pass  # the stack is gone
+    except Exception as e:  # a bug: the stack is told why before it looks for itself
+        try:
+            states.send(("error", f"the feed stopped: {type(e).__name__}: {e}"))
+        except OSError:
+            pass
+        raise
     finally:
         ring.close()
 
@@ -313,6 +319,7 @@ class FeedClient(Feed):
         self.states: deque[WorldState] = deque(maxlen=KEEP)
         self.events: deque[Event] = deque(maxlen=EVENTS_KEPT)
         self.dropped = 0          # events lost because nothing drained them
+        self.served = self.refused = 0  # states handed out by latest(), and times it had none to give
         self.hello: dict | None = None
         self.bye: dict | None = None
         self.alive, self.why = False, "not started"
@@ -383,21 +390,22 @@ class FeedClient(Feed):
         with self._cond:
             while True:
                 if not self.alive:
+                    self.refused += 1
                     return None
                 for st in reversed(self.states):
                     if fresh(st, want):
                         self._seen_seq = max(self._seen_seq, st.seq)
+                        self.served += 1
                         return st
                 newest = self.states[-1] if self.states else None
-                if not self.alive or (newest is not None and newest.t >= want.after and not newest.visible):
-                    return None  # the game isn't on screen: the look brings it forward itself
+                left = deadline - time.monotonic()
+                if (newest is not None and newest.t >= want.after and not newest.visible) or left <= 0:
+                    self.refused += 1  # the game isn't on screen (the look brings it forward itself), or too slow
+                    return None
                 seq = newest.seq if newest is not None else 0
                 if seq != asked:  # nothing fresh as of the newest state: asked (again) of the next frame
                     self._send("ask", want)
                     asked = seq
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    return None
                 self._cond.wait(left)
 
     def frame_of(self, st: WorldState) -> np.ndarray:
