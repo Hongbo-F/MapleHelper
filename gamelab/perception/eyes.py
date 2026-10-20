@@ -35,6 +35,12 @@ EXP_TEXT = 150      # her EXP number's text pixels are brighter than this (in an
 GLANCE_EVERY_S = 0.063
 
 
+def band_rows(obs: Observation, up: float, down: float) -> tuple[int, int]:
+    """The rows of a look's frame from `up` map units above her feet to `down` below, above the bottom bar."""
+    feet, bottom = obs.floor_y, int(obs.frame.shape[0] * HUD_TOP)
+    return max(0, int(feet - up / UNITS_PER_HALF_PX)), min(bottom, int(feet + down / UNITS_PER_HALF_PX))
+
+
 def rgb_of(bgra: np.ndarray) -> np.ndarray:
     """A screen capture (BGRA, as mss gives it) as an RGB picture of its own. Viewed as RGB in place
     ([:, :, 2::-1]) it cost nothing here, but every OpenCV call on the view then copied it first: 17-20 ms
@@ -85,18 +91,24 @@ class Eyes:
 
     def look(self) -> Observation:
         """HP/MP, her name tag, the ground under her and her minimap dot; no monsters (`monsters`)."""
-        full = self._capture()
+        return self.look_at(self._capture())
+
+    def look_at(self, full: np.ndarray, t: float | None = None, ropes: bool | None = None) -> Observation:
+        """What a capture of the game window shows (full size, RGB), as `look` reads it: `t` is when the
+        screen showed it (by default now, the end of the look); `ropes` False leaves the rope search out
+        (by default `want_ropes`). The continuous feed (localization.feed) looks at frames it captured
+        itself this way."""
         hp, mp = bars(full)
         frame = cv2.resize(full, (full.shape[1] // SCALE, full.shape[0] // SCALE), interpolation=cv2.INTER_AREA)
         tag = self.name_tag.find(full)
         ground = ground_extent(frame, tag[0], tag[1] - TAG_BELOW_FEET) if tag else None
         dot = her_dot(full)
-        ropes = []
-        if self.want_ropes:
-            ropes = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None)
+        found = []
+        if self.want_ropes if ropes is None else ropes:
+            found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None)
         x0, y0, x1, y1 = EXP_NUMBER
-        return Observation(t=time.monotonic(), frame=frame, tag=tag, hp=hp, mp=mp, ground=ground, dot=dot,
-                           ropes=ropes, exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
+        return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=tag, hp=hp, mp=mp,
+                           ground=ground, dot=dot, ropes=found, exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from the newest frame (with DXGI 0.2 ms, with mss two grabs of 16.7
@@ -157,13 +169,19 @@ class Eyes:
 
     def monsters(self, obs: Observation, up: float, down: float) -> list[Mob]:
         """Monsters from `up` map units above her feet to `down` below (her screen position must be known)."""
-        feet, bottom = obs.floor_y, int(obs.frame.shape[0] * HUD_TOP)
-        return self.detector.detect(obs.frame, rows=(max(0, int(feet - up / UNITS_PER_HALF_PX)),
-                                                     min(bottom, int(feet + down / UNITS_PER_HALF_PX))))
+        return self.detector.detect(obs.frame, rows=band_rows(obs, up, down))
 
     def monsters_wide(self, obs: Observation) -> list[Mob]:
         """Every monster on screen (above the bottom bar)."""
         return self.detector.detect_wide(obs.frame, (0, int(obs.frame.shape[0] * HUD_TOP)))
+
+    def refind(self, obs: Observation, mob: Mob, box: tuple[int, int, int, int], fallback: bool = True) -> Mob | None:
+        """Monster `mob`, seen in an earlier frame, looked for again where its picture should be now (`box`:
+        x0, y0, x1, y1), above the bottom bar (MobDetector.refind; without `fallback`, only with the template
+        that matched it last)."""
+        h, w = obs.frame.shape[:2]
+        return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing, (0, 0, w, int(h * HUD_TOP)),
+                                    fallback)
 
     def bar(self, obs: Observation, mob: Mob) -> float | None:
         """A monster's HP bar (the fraction left), or None if it hasn't been hit."""

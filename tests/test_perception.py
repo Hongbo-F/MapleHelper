@@ -399,6 +399,68 @@ def test_monsters_in_saved_screenshots_found_as_before():
         assert core(six.detect_wide(frame, (0, 486))) == core(old_detect_wide(one, frame, (0, 486)))
 
 
+def box_of(m) -> tuple[int, int, int, int]:
+    return m.x - m.w // 2, m.y - m.h // 2, m.x + m.w // 2, m.y + m.h // 2
+
+
+def test_a_monster_seen_is_refound_where_it_walked_to():
+    # Seen in one frame, then a few px on in the next: the last template finds it in the window around
+    # where it was, at the same place the whole search puts it.
+    detector = MobDetector(threads=1)
+    first = detector.detect(with_monsters(("pig_0", 300, 420, False)))
+    assert [m.kind for m in first] == ["pig"]
+    for dx, dy in ((0, 0), (7, 0), (-12, 3)):
+        frame = with_monsters(("pig_0", 300 + dx, 420 + dy, False))
+        again = detector.refind(frame, box_of(first[0]), "pig", first[0].template, first[0].facing)
+        whole = detector.detect(frame)
+        assert again is not None and (again.kind, again.template) == ("pig", first[0].template)
+        assert (again.x, again.y) == (whole[0].x, whole[0].y)
+        assert abs(again.x - first[0].x - dx) <= 1 and abs(again.y - first[0].y - dy) <= 1
+
+
+def test_a_monster_that_turned_is_refound_with_its_kinds_other_templates(tmp_path):
+    # The picture that matched it faced left; it turned: the last template doesn't fit any more, and the
+    # kind's templates are tried in the window (they find it facing right).
+    rgba = np.asarray(Image.open(ASSETS / "pig_0.png"))
+    Image.fromarray(rgba).save(tmp_path / "pig_move9.png")
+    (tmp_path / INDEX).write_text('{"pig_move9.png": {"origin": [20, 60], "w": 104, "h": 64, "frame": "move/9"}}',
+                                  encoding="utf-8")
+    small = np.asarray(Image.fromarray(rgba).resize((52, 32)))
+    detector = MobDetector(tmp_path, threads=1)
+    frame = np.full((300, 400, 3), SKY, np.uint8)
+    frame[200:] = GRASS
+    paste(frame, small, 150, 168)
+    seen = detector.detect(frame)[0]
+    assert seen.facing == -1
+    turned = np.full((300, 400, 3), SKY, np.uint8)
+    turned[200:] = GRASS
+    paste(turned, small[:, ::-1], 154, 168)
+    again = detector.refind(turned, box_of(seen), "pig", seen.template, seen.facing)
+    assert again is not None and again.facing == 1 and abs(again.x - (154 + 26)) <= 1
+    assert again.foot_x == pytest.approx(154 + 52 - 10, abs=1)  # its feet, in the frame's px, not the window's
+
+
+def test_a_monster_gone_from_its_window_isnt_refound():
+    detector = MobDetector(threads=1)
+    seen = detector.detect(with_monsters(("pig_0", 300, 420, False)))[0]
+    assert detector.refind(with_monsters(("pig_0", 600, 420, False)), box_of(seen), "pig", seen.template) is None
+    assert detector.refind(with_monsters(), box_of(seen), "pig", seen.template) is None
+    assert detector.refind(with_monsters(("pig_0", 300, 420, False)), box_of(seen), "slime") is None
+
+
+def test_a_look_at_a_capture_is_a_look():
+    # look() is look_at(its capture): the feed hands it frames it captured itself.
+    rng = np.random.default_rng(1)
+    bgra = rng.integers(0, 256, (1080, 1920, 4), np.uint8)
+    eyes = bench.SavedEyes(np.zeros((10, 36), np.uint8))
+    eyes.show(bgra)
+    a, b = eyes.look(), eyes.look_at(rgb_of(bgra), t=5.0, ropes=False)
+    assert b.t == 5.0 and b.ropes == [] and a.ropes == []  # want_ropes is off without Senses
+    for name in ("tag", "hp", "mp", "ground", "dot"):
+        assert getattr(a, name) == getattr(b, name), name
+    assert np.array_equal(a.frame, b.frame) and np.array_equal(a.exp, b.exp)
+
+
 def test_window_cover_from_the_integral_image_is_the_tm_ccorr_sum():
     frame = with_monsters(("pig_0", 100, 420, False), ("slime_4", 400, 300, True))
     detector = MobDetector(threads=1)

@@ -17,6 +17,7 @@ BAR_ROW = 1064 / 1080
 BAR_SEARCH = 45   # half-size px either side of a monster's centre searched for its own HP bar
 BAR_ABOVE = 30    # ... and how far above its top
 BAR_MIN_RUN = 22  # half-size px of bar colours in a row that make a monster's HP bar
+EXP_CHANGED = 3   # pixels of her EXP number that must differ from the last look's for an EXP gain
 
 
 def bars(full: np.ndarray) -> tuple[float, float]:
@@ -40,6 +41,12 @@ def mp_fill(row: np.ndarray) -> float:
     """The share of a row of the MP bar (RGB, int16) that's blue: her MP left."""
     on = (row[:, 2] > 150) & (row[:, 0] < 90)
     return float(on.sum()) / max(1, len(row))
+
+
+def exp_changed(before: np.ndarray | None, now: np.ndarray | None) -> bool:
+    """Whether her EXP number (its text pixels, Observation.exp) changed between two looks: it went up."""
+    return (before is not None and now is not None and now.shape == before.shape
+            and int((now != before).sum()) >= EXP_CHANGED)
 
 
 def touch_popup(frame: np.ndarray, tag: tuple[int, int]) -> int:

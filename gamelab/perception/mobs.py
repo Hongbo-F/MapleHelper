@@ -17,7 +17,7 @@ template faces right), and its frame and pose.
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -40,6 +40,11 @@ COARSE = 2                   # step 1 works at 1/COARSE of the frame's size
 CHECK_SLACK = 6              # step 2 looks this far (px) around a spot, so spots closer than this are one
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
 THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the whole screen 250 -> 117 (8 are no faster)
+# A monster seen in the last frame is looked for again this far (px) around where it should be (`refind`):
+# at 30 frames a second a pig walking 125 units/s moves 3 px a frame, and where her minimap dot puts her
+# (which places the monsters on the map) can step by a minimap pixel, 11.4 units or 8 px, as she walks.
+# The research's prototype re-found 84 of 84 monsters in saved frames with 16 px, 78 with 8.
+REFIND_PAD = 16
 # What a folder of templates may say about them, by file name: where the monster's feet are in each picture
 # ("origin", in the picture's own px, of its size "w" x "h"), which way it faces ("faces_right"; the game's
 # sprites face left), its frame in the game data ("frame": "move/2") and that frame's body box ("lt", "rb").
@@ -203,12 +208,45 @@ class MobDetector:
         bands = self._map(lambda y0: self._detect(frame, (y0, min(rows[1], y0 + WIDE_BAND)), _serial), starts)
         return suppress_overlaps([hit for band in bands for hit in band])
 
+    def refind(self, frame: np.ndarray, box: tuple[int, int, int, int], kind: str, template: str = "",
+               facing: int = 0, bounds: tuple[int, int, int, int] | None = None, fallback: bool = True) -> Mob | None:
+        """A monster seen before, looked for again around where it should be: `box` (x0, y0, x1, y1, frame
+        px) is where its picture should be, searched REFIND_PAD px around (within `bounds`, by default the
+        frame). First the picture that matched it last (`template`, `facing`: Mob.template and Mob.facing; a
+        cut-out that doesn't know its facing, both ways), one masked match over the window; if that doesn't
+        reach THRESHOLD (and `fallback`), every template of its kind there, as `detect` does. The one found
+        nearest the box's centre, or None. On the caller's thread: a window is small, and the pool's
+        hand-offs cost more."""
+        h, w = frame.shape[:2]
+        bx0, by0, bx1, by1 = bounds or (0, 0, w, h)
+        x0, y0 = max(bx0, int(box[0]) - REFIND_PAD), max(by0, int(box[1]) - REFIND_PAD)
+        x1, y1 = min(bx1, int(box[2]) + REFIND_PAD), min(by1, int(box[3]) + REFIND_PAD)
+        if x1 <= x0 or y1 <= y0 or kind not in self.templates:
+            return None
+        window = frame[y0:y1, x0:x1]
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        best = None
+        for t in self.templates[kind]:
+            if not template or t.name != template or (facing and t.facing and t.facing != facing):
+                continue
+            th, tw = t.rgb.shape[:2]
+            if window.shape[0] < th or window.shape[1] < tw:
+                continue
+            _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, t.rgb, t.mask3))
+            if score >= THRESHOLD and (best is None or score > best.score):
+                best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
+        if best is not None or not fallback:
+            return best
+        found = [_moved(m, x0, y0) for m in self._detect(window, None, _serial, (kind,))]
+        return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
+
     def _map(self, fn, items) -> list:
         """fn of each item, in order: on the pool, or here with one thread."""
         return list(self._pool.map(fn, items)) if self._pool else [fn(item) for item in items]
 
-    def _detect(self, frame: np.ndarray, rows: tuple[int, int] | None, run) -> list[Mob]:
-        """detect, with `run(fn, items)` doing the matches (on the pool, or one after another)."""
+    def _detect(self, frame: np.ndarray, rows: tuple[int, int] | None, run, only=None) -> list[Mob]:
+        """detect, with `run(fn, items)` doing the matches (on the pool, or one after another); `only`: these
+        kinds alone (default: every kind)."""
         y_off = 0
         if rows:
             y_off = max(0, rows[0])
@@ -220,6 +258,8 @@ class MobDetector:
         coarse_size = (frame.shape[1] // COARSE, frame.shape[0] // COARSE)
         kinds = []  # (kind, its templates, its body colour at 1/COARSE size, that colour's cover)
         for kind, templates in self.templates.items():
+            if only is not None and kind not in only:
+                continue
             colour = palette(kind, frame, channels)
             if colour.sum() < MIN_BODY_PIXELS:
                 continue
@@ -248,6 +288,12 @@ def _seen(kind: str, t: MobTemplate, x: int, y: int, w: int, h: int, score: floa
     if t.origin is not None:  # the window's top-left (the centre is that plus half the size, rounded down)
         ox, feet = round(x - w // 2 + t.origin[0], 2), round(y - h // 2 + t.origin[1], 2)
     return Mob(kind, x, y, w, h, score, ox, feet, t.facing, t.pose, t.frame, t.name)
+
+
+def _moved(m: Mob, dx: int, dy: int) -> Mob:
+    """A monster found in a window of the frame, in the frame's px (the window's top-left at dx, dy)."""
+    return replace(m, x=m.x + dx, y=m.y + dy, ox=None if m.ox is None else round(m.ox + dx, 2),
+                   feet=None if m.feet is None else round(m.feet + dy, 2))
 
 
 def _one_opencv_thread() -> None:

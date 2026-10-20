@@ -33,12 +33,12 @@ from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..perception.eyes import Eyes
+from ..perception.hud import exp_changed
 from . import fight
 from .fight import Report
 from .ledger import DropStore, Ledger
 from .looting import Looter
 
-EXP_CHANGED = 3     # pixels of her EXP number that must differ from the last look's for an EXP gain
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
 # s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
@@ -126,7 +126,7 @@ class Hunter:
     def _vitals(self, s: Scene) -> None:
         """Her EXP number changed since the last look: a kill of hers. Her HP dropped: a hit (logged
         with how far it pushed her when no key was pressed)."""
-        if _exp_changed(self._exp, s.exp):
+        if exp_changed(self._exp, s.exp):
             self.exp_events.append(s.t)
             self.report.exp_kills += 1
             self.exp_gains += 1
@@ -167,9 +167,3 @@ class Hunter:
                                     "platform": before.platform.id, "time": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
         except OSError:
             pass
-
-
-def _exp_changed(before: np.ndarray | None, now: np.ndarray | None) -> bool:
-    """Whether her EXP number (its text pixels) changed between two looks: it went up."""
-    return (before is not None and now is not None and now.shape == before.shape
-            and int((now != before).sum()) >= EXP_CHANGED)
