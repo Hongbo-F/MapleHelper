@@ -768,8 +768,30 @@ def test_a_monster_seen_walking_heads_the_way_it_faces_from_its_first_sighting(m
     assert Tracker().update(10.0, [walker(400, 1)])[0].heading == 0
 
 
-def test_two_of_a_kind_walking_apart_are_told_apart_by_which_way_they_face():
+def test_two_standing_in_move_frames_are_matched_to_themselves_as_the_nearest():
+    # In game the pose is the matched template's, wrong for about a fifth of the sightings: two pigs standing
+    # 100 apart in move frames, facing each other, were each matched to the other by the way they faced
+    # (WALK_MATCH), and said to walk toward each other at 125 units/s. By default the nearest is matched.
+    from gamelab.localization import monsters
     from gamelab.localization.monsters import Tracker
+    assert not monsters.WALK_MATCH
+    pigs = [walker(0.0, 1), walker(100.0, -1)]
+    tracker = Tracker()
+    tracker.update(10.0, pigs)
+    assert [(t.heading, t.vx) for t in tracker.update(10.8, pigs)] == [(0, 0.0), (0, 0.0)]
+    monsters.WALK_MATCH = True
+    try:
+        tracker = Tracker()
+        tracker.update(10.0, pigs)
+        assert [t.vx for t in tracker.update(10.8, pigs)] == pytest.approx([-125.0, 125.0])  # swapped, as it was
+    finally:
+        monsters.WALK_MATCH = False
+
+
+def test_two_of_a_kind_walking_apart_are_told_apart_by_which_way_they_face(monkeypatch):
+    from gamelab.localization import monsters
+    from gamelab.localization.monsters import Tracker
+    monkeypatch.setattr(monsters, "WALK_MATCH", True)  # off by default (see above)
     # Two pigs 60 apart walk past each other: a second later each is nearer where the other was.
     a, b = walker(400, 1), walker(460, -1)
     tracker = Tracker()

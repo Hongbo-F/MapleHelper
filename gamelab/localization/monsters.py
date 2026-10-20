@@ -64,6 +64,14 @@ MIN_SPEED_DT = 0.2   # s between looks before its speed is worth measuring
 # trips with --rest-avoid 1.20 touches against 1.15). So off, until the planner's turn allowance is worked out
 # per second; fights don't use it (no difference in the tour or the hunt loop).
 FACING_HEADING = False
+# True: a sighting is matched to a monster the last look saw walking (a move frame) by where it can have got
+# to the way it faced (off_course), not by where it was, so two walking past each other aren't swapped. But
+# the pose comes from the template that matched, and in game that was wrong for 18% of the sightings of
+# monsters walking and 22% of those standing (`bodies` on 3 recordings with the camera still), for up to 1.4
+# s on end: two pigs standing 100 units apart in move frames, facing each other, were each matched to the
+# other and said to walk at 125 units/s. In the simulator, where poses are right, the tour and the hunt loop
+# came out the same either way. False: the nearest within MATCH_DX of where it was.
+WALK_MATCH = False
 # Speeds kept per kind (Tracker.speeds, for `nav`'s summary), the latest: one a monster a look, so kept
 # all, a look every frame would add about 110,000 an hour (4 MB); 400 is a few minutes' worth even at 1.4
 # looks a second, and enough for the summary's median and 90th percentile.
@@ -199,8 +207,8 @@ class MonsterTrack:
 
 class Tracker:
     """Which way the monsters walk, and how fast: each look's monsters matched to the last look's (on
-    the same platform, within MATCH_DX units, the last look under MATCH_WITHIN s ago): the nearest, or for
-    one seen walking, the nearest to the way it was going (off_course)."""
+    the same platform, within MATCH_DX units, the last look under MATCH_WITHIN s ago): the nearest, or (with
+    WALK_MATCH) for one seen walking, the nearest to the way it was going (off_course)."""
 
     def __init__(self, model: MapModel | None = None):
         """`model`: the map, for how fast its monsters walk (speeds)."""
@@ -213,8 +221,8 @@ class Tracker:
         """Tracks for the monsters of a look taken at `t` (time.monotonic). `seen_at`: when that look
         was, in the time of the plan they're for."""
         when, tracks = self.last
-        # The last look's tracks, each with how far it can have walked since, if it was seen walking.
-        before = [(mo, mo.facing * mo.speed * (t - when)) for mo in tracks] if t - when < MATCH_WITHIN else []
+        # The last look's tracks, each with how far it can have walked since, if it was seen walking (WALK_MATCH).
+        before = [(mo, mo.facing * mo.speed * (t - when) if WALK_MATCH else 0.0) for mo in tracks]             if t - when < MATCH_WITHIN else []
         out = []
         for m in monsters:
             if m.platform is None:
