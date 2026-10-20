@@ -55,7 +55,7 @@ def test_running_jump_keeps_the_arrow_held_through_the_air():
     c = Clock()
     actions.jump(c, RIGHT)
     [(t_right, _, _), (t_jump, _, _)] = [e for e in c.events if e[2] == "down"]
-    assert t_jump - t_right == MOVEMENT.reaction_ms  # already moving at takeoff
+    assert t_jump - t_right == actions.RUN_JUMP_AFTER_MS  # already moving at takeoff, and at full speed
     assert c.held("right")[0] >= MOVEMENT.reaction_ms + MOVEMENT.jump_airtime_ms
 
 
@@ -73,6 +73,16 @@ def test_jump_to_ledge_runs_and_jumps_without_stopping():
     m = MOVEMENT
     takeoff_px = (jump_at - m.reaction_ms) * m.walk_px_per_ms + m.walk_px_per_ms * m.reaction_ms
     assert takeoff_px == pytest.approx(60 - actions.EDGE_MARGIN_PX, abs=1)  # just short of her own edge
+
+
+def test_jump_to_ledge_never_keys_the_jump_before_she_has_reached_full_speed():
+    # Taking off within ~21 px, it keyed the jump 100 ms after the arrow, where by gamelab's engine a
+    # quarter of jumps leave short: too fast for the kick, short of full speed.
+    c = Clock()
+    actions.jump_to_ledge(c, LEFT, ledge_px=40, height_px=60, own_edge_px=25)
+    arrow = next(t for t, k, kind in c.events if k == "left" and kind == "down")
+    jump = next(t for t, k, kind in c.events if k == "alt" and kind == "down")
+    assert jump - arrow == actions.RUN_JUMP_AFTER_MS >= 118
 
 
 def test_jump_to_ledge_refuses_what_it_cant_make():

@@ -805,7 +805,8 @@ class World:
         if action in ("left", "right"):
             if (self.noise.tap_lost and (at - since) * 1000 <= TAP_LOST_MS + 1e-6 and action in self._seen_due
                     and self.chance("tap") < self.noise.tap_lost):
-                # A short tap lost: the game sees it let go as it sees it pressed (it turns her), so it doesn't walk her.
+                # A short tap lost: the game sees it let go as it sees it pressed (it turns her), and it doesn't
+                # walk her.
                 self._push(self._seen_due[action], "seen", (action, False))
                 return
             lag = self._lag(f"{action} up", LAGS.off, LAGS.sd_off)
