@@ -2,6 +2,7 @@
 (gamelab.ui.state.State), with a text panel under it. Pure drawing: a State in, an RGB picture out, so
 it's tested offline and the window only shows the result."""
 
+import copy
 import time
 
 import cv2
@@ -38,6 +39,12 @@ KIND = {"pig": (255, 150, 170), "slime": (110, 235, 110), "snail": (130, 170, 25
         "orange-mushroom": (255, 150, 40)}
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 JUMP_ARC = 77                # how high a jump's arc is drawn, in map units (physics.JUMP_HEIGHT)
+REACH_ALPHA = 0.35           # how strongly her reach's bands show over the map
+# The map's colours by name: the web page draws the same map in the browser, with these (web.map_payload).
+STYLE = {"background": BACKGROUND, "wall": WALL, "platform": PLATFORM, "safe": SAFE, "ground": GROUND,
+         "rope": ROPE, "portal": PORTAL, "text": TEXT, "dim": DIM, "her": HER, "route": ROUTE, "chain": CHAIN,
+         "danger": DANGER, "loot": LOOT, "drops": DROPS, "her_trail": HER_TRAIL, "unseen": UNSEEN,
+         "reach_facing": REACH_FACING, "reach_behind": REACH_BEHIND, "mob_hp": MOB_HP}
 
 
 class MapView:
@@ -54,35 +61,54 @@ class MapView:
         self.margin = margin
         self.map_h = int((self.y1 - self.y0) * self.scale) + 2 * margin
         self.size = (width, self.map_h + panel)
+        self._left = self._top = 0  # where the picture drawn on starts (draw(crop=...): a part of the map)
         self._base = self._draw_base()
+        self._roles: tuple | None = None   # the tour's (safe, grounds) drawn into _with_roles
+        self._with_roles = self._base
 
     def pt(self, x: float, y: float) -> tuple[int, int]:
         """Picture px of map point (x, y)."""
-        return (int(round((x - self.x0) * self.scale)) + self.margin,
-                int(round((y - self.y0) * self.scale)) + self.margin)
+        return (int(round((x - self.x0) * self.scale)) + self.margin - self._left,
+                int(round((y - self.y0) * self.scale)) + self.margin - self._top)
 
-    def draw(self, state: State) -> np.ndarray:
-        img = self._base.copy()
-        on_map = img[:self.map_h]  # map drawings stay out of the text panel
+    def draw(self, state: State, crop: tuple[int, int, int, int] | None = None) -> np.ndarray:
+        """The picture of `state`: the map with the text panel under it; or, with `crop` (left, top, width,
+        height in picture px), just that part of the map, drawn only there: /frame.jpg's "around her" is
+        900 px of a 2250-px map, which took 11 ms drawn whole and cut, and takes 1.5-2 ms. It's the same
+        as draw(state)[top:top + height, left:left + width] but for the antialiasing of lines where they
+        cross its edges (OpenCV cuts them there): 11-27 px of its 648,000 differ, on five recorded runs."""
         tour = state.tour or {}
-        self._platform_roles(on_map, tour)
-        self._tour(on_map, tour)
-        self._monsters(on_map, state.monsters)
-        self._route(on_map, state.route)
-        self._chain(on_map, state.chain)
-        self._drops(on_map, state.drops)
-        self._piles(on_map, state.hunt)
+        base = self._roles_layer(tour)
+        if crop is None:
+            img = base.copy()
+            self._layers(img[:self.map_h], state, tour)  # map drawings stay out of the text panel
+            self._panel(img, state)
+            return img
+        left, top, w, h = crop
+        h = min(h, self.map_h - top)
+        img = base[top:top + h, left:left + w].copy()
+        part = copy.copy(self)  # the same view, its points moved to the part's corner
+        part._left, part._top = left, top
+        part._layers(img, state, tour)
+        return img
+
+    def _layers(self, img, state: State, tour: dict) -> None:
+        """Everything drawn over the map (the tour's platforms are in the base already)."""
+        self._tour(img, tour)
+        self._monsters(img, state.monsters)
+        self._route(img, state.route)
+        self._chain(img, state.chain)
+        self._drops(img, state.drops)
+        self._piles(img, state.hunt)
         scene = state.scene or {}
         her = state.her()
         if her is not None:
-            self._reach(on_map, her)
-        self._monsters_seen(on_map, scene.get("monsters") or [], state.stance)
-        self._loot(on_map, scene.get("loot") or [])
-        self._trail(on_map, state.trail)
+            self._reach(img, her)
+        self._monsters_seen(img, scene.get("monsters") or [], state.stance)
+        self._loot(img, scene.get("loot") or [])
+        self._trail(img, state.trail)
         if her is not None:
-            self._her(on_map, her)
-        self._panel(img, state)
-        return img
+            self._her(img, her)
 
     # --- the map ----------------------------------------------------------------------------------
 
@@ -111,6 +137,16 @@ class MapView:
     def _platform(self, img, p, colour, thickness) -> None:
         for s in p.segments:
             cv2.line(img, self.pt(s.x1, s.y1), self.pt(s.x2, s.y2), colour, thickness, cv2.LINE_AA)
+
+    def _roles_layer(self, tour: dict) -> np.ndarray:
+        """The map with the tour's safe platforms and hunting grounds drawn in, kept until they change:
+        drawn every time, they were a quarter of a 900-px picture's 3.6 ms."""
+        key = (tuple(tour.get("safe") or ()), tuple(tour.get("grounds") or ()))
+        if key != self._roles:
+            img = self._base.copy() if any(key) else self._base
+            self._platform_roles(img[:self.map_h], tour)
+            self._roles, self._with_roles = key, img
+        return self._with_roles
 
     def _platform_roles(self, img, tour: dict) -> None:
         for pid in tour.get("safe") or []:
@@ -229,15 +265,27 @@ class MapView:
             cv2.rectangle(img, (x - r, y - r), (x + r, y + r), colour, 1)
 
     def _reach(self, img, her: dict) -> None:
-        """Where a star from her reaches: a band on each side, the side she faces brighter."""
+        """Where a star from her reaches: a band on each side, the side she faces brighter.
+
+        Blended into the rows the bands cover only: blending the whole picture (it comes out unchanged
+        outside the bands) was a third of a 900-px picture's time and over half of a 2250-px one's. Whole
+        rows and one more, as one block, so the result is the same to the last px: OpenCV's vector code
+        blends all but a block's last few px, which other code does, at times 1 level apart (blending each
+        band's own rectangle left a px at its right end 1 level off in 4 of 435 pictures)."""
         x, y = her["x"], her["y"]
-        overlay = img.copy()
+        h = img.shape[0]
+        top, bottom = self.pt(x, y - SHOT_UP)[1], self.pt(x, y + SHOT_DOWN)[1]
+        if bottom < 0 or top >= h:
+            return
+        first = max(top, 0) if bottom < h - 1 else 0  # down to the last row: the picture's own last px
+        rows = img[first:min(bottom + 2, h)]
+        overlay = rows.copy()
         for sign in (-1, 1):
             near, far = x + sign * min_dx(0), x + sign * STAR_REACH
-            a, b = self.pt(min(near, far), y - SHOT_UP), self.pt(max(near, far), y + SHOT_DOWN)
+            (ax, ay), (bx, by) = self.pt(min(near, far), y - SHOT_UP), self.pt(max(near, far), y + SHOT_DOWN)
             facing = her.get("facing") == directions.toward(sign)
-            cv2.rectangle(overlay, a, b, REACH_FACING if facing else REACH_BEHIND, -1)
-        cv2.addWeighted(overlay, 0.35, img, 0.65, 0, img)
+            cv2.rectangle(overlay, (ax, ay - first), (bx, by - first), REACH_FACING if facing else REACH_BEHIND, -1)
+        cv2.addWeighted(overlay, REACH_ALPHA, rows, 1 - REACH_ALPHA, 0, rows)
 
     def _trail(self, img, trail) -> None:
         if len(trail) >= 2:

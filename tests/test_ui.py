@@ -133,6 +133,104 @@ def test_the_hunt_loop_s_piles_and_rates_are_drawn():
     assert not np.array_equal(img, view.draw(State()))
 
 
+class OldView(MapView):
+    """MapView.draw as it was before it was made faster: the tour's platforms drawn every time, and the
+    reach bands blended over the whole picture."""
+
+    def draw(self, state):
+        img = self._base.copy()
+        on_map = img[:self.map_h]
+        tour = state.tour or {}
+        self._platform_roles(on_map, tour)
+        self._tour(on_map, tour)
+        self._monsters(on_map, state.monsters)
+        self._route(on_map, state.route)
+        self._chain(on_map, state.chain)
+        self._drops(on_map, state.drops)
+        self._piles(on_map, state.hunt)
+        scene = state.scene or {}
+        her = state.her()
+        if her is not None:
+            self._old_reach(on_map, her)
+        self._monsters_seen(on_map, scene.get("monsters") or [], state.stance)
+        self._loot(on_map, scene.get("loot") or [])
+        self._trail(on_map, state.trail)
+        if her is not None:
+            self._her(on_map, her)
+        self._panel(img, state)
+        return img
+
+    def _old_reach(self, img, her):
+        import cv2
+        from gamelab import directions
+        from gamelab.attack.reach import SHOT_DOWN, SHOT_UP, STAR_REACH, min_dx
+        from gamelab.ui.render import REACH_BEHIND, REACH_FACING
+        x, y = her["x"], her["y"]
+        overlay = img.copy()
+        for sign in (-1, 1):
+            near, far = x + sign * min_dx(0), x + sign * STAR_REACH
+            a, b = self.pt(min(near, far), y - SHOT_UP), self.pt(max(near, far), y + SHOT_DOWN)
+            facing = her.get("facing") == directions.toward(sign)
+            cv2.rectangle(overlay, a, b, REACH_FACING if facing else REACH_BEHIND, -1)
+        cv2.addWeighted(overlay, 0.35, img, 0.65, 0, img)
+
+
+def busy_state(m, x: float, y: float, facing: str, safe=None) -> State:
+    """A state with something of every kind on the map, her at (x, y)."""
+    a, b, c, d = by_y(m, 300, 100), by_y(m, 360, 300), by_y(m, 500, 400), by_y(m, 300, 700)
+    here = min((a, b, c, d), key=lambda p: abs(p.y_at(x) - y) if p.covers(x) else 1e9)
+    s = State()
+    s.apply({"topic": "session", "t": 0.0, "map": 1, "mode": "live"})
+    s.apply({"topic": "tour", "t": 0.1, "order": [d.id, b.id, c.id], "safe": [a.id] if safe is None else safe,
+             "grounds": [str(d.id), b.id]})
+    s.apply({"topic": "tour", "t": 0.2, "stop": b.id, "spot": {"platform": c.id, "x": 300}})
+    s.apply({"topic": "monsters", "t": 0.3, "list": [{"platform": b.id, "x": 300, "vx": 20, "reach": [260, 340]}]})
+    s.apply({"topic": "route", "t": 0.4, "moves": [{"kind": "climb", "src": c.id, "dst": d.id, "x": 700, "land_x": 700},
+                                                    {"kind": "jump", "src": d.id, "dst": d.id, "x": 650, "land_x": 760}]})
+    s.apply({"topic": "chain", "t": 0.5, "text": "run, jump", "legs": [
+        {"kind": "walk", "src": c.id, "dst": c.id, "spans": [[c.id, x, 700]], "end": {"platform": c.id, "x": 700}}]})
+    s.apply({"topic": "drops", "t": 0.6, "pending": [{"x": 150, "y": 300, "platform": a.id, "mesos": True},
+                                                      {"x": 250, "y": 500, "platform": c.id}]})
+    s.apply({"topic": "hunt", "t": 0.7, "rule": "shoot", "piles": [
+        {"x": 330, "y": 360, "platform": b.id, "status": "expected", "hers": True},
+        {"x": 500, "y": 500, "platform": c.id, "status": "seen", "urgent": True}]})
+    s.apply({"topic": "stance", "t": 0.8, "act": "throw", "aimed": [{"kind": "pig", "x": 600, "y": 500}]})
+    for i in range(6):
+        s.apply({"topic": "glance", "t": 0.9 + i / 10, "x": x - 60 + 10 * i, "y": y})
+    s.apply({"topic": "scene", "t": 1.5, "her": {"x": x, "y": y, "platform": here.id, "facing": facing, "seen": False},
+             "hp": 0.7, "mp": 0.4, "monsters": [{"kind": "pig", "x": 600, "y": 500, "platform": c.id, "bar": 0.5},
+                                                {"kind": "snail", "x": 120, "y": 300, "platform": a.id}],
+             "loot": [{"kind": "mesos", "x": 450, "y": 500, "platform": c.id}]})
+    s.apply({"topic": "log", "t": 1.6, "text": "pig down"})
+    return s
+
+
+def test_the_faster_drawing_is_pixel_identical():
+    m = model()
+    states = [busy_state(m, 400, 500, "right"),               # on the lowest platform: the bands reach its foot
+              busy_state(m, 100, 300, "left"),                # the bands cut by the picture's left edge
+              busy_state(m, 700, 300, "right", safe=[]),      # other tour platforms
+              busy_state(m, 760, 300, "right"), State()]
+    for width in (300, 760, 900, 2250):
+        old, new = OldView(m, width=width), MapView(m, width=width)
+        for s in states + states:  # again: the tour's platforms from the kept picture
+            assert np.array_equal(old.draw(s), new.draw(s))
+
+
+def test_the_part_around_her_is_drawn_in_place():
+    m = model()
+    s = busy_state(m, 400, 500, "right")
+    zoomed = MapView(m, width=900)
+    left, top, w, h = 300, 150, 360, 200  # her in it, the bands to its foot
+    whole = zoomed.draw(s)[top:top + h, left:left + w]
+    part = zoomed.draw(s, crop=(left, top, w, h))
+    assert part.shape == whole.shape
+    same = (part == whole).all(axis=2)
+    assert same.mean() > 0.999  # only lines cut by the part's edges are antialiased differently
+    x, y = zoomed.pt(400, 500 - 8)
+    assert tuple(part[y - top, x - left - 3]) == HER == tuple(whole[y - top, x - left - 3])
+
+
 def test_a_replay_plays_records_at_their_own_pace_and_can_seek():
     now = [0.0]
     records = [{"topic": "log", "t": 100.0 + i, "text": str(i)} for i in range(5)]

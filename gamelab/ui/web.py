@@ -98,7 +98,7 @@ class Feed:
         return self._jpeg[view][1]
 
     def _around_her(self):
-        """The part of the zoomed map around her (None while she hasn't been seen)."""
+        """The part of the zoomed map around her (None while she hasn't been seen), drawn only there."""
         her = self.state.her()
         if her is None:
             return None
@@ -106,13 +106,12 @@ class Feed:
         zoomed = self._zoomed.get(model.id)
         if zoomed is None:
             zoomed = self._zoomed[model.id] = MapView(model, width=int(self.view.size[0] * ZOOM))
-        rgb = zoomed.draw(self.state)[:zoomed.map_h]
         w = self.view.size[0]
-        h = min(int(w * AROUND), rgb.shape[0])
+        h = min(int(w * AROUND), zoomed.map_h)
         x, y = zoomed.pt(her["x"], her["y"])
-        left = min(max(x - w // 2, 0), rgb.shape[1] - w)
-        top = min(max(y - h // 2, 0), rgb.shape[0] - h)
-        return rgb[top:top + h, left:left + w]
+        left = min(max(x - w // 2, 0), zoomed.size[0] - w)
+        top = min(max(y - h // 2, 0), zoomed.map_h - h)
+        return zoomed.draw(self.state, crop=(left, top, w, h))
 
     def status(self) -> dict:
         """What the page shows as text."""
