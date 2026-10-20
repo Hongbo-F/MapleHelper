@@ -87,6 +87,10 @@ class Clock:
         # charged too, times `think` (1.0: as fast as this computer). Off by default: it makes runs vary.
         self.think = think
         self._mark: float | None = None
+        # (period, fn): fn(t) at every frame the game shows, as time passes it (a continuous feed's frames:
+        # localization.feed.SyncFeed.tick); None: no frames
+        self.frames: tuple[float, Callable[[float], None]] | None = None
+        self._next_frame = start
 
     def charge(self) -> None:
         """Charge the stack's computing since the last fake call (only with `think` set)."""
@@ -105,6 +109,17 @@ class Clock:
         return self.now - self.start
 
     def advance_to(self, t: float) -> None:
+        if t > self.now:
+            if self.frames is not None:
+                period, fn = self.frames
+                while self._next_frame <= t + 1e-9:
+                    frame, self._next_frame = self._next_frame, self._next_frame + period
+                    if frame >= self.now:
+                        self._to(frame)
+                        fn(frame)
+            self._to(t)
+
+    def _to(self, t: float) -> None:
         if t > self.now:
             if self.pace:  # to watch a run on the mini-map as it happens
                 _REAL["sleep"]((t - self.now) / self.pace)
@@ -269,8 +284,7 @@ class FakeEyes(Eyes):
         """What the screen shows now (the world advanced to the clock), as taken at `t`."""
         w, (x, y) = self.world, self.world.her()
         her = self.her_on_screen()
-        frame = np.empty(FRAME + (3,), np.uint8).view(Frame)
-        frame[:] = SKY
+        frame = _BLANK.copy().view(Frame)  # 0.3 ms, against 2.5 to fill a new one with SKY: the same pixels
         frame.screen = self._draw(frame, her, x, y)
         found = self._ropes(her, x, y) if ropes else []
         seen = not Noise.during(self.noise.tag_hidden, w.t)
@@ -357,6 +371,9 @@ class FakeEyes(Eyes):
             if 0 <= rx < 1920 and bottom - top >= 90:
                 out.append(ScreenRope(rx, top, bottom))
         return sorted(out, key=lambda r: (r.x, r.top))
+
+
+_BLANK = np.full(FRAME + (3,), SKY, np.uint8)
 
 
 def _bar(frame: np.ndarray, x: int, top: int, left: float) -> None:

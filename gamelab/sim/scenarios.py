@@ -36,7 +36,7 @@ from ..localization.mapdata import MapModel
 from ..control.navigator import Navigator
 from ..control.timeline import her_setup
 from ..behavior.tour import Tour
-from .fakes import Clock, FakeEyes, FakePlayer, SimTimeout, SimViolation, Trace, patched
+from .fakes import Clock, FakeDetector, FakeEyes, FakeLoot, FakePlayer, SimTimeout, SimViolation, Trace, patched
 from .world import Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
@@ -76,6 +76,7 @@ class Scenario:
     noise: Noise | None = None   # the real game's errors (world.Noise); None: none
     realism: Realism | None = None  # how busy and hard the map is (world.Realism); None: the default world
     think: float = 0.0           # charge the stack's computing to the fake clock (fakes.Clock); 0: free
+    feed: bool = False           # her looks and glances from a continuous feed (localization.feed.SyncFeed)
     expects: tuple = ()          # (what, trace -> bool): what the scenario is there for (tests check them)
     may_die: bool = False        # unless set, every scenario also expects her alive at the end
     doc: str = ""
@@ -110,6 +111,32 @@ class Sim:
         self.player = FakePlayer(self.world, self.clock, self.trace, self.keys)
         self.active = False
         self.files: dict[str, list[str]] = {}  # what the run wrote (under its stand-in for gamelab/lab)
+        self.senses = []  # every hunter's (for the feed's record)
+        self.feed = self._feed() if sc.feed else None
+
+    def _feed(self):
+        """A continuous feed on the world (SyncFeed): its own eyes (their detectors free, the feed's costs are
+        its own: feed.COSTS), the world step on them at every frame the clock passes."""
+        from ..attack.reach import LOOK_DOWN, LOOK_UP
+        from ..localization.feed import GAME_HZ, SyncFeed
+        from ..localization.senses import Senses
+        from ..localization.worldstate import WorldStep
+        self.frames = FakeEyes(self.world, self.clock, self.model, guard=self.guard)
+        self.frames.detector, self.frames._loot = FakeDetector(), FakeLoot()
+        feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN))), self.frames.observe)
+        self.clock.frames = (1.0 / GAME_HZ, feed.tick)
+        return feed
+
+    def feed_record(self) -> dict:
+        """What the feed did (the trace's 'feed'): frames, how many were asked for, the world step's and the
+        tracker's counts, and how many of her looks and glances came from it."""
+        f = self.feed
+        senses = {}
+        for s in self.senses:
+            for k, v in s.counts.items():
+                senses[k] = senses.get(k, 0) + v
+        return {"frames": f.counts["frames"], "asked": f.counts["asked"], "busy_s": round(f.counts["busy"], 3),
+                "step": dict(f.step.counts), "tracker": dict(f.step.tracker.counts), "senses": senses}
 
     def __enter__(self) -> "Sim":
         _import_all()
@@ -148,7 +175,8 @@ class Sim:
     # The stack, as gamelab/__main__.py builds it.
     def hunter(self, **kw) -> Hunter:
         self.guard()
-        h = Hunter(self.eyes, self.keys, self.model, log=self.log, **kw)
+        h = Hunter(self.eyes, self.keys, self.model, log=self.log, feed=self.feed, **kw)
+        self.senses.append(h.senses)
         play = h.actions.play  # every plan Actions plays (fights, single moves, tours): checked each time;
         # the navigator's chains go through client.send, which guard() checks through the fake player
 
@@ -216,6 +244,8 @@ def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = No
              "plans": sim.trace.plans, "cancels": sim.trace.cancels, "log": sim.trace.log,
              "world": sim.world.summary(), "world_log": sim.world.log, "eyes": dict(sim.eyes.counts),
              "files": sim.files}
+    if sim.feed is not None:
+        trace["feed"] = sim.feed_record()
     return trace, sim
 
 
@@ -1182,3 +1212,61 @@ def loop_rival(sim):
     """Another player on the map: half the monsters spawn, and a rival kills one every 20 s and takes its
     drops. Their kills give her no EXP, so the ledger has only hers."""
     return _loop(3)(sim)
+
+
+# The continuous feed (localization.feed; `--feed` on the hunting commands): her looks and glances from a feed
+# looking at every frame in a process of its own (SyncFeed on the fake clock), the same entry points.
+
+def _fed(tr: dict, at_least: float = 0.95) -> bool:
+    """Her looks came from the feed (at least this share; the rest she took herself, the feed too slow)."""
+    s = tr["feed"]["senses"]
+    return s["from the feed"] >= at_least * (s["from the feed"] + s["taken here"]) and s["from the feed"] > 0
+
+
+def _died(cause: str, at_least: int = 1):
+    return check(f"the feed saw {at_least}+ monsters die, killed by {cause}",
+                 lambda tr: tr["feed"]["tracker"][f"died {cause}"] >= at_least)
+
+
+@scenario((36, 300.0), monsters={36}, seed=7, feed=True,
+          expects=(ends("killed", key="ended"), check("looks from the feed", _fed), _died("hers")))
+def feed_hunt_kill(sim):
+    """hunt_kill with the feed: the slime nearest her, shot dead and looted; the feed follows it and puts her
+    EXP gain on it."""
+    return hunt_kill(sim)
+
+
+@scenario((36, 200.0), monsters="all", seed=4, feed=True,
+          expects=(ends("arrived"), moves("climb"), check("looks from the feed", _fed)))
+def feed_nav_monsters_basin(sim):
+    """nav_monsters_basin with the feed: across the basin floor and up onto 33, keeping clear of the monsters
+    (whole-screen looks: the screen is searched once a second, its monsters re-found every frame)."""
+    return _nav(33)(sim)
+
+
+@scenario((36, 300.0), monsters="all", seed=22, limit=400, feed=True,
+          expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
+                   logs("collecting drops on platform 36"), check("looks from the feed", _fed), _died("hers", 2)))
+def feed_tour_hunt_basin(sim):
+    """tour_hunt_basin with the feed (3 kills, not 5: the feed's frames take the simulator time): the basin
+    hunted on the platform itself, then its drops collected."""
+    return _tour_hunt(36, 3)(sim)
+
+
+@scenario((36, 300.0), monsters="all", seed=22, limit=400, feed=True,
+          expects=(_rule("shoot"), check("ten kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 10),
+                   check("every kill counted", _every_kill), check("looks from the feed", _fed),
+                   ends("standing by on a safe platform", key="stop")))
+def feed_loop_basin(sim):
+    """loop_basin with the feed, for 2 minutes: every kill in the ledger."""
+    return _loop(2)(sim)
+
+
+@scenario((36, 300.0), monsters="all", seed=25, limit=400, may_die=True, feed=True,
+          realism=Realism(spawn_share=0.5, rival_every=20.0),
+          expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
+                   _died("other"), check("looks from the feed", _fed)))
+def feed_loop_rival(sim):
+    """loop_rival with the feed, for 2 minutes: another player kills a monster every 20 s. The feed sees some
+    of those die with no EXP of hers: killed by someone else (the hunt loop doesn't read that yet)."""
+    return _loop(2)(sim)

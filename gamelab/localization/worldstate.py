@@ -28,7 +28,7 @@ from .monsters import Monster
 from .pose import Where
 from .scene import Loot, Scene, find_loot
 from .senses import Senses
-from .tracking import DYING, HIDDEN, LIVE, Event, MonsterTracker, Track, View, overlap, snapshot
+from .tracking import DYING, HIDDEN, LIVE, Event, MonsterTracker, Track, View, overlap, same, snapshot
 
 # Ropes are searched every frame: placed by a rope in one frame and by her dot alone in the next, her x (and
 # with it every monster's) would step by up to a minimap pixel (11.4 units) from frame to frame, which the
@@ -187,10 +187,12 @@ class WorldStep:
             self.counts["fallbacks"] += work["fallbacks"]
         her = (s.where.x, s.where.y) if placed else None
         events += self.tracker.update(t, refound, found, self._view(s) if placed else None, her)
-        seen: list[Monster] = []
-        for m in list(refound.values()) + found:
-            if not any(m.kind == k.kind and overlap(m.mob, k.mob) for k in seen):
+        seen: list[Monster] = []  # re-found (two tracks may have found one), then what the searches found anew
+        for m in refound.values():
+            if not any(same(m.mob, k.mob) for k in seen):
                 seen.append(m)
+        again = list(seen)
+        seen += [m for m in found if not any(m.kind == k.kind and overlap(m.mob, k.mob) for k in again)]
         loot, wide_loot = None, False
         if placed:
             wide_loot = asks.loot_wide or (sch.loot_wide_s is not None and (
