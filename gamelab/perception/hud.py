@@ -71,17 +71,14 @@ def hp_bar(frame: np.ndarray, x: int, top: int) -> float | None:
     # Any shade of pure green (the half-size frame blends green and black where they meet), black,
     # or the dark red of the latest damage.
     inside = (b < 15) & ((r < 15) | ((r > 90) & (g < 50)))
-    # The longest run of bar colours in any row (the first of equally long ones).
-    best = None
-    for y in range(inside.shape[0]):
-        run, start = 0, 0
-        for i, on in enumerate(inside[y]):
-            run = run + 1 if on else 0
-            if run == 1:
-                start = i
-            if run >= BAR_MIN_RUN and (best is None or run > best[0]):
-                best = (run, y, start)
-    if best is None:
+    # The longest run of bar colours in any row (the first of equally long ones, row by row). Each row is
+    # padded with a pixel off at both ends, so its runs start where it steps up and end where it steps down,
+    # one end for each start, in the same order.
+    steps = np.diff(np.pad(inside, ((0, 0), (1, 1))).view(np.int8), axis=1)
+    rows, starts = np.nonzero(steps == 1)
+    runs = np.nonzero(steps == -1)[1] - starts
+    if runs.size == 0 or runs.max() < BAR_MIN_RUN:
         return None
-    run, y, start = best
+    i = int(np.argmax(runs))
+    run, y, start = int(runs[i]), int(rows[i]), int(starts[i])
     return float(green[y, start:start + run].sum()) / run

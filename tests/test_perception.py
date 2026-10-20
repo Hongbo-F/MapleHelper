@@ -365,3 +365,44 @@ def test_window_cover_from_the_integral_image_is_the_tm_ccorr_sum():
             ccorr = cv2.matchTemplate(coarse, np.ones((h, w), np.float32), cv2.TM_CCORR)
             assert cover.sums(h, w).shape == ccorr.shape
             assert np.abs(cover.sums(h, w) - ccorr).max() / (h * w) < 1e-4
+
+
+def loop_hp_bar(frame, x, top):
+    """hud.hp_bar as it was: the longest run found pixel by pixel in Python."""
+    y0, x0 = max(0, top - hud.BAR_ABOVE), max(0, x - hud.BAR_SEARCH)
+    box = frame[y0:max(y0, top + 2), x0:x + hud.BAR_SEARCH].astype(np.int16)
+    if box.size == 0:
+        return None
+    r, g, b = box[..., 0], box[..., 1], box[..., 2]
+    green = (g > 120) & (r < 15) & (b < 15)
+    inside = (b < 15) & ((r < 15) | ((r > 90) & (g < 50)))
+    best = None
+    for y in range(inside.shape[0]):
+        run, start = 0, 0
+        for i, on in enumerate(inside[y]):
+            run = run + 1 if on else 0
+            if run == 1:
+                start = i
+            if run >= hud.BAR_MIN_RUN and (best is None or run > best[0]):
+                best = (run, y, start)
+    if best is None:
+        return None
+    run, y, start = best
+    return float(green[y, start:start + run].sum()) / run
+
+
+def test_monster_hp_bars_read_as_before():
+    rng = np.random.default_rng(0)
+    colours = np.array([(0, 196, 0), (0, 130, 0), (0, 0, 0), (140, 0, 0), SKY, GRASS, (165, 165, 165)], np.uint8)
+    seen = 0
+    for _ in range(300):
+        frame = np.full((120, 160, 3), SKY, np.uint8)
+        for _ in range(rng.integers(1, 6)):  # bars and runs of bar colours, some of them as long as each other
+            y, x0 = rng.integers(0, 120), rng.integers(0, 150)
+            frame[y:y + rng.integers(1, 5), x0:x0 + rng.choice([20, 22, 25, 25, 30, 36, 60])] = colours[rng.integers(0, 4)]
+        frame[rng.random((120, 160)) < 0.05] = colours[rng.integers(0, 7)]  # specks
+        for x, top in [(rng.integers(-10, 170), rng.integers(-10, 130)) for _ in range(4)] + [(80, 60), (5, 3)]:
+            old = loop_hp_bar(frame, x, top)
+            assert hud.hp_bar(frame, x, top) == old
+            seen += old is not None
+    assert seen > 200
