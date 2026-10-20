@@ -55,6 +55,7 @@ class Senses:
         s = None
         if self.feed is not None and self.feed.alive:
             s = self.feed.look(self, mobs, wide, loot, mesos_only)
+        served = s is not None
         if s is None:
             s = self.place(self.eyes.look())
             if mobs and s.tag is not None and s.where is not None:
@@ -67,7 +68,9 @@ class Senses:
         else:
             self.counts["from the feed"] += 1
         if self.feed is not None:
-            s.events = self.feed.drain_events() if self.feed.alive else None
+            # What the feed saw up to the frame this look shows (all of it for a look taken here, now): an EXP
+            # gain of a later frame goes with the next look, whose monsters no longer show the one it killed.
+            s.events = self.feed.drain_events(s.t if served else None) if self.feed.alive else None
         for listener in self.listeners:
             listener(s)
         return s

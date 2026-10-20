@@ -309,6 +309,28 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     assert eyes.glances == 1
 
 
+def test_a_look_takes_the_feeds_events_up_to_its_frame_and_the_later_ones_go_with_the_next(sync, monkeypatch):
+    # A look may be handed a state older than the newest (the frame searched for drops): an EXP gain of a later
+    # frame goes with the next look, whose monsters no longer show the one it killed.
+    from dataclasses import replace
+
+    from gamelab.localization.tracking import Event
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    clock.sleep(0.5)
+    s = senses.look(mobs=False)
+    t = s.t
+    f.events.extend([Event("exp_gain", t + 0.4), Event("hp_drop", t + 0.5), Event("exp_gain", t + 0.6)])
+    served = iter([replace(s, t=t + 0.5), replace(s, t=t + 0.7)])
+    monkeypatch.setattr(f, "look", lambda *a: next(served))
+    assert [(e.kind, e.t) for e in senses.look().events] == [("exp_gain", t + 0.4), ("hp_drop", t + 0.5)]
+    assert [(e.kind, e.t) for e in senses.look().events] == [("exp_gain", t + 0.6)]
+    # A look the feed couldn't give is taken here, now: everything the feed saw goes with it.
+    f.events.append(Event("exp_gain", t + 2.0))
+    monkeypatch.setattr(f, "look", lambda *a: None)
+    assert [e.t for e in senses.look(mobs=False).events] == [t + 2.0]
+
+
 def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_game_forward(monkeypatch, tmp_path):
     from maplehelper import win32
 

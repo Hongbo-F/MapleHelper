@@ -16,8 +16,8 @@ The stack's side (`FeedClient`) keeps the last few states, read off the pipe by 
   that very frame (a pile just picked up must not be seen again). If none has, it asks for it on the next
   frame and waits, FEED_WAIT_S at most; then (or once the game isn't in front, or the child has died) None,
   and Senses takes the look itself as before.
-- `wait_frame(timeout)`: until a new frame's state comes; `drain_events()`: every event since the last
-  drain, each once.
+- `wait_frame(timeout)`: until a new frame's state comes; `drain_events(upto)`: every event since the last
+  drain of a frame up to the one a look shows, each once.
 
 `SyncFeed` is the same thing in-process for the simulator: its clock calls `tick` at every frame the game
 shows, the world step runs on the fake eyes there, and each state is ready its measured cost (COSTS) after
@@ -304,7 +304,9 @@ class Feed:
         """Wait until a new frame's state comes (True), `timeout` s at most."""
         raise NotImplementedError
 
-    def drain_events(self) -> list[Event]:
+    def drain_events(self, upto: float | None = None) -> list[Event]:
+        """Every event not drained yet of a frame shown at `upto` or before (None: all), each once; the later
+        ones wait for the next drain."""
         raise NotImplementedError
 
     def throw(self, t: float, side: str) -> None:
@@ -433,11 +435,9 @@ class FeedClient(Feed):
             return self._cond.wait_for(lambda: not self.alive or (self.states and self.states[-1].seq > seen),
                                        timeout) and self.alive
 
-    def drain_events(self) -> list[Event]:
+    def drain_events(self, upto: float | None = None) -> list[Event]:
         with self._cond:
-            out = list(self.events)
-            self.events.clear()
-        return out
+            return _drain(self.events, upto)
 
     def throw(self, t: float, side: str) -> None:
         if self.alive:
@@ -461,6 +461,15 @@ class FeedClient(Feed):
         if getattr(self, "ring", None) is not None:
             self.ring.close(unlink=True)
             self.ring = None
+
+
+def _drain(events: deque[Event], upto: float | None) -> list[Event]:
+    """Take the events of frames shown at `upto` or before (all if None) off the front of `events` (in frame
+    order: each state's come after the one before's)."""
+    out = []
+    while events and (upto is None or events[0].t <= upto + 1e-9):
+        out.append(events.popleft())
+    return out
 
 
 # --- in-process, for the simulator ---------------------------------------------------------------------
@@ -499,7 +508,7 @@ class SyncFeed(Feed):
     def __init__(self, step: WorldStep, look: Callable[[bool], Observation], costs: Costs = COSTS, hz: float = HZ):
         self.step, self._look, self.costs, self.hz = step, look, costs, hz
         self.states: deque[tuple[float, WorldState]] = deque(maxlen=KEEP)  # (ready at, state)
-        self.events: list[Event] = []
+        self.events: deque[Event] = deque()
         self.asks: Asks | None = None
         self.busy_until = -1e18
         self.next_due = -1e18
@@ -521,7 +530,7 @@ class SyncFeed(Feed):
         self.counts["asked"] += asked
         self.counts["busy"] += cost
         self.states.append((t + cost, st))
-        self.events += st.events
+        self.events.extend(st.events)
 
     def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
         deadline = time.monotonic() + timeout
@@ -554,9 +563,8 @@ class SyncFeed(Feed):
             time.sleep(max(1e-4, min(later + [now + 1.0 / GAME_HZ, deadline]) - now))
         return False
 
-    def drain_events(self) -> list[Event]:
-        out, self.events = self.events, []
-        return out
+    def drain_events(self, upto: float | None = None) -> list[Event]:
+        return _drain(self.events, upto)
 
     def throw(self, t: float, side: str) -> None:
         self.step.throw(t, side)
