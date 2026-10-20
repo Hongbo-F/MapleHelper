@@ -178,3 +178,63 @@ def test_the_web_page_serves_the_map_and_the_text_with_its_key_only():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_the_minimap_starts_the_window_and_the_web_page_or_just_one(monkeypatch):
+    import gamelab.__main__ as cli
+    from gamelab.ui import app, web
+    started = []
+
+    class Window:
+        def __init__(self, view_for, source, live, position=None):
+            started.append("window")
+
+        def run(self):
+            pass
+
+    def start(feed, **kw):
+        started.append("web")
+        return "server"
+    monkeypatch.setattr(app, "MapWindow", Window)
+    monkeypatch.setattr(web, "start", start)
+    monkeypatch.setattr(web, "stop", lambda server: started.append("web stopped"))
+    monkeypatch.setattr(web, "Feed", lambda view_for, source, live: None)
+    monkeypatch.setattr(cli, "_map_views", lambda args, width: lambda map_id: SimpleView())
+    monkeypatch.setattr(cli, "_map_source", lambda args: (None, True))
+    monkeypatch.setattr(cli, "_beside_game", lambda w, h: None)
+    parser = cli.build_parser()
+
+    def run(*argv):
+        started.clear()
+        args = parser.parse_args(["minimap", *argv])
+        assert args.func(args) in (0, 1)
+        return list(started)
+    assert run() == ["web", "window", "web stopped"]  # both; closing the window stops the page too
+    assert run("--window-only") == ["window"]
+    monkeypatch.setattr(cli.time, "sleep", lambda s: (_ for _ in ()).throw(KeyboardInterrupt))  # Ctrl+C at once
+    assert run("--web-only") == ["web", "web stopped"]
+
+    def taken(feed, **kw):
+        raise OSError("address already in use")
+    monkeypatch.setattr(web, "start", taken)
+    assert run() == ["window"]  # the port taken: the window still opens
+
+
+class SimpleView:
+    size = (760, 600)
+
+
+def test_the_web_page_can_be_served_in_the_background_and_stopped():
+    import urllib.request
+
+    from gamelab.ui.sources import ReplaySource
+    from gamelab.ui.web import Feed, start, stop
+    m = model()
+    feed = Feed(lambda map_id: MapView(m, width=300), ReplaySource([]), live=False)
+    lines = []
+    server = start(feed, host="127.0.0.1", port=0, key="k", announce=lines.append)
+    try:
+        assert urllib.request.urlopen(f"http://127.0.0.1:{server.port}/state.json?k=k").status == 200
+        assert lines[1] == f"  http://127.0.0.1:{server.port}/?k=k" and len(lines) == 2  # this computer only
+    finally:
+        stop(server)

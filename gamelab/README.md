@@ -97,9 +97,9 @@ Other commands (`python -m gamelab -h` lists them all):
 | `tour --stops 3 --kills 5` | A hunting sweep of the map, then rest and stand by |
 | `tour --loop --minutes 20` | The hunt loop instead of the sweep's stops (`docs/hunt-modes.md`; simulator-tested only): one decision after every look, for 20 minutes, then rest and stand by |
 | `tour --rest-avoid` | On the trips to rest and to stand by, keep clear of monsters instead of shooting the ones in the way (simulator-tested only) |
-| `minimap` | The live mini-map window, following the run in progress; see below |
+| `minimap` | The live mini-map, following the run in progress: a window beside the game, and the same as a web page for a phone on the same Wi-Fi; see below |
+| `minimap --window-only`, `minimap --web-only` | Just one of the two (`web` is short for `minimap --web-only`) |
 | `minimap --replay FILE`, `minimap --plan 36 2` | Replay a recorded run, or show the route between two platforms; no game needed |
-| `web` (also `--replay FILE`, `--plan 36 2`) | The mini-map as a web page, to watch from a phone on the same Wi-Fi; see below |
 | `sim SCENARIO --speed 4` | Run the stack offline on the simulator, recorded for the mini-map; `sim list` names the scenarios |
 | `do walk left 150`, `do climb_rope 300`, `do pick_up 2`, `do rest 40` | Run one move from `maplehelper/actions.py` in the game, recorded |
 | `act right*800 alt 500 @960,540 --record` | Ad-hoc steps: `KEY` tap, `KEY*MS` hold, `KEY+`/`KEY-` press/release, `MS` wait, `@X,Y` move the mouse |
@@ -112,7 +112,7 @@ Other commands (`python -m gamelab -h` lists them all):
 
 ## The mini-map
 
-`python -m gamelab minimap` opens a window that draws the map from the game data, and on it what the stack sees and plans, as it happens:
+`python -m gamelab minimap` opens a window that draws the map from the game data, and on it what the stack sees and plans, as it happens (it also serves the same as a web page for a phone: see "On a phone" below):
 
 - **Localization:** her position (yellow; a magenta ring when placed from the minimap dot because her name tag is hidden) with the way she faces and her trail, HP and MP, and how her position was worked out (rope, edge or dot).
 - **Perception:** the monsters in the last look, coloured by kind, with their HP bars once hit; the drops seen on the ground (yellow), and those remembered for later (hollow squares).
@@ -122,7 +122,7 @@ Other commands (`python -m gamelab -h` lists them all):
 - **The tour:** its stops in order, the current one, the spot she shoots it from, the safe platforms (teal) and the hunting grounds (bright green). Below the map, the latest log lines.
 - **The hunt loop** (`tour --loop`): the grounds visited, the current one and its spot; under the map, the rule that decided the last step, the objective, her EXP rate on this ground and the rate to beat elsewhere; on it, the piles in its drop store (hers bright, others' dim, expected ones small, urgent ones red).
 
-**On a phone:** `python -m gamelab web` serves the same picture as a web page, for a phone on the same Wi-Fi. It prints two addresses: one for this computer, and one for the phone (opened on the computer, the page also shows a QR code of it). Each address ends in a key that changes every time, so nobody else on the network can watch; `--key WORD` keeps it the same, so a bookmark keeps working. The page shows the map, either the part around her (the default on a phone) or the whole of it, with HP and MP, the hunt loop's rule, objective and rates, the fight, the moves, her position and the latest log lines, refreshed a few times a second. A replay (`--replay FILE`) gets buttons to pause, change the speed and jump 10 s. The first time, Windows may ask whether Python may accept connections: allow it on private networks. `--host 127.0.0.1` serves this computer only. Like the window, it only reads the telemetry: it sends no keys and never touches the game.
+**On a phone:** `minimap` also serves the same picture as a web page, for a phone on the same Wi-Fi, from the same process (no administrator rights; closing the window stops it too). `--window-only` starts just the window, and `--web-only` (or `python -m gamelab web`) just the page. If the page's port is taken, the window still opens (`--port` picks another). It prints two addresses: one for this computer, and one for the phone (opened on the computer, the page also shows a QR code of it). Each address ends in a key that changes every time, so nobody else on the network can watch; `--key WORD` keeps it the same, so a bookmark keeps working. The page shows the map, either the part around her (the default on a phone) or the whole of it, with HP and MP, the hunt loop's rule, objective and rates, the fight, the moves, her position and the latest log lines, refreshed a few times a second. A replay (`--replay FILE`) gets buttons to pause, change the speed and jump 10 s (the page and the window each play it with their own controls). The first time, Windows may ask whether Python may accept connections: allow it on private networks. `--host 127.0.0.1` serves this computer only. Like the window, it only reads the telemetry: it sends no keys and never touches the game.
 
 Hunting commands (`hunt clear`/`kill`, `nav`, `tour`) record what they see and plan to `lab/telemetry/<time>-<command>.jsonl` (`gamelab/telemetry.py`). The window follows the newest of those files, so it can be opened before or during a run. Live, the window never takes focus from the game: the player only presses keys while the game is in front, and screen captures see whatever is on top. So it goes beside the game window when the screen has room, and clicks on it don't activate it. A replay (`--replay FILE`, also last night's `lab/sweep_track.json`) is an ordinary window: space pauses, + and - change the speed, and the arrow keys jump 10 s.
 

@@ -261,24 +261,39 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200 if ok else 400, b"ok" if ok else b"no such control", "text/plain")
 
 
-def serve(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None,
-          announce: Callable[[str], None] = print) -> None:
-    """Serve the page until Ctrl+C."""
+def start(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None,
+          announce: Callable[[str], None] = print, ends: str = "Ctrl+C stops it") -> WebServer:
+    """Serve the page in the background (threads of this process); returns the server, for stop().
+    Raises OSError if the port can't be had (another one already serving it)."""
     server = WebServer(feed, host, port, key)
     feed.start()
-    announce("the mini-map, in a browser (Ctrl+C stops it):")
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.25}, name="web", daemon=True).start()
+    announce(f"the mini-map, in a browser ({ends}):")
     for u in server.urls():
         announce(f"  {u}")
     if host not in ("127.0.0.1", "localhost"):
         announce("on a phone: the same Wi-Fi, and the second address (Windows may ask to let Python through "
                  "its firewall: allow it on private networks)")
+    return server
+
+
+def stop(server: WebServer) -> None:
+    server.feed.stop()
+    server.shutdown()
+    server.server_close()
+
+
+def serve(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None,
+          announce: Callable[[str], None] = print) -> None:
+    """Serve the page until Ctrl+C."""
+    server = start(feed, host, port, key, announce)
     try:
-        server.serve_forever(poll_interval=0.25)
+        while True:
+            time.sleep(0.5)
     except KeyboardInterrupt:
         pass
     finally:
-        feed.stop()
-        server.server_close()
+        stop(server)
 
 
 PAGE = r"""<!doctype html>
