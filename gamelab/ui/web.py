@@ -792,6 +792,7 @@ function snapshot(s) {
 }
 function update(u) {
   setClock(u);
+  if (DEBUG) late(u.records);
   for (const r of u.records) apply(r);
   if (u.records.length) rev++;
   if (u.status) { Object.assign(status, u.status); textChanged = true; }
@@ -1078,11 +1079,23 @@ function tick() {   // 4 times a second: the text, the log, the clock
   } else if (!M) empty.textContent = lost() && quiet() > 3000 ? "can't reach the mini-map: trying again..." : "waiting for a run...";
 }
 
-// ?debug=1: how fast it draws, what comes over the network, and how old the data on screen is
+// ?debug=1: how fast it draws, what comes over the network, and how late it comes
+const lates = [];   // [when it came (performance.now ms), how late its newest record came (ms)]
+function late(records) {
+  // Against the run's clock as the server sent it, set by the message that came quickest: how much
+  // later than that this one came, and how long its record waited to be sent. Wi-Fi adds about half
+  // the round trip (shown next to it). Not how old the newest record is: between moves she's looked
+  // at only a few times a second, so that's often several hundred ms with nothing slow.
+  let t = null;
+  for (const r of records) if (typeof r.t === "number" && (t == null || r.t > t)) t = r.t;
+  if (t != null && clock) keep(lates, [performance.now(), (runNow() - t) / (clock.rate || 1) * 1000], 2000);
+}
 let was = {t: performance.now(), frames: 0, drawn: 0, msgs: 0, bytes: 0};
 function debug() {
   const now = performance.now(), dt = (now - was.t) / 1000;
   const ms = perf.ms.slice().sort((a, b) => a - b), q = f => ms.length ? ms[Math.floor(f * (ms.length - 1))].toFixed(2) : "-";
+  const recent = lates.filter(l => now - l[0] < 5000).map(l => l[1]).sort((a, b) => a - b);
+  const lq = f => recent.length ? Math.round(recent[Math.floor(f * (recent.length - 1))]) : "-";
   const t = runNow(), age = t == null || !S.t ? "-" : Math.round((t - S.t) * 1000);
   $("debug").textContent =
     "fps " + ((perf.frames - was.frames) / dt).toFixed(0) + ", drawn " + ((perf.drawn - was.drawn) / dt).toFixed(0) + "/s\n" +
@@ -1090,7 +1103,8 @@ function debug() {
     "msgs " + ((net.msgs - was.msgs) / dt).toFixed(1) + "/s, " + ((net.bytes - was.bytes) / dt / 1024).toFixed(2) +
     " KiB/s, " + (net.bytes / 1024).toFixed(0) + " KiB\n" +
     "reconnects " + Math.max(0, net.opens - 1) + " (" + net.restarts + " by the page)\n" +
-    "data age " + age + " ms + rtt/2 " + (net.rtt == null ? "-" : Math.round(net.rtt / 2)) + " ms\n" +
+    "late p50 " + lq(.5) + " p90 " + lq(.9) + " ms (last 5 s) + rtt/2 " + (net.rtt == null ? "-" : Math.round(net.rtt / 2)) + " ms\n" +
+    "newest record " + age + " ms ago\n" +
     "her " + Math.round(DELAY * 1000) + " ms behind, canvas " + cv.width + "x" + cv.height + " at " +
     +(window.devicePixelRatio || 1).toFixed(2) + "x";
   was = {t: now, frames: perf.frames, drawn: perf.drawn, msgs: net.msgs, bytes: net.bytes};

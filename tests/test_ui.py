@@ -659,7 +659,9 @@ def test_the_page_s_map_matches_the_window_s():
     assert payload["reach"]["star"] == STAR_REACH and payload["zoom"] == 2.5
 
 
-def test_the_page_folds_records_as_the_state_does():
+def test_the_page_is_given_the_state_s_topics_and_lengths():
+    """Only that its copy of State.apply keeps what the server's keeps: no test here runs the page's
+    JavaScript (its state was compared with /state.json by hand, in a browser)."""
     import json
     import re
     import urllib.request
