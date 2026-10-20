@@ -132,8 +132,8 @@ class WorldStep:
         self._exp: np.ndarray | None = None
         self._hp: float | None = None
         self._hit_at = -1e9
-        self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "band": 0,
-                       "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "hits": 0}
+        self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "fallbacks": 0,
+                       "band": 0, "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "hits": 0}
 
     def throw(self, t: float, side: str) -> None:
         """She threw toward `side` at t."""
@@ -156,6 +156,7 @@ class WorldStep:
         s = self.senses.place(obs)
         events = self._vitals(s, t)
         work = {"re-finds": 0, "fallbacks": 0, "band": 0, "wide": 0, "loot strips": 0}
+        fallbacks = getattr(self.eyes.detector, "fallbacks", 0)
         refound: dict[int, Monster] = {}
         found: list[Monster] = []
         placed = s.tag is not None and s.where is not None
@@ -168,7 +169,6 @@ class WorldStep:
                 if box is None:
                     continue
                 work["re-finds"] += 1
-                work["fallbacks"] += tr.state != HIDDEN
                 m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN)
                 if m is not None:
                     refound[tr.id] = s.place(m, self.model, self.eyes.bar(s, m))
@@ -181,8 +181,10 @@ class WorldStep:
                 self.counts["wide" if wide else "band"] += 1
                 if wide:
                     self.wide_at = t
+            work["fallbacks"] = getattr(self.eyes.detector, "fallbacks", 0) - fallbacks
             self.counts["re-finds"] += work["re-finds"]
             self.counts["re-found"] += len(refound)
+            self.counts["fallbacks"] += work["fallbacks"]
         her = (s.where.x, s.where.y) if placed else None
         events += self.tracker.update(t, refound, found, self._view(s) if placed else None, her)
         seen: list[Monster] = []

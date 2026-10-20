@@ -42,7 +42,8 @@ def offline(monkeypatch, tmp_path):
 
     monkeypatch.setattr(win32, "send_key", refuse("maplehelper.win32.send_key"))
     monkeypatch.setattr(win32, "foreground_title", refuse("maplehelper.win32.foreground_title"))
-    for name in ("bring_to_front", "move_cursor", "find_game", "client_rect", "foreground_title"):
+    for name in ("bring_to_front", "move_cursor", "find_game", "client_rect", "foreground_title", "shows",
+                 "minimized"):
         monkeypatch.setattr(window, name, refuse(f"gamelab.window.{name}"))
     monkeypatch.setattr(capture, "Dxgi", refuse("gamelab.capture.Dxgi (desktop duplication)"))
     monkeypatch.setattr(capture, "_open_mss", refuse("gamelab.capture's mss"))

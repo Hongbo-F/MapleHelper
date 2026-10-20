@@ -22,6 +22,11 @@ user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BO
 user32.IsIconic.argtypes = (wintypes.HWND,)
 user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
 user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
+user32.WindowFromPoint.argtypes = (wintypes.POINT,)
+user32.WindowFromPoint.restype = wintypes.HWND
+user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
+user32.GetAncestor.restype = wintypes.HWND
+GA_ROOT = 2  # GetAncestor: the top-level window
 
 
 def move_cursor(x: int, y: int) -> None:
@@ -44,6 +49,19 @@ def client_rect(hwnd: int) -> dict:
     origin = wintypes.POINT(0, 0)
     user32.ClientToScreen(hwnd, ctypes.byref(origin))
     return {"left": origin.x, "top": origin.y, "width": r.right, "height": r.bottom}
+
+
+def minimized(hwnd: int) -> bool:
+    return bool(user32.IsIconic(hwnd))
+
+
+def shows(hwnd: int, area: dict, inset: int = 8) -> bool:
+    """Whether the screen shows window `hwnd` at its client area's middle and near each corner (`inset` px
+    in): no other window is over those points. Screen captures see whatever is on top."""
+    x0, y0 = area["left"] + inset, area["top"] + inset
+    x1, y1 = area["left"] + area["width"] - 1 - inset, area["top"] + area["height"] - 1 - inset
+    points = [((x0 + x1) // 2, (y0 + y1) // 2), (x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+    return all(user32.GetAncestor(user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) == hwnd for x, y in points)
 
 
 def bring_to_front(title: str) -> bool:

@@ -194,6 +194,7 @@ class MobDetector:
         if not self.templates:
             raise RuntimeError(f"no monster templates in {folder}")
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
+        self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         """Monsters in `frame` (RGB, game window / SCALE). `rows` limits the search to a band."""
@@ -237,6 +238,7 @@ class MobDetector:
                 best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
         if best is not None or not fallback:
             return best
+        self.fallbacks += 1
         found = [_moved(m, x0, y0) for m in self._detect(window, None, _serial, (kind,))]
         return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
 

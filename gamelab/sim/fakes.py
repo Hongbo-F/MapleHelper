@@ -151,6 +151,7 @@ class FakeDetector:
     def __init__(self, kinds=KINDS, clock: Clock | None = None):
         self.templates = {k: [] for k in kinds}
         self.clock = clock
+        self.fallbacks = 0
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         if self.clock is not None:
@@ -174,7 +175,10 @@ class FakeDetector:
         found = [m for m in getattr(frame, "screen", Screen()).mobs
                  if m.kind == kind and x0 <= m.x - m.w // 2 and m.x + m.w // 2 <= x1
                  and y0 <= m.y - m.h // 2 and m.y + m.h // 2 <= y1]
-        return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
+        if not found:
+            self.fallbacks += fallback  # the real one would have tried its kind's whole set
+            return None
+        return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2)
 
     def detect_wide(self, frame: np.ndarray, rows: tuple[int, int], band: int = 120, step: int = 90) -> list[Mob]:
         if self.clock is not None:
