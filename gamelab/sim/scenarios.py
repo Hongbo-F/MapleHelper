@@ -477,7 +477,7 @@ def nav_fight_basin(sim):
     pushes a monster back: on seed 5 the trip's 180 s ran out on 30 that way. Over 16 seeds 8 meet all of
     this, 7 running out of time. With knocks unsteered and the planner flying her by the engine, 9 meet
     all of it; of the 7 that run out of time, 6 throw 54-88 stars from 30 at a snail on 33 that the
-    simulator's attack can't pick (README, Found offline), the 7th is a pig fight in the basin. With both
+    simulator's attack can't pick (README, Fixed since), the 7th is a pig fight in the basin. With both
     tracks, from the ground the decisions and the simulator's attack both go by the star's search, which
     picks a snail 60 below from 246 units off: all 16 of seeds 1-16 meet all of it, at the merge and since.)"""
     return _nav(25, fight=True)(sim)

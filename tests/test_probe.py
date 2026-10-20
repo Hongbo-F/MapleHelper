@@ -163,8 +163,9 @@ def test_the_scorer_checks_the_wall_rule_and_its_line(monkeypatch):
     assert rule > none + 5
     line = probe.fit_shot_h(rows, model)
     assert line.holds(28) and not line.holds(10) and not line.holds(65)
-    # A world where no wall stops a star: the throws from the ground hit too (but one whose Orange Mushroom had
-    # walked to within 193 of her by the pick, where the search doesn't take it yet), and no walls fits better.
+    # A world where no wall stops a star: the throws from the ground hit too (all 12 on seed 1; one whose Orange
+    # Mushroom had walked to within 193 of her by the pick, where the search doesn't take it yet, may not), and no
+    # walls fits better.
     open_world = SimpleNamespace(**{k: getattr(reach, k) for k in dir(reach) if not k.startswith("__")})
     open_world.wall_between = lambda *a, **k: None
     monkeypatch.setattr(world_mod, "reach", open_world)
