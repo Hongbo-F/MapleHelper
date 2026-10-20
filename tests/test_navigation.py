@@ -52,6 +52,22 @@ def test_footholds_join_into_platforms_and_walls(model):
     assert len(model.walls) == 2
 
 
+def test_platforms_and_walls_keep_their_foothold_group(model):
+    a, c = by_y(model, 300, 100), by_y(model, 500, 400)
+    assert a.group == (1, 1) and c.group == (1, 3)
+    assert {(w.x1, w.group) for w in model.walls} == {(0, (1, 3)), (800, (1, 3))}
+    assert model.walls_of(c.group) == model.walls and model.walls_of(a.group) == [] and model.walls_of(None) == []
+    # A step joined by a wall is one group with two platforms (like platforms 2 and 4 on the real map).
+    t = tree()
+    t["info"]["VRRight"] = 1400
+    t["foothold"]["2"] = {"7": dict([seg(2, 7, 20, 1000, 300, 1100, 300, 0, 21), seg(2, 7, 21, 1100, 300, 1100, 240, 20, 22),
+                                      seg(2, 7, 22, 1100, 240, 1200, 240, 21, 0)])}
+    m = mapdata.parse(1, t, "Test Map", {})
+    low, high = by_y(m, 300, 1050), by_y(m, 240, 1150)
+    assert low is not high and low.group == high.group == (2, 7)
+    assert [(w.x1, w.y1, w.y2) for w in m.walls_of((2, 7))] == [(1100, 300, 240)]
+
+
 def test_platform_lookups(model):
     c = by_y(model, 500, 400)
     assert model.platform_under(400, 490).id == c.id

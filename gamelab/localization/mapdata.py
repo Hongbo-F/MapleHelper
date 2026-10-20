@@ -28,11 +28,16 @@ SPAWN_REACH = 60             # how far above its platform a spawn point may be p
 
 @dataclass(frozen=True)
 class Segment:
-    """A straight foothold (or wall) from (x1, y1) to (x2, y2)."""
+    """A straight foothold (or wall) from (x1, y1) to (x2, y2). `group`: the foothold's (layer, group) in
+    the map image (foothold/<layer>/<group>/<id>). Each floating block is one group: its floor and the
+    walls hanging from its ends; steps joined by a wall share one. The client's collisions go by it
+    (walls of another group are passed through in the air), and so, by the live logs, does what stops a
+    star (attack.reach)."""
     x1: float
     y1: float
     x2: float
     y2: float
+    group: tuple[int, int] | None = field(default=None, compare=False, repr=False)
 
     def y_at(self, x: float) -> float:
         if self.x2 == self.x1:
@@ -58,6 +63,11 @@ class Platform:
     @property
     def top(self) -> float:
         return min(min(s.y1, s.y2) for s in self.segments)
+
+    @property
+    def group(self) -> tuple[int, int] | None:
+        """Its footholds' (layer, group) (Segment.group): platforms joined by a step wall share one."""
+        return self.segments[0].group
 
     def y_at(self, x: float) -> float:
         for s in self.segments:
@@ -165,6 +175,19 @@ class MapModel:
     def platform(self, pid: int) -> Platform:
         return self.platforms[pid]
 
+    def walls_of(self, group: tuple[int, int] | None) -> list[Segment]:
+        """The walls of a foothold group (Segment.group): those hanging from a block's ends, and the steps
+        joining platforms of one group."""
+        return self._walls_by_group.get(group, []) if group is not None else []
+
+    @cached_property
+    def _walls_by_group(self) -> dict[tuple[int, int], list[Segment]]:
+        out: dict[tuple[int, int], list[Segment]] = {}
+        for w in self.walls:
+            if w.group is not None:
+                out.setdefault(w.group, []).append(w)
+        return out
+
     # --- monsters -----------------------------------------------------------------------------
 
     def safe(self, pid: int, reach: float = MONSTER_REACH) -> bool:
@@ -215,7 +238,11 @@ def _platforms(footholds: list[dict]) -> tuple[list[Platform], list[Segment]]:
     """Join walkable footholds (going right) into platforms; vertical ones are walls. Platforms are
     numbered by the height of their left end (top first), then left to right."""
     by_key = {(f["layer"], f["group"], f["id"]): f for f in footholds}
-    walls = [Segment(f["x1"], f["y1"], f["x2"], f["y2"]) for f in footholds if f["x1"] == f["x2"]]
+
+    def segment(f: dict) -> Segment:
+        return Segment(f["x1"], f["y1"], f["x2"], f["y2"], (int(f["layer"]), int(f["group"])))
+
+    walls = [segment(f) for f in footholds if f["x1"] == f["x2"]]
     walkable = {k for k, f in by_key.items() if f["x2"] > f["x1"]}
     seen, chains = set(), []
     # Taken left to right, a foothold always comes after the one joined before it (which ends where
@@ -227,7 +254,7 @@ def _platforms(footholds: list[dict]) -> tuple[list[Platform], list[Segment]]:
         while cur in walkable and cur not in seen:
             seen.add(cur)
             f = by_key[cur]
-            chain.append(Segment(f["x1"], f["y1"], f["x2"], f["y2"]))
+            chain.append(segment(f))
             nxt = (f["layer"], f["group"], f["next"])
             if nxt in walkable and by_key[nxt]["x1"] == f["x2"]:
                 cur = nxt
