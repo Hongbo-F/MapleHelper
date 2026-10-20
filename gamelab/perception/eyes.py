@@ -28,6 +28,13 @@ TAG_BELOW_FEET = 8  # half-size px from the ground line she stands on down to he
 EXP_TEXT = 150      # her EXP number's text pixels are brighter than this (in any channel)
 
 
+def rgb_of(bgra: np.ndarray) -> np.ndarray:
+    """A screen capture (BGRA, as mss gives it) as an RGB picture of its own. Viewed as RGB in place
+    ([:, :, 2::-1]) it cost nothing here, but every OpenCV call on the view then copied it first: 17-20 ms
+    a look in all, against about 1 ms for this."""
+    return cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGB)
+
+
 @dataclass(kw_only=True)
 class Observation:
     """What one look at the game shows (half-size frame px unless noted)."""
@@ -78,10 +85,10 @@ class Eyes:
         """Just her minimap dot and HP, from two small captures (a few ms): for watching a plan run."""
         area = self._client_area()
         x0, y0, x1, y1 = MINIMAP_BOX
-        box = self._grab(area, x0, y0, x1 - x0, y1 - y0)[:, :, 2::-1]  # BGRA -> RGB
+        box = rgb_of(self._grab(area, x0, y0, x1 - x0, y1 - y0))
         w, h = area["width"], area["height"]
         a, b = int(HP_BAR[0] * w), int(HP_BAR[1] * w)
-        row = self._grab(area, a, int(BAR_ROW * h), b - a, 1)[0, :, 2::-1].astype(np.int16)
+        row = rgb_of(self._grab(area, a, int(BAR_ROW * h), b - a, 1))[0].astype(np.int16)
         return dot_in_box(box), hp_fill(row)
 
     def messages(self) -> str:
@@ -122,7 +129,7 @@ class Eyes:
         if (area["width"], area["height"]) != GAME_SIZE:
             raise RuntimeError(f"the game window is {area['width']}x{area['height']}; monster "
                                f"templates and her name tag were made at {GAME_SIZE[0]}x{GAME_SIZE[1]}")
-        return self._grab(area, 0, 0, area["width"], area["height"])[:, :, 2::-1]  # BGRA -> RGB
+        return rgb_of(self._grab(area, 0, 0, area["width"], area["height"]))
 
     # --- questions about a look's frame -----------------------------------------------------------
 

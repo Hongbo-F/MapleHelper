@@ -7,14 +7,35 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from gamelab.analysis import bench
 from gamelab.perception import hud
-from gamelab.perception.hud import bars, touch_popup
+from gamelab.perception.eyes import rgb_of
+from gamelab.perception.hud import BAR_ROW, HP_BAR, bars, hp_fill, touch_popup
+from gamelab.perception.minimap import MINIMAP_BOX, dot_in_box
 from gamelab.perception.mobs import ASSETS, MobDetector
 from gamelab.perception.terrain import ground_extent
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SKY = (60, 140, 230)
 GRASS = (90, 170, 40)
+
+
+def test_captures_are_rgb_pictures_of_their_own_with_the_same_pixels():
+    # A capture was viewed as RGB in place ([:, :, 2::-1]), and every OpenCV call on it copied it first.
+    rng = np.random.default_rng(0)
+    bgra = rng.integers(0, 256, (1080, 1920, 4), np.uint8)
+    bgra[150:156, 100:106] = (40, 230, 240, 255)  # her yellow minimap dot (BGR)
+    bgra[1062:1066, 707:800] = (30, 30, 220, 255)  # some HP left
+    eyes = bench.SavedEyes(np.zeros((10, 36), np.uint8))
+    eyes.show(bgra)
+    full = eyes._capture()
+    assert full.flags.c_contiguous and np.array_equal(full, bgra[:, :, 2::-1])
+    x0, y0, x1, y1 = MINIMAP_BOX
+    a, b = int(HP_BAR[0] * 1920), int(HP_BAR[1] * 1920)
+    old = dot_in_box(bgra[y0:y1, x0:x1, 2::-1]), hp_fill(bgra[int(BAR_ROW * 1080), a:b, 2::-1].astype(np.int16))
+    assert eyes.glance() == old and old[0] is not None and old[1] > 0
+    row = bgra[5:6, :50]
+    assert np.array_equal(rgb_of(row), row[:, :, 2::-1])
 
 
 def test_bars_read_the_fill_fraction():
