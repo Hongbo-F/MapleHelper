@@ -19,8 +19,9 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
-from .physics import (CLIMB_SPEED, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH, WALK_SPEED, fall_time,
-                      fly, sure_landing)
+from .body import slide
+from .physics import (CLIMB_SPEED, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH, SHOE, WALK_SPEED,
+                      fall_time, flight, fly, sure_landing)
 
 
 JUMP_MARGIN = 12         # don't plan jumps that need the last few units of height
@@ -31,7 +32,8 @@ MIN_JUMP_UP_RISE = 8     # a platform overhead must be more than this above to j
 RUN_START = 40
 RUN_MS = 150
 JUMP_FROM = 33
-LANDING_ROOM = LAND_MARGIN * 0.5  # a running jump must land at least this far in from the landing platform's ends
+LANDING_ROOM = LAND_MARGIN * 0.5  # a running jump must land at least this far in from the landing platform's ends,
+                                  # and a walk-off this far more than her slide from its far end
 NEEDLESS_DROP = 10       # a running jump down more than this, where walking off gets there too, is needless
 # Ropes: a rope hangs from the platform within ROPE_TOP_DX sideways and ROPE_TOP_DY up or down of its
 # top, and can be grabbed from a platform it ends at most ROPE_REACH above (or ROPE_PAST below).
@@ -143,9 +145,13 @@ def _end_moves(model: MapModel, a: Platform) -> list[Move]:
         level = a.y_at(edge)
         rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
                      for w in model.walls)
-        land, land_x, t = fly(model, edge + sign * (-1 if rising else 0.5), a.y_at(edge) - 1,
-                              sign * WALK_SPEED, 0.0)
-        if land is not None and land is not a:
+        land, land_x, t, v_land = flight(model, edge + sign * (-1 if rising else 0.5), a.y_at(edge) - 1,
+                                         sign * WALK_SPEED, 0.0)
+        # She lands at full speed (unless a wall stopped her), so she must be able to stop on it: her slide
+        # and LANDING_ROOM more before its far end. Walking off 10's right end, 10 units from 15's right
+        # end, she slid off it onto 18 every time in the simulator.
+        if land is not None and land is not a \
+                and land.covers(land_x + ((v_land > 0) - (v_land < 0)) * (slide(v_land, SHOE) + LANDING_ROOM)):
             # She starts 5 units in from the end.
             out.append(Move("walk_off", a.id, land.id, edge - sign * 5, land_x, direction,
                             seconds=WALK_OFF_EXTRA_S + t))

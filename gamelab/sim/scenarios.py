@@ -488,14 +488,16 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=3,
+@scenario((12, -300.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down
-    to 34), and goes on from there; hit on the way, her chains are cut and replanned, and she fights her way
-    to 17. (Seed 3 since jump-throws come 40 ms after the jump: on seed 6 nothing knocked her off any more.
-    On seed 6 before, her first chain from 11 waited out the attack lock of her last throw: before it did,
-    she was touched on the way, and the quick looks after those cuts skipped the fights on 18 and 17.)"""
+    to 13), and goes on from there; hit on the way, her chain is cut and replanned, and she fights her way
+    to 17. (Seed 2 since a walk-off must land where she can stop: on seed 3 nothing hit her on the way any
+    more; 12 of 16 seeds show all of it. Seed 3 since jump-throws come 40 ms after the jump: on seed 6
+    nothing knocked her off any more. On seed 6 before, her first chain from 11 waited out the attack lock
+    of her last throw: before it did, she was touched on the way, and the quick looks after those cuts
+    skipped the fights on 18 and 17.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 

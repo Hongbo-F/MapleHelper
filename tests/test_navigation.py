@@ -269,6 +269,20 @@ def test_down_to_a_platform_a_walk_off_reaches_she_walks_off(model):
     assert "walk_off" in kinds and "jump" not in kinds
 
 
+def test_a_walk_off_must_land_where_she_can_stop():
+    # Off A's right end at full speed she comes down on B 37 units on, then slides 13.9 more: on a B 30 units
+    # long she'd slide off its far end (as walking off 10's right end onto 15 on the real map did, every time
+    # in the simulator), so that's no move; on B as it is (180 long), it is.
+    t = tree()
+    t["foothold"]["1"]["2"] = dict([seg(1, 2, 3, 220, 360, 250, 360)])
+    m = mapdata.parse(1, t, "Test Map", {})
+    a, b = by_y(m, 300, 100), by_y(m, 360, 230)
+    assert not any(x.kind == "walk_off" and x.src == a.id and x.dst == b.id for x in Planner(m).moves)
+    m = mapdata.parse(1, tree(), "Test Map", {})
+    a, b = by_y(m, 300, 100), by_y(m, 360, 230)
+    assert any(x.kind == "walk_off" and x.src == a.id and x.dst == b.id for x in Planner(m).moves)
+
+
 def _stop(rounds, seen, loot_after=(), elsewhere=(), log=None):
     """A tour stop with faked fights: `rounds` gives each fight's throws, `seen` how many monsters a
     whole-screen look then sees on the platform, `loot_after` the rounds after which drops were
