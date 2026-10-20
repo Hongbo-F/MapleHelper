@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C D:/MapleHelper log *)",
+      "mcp__ccd_session_mgmt__list_sessions",
+      "mcp__ccd_session_mgmt__list_events",
+      "mcp__Claude_Browser__get_page_text",
+      "mcp__Claude_Browser__find",
+      "Bash(git -C D:/MapleHelper status *)",
+      "Bash(git -C D:/MapleHelper diff *)",
+      "mcp__terminal__read_terminal",
+      "Bash(git -C D:/MapleHelper merge-base *)"
+    ]
+  }
+}
