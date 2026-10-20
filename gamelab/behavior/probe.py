@@ -191,8 +191,9 @@ PROBES = {p.name: p for p in (
     # body 60 below her (46 and 55 tall), not a slime's (41). From 35 inside 3's left end, at 4.
     Probe("claw-down", "whether the claw swipes a monster off her level (reach.claw_takes: on her level only)", 3,
           716.0, LEFT, (4,), ("pig", "orange-mushroom"), (60, 125), source="bodies D",
-          expect="if the claw keeps to her level, no hit at a pig (the search picks one 60 below from 151) and stars at "
-                 "Orange Mushrooms from 113; if it swipes off her level, small bar drops at both within about 124"),
+          expect="if the claw keeps to her level, no hit at a pig (the search picks one 60 below from 151) and "
+                 "stars at Orange Mushrooms from 113; if it swipes off her level, small bar drops at both within "
+                 "about 124"),
     Probe("hanging-wall", "a level line or a line to the feet, down past her own block's hanging wall", 14, 730.0,
           RIGHT, (17,), ("pig", "orange-mushroom", "slime"), (180, 360), walls=False, source="terrain 3",
           expect="by the level line hits at every distance; by a line to the feet none from 198 units on (from x 730 "

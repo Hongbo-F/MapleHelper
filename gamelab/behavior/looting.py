@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from .. import directions
 from ..attack.reach import EDGE_MARGIN
 from ..attack.stance import TOO_CLOSE
+from ..control.navigator import MIN_GROUND_PX
 from ..localization.monsters import Monster
 from ..localization.scene import Loot, Scene
 from ..perception.loot import says_full
@@ -35,6 +36,16 @@ UNPICKABLE_FOR = 90  # s drops she failed to pick up are left alone (they vanish
 FAILED_PICKS = 3   # items in a row that stayed under her with no item picked up: her inventory is full
 DROPS_LAST = 90    # s remembered drops are worth going back for (they vanish, and others may take them)
 MIN_WALK = 10      # a sweep's stops nearer to her than this aren't walked to: she's there
+# Whether only a look that shows her standing can see a drop spot empty (`standing`). From mid-jump a look's loot
+# strips miss the drops on the ground, and two such looks forget a spot with its drops still there: in simulated
+# hunt loops (preset game, seed 2), 357 of the 359 piles forgotten with drops on them were forgotten that way,
+# and most of the loop's lost drops (its drops share fell 0.84 -> 0.72 on this branch, as jump backs and jump
+# throws grew) lay in the basin under such piles. Switched on, the loop's drops share is 0.92, but its EXP a
+# minute 7% lower (8 seeds; two runs fell out of the map): it then goes for piles in the basin that monsters
+# always guard, and in seed 4 seven of its ten pile trips there ran out their 60 s. Off until the hunt loop's
+# pile rules weigh that. (In game it's the same: in mid-jump her y is put on the platform under her, so the
+# strips sit as high above its ground as she is.)
+STANDING_ONLY = False
 
 
 @dataclass
@@ -78,6 +89,8 @@ class Looter:
         for d in self.pending:
             if now - d.since < SETTLE or not s.in_view(d.platform, d.x) or any(_in_pile(d, loot) for loot in seen):
                 d.empty_since = None  # still landing, out of view, or drops seen there
+            elif STANDING_ONLY and not standing(s):
+                pass                  # in the air: blind to the drops on the ground (standing)
             elif d.empty_since is None:
                 d.empty_since = now   # seen empty once
             elif now - d.empty_since >= EMPTY_LOOKS:
@@ -116,7 +129,8 @@ class Looter:
                 and abs(d.x - drops.x) <= 2 * LOOT_REACH]
         if seen:
             self.sweep_through(s, [DropSpot(d.x, d.y, d.platform, s.t) for d in seen], margin=0)
-        elif drops.on_ground and time.monotonic() - drops.since >= SETTLE and s.in_view(drops.platform, drops.x):
+        elif drops.on_ground and time.monotonic() - drops.since >= SETTLE and s.in_view(drops.platform, drops.x) \
+                and (not STANDING_ONLY or standing(s)):
             self.h.log(f"  the drops seen at x {drops.x:.0f} are gone")
         else:
             self.sweep_through(s, [drops])
@@ -232,6 +246,14 @@ class Looter:
             return
         self.inventory_full = True
         self.h.log(f"  her inventory is full ({why}): leaving items, picking up mesos only")
+
+
+def standing(s: Scene) -> bool:
+    """Whether look `s` shows her standing: ground under her feet on screen (control.navigator's test, but not
+    with her name tag hidden). With STANDING_ONLY, only such a look can see a drop spot empty: in the air or on a
+    rope there's no ground under her, and a look's loot strips, put just above her platform's ground as if she
+    stood on it, lie above the drops by as high as she is, so it finds none."""
+    return s.ground is not None and s.ground[1] - s.ground[0] >= MIN_GROUND_PX
 
 
 def _in_pile(spot: DropSpot, loot: Loot) -> bool:

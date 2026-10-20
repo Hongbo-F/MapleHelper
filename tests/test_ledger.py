@@ -79,6 +79,28 @@ def test_a_pile_is_forgotten_only_after_two_empty_looks_apart_and_settled():
     assert not p.hers and p.mesos and p.status == "seen"       # drops no kill of hers explains
 
 
+def test_with_standing_only_a_look_from_mid_jump_doesnt_see_a_pile_empty(monkeypatch):
+    # In mid-jump a look's loot strips sit above the ground (her y is put on the platform under her): it finds no
+    # drops, and two such looks forgot piles with drops still on them. With looting.STANDING_ONLY only a look that
+    # shows ground under her feet can see one empty.
+    from gamelab.behavior import looting
+    monkeypatch.setattr(looting, "STANDING_ONLY", True)
+    store = DropStore()
+    store.on_kill(Kill(0.0, "pig", 3, 500.0, 300.0, 3))
+    view = [(3, 300.0, 700.0)]
+
+    def look(t, ground):
+        s = _look(t, looked=view)
+        s.ground = ground
+        store.on_look(s)
+    look(SETTLE + 0.1, (100, 100))                   # no ground under her feet: in the air
+    look(SETTLE + 0.2 + EMPTY_LOOKS, (100, 100))
+    assert store.known and store.piles[0].empty_since is None
+    look(SETTLE + 3.0, (60, 140))                    # standing
+    look(SETTLE + 3.1 + EMPTY_LOOKS, (60, 140))
+    assert store.known == []
+
+
 @pytest.mark.parametrize("name", ["hunt_clear_basin", "tour_hunt_basin", "nav_fight_basin"])
 def test_the_ledger_counts_every_kill_and_places_most_of_them_right(name):
     if scenarios.real_map() is None:

@@ -22,7 +22,8 @@ from maplehelper.engine import RIGHT
 from ..attack import reach
 from ..localization.monsters import Monster, same
 from ..localization.scene import Loot, Scene
-from .looting import EMPTY_LOOKS, LOOT_REACH, SETTLE
+from . import looting
+from .looting import EMPTY_LOOKS, LOOT_REACH, SETTLE, standing
 
 STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be its kill: 520 ms to the
                    # release, up to 0.65 s of flight (434 units at 690 a second), and up to a look later
@@ -146,15 +147,17 @@ class DropStore:
 
     def on_look(self, s: Scene) -> None:
         """A look that searched for loot: drops seen confirm a pile (or start one); a pile in view that two
-        looks EMPTY_LOOKS apart see empty, SETTLE after its kill, is gone."""
+        looks EMPTY_LOOKS apart see empty, SETTLE after its kill, is gone. With looting.STANDING_ONLY, only looks
+        that show her standing see a pile empty (looting.standing: from mid-jump a look's strips miss the drops on
+        the ground)."""
         if not s.looked:
             return
-        seen = list(s.loot)
+        seen, ground = list(s.loot), not looting.STANDING_ONLY or standing(s)
         for p in self.known:
             if any(_in_pile(p, d) for d in seen):
                 p.status, p.last_seen, p.empty_since = "seen", s.t, None
                 p.mesos = p.mesos or any(d.mesos for d in seen if _in_pile(p, d))
-            elif s.t - p.since >= SETTLE and s.in_view(p.platform, p.x):
+            elif ground and s.t - p.since >= SETTLE and s.in_view(p.platform, p.x):
                 if p.empty_since is None:
                     p.empty_since = s.t
                 elif s.t - p.empty_since >= EMPTY_LOOKS:
