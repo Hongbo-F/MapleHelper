@@ -449,6 +449,8 @@ class Hunt:
         """One step of stance's answer: a throw (fight's bookkeeping kept), or a walk."""
         self._note(rule)
         act = self._stance(s, targets, visible, hidden, approach)
+        if fight.knocked_jump(self.h, s, act):
+            return None
         if act[0] in THROWS:
             self.fs.note_throw(now)
             {"throw": self.h.actions.throw, "jump_throw": self.h.actions.jump_throw,
@@ -473,6 +475,8 @@ class Hunt:
         t0 = time.monotonic()
         self._note("in passing")
         act = self._stance(s, targets, visible, hidden, approach=False)
+        if fight.knocked_jump(self.h, s, act):
+            return None
         if act[0] in THROWS:
             self.fs.note_throw(now)
             {"throw": self.h.actions.throw, "jump_throw": self.h.actions.jump_throw,

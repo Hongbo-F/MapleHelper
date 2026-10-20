@@ -43,6 +43,8 @@ FADING = 1.2       # s a killed monster may still be seen fading out where it di
 UNPLACED_LOOKS = 10  # looks in a row that can't place her before a fight gives up on her
 IN_HER_WAY = TOO_CLOSE + 40  # a monster of any kind this close on her platform is in her way: fought too
 THROWS = ("throw", "jump_throw", "jump_back")  # the stances that throw a star (each an Actions method)
+JUMPS = ("jump_throw", "jump_back")  # ... and of those, the ones that jump
+STEADY_WAIT_S = 0.05  # s before the next look when a jump waits out a touch's knock (knocked_jump)
 GUARD_SECONDS = 15  # longest spent shooting a monster out of the way while travelling
 GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she travels on
 # When a throw's damage can show on its target, for the shot log (_score_shots, _target_gone): from LANDS_FROM_S
@@ -210,6 +212,8 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
         now = time.monotonic()  # read once a look: hidden ones are told by it
         fight, visible, hidden = _targets(h, st, s, kinds, ground, far, now)
         act = _take_stance(h, st, s, fight, visible, hidden, approach and not enough)
+        if knocked_jump(h, s, act):
+            continue
         if (step := _carry_out(h, st, s, act, fight, now, patience, enough)) == _OVER:
             return report
         if step == _DONE:
@@ -310,6 +314,21 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                        aimed=[{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1)} for m in st.aimed]
                        if throwing else [])
     return act
+
+
+def knocked_jump(h: "Hunter", s: Scene, act: tuple) -> bool:
+    """Whether stance `act` is a jump (a jump throw or a jump back) decided from a look a touch's knock may still
+    be moving her in (Hunter.knocked): then it waits a moment for the next look. Keyed from such a look, the jump
+    key came while she was still in the air, and did nothing (in loop_run 21 jump keys were lost so, 9 now: those
+    left come from a touch after the look, in the plan's lead-in), or once she had landed and still slid on, from
+    where she no longer was: in the harness (tour, seed 5, both tracks) a jump throw keyed from a look taken
+    mid-knock went in after she had landed on 34 sliding at 104 units/s, took her off its end up onto 31 (that
+    nothing was overhead was checked where she was at the look, 55 units back) and landed her 0.4 units from
+    31's end, which the next throw's turn walked her off, and out of the map."""
+    if act[0] in JUMPS and h.knocked(s):
+        time.sleep(STEADY_WAIT_S)
+        return True
+    return False
 
 
 def _carry_out(h: "Hunter", st: FightState, s: Scene, act: tuple, fight: list[Monster], now: float,
