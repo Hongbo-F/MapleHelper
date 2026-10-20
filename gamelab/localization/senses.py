@@ -67,6 +67,7 @@ class Senses:
                 self.counts["taken here"] += 1
         else:
             self.counts["from the feed"] += 1
+            self._learn(s)  # the feed placed her with its own camera; this one learns too, for looks taken here
         if self.feed is not None:
             # What the feed saw up to the frame this look shows (all of it for a look taken here, now): an EXP
             # gain of a later frame goes with the next look, whose monsters no longer show the one it killed.
@@ -106,6 +107,11 @@ class Senses:
         seen = self.eyes.monsters_wide(s) if wide else self.eyes.monsters(s, *self.band)
         return [s.place(m, self.model, self.eyes.bar(s, m)) for m in seen]
 
+    def _learn(self, s: Scene) -> None:
+        """With her name tag seen and her placed, the camera learns where it keeps her."""
+        if s.tag is not None and s.tag_seen and s.where is not None:
+            self.camera.learn((s.where.x, s.where.y), (SCALE * s.tag[0], SCALE * s.floor_y))
+
     def _rope_columns(self, dot: tuple[float, float] | None,
                       tag: tuple[int, int] | None) -> list[tuple[int, int]] | None:
         """Where a look searches for ropes (ranges of x, full-size px): around where her dot puts the map's
@@ -129,7 +135,7 @@ class Senses:
         if s.where is None:
             return
         if s.tag is not None:
-            self.camera.learn((s.where.x, s.where.y), (SCALE * s.tag[0], SCALE * s.floor_y))
+            self._learn(s)
         else:
             sx, sy = self.camera.to_screen(s.where.x, s.where.y, (s.where.x, s.where.y))
             s.tag, s.tag_seen = (round(sx / SCALE), round(sy / SCALE) + TAG_BELOW_FEET), False

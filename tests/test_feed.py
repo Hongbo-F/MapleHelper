@@ -309,6 +309,20 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     assert eyes.glances == 1
 
 
+def test_looks_from_the_feed_teach_the_stacks_camera_for_the_looks_it_takes_itself(sync):
+    # Placed by the feed's child, a look skips Senses' own placing; without this, a look taken here with her
+    # name tag hidden (the feed slow or gone) placed her by the default camera.
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    alone = Senses(eyes, f.step.model, band=(100, 100))
+    clock.sleep(0.5)
+    before = senses.camera.offset
+    s = senses.look(mobs=False)
+    assert s.tag_seen and senses.counts["from the feed"] == 1 and senses.camera.offset != before
+    alone.place(eyes.look())  # the same look taken without the feed: the camera learns the same
+    assert alone.camera.offset == pytest.approx(senses.camera.offset)
+
+
 def test_a_look_takes_the_feeds_events_up_to_its_frame_and_the_later_ones_go_with_the_next(sync, monkeypatch):
     # A look may be handed a state older than the newest (the frame searched for drops): an EXP gain of a later
     # frame goes with the next look, whose monsters no longer show the one it killed.
