@@ -177,8 +177,10 @@ def test_the_scorer_checks_the_wall_rule_and_its_line(monkeypatch):
 def test_the_scorer_tells_the_area_of_an_attack_from_a_jump_from_the_search():
     # Jump throws at a snail about 40 units off: the world's attack picks by the area, and the snail dies to
     # every star; the search (from 65 ahead, as from the ground or from as high as she is) wouldn't pick it.
+    # With her body moved by motion.body a jump throw goes straight up, so she keeps to x 30-31, and on the
+    # last of the 12 the snail had walked to 53 off (inside the probe's 35-85): all but that one are 38-45.
     rows = _rows(scenarios.run("probe_air"))
-    assert all(35 <= abs(r["dx"]) <= 50 for r in rows)
+    assert sum(35 <= abs(r["dx"]) <= 50 for r in rows) >= len(rows) - 1 and all(abs(r["dx"]) <= 60 for r in rows)
     lls = probe.air_lls(rows, scenarios.real_map())
     assert lls["area"] > max(lls["search"], lls["ground"]) + 5
 
