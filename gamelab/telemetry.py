@@ -52,8 +52,8 @@ STAMP = "%Y%m%d-%H%M%S"  # file names start with the time the run (or the part) 
 # enough for a replay to load whole.
 MAX_BYTES = 64 * 1024 * 1024
 # What's kept when a run starts: files last written in the last 14 days, and of those at most 2 GB, the
-# newest (38 files and 2.9 MB after the first week of live runs; a continuous feed's could take 240-360 MB
-# a day).
+# newest (38 files and 2.9 MB from the first two days of live runs; a continuous feed's could take
+# 240-360 MB a day).
 KEEP_DAYS = 14
 KEEP_BYTES = 2 * 1024 ** 3
 
