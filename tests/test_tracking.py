@@ -1,0 +1,203 @@
+"""Monsters followed from frame to frame (localization.tracking), on made-up 30 Hz sequences of sightings: one
+id across walks and turns, facing from the first frame, off screen against dead, a monster hidden under its
+damage numbers kept, and who killed it."""
+
+import pytest
+
+from gamelab.localization import tracking
+from gamelab.localization.monsters import Monster
+from gamelab.localization.tracking import (DEAD, DYING, HIDDEN, LIVE, OFFSCREEN, MonsterTracker, View)
+from gamelab.perception.mobs import Mob
+from gamelab.screen import UNITS_PER_HALF_PX as U
+
+FPS = 30
+KINDS = ("pig", "slime", "snail", "orange-mushroom")
+HER = (1000.0, 500.0)  # her feet on the map; on screen at column 480, row 300 (half size)
+
+
+def view(her_x: float = HER[0]) -> View:
+    """What the frame shows with her at map x `her_x` (the camera keeps her at column 480)."""
+    return View(her_x - 480 * U, her_x + 480 * U, HER[1] - 300 * U, HER[1] + 175 * U, 960, 475)
+
+
+def sighting(x: float, facing: int = 1, pose: str = "move", bar: float | None = None, kind: str = "pig",
+             her_x: float = HER[0], y: float = HER[1], platform: int | None = 1) -> Monster:
+    """A monster seen with its feet at map (x, y), as Scene.place puts it, its picture on screen."""
+    sx, feet = round(480 + (x - her_x) / U), round(300 + (y - HER[1]) / U)
+    mob = Mob(kind, sx, feet - 16, 48, 32, 0.9, float(sx), float(feet), facing, pose, "move/1", f"{kind}_move1")
+    return Monster(mob, x, y, platform, bar, facing, pose)
+
+
+def run(tracker: MonsterTracker, frames, refind: bool = True, start: float = 100.0):
+    """Feed the tracker a frame at a time: each frame's sightings (None: none). With `refind`, each tracked
+    monster is handed back as re-found, as the world step's windows find them; the rest as a search found
+    them. Returns every event and the tracks' (id, state) after each frame."""
+    events, states = [], []
+    for k, (seen, v) in enumerate(frames):
+        t = start + k / FPS
+        refound, found = {}, []
+        for m in seen or []:
+            near = [tr for tr in tracker.live() if refind and tr.kind == m.kind
+                    and abs(tracker.predicted(tr, t) - m.x) < 20]
+            if near:
+                refound[min(near, key=lambda tr: abs(tracker.predicted(tr, t) - m.x)).id] = m
+            else:
+                found.append(m)
+        events += tracker.update(t, refound, found, v, HER)
+        states.append({tr.id: tr.state for tr in tracker.tracks.values()})
+    return events, states
+
+
+def walk(x0: float, v: float, seconds: float, start: float = 0.0, **kw) -> list:
+    """A pig walking at v units/s from x0, a frame at a time."""
+    return [([sighting(x0 + v * (start + k / FPS), facing=1 if v > 0 else -1, **kw)], view())
+            for k in range(round(seconds * FPS))]
+
+
+@pytest.mark.parametrize("refind", [True, False])
+def test_one_id_across_a_walk_and_a_turn_facing_known_from_the_first_frame(refind):
+    tracker = MonsterTracker()
+    there = walk(800, 125, 1.5)
+    back = walk(800 + 125 * 1.5, -125, 1.5)
+    events, states = run(tracker, there + back, refind=refind)
+    assert [e.kind for e in events] == ["appeared"]
+    assert all(list(s) == [1] for s in states)
+    tr = tracker.tracks[1]
+    assert tr.state == LIVE and tr.facing == -1 and tr.seen == 90
+    first = MonsterTracker()
+    run(first, there[:1])
+    assert first.tracks[1].facing == 1  # from the template that matched, on its first frame
+
+
+def test_its_speed_within_a_fifth_after_half_a_second_and_turning_with_it():
+    tracker = MonsterTracker()
+    vx = []
+    for k, frame in enumerate(walk(800, 125, 1.5) + walk(800 + 125 * 1.5, -125, 0.5)):
+        run(tracker, [frame], start=100.0 + k / FPS)
+        vx.append(tracker.tracks[1].vx)
+    assert vx[15] == pytest.approx(125, rel=0.2)
+    assert vx[45] < -100  # the frame after it turned: the move frame faces the other way
+
+
+def test_two_walking_past_each_other_keep_their_ids():
+    tracker = MonsterTracker()
+    frames = [([sighting(700 + 125 * k / FPS), sighting(1000 - 125 * k / FPS, facing=-1)], view())
+              for k in range(60)]
+    run(tracker, frames, refind=False)
+    a, b = tracker.tracks[1], tracker.tracks[2]
+    assert (a.facing, b.facing) == (1, -1)
+    assert a.x == pytest.approx(700 + 125 * 59 / FPS, abs=3) and b.x == pytest.approx(1000 - 125 * 59 / FPS, abs=3)
+
+
+def test_one_that_walks_off_screen_is_offscreen_not_dead_and_back_with_its_id():
+    tracker = MonsterTracker()
+    out = walk(1550, 125, 1.0)                                         # walks off the right side
+    gone = [(None, view())] * (6 * FPS)                                # 6 s off screen
+    back = [([sighting(1660, facing=-1)], view())] * 10                # comes back in
+    events, states = run(tracker, out + gone + back)
+    kinds = [e.kind for e in events]
+    assert kinds == ["appeared", "left", "back"]
+    assert states[len(out) + 30][1] == OFFSCREEN and "died" not in kinds
+    assert list(tracker.tracks) == [1] and tracker.tracks[1].state == LIVE
+
+
+def test_the_camera_moving_away_leaves_it_offscreen():
+    tracker = MonsterTracker()
+    frames = [([sighting(500, pose="stand", her_x=1000 + 4 * k)], view(1000 + 4 * k)) for k in range(30)]
+    frames += [(None, view(1120 + 10 * k)) for k in range(60)]  # she runs right: it drops off the left
+    events, _ = run(tracker, frames)
+    assert [e.kind for e in events] == ["appeared", "left"] and tracker.tracks[1].state == OFFSCREEN
+
+
+@pytest.mark.parametrize("hidden_s", [1.0, 2.0, 3.0])
+def test_hidden_under_its_damage_numbers_for_up_to_3_s_it_keeps_its_id(hidden_s):
+    tracker = MonsterTracker()
+    before = [([sighting(1200, pose="stand", bar=1.0 if k < 10 else 0.6)], view()) for k in range(20)]
+    hidden = [(None, view())] * round(hidden_s * FPS)
+    after = [([sighting(1205, pose="stand", bar=0.6)], view())] * 10
+    events, states = run(tracker, before + hidden + after)
+    assert states[len(before) + 15][1] == HIDDEN
+    assert [e.kind for e in events if e.kind != "bar_hit"] == ["appeared"]
+    assert list(tracker.tracks) == [1] and tracker.tracks[1].state == LIVE
+
+
+def test_one_gone_in_plain_view_with_no_exp_of_hers_was_killed_by_someone_else():
+    tracker = MonsterTracker()
+    hurt = [([sighting(1200, pose="stand", bar=1.0 if k < 10 else 0.3)], view()) for k in range(30)]
+    events, states = run(tracker, hurt + [(None, view())] * (5 * FPS))
+    died = [e for e in events if e.kind == "died"]
+    assert [(e.track, e.data["cause"], e.data["hurt"]) for e in died] == [(1, "other", True)]
+    assert died[0].t - (100 + 29 / FPS) == pytest.approx(tracking.HIDE_S, abs=0.05)
+    bar = [e for e in events if e.kind == "bar_hit"]
+    assert [e.data["by"] for e in bar] == ["other"]  # her throws are known, and none went its way
+    assert tracker.counts["died other"] == 1 and tracker.counts["died hers"] == 0
+
+
+def test_one_she_threw_at_that_vanished_as_her_exp_went_up_was_hers():
+    tracker = MonsterTracker()
+    t0 = 100.0
+    standing = [([sighting(1200, pose="stand", bar=None if k < 10 else 0.4)], view()) for k in range(30)]
+    events, _ = run(tracker, standing[:5], start=t0)
+    tracker.throw(t0 + 5 / FPS, "right")             # her star goes its way ...
+    more, _ = run(tracker, standing[5:], start=t0 + 5 / FPS)
+    tracker.throw(t0 + 1.0, "right")                 # ... and another one kills it:
+    tracker.gain(t0 + 1.4)                            # her EXP goes up
+    fading = [([sighting(1200, pose="", bar=0.4)], view())] * 24  # still seen fading for 0.8 s
+    states = []
+    for k, frame in enumerate(fading + [(None, view())] * 60):
+        ev, st = run(tracker, [frame], start=t0 + 1.4 + k / FPS)
+        more += ev
+        states += st
+    assert states[5][1] == DYING  # fading, while her gain waits for it to go
+    died = [e for e in more if e.kind == "died"]
+    assert [(e.data["cause"], e.data["at"]) for e in died] == [("hers", round(t0 + 1.4, 3))]
+    assert [e.data["by"] for e in more if e.kind == "bar_hit"] == ["hers"]
+    assert tracker.tracks[1].state == DEAD and tracker.tracks[1].cause == "hers"
+
+
+def test_her_kill_is_the_one_that_faded_not_the_one_hiding_under_its_damage_numbers():
+    tracker = MonsterTracker()
+    t0 = 100.0
+    both = [([sighting(1150, pose="stand", bar=0.7), sighting(1300, pose="stand", bar=0.3)], view())] * 10
+    run(tracker, both, start=t0)
+    tracker.throw(t0 + 0.4, "right")
+    # The near one is hit and hides under its damage numbers; the far one dies and fades for 0.8 s.
+    hiding = [([sighting(1300, pose="", bar=0.3)], view())] * 24 + [(None, view())] * 30
+    tracker.gain(t0 + 0.5)
+    events, _ = run(tracker, hiding, start=t0 + 0.5)
+    events += run(tracker, [([sighting(1152, pose="stand", bar=0.5)], view())] * 5, start=t0 + 2.3)[0]
+    died = [e for e in events if e.kind == "died"]
+    assert [(e.track, e.data["cause"]) for e in died] == [(2, "hers")]
+    assert tracker.tracks[1].state == LIVE  # back from hiding, the same one
+
+
+def test_played_by_hand_her_exp_puts_the_kill_on_one_in_reach_that_went():
+    tracker = MonsterTracker(throws=False)
+    t0 = 100.0
+    run(tracker, [([sighting(1250, pose="stand")], view())] * 10, start=t0)
+    tracker.gain(t0 + 0.4)
+    events, _ = run(tracker, [(None, view())] * 60, start=t0 + 0.4)
+    assert [(e.kind, e.data.get("cause")) for e in events] == [("died", "hers")]
+
+
+def test_a_match_on_scenery_for_a_frame_or_two_is_no_death():
+    tracker = MonsterTracker()
+    events, _ = run(tracker, [([sighting(1200, pose="stand")], view())] * 2 + [(None, view())] * (5 * FPS))
+    assert [e.kind for e in events] == ["appeared"] and not tracker.tracks
+    assert tracker.counts["flickers"] == 1
+
+
+def test_tracks_dont_pile_up():
+    tracker = MonsterTracker()
+    frames = []
+    for n in range(40):  # a monster every 2 s (each kind every 8 s), killed by someone else after 1 s on screen
+        frames += [([sighting(1000, pose="stand", kind=KINDS[n % 4])], view())] * FPS + [(None, view())] * FPS
+    run(tracker, frames + [(None, view())] * (10 * FPS))
+    assert tracker.counts["tracks"] == 40 and tracker.counts["died other"] == 40 and not tracker.tracks
+
+
+def test_nothing_is_judged_while_she_isnt_placed():
+    tracker = MonsterTracker()
+    run(tracker, [([sighting(1200, pose="stand")], view())] * 10)
+    events, states = run(tracker, [(None, None)] * (5 * FPS), start=101.0)
+    assert events == [] and states[-1] == {1: LIVE}
