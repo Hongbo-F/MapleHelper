@@ -324,6 +324,43 @@ def test_walking_off_an_end_falls_and_a_wall_stops_her(model):
     assert w.plat is c and w.x == 800 and w.mode == "ground"
 
 
+def test_in_the_air_only_walls_of_her_foothold_group_stop_her(monkeypatch):
+    # A ledge L (0..200, y 300), and 12 units past its right end the wall hanging 85 units under the left end
+    # of a block H (212..600, y 240) of another group, as off platform 3's right end on the real map; F is
+    # 600 below L, a basin floor 1200 below.
+    t = tree()
+    t["info"].update(VRLeft=-200, VRRight=1200, VRBottom=1600)
+    t["foothold"] = {"1": {
+        "10": dict([seg(1, 0, 300, 200, 300), seg(2, 200, 300, 200, 325)]),
+        "11": dict([seg(3, 212, 325, 212, 240, 0, 4), seg(4, 212, 240, 600, 240, 3, 0)]),
+        "12": dict([seg(5, 212, 900, 600, 900)]),
+        "13": dict([seg(6, -100, 1500, 1000, 1500)]),
+    }}
+    t["life"], t["ladderRope"] = {}, {}
+    m = mapdata.parse(1, t, "Test Map", {})
+    ledge, block, floor, basin = plat(m, 300, 100), plat(m, 240, 400), plat(m, 900, 400), plat(m, 1500, 400)
+
+    def walk_off() -> World:  # the arrow let go once she's off the end
+        w = world(m, ledge.id, 150.0)
+        tap(w, 0.0, "right", 0.6)
+        w.advance(3.0)
+        return w
+
+    w = walk_off()
+    assert w.plat is floor and w.x > 300 and w.group == floor.group  # through H's wall, and on
+    monkeypatch.setattr(body, "OWN_GROUP_WALLS", False)
+    w = walk_off()  # every wall: H's stops her, and she comes down by it (in the basin, or round its foot)
+    assert w.x < 220
+    monkeypatch.setattr(body, "OWN_GROUP_WALLS", True)
+    # Her own group's walls still stop her: from C, a running jump into the wall rising at C's right end.
+    c = plat(model_c := mapdata.parse(1, tree(), "Test Map", {}), 500, 400)
+    w = world(model_c, c.id, 740.0)
+    w.key(0.0, "right", True)
+    tap(w, 0.2, "alt", 0.04)
+    w.advance(2.0)
+    assert w.plat is c and 799 < w.x <= 800 and w.group == c.group
+
+
 def test_up_and_a_jump_grab_the_rope_climb_it_and_down_lets_her_off_at_the_bottom(model):
     c, d = plat(model, 500, 400), plat(model, 300, 700)
     w = world(model, c.id, 700.0)

@@ -299,12 +299,40 @@ def jump_window_ok(gap_ms: float, shoe: Shoe, lags: Lags, risk: float = 0.05) ->
 
 Walls = tuple[list[float], list[tuple[float, float]]]  # vertical walls by x: their xs, each one's (top, bottom)
 
+# Which walls stop her: only those of her own foothold group (mapdata.Segment.group), the group of the
+# foothold she last stood on. A jump or a fall through her platform keeps it, landing sets it, and a rope
+# gives her none (ROPE_GROUP). Floors of every group land her. A reconstruction of the client's code has its
+# airborne collision skip a wall of any other group (ThatMapleDev's "Player Physics" gist), and so did she
+# in the live runs (telemetry, 2026-10-19 and 20; her minimap dot fitted to this engine's arcs): six flights
+# went across another group's wall (15-37 units inside its span; one just under the floor of the block it
+# hangs from, which she'd have landed on above it), and each came down within 13 units of where this puts
+# it, against 54-142 units off (or on another platform) with every wall stopping her. Three walk-offs off
+# platform 3's right end went through platform 1's wall 12 units on, planned for the basin, and landed on 17
+# at 1,005-1,015 (this: 1,004-1,008; stopped by it: the basin, or 869 round its foot); two jumps from 19
+# that came in under 18's floor went through its wall onto 24 at 198 (this: 185-198; stopped: 140-144); one
+# from 22 went through 21's wall onto 34 at -138 (this: -138; stopped: -56). None was seen stopped by one.
+# False: every wall stops her, whatever its group (as before).
+OWN_GROUP_WALLS = True
+EVERY_WALL = "every wall"  # a group that has every wall stop her (whatever OWN_GROUP_WALLS says)
+# Her group off a rope: none, so no wall stops her. (The decompile gives a rope group 0 on the rope's own
+# page, 4 on this map, which no foothold is on; read as the group number alone, it is the basin's (3, 0),
+# whose walls are nowhere near a rope here. Untested in game.)
+ROPE_GROUP = None
+
 
 def vertical_walls(segments) -> Walls:
     """The vertical ones of a map's wall segments, sorted by x, as fly takes them: their xs, and each
     one's top and bottom (a unit beyond its ends)."""
     ws = sorted((w for w in segments if w.x1 == w.x2), key=lambda w: w.x1)
     return [w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws]
+
+
+def walls_for(model, group) -> list:
+    """The walls of the map that stop her with foothold group `group` (Segment.group; ROPE_GROUP off a
+    rope, EVERY_WALL for all of them): her own group's (OWN_GROUP_WALLS), or else all of them."""
+    if group == EVERY_WALL or not OWN_GROUP_WALLS:
+        return model.walls
+    return model.walls_of(group)
 
 
 @dataclass(frozen=True)
@@ -340,14 +368,15 @@ def _lands_at(q, x: float, y: float, nx: float, ny: float) -> float | None:
 
 
 def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: int = 0, skip=None,
-        walls: Walls | None = None, sides: tuple[float, float] | None = None, dt: float = TICK,
-        limit: float = 4.0, path: bool = False, airborne: bool = False) -> Flight:
+        group=EVERY_WALL, walls: Walls | None = None, sides: tuple[float, float] | None = None,
+        dt: float = TICK, limit: float = 4.0, path: bool = False, airborne: bool = False) -> Flight:
     """Where she lands from (x, y) moving at (vx, vy) with `arrow` held all the way: the first platform
-    whose surface her feet cross on the way down (_lands_at). Walls stop her sideways (`walls`: the
-    model's, worked out each call if not given; `sides`: the map's left and right limits, which stop her
-    too). `skip` is a platform she falls through (dropping). A flight leaving the ground can't land on
+    whose surface her feet cross on the way down (_lands_at), whatever its group. Walls stop her sideways:
+    `walls`, or else those that stop her with foothold `group` (walls_for: the group of the platform she
+    leaves; by default every wall), worked out each call; `sides`, the map's left and right limits, stop
+    her too. `skip` is a platform she falls through (dropping). A flight leaving the ground can't land on
     its first step; one carried on from mid-air (`airborne`) can. Not cached."""
-    wall_xs, wall_ys = walls if walls is not None else vertical_walls(model.walls)
+    wall_xs, wall_ys = walls if walls is not None else vertical_walls(walls_for(model, group))
     # Only platforms she could reach in the time: within her sideways travel, at or below the top of the jump.
     reach = max(abs(vx), shoe.air_speed if arrow else 0.0) * limit + 1
     top = y - (vy * vy / (2 * shoe.gravity) if vy < 0 else 0) - 1

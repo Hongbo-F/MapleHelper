@@ -7,7 +7,8 @@ Moves between platforms (all in map units, using the game's physics and her meas
 - jump: a running jump off one platform's end onto another (up, level or down);
 - walk_off: walk off a platform's end and fall onto the platform below;
 - drop: down + jump to fall through the platform she stands on.
-Walking along a platform links its moves; routes are found with Dijkstra on time.
+In the air only walls of the foothold group she leaves stop her (body.OWN_GROUP_WALLS). Walking along a
+platform links its moves; routes are found with Dijkstra on time.
 """
 
 import heapq
@@ -19,7 +20,7 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
-from .body import slide
+from .body import slide, walls_for
 from .physics import (CLIMB_SPEED, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH, SHOE, WALK_SPEED,
                       fall_time, flight, fly, sure_landing)
 
@@ -121,7 +122,7 @@ def _jump_up_moves(model: MapModel, a: Platform) -> list[Move]:
         rise = a.y_at(x) - b.y_at(x)
         if not MIN_JUMP_UP_RISE < rise <= JUMP_HEIGHT - JUMP_MARGIN:
             continue
-        land, land_x, t = fly(model, x, a.y_at(x), 0.0, -JUMP_SPEED)
+        land, land_x, t = fly(model, x, a.y_at(x), 0.0, -JUMP_SPEED, group=a.group)
         if land is b:
             out.append(Move("jump_up", a.id, b.id, x, land_x, seconds=t + JUMP_EXTRA_S))
     return out
@@ -139,14 +140,14 @@ def _end_moves(model: MapModel, a: Platform) -> list[Move]:
             if jump is not None:
                 land, land_x, t = jump
                 out.append(Move("jump", a.id, land.id, start, land_x, direction, seconds=_running_jump_seconds(t)))
-        # Walking off this end: from just inside it when a wall rises there (it stops her), else
-        # from just past it. A cliff dropping from the end (34 down to 36) isn't in her way, but
+        # Walking off this end: from just inside it when a wall of her group rises there (it stops her),
+        # else from just past it. A cliff dropping from the end (34 down to 36) isn't in her way, but
         # starting inside it read as bumping into the cliff's top.
         level = a.y_at(edge)
         rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
-                     for w in model.walls)
+                     for w in walls_for(model, a.group))
         land, land_x, t, v_land = flight(model, edge + sign * (-1 if rising else 0.5), a.y_at(edge) - 1,
-                                         sign * WALK_SPEED, 0.0)
+                                         sign * WALK_SPEED, 0.0, group=a.group)
         # She lands at full speed (unless a wall stopped her), so she must be able to stop on it: her slide
         # and LANDING_ROOM more before its far end. Walking off 10's right end, 10 units from 15's right
         # end, she slid off it onto 18 every time in the simulator.
@@ -202,7 +203,7 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
         x = _overlap_middle(a, b)
         if x is None:
             continue
-        land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a)
+        land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a, group=a.group)
         if land is not None and land.id not in seen:
             seen.add(land.id)
             out.append(Move("drop", a.id, land.id, x, land_x, seconds=DROP_EXTRA_S + t))
@@ -218,10 +219,10 @@ def _overlap_middle(a: Platform, b: Platform) -> float | None:
 def _sure_running_jump(model: MapModel, a: Platform, x: float, sign: int) -> tuple[Platform, float, float] | None:
     """Where a running jump leaving a at x (going that way) lands, if it surely lands on another platform
     with room to spare: (platform, landing x, seconds in the air)."""
-    land, land_x, t = fly(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED)
+    land, land_x, t = fly(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, group=a.group)
     if land is not None and land is not a and land.covers(land_x - sign * LANDING_ROOM) \
             and land.covers(land_x + sign * LANDING_ROOM) \
-            and sure_landing(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, land):
+            and sure_landing(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, land, group=a.group):
         return land, land_x, t
     return None
 

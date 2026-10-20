@@ -16,8 +16,10 @@ on the world's 5 ms tick:
   ignored, and so is one the game takes while she's in the air;
 - in the air she flies body.fly's arc with the arrow the game sees, flown again from where she is when
   that arrow changes: the opposite one brakes her at 200 units/s², the one she flies with does nothing,
-  and none drags her at 1 (100 once she falls at the cap). She lands with the speed she has and slides on,
-  unless an attack is playing: that stops her (jump-backs and jump-throws slid 1.4-2.9 units in game);
+  and none drags her at 1 (100 once she falls at the cap). Only the walls of her foothold group stop her
+  (body.OWN_GROUP_WALLS: the group of the platform she last stood on; off a rope, none), and the map's
+  sides. She lands with the speed she has and slides on, unless an attack is playing: that stops her
+  (jump-backs and jump-throws slid 1.4-2.9 units in game);
 - up held at a rope's foot, or anywhere along it in the air, grabs it; up climbs at flow.ROPE_SPEED onto
   the platform at its top (a short climb-over, flow.CLIMB_OVER), down climbs down at physics.CLIMB_SPEED
   and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
@@ -305,7 +307,8 @@ class World:
         self.flight_ms = 0              # ... from this tick (its first point) ...
         self.flight_arrow = 0           # ... flown with this arrow held ...
         self.flight_skip: Platform | None = None  # ... through this platform (dropping)
-        self._walls = body.vertical_walls(model.walls)
+        self.group = p.group            # her foothold group: the walls of it stop her in the air (body.fly)
+        self._walls: dict = {}          # foothold group -> the walls that stop her with it (body.Walls)
         self.x, self.y = float(start[1]), p.y_at(start[1])
         self.vx = self.vy = 0.0         # her speed (units/s; y down)
         self.facing = facing
@@ -614,8 +617,12 @@ class World:
     def _flight(self, x: float, y: float, vx: float, vy: float, arrow: int, skip: Platform | None = None,
                 airborne: bool = False) -> body.Flight:
         """Her arc from (x, y) at (vx, vy) with `arrow` held: body.fly's, step by step on the world's tick,
-        with the map's sides stopping her like walls (the planner never jumps at them)."""
-        return body.fly(self.model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=self._walls,
+        with the map's sides stopping her like walls (the planner never jumps at them), and the walls of
+        her foothold group."""
+        walls = self._walls.get(self.group)
+        if walls is None:
+            walls = self._walls[self.group] = body.vertical_walls(body.walls_for(self.model, self.group))
+        return body.fly(self.model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls,
                         sides=self.sides, dt=TICK_MS / 1000, path=True, airborne=airborne)
 
     def _launch(self, vx: float, vy: float, from_ms: int) -> None:
@@ -667,7 +674,7 @@ class World:
         ground brakes her (or runs on, with the arrow), except while an attack plays: it stops her. Five
         jump-backs and jump-throws landing during their attack slid 1.4-2.9 units, where braking alone
         has 7.6-11.7 (research: 60 fps recordings)."""
-        self.mode, self.plat, self.flight, self.last_plat = "ground", q, None, q
+        self.mode, self.plat, self.flight, self.last_plat, self.group = "ground", q, None, q, q.group
         self.x, self.y = x, q.y_at(x)
         start, end = self.attack_ms
         self.vx, self.vy = (0.0 if start <= self.ms < end else vx), 0.0
@@ -694,7 +701,7 @@ class World:
         return False
 
     def _grab(self, r: Rope) -> None:
-        self.mode, self.rope, self.plat, self.flight = "rope", r, None, None
+        self.mode, self.rope, self.plat, self.flight, self.group = "rope", r, None, None, body.ROPE_GROUP
         self.x, self.y, self.vx, self.vy = r.x, min(max(self.y, r.top), r.bottom), 0.0, 0.0
         self.sitting = False
         self.note(f"grabs the rope at x {r.x:.0f}")
@@ -713,7 +720,7 @@ class World:
                             if p.covers(r.x, 4) and abs(p.y_at(r.x) - r.top) <= 20), None)
                 if top is not None and r.from_platform:
                     self._leave_rope()
-                    self.mode, self.plat, self.last_plat = "ground", top, top
+                    self.mode, self.plat, self.last_plat, self.group = "ground", top, top, top.group
                     self.x = min(max(r.x, top.left), top.right)
                     self.y, self.vx = top.y_at(self.x), 0.0
                     self.still_ms = self.ms + int(round(CLIMB_OVER * 1000))
@@ -953,10 +960,10 @@ def _actions(keys: GameKeys) -> dict[str, str]:
 
 
 def _wall_at(model: MapModel, p: Platform, edge: float) -> bool:
-    """Whether a wall rises at this end of platform `p` (it stops her there)."""
+    """Whether a wall of its foothold group rises at this end of platform `p` (it stops her there)."""
     level = p.y_at(edge)
     return any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
-               for w in model.walls)
+               for w in body.walls_for(model, p.group))
 
 
 def exp_pixels(exp: int) -> np.ndarray:

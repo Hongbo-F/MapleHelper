@@ -386,7 +386,7 @@ class Flow:
         t_off, takeoff, vx = self.press_jump(k, start, d, t)
         if (edge - takeoff) * d < 3:
             return None
-        land, lx, ta, v_land = flight(self.model, takeoff, a.y_at(takeoff), vx, -JUMP_SPEED)
+        land, lx, ta, v_land = flight(self.model, takeoff, a.y_at(takeoff), vx, -JUMP_SPEED, group=a.group)
         if land is None or land.id != m.dst:
             return None
         return self._landing(m, b, k, variant, t_off + ta, lx, land, d, v_land,
@@ -404,7 +404,7 @@ class Flow:
         if t is None:
             return None
         _, v = _ground(start, d, t)  # (from standing close to the end: not yet at full speed)
-        land, lx, ta, v_land = flight(self.model, edge + d, a.y_at(edge) - 1, v, 0.0)
+        land, lx, ta, v_land = flight(self.model, edge + d, a.y_at(edge) - 1, v, 0.0, group=a.group)
         if land is None or land.id != m.dst:
             return None
         k.set_arrow(start.t, d)
@@ -427,7 +427,8 @@ class Flow:
                     return None
                 press, t_off, x_off, vx = self.liftoff(b, d, t)
                 if abs(t_off - t) < 0.02:  # leaves the ground where planned
-                    land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED)
+                    land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED,
+                                                  group=a.group)
                     if land is q and q.covers(lx - d * LAND_MARGIN) and q.covers(lx + d * 30):
                         k.set_arrow(b.t, d)
                         k.tap(press, "jump")
@@ -444,7 +445,7 @@ class Flow:
         if stop is None:
             return None
         t, x = stop
-        land, lx, ta = fly(self.model, x, a.y_at(x), 0.0, -JUMP_SPEED)
+        land, lx, ta = fly(self.model, x, a.y_at(x), 0.0, -JUMP_SPEED, group=a.group)
         if land is not q:
             return None
         t, _, _ = self.press_jump(k, Body(t, x, a, landed=b.landed and t == b.t, slack=b.slack), 0, t + JUMP_LAG)
@@ -477,7 +478,7 @@ class Flow:
         if stop is None:
             return None
         t, x = stop
-        land, lx, ta = fly(self.model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a)
+        land, lx, ta = fly(self.model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a, group=a.group)
         if land is None or land.id != m.dst:
             return None
         t = max(t, b.ready_at)
@@ -623,7 +624,7 @@ class Flow:
         press, t_off, x_off, vx = self.liftoff(b, d, t)  # (from standing: maybe later, out of the kick's blind spot)
         if (mo.at(t_off, a) - x_off) * d < gap - 15 or not a.covers(x_off, -EDGE_ROOM):
             return None  # too close by then, or no room
-        land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED)
+        land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED, group=a.group)
         if land is not a or (lx - mo.at(t_off + ta, a)) * d < 0:
             return None  # off the platform, or she'd come down short of it
         k.set_arrow(b.t, d)

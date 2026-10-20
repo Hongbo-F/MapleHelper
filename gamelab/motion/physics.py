@@ -1,7 +1,8 @@
 """Her physics as the planner takes it: the game's jump, gravity and fall speeds, her walking (with its
 lags and slides) and climbing (and how long to hold an arrow to walk or run a distance), and where a
-jump or fall lands (simulated against the map's platforms and walls). All in map units. The walk, the
-jump and their lags come from motion.body, the engine that moves her as the game does.
+jump or fall lands (simulated against the map's platforms and the walls of her foothold group). All in
+map units. The walk, the jump and their lags come from motion.body, the engine that moves her as the
+game does.
 """
 
 import bisect
@@ -89,48 +90,50 @@ FLY_CACHE_SIZE = 20_000  # landings (about 9 MB when full)
 MODELS_KEPT = 4          # maps fly knows at a time (their walls, and the serial numbers keying their landings)
 _FLY_CACHE: OrderedDict[tuple, tuple] = OrderedDict()
 # The last MODELS_KEPT models fly was used on, by id(model): each kept with its serial number (its landings'
-# key) and its walls. Keyed by id(model) alone, a freed model's id was reused by the next one, which then got
-# the old one's walls and landings (tests failed depending on their order). A model is kept while it's in
-# here, so its id can't be taken, and a model seen again after it was let go gets a new serial: no landing
-# cached for another model can ever be handed to it.
-_MODELS: OrderedDict[int, tuple[MapModel, int, tuple]] = OrderedDict()
+# key) and the walls that stop her by foothold group (body.walls_for). Keyed by id(model) alone, a freed
+# model's id was reused by the next one, which then got the old one's walls and landings (tests failed
+# depending on their order). A model is kept while it's in here, so its id can't be taken, and a model seen
+# again after it was let go gets a new serial: no landing cached for another model can ever be handed to it.
+_MODELS: OrderedDict[int, tuple[MapModel, int, dict]] = OrderedDict()
 _SERIALS = itertools.count()
 
 
-def _known(model: MapModel) -> tuple[int, tuple[list[float], list[tuple[float, float]]]]:
-    """The model's serial number, and its vertical walls sorted by x: their xs, and each one's (top, bottom)."""
+def _known(model: MapModel, group) -> tuple[int, body.Walls]:
+    """The model's serial number, and the vertical walls that stop her with foothold `group`, sorted by x:
+    their xs, and each one's (top, bottom)."""
     known = _MODELS.get(id(model))
-    if known is not None and known[0] is model:
-        _MODELS.move_to_end(id(model))
-        return known[1], known[2]
-    ws = sorted((w for w in model.walls if w.x1 == w.x2), key=lambda w: w.x1)
-    walls = ([w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws])
-    serial = next(_SERIALS)
-    _MODELS[id(model)] = (model, serial, walls)
+    if known is None or known[0] is not model:
+        known = _MODELS[id(model)] = (model, next(_SERIALS), {})
     _MODELS.move_to_end(id(model))
     if len(_MODELS) > MODELS_KEPT:
         _MODELS.popitem(last=False)
-    return serial, walls
+    walls = known[2].get(group)
+    if walls is None:
+        walls = known[2][group] = body.vertical_walls(body.walls_for(model, group))
+    return known[1], walls
 
 
 def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
-        dt: float = 0.004, limit: float = 4.0) -> tuple[Platform | None, float, float]:
+        dt: float = 0.004, limit: float = 4.0, group=body.EVERY_WALL) -> tuple[Platform | None, float, float]:
     """Where she lands from (x, y) moving at (vx, vy) (map units/s, y down): the first platform whose
-    surface her feet cross on the way down. Walls stop her sideways. `skip` is a platform she falls
-    through (dropping). Returns (platform, landing x, seconds). The start is rounded (x and y to 0.01
-    units, the speeds to 0.1 units/s) and results are cached by it: chains try the same jumps many times
-    over."""
-    return flight(model, x, y, vx, vy, skip, dt, limit)[:3]
+    surface her feet cross on the way down. Walls stop her sideways: those of foothold `group` (the
+    platform's she leaves, Platform.group; body.ROPE_GROUP off a rope), unless body.OWN_GROUP_WALLS is
+    off; by default every wall. `skip` is a platform she falls through (dropping). Returns (platform,
+    landing x, seconds). The start is rounded (x and y to 0.01 units, the speeds to 0.1 units/s) and
+    results are cached by it: chains try the same jumps many times over."""
+    return flight(model, x, y, vx, vy, skip, dt, limit, group)[:3]
 
 
 def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
-           dt: float = 0.004, limit: float = 4.0) -> tuple[Platform | None, float, float, float]:
+           dt: float = 0.004, limit: float = 4.0, group=body.EVERY_WALL) -> tuple[Platform | None, float, float, float]:
     """fly's landing, and her sideways speed as she lands: what she left with (with the arrow held, the
     air does nothing to it), or 0 after a wall stopped her. On the ground she slides on from it, or runs
     on."""
-    serial, walls = _known(model)
+    if not body.OWN_GROUP_WALLS:
+        group = body.EVERY_WALL  # (one set of landings, whatever group is asked for)
+    serial, walls = _known(model, group)
     x, y, vx, vy = round(x, 2), round(y, 2), round(vx, 1), round(vy, 1)
-    key = (serial, x, y, vx, vy, None if skip is None else skip.id, dt, limit)
+    key = (serial, group, x, y, vx, vy, None if skip is None else skip.id, dt, limit)
     result = _FLY_CACHE.get(key)
     if result is not None:
         _FLY_CACHE.move_to_end(key)
@@ -178,14 +181,14 @@ SLOW_TAKEOFF = 0.85
 
 
 def sure_landing(model: MapModel, x: float, y: float, vx: float, vy: float, land: Platform,
-                 slop: float = 12.0) -> bool:
+                 slop: float = 12.0, group=body.EVERY_WALL) -> bool:
     """Whether a jump from (x, y) still lands on `land` if she leaves the ground `slop` units early or
     late, or 10% slower, or as slow as SLOW_TAKEOFF: a jump down from platform 25 meant for the basin
-    landed on platform 33, whose edge its arc passed close by."""
+    landed on platform 33, whose edge its arc passed close by. (`group`: fly's.)"""
     sign = 1 if vx > 0 else -1 if vx < 0 else 0
     for dx, k in ((-slop, 1.0), (slop, 1.0), (0.0, 0.9), (0.0, SLOW_TAKEOFF)):
         x0 = x + sign * dx
-        got, _, _ = fly(model, x0, y, vx * k, vy)
+        got, _, _ = fly(model, x0, y, vx * k, vy, group=group)
         if got is not land:
             return False
     return True

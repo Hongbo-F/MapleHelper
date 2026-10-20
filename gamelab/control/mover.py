@@ -18,6 +18,7 @@ from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.scene import Scene
 from ..localization.senses import Senses
+from ..motion.body import ROPE_GROUP
 from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_SPEED, ROPE_REACH, WALK_SPEED, air_time, fly, hold_ms, run_ms
 from ..motion.route import JUMP_FROM, Move
 from ..screen import SCALE, SCREEN_SCALE
@@ -249,7 +250,8 @@ class Mover:
             self._send([[0, k.up.name, "down"], [900, k.up.name, "up"]], "off_rope")
         else:
             # Right if a jump off to the right (up, at walking speed) comes down on a platform.
-            side = RIGHT if fly(self.model, x + 15, y, WALK_SPEED, -300)[0] is not None else LEFT
+            # (Off a rope she's in no foothold group: no wall stops her.)
+            side = RIGHT if fly(self.model, x + 15, y, WALK_SPEED, -300, group=ROPE_GROUP)[0] is not None else LEFT
             arrow = self.actions.arrow(side)
             self._send([[0, arrow, "down"], [30, k.jump.name, "down"], [80, k.jump.name, "up"], [400, arrow, "up"]],
                        "off_rope")

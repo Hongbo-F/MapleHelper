@@ -221,6 +221,59 @@ def test_walls_and_the_maps_sides_stop_her(model):
     assert open_sky.platform is None and open_sky.land_x == 850  # past the wall's top: the side stops her
 
 
+def test_in_the_air_only_her_own_foothold_groups_walls_stop_her(model, monkeypatch):
+    # C's walls are C's group's: they stop her jumping off C, not someone come from A (another group's).
+    a, c = by_y(model, 300, 100), by_y(model, 500, 400)
+    assert body.walls_for(model, c.group) == model.walls and body.walls_for(model, a.group) == []
+    assert body.walls_for(model, body.ROPE_GROUP) == [] and body.walls_for(model, body.EVERY_WALL) == model.walls
+    own = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, group=c.group)
+    assert own.platform is c and 799 < own.land_x < 800 and own.vx_land == 0
+    other = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, group=a.group, sides=(-100, 850))
+    assert other.platform is None and other.land_x == 850  # through the wall, out to the map's side
+    monkeypatch.setattr(body, "OWN_GROUP_WALLS", False)  # every wall stops her, as before
+    assert body.walls_for(model, a.group) == model.walls
+    assert body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, group=a.group).land_x == own.land_x
+
+
+def _ledge_map():
+    """Platform 3's right end on the real map, made up: a ledge L (0..200, y 300) whose walk-off passes,
+    12 units on, the wall hanging 85 units under the left end of a block H (212..600, y 240) of another
+    group; F (212..600) is 600 below L, and a basin floor under everything is 1200 below."""
+    t = tree()
+    t["info"].update(VRLeft=-200, VRRight=1200, VRBottom=1600)
+    t["foothold"] = {"1": {
+        "10": dict([seg(1, 10, 1, 0, 300, 200, 300), seg(1, 10, 2, 200, 300, 200, 325)]),
+        "11": dict([seg(1, 11, 3, 212, 325, 212, 240, 0, 4), seg(1, 11, 4, 212, 240, 600, 240, 3, 0)]),
+        "12": dict([seg(1, 12, 5, 212, 900, 600, 900)]),
+        "13": dict([seg(1, 13, 6, -100, 1500, 1000, 1500)]),
+    }}
+    t["life"] = {}
+    m = mapdata.parse(1, t, "Test Map", {})
+    return m, by_y(m, 300, 100), by_y(m, 900, 400), by_y(m, 1500, 400)
+
+
+def test_walking_off_through_another_groups_wall_lands_beyond_it(monkeypatch):
+    m, ledge, floor, basin = _ledge_map()
+    f = body.fly(m, 200.5, 299, 149.0, 0.0, shoe=SHOE, arrow=1, group=ledge.group)
+    assert f.platform is floor and f.land_x == pytest.approx(200.5 + 149 * f.seconds, abs=1) and f.vx_land == 149
+    assert physics.fly(m, 200.5, 299, 149.0, 0.0, group=ledge.group)[0] is floor
+    # Every wall stopping her, she'd come down along H's wall into the basin (as the planner had platform 3's
+    # walk-off going into the basin, 36, where in game she landed on 17 three times out of three). (With the
+    # arrow let go: held, it steers her round the foot of the wall onto F.)
+    every = body.fly(m, 200.5, 299, 149.0, 0.0, shoe=SHOE, arrow=0)
+    assert every.platform is basin and 211 < every.land_x < 212
+    assert physics.fly(m, 200.5, 299, 149.0, 0.0)[0] is basin
+    monkeypatch.setattr(body, "OWN_GROUP_WALLS", False)
+    assert physics.fly(m, 200.5, 299, 149.0, 0.0, group=ledge.group)[0] is basin
+
+    def walk_off() -> list[int]:  # where walking off L's right end lands, by the planner
+        return [mv.dst for mv in route.moves(m) if (mv.kind, mv.src, mv.direction) == ("walk_off", ledge.id, "right")]
+
+    assert walk_off() == [basin.id]
+    monkeypatch.setattr(body, "OWN_GROUP_WALLS", True)
+    assert walk_off() == [floor.id]
+
+
 def test_a_step_through_a_platforms_corner_lands_on_it(model):
     # Falling at 180 units/s sideways onto B (220..400, y 360) from 5 units above: she lands on it exactly
     # when her arc crosses its surface by its end, even when the step that does it ends past the end.
@@ -261,16 +314,17 @@ def test_long_falls_with_the_arrow_let_go_land_shorter():
 
 
 @REAL
-def test_the_planners_moves_fly_the_same_with_the_arrow_held():
-    """Every jump, jump up and drop the route planner found with physics.fly lands on the same platform
-    with the engine, and so does every walk-off but one. The arcs differ only by the integration: the
-    engine moves her by the mean of the step's two speeds, as the client does, physics.fly by the
-    speed at its start, which lifts her about a unit higher at the top (78.1 for 77.0). And where a wall
-    stops a walk-off, the arrow held pushes her on at 8.9 units/s below its foot, as the client's air
-    steering does: off platform 3 she clears the foot of platform 1's wall and lands on 17, not in the
-    basin (36), as terrain research expects for another reason (a probe in game for later)."""
+@pytest.mark.parametrize("own_group", [True, False])
+def test_the_planners_moves_fly_the_same_with_the_arrow_held(own_group, monkeypatch):
+    """Every move the route planner finds with physics.fly lands on the same platform with the engine, the
+    same walls stopping her (her foothold group's). The arcs differ only by the integration: the engine
+    moves her by the mean of the step's two speeds, as the client does, physics.fly by the speed at its
+    start, which lifts her about a unit higher at the top (78.1 for 77.0). With every wall stopping her
+    (OWN_GROUP_WALLS off, as before), where one stops a walk-off the arrow held pushes her on at 8.9
+    units/s below its foot, as the client's air steering does: off platform 3 she clears the foot of
+    platform 1's wall and lands on 17, not in the basin (36). In game she went through that wall."""
+    monkeypatch.setattr(body, "OWN_GROUP_WALLS", own_group)
     m = scenarios.real_map()
-    walls = body.vertical_walls(m.walls)
     far, other = [], []
     for mv in route.moves(m):
         a, sign = m.platform(mv.src), 1 if mv.direction == "right" else -1
@@ -285,19 +339,36 @@ def test_the_planners_moves_fly_the_same_with_the_arrow_held():
         elif mv.kind == "walk_off":
             level = a.y_at(edge)
             rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
-                         for w in m.walls)
+                         for w in body.walls_for(m, a.group))
             x = edge + sign * (-1 if rising else 0.5)
             start, arrow, skip = (x, level - 1, sign * physics.WALK_SPEED, 0.0), sign, None
         else:
             continue
-        f = body.fly(m, *start, shoe=physics.SHOE, arrow=arrow, skip=skip, walls=walls)
-        _, old_x, _ = physics.fly(m, *start, skip)
+        f = body.fly(m, *start, shoe=physics.SHOE, arrow=arrow, skip=skip, group=a.group)
+        _, old_x, _ = physics.fly(m, *start, skip, group=a.group)
         if f.platform is None or f.platform.id != mv.dst:
             other.append((mv.kind, mv.src, mv.dst, f.platform and f.platform.id))
         elif abs(f.land_x - old_x) > (1.1 if mv.kind == "jump" else 0.5):
             far.append((mv.kind, mv.src, mv.dst))
-    assert other == [("walk_off", 3, 36, 17)]
-    assert sorted(far) == [("walk_off", 13, 20), ("walk_off", 19, 24), ("walk_off", 22, 34)]  # the wall push
+    if own_group:
+        assert other == [] and far == []
+    else:
+        assert other == [("walk_off", 3, 36, 17)]
+        assert sorted(far) == [("walk_off", 13, 20), ("walk_off", 19, 24), ("walk_off", 22, 34)]  # the wall push
+
+
+@REAL
+def test_off_platform_3s_right_end_she_goes_through_platform_1s_wall_onto_17():
+    # Three times out of three in game (telemetry, 2026-10-20), landing at 1,005-1,015 by her dot.
+    m = scenarios.real_map()
+    p3 = m.platform(3)
+    assert p3.group != m.platform(1).group
+    f = body.fly(m, 849.5, -926, 149.0, 0.0, shoe=physics.SHOE, arrow=1, group=p3.group)
+    assert f.platform.id == 17 and f.land_x == pytest.approx(1008, abs=2)
+    assert physics.fly(m, 849.5, -926, 149.0, 0.0, group=p3.group)[0].id == 17
+    assert physics.fly(m, 849.5, -926, 149.0, 0.0)[0].id == 36  # every wall: down it into the basin
+    kinds = {(mv.kind, mv.dst) for mv in route.moves(m) if mv.src == 3 and mv.direction == "right"}
+    assert ("walk_off", 17) in kinds and ("walk_off", 36) not in kinds
 
 
 def test_physics_fly_and_body_fly_land_alike_on_random_running_jumps(model):

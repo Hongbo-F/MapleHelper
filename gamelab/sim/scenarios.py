@@ -569,11 +569,14 @@ def move_walk_off(sim):
     return _one_move(sim, "walk_off", 4, 6)
 
 
-@scenario((3, 760.0), expects=(ends(None, key="landed"), sends("walk_off")))
-def move_walk_off_long_fall(sim):
-    """Mover.do: walk off platform 3's right end, 1500 units above the basin: Mover.settle gives up after
-    2 s with her still falling, and the move ends on no platform."""
-    return _one_move(sim, "walk_off", 3, 36)
+@scenario((3, 760.0), expects=(ends(17, key="landed"), sends("walk_off")))
+def move_walk_off_through_wall(sim):
+    """Mover.do: walk off platform 3's right end and on through the wall hanging under platform 1's left
+    end, 12 units on (another foothold group's: in the air only her own group's walls stop her), down onto
+    17, 600 units below, as in game three times out of three. (Stopped by that wall, she fell 1500 units
+    into the basin, and Mover.settle gave up after 2 s with her still falling; no move on this map falls
+    that long now.)"""
+    return _one_move(sim, "walk_off", 3, 17)
 
 
 @scenario((2, -100.0), expects=(ends(12, key="landed"), sends("drop")))
