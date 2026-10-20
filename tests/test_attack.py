@@ -1,5 +1,8 @@
 """Attack decisions from map positions: where a star reaches, which monster first, what to do about the
-monsters around her, what an attack from a jump can hit, and where to stand to shoot a platform."""
+monsters around her, what an attack from a jump can hit, what stops a star, and where to stand to shoot
+a platform."""
+
+import math
 
 import pytest
 
@@ -226,3 +229,91 @@ def test_monsters_are_placed_only_on_platforms_they_spawn_on():
     model = mapdata.parse(1, tree, "Test", {}, {"8": "Pig"})
     # Feet read 15 units too high: closer to the safe platform, but pigs only walk the lower one.
     assert monster_platform(model, "pig", 350, 465).y_at(350) == 500
+
+
+# --- what stops a star -----------------------------------------------------------------------------------
+
+def _fh(x1, y1, x2, y2, prev=0, nxt=0):
+    return {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "prev": prev, "next": nxt}
+
+
+def step_map():
+    """Group (1, 1): floor A (0..200, y 500), the step wall at x 200 (from 500 up to 440), floor B
+    (200..400, y 440), like platforms 4 and 2 on the real map. Group (1, 2): block C (450..600, y 400),
+    its walls hanging 25 below its ends. Returns the model and A, B, C."""
+    tree = {"info": {"VRLeft": -100, "VRTop": 0, "VRRight": 800, "VRBottom": 800},
+            "foothold": {"1": {"1": {"1": _fh(0, 500, 200, 500, 0, 2), "2": _fh(200, 500, 200, 440, 1, 3),
+                                     "3": _fh(200, 440, 400, 440, 2, 0)},
+                               "2": {"4": _fh(450, 425, 450, 400, 0, 5), "5": _fh(450, 400, 600, 400, 4, 6),
+                                     "6": _fh(600, 400, 600, 425, 5, 0)}}}}
+    model = mapdata.parse(1, tree, "Steps", {})
+    a, b, c = (next(p for p in model.platforms if p.left == left) for left in (0, 200, 450))
+    return model, a, b, c
+
+
+def test_a_wall_of_her_own_foothold_group_stops_a_star():
+    model, a, b, c = step_map()
+    assert a.group == b.group == (1, 1) and a.walls == b.walls == tuple(model.walls_of(a.group))
+    assert [w.x1 for w in a.walls] == [200] and sorted(w.x1 for w in c.walls) == [450, 600]
+    # Below the step: the wall rises 0..60 above her feet, across the line 28 above them.
+    up = target(300, 440, platform=b.id)
+    assert reach.can_shoot(300 - 100, -60) and not reach.can_hit(a, 100, 500, up)
+    assert reach.wall_in_way(a, 100, 500, 300).x1 == 200
+    assert reach.clear_span(a, 100, 500) == (-math.inf, 200)
+    # Above it, the wall hangs below her feet: down past it the star gets there.
+    assert reach.wall_in_way(b, 210, 440, 100) is None and reach.can_hit(b, 300, 440, target(100, 500, platform=a.id))
+    assert reach.clear_span(b, 300, 440) == (-math.inf, math.inf)
+
+
+def test_walls_of_other_groups_and_floors_let_stars_through():
+    model, a, b, c = step_map()
+    # From B at 300 (the line at y 412) to C's top, 40 above her: C's own wall at 450 hangs from 400 to 425,
+    # across the line, but it's another group's (the side of the block a target stands on).
+    assert any(min(w.y1, w.y2) <= 440 - reach.SHOT_H < max(w.y1, w.y2) for w in c.walls if w.x1 == 450)
+    assert reach.wall_in_way(b, 300, 440, 560) is None and reach.can_hit(b, 300, 440, target(560, 400, platform=c.id))
+    # Floors never stop one: from C down to B, past C's end and its hanging wall (C's own group).
+    assert reach.wall_in_way(c, 470, 400, 300) is None
+
+
+def test_a_jump_raises_the_line_a_star_runs_at():
+    model, a, b, c = step_map()
+    # A jump throw's attack starts 26 up (the line 54 above her feet): still under the 60 step's top. A jump
+    # back's, 44 up (72): over it.
+    assert reach.wall_in_way(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_ATTACK_MS)) is not None
+    assert reach.wall_in_way(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_BACK_ATTACK_MS)) is None
+
+
+def test_a_monster_is_never_past_its_platforms_end():
+    model, a, b, c = step_map()
+    # Read 9 units past A's end (where the step wall rises): on A, so on her side of it.
+    near_end = target(209, 500, platform=a.id)
+    assert reach.can_hit(a, 100, 500, near_end) and reach.wall_in_way(a, 100, 500, 209, target=a) is None
+    assert reach.wall_in_way(a, 100, 500, 209) is not None  # its platform unknown: taken where it was seen
+    # On B, right at the step's top: behind it.
+    assert reach.wall_in_way(a, 100, 500, 200, target=b) is not None
+
+
+def test_walls_block_can_be_switched_off_for_probes(monkeypatch):
+    model, a, b, c = step_map()
+    monkeypatch.setattr(reach, "WALLS_BLOCK", False)
+    assert reach.wall_in_way(a, 100, 500, 300) is None and reach.can_hit(a, 100, 500, target(300, 440, platform=b.id))
+    assert reach.clear_span(a, 100, 500) == (-math.inf, math.inf)
+    assert reach.wall_between(a, 100, 500, 300) is not None  # what the shot log records either way
+
+
+def test_what_stops_a_star_on_the_real_map():
+    """Thicket Around the Beach II (skipped without its parsed game data): from platform 4 a star never
+    reaches 2, behind the step wall of their group (3, 63); the shots that hit in the live logs, past other
+    groups' walls and down past her own block's, are clear."""
+    if not (mapdata.CACHE / "10000012.json").is_file():
+        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
+    model = mapdata.load(10000012)
+    p = model.platform
+    assert p(2).group == p(4).group == (3, 63)
+    assert all(reach.wall_in_way(p(4), x, p(4).y_at(x), tx, target=p(2)) is not None
+               for x in range(219, 670, 10) for tx in range(-309, 220, 10))
+    for her, x, there, txs in ((19, -14, 18, (150, 300, 380)), (19, 52, 18, (300, 439)), (3, 706, 1, (870, 930)),
+                               (3, 723, 1, (900, 950)), (14, 716, 17, (900, 1050)), (14, 737, 17, (918, 1088)),
+                               (2, 200, 4, (300, 450)), (22, 16, 21, (-150, -300))):
+        for tx in txs:
+            assert reach.wall_in_way(p(her), x, p(her).y_at(x), tx, target=p(there)) is None, (her, x, there, tx)

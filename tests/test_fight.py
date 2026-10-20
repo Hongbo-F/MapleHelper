@@ -1,5 +1,6 @@
 """The fight loop (behavior.fight.clear) on prepared looks and a fake clock: hidden monsters, kills
-from her EXP, the kill count, far targets, the star's path; and the hunter counting EXP gains."""
+from her EXP, the kill count, far targets, the star's path, what the shot log keeps; and the hunter
+counting EXP gains."""
 
 import time
 from types import SimpleNamespace
@@ -239,3 +240,17 @@ def test_hidden_monsters_are_told_by_the_one_time_read_per_look(monkeypatch):
     monkeypatch.setattr(time, "monotonic", monotonic)
     h.clear(patience=0.01, seconds=0.5)
     assert throws and all(side == RIGHT for _, side in throws)
+
+
+def test_the_shot_log_keeps_where_she_and_the_target_were_and_the_wall_rule():
+    # From below the step (A, at x 100) at a monster up on B: a wall of her group in the way. From B down
+    # at one on A: clear. Recorded whether or not her decisions keep to the rule (reach.WALLS_BLOCK).
+    from gamelab.behavior.fight import _shot
+    from test_attack import step_map
+    model, a, b, _ = step_map()
+    up = _shot(SimpleNamespace(where=SimpleNamespace(x=100, y=500), platform=a, tag_seen=True),
+               target(300, 440, platform=b.id), 200, -60, model)
+    assert (up["x"], up["tx"], up["her_group"], up["clear"]) == (100, 300, [1, 1], False)
+    down = _shot(SimpleNamespace(where=SimpleNamespace(x=300, y=440), platform=b, tag_seen=True),
+                 target(100, 500, platform=a.id), -200, 60, model)
+    assert down["clear"] and down["her"] == b.id and down["target"] == a.id

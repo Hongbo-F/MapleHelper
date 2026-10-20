@@ -17,9 +17,30 @@ monster's body is its box in the game data, localization.monsters): in 45 jump-t
 units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60 above took the
 stars. On the ground the claw's swing is looked at first: a monster whose body reaches into it is swiped.
 
+What stops a star is the walls of her own foothold group (mapdata.Segment.group: a floating block's floor
+and the walls hanging from its ends, or platforms joined by a step), where they cross a level line SHOT_H
+above her feet (higher in a jump): `wall_in_way`. Floors never stop one, and nor do the walls of any
+other group, such as the side walls of the block the target stands on. The game data has no foothold
+flag for it (306 map images: a foothold has its ends, its neighbours and `piece`, and in 51 maps
+`forbidFallDown`); the rule is fitted to the live logs of 2026-10-18 to 10-20:
+- from platform 4, no star reached a monster on 2, 60 above her behind the step wall joining the two
+  (group (3, 63)), in 3 sessions: 0 of 3 in the shot log, every kill of 40 throws on 4 (sweep log 9),
+  0 of 5 in the telemetry (Orange Mushrooms on 2 in view, no HP bar, for 4 s of throwing);
+- in the same logs, stars 60 up past the side wall of the block above (another group, from 25 below
+  to 60 above her feet) hit: 19 -> 18 13 of 13 decided, 3 -> 1 15 of 19; and stars down past her own
+  block's hanging wall (14 -> 17, 25 deep) hit 81%;
+- a straight line from her to the target fits neither 4 -> 2 and 14 -> 17 together, nor "every wall
+  blocks" 19 -> 18; the level line through her own group's walls fits every pair decided.
+The client's collisions in the air also skip walls of other groups (a reconstruction of its physics),
+likely the same test. On this map it changes one pair: 4 -> 2.
+
 All in map units; dy is the target's feet minus hers (+ = below her).
 """
 
+import math
+
+from ..localization.mapdata import Platform, Segment
+from ..localization.monsters import Monster
 from ..motion import physics
 
 # With Keen Eyes maxed (+200 range by the skill data; the 400 above was measured before), stars on her
@@ -57,6 +78,14 @@ CLAW_DOWN = 17
 CLAW_UP = 62
 STAR_SURE = 125      # from this far on, a throw from the ground surely throws a star at a snail: the widest
                      # swing (swingO3) reaches 102 ahead of her, and half a snail is 19
+# What stops a star (see above). The level line runs SHOT_H above her feet: anything from 1 to 59 fits the
+# logs (on this map it matters only for steps lower than 60, and there are none), and 28 is where the
+# client's target search is centred (MeowDB, Lucky Seven: 28 above her feet).
+SHOT_H = 28
+# Whether her decisions keep to it. Off, they throw at monsters behind such walls as before, so an in-game
+# probe can measure it (the shot log has the rule's verdict either way; the simulator's world keeps to the
+# rule regardless).
+WALLS_BLOCK = True
 
 
 def in_band(dy: float) -> bool:
@@ -73,8 +102,71 @@ def min_dx(dy: float) -> float:
 
 
 def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE) -> bool:
-    """Whether a target dx along (either way) and dy below (+) is hit by a star from where she stands."""
+    """Whether a target dx along (either way) and dy below (+) is hit by a star from where she stands,
+    terrain aside (can_hit: with it)."""
     return min_dx(dy) <= abs(dx) <= reach and in_band(dy)
+
+
+def _crosses(w: Segment, line: float) -> bool:
+    """Whether wall `w` crosses the level line at map y `line` (a wall split into footholds, end to end,
+    crosses it once: each foothold from its top, inclusive, to its bottom)."""
+    return min(w.y1, w.y2) <= line < max(w.y1, w.y2)
+
+
+def _inside(x: float, p: Platform) -> float:
+    """Map x, 1 unit inside platform `p`'s ends."""
+    return min(max(x, p.left + 1), p.right - 1)
+
+
+def wall_between(platform: Platform | None, x: float, y: float, tx: float, rise: float = 0.0,
+                 target: Platform | None = None) -> Segment | None:
+    """The wall that stops a star from her (map x on `platform`, her feet at y, `rise` units up in a jump)
+    before map x `tx`: of the walls of her own foothold group (Platform.walls), the nearest standing
+    between them across the level line SHOT_H above her feet; None if the star gets there. Her x is taken
+    1 unit inside her platform's ends, and `tx` inside the target's platform (`target`, if known): a
+    monster is never past its platform's end, and one at the foot of a wall of her group that rises from
+    its own platform's end (the basin's sides, from its floor) isn't behind it."""
+    if platform is None:
+        return None
+    line = y - rise - SHOT_H
+    a = _inside(x, platform)
+    b = tx if target is None else _inside(tx, target)
+    lo, hi = min(a, b), max(a, b)
+    walls = [w for w in platform.walls if lo <= w.x1 <= hi and _crosses(w, line)]
+    return min(walls, key=lambda w: abs(w.x1 - a), default=None)
+
+
+def wall_in_way(platform: Platform | None, x: float, y: float, tx: float, rise: float = 0.0,
+                target: Platform | None = None) -> Segment | None:
+    """wall_between, as her decisions see it: None whatever the terrain with WALLS_BLOCK off."""
+    return wall_between(platform, x, y, tx, rise, target) if WALLS_BLOCK else None
+
+
+def wall_to(platform: Platform | None, x: float, y: float, m: Monster, rise: float = 0.0,
+            target: Platform | None = None) -> Segment | None:
+    """wall_in_way from map (x, y) on `platform` to monster `m`. `target`: m's platform if known (if m is
+    on hers, it's hers)."""
+    if target is None and platform is not None and m.platform == platform.id:
+        target = platform
+    return wall_in_way(platform, x, y, m.x, rise, target)
+
+
+def can_hit(platform: Platform | None, x: float, y: float, m: Monster, reach: float = SHOT_RANGE,
+            rise: float = 0.0, target: Platform | None = None) -> bool:
+    """Whether a star from map (x, y) on `platform` hits monster `m`: in reach (can_shoot), and no wall of
+    her foothold group in the way (wall_to; `rise`: her height in a jump, `target`: m's platform)."""
+    return can_shoot(m.x - x, m.y - y, reach) and wall_to(platform, x, y, m, rise, target) is None
+
+
+def clear_span(platform: Platform | None, x: float, y: float, rise: float = 0.0) -> tuple[float, float]:
+    """The map x a star from her (as in wall_in_way) gets to either way before a wall of her foothold group
+    stops it: from the nearest such wall on her left to the nearest on her right (infinite where there's
+    none, and either way with WALLS_BLOCK off)."""
+    if not WALLS_BLOCK or platform is None:
+        return -math.inf, math.inf
+    line, a = y - rise - SHOT_H, _inside(x, platform)
+    xs = [w.x1 for w in platform.walls if _crosses(w, line)]
+    return max((v for v in xs if v <= a), default=-math.inf), min((v for v in xs if v >= a), default=math.inf)
 
 
 def reaches_into(ahead: float, dy: float, top: float, half: float, far: float, down: float, up: float) -> bool:

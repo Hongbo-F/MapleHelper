@@ -48,9 +48,12 @@ class Segment:
 
 @dataclass
 class Platform:
-    """A walkable stretch of ground: footholds joined end to end, left to right, with no wall between."""
+    """A walkable stretch of ground: footholds joined end to end, left to right, with no wall between.
+    `walls`: the walls of its foothold group (MapModel.walls_of; parse attaches them): the only terrain
+    that stops a star thrown from it (attack.reach)."""
     id: int
     segments: list[Segment]
+    walls: tuple[Segment, ...] = field(default=(), repr=False, compare=False)
 
     @property
     def left(self) -> float:
@@ -292,13 +295,16 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
                     mob_names.get(_mob_id(s), ""))
               for s in _monster_lives(tree)]
     mm = tree.get("miniMap") or {}
-    return MapModel(
+    model = MapModel(
         id=map_id, name=name,
         bounds=(info.get("VRLeft"), info.get("VRTop"), info.get("VRRight"), info.get("VRBottom")),
         minimap={k: mm.get(k) for k in ("width", "height", "centerX", "centerY", "mag")},
         platforms=platforms, walls=walls, ropes=ropes, portals=portals, spawns=spawns, physics=physics,
         mob_exp={mob_names.get(i, i): e for i, e in (mob_exp or {}).items()},
         mob_bodies={mob_names.get(i, i): MobBody(**b) for i, b in (mob_bodies or {}).items()})
+    for p in model.platforms:
+        p.walls = tuple(model.walls_of(p.group))
+    return model
 
 
 def _image(map_id: int) -> dict:

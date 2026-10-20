@@ -21,6 +21,7 @@ from maplehelper.game import COMBAT
 from .. import directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import TOO_CLOSE, act_text, air_gap, decide, open_above, pct, pick_target, stance
+from ..localization.mapdata import MapModel
 from ..localization.monsters import (MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster, bodies, dead_one,
                                      seen_again)
 from ..localization.scene import Scene
@@ -434,7 +435,7 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
     if act[0] == "throw":
         dx, dy = t.x - s.where.x, t.y - s.where.y
         if reach.can_shoot(dx, dy, reach=reach.STAR_REACH) and act[1] == directions.toward(dx):
-            st.flying.append(_shot(s, t, dx, dy))
+            st.flying.append(_shot(s, t, dx, dy, h.model))
         h.actions.throw(act[1])
         h.report.throws += 1
         st.throws += 1
@@ -444,11 +445,21 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
     return None
 
 
-def _shot(s: Scene, t: Monster, dx: float, dy: float) -> dict:
+def _shot(s: Scene, t: Monster, dx: float, dy: float, model: MapModel | None = None) -> dict:
     """A throw at `t` (`dx`, `dy` from her), to be scored: what the shot log keeps, its HP bar before
-    the throw, and when the star should hit (`due`: the attack's release, then the star's flight)."""
-    return {"kind": t.kind, "dx": int(round(dx)), "dy": int(round(dy)), "her": s.platform.id,
+    the throw, and when the star should hit (`due`: the attack's release, then the star's flight). The log
+    also keeps where she and it were (map x), her foothold group, and whether a wall of it stood in the
+    way (`clear`: reach.wall_between, whether or not her decisions keep to it), so what stops a star can
+    be checked from it."""
+    here = s.platform
+    on = here if t.platform == here.id else None  # the target's platform, if known
+    if on is None and model is not None and t.platform is not None:
+        on = model.platform(t.platform)
+    clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on) is None
+    return {"kind": t.kind, "dx": int(round(dx)), "dy": int(round(dy)), "her": here.id,
             "target": t.platform, "bar": t.bar, "seen": bool(s.tag_seen),
+            "x": int(round(s.where.x)), "tx": int(round(t.x)),
+            "her_group": list(here.group) if here.group is not None else None, "clear": clear,
             "due": time.monotonic() + COMBAT.attack_release_ms / 1000 + abs(dx) / reach.STAR_SPEED}
 
 
