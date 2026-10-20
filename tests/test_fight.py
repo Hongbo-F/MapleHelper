@@ -192,16 +192,19 @@ def test_a_jump_throw_aims_at_the_platform_above_and_over_a_snail_beside_her():
     # the ground, one 60 above needs 200 sideways), and the snail 30 away on her own platform is under it.
     from gamelab.behavior.fight import _in_path
     from gamelab.motion.physics import JUMP_ATTACK_MS
+    late = 100  # the attack keyed 100 ms after the jump (now JUMP_ATTACK_MS is 40: see the end)
     s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT)
     snail = target(470, kind="snail")
     near_slime, far_slime = target(350, y=440, platform=5, kind="slime"), target(300, y=440, platform=5, kind="slime")
     too_far = target(30, y=440, platform=5, kind="slime")  # 470 away: past the star's reach
     seen = [snail, near_slime, far_slime, too_far]
-    assert _in_path(s, LEFT, seen, JUMP_ATTACK_MS) == [near_slime, far_slime]
+    assert _in_path(s, LEFT, seen, late) == [near_slime, far_slime]
     assert _in_path(s, LEFT, seen) == [snail, far_slime]  # a throw from the ground: as before
     # A pig beside her is tall enough for the jump throw's attack.
     pig = target(470)
-    assert _in_path(s, LEFT, [pig, near_slime], JUMP_ATTACK_MS) == [pig, near_slime]
+    assert _in_path(s, LEFT, [pig, near_slime], late) == [pig, near_slime]
+    # Keyed 40 ms after the jump, she's low enough that the snail beside her is in the attack's path first.
+    assert _in_path(s, LEFT, seen, JUMP_ATTACK_MS)[0] is snail
 
 
 def test_a_kill_on_the_platform_above_during_jump_throws_is_placed_there(monkeypatch):

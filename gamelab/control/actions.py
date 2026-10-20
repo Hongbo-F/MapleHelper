@@ -105,8 +105,9 @@ class Actions:
     def jump_throw(self, direction: str) -> None:
         """Face `direction`, jump straight up and attack in mid-air: in the air the attack throws a
         star even at point-blank range, where on the ground the claw only swipes (9-11 damage against
-        30-70 for a star, seen with slimes crowding her in the basin). The macro's F1 combo, with its
-        timing (jump, then the attack 100 ms after the jump key)."""
+        30-70 for a star, seen with slimes crowding her in the basin). The attack key comes JUMP_ATTACK_MS
+        (40 ms) after the jump key, while she's still low: the macro's F1 combo times it at 100 ms, and an
+        attack starting that high in the jump went over a snail."""
         self.wait_lock()
         events, t = self._turn(direction)
         key, jump = self._attack_key(), self.keys.jump.name

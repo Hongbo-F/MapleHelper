@@ -128,21 +128,25 @@ def test_under_a_low_platform_she_does_not_jump_at_a_monster():
 
 # --- what an attack from a jump can hit ----------------------------------------------------------------
 
-def test_a_jump_throw_attack_starts_too_high_for_a_snail():
-    # She's 49 units up when a jump throw's attack picks its target (100 ms after the jump key, plus the
-    # lags), so its area's floor is 30 up: a snail (24 at least) is under it, the others reach into it.
-    assert reach.air_floor(physics.JUMP_ATTACK_MS) == pytest.approx(30.3, abs=0.1)
+def test_an_attack_keyed_late_in_a_jump_starts_too_high_for_a_snail():
+    # Keyed 100 ms after the jump key (the macro's F1 combo), she's 49 units up when the attack picks its
+    # target (plus the lags), so its area's floor is 30 up: a snail (24 at least) is under it, the others
+    # reach into it. In game the star went over the snail. The jump back's attack (85 ms) too.
+    assert reach.air_floor(100) == pytest.approx(30.3, abs=0.1)
     assert reach.air_floor(physics.JUMP_BACK_ATTACK_MS) == pytest.approx(25.1, abs=0.1)
-    assert reach.air_floor(40) == pytest.approx(6.7, abs=0.1)
     tops = monsters.MONSTER_TOP
-    for gap in (physics.JUMP_ATTACK_MS, physics.JUMP_BACK_ATTACK_MS):
+    for gap in (100, physics.JUMP_BACK_ATTACK_MS):
         assert not reach.air_hits(tops["snail"], gap)
         assert tops["snail"] < reach.air_floor(gap) + reach.AIR_MARGIN
-    assert all(reach.air_hits(tops[k], physics.JUMP_ATTACK_MS) for k in ("pig", "slime", "orange-mushroom"))
-    assert all(reach.air_hits(top, 40) for top in tops.values())  # keyed 40 ms after the jump: all of them
+    assert all(reach.air_hits(tops[k], 100) for k in ("pig", "slime", "orange-mushroom"))
+    # A jump throw's attack is keyed 40 ms after the jump (killed a snail in game): every kind is hit.
+    assert physics.JUMP_ATTACK_MS == 40
+    assert reach.air_floor(physics.JUMP_ATTACK_MS) == pytest.approx(6.7, abs=0.1)
+    assert all(reach.air_hits(top, physics.JUMP_ATTACK_MS) for top in tops.values())
 
 
-def test_a_cornered_snail_is_shot_from_the_ground_never_from_a_jump():
+def test_with_the_attack_keyed_late_a_cornered_snail_is_shot_from_the_ground(monkeypatch):
+    monkeypatch.setattr(physics, "JUMP_ATTACK_MS", 100)
     snail = target(110, kind="snail")
     # Cornered at the left end (no room to step back far enough for a star): from where she is, the claw
     # swipes it, and every swipe hits. A jump throw's attack would go over it.
@@ -161,9 +165,9 @@ def test_a_cornered_snail_is_shot_from_the_ground_never_from_a_jump():
         assert stance(60, 500, PLAT, [target(110, kind=kind)]) == ("jump_throw", RIGHT)
 
 
-def test_an_attack_keyed_sooner_after_the_jump_gets_jump_throws_at_snails_back(monkeypatch):
-    # Everything follows from the attack's timing: at 40 ms the jump throw's attack starts low enough.
-    monkeypatch.setattr(physics, "JUMP_ATTACK_MS", 40)
+def test_with_the_attack_keyed_40_ms_after_the_jump_a_cornered_snail_gets_a_jump_throw():
+    # Everything follows from the attack's timing: at 40 ms (JUMP_ATTACK_MS) the jump throw's attack starts
+    # low enough.
     assert stance(60, 500, PLAT, [target(110, kind="snail")]) == ("jump_throw", RIGHT)
     # Never a jump back at a snail: its attack has to come after the turn in mid-air (85 ms).
     assert stance(500, 500, PLAT, [target(560, kind="snail")]) == ("jump_throw", RIGHT)

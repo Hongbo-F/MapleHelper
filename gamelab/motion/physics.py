@@ -43,7 +43,9 @@ RUN_LAG_MS = 65
 # attack can hit). An attack picks its target when it starts, about JUMP_LAG after its key, the same input
 # lag as a jump's lift-off: so when it starts she has been in the air for about as long as the attack key
 # came after the jump key.
-JUMP_ATTACK_MS = 100       # a jump throw's attack key comes this long after the jump key (the macro's F1 combo)
+JUMP_ATTACK_MS = 40        # a jump throw's attack key comes this long after the jump key. In game on 2026-10-20,
+                           # at a snail 20-60 units away: keyed 100 ms after the jump (the macro's F1 combo), the
+                           # star went over it; keyed 40 ms after, a star hit it for 78 and killed it
 JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid-air (actions.JB_THROW_MS 165
                            # less JB_RUN_MS 80, when the jump key goes down)
 ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fps recordings jump_throw_0 and
