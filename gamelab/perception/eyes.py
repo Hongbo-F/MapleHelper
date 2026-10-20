@@ -191,6 +191,11 @@ class Eyes:
         """Drops lying in a box (x0, y0, x1, y1) of the frame."""
         return self.loot_detector().detect(obs.frame, box, mesos_only=mesos_only)
 
+    def items_in(self, obs: Observation, boxes: list[tuple[int, int, int, int]],
+                 mesos_only: bool = False) -> list[list[Item]]:
+        """`items` in each of several boxes, searched together."""
+        return self.loot_detector().detect_each(obs.frame, boxes, mesos_only=mesos_only)
+
     @property
     def item_height(self) -> int:
         """The tallest drop picture (half-size px): a box shorter than this can't hold one."""

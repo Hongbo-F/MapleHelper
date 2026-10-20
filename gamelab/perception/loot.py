@@ -43,7 +43,8 @@ MESO_KINDS = {0: "bronze", 1: "gold"}  # these monsters drop 10-20 mesos: coins,
 THRESHOLD = 0.6      # masked colour match (the drops in the saved frames: 0.63-0.87)
 PIXEL_SLACK = 24     # mean difference from the template, per pixel and channel under its mask (in saved
                      # frames: drops 12-19; scenery and UI that matched a shape 27-57)
-THREADS = 4          # templates matched at once (a strip: 30 ms on 4 threads, 90 ms on one)
+THREADS = 8          # templates matched at once: her platform's strips 22 -> 14 ms against 4 threads, every
+                     # platform's in view 120 -> 88 (back to back on the 17 bench frames, the CPU busy); 12: 13 and 88
 ABOVE = 30           # half-size px above a platform's top searched (items are up to 22 tall, and bob)
 BELOW = 6            # ... and below it
 HALF_COVER = 0.5     # a template's mask: where the picture covers at least this much of a pixel
@@ -188,16 +189,27 @@ class LootDetector:
                mesos_only: bool = False) -> list[Item]:
         """Items in `frame` (RGB, game window / SCALE), within `box` (x0, y0, x1, y1) if given. The
         templates are matched on a few threads: 30 ms a platform's strip instead of 90."""
-        x0, y0, x1, y1 = box or (0, 0, frame.shape[1], frame.shape[0])
-        x0, y0 = max(0, int(x0)), max(0, int(y0))
-        area = np.ascontiguousarray(frame[y0:int(y1), x0:int(x1)])
+        return self.detect_each(frame, [box or (0, 0, frame.shape[1], frame.shape[0])], mesos_only)[0]
 
-        def wanted(t: LootTemplate) -> bool:
+    def detect_each(self, frame: np.ndarray, boxes: list[tuple[int, int, int, int]],
+                    mesos_only: bool = False) -> list[list[Item]]:
+        """`detect` in each of several boxes, every box's templates on the threads together: the strips of
+        every platform in view (13 on the bench frames) took 93 ms one after another, 68 together."""
+        areas = []
+        for x0, y0, x1, y1 in boxes:
+            x0, y0 = max(0, int(x0)), max(0, int(y0))
+            areas.append((np.ascontiguousarray(frame[y0:int(y1), x0:int(x1)]), (x0, y0)))
+
+        def wanted(t: LootTemplate, area: np.ndarray) -> bool:
             fits = t.rgb.shape[0] <= area.shape[0] and t.rgb.shape[1] <= area.shape[1]
             return (t.kind == MESOS or not mesos_only) and fits
 
-        found = self._pool.map(lambda t: self._match(area, (x0, y0), t), [t for t in self.templates if wanted(t)])
-        return suppress_overlaps([item for hits in found for item in hits])
+        jobs = [(k, t) for k, (area, _) in enumerate(areas) for t in self.templates if wanted(t, area)]
+        found = self._pool.map(lambda job: self._match(*areas[job[0]], job[1]), jobs)
+        each: list[list[Item]] = [[] for _ in boxes]
+        for (k, _), hits in zip(jobs, found):
+            each[k] += hits
+        return [suppress_overlaps(items) for items in each]
 
     def _match(self, area: np.ndarray, origin: tuple[int, int], template: LootTemplate) -> list[Item]:
         """Where one template is in `area`, whose top left is at `origin` in the frame."""

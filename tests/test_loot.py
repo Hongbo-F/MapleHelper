@@ -89,6 +89,18 @@ def test_finds_coins_and_items_lying_on_the_ground(detector):
     assert detector.detect(frame, (0, 270, 960, 306), mesos_only=True)[0].kind == "mesos"
 
 
+def test_drops_in_several_boxes_searched_together_are_each_boxs(detector):
+    frame = scene()
+    for x in (100, 300, 700):
+        paste(frame, coin(), x, 300)
+    paste(frame, leather(), 520, 300)
+    boxes = [(0, 270, 400, 306), (250, 270, 960, 306), (600, 280, 800, 306), (0, 0, 20, 20), (480, 250, 560, 306)]
+    for mesos_only in (False, True):
+        each = detector.detect_each(frame, boxes, mesos_only)
+        assert each == [detector.detect(frame, box, mesos_only) for box in boxes]
+    assert [len(found) for found in detector.detect_each(frame, boxes)] == [2, 3, 1, 0, 1]
+
+
 def test_a_shape_in_the_wrong_colour_is_not_loot(detector):
     # The normalised match ignores tint: a grey-green stone the shape of a coin matches it as well as a
     # coin does. In saved frames the sea matched the Blue Potion's shape, UI buttons the White Potion's;

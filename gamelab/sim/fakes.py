@@ -221,6 +221,9 @@ class FakeLoot:
                  and y0 <= i.y - i.h // 2 and i.y + i.h // 2 <= int(y1)]
         return suppress_overlaps(found)
 
+    def detect_each(self, frame: np.ndarray, boxes, mesos_only: bool = False) -> list[list[Item]]:
+        return [self.detect(frame, box, mesos_only) for box in boxes]  # each charged as a strip of its own
+
 
 class FakeEyes(Eyes):
     def __init__(self, world: World, clock: Clock, model: MapModel, guard: Callable[[], None] | None = None):

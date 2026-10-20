@@ -135,7 +135,7 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
     bottom = int(h * HUD_TOP)
     mini_x, mini_y = MINIMAP_BOX[2] // SCALE, MINIMAP_BOX[3] // SCALE  # the minimap's bottom-right corner
     platforms = model.platforms if wide else [p for p in (s.platform,) if p is not None]
-    found: list[tuple[float, Loot]] = []  # (px between its bottom and the ground under it, loot)
+    strips: list[tuple[Platform, tuple[int, int, int, int]]] = []
     for p in platforms:
         for x0, x1, high, low in level_runs(p):
             left, right = max(0.0, s.screen_x(x0) - STRIP_PAD), min(float(w), s.screen_x(x1) + STRIP_PAD)
@@ -145,11 +145,13 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
             if right - left < MIN_STRIP or under - top < eyes.item_height:
                 continue
             s.looked.append((p.id, s.map_x(left), s.map_x(right)))
-            box = (int(left), int(top), int(right), int(under))
-            for it in eyes.items(s, box, mesos_only=mesos_only):
-                x = p.clamp(s.map_x(it.x))
-                ground = p.y_at(x)
-                found.append((abs(it.bottom - s.screen_y(ground)), Loot(it, x, ground, p.id)))
+            strips.append((p, (int(left), int(top), int(right), int(under))))
+    found: list[tuple[float, Loot]] = []  # (px between its bottom and the ground under it, loot)
+    for (p, _), items in zip(strips, eyes.items_in(s, [box for _, box in strips], mesos_only=mesos_only)):
+        for it in items:
+            x = p.clamp(s.map_x(it.x))
+            ground = p.y_at(x)
+            found.append((abs(it.bottom - s.screen_y(ground)), Loot(it, x, ground, p.id)))
     return _on_nearest_platform(found)
 
 
