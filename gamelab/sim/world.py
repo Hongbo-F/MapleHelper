@@ -25,12 +25,15 @@ on the world's 5 ms tick:
   and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
   her off it sideways (ROPE_JUMP); down and jump on a floor whose foothold forbids it (forbidFallDown)
   does nothing, as on the bottom floor;
-- monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded). A
-  touch leaves her a second's invulnerability. She evades it (a thief's "MISS": nothing else happens) with
-  a chance inversely proportional to the monster's accuracy (game data: half a pig's touches, four in
-  five of a snail's); the others take a share of her HP by the monster's touch damage (game data: about
-  1.6% for a pig, 0.3% for a snail, give or take 70%) and knock her back ~58 units (the median logged
-  push). At 0% HP she dies, and the run ends (SimDied);
+- monsters walk their platform at monster_data.MONSTER_SPEED, turning and stopping now and then (seeded).
+  A monster touches her when its body overlaps hers (HER_HALF either side of her feet, HER_HEIGHT tall):
+  the box of the frame it shows then in the game data, walking, standing or flinching after a hit,
+  turned the way it faces (SimMonster.body), so a hopping slime is off the ground and taller for 38% of
+  its walk. A touch leaves her a second's invulnerability. She evades it (a thief's "MISS": nothing else
+  happens) with a chance inversely proportional to the monster's accuracy (game data: half a pig's
+  touches, four in five of a snail's); the others take a share of her HP by the monster's touch damage
+  (game data: about 1.6% for a pig, 0.3% for a snail, give or take 70%) and knock her back ~58 units (the
+  median logged push). At 0% HP she dies, and the run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
@@ -42,12 +45,13 @@ on the world's 5 ms tick:
   her level a star needs room sideways, by the monster's body (right under or over her, none is hit).
   In the air, the nearest whose body reaches into the attack's area (its near side within
   reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is
-  then) takes a star. Bodies are as tall as their kind walking (monster_data.MONSTER_HEIGHT), and taller
-  while they flinch after a hit (monster_data.FLINCH_S, flinch tops from the game data). So a jump
-  throw's attack, starting 46 units up, passes over a snail. Neither the claw nor a star gets past a wall
-  of the foothold group of the platform she last stood on, where it crosses the level line reach.SHOT_H
-  above her feet (reach.wall_between): from platform 4 a throw at a monster on 2 hits nothing, or a
-  monster short of the wall (live, no star from 4 ever reached one on 2). Kills give EXP
+  then) takes a star. For all of these, bodies are their kind's half width either side and as tall as
+  their kind walking (monster_data.MONSTER_HEIGHT), taller while they flinch after a hit
+  (monster_data.FLINCH_S, flinch tops from the game data); not their frames (World.top says why). So a
+  jump throw's attack, starting 46 units up, passes over a snail. Neither the claw nor a star gets past a
+  wall of the foothold group of the platform she last stood on, where it crosses the level line
+  reach.SHOT_H above her feet (reach.wall_between): from platform 4 a throw at a monster on 2 hits
+  nothing, or a monster short of the wall (live, no star from 4 ever reached one on 2). Kills give EXP
   (model.mob_exp) and, 2 s later, drops on its platform; a killed monster is seen fading out where it
   died as long as its death animation runs (MobBody.die_s: a pig 0.66 s, a snail 1.26), and respawns 8 s
   later where it spawned;
@@ -201,14 +205,43 @@ class Realism:
 
 MOBS = OUT / "mobs"      # what the simulator reads of each monster from the game data, cached as JSON (as
                          # mapdata caches maps): the simulator runs the same off the caches alone
+FRAME_MS = 100           # how long a frame shows when the game data gives it no delay (the client's default)
+
+
+@dataclass(frozen=True)
+class Frame:
+    """One frame of a monster's animation in the game data: how long it shows (delay), and its body then
+    (its box, lt/rb, which is what touches her): from `lo` to `hi` sideways of its feet as drawn, facing
+    left, and from `bottom` to `top` above them (a hop lifts its bottom off the ground)."""
+    ms: int
+    lo: float
+    hi: float
+    bottom: float
+    top: float
 
 
 @dataclass(frozen=True)
 class MobInfo:
-    """A monster as the game data has it: how much a touch by it takes (PADamage, before her defence) and
-    its accuracy (acc), which her evasion goes against."""
+    """A monster as the game data has it: how much a touch by it takes (PADamage, before her defence), its
+    accuracy (acc), which her evasion goes against, and its frames standing, walking and flinching after a
+    hit (hit1). A walk cycle can lift it: a slime is off the ground for 400 of its 1,050 ms (its box 10-17
+    above its feet, up to 66 tall where it stands 42-44), a pig 4 units for 300 of 500, an Orange Mushroom
+    3 for 120 of 480 (67 tall where it stands 55-58)."""
     pad: float
     acc: float
+    stand: tuple[Frame, ...] = ()
+    move: tuple[Frame, ...] = ()
+    hit: Frame | None = None
+
+    @staticmethod
+    def frame_at(frames: tuple[Frame, ...], ms: float) -> Frame:
+        """The frame an animation of `frames` (looping) shows `ms` after it began."""
+        k = ms % sum(f.ms for f in frames)
+        for f in frames:
+            if k < f.ms:
+                return f
+            k -= f.ms
+        return frames[-1]
 
 
 @functools.lru_cache(maxsize=None)
@@ -216,7 +249,7 @@ def mob_info(mob_id: int) -> MobInfo | None:
     """Monster `mob_id`'s MobInfo, from the game data (cached in MOBS), or None where there's none."""
     cache = MOBS / f"{mob_id:07d}.json"
     raw = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else None
-    if raw is None:
+    if raw is None or "move" not in raw:  # not cached yet, or cached before its frames were kept
         raw = _read_mob(mob_id)
         if raw is None:
             return None
@@ -224,17 +257,38 @@ def mob_info(mob_id: int) -> MobInfo | None:
         part = cache.with_suffix(f".{os.getpid()}.part")  # whole, or not there: harness workers read it too
         part.write_text(json.dumps(raw), encoding="utf-8")
         os.replace(part, cache)
-    return MobInfo(raw["pad"], raw["acc"])
+    stand, move = (tuple(Frame(*f) for f in raw[k]) for k in ("stand", "move"))
+    return MobInfo(raw["pad"], raw["acc"], stand or move, move or stand, raw["hit"] and Frame(*raw["hit"]))
 
 
 def _read_mob(mob_id: int) -> dict | None:
-    """MobInfo's fields for monster `mob_id`, from its image in the game data copy (None without it)."""
+    """MobInfo's fields for monster `mob_id`, from its image in the game data copy (None without it). A
+    monster that borrows another's frames (info/link) takes them from that one's image; an animation
+    marked zigzag plays forward then back."""
     try:
         from gamedata.canvas import _mob_pack
-        info = _mob_pack().image(f"Mob/{mob_id:07d}.img").get("info") or {}
+        from gamedata.wz import Canvas
+        pack = _mob_pack()
+        tree = pack.image(f"Mob/{mob_id:07d}.img")
+        info = tree.get("info") or {}
+        if info.get("link") and not tree.get("stand"):
+            tree = pack.image(f"Mob/{int(info['link']):07d}.img")
     except (OSError, KeyError, ValueError):  # no copy of the game data, or no such monster in it
         return None
-    return {"pad": float(info.get("PADamage") or 0), "acc": float(info.get("acc") or 0)}
+
+    def frames(action: str) -> list[list]:
+        node = tree.get(action) or {}
+        out = []
+        for index, f in sorted(node.items(), key=lambda kv: (len(kv[0]), kv[0])):
+            lt, rb = (f.props.get("lt"), f.props.get("rb")) if isinstance(f, Canvas) else (None, None)
+            if index.isdigit() and lt is not None and rb is not None:  # y is up negative in the data
+                out.append([int(f.props.get("delay") or FRAME_MS), float(lt.x), float(rb.x), float(-rb.y),
+                            float(-lt.y)])
+        return out + out[-2:0:-1] if node.get("zigzag") else out
+
+    hit = frames("hit1")
+    return {"pad": float(info.get("PADamage") or 0), "acc": float(info.get("acc") or 0),
+            "stand": frames("stand"), "move": frames("move"), "hit": hit[0] if hit else None}
 
 
 def touch_damage(info: MobInfo | None, u: float) -> float:
@@ -256,7 +310,7 @@ def evade_chance(info: MobInfo | None) -> float:
 class SimMonster:
     """A monster walking its platform. Its motion is a list of segments drawn from its own rng (walk
     left, walk right or stand, for a while), evaluated lazily, so where it is at a moment doesn't depend
-    on how often it was looked at."""
+    on how often it was looked at. Its body at a moment is the box of the frame it shows then (body)."""
     idx: int
     name: str
     kind: str
@@ -274,12 +328,14 @@ class SimMonster:
     hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden; it flinches)
     flinch_top: float = 54.0   # how tall it is while it flinches
     fade: float = FADE         # s it's still seen once killed, fading out where it died
-    info: MobInfo | None = None  # its touch damage and accuracy (game data), if known
+    info: MobInfo | None = None  # its touch damage, accuracy and frames (game data), if known
     # current motion segment: from t0 at x0, heading d (-1, 0, +1) until t1
     t0: float = 0.0
     x0: float = 0.0
     d: int = 0
     t1: float = 0.0
+    facing: int = -1           # the way it faced when it last stopped walking (-1: left, as it's drawn) ...
+    anim0: float = 0.0         # ... and when it began to stand or walk (its animation's start)
 
     @property
     def lo(self) -> float:
@@ -290,7 +346,7 @@ class SimMonster:
         return max(self.lo, self.platform.right - self.half)
 
     def start(self, t: float, x: float) -> None:
-        self.t0, self.x0 = t, min(max(x, self.lo), self.hi)
+        self.t0, self.x0, self.anim0 = t, min(max(x, self.lo), self.hi), t
         self._draw()
 
     def _draw(self) -> None:
@@ -311,12 +367,30 @@ class SimMonster:
 
     def at(self, t: float) -> float:
         while t >= self.t1:
-            self.t0, self.x0 = self.t1, self._fold(self.t1)[0]
+            (x, d), walked = self._fold(self.t1), self.d
+            self.t0, self.x0, self.facing = self.t1, x, d or self.facing
             self._draw()
+            if bool(self.d) != bool(walked):  # from walking to standing or back: that animation starts
+                self.anim0 = self.t0
         return self._fold(t)[0]
 
     def y(self, x: float) -> float:
         return self.platform.y_at(x)
+
+    def body(self, t: float, flinching: bool = False) -> tuple[float, float, float, float]:
+        """Its body at t: from `lo` to `hi` sideways of its feet and from `bottom` to `top` above them. With
+        game data, the box of the frame it shows then (walking, standing, or its hit1 frame while it
+        flinches after a hit), turned the way it faces; without, its half width either side, as tall as
+        its kind (or its flinch top)."""
+        self.at(t)
+        if self.info is None or not self.info.move:
+            return -self.half, self.half, 0.0, max(self.height, self.flinch_top) if flinching else self.height
+        _, d = self._fold(t)
+        if flinching and self.info.hit is not None:
+            f = self.info.hit
+        else:
+            f = MobInfo.frame_at(self.info.move if self.d else self.info.stand, (t - self.anim0) * 1000)
+        return (f.lo, f.hi, f.bottom, f.top) if (d or self.facing) < 0 else (-f.hi, -f.lo, f.bottom, f.top)
 
 
 @dataclass
@@ -830,10 +904,11 @@ class World:
                 if not m.alive:
                     continue
                 mx = m.at(t)
-                if abs(mx - self.x) >= m.half + HER_HALF:
+                lo, hi, bottom, top = self.body(m)
+                if self.x + HER_HALF <= mx + lo or self.x - HER_HALF >= mx + hi:
                     continue
                 my = m.y(mx)
-                if self.y > my - m.height and self.y - HER_HEIGHT < my:
+                if self.y > my - top and self.y - HER_HEIGHT < my - bottom:
                     self._hit_by(m, mx)
                     return
 
@@ -861,11 +936,22 @@ class World:
             self._leave_rope()
         self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
 
+    def flinching(self, m: SimMonster) -> bool:
+        """Whether monster `m` flinches now: for FLINCH_S after a star or a swipe hit it."""
+        return m.hit_at is not None and self.t - m.hit_at < monster_data.FLINCH_S
+
+    def body(self, m: SimMonster) -> tuple[float, float, float, float]:
+        """Monster `m`'s body now (SimMonster.body): its frame's box, which is what touches her."""
+        return m.body(self.t, self.flinching(m))
+
     def top(self, m: SimMonster) -> float:
-        """How tall monster `m` is now: as tall as its kind, taller while it flinches after a hit."""
-        if m.hit_at is not None and self.t - m.hit_at < monster_data.FLINCH_S:
-            return max(m.height, m.flinch_top)
-        return m.height
+        """How tall monster `m` is for an attack to pick it: as tall as its kind walking (MONSTER_HEIGHT, as
+        the decisions' reach.body_of has it), taller while it flinches. Not its frame's top (body): the star's
+        search was fitted by these heights, and the decisions work out its reach by them. By its frames a pig
+        standing 60 below her (38-40 tall) would be picked by the search only from 171 units sideways, not
+        151, and by a jump's area (its floor 19 below her feet, reach.AREA_DOWN) not at all, where in game
+        pigs 60 below were hit. The attack and the frames don't agree there yet (README: Found offline)."""
+        return max(m.height, m.flinch_top) if self.flinching(m) else m.height
 
     def nearest_in(self, facing: str, far: float, down: float, up: float, level: bool = False) -> SimMonster | None:
         """The live monster nearest her whose body reaches into a box on her `facing` side, from her to

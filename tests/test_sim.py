@@ -622,6 +622,68 @@ def test_the_game_data_gives_each_kind_its_touch_damage_and_accuracy():
         "snail": (3, 33), "slime": (13, 53), "pig": (15, 54), "orange-mushroom": (17, 62)}
     w = World(m, KEYS, (36, 300.0), monsters="all")
     assert {mo.kind: mo.info for mo in w.monsters} == infos
+    assert infos["slime"] == SLIME and infos["orange-mushroom"] == MUSHROOM  # the frames the tests above use
+
+
+F = world_mod.Frame
+# The slime's and the Orange Mushroom's frames as the game data has them (Mob/0000007.img, 0000009.img):
+# a slime's walk lifts it 16-17 units for its 300 ms hop (and 10 for 100 ms), and is 66 tall then.
+SLIME = world_mod.MobInfo(13.0, 53.0, stand=(F(200, -27, 24, 0, 43), F(300, -28, 24, 0, 42), F(250, -26, 23, 0, 44)),
+                          move=(F(200, -29, 26, 0, 41), F(50, -31, 26, 0, 40), F(150, -27, 19, 16, 66),
+                                F(150, -27, 19, 17, 66), F(100, -27, 21, 10, 58), F(100, -28, 25, 0, 42),
+                                F(300, -27, 24, 0, 43)),
+                          hit=F(600, -23, 26, 0, 46))
+MUSHROOM = world_mod.MobInfo(17.0, 62.0, stand=(F(180, -27, 36, 0, 58), F(180, -27, 36, 0, 55)),
+                             move=(F(180, -32, 32, 0, 55), F(120, -31, 31, 3, 67), F(180, -31, 32, 0, 55)),
+                             hit=F(600, -28, 34, 0, 65))
+
+
+def _put(w, mode, x, y):
+    w.mode, w.plat, w.x, w.y = mode, None if mode == "air" else w.plat, x, y
+    w.invulnerable_ms, w.touches = -10_000, 0
+
+
+def test_a_monster_s_body_is_its_frame_s_box_turned_the_way_it_faces(model):
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0, monsters=[("Slime", c.id, 400.0)]))
+    m = w.monsters[0]
+    m.info, m.t0, m.d, m.t1, m.anim0 = SLIME, 0.0, 1, 1e9, 0.0  # walking right (on the spot) for good
+    assert m.body(0.1) == (-26, 29, 0, 41)       # its first frame, turned to face right
+    assert m.body(0.3) == (-19, 27, 16, 66)      # 250-400 ms into its walk it's in the air
+    assert m.body(1.05 + 0.3) == m.body(0.3)     # the walk loops every 1,050 ms
+    assert m.body(0.3, flinching=True) == (-26, 23, 0, 46)  # hit: its hit1 frame
+    m.t1 = 1.0
+    m.at(1.0)
+    m.d, m.t1, m.anim0 = 0, 1e9, 1.0             # then it stands, still facing right
+    assert m.body(1.1) == (-24, 27, 0, 43)
+    m.facing = -1
+    assert m.body(1.1) == (-27, 24, 0, 43)       # facing left, as it's drawn
+    m.info = None                                # no game data: its kind's half width and height
+    assert m.body(1.1) == (-m.half, m.half, 0.0, m.height)
+
+
+def test_her_jump_clears_a_slime_on_the_ground_but_not_one_mid_hop(model):
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0, monsters=[("Slime", c.id, 400.0)]))
+    m = w.monsters[0]
+    m.info, m.t0, m.d, m.t1, m.anim0 = SLIME, 0.0, 1, 1e9, 0.0
+    for ms, touched in ((100, False), (300, True), (500, True), (800, False)):
+        w.ms = ms
+        _put(w, "air", 420.0, c.y_at(420) - 50)  # her feet 50 units up, beside its front
+        w._touch()
+        assert w.touches == int(touched), ms
+
+
+def test_a_monster_touches_her_by_its_body_as_it_faces(model):
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0, monsters=[("Orange Mushroom", c.id, 400.0)]))
+    m = w.monsters[0]
+    m.info, m.t0, m.d, m.t1 = MUSHROOM, 0.0, 0, 1e9  # standing for good
+    for facing, touched in ((-1, True), (1, False)):  # its cap reaches 36 behind it, 27 in front
+        m.facing = facing
+        _put(w, "ground", 400.0 + 34 + world_mod.HER_HALF, c.y_at(400))
+        w._touch()
+        assert w.touches == int(touched), facing
 
 
 def test_she_evades_some_touches_and_dies_at_no_hp(model, monkeypatch):
