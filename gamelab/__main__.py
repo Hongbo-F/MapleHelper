@@ -26,7 +26,8 @@ from .control.timeline import action_events, chain, her_setup
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
 
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
-# Commands that bring the game to the front or send it input; refused while the alarm is set.
+# Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
+# subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
 GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
 LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command
 
@@ -348,6 +349,51 @@ def _shot_summary(path) -> int:
     for dy, (hit, miss, far) in sorted(bands.items()):
         print(f"  dy {dy:+4d}: {hit} hit, {miss} missed; farthest hit {far} units")
     return 0
+
+
+def cmd_probe(args) -> int:
+    """The in-game probes of what a star hits (behavior.probe): `list` them, `run` one in the game (the way
+    `hunt kill` runs: the hunter, the player, the Lie Detector alarm), `score` their log offline."""
+    from .behavior import probe
+    from .localization import mapdata
+    if args.action == "list":
+        print(probe.listing())
+        return 0
+    if args.action == "score":
+        path = Path(args.file) if args.file else paths.PROBE_LOG
+        rows = probe.load(path)
+        if not rows:
+            print(f"no probe throws logged yet ({path})")
+            return 0
+        print(probe.score(rows, mapdata.load(args.map or rows[0]["map"])))
+        return 0
+    if args.name not in probe.PROBES:
+        print(f"no probe {args.name!r}; they are: {', '.join(probe.PROBES)} (`probe list` says what each settles)")
+        return 1
+    p = probe.adjust(probe.PROBES[args.name], x=args.x, dx=args.dx, style=args.style, throws=args.throws,
+                     walls=None if args.walls is None else args.walls == "on")
+    if trouble := probe.problems(mapdata.load(args.map), p):
+        print(f"probe {p.name} can't run like that: {'; '.join(trouble)}")
+        return 1
+    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)  # the regular attack: no --skill
+    nav = hunter.navigator()
+    _record(f"probe-{p.name}", hunter.model.id)
+    window.bring_to_front(_game_title())
+    report = probe.run(hunter, nav, p, seconds=args.seconds, crowd=args.crowd)
+    print(f"done: {report}. Logged to {paths.PROBE_LOG}: `python -m gamelab probe score` reads it")
+    return 0
+
+
+def _span(text: str) -> tuple[float, float]:
+    """`--dx LO-HI`: a range of map units sideways."""
+    lo, sep, hi = text.partition("-")
+    try:
+        span = float(lo), float(hi)
+    except ValueError:
+        span = None
+    if not sep or span is None or not 0 <= span[0] <= span[1]:
+        raise argparse.ArgumentTypeError(f"{text!r} isn't LO-HI (map units, e.g. 110-200)")
+    return span
 
 
 def cmd_map(args) -> int:
@@ -701,6 +747,34 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
     s.set_defaults(func=cmd_hunt)
 
+    s = sub.add_parser("probe", help="in-game probes of what a star hits: list them, run one, score their log")
+    probes = s.add_subparsers(dest="action", required=True)
+    probes.add_parser("list", help="the probes: where she stands, what she throws at, what each settles "
+                                   "(sends no keys)")
+    q = probes.add_parser("run", help="run a probe in the game: from her place, throw only at a lone monster in "
+                                      "range, and log every throw to lab/probe_geometry.jsonl")
+    q.add_argument("name", help="the probe (see `probe list`)")
+    q.add_argument("--x", type=float, help="stand at this map x on its platform instead")
+    q.add_argument("--dx", type=_span, help="throw at monsters this far off sideways by their middle instead, LO-HI "
+                                            "(map units, every kind)")
+    q.add_argument("--style", choices=["throw", "jump_throw", "jump_back"],
+                   help="throw from the ground, from a jump straight up, or jumping back (default: the probe's)")
+    q.add_argument("--throws", type=int, help="how many throws (default: the probe's)")
+    q.add_argument("--walls", choices=["on", "off"],
+                   help="whether her decisions keep to the wall rule during the run: who counts as in front, and "
+                        "fights (default: the probe's; off for those that measure it)")
+    q.add_argument("--crowd", type=int, default=0,
+                   help="also throw with this many other monsters in front (each is logged with what it showed)")
+    q.add_argument("--seconds", type=float, default=900, help="stop after this long")
+    q.add_argument("--map", type=int, default=DEFAULT_MAP)
+    q.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
+    q.add_argument("--low-hp", type=float, default=0.35, help="stop below this HP fraction")
+    q.set_defaults(game=True)
+    q = probes.add_parser("score", help="settle the probes' questions from their log (sends no keys)")
+    q.add_argument("file", nargs="?", help="the log (default: lab/probe_geometry.jsonl)")
+    q.add_argument("--map", type=int, help="the map's game data to score it with (default: the log's map)")
+    s.set_defaults(func=cmd_probe)
+
     s = sub.add_parser("map", help="the map's platforms and where she is on them (sends no keys)")
     s.add_argument("--map", type=int, default=DEFAULT_MAP, help="map id (default: Thicket Around the Beach II)")
     s.add_argument("--offline", action="store_true", help="don't look at the game, just draw the map")
@@ -811,7 +885,7 @@ def main(argv=None) -> int:
     from maplehelper.win32 import enable_dpi_awareness
     enable_dpi_awareness()
     try:
-        if args.cmd in GAME_COMMANDS:
+        if args.cmd in GAME_COMMANDS or getattr(args, "game", False):
             client.check_alarm()
         return args.func(args)
     except client.LieDetectorAlarm as e:

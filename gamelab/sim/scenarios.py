@@ -29,6 +29,7 @@ from maplehelper.engine import RIGHT
 from .. import telemetry
 from ..control import client
 from ..localization import mapdata
+from ..behavior import probe
 from ..behavior.hunter import Hunter
 from ..behavior.looting import DropSpot
 from ..localization.mapdata import MapModel
@@ -695,6 +696,83 @@ def fight_step_wall(sim):
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
+
+
+# The in-game probes (`python -m gamelab probe run`, behavior.probe), in a world that has reach's answers.
+
+def _probe_rows(trace: dict) -> list[dict]:
+    """The throws a run logged to the probe log (lab/probe_geometry.jsonl)."""
+    return [json.loads(line) for line in trace["files"].get("probe_geometry.jsonl", ())]
+
+
+def _shown(trace: dict, style: str | None = None) -> list[tuple[float, bool | None]]:
+    """For each probe throw (of `style`): how far off its target was at the pick, and what it showed."""
+    out = []
+    for r in _probe_rows(trace):
+        if style is None or r["style"] == style:
+            e, seen = next((e, s) for e, s in probe.outcomes(r) if e["target"])
+            out.append((abs(e["x"] - r["pick"]["x"]), seen))
+    return out
+
+
+def _lone(trace: dict, lo: float, hi: float) -> bool:
+    """Every probe throw was at the one monster in front of her, lo to hi off when she threw."""
+    rows = _probe_rows(trace)
+    return bool(rows) and all(len(r["front"]) == 1 and r["front"][0].get("target") and lo <= abs(r["dx"]) <= hi
+                              for r in rows)
+
+
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400,
+          expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
+                   check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
+                   check("each with the pick and every monster's evidence",
+                         lambda tr: all("pick" in r and r["evidence"] and r["looks"] >= 5 for r in _probe_rows(tr))),
+                   check("hits only from 188 off, and misses closer",
+                         lambda tr: all(d >= 188 for d, s in _shown(tr) if s)
+                         and any(s is False and d < 180 for d, s in _shown(tr))),
+                   happens("star thrown left: no hit")))
+def probe_top(sim):
+    """`probe run top-60`: from 13 at a lone pig on 12, 60 above her, 110-200 units off sideways. The world's
+    search window has reach's top (21 above her feet in the first band), so a star picks the pig only from 191
+    units: most throws hit nothing. Each throw waits for its evidence before the next, and the log has where the
+    pig was at the pick and what it showed (`probe score` fits the top to it: tests/test_probe.py)."""
+    h = sim.hunter()
+    return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
+
+
+@scenario((4, 260.0), monsters=[("Orange Mushroom", 2, -50.0)], seed=1, limit=400,
+          expects=(check("from the ground, no star gets past the step",
+                         lambda tr: len(_shown(tr, "throw")) == 6 and all(s is False for _, s in _shown(tr, "throw"))),
+                   check("jumping back, every star does",
+                         lambda tr: len(_shown(tr, "jump_back")) == 6 and all(s for _, s in _shown(tr, "jump_back"))),
+                   check("the rule's verdict logged", lambda tr: {r["clear"] for r in _probe_rows(tr)} == {False, True}),
+                   check("she's back on 4", lambda tr: tr["world"]["platform"] == 4)))
+def probe_step_up(sim):
+    """`probe run step-up --x 260 --throws 6`, then again with `--style jump_back`: an Orange Mushroom on 2,
+    60 above her behind the step wall of her own foothold group (the wall rule off for the run, so she throws
+    at it). The world stops a star at that wall where it crosses the line 28 above her feet, higher in a jump:
+    from the ground every star hits nothing; jumping back the attack starts 44 up, its line over the step's
+    top, and every star hits."""
+    h = sim.hunter()
+    nav = sim.navigator(h)
+    p = probe.adjust(probe.PROBES["step-up"], x=260.0, throws=6)
+    ground = probe.run(h, nav, p, seconds=200)
+    back = probe.run(h, nav, probe.adjust(p, style="jump_back"), seconds=200)
+    return {"ground": str(ground), "jump_back": str(back)}
+
+
+@scenario((22, 30.0), monsters=[("Snail", 22, 70.0)], seed=1, limit=400,
+          expects=(check("12 jump throws logged", lambda tr: len(_shown(tr, "jump_throw")) == 12),
+                   check("every one kills the snail", lambda tr: all(s for _, s in _shown(tr))
+                         and all(r["exp"] == 1 for r in _probe_rows(tr))),
+                   happens("star kills snail")))
+def probe_air(sim):
+    """`probe run air --throws 12`: jump throws at a lone snail on her own platform (22), about 40 units off,
+    closer than the star's search picks it from (its far side short of 65). The attack picks by the area when
+    it starts (26 up): the snail's in it, and each star kills it (one star kills a snail here). A kill is seen
+    fading out for 1.26 s, so the evidence waits for it to be gone."""
+    h = sim.hunter()
+    return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["air"], throws=12), seconds=300))
 
 
 @scenario((36, 500.0), drops=(("mesos", 36, 560.0), ("leather", 36, 620.0), ("mesos", 36, 700.0),
