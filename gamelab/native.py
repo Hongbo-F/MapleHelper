@@ -74,6 +74,12 @@ def build() -> Path:
         except OSError:  # another process built and loaded it meanwhile
             if not out.exists():
                 raise
+    for old in BUILD.glob("native-*.dll"):  # earlier sources' builds (about 100 KB each); a loaded one stays
+        if old != out:
+            try:
+                old.unlink()
+            except OSError:
+                pass
     return out
 
 
