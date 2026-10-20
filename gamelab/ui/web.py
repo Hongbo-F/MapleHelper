@@ -8,7 +8,7 @@ canvas, layer for layer as render.MapView draws it for the window:
                   fight, the moves, the latest log lines)
     /events       the stream (Server-Sent Events): a snapshot of the state first, then the records as
                   they're read (every 25 ms), what changed in the text (at most 5 times a second), and a
-                  ping after 5 s of quiet
+                  ping after 5 s of quiet; past 16 streams, the oldest is told it was crowded out, and ends
     /map.json     the map: its platforms, walls, ropes and portals, with the colours and the reach the
                   window draws them with (from render.py, so the two can't drift apart)
     /control      replays only (POST action=pause|faster|slower|back|on): play, speed, jump 10 s
@@ -31,6 +31,7 @@ at the start (?k=..., then a cookie), so nobody else on the network can watch.
 import json
 import secrets
 import socket
+import sys
 import threading
 import time
 from collections import deque
@@ -55,7 +56,7 @@ ZOOM = 2.5              # "around her": the map drawn this much bigger, and the 
 AROUND = 0.8            # ... as tall as this share of its width
 RING = 4096             # records kept for the streams: a stream further behind gets a snapshot instead
 HEARTBEAT_S = 5.0       # a stream with nothing to send pings this often (the page reopens one 12.5 s quiet)
-MAX_STREAMS = 16        # past this many, the oldest stream ends (a phone locked and unlocked leaves one)
+MAX_STREAMS = 16        # past this many, the oldest stream ends (a phone gone from the Wi-Fi leaves one)
 STATUS_EVERY_S = 0.2    # what changed in the text goes to a stream at most this often
 HANDLER_TIMEOUT_S = 30  # a connection quiet this long (a phone gone mid-request, a stream stuck) is closed
 OWN_CLOCK_S = 5.0       # records stamped within this of this computer's clock come from a run on it
@@ -63,12 +64,13 @@ OWN_CLOCK_S = 5.0       # records stamped within this of this computer's clock c
 
 class Cursor:
     """How far one stream has got: the last record it was sent (`seq`, of `epoch`), and the text it was
-    last sent, of which version and when (monotonic s). Setting `ended` ends the stream."""
+    last sent, of which version and when (monotonic s). Setting `ended` ends the stream: "stopping" (the
+    server stops) or "crowded" (MAX_STREAMS newer ones are open)."""
 
     def __init__(self):
         self.seq, self.epoch = 0, -1
         self.version, self.status_at, self.text = -1, float("-inf"), {}
-        self.ended = False
+        self.ended: str | None = None
 
 
 class Feed:
@@ -387,12 +389,16 @@ class WebServer(ThreadingHTTPServer):
         return [local] + [f"http://{ip}:{self.port}/?k={self.key}" for ip in lan_addresses()]
 
     def open_stream(self) -> Cursor:
+        """A new stream's cursor. Past MAX_STREAMS the oldest ends: a phone gone from the Wi-Fi leaves
+        its stream open until a write to it fails, and a new page always gets in. The page so ended is
+        told (`crowded`) and doesn't come back by itself, else it would end the next oldest a second
+        later, and so on round every page open."""
         cursor = Cursor()
         with self.feed.cond:
-            cursor.ended = self.stopping.is_set()
+            cursor.ended = "stopping" if self.stopping.is_set() else None
             self.streams.append(cursor)
-            while len(self.streams) > MAX_STREAMS:  # each locking of a phone can leave a dead one open
-                self.streams.pop(0).ended = True
+            while len(self.streams) > MAX_STREAMS:
+                self.streams.pop(0).ended = "crowded"
             self.feed.cond.notify_all()
         return cursor
 
@@ -407,8 +413,16 @@ class WebServer(ThreadingHTTPServer):
         with self.feed.cond:
             self.stopping.set()
             for cursor in self.streams:
-                cursor.ended = True
+                cursor.ended = "stopping"
             self.feed.cond.notify_all()
+
+    def handle_error(self, request, client_address) -> None:
+        """A connection dropped by the other end is no error: a phone leaves the Wi-Fi or iOS suspends
+        the page, often between two requests on a kept-alive connection, where the next request is being
+        read (with HTTP/1.0 nothing was read after a reply). Anything else is printed, as socketserver
+        does."""
+        if not isinstance(sys.exception(), ConnectionError):
+            super().handle_error(request, client_address)
 
 
 def lan_addresses() -> list[str]:
@@ -521,6 +535,8 @@ class _Handler(BaseHTTPRequestHandler):
             while True:
                 got = server.feed.updates(cursor, HEARTBEAT_S)
                 if got is None:
+                    if cursor.ended == "crowded":  # the page stops rather than come back (open_stream)
+                        self.wfile.write(first + _event("crowded", {"streams": MAX_STREAMS}))
                     return
                 self.wfile.write(first + _event(*got))
                 first = b""
@@ -606,7 +622,9 @@ PAGE = r"""<!doctype html>
   .map { position: relative; border-radius: 10px; overflow: hidden; background: #000; min-height: 120px; }
   .map canvas { display: block; width: 100%; height: 0; }
   .map img { display: block; width: 100%; height: auto; }
-  .map .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); }
+  .map .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 16px;
+                text-align: center; color: var(--dim); }
+  .map .empty.over { background: rgba(16, 20, 30, .85); color: var(--text); }
   .map .debug { position: absolute; left: 6px; top: 6px; max-width: calc(100% - 12px); margin: 0; padding: 4px 6px;
                 border-radius: 4px; background: rgba(0, 0, 0, .7); color: var(--text); pointer-events: none;
                 font: 11px/1.35 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
@@ -783,27 +801,33 @@ function update(u) {
 // --- the stream, kept open ---------------------------------------------------------------------------
 
 const net = {msgs: 0, bytes: 0, opens: 0, restarts: 0, rtt: null};
-let es = null, lastMsg = performance.now();
-function heard(e) { lastMsg = performance.now(); net.msgs++; net.bytes += e.data.length + 20; }
-function quiet() { return performance.now() - lastMsg; }
+// How long the stream has been quiet goes by Date.now(): on an iPhone performance.now() can stop while
+// the phone sleeps, so after the screen was locked it would tell of less quiet than there was.
+let es = null, lastMsg = Date.now();
+let crowded = 0;   // the server ended this page's stream for this many newer ones: it waits to be shown again
+function heard(e) { lastMsg = Date.now(); net.msgs++; net.bytes += e.data.length + 20; }
+function quiet() { return Date.now() - lastMsg; }
 function lost() { return !es || es.readyState !== 1 || quiet() > 2 * HEARTBEAT_S * 1000; }
 function connect(byPage) {
   if (es) es.close();
   if (byPage) net.restarts++;
-  lastMsg = performance.now();
+  crowded = 0;
+  lastMsg = Date.now();
   es = new EventSource(withKey("events"));
   es.onopen = () => { net.opens++; textChanged = true; };
   es.onerror = () => { textChanged = true; };   // the browser tries again by itself (retry: 1000)
   es.addEventListener("snapshot", e => { heard(e); snapshot(JSON.parse(e.data)); });
   es.addEventListener("ping", e => { heard(e); setClock(JSON.parse(e.data)); });
+  es.addEventListener("crowded", e => { es.close(); crowded = JSON.parse(e.data).streams || 1; textChanged = true; });
   es.onmessage = e => { heard(e); update(JSON.parse(e.data)); };
 }
 // iOS Safari can leave a stream dead behind a locked screen or a page in the background, still "open"
 // and with no error: one quiet for 2.5 pings' time is opened again, and so is one quiet for over a
-// ping's time when the page is shown again.
-setInterval(() => { if (quiet() > 2.5 * HEARTBEAT_S * 1000) connect(true); wantMap(); }, 1000);
+// ping's time when the page is shown again. A page crowded out comes back only when it's shown again
+// (or reloaded): coming back by itself, it would crowd out the next oldest page.
+setInterval(() => { if (!crowded && quiet() > 2.5 * HEARTBEAT_S * 1000) connect(true); wantMap(); }, 1000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && quiet() > (HEARTBEAT_S + 1) * 1000) connect(true);
+  if (!document.hidden && (crowded || quiet() > (HEARTBEAT_S + 1) * 1000)) connect(true);
 });
 window.addEventListener("pageshow", e => { if (e.persisted) connect(true); });
 
@@ -872,7 +896,7 @@ function frame(now) {
   draw({k, ox: margin - M.x0 * k - left, oy: margin - M.y0 * k - top, u, W, H, dpr}, her, at, when);
   perf.drawn++;
   keep(perf.ms, performance.now() - t0, 240);
-  $("empty").style.display = "none";
+  if (!crowded) $("empty").style.display = "none";
 }
 
 function draw(v, her, at, when) {
@@ -1046,7 +1070,12 @@ function tick() {   // 4 times a second: the text, the log, the clock
     const t = runNow(), pos = t == null || r.start == null ? r.pos : Math.min(Math.max(t - r.start, 0), r.length);
     $("pos").textContent = (r.paused ? "paused · " : "") + "×" + r.speed + " · " + Math.round(pos) + " / " + Math.round(r.length) + " s";
   }
-  if (!M) $("empty").textContent = lost() && quiet() > 3000 ? "can't reach the mini-map: trying again..." : "waiting for a run...";
+  const empty = $("empty");
+  empty.classList.toggle("over", crowded > 0);
+  if (crowded) {
+    empty.textContent = "Stopped: " + crowded + (crowded === 1 ? " newer page is" : " newer pages are") + " watching. Reload to watch here.";
+    empty.style.display = "";
+  } else if (!M) empty.textContent = lost() && quiet() > 3000 ? "can't reach the mini-map: trying again..." : "waiting for a run...";
 }
 
 // ?debug=1: how fast it draws, what comes over the network, and how old the data on screen is

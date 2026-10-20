@@ -589,6 +589,54 @@ def test_stopping_the_server_ends_its_streams():
     assert not left, left
 
 
+def test_the_oldest_stream_past_the_most_is_told_it_was_crowded_out(monkeypatch):
+    from gamelab.ui import web
+    monkeypatch.setattr(web, "MAX_STREAMS", 1)
+    m = model()
+    feed = replay_feed(m, [0.0])
+    with Served(feed) as server:
+        old_conn, old = open_stream(server)
+        assert read_event(old)[0] == "snapshot"
+        new_conn, new = open_stream(server)
+        assert read_event(new)[0] == "snapshot"
+        kind, data, _ = read_event(old)  # so the page doesn't come back by itself and crowd out the next
+        assert (kind, data) == ("crowded", {"streams": 1})
+        try:
+            read_event(old)
+            assert False, "the stream went on"
+        except EOFError:
+            pass
+        assert len(server.streams) == 1 and server.streams[0].ended is None
+        old_conn.close()
+        new_conn.close()
+
+
+def test_a_connection_dropped_between_requests_prints_nothing(capsys):
+    import socket
+    import struct
+    import threading
+    import time
+    feed = replay_feed(model(), [0.0])
+    with Served(feed) as server:
+        before = set(threading.enumerate())
+        s = socket.create_connection(("127.0.0.1", server.port), timeout=5)
+        s.sendall(b"GET /clock.json?k=secret HTTP/1.1\r\nHost: here\r\n\r\n")
+        assert s.recv(65536).startswith(b"HTTP/1.1 200")
+        # A reset while the server waits for the next request on the connection (a phone gone)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        s.close()
+        for _ in range(100):  # its handler thread has seen the reset
+            if not [t for t in threading.enumerate() if t not in before and t.is_alive()]:
+                break
+            time.sleep(0.02)
+        try:
+            raise ValueError("a real error")
+        except ValueError:
+            server.handle_error(None, ("127.0.0.1", 1))
+    err = capsys.readouterr().err
+    assert "ValueError: a real error" in err and "ConnectionResetError" not in err and err.count("Traceback") == 1
+
+
 def test_the_page_s_map_matches_the_window_s():
     import http.client
     import json
