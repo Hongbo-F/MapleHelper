@@ -129,7 +129,7 @@ Checked after every look, before the mode's own decision.
 - **MP:** none is used with the regular attack, which tours use. With `--skill` (about 7 MP a throw) an MP check would be needed; tours don't offer it.
 - **Knocked off, falling, on a rope, dot hidden:** the navigator and mover deal with it as today. In hunt mode being knocked onto another platform ends nothing: the next decision starts from where she is, and rule 2 takes her back up if she's below her spot.
 - **After a hit cuts a plan short:**
-  - Until one chain has run, she may only answer a monster within 100 units by stepping away from it, at most once, and doesn't shoot (a jump back throws a star).
+  - Until one chain has run, she may only answer a monster on her platform the claw would swipe (`stance.close_to`, by its size: a pig within 136, a snail within 121; 100 for every kind before) by stepping away from it, at most once, and doesn't shoot (a jump back throws a star).
   - Shooting from wherever a hit knocked her made a 12 s trip (`nav_fight_across`) run out its 180 s, and `tour_hunt_platform_12` take 79 s longer. Both stay pinned.
 - **Stuck guard:** no kill, pick-up or new ground for 120 s, or the same objective dropped 3 times. She stands by on a safe platform and logs why.
 

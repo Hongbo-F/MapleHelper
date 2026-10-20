@@ -164,8 +164,8 @@ PROBES = {p.name: p for p in (
                  "30 down); again with --x 195 --dx 160-250: hits by either"),
     Probe("hanging-wall", "a level line or a line to the feet, down past her own block's hanging wall", 14, 730.0,
           RIGHT, (17,), ("pig", "orange-mushroom", "slime"), (180, 360), walls=False, source="terrain 3",
-          expect="by the level line hits at every distance; by a line to the feet none from 186 to 352 units "
-                 "(it crosses 14's own wall, 25 deep)"),
+          expect="by the level line hits at every distance; by a line to the feet none from 198 units on (from x 730 "
+                 "it crosses 14's own wall, 25 deep, at 198-374)"),
 )}
 
 

@@ -115,8 +115,11 @@ CLAW_MARGIN = 12     # kept past the swing's reach, for a monster walking at her
                      # much, but gained less in the hunt loop (+1.8% EXP a minute against +5.6%; +1.6% against
                      # +3.2% with the game data's walking speeds), and about the same on the tour.
 # What stops a star (see above). The level line runs SHOT_H above her feet: anything from 1 to 59 fits the
-# logs (on this map it matters only for steps lower than 60, and there are none), and 28 is where the
-# client's target search is centred (MeowDB, Lucky Seven: 28 above her feet).
+# logs (on this map it matters only for steps lower than 60, and there are none). 28 is a stand-in, the middle
+# of meowdb's first window (12-44), which the logs' fit doesn't keep (12-21, its middle 16.5); on a map with
+# steps 17-27 tall the two would differ. The step-up probe's jump throws and jump backs (the line 26 and 44
+# higher: `python -m gamelab probe run step-up --style jump_throw`, `jump_back`) bracket it: from 4 at 2, a
+# 60 step, stopped and through put it at 16-34.
 SHOT_H = 28
 # Whether her decisions keep to it. Off, they throw at monsters behind such walls as before, so an in-game
 # probe can measure it (the shot log has the rule's verdict either way; the simulator's world keeps to the
