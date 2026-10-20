@@ -82,7 +82,8 @@ SEARCH_TOP0 = 21     # ... to this far. meowdb draws 44 (12 to 44: 28 +- 16); fi
                      # telemetry the top is 21 (95% about 16-28; 44 is 6.2 log-likelihood worse, and each
                      # prefers the lower top on its own). Too low a top only skips chances above her (a pig
                      # 60 above is picked from 191 units, from 111 with 44), never throws at nothing.
-                     # Unmeasured in game: throws from 13 at 12 (60 above her), 110-200 units off, settle it.
+                     # Unmeasured in game: throws from 13 at 12 (60 above her), 110-200 units off, settle it
+                     # (`python -m gamelab probe run top-60`, then `probe score`: behavior.probe).
 BANDS = math.ceil((STAR_RANGE - SEARCH_START) / SEARCH_STEP)  # 17: the last one 15 wide
 LEVEL = 15           # within this of her height, a target counts as on her level
 STAR_SPEED = 690     # units/s
@@ -119,7 +120,8 @@ CLAW_MARGIN = 12     # kept past the swing's reach, for a monster walking at her
 SHOT_H = 28
 # Whether her decisions keep to it. Off, they throw at monsters behind such walls as before, so an in-game
 # probe can measure it (the shot log has the rule's verdict either way; the simulator's world keeps to the
-# rule regardless).
+# rule regardless). The probes that measure it (behavior.probe: step-up, step-down, hanging-wall) switch it
+# off for their run.
 WALLS_BLOCK = True
 PIG = (MONSTER_HEIGHT["pig"], MONSTER_HALF["pig"])  # the body of a kind no one knows (body_of)
 
@@ -131,9 +133,12 @@ def in_band(dy: float) -> bool:
 
 # --- the star's target search, from the ground ---------------------------------------------------------
 
-def window(k: int) -> tuple[float, float]:
-    """Band k's window: from how far above her feet (its floor) to how far (its top)."""
-    return SEARCH_FLOOR0 - SEARCH_GROW * k, SEARCH_TOP0 + SEARCH_GROW * k
+def window(k: int, top0: float | None = None, floor0: float | None = None) -> tuple[float, float]:
+    """Band k's window: from how far above her feet (its floor) to how far (its top). `top0`, `floor0`: the
+    first window's edges, if not SEARCH_TOP0 and SEARCH_FLOOR0 (the probes' scorer tries others)."""
+    top0 = SEARCH_TOP0 if top0 is None else top0
+    floor0 = SEARCH_FLOOR0 if floor0 is None else floor0
+    return floor0 - SEARCH_GROW * k, top0 + SEARCH_GROW * k
 
 
 def band_of(ahead: float) -> int | None:
@@ -143,13 +148,14 @@ def band_of(ahead: float) -> int | None:
     return min(BANDS - 1, int((ahead - SEARCH_START) // SEARCH_STEP))
 
 
-def search_band(near: float, far: float, bottom: float, top: float) -> int | None:
+def search_band(near: float, far: float, bottom: float, top: float, top0: float | None = None,
+                floor0: float | None = None) -> int | None:
     """The first band a body overlaps, from `near` to `far` ahead of her and from `bottom` to `top` above
-    her feet (body_box). None if the search doesn't pick it."""
+    her feet (body_box). None if the search doesn't pick it. `top0`, `floor0`: as in window."""
     if far < SEARCH_START or near > STAR_RANGE or far < near:
         return None
     for k in range(band_of(max(near, SEARCH_START)), band_of(min(far, STAR_RANGE)) + 1):
-        floor, roof = window(k)
+        floor, roof = window(k, top0, floor0)
         if bottom < roof and top > floor:
             return k
     return None
@@ -264,16 +270,17 @@ def _inside(x: float, p: Platform) -> float:
 
 
 def wall_between(platform: Platform | None, x: float, y: float, tx: float, rise: float = 0.0,
-                 target: Platform | None = None) -> Segment | None:
+                 target: Platform | None = None, shot_h: float | None = None) -> Segment | None:
     """The wall that stops a star from her (map x on `platform`, her feet at y, `rise` units up in a jump)
     before map x `tx`: of the walls of her own foothold group (Platform.walls), the nearest standing
     between them across the level line SHOT_H above her feet; None if the star gets there. Her x is taken
     1 unit inside her platform's ends, and `tx` inside the target's platform (`target`, if known): a
     monster is never past its platform's end, and one at the foot of a wall of her group that rises from
-    its own platform's end (the basin's sides, from its floor) isn't behind it."""
+    its own platform's end (the basin's sides, from its floor) isn't behind it. `shot_h`: the line's
+    height, if not SHOT_H (the probes' scorer tries others)."""
     if platform is None:
         return None
-    line = y - rise - SHOT_H
+    line = y - rise - (SHOT_H if shot_h is None else shot_h)
     a = _inside(x, platform)
     b = tx if target is None else _inside(tx, target)
     lo, hi = min(a, b), max(a, b)
