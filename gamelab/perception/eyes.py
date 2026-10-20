@@ -53,11 +53,12 @@ class Eyes:
     made on first use."""
 
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
-                 loot: LootDetector | None = None):
+                 loot: LootDetector | None = None, screen=None):
+        """`screen`: what grabs boxes of the screen (mss by default; analysis.bench passes saved frames)."""
         self.title = title
         self.detector = detector or MobDetector()
         self._loot = loot
-        self.sct = mss.MSS()
+        self.sct = screen or mss.MSS()
         self.name_tag = NameTag(tag_template, paths.TAG_FULL)
         self.want_ropes = False  # Senses turns this on (+~25 ms per look)
 
@@ -107,17 +108,21 @@ class Eyes:
         return np.asarray(self.sct.grab({"left": area["left"] + x, "top": area["top"] + y,
                                          "width": width, "height": height}))
 
-    def _capture(self) -> np.ndarray:
-        """The whole client area, full size, RGB, with the game in front (the capture sees whatever window
-        is on top). It must be the size the templates were made at."""
+    def _to_front(self) -> None:
+        """Bring the game to the front unless it's there already: a capture sees whatever window is on top."""
         if window.foreground_title() != self.title:
             window.bring_to_front(self.title)
             time.sleep(0.3)
+
+    def _capture(self) -> np.ndarray:
+        """The whole client area, full size, RGB, with the game in front. It must be the size the templates
+        were made at."""
+        self._to_front()
         area = self._client_area()
         if (area["width"], area["height"]) != GAME_SIZE:
             raise RuntimeError(f"the game window is {area['width']}x{area['height']}; monster "
                                f"templates and her name tag were made at {GAME_SIZE[0]}x{GAME_SIZE[1]}")
-        return np.asarray(self.sct.grab(area))[:, :, 2::-1]  # BGRA -> RGB
+        return self._grab(area, 0, 0, area["width"], area["height"])[:, :, 2::-1]  # BGRA -> RGB
 
     # --- questions about a look's frame -----------------------------------------------------------
 

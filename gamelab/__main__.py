@@ -688,6 +688,47 @@ def cmd_list(args) -> int:
     return 0
 
 
+# --- timing perception ------------------------------------------------------------------------------------
+
+def cmd_bench_look(args) -> int:
+    """A look's stages timed on saved frames, or (--live) on the game as it is on screen. It sends no keys
+    and never brings the game to the front."""
+    import cv2
+
+    from .analysis import bench
+    from .attack import reach
+    from .localization import mapdata
+    from .localization.senses import Senses
+    from .perception.sprites import detector_for
+    title = _game_title()
+    if args.live and window.foreground_title() != title:
+        print("the game isn't in front: bring it forward yourself and run this again (it never does)")
+        return 1
+    model = mapdata.load(args.map)
+    template = calibration.load().template
+    frames = None
+    if args.live:
+        eyes = bench.FrontEyes(title, template, detector_for(model))
+    else:
+        files = [Path(f) for f in args.files] or bench.saved_frames()
+        if not files:
+            print(f"no frames: name some saved 1920x1080 screenshots (the default ones are in {LAB})")
+            return 1
+        frames = bench.load(files)
+        eyes = bench.SavedEyes(template, detector_for(model))
+    senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
+    looks = {"Senses.look: no monsters": lambda: senses.look(mobs=False),
+             "Senses.look: her band": lambda: senses.look(),
+             "Senses.look: band + loot on her platform": lambda: senses.look(loot=True),
+             "Senses.look: whole screen + all loot": lambda: senses.look(wide=True, loot=True)}
+    timer = bench.run(eyes, senses.band, looks, frames, reps=args.reps, n=args.n)
+    where = f"{args.n} live captures" if frames is None else f"{len(frames)} saved frames x {args.reps}"
+    print(f"{where}; OpenCV {cv2.__version__}, {cv2.getNumThreads()} threads"
+          + ("" if frames is None else "; the grab itself (16.7 ms with mss) isn't included"))
+    print("\n".join(timer.table()))
+    return 0
+
+
 # --- the command line ------------------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -876,6 +917,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_check)
 
     sub.add_parser("list", help="list saved recordings").set_defaults(func=cmd_list)
+
+    s = sub.add_parser("bench-look", help="time each stage of a look on saved frames, or --live on the game as "
+                                          "it is (refuses unless it's in front; never brings it forward); no keys")
+    s.add_argument("files", nargs="*", help="saved 1920x1080 screenshots (default: the ones listed in "
+                                            "analysis/bench.py, from gamelab/lab)")
+    s.add_argument("--reps", type=int, default=5, help="looks at each saved frame")
+    s.add_argument("--live", action="store_true", help="look at the game on screen instead (it must be in front)")
+    s.add_argument("--n", type=int, default=100, help="--live: how many captures")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.set_defaults(func=cmd_bench_look)
     return p
 
 
