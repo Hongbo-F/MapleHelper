@@ -6,7 +6,7 @@ Saved frames go through the same capture path as the game's: each is turned back
 screen capture gives, and Eyes converts that as it would a capture. What offline numbers leave out is the
 grab itself: mss waits for the compositor's next frame, 16.7 ms whatever the size of the box; DXGI desktop
 duplication waits for the next frame the screen shows, and copying the game's 1920x1080 off the graphics
-card takes about 2 ms.
+card takes about 2 ms. `bench-capture` times those two on the screen as it is.
 
 A frame is timed `reps` times in a row (after one look at it that isn't timed), as a run of looks at a
 scene that barely changes from one to the next.
@@ -23,10 +23,10 @@ from PIL import Image
 
 from .. import capture, window
 from ..paths import LAB
-from ..perception.eyes import EXP_TEXT, TAG_BELOW_FEET, Eyes
-from ..perception.hud import EXP_NUMBER, bars
+from ..perception.eyes import EXP_TEXT, TAG_BELOW_FEET, Eyes, rgb_of
+from ..perception.hud import BAR_ROW, EXP_NUMBER, HP_BAR, bars
 from ..perception.lie_detector import LieDetectorSpotter
-from ..perception.minimap import her_dot
+from ..perception.minimap import MINIMAP_BOX, her_dot
 from ..perception.terrain import find_ropes, ground_extent
 from ..screen import GAME_SIZE, SCALE
 
@@ -192,3 +192,34 @@ def run(eyes: Eyes, band: tuple[float, float], looks: dict[str, Callable], frame
         for _ in range(reps):
             once(timer)
     return timer
+
+
+def capture_stages(area: capture.Area, dxgi: capture.Grabber, gdi: capture.Grabber, timer: Timer) -> None:
+    """A look's capture and a glance's, through DXGI and through mss, on the screen box `area` as it is
+    (nothing is brought to the front); and whether the two see the same pixels."""
+    w, h = area["width"], area["height"]
+    a, b = int(HP_BAR[0] * w), int(HP_BAR[1] * w)
+    x0, y0, x1, y1 = MINIMAP_BOX
+    glance = [(x0, y0, x1 - x0, y1 - y0), (a, int(BAR_ROW * h), b - a, 1)]
+
+    def look(grabber: capture.Grabber) -> np.ndarray:
+        shot = grabber.shot(area, after=time.monotonic())
+        return shot.crop(0, 0, w, h, rgb_of)
+
+    def fresh() -> np.ndarray:
+        begun = time.monotonic()
+        shot = dxgi.shot(area, after=begun)
+        full = shot.crop(0, 0, w, h, rgb_of)
+        if isinstance(shot, capture.DxgiShot):
+            timer.add("dxgi: frame shown after look began, by", shot.t - begun)
+            timer.add("dxgi: frame's age once RGB", time.monotonic() - shot.t)
+        return full
+
+    seen = timer.time("dxgi: a look's capture (RGB)", fresh)
+    timer.time("dxgi: a glance (from the newest frame)", lambda: dxgi.shot(area).crops(glance, rgb_of))
+    timer.time("mss: a look's capture (RGB)", lambda: look(gdi))
+    timer.time("mss: a glance (two grabs)", lambda: gdi.shot(area).crops(glance, rgb_of))
+    also = look(gdi)
+    timer.count("looks", 1)
+    timer.count("... DXGI and mss the same on every pixel", int(np.array_equal(seen, also)))
+    timer.count("... pixels that differed (in all)", int((seen != also).any(axis=2).sum()))

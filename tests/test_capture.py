@@ -354,3 +354,15 @@ def test_eyes_share_the_processs_grabber():
     a = Eyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object())
     b = Eyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object())
     assert a.screen is b.screen is capture.shared()
+
+
+def test_bench_capture_times_both_ways_and_compares_their_pixels():
+    from gamelab.analysis import bench
+    clock = Clock()
+    dxgi = grabber(clock, Opener(clock, [(S_OK, 0, picture(0)), (S_OK, 100_500, picture(7))]))
+    gdi = grabber(clock, Opener(clock, CaptureError("must not be opened")), method="mss")
+    timer = bench.Timer()
+    bench.capture_stages(AREA, dxgi, gdi, timer)
+    assert timer.counts == {"looks": 1, "... DXGI and mss the same on every pixel": 1,
+                            "... pixels that differed (in all)": 0}
+    assert {"dxgi: a look's capture (RGB)", "mss: a glance (two grabs)"} <= set(timer.samples)

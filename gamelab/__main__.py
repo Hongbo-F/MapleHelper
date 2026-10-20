@@ -695,6 +695,7 @@ def cmd_bench_look(args) -> int:
     and never brings the game to the front."""
     import cv2
 
+    from . import capture
     from .analysis import bench
     from .attack import reach
     from .localization import mapdata
@@ -708,7 +709,7 @@ def cmd_bench_look(args) -> int:
     template = calibration.load().template
     frames = None
     if args.live:
-        eyes = bench.FrontEyes(title, template, detector_for(model))
+        eyes = bench.FrontEyes(title, template, detector_for(model), screen=capture.Grabber(args.capture))
     else:
         files = [Path(f) for f in args.files] or bench.saved_frames()
         if not files:
@@ -728,6 +729,32 @@ def cmd_bench_look(args) -> int:
     print("\n".join(timer.table()))
     if frames is None:
         print(eyes.screen.summary())
+    return 0
+
+
+def cmd_bench_capture(args) -> int:
+    """A look's capture and a glance's timed through DXGI and mss, on the game's window as it is on screen
+    (or a 1920x1080 box at the screen's top left if the game isn't running). Reads the screen only: no
+    keys, and nothing is brought to the front."""
+    from . import capture
+    from .analysis import bench
+    try:
+        area = window.client_rect(window.find_game(_game_title()))
+        what = "the game's window as it is on screen"
+    except RuntimeError:
+        area = {"left": 0, "top": 0, "width": 1920, "height": 1080}
+        what = "the screen's top-left 1920x1080 (the game isn't running)"
+    if area["width"] <= 0 or area["height"] <= 0:
+        print("the game is minimized: restore it yourself and run this again")
+        return 1
+    dxgi, gdi = capture.Grabber("dxgi"), capture.Grabber("mss")
+    timer = bench.Timer()
+    bench.capture_stages(area, dxgi, gdi, bench.Timer())  # the first duplicates the monitor: not timed
+    for _ in range(args.n):
+        bench.capture_stages(area, dxgi, gdi, timer)
+    print(f"{args.n} rounds on {what}")
+    print("\n".join(timer.table()))
+    print(dxgi.summary())
     return 0
 
 
@@ -928,7 +955,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--live", action="store_true", help="look at the game on screen instead (it must be in front)")
     s.add_argument("--n", type=int, default=100, help="--live: how many captures")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--capture", choices=("dxgi", "mss"), help="--live: capture this way (default: config.toml)")
     s.set_defaults(func=cmd_bench_look)
+    s = sub.add_parser("bench-capture", help="time a look's capture and a glance's through DXGI and mss on the "
+                                             "game as it is on screen; never brings it forward; no keys")
+    s.add_argument("--n", type=int, default=100, help="rounds")
+    s.set_defaults(func=cmd_bench_capture)
     return p
 
 
