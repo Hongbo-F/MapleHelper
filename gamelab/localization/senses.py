@@ -17,7 +17,7 @@ from .scene import Scene, find_loot
 
 # Full-size px either side of where her minimap dot puts each of the map's ropes on screen that a look
 # searches for ropes: all `pose.rope_x` can use (a rope within ROPE_MATCH_PX of there, up to MAX_ROPE_WIDTH
-# wide). 8.8 ms a look (median, bench-look), against 13.9 for the whole screen. On 17 saved frames the
+# wide). 8.6 ms a look (median, bench-look), against 19 for the whole screen. On 17 saved frames the
 # ropes seen were 0-20 px from there (her dot 0-14.5 map units off), the same ropes as on the whole
 # screen, and she was placed the same. The mover's line-up on a rope looks 70 px around where the map
 # puts it from her refined position: the same ropes while her dot is within about 30 units. None
