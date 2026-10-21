@@ -610,7 +610,9 @@ def nav_fight_up_runs_out(sim):
     arrived before monsters walked 125 units/s; with the physics and attack tracks it arrives there. Seed 11
     then, where with the client's star search and claw stab it arrives too: knocked off 4 at 26 s and hit off
     the jump from 3 to 1, it had gone the long way round, fighting 38 monsters, and run out of time on 16. Of
-    seeds 1-48, 41 arrive, against 37 before and 36 at the physics and attack tracks' merge.)"""
+    seeds 1-48, 41 arrive, against 37 before and 36 at the physics and attack tracks' merge. On the play
+    track, before the steps, seed 17 since she finishes what she has hurt before she moves on (behavior.
+    fight.owed): on seed 4 she arrived there; of seeds 1-48, 46 arrived, against 41 before.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -630,7 +632,9 @@ def nav_fight_across_runs_out(sim):
     1-16 10 arrive, 11 just before.) Seed 3 before, where with the client's star search and claw stab she now
     arrives: after 52 s fighting on 12 she'd been knocked off down to 34, and twice more on the long way
     round, and run out of time on 18; it arrived there before monsters walked 125 units/s. Of seeds 1-16, 12
-    arrived then, 8 with the physics and attack tracks before the client's search and stab, 12 at their merge.)"""
+    arrived then, 8 with the physics and attack tracks before the client's search and stab, 12 at their merge.
+    On the play track, before the steps, seed 15 since she finishes what she has hurt before she moves on
+    (behavior.fight.owed): on seed 2 she arrived there; of seeds 1-16, 14 arrived, against 12 before.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1343,8 +1347,44 @@ def loop_lull_loot(sim):
     than 20, seed 16 both. Seed 3 since the game moves her in 30 ms steps (body.STEP) and jumps from standing
     wait 150 ms after the arrow: on seed 2 no lull came. Over 16 seeds 9 meet all of this, 5 just before. Seed
     4 since chained jumps take off where they land with room to spare (flow.TAKEOFF_SLOP): on seed 3 no lull
-    came. Over 16 seeds 8 meet all of this.)"""
+    came. Over 16 seeds 8 meet all of this. On the play track, before the steps, seed 4 too, since she finishes
+    what she has hurt before she moves on (behavior.fight.owed): on seed 1 no lull came there; over 16 seeds 8
+    met all of it.)"""
     return _loop_on_12(sim)
+
+
+def _hold(sim, k: int, seconds: float) -> None:
+    """The world's monster `k` stands where it is now for `seconds` (as one seen in a live log did)."""
+    m, t = sim.world.monsters[k], sim.world.t
+    m.t0, m.x0, m.d, m.t1, m.pushed = t, m.at(t), 0, t + seconds, None
+
+
+def _left_from(tr: dict, pid: int) -> float:
+    """When she first set off from platform `pid` (its first chain or move in the log), s (infinity: never)."""
+    return _first(tr["log"], f"platform {pid} (")
+
+
+@scenario((3, 760.0), monsters=[("Pig", 4, 584.0)], seed=1, limit=200, facing=LEFT,
+          expects=(happens("star hits pig", "her first star hurts the pig"),
+                   check("the pig dies before she leaves platform 3",
+                         lambda tr: _first(tr["world_log"], "kills pig") < _left_from(tr, 3)),
+                   _rule("finish")))
+def loop_finishes_what_she_hurt(sim):
+    """A live hunt loop of 2026-10-21 (00:49:51): from platform 3 she threw at a pig on 4, 60 below, and hurt it;
+    it stood at x 584, 130 units along from her at 714, too close sideways for a star (151 for a pig 60 below),
+    and she set off for drops on 7 with its bar at 27%. Here: one star from 760 hurts it, it stands where it is,
+    and she walks to 714; then the hunt loop, its next ground on another platform. She finishes it first (rule
+    4b): a step back along 3 to where a star picks it, and the stars."""
+    tour = sim.tour_stack()
+    h = tour.h
+    _hold(sim, 0, 3.0)
+    h.look()
+    h.actions.throw(LEFT)
+    sim.clock.sleep(0.7)  # the star lands 0.52 s after the key
+    h.look()              # her bar seen: hurt by her (Hunter.wounds)
+    _hold(sim, 0, 8.0)
+    h.actions.walk(LEFT, 46)
+    return _loop(1.0)(sim, tour)
 
 
 @scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,

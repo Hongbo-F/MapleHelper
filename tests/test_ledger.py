@@ -210,5 +210,72 @@ def test_the_ledger_counts_every_kill_and_places_most_of_them_right(name):
     # nav_fight_basin's seed 4, 0.46. With the game's 30 ms steps (motion.body.STEP) and jumps from standing
     # 150 ms after the arrow, the same 33: placed 0.93-1.0, placed right 0.40-0.82 (pooled 0.68; 0.61, 0.60 and
     # 0.54 on the pinned seeds): nav_fight_basin's seed 2 a kill under the 0.55, the pooled share as before. So
-    # placed right is 0.5 (one of the 33 below it: nav_fight_basin's seed 7, 0.40).
+    # placed right is 0.5 (one of the 33 below it: nav_fight_basin's seed 7, 0.40). On the play track, before
+    # the steps, with her finishing what she has hurt before she moves on (fight.owed), the same 33: placed
+    # 0.97-1.0, placed right 0.42-0.83, pooled 0.70 as before (0.69), but three below 0.55: nav_fight_basin's
+    # pinned seed, and its seeds 2 and 8 (0.53, 0.53, 0.42). So 0.5 there too.
     assert len(placed) >= 0.9 * len(kills) and right >= 0.5 * len(placed)
+
+
+# --- her wounds ---------------------------------------------------------------------------------------------
+
+def _seen_at(t, monsters, x=500.0):
+    """A look that searched for monsters, her at map x on a long flat platform (y 500)."""
+    from gamelab.localization.mapdata import Platform, Segment
+    from gamelab.localization.pose import Where
+    p = Platform(0, [Segment(0, 500, 1000, 500)])
+    s = _look(t)
+    s.where, s.monsters, s.searched = Where(x, 500.0, p, (0.0, 0.0)), list(monsters), True
+    return s
+
+
+def _mon(kind, x, bar=None):
+    from gamelab.localization.monsters import Monster
+    from gamelab.perception.mobs import Mob
+    return Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, 500.0, 0, bar)
+
+
+def test_a_monster_in_her_throws_path_whose_bar_shows_is_hers_until_a_kill_of_hers_is_placed_on_it():
+    from gamelab.behavior.ledger import Wounds
+    h = _Hunter()
+    ledger = Ledger(h)
+    wounds = Wounds(ledger)
+    pig, other = _mon("pig", 700.0), _mon("slime", 200.0, bar=0.5)  # the slime's bar: someone else's doing
+    wounds.on_look(_seen_at(10.0, [pig, other]))
+    ledger.on_look(_seen_at(10.0, [pig, other]))
+    for w in (ledger, wounds):
+        w.on_throw(10.1, "right")
+    for w in (ledger, wounds):
+        w.on_look(_seen_at(10.8, [_mon("pig", 690.0, bar=0.67), other]))
+    assert [(m.kind, m.x) for m in wounds.seen_within(10.8, 1.8)] == [("pig", 690.0)]  # not the slime
+    # Followed look to look, as long as it's seen; unseen (hidden under its damage numbers) it's still hers.
+    for t, seen in ((11.2, [_mon("pig", 660.0, bar=0.67)]), (11.6, [])):
+        for w in (ledger, wounds):
+            w.on_look(_seen_at(t, seen))
+    assert [m.x for m in wounds.seen_within(11.6, 1.8)] == [660.0]
+    # A kill of hers placed on it closes it.
+    h.exp_gains = 1
+    for w in (ledger, wounds):
+        w.on_look(_seen_at(12.0, []))
+    assert ledger.kills[0].kind == "pig" and wounds.open == []
+
+
+def test_a_wound_is_given_up_out_of_sight_and_after_being_chased_too_long():
+    from gamelab.behavior.ledger import WOUND_LOST_S, WOUND_S, Wounds
+    ledger = Ledger(_Hunter())
+    wounds = Wounds(ledger)
+    wounds.on_look(_seen_at(0.0, [_mon("pig", 700.0)]))
+    wounds.on_throw(0.1, "right")
+    wounds.on_look(_seen_at(0.8, [_mon("pig", 700.0, bar=0.6)]))
+    wounds.on_look(_seen_at(0.8 + WOUND_LOST_S + 0.1, []))
+    assert wounds.open == []  # out of sight that long: dead, or gone where she can't follow
+    wounds.on_look(_seen_at(20.0, [_mon("pig", 700.0)]))
+    wounds.on_throw(20.1, "right")
+    for t in (20.8, 21.6, 22.4):
+        wounds.on_look(_seen_at(t, [_mon("pig", 700.0, bar=0.6)]))
+    assert len(wounds.open) == 1
+    wounds.on_look(_seen_at(20.8 + WOUND_S + 0.1, [_mon("pig", 700.0, bar=0.5)]))
+    assert wounds.open == []  # chased too long
+    # A bar that shows on a monster no throw of hers had in its path isn't hers.
+    wounds.on_look(_seen_at(60.0, [_mon("pig", 700.0, bar=0.6)]))
+    assert wounds.open == []

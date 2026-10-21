@@ -6,14 +6,18 @@ from types import SimpleNamespace
 
 from gamelab.attack.spots import Spot
 from gamelab.behavior import hunt
+from gamelab.behavior.fight import FightState
 from gamelab.behavior.hunt import Hunt, Objective, Visit
 from gamelab.behavior.ledger import Pile
 
 
 def _hunt(piles, kills=(), travel=5.0):
-    """A Hunt with only what the pile rules read: the drop store, the looter, route times, the visit."""
+    """A Hunt with only what the pile rules read: the drop store, the looter, route times, the visit (and no
+    monster she has hurt)."""
     h = object.__new__(Hunt)
-    h.h = SimpleNamespace(drops=SimpleNamespace(known=list(piles)), looter=SimpleNamespace(inventory_full=False))
+    h.h = SimpleNamespace(drops=SimpleNamespace(known=list(piles)), looter=SimpleNamespace(inventory_full=False),
+                          wounds=SimpleNamespace(seen_within=lambda now, seconds, hurt_by=None: []))
+    h.fs = FightState()
     h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel))
     h.visit = Visit(1, Spot(1, 0.0, 1.0, True), kills=list(kills))
     h._exit_piles = None
@@ -140,3 +144,22 @@ def test_the_ground_is_judged_empty_only_from_looks_that_cover_it_for_a_while():
     assert h._leaving(look(16, [(16, 501, 669)])) is None and h.visit.empty_since is not None  # band look: kept
     h.visit.empty_since -= hunt.EMPTY_CONFIRM_S
     assert h._leaving(on_spot) == "nothing left here, and nothing due back" and 17 in h._skip
+
+
+def test_she_finishes_what_she_hurt_before_she_sets_off_for_another_platform(monkeypatch):
+    from gamelab.behavior import fight
+    hurt = SimpleNamespace(kind="pig", x=-200.0, platform=4, bar=0.4)
+    monkeypatch.setattr(fight, "owed", lambda h, s, st=None, hurt_by=None: [hurt])
+    monkeypatch.setattr(fight, "finish_act", lambda h, s, wounds, around: ("throw", "left") if wounds else None)
+    monkeypatch.setattr(fight, "finish_targets", lambda s, wounds, around: list(wounds))
+    h = _hunt([])
+    s = _scene()
+    h.obj = Objective("spot", 7, 0.0)            # going to another platform: she finishes it first
+    assert h._owed(s, []) == [hurt]
+    h.obj = Objective("pile", 1, 50.0)           # along her own platform she leaves nothing behind
+    assert h._owed(s, []) is None
+    h.obj = Objective("spot", 7, 0.0)
+    h.obj.finishing = hunt.FINISH_S              # done finishing for this one: off she goes
+    assert h._owed(s, []) is None
+    h.obj = None                                 # at the ground, shooting goes on as before
+    assert h._owed(s, []) is None

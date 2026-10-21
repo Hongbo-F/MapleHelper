@@ -36,7 +36,7 @@ from ..perception.eyes import Eyes
 from ..perception.hud import exp_changed
 from . import fight
 from .fight import Report
-from .ledger import DropStore, Ledger
+from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
@@ -67,11 +67,14 @@ class Hunter:
         self.hit_at: float | None = None  # the time of the last look that saw her HP drop (a touch)
         self.knock_waited: float | None = None  # ... the hit_at a jump last waited out (fight.knocked_jump)
         self._last_potion = 0.0
-        # The hunt's bookkeeping from every look and throw (behavior.ledger): read by nothing that decides yet.
+        # The hunt's bookkeeping from every look and throw (behavior.ledger): the hunt loop reads the drop store,
+        # and the fights and the hunt loop her wounds (the monsters she has hurt, finished before she moves on).
         self.drops = DropStore()
         self.ledger = Ledger(self, self.drops)
-        self.senses.listeners += [self._vitals, self._publish, self.ledger.on_look, self.drops.on_look]
-        self.actions.throw_listeners.append(self.ledger.on_throw)
+        self.wounds = Wounds(self.ledger)
+        self.senses.listeners += [self._vitals, self._publish, self.ledger.on_look, self.drops.on_look,
+                                  self.wounds.on_look]
+        self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw]
         if feed is not None:  # whose kills are whose (localization.tracking)
             self.actions.throw_listeners.append(feed.throw)
 

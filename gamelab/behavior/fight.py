@@ -9,7 +9,9 @@ in its path, whatever its kind, so a kill is matched against everything in the p
 the ground, what the claw or the star's search can pick by each monster's body; from a jump, what the
 attack's area takes in as high as she is when it picks its target; and short of any wall of her foothold
 group (attack.reach).
-Kills are counted in the hunter's Report; their drops go to her Looter (behavior.looting).
+Kills are counted in the hunter's Report; their drops go to her Looter (behavior.looting). A monster she has
+hurt (Hunter.wounds) is finished before a fight ends, from where she is or a short walk along her platform
+(`owed`, `finish_act`; the hunt loop's rule 4b too).
 """
 
 import json
@@ -48,6 +50,12 @@ JUMPS = ("jump_throw", "jump_back")  # ... and of those, the ones that jump
 STEADY_WAIT_S = 0.05  # s before the next look when a jump waits out a touch's knock (knocked_jump)
 GUARD_SECONDS = 15  # longest spent shooting a monster out of the way while travelling
 GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she travels on
+# A monster she has hurt (Hunter.wounds) is finished before she moves on, from where she is or from a walk this
+# long along her platform at most (a second's walk at 149 units/s): in the live hunt loops of 2026-10-21 she set
+# off 44 times with a monster's HP bar down and it in reach or a step of 18-99 units away (to a pile, a spot,
+# the next ground), 23 of them not killed in the next 20 s; in the simulator's game-like world 13% of the
+# monsters she hurt (tour 17%) died to her only 20 s or more after the first hit.
+FINISH_WALK = 150
 # When a throw's damage can show on its target, for the shot log (_score_shots, _target_gone): from LANDS_FROM_S
 # after its attack key (the star leaves STAR_DELAY_MS after it, less a look's slack) to SETTLED_S after it's due
 # (`due`: the release, then the flight at reach.STAR_SPEED). Which end the game shows it at isn't measured: a
@@ -191,6 +199,11 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
     `HIDDEN_FOR` seconds: hit, it flinches under its damage numbers, and the detector loses it.
     With `finish`, reaching `max_kills` doesn't end the fight while monsters are still in reach:
     she finishes those (without walking after others), as stopping halfway gave up a good spot.
+    Nor, `finish` or not, while one she had hurt by then (owed) is in reach or a short walk from it
+    (finish_act): she finishes it, closing in on it even without `approach`, before the fight ends,
+    and before she waits on nothing (she used to leave monsters half hunted). Only those hurt by the
+    look that saw the kill count reached: in the simulator's basin, where respawns never stop, there was
+    always another, and the escort's fights in her way to drops ran out the trips.
     Monsters of other kinds on her platform that come close are in her way, and fought too. With
     `far`, monsters (of `kinds`) on any platform in reach are fought too: her darts reach far, and
     their drops are left to the tour (looter.pending)."""
@@ -199,9 +212,11 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
     exp_at_start = report.exp_kills
     st = FightState(exp_counted=exp_at_start)
     placed = None  # the last look that placed her
+    owing = False  # at the last look, one she had hurt was in reach or a short walk from it ...
+    enough_at = None  # ... hurt by when the kill count was reached (once it was)
     while time.monotonic() < deadline:
         enough = report.exp_kills - exp_at_start >= max_kills
-        if enough and not finish:
+        if enough and not finish and not owing:
             break
         s = h.look()
         if (step := _place_and_check(h, st, s)) == _OVER:
@@ -212,7 +227,14 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
         placed = s
         now = time.monotonic()  # read once a look: hidden ones are told by it
         fight, visible, hidden = _targets(h, st, s, kinds, ground, far, now)
-        act = _take_stance(h, st, s, fight, visible, hidden, approach and not enough)
+        targets, closing = fight, approach and not enough
+        if enough and enough_at is None:
+            enough_at = now
+        wounds = owed(h, s, st, enough_at)
+        owing = finish_act(h, s, wounds, visible + hidden) is not None
+        if owing and ((enough and not finish) or _plain_stance(h, s, fight, visible + hidden, closing)[0] == "wait"):
+            targets, closing = finish_targets(s, wounds, visible + hidden), True  # finish hers (finish_act)
+        act = _take_stance(h, st, s, targets, visible, hidden, closing)
         if knocked_jump(h, s, act):
             continue
         if (step := _carry_out(h, st, s, act, fight, now, patience, enough)) == _OVER:
@@ -386,6 +408,53 @@ def _wanted(s: Scene, kinds, ground: set[int] | None, far: bool) -> list[Monster
                    or (far and reach.can_hit(s.platform, x, y, m, others=s.monsters)))]
     wanted += [m for m in s.monsters if m not in wanted and m.platform == here and abs(m.x - x) < IN_HER_WAY]
     return wanted
+
+
+def owed(h: "Hunter", s: Scene, st: FightState | None = None, hurt_by: float | None = None) -> list[Monster]:
+    """The monsters she has hurt and not killed (Hunter.wounds) around her at look `s` (first hurt by `hurt_by`,
+    if given): as seen in it, or unseen in it (hit, under their damage numbers) where last seen, for HIDDEN_FOR at
+    most. Not one seen fading out where a kill of the fight `st` died."""
+    now = time.monotonic()
+    wounds = h.wounds.seen_within(now, HIDDEN_FOR, hurt_by)
+    if not wounds:
+        return []
+    visible = s.monsters if st is None else [m for m in s.monsters if m not in st.fading(s.monsters)]
+    out = []
+    for w in wounds:
+        again = seen_again(w, visible)
+        if again is None and any(seen_again(w, [m]) is not None for m in s.monsters):
+            continue  # seen fading out where it died
+        if (again or w) not in out:
+            out.append(again or w)
+    return out
+
+
+def finish_targets(s: Scene, wounds: list[Monster], around: list[Monster]) -> list[Monster]:
+    """What she shoots at to finish `wounds` from look `s`: them, and any monster of `around` (every monster
+    around her) in her way on her platform (IN_HER_WAY)."""
+    here, x = s.platform.id, s.where.x
+    return wounds + [m for m in around if m.platform == here and abs(m.x - x) < IN_HER_WAY
+                     and not any(m is w for w in wounds)]
+
+
+def finish_act(h: "Hunter", s: Scene, wounds: list[Monster], around: list[Monster]) -> tuple | None:
+    """What finishing `wounds` (owed) takes from where she stands in look `s`: attack.stance at finish_targets,
+    closing in if need be (`around`: every monster around her), if that's a throw or a walk of FINISH_WALK at
+    most along her platform; None if neither (out of reach from near her: she's free to move on)."""
+    if not wounds:
+        return None
+    act = _plain_stance(h, s, finish_targets(s, wounds, around), around, True)
+    if act[0] in THROWS or (act[0] in ("back", "approach") and act[2] <= FINISH_WALK):
+        return act
+    return None
+
+
+def _plain_stance(h: "Hunter", s: Scene, targets: list[Monster], around: list[Monster], approach: bool) -> tuple:
+    """attack.stance at `targets` from look `s`, by each kind's size, as _take_stance has it (unlogged)."""
+    here = s.platform
+    tops, halves = body_sizes(h.model)
+    return stance(s.where.x, s.where.y, here, targets, approach, h.actions.facing,
+                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves, around=around)
 
 
 def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], gains: int,
@@ -722,10 +791,16 @@ class FightOnTheWay:
                                             # in her way is shot
 
     def target(self, s: Scene) -> Monster | None:
-        """The monster to shoot from where she stands, if any is in reach (pick_target's choice)."""
+        """The monster to shoot from where she stands, if any is in reach (pick_target's choice), else one she
+        has hurt that a short walk brings back into reach (owed, finish_act): the burst (shoot) finishes it."""
         in_reach = [m for m in s.monsters if reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters)
                     and (self.kinds is None or m.kind in self.kinds)]
-        return pick_target(s.where.x, s.where.y, s.platform, in_reach, s.monsters) if in_reach else None
+        if in_reach:
+            return pick_target(s.where.x, s.where.y, s.platform, in_reach, s.monsters)
+        wounds = owed(self.h, s)
+        if finish_act(self.h, s, wounds, s.monsters) is not None:
+            return min(wounds, key=lambda m: abs(m.x - s.where.x))
+        return None
 
     def shoot(self) -> int:
         """A short fight at what's in reach (up to 3 kills, never walking after them); its kills."""

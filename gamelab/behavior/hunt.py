@@ -17,6 +17,10 @@ in the order listed, 6 before 3):
                        under, close in along her platform
    4  in passing       travelling: a target in reach, thrown at from where she is, PASSING_S at most per
                        platform per objective (the navigator shoots what stands in the way of a move)
+   4b finish           travelling to another platform, done shooting in passing: the monsters she has hurt
+                       and not killed (fight.owed), when a throw from here or a walk of fight.FINISH_WALK at
+                       most along her platform gets to them (fight.finish_act), FINISH_S at most per
+                       objective; she used to leave monsters half hunted
    5  pile here        drops on her platform within PILE_NEAR, nothing by them or between her and them (also
                        piles she passes while travelling)
    7  better spot      wanted monsters seen out of reach, and a spot that reaches clearly more of them
@@ -54,6 +58,11 @@ from .looting import DROPS_LAST, DropSpot
 from .tour import PRIOR
 
 IN_HER_WAY = fight.IN_HER_WAY  # any monster this close on her platform is a target, whatever its kind
+FINISH_S = 8.0         # rule 4b: s of finishing what she has hurt per objective, before (and while) she goes.
+                       # Unbounded, in the simulator's basin, where respawns never stop, there was always one
+                       # she had hurt in reach: piles and spots ran out their OBJECTIVE_S (52 times in 30 runs of
+                       # 20 minutes, against 26) and she picked up 2.9 points less of her drops (and with it,
+                       # where the objective was on her own platform, 55)
 PASSING_S = 15.0       # rule 4: s of shooting per platform per objective while passing through
 PILE_NEAR = 150        # rule 5: drops on her platform this close are picked up from where she is
 PILE_GUARD = 110       # ... unless a monster is this close to them (looting.TOO_CLOSE, today's guard)
@@ -102,6 +111,7 @@ class Objective:
         return time.monotonic() - self.started
     trip: TripState | None = None
     passing: dict[int, float] = field(default_factory=dict)  # platform -> s shot there while passing (rule 4)
+    finishing: float = 0.0     # s spent finishing what she had hurt (rule 4b)
 
     def text(self) -> str:
         what = f"spot for {self.ground}" if self.kind == "spot" else "pile"
@@ -246,6 +256,8 @@ class Hunt:
     def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
         if self._can_pass_shoot(s, targets):
             return self._passing_shot(s, targets, visible, hidden, now)
+        if (owed := self._owed(s, visible + hidden)) is not None:
+            return self._finish(s, owed, visible, hidden, now)
         if (pile := self._pile_here(s)) is not None and pile is not self.obj.pile:  # one she passes
             return self._pick_here(s, pile)
         if self.obj.kind != "pile" and self._exit_piles is None and (pile := self._urgent_pile(s)) is not None:
@@ -436,6 +448,34 @@ class Hunt:
         """Rule 1: one of `monsters` on her platform is as close as stance's own threshold (close_to: the
         claw would swipe it, by its size)."""
         return any(m.platform == s.platform.id and close_to(m, s.where.x, self._halves) for m in monsters)
+
+    def _owed(self, s: Scene, around: list[Monster]) -> list[Monster] | None:
+        """Rule 4b: with an objective on another platform (she's set off, or about to: every rule that takes her
+        away makes one), and done shooting in passing, the monsters she has hurt and not killed (fight.owed)
+        that a throw from here, or a walk of fight.FINISH_WALK at most along her platform, gets to
+        (fight.finish_act): what to shoot at to finish them (fight.finish_targets), else None. In the live hunt
+        loops she set off for piles, spots and the next ground with monsters half hunted (fight.FINISH_WALK).
+        It ends with the kill, once they're out of reach from near her, out of sight, or chased
+        ledger.WOUND_S, or with the objective's FINISH_S. Going along her own platform (a pile on it) she
+        leaves nothing behind, and at the ground itself shooting (rule 3) goes on as it did: in the simulator's
+        basin, where respawns never stop and one she had hurt was always about, finishing before the piles on
+        it ran them out of their OBJECTIVE_S."""
+        o = self.obj
+        if o is None or o.platform == s.platform.id or o.finishing >= FINISH_S:
+            return None
+        wounds = fight.owed(self.h, s, self.fs)
+        if fight.finish_act(self.h, s, wounds, around) is None:
+            return None
+        return fight.finish_targets(s, wounds, around)
+
+    def _finish(self, s: Scene, owed: list[Monster], visible, hidden, now: float) -> None:
+        """Rule 4b: one step at the monsters she owes (_owed), counted against the objective's FINISH_S."""
+        t0, o = time.monotonic(), self.obj
+        self._shoot(s, owed, visible, hidden, now, "finish", approach=True)
+        o.finishing += time.monotonic() - t0
+        if o.finishing >= FINISH_S:
+            telemetry.emit("event", kind="backstop", text=f"FINISH_S: {FINISH_S:.0f} s finishing for {o.text()}")
+        return None
 
     def _stance(self, s: Scene, targets, visible, hidden, approach: bool, log: bool = True) -> tuple:
         if log:
@@ -768,12 +808,12 @@ class Hunt:
                 and any(m.platform == o.ground and self._hits(s, m) for m in s.monsters))
 
     def _interrupt(self, s: Scene) -> bool:
-        """Asked before every chain of a trip: whether a rule calls for her here (close quarters, a target in
-        reach she may shoot, an urgent pile, low HP)."""
+        """Asked before every chain of a trip: whether a rule calls for her here (close quarters, one she has
+        hurt to finish, a target in reach she may shoot, an urgent pile, low HP)."""
         if s.hp < self.h.low_hp:
             return True
         here = s.platform.id
-        if self._close_quarters(s, s.monsters):
+        if self._close_quarters(s, s.monsters) or self._owed(s, s.monsters) is not None:
             return True
         o = self.obj
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):

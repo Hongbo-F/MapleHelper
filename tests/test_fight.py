@@ -11,6 +11,7 @@ from maplehelper.config import GameKeys
 from maplehelper.engine import LEFT, RIGHT
 
 from gamelab.attack import reach
+from gamelab.behavior import fight as fight_mod
 from gamelab.behavior.fight import EMPTY_PATIENCE, HIDDEN_FOR
 from gamelab.behavior.hunter import Hunter
 from gamelab.behavior.looting import LOOT_REACH, DropSpot
@@ -162,6 +163,36 @@ def test_after_the_kill_count_she_finishes_what_is_in_reach(monkeypatch):
     h2.looter.sweep_after = lambda deaths: None
     h2.clear(max_kills=1, patience=2.0)  # without finish: stops at the kill
     assert len(throws2) < len(throws)
+
+
+def test_a_fight_finishes_one_she_has_hurt_before_it_ends(monkeypatch):
+    # The kill count is reached with a pig she has hurt still in reach (Hunter.wounds): without `finish` the
+    # fight goes on until that one is dead too (she used to leave monsters half hunted).
+    def kills(h, t):
+        if abs(t - 0.6) < 1e-6 or abs(t - 1.5) < 1e-6:
+            h.report.exp_kills += 1
+    hurt = target(250, bar=0.5)
+    looks = [[target(700), hurt]] * 2 + [[hurt]] * 3 + [[]] * 5
+    h, throws = _fighter(monkeypatch, looks, on_look=kills)
+    h.looter.sweep_after = lambda deaths: None
+    h.wounds.seen_within = lambda now, seconds, hurt_by=None: [hurt] if h.report.exp_kills < 2 else []
+    h.clear(max_kills=1, patience=2.0)
+    assert [side for _, side in throws][-3:] == [LEFT] * 3 and h.report.kills == {"pig": 2}
+    # Out of reach but a short walk away, she closes in on it even in a fight that doesn't (approach off).
+    walks = []
+    h, throws = _fighter(monkeypatch, [[target(950, bar=0.5)]] * 4)
+    h.actions.walk = lambda direction, units: walks.append((direction, round(units)))
+    h.wounds.seen_within = lambda now, seconds, hurt_by=None: [target(950, bar=0.5)]
+    h.clear(seconds=1.0, approach=False)
+    assert walks and walks[0][0] == RIGHT and walks[0][1] <= fight_mod.FINISH_WALK and not throws
+    # Farther than that: she's free to go.
+    walks.clear()
+    far = target(500 + reach.SHOT_RANGE + fight_mod.FINISH_WALK + 60, 560, platform=1, bar=0.5)  # 60 below
+    h, throws = _fighter(monkeypatch, [[far]] * 4)
+    h.actions.walk = lambda direction, units: walks.append((direction, round(units)))
+    h.wounds.seen_within = lambda now, seconds, hurt_by=None: [far]
+    r = h.clear(seconds=1.0, patience=0.3, approach=False)
+    assert not walks and r.stop == "nothing left in reach"
 
 
 def test_a_kill_seen_while_she_sweeps_up_still_counts(monkeypatch):

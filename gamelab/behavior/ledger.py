@@ -14,9 +14,14 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   as the Looter forgets drops: never before SETTLE after the kill, and only after two empty looks
   EMPTY_LOOKS apart, because monsters are drawn over drops. Gone piles are dropped from the store
   GONE_KEEP_S later; what the hunt loop counts of them is kept in counters (`gone_tried`).
+- **Her wounds** (`Wounds`): the monsters she has hurt and not killed. A monster in the path of a throw of
+  hers (as the ledger has it) whose HP bar shows up or changes in a look within STAR_WINDOW s of the throw is
+  hers, and followed look to look until a kill of hers is placed on it, it's out of sight for WOUND_LOST_S,
+  or WOUND_S have gone by since it was first hurt (chased too long). The fights and the hunt loop finish
+  these before they move on (behavior.fight.owed): she used to leave monsters half hunted.
 
-Step 4 of gamelab/docs/hunt-modes.md: these are observers. Nothing reads them to decide yet; the
-simulator checks them against its world (tests/test_ledger.py), and the hunt loop will read them.
+Step 4 of gamelab/docs/hunt-modes.md: these are observers, kept up whoever looks; the simulator checks the
+ledger against its world (tests/test_ledger.py), and the hunt loop reads the drop store and the wounds.
 """
 
 from dataclasses import dataclass, field
@@ -24,7 +29,7 @@ from dataclasses import dataclass, field
 from maplehelper.engine import RIGHT
 
 from ..attack import reach
-from ..localization.monsters import Monster, same
+from ..localization.monsters import TRACK_SLACK, Monster, same, seen_again
 from ..localization.scene import Loot, Scene
 from . import looting
 from .looting import EMPTY_LOOKS, LOOT_REACH, SETTLE, standing
@@ -36,6 +41,16 @@ DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded a
 # count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
 # forever, every kill added a pile, and every look went through all of them.
 GONE_KEEP_S = 300.0
+# Her wounds (Wounds). A bar new, or this much other than at the throw, is a hit (fight.HURT). A wound unseen this long
+# is gone: a hit monster hides under its damage numbers for 1-3 s (fight.HIDDEN_FOR is how long she keeps
+# throwing at one unseen; seen again within this, it's still hers), and seen without its bar it's still kept
+# (in the live looks of 2026-10-21 a bar seen was gone at the next look of the monster 70 times, 21 of them
+# with no kill after). Chased this long from the look that first saw it hurt, it's no longer owed: in the
+# simulator's game-like world (20 minutes, 30 seeds) she killed half of the monsters she hurt within 5.4 s of
+# the first hit and 84% within 20 s.
+WOUND_HURT = 0.02
+WOUND_LOST_S = 3.0
+WOUND_S = 15.0
 
 
 @dataclass
@@ -119,6 +134,66 @@ class Ledger:
         if self.store is not None:
             self.store.on_kill(kill)
         return kill
+
+
+@dataclass
+class Wound:
+    """A monster she has hurt and not seen die: as a look last saw it (`m`), when a look first saw it hurt by
+    her (`since`), and when one last saw it (`seen`)."""
+    m: Monster
+    since: float
+    seen: float
+
+
+class Wounds:
+    """The monsters she has hurt and not killed (see the module's docstring), kept up from every look that
+    searched for monsters and every throw. `ledger`: its kills close the wounds they're placed on."""
+
+    def __init__(self, ledger: Ledger):
+        self.ledger = ledger
+        self.open: list[Wound] = []
+        self._paths: list[tuple[float, list[Monster]]] = []  # recent throws: when, and their path, followed
+        self._last: Scene | None = None   # the last look that searched for monsters
+        self._kills = len(ledger.kills)   # the ledger's kills already gone through
+
+    def on_throw(self, when: float, side: str) -> None:
+        """A throw (Actions.throw_listeners): what's in its path, from the last look with monsters (in_path)."""
+        s = self._last
+        if s is not None and s.where is not None and s.platform is not None:
+            self._paths.append((when, in_path(s, side, s.monsters)))
+
+    def on_look(self, s: Scene) -> None:
+        """After every look (after the ledger's): a monster in a recent throw's path with its bar new or changed
+        is hers; her wounds are followed; a kill placed on one closes it, and so do WOUND_LOST_S out of sight
+        and WOUND_S since it was first hurt."""
+        for k in self.ledger.kills[self._kills:]:
+            if k.placed:
+                self.open = [w for w in self.open if not (w.m.kind == k.kind and w.m.platform == k.platform
+                                                          and abs(w.m.x - k.x) < TRACK_SLACK)]
+        self._kills = len(self.ledger.kills)
+        if not s.searched or s.where is None:
+            return
+        self._last = s
+        self._paths = [(t, path) for t, path in self._paths if s.t - t <= STAR_WINDOW]
+        for _, path in self._paths:
+            for i, m in enumerate(path):
+                if (again := seen_again(m, s.monsters)) is None:
+                    continue
+                # Its bar new, or other than it was (two of a kind near each other can be taken for each other
+                # from look to look: a higher one is still one in her star's path that she has hurt)
+                if again.bar is not None and (m.bar is None or abs(again.bar - m.bar) > WOUND_HURT) \
+                        and not any(seen_again(w.m, [again]) is again for w in self.open):
+                    self.open.append(Wound(again, s.t, s.t))
+                path[i] = again
+        hurt = [o for o in s.monsters if o.bar is not None]  # a hurt one shows its bar: those first
+        for w in self.open:
+            if (again := seen_again(w.m, hurt) or seen_again(w.m, s.monsters)) is not None:
+                w.m, w.seen = again, s.t
+        self.open = [w for w in self.open if s.t - w.seen < WOUND_LOST_S and s.t - w.since < WOUND_S]
+
+    def seen_within(self, now: float, seconds: float, hurt_by: float | None = None) -> list[Monster]:
+        """Her wounds as last seen, those seen within `seconds` of `now` (and first hurt by `hurt_by`, if given)."""
+        return [w.m for w in self.open if now - w.seen <= seconds and (hurt_by is None or w.since <= hurt_by)]
 
 
 def in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:
