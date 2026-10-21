@@ -486,10 +486,16 @@ def test_walls_of_other_groups_and_floors_let_stars_through():
 
 def test_a_jump_raises_the_line_a_star_runs_at():
     model, a, b, c = step_map()
-    # A jump throw's attack starts 26 up (the line 54 above her feet): still under the 60 step's top. A jump
-    # back's, 44 up (72): over it.
-    assert reach.wall_in_way(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_ATTACK_MS)) is not None
-    assert reach.wall_in_way(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_BACK_ATTACK_MS)) is None
+    # At a pig up on B: a jump throw's attack starts 26 up (the line 54 above her feet): still under the 60 step's
+    # top. A jump back's, 44 up (72): over it. By either line (the v83 line ends at the pig's feet, 60 up, from 54
+    # up, or crosses its body at 72).
+    for line in reach.LINES:
+        assert reach.wall_between(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_ATTACK_MS), target=b,
+                                  line=line) is not None, line
+        assert reach.wall_between(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_BACK_ATTACK_MS), target=b,
+                                  line=line) is None, line
+    assert reach.wall_in_way(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_ATTACK_MS), target=b) is not None
+    assert reach.wall_in_way(a, 100, 500, 300, rise=reach.air_rise(physics.JUMP_BACK_ATTACK_MS), target=b) is None
 
 
 def test_a_monster_is_never_past_its_platforms_end():
@@ -528,34 +534,92 @@ def test_spots_are_worked_out_again_when_reach_s_other_answers_are_switched(monk
     the claw, the old ramp) too, which the probes' tests switch for their worlds: switched, spots answers as
     worked out afresh, and switched back, as before."""
     model, a, b, c = step_map()
-    level = spots.spots(model, a.id)
-    monkeypatch.setattr(reach, "LINE", "v83")  # from C down at A, its own floor stops the line close in
     v83 = spots.spots(model, a.id)
-    assert v83 != level and v83 == spots._spots(model, a.id)
-    monkeypatch.setattr(reach, "LINE", "level")
+    monkeypatch.setattr(reach, "LINE", "level")  # from C down at A, its own floor no longer stops the line close in
+    level = spots.spots(model, a.id)
+    assert level != v83 and level == spots._spots(model, a.id)
+    monkeypatch.setattr(reach, "LINE", "v83")
     monkeypatch.setattr(reach, "SEARCH_FLOOR0", -20)
     lower = spots.spots(model, a.id)
-    assert lower != level and lower == spots._spots(model, a.id)
+    assert lower != v83 and lower == spots._spots(model, a.id)
     monkeypatch.undo()
-    assert spots.spots(model, a.id) == level
+    assert spots.spots(model, a.id) == v83
 
 
 def test_what_stops_a_star_on_the_real_map():
     """Thicket Around the Beach II (skipped without its parsed game data): from platform 4 a star never
     reaches 2, behind the step wall of their group (3, 63); the shots that hit in the live logs, past other
-    groups' walls and down past her own block's, are clear."""
+    groups' walls and down past her own platform's end (from near it), are clear."""
     if not (mapdata.CACHE / "10000012.json").is_file():
         pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
     model = mapdata.load(10000012)
     p = model.platform
     assert p(2).group == p(4).group == (3, 63)
-    assert all(reach.wall_in_way(p(4), x, p(4).y_at(x), tx, target=p(2)) is not None
-               for x in range(219, 670, 10) for tx in range(-309, 220, 10))
+    for line in reach.LINES:
+        assert all(reach.wall_between(p(4), x, p(4).y_at(x), tx, target=p(2), line=line) is not None
+                   for x in range(219, 670, 10) for tx in range(-309, 220, 10)), line
+    # By the v83 line, at a pig on 2 within 22 of its end, 368 off or more (the star's reach ends 400 ahead of
+    # her), the row ends inside its body, and the client's hit point, the middle of the body's part within the
+    # row, is past the step's edge, on 4's side of the wall (hit_point, as RustMS has it). It's taken on 2, as
+    # the pig is (reach._hit_on): there the wall stops it.
+    pig = reach.PIG
+    assert reach.hit_point(609, -893, -1, 211, -925, *pig)[0] == 227  # 209-245 of the pig's 177-245
+    assert reach.sight_stop(p(4), 609, -893, 227, -925) is None
+    assert reach.wall_between(p(4), 609, -865, 211, target=p(2), ty=-925, body=pig) is not None
+    # The logged hits (research/terrain's 299 decided throws): up past other groups' walls, and down from near
+    # her platform's end.
     for her, x, there, txs in ((19, -14, 18, (150, 300, 380)), (19, 52, 18, (300, 439)), (3, 706, 1, (870, 930)),
-                               (3, 723, 1, (900, 950)), (14, 716, 17, (900, 1050)), (14, 737, 17, (918, 1088)),
-                               (2, 200, 4, (300, 450)), (22, 16, 21, (-150, -300))):
+                               (3, 723, 1, (900, 950)), (14, 735, 17, (1153,)), (14, 737, 17, (918, 1032, 1097)),
+                               (2, 197, 4, (511,)), (2, 211, 4, (377, 446)), (20, -28, 21, (-215, -236)),
+                               (16, 516, 18, (203, 248)), (22, 16, 21, (-150, -300))):
         for tx in txs:
             assert reach.wall_in_way(p(her), x, p(her).y_at(x), tx, target=p(there)) is None, (her, x, there, tx)
+
+
+def test_her_own_platform_stops_a_star_down_past_its_end_on_the_real_map():
+    """Thicket Around the Beach II (skipped without its parsed game data): as the user saw in game on 2026-10-21,
+    her own platform stops a star at a monster below her, down a step (2 at 4) and from a higher platform (14 at
+    17), unless she stands near enough its end (the v83 line, reach's): from 14 at x 690, 159 from its end, a pig
+    on 17 up to 238 off; from 25 inside its end none. Her decisions walk her there."""
+    if not (mapdata.CACHE / "10000012.json").is_file():
+        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
+    model = mapdata.load(10000012)
+    p = model.platform
+    y14 = p(14).y_at(690)
+
+    def pig(tx, there=17):
+        return target(tx, p(there).y_at(tx), platform=there)
+
+    for tx in range(861, 1101):
+        clear = reach.can_hit(p(14), 690, y14, pig(tx))
+        assert clear == (tx - 690 >= 239), tx  # in reach by distance from 151 off (shot_dx)
+        assert reach.wall_between(p(14), 690, y14, tx, target=p(17), line="level") is None
+    assert all(reach.can_hit(p(14), 824, y14, pig(tx)) for tx in range(975, 1235))  # 151-410 off
+    # From 2 at x 50 (169 from its end) at a pig on 4: under 254 off out of reach; from x 195, none.
+    y2 = p(2).y_at(50)
+    assert [tx for tx in range(219, 461) if reach.can_hit(p(2), 50, y2, pig(tx, 4))] == list(range(304, 461))
+    assert all(reach.can_hit(p(2), 195, y2, pig(tx, 4)) for tx in range(346, 606))
+    # From 14 at 690: a pig on 17 at 900 (210 off) is out of reach from all of 14 (but from x 747 to 749, between
+    # her floor and the search's 151), so neither policy walks for it; one at 1000 is in reach from there already;
+    # for one at 1130 (440 off) she closes in to 370 from it, 89 from her platform's end, where the line clears.
+    assert decide(690, y14, p(14), pig(900), []) == ("skip", "a floor in the way from all along her platform")
+    assert stance(690, y14, p(14), [pig(900)]) == ("wait",)
+    assert stance(690, y14, p(14), [pig(1000)]) == ("throw", RIGHT)
+    assert stance(690, y14, p(14), [pig(1130)]) == ("approach", RIGHT, 70)
+    assert reach.can_hit(p(14), 760, y14, pig(1130))
+    # From 700 at a pig on 17 at 910 (210 off: her floor stops it under 224): decide walks her to its near goal, 171
+    # from it (shot_dx 151 and a band), 110 from her platform's end, where the line clears (from 165 off there).
+    assert not reach.can_hit(p(14), 700, y14, pig(910)) and reach.can_hit(p(14), 739, y14, pig(910))
+    assert decide(700, y14, p(14), pig(910), []) == ("walk", RIGHT, 39)
+    # A pig at 880, in her floor's shadow, takes the stars at one at 1000 from 690 (picked first, stopped): from
+    # 729 on it's under 151 off, not picked, and the one at 1000 gets them. stance closes in to 736, decide to 824.
+    shade, far = pig(880), pig(1000)
+    assert reach.can_hit(p(14), 690, y14, far) and not reach.can_hit(p(14), 690, y14, far, others=[shade, far])
+    assert stance(690, y14, p(14), [shade, far]) == ("approach", RIGHT, 46)
+    assert decide(690, y14, p(14), far, [], around=[shade, far]) == ("walk", RIGHT, 134)
+    # Where to shoot 17 from: the place on 14 the most of 17 is in reach from, the first of them from the left: 756
+    # (from 716 by the level line, where her floor stops a star at a pig on 17 under 200 off).
+    assert spots.spots(model, 17)[0] == spots.Spot(14, 756.0, 0.491, True)
 
 
 def test_she_doesnt_throw_at_or_walk_for_a_monster_behind_a_wall_of_her_group(monkeypatch):
@@ -636,7 +700,7 @@ def test_the_v83_line_runs_to_where_the_star_hits_and_floors_stop_it_going_down(
     # her. From H at 100, 200 from its end, her own floor stops a star at a pig on L under 300 off (1.5 x 200:
     # the line drops 28 to her floor's level for 42 to the pig's top), and the level line doesn't.
     model, h, low, up = ledge_map()
-    assert reach.LINE == "level"  # the default, until the probes settle it
+    assert reach.LINE == "v83"  # the default since the user saw her own platform stop her stars (2026-10-21)
     assert reach.hit_point(100, 472, 1, 400, 560, 46, 34) == (400, 514)  # its top: the pig is below the row
     assert reach.hit_point(100, 472, 1, 300, 440, 46, 34) == (300, 440)  # its feet: above the row
     assert reach.hit_point(100, 472, 1, 300, 500, 46, 34) == (300, 472)  # the row: it crosses the body
@@ -662,15 +726,15 @@ def test_the_v83_line_runs_to_where_the_star_hits_and_floors_stop_it_going_down(
     steps, a, b, _ = step_map()
     assert stop(100, 300, there=b, here=a) == stop(100, 300, there=b, here=a, line="level") == a.walls[0]
     assert stop(300, 100, there=a, y=440, here=b) is None  # down past the wall's back, clear of B's floor
-    # Her decisions keep to the switch: a pig on L at 380 is thrown at from 100 by the level line, and by the
-    # v83 line only from past 140 (where 380 - x > 1.5 (300 - x)). She walks there: to 145, the nearest of the
-    # places 10 apart from 25, her platform's limit (stance._clear_from).
+    # Her decisions keep to the switch: a pig on L at 380 is thrown at from 100 by the v83 line only from past
+    # 140 (where 380 - x > 1.5 (300 - x)). She walks there: to 145, the nearest of the places 10 apart from 25,
+    # her platform's limit (stance._clear_from). By the level line she throws from 100.
     pig = target(380, 560, platform=low.id)
-    assert reach.can_hit(h, 100, 500, pig) and stance(100, 500, h, [pig]) == ("throw", RIGHT)
-    monkeypatch.setattr(reach, "LINE", "v83")
     assert not reach.can_hit(h, 135, 500, pig) and reach.can_hit(h, 145, 500, pig)
     assert stance(100, 500, h, [pig]) == ("approach", RIGHT, 45)
     assert decide(100, 500, h, pig, []) == ("walk", RIGHT, 109)  # to its own near goal, 171 off: clear
+    monkeypatch.setattr(reach, "LINE", "level")
+    assert reach.can_hit(h, 100, 500, pig) and stance(100, 500, h, [pig]) == ("throw", RIGHT)
 
 
 def test_with_the_v83_line_a_spot_covers_only_what_her_floor_lets_a_star_down_to(monkeypatch):
@@ -678,9 +742,10 @@ def test_with_the_v83_line_a_spot_covers_only_what_her_floor_lets_a_star_down_to
     # By the v83 line her floor stops a star under 300 off to the right (200 to her end) and none to the
     # left (100 to it: under 150).
     model, h, low, up = ledge_map()
-    assert spots.coverage(low, 100, 500, h) == pytest.approx(0.408)
-    monkeypatch.setattr(reach, "LINE", "v83")
     assert spots.coverage(low, 100, 500, h) == pytest.approx(0.149 + 0.110, abs=0.003)
+    assert spots.coverage(low, 100, 500) == pytest.approx(0.408)  # her platform unknown: nothing stops it
+    monkeypatch.setattr(reach, "LINE", "level")
+    assert spots.coverage(low, 100, 500, h) == pytest.approx(0.408)
 
 
 def test_clear_length_answers_as_its_lines_one_at_a_time():
@@ -725,7 +790,9 @@ def test_a_monster_the_attack_takes_first_whose_star_is_stopped_shields_those_be
     # 1290-1307; ohmi69 and meowdb on this game: the slot isn't refilled). From A at 10, a pig up on B at 215,
     # just past the step wall, is in the search's band 5; a pig on L 60 below at 170, short of the wall, in band
     # 6 (it needs room sideways). The star goes to the one on B and stops at the wall: the one on L, in reach and
-    # its line clear, gets none.
+    # its line clear, gets none. On the level line: by the v83 line A's own floor stops the star at the one on L
+    # too (160 off, 190 from A's end; test_her_floor_s_shadow_shields_those_behind_it has that).
+    monkeypatch.setattr(reach, "LINE", "level")
     model, a, b, low = shield_map()
     up, under = target(215, 440, platform=b.id), target(170, 560, platform=low.id)
     assert reach.search_band(*reach.body_box(205, -60, *reach.PIG)) == 5
@@ -742,11 +809,13 @@ def test_a_monster_the_attack_takes_first_whose_star_is_stopped_shields_those_be
     assert reach.can_hit(a, 10, 500, under, others=[up, under])
 
 
-def test_decide_never_walks_on_the_spot():
+def test_decide_never_walks_on_the_spot(monkeypatch):
     # From A at 25 (its left end's stand limit) at a pig on L at 190, 60 below, behind the pig up on B at 215
     # that the search takes first (its star stopped by the step wall): every spot near enough to reach the
     # one on L is shielded too, and she's at the nearest. She skips it; she used to "walk" 0 units, a tap back
-    # and forth on the spot for as long as the kill's patience lasted.
+    # and forth on the spot for as long as the kill's patience lasted. On the level line (by the v83 line A's
+    # floor stops the star at the one on L from all of A).
+    monkeypatch.setattr(reach, "LINE", "level")
     model, a, b, low = shield_map()
     up, under = target(215, 440, platform=b.id), target(190, 560, platform=low.id)
     assert reach.shielded(a, 25, 500, under, [up, under]) is up
@@ -755,6 +824,27 @@ def test_decide_never_walks_on_the_spot():
     # At her platform's end with a target 415 off (past SHOT_RANGE, within a star's reach): no nearer spot, so
     # she throws from there.
     assert decide(975, 500, PLAT, target(1390, 560, platform=1), []) == ("throw", RIGHT)
+    monkeypatch.undo()
+    skip = ("skip", "a floor in the way from all along her platform")
+    assert decide(25, 500, a, under, [], around=[up, under]) == skip
+
+
+def test_her_floor_s_shadow_shields_those_behind_it():
+    # By the v83 line, from H at 100 (200 from its end) a pig on L at 330 (230 off, the search's band 6) is in her
+    # floor's shadow: its star is stopped (from past 240 only is it clear, but from there it's under 151 off, so
+    # never). A pig on L at 420 (320 off, band 11), its line clear, gets no star while the one at 330 is picked
+    # first. From 179 on, the one at 330 (151 off) isn't picked, and the one at 420 is, its line clear: stance
+    # walks her to 185, the nearest place 10 apart from 25 from where a star gets to it (stance._clear_from with
+    # the monsters around her), and decide to its near goal, 171 off (249).
+    model, h, low, up = ledge_map()
+    shade, far = target(330, 560, platform=low.id), target(420, 560, platform=low.id)
+    assert reach.wall_to(h, 100, 500, shade) in h.segments and reach.wall_to(h, 100, 500, far) is None
+    assert reach.shielded(h, 100, 500, far, [shade, far]) is shade
+    assert not reach.can_hit(h, 100, 500, far, others=[shade, far]) and reach.can_hit(h, 100, 500, far)
+    assert not any(reach.can_hit(h, g, 500, shade) for g in range(25, 276))
+    assert [g for g in range(25, 276) if reach.can_hit(h, g, 500, far, others=[shade, far])] == list(range(179, 270))
+    assert stance(100, 500, h, [shade, far]) == ("approach", RIGHT, 85)
+    assert decide(100, 500, h, far, [], around=[shade, far]) == ("walk", RIGHT, 149)
 
 
 def test_no_spot_on_platform_4_for_platform_2():

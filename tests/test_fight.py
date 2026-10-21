@@ -10,6 +10,7 @@ import numpy as np
 from maplehelper.config import GameKeys
 from maplehelper.engine import LEFT, RIGHT
 
+from gamelab.attack import reach
 from gamelab.behavior.fight import EMPTY_PATIENCE, HIDDEN_FOR
 from gamelab.behavior.hunter import Hunter
 from gamelab.behavior.looting import LOOT_REACH, DropSpot
@@ -256,14 +257,23 @@ def test_a_monster_just_hit_is_in_the_path_as_tall_as_it_flinches():
     assert st.just_hit(seen) == [seen[0], seen[2]]
 
 
-def test_no_kill_is_matched_behind_a_monster_whose_star_is_stopped():
-    # test_attack's shield map: from A at 10, the search picks a pig up on B at 215 first (band 5), and the
-    # step wall stops its star; the client doesn't refill its pick, so the pig on L at 170 (band 6, its own
-    # line clear) can't have taken that throw's attack either. Neither the fight's path nor the ledger's has
-    # one: a kill then isn't put on either. Alone, the one on L is in both.
+def test_no_kill_is_matched_behind_a_monster_whose_star_is_stopped(monkeypatch):
+    # test_attack's ledge map: from H at 100 the search picks a pig on L at 330 first (230 off, band 6), in her
+    # floor's shadow, so her floor stops its star (the v83 line, reach's); the client doesn't refill its pick, so
+    # the pig on L at 420 (320 off, band 11, its own line clear) can't have taken that throw's attack either.
+    # Neither the fight's path nor the ledger's has one: a kill then isn't put on either. Alone, the one at 420 is
+    # in both.
     from gamelab.behavior.fight import _in_path
     from gamelab.behavior.ledger import in_path
-    from test_attack import shield_map
+    from test_attack import ledge_map, shield_map
+    model, h, low, up = ledge_map()
+    shade, far = target(330, 560, platform=low.id), target(420, 560, platform=low.id)
+    s = SimpleNamespace(where=SimpleNamespace(x=100, y=500), platform=h, monsters=[shade, far])
+    assert _in_path(s, RIGHT, [shade, far]) == [] and in_path(s, RIGHT, [shade, far]) == []
+    assert _in_path(s, RIGHT, [far]) == [far] and in_path(s, RIGHT, [far]) == [far]
+    # And behind a wall, on the level line: from A at 10, the search picks a pig up on B at 215 first (band 5),
+    # and the step wall stops its star; the pig on L at 170 (band 6, its line clear by the level line) gets none.
+    monkeypatch.setattr(reach, "LINE", "level")
     model, a, b, low = shield_map()
     up, under = target(215, 440, platform=b.id), target(170, 560, platform=low.id)
     s = SimpleNamespace(where=SimpleNamespace(x=10, y=500), platform=a, monsters=[up, under])

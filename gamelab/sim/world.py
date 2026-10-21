@@ -61,9 +61,11 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   (monster_data.FLINCH_S, flinch tops from the game data); not their frames (World.top says why). So a
   jump throw's attack, starting 46 units up, passes over a snail. All of these pick by the bodies alone,
   whatever the terrain; then, as the client does, the line to a star's pick alone is checked
-  (World.sight_stop, reach.wall_between by reach.LINE: a wall of the foothold group of the platform she
-  last stood on, gone into at its outer face, where it crosses the level line reach.SHOT_H above her feet
-  now; or by the v83 line, that or a floor it goes down through). Stopped, the attack hits nothing, and no
+  (World.sight_stop, reach.wall_between by reach.LINE: by the v83 line, the default since the user saw her
+  own platform stop her stars in game on 2026-10-21, the line from reach.SHOT_H above her feet now to where
+  the star hits the monster's body, which a wall of the foothold group of the platform she last stood on
+  stops, gone into at its outer face, and a floor it goes down through; by the level line, such a wall where
+  it crosses the level line reach.SHOT_H above her feet). Stopped, the attack hits nothing, and no
   other monster takes the star: from platform 4 a throw whose search picks a monster on 2 hits nothing
   (live, no star from 4 ever reached one on 2). Kills give EXP
   (model.mob_exp) and, 2 s later, drops on its platform; a killed monster is seen fading out where it

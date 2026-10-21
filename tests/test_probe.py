@@ -219,8 +219,8 @@ PLACES = {
     "air": ((22, 30.0), [("Snail", 22, 70.0)], {}),
     "other-wall": ((19, 104.0), [("Pig", 18, 330.0)], {}),
     "step-up": ((4, 260.0), [("Orange Mushroom", 2, -50.0)], {"x": 260.0}),
-    "step-down": ((2, 50.0), [("Pig", 4, 280.0)], {}),
-    "hanging-wall": ((14, 706.0), [("Pig", 17, 910.0)], {}),
+    "step-down": ((2, 50.0), [("Pig", 4, 280.0)], {"throws": 40}),
+    "hanging-wall": ((14, 706.0), [("Pig", 17, 910.0)], {"throws": 40}),
     "below-42": ((0, 1222.0), [("Pig", 1, 1110.0)], {}),
     "claw-edge": ((21, -225.0), [("Pig", 21, -90.0)], {"throws": 40}),
     "claw-down": ((3, 716.0), [("Pig", 4, 620.0)], {"throws": 80}),
@@ -251,7 +251,7 @@ WORLDS = {
     "the old claw": lambda mp: mp.setattr(reach, "CLAW", probe.OLD_CLAW),
     "the swings": lambda mp: mp.setattr(reach, "CLAW", probe.SWINGS),
     "the ramp": lambda mp: mp.setattr(world_mod, "reach", _reach_with(search_band=_search_by_the_ramp)),
-    "the v83 line": lambda mp: mp.setattr(reach, "LINE", "v83"),
+    "the level line": lambda mp: mp.setattr(reach, "LINE", "level"),
     "no walls": lambda mp: mp.setattr(world_mod, "reach", _reach_with(wall_between=lambda *a, **k: None)),
     "every wall": lambda mp: mp.setattr(world_mod, "reach", _reach_with(wall_between=_every_wall)),
     "the v83 air": lambda mp: mp.setattr(world_mod, "AIR_PICK", "v83"),
@@ -287,8 +287,8 @@ RECOVERS = [
     ("claw-edge", None, "CLAW_FAR", 0), ("claw-edge", "the old claw", "CLAW_FAR", 1),
     ("claw-down", None, "claw_takes", 0), ("claw-down", "the swings", "claw_takes", 1),
     ("below-42", None, "RAMP_BELOW", 0), ("below-42", "the ramp", "RAMP_BELOW", 1),
-    ("step-down", None, "LINE", 0), ("step-down", "the v83 line", "LINE", 1),
-    ("hanging-wall", None, "LINE", 0), ("hanging-wall", "the v83 line", "LINE", 1),
+    ("step-down", None, "LINE", 0), ("step-down", "the level line", "LINE", 1),
+    ("hanging-wall", None, "LINE", 0), ("hanging-wall", "the level line", "LINE", 1),
     ("step-up", None, "WALLS", 0), ("step-up", "no walls", "WALLS", 1),
     ("other-wall", None, "OTHER_WALLS", 0), ("other-wall", "every wall", "OTHER_WALLS", 1),
     ("air", None, "in_area", 0), ("air", "the v83 air", "in_area", 1),
@@ -303,7 +303,9 @@ def test_each_probe_s_log_decides_the_answer_its_world_has(name, world, key, ans
     # the scorer decides on the world's answer, on DECIDE_THROWS throws or more where the two have the attack
     # take something else (so on seeds 1-8 too, but for top-120 on seed 5 in the logs' top's world, 2.6 on 10
     # such throws; none leans the other way). claw-edge makes 40 throws, as in game: with 20, both worlds were
-    # decided on seed 1 on 5 throws that differ, the least that decides. below-42 also asks the claw off her
+    # decided on seed 1 on 5 throws that differ, the least that decides. So do step-down and hanging-wall: they
+    # throw past where the v83 line lets a star through as well as short of it, and the lines differ only short
+    # of it. below-42 also asks the claw off her
     # level, but its few throws at pigs within 99 decide it alone on 2 of those seeds (5 and 6) in a world with
     # the swings: claw-down's 80 throws do on all 8.
     q, model = probe.QUESTIONS[key], scenarios.real_map()

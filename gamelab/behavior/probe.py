@@ -7,13 +7,14 @@ The questions (attack.reach, gamelab/README.md, `QUESTIONS`): the target search'
 logs) and its floor by kind; the search between her level and 60 below her (against the old ramp her
 decisions keep to there, RAMP_BELOW); whether an attack from a jump picks by the area or as from the ground,
 from as high as she is (the v83 client's); what stops a star (her own foothold group's walls against none or
-every wall, and the line: a level line SHOT_H above her feet against the v83 client's, which a floor stops
-too, LINE); and how far the claw swipes, on her level (the client's stabs cut to 65 ahead against the box
-reach had until 2026-10-20, 90 ahead) and off it (the stabs, 15-30 above her feet, against the throw's
-swings, 17 below to 62 above). A `Probe` is a place on Thicket Around the Beach II (the platform she stands
-on, her x, the way she throws), the monsters it throws at (their kinds, their platforms, how far off
-sideways by their middle), and how she throws: from the ground, a jump throw or a jump back, always with
-the regular attack.
+every wall, and the line: the v83 client's, which a floor stops too, against a level line SHOT_H above her
+feet, LINE; that her own platform stops a star down past its end the user saw in game on 2026-10-21, and
+that the step wall up from 4 stops one, so these probes now tell where and how high); and how far the claw
+swipes, on her level (the client's stabs cut to 65 ahead against the box reach had until 2026-10-20, 90
+ahead) and off it (the stabs, 15-30 above her feet, against the throw's swings, 17 below to 62 above). A
+`Probe` is a place on Thicket Around the Beach II (the platform she stands on, her x, the way she throws),
+the monsters it throws at (their kinds, their platforms, how far off sideways by their middle), and how she
+throws: from the ground, a jump throw or a jump back, always with the regular attack.
 
 A run (`run`) sends her to her place (the navigator, keeping clear of monsters) and keeps her there. After
 every look she throws only when exactly one monster is in front of her (`in_front`: within FRONT by its
@@ -238,21 +239,26 @@ PROBES = {p.name: p for p in (
                  "wall stopped a star, none"),
     # Both lines alike here: the v83 line to a monster on 2 ends at its feet, 60 up, so it meets the step wall
     # below its top corner whatever the distance, as the level line does; only a body lifted off its feet right
-    # behind the step's edge (a pig's third walking frame lifts 4) would take it over the corner.
-    Probe("step-up", "whether her own group's step wall stops a star, and how high its line runs (reach.SHOT_H)",
+    # behind the step's edge (a pig's third walking frame lifts 4) would take it over the corner. That the step
+    # wall stops a star from the ground the logs had, and the user saw (in game, 2026-10-21); what's left is how
+    # high the line runs, which the jump throws and jump backs bracket.
+    Probe("step-up", "how high the line a wall stops runs (reach.SHOT_H), at her own group's step wall",
           4, 500.0, LEFT, (2,), ("pig", "orange-mushroom"), (200, 400), throws=10, walls=False,
           source="terrain 1",
           expect="past the 60-unit step wall up to 2, by either line: from the ground (28 up) and from jump throws "
                  "(54 up) no hits, from jump backs (72 up) hits; if her group's walls didn't stop a star, hits from "
                  "all three; again with --x 260, and --style jump_throw, jump_back"),
     # From 2 at x 50, 169 units from its right end: the v83 line goes down through 2's floor before its end,
-    # unless the monster is far enough out (a walking pig from 254 off, a slime from 284). An Orange Mushroom
-    # (55 tall) is clear from 199, and 4's are all 201 or more off: none is thrown at.
-    Probe("step-down", "a level line or the v83 line, down past her own platform's end (reach.LINE)", 2, 50.0,
-          RIGHT, (4,), ("pig", "slime"), (200, 255), by_kind=(("slime", (200, 285)),), walls=False,
-          source="terrain 2, geometry P5's second",
-          expect="by the level line (reach's) hits; by the v83 line none at pigs under 254 off or slimes under 284 "
-                 "(2's own floor stops it); again with --x 195 --dx 160-250: hits by either"),
+    # unless the monster is far enough out (a walking pig from 254 off, a slime from 284). That 2's floor stops
+    # some is the user's (in game, 2026-10-21); where it lets them through isn't, so the range runs about 55 past
+    # it as well as short of it, and 40 throws (about half where the lines differ, as 20 were). An Orange
+    # Mushroom (55 tall) is clear from 199, and 4's are all 201 or more off: none is thrown at.
+    Probe("step-down", "where her own platform lets a star down past its end: the v83 line or a level one (reach.LINE)",
+          2, 50.0, RIGHT, (4,), ("pig", "slime"), (200, 310), by_kind=(("slime", (230, 340)),), throws=40,
+          walls=False, source="terrain 2, geometry P5's second",
+          expect="by the v83 line (reach's) none at pigs under 254 off or slimes under 284 (2's own floor stops it), "
+                 "hits beyond; by a level line hits at every distance; again with --x 195 --dx 160-250: hits by "
+                 "either"),
     # 42 below her, between her level and the 60 the search was fitted to: 0 is 1's only such neighbour. Facing
     # left from 25 inside 0's left end, 1 runs on 336 units ahead of her (monsters on 1 can touch her on 0: their
     # bodies reach 38-55 up). An Orange Mushroom 42 below reaches into the stabs' boxes in its taller frames
@@ -301,11 +307,13 @@ PROBES = {p.name: p for p in (
                  "swiped (small bar drops)"),
     # From 14 at x 706, 143 units from its right end (25 in from its left; no monster can touch her on 14): the
     # v83 line goes down through 14's floor before its end, unless the monster is far enough out (a walking pig
-    # from 215 off, a slime from 241; an Orange Mushroom from 187, closer than any on 17 can be, so none).
-    Probe("hanging-wall", "a level line or the v83 line, down past her own block's end (reach.LINE)", 14, 706.0,
-          RIGHT, (17,), ("pig", "slime"), (180, 240), walls=False, source="terrain 3",
-          expect="by the level line (reach's) hits at every distance; by the v83 line none at pigs under 215 off "
-                 "(on 17 they come from 189) or slimes under 241 (from 183), hits beyond"),
+    # from 215 off, a slime from 241; an Orange Mushroom from 187, closer than any on 17 can be, so none). As
+    # step-down's, the range runs past where it lets them through as well as short of it, with 40 throws.
+    Probe("hanging-wall", "where her own block lets a star down past its end: the v83 line or a level one (reach.LINE)",
+          14, 706.0, RIGHT, (17,), ("pig", "slime"), (180, 250), by_kind=(("slime", (190, 290)),), throws=40,
+          walls=False, source="terrain 3",
+          expect="by the v83 line (reach's) none at pigs under 215 off (on 17 they come from 189) or slimes under "
+                 "241 (from 183), hits beyond; by a level line hits at every distance"),
 )}
 
 
@@ -1178,7 +1186,7 @@ QUESTIONS = {q.key: q for q in (
     Question("RAMP_BELOW", "the search between her level and 60 below her", ("below-42",),
              (("the search alone", {"ramp": False}), ("the old ramp her decisions keep to", {"ramp": True}))),
     Question("LINE", "which line terrain stops", ("step-down", "hanging-wall"),
-             (("the level line", {"line": "level"}), ("the v83 line", {"line": "v83"}))),
+             (("the v83 line", {"line": "v83"}), ("the level line", {"line": "level"}))),
     Question("WALLS", "whether her own foothold group's walls stop a star", ("step-up",),
              (("they do", {"walls": "group"}), ("no wall does", {"walls": "none"}))),
     Question("OTHER_WALLS", "whether other groups' walls stop a star", ("other-wall",),

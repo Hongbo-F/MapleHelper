@@ -1,7 +1,9 @@
 """Where to stand to shoot a platform's monsters: the spots on other platforms that have the most of it
 in reach, and of those, one she can stand on safely and get to quickly. In reach counts only what terrain
 doesn't stop a star at (reach.wall_in_way): from platform 4, nothing on 2 (a wall of her foothold group),
-and by the v83 line (reach.LINE) nothing down close past her platform's end.
+and nothing down close past her platform's end (her own floor, by the v83 line, reach.LINE). So to shoot
+down, a place near her platform's end has the most in reach: 17 is shot from 14 at x 756, where 716 had as
+much by the level line.
 
 A spot is good to stand on (`spot_ok`) when no monster can touch her there (MapModel.safe), or only
 ones not worth hunting can (the snails on 3, 20 and 22: those she shoots when they come close). Of the

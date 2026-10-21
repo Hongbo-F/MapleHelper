@@ -12,10 +12,11 @@ platform, and `act_text` and `pct` word it for the log. Thresholds built on reac
 read from reach at call time, and so are the attacks' timings (physics.JUMP_ATTACK_MS and
 JUMP_BACK_ATTACK_MS): whether a jump throw or a jump back can hit a kind follows from them.
 A monster whose star terrain stops (reach.wall_to: a wall of her own foothold group, as for one on
-platform 2 for her on 4, from anywhere on her platform; by the v83 line a floor too, from where she stands)
-is out of reach from there: neither policy throws at it, or walks along her platform for it but to where
-its line is clear. So is one behind a monster the attack takes first whose star is stopped (reach.shielded:
-the client checks the line to its pick alone), so all of them go by every monster around her (`around`).
+platform 2 for her on 4, from anywhere on her platform; or a floor, her own for one below her unless she
+stands near enough its end, as the user saw in game on 2026-10-21) is out of reach from there: neither
+policy throws at it, or walks along her platform for it but to where its line is clear (_clear_from). So
+is one behind a monster the attack takes first whose star is stopped (reach.shielded: the client checks the
+line to its pick alone), so all of them go by every monster around her (`around`).
 Off her level, how much room a star needs sideways goes by the monster's kind (reach.shot_dx: the star's
 search picks a small or a short one from farther off).
 """
@@ -65,14 +66,21 @@ def _goal_reach() -> float:
     return reach.SHOT_RANGE + 15
 
 
-def _clear_from(platform: Platform, x: float, y: float, t: Monster, lo: float, hi: float) -> float | None:
+def _clear_from(platform: Platform, x: float, y: float, t: Monster, lo: float, hi: float,
+                around: list[Monster] | None = None) -> float | None:
     """The nearest place to map x along `platform`, from `lo` to `hi` (every CLEAR_STEP units), from where a
     star reaches monster `t` (reach.can_shoot, out to _goal_reach) and terrain doesn't stop it (reach.wall_to),
     or None. A wall of her foothold group stops it from anywhere on her platform; by the v83 line (reach.LINE)
-    her own floor stops a star at a monster below unless she stands near enough its end."""
+    her own floor stops a star at a monster below unless she stands near enough its end. With `around` (the
+    monsters around her), nor does a monster the attack takes first have its star stopped there (reach.can_hit's
+    shield): from 14 at x 690 a pig on 17 at 880, in her floor's shadow, takes the stars at one at 1000, and
+    from x 729 on the search doesn't pick it (under 151 off), so the one at 1000 gets them."""
     xs = [lo + i * CLEAR_STEP for i in range(int((hi - lo) // CLEAR_STEP) + 1)] + [hi]
-    ok = [g for g in xs if reach.can_shoot(t.x - g, t.y - y, reach=_goal_reach(), kind=t.kind)
-          and reach.wall_to(platform, g, y, t) is None]
+    if around is None:
+        ok = [g for g in xs if reach.can_shoot(t.x - g, t.y - y, reach=_goal_reach(), kind=t.kind)
+              and reach.wall_to(platform, g, y, t) is None]
+    else:
+        ok = [g for g in xs if reach.can_hit(platform, g, y, t, reach=_goal_reach(), others=around)]
     return min(ok, key=lambda g: abs(g - x), default=None)
 
 
@@ -210,9 +218,9 @@ def _step_from_under(x: float, y: float, platform: Platform, wanted: list[Monste
     def goal_of(t: Monster) -> tuple[str, float] | None:
         away = LEFT if t.x > x else RIGHT
         goal = min(max(t.x + directions.sign(away) * (reach.shot_dx(t.y - y, t.kind) + 40), lo), hi)
-        if reach.wall_to(platform, goal, y, t) is None:
+        if reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around):
             return away, goal
-        goal = _clear_from(platform, x, y, t, lo, hi)
+        goal = _clear_from(platform, x, y, t, lo, hi, around)
         return None if goal is None else (RIGHT if goal > x else LEFT, goal)
 
     under = [(t, g) for t in wanted if t.platform != platform.id and reach.in_band(t.y - y)
@@ -233,7 +241,9 @@ def _close_in(x: float, y: float, platform: Platform, wanted: list[Monster], lo:
     none, or it can't be brought into reach from her platform. `around`: as stance's."""
     def goal_of(t: Monster) -> float | None:
         goal = min(max(t.x - directions.sign(_side_of(t, x)) * (reach.SHOT_RANGE - 40), lo), hi)
-        return goal if reach.wall_to(platform, goal, y, t) is None else _clear_from(platform, x, y, t, lo, hi)
+        if reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around):
+            return goal
+        return _clear_from(platform, x, y, t, lo, hi, around)
 
     level = [(t, g) for t in wanted if reach.in_band(t.y - y) and (g := goal_of(t)) is not None]
     if not level:
@@ -285,7 +295,8 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
            halves: dict[str, float] | None = None, around: list[Monster] | None = None) -> tuple:
     """What to do about `target` from map (x, y) on `platform`: ('throw', direction),
     ('walk', direction, units), or ('skip', reason) when no spot on her platform is in reach (or terrain
-    stops the target's star from all of them, or from every one a monster the attack takes first has its star
+    stops the target's star from all of them: a wall of her group, or a floor, her own for one below her
+    unless she can stand near enough its end; or from every one a monster the attack takes first has its star
     stopped and none is MIN_MOVE or more away). `threats` are the other monsters on her platform; `around`:
     every monster around her (as stance's; `threats` by default). Never walks off her platform. One on her
     platform is too close within TOO_CLOSE, or while the claw would swipe it (close_to: by half its width,
@@ -320,14 +331,21 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
     goals = [g for g in goals if reach.can_shoot(target.x - g, dy, reach=_goal_reach(), kind=target.kind)]
     if not goals:
         return ("skip", "out of reach from this platform")
-    goals = ([g for g in goals if reach.wall_to(platform, g, y, target) is None]
+    stops = [reach.wall_to(platform, g, y, target) for g in goals]
+    goals = ([g for g, stop in zip(goals, stops) if stop is None]
              or [g for g in [_clear_from(platform, x, y, target, lo, hi)] if g is not None])
     if not goals:
-        return ("skip", "behind a wall of her platform's foothold group")
-    # Of those, where no monster the attack takes first has its star stopped, if there's one; else one at least
-    # MIN_MOVE off, as monsters move. Already at one so shielded (she'd tap back and forth on the spot until the
-    # kill's patience ran out), the target is out of reach from here for now.
+        wall = stops[0].x1 == stops[0].x2
+        return ("skip", "behind a wall of her platform's foothold group" if wall
+                else "a floor in the way from all along her platform")
+    # Of those, where no monster the attack takes first has its star stopped, if there's one; else the nearest
+    # place on her platform where none has (_clear_from, with the monsters around her: one in her floor's shadow,
+    # picked first from farther back, isn't picked from nearer her platform's end); else one at least MIN_MOVE
+    # off, as monsters move. Already at one so shielded (she'd tap back and forth on the spot until the kill's
+    # patience ran out), the target is out of reach from here for now.
     clear = [g for g in goals if reach.shielded(platform, g, y, target, around) is None]
+    if not clear and (g := _clear_from(platform, x, y, target, lo, hi, around)) is not None:
+        clear = [g]
     goals = clear or [g for g in goals if abs(g - x) >= MIN_MOVE]
     if not goals:
         return ("skip", "behind a monster whose star is stopped")

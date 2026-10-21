@@ -1065,21 +1065,26 @@ def _hunt_17_pigs(sim):
     return tour.hunt(17, {"pig"}, kills=2, seconds=90)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=6, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1240.0)], seed=6, limit=400,
           expects=(logs("out of reach here: over to platform"),))
 def tour_hunt_other_spot(sim):
     """Tour.hunt of two pigs on 17 from 14: one dies, the other is out of reach, so over to a spot that
     reaches it (Tour.spot_for). (Seed 6 since monsters walk as fast as the game data says (a pig 125
     units/s, not 70): on seed 1 the other walked into reach first. That alone moved it to seed 28, where with
-    the physics and attack tracks it doesn't; of seeds 1-16 only 6 shows it.)"""
+    the physics and attack tracks it doesn't; of seeds 1-16 only 6 shows it. The other pig starts at 1240,
+    not 1320, since her own floor stops a star down past 14's end (reach.LINE 'v83', 2026-10-21): the spot on
+    14 is at 756, reaching 17 out to 1166, not 716, and from 1320 no seed of 1-32 showed it; from 1240 seeds
+    1 and 6 of 1-12 do.)"""
     return _hunt_17_pigs(sim)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=6, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1240.0)], seed=6, limit=400,
           expects=(logs("that no spot reaches: onto the platform"),))
 def tour_hunt_onto_platform(sim):
     """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself.
-    (Seed 6 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 the other walked into reach first.)"""
+    (Seed 6 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 the other
+    walked into reach first. With the other pig from 1240, as tour_hunt_other_spot's, seeds 3, 5, 6, 8 and 9
+    of 1-12 show it; from 1320, 1, 3, 6, 11 and 12.)"""
     return _hunt_17_pigs(sim)
 
 

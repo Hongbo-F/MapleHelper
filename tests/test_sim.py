@@ -692,12 +692,25 @@ def test_a_wall_of_her_own_foothold_group_stops_the_star(model):
     assert w.monsters[0].hp == 2
 
 
-def test_a_star_stopped_on_its_way_to_the_pick_hits_no_other_monster():
-    # test_attack's shield map: from A at 10 a pig up on B at 215 (past the step wall, the search's band 5) and
-    # a pig on L 60 below at 170 (short of it, band 6). The search picks the one on B whatever the wall, its
-    # line is checked, stopped, and the attack hits nothing: the one on L, its line clear, doesn't get the star
-    # the wall stopped (the client doesn't refill its pick). Alone, the one on L is hit.
-    from test_attack import shield_map
+def test_a_star_stopped_on_its_way_to_the_pick_hits_no_other_monster(monkeypatch):
+    # test_attack's ledge map: from H at 100 a pig on L at 330 (230 off, the search's band 6), in her floor's
+    # shadow, and one at 420 (320 off, band 11). The search picks the one at 330, its line is checked and stopped
+    # by her floor (the v83 line, reach's), and the attack hits nothing: the one at 420, its line clear, doesn't
+    # get the star (the client doesn't refill its pick). Alone, the one at 420 is hit.
+    from test_attack import ledge_map, shield_map
+    ledges, h, low, up = ledge_map()
+    w = still(world(ledges, h.id, 100.0, monsters=[("Pig", low.id, 330.0), ("Pig", low.id, 420.0)], facing="right"))
+    tap(w, 0.0, "f", 0.04)
+    w.advance(1.0)
+    assert [m.hp for m in w.monsters] == [m.hp_max for m in w.monsters]
+    assert any("at pig #0: stopped by the floor at y 500" in line for line in w.log)
+    w = still(world(ledges, h.id, 100.0, monsters=[("Pig", low.id, 420.0)], facing="right"))
+    tap(w, 0.0, "f", 0.04)
+    w.advance(1.0)
+    assert w.monsters[0].hp < w.monsters[0].hp_max
+    # Behind a wall, on the level line: from A at 10 a pig up on B at 215 (past the step wall, band 5) and a pig on
+    # L 60 below at 170 (short of it, band 6, its line clear by the level line): the wall stops the star.
+    monkeypatch.setattr(reach, "LINE", "level")
     steps, a, b, low = shield_map()
     w = still(world(steps, a.id, 10.0, monsters=[("Pig", b.id, 215.0), ("Pig", low.id, 170.0)], facing="right"))
     tap(w, 0.0, "f", 0.04)
@@ -711,9 +724,9 @@ def test_a_star_stopped_on_its_way_to_the_pick_hits_no_other_monster():
 
 
 def test_with_the_v83_line_her_floor_stops_a_star_down_close_past_its_end(monkeypatch):
-    # test_attack's ledge map: from H at 100 (200 from its end) at a pig on L 60 below, 280 off. The level line
-    # gets there; by the v83 line (reach.LINE) her own floor stops it (the line drops 28 to its level in 2/3 of
-    # the way to the pig's top: past the end only from 300 off), and from 200 the star gets there again.
+    # test_attack's ledge map: from H at 100 (200 from its end) at a pig on L 60 below, 280 off. By the v83 line
+    # (reach.LINE's) her own floor stops it (the line drops 28 to its level in 2/3 of the way to the pig's top:
+    # past the end only from 300 off), and from 200 the star gets there. The level line gets there from 100.
     from test_attack import ledge_map
     ledges, h, low, up = ledge_map()
 
@@ -723,11 +736,11 @@ def test_with_the_v83_line_her_floor_stops_a_star_down_close_past_its_end(monkey
         w.advance(1.0)
         return w.monsters[0].hp < w.monsters[0].hp_max, w.log
 
-    assert hit(100.0)[0]
-    monkeypatch.setattr(reach, "LINE", "v83")
     got, log = hit(100.0)
     assert not got and any("at pig #0: stopped by the floor at y 500" in line for line in log)
     assert hit(200.0)[0]
+    monkeypatch.setattr(reach, "LINE", "level")
+    assert hit(100.0)[0]
 
 
 def test_a_monster_touching_her_hurts_and_knocks_her_back(model, monkeypatch):

@@ -49,18 +49,20 @@ a step), and only going in at their outer face: a wall drawn downward (y1 < y2) 
 upward faces left (RustMS ShotPath.h:382-445, `blocked`: a line stops only going from a foothold's open side
 to its closed side; on this map every block's walls face out from it, and the step between 2 and 4 and the
 basin's sides face the floor below them, so it changes nothing here). The walls of other groups never stop
-one, such as the side walls of the block the target stands on. Which line is checked is open (`LINE`): a
-level line SHOT_H above her feet (higher in a jump) to the monster's x, which no floor can stop (ohmi69, for
-a basic shot; the rule fitted to the logs), or the v83 client's, from SHOT_H above her feet to where the star
-hits its body (`hit_point`), which a floor of any group stops going down through it (RustMS). The game data
-has no foothold flag for it (306 map images: a foothold has its ends, its neighbours and `piece`, and in 51
-maps `forbidFallDown`), and the live logs of 2026-10-18 to 10-20 fit both lines alike (299 decided throws,
-the same verdict on every one):
+one, such as the side walls of the block the target stands on. The line checked (`LINE`) is the v83
+client's, from SHOT_H above her feet to where the star hits its body (`hit_point`), which a floor of any
+group stops going down through it (RustMS): so her own platform stops a star at a monster below her unless
+she stands near enough its end. Watching her hunt on 2026-10-21, the user saw just that, down a step and from
+a higher platform onto a lower one. The other line, a level one SHOT_H above her feet (higher in a jump) to
+the monster's x, which no floor can stop (ohmi69, for a basic shot), was the default until then: the live
+logs of 2026-10-18 to 10-20 fit both alike, as every throw down in them was made from near an end (299
+decided throws, the same verdict on every one). The game data has no foothold flag for it (306 map images: a
+foothold has its ends, its neighbours and `piece`, and in 51 maps `forbidFallDown`). In those logs:
 - from platform 4, no star reached a monster on 2, 60 above her behind the step wall joining the two
   (group (3, 63)), in 3 sessions: 0 of 3 in the shot log, every kill of 40 throws on 4 (sweep log 9),
   0 of 5 in the telemetry (Orange Mushrooms on 2 in view, no HP bar, for 4 s of throwing). The search
   alone picks them there (286-392 units off when the attacks started, 60 above): it's the wall that stops
-  those stars;
+  those stars (and the user, watching on 2026-10-21: the step up for sure blocks the star);
 - in the same logs, stars 60 up past the side wall of the block above (another group, from 25 below
   to 60 above her feet) hit: 19 -> 18 13 of 13 decided, 3 -> 1 15 of 19; and stars down past her own
   block's hanging wall (14 -> 17, 25 deep) hit 81%, all thrown from near its end, where the v83 line clears
@@ -68,8 +70,9 @@ the same verdict on every one):
 - "every wall blocks" contradicts 19 -> 18, and a line to the target's feet can't fit 4 -> 2 and 14 -> 17
   together.
 The client's collisions in the air also skip walls of other groups (a reconstruction of its physics),
-likely the same test. On this map her own group's walls change one pair, 4 -> 2; the v83 line would also
-stop stars down at monsters close past her platform's end (from 2 at x 50 at pigs on 4 under 254 off).
+likely the same test. On this map her own group's walls change one pair, 4 -> 2; her own floor stops stars
+down at monsters close past her platform's end (from 2 at x 50 at pigs on 4 under 254 off, from 14 at x 690
+at pigs on 17 up to 238 off), and from near its end none.
 
 All in map units; dy is the target's feet minus hers (+ = below her).
 """
@@ -198,32 +201,33 @@ CLAW_MARGIN = 12     # kept past the claw's reach, for a monster walking at her 
                      # +3.2% with the game data's walking speeds), and about the same on the tour (with the old
                      # swing).
 # What stops a star (see above): which line the client checks from her to the monster its attack picked.
-# 'level': a level line SHOT_H above her feet (raised in a jump), from her x to the monster's, which only walls
-# can cross: ohmi69's reading of this game's client checks a basic shot straight across from that row (its one
-# source, and one whose basic shot's target, a 1-unit line 28 up, the logs refute), and the logs' rule was
-# fitted so. 'v83': the v83 client's, from SHOT_H above her feet at her own x (not the shot's start, 65 ahead)
-# to where the star hits the monster's body (hit_point: its top if it's below the row, its feet if above),
-# which a floor of any group stops going down through it as well (RustMS ShotPath.h:382-445,
-# Combat.cpp:1289-1307). meowdb's page on this game says so too (shooting down through the platform she stands
-# on is blocked, up through one isn't), citing no test: on its Lucky Seven page the claim was tagged unverified
-# in August and untagged by late September, and the one in-game test the site gives on terrain is that walls
-# stop Energy Bolt. So two sources have a floor stop a star going down, against one, discounted, that has none
-# do; the logs fit both. 'level' stays the default, as master has it, until the probes below decide. The two
-# differ only below her: by the v83 line a star needs room past her platform's end, |dx| > e (28 + t) / 28, e
-# her distance to the end and t how far below her feet the monster's top is (a walking pig 60 below, t 14:
-# 1.5 e). Every throw logged was made from near an end,
-# where the two agree (299 decided, the same verdict on all). Unmeasured in game: from 2 (x 50) at pigs on 4
-# 200-253 off and slimes 200-283, the v83 line has none hit, the level line as many as anywhere (`python -m
-# gamelab probe run step-down`; from 14 at x 706 at 17, pigs 189-214 and slimes 183-240, `hanging-wall`; then
-# `probe score`, which weighs the two lines on them). SHOT_H is the client's row, 28;
-# the logs fit any height from 1 to 59 for the level line (on this map it matters only for steps lower than 60,
-# and there are none), and the step-up probe's jump throws and jump backs (the line 26 and 44 higher: `probe run
-# step-up --style jump_throw`, `jump_back`) bracket it: from 4 at 2, a 60 step, stopped and through put it at
-# 16-34. Walls of group 0 stop a star from any group in RustMS's port alone (ShotPath.h:398; the v40 client's
-# collisions have no such exception): left out, and on this map group 0 is the basin, where it would change
-# nothing. Ceilings (x2 < x1), which the walls' rule covers there too, aren't kept (none on this map).
-LINE = "level"
-LINES = ("level", "v83")
+# 'v83': the v83 client's, from SHOT_H above her feet at her own x (not the shot's start, 65 ahead) to where the
+# star hits the monster's body (hit_point: its top if it's below the row, its feet if above), which a floor of any
+# group stops going down through it as well as her group's walls (RustMS ShotPath.h:382-445,
+# Combat.cpp:1289-1307). meowdb's page on this game says so too (shooting down through the platform she stands on
+# is blocked, up through one isn't), citing no test. 'level': a level line SHOT_H above her feet (raised in a
+# jump), from her x to the monster's, which only walls can cross: ohmi69's reading of this game's client checks a
+# basic shot straight across from that row (its one source, and one whose basic shot's target, a 1-unit line 28
+# up, the logs refute). The logs fit both: every throw down in them was made from near an end, where the two agree
+# (299 decided, the same verdict on all), so 'level' was the default until 2026-10-21, when the user, watching her
+# hunt, saw her own platform stop her stars at monsters below her, both down a step (as from 2 at 4) and from a
+# higher platform at a lower one (as from 14 at 17). So 'v83' is the default. The two differ only below her: by
+# the v83 line a star needs room past her platform's end, |dx| > e (28 + t) / 28, e her distance to the end and t
+# how far below her feet the monster's top is (a walking pig 60 below, t 14: 1.5 e): from 2 at x 50 pigs on 4
+# under 254 off and slimes under 284 are out of reach, from 14 at x 690 pigs on 17 up to 238 off, and from 25 in
+# from either end every monster a star picks 60 below her. Unmeasured in game: where past her platform's end the
+# star gets through, which the user's report doesn't say (`python -m gamelab probe run step-down`, from 2 at x 50
+# at pigs on 4 200-310 off and slimes 230-340, and `hanging-wall`, from 14 at x 706 at pigs on 17 180-250 and
+# slimes 190-290: by the v83 line none under 254, 284, 215 and 241 off is hit, and beyond them as many as
+# anywhere; then `probe score`, which weighs the two lines on them, and shows the hits by how far off). SHOT_H is
+# the client's row, 28; the logs fit any height from 1 to 59 for the level line (on this map it matters only for
+# steps lower than 60, and there are none), and the step-up probe's jump throws and jump backs (the line 26 and 44
+# higher: `probe run step-up --style jump_throw`, `jump_back`) bracket it: from 4 at 2, a 60 step, stopped and
+# through put it at 16-34. Walls of group 0 stop a star from any group in RustMS's port alone (ShotPath.h:398; the
+# v40 client's collisions have no such exception): left out, and on this map group 0 is the basin, where it would
+# change nothing. Ceilings (x2 < x1), which the walls' rule covers there too, aren't kept (none on this map).
+LINE = "v83"
+LINES = ("v83", "level")
 # Whether her decisions keep to what stops a star. Off, they throw at monsters behind such walls as before, so an
 # in-game probe can measure it (the shot log has the rule's verdict either way; the simulator's world keeps to the
 # rule regardless). The probes that measure it (behavior.probe: step-up, step-down, hanging-wall) switch it off
@@ -500,6 +504,19 @@ def hit_point(x: float, row: float, d: int, mx: float, feet: float, top: float, 
     return hx, min(max(row, feet - top), feet - lift)
 
 
+def _hit_on(a: float, row: float, b: float, feet: float, top: float, half: float,
+            target: Platform | None) -> tuple[float, float]:
+    """hit_point from her at map x `a` (the shot's row at map y `row`) at a body whose middle is at map x `b`
+    and feet at map y `feet`, `top` tall and `half` wide either side, facing it; its x taken 1 unit inside the
+    monster's platform `target`, if known, as the monster itself is (_inside). Where the row ends inside a
+    body hanging over its platform's end, the client's hit point is past that end: from platform 4 a pig on 2
+    within 22 of 2's end, 368-410 off, would be hit over the step's edge, short of the step wall, where no star
+    from 4 reached one on 2 in the logs and the user saw the step stop them (2026-10-21); and from a jump a
+    slime by the basin's side right beside her (the row starts 65 ahead, so its far edge) at the wall's foot."""
+    hx, hy = hit_point(a, row, 1 if b >= a else -1, b, feet, top, half)
+    return (hx if target is None else _inside(hx, target)), hy
+
+
 def _side(line: tuple, x: float, y: float) -> float:
     """Which side of a foothold's line (x1, y1, x2, y2) a point is on: negative on its open side, left of
     its direction (above a floor drawn left to right), positive behind it (RustMS ShotPath.h side)."""
@@ -565,9 +582,9 @@ def wall_between(platform: Platform | None, x: float, y: float, tx: float, rise:
     `tx` inside the target's platform (`target`, if known): a monster is never past its platform's end, and
     one at the foot of a wall of her group that rises from its own platform's end (the basin's sides, from its
     floor) isn't behind it. The level line runs SHOT_H above her feet (`shot_h`, if not: the probes' scorer
-    tries others) across to `tx`; the v83 line from there to the star's hit_point on the monster's body: its
-    feet at map y `ty` (by default on `target` at tx, else at her height), `body` (how tall, half its width:
-    body_of; a pig's by default)."""
+    tries others) across to `tx`; the v83 line from there to the star's hit_point on the monster's body (inside
+    `target`, if known: _hit_on): its feet at map y `ty` (by default on `target` at tx, else at her height),
+    `body` (how tall, half its width: body_of; a pig's by default)."""
     if platform is None:
         return None
     row = y - rise - (SHOT_H if shot_h is None else shot_h)
@@ -578,7 +595,7 @@ def wall_between(platform: Platform | None, x: float, y: float, tx: float, rise:
         return min(walls, key=lambda w: abs(w.x1 - a), default=None)
     feet = ty if ty is not None else target.y_at(b) if target is not None else y
     top, half = body or PIG
-    return sight_stop(platform, a, row, *hit_point(a, row, 1 if b >= a else -1, b, feet, top, half))
+    return sight_stop(platform, a, row, *_hit_on(a, row, b, feet, top, half, target))
 
 
 def wall_in_way(platform: Platform | None, x: float, y: float, tx: float, rise: float = 0.0,
@@ -655,7 +672,7 @@ def clear_length(platform: Platform, x: float, y: float, target: Platform, lo: f
     feet = _ys_at(target, xs)
     near = _near_line((*platform.floors, *platform.walls), min(a, lo - half), min(row, float(feet.min()) - top),
                       max(a, hi + half), max(row, float(feet.max())))  # what any of those lines can meet
-    hx, hy = _hits_on(a, row, xs, feet, top, half)
+    hx, hy = _hits_on(a, row, xs, feet, top, half, target)
     return width * int(np.count_nonzero(_sight_clear(near, a, row, hx, hy)))
 
 
@@ -669,16 +686,16 @@ def _ys_at(p: Platform, xs: np.ndarray) -> np.ndarray:
     return ys
 
 
-def _hits_on(a: float, row: float, b: np.ndarray, feet: np.ndarray, top: float,
-             half: float) -> tuple[np.ndarray, np.ndarray]:
-    """hit_point for many bodies at once, facing each (their middles at map x `b`, their feet at map y `feet`),
-    in the same arithmetic, so with the same answers."""
+def _hits_on(a: float, row: float, b: np.ndarray, feet: np.ndarray, top: float, half: float,
+             target: Platform) -> tuple[np.ndarray, np.ndarray]:
+    """_hit_on for many bodies at once (their middles at map x `b`, their feet at map y `feet`), in the same
+    arithmetic, so with the same answers."""
     d = np.where(b >= a, 1.0, -1.0)
     near, far = a + d * SEARCH_START, a + d * STAR_RANGE
     lo, hi = np.minimum(near, far), np.maximum(near, far)
     left, right = b - half, b + half
     hx = np.where(lo >= right, right, np.where(hi <= left, left, (np.maximum(lo, left) + np.minimum(hi, right)) / 2))
-    return hx, np.minimum(np.maximum(row, feet - top), feet)
+    return np.minimum(np.maximum(hx, target.left + 1), target.right - 1), np.minimum(np.maximum(row, feet - top), feet)
 
 
 def _sight_clear(footholds: list[Segment], sx: float, sy: float, ex: np.ndarray, ey: np.ndarray) -> np.ndarray:
