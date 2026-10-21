@@ -335,8 +335,8 @@ def test_the_step_up_s_throws_cant_tell_the_two_lines_apart():
 def test_the_scorer_finds_the_window_top_the_world_has(monkeypatch):
     # From 13 at a lone pig on 12, 60 above her, 110-200 off: with the client's top (44, reach's) the star picks
     # it from 111, with the logs' lower one (21) only from 191. Each world's log fits its own top and rules out
-    # the other. With no hit at all the fit would be flat down to 0, not bounding the top from below (on seed 1
-    # the lower top's world has one).
+    # the other. With no hit at all the fit would be flat down to 0, not bounding the top from below (on the
+    # scenario's seed 1 the lower top's world has 7, 199-219 off).
     model = scenarios.real_map()
     rows = _rows(scenarios.run("probe_top"))
     high = probe.fit_top0(rows, model)
@@ -426,15 +426,17 @@ def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     # The game's hit monsters hide under their damage numbers for 1-3 s: the evidence waits up to
     # HIDDEN_MAX_S for the target to show again. With the client's top in the world (reach's), a star picks the
     # pig from 111 units off: none of the throws its attack took may be read as a miss (seen again with its bar
-    # unchanged), and most are read as hits (21 of the 30 on the scenario's seed 6, where every star hits; 9
-    # can't be told). A throw at a pig that walks out of the search's window by the pick (on seed 1, three
-    # walked to 90-105 off, under the 111) the world's star misses, and so it's read as a miss.
+    # unchanged), and most are read as hits (19 of the 30 on the scenario's seed 1; 9 can't be told). A throw at
+    # the pig walking at her out of the search's window by the pick (on seed 1, two to 105 off, under the 111)
+    # the world's star misses, and so it's read as a miss: there is one to check (on seed 6, where every star
+    # hits, there was none).
     sc = dataclasses.replace(scenarios.SCENARIOS["probe_top"], noise=Noise(hit_hidden=(1.0, 3.0)))
     trace = scenarios.run_scenario(sc)
     model = scenarios.real_map()
     body, client_top = bodies(model), dataclasses.replace(probe.reach_model(), top0=44)
     told = [(r, s) for r in _rows(trace) for e, s in outcomes(r) if e["target"]]
     assert len(told) == 30 and [s for _, s in told].count(True) > len(told) / 2
+    assert any(s is False for _, s in told)
     for r, s in told:
         if s is False:
             assert all(swipe + star == 0 for e, swipe, star in probe.chances(r, model, body, client_top) if e["target"])

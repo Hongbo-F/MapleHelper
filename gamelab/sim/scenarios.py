@@ -827,22 +827,25 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
                               for r in rows)
 
 
-@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=6, limit=400,
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400,
           expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
                          lambda tr: all("pick" in r and r["evidence"] and r["looks"] >= 5 for r in _probe_rows(tr))),
-                   check("every throw hits, some under 150 off",
-                         lambda tr: all(s for _, s in _shown(tr)) and any(d < 150 for d, _ in _shown(tr)))))
+                   check("a hit at the pig 111 off or more at the pick, and only there; some under 150",
+                         lambda tr: all(bool(s) == (d >= 111) for d, s in _shown(tr))
+                         and any(s and d < 150 for d, s in _shown(tr)))))
 def probe_top(sim):
     """`probe run top-60`: from 13 at a lone pig on 12, 60 above her, 110-200 units off sideways. The world's
     search window has reach's top (the client's, 44 above her feet in the first band), so a star picks the pig
-    from 111 units: every throw hits, the closest 117 off at the pick (with the logs' lower top, 21, one would
-    from 191: on this seed 6 do, 195-220 off). Each throw waits for its evidence before the next, and the log has
-    where the pig was at the pick and what it showed (`probe score` fits the top to it: tests/test_probe.py).
-    (Seed 6 since monsters walk as fast as the game data says, a pig 125 units/s, not 70: on seed 1, 27 of the
-    30 hit, the 3 others at the pig walked to 90-105 off by the pick, under the 111 a star picks it from. Of
-    seeds 1-16, 6 and 12 have all 30 hit, the others 25-29.)"""
+    from 111 units: every throw at it that far off at the pick hits, the closest 114 off, and none closer (with
+    the logs' lower top, 21, one would from 191: on this seed 7 do, 199-219 off). Thrown at 110-200 off, the
+    pig walking at her at the game data's 125 units/s can be closer than 111 by the pick: on this seed 3 of the
+    30, 90-105 off, and the star misses each (of seeds 1-16, misses only at 90-110 off, 0-5 a seed, hits only
+    from 112). Each throw waits for its evidence before the next, and the log has where the pig was at the pick
+    and what it showed (`probe score` fits the top to it: tests/test_probe.py). (Seed 6 for a while, where all 30
+    hit, as "every throw hits" was: then no throw was read as a miss, not even with hit monsters hidden, and the
+    test of that had none to check.)"""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
