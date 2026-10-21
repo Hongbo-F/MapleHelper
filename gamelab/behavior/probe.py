@@ -23,9 +23,11 @@ too; for a probe that asks it, `at_pick`, where it will be when the attack picks
 throw she neither moves nor throws until its star's evidence is in: every look up to EVIDENCE_S after the
 star was due (longer while the target is hidden, up to HIDDEN_MAX_S: a hit monster flinches under its
 damage numbers for 1-3 s). So one throw's evidence is never another's, and a monster hit by one has stopped
-flinching (0.6 s, taller) when the next attack picks. A monster of a kind the probe doesn't throw at that
-comes close on her platform is fought off first (behavior.fight.clear, her platform only); one it throws at,
-closer than its range, is left be (GIVE_WAY: or stepped away from). Standing where monsters spawn and throwing
+flinching (0.6 s, taller) when the next attack picks. She never throws while a monster of her platform is
+closer than the probe's range (`in_her_way`: one of a kind it throws at closer than its kind's range, any other
+closer than fight.IN_HER_WAY), whatever the crowd: one of a kind the probe doesn't throw at is fought off first
+(behavior.fight.clear, her platform only); one it throws at is stepped away from (GIVE_WAY), or waited out where
+she can't step. Standing where monsters spawn and throwing
 at those of other platforms, she clears her platform first, and again whenever one of its monsters is in front
 of her or in her way; a run that fights FIGHT_MAX_S without a throw stops (clears_first); knocked off her
 place, she walks or goes back to it, the last walk the way she throws, so that no throw turns her (a turn's
@@ -111,17 +113,21 @@ HURT = 0.02          # a bar this much lower than before is a hit
 WAIT_S = 0.1         # s between looks while there's nothing to throw at
 # Her own platform's monsters (`_keep_clear`). One closer than the probe's range is in her way (`in_her_way`):
 # one of a kind it throws at, on a platform it throws at (hers: claw-edge, air), closer than its kind's range;
-# any other closer than fight.IN_HER_WAY. Any other is fought off (fight.clear on her platform, up to one kill;
-# she steps away first if she can, as in any fight), never thrown at as the probe's. One it throws at isn't:
-# in the simulator (claw-edge on 21 with its pig and two slimes, the snails on 20 and 22, the game's errors, two
-# others allowed in front, 300 s, seeds 1 and 3-6) fighting them off left 1-4 throws where she made 30-40, and
-# she was knocked off 21 into the basin on the way. GIVE_WAY has her step away from it instead.
-GIVE_WAY = False     # Off: on those runs stepping away (to have it past its range's start, STEP_LEASH of her place at
-                     # most) made 15-37 throws, not 30-40, 6-14 of them where the claw's answers differ, not 11-16,
-                     # and decided 2 of the 5 seeds, not 3; it saved HP (0.75-0.80 left, not 0.60-0.73), but in game
-                     # on 2026-10-21 a pig or slime was inside claw-edge's 95 at 288 of 533 looks, touching her 4
-                     # times in 90 s for 1% of her HP. Stepping away only once one touches (her half width and 25)
-                     # did no better: 25-38 throws, and one of the 5 seeds decided the old claw's way
+# any other closer than fight.IN_HER_WAY. While one is, she doesn't throw (`choose`): a throw then is no probe's.
+# Any other is fought off (fight.clear on her platform, up to one kill; she steps away first if she can, as in
+# any fight). One it throws at isn't (in the simulator, claw-edge on 21 with its pig and two slimes, the snails on
+# 20 and 22, the game's errors, two others allowed in front, 300 s, seeds 1 and 3-6: fighting them off left 1-4
+# throws where she made 30-40, and she was knocked off 21 into the basin on the way): she steps away from it
+# (GIVE_WAY), to have it past its range's start, and where she can't, waits.
+GIVE_WAY = True      # In the simulator (claw-edge, 40 throws, 21's, 20's and 22's monsters, the game's errors, crowd 2,
+                     # seeds 1-8 in reach's world and in the old claw's): throwing with one in her way (as until the
+                     # review of 2026-10-21), 40 throws took 232-387 s, but 3-11 of each run's 40 had one of 21's
+                     # inside 95 in front of her, and those told nothing (the claw's answers differed on 0-5 of them
+                     # all told; the rest alone decided the same: 13 runs right, 1 wrong, 2 undecided). With no
+                     # throw while one is in her way, standing (False): 450-900 s, and 5 right, 1 wrong, 10
+                     # undecided; stepping away: 720-1,500 s (3 of the 16 ran out of their 1,500 s at 33-39
+                     # throws), and 11 right, 1 wrong, 4 undecided, her HP as either way (0.53-0.79 left). In game
+                     # on 2026-10-21 a pig or slime was inside claw-edge's 95 at 288 of 533 looks
 STEP_LEASH = 60      # ... how far from her place she steps away at most ...
 END_ROOM = 90        # ... and never nearer than this to her platform's end (a touch's knock is 21-87 units)
 STEP_PAST = 10       # ... to have it this far past its range's start
@@ -189,7 +195,8 @@ class Probe:
     style: str = "throw"    # how she throws (STYLES)
     throws: int = 20
     wide: bool = False      # looks over the whole screen: the targets stand above what a look's band searches
-    crowd: int = 0          # it also throws with this many others in front (`choose`; `probe run --crowd`)
+    crowd: int = 0          # it also throws with this many others in front (`choose`; `probe run --crowd`), never
+                            # with one of her platform's in her way (in_her_way)
     walls: bool = True      # whether her decisions keep to the wall rule during the run (off: it's measured)
     at_pick: bool = False   # the range sideways is where a monster will be when the attack picks (`x_after`),
                             # not where the look has it
@@ -262,10 +269,12 @@ PROBES = {p.name: p for p in (
     # level, in the middle of 21 (two slimes and a pig spawn there; 174 units to either end, past a knockback).
     # With two others in front: a snail on 20 (60 above) or 22 (60 below) is in front of her nearly always, and in
     # game on 2026-10-21 it threw none in 90 s, a pig or slime in range in front of her at 82 looks and never alone
-    # (the snails on 20 and 22 both there at 81). In the simulator, with 20's, 21's and 22's monsters and the
-    # game's errors, alone it threw none in 300 s; with two others, its 40 throws in 4-6.5 minutes decided reach's
-    # world on 7 of seeds 1-8 and the old claw's on 6, one the other way (the old claw's seed 5, by 4.8): neither
-    # claw reaches 60 above or below her, so a snail there takes a star the same by either.
+    # (the snails on 20 and 22 both there at 81). Neither claw reaches 60 above or below her, so a snail there
+    # takes a star the same by either. None of 21's in her way, though (choose: one inside 95 in front takes the
+    # attack itself, and told nothing); she steps away from them (GIVE_WAY). In the simulator, with 20's, 21's and
+    # 22's monsters and the game's errors, alone it threw none in 300 s; with two others, its 40 throws took
+    # 12-25 minutes and decided reach's world on 5 of seeds 1-8 and the old claw's on 6, one the other way (the
+    # old claw's seed 8, by 5.4), four undecided.
     Probe("claw-edge", "how far off the claw still swipes, by kind (reach.CLAW_FAR, CLAW_MARGIN, claw_edge)", 21,
           -225.0, RIGHT, (21,), ("pig", "slime"), (95, 160), throws=40, crowd=2, source="bodies D",
           expect="by the client's stab boxes (cut to 65 ahead, reach's) and the bodies, swipes (a small bar drop: "
@@ -526,7 +535,8 @@ def in_her_way(probe: Probe, s: Scene, x: float | None = None) -> list[Monster]:
 def _keep_clear(h: "Hunter", probe: Probe, s: Scene, guard: _Guard, report: ProbeReport) -> bool:
     """Her own platform's monsters, before a throw (see GIVE_WAY, CLEAR_KILLS): with clears_first, the platform
     cleared when she first gets to her place with any on it, and whenever one is in front of her or in her way;
-    else one in her way fought off, or (GIVE_WAY) one she throws at stepped away from. Whether she did any."""
+    else one in her way fought off, or (GIVE_WAY) one she throws at stepped away from (where she can't step, it's
+    waited out: `choose` throws at nothing while it's there). Whether she did any."""
     here = s.platform.id
     on = [m for m in s.monsters if m.platform == here]
     close = in_her_way(probe, s)
@@ -616,7 +626,11 @@ def choose(s: Scene, probe: Probe, crowd: int = 0, model: MapModel | None = None
     nearer; with `probe.at_pick`, where it will be when the attack picks, `lead` s after the look: x_after on
     `model`), when it's the only one in front (or with at most `crowd` others). While her decisions keep to what
     stops a star (reach.WALLS_BLOCK), not one whose star is stopped (reach.wall_to), nor one behind another in
-    front that the attack takes first whose star is (reach.shielded: with a crowd)."""
+    front that the attack takes first whose star is (reach.shielded: with a crowd). Never while a monster of her
+    platform is in her way (in_her_way), whatever the crowd: one that close in front takes the attack (the claw's
+    or a star) before any in range, one behind her touches her, and the throw is no probe's."""
+    if in_her_way(probe, s):
+        return None
     front = in_front(s, probe.side)
     x, y, rise = s.where.x, s.where.y, rise_of(probe.style)
     out = JUMP_BACK_OUT if probe.style == "jump_back" else 0.0  # she's that much farther off when it picks

@@ -48,8 +48,24 @@ def test_a_probe_throws_only_at_a_lone_monster_in_range():
     assert choose(scene(target(650, 560, platform=1, kind="slime")), TOY) is None
     assert choose(scene(target(650, 500, platform=0)), TOY) is None
     # Behind her, past FRONT, or far below or above her: not in front, so it doesn't count.
-    for other in (target(400), target(500 + probe.FRONT + 10, 560, platform=1), target(700, 500 + 160, platform=3)):
+    for other in (target(300), target(500 + probe.FRONT + 10, 560, platform=1), target(700, 500 + 160, platform=3)):
         assert choose(scene(pig, other), TOY) is pig
+    # But one on her platform in her way (in_her_way: here, of a kind it doesn't throw at, within 150) stops the
+    # throw from either side, whatever the crowd: it's fought off first.
+    for close in (target(400), target(600)):
+        assert choose(scene(pig, close), TOY, crowd=3) is None
+
+
+def test_no_probe_throw_while_one_of_her_platform_s_monsters_is_closer_than_its_range():
+    # A probe that throws at her own platform's monsters (claw-edge, air): one of its kinds there, closer than its
+    # range starts, takes the attack itself (the claw's or a star) before any in range, and tells nothing, so no
+    # throw while it's there, whatever the crowd; once it's out of the way, the one in range alone is thrown at.
+    p = Probe("toy", "a test", 0, 500.0, RIGHT, (0,), ("pig",), (110, 200), crowd=2)
+    far, close, behind = target(650), target(560), target(440)
+    assert choose(scene(far), p, crowd=2) is far
+    assert choose(scene(far, close), p, crowd=2) is None and choose(scene(far, behind), p, crowd=2) is None
+    assert choose(scene(far, target(300)), p, crowd=2) is far  # behind her past its range's start
+    assert choose(scene(far, target(720)), p, crowd=2) is far  # in front, farther: a crowd of one
 
 
 def test_who_counts_as_in_front_keeps_to_the_wall_switch(monkeypatch):
@@ -530,12 +546,12 @@ def test_a_probe_that_only_fights_its_platform_s_monsters_stops_and_says_so():
 
 
 @REAL
-def test_with_give_way_she_steps_away_from_one_she_throws_at_and_keeps_near_her_place(monkeypatch):
-    # GIVE_WAY (off by default: see it) has her step away from a monster she throws at that comes closer than
-    # its range starts, rather than stand in it: never past STEP_LEASH of her place or END_ROOM of her
-    # platform's ends, and back to her place once it's gone from there. A slime spawns 25 units from claw-edge's
-    # place on 21, a pig 135 off; she throws only at them 95-160 off, from within the leash.
-    monkeypatch.setattr(probe, "GIVE_WAY", True)
+def test_she_steps_away_from_one_she_throws_at_and_throws_only_with_none_of_her_platform_s_in_her_way():
+    # GIVE_WAY has her step away from a monster she throws at that comes closer than its range starts, rather
+    # than stand in it: never past STEP_LEASH of her place or END_ROOM of her platform's ends, and back to her
+    # place once it's gone from there. A slime spawns 25 units from claw-edge's place on 21, a pig 135 off; she
+    # throws only at them 95-160 off, from within the leash, and never with the other inside 95 in front of her.
+    assert probe.GIVE_WAY
 
     def run(sim):
         h = sim.hunter()
@@ -550,19 +566,22 @@ def test_with_give_way_she_steps_away_from_one_she_throws_at_and_keeps_near_her_
                for x in to)
     assert rows and all(95 <= abs(r["dx"]) <= 160 and abs(r["x"] + 225) <= probe.STEP_LEASH + probe.STAND_SLACK
                         for r in rows)
+    assert not [m for r in rows for m in r["front"] if m["platform"] == 21 and not m.get("target")
+                and abs(m["x"] - r["x"]) < 95]
 
 
 @REAL
 def test_claw_edge_throws_with_the_snails_on_20_and_22_in_front_of_her():
     # In game on 2026-10-21 claw-edge threw none in 90 s: a snail on 20 (60 above her) or 22 (60 below) was in front
     # of her at every look that had a pig or slime of 21 in its range. Alone, as the other probes throw, it throws
-    # none here either; with two others allowed in front (its own crowd), it throws at the pig.
+    # none here either; with two others allowed in front (its own crowd), it throws at the pig, each time once it
+    # has walked out of her way (stepping away from it when it's inside 95: 10 throws in 300 s).
     def run(crowd):
         def go(sim):
             h = sim.hunter()
-            return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["claw-edge"], throws=10), seconds=150,
+            return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["claw-edge"], throws=10), seconds=300,
                                  crowd=crowd))
-        trace = scenarios.run_scenario(scenarios.Scenario("probe_claw_snails", go, (21, -225.0), limit=300, monsters=[
+        trace = scenarios.run_scenario(scenarios.Scenario("probe_claw_snails", go, (21, -225.0), limit=450, monsters=[
             ("Snail", 20, -17.0), ("Snail", 22, 53.0), ("Pig", 21, -90.0)]))
         return [json.loads(line) for line in trace["files"].get("probe_geometry.jsonl", ())]
     assert probe.PROBES["claw-edge"].crowd == 2 and "with up to 2 others in front" in probe.listing()
