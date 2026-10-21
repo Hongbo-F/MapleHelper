@@ -24,6 +24,7 @@ chain stops before that leg and the navigator waits or goes another way.
 All positions in map units, times in seconds from the start of the plan.
 """
 
+import math
 from dataclasses import dataclass, field
 
 from maplehelper.engine import LEFT, RIGHT
@@ -34,7 +35,7 @@ from ..localization.monsters import MonsterTrack
 from . import body
 from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
                       RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms, sure_jump_ms, sure_landing)
-from .route import DROP_STEP, JUMP_FROM, LANDING_ROOM, ROPE_CLEAR, Move, drop_clear, drop_spots
+from .route import DROP_STEP, JUMP_FROM, LANDING_ROOM, ROPE_ARMS, ROPE_CLEAR, Move, drop_clear, drop_spots
 
 # Her measured lags and slides (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, STOP_S, LAND_SLIDE) describe her body,
 # so they're in physics, with how they were measured (still importable from here). Her walk, stops and
@@ -233,6 +234,15 @@ def ms(t: float) -> int:
 
 def _sign(v: float) -> int:
     return 1 if v > 0 else -1
+
+
+def _rise_time(h: float) -> float:
+    """s from leaving the ground until a jump straight up has risen h units (APEX_T past its top)."""
+    if h <= 0:
+        return 0.0
+    if h >= APEX:
+        return APEX_T
+    return (JUMP_SPEED - math.sqrt(JUMP_SPEED ** 2 - 2 * GRAVITY * h)) / GRAVITY
 
 
 def _brake(v: float, tau: float) -> tuple[float, float]:
@@ -571,8 +581,14 @@ class Flow:
         if gap > APEX + 10 or self.model.portal_near(a, rx):
             return None
         if abs(rx - b.x) <= 4 and not b.run:
-            t, grab_h, ran_to = b.t, min(APEX, max(0.0, gap)), b.x   # straight up under it
-            t_rope = self.press_jump(k, b, 0, t + JUMP_LAG)[0] + 0.15  # grabs it 0.15 s after leaving the ground
+            # Straight up under it: she grabs it once her feet are ROPE_ARMS below its bottom (route, the
+            # simulator's world.ARMS), on her feet at its bottom (grab_h). Timed 0.15 s after leaving the ground,
+            # the plan had her at the top about 0.1 s after she got there under the ropes 40 above 6, 30 and 36
+            # (grabbed 0.045 s up), and a run off the top to a jump taking off 15 units from the end (route.
+            # TAKEOFF_EDGE) went off the end before its key: 11 of seeds 1-24 from under 723's rope to 1. When the
+            # game grabs isn't measured: with her feet at the rope's bottom it would be 0.085 s up, 0.04 s later.
+            t, grab_h, ran_to = b.t, min(APEX, max(0.0, gap)), b.x
+            t_rope = self.press_jump(k, b, 0, t + JUMP_LAG)[0] + _rise_time(gap - ROPE_ARMS)
         else:
             d = _sign(rx - b.x)
             ran_to = rx - d * GRAB_LEAD

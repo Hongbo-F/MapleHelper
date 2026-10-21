@@ -1340,6 +1340,21 @@ def test_a_climb_a_step_back_and_two_jumps_land_on_every_seed():
 
 
 @REAL
+def test_a_climb_from_under_its_rope_then_a_run_to_a_jump_lands_on_every_seed():
+    """From standing under a rope, the climb and a run off its top to a jump taking off 15 units from the end
+    (route.TAKEOFF_EDGE), the lags spread as in nav_climb_then_jump, seeds 1-16: every trip arrives without a
+    miss. With the grab timed 0.15 s after leaving the ground (it comes 0.045 s up under these ropes, 40 above
+    her: route.ROPE_ARMS), the plan had her at the top 0.09-0.10 s late, and she went off the end before the
+    jump's key: 11, 10 and 11 of seeds 1-24 missed (Flow._climb)."""
+    sc = scenarios.SCENARIOS["nav_climb_then_jump"]
+    for (src, x, dst) in ((6, 723.0, 1), (30, 795.0, 17), (36, 539.0, 28)):
+        for seed in range(1, 17):
+            r = scenarios.run_scenario(dataclasses.replace(sc, seed=seed, start=(src, x), fn=scenarios._nav(dst),
+                                                           expects=()))["result"]
+            assert r["result"] == "arrived" and r["misses"] == 0, (src, x, dst, seed, r["moves"])
+
+
+@REAL
 def test_a_step_after_a_climb_pressed_before_the_top_throws_the_jumps_after_it(monkeypatch, old_route_takeoffs):
     """At the route's takeoffs of that night (old_route_takeoffs: the jump 32 -> 29 from 33-45 units in from 32's
     left end, which after the climb from 36 needs a step back), with every arrow after a climb pressed before the

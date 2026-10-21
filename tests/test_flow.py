@@ -388,3 +388,29 @@ def test_every_placed_route_jump_takes_off_where_it_lands_with_room_to_spare_and
             if any(flow._jump_from(mv, b, Keys(KEYS), "run", mv.takeoff - d * v) is None for v in range(2, 11, 2)):
                 narrow.add((mv.src, mv.dst))
     assert narrow == {(10, 15), (13, 20), (18, 32), (19, 24)}
+
+
+@REAL
+def test_a_climb_from_under_its_rope_has_her_at_the_top_when_the_world_does():
+    """Standing under a rope 40-41 above her (6 at 723, 30 at 795, 36 at 539, 14 at 798), the plan's top of the
+    climb is the world's to 15 ms, whatever the phase of the game's steps: she grabs the rope as her feet come
+    within ROPE_ARMS of its bottom (0.045 s up), on her feet at its bottom. Timed 0.15 s after leaving the ground,
+    it had her there 0.10 s late, and a run off the top to a jump 15 units from the end went off it first
+    (test_sim: test_a_climb_from_under_its_rope_then_a_run_to_a_jump_lands_on_every_seed)."""
+    from gamelab.motion.flow import CLIMB_OVER
+    from gamelab.sim.world import World
+    from test_sim import KEYS as WORLD_KEYS
+    m = scenarios.real_map()
+    moves = Planner(m).moves
+    for src, x, dst in ((6, 723.0, 3), (30, 795.0, 25), (36, 539.0, 32), (14, 798.0, 6)):
+        climb = next(mv for mv in moves if (mv.kind, mv.src, mv.dst) == ("climb", src, dst))
+        assert abs(climb.rope_x - x) <= 4
+        legs, keys, why = Flow(m, KEYS).chain([climb], Body(0.0, x, m.platform(src)))
+        assert why == "done"
+        for phase in (0, 10, 25):
+            w = World(m, WORLD_KEYS, (src, x), monsters=None, step_phase=phase)
+            for at, name, how in keys.sorted():
+                w.key(at / 1000, name, how == "down")
+            w.advance(legs[-1].end.t + 1.0)
+            top = next(float(line.split()[0]) for line in w.log if f"climbs onto platform {dst}" in line)
+            assert top == pytest.approx(legs[-1].end.t - CLIMB_OVER, abs=0.015), (src, dst, phase)
