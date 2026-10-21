@@ -27,10 +27,10 @@ room sideways, the more the farther off her level and the smaller the monster (`
 `body_of`): 60 below her an Orange Mushroom is picked from 113 units, a pig from 151, a slime from 177, a
 snail from 246; 60 above, a pig from 111, an Orange Mushroom from 113, a slime from 117, a snail from 126.
 The shot log and the live tours' telemetry agree with the search's shape and fit its floor; they lean
-to a lower top (SEARCH_TOP0), not significantly, which `probe run top-60` settles. From a jump it doesn't
-fit (40 ms after the jump, stars killed snails 36-66 units away, closer than a search starting 65 ahead
-picks), so an attack from a jump keeps to the area that does: a box fixed to her feet, as high as she is
-then (`in_area`), from AREA_DOWN below them to AREA_UP above, STAR_RANGE ahead. A jump throw's attack
+to a lower top (SEARCH_TOP0), suggestively, not decisively, which `probe run top-60` settles. From a jump
+it doesn't fit (40 ms after the jump, stars killed snails 36-66 units away, closer than a search starting
+65 ahead picks), so an attack from a jump keeps to the area that does: a box fixed to her feet, as high as
+she is then (`in_area`), from AREA_DOWN below them to AREA_UP above, STAR_RANGE ahead. A jump throw's attack
 keyed 100 ms after the jump started 42-49 units up, its area over a snail (24-26 tall): in 45 jump-throws
 at snails 3-77 units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60
 above took the stars. RustMS's port of the v83 client has no case for the air: the claw and the search as
@@ -69,7 +69,7 @@ the same verdict on every one):
   together.
 The client's collisions in the air also skip walls of other groups (a reconstruction of its physics),
 likely the same test. On this map her own group's walls change one pair, 4 -> 2; the v83 line would also
-stop stars down at monsters close past her platform's end (from 2 at x 50 at pigs on 4 under 253 off).
+stop stars down at monsters close past her platform's end (from 2 at x 50 at pigs on 4 under 254 off).
 
 All in map units; dy is the target's feet minus hers (+ = below her).
 """
@@ -114,10 +114,13 @@ SEARCH_TOP0 = SHOT_H + SEARCH_START // SEARCH_SPREAD    # 44: ... to this far. R
                      # 68 down at its last band (385-400), drawn since 2026-08-22, before RustMS's code. The
                      # logs lean to a lower top: fitted to the shot log and the telemetry it came out 21 (a pig
                      # 60 above her picked from 191 units, not 111), but cleaned fairly the lean is 2-5
-                     # log-likelihood, from about 10-14 throws 60 above her at 150-191 in four episodes (3 -> 1
-                     # twice, 13 -> 12, 22 -> 21), each leaning the same way: not significant, and tops 17-28
-                     # fit alike. Too high a top has her throw at monsters above her that the star doesn't
-                     # take; too low, skip them, and count on stars at monsters past them that they take.
+                     # log-likelihood. As independent throws that would rule 44 out (the probes' scorer's 95%
+                     # bound is 1.92), but its 10-14 throws (60 above her, 150-191 off) are four episodes (3 -> 1
+                     # twice, 13 -> 12, 22 -> 21), whose throws go together: all four leaning the same way is 1 in
+                     # 16 by chance (p 0.06, one-sided), and in the shot log, without any one of them the lean is
+                     # 1-3.5. Suggestive, not decisive; tops 17-28 fit alike. Too high a top has her throw at
+                     # monsters above her that the star doesn't take; too low, skip them, and count on stars at
+                     # monsters past them that they take.
                      # Unmeasured in game: throws from 13 at 12 (60 above her), 110-200 units off, settle it
                      # (`python -m gamelab probe run top-60`, then `probe score`); this is the one number to
                      # change (to 21) if they find the lower top.
@@ -125,7 +128,8 @@ BANDS = math.ceil((STAR_RANGE - SEARCH_START) / SEARCH_STEP)  # 17: the last one
 LEVEL = 15           # within this of her height, a target counts as on her level
 # Between her level and 60 below her the search is unchecked, and the only throws logged there go against it:
 # from 0 at 1 (42 below), the shot log of 2026-10-18 has 3 misses in 4 at pigs 124-125 off and a miss at an
-# Orange Mushroom 91 off, where the search picks both from 90 (what else was in front wasn't logged then). Its
+# Orange Mushroom 91 off, where the search picks a pig from 71 and an Orange Mushroom from 33 (what else was in
+# front wasn't logged then). Its
 # fit rests on the throws 60 off her level. So below her, between the two, her decisions keep at least to the
 # old ramp (ramp_dx: RAMP_NEAR on her level to RAMP_FAR 60 below, a pig 42 below from 126 instead of 71) until
 # a probe settles it (`python -m gamelab probe run below-42`, then `probe score`). False: the search alone.
@@ -157,11 +161,13 @@ AIR_MARGIN = 6       # how far into the area a body must reach for an attack fro
 # Combat.cpp:1813-1842) whose body reaches into it, on her level or not: no gate for it. A throw plays a swing
 # (swingO1-O3, the claw's ranged list), but the swings' boxes aren't what the claw tests. So the swipe reaches
 # from 12-20 to 65 ahead of her and from 15 to 30 above her feet: on her level a monster out to 65 plus half its
-# width off by its middle (a pig 99, a snail 84), none 40 or more off her level. Before, the swings and stabO1
-# together (73-102 ahead, 17 below to 62 above her feet, taken as 90 ahead on her level only) had a pig swiped
-# out to 124. Unmeasured in game: how far off a pig is still swiped (`python -m gamelab probe run claw-edge`,
-# then `probe score`: a swipe takes 7-10% of a pig's or a slime's bar, a star 23-61%). Deciding by the body,
-# not by the middle alone, cut the simulator's swipes by a third (20 seeds, with the old swing).
+# width off by its middle (a pig 99, a snail 84); off it, none whose feet are 30 or more above hers, nor one whose
+# top is under 15 above them (walking, a pig more than 31 below her or an Orange Mushroom more than 40; flinching,
+# taller, more than 39 and 50). Before, the swings and stabO1 together (73-102 ahead, 17 below to 62 above her
+# feet, taken as 90 ahead on her level only) had a pig swiped out to 124. Unmeasured in game: how far off a pig
+# is still swiped (`python -m gamelab probe run claw-edge`, then `probe score`: a swipe takes 7-10% of a pig's or
+# a slime's bar, a star 23-61%). Deciding by the body, not by the middle alone, cut the simulator's swipes by a
+# third (20 seeds, with the old swing).
 CLAW_FAR = 65
 CLAW_BOXES = {"stabO1": ((-84, -30), (-20, -15)), "stabO2": ((-83, -30), (-12, -16))}
 CLAW_STANCES = tuple(CLAW_BOXES)  # one of these per attack, each as likely
@@ -191,14 +197,19 @@ CLAW_MARGIN = 12     # kept past the claw's reach, for a monster walking at her 
                      # swing).
 # What stops a star (see above): which line the client checks from her to the monster its attack picked.
 # 'level': a level line SHOT_H above her feet (raised in a jump), from her x to the monster's, which only walls
-# can cross: ohmi69's reading of this game's client checks a basic shot straight across from that row, and the
-# logs' rule was fitted so. 'v83': the v83 client's, from SHOT_H above her feet at her own x (not the shot's
-# start, 65 ahead) to where the star hits the monster's body (hit_point: its top if it's below the row, its
-# feet if above), which a floor of any group stops going down through it as well (RustMS ShotPath.h:382-445,
-# Combat.cpp:1289-1307; meowdb's page on this game has shooting down through the platform she stands on
-# blocked, carried over from Energy Bolt's tests). The two differ only below her: by the v83 line a star needs
-# room past her platform's end, |dx| > e (28 + t) / 28, e her distance to the end and t how far below her feet
-# the monster's top is (a walking pig 60 below, t 14: 1.5 e). Every throw logged was made from near an end,
+# can cross: ohmi69's reading of this game's client checks a basic shot straight across from that row (its one
+# source, and one whose basic shot's target, a 1-unit line 28 up, the logs refute), and the logs' rule was
+# fitted so. 'v83': the v83 client's, from SHOT_H above her feet at her own x (not the shot's start, 65 ahead)
+# to where the star hits the monster's body (hit_point: its top if it's below the row, its feet if above),
+# which a floor of any group stops going down through it as well (RustMS ShotPath.h:382-445,
+# Combat.cpp:1289-1307). meowdb's page on this game says so too (shooting down through the platform she stands
+# on is blocked, up through one isn't), citing no test: on its Lucky Seven page the claim was tagged unverified
+# in August and untagged by late September, and the one in-game test the site gives on terrain is that walls
+# stop Energy Bolt. So two sources have a floor stop a star going down, against one, discounted, that has none
+# do; the logs fit both. 'level' stays the default, as master has it, until the probes below decide. The two
+# differ only below her: by the v83 line a star needs room past her platform's end, |dx| > e (28 + t) / 28, e
+# her distance to the end and t how far below her feet the monster's top is (a walking pig 60 below, t 14:
+# 1.5 e). Every throw logged was made from near an end,
 # where the two agree (299 decided, the same verdict on all). Unmeasured in game: from 2 (x 50) at pigs on 4
 # 200-253 off and slimes 200-283, the v83 line has none hit, the level line as many as anywhere (`python -m
 # gamelab probe run step-down`; from 14 at x 706 at 17, pigs 189-214 and slimes 183-240, `hanging-wall`; then
@@ -253,10 +264,15 @@ def band_of(ahead: float) -> int | None:
 def search_band(near: float, far: float, bottom: float, top: float, top0: float | None = None,
                 floor0: float | None = None) -> int | None:
     """The first band a body overlaps, from `near` to `far` ahead of her and from `bottom` to `top` above
-    her feet (body_box). None if the search doesn't pick it. `top0`, `floor0`: as in window."""
-    if far < SEARCH_START or near > STAR_RANGE or far < near:
+    her feet (body_box). None if the search doesn't pick it. Overlap is strict, sideways as well as up and
+    down, as the client's (RustMS ShotPath.h:335-339, in_step, IntersectRect's): a body whose far side is
+    right at a band's near edge isn't in that band, nor one whose near side is at STAR_RANGE. `top0`,
+    `floor0`: as in window."""
+    if far <= SEARCH_START or near >= STAR_RANGE or far <= near:
         return None
-    for k in range(band_of(max(near, SEARCH_START)), band_of(min(far, STAR_RANGE)) + 1):
+    first = max(0, int((near - SEARCH_START) // SEARCH_STEP))
+    last = min(BANDS - 1, math.ceil((far - SEARCH_START) / SEARCH_STEP) - 1)
+    for k in range(first, last + 1):
         floor, roof = window(k, top0, floor0)
         if bottom < roof and top > floor:
             return k
@@ -290,8 +306,9 @@ def body_of(kind: str | None, bodies: dict[str, MobBody] | None = None) -> tuple
 def min_dx(dy: float, top: float = PIG[0], half: float = PIG[1], lift: float = 0.0) -> float:
     """The closest sideways (middle to middle) the search picks a monster dy below (+) or above (-) her
     feet, `top` tall and `half` wide either side, raised `lift` off its feet (default: a walking pig): its
-    far side has to reach the first band whose window takes in its body. Infinite if none does. On her
-    level, 65 less its half width; the claw swipes that close (shot_dx)."""
+    far side has to reach the first band whose window takes in its body (past that band's near edge: the
+    search picks it from just farther off, search_band). Infinite if none does. On her level, 65 less its
+    half width; the claw swipes that close (shot_dx)."""
     t, b = top - dy, lift - dy  # its top and its bottom, above her feet
     for k in range(BANDS):
         floor, roof = window(k)
@@ -302,7 +319,7 @@ def min_dx(dy: float, top: float = PIG[0], half: float = PIG[1], lift: float = 0
 
 def max_dx(half: float = PIG[1]) -> float:
     """The farthest (by its middle) the search picks a monster `half` wide either side: its near side
-    within STAR_RANGE."""
+    within STAR_RANGE (short of it: search_band)."""
     return STAR_RANGE + half
 
 
@@ -357,7 +374,8 @@ def claw_takes(ahead: float, dy: float, top: float, half: float, stance: str, cl
 def claw_chance(ahead: float, dy: float, top: float, half: float, claw: Claw | None = None) -> float:
     """The chance an attack from the ground takes a stance of the claw whose box reaches this monster (as in
     claw_takes): the share of CLAW_STANCES that do, one taken per attack, each as likely. 1 for a monster on
-    her level with its near side within 65 of her, 0 for one 40 or more off her level; the two boxes differ
+    her level with its near side within 65 of her, 0 for one whose feet are 30 or more above hers or whose top
+    is under 15 above them (an Orange Mushroom walking 41 below her); the two boxes differ
     only in slivers (stabO2's starts 12 ahead of her, stabO1's 20, so a snail within a unit of her middle is
     in stabO2's alone; and stabO1's reaches down to 15 above her feet, stabO2's 16), where it's 0.5. It's
     swiped if it's also the nearest of those the stance takes (take_chances). `claw`: as in claw_box."""
@@ -614,7 +632,10 @@ def can_hit(platform: Platform | None, x: float, y: float, m: Monster, reach: fl
             rise: float = 0.0, target: Platform | None = None, others: list[Monster] = ()) -> bool:
     """Whether a star from map (x, y) on `platform` hits monster `m`: in reach by its kind (can_shoot), its
     line not stopped (wall_to; `rise`: her height in a jump, `target`: m's platform), and none of `others` (the
-    monsters around her) that the attack takes before it stopped either (shielded)."""
+    monsters around her) that the attack takes before it stopped either (shielded). Whether m is the pick now
+    isn't asked: a monster the attack takes first whose line is clear takes the stars until it's dead, and
+    then m's turn comes, so it only orders the kills (her decisions shoot what's in the way first anyway). One
+    whose star is stopped dies to none of them, so from here m gets none while it stands there."""
     return (can_shoot(m.x - x, m.y - y, reach, m.kind) and wall_to(platform, x, y, m, rise, target) is None
             and shielded(platform, x, y, m, others, rise) is None)
 

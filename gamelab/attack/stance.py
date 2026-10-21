@@ -284,7 +284,8 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
            halves: dict[str, float] | None = None, around: list[Monster] | None = None) -> tuple:
     """What to do about `target` from map (x, y) on `platform`: ('throw', direction),
     ('walk', direction, units), or ('skip', reason) when no spot on her platform is in reach (or terrain
-    stops the target's star from all of them). `threats` are the other monsters on her platform; `around`:
+    stops the target's star from all of them, or from every one a monster the attack takes first has its star
+    stopped and none is MIN_MOVE or more away). `threats` are the other monsters on her platform; `around`:
     every monster around her (as stance's; `threats` by default). Never walks off her platform. One on her
     platform is too close within TOO_CLOSE, or while the claw would swipe it (close_to: by half its width,
     `halves`, as half_of)."""
@@ -322,9 +323,17 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
              or [g for g in [_clear_from(platform, x, y, target, lo, hi)] if g is not None])
     if not goals:
         return ("skip", "behind a wall of her platform's foothold group")
-    # Of those, where no monster the attack takes first has its star stopped, if there's one: monsters move.
-    goals = [g for g in goals if reach.shielded(platform, g, y, target, around) is None] or goals
+    # Of those, where no monster the attack takes first has its star stopped, if there's one; else one at least
+    # MIN_MOVE off, as monsters move. Already at one so shielded (she'd tap back and forth on the spot until the
+    # kill's patience ran out), the target is out of reach from here for now.
+    clear = [g for g in goals if reach.shielded(platform, g, y, target, around) is None]
+    goals = clear or [g for g in goals if abs(g - x) >= MIN_MOVE]
+    if not goals:
+        return ("skip", "behind a monster whose star is stopped")
     goal = min(goals, key=lambda g: abs(g - x))
+    if abs(goal - x) < 1:
+        # At the spot already (her platform's end keeps her from a nearer one): the star gets there from here.
+        return ("throw", directions.toward(dx))
     direction = RIGHT if goal > x else LEFT
     # A monster on her platform in the way gets shot first.
     ahead = [t for t in threats if 0 < (t.x - x) * directions.sign(direction) < abs(goal - x) + TOO_CLOSE]

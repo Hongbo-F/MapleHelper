@@ -163,11 +163,12 @@ def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_mons
 
 def test_the_claw_takes_what_its_stance_reaches_on_her_level_or_off_it():
     # No gate for her level: a body that reaches 15-30 above her feet is in the boxes (a pig 20 below her, its
-    # top 26 above her feet), one 40 or more off isn't (an Orange Mushroom 42 below, its top 13 up; a pig 42
-    # above, its feet over the boxes' tops). The boxes differ only in slivers: a snail within a unit of her
+    # top 26 above her feet; an Orange Mushroom 40 below, its top 15 up, just), one that doesn't isn't (an
+    # Orange Mushroom 42 below, its top 13 up; a pig 42 above, its feet over the boxes' tops). The boxes differ only in slivers: a snail within a unit of her
     # middle is in stabO2's alone (it starts 12 ahead of her, stabO1's 20), so half the attacks swipe it.
     assert reach.claw_chance(60, 20, 46, 34) == 1
     assert reach.claw_chance(60, 42, 55, 32) == 0 and reach.claw_chance(30, -42, 46, 34) == 0
+    assert reach.claw_chance(50, 40, 55, 32) == 0.5 and reach.claw_chance(50, 41, 55, 32) == 0
     assert reach.claw_chance(0.5, 0, 26, 19) == 0.5 and reach.claw_chance(1.5, 0, 26, 19) == 1
     assert reach.claw_dx(0) == 99 and reach.claw_dx(0, 26, 19) == 84
     assert reach.claw_dx(60) == reach.claw_dx(-42) == 0
@@ -190,19 +191,24 @@ def test_the_star_search_opens_one_in_four():
     # feet, from 80 to 150 ahead (bands 0-4), it's under band 2's top (54), not band 1's (49).
     assert reach.search_band(80, 150, 50, 90) == 2
     assert reach.search_band(10, 60, 0, 40) is None and reach.search_band(405, 440, 0, 40) is None
+    # Overlap is strict, as the client's (in_step): a body whose far side is right at band 4's near edge (145)
+    # isn't in it, nor one whose near side is at 400 in the last band.
+    assert reach.search_band(77, 145, 60, 106) is None and reach.search_band(77, 145.5, 60, 106) == 4
+    assert reach.search_band(20, 65, 12, 40) is None and reach.search_band(400, 430, 0, 40) is None
+    assert reach.search_band(399.5, 430, 0, 40) == 16
 
 
 def test_min_dx_is_where_the_search_first_picks_a_body():
     # The closed form against the search itself, every half unit sideways, for each kind's body (and a pig
-    # flinching): from min_dx out to max_dx, its near side within 400.
+    # flinching): from just past min_dx out to just short of max_dx, its near side within 400 (overlap is strict).
     for dy in (-120, -60, -42, -20, 0, 20, 42, 60, 120):
         for top, half in ((26, 18.5), (41, 28.5), (46, 34.5), (55, 32), (54, 34)):
             picked = [a / 2 for a in range(0, 1000) if reach.picks(a / 2, dy, top, half)]
             if not picked:
                 assert reach.min_dx(dy, top, half) == math.inf, (dy, top)
                 continue
-            assert abs(picked[0] - reach.min_dx(dy, top, half)) <= 0.5, (dy, top)
-            assert picked[-1] == reach.max_dx(half), (dy, top)
+            assert reach.min_dx(dy, top, half) < picked[0] <= reach.min_dx(dy, top, half) + 0.5, (dy, top)
+            assert reach.max_dx(half) - 0.5 <= picked[-1] < reach.max_dx(half), (dy, top)
 
 
 def test_off_level_a_star_needs_more_room_the_smaller_the_monster():
@@ -692,6 +698,21 @@ def test_a_monster_the_attack_takes_first_whose_star_is_stopped_shields_those_be
     # Off (an in-game probe), as before.
     monkeypatch.setattr(reach, "WALLS_BLOCK", False)
     assert reach.can_hit(a, 10, 500, under, others=[up, under])
+
+
+def test_decide_never_walks_on_the_spot():
+    # From A at 25 (its left end's stand limit) at a pig on L at 190, 60 below, behind the pig up on B at 215
+    # that the search takes first (its star stopped by the step wall): every spot near enough to reach the
+    # one on L is shielded too, and she's at the nearest. She skips it; she used to "walk" 0 units, a tap back
+    # and forth on the spot for as long as the kill's patience lasted.
+    model, a, b, low = shield_map()
+    up, under = target(215, 440, platform=b.id), target(190, 560, platform=low.id)
+    assert reach.shielded(a, 25, 500, under, [up, under]) is up
+    assert decide(25, 500, a, under, [], around=[up, under]) == ("skip", "behind a monster whose star is stopped")
+    assert decide(25, 500, a, under, []) == ("throw", RIGHT)
+    # At her platform's end with a target 415 off (past SHOT_RANGE, within a star's reach): no nearer spot, so
+    # she throws from there.
+    assert decide(975, 500, PLAT, target(1390, 560, platform=1), []) == ("throw", RIGHT)
 
 
 def test_no_spot_on_platform_4_for_platform_2():
