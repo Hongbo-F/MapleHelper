@@ -404,6 +404,69 @@ def test_every_route_jump_takes_off_where_it_lands_with_the_most_room_nearby():
                 assert here is not None and there <= here, (m, dx)
 
 
+def test_a_rope_just_past_a_platforms_end_is_jumped_at_from_it():
+    """A platform E (380..480, y 240) hangs a rope 15 units past B's right end, its bottom 60 above B: a running
+    jump off B grabs it (a climb from B to E, taking off GRAB_LEAD before the rope). 45 units past the end it's out
+    of GRAB_PAST: no climb."""
+    from gamelab.motion import route
+    for past, found in ((15, True), (45, False)):
+        t = tree()
+        t["foothold"]["1"]["5"] = dict([seg(1, 5, 8, 380, 240, 480, 240)])
+        t["ladderRope"]["1"] = {"l": 0, "uf": 1, "x": 400 + past, "y1": 240, "y2": 300}
+        model = mapdata.parse(1, t, "Test Map", {})
+        b, e = by_y(model, 360, 300), by_y(model, 240, 420)
+        climbs = [m for m in route.moves(model) if (m.kind, m.src, m.dst) == ("climb", b.id, e.id)]
+        assert bool(climbs) == found
+        if found:
+            m, = climbs
+            assert m.rope_x == 400 + past and m.direction == "right"
+            assert m.x == pytest.approx(m.rope_x - route.GRAB_LEAD)
+
+
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_from_23_to_17_by_the_rope_past_its_end_or_two_rope_hops(monkeypatch):
+    """23 -> 17: a running jump off 23's right end at the rope hanging from 17 at x 1040, 11 units past it (taking off
+    at 999), or (the user's way) a jump at the rope under 17's block at 959, up it and off it to the right onto 1040,
+    held from between 959's top and 120 above 23 (from lower she comes down under 1040's bottom). The planner takes
+    the first; without the climb past the end, the hops."""
+    from gamelab.motion import route
+    from gamelab.sim import scenarios
+    model = scenarios.real_map()
+    moves = route.moves(model)
+    climb, = [m for m in moves if (m.kind, m.src, m.dst) == ("climb", 23, 17)]
+    assert climb.rope_x == 1040 and climb.x == pytest.approx(1040 - route.GRAB_LEAD)
+    hop, = [m for m in moves if (m.kind, m.src, m.dst) == ("rope_jump", 23, 17)]
+    assert hop.rope_x == 959 and hop.onto.x == 1040 and hop.direction == "right"
+    assert -240 + route.HANG_SLOP <= hop.hang <= -120 - route.HANG_SLOP
+    assert [m.kind for m in Planner(model).plan(23, 945, 17)] == ["climb"]
+    assert [m.kind for m in Planner(model).plan(23, 945, 17, penalty=lambda m: 9.0 if m.kind == "climb" else 0.0)] \
+        == ["rope_jump"]
+    monkeypatch.setattr(route, "ROPE_HOPS", False)
+    assert not [m for m in route.moves(model) if m.kind == "rope_jump" and m.onto is not None]
+
+
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_a_jump_off_a_rope_grabs_the_next_where_the_engines_flight_does():
+    """side_jump works out her arc off a rope where she passes another (no wall stops her off a rope): the rope and
+    the height she grabs it at are those of the engine's flight (route.grabbed, body.fly's path), from every height
+    on 959 to the right, and from 1040 to the left."""
+    from gamelab.motion import body, route
+    from gamelab.sim import scenarios
+    model = scenarios.real_map()
+    for x, sign in ((959, 1), (1040, -1)):
+        rope = next(r for r in model.ropes if r.x == x)
+        for y in range(int(rope.top), int(rope.bottom) + 1, 10):
+            mine = route.side_jump(model, rope, y, sign)
+            engine = route.grabbed(model, rope.x, y, sign * route.ROPE_VX, -route.ROPE_VY, body.ROPE_GROUP,
+                                   leaving=rope)
+            if engine is None:
+                assert mine is None or mine[0] == "land"
+            else:
+                assert mine[0] == "rope" and mine[1] is engine[0] and mine[2] == pytest.approx(engine[1], abs=0.5)
+
+
 def test_a_landing_is_worked_out_from_the_rounded_start_so_the_cache_never_changes_it(model, monkeypatch):
     from collections import OrderedDict
     from gamelab.motion import physics

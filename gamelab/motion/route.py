@@ -1,8 +1,10 @@
 """Routes across a map: which moves link which platforms, and the quickest way from here to there.
 
 Moves between platforms (all in map units, using the game's physics and her measured speed):
-- climb: a rope or ladder whose bottom she can reach from a platform, up to the platform it hangs from;
+- climb: a rope or ladder whose bottom she can reach from a platform (or, jumping at it, just past its end), up to
+  the platform it hangs from;
 - climb_down: from a rope's top down to its bottom, falling onto what's below;
+- rope_jump: onto a rope, up or down it, and off it sideways: onto a platform, or onto another rope and up it;
 - jump_up: straight up through a platform overhead (floating platforms can be jumped through from below);
 - jump: a running jump off one platform's end onto another (up, level or down);
 - walk_off: walk off a platform's end and fall onto the platform below;
@@ -19,10 +21,11 @@ from dataclasses import dataclass
 from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
-from ..localization.mapdata import MapModel, Platform
+from ..localization.mapdata import MapModel, Platform, Rope
+from . import body
 from .body import slide, walls_for
-from .physics import (CLIMB_SPEED, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH, SHOE, WALK_SPEED,
-                      fall_time, flight, fly, sure_landing)
+from .physics import (CLIMB_SPEED, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH, SHOE,
+                      SLOW_TAKEOFF, WALK_SPEED, fall_time, flight, fly, sure_landing)
 
 
 JUMP_MARGIN = 12         # don't plan jumps that need the last few units of height
@@ -61,6 +64,40 @@ NEEDLESS_DROP = 10       # a running jump down more than this, where walking off
 ROPE_TOP_DX = 4
 ROPE_TOP_DY = 20
 ROPE_PAST = 5
+# Ropes in mid-air. With up held she grabs a rope she passes within GRAB_X of while her feet are between its top and
+# ROPE_ARMS below its bottom (the simulator's world.GRAB_X and ARMS: ROPE_REACH less a jump's height; the two climbs
+# from the basin up the rope ending 69 above it, on 2026-10-20 and 21, caught it at the top of her jump), but not
+# within REGRAB_S of leaving a rope (world.REGRAB_AFTER: not measured). Off a rope, the jump key with an arrow held
+# jumps her off sideways at the decompile's rope jump (body.Shoe.rope_vx, rope_vy: 1.3 x her walking speed out, 194
+# units/s, and half a jump's speed up, 277; the minimap's one traced rope jump, 178 +- 18 out and 16-20 up, agrees
+# weakly), in no foothold group (no wall stops her: body.ROPE_GROUP).
+GRAB_X = 10.0
+ROPE_ARMS = ROPE_REACH - JUMP_HEIGHT
+REGRAB_S = 0.3
+ROPE_VX = SHOE.rope_vx * SHOE.vmax
+ROPE_VY = SHOE.rope_vy * SHOE.vjump
+GRAB_LEAD = WALK_SPEED * JUMP_SPEED / GRAVITY  # 41: a jump at a rope leaves this far before it (flow.GRAB_LEAD,
+                                               # mover.grab_lead), to be at the top of the jump over it
+# A rope this far past a platform's end or nearer (and its bottom in reach) is jumped at from it: 1040's, 11 past
+# 23's right end, up to 17. She has to grab it with her feet at its bottom or above (SURE_GRAB_REACH) taking off
+# on time, which a client that wants her feet on the rope would allow too, and by ROPE_ARMS taking off TAKEOFF_SLOP
+# early or late, 10% slower or as slow as physics.SLOW_TAKEOFF. Off 23 the takeoffs that catch it are 966-1026 by
+# ROPE_ARMS, 986-1014 with her feet on it; she takes off at 999.
+GRAB_PAST = 30
+SURE_GRAB_REACH = 0.0
+# Jumps off a rope sideways (rope_jump), on the user's word (2026-10-21: "It also never went to platform 17 via two
+# rope hops from platform 23"): onto a platform (ROPE_JUMPS), and onto another rope and up it (ROPE_HOPS, which also
+# takes her grabbing a rope 0.37 s after leaving one: REGRAB_S). Neither is measured in game (README: Found offline,
+# Ropes in mid-air, has what to check).
+ROPE_JUMPS = True
+ROPE_HOPS = True
+HANG_STEP = 5        # units between the heights on a rope a jump off it is tried from ...
+HANG_SLOP = 15       # ... and it has to end the same from this much higher or lower on it (her dot's ~11 units) ...
+HANG_TOP_ROOM = 25   # ... and not so near the top of a rope hanging from a platform that she'd climb onto it
+ROPE_SPEEDS = ((1.0, 1.0), (0.9, 1.0), (1.1, 1.0), (1.0, 0.9))  # ... and at these shares of its speeds, out and up
+ROPE_JUMP_SLIDE = slide(ROPE_VX, SHOE)  # 23.5: she lands from it faster than she walks, and slides this far
+ROPE_LOOK_S = 0.6    # a rope jump's look on the rope before it jumps off (the mover does it closed loop)
+LINE_UP_S = 0.5      # lining up on a rope's top to go down it
 # Seconds each kind of move costs on top of its simulated flight, climb or fall.
 CLIMB_EXTRA_S = 0.6
 JUMP_EXTRA_S = 0.2
@@ -69,7 +106,7 @@ DROP_EXTRA_S = 0.4
 # Seconds added to a move's cost for how often it goes wrong (a miss costs ~2-3 s to recover from).
 # Moving one move at a time, running jumps missed often and this was 1.5 s; chained (flow.py) about
 # one move in 15 lands elsewhere, mostly drops and straight-up jumps timed off.
-RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25}
+RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25, "rope_jump": 0.5}  # (rope_jump's: a guess, not measured)
 # Where she drops: down on a rope's top climbs onto the rope, and on a foothold that forbids it (forbidFallDown)
 # the drop does nothing. So not within ROPE_CLEAR of the top of a rope hanging from her platform, nor within
 # DROP_ROOM of a foothold that forbids it: where she stands to drop is good to about that (flow.STEP_ACCEPT,
@@ -89,6 +126,11 @@ ALONG_STEP = 10      # running jumps are tried from every this many units along 
 ALONG_SPREAD = 60    # ... and kept this far apart ...
 ALONG_KEEP = 3       # ... up to this many (plus the last) per landing platform
 TIMES_KEPT = 256     # Planner.times: starts whose route times to every platform are kept (a few KB each)
+# A trip to shoot a hunting ground from a spot off it keeps off the ground itself (`keep_off`): each move onto it
+# costs this much more. Since the rope past 23's end leads up onto 17, the quickest way from the basin to 17's spot
+# on 14 climbs into the middle of 17's monsters; in loop_spot_off_ground the transit's fights there and their knocks
+# (off onto 35, twice) kept her from the spot until its 60 s ran out.
+KEEP_OFF_S = 8.0
 
 SIDES = tuple((d, directions.sign(d)) for d in (RIGHT, LEFT))  # a direction and its sign along x
 
@@ -97,7 +139,7 @@ SIDES = tuple((d, directions.sign(d)) for d in (RIGHT, LEFT))  # a direction and
 class Move:
     """One move from platform src to platform dst. flow adds 'hop' (a running jump over a monster,
     landing on the same platform) to the kinds below."""
-    kind: str            # climb | climb_down | jump_up | jump | walk_off | drop
+    kind: str            # climb | climb_down | jump_up | jump | walk_off | drop | rope_jump
     src: int             # platform ids
     dst: int
     x: float             # where on src she starts the move
@@ -108,6 +150,8 @@ class Move:
     rope_top: float | None = None
     rope_bottom: float | None = None
     takeoff: float | None = None  # running jumps from along a platform: where she leaves the ground
+    hang: float | None = None     # rope_jump: the height (her feet's map y) she jumps off the rope from ...
+    onto: Rope | None = None      # ... and the rope she jumps onto (None: a platform, dst)
 
 
 def moves(model: MapModel) -> list[Move]:
@@ -118,7 +162,7 @@ def moves(model: MapModel) -> list[Move]:
     for a in model.platforms:
         mine = _jump_up_moves(model, a) + _end_moves(model, a) + _along_jumps(model, a)
         out += _without_needless_jumps(model, a, _distinct(mine)) + _drop_moves(model, a)
-    return out
+    return out + _rope_jumps(model, out)
 
 
 def _distinct(mine: list[Move]) -> list[Move]:
@@ -135,20 +179,26 @@ def _distinct(mine: list[Move]) -> list[Move]:
 
 
 def _rope_moves(model: MapModel) -> list[Move]:
-    """Climbing each rope from every platform she can grab it from, and climbing down it."""
+    """Climbing each rope from every platform she can grab it from (jumping at it past a platform's end too), and
+    climbing down it."""
     out: list[Move] = []
     for rope in model.ropes:
-        top = next((p for p in model.platforms
-                    if p.covers(rope.x, ROPE_TOP_DX) and abs(p.y_at(rope.x) - rope.top) <= ROPE_TOP_DY), None)
+        top = hung_from(model, rope)
         if top is None:
             continue
         for p in model.platforms:
-            if not p.covers(rope.x) or p is top:
+            if p is top:
                 continue
-            gap = p.y_at(rope.x) - rope.bottom  # how far the rope ends above her feet
-            if -ROPE_PAST <= gap <= ROPE_REACH:
-                out.append(Move("climb", p.id, top.id, rope.x, rope.x,
-                                seconds=CLIMB_EXTRA_S + (p.y_at(rope.x) - rope.top) / CLIMB_SPEED,
+            if p.covers(rope.x):
+                gap = p.y_at(rope.x) - rope.bottom  # how far the rope ends above her feet
+                if -ROPE_PAST <= gap <= ROPE_REACH:
+                    out.append(Move("climb", p.id, top.id, rope.x, rope.x,
+                                    seconds=CLIMB_EXTRA_S + (p.y_at(rope.x) - rope.top) / CLIMB_SPEED,
+                                    rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom))
+            elif (past := _past_end(model, p, rope)) is not None:
+                takeoff, sign, _ = past
+                out.append(Move("climb", p.id, top.id, takeoff, rope.x, directions.toward(sign),
+                                seconds=CLIMB_EXTRA_S + (p.y_at(takeoff) - rope.top) / CLIMB_SPEED,
                                 rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom))
         below = model.platform_below(rope.x, rope.bottom)
         if below is not None:
@@ -269,6 +319,175 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
         land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a, group=a.group)
         if land is b:
             out.append(Move("drop", a.id, b.id, x, land_x, seconds=DROP_EXTRA_S + t))
+    return out
+
+
+def hung_from(model: MapModel, rope: Rope) -> Platform | None:
+    """The platform a rope hangs from (its top within ROPE_TOP_DX sideways and ROPE_TOP_DY up or down of it), if
+    any: the one she climbs onto at its top, if the rope lets her (Rope.from_platform)."""
+    return next((p for p in model.platforms
+                 if p.covers(rope.x, ROPE_TOP_DX) and abs(p.y_at(rope.x) - rope.top) <= ROPE_TOP_DY), None)
+
+
+def grabbed(model: MapModel, x: float, y: float, vx: float, vy: float, group, reach: float = ROPE_ARMS,
+            leaving: Rope | None = None) -> tuple[Rope, float, float] | None:
+    """The rope she grabs with up held flying from (x, y) at (vx, vy), the arrow held the way she goes, with the
+    walls of foothold `group` (body.fly's flight); her feet's y and the time then: the first she passes within GRAB_X
+    of with her feet between its top and `reach` below its bottom (not the one she's `leaving`, nor any within
+    REGRAB_S of leaving it). None if she lands first. Not cached (it isn't asked often)."""
+    f = body.fly(model, x, y, vx, vy, shoe=SHOE, arrow=(vx > 0) - (vx < 0),
+                 walls=body.vertical_walls(walls_for(model, group)), path=True)
+    after = REGRAB_S if leaving is not None else 0.0
+    for i, (px, py) in enumerate(f.path):
+        if i * body.TICK < after - 1e-9:
+            continue
+        for r in model.ropes:
+            if r is not leaving and abs(px - r.x) <= GRAB_X and r.top <= py <= r.bottom + reach:
+                return r, py, i * body.TICK
+    return None
+
+
+def _past_end(model: MapModel, p: Platform, rope: Rope) -> tuple[float, int, float] | None:
+    """A running jump off p's end at a rope GRAB_PAST past it at most, its bottom in reach: (where she takes off,
+    GRAB_LEAD before it; which way; her feet's y as she grabs it), if she surely grabs it (GRAB_PAST, above)."""
+    for sign, edge in ((1, p.right), (-1, p.left)):
+        if not 0 < (rope.x - edge) * sign <= GRAB_PAST or not -ROPE_PAST <= p.y_at(edge) - rope.bottom <= ROPE_REACH:
+            continue
+        takeoff = rope.x - sign * GRAB_LEAD
+        if not p.covers(takeoff) or (edge - takeoff) * sign < TAKEOFF_SLOP:
+            continue
+
+        def grab(x: float, k: float = 1.0, reach: float = ROPE_ARMS) -> tuple | None:
+            g = grabbed(model, x, p.y_at(x), sign * WALK_SPEED * k, -JUMP_SPEED, p.group, reach)
+            return g if g is not None and g[0] is rope else None
+        on_time = grab(takeoff, reach=SURE_GRAB_REACH)
+        if on_time and all(grab(takeoff + o) for o in (-TAKEOFF_SLOP, TAKEOFF_SLOP)) \
+                and grab(takeoff, 0.9) and grab(takeoff, SLOW_TAKEOFF):
+            return takeoff, sign, on_time[1]
+    return None
+
+
+def grab_height(floor_y: float, rope: Rope) -> float:
+    """Where her feet are on a rope she has jumped at from a floor at floor_y, as a climb's jump has her: over it at
+    the top of the jump, so about there, or at its bottom if that's lower (she's caught on the way up)."""
+    return max(rope.top, min(rope.bottom, floor_y - JUMP_HEIGHT + 5))
+
+
+def _rise(y: float, vy: float, t: float) -> float:
+    """Her feet's y t s after leaving y at vertical speed vy (y down) in the air: gravity up to the fall cap."""
+    cap = (FALL_SPEED - vy) / GRAVITY
+    if t <= cap:
+        return y + vy * t + GRAVITY * t * t / 2
+    return y + vy * cap + GRAVITY * cap * cap / 2 + FALL_SPEED * (t - cap)
+
+
+def side_jump(model: MapModel, rope: Rope, y: float, sign: int, kx: float = 1.0, ky: float = 1.0,
+              grab: bool = True) -> tuple | None:
+    """Where a jump off `rope` at height y (her feet) that way takes her, at kx and ky times the rope jump's speeds
+    out and up: ('rope', the rope she grabs, her feet's y on it, s after leaving), with up held (`grab`), or ('land',
+    the platform, x, s). None if nowhere. In no foothold group nothing stops her sideways, and the arrow held does
+    nothing at that speed: her arc is worked out (_rise) where she passes a rope, at the engine's steps."""
+    vx, vy = sign * ROPE_VX * kx, -ROPE_VY * ky
+    land, lx, t_land = fly(model, rope.x, y, vx, vy, group=body.ROPE_GROUP)
+    if grab:
+        first = None
+        step = abs(vx) * body.TICK
+        for r in model.ropes:
+            off = (r.x - rope.x) * sign
+            if r is rope or off <= 0:
+                continue
+            for i in range(max(math.ceil((off - GRAB_X) / step), math.ceil(REGRAB_S / body.TICK - 1e-9), 1),
+                           math.floor((off + GRAB_X) / step) + 1):
+                t = i * body.TICK
+                if land is not None and t >= t_land:
+                    break
+                py = _rise(y, vy, t)
+                if r.top <= py <= r.bottom + ROPE_ARMS:
+                    if first is None or t < first[3]:
+                        first = ("rope", r, py, t)
+                    break
+        if first is not None:
+            return first
+    return None if land is None else ("land", land, lx, t_land)
+
+
+def _side_jumps(model: MapModel, rope: Rope, sign: int) -> list[tuple]:
+    """The sure jumps off `rope` that way: (where to, the height she jumps from, x there, s in the air, the rope she
+    grabs or None, her feet's y on it). Where to: the platform she lands on (ROPE_JUMPS), with room to slide to a stop
+    on it, or (ROPE_HOPS) the platform the rope she grabs hangs from. Tried from every HANG_STEP up the rope (but the
+    HANG_TOP_ROOM under the top of a rope she'd climb onto a platform from); each has to end the same HANG_SLOP higher
+    or lower and at ROPE_SPEEDS' shares of the jump's speeds, and is jumped from the middle of the heights that do."""
+    def end(y: float, kx: float = 1.0, ky: float = 1.0, grab: bool = True) -> tuple | None:
+        got = side_jump(model, rope, min(max(y, rope.top), rope.bottom), sign, kx, ky, grab)
+        if got is None:
+            return None
+        if got[0] == "rope":
+            return ("rope", got[1]) if hung_from(model, got[1]) is not None and got[1].from_platform else None
+        q, lx = got[1], got[2]
+        roomy = q.covers(lx - sign * LANDING_ROOM) and q.covers(lx + sign * (ROPE_JUMP_SLIDE + LANDING_ROOM))
+        return ("land", q.id) if roomy else None  # (by id: a Platform isn't hashable)
+
+    out = []
+    highest = rope.top + (HANG_TOP_ROOM if hung_from(model, rope) is not None and rope.from_platform else 0)
+    for grab, kind in ((True, "rope"), (False, "land")):
+        if not (ROPE_HOPS if grab else ROPE_JUMPS):
+            continue
+        by_end: dict[tuple, list[int]] = {}
+        for y in range(math.ceil(highest), math.floor(rope.bottom) + 1, HANG_STEP):
+            e = end(y, grab=grab)
+            if e is not None and e[0] == kind and all(end(y + dy, kx, ky, grab) == e
+                                                      for dy in (-HANG_SLOP, 0, HANG_SLOP) for kx, ky in ROPE_SPEEDS):
+                by_end.setdefault(e, []).append(y)
+        for e, ys in by_end.items():
+            y = ys[len(ys) // 2]
+            got = side_jump(model, rope, y, sign, grab=grab)
+            if kind == "rope":
+                out.append((hung_from(model, e[1]), y, e[1].x, got[3], e[1], got[2]))
+            else:
+                out.append((model.platform(e[1]), y, got[2], got[3], None, None))
+    return out
+
+
+def _rope_jumps(model: MapModel, others: list[Move]) -> list[Move]:
+    """The rope_jump moves: from each platform she gets onto a rope from (below it, as a climb does, jumping at it
+    past an end, or from its top, going down it), up or down it and off it sideways (_side_jumps). Not to where she
+    started, nor to the platform the rope hangs from (that's a climb), nor, off onto a platform, where one of the
+    `others` (the map's other moves) goes quicker: down to where a drop or a walk-off gets her (of 24 on this map
+    before that, 19). A hop onto another rope is kept even so: 23 -> 959 -> 1040 -> 17 is 0.8 s slower than jumping
+    at 1040 off 23's end, and the way round when a monster stands there."""
+    if not (ROPE_JUMPS or ROPE_HOPS):
+        return []
+    quickest: dict[tuple[int, int], float] = {}
+    for m in others:
+        key = (m.src, m.dst)
+        quickest[key] = min(quickest.get(key, math.inf), m.seconds + RISK.get(m.kind, 0.0))
+    out: list[Move] = []
+    for rope in model.ropes:
+        top = hung_from(model, rope)
+        ways = []  # (platform, where she starts, seconds before she's on the rope, her feet's y then)
+        for p in model.platforms:
+            if p is top:
+                continue
+            if p.covers(rope.x):
+                if -ROPE_PAST <= p.y_at(rope.x) - rope.bottom <= ROPE_REACH:
+                    ways.append((p, rope.x, 0.0, grab_height(p.y_at(rope.x), rope)))
+            elif (past := _past_end(model, p, rope)) is not None:
+                ways.append((p, past[0], GRAB_LEAD / WALK_SPEED, past[2]))
+        if top is not None:
+            ways.append((top, rope.x, LINE_UP_S, rope.top))
+        if not ways:
+            continue
+        for sign in (1, -1):
+            for dst, hang, land_x, t, onto, onto_y in _side_jumps(model, rope, sign):
+                up_it = 0.0 if onto is None else CLIMB_EXTRA_S + (onto_y - onto.top) / CLIMB_SPEED
+                for p, x, on, y_on in ways:
+                    if dst is p or dst is top:
+                        continue
+                    seconds = on + JUMP_EXTRA_S + abs(y_on - hang) / CLIMB_SPEED + ROPE_LOOK_S + t + up_it
+                    if onto is None and seconds + RISK["rope_jump"] >= quickest.get((p.id, dst.id), math.inf):
+                        continue
+                    out.append(Move("rope_jump", p.id, dst.id, x, land_x, directions.toward(sign), seconds=seconds,
+                                    rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom, hang=hang, onto=onto))
     return out
 
 
@@ -396,8 +615,12 @@ class Planner:
         found = self._search(src, x, dst, penalty, weight)
         return None if found is None else found[0]
 
-    def travel(self, src: int, x: float, dst: int) -> float | None:
-        """Seconds the quickest route from (platform src, x) to platform dst takes (by the model)."""
+    def travel(self, src: int, x: float, dst: int, keep_off=()) -> float | None:
+        """Seconds the quickest route from (platform src, x) to platform dst takes (by the model); keeping off the
+        platforms `keep_off` (but dst), KEEP_OFF_S more for each move onto one (a search of its own: not kept)."""
+        if keep_off:
+            found = self._search(src, x, dst, keeping_off(keep_off, dst), None)
+            return None if found is None else found[1]
         return self.times(src, x).get(dst)
 
     def times(self, src: int, x: float) -> dict[int, float]:
@@ -512,6 +735,12 @@ class Planner:
                     seen.add(m.dst)
                     todo.append(m.dst)
         return seen
+
+
+def keeping_off(platforms, dst: int) -> Callable[[Move], float]:
+    """A route penalty (Planner.plan's) of KEEP_OFF_S for each move onto one of `platforms`, but dst."""
+    off = frozenset(platforms) - {dst}
+    return lambda m: KEEP_OFF_S if m.dst in off else 0.0
 
 
 def route_record(dst: int, moves: list[Move]) -> dict:

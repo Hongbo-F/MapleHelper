@@ -35,7 +35,7 @@ from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..motion.flow import Body, Flow, Leg, Span, chain_record, ms
 from ..motion.physics import WALK_SPEED
-from ..motion.route import Move, Planner, route_record
+from ..motion.route import Move, Planner, keeping_off, route_record
 from . import client
 from .actions import Actions
 from .mover import Mover, platform_text
@@ -175,6 +175,8 @@ class TripState:
     quick: bool = False  # just cut short: replan from a fast look with the monsters already seen
     fresh: Scene | None = None  # a look taken for the next pass already (after a chain, or the caller's)
     last: Scene | None = None   # the last pass's look (the one `until` said 'in position' to, if it did)
+    keep_off: frozenset = frozenset()  # platforms its routes go onto only at a cost (route.KEEP_OFF_S): the hunting
+                                       # ground a spot it goes to shoots
 
     def end(self, result: str) -> Trip:
         """The trip, over: `result` says how it ended."""
@@ -219,27 +221,29 @@ class Navigator:
 
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-           scene: Scene | None = None) -> Trip:
+           scene: Scene | None = None, keep_off=()) -> Trip:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
         with a look that includes monsters (late in the chain before, when it follows on from that one):
         True ends the trip early ('in position'). `mode` (AVOID, HUNT or TRANSIT; the navigator's own by
         default) says how the trip treats monsters. `scene`: the caller's last look, used for the first
-        pass instead of a new one if it's fresh (no keys sent since)."""
-        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene)
+        pass instead of a new one if it's fresh (no keys sent since). `keep_off`: platforms its routes go onto
+        only at a cost (TripState.keep_off)."""
+        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off)
         while not st.over:
             self.step(st)
         return st.trip
 
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-              scene: Scene | None = None) -> TripState:
+              scene: Scene | None = None, keep_off=()) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time."""
         mode = mode or self.mode
         if mode not in MODES or (mode in FIGHTING and self.escort is None):
             raise ValueError(f"no {mode!r} trip without an escort" if mode in MODES else f"unknown mode {mode!r}")
         # Transit: low HP is why she's going (to rest), so potions only.
         health = self.potions if mode in (TRANSIT, TRANSIT_AVOID) else self.health
-        st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode)
+        st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode,
+                       keep_off=frozenset(keep_off))
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -363,11 +367,17 @@ class Navigator:
         if there is one."""
         now = time.monotonic()
         st.avoid = {key: t for key, t in st.avoid.items() if now - t < AVOID_MEMORY_S}
-        path = self.planner.plan(s.where.platform.id, s.where.x, dst, weight=self.weight,
-                                 penalty=lambda m: AVOID_SECONDS if _key(m) in st.avoid else 0.0)
+        path = self.planner.plan(s.where.platform.id, s.where.x, dst, weight=self.weight, penalty=self._penalty(st))
         if path and telemetry.recording():
             telemetry.emit("route", **route_record(dst, path))
         return path, now
+
+    @staticmethod
+    def _penalty(st: TripState) -> Callable[[Move], float]:
+        """The trip's route penalty: AVOID_SECONDS for a move a monster was in the way of lately (st.avoid), and
+        route.KEEP_OFF_S for one onto a platform it keeps off (st.keep_off)."""
+        off = keeping_off(st.keep_off, st.dst)
+        return lambda m: (AVOID_SECONDS if _key(m) in st.avoid else 0.0) + off(m)
 
     def _clear_the_way(self, st: TripState, s: Scene, x: float) -> bool:
         """With an escort: shoot a monster on her platform in her way to map x (where the route's first move
@@ -773,8 +783,7 @@ class Navigator:
                               f"{time.monotonic() - starts:+.3f} s from the plan's end)")
         # Where she'll be when the running plan ends: running on with the arrow held, or standing.
         x = min(max(s.where.x + end.run * WALK_SPEED * max(0.0, starts - s.t), p.left), p.right)
-        path = self.planner.plan(p.id, x, dst, weight=self.weight,
-                                 penalty=lambda m: AVOID_SECONDS if _key(m) in st.avoid else 0.0)
+        path = self.planner.plan(p.id, x, dst, weight=self.weight, penalty=self._penalty(st))
         if not path:
             return None
         here = replace(ahead.scene, where=replace(ahead.scene.where, x=x, y=p.y_at(x)))

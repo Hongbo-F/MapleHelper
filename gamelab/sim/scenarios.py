@@ -423,11 +423,39 @@ def nav_rope_then_jump_up(sim):
     return _nav(0, x=1250)(sim)
 
 
+@scenario((23, 900.0), expects=(ends("arrived"), moves("climb"),
+                                check("one climb, chained",
+                                      lambda tr: _result(tr, "moves") == ["climb 23->17: landed on 17"])))
+def nav_rope_past_end(sim):
+    """From 23 up to 17: a running jump off 23's right end at the rope hanging from 17 at x 1040, 11 units past it,
+    and up it (a climb past a platform's end, route._past_end), chained by flow as any climb. Before, 17 was 15 moves
+    away by the map's left side (23 -> 25 -> 32 -> 29 ... 18 -> 16 -> 14 -> 17)."""
+    return _nav(17)(sim)
+
+
+@scenario((36, 500.0), expects=(ends("arrived"), moves("climb", "jump"),
+                                check("up the right side, by 23", lambda tr: any(m.startswith("climb 23->17")
+                                                                                 for m in _result(tr, "moves")))))
+def nav_basin_up_right_side(sim):
+    """From the basin floor up to 3 (the spot for 4, the hunt loop's most made trip on 2026-10-21, 30 times): two
+    ropes up to 25, a jump onto 23, the rope past its end up to 17, a jump onto 14 and two ropes on. By the map's
+    left side, the only way up before, the simulator took 21.3 s; this way 17.6."""
+    return _nav(3)(sim)
+
+
 @scenario((30, 795.0), hanging=180.0, expects=(ends("arrived"), logs("on a rope at x"), sends("off_rope")))
 def nav_off_rope_jump(sim):
     """Hanging halfway up the rope from 30 to 25: no platform under her dot, so she jumps off it sideways
     (towards the side a fall lands on a platform), then goes on to 36."""
     return _nav(36, x=500)(sim)
+
+
+@scenario((23, 959.0), hanging=-230.0, expects=(ends("arrived"), sends("off_rope")))
+def nav_off_rope_no_top(sim):
+    """Hanging near the top of the rope under 17's block (x 959), which takes her onto no platform: she climbs down it
+    and lets go at its bottom, onto 23 (holding up there did nothing, and the trip ended 'lost: not on any platform'),
+    then goes on up to 17."""
+    return _nav(17)(sim)
 
 
 @scenario((30, 795.0), hanging=80.0, expects=(ends("arrived"), sends("off_rope")))
@@ -496,7 +524,9 @@ def nav_monsters_staircase(sim):
     around or hop; over 16 seeds 15 arrive, 1 meeting all of this; 16 and 2 just before. On the play track,
     before the steps, seed 10 since the route's jumps take off where they land with room, 15 units from the end
     up the staircase, not 33-45 (route._placed): on seed 5 no monster was in her way to hop or go around there;
-    over 24 seeds all arrived, 2 meeting all of this, 10 and 18.)"""
+    over 24 seeds all arrived, 2 meeting all of this, 10 and 18. Then seed 18 there since the rope moves
+    (route._past_end, _rope_jumps): the random weights are drawn in another order, and on seed 10 no monster was
+    in her way to hop; over 24 seeds all arrived, 1 meeting all of this.)"""
     return _nav(19)(sim)
 
 
@@ -528,7 +558,9 @@ def nav_monsters_long_way(sim):
     knocked down the gap beside platform 3 to the basin and ended "lost: not on any platform" before the
     navigator waited out a long fall too: navigator.FALL_LOOKS. On the play track, before the steps, seed 3
     since the route's jumps take off where they land with room (route._placed): on seed 12 nothing stood in her
-    way to wait for there; over 24 seeds all arrived, 2 of them after a wait, 3 and 13.)"""
+    way to wait for there; over 24 seeds all arrived, 2 of them after a wait, 3 and 13. Then seed 12 again
+    there since the rope moves (route._past_end, _rope_jumps), which draw the random weights in another order:
+    on seed 3 nothing stood in her way; over 24 seeds all arrived, 2 of them after a wait, 12 and 13.)"""
     return _nav(2)(sim)
 
 
@@ -793,6 +825,16 @@ def move_walk_off_through_wall(sim):
 def move_drop(sim):
     """Mover.do: walk to the spot and drop through 2 onto 12."""
     return _one_move(sim, "drop", 2, 12)
+
+
+@scenario((23, 900.0), expects=(ends(17, key="landed"), sends("climb"), sends("rope_jump"),
+                                happens("grabs the rope at x 1040", "the second rope grabbed in the air")))
+def move_rope_hops(sim):
+    """Mover.do: from 23 up to 17 by two rope hops (the user's way, 2026-10-21): a jump at the rope hanging under 17's
+    block at x 959 (its bottom 58 above 23), up it to where a jump off it reaches the next (route.side_jump), a look
+    there, then off it to the right at the rope jump's speeds (1.3 x 149 out, half a jump's up), holding up: she
+    grabs the rope at 1040, 81 units on, 0.37 s later, and climbs it onto 17."""
+    return _one_move(sim, "rope_jump", 23, 17)
 
 
 # Fighting and looting.

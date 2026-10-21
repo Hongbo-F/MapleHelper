@@ -161,12 +161,17 @@ class Tour:
     def spot(self, pid: int, on_it: bool = False) -> Spot:
         """Where to shoot platform `pid` from (attack.spots.spot), from where she is now."""
         here = self.nav.mover.locate().where
-        return spots.spot(self.nav.model, pid, here, self.nav.planner.travel, self.worth, on_it)
+        return spots.spot(self.nav.model, pid, here, self._travel_off(pid), self.worth, on_it)
 
     def spot_for(self, pid: int, left: list[Monster], current: Spot) -> Spot | None:
         """A spot that reaches more of the monsters `left` on `pid` (attack.spots.spot_for)."""
         here = self.nav.mover.locate().where
-        return spots.spot_for(self.nav.model, pid, left, current, here, self.nav.planner.travel, self.worth)
+        return spots.spot_for(self.nav.model, pid, left, current, here, self._travel_off(pid), self.worth)
+
+    def _travel_off(self, pid: int):
+        """The planner's route times keeping off platform `pid` (route.KEEP_OFF_S): to the spots off it it's shot
+        from, which a trip to one keeps off it for (_go_to_spot)."""
+        return lambda a, x, b: self.nav.planner.travel(a, x, b, keep_off=(pid,))
 
     # --- resting -------------------------------------------------------------------------------
 
@@ -280,7 +285,8 @@ class Tour:
         self.log(f"  shooting platform {st.pid} {how} {spot.platform} at x {spot.x:.0f} "
                  f"({spot.coverage:.0%} in reach)")
         trip = self.nav.go(spot.platform, x=spot.x, until=lambda s: self._in_reach(st, s),
-                           seconds=max(20, st.end - time.monotonic()))
+                           seconds=max(20, st.end - time.monotonic()),
+                           keep_off=(st.pid,) if spot.platform != st.pid else ())
         self.report.on_the_way += trip.kills
         if trip.result not in ("arrived", "in position"):
             st.total.stop = f"didn't get there: {trip.result}"

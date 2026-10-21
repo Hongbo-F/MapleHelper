@@ -517,6 +517,9 @@ def cmd_map(args) -> int:
 def cmd_nav(args) -> int:
     hunter = _hunter(args)
     nav = hunter.navigator(fighting=args.fight)
+    if args.avoid:  # those kinds of move cost 20 times as much: any other way wins
+        weight = nav.weight
+        nav.weight = lambda m: weight(m) * (20.0 if m.kind in args.avoid else 1.0)
     _record("nav", hunter.model.id)
     if not _to_game():
         return 1
@@ -1129,6 +1132,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--seconds", type=float, default=180)
     s.add_argument("--fight", action="store_true", help="shoot monsters on the way instead of avoiding them")
+    s.add_argument("--avoid", action="append", default=[], metavar="KIND",
+                   help="a kind of move (climb, rope_jump, jump, ...) the route takes only if nothing else gets there: "
+                        "from 23, `nav 17 --avoid climb` goes by the two rope hops")
     feed_arg(s)
     s.set_defaults(func=cmd_nav)
 

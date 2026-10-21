@@ -3,7 +3,8 @@
 Each move is a single plan from wherever she stands, the way a player does it: run towards the end
 and jump on the way (no stopping at a run-up spot first), run at a rope and jump onto it holding up
 (no lining up underneath first), walk and drop in one go. Only climbing down a rope still lines up
-first, since she has to stand on its top to grab it.
+first, since she has to stand on its top to grab it. A jump off a rope sideways (rope_jump) looks once
+she's on the rope, and puts her at the height it jumps from before it does.
 
 Her position comes from Senses.look (localization.pose.refine): a rope in view or the visible end of
 her platform when her name tag shows, else the minimap dot.
@@ -15,13 +16,13 @@ import time
 from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
-from ..localization.mapdata import MapModel, Platform
+from ..localization.mapdata import MapModel, Platform, Rope
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..motion.body import ROPE_GROUP
 from ..motion.flow import ARROW_LAG
 from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_LAG, JUMP_SPEED, ROPE_REACH, WALK_SPEED, fly, hold_ms, run_ms
-from ..motion.route import JUMP_FROM, Move, drop_clear, drop_spots
+from ..motion.route import JUMP_FROM, ROPE_TOP_DY, Move, drop_clear, drop_spots, grab_height, hung_from, side_jump
 from ..screen import SCALE, SCREEN_SCALE
 from .actions import WALK_PICK_AFTER_MS, Actions, tap
 
@@ -40,6 +41,14 @@ GRAB_MARGIN = 8           # grab with at least this much rope to spare
 MIN_RUN = 15              # map units ...
 RUN_UP_SPARE = 10         # ... and backing off for one goes this much further
 CLIMB_EXTRA_MS = 500      # up (or down) is held this much longer than the climb takes
+# A jump off a rope (rope_jump): once on the rope, a look; off by more than HANG_TOLERANCE from the height it jumps
+# from (her dot's raw height: it's good to ~11 units, and snaps to a platform within 25 of her), a climb up or down
+# to it and another look. On the rope means her dot within ON_ROPE_X of it and between its ends, not at the floor she
+# jumped from. The jump key goes ROPE_JUMP_KEY_MS after the arrow: the game sees the arrow 60 ms after its key, and
+# acts on the jump 67 ms after its own (off_rope's, 30).
+HANG_TOLERANCE = 15
+ON_ROPE_X = 25
+ROPE_JUMP_KEY_MS = 40
 
 
 def grab_lead(gap: float) -> float | None:
@@ -148,7 +157,8 @@ class Mover:
         """Carry out move `m` from where she is (`s`, or a fresh look) and return a look once she's landed."""
         s = s or self.locate()
         by_kind = {"climb": self._climb, "climb_down": self._climb_down, "jump_up": self._jump_up,
-                   "jump": self._run_and_jump, "walk_off": self._walk_off, "drop": self._drop}
+                   "jump": self._run_and_jump, "walk_off": self._walk_off, "drop": self._drop,
+                   "rope_jump": self._rope_jump}
         if m.kind not in by_kind:
             raise ValueError(f"unknown move {m.kind}")
         by_kind[m.kind](m, s)
@@ -217,13 +227,18 @@ class Mover:
         hold = int(t + 1000 * (JUMP_LAG + air - ARROW_LAG))
         self._send([[0, arrow, "down"], *tap(t, jump), [hold, arrow, "up"]], "jump")
 
-    def _climb(self, m: Move, s: Scene) -> None:
+    def _climb(self, m: Move, s: Scene, to: float | None = None) -> None:
         """Grab the rope on the way: run at it and jump holding up (or just walk into it holding up
-        when it comes down to her feet). Standing under it already: jump straight up holding up."""
+        when it comes down to her feet). Standing under it already: jump straight up holding up. Up is
+        held to the rope's top, or (`to`) about as long as it takes from where she grabs it to there."""
         k = self.actions.keys
         p = self.model.platform(m.src)
         gap = p.y_at(m.rope_x) - m.rope_bottom  # how far above her feet the rope ends
-        hold_up = climb_ms(p.y_at(m.rope_x) - m.rope_top)
+        if to is None:
+            hold_up = climb_ms(p.y_at(m.rope_x) - m.rope_top)
+        else:
+            on = grab_height(p.y_at(m.rope_x), _rope(self.model, m))
+            hold_up = max(0, int(1000 * (on - to) / CLIMB_SPEED))
         dx = m.rope_x - s.where.x
         if abs(dx) <= SPOT_TOLERANCE:
             self._climb_from_under(hold_up)
@@ -237,7 +252,8 @@ class Mover:
         if run < MIN_RUN:  # too close to jump at it: back off to a run-up first (on her platform)
             back = s.where.x - sign * (MIN_RUN - run + RUN_UP_SPARE)
             if not p.covers(back, -10):
-                back = m.rope_x  # no room to back off: stand under it instead
+                # No room to back off: stand under it instead (a rope past her platform's end: as far back as it goes).
+                back = m.rope_x if p.covers(m.rope_x) else p.clamp(back)
             s = self.walk_to(back, tolerance=SPOT_TOLERANCE, s=s)
             if back == m.rope_x:
                 # Under it now (within the walk's SPOT_TOLERANCE). Calling _climb again here recursed
@@ -263,15 +279,78 @@ class Mover:
         k = self.actions.keys
         self._send([[0, k.up.name, "down"], *tap(40, k.jump.name), [hold_up + 350, k.up.name, "up"]], "climb")
 
+    def _rope_jump(self, m: Move, s: Scene) -> None:
+        """Onto the rope (as a climb does, or from its top as a climb down does) and to about the height the jump goes
+        from (m.hang); a look there, and a climb up or down to it if she's off by more than HANG_TOLERANCE; then off
+        it sideways: the arrow, then jump, holding up for the rope she jumps onto (m.onto) and on up it onto its top,
+        or letting go of the arrow just before she lands on m.dst. Not on the rope at the look, nothing more: the
+        navigator replans from where she is."""
+        k = self.actions.keys
+        p, rope = self.model.platform(m.src), _rope(self.model, m)
+        if abs(p.y_at(m.rope_x) - m.rope_top) <= ROPE_TOP_DY:  # from its top: down onto it
+            self.line_up_rope(m.rope_x)
+            down = k.down.name
+            self._send([[0, down, "down"], [int(1000 * (m.hang - m.rope_top) / CLIMB_SPEED), down, "up"]], "climb_down")
+        else:
+            self._climb(m, s, to=m.hang)
+        x, y = self._on_rope()
+        if not self._hanging(x, y, m, p):
+            self.log(f"    not on the rope at x {m.rope_x:.0f} (her dot at {x:.0f}, {y:.0f}): no jump off it")
+            return
+        if abs(y - m.hang) > HANG_TOLERANCE:
+            key = (k.up if y > m.hang else k.down).name
+            self._send([[0, key, "down"], [int(1000 * abs(y - m.hang) / CLIMB_SPEED), key, "up"]], "climb")
+            x, y = self._on_rope()
+            if not self._hanging(x, y, m, p):
+                return
+        sign = directions.sign(m.direction)
+        arrow, jump = self.actions.arrow(m.direction), k.jump.name
+        off = ROPE_JUMP_KEY_MS + 1000 * JUMP_LAG  # when she leaves the rope (ms)
+        events = [[0, arrow, "down"], *tap(ROPE_JUMP_KEY_MS, jump)]
+        got = side_jump(self.model, rope, min(max(y, rope.top), rope.bottom), sign, grab=m.onto is not None)
+        if m.onto is not None:
+            # Up from just after she leaves the rope (on it, up would climb), held up the rope she grabs and over its top.
+            grab_y, t = (got[2], got[3]) if got is not None and got[0] == "rope" else (m.onto.bottom, 0.5)
+            grab = int(off + 1000 * t)
+            events += [[int(off) + 10, k.up.name, "down"], [grab + climb_ms(grab_y - m.onto.top), k.up.name, "up"],
+                       [grab + 100, arrow, "up"]]
+        else:
+            t = got[3] if got is not None else 0.5
+            events += [[int(off + 1000 * (t - ARROW_LAG)), arrow, "up"]]
+        self._send(events, "rope_jump")
+        time.sleep(0.2)  # then settle looks for her standing still
+
+    def _on_rope(self, seconds: float = 1.5) -> tuple[float, float]:
+        """Her dot's map position (raw: not snapped to a platform) once it has stopped moving, or after `seconds`."""
+        end, last = time.monotonic() + seconds, None
+        while True:
+            s = self.locate()
+            dot = s.where.dot
+            if last is not None and math.dist(dot, last) < 0.6 or time.monotonic() >= end:
+                return self.senses.localizer.to_map(dot)
+            last = dot
+            time.sleep(0.08)
+
+    @staticmethod
+    def _hanging(x: float, y: float, m: Move, p: Platform) -> bool:
+        """Whether her dot at (x, y) is on move m's rope: by it, between its ends, and not at the floor she left."""
+        return abs(x - m.rope_x) <= ON_ROPE_X and m.rope_top - HANG_TOLERANCE <= y <= m.rope_bottom + HANG_TOLERANCE \
+            and abs(y - p.y_at(m.rope_x)) > HANG_TOLERANCE
+
     def off_rope(self, s: Scene) -> Scene:
         """She's on a rope (no platform under her dot): climb up onto the platform if she's near its
-        top, else jump off it sideways (towards the side a fall lands on a platform)."""
+        top, else jump off it sideways (towards the side a fall lands on a platform). Off a rope that
+        takes her onto no platform at its top (959's, under 17's block) she climbs down and lets go
+        at its bottom, onto what's under it (up there did nothing: the trip ended lost)."""
         k = self.actions.keys
         x, y = s.where.x, s.where.y
         # The rope she's on: the nearest one reaching her height.
         rope = min(self.model.ropes, key=lambda r: abs(r.x - x) + (0 if r.top - 10 <= y <= r.bottom + 10 else 1000))
-        if y - rope.top < 70:
+        topped = rope.from_platform and hung_from(self.model, rope) is not None
+        if y - rope.top < 70 and topped:
             self._send([[0, k.up.name, "down"], [900, k.up.name, "up"]], "off_rope")
+        elif not topped and self.model.platform_below(rope.x, rope.bottom) is not None:
+            self._send([[0, k.down.name, "down"], [climb_ms(max(0.0, rope.bottom - y)), k.down.name, "up"]], "off_rope")
         else:
             # Right if a jump off to the right (up, at walking speed) comes down on a platform.
             # (Off a rope she's in no foothold group: no wall stops her.)
@@ -280,6 +359,11 @@ class Mover:
             self._send([[0, arrow, "down"], [30, k.jump.name, "down"], [80, k.jump.name, "up"], [400, arrow, "up"]],
                        "off_rope")
         return self.settle(2.5)
+
+
+def _rope(model: MapModel, m: Move) -> Rope:
+    """Move m's rope (a climb's, or the one a rope jump jumps off)."""
+    return next(r for r in model.ropes if (r.x, r.top, r.bottom) == (m.rope_x, m.rope_top, m.rope_bottom))
 
 
 def platform_text(p: Platform | None) -> str:

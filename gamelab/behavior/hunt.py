@@ -132,6 +132,12 @@ DETOURS = 3
 DETOUR_REACH = 2.5
 
 
+def _keep_off(o: "Objective") -> tuple[int, ...]:
+    """The platforms a trip to objective o keeps off (Navigator.begin's keep_off): a spot's ground, when the spot is
+    off it (its monsters would stop her on the way; route.KEEP_OFF_S)."""
+    return (o.ground,) if o.kind == "spot" and o.ground is not None and o.ground != o.platform else ()
+
+
 @dataclass
 class Objective:
     """Where she's heading: a ground's spot, or a pile."""
@@ -791,16 +797,21 @@ class Hunt:
         if not left:
             return None
         now_n = sum(self._hits(s, m) for m in left)
-        nxt = spots.spot_for(self.model, v.ground, left, v.spot, s.where, self.nav.planner.travel, self.kinds)
+        nxt = spots.spot_for(self.model, v.ground, left, v.spot, s.where, self._travel_off(v.ground), self.kinds)
         if nxt is None:
             return None
         p = self.model.platform(nxt.platform)
         n = sum(reach.can_hit(p, nxt.x, p.y_at(nxt.x), m, others=s.monsters) for m in left)
         travel = (abs(nxt.x - s.where.x) / WALK_SPEED if nxt.platform == s.platform.id
-                  else self.nav.planner.travel(s.platform.id, s.where.x, nxt.platform))
+                  else self._travel_off(v.ground)(s.platform.id, s.where.x, nxt.platform))
         if travel is None or travel > SPOT_TRAVEL or not (n >= now_n + SPOT_MORE or n >= SPOT_TIMES * max(now_n, 1)):
             return None
         return nxt
+
+    def _travel_off(self, ground: int):
+        """The planner's route times keeping off `ground` (route.KEEP_OFF_S): to the spots off it it's shot from,
+        which a trip to one keeps off it for (_keep_off)."""
+        return lambda a, x, b: self.nav.planner.travel(a, x, b, keep_off=(ground,))
 
     def _nothing_here(self, s: Scene) -> bool:
         return not any(m.platform == self.visit.ground and (self.kinds is None or m.kind in self.kinds)
@@ -911,7 +922,7 @@ class Hunt:
             self._skip.pop(g, None)
         else:
             g = best[1]
-        spot = spots.spot(self.model, g, s.where, self.nav.planner.travel, self.kinds)
+        spot = spots.spot(self.model, g, s.where, self._travel_off(g), self.kinds)
         self.visit = Visit(g, spot)
         self.report.grounds.append(g)
         self.stack.clear()
@@ -935,7 +946,7 @@ class Hunt:
         self._note(rule)
         o = self.obj
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
-                                until=self._interrupt, mode=TRANSIT, scene=self._seen)
+                                until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o))
         o.trip.weights = o.weights
         chains = o.trip.trip.chains
         while not o.trip.over:
