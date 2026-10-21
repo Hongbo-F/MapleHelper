@@ -268,7 +268,7 @@ Each pile keeps:
 
 The rules for forgetting stay: never before 3 s after the kill, and only after two empty looks 1.5 s apart, because monsters are drawn over drops. Any look that searches for loot updates the store, whoever takes it, through `Senses.listeners`.
 
-- **Picked up on the way:** pick-up is pressed every 0.15 s on every walk and every chain's ground stretches. The mover's own walks (after a trip, lining up under a rope, single moves) press nothing today; step 1 adds it. Walking past a pile at full speed picks up only 1-2 of a pig's drops, so a pile on her platform gets a stop (rule 5).
+- **Picked up on the way:** pick-up is pressed every 0.15 s on every walk and every chain's ground stretches. (Built since, 2026-10-21: travelling, a pile a stop at costs 2 s at most on top of the trip is gone for on the way, rule 5b: README, Piles on the way.) The mover's own walks (after a trip, lining up under a rope, single moves) press nothing today; step 1 adds it. Walking past a pile at full speed picks up only 1-2 of a pig's drops, so a pile on her platform gets a stop (rule 5).
 - **All monsters killed:** rule 8, in the gap before the next respawn. With respawns about every 8 s per monster in the simulator (unmeasured in game), "all killed" is a short window, so the rule asks whether the pile can be reached and picked up before the next one is due.
 - **About to expire:** rule 6.
   - The real lifetime isn't measured: the code assumes 90 s is still worth a trip, and the simulator keeps drops for 180 s.

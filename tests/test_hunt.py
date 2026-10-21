@@ -18,7 +18,8 @@ def _hunt(piles, kills=(), travel=5.0):
     h.h = SimpleNamespace(drops=SimpleNamespace(known=list(piles)), looter=SimpleNamespace(inventory_full=False),
                           wounds=SimpleNamespace(seen_within=lambda now, seconds, hurt_by=None: []))
     h.fs = FightState()
-    h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel))
+    h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel,
+                                                    arrive=lambda src, x, dst, dst_x=None: travel))
     h.visit = Visit(1, Spot(1, 0.0, 1.0, True), kills=list(kills))
     h._exit_piles, h.obj = None, None
     return h
@@ -200,3 +201,40 @@ def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():
     h.obj = None
     bubble.rushed = hunt.VALUABLE_TRIES  # gone for at once that often (a monster by it): a pile like the others
     assert h._valuable_pile(_scene()) is None
+
+
+def _detour_hunt(piles, times):
+    """A Hunt whose route times are `times`: {(from platform, to platform): s} (Planner.arrive's)."""
+    h = _hunt(piles)
+    h.nav.planner.arrive = lambda src, x, dst, dst_x=None: times.get((src, dst))
+    h._standable = lambda pid: True
+    return h
+
+
+def _at(pid, x=0.0, monsters=()):
+    return SimpleNamespace(platform=SimpleNamespace(id=pid), where=SimpleNamespace(x=x), monsters=list(monsters))
+
+
+def test_a_pile_a_little_off_her_way_is_picked_up_on_the_way():
+    # From 13 to 17's spot on 16, 5.7 s; by coins on 19 (2.0 s there, 0.6 on them, 4.4 on to 16): 1.3 s more.
+    near, far = _pile(20, platform=19), _pile(20, platform=12)
+    times = {(13, 16): 5.7, (13, 19): 2.0, (19, 16): 4.4, (13, 12): 3.0, (12, 16): 5.0}  # 12: 2.9 s more
+    h = _detour_hunt([far, near], times)
+    h.obj = Objective("spot", 16, 636.0)
+    assert h._detour(_at(13)) == (2.0 + hunt.PICK_S + 4.4 - 5.7, near)
+    assert h._detour(_at(13, monsters=[SimpleNamespace(platform=19, x=120.0)])) is None  # guarded
+    h.obj.detours = hunt.DETOURS                    # bounded: so many on one trip, then on her way
+    assert h._detour(_at(13)) is None
+    for why in ("on the way", "valuable pile", "urgent pile"):  # not from a pile on the way, nor to one that can't wait
+        h.obj = Objective("pile", 16, 600.0, why=why)
+        assert h._detour(_at(13)) is None
+
+
+def test_the_wait_for_drops_to_land_counts_in_what_a_pile_on_the_way_costs():
+    times = {(13, 16): 5.7, (13, 19): 0.5, (19, 16): 5.4}  # she's right by it: 0.5 + 0.6 + 5.4 - 5.7 = 0.8 s
+    h = _detour_hunt([_pile(1.0, platform=19, status="expected")], times)  # lands 1.0 s from now: 0.5 s waited
+    h.obj = Objective("spot", 16, 636.0)
+    extra, _ = h._detour(_at(13))
+    assert abs(extra - (0.8 + 0.5)) < 0.05
+    h.h.drops.known[0].since = time.monotonic()  # killed just now: 1.5 s to wait, 2.3 s in all
+    assert h._detour(_at(13)) is None

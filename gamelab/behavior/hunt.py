@@ -27,6 +27,10 @@ in the order listed, 6 before 3):
                        objective; she used to leave monsters half hunted
    5  pile here        drops on her platform within PILE_NEAR, nothing by them or between her and them (also
                        piles she passes while travelling)
+  5b  on the way       travelling: a pile a stop at costs DETOUR_S at most more than the trip without it (the
+                       planner's times, motion.route.Planner.arrive), DETOUR_REACH away at most, DETOURS per
+                       objective at most; she used to leave such piles and go back across the map for them when
+                       they were about to vanish
    7  better spot      wanted monsters seen out of reach, and a spot that reaches clearly more of them
    8  lull loot        nothing wanted on this ground and a kill of hers due back: piles she can pick up first
    9  wait             monsters about or due back: stand still, for the patience at most
@@ -57,7 +61,7 @@ from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
 from . import fight
 from .fight import THROWS, FightState, Report, kills_text
-from .ledger import Pile
+from .ledger import DROP_LANDS, Pile
 from .looting import DROPS_LAST, SETTLE, DropSpot
 from .tour import PRIOR
 
@@ -110,6 +114,22 @@ VALUABLE_TRIES = 2      # ... this many times at most (then it's a pile like the
 # set off for the Slime Bubble before the mushrooms were dead on 16 seeds with it, on 12 without; the look takes about
 # 120 ms more in game than the band's (README: What a look costs), once a far kill.
 FAR_DROPS_LOOK = True
+# Rule 5b: travelling, a pile a stop at costs this many s at most on top of the trip (her way to it, PICK_S on it
+# and her way on from it, against her way on from here: Planner.arrive), DETOURS piles at most per objective. In
+# the hunt loops of 2026-10-21 (12 runs, 70 minutes) she made 44 trips for piles about to vanish (rule 6), 668 s in
+# all, 27 of them of 10 s or more; 23 of those 44 (280 s) were for piles a trip of hers had passed within 2 s of
+# before, 15 of them within 0.7 s: on the route, only the stop on them. A look at the end of a chain stops it for one
+# within DETOUR_S; the pass that decides allows DETOUR_SLACK more (her real place is a few units off the
+# predicted one), so she doesn't stop again and again for one just over. Only for a pile DETOUR_REACH s away at
+# most: one near the end of a long trip made the whole trip its own while the trip's clock ran (OBJECTIVE_S). In the
+# simulator's hunt loop (preset game, 60 runs of 20 minutes), with no such bound she picked up 89.1% of her drops, for
+# 127.8 EXP a minute, and objectives ran out 111 times; with 6 s 89.4%, 127.4 and 99; with 4 s 89.8%, 128.0 and 99;
+# with 2.5 s 90.1%, 128.3 and 99 (before the stops shared the trip's budgets, `_go_for`; without the rule 88.9%,
+# 128.6 and 61).
+DETOUR_S = 2.0
+DETOUR_SLACK = 0.5
+DETOURS = 3
+DETOUR_REACH = 2.5
 
 
 @dataclass
@@ -132,7 +152,8 @@ class Objective:
     trip: TripState | None = None
     passing: dict[int, float] = field(default_factory=dict)  # platform -> s shot there while passing (rule 4)
     finishing: float = 0.0     # s spent finishing what she had hurt (rule 4b)
-    why: str = ""              # the rule that set it ("valuable pile", "urgent pile", ...)
+    why: str = ""              # the rule that set it ("valuable pile", "on the way", ...)
+    detours: int = 0           # piles taken on the way (rule 5b) while it was suspended
 
     def text(self) -> str:
         what = f"spot for {self.ground}" if self.kind == "spot" else "pile"
@@ -291,9 +312,14 @@ class Hunt:
             return self._finish(s, owed, visible, hidden, now)
         if (pile := self._pile_here(s)) is not None and pile is not self.obj.pile:  # one she passes
             return self._pick_here(s, pile)
+        if (way := self._detour(s, DETOUR_SLACK)) is not None:
+            extra, pile = way
+            self.obj.detours += 1
+            self.log(f"  {_contents(pile)} on platform {pile.platform} at x {pile.x:.0f}: on the way ({extra:+.1f} s)")
+            return self._go_for(pile, "on the way", s)
         if self.obj.kind != "pile" and self._exit_piles is None and (pile := self._urgent_pile(s)) is not None:
             return self._go_for(pile, "urgent pile", s)
-        return self._travel(self._rule if self._rule in ("advance", "loot elsewhere", "urgent pile",
+        return self._travel(self._rule if self._rule in ("advance", "loot elsewhere", "urgent pile", "on the way",
                                                          "high ground", "back to spot", "better spot", "lull loot")
                             else "travel")
 
@@ -698,12 +724,51 @@ class Hunt:
                 best = (p.worth / t, p)
         return None if best is None else best[1]
 
+    def _detour(self, s: Scene, slack: float = 0.0) -> tuple[float, Pile] | None:
+        """Rule 5b: travelling, the pile a stop at costs DETOUR_S at most on top of the trip (and `slack` more):
+        her way to it (and its drops' landing, for one not seen yet), PICK_S on it and her way on from it to the
+        objective's place, less her way there from here (Planner.arrive), the most worth per second of that first;
+        with what it costs. Not for a pile more than DETOUR_REACH s away, nor one with a monster by it, nor on a
+        platform she can't stand on with monsters on it, as rule 5 has them; not while the objective is a pile on
+        the way itself, a valuable or an urgent one, nor after DETOURS."""
+        o = self.obj
+        if o is None or o.why in ("on the way", "valuable pile", "urgent pile") or o.detours >= DETOURS:
+            return None
+        plan, here, x = self.nav.planner, s.platform.id, s.where.x
+        direct = plan.arrive(here, x, o.platform, o.x)
+        if direct is None:
+            return None
+        now, best = time.monotonic(), None
+        for p in self.h.drops.known:
+            if p is o.pile or not self._fresh(p) or self._guarded(s, p):
+                continue
+            to, on = plan.arrive(here, x, p.platform, p.x), plan.arrive(p.platform, p.x, o.platform, o.x)
+            if to is None or on is None or to > DETOUR_REACH:
+                continue
+            lands = max(0.0, p.since + DROP_LANDS - now - to) if p.status == "expected" else 0.0
+            extra = to + lands + PICK_S + on - direct
+            if extra <= DETOUR_S + slack and (best is None or p.value / max(extra, PICK_S) > best[0]):
+                best = (p.value / max(extra, PICK_S), extra, p)
+        return None if best is None else best[1:]
+
+    def _guarded(self, s: Scene, p: Pile) -> bool:
+        """Whether look `s` shows a monster by pile `p` (PILE_GUARD), or any on its platform where she can't stand."""
+        there = [m for m in s.monsters if m.platform == p.platform]
+        return bool(there) and (not self._standable(p.platform) or any(abs(m.x - p.x) < PILE_GUARD for m in there))
+
     def _go_for(self, pile: Pile, rule: str, s: Scene) -> None:
-        if self.obj is not None:
-            self.stack.append(self.obj)  # suspended
+        parent = self.obj
+        if parent is not None:
+            self.stack.append(parent)  # suspended
         if rule == "valuable pile":
             pile.rushed += 1
         self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule)
+        if rule == "on the way" and parent is not None:
+            # A stop on the way shoots in passing out of the trip's own budget, and leaves finishing to it (once
+            # it's done she owes them still): with budgets of their own, its stops shot on and on, and in the
+            # simulator's hunt loop the objectives ran out their OBJECTIVE_S 99 times in 60 runs, 87 so (61 without
+            # the rule), for 128.3 EXP a minute against 128.7 and 90.1% of her drops against 90.0%.
+            self.obj.passing, self.obj.finishing = parent.passing, FINISH_S
         return self._travel(rule)
 
     # --- spots and grounds --------------------------------------------------------------------------
@@ -894,8 +959,8 @@ class Hunt:
                 and any(m.platform == o.ground and self._hits(s, m) for m in s.monsters))
 
     def _interrupt(self, s: Scene) -> bool:
-        """Asked before every chain of a trip: whether a rule calls for her here (close quarters, one she has
-        hurt to finish, a target in reach she may shoot, an urgent pile, low HP)."""
+        """Asked before every chain of a trip: whether a rule calls for her here (close quarters, a valuable pile,
+        one she has hurt to finish, a target in reach she may shoot, a pile on the way, an urgent pile, low HP)."""
         if s.hp < self.h.low_hp:
             return True
         here = s.platform.id
@@ -915,6 +980,8 @@ class Hunt:
             return True
         if o is not None and o.kind == "spot" and self._standable(here) \
                 and any(m.platform == o.ground for m in in_reach):
+            return True
+        if self._detour(s) is not None:
             return True
         return o is not None and o.kind != "pile" and self._exit_piles is None and self._urgent_pile(s) is not None
 

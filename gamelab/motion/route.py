@@ -308,6 +308,7 @@ class Planner:
         for m in self.moves:
             self.by_src.setdefault(m.src, []).append(m)
         self._times: dict[tuple[int, int], dict[int, float]] = {}  # travel's, by where from (TIMES_KEPT)
+        self._landings: dict[tuple[int, int], dict[int, list[tuple[int, float]]]] = {}  # arrive's (TIMES_KEPT)
 
     def plan(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
              weight: Callable[[Move], float] | None = None) -> list[Move] | None:
@@ -336,6 +337,44 @@ class Planner:
                 del self._times[next(iter(self._times))]  # the one asked for longest ago
         self._times[start] = found
         return found
+
+    def arrive(self, src: int, x: float, dst: int, dst_x: float | None = None) -> float | None:
+        """Seconds from (platform src, x) to standing at map x `dst_x` on platform dst (None: anywhere on it, as
+        `travel`): the quickest of the routes landing anywhere on dst, with the walk along it from where each
+        lands (`travel` ends wherever she lands). None if there's no way there. The searches are kept as
+        `times`' are (by where from, rounded): a pile's from its place are asked for again and again (the hunt
+        loop's piles on the way: hunt._detour), and one to every platform has about 210 landings on this map."""
+        if dst_x is None:
+            return self.travel(src, x, dst)
+        start = (src, round(x))
+        found = self._landings.pop(start, None)
+        if found is None:
+            found = self._landed(*start)
+            if len(self._landings) >= TIMES_KEPT:
+                del self._landings[next(iter(self._landings))]
+        self._landings[start] = found
+        at = found.get(dst)
+        return None if not at else min(t + abs(px - dst_x) / WALK_SPEED for px, t in at)
+
+    def _landed(self, src: int, px: int) -> dict[int, list[tuple[int, float]]]:
+        """`_every`'s search, keeping every landing: each platform's [(x landed at, cost)], the start among
+        them (where she stands, at no cost)."""
+        best = {(src, px): 0.0}
+        heap = [(0.0, (src, px))]
+        while heap:
+            t, (pid, at) = heapq.heappop(heap)
+            if t > best.get((pid, at), math.inf):
+                continue
+            for m in self.by_src.get(pid, []):
+                cost = t + abs(m.x - at) / WALK_SPEED + m.seconds + RISK.get(m.kind, 0.0)
+                node = (m.dst, round(m.land_x))
+                if cost < best.get(node, math.inf):
+                    best[node] = cost
+                    heapq.heappush(heap, (cost, node))
+        out: dict[int, list[tuple[int, float]]] = {}
+        for (pid, at), t in best.items():
+            out.setdefault(pid, []).append((at, t))
+        return out
 
     def _every(self, src: int, px: int) -> dict[int, float]:
         """`_search` without a goal, to the end: each platform's cost, as `_search` would return it for

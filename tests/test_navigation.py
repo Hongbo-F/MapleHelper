@@ -239,6 +239,28 @@ def test_route_times_from_one_search_are_each_platforms_own_search(model):
     assert len(planner._times) == route.TIMES_KEPT and (0, 0) not in planner._times
 
 
+def test_arriving_at_an_x_is_the_quickest_landing_and_the_walk_from_it(model):
+    """Planner.arrive: to stand at an x on a platform, the quickest of the routes landing anywhere on it with the walk
+    along it from there (`travel` ends wherever she lands); on her own platform, the walk (or a way round, if
+    quicker); with no x, `travel`'s."""
+    from gamelab.motion.physics import WALK_SPEED
+    planner = Planner(model)
+    for p in model.platforms:
+        for q in model.platforms:
+            for x in (q.left + 5, (q.left + q.right) / 2, q.right - 5):
+                t = planner.arrive(p.id, p.left + 20, q.id, x)
+                path = planner.plan(p.id, p.left + 20, q.id)
+                if path is None and p.id != q.id:
+                    assert t is None
+                    continue
+                if p.id == q.id:
+                    assert t <= abs(x - round(p.left + 20)) / WALK_SPEED + 1e-9
+                else:  # never more than the quickest route's landing and the walk from it
+                    landing = planner.travel(p.id, p.left + 20, q.id)
+                    assert landing <= t <= landing + abs(x - round(path[-1].land_x)) / WALK_SPEED + 1e-9
+        assert planner.arrive(p.id, p.left + 20, p.id) == planner.travel(p.id, p.left + 20, p.id)
+
+
 @pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
                     reason="needs the map's game data (gamedata/data)")
 def test_route_times_on_the_real_map_are_each_platforms_own_search():

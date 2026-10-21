@@ -1459,6 +1459,32 @@ def loop_shoots_21_from_22(sim):
     return _loop_up_from_22(sim)
 
 
+def _loop_to_17_past_a_pile(sim):
+    from ..behavior.ledger import Pile
+    tour = sim.tour_stack()
+    tour.stats["17"] = {"visits": 4, "exp": 600.0}  # by the value map, 17 is the best ground: its spot is on 16
+    pile = Pile(45.0, sim.model.platform(19).y_at(45.0), 19, sim.clock.now - 20.0, hers=True, mesos=True,
+                status="seen", items=("mesos",), worth=15.0, dearest=15.0)
+    tour.h.drops.piles.append(pile)  # a kill of hers 20 s ago, its coins seen
+    return _loop(0.5)(sim, tour)
+
+
+@scenario((13, 0.0), monsters=[("Pig", 17, 1300.0)], seed=1, limit=120, drops=(("mesos", 19, 45.0),),
+          expects=(_rule("on the way"), happens("picks up mesos at x 45"),
+                   check("the coins on 19 are picked up before she gets to 16",
+                         lambda tr: _first(tr["world_log"], "picks up mesos at x 45")
+                         < _first(tr["log"], "at platform 17's spot"))))
+def loop_pile_on_the_way(sim):
+    """On the safe platform 13, on her way to 17's spot on 16 (by the value map the best ground), with coins of a
+    kill of hers on 19, a platform off her route (13 -> 15 -> 18 -> 16): a stop at them costs 1.3 s more than the
+    trip without it by the planner (hunt.DETOUR_S: 2), so she takes them on the way (rule 5b). In the live hunt loops
+    of 2026-10-21 she passed such piles and went back across the map for them when they were about to vanish (rule
+    6). On seeds 1-16 she picks them up 2.4 s in and is at the spot 7.4-8.6 s in (the stop took 3 s in all, with
+    the look for what's left after it, looting.mop_up); without the rule she's there at 4.4-5.7 s, and picks them up
+    on 11, 11.8-27.0 s in, on a trip back."""
+    return _loop_to_17_past_a_pile(sim)
+
+
 def _loop_bubble(sim):
     tour = sim.tour_stack()
     tour.stats["17"] = {"visits": 4, "exp": 600.0}
