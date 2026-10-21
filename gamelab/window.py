@@ -16,7 +16,11 @@ FRONT_POLL_S = 0.05  # bring_to_front: how often it looks whether the game came 
 # the game for 2.5 s and the player refused its first plan ("game not in front (foreground: 'Claude')"; the
 # player's own try had failed too; its log has two more such refusals on nights before). If it hasn't come within
 # half the wait, bring_to_front also switches to it as Alt+Tab does (SwitchToThisWindow: no keys, but documented
-# as not for general use, and not tried in game yet). False: SetForegroundWindow alone.
+# as not for general use, and not tried in game yet). On though untried, as it can only help: it runs only once
+# SetForegroundWindow has been seen to fail (the game still not in front half way through the wait), it sends no
+# keys and clicks nothing, and without it the command stops there anyway (__main__.FRONT_WAIT_S), the game behind.
+# Worst case it does nothing, as SetForegroundWindow did. False: SetForegroundWindow alone (if in game it's seen
+# to do anything but bring the game forward, such as flash its taskbar button or restore a window it shouldn't).
 SWITCH_FALLBACK = True
 
 user32.FindWindowW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR)
