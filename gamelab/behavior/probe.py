@@ -61,7 +61,8 @@ the shot log and the telemetry. Then:
   many throws the two best differ, and the answer the throws decide on (DECIDES better than the next, on
   DECIDE_THROWS throws or more where they differ);
 - the window's top and floor (SEARCH_TOP0, SEARCH_FLOOR0) fitted to every throw from the ground, and the
-  level line's height (SHOT_H, raised in a jump: reach.air_rise) to every throw;
+  line's height (SHOT_H, raised in a jump: reach.air_rise) to every throw, each by the line in force (reach.LINE:
+  a throw whose star it stops took nothing, so its miss says nothing of the window);
 - the claw probes' hits by how far off the target was, each the claw's or a star's.
 """
 
@@ -1109,9 +1110,12 @@ def fit_floor0(rows: list[dict], model: MapModel) -> Fit:
 
 
 def fit_shot_h(rows: list[dict], model: MapModel) -> Fit:
-    """The level line's height (SHOT_H) fitted to every throw (from the ground and from jumps)."""
+    """The line's height (SHOT_H) fitted to every throw (from the ground and from jumps), by the line in force
+    (reach.LINE: the level line's height, or where the v83 line starts above her feet). Until 2026-10-21 it was
+    fitted by the level line whatever reach had, so where only a floor stops the line (throws down past her own
+    platform's end) nothing bounded it."""
     grid = sorted(set(SHOT_H_GRID) | {reach.SHOT_H})
-    return _fit("SHOT_H", rows, grid, lambda v: replace(reach_model(), line="level", shot_h=v), model)
+    return _fit("SHOT_H", rows, grid, lambda v: replace(reach_model(), shot_h=v), model)
 
 
 @dataclass(frozen=True)
@@ -1298,7 +1302,8 @@ def _fit_text(fit: Fit, now: float, other: tuple[str, float] | None = None) -> s
 
 def score(rows: list[dict], model: MapModel) -> str:
     """The probe log scored (see the module's docstring), as text."""
-    lines = [f"{len(rows)} probe throws; by probe, how she threw, and where she stood (map x):"]
+    lines = [f"{len(rows)} probe throws, scored by the {reach.LINE} line (reach.LINE) where a question doesn't weigh "
+             f"it; by probe, how she threw, and where she stood (map x):"]
     lines += _table(rows, lambda r: (r["probe"], r["style"], f"x {round(r['x'] / 10) * 10:g}"))
     lines.append("By the target's kind and how far off it was at the pick (20-unit bins, middle to middle):")
     lines += _table(rows, lambda r: (r["probe"], r["style"], r["target"]["kind"], _bin(r)))

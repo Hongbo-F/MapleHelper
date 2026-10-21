@@ -454,6 +454,9 @@ def cmd_probe(args) -> int:
         if not rows:
             print(f"no probe throws logged yet ({path})")
             return 0
+        if args.line:  # this command only: it sends nothing, and nothing else runs on it
+            from .attack import reach
+            reach.LINE = args.line
         print(probe.score(rows, mapdata.load(args.map or rows[0]["map"])))
         return 0
     if args.name not in probe.PROBES:
@@ -1108,6 +1111,8 @@ def build_parser() -> argparse.ArgumentParser:
     q = probes.add_parser("score", help="settle the probes' questions from their log (sends no keys)")
     q.add_argument("file", nargs="?", help="the log (default: lab/probe_geometry.jsonl)")
     q.add_argument("--map", type=int, help="the map's game data to score it with (default: the log's map)")
+    q.add_argument("--line", choices=["level", "v83"],
+                   help="score by this line where a question doesn't weigh it (default: reach.LINE, her decisions')")
     s.set_defaults(func=cmd_probe)
 
     s = sub.add_parser("map", help="the map's platforms and where she is on them (sends no keys)")

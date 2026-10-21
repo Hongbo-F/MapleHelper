@@ -603,11 +603,47 @@ def test_probe_run_is_refused_while_the_alarm_is_up_and_list_and_score_are_not(a
 
 
 @REAL
-def test_probe_score_reads_a_log(tmp_path, capsys):
+def test_probe_score_reads_a_log(tmp_path, capsys, monkeypatch):
+    # By the line in force, or the one asked for (`--line`, this command only): the line's height from the step-up
+    # fits 16-60 by the level line, 16-59 by the v83 line, which starts at her x and ends at the target's feet.
     from gamelab.__main__ import main
+    monkeypatch.setattr(reach, "LINE", reach.LINE)  # put back after the test: --line sets it for the command
     log = tmp_path / "probe_geometry.jsonl"
     rows = _rows(scenarios.run("probe_step_up"))
     log.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    assert main(["probe", "score", str(log)]) == 0
-    out = capsys.readouterr().out
-    assert "12 probe throws" in out and "SHOT_H: fits 16 to 60" in out and "step-up jump_back x" in out
+    for line, fits in (("level", "16 to 60"), ("v83", "16 to 59")):
+        assert main(["probe", "score", str(log), "--line", line]) == 0
+        out = capsys.readouterr().out
+        assert out.startswith(f"12 probe throws, scored by the {line} line") and "step-up jump_back x" in out
+        assert f"SHOT_H: fits {fits}" in out
+
+
+def _from_2(dx: float, hit: bool) -> dict:
+    """A throw of step-down's from 2 at x 50 at a pig standing on 4, `dx` off, that showed a star's hit or none."""
+    model = scenarios.real_map()
+    e = {"kind": "pig", "x": 50.0 + dx, "y": model.platform(4).y_at(50 + dx), "platform": 4, "facing": 0,
+         "pose": "stand", "target": True, "at_pick": True, "bar_before": None, "after": [[0.5, 0.6 if hit else None]],
+         "unseen": [], "gone": False}
+    y = model.platform(2).y_at(50.0)
+    return {"probe": "step-down", "style": "throw", "gap_ms": None, "side": RIGHT, "x": 50.0, "y": y, "her": 2,
+            "exp": 0, "pick": {"x": 50.0, "y": y, "t": 0.1}, "evidence": [e], "target": {"kind": "pig"}}
+
+
+@REAL
+def test_the_scorer_goes_by_the_line_in_force(monkeypatch):
+    # From 2 at x 50 at pigs standing on 4, 60 below: the v83 line goes down through 2's floor short of 254 off, the
+    # level line crosses nothing. Six throws 200-250 off that showed nothing and six 270-320 off that hit: by the
+    # level line the search's window takes the misses (its floor fits 36-40, reach's 12 not), by the v83 line her
+    # floor does, and the window's floor fits anything. The line's height, which nothing here bounds by the level
+    # line, fits 24-29 by the v83 line. So the fits go by reach.LINE, whichever it is. (below-42's snails that
+    # showed nothing in game aren't such throws: from 22-32 inside 0's end her floor lets a star down to 1 there.)
+    model = scenarios.real_map()
+    rows = [_from_2(dx, False) for dx in range(200, 251, 10)] + [_from_2(dx, True) for dx in range(270, 321, 10)]
+    monkeypatch.setattr(reach, "LINE", "level")
+    floor, line = probe.fit_floor0(rows, model), probe.fit_shot_h(rows, model)
+    assert not floor.holds(12) and floor.fits[0] >= 30 and line.fits == (0, 100)
+    monkeypatch.setattr(reach, "LINE", "v83")
+    floor, line = probe.fit_floor0(rows, model), probe.fit_shot_h(rows, model)
+    assert floor.holds(12) and floor.fits == (-30, 40) and 20 <= line.fits[0] and line.fits[1] <= 35
+    body = bodies(model)
+    assert [c[2] for r in rows for c in probe.chances(r, model, body, probe.reach_model())] == [0.0] * 6 + [1.0] * 6
