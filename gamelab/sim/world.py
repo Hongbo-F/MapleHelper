@@ -2,16 +2,20 @@
 (mapdata.MapModel), in map units, driven by key events on a fake clock (see sim.fakes).
 
 Her body moves as the game moves it, by motion.body's engine (the one the planner's constants come from),
-on the world's 5 ms tick:
+on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
 
-- the game sees an arrow pressed body.Lags.on (60 ms) after its key and let go Lags.off (72 ms) after,
-  so a tap is as long as the game sees it (12 ms longer), and she turns when it sees the press; of the
-  arrows it sees held, the one pressed last counts;
-- on the ground the arrow it sees speeds her up at 1400 units/s² to physics.WALK_SPEED (turning her round
-  the same way), and none brakes her at 800 (body.ground_step); walking past a platform's end she falls,
-  unless a wall rises there;
-- the jump key lifts her off Lags.jump (67 ms) later, if she's on the ground then, with the kick: below
-  0.8 × her speed toward the arrow it sees, she gets that much more (body.takeoff). With down held it
+- the game sees an arrow pressed half a step sooner than body.Lags.on (66 ms) after its key and let go
+  half a step sooner than Lags.off (68 ms) after (Lags.seen), and acts on what it has seen at its next step
+  (on average Lags.on and Lags.off after the key), so a tap is as long as the game sees it (2 ms longer
+  on average, a whole number of steps), and she turns when it sees the press; of the arrows it sees held,
+  the one pressed last counts. The steps fall every 30 ms from a phase drawn from the seed (step_phase);
+- on the ground, at each step, the arrow it sees speeds her up at 1400 units/s² to physics.WALK_SPEED
+  (turning her round the same way), and none brakes her at 800 (body.ground_step over the step), and she
+  runs the step evenly; walking past a platform's end she falls, unless a wall rises there;
+- the jump key lifts her off at the step after the game sees it (Lags.jump, 65 ms, after the key on
+  average), if she's on the ground then, with the kick: below 0.8 × her speed toward the arrow it sees, she
+  gets that much more (body.takeoff). So a jump three steps into a run from standing leaves at 126. With
+  down held it
   drops her through the platform physics.DROP_LAG later. A jump key that comes inside the attack lock is
   ignored, and so is one pressed while she's in the air (JUMP_TAKEN_LATE: or one the game takes then);
 - in the air she flies body.fly's arc with the arrow the game sees, flown again from where she is when
@@ -102,14 +106,17 @@ from ..motion import body, flow
 from ..motion.physics import CLIMB_SPEED, DROP_LAG, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE, WALK_SPEED
 from ..perception.kinds import kind_of
 
-TICK_MS = 5              # the world's tick, which is also the engine's step (body.TICK)
+TICK_MS = 5              # the world's tick, which is also the engine's own step in the air (body.TICK)
+STEP_MS = round(body.STEP * 1000)  # the game's step: it acts on keys, and sets her speed on the ground, every
+                                   # 30 ms (body.STEP)
 CLIMB_UP = flow.ROPE_SPEED
 CLIMB_DOWN = CLIMB_SPEED
 # A climb ends in an animation onto the platform at the rope's top: flow.CLIMB_OVER is how long after the
 # top she makes a standing start, which the game then sees an arrow already held for Lags.on later. So she
-# stands still for both (0.29 s), and with the arrow held from before the top is running at full speed 0.35
-# s after it, as in the two climbs traced on the minimap (flow).
-CLIMB_OVER = flow.CLIMB_OVER + LAGS.on
+# stands still for both (0.30 s), less the wait for the game's next step that comes after it (12.5 ms on
+# average from a tick), and with the arrow held from before the top is running at full speed 0.35 s after
+# it, as in the two climbs traced on the minimap (flow).
+CLIMB_OVER = flow.CLIMB_OVER + LAGS.on - (STEP_MS - TICK_MS) / 2000
 ARMS = ROPE_REACH - JUMP_HEIGHT  # she grabs a rope this far above her feet
 GRAB_X = 10.0            # ... within this of its x
 ROPE_TOP_REACH = 15.0    # down grabs a rope whose top is within this of her platform
@@ -125,7 +132,7 @@ HER_HEIGHT = 55.0
 # A jump key the game takes in the air does nothing. When it takes one isn't measured: the 18 jumps recorded
 # lifted off 45-95 ms after their key, and a key pressed while she was in the air (or held from before) never
 # jumped her again on landing. Taken when it acts on it (Lags.jump after the key, as the world's clock
-# counts), a key pressed in the last 67 ms of a fall jumps her once she lands; taken as the key goes out,
+# counts), a key pressed in the last 65 ms of a fall jumps her once she lands; taken as the key goes out,
 # it is lost. False takes it as the key goes out, as the simulator did before it ran on the engine: the
 # harsher of the two for a plan that presses the next jump early, so a plan that copes here copes in game.
 JUMP_TAKEN_LATE = False
@@ -234,10 +241,10 @@ class Noise:
     miss: float = 0.0            # chance a star that would hit misses (lab/shots.jsonl: 72.5% of 204 hit)
     walk_jitter: float = 0.0     # units: letting go of an arrow stops her up to this much early or late
     lag_sd: float = 0.0          # the lags' spread around their medians, times the measured one (body.Lags:
-                                 # sd 10 ms for an arrow pressed, 11 let go, 12 for a jump), drawn for each
-                                 # key; 1: as measured. 0: every lag is its median. (Spread alone, few taps
-                                 # are lost, seen let go before they're seen pressed: of 200 taps, 36 of 20
-                                 # ms moved her under half a unit, 5 of 39 ms, none of 50 ms)
+                                 # sd 7.7 ms of when the game sees each key, which the wait for its next
+                                 # step makes the 11-13 measured), drawn for each key; 1: as measured. 0:
+                                 # every lag is its median. (On the game's steps a tap seen held less than a
+                                 # step can fall between two and not move her: a 20 ms tap 27% of the time)
     tap_lost: float = 0.0        # chance an arrow tap of TAP_LOST_MS or less turns her without walking her
                                  # (the game sees it pressed, then let go at once): in the recordings, of
                                  # five taps of 20-50 ms, three moved her 0 (0.6; research 4.7)
@@ -522,14 +529,19 @@ class World:
     def __init__(self, model: MapModel, keys: GameKeys, start: tuple[int, float], seed: int = 1,
                  monsters="all", hp: float = 1.0, inventory_full: bool = False, facing: str = RIGHT,
                  origin: float = 0.0, drops: list[tuple[str, int, float]] = (), hanging: float | None = None,
-                 noise: Noise | None = None, realism: Realism | None = None):
+                 noise: Noise | None = None, realism: Realism | None = None, step_phase: int | None = None):
         """Her standing on platform start[0] at x start[1] (or, with `hanging`, on the rope nearest that x,
         her feet at y `hanging`). `monsters`: None, "all" (the map's spawns), a set of platform ids (the
-        spawns on those), or [(name, platform, x)]. `drops`: [(kind, platform, x)] lying there already."""
+        spawns on those), or [(name, platform, x)]. `drops`: [(kind, platform, x)] lying there already.
+        `step_phase`: the ms (a whole tick, below STEP_MS) of the game's first step; by default drawn from
+        the seed (from an rng of its own: the world's other draws don't move)."""
         self.model = model
         self.origin = origin       # clock time of ms 0
         self.ms = 0
         self.seed = seed
+        if step_phase is None:
+            step_phase = random.Random(f"step:{seed}").randrange(0, STEP_MS, TICK_MS)
+        self.step_phase = step_phase
         self.rng = random.Random(seed)
         self.noise = noise or Noise()
         self.realism = realism or Realism()
@@ -562,6 +574,9 @@ class World:
         self._walls: dict = {}          # foothold group -> the walls that stop her with it (body.Walls)
         self.x, self.y = float(start[1]), p.y_at(start[1])
         self.vx = self.vy = 0.0         # her speed (units/s; y down)
+        self.glide = 0.0                # on the ground: how far she moves each tick of the game's step (none from a
+                                        # landing until the next step: body.LANDING_ENDS_STEP)
+        self.step_arrow = 0             # the arrow the game moved her with at its last step on the ground
         self.facing = facing
         self.seen: dict[str, int] = {}  # the arrows the game sees held -> the order it saw them pressed in
         self._seen_count = 0
@@ -645,6 +660,15 @@ class World:
         """The tick a clock time falls on (events take effect on the tick at or after them)."""
         ms = (clock_t - self.origin) * 1000
         return int(math.ceil(ms / TICK_MS - 1e-6)) * TICK_MS
+
+    def step_at(self, ms: int) -> int:
+        """The game's step at or after tick `ms` (when it acts on what it has seen by then)."""
+        return ms + (self.step_phase - ms) % STEP_MS
+
+    def _acts(self, at: float, lag: float) -> int:
+        """The step at which the game acts on a key that went out at clock time `at`, `lag` s on average
+        after it (a Lags value: it sees it Lags.seen(lag) after the key, and acts at its next step)."""
+        return self.step_at(self.ms_of(at + body.Lags.seen(lag)))
 
     def advance(self, clock_t: float) -> None:
         """Run the world up to clock time `clock_t` (whole ticks at or before it). Raises SimDied once
@@ -773,9 +797,10 @@ class World:
         return max(0.0, median + max(-3.0, min(3.0, z)) * sd * self.noise.lag_sd)
 
     def _seen_later(self, action: str, down: bool, at: float, lag: float) -> None:
-        """The game sees arrow `action` go down/up `lag` s after clock time `at`. One key's changes are
-        seen in the order they happen: let go and pressed again at once, it stays held."""
-        ms = max(self.ms_of(at + lag), self._seen_due.get(action, -10_000))
+        """The game acts on arrow `action` going down/up at clock time `at` at its step `lag` s after it on
+        average (_acts). One key's changes are seen in the order they happen: let go and pressed again at
+        once, it stays held."""
+        ms = max(self._acts(at, lag), self._seen_due.get(action, -10_000))
         self._seen_due[action] = ms
         self._push(ms, "seen", (action, down))
 
@@ -815,9 +840,9 @@ class World:
                 return
             if self.mode == "air" and not JUMP_TAKEN_LATE:
                 return  # pressed in the air: lost
-            # It lifts her off Lags.jump later, if she's on the ground then (_liftoff); with JUMP_TAKEN_LATE,
-            # one pressed just before she lands jumps her once she has.
-            self._push(self.ms_of(at + self._lag("jump", LAGS.jump, LAGS.sd_jump)), "liftoff", self.mode)
+            # It lifts her off at the game's step Lags.jump later on average, if she's on the ground then
+            # (_liftoff); with JUMP_TAKEN_LATE, one pressed just before she lands jumps her once she has.
+            self._push(self._acts(at, self._lag("jump", LAGS.jump, LAGS.sd_jump)), "liftoff", self.mode)
         elif action == "attack":
             if self.ms < self.attack_lock_ms or self.mode == "rope":
                 return
@@ -874,25 +899,32 @@ class World:
             return
         if "down" in self.held and self._grab_from_top():
             return
-        lying = "down" in self.held or self.sitting
-        d = 0 if lying or self.ms < self.still_ms else self.arrow()
-        if not d and not self.vx:
+        if self.ms == self.step_at(self.ms):  # the game's step: her speed for the step to come (body.replay)
+            lying = "down" in self.held or self.sitting
+            d = 0 if lying or self.ms < self.still_ms else self.arrow()
+            self.step_arrow = d
+            if not d and not self.vx:
+                self.glide = 0.0
+                return
+            self.vx, dx = body.ground_step(self.vx, d, SHOE, STEP_MS / 1000)
+            self.glide = dx * TICK_MS / STEP_MS
+        if not self.glide:
             return
-        v, dx = body.ground_step(self.vx, d, SHOE, dt)
-        nx = self.x + dx
+        nx = self.x + self.glide
         if nx > p.right or nx < p.left:
             right = nx > p.right
             edge = p.right if right else p.left
             if self._blocked[p.id][1 if right else 0]:
                 # Against the wall, a hair inside the end: on her side of it, so a flight from here (even one
                 # flown on in mid-air, with another arrow) goes into it only toward it (body.fly).
-                self.x, self.vx = edge - (1e-6 if right else -1e-6), 0.0
+                self.x, self.vx, self.glide = edge - (1e-6 if right else -1e-6), 0.0, 0.0
                 self.y = p.y_at(self.x)
                 return
             # off the end: in the air from the end of this tick
-            self._fly(self._flight(nx, p.y_at(edge) - 1, v, 0.0, d), self.ms + TICK_MS, d)
+            d = self.step_arrow
+            self._fly(self._flight(nx, p.y_at(edge) - 1, self.vx, 0.0, d), self.ms + TICK_MS, d)
             return
-        self.x, self.y, self.vx = nx, p.y_at(nx), v
+        self.x, self.y = nx, p.y_at(nx)
 
     def _flight(self, x: float, y: float, vx: float, vy: float, arrow: int, skip: Platform | None = None,
                 airborne: bool = False) -> body.Flight:
@@ -971,11 +1003,13 @@ class World:
         """Down on platform q at x, going sideways at vx (0 if a wall stopped her): she slides on as the
         ground brakes her (or runs on, with the arrow), except while an attack plays: it stops her. Five
         jump-backs and jump-throws landing during their attack slid 1.4-2.9 units, where braking alone
-        has 7.6-11.7 (research: 60 fps recordings)."""
+        has 7.6-11.7 (research: 60 fps recordings). Between the game's steps she stands where she lands until
+        the next (body.LANDING_ENDS_STEP)."""
         self.mode, self.plat, self.flight, self.last_plat, self.group, self.knocked = "ground", q, None, q, q.group, False
         self.x, self.y = x, q.y_at(x)
         start, end = self.attack_ms
         self.vx, self.vy = (0.0 if start <= self.ms < end else vx), 0.0
+        self.glide = 0.0 if body.LANDING_ENDS_STEP else self.vx * TICK_MS / 1000  # until the game's next step
 
     def _grab_from_ground(self) -> bool:
         """Up at a rope's foot: onto it."""
@@ -1021,7 +1055,7 @@ class World:
                     self._leave_rope()
                     self.mode, self.plat, self.last_plat, self.group = "ground", top, top, top.group
                     self.x = min(max(r.x, top.left), top.right)
-                    self.y, self.vx = top.y_at(self.x), 0.0
+                    self.y, self.vx, self.glide = top.y_at(self.x), 0.0, 0.0
                     self.still_ms = self.ms + int(round(CLIMB_OVER * 1000))
                     self.note(f"climbs onto platform {top.id}")
         elif "down" in self.held and "up" not in self.held:

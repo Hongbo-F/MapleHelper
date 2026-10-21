@@ -5,6 +5,7 @@ needs no game data, the real map's tests are skipped without it."""
 
 import random
 
+import numpy as np
 import pytest
 
 from maplehelper import config
@@ -33,6 +34,14 @@ def steps(v, d, seconds, dt=body.TICK):
         v, dx = body.ground_step(v, d, SHOE, dt)
         x += dx
     return v, x
+
+
+def mean_replay(events, until, dt=0.001):
+    """replay's (t, x, y) from 0 s, the mean over every phase of the game's steps at dt (what the closed
+    forms stand for), and each phase's."""
+    paths = [np.array(body.replay(events, until, SHOE, LAGS, start=0.0, dt=dt, phase=ph).points)
+             for ph in body.phases(dt=dt)]
+    return np.mean(paths, axis=0), paths
 
 
 # --- her shoe ----------------------------------------------------------------------------------------
@@ -78,21 +87,22 @@ def test_a_standing_start_speeds_up_at_1400_then_runs_at_149():
     v, x = steps(0.0, 1, 0.105)
     assert v == pytest.approx(147, abs=0.1) and x == pytest.approx(7.7, abs=0.1)  # 1400 t, 700 t²
     assert steps(0.0, 1, 0.11)[0] == SHOE.vmax  # full speed 0.106 s after the game sees the arrow
-    # From the key: the arrow is seen LAGS.on later, so she's 149 (t - 0.113) along for t past ~0.17 s.
-    r = body.replay([(0.0, "right", True)], 1.0, SHOE, LAGS, start=0.0)
-    for t, x, y in r.points:
-        if t >= 0.2:
-            assert x == pytest.approx(149 * (t - 0.113), abs=0.3) and y == 0
-    assert r.takeoffs == []
+    # From the key: the game acts on the arrow LAGS.on later on average, so she's 149 (t - 0.119) along for t
+    # past ~0.17 s, over the phases of its steps; at each, up to half a step's run (2.2 units) either way.
+    mean, paths = mean_replay([(0.0, "right", True)], 1.0)
+    later = mean[:, 0] >= 0.2
+    assert np.abs(mean[later, 1] - 149 * (mean[later, 0] - 0.1192)).max() < 0.1 and not mean[:, 2].any()
+    assert max(np.abs(p[later, 1] - mean[later, 1]).max() for p in paths) < 2.3
 
 
-def test_letting_go_she_goes_on_24_6_units():
+def test_letting_go_she_goes_on_24_units():
     assert body.slide(149, SHOE) == pytest.approx(13.9, abs=0.05)  # 149²/1600, on landing too
-    assert body.stop_distance(149, SHOE, LAGS) == pytest.approx(24.6, abs=0.2)  # measured 23.4-28.1
-    assert body.stop_time(149, SHOE, LAGS) == pytest.approx(0.26, abs=0.005)
-    r = body.replay([(0.0, "right", True), (1.0, "right", False)], 2.0, SHOE, LAGS, start=0.0)
-    at_release = next(x for t, x, _ in r.points if t >= 1.0)
-    assert r.points[-1][1] - at_release == pytest.approx(24.6, abs=0.8)  # within a step's travel
+    assert body.stop_distance(149, SHOE, LAGS) == pytest.approx(24.0, abs=0.1)  # measured 24.0 ± 2.0 (18 stops)
+    assert body.stop_time(149, SHOE, LAGS) == pytest.approx(0.254, abs=0.001)
+    mean, paths = mean_replay([(0.0, "right", True), (1.0, "right", False)], 2.0)
+    i = np.searchsorted(mean[:, 0], 1.0)
+    assert mean[-1, 1] - mean[i, 1] == pytest.approx(24.0, abs=0.1)
+    assert all(p[-1, 1] - p[i, 1] == pytest.approx(24.0, abs=2.3) for p in paths)  # half a step's run either way
 
 
 def test_turning_round_brakes_and_turns_at_1400():
@@ -114,19 +124,24 @@ def test_run_x_and_run_time_are_the_steps_closed_form(v0, d):
 
 
 def test_holds_follow_the_tap_model():
-    # The game sees a hold 12 ms longer than it is (off - on), and she brakes from what she reached.
-    assert body.hold_distance(50, SHOE, LAGS) == pytest.approx(1925 * 0.062 ** 2, abs=0.05)  # 7.4; game: 7.1 once
-    assert body.hold_distance(300, SHOE, LAGS) == pytest.approx(7.74 + 0.149 * 300, abs=0.05)
+    # The game sees a hold 2 ms longer than it is (off - on), and she brakes from what she reached.
+    # On average over the game's steps: the line between whole steps of it seen held (1.8, 7.0, 15.7, 23.7).
+    assert [round(body.steps_run(k, SHOE), 2) for k in range(6)] == [0, 1.8, 7.02, 15.66, 23.73, 28.2]
+    assert body.hold_distance(50, SHOE, LAGS) == pytest.approx(1.8 + (52 / 30 - 1) * 5.22, abs=0.01)  # 5.6
+    assert body.hold_distance(300, SHOE, LAGS) == pytest.approx(6.15 + 0.149 * 300, abs=0.05)
     assert body.hold_distance(-20, SHOE, LAGS) == 0
-    assert body.hold_for(5, SHOE, LAGS) == pytest.approx(39, abs=1)
-    assert body.hold_for(50, SHOE, LAGS) == pytest.approx(283, abs=2)
+    assert body.hold_for(5, SHOE, LAGS) == 46 and body.hold_for(20, SHOE, LAGS) == 104
+    assert body.hold_for(50, SHOE, LAGS) == pytest.approx(294, abs=2)
     for units in (2, 5, 12, 20, 21.8, 30, 50, 120):
         # (whole ms: half a ms is up to 0.2 units around full speed, where she's quickest to brake from)
         assert body.hold_distance(body.hold_for(units, SHOE, LAGS), SHOE, LAGS) == pytest.approx(units, abs=0.25)
-    for ms in (30, 60, 90, 150, 400):  # the closed form is what the steps give (1 ms steps: a release can
-        # come up to a step late, and around 100 ms each ms held is 0.4 units)
-        r = body.replay([(0.0, "right", True), (ms / 1000, "right", False)], 1.5, SHOE, LAGS, start=0.0, dt=0.001)
-        assert r.points[-1][1] == pytest.approx(body.hold_distance(ms, SHOE, LAGS), abs=0.5)
+    for ms in (30, 60, 90, 150, 400):  # the closed form is the mean of what the steps give over their phase
+        mean, paths = mean_replay([(0.0, "right", True), (ms / 1000, "right", False)], 1.5)
+        assert mean[-1, 1] == pytest.approx(body.hold_distance(ms, SHOE, LAGS), abs=0.05)
+    # One phase at a time a short tap is bimodal: a 50 ms tap is held one step of speeding up or two (as in
+    # game: of three 50 ms taps, two moved her 0 and one 7.1).
+    _, paths = mean_replay([(0.0, "right", True), (0.05, "right", False)], 1.0)
+    assert sorted({round(p[-1, 1], 1) for p in paths}) == [1.8, 7.0]
 
 
 @pytest.mark.parametrize("v0", [0.0, 60.0, 127.0, 149.0])
@@ -140,17 +155,17 @@ def test_held_for_brings_her_to_rest_where_asked_from_any_speed(v0):
             continue
         assert x + body.slide(v, SHOE) == pytest.approx(units, abs=0.05)
         assert body.run_speed(tau, v0, 1, SHOE) == pytest.approx(v, abs=0.2)
-    # From standing that is hold_for, the game seeing a hold 12 ms longer than it is.
-    assert body.hold_for(20, SHOE, LAGS) == round(1000 * body.held_for(20, 0.0, SHOE)) - 12
+    # From standing, hold_for is that over the game's steps (within 5 ms), the game seeing a hold 2 ms longer.
+    assert body.hold_for(20, SHOE, LAGS) == pytest.approx(round(1000 * body.held_for(20, 0.0, SHOE)) - 2, abs=5)
 
 
 def test_a_tap_has_her_standing_still_again_when_hold_time_says():
-    # A 50 ms tap (a turn): seen held 62 ms, 87 units/s when the game sees it let go 122 ms after the key,
-    # braked to a stop 109 ms later.
-    assert body.hold_time(50, SHOE, LAGS) == pytest.approx(0.2305, abs=0.0005)
-    r = body.replay([(0.0, "right", True), (0.05, "right", False)], 0.5, SHOE, LAGS, start=0.0, dt=0.001)
-    last = next(t for (t, x, _), (_, nx, _) in zip(r.points, r.points[1:]) if nx == x and t > 0.1)
-    assert last == pytest.approx(body.hold_time(50, SHOE, LAGS), abs=0.002)
+    # A 50 ms tap (a turn): seen held 52 ms, 73 units/s when the game acts on its release 118 ms after the key,
+    # braked to a stop 91 ms later. Over the game's steps she is within a quarter unit of where she comes to
+    # rest by then (the steps brake her 24 units/s at a time, the last one to a stop: 13 ms later on average).
+    assert body.hold_time(50, SHOE, LAGS) == pytest.approx(0.209, abs=0.0005)
+    mean, _ = mean_replay([(0.0, "right", True), (0.05, "right", False)], 0.5)
+    assert mean[-1, 1] - np.interp(body.hold_time(50, SHOE, LAGS), mean[:, 0], mean[:, 1]) < 0.25
 
 
 # --- the jump ----------------------------------------------------------------------------------------
@@ -166,18 +181,42 @@ def test_the_kick():
 
 
 def test_a_jump_keyed_in_the_kicks_blind_spot_is_flagged():
-    # 80 ms after the arrow (the jump-back's timing): 35% of jumps leave below 140 (three of five did).
-    assert body.short_takeoff_chance(80, SHOE, LAGS) == pytest.approx(0.35, abs=0.02)
-    assert body.short_takeoff_chance(40, SHOE, LAGS) == pytest.approx(0.03, abs=0.01)
-    assert body.short_takeoff_chance(0, SHOE, LAGS) == pytest.approx(0.69, abs=0.02)  # often not seen yet
+    # The game's steps: after k steps of the arrow she runs at 42 k (to 149), and the kick takes 42 and 84 to
+    # full speed, not 126. In game (2026-10-21) jumps keyed 80, 100 and 120 ms after the arrow left short 2,
+    # 3 and 3 times of 4; none of 10 keyed 130-160 ms after it, nor of 4 at 40.
+    assert body.short_takeoff_chance(80, SHOE, LAGS) == pytest.approx(0.58, abs=0.01)
+    assert body.short_takeoff_chance(100, SHOE, LAGS) == pytest.approx(0.62, abs=0.01)
+    assert body.short_takeoff_chance(120, SHOE, LAGS) == pytest.approx(0.16, abs=0.01)
+    assert body.short_takeoff_chance(150, SHOE, LAGS) < 0.001
+    assert body.short_takeoff_chance(40, SHOE, LAGS) == pytest.approx(0.045, abs=0.005)
+    assert body.short_takeoff_chance(0, SHOE, LAGS) == pytest.approx(0.87, abs=0.01)  # 119 from the arrow's step
     assert [body.jump_window_ok(g, SHOE, LAGS) for g in (0, 20, 40, 50, 60, 80, 100, 112, 130, 166)] == \
         [False, False, True, True, False, False, False, False, True, True]
+    assert body.blind_ends_ms(SHOE, LAGS) == 129
+
+
+def test_the_steps_chances_are_the_triangle_over_the_lags_spread():
+    # With no spread, a gap of 1.25 steps between the game seeing the arrow and the jump is 1 step or 2 by the
+    # phase of its grid (3 in 4 and 1 in 4); with the spread, each k's chance is that averaged.
+    still = body.Lags(sd_on=0.0, sd_jump=0.0)
+    gap = 1.25 * body.STEP * 1000 - (still.jump - still.on) * 1000
+    chances = {k: p for k, p in body.steps_held_chances(gap, still).items() if p > 1e-9}
+    assert chances == pytest.approx({1: 0.75, 2: 0.25})
+    spread = body.steps_held_chances(100, LAGS)
+    assert sum(spread.values()) == pytest.approx(1.0) and max(spread, key=spread.get) == 3
+    # And replayed over the grid's phases, a jump 80 ms after the arrow leaves as the chances say.
+    events = [(0.0, "right", True), (0.08, "jump", True), (0.12, "jump", False), (0.8, "right", False)]
+    speeds = [abs(body.replay(events, 0.4, SHOE, still, start=0.0, dt=0.001, phase=ph).takeoffs[0][2])
+              for ph in body.phases(dt=0.001)]
+    p = body.short_takeoff_chance(80, SHOE, still)
+    assert sum(v < 140 for v in speeds) / len(speeds) == pytest.approx(p, abs=0.04)
+    assert {round(v) for v in speeds} == {126, 149}
 
 
 def test_a_jump_key_in_the_air_is_ignored_and_holding_it_doesnt_jump_again():
     events = [(0.0, "jump", True), (0.04, "jump", False), (0.3, "jump", True), (0.9, "jump", False)]  # held_jump
-    r = body.replay(events, 1.5, SHOE, LAGS, start=0.0)
-    assert len(r.takeoffs) == 1 and r.takeoffs[0][0] == pytest.approx(0.067, abs=body.TICK) and r.takeoffs[0][2] == 0
+    r = body.replay(events, 1.5, SHOE, LAGS, start=0.0)  # the game's steps at 0, 30, 60 ms ...
+    assert len(r.takeoffs) == 1 and r.takeoffs[0][0] == pytest.approx(0.060) and r.takeoffs[0][2] == 0
     top = min(y for _, _, y in r.points)
     assert top == pytest.approx(-77.0, abs=0.1) and r.points[-1][2] == 0  # 555²/4000 up, and back down
 

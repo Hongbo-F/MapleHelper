@@ -82,7 +82,7 @@ def test_jump_to_ledge_never_keys_the_jump_before_she_has_reached_full_speed():
     actions.jump_to_ledge(c, LEFT, ledge_px=40, height_px=60, own_edge_px=25)
     arrow = next(t for t, k, kind in c.events if k == "left" and kind == "down")
     jump = next(t for t, k, kind in c.events if k == "alt" and kind == "down")
-    assert jump - arrow == actions.RUN_JUMP_AFTER_MS >= 118
+    assert jump - arrow == actions.RUN_JUMP_AFTER_MS >= 150
 
 
 def test_jump_to_ledge_refuses_what_it_cant_make():

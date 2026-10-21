@@ -36,7 +36,7 @@ Each throw is a line of lab/probe_geometry.jsonl: the probe, how she threw (and 
 after the jump key, `gap_ms`), whether the wall rule was on, where she stood and her foothold group, the
 target, every monster in front at the throw (`front`, walls or not; each with the way it faced and its pose,
 as the look read them) and at the first look after it, about when the attack picked its target (`pick`: that
-look's frame is taken once the throw's key plan is done, about when the attack starts, ~67 ms after its
+look's frame is taken once the throw's key plan is done, about when the attack starts, ~65 ms after its
 key), the rule's verdict on the target (`clear`), her EXP gains from the key to the end (`exp`), and for
 every monster in front then its `evidence`: where it was, the way it faced and its pose at that look, its HP
 bar before the star could land, every bar seen after (with when, from the star's due time), the looks it
@@ -96,7 +96,7 @@ FRONT_DOWN = 140     # ... to this far below (the search's lowest floor is 68 be
                      # here, an Orange Mushroom, 67). A look searches only LOOK_DOWN (75) below her, unless wide.
 STAND_SLACK = 20     # she walks back to her place when she's farther off it than this (a jump back carries her 85)
 APPROACH = 12        # ... or faces the other way: then she comes at it walking the way she throws, from at least
-                     # this far behind it (a 67 ms hold: no tap short enough to be lost, under 50 ms)
+                     # this far behind it (a 75 ms hold: no tap short enough to be lost, under 50 ms)
 EVIDENCE_S = 0.9     # s after a star was due that a throw's evidence is gathered (as fight._score_shots: a miss) ...
 HIDDEN_MAX_S = 2.5   # ... and up to this long while its target is hidden (under its damage numbers: 1-3 s)
 EARLY_S = 0.15       # a target seen this long before its star was due, or later, has been seen since (`over`)
@@ -259,18 +259,20 @@ PROBES = {p.name: p for p in (
 def _jump_back_out() -> float:
     """How far a jump back has carried her when its attack picks its target (JUMP_LAG after the attack key), by the
     engine with the median lags: control.actions' plan (the arrow away, the jump JB_RUN_MS after it, the turn at
-    JB_TURN_MS), replayed on flat ground."""
+    JB_TURN_MS), replayed on flat ground, the mean over the phases the game's steps can have against the keys."""
     events = [(0.0, "left", True), (JB_RUN_MS / 1000, "jump", True), (JB_TURN_MS / 1000, "left", False),
               (JB_TURN_MS / 1000, "right", True), ((JB_TURN_MS + TAP_MS) / 1000, "right", False)]
     picks = (JB_THROW_MS + physics.JUMP_LAG * 1000) / 1000
-    return -body.replay(events, picks, physics.SHOE, physics.LAGS).points[-1][1]
+    out = [-body.replay(events, picks, physics.SHOE, physics.LAGS, phase=phase).points[-1][1]
+           for phase in body.phases()]
+    return sum(out) / len(out)
 
 
 # A jump back's target, as far off as a probe's range reaches at the look, is this much farther off when the attack
-# picks (25 units, with the jump keyed 130 ms after the arrow), and it may walk on meanwhile: from 4 at 2 (step-up,
-# 200-400 off) jump backs at Orange Mushrooms 387-394 off at the look were 434-445 off at the pick, past a star's
-# reach (an Orange Mushroom's to 432 by its middle), and missed for that, not for the wall. So a jump back's range
-# ends this much nearer.
+# picks (27 units, with the jump keyed 150 ms after the arrow; 25 at 130), and it may walk on meanwhile: from 4
+# at 2 (step-up, 200-400 off) jump backs at Orange Mushrooms 387-394 off at the look were 434-445 off at the
+# pick, past a star's reach (an Orange Mushroom's to 432 by its middle), and missed for that, not for the wall.
+# So a jump back's range ends this much nearer.
 JUMP_BACK_OUT = _jump_back_out()
 
 

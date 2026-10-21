@@ -13,7 +13,7 @@ from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT, MOVEMENT
 
 from .. import directions
-from ..motion.physics import JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS, KICK_JUMPS, hold_ms
+from ..motion.physics import BLIND_ENDS_MS, JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS, KICK_JUMPS, hold_ms
 from . import client
 
 TAP_MS = 40          # a key tap: released this long after it's pressed
@@ -36,23 +36,23 @@ ARROW_LOCK_MS = 600
 
 # A jump back: run away a moment, jump, turn toward the monster in mid-air and throw.
 # The arrow away is held this long before the jump, to get her moving. Keyed 80 ms after the arrow, the jump
-# came in the kick's blind spot (physics.sure_jump_ms): just below full speed she gets no kick, and three of
-# the five recorded at 60 fps left at 121-127 units/s (one at 142, the arrow seen late and kicked; one at 146).
-# In the simulator, with the lags spread as measured, 29% left below 140 and landed 68-89 units away. Keyed
-# 130 ms after it she has reached full speed herself (1400 units/s² from 60 ms after the arrow, as the standing
-# starts recorded at 60 fps fit), runs 12 units first, and lands 86-94 units away (90 at the median lags), the
-# jump 50 ms later. 40 ms after the arrow would leave at full speed too, by the kick from 66 units/s, within 2
-# units of where she stands (79 units away in all): that rests on the decompile and one recording (jb_k190),
-# so it waits for the in-game sweep of the gap (probe P1), which physics.KICK_JUMPS stands for. In the
-# simulator's game-like world (40 seeds of 20 minutes), keyed at 130 she made 3% less EXP a minute than at 80
-# (124 and 88 against 127 and 91, hunt loop and tour: the plan is 50 ms longer) and picked up 2 points more of
-# her drops; keyed at 40 she made as much as at 80.
-JB_RUN_MS = 40 if KICK_JUMPS else 130
+# came in the blind spot (physics.sure_jump_ms): three of the game's 30 ms steps into her run, at 126 units/s,
+# she gets no kick, and three of the five recorded at 60 fps left at 121-127 units/s (one at 142, the arrow seen
+# late and kicked; one at 146). Keyed 130 ms after it, as it was until the jump sweeps of 2026-10-21, up to a
+# quarter leave short by what they allow (of the 4 jumps keyed 120 ms after the arrow there, 3 left at 125-127).
+# Keyed at physics.BLIND_ENDS_MS (150) she has had four steps of the arrow but for at most 5% of jumps, runs 14
+# units first, and lands 90-94 units away by the engine, the jump 20 ms later than at 130. With KICK_JUMPS it
+# is keyed 52 ms after the arrow, the kick's best by the sweeps (one or two steps of the arrow: kicked to full
+# speed from 42 or 84), lifting off within 3 units of where she stands. In the simulator's game-like world (40
+# seeds of 20 minutes), keyed at 130 she made 3% less EXP a minute than at 80 (124 and 88 against 127 and 91,
+# hunt loop and tour: the plan is 50 ms longer) and picked up 2 points more of her drops; keyed at 40 she made
+# as much as at 80.
+JB_RUN_MS = 52 if KICK_JUMPS else BLIND_ENDS_MS
 STAR_DELAY_MS = 520  # the star leaves this long after the attack key, in the air or not (recorded at 60
                      # fps: 515-545 ms with the key at 190, 290, 450 and 610 ms into a jump back)
 JB_TURN_MS = JB_RUN_MS + 60  # the arrow toward the monster: turning as soon as she's off the ground
-JB_THROW_MS = JB_RUN_MS + JUMP_BACK_ATTACK_MS  # the attack key right after (215), so the star leaves just
-                               # before she lands (215 + 520 = 735; she lands 130 + 67 + 555 = 752 ms in)
+JB_THROW_MS = JB_RUN_MS + JUMP_BACK_ATTACK_MS  # the attack key right after (235), so the star leaves just
+                               # before she lands (235 + 520 = 755; she lands 150 + 65 + 555 = 770 ms in)
 # A jump throw that turns her first: the turn's arrow tap (MOVEMENT.tap_turn_ms) walks her, and a jump that
 # lifts off before she has stopped carries that speed into the air (the arrow is let go by then: no kick).
 # Keyed TURN_SETTLE_MS (30) after the tap, the jump lifted off with her at 71 units/s and came down 44 units

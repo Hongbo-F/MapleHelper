@@ -12,14 +12,14 @@ from .game import MOVEMENT, RECOVERY
 from .keys import Key
 
 PICK_UP_GAP_MS = 260  # between pick-up presses; one item per press
-# A running jump from standing goes in at least this long after its arrow. Keyed about 55-117 ms after it,
-# she has nearly reached her walking speed: too fast for the jump's kick (which takes her to full speed from
-# below 80% of it), short of it herself, so she leaves at 80-100% of it and lands short (at 81%, a flat
-# jump lands about 21 px short). Of five jump-backs recorded at 60 fps keyed 80 ms after the arrow, three
-# left at 81-85%; by gamelab's movement engine (gamelab/motion/body.py, fitted to those recordings) a jump
-# keyed 100 ms after it leaves short a quarter of the time, and from 118 ms on she's at full speed (gamelab
-# keys its own jumps there: physics.sure_jump_ms). Not yet checked in game (gamelab README, probe P1).
-RUN_JUMP_AFTER_MS = 120
+# A running jump from standing goes in at least this long after its arrow. The game moves her in steps of
+# about 30 ms: after three steps of the arrow she runs at 85% of her walking speed, too fast for the jump's
+# kick (which takes her to full speed from below 80% of it) and short of it herself, so a jump that comes then
+# leaves at 85% and lands short (a flat jump about 18 px short). In game on 2026-10-21, of 4 jumps keyed 120 ms
+# after the arrow 3 left at 84-85%, and of 4 keyed 100 ms after it 3 did; none of the 10 keyed 130-160 ms after
+# it. By gamelab's movement engine fitted to those (gamelab/motion/body.py), from 150 ms on at most 5% leave
+# short (physics.BLIND_ENDS_MS, which gamelab keys its own jumps from standing after; at 120 ms, 16-44%).
+RUN_JUMP_AFTER_MS = 150
 
 
 def _key(c: Ctx, action: str) -> Key:
@@ -106,7 +106,7 @@ def jump_to_ledge(c: Ctx, direction: str, ledge_px: float, height_px: float, own
     # One continuous run: stopping first and jumping from a standstill carries her ~30% less far.
     # The jump key goes down early enough that she takes off (one reaction later) at takeoff_at_px, but
     # not sooner than RUN_JUMP_AFTER_MS after the arrow: keyed at 100 ms (as it was for take-offs within
-    # ~21 px) a quarter of such jumps leave short.
+    # ~21 px) most such jumps leave short (3 of 4 in game).
     arrow = _arrow(c, direction)
     run_ms = m.reaction_ms + max(0.0, takeoff_at_px - m.walk_px_per_ms * m.reaction_ms) / m.walk_px_per_ms
     run_ms = max(run_ms, RUN_JUMP_AFTER_MS)

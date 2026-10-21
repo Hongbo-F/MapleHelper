@@ -9,6 +9,7 @@ import itertools
 import math
 import os
 from collections import OrderedDict
+from dataclasses import replace
 
 from maplehelper import config
 
@@ -43,49 +44,67 @@ FALL_SPEED = SHOE.fall   # physics: fallSpeed (670, terminal)
 JUMP_HEIGHT = JUMP_SPEED ** 2 / (2 * GRAVITY)   # 77 map units
 ROPE_REACH = 95          # she can grab a rope that ends this far above her feet (jump + arms)
 LAND_MARGIN = 18         # land at least this far onto a platform
-# Her walk and jump in the planner's terms, from the engine with the median lags (body.Lags; the 60 and 30
-# fps recordings). From standing the game sees an arrow 60 ms after the key and speeds her up at 1400
-# units/s² to full speed, so after t s she's 149 (t - 0.113) units along. Let go, she runs on until the
-# game sees the release (72 ms), then brakes at 800 units/s². A jump lifts off 67 ms after its key (18
-# jumps: 45-95 ms). A jump key pressed while she's still in the air is ignored, and holding it doesn't jump
-# again on landing.
-RUN_LAG = LAGS.on + WALK_SPEED / (2 * SHOE.acc)  # 0.113 s: a standing start lags full-speed running by this much
+# Her walk and jump in the planner's terms, from the engine with the median lags (body.Lags: the jump sweeps
+# at 30 fps and the 60 fps recordings, the wait for the game's 30 ms step included). From standing the game
+# acts on an arrow 66 ms after the key and speeds her up at 1400 units/s² to full speed, so after t s she's
+# 149 (t - 0.119) units along. Let go, she runs on until it acts on the release (68 ms), then brakes at 800
+# units/s². A jump lifts off 65 ms after its key. A jump key pressed while she's still in the air is ignored,
+# and holding it doesn't jump again on landing.
+RUN_LAG = LAGS.on + WALK_SPEED / (2 * SHOE.acc)  # 0.119 s: a standing start lags full-speed running by this much
 # ... and a start from running the other way at full speed lags a standing one by this much more: braking
 # and turning at 1400 units/s² (body.run_time; the decompile's, unmeasured). It was 0.08 s, from a loose
 # measurement. Nothing plans with it now (flow turns her by body.run_time): it is kept for its name.
 TURN_EXTRA = body.run_time(100.0, -WALK_SPEED, 1, SHOE) - body.run_time(100.0, 0.0, 1, SHOE)  # 0.16 s
-JUMP_LAG = LAGS.jump  # 0.067 s from the jump key to leaving the ground
+JUMP_LAG = LAGS.jump  # 0.065 s from the jump key to leaving the ground
 DROP_LAG = LAGS.drop  # 0.28 s from the jump key (down held) to falling through (0.28-0.34 in 4 drops on the
                       # minimap at 60 fps, whether or not she had just stopped running)
-STOP_RUN = body.stop_distance(WALK_SPEED, SHOE, LAGS)  # 24.6 units she goes on after the arrow is released at
-                                                        # full speed (measured 23.4-28.1) ...
-STOP_S = body.stop_time(WALK_SPEED, SHOE, LAGS)        # ... until she stands still, 0.26 s later
+STOP_RUN = body.stop_distance(WALK_SPEED, SHOE, LAGS)  # 24.0 units she goes on after the arrow is released at
+                                                        # full speed (measured 24.0 ± 2.0 in 18 stops) ...
+STOP_S = body.stop_time(WALK_SPEED, SHOE, LAGS)        # ... until she stands still, 0.25 s later
 LAND_SLIDE = body.slide(WALK_SPEED, SHOE)              # 13.9 units she slides on landing with no arrow held
-# Holding an arrow t ms from standing moves her 7.7 + 0.149 t map units, the slide after release included,
-# once t is past about 95 ms (she has reached full speed by then: the game sees a hold 12 ms longer than it
-# is); a shorter hold, 1925 (t/1000 + 0.012)² (body.hold_distance, hold_ms). Taps of 50 ms or less are
-# bimodal in game: of three, two moved her 0 and one 7.1. Shorter than MIN_HOLD_MS isn't sent.
+# Holding an arrow t ms from standing moves her 6.2 + 0.149 t map units, the slide after release included,
+# once t is past about 118 ms (she has reached full speed by then: the game sees a hold 2 ms longer than it
+# is); a shorter hold, on average over the game's steps, the line between 1.8, 7.0, 15.7 and 23.7 units for
+# one to four steps of it seen held (body.hold_distance, hold_ms). One hold at a time it is one of the two:
+# a 50 ms tap moves her 1.8 or 7.0 units (5.6 on average), as bimodal as in game (of three, two moved her 0
+# and one 7.1). Shorter than MIN_HOLD_MS isn't sent.
 WALK_UNITS_PER_MS = WALK_SPEED / 1000
-WALK_UNITS_FIXED = body.hold_distance(1000, SHOE, LAGS) - WALK_SPEED  # 7.7
+WALK_UNITS_FIXED = body.hold_distance(1000, SHOE, LAGS) - WALK_SPEED  # 6.2
 MIN_HOLD_MS = 30
 # When to press jump (ms after the arrow, from standing) to lift off `units` along: she's at
-# 0.149 (t - 113) units after t ms, and lifts off 67 ms after the key (JUMP_LAG), so
-# RUN_LAG_MS = RUN_LAG - JUMP_LAG (46).
+# 0.149 (t - 119) units after t ms, and lifts off 65 ms after the key (JUMP_LAG), so
+# RUN_LAG_MS = RUN_LAG - JUMP_LAG (54).
 RUN_LAG_MS = round((RUN_LAG - JUMP_LAG) * 1000)
-# A jump from standing, keyed t ms after the arrow, leaves at full speed only outside the kick's blind spot
-# (body.jump_window_ok): keyed 35-52 ms after it, the kick takes her from the 30-80 units/s she has reached
-# to full speed; keyed 118 ms or more after it, she has reached full speed herself; in between she leaves
-# at 119-149 (three of the five jump-backs recorded at 60 fps, keyed 80 ms after the arrow, left at 121-127).
-# Full speed by running rests on the walk the recordings fit (1400 units/s², the lags); full speed by the
-# kick from a near standstill rests on the decompile and one recording (jb_k190: the arrow seen a step
-# before the jump, at 23 units/s, and it left at 142). So the planner times jumps from standing for the
-# first only, until an in-game sweep of the gap (probe P1) shows the kick: True lets it key them 35-52 ms
-# after the arrow too, lifting off within 2 units of where she stands, and keys the jump-back 40 ms after its
-# arrow (control.actions.JB_RUN_MS), not 130.
+# A jump from standing, keyed t ms after the arrow, leaves at full speed only outside the blind spot
+# (body.short_takeoff_chance): the game's steps of 30 ms have her at 42, 84, 126 and 149 units/s after one to
+# four steps of the arrow, and the kick takes the first two to full speed, not the third. So a jump the arrow's
+# own step lifts off leaves at 119, one after one or two steps at full speed (the kick), after three at 126
+# (landing 13 units short of a full jump), after four or more at full speed. In game on 2026-10-21 (34 jumps
+# keyed 0-160 ms after the arrow, from standing on platform 34), of those keyed 80, 100 and 120 ms after it 2
+# of 4, 3 of 4 and 3 of 4 left short, and none of the 10 keyed 130 ms or later. Full speed by her own run is
+# what the planner times jumps from standing for. The kick from a near standstill worked in all 4 jumps keyed
+# 40 ms after the arrow and 3 of 4 at 60, which the step model puts at 5% and 13% short by the median lags (up
+# to 27% and 21% within what the sweeps allow): not reliable enough to plan on, so KICK_JUMPS stays off. True
+# lets the planner key jumps from standing in the kick's window too (body.jump_window_ok: 40-52 ms after the
+# arrow by the median lags), lifting off within 2 units of where she stands, and keys the jump-back 52 ms after
+# its arrow (control.actions.JB_RUN_MS), the window's best by the sweeps' fit: about 20 more runs there in game
+# should confirm it first.
 KICK_JUMPS = False
-# ms after the arrow (from standing) at which the jump, by the median lags, finds her at the kick's limit
-# (0.8 × her walking speed): the blind spot is around and after it (78).
-_KICK_ENDS_MS = (SHOE.kick * SHOE.vmax / SHOE.acc - (LAGS.jump - LAGS.on)) * 1000
+# The difference of the jump's lag and the arrow's (when the game sees them, its step aside), as the two jump
+# sweeps of 2026-10-21 have it: the step model fitted to all 34 jumps' outcomes (and the steps of the 18
+# tracked) puts it at -7 ms, sd 10; within 2 log-likelihood of the best, from -13 to -1 ms, its spread from
+# 4 to 17 ms. The median lags have -1 (body.Lags: 65 - 66), and the spread of two keys seen, 10.9.
+SWEEP_LAG_GAP = (-0.013, -0.001)
+SWEEP_LAG_GAP_SD = (0.004, 0.017)
+BLIND_RISK = 0.05  # the most jumps from standing that may leave short
+# ms after the arrow from which a jump from standing leaves at full speed by her own run (four steps of the
+# arrow or more) but for at most BLIND_RISK of jumps, wherever in that range the lags' gap is: 150. By the
+# median lags 129 (138 for 1%), by the sweeps' best fit 134; at the old 118, 20% leave short by the median lags,
+# 33% by the best fit and up to 50% within its range. No jump from standing is keyed sooner than this after its
+# arrow (sure_jump_ms), but in the kick's window with KICK_JUMPS.
+BLIND_ENDS_MS = max(body.blind_ends_ms(SHOE, replace(LAGS, jump=LAGS.on + gap, sd_on=sd / math.sqrt(2),
+                                                     sd_jump=sd / math.sqrt(2)), BLIND_RISK)
+                    for gap in SWEEP_LAG_GAP for sd in SWEEP_LAG_GAP_SD)
 # Attacks from a jump (control.actions times her key plans with these; attack.reach works out what such an
 # attack can hit). An attack picks its target when it starts, about JUMP_LAG after its key, the same input
 # lag as a jump's lift-off: so when it starts she has been in the air for about as long as the attack key
@@ -93,8 +112,8 @@ _KICK_ENDS_MS = (SHOE.kick * SHOE.vmax / SHOE.acc - (LAGS.jump - LAGS.on)) * 100
 JUMP_ATTACK_MS = 40        # a jump throw's attack key comes this long after the jump key. In game on 2026-10-20,
                            # at a snail 20-60 units away: keyed 100 ms after the jump (the macro's F1 combo), the
                            # star went over it; keyed 40 ms after, a star hit it for 78 and killed it
-JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid-air (actions.JB_THROW_MS 215
-                           # less JB_RUN_MS 130, when the jump key goes down)
+JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid-air (actions.JB_THROW_MS 235
+                           # less JB_RUN_MS 150, when the jump key goes down)
 ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fps recordings jump_throw_0 and
                            # _1, keys 100 ms apart: her attack pose first shows 91-110 ms after lift-off)
 # fly's landings, the FLY_CACHE_SIZE most recently used. Each is worked out from its start rounded as its
@@ -204,9 +223,10 @@ def _native_flight(model: MapModel, laid_out: dict, group, walls: body.Walls, x:
     return None if q < 0 else model.platforms[q], x if same_x else lx, t, vx if same_vx else vl
 
 
-# A route jump has to land on its platform at this share of her walking speed too: a jump the mover keys
-# from standing (control.mover, MIN_RUN on) leaves slower than 0.85 × 149 (127) only with the lags 2.8 sd
-# off (0.3%), and one keyed in the kick's blind spot leaves at 119-149 (0.8-1 ×).
+# A route jump has to land on its platform at this share of her walking speed too: a jump from standing
+# keyed in the blind spot leaves at 126 (three of the game's steps into her run: 0.846 × 149), and one the
+# mover keys (control.mover, MIN_RUN on) does so for 0.01% of jumps by the median lags (up to 5% within what
+# the jump sweeps of 2026-10-21 allow).
 SLOW_TAKEOFF = 0.85
 
 
@@ -246,17 +266,20 @@ def fall_time(dy: float) -> float:
 
 
 def hold_ms(units: float) -> int:
-    """How long to hold an arrow to walk `units` map units and come to rest there (body.hold_for: 39 ms
-    for 5 units, 90 for 20, 284 for 50), MIN_HOLD_MS at least."""
+    """How long to hold an arrow to walk `units` map units and come to rest there (body.hold_for: 46 ms
+    for 5 units, 104 for 20, 294 for 50), MIN_HOLD_MS at least."""
     return max(MIN_HOLD_MS, body.hold_for(units, SHOE, LAGS))
 
 
 def sure_jump_ms(gap: float) -> float:
     """The soonest a jump from standing can be keyed, `gap` ms after the arrow or later, and surely leave
-    the ground at full speed (KICK_JUMPS above): 118 ms after the arrow for any gap up to that, the gap
-    itself from there on."""
+    the ground at full speed (KICK_JUMPS above): BLIND_ENDS_MS (150) after the arrow for any gap up to that,
+    the gap itself from there on. With KICK_JUMPS, a gap in the kick's window too (before three of the game's
+    steps, and short at most BLIND_RISK of the time by the median lags)."""
     def sure(t: float) -> bool:
-        return body.jump_window_ok(t, SHOE, LAGS) and (KICK_JUMPS or t >= _KICK_ENDS_MS)
+        if t >= BLIND_ENDS_MS:
+            return True
+        return KICK_JUMPS and t < 3 * body.STEP * 1000 and body.jump_window_ok(t, SHOE, LAGS, BLIND_RISK)
     if gap >= 0 and sure(gap):
         return gap
     t = max(0, math.ceil(gap))
@@ -267,11 +290,9 @@ def sure_jump_ms(gap: float) -> float:
 
 def run_ms(units: float) -> int:
     """How long after pressing the arrow (from standing) to press jump to lift off `units` along, still
-    running; never in the kick's blind spot, though (sure_jump_ms: keyed there, the jump finds her just
-    below full speed and leaves at 119-149; keyed 93 ms after the arrow, 22% leave below 134, the 10% slower
-    that route.sure_landing allows). So a run-up shorter than about 12 units is keyed 118 ms in and lifts
-    her off up to 11 units along, at full speed: within the 12 units early or late every route jump
-    allows."""
+    running; never in the blind spot, though (sure_jump_ms: keyed there, the jump can find her three steps
+    into her run and leave at 126). So a run-up shorter than about 14 units is keyed 150 ms in and lifts her
+    off about 14 units along, at full speed."""
     if units <= 0:
         return 0
     return sure_jump_ms(round(units / WALK_UNITS_PER_MS + RUN_LAG_MS))

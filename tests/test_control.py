@@ -119,9 +119,9 @@ def test_the_movers_walks_press_pick_up_as_every_walk_does():
 
 
 def test_no_jump_in_her_key_plans_is_keyed_in_the_kicks_blind_spot():
-    """A jump keyed 55-117 ms after the arrow, from standing, finds her just below full speed: no kick, and
-    she leaves at 119-149 units/s (three of the five jump-backs recorded at 60 fps, keyed 80 ms after the
-    arrow, left at 121-127)."""
+    """A jump keyed 60-149 ms after the arrow, from standing, can find her three of the game's steps into her
+    run: no kick, and she leaves at 126 units/s (three of the five jump-backs recorded at 60 fps, keyed 80 ms
+    after the arrow, left at 121-127; of the jumps of the sweeps keyed 80-120 ms after it, 8 of 12)."""
     from gamelab.control import actions as actions_mod
     from gamelab.control.mover import MIN_RUN
     from gamelab.motion import body
@@ -133,7 +133,7 @@ def test_no_jump_in_her_key_plans_is_keyed_in_the_kicks_blind_spot():
     gap = at("alt", "down") - at("left", "down")
     assert gap == actions_mod.JB_RUN_MS and sure_jump_ms(gap) == gap and body.short_takeoff_chance(gap, SHOE, LAGS) <= 0.01
     # The mover's shortest run-up is keyed as its length says (not put off), outside the blind spot.
-    assert run_ms(MIN_RUN) == round(MIN_RUN / 0.149 + 46) and body.jump_window_ok(run_ms(MIN_RUN), SHOE, LAGS)
+    assert run_ms(MIN_RUN) == round(MIN_RUN / 0.149 + 54) and body.jump_window_ok(run_ms(MIN_RUN), SHOE, LAGS)
 
 
 def test_a_jump_throw_that_turns_her_jumps_once_the_turns_tap_has_stopped_walking_her():

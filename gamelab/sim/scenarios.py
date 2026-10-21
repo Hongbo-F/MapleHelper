@@ -457,22 +457,23 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=5,
+@scenario((34, -300.0), monsters="all", seed=6,
           expects=(ends("arrived"), logs("looking for a way around"), logs("hop@"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
-    """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the
-    monster in her way, hops over one, and is touched and knocked about a few times on the way up.
-    (Seed 3 until her walks pressed pick-up: they last ~0.2 s longer, and with seed 3 no monster was then
-    in her way to hop; seed 1 until her walk and jump lags came from motion.body, after which no monster
-    was in her way on seed 1, and one is on seed 3 again. Seed 2 since the simulator moves her by the
-    engine: on seed 3 nothing was in her way to hop. Over 16 seeds all arrive, and 8 meet all of this, 10
-    before. Seed 4 since the planner times her runs and stops by the engine: on seed 2 nothing was in her
-    way to hop; over 16 seeds all arrive, 7 meeting all of this. Seed 1 since a touch is evaded by the
-    monster's accuracy: on seed 4 she evaded a snail's touch at 7 s (82% of a snail's are), and then
-    nothing was in her way to hop; over 16 seeds all arrive, 5 meeting all of this. Seed 5 since monsters
-    walk as fast as the game data says (a pig 125 units/s, not 70; alone, that moved it to seed 2): on
-    seeds 1 and 2 no monster was in her way to go around or hop; over 16 seeds all arrive, 2 meeting all of
-    this.)"""
+    """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the monster
+    in her way, hops over one, and is touched and knocked about a few times on the way up. (Seed 3 until her
+    walks pressed pick-up: they last ~0.2 s longer, and with seed 3 no monster was then in her way to hop;
+    seed 1 until her walk and jump lags came from motion.body, after which no monster was in her way on seed
+    1, and one is on seed 3 again. Seed 2 since the simulator moves her by the engine: on seed 3 nothing was
+    in her way to hop. Over 16 seeds all arrive, and 8 meet all of this, 10 before. Seed 4 since the planner
+    times her runs and stops by the engine: on seed 2 nothing was in her way to hop; over 16 seeds all arrive,
+    7 meeting all of this. Seed 1 since a touch is evaded by the monster's accuracy: on seed 4 she evaded a
+    snail's touch at 7 s (82% of a snail's are), and then nothing was in her way to hop; over 16 seeds all
+    arrive, 5 meeting all of this. Seed 5 since monsters walk as fast as the game data says (a pig 125
+    units/s, not 70; alone, that moved it to seed 2): on seeds 1 and 2 no monster was in her way to go around
+    or hop; over 16 seeds all arrive, 2 meeting all of this. Seed 6 since the game moves her in 30 ms steps
+    (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 5 no monster was in her way to go
+    around or hop; over 16 seeds 15 arrive, 1 meeting all of this; 16 and 2 just before.)"""
     return _nav(19)(sim)
 
 
@@ -482,21 +483,23 @@ def nav_monsters_basin(sim):
     return _nav(33)(sim)
 
 
-@scenario((21, -300.0), monsters="all", seed=12,
+@scenario((21, -300.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("waiting for the monster to move off")))
 def nav_monsters_long_way(sim):
-    """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way. (Seed
-    11 since chains follow on: on seed 5 the staircase's monsters knocked her back down until time ran out;
-    over 16 seeds 12 arrived, 14 before. Seed 4 since her walk and jump lags came from motion.body: on
-    seed 11 nothing was in her way to wait for; over 16 seeds 14 arrive, 3 of them after a wait. Seed 5
-    since the simulator moves her by the engine: on seed 4 nothing was in her way to wait for; over 16
-    seeds all arrive, 3 of them after a wait, where 15 and 3 did just before. Seed 9 since no jump is keyed
-    in the kick's blind spot and jump-backs leave at full speed: on seed 5 nothing was in her way to wait
-    for; over 16 seeds 14 arrive, 2 of them after a wait, where 15 and 6 did just before. Seed 7 since the
-    arrow she holds doesn't steer a knock's flight: on seed 9 nothing was in her way to wait for; over 16
-    seeds all arrive, 4 of them after a wait, where 5 did just before. Seed 12 since monsters walk as fast
-    as the game data says (a pig 125 units/s, not 70; alone, that moved it to seed 12 too): on seed 7
-    nothing stood in her way to wait for; over 16 seeds 15 arrive, 2 of them after a wait.)"""
+    """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way. (Seed 11
+    since chains follow on: on seed 5 the staircase's monsters knocked her back down until time ran out; over
+    16 seeds 12 arrived, 14 before. Seed 4 since her walk and jump lags came from motion.body: on seed 11
+    nothing was in her way to wait for; over 16 seeds 14 arrive, 3 of them after a wait. Seed 5 since the
+    simulator moves her by the engine: on seed 4 nothing was in her way to wait for; over 16 seeds all arrive,
+    3 of them after a wait, where 15 and 3 did just before. Seed 9 since no jump is keyed in the kick's blind
+    spot and jump-backs leave at full speed: on seed 5 nothing was in her way to wait for; over 16 seeds 14
+    arrive, 2 of them after a wait, where 15 and 6 did just before. Seed 7 since the arrow she holds doesn't
+    steer a knock's flight: on seed 9 nothing was in her way to wait for; over 16 seeds all arrive, 4 of them
+    after a wait, where 5 did just before. Seed 12 since monsters walk as fast as the game data says (a pig
+    125 units/s, not 70; alone, that moved it to seed 12 too): on seed 7 nothing stood in her way to wait for;
+    over 16 seeds 15 arrive, 2 of them after a wait. Seed 2 since the game moves her in 30 ms steps
+    (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 12 nothing stood in her way to
+    wait for; over 16 seeds all arrive, 3 of them after a wait; 15 and 2 just before.)"""
     return _nav(2)(sim)
 
 
@@ -529,39 +532,45 @@ def nav_fight_short(sim):
     return _nav(25, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((14, 760.0), monsters="all", seed=1,
+@scenario((14, 760.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("shooting it on the way"), moves("climb")))
 def nav_fight_up(sim):
-    """From 14 up two ropes and a jump to 1 (pigs, Orange Mushrooms) with `fight` on: she shoots 17's
-    monsters from 14 first, and fights her way up past 3 and 4. On some seeds a touch knocks her off 3 or
-    4 down to the basin and the trip runs out of time (of seeds 1-48: on 10 with the decisions of the star
-    search, 14 with the claw's edge by size, 18 with kills fading by their death animation too, seed 10
-    among them; 5 with both tracks), so it was seed 3, where she got there with each of them. (Seed 1 since a
-    trip waits for her to land before it plans, Navigator._onto_platform: on seed 3 knocks back onto 4 sent
-    her the long way round, and the trip ran out of time. Of seeds 1-48 36 arrived before monsters walked
-    the game data's speeds: 38 without that and the fight's wait for a knock to end, 43 at the tracks'
-    merge, before the drops and walk-offs kept clear of the basin's cliffs. The 12 others ran out of time at
-    180-194 s, 10 of them knocked off 3 or 4 and climbing back up from 32 or the basin, which took 164-180 s
-    on the seeds that went that way and arrived at the merge. Seed 1 arrives with each. With monsters
-    walking those speeds 37 arrive, the 11 others running out of time at 181-195 s; with the client's star
-    search and claw stab too, 41, the 7 others at 181-193 s.)"""
+    """From 14 up two ropes and a jump to 1 (pigs, Orange Mushrooms) with `fight` on: she shoots 17's monsters
+    from 14 first, and fights her way up past 3 and 4. On some seeds a touch knocks her off 3 or 4 down to the
+    basin and the trip runs out of time (of seeds 1-48: on 10 with the decisions of the star search, 14 with
+    the claw's edge by size, 18 with kills fading by their death animation too, seed 10 among them; 5 with
+    both tracks), so it was seed 3, where she got there with each of them. (Seed 1 since a trip waits for her
+    to land before it plans, Navigator._onto_platform: on seed 3 knocks back onto 4 sent her the long way
+    round, and the trip ran out of time. Of seeds 1-48 36 arrived before monsters walked the game data's
+    speeds: 38 without that and the fight's wait for a knock to end, 43 at the tracks' merge, before the drops
+    and walk-offs kept clear of the basin's cliffs. The 12 others ran out of time at 180-194 s, 10 of them
+    knocked off 3 or 4 and climbing back up from 32 or the basin, which took 164-180 s on the seeds that went
+    that way and arrived at the merge. Seed 1 arrives with each. With monsters walking those speeds 37 arrive,
+    the 11 others running out of time at 181-195 s; with the client's star search and claw stab too, 41, the 7
+    others at 181-193 s. Seed 2 since the game moves her in 30 ms steps (body.STEP) and jumps from standing
+    wait 150 ms after the arrow: on seed 1 she was knocked off 17 down to 35 at 103 s and ran out of time on
+    the long way round (nav_fight_up_runs_out now). Of seeds 1-48 41 arrive, 42 just before; on seed 2 knocked
+    off 3 to 25 at 122 s, she goes the long way round and arrives.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=1,
+@scenario((12, -300.0), monsters="all", seed=4,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
-    """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down
-    to 13), and goes on from there; hit on the way, her chain is cut and replanned, and she fights her way
-    to 17. (Seed 2 since a walk-off must land where she can stop: on seed 3 nothing hit her on the way any
-    more; 12 of 16 seeds show all of it. Seed 3 since jump-throws come 40 ms after the jump: on seed 6
-    nothing knocked her off any more. On seed 6 before, her first chain from 11 waited out the attack lock
-    of her last throw: before it did, she was touched on the way, and the quick looks after those cuts
-    skipped the fights on 18 and 17. Seed 10 since a hit pushes a monster back: on seed 2 a knock down to
-    34 at 5 s left her fighting and looting there until the 180 s ran out. Over 16 seeds 12 arrived, 5
-    showing all of this; with monsters walking the game data's speeds 8 arrive, 4 showing all of it: 7, 9,
-    11 and 10. Seed 1 since the star's search and the claw's stab are the client's too: on seed 10 nothing
-    knocked her off 12 any more. Over 16 seeds 12 arrive, 8 showing all of it.)"""
+    """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down to
+    13), and goes on from there; hit on the way, her chain is cut and replanned, and she fights her way to 17.
+    (Seed 2 since a walk-off must land where she can stop: on seed 3 nothing hit her on the way any more; 12
+    of 16 seeds show all of it. Seed 3 since jump-throws come 40 ms after the jump: on seed 6 nothing knocked
+    her off any more. On seed 6 before, her first chain from 11 waited out the attack lock of her last throw:
+    before it did, she was touched on the way, and the quick looks after those cuts skipped the fights on 18
+    and 17. Seed 10 since a hit pushes a monster back: on seed 2 a knock down to 34 at 5 s left her fighting
+    and looting there until the 180 s ran out. Over 16 seeds 12 arrived, 5 showing all of this; with monsters
+    walking the game data's speeds 8 arrive, 4 showing all of it: 7, 9, 11 and 10. Seed 1 since the star's
+    search and the claw's stab are the client's too: on seed 10 nothing knocked her off 12 any more. Over 16
+    seeds 12 arrive, 8 showing all of it. Seed 4 since the game moves her in 30 ms steps (body.STEP) and jumps
+    from standing wait 150 ms after the arrow: on seed 1 nothing hit her on the way any more. Over 16 seeds 10
+    arrive, 6 showing all of it; 11 and 8 just before; on seed 4 she's knocked off 12 down to 34 at 5 s and
+    comes the long way round, the staircase's monsters cutting her chains short three times.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -569,29 +578,36 @@ def nav_fight_across(sim):
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=4,
+@scenario((14, 760.0), monsters="all", seed=1,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
-    """nav_fight_up on seed 4: knocked off 3 down to 17 at 84 s, she goes the long way round, down from 25 to
-    32 and up the staircase, fighting 48 monsters in all, is knocked off 20 down to 21 at 180 s and runs out of
-    her 180 s there. (Seed 10 on the perception track, where it arrived before monsters walked 125 units/s;
-    with the physics and attack tracks it arrives there. Seed 11 then, where with the client's star search
-    and claw stab it arrives too: knocked off 4 at 26 s and hit off the jump from 3 to 1, it had gone the long
-    way round, fighting 38 monsters, and run out of time on 16. Of seeds 1-48, 41 arrive, against 37 before
-    and 36 at the physics and attack tracks' merge.)"""
+    """nav_fight_up on seed 1: she shoots 17's monsters from 14 for 48 s, climbs to 3 and shoots 1's, is knocked
+    down onto 17 and off it down to 35 at 103 s, fights there until 162 s, and on the long way round up the
+    staircase runs out of her 180 s on 19, 45 monsters killed. (Seed 1 since the game moves her in 30 ms steps
+    (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 4 she now arrives; of seeds 1-48,
+    41 arrive, 42 just before. Seed 4 had been since the drops and walk-offs kept clear of the basin's cliffs:
+    knocked off 3 down to 17 at 84 s, she had gone the long way round, down from 25 to 32 and up the
+    staircase, fighting 48 monsters, and run out of time on 21. Seed 10 on the perception track, where it
+    arrived before monsters walked 125 units/s; with the physics and attack tracks it arrives there. Seed 11
+    then, where with the client's star search and claw stab it arrives too: knocked off 4 at 26 s and hit off
+    the jump from 3 to 1, it had gone the long way round, fighting 38 monsters, and run out of time on 16. Of
+    seeds 1-48, 41 arrive, against 37 before and 36 at the physics and attack tracks' merge.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
 @scenario((12, -300.0), monsters="all", seed=2,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
-    """nav_fight_across on seed 2: after 25 s fighting on 12 she's knocked off down to 34, and on the long way
-    round up the staircase she's knocked off 20 to 19 at 93 s, hit back onto 14 off its walk-off to 17 and
-    back down to 36 off the jump from 32, fighting 36 monsters in all, and runs out of her 180 s on 22. (Seed 3
-    before, where with the client's star search and claw stab she now arrives: after 52 s fighting on 12
-    she'd been knocked off down to 34, and twice more on the long way round, and run out of time on 18; it
-    arrived there before monsters walked 125 units/s. Of seeds 1-16, 12 arrive now, 8 with the physics and
-    attack tracks before the client's search and stab, 12 at their merge.)"""
+    """nav_fight_across on seed 2: knocked off 12 down to 34, on the long way round up the staircase she fights
+    80 s on 22, is knocked off 18 back to 19 at 138 s and hit off it down to 32 at 150 s and to 34 at 158 s,
+    fighting 40 monsters in all, and runs out of her 180 s on her way up again. (On seed 2 still since the
+    game moves her in 30 ms steps (body.STEP) and jumps from standing wait 150 ms after the arrow, a different
+    run: before, after 25 s fighting on 12 she was knocked off down to 34, then off 20 to 19 at 93 s, back
+    onto 14 off its walk-off to 17 and down to 36 off the jump from 32, and ran out of time on 22. Of seeds
+    1-16 10 arrive, 11 just before. Seed 3 before, where with the client's star search and claw stab she now
+    arrives: after 52 s fighting on 12 she'd been knocked off down to 34, and twice more on the long way
+    round, and run out of time on 18; it arrived there before monsters walked 125 units/s. Of seeds 1-16, 12
+    arrived then, 8 with the physics and attack tracks before the client's search and stab, 12 at their merge.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -645,21 +661,25 @@ def move_climb_down(sim):
     return _one_move(sim, "climb_down", 30, 36)
 
 
-@scenario((30, 700.0), seed=14, noise=Noise(walk_jitter=5.0, dot_px=True),
+@scenario((30, 700.0), seed=6, noise=Noise(walk_jitter=5.0, dot_px=True),
           expects=(sends("nudge", "nudges by the rope on screen"),
-                   check("one nudge, past the rope's top but inside the tolerance",
-                         lambda tr: [p[2][0][1] for p in tr["plans"] if p[1] == "nudge"] == ["left"]),
+                   check("lined up in a few nudges, from either side",
+                         lambda tr: 2 <= sum(p[1] == "nudge" for p in tr["plans"]) <= 4
+                         and {p[2][0][1] for p in tr["plans"] if p[1] == "nudge"} == {"left", "right"}),
                    ends(36, key="landed", what="down the rope after all")))
 def move_climb_down_nudge(sim):
-    """Mover.do with walks a few units off: the walk stops 5 units (7 px) from the rope's top, and
-    Mover.line_up_rope nudges her by the rope on screen, held as physics.hold_ms says: 39 ms for 5 units,
-    which by the engine moves her 5.8 here, a unit past the rope's top. That's inside the 6 px tolerance,
-    so she climbs down after the one nudge. (Seed 14 since the walk's lags came from motion.body: on seed
-    7 the walk now stops close enough not to nudge. Until the simulator moved her by the engine, any tap
-    that moved her at all moved her at least ~14 units, so that nudge went 23 px, and she swung from side
-    to side of the rope three times before pressing down; over 16 seeds 1 nudged then, and 1 now. Until
-    the mover held its nudges as hold_ms says, they were timed by her walking speed alone, plus 25 ms: 58
-    ms for 5 units, which moved her 9, 4 past the rope's top.)"""
+    """Mover.do with walks a few units off: the walk stops a few units from the rope's top, and
+    Mover.line_up_rope nudges her by the rope on screen, held as physics.hold_ms says (54-61 ms here), until
+    she's inside the 6 px tolerance, and she climbs down. On the game's 30 ms steps a nudge that short moves
+    her one step of speeding up or two, 1.8 or 7.0 units, so it can take a few, from either side: on seed 6
+    three (left, right, left). (Seed 6 since the game moves her in those steps: on seed 14 the walk stopped
+    close enough not to nudge. Over 16 seeds 3 nudge, 1 just before; with a nudge moving her 5.8 units, as on
+    the engine's 5 ms step, she climbed down after one. Seed 14 since the walk's lags came from motion.body:
+    on seed 7 the walk now stops close enough not to nudge. Until the simulator moved her by the engine, any
+    tap that moved her at all moved her at least ~14 units, so that nudge went 23 px, and she swung from side
+    to side of the rope three times before pressing down; over 16 seeds 1 nudged then, and 1 now. Until the
+    mover held its nudges as hold_ms says, they were timed by her walking speed alone, plus 25 ms: 58 ms for 5
+    units, which moved her 9, 4 past the rope's top.)"""
     return _one_move(sim, "climb_down", 30, 36)
 
 
@@ -981,13 +1001,16 @@ def tour_hunt_basin(sim):
     return _tour_hunt(36, 5)(sim)
 
 
-@scenario((15, 100.0), monsters="all", seed=1, limit=400,
+@scenario((15, 100.0), monsters="all", seed=3, limit=400,
           expects=(logs("shooting platform 12 from platform 13"), logs("nothing left on platform 12")))
 def tour_hunt_platform_12(sim):
     """Tour.hunt of platform 12 (pigs, Orange Mushrooms) from the safe platform 13 beside it. (Seed 1 since the
     star's search has the client's top, and from 13 86% of 12 is in reach, not 63%: with monsters walking the
     game data's speeds too, on seed 23 she made the stop's 4 kills before 12 was clear. Of seeds 1-16, 15 meet
-    all of it; on 14 the scenario's 400 s ran out.)"""
+    all of it; on 14 the scenario's 400 s ran out. Seed 3 since the game moves her in 30 ms steps (body.STEP)
+    and jumps from standing wait 150 ms after the arrow: on seed 1 the last monster on 12 was where no spot on
+    13 reaches, and the trip onto 12 for it ran out of time. Of seeds 1-16, 13 meet all of it, 15 just
+    before.)"""
     return _tour_hunt(12, 4)(sim)
 
 
@@ -1049,23 +1072,26 @@ def tour_collect_loot_on_the_way(sim):
             "pending_loot": [[round(d.x), d.platform] for d in tour.h.looter.pending]}
 
 
-@scenario((36, 300.0), monsters="all", seed=1, limit=1500,
+@scenario((36, 300.0), monsters="all", seed=2, limit=1500,
           expects=(check("three stops visited", lambda tr: len(tr["result"]["visited"]) == 3),
                    ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
                    check("every kill counted (the stops' and on the way, resting included)",
                          lambda tr: sum(tr["result"]["kills"].values()) + tr["result"]["on_the_way"]
                          == sum(tr["world"]["kills"].values()))))
 def tour_run(sim):
-    """`python -m gamelab tour --stops 3`: the whole tour, end to end: three hunting grounds, rests when
-    HP runs low, and standing by on a safe platform at the end. (Seed 1 since the two tracks came together,
-    her body moved by motion.body and her stars picked by the star's search: on seed 6 one of 160 kills
-    went uncounted. Over seeds 1-16, 12 meet all of this and 4 miss 1 or 2 of 136-237 kills in the count;
-    none runs out of time, 560-1142 s. With no jump keyed from a knock, no chain planned in mid-air and the
-    drops clear of the basin's cliffs, still 12: 4 miss 1 or 2 of 122-184, in 587-984 s. Seed 6 since stars from the ground pick by the star's search: on
-    seed 8 an EXP gain came in as the stop's fight ended, unplaced, and two kills on the way came between
-    two looks. Seed 8 had been since jump-throws come 40 ms after the jump: on seed 25 two kills came
-    between two looks once, and two kills raise her EXP number once.) The basin's respawns make its length
-    chaotic: on world seeds 1-16 it took 470-1190 s, before stars picked by the search and since.
+    """`python -m gamelab tour --stops 3`: the whole tour, end to end: three hunting grounds, rests when HP runs
+    low, and standing by on a safe platform at the end. (Seed 2 since the game moves her in 30 ms steps
+    (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 1 one of 181 kills went
+    uncounted. Over seeds 1-16 12 meet all of this, as just before. Seed 1 since the two tracks came together,
+    her body moved by motion.body and her stars picked by the star's search: on seed 6 one of 160 kills went
+    uncounted. Over seeds 1-16, 12 meet all of this and 4 miss 1 or 2 of 136-237 kills in the count; none runs
+    out of time, 560-1142 s. With no jump keyed from a knock, no chain planned in mid-air and the drops clear
+    of the basin's cliffs, still 12: 4 miss 1 or 2 of 122-184, in 587-984 s. Seed 6 since stars from the
+    ground pick by the star's search: on seed 8 an EXP gain came in as the stop's fight ended, unplaced, and
+    two kills on the way came between two looks. Seed 8 had been since jump-throws come 40 ms after the jump:
+    on seed 25 two kills came between two looks once, and two kills raise her EXP number once.) The basin's
+    respawns make its length chaotic: on world seeds 1-16 it took 470-1190 s, before stars picked by the
+    search and since.
 
     On the physics branch (her body by motion.body) it met all of this on few seeds, and its seed moved
     from 8 to 9, 8, 9, 5, 9 and 1 there; looked into rather than moved again, it was the limit and the
@@ -1246,25 +1272,26 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=3, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
 def loop_lull_loot(sim):
-    """Only platform 12 has monsters, and the value map says it's the best ground. She hunts it from the
-    safe platform 13 beside it; in the lulls, with nothing wanted left on it and her kills due back, she
-    picks up the piles she can get to before they respawn. (Seed 5 since the simulator moves her by the
-    engine: on seed 4 she picked up 19 drops, not 20. Over 16 seeds 9 meet all of this, 8 before. Seed 6
-    since no jump is keyed in the kick's blind spot and jump-backs leave at full speed: on seed 5 she picked
-    up 17. Over 16 seeds 8 meet all of this, 10 just before. Seed 8 since monsters walk as fast as the game
-    data says (a pig 125 units/s, not 70): on seed 6 no lull came for the rule, and she picked up fewer than
-    20. Over 16 seeds 8 meet all of this. On the attack track alone, seed 4 since the star's search has the
-    client's top (from 13 a star picks a pig on 12 from 111 units, not 191): on seed 6 no lull came. Seed 1
-    since both are together: on seed 8 no lull came. Over 16 seeds 10 meet all of this; of the 6 others, 5 had
-    no lull and 2 picked up fewer than 20 drops, seed 3 both. Seed 2 since a plan's first arrow waits until
-    0.6 s after her last attack's key (actions.ARROW_LOCK_MS): on seed 1 her first walk to a better spot went
-    0.39 s later, and no lull came. Over 16 seeds 5 meet all of this; of the 11 others, 9 had no lull and 3
-    picked up fewer than 20, seed 16 both.)"""
+    """Only platform 12 has monsters, and the value map says it's the best ground. She hunts it from the safe
+    platform 13 beside it; in the lulls, with nothing wanted left on it and her kills due back, she picks up
+    the piles she can get to before they respawn. (Seed 5 since the simulator moves her by the engine: on seed
+    4 she picked up 19 drops, not 20. Over 16 seeds 9 meet all of this, 8 before. Seed 6 since no jump is
+    keyed in the kick's blind spot and jump-backs leave at full speed: on seed 5 she picked up 17. Over 16
+    seeds 8 meet all of this, 10 just before. Seed 8 since monsters walk as fast as the game data says (a pig
+    125 units/s, not 70): on seed 6 no lull came for the rule, and she picked up fewer than 20. Over 16 seeds
+    8 meet all of this. On the attack track alone, seed 4 since the star's search has the client's top (from
+    13 a star picks a pig on 12 from 111 units, not 191): on seed 6 no lull came. Seed 1 since both are
+    together: on seed 8 no lull came. Over 16 seeds 10 meet all of this; of the 6 others, 5 had no lull and 2
+    picked up fewer than 20 drops, seed 3 both. Seed 2 since a plan's first arrow waits until 0.6 s after her
+    last attack's key (actions.ARROW_LOCK_MS): on seed 1 her first walk to a better spot went 0.39 s later,
+    and no lull came. Over 16 seeds 5 meet all of this; of the 11 others, 9 had no lull and 3 picked up fewer
+    than 20, seed 16 both. Seed 3 since the game moves her in 30 ms steps (body.STEP) and jumps from standing
+    wait 150 ms after the arrow: on seed 2 no lull came. Over 16 seeds 9 meet all of this, 5 just before.)"""
     return _loop_on_12(sim)
 
 

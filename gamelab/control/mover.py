@@ -31,11 +31,12 @@ SPOT_TOLERANCE = 6        # map units: close enough to a run-up spot, or under a
 ROPE_TOLERANCE = 6        # screen px: close enough to a rope's top to climb down it
 ROPE_SEARCH_PX = 70       # screen px: a rope this close to where the map puts it is the one
 GRAB_MARGIN = 8           # grab with at least this much rope to spare
-# The shortest run-up a jump is timed for: 12 units is keyed 127 ms after the arrow (physics.run_ms) and
-# leaves at full speed but for 1.4% of jumps (body.short_takeoff_chance). 7 was keyed 118 ms in, pushed out
-# of the kick's blind spot (at 93 ms, 22% of jumps would leave 10% slow), lifting her off 11 units along,
-# not 7; at 112 ms, as it was before the blind spot was known, 9% left below 140 units/s.
-MIN_RUN = 12              # map units ...
+# The shortest run-up a jump is timed for: 15 units is keyed 155 ms after the arrow (physics.run_ms), past
+# the blind spot (physics.BLIND_ENDS_MS, 150), and leaves at full speed but for 0.01% of jumps by the median
+# lags (body.short_takeoff_chance). A shorter one would be put off to 150 ms and lift her off 14 units along,
+# not where it was planned for. It was 12 (keyed 127 ms in), before the jump sweeps of 2026-10-21: there 3 of
+# the 4 jumps keyed 120 ms after the arrow left at 126 units/s, three of the game's 30 ms steps into the run.
+MIN_RUN = 15              # map units ...
 RUN_UP_SPARE = 10         # ... and backing off for one goes this much further
 CLIMB_EXTRA_MS = 500      # up (or down) is held this much longer than the climb takes
 

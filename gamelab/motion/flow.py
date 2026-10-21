@@ -40,15 +40,16 @@ from .route import DROP_STEP, JUMP_FROM, ROPE_CLEAR, Move, drop_clear, drop_spot
 # so they're in physics, with how they were measured (still importable from here). Her walk, stops and
 # takeoffs are worked out here from the engine's closed forms (motion.body), from whatever speed she has.
 DROP_SLACK = 0.1     # s of extra timing error a drop adds
-ARROW_LAG = 0.1      # s before a landing the arrow is let go for her to stop there: the game sees it let go
-                     # 72 ms later (body.Lags, sd 11), so by 2.5 sd it has before she lands, and she slides
-                     # from her landing speed (in the air with no arrow she slows by 1 unit/s² at most)
+ARROW_LAG = 0.1      # s before a landing the arrow is let go for her to stop there: the game acts on it 68
+                     # ms later (body.Lags; sd 12 with the wait for its step), so by 2.5 sd it has before she
+                     # lands, and she slides from her landing speed (in the air with no arrow she slows by 1
+                     # unit/s² at most)
 AFTER_LANDING = 0.03  # s after a predicted landing before the next jump key (in the air it's ignored)
 SLACK_PER_LEG = 0.025  # s of timing error each predicted landing may add
 MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only makes her sluggish)
 TAP = 0.04           # s a jump/down tap is held
 PICK_EVERY = 0.15    # s between pick-up presses while she runs
-MIN_RUNUP = 15.0     # units of run before a running jump from standing (keyed 147 ms after the arrow: full speed)
+MIN_RUNUP = 15.0     # units of run before a running jump from standing (keyed 155 ms after the arrow: full speed)
 JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
 # Standing this close to where a move wants her she doesn't step: a step that short is an arrow tap of
 # under 50 ms (physics.hold_ms), and of three 50 ms taps in game two didn't move her and one moved her 7.1
@@ -300,8 +301,8 @@ class Flow:
         """When to press jump for her to leave the ground at t_off, running that way (d; 0: straight up)
         from body b with that arrow held from b.t, or as soon after as she can: never before she has landed
         (a press in the air is ignored), and with the arrow pressed at b.t never in the kick's blind spot
-        (physics.sure_jump_ms: keyed there she'd leave at 119-149 units/s, short of where she's meant to
-        land). Turning round first, she gets to a standstill |v|/1400 s later than standing would.
+        (physics.sure_jump_ms: keyed there she could leave at 126 units/s, three of the game's steps into her
+        run, short of where she's meant to land). Turning round first, she gets to a standstill |v|/1400 s later than standing would.
         Returns (the press, when she leaves the ground, where, and her sideways speed then: what she has
         on the ground, with the kick if that's below 0.8 × her walking speed, body.takeoff)."""
         press = max(t_off - JUMP_LAG, b.ready_at)
@@ -331,15 +332,19 @@ class Flow:
     def _landing(self, m: Move, b: Body, k: Keys, variant: str, t_land: float, lx: float, land: Platform,
                  d: int, v_land: float, spans: list[Span]) -> Leg:
         """End a jump/fall leg, landing at v_land (signed): running on (arrow held) or, for 'stop',
-        standing a little further on, where she slides to from v_land (13.9 units from full speed)."""
+        standing a little further on, where she slides to from v_land (13.9 units from full speed). Either
+        way she stands where she lands until the game's next step first (body.landing_wait: 15 ms on
+        average), so a run on from a landing, and the jump at the end of it, is that much behind the arc's
+        landing (in game 3.3 units at full speed, 22 ms: body.LANDING_ENDS_STEP)."""
         slack = b.slack + SLACK_PER_LEG
+        t_on = t_land + body.landing_wait()
         if variant == "stop" and d:
             k.set_arrow(t_land - ARROW_LAG, 0)  # the game sees it just before she lands
             x = lx + _sign(v_land) * body.slide(v_land, SHOE)
             if not land.covers(x, -3):  # she'd slide off the end: she stops 3 units in from it
                 x = min(max(x, land.left + 3), land.right - 3)
-            return Leg(m, b, Body(t_land + abs(v_land) / SHOE.drag, x, land, slack=slack), spans)
-        return Leg(m, b, Body(t_land, lx, land, run=d, landed=True, slack=slack, v=v_land), spans)
+            return Leg(m, b, Body(t_on + abs(v_land) / SHOE.drag, x, land, slack=slack), spans)
+        return Leg(m, b, Body(t_on, lx, land, run=d, landed=True, slack=slack, v=v_land), spans)
 
     def _runup(self, b: Body, d: int, takeoff: float, k: Keys) -> Body | None:
         """Make sure she can run at `takeoff` going that way: stop if she's running the other way,

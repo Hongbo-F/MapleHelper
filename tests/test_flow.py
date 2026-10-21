@@ -167,15 +167,19 @@ def test_no_hop_over_a_monster_walking_away_from_her(model):
 
 def replayed(k: Keys, until: float, running: bool = False) -> float:
     """Where body.replay (the engine, step by step) has her at `until` under plan k's arrows, from x 0
-    standing, or running right at full speed (the arrow held from a second before)."""
+    standing, or running right at full speed (the arrow held from a second before): the mean over the
+    phases of the game's steps, which is what the closed forms stand for."""
     from gamelab.motion import body
     from gamelab.motion.physics import LAGS, SHOE
     events = [(-1.0, "right", True)] if running else []
     events += [(t / 1000, name, how == "down") for t, name, how in k.sorted() if name in ("left", "right")
                and not (running and t == 0 and how == "down")]
-    points = body.replay(events, until, SHOE, LAGS, start=-1.0 if running else 0.0, dt=0.001).points
-    at_0 = next(x for t, x, _ in points if t >= -1e-9) if running else 0.0
-    return points[-1][1] - at_0
+    out = []
+    for phase in body.phases(dt=0.001):
+        points = body.replay(events, until, SHOE, LAGS, start=-1.0 if running else 0.0, dt=0.001, phase=phase).points
+        at_0 = next(x for t, x, _ in points if t >= -1e-9) if running else 0.0
+        out.append(points[-1][1] - at_0)
+    return sum(out) / len(out)
 
 
 def test_she_stops_where_the_engine_says_from_standing_and_running(model):
@@ -205,11 +209,11 @@ def test_a_jump_from_standing_is_never_keyed_in_the_kicks_blind_spot(model):
     from gamelab.motion import body
     c = by_y(model, 500, 400)
     standing = Body(0.0, 100.0, c)
-    # Meant to leave the ground 147 ms after the arrow (the key 80 ms after it): put off to 118 ms, when
-    # she's almost at full speed, so she leaves at full speed (a jump back used to be keyed at 80 ms: three
-    # of five left at 121-127).
+    # Meant to leave the ground 145 ms after the arrow (the key 80 ms after it): put off to 150 ms, after four
+    # of the game's steps of her run but for 5% of jumps, so she leaves at full speed (a jump back used to be
+    # keyed at 80 ms: three of five left at 121-127).
     press, t, x, vx = Flow.liftoff(standing, 1, 0.08 + JUMP_LAG)
-    assert press == pytest.approx(0.118) and vx == WALK_SPEED and t == pytest.approx(0.118 + JUMP_LAG)
+    assert press == pytest.approx(0.150) and vx == WALK_SPEED and t == pytest.approx(0.150 + JUMP_LAG)
     assert x == pytest.approx(100 + body.run_x(t - LAGS.on, 0.0, 1, SHOE), abs=1e-6)
     # Keyed later, it's as planned; running already, any time (the arrow was seen long ago).
     assert Flow.liftoff(standing, 1, 0.2 + JUMP_LAG)[0] == pytest.approx(0.2)
@@ -236,8 +240,12 @@ def test_a_stop_landing_slides_from_her_landing_speed(model):
     k = Keys(KEYS)
     k.set_arrow(0.0, 1)
     m = Move("jump", c.id, c.id, 100, 200, "right")
+    # (she stands where she lands until the game's next step first: half a step on average)
+    from gamelab.motion import body
+    wait = body.landing_wait()
     leg = Flow(model, KEYS)._landing(m, Body(0.0, 100.0, c), k, "stop", 1.0, 300.0, c, 1, 127.0, [])
-    assert leg.end.x == pytest.approx(300 + 127 ** 2 / 1600) and leg.end.t == pytest.approx(1.0 + 127 / 800)
+    assert leg.end.x == pytest.approx(300 + 127 ** 2 / 1600) and leg.end.t == pytest.approx(1.0 + wait + 127 / 800)
     assert [1000 - ARROW_LAG * 1000, "right", "up"] in k.sorted()  # let go so the game sees it in the air
     ran = Flow(model, KEYS)._landing(m, Body(0.0, 100.0, c), Keys(KEYS), "run", 1.0, 300.0, c, 1, 127.0, [])
     assert ran.end.run == 1 and ran.end.v == 127.0 and ran.end.landed
+    assert ran.end.x == 300.0 and ran.end.t == pytest.approx(1.0 + wait) and wait == pytest.approx(0.015)

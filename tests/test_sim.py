@@ -73,6 +73,9 @@ def world(model, pid, x, **kw):
     return World(model, KEYS, (pid, x), **kw)
 
 
+PHASES = range(0, world_mod.STEP_MS, world_mod.TICK_MS)  # every phase the game's steps can have in the world
+
+
 def tap(w, t, name, hold):
     w.key(t, name, True)
     w.key(t + hold, name, False)
@@ -104,31 +107,45 @@ def test_her_arc_is_the_engines_and_lands_where_the_planner_says(model):
 
 
 def test_walking_is_the_engines(model):
-    # The game sees the arrow 60 ms after the key and speeds her up at 1400 units/s²; let go, it sees that
-    # 72 ms later and brakes her at 800 (body.run_x, body.hold_distance).
+    # The game acts on the arrow at its next step after it sees it, 66 ms after the key on average, and speeds
+    # her up at 1400 units/s² a step at a time; let go, it acts on that 68 ms after on average and brakes her
+    # at 800: at each phase of its steps body.replay's walk, and over them the closed forms (body.hold_distance,
+    # and flow's run model).
     c = plat(model, 500, 400)
     for ms in (300, 600, 1000):
-        w = world(model, c.id, 100.0)
-        tap(w, 0.0, "right", ms / 1000)
-        if ms == 1000:
+        rests, at_06 = [], []
+        for phase in PHASES:
+            w = world(model, c.id, 100.0, step_phase=phase)
+            tap(w, 0.0, "right", ms / 1000)
+            r = body.replay([(0.0, "right", True), (ms / 1000, "right", False)], 3.0, physics.SHOE, physics.LAGS,
+                            start=0.0, phase=phase / 1000)
+            path = np.array(r.points)
             for t in (0.05, 0.1, 0.15, 0.3, 0.6):
                 w.advance(t)
-                assert w.x - 100 == pytest.approx(body.run_x(t - physics.LAGS.on, 0.0, 1, physics.SHOE), abs=0.01)
-            assert w.x - 100 == pytest.approx(physics.WALK_SPEED * (0.6 - physics.RUN_LAG), abs=0.5)  # flow's run model
-        w.advance(3.0)
-        assert w.vx == 0 and w.mode == "ground"
-        assert w.x - 100 == pytest.approx(body.hold_distance(ms, physics.SHOE, physics.LAGS), abs=1)
-        assert abs(hold_ms(w.x - 100) - ms) <= 10  # physics.hold_ms: the hold for what she walked
+                assert w.x - 100 == pytest.approx(np.interp(t, path[:, 0], path[:, 1]), abs=1e-6)
+            at_06.append(w.x - 100)
+            w.advance(3.0)
+            assert w.vx == 0 and w.mode == "ground"
+            rests.append(w.x - 100)
+        if ms == 1000:
+            assert np.mean(at_06) == pytest.approx(physics.WALK_SPEED * (0.6 - physics.RUN_LAG), abs=0.5)
+        assert np.mean(rests) == pytest.approx(body.hold_distance(ms, physics.SHOE, physics.LAGS), abs=0.5)
+        assert abs(hold_ms(np.mean(rests)) - ms) <= 10  # physics.hold_ms: the hold for what she walked
 
 
 def test_taps_move_her_as_long_as_the_game_sees_them_held(model):
     c = plat(model, 500, 400)
-    for hold in (0.107, 0.05, 0.02):  # 23.7, 7.4 and 2.0 units by the engine
-        w = world(model, c.id, 100.0)
-        tap(w, 0.0, "left", hold)
-        w.advance(2.0)
-        assert 100 - w.x == pytest.approx(body.hold_distance(hold * 1000, physics.SHOE, physics.LAGS), abs=1)
-        assert w.facing == "left"
+    for hold in (0.107, 0.05, 0.02):  # 20.8, 5.6 and 1.3 units by the engine, over the game's steps
+        moved = []
+        for phase in PHASES:
+            w = world(model, c.id, 100.0, step_phase=phase)
+            tap(w, 0.0, "left", hold)
+            w.advance(2.0)
+            assert w.facing == "left"
+            moved.append(100 - w.x)
+        # (keyed at 0, the press is seen on the tick 4 ms after its lag: a hold of 105 ms, not 109)
+        assert np.mean(moved) == pytest.approx(body.hold_distance(hold * 1000, physics.SHOE, physics.LAGS), abs=1.2)
+        assert len({round(v, 2) for v in moved}) == 2  # whole steps of it, one more or one less
     # With the lags spread (three times as measured, to see it in a few seeds), a tap the game sees let go
     # before it saw it pressed is lost: it turns her without moving her.
     moved = []
@@ -142,18 +159,26 @@ def test_taps_move_her_as_long_as_the_game_sees_them_held(model):
 
 
 def test_a_jump_from_standing_gets_the_kick_unless_she_is_nearly_at_full_speed(model):
-    # Her sideways speed leaving the ground (body.takeoff) with the arrow pressed `gap` s before the jump key:
-    # the game sees the arrow 60 ms after its key and the jump 67 ms after its own.
+    # Her sideways speed leaving the ground (body.takeoff) with the arrow pressed `gap` s before the jump key,
+    # at each phase of the game's steps: it acts on the arrow 66 ms after its key on average and on the jump
+    # 65 ms after its own, at its steps, which have her at 42, 84, 126 and 149 after one to four of the arrow.
+    # Lifted off by the arrow's own step she leaves at 119 (or straight up, if the jump's step came first),
+    # after one or two kicked to full speed, after three at 126 (as in game: 3 of 4 keyed 100 ms after it).
     c = plat(model, 500, 400)
-    for gap, vx in ((None, 0.0), (0.0, 14 + 119.2), (0.045, 149.0), (0.08, 126.0), (0.2, 149.0)):
-        w = world(model, c.id, 100.0)
-        if gap is not None:
-            w.key(0.0, "right", True)
-        tap(w, gap or 0.0, "alt", 0.04)
-        w.advance((gap or 0.0) + 0.1)
-        assert w.mode == "air" and w.flight.speeds[0][0] == pytest.approx(vx, abs=0.01), gap
-    # Keyed 80 ms after the arrow, as the jump-back is, the lags' spread makes it two outcomes: kicked to
-    # full speed, or not kicked just below it (the five recorded: 121, 124, 127, 142 and 146 units/s).
+    for gap, speeds in ((None, {0.0}), (0.0, {0.0, 119.2}), (0.045, {149.0}), (0.08, {126.0, 149.0}),
+                        (0.2, {149.0})):
+        seen = set()
+        for phase in PHASES:
+            w = world(model, c.id, 100.0, step_phase=phase)
+            if gap is not None:
+                w.key(0.0, "right", True)
+            tap(w, gap or 0.0, "alt", 0.04)
+            w.advance((gap or 0.0) + 0.12)
+            assert w.mode == "air", (gap, phase)
+            seen.add(round(w.flight.speeds[0][0], 1))
+        assert seen == speeds, gap
+    # Keyed 80 ms after the arrow, as the jump-back was, it is two outcomes: kicked to full speed, or not
+    # kicked, three steps in (the five recorded: 121, 124, 127, 142 and 146 units/s).
     speeds = []
     for seed in range(40):
         w = world(model, c.id, 100.0, seed=seed, noise=Noise(lag_sd=1.0))
@@ -168,9 +193,9 @@ def test_in_the_air_the_opposite_arrow_brakes_her_and_her_own_does_nothing(model
     c = plat(model, 500, 400)
 
     def jump(then):
-        w = world(model, c.id, 100.0)
+        w = world(model, c.id, 100.0, step_phase=0)
         w.key(0.0, "right", True)
-        tap(w, 0.5, "alt", 0.04)    # at full speed: lifts off at 0.57, lands about 0.555 s later
+        tap(w, 0.5, "alt", 0.04)    # at full speed: lifts off at the step at 0.57, lands about 0.555 s later
         then(w)
         w.advance(1.0)
         assert w.mode == "air"
@@ -180,16 +205,16 @@ def test_in_the_air_the_opposite_arrow_brakes_her_and_her_own_does_nothing(model
     braked = jump(lambda w: tap(w, 0.7, "left", 0.04))
     let_go = jump(lambda w: w.key(0.55, "right", False))
     assert held.vx == 149.0  # the arrow she flies with does nothing at speed
-    # left seen from 0.76 s to 0.815 (on the tick): 55 ms at 200 units/s²
-    assert held.vx - braked.vx == pytest.approx(200 * 0.055, abs=0.1) and braked.facing == "left"
-    assert held.vx - let_go.vx == pytest.approx(1 * (1.0 - 0.625), abs=0.01)  # no arrow: 1 unit/s² of drag
+    # left acted on from the step at 0.78 s to the one at 0.81: 30 ms at 200 units/s²
+    assert held.vx - braked.vx == pytest.approx(200 * 0.030, abs=0.1) and braked.facing == "left"
+    assert held.vx - let_go.vx == pytest.approx(1 * (1.0 - 0.63), abs=0.01)  # no arrow: 1 unit/s² of drag
 
 
 def test_landing_while_an_attack_plays_stops_her(model):
     c = plat(model, 500, 400)
 
     def jump(attack: bool):
-        w = world(model, c.id, 100.0)
+        w = world(model, c.id, 100.0, step_phase=0)
         w.key(0.0, "right", True)
         tap(w, 0.5, "alt", 0.04)
         w.key(0.6, "right", False)  # let go in the air: she'd slide 13.9 on landing
@@ -233,8 +258,8 @@ def test_an_arrow_pressed_right_after_an_attack_moves_her_only_once_it_stops_swa
 
 
 def test_a_jump_back_leaves_at_full_speed_and_lands_about_90_units_away(model):
-    # control.actions' key plan, on the engine with the lags spread as measured: keyed 130 ms after the arrow
-    # the jump is past the kick's blind spot (at 80 ms, 29% left below 140 and landed 68-89 units away).
+    # control.actions' key plan, on the engine with the lags spread as measured: keyed 150 ms after the arrow
+    # the jump is past the blind spot (at 80 ms, half left at 126 and landed 68-89 units away).
     from gamelab.control import actions
     c = plat(model, 500, 400)
     events = [[0, "right", "down"], *actions.tap(actions.JB_RUN_MS, "alt"), [actions.JB_TURN_MS, "right", "up"],
@@ -250,21 +275,26 @@ def test_a_jump_back_leaves_at_full_speed_and_lands_about_90_units_away(model):
         w.advance(1.5)
         lands.append(w.x - 300)
     assert min(speeds) >= 0.94 * physics.WALK_SPEED
-    assert 84 <= min(lands) and max(lands) <= 97 and sorted(lands)[15] == pytest.approx(90, abs=1)
+    assert 86 <= min(lands) and max(lands) <= 97 and sorted(lands)[15] == pytest.approx(94, abs=1)
 
 
 def test_after_a_climb_she_runs_off_as_the_minimap_traced_it(model):
     # The arrow held from before the top: she stands still through the climb-over (flow.CLIMB_OVER) and the
     # game's lag for the arrow, then speeds up: at full speed 0.35 s after the top, as flow plans it.
     c, d = plat(model, 500, 400), plat(model, 300, 700)
-    w = World(model, KEYS, (c.id, 700.0), monsters=None, hanging=400.0)
-    w.key(0.0, "up", True)
-    w.key(0.5, "right", True)  # the top comes 100 / 130 = 0.77 s in
-    w.advance(1.0)
-    top = next(float(line.split()[0]) for line in w.log if "climbs onto platform" in line)
-    w.advance(top + 0.6)
-    # flow's model: a standing start (RUN_LAG, 0.113 s) CLIMB_OVER (0.23 s) after the top
-    assert w.plat is d and w.x - 700 == pytest.approx(physics.WALK_SPEED * (0.6 - flow.CLIMB_OVER - physics.RUN_LAG), abs=0.3)
+    ran = []
+    for phase in PHASES:
+        w = World(model, KEYS, (c.id, 700.0), monsters=None, hanging=400.0, step_phase=phase)
+        w.key(0.0, "up", True)
+        w.key(0.5, "right", True)  # the top comes 100 / 130 = 0.77 s in
+        w.advance(1.0)
+        top = next(float(line.split()[0]) for line in w.log if "climbs onto platform" in line)
+        w.advance(top + 0.6)
+        assert w.plat is d
+        ran.append(w.x - 700)
+    # flow's model: a standing start (RUN_LAG, 0.119 s) CLIMB_OVER (0.23 s) after the top, on average over the
+    # game's steps (each a step's run, 4.5 units, from the next)
+    assert np.mean(ran) == pytest.approx(physics.WALK_SPEED * (0.6 - flow.CLIMB_OVER - physics.RUN_LAG), abs=0.5)
 
 
 def test_a_rope_side_jump_goes_out_fast_with_a_little_lift(model):
@@ -284,17 +314,17 @@ def test_a_rope_side_jump_goes_out_fast_with_a_little_lift(model):
 
 def test_a_running_jump_lands_where_the_engine_and_the_planner_say(model):
     a, b = plat(model, 300, 100), plat(model, 360, 300)
-    w = world(model, a.id, 40.0)
+    w = world(model, a.id, 40.0, step_phase=0)
     w.key(0.0, "right", True)
-    tap(w, 0.93, "alt", 0.04)  # lifts off JUMP_LAG (67 ms) later, on the tick at 1.0 s: down onto B
+    tap(w, 0.93, "alt", 0.04)  # lifts off at the game's step 1.005 s in (JUMP_LAG, 65 ms, on average): down onto B
     w.advance(1.01)
     assert w.mode == "air"
     x0, y0 = w.flight.path[0]
-    assert x0 - 40 == pytest.approx(physics.WALK_SPEED * (1.0 - physics.RUN_LAG), abs=0.5)
+    assert x0 - 40 == pytest.approx(physics.WALK_SPEED * (0.93 + physics.JUMP_LAG - physics.RUN_LAG), abs=0.5)
     f = body.fly(model, x0, y0, physics.WALK_SPEED, -physics.JUMP_SPEED, shoe=physics.SHOE, arrow=1)
     land, land_x, seconds = physics.fly(model, x0, y0, physics.WALK_SPEED, -physics.JUMP_SPEED)
     assert f.platform is land is b and f.land_x == pytest.approx(land_x, abs=1.5)
-    w.key(1.01, "right", False)  # let go in the air: the game sees it at 1.085 s, and she flies on from there
+    w.key(1.01, "right", False)  # let go in the air: the game acts on it at 1.08 s, and she flies on from there
     w.advance(1.1)
     g = w.flight
     assert g.platform is b and g.land_x == pytest.approx(f.land_x, abs=0.5)

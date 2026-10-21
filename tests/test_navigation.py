@@ -155,12 +155,12 @@ def test_run_timing_and_rope_grab_lead():
     from gamelab.control.mover import grab_lead
     from gamelab.motion.physics import RUN_LAG_MS, run_ms
     from gamelab.motion.physics import WALK_SPEED
-    assert RUN_LAG_MS == 46  # she's 149 (t - 0.113) along t s in, and lifts off 67 ms after the key
-    assert run_ms(30) == pytest.approx(247, abs=1)  # jump key 247 ms in: lifts off 30 units along
+    assert RUN_LAG_MS == 54  # she's 149 (t - 0.119) along t s in, and lifts off 65 ms after the key
+    assert run_ms(30) == pytest.approx(255, abs=1)  # jump key 255 ms in: lifts off 30 units along
     assert run_ms(149) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
-    # 7 units along is 93 ms in, in the kick's blind spot (she'd leave just below full speed): a little
-    # later instead, at full speed, 11 units along.
-    assert run_ms(7) == 118 and run_ms(10) == 118 and run_ms(12) == 127
+    # 7 units along is 101 ms in, in the blind spot (three of the game's steps into her run, she'd leave at
+    # 126): later instead, at full speed, 14 units along.
+    assert run_ms(7) == 150 and run_ms(12) == 150 and run_ms(15) == 155
     assert grab_lead(41) == pytest.approx(WALK_SPEED * 0.2775, abs=1)  # top of the jump over the rope
     assert grab_lead(120) is None
 
@@ -168,13 +168,20 @@ def test_run_timing_and_rope_grab_lead():
 def test_a_jump_from_standing_is_keyed_where_it_surely_leaves_at_full_speed(monkeypatch):
     from gamelab.motion import body, physics
     from gamelab.motion.physics import LAGS, SHOE, sure_jump_ms
-    # Up to 118 ms after the arrow the jump is put off to then (the kick's blind spot ends there); later is
-    # as it comes. Every gap it gives leaves short at most 5% of the time.
-    assert [sure_jump_ms(g) for g in (0, 40, 80, 117.2, 118, 130, 200)] == [118, 118, 118, 118, 118, 130, 200]
-    assert all(body.short_takeoff_chance(sure_jump_ms(g), SHOE, LAGS) <= 0.05 for g in range(0, 300, 7))
-    # With the kick trusted (probe P1), 35-52 ms after the arrow will do too: full speed from where she stands.
+    # Up to 150 ms after the arrow the jump is put off to then (the blind spot ends there, wherever in what the
+    # jump sweeps allow the lags' gap is); later is as it comes. Every gap it gives leaves short at most 5% of
+    # the time, by the median lags at most 0.2%.
+    assert physics.BLIND_ENDS_MS == 150
+    assert [sure_jump_ms(g) for g in (0, 40, 80, 120, 130, 149.2, 150, 160, 200)] == [150] * 7 + [160, 200]
+    assert all(body.short_takeoff_chance(sure_jump_ms(g), SHOE, LAGS) <= 0.002 for g in range(0, 300, 7))
+    worst = body.Lags(jump=LAGS.on - 0.013, sd_on=0.017 / 2 ** 0.5, sd_jump=0.017 / 2 ** 0.5)
+    assert body.short_takeoff_chance(150, SHOE, worst) <= 0.05 < body.short_takeoff_chance(149, SHOE, worst)
+    # MapleHelper's own running jumps wait as long (it can't import gamelab).
+    from maplehelper import actions as helper_actions
+    assert helper_actions.RUN_JUMP_AFTER_MS >= physics.BLIND_ENDS_MS
+    # With the kick trusted (KICK_JUMPS), 40-52 ms after the arrow will do too: full speed from where she stands.
     monkeypatch.setattr(physics, "KICK_JUMPS", True)
-    assert [sure_jump_ms(g) for g in (0, 40, 52, 53, 80)] == [34, 40, 52, 118, 118]
+    assert [sure_jump_ms(g) for g in (0, 40, 52, 53, 80)] == [40, 40, 52, 150, 150]
 
 
 def test_a_route_jump_lands_even_if_she_leaves_15_percent_slow(model, monkeypatch):

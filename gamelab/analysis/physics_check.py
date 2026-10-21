@@ -8,8 +8,10 @@ The models, each with fixed lags:
   in the air her sideways speed never changes;
 - steps: that model with physics.py's constants now (how the simulator moved her until it ran on the
   engine);
-- engine: motion.body.replay, with the median lags (body.Lags). `--fit` adds the engine with its lags
-  fitted to each recording, which shows what is left once the lags' spread is taken out.
+- engine: motion.body.replay, with the median lags (body.Lags), its path the mean over the phases the
+  game's 30 ms steps can have against the keys (what the planner's closed forms expect). `--fit` adds the
+  engine with its lags and its steps' phase fitted to each recording, which shows what is left once the
+  lags' spread is taken out.
 
   python -m gamelab.analysis.physics_check                 every recording in CASES
   python -m gamelab.analysis.physics_check jb_k165 --fit   one, with the fitted lags too
@@ -199,10 +201,13 @@ def _brake(v: float, by: float) -> float:
     return 0.0 if abs(v) <= by else v - by if v > 0 else v + by
 
 
-def engine(events, until: float, lags: body.Lags, floors=(), shoe: body.Shoe | None = None) -> np.ndarray:
-    """The engine's (t, x, y) under a key timeline on flat ground."""
-    r = body.replay(events, until + 0.02, shoe or physics.SHOE, lags, floors=floors)
-    return np.array(r.points)
+def engine(events, until: float, lags: body.Lags, floors=(), shoe: body.Shoe | None = None,
+           phase: float | None = None) -> np.ndarray:
+    """The engine's (t, x, y) under a key timeline on flat ground: with the game's steps at `phase`, or
+    (None) the mean of its paths over every phase they can have (body.phases)."""
+    paths = [np.array(body.replay(events, until + 0.02, shoe or physics.SHOE, lags, floors=floors, phase=ph).points)
+             for ph in (body.phases() if phase is None else [phase])]
+    return np.mean(paths, axis=0)
 
 
 def errors(tr: Track, path: np.ndarray, until: float) -> tuple[float, float, float]:
@@ -214,26 +219,31 @@ def errors(tr: Track, path: np.ndarray, until: float) -> tuple[float, float, flo
     return rms(tr.x[ok], xm), rms(tr.y[ok], ym), float(xm[-1])
 
 
-def fit_lags(tr: Track, until: float, floors=(), rounds: int = 3) -> body.Lags:
-    """The engine's lags fitted to one recording: each of on, off and jump in turn over its grid (5 ms,
-    10 for off), the others held, `rounds` times, from the medians, for the least x² + y² error."""
+def fit_lags(tr: Track, until: float, floors=(), rounds: int = 3) -> tuple[body.Lags, float]:
+    """The engine's lags and its steps' phase fitted to one recording: for each phase (body.phases), each of
+    on, off and jump in turn over its grid (5 ms, 10 for off), the others held, `rounds` times, from the
+    medians; the phase and lags with the least x² + y² error. Returns (lags, phase)."""
     grids = {"on": np.arange(0.02, 0.1001, 0.005), "jump": np.arange(0.02, 0.1051, 0.005),
              "off": np.arange(0.02, 0.1201, 0.01)}
-    lags = body.Lags()
 
-    def cost(lg):
-        ex, ey, _ = errors(tr, engine(tr.events, until, lg, floors), until)
+    def cost(lg, ph):
+        ex, ey, _ = errors(tr, engine(tr.events, until, lg, floors, phase=ph), until)
         return ex * ex + ey * ey
 
-    best = cost(lags)
-    for _ in range(rounds):
-        for name, grid in grids.items():
-            for v in grid:
-                trial = replace(lags, **{name: float(v)})
-                c = cost(trial)
-                if c < best - 1e-12:
-                    best, lags = c, trial
-    return lags
+    fits = []
+    for phase in body.phases():
+        lags = body.Lags()
+        best = cost(lags, phase)
+        for _ in range(rounds):
+            for name, grid in grids.items():
+                for v in grid:
+                    trial = replace(lags, **{name: float(v)})
+                    c = cost(trial, phase)
+                    if c < best - 1e-12:
+                        best, lags = c, trial
+        fits.append((best, phase, lags))
+    _, phase, lags = min(fits, key=lambda f: (f[0], f[1]))
+    return lags, phase
 
 
 def main(argv=None) -> int:
@@ -250,7 +260,7 @@ def main(argv=None) -> int:
     keys = her_key_names()
     lags = body.Lags()
     head = "| Recording | before x / y | steps x / y | engine x / y |"
-    head += " fitted x / y (on off jump ms) |" if args.fit else ""
+    head += " fitted x / y (on off jump, phase ms) |" if args.fit else ""
     print(head + " end x seen | before | steps | engine |")
     print("|---" * (head.count("|") - 1 + 4) + "|")
     rows = []
@@ -271,9 +281,10 @@ def main(argv=None) -> int:
         line = f"| {name} | {b[0]:.2f} / {b[1]:.2f} | {s[0]:.2f} / {s[1]:.2f} | {e[0]:.2f} / {e[1]:.2f} |"
         row = [b[0], b[1], s[0], s[1], e[0], e[1]]
         if args.fit:
-            fl = fit_lags(tr, until, floors)
-            f = errors(tr, engine(tr.events, until, fl, floors), until)
-            line += f" {f[0]:.2f} / {f[1]:.2f} ({fl.on * 1000:.0f} {fl.off * 1000:.0f} {fl.jump * 1000:.0f}) |"
+            fl, ph = fit_lags(tr, until, floors)
+            f = errors(tr, engine(tr.events, until, fl, floors, phase=ph), until)
+            line += (f" {f[0]:.2f} / {f[1]:.2f} ({fl.on * 1000:.0f} {fl.off * 1000:.0f} {fl.jump * 1000:.0f},"
+                     f" {ph * 1000:.0f}) |")
             row += [f[0], f[1]]
         line += f" {tr.x[ok][-1]:.1f} | {b[2]:.1f} | {s[2]:.1f} | {e[2]:.1f} |"
         if name in NOTES:
