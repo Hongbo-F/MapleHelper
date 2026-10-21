@@ -44,7 +44,8 @@ CLEAR_STEP = 10    # where a star's line is stopped from where she'd go, the pla
                    # instead, this far apart (by the v83 line a floor stops it from part of her platform only)
 JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less the margin) to jump back
 JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
-JUMP_BACK_SPAN = 95  # how far a jump back carries her (by the engine 86-94 units, control.actions.JB_RUN_MS)
+JUMP_BACK_SPAN = 95  # how far a jump back carries her (by the engine 87-97 units with the lags spread as measured,
+                     # 94 at the median: control.actions.JB_RUN_MS)
 
 _THROW_VERBS = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back": "jumping back, throwing"}
 

@@ -8,13 +8,14 @@ of the recordings, kept as small fixtures in tests/fixtures/tracks (`python -m g
 
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from gamelab.analysis import physics_check as pc
-from gamelab.motion import body
+from gamelab.motion import body, physics
 
 NAMES = ["motion", "walk", "jb_k165", "jb_k190", "jb_k450", "held_jump"]
 LAGS = body.Lags()
@@ -46,8 +47,9 @@ def test_the_fixtures_are_her_tracks():
 
 @pytest.mark.parametrize("name, x_rms, y_rms", [
     ("motion", 2.3, 2.0),   # measured 2.10 / 1.81 (1.38 in x with her landing not waiting for the next step)
-    ("walk", 1.5, 0.1),     # 1.35 / 0.01
-    ("jb_k190", 2.4, 1.4),  # 2.21 / 1.25
+    ("walk", 1.5, 0.1),     # 1.35 / 0.01: 0.43 on the 5 ms engine (see below)
+    ("jb_k190", 2.4, 1.4),  # 2.21 / 1.25: 1.74 on the 5 ms engine, where its jump at 80 ms was kicked by the median
+                            # lags as she was; on the steps 58% of the phases leave at 126 (0.6 with its own: below)
     ("jb_k165", 1.0, 1.2),  # 0.88 / 1.05: the blind spot (see below), half the phases leaving at 126
     ("jb_k450", 1.9, 2.7),  # 1.73 / 2.51
     ("held_jump", 0.2, 4.4),  # 0.12 / 4.18: it lifted off about 84 ms after the key (36 jumps: 45-95)
@@ -55,7 +57,12 @@ def test_the_fixtures_are_her_tracks():
 def test_with_the_median_lags_the_engine_follows_her(name, x_rms, y_rms):
     """The engine's path is the mean over the phases its 30 ms steps can have against the keys (what the
     planner's closed forms expect). On the 5 ms engine with the lags then the jump-backs were off by 4.3-5.6
-    units in x (a jump at 80 ms took her kicked or not by the lags alone), the walks by 0.6-1.0; y by 1.25-3.7."""
+    units in x (a jump at 80 ms took her kicked or not by the lags alone), the walks by 0.6-1.0; y by 1.25-3.7.
+    The walks are followed less well than they were: over the seven 60 fps walks (walk, walk300, walk600,
+    walk1000, do_walk, do_walk2, motion) 1.64 units in x against 1.17, two better and five worse, and the long
+    ones end 1.6-5.6 units short of where she stopped (walk1000 154.9 against 158.1). Most of that is the
+    release's lag: fitted to the sweeps it's 2 ms after the press's (68 against 66), where the walks want it
+    about 12 after (as on the 5 ms engine, 72 against 60); with 78 they're off by 1.52 (walk 0.91)."""
     ex, ey, _ = engine_errors(name)
     assert ex <= x_rms and ey <= y_rms
 
@@ -136,10 +143,13 @@ def test_with_each_tracked_jumps_own_lags_the_engine_takes_off_and_lands_as_she_
     """The game moves her in steps of 30 ms: her ground run when she left sat on the steps' ladder (0.63, 2.52,
     5.67, 9.80, 14.27 units after one to five steps of 1400 units/s²), and the speed she left with on the kick's
     rule over it: after one or two steps kicked to full speed, after three at 126 (all five such: 124.7-126.9),
-    after four or more at full speed. With the lags each track shows, the engine lifts her off after the same
-    number of steps in all 18, at the speed she left with to 4 units/s, as far along to a unit, and lands her
-    within 2 units of where she came down. The 5 ms engine with the same lags has three of the five that left
-    at 126 leave at 133, 133 and 149 (kicked from 119), landing 4-14 units off."""
+    after four or more at full speed. Each track's lags are read off its lift-off: the arrow's from how far she
+    had run by then and when (on_lag_ms, the fixture's `method`), the steps' phase from when. So the engine
+    lifting her off after as many steps and as far along follows from how they were read, and checks only that
+    the reading holds together. What this tests is the speed she left with, the kick's rule over those steps
+    (to 4 units/s in all 18), and so where she came down (within 2 units; the fixture's landing is the line of
+    her air speed). The 5 ms engine with the same lags has three of the five that left at 126 leave at 133, 133
+    and 149 (kicked from 119), landing 4-14 units off."""
     off = 0
     for run in SWEEPS["sweep2"]:
         sign = 1 if run["dir"] == "r" else -1
@@ -159,28 +169,36 @@ def test_with_each_tracked_jumps_own_lags_the_engine_takes_off_and_lands_as_she_
         assert _landing_x(r, sign) == pytest.approx(run["landing_x"], abs=3), run["name"]
 
 
-def _verdict(gap_ms, lags, step):
-    """What the engine's chance of a short takeoff says of a jump keyed gap_ms after the arrow: 'short' above
-    3 in 4, 'full' below 1 in 4, else 'either'."""
-    p = body.short_takeoff_chance(gap_ms, SHOE, lags, step=step)
-    return "short" if p > 0.75 else "full" if p < 0.25 else "either"
+def _called_right(runs, lags, step):
+    """How many of `runs` the engine's chance of a short takeoff calls right: short where it's over a half."""
+    return sum((body.short_takeoff_chance(run["gap_ms"], SHOE, lags, step=step) > 0.5) == (run["outcome"] == "short")
+               for run in runs)
 
 
-def _agrees(runs, lags, step):
-    return sum(_verdict(run["gap_ms"], lags, step) in (run["outcome"], "either") for run in runs)
-
-
-def test_the_engines_chance_of_a_short_takeoff_agrees_with_both_sweeps():
-    """By the engine's chance with the median lags, 30 of the 34 jumps went the way it says, or it calls them a
-    coin flip (the two keyed 20 ms after the arrow, short, at 39%). The four it doesn't are 60_r (whose arrow
-    the game acted on 37 ms after its key, the soonest of the 18) and three of the four keyed 120 ms after the
-    arrow, which left short where it gives 16% (and up to 44% within what the sweeps allow: physics.
-    SWEEP_LAG_GAP). With their own lags the tracked ones all go its way (above), which makes 32. The 5 ms
-    engine with the lags then agreed with 28, but by chances that make the 34 outcomes e^7 less likely; what
-    sets the two apart is the speeds the jumps left with (above)."""
+def test_the_engines_chance_of_a_short_takeoff_against_both_sweeps():
+    """Called short where its chance is over a half, the engine with the median lags gets 25 of the 34 jumps
+    right (24.5 expected by its own chances), the 5 ms engine with the lags then 23. No rule by the gap alone
+    gets near 30 of 34: where the game's steps fall against the keys can't be seen, and the same gap goes
+    either way (at 80 ms 2 of 4 left short), so even the sweeps' own majority at each gap gets 29. It calls
+    wrong the two keyed 20 ms after the arrow (short, at 39%), 60_r (whose arrow the game acted on 37 ms after
+    its key, the soonest of the 18), two of the four at 80 ms and one at 100 (at 58-62%), and three of the
+    four at 120, which left short where it gives 16%. By the median lags it has too few short in all (8.8
+    expected where 13 were; 5.5 from 80 to 120 ms, where 8 of 12 were): physics.BLIND_ENDS_MS is safe from
+    that only as it takes the worst case over what the sweeps allow (SWEEP_LAG_GAP: up to 43% at 120 ms). By
+    the likelihood of all 34 outcomes the step engine is e^7 likelier than the 5 ms one; what sets the two
+    apart is the speeds the jumps left with (above)."""
     runs = SWEEPS["sweep1"] + SWEEPS["sweep2"]
-    assert _agrees(runs, LAGS, body.STEP) >= 30
-    assert _agrees(SWEEPS["sweep1"], LAGS, body.STEP) + len(SWEEPS["sweep2"]) >= 32
+    assert _called_right(runs, LAGS, body.STEP) == 25 and _called_right(runs, OLD_LAGS, FIVE_MS) == 23
+    by_gap = {}
+    for run in runs:
+        by_gap.setdefault(round(run["gap_ms"] / 10), []).append(run["outcome"] == "short")
+    assert sum(max(sum(v), len(v) - sum(v)) for v in by_gap.values()) == 29
+    expected = sum(body.short_takeoff_chance(run["gap_ms"], SHOE, LAGS) for run in runs)
+    assert expected == pytest.approx(8.8, abs=0.1) and sum(run["outcome"] == "short" for run in runs) == 13
+    worst = max(body.short_takeoff_chance(120, SHOE, replace(LAGS, jump=LAGS.on + gap, sd_on=sd / math.sqrt(2),
+                                                            sd_jump=sd / math.sqrt(2)))
+                for gap in physics.SWEEP_LAG_GAP for sd in physics.SWEEP_LAG_GAP_SD)
+    assert body.short_takeoff_chance(120, SHOE, LAGS) < 0.2 and worst > 0.4
 
     def log_likelihood(lags, step):
         p = [min(max(body.short_takeoff_chance(run["gap_ms"], SHOE, lags, step=step), 1e-4), 1 - 1e-4) for run in runs]
