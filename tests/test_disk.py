@@ -1,7 +1,7 @@
 """What gamelab leaves on disk stays bounded (README: Memory and disk): a long run's telemetry goes on in
-parts, the oldest telemetry is deleted when a run starts, the player's log is moved aside when the player
-starts, no cancel file stays in the inbox once its plan is over, and `lab-usage` tells what's there. All in
-temp folders."""
+parts, the oldest telemetry past the size cap is deleted when a run starts (none for its age, unless asked),
+the player's log is moved aside when the player starts, no cancel file stays in the inbox once its plan is
+over, and `lab-usage` tells what's there. All in temp folders."""
 
 import os
 import time
@@ -43,7 +43,7 @@ def test_a_run_left_going_deletes_the_oldest_telemetry_as_it_goes_on_in_new_part
     # would let the folder grow without bound.
     monkeypatch.setattr(telemetry, "KEEP_BYTES", 1000)
     path = telemetry.record_to("watch", folder=tmp_path, max_bytes=400)
-    old = _make(tmp_path, "20260901-120000-tour.jsonl", telemetry.KEEP_DAYS + 1, 10, time.time())
+    old = _make(tmp_path, "20260901-120000-tour.jsonl", 30, 10, time.time())
     try:
         telemetry.emit("session", map=1, command="watch", mode="watch")
         for i in range(40):
@@ -59,29 +59,69 @@ def test_a_run_left_going_deletes_the_oldest_telemetry_as_it_goes_on_in_new_part
     assert telemetry.prune(tmp_path, keep_bytes=0, spare=writing) and parts[-1].exists()
 
 
-def test_the_oldest_telemetry_goes_first_by_age_then_past_the_size_cap(tmp_path):
+def test_the_oldest_telemetry_goes_past_the_size_cap_and_by_age_only_when_asked(tmp_path):
     now = time.time()
-    old = _make(tmp_path, "20260901-120000-tour.jsonl", 20, 100, now)
+    old = _make(tmp_path, "20260901-120000-tour.jsonl", 400, 100, now)
     a = _make(tmp_path, "20261010-120000-nav.jsonl", 5, 300, now)
     b = _make(tmp_path, "20261011-120000-nav.jsonl", 4, 300, now)
     c = _make(tmp_path, "20261012-120000-tour.jsonl", 3, 300, now)
     other = _make(tmp_path, "notes.txt", 30, 10, now)  # not telemetry: never touched
+    assert telemetry.KEEP_DAYS is None and telemetry.prune(tmp_path, now=now) == []  # a year old, within the cap
     assert telemetry.prune(tmp_path, keep_bytes=700, now=now, dry_run=True) == [(old, 100), (a, 300)]
     assert old.exists() and a.exists()
+    # By age, only when it's asked for: those last written longer ago go first, then the cap as before.
+    assert telemetry.prune(tmp_path, keep_days=4.5, now=now, dry_run=True) == [(old, 100), (a, 300)]
+    assert telemetry.prune(tmp_path, keep_days=30, keep_bytes=700, now=now, dry_run=True) == [(old, 100), (a, 300)]
+    assert telemetry.prune(tmp_path, keep_days=30, now=now, dry_run=True) == [(old, 100)]
     assert telemetry.prune(tmp_path, keep_bytes=700, now=now) == [(old, 100), (a, 300)]
     assert sorted(tmp_path.iterdir()) == sorted([b, c, other])
     assert telemetry.prune(tmp_path, keep_bytes=700, now=now) == []
     assert telemetry.prune(tmp_path / "none") == []  # no folder yet
 
 
-def test_a_run_starts_by_deleting_telemetry_older_than_two_weeks(tmp_path, capsys):
+def test_a_run_starts_by_deleting_the_oldest_telemetry_past_the_size_cap_but_none_for_its_age(tmp_path, capsys,
+                                                                                               monkeypatch):
+    # Live telemetry is evidence later fits use (the terrain and geometry fits of 2026-10-20 came from the live
+    # runs of 2026-10-19 and 20): a file isn't deleted for its age, only to keep the folder under KEEP_BYTES.
     now = time.time()
-    old = _make(tmp_path, "20260901-120000-tour.jsonl", telemetry.KEEP_DAYS + 1, 10, now)
-    recent = _make(tmp_path, "20261019-120000-tour.jsonl", telemetry.KEEP_DAYS - 1, 10, now)
+    old = _make(tmp_path, "20250901-120000-tour.jsonl", 400, 10, now)
+    recent = _make(tmp_path, "20261019-120000-tour.jsonl", 1, 10, now)
+    path = telemetry.record_to("nav", folder=tmp_path)
+    telemetry.stop()
+    assert old.exists() and recent.exists() and path.exists() and capsys.readouterr().err == ""
+    monkeypatch.setattr(telemetry, "KEEP_BYTES", 15)
     path = telemetry.record_to("nav", folder=tmp_path)
     telemetry.stop()
     assert not old.exists() and recent.exists() and path.exists()
-    assert "deleted the 1 oldest" in capsys.readouterr().err
+    assert "deleted the 1 oldest files" in capsys.readouterr().err and "newest" in telemetry.kept()
+    monkeypatch.setattr(telemetry, "KEEP_BYTES", 10 ** 9)
+    monkeypatch.setattr(telemetry, "KEEP_DAYS", 14)  # with an age rule set, the old go for their age too
+    older = _make(tmp_path, "20260901-120000-tour.jsonl", 15, 10, now)
+    path = telemetry.record_to("nav", folder=tmp_path)
+    telemetry.stop()
+    assert not older.exists() and recent.exists() and "14 days" in capsys.readouterr().err
+
+
+def test_the_part_being_written_is_the_newest_run_by_its_last_write(tmp_path):
+    # telemetry.newest (the mini-map window's and the web page's LiveSource) goes by last write, not by name: in
+    # the hour the clocks go back a finished run's name sorts after the part being written, which is newest.
+    from gamelab.ui.sources import LiveSource
+    now = time.time()
+    finished = _make(tmp_path, "20261101-013000-tour.jsonl", 0.01, 10, now)  # written 15 minutes ago
+    writing = tmp_path / "20261101-012000-watch-part2.jsonl"
+    writing.write_text('{"t": 1, "topic": "session", "continues": "20261101-010000-watch.jsonl", "part": 2}\n',
+                       encoding="utf-8")
+    assert telemetry.newest(tmp_path) == writing
+    clock = [0.0]
+    source = LiveSource(tmp_path, clock=lambda: clock[0])
+    fresh, records = source.poll()
+    assert fresh and source.path == writing and records[0]["part"] == 2
+    part3 = tmp_path / "20261101-020000-watch-part3.jsonl"
+    part3.write_text('{"t": 2, "topic": "session", "part": 3}\n', encoding="utf-8")
+    os.utime(writing, (now - 1, now - 1))
+    clock[0] = 1.0  # the folder looked through again a second later: on to the next part
+    fresh, records = source.poll()
+    assert fresh and source.path == part3 and records[0]["part"] == 3
 
 
 def test_the_player_moves_its_log_aside_when_it_starts_past_5_mb(tmp_path, monkeypatch):
@@ -118,7 +158,7 @@ def test_no_cancel_file_stays_in_the_inbox_once_its_plan_is_over():
     assert client.cancel("p2") is True and list(client.INBOX.iterdir()) == []
 
 
-def test_lab_usage_sizes_each_kind_and_deletes_only_old_telemetry_when_asked(tmp_path, monkeypatch, capsys):
+def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_asked(tmp_path, monkeypatch, capsys):
     from gamelab import paths
     from gamelab.__main__ import main
     from gamelab.analysis import disk
@@ -136,6 +176,7 @@ def test_lab_usage_sizes_each_kind_and_deletes_only_old_telemetry_when_asked(tmp
     assert got == {"recordings": (1, 5000), "screenshots": (1, 3000), "telemetry": (2, 300), "harness runs": (0, 0),
                    "golden traces": (1, 50), "player inbox, outbox": (1, 0), "other": (1, 40)}
     monkeypatch.setattr(paths, "LAB", tmp_path)
+    monkeypatch.setattr(telemetry, "KEEP_BYTES", 250)  # the old one is past the cap (none goes for its age)
     assert main(["lab-usage"]) == 0
     out = capsys.readouterr().out
     assert "due to go now: 1 files (100 B)" in out and old.exists()  # told, not deleted

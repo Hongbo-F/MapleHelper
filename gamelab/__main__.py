@@ -967,7 +967,7 @@ def _lie_detector_seen(frame) -> None:
 
 def cmd_lab_usage(args) -> int:
     """What gamelab keeps under gamelab/lab, by kind. It deletes nothing, unless --prune-telemetry: then the
-    telemetry a run starting now would delete (last written over 14 days ago, then the oldest past 2 GB)."""
+    telemetry a run starting now would delete (the oldest past 2 GB in all; none for its age)."""
     from .analysis import disk
     lab = paths.LAB
     if args.prune_telemetry:
@@ -1212,8 +1212,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, screenshots, "
                                          "telemetry, harness runs, golden traces), by kind; deletes nothing")
     s.add_argument("--prune-telemetry", action="store_true",
-                   help="delete the telemetry a run starting now would (last written over 14 days ago, then "
-                        "the oldest past 2 GB in all); recordings and screenshots are never deleted")
+                   help="delete the telemetry a run starting now would (the oldest past 2 GB in all; none for "
+                        "its age); recordings and screenshots are never deleted")
     s.set_defaults(func=cmd_lab_usage)
     return p
 

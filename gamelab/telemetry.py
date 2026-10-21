@@ -6,13 +6,14 @@ installed (`record_to`), so tests and library use pay nothing. Each line is
 {"t": seconds, "topic": topic, **data}. `t` is wall-clock time (the simulator's fake clock in a
 simulated run), so a replay keeps the original pace.
 
-Files are named for the time a run started and what it is (`<%Y%m%d-%H%M%S>-<name>.jsonl`), so the
-newest sorts last. A run goes on in a new part past MAX_BYTES: a file of its own, named for the time the
-part starts (`...-<name>-part2.jsonl`, always later than the part before), that starts with the run's
-session record marked `continues` (the part before's file name) and `part`. When a run starts, and each
-time one goes on in a new part, the oldest files are deleted: those last written over KEEP_DAYS ago, then
-more until the rest take at most KEEP_BYTES (`prune`; never the part being written). So a run left going
-for days (`watch`) keeps the folder bounded too.
+Files are named for the time a run started and what it is (`<%Y%m%d-%H%M%S>-<name>.jsonl`); the newest
+run is the file written to last (`newest`). A run goes on in a new part past MAX_BYTES: a file of its own,
+named for the time the part starts (`...-<name>-part2.jsonl`, always later than the part before), that
+starts with the run's session record marked `continues` (the part before's file name) and `part`; being
+written to, it's the newest. When a run starts, and each time one goes on in a new part, the oldest files
+are deleted until the rest take at most KEEP_BYTES (`prune`; never the part being written), and, if
+KEEP_DAYS is set, those last written longer ago than that first (by default none goes for its age). So a
+run left going for days (`watch`) keeps the folder bounded too.
 
 Topics (map units; producers build the records, ui.state folds them):
 
@@ -52,11 +53,14 @@ STAMP = "%Y%m%d-%H%M%S"  # file names start with the time the run (or the part) 
 # an hour. Parts let the retention below delete a long run a piece at a time, and keep any one file small
 # enough for a replay to load whole.
 MAX_BYTES = 64 * 1024 * 1024
-# What's kept when a run starts or goes on in a new part: files last written in the last 14 days, and of those
-# at most 2 GB, the newest (38 files and 2.9 MB from the first two days of live runs; `watch` writes about
-# 400 MB a day).
-KEEP_DAYS = 14
+# What's kept when a run starts or goes on in a new part: the newest files, 2 GB of them at most (`watch` writes
+# about 400 MB a day). None goes for its age alone (KEEP_DAYS None): live telemetry is evidence that later fits
+# go back to (the terrain and geometry fits of 2026-10-20 were made from the live runs of 2026-10-19 and 20),
+# and small old files cost next to no disk (the first two days of live runs were 38 files and 2.9 MB). The
+# size cap alone bounds the disk. A number of days here deletes files last written longer ago than that too.
+KEEP_DAYS: float | None = None
 KEEP_BYTES = 2 * 1024 ** 3
+_DEFAULT = object()  # prune's keep_days when not given: KEEP_DAYS
 
 _sink: Callable[[dict], None] | None = None
 
@@ -148,20 +152,21 @@ def record_to(name: str = "run", folder: Path = FOLDER, max_bytes: int | None = 
     return path
 
 
-def prune(folder: Path = FOLDER, keep_days: float | None = None, keep_bytes: int | None = None,
-          now: float | None = None, dry_run: bool = False, spare: Path | None = None) -> list[tuple[Path, int]]:
-    """Delete the telemetry files (*.jsonl) in `folder` last written more than `keep_days` (KEEP_DAYS)
-    ago, then the oldest of the rest until they take at most `keep_bytes` (KEEP_BYTES). Returns those
-    deleted (path, bytes), oldest first; with `dry_run`, those it would delete. A file that can't be
-    deleted (a run still writing it) is left, and the next oldest goes instead; `spare` (the part being
-    written) is never deleted."""
-    keep_days = KEEP_DAYS if keep_days is None else keep_days
+def prune(folder: Path = FOLDER, keep_days=_DEFAULT, keep_bytes: int | None = None, now: float | None = None,
+          dry_run: bool = False, spare: Path | None = None) -> list[tuple[Path, int]]:
+    """Delete the oldest telemetry files (*.jsonl) in `folder` until the rest take at most `keep_bytes`
+    (KEEP_BYTES), and with `keep_days` (KEEP_DAYS; None: no age rule, the default) those last written more
+    than that many days ago first. Returns those deleted (path, bytes), oldest first; with `dry_run`, those
+    it would delete. A file that can't be deleted (a run still writing it) is left, and the next oldest goes
+    instead; `spare` (the part being written) is never deleted."""
+    keep_days = KEEP_DAYS if keep_days is _DEFAULT else keep_days
     keep_bytes = KEEP_BYTES if keep_bytes is None else keep_bytes
     now = time.time() if now is None else now
     files = sorted((st.st_mtime, path.name, st.st_size, path) for path, st in files_in(folder))  # oldest first
     total, gone = sum(size for _, _, size, _ in files), []
     for mtime, _, size, path in files:
-        if now - mtime <= keep_days * 86400 and total <= keep_bytes:
+        aged = keep_days is not None and now - mtime > keep_days * 86400
+        if not aged and total <= keep_bytes:
             break  # the rest are newer still
         if spare is not None and path.name == spare.name:
             continue
@@ -175,11 +180,16 @@ def prune(folder: Path = FOLDER, keep_days: float | None = None, keep_bytes: int
     return gone
 
 
+def kept() -> str:
+    """What `prune` keeps, in words: 'the newest 2 GB', and the days if KEEP_DAYS is set."""
+    days = "" if KEEP_DAYS is None else f" of those written in the last {KEEP_DAYS:g} days"
+    return f"the newest {KEEP_BYTES / 1024 ** 3:g} GB{days}"
+
+
 def _prune(folder: Path, spare: Path | None = None) -> None:
     """`prune`, saying so when it deletes anything."""
     if gone := prune(folder, spare=spare):
-        print(f"telemetry: deleted the {len(gone)} oldest files in {folder} (older than {KEEP_DAYS} days, "
-              f"or past {KEEP_BYTES / 1024 ** 3:.0f} GB in all)", file=sys.stderr)
+        print(f"telemetry: deleted the {len(gone)} oldest files in {folder} (it keeps {kept()})", file=sys.stderr)
 
 
 def stop() -> None:

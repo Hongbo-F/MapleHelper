@@ -1,7 +1,7 @@
 """What gamelab keeps under gamelab/lab, by kind, and how much (`python -m gamelab lab-usage`). It only
 reads. Recordings and screenshots are measurement evidence and are never deleted for you; telemetry is
-pruned when a run starts or goes on in a new part (telemetry.prune: 14 days, 2 GB), and `lab-usage
---prune-telemetry` applies the same now.
+pruned when a run starts or goes on in a new part (telemetry.prune: the newest 2 GB are kept, and none is
+deleted for its age), and `lab-usage --prune-telemetry` applies the same now.
 """
 
 import os
@@ -64,9 +64,9 @@ def report(lab: Path = LAB, now: float | None = None) -> list[str]:
         span = "" if u.oldest is None else f"  {_day(u.oldest)} to {_day(u.newest)}"
         lines.append(f"  {u.kind:22s} {size(u.bytes):>9s} {u.files:6d} files{span}")
     due = telemetry.prune(lab / "telemetry", now=now, dry_run=True)
-    lines.append(f"telemetry is kept {telemetry.KEEP_DAYS} days and {size(telemetry.KEEP_BYTES)} at most, in "
-                 f"parts of {size(telemetry.MAX_BYTES)}; due to go now: {len(due)} files "
-                 f"({size(sum(b for _, b in due))}), deleted when the next run starts or with --prune-telemetry")
+    lines.append(f"telemetry: {telemetry.kept()} are kept, in parts of {size(telemetry.MAX_BYTES)}; due to go "
+                 f"now: {len(due)} files ({size(sum(b for _, b in due))}), deleted when the next run starts or with "
+                 f"--prune-telemetry")
     lines.append("recordings and screenshots are never deleted for you")
     return lines
 
