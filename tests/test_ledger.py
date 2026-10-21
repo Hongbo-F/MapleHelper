@@ -279,3 +279,17 @@ def test_a_wound_is_given_up_out_of_sight_and_after_being_chased_too_long():
     # A bar that shows on a monster no throw of hers had in its path isn't hers.
     wounds.on_look(_seen_at(60.0, [_mon("pig", 700.0, bar=0.6)]))
     assert wounds.open == []
+
+
+def test_a_kill_is_placed_where_its_monster_was_seen_last_and_its_pile_expected_there():
+    # A slime shot from 16 walked 90 units on 17 before it died: placed where it was at the throw, its pile lay
+    # past LOOT_REACH of the drops, which were then taken for someone else's.
+    h, store = _Hunter(), DropStore()
+    ledger = Ledger(h, store)
+    ledger.on_look(_seen_at(10.0, [_mon("slime", 800.0)]))
+    ledger.on_throw(10.1, "right")
+    for t, x in ((10.5, 840.0), (10.9, 880.0)):
+        ledger.on_look(_seen_at(t, [_mon("slime", x)]))
+    h.exp_gains = 1
+    ledger.on_look(_seen_at(11.3, []))
+    assert [(k.kind, k.x) for k in ledger.kills] == [("slime", 880.0)] and store.piles[0].x == 880.0

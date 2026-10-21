@@ -6,7 +6,8 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   that can have taken the attack of a throw made in the last STAR_WINDOW s (or, with none, that long before
   the look before, as the gain came after it; any of them: which of the claw's stances an attack takes is
   drawn, and the client's order within a band of the star's search can't be seen), preferring one that's
-  gone from view, the newest throw's and the likeliest first.
+  gone from view, the newest throw's and the likeliest first; where that monster was seen last (a throw's
+  path is followed from look to look).
   A gain no throw explains (party EXP, or a kill seen only from a look without monsters) still counts,
   credited to where she is, but has no place and so no drops.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
@@ -109,6 +110,12 @@ class Ledger:
             self.kills.append(self._place(s))
         if s.searched:
             self._last = s
+            # What can have taken a throw's attack is followed from look to look (as Wounds follows them), so a
+            # kill is placed, and its pile expected, where its monster was seen last, not where it was at the
+            # throw: a slime shot from 16 walked 90 units on 17 before it died, and the drops seen where it fell,
+            # past the pile's LOOT_REACH, were taken for someone else's (the hunt loop waits for those).
+            for th in self._throws:
+                th.path = [seen_again(m, s.monsters) or m for m in th.path]
 
     def _place(self, s: Scene) -> Kill:
         """The kill a gain seen in look `s` was: a monster that can have taken the attack of a throw made in

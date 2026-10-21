@@ -571,7 +571,10 @@ def nav_fight_up(sim):
     the long way round (nav_fight_up_runs_out now). Of seeds 1-48 41 arrive, 42 just before; on seed 2 knocked
     off 3 to 25 at 122 s, she goes the long way round and arrives. On the play track, before the steps: with her
     finishing what she has hurt, 46; with no jump throw at a snail (stance.JUMP_THROW_SNAILS), 41: in this world a
-    jump throw's area picks the snail on 3, where she now stabs it or steps back from it.)"""
+    jump throw's area picks the snail on 3, where she now stabs it or steps back from it. Then seed 3 there,
+    since a kill is placed where its monster was seen last (behavior.ledger): on seed 1 her bursts from 14 at
+    17's monsters went on otherwise from its third kill, and the trip ran out of time at 200 s; 40 of seeds 1-48
+    arrived.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1188,8 +1191,10 @@ def tour_run(sim):
     of the basin's cliffs, still 12: 4 miss 1 or 2 of 122-184, in 587-984 s. Seed 6 since stars from the
     ground pick by the star's search: on seed 8 an EXP gain came in as the stop's fight ended, unplaced, and
     two kills on the way came between two looks. Seed 8 had been since jump-throws come 40 ms after the jump:
-    on seed 25 two kills came between two looks once, and two kills raise her EXP number once.) The basin's
-    respawns make its length chaotic: on world seeds 1-16 it took 470-1190 s, before stars picked by the
+    on seed 25 two kills came between two looks once, and two kills raise her EXP number once. On the play
+    track, before the steps, seed 2 as well, since a kill is placed where its monster was seen last (behavior.
+    ledger): on seed 1 one of its 225 kills went uncounted there; over seeds 1-16, 12 met all of it, 15 just
+    before, the 4 others missing 1 of 185-227 kills in the count.) The basin's respawns make its length chaotic: on world seeds 1-16 it took 470-1190 s, before stars picked by the
     search and since.
 
     On the physics branch (her body by motion.body) it met all of this on few seeds, and its seed moved
