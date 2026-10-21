@@ -15,8 +15,9 @@ in the order listed, 6 before 3):
                        URGENT_TRAVEL; above shooting, or drops lay until they vanished where respawns never stop
    3  shoot            a target in reach from her spot (or the ground she hunts on): throw, step out from
                        under, close in along her platform
-   4  in passing       travelling: a target in reach, thrown at from where she is, PASSING_S at most per
-                       platform per objective (the navigator shoots what stands in the way of a move)
+   4  in passing       travelling: a target in reach, thrown at from where she is (or a step of PASS_STEP at
+                       most out from under one above her: from 22 at 21's), PASSING_S at most per platform per
+                       objective (the navigator shoots what stands in the way of a move)
    4b finish           travelling to another platform, done shooting in passing: the monsters she has hurt
                        and not killed (fight.owed), when a throw from here or a walk of fight.FINISH_WALK at
                        most along her platform gets to them (fight.finish_act), FINISH_S at most per
@@ -46,7 +47,7 @@ from dataclasses import dataclass, field
 from .. import telemetry
 from ..attack import reach, spots
 from ..attack.spots import Spot
-from ..attack.stance import close_to, open_above, stance
+from ..attack.stance import act_text, close_to, open_above, stance
 from ..control.navigator import TRANSIT, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.scene import Scene
@@ -63,7 +64,8 @@ FINISH_S = 8.0         # rule 4b: s of finishing what she has hurt per objective
                        # she had hurt in reach: piles and spots ran out their OBJECTIVE_S (52 times in 30 runs of
                        # 20 minutes, against 26) and she picked up 2.9 points less of her drops (and with it,
                        # where the objective was on her own platform, 55)
-PASSING_S = 15.0       # rule 4: s of shooting per platform per objective while passing through
+PASSING_S = 15.0       # rule 4: s of shooting per platform per objective while passing through ...
+PASS_STEP = fight.FINISH_WALK  # ... and the longest step out from under a target there (_pass_step)
 PILE_NEAR = 150        # rule 5: drops on her platform this close are picked up from where she is
 PILE_GUARD = 110       # ... unless a monster is this close to them (looting.TOO_CLOSE, today's guard)
 PILE_TRIES = 2         # a pile is gone after at most this many times (a suspension counts)
@@ -254,8 +256,12 @@ class Hunt:
         return self._at_ground(s, targets, visible, hidden, now)
 
     def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
-        if self._can_pass_shoot(s, targets):
-            return self._passing_shot(s, targets, visible, hidden, now)
+        # In passing she shoots her targets, and steps out from under any wanted monster above her (which isn't a
+        # target, out of reach: as _interrupt has them, or a trip stopped for one went on, then again)
+        passing = targets + [m for m in visible if (self.kinds is None or m.kind in self.kinds)
+                             and not any(m is t for t in targets)]
+        if self._can_pass_shoot(s, passing):
+            return self._passing_shot(s, passing, visible, hidden, now)
         if (owed := self._owed(s, visible + hidden)) is not None:
             return self._finish(s, owed, visible, hidden, now)
         if (pile := self._pile_here(s)) is not None and pile is not self.obj.pile:  # one she passes
@@ -506,10 +512,30 @@ class Hunt:
         return None
 
     def _can_pass_shoot(self, s: Scene, targets) -> bool:
-        """Rule 4: a wanted target in reach while travelling, with this platform's budget not spent."""
+        """Rule 4: a wanted target in reach while travelling, or one a short step brings into reach (_pass_step),
+        with this platform's budget not spent."""
         if self.obj is None or self.obj.passing.get(s.platform.id, 0.0) >= PASSING_S:
             return False
-        return any(self._hits(s, m) for m in targets)
+        return any(self._hits(s, m) for m in targets) or self._pass_step(s, targets) is not None
+
+    def _pass_step(self, s: Scene, targets) -> tuple | None:
+        """In passing, a step along her platform out from under a target above her too close sideways for the
+        star's search to pick it (stance's step from under, never closing in), PASS_STEP at most. From 22 a star
+        at a monster on 21 (60 above) needs 111-126 units sideways, and 21's right end is 12 units left of 22's
+        left end: one near it is in reach only from x 60-75 on 22, and coming up she stands on 22's left part,
+        where her way on jumps onto 21 at that end. In the live hunt loops of 2026-10-21, of the 3 times she went
+        on from 22 with a monster on 21 in view, 2 had it under the search (77 and 103 units off), and she jumped
+        up beside it. Not from over one below her (she shoots those from the spots above them as she gets
+        there): with those too, in the simulator's hunt loop (60 runs of 20 minutes) she picked up 88.5% of her
+        drops, against 89.0% so and 90.1% without the step."""
+        above = [m for m in targets if m.y < s.where.y - reach.LEVEL]
+        if not above:
+            return None
+        here = s.platform
+        act = stance(s.where.x, s.where.y, here, above, False, self.h.actions.facing,
+                     can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
+                     around=s.monsters)
+        return act if act[0] == "back" and act[2] <= PASS_STEP else None
 
     def _passing_shot(self, s: Scene, targets, visible, hidden, now: float) -> None:
         t0 = time.monotonic()
@@ -523,6 +549,10 @@ class Hunt:
              "jump_back": self.h.actions.jump_back}[act[0]](act[1])
             self.h.report.throws += 1
             self.report.throws += 1
+        elif (step := self._pass_step(s, targets)) is not None:  # out from under one: a star picks it there
+            if step != act:
+                self.h.log(f"  {act_text(step, targets, s.where.x, hidden)} (HP {s.hp:.0%})")
+            self.h.actions.walk(step[1], step[2])
         else:  # nothing to throw from here without walking after it: on her way
             self.obj.passing[s.platform.id] = PASSING_S
         pid = s.platform.id
@@ -820,7 +850,8 @@ class Hunt:
             return True  # not worth it any more (`_pass` drops it)
         wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
         in_reach = [m for m in wanted if self._hits(s, m)]
-        if in_reach and o is not None and o.passing.get(here, 0.0) < PASSING_S:
+        if (in_reach or self._pass_step(s, wanted) is not None) and o is not None \
+                and o.passing.get(here, 0.0) < PASSING_S:
             return True
         if o is not None and o.kind == "spot" and self._standable(here) \
                 and any(m.platform == o.ground for m in in_reach):

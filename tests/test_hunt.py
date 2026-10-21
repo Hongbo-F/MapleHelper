@@ -163,3 +163,26 @@ def test_she_finishes_what_she_hurt_before_she_sets_off_for_another_platform(mon
     assert h._owed(s, []) is None
     h.obj = None                                 # at the ground, shooting goes on as before
     assert h._owed(s, []) is None
+
+
+def test_in_passing_she_steps_out_from_under_a_target_off_her_level(monkeypatch):
+    # From 22 a pig on 21 near its right end is under the star's search: a step along 22 brings it in, and that's
+    # a reason to stop a trip (and shoot in passing), as one in reach is; a long walk isn't.
+    acts = {"act": ("back", "right", 80.0)}
+    monkeypatch.setattr(hunt, "stance", lambda *a, **k: acts["act"])
+    h = _hunt([])
+    h.model, h._tops, h._halves = None, {}, {}
+    h.h.actions = SimpleNamespace(facing=None)
+    h.h.low_hp = 0.3
+    h.kinds = None
+    h._hits = lambda s, m: False
+    h._close_quarters = lambda s, monsters: False
+    h._standable = lambda pid: False
+    h.obj = Objective("spot", 19, 36.0)
+    pig = SimpleNamespace(kind="pig", x=-86.0, y=-85.0, platform=21, bar=None)
+    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=22), where=SimpleNamespace(x=-10.0, y=-25.0), monsters=[pig])
+    assert h._can_pass_shoot(s, [pig]) and h._interrupt(s)
+    acts["act"] = ("back", "right", hunt.PASS_STEP + 1)
+    assert not h._can_pass_shoot(s, [pig]) and not h._interrupt(s)
+    acts["act"] = ("approach", "left", 60.0)  # closing in on one isn't for passing through
+    assert not h._can_pass_shoot(s, [pig])

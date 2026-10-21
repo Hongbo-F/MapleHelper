@@ -1412,14 +1412,14 @@ def _left_from(tr: dict, pid: int) -> float:
 @scenario((3, 760.0), monsters=[("Pig", 4, 584.0)], seed=1, limit=200, facing=LEFT,
           expects=(happens("star hits pig", "her first star hurts the pig"),
                    check("the pig dies before she leaves platform 3",
-                         lambda tr: _first(tr["world_log"], "kills pig") < _left_from(tr, 3)),
-                   _rule("finish")))
+                         lambda tr: _first(tr["world_log"], "kills pig") < _left_from(tr, 3))))
 def loop_finishes_what_she_hurt(sim):
     """A live hunt loop of 2026-10-21 (00:49:51): from platform 3 she threw at a pig on 4, 60 below, and hurt it;
     it stood at x 584, 130 units along from her at 714, too close sideways for a star (151 for a pig 60 below),
     and she set off for drops on 7 with its bar at 27%. Here: one star from 760 hurts it, it stands where it is,
-    and she walks to 714; then the hunt loop, its next ground on another platform. She finishes it first (rule
-    4b): a step back along 3 to where a star picks it, and the stars."""
+    and she walks to 714; then the hunt loop, its next ground on another platform. She finishes it first: a step
+    back along 3 to where a star picks it, and the stars. Before she stepped out from under a target in passing
+    (hunt.PASS_STEP) that was the finish rule's (4b); since, it's shooting in passing's."""
     tour = sim.tour_stack()
     h = tour.h
     _hold(sim, 0, 3.0)
@@ -1430,6 +1430,28 @@ def loop_finishes_what_she_hurt(sim):
     _hold(sim, 0, 8.0)
     h.actions.walk(LEFT, 46)
     return _loop(1.0)(sim, tour)
+
+
+def _loop_up_from_22(sim):
+    tour = sim.tour_stack()
+    tour.stats["18"] = {"visits": 4, "exp": 600.0}  # by the value map, 18 is the best ground: she goes up past 21
+    return _loop(1.0)(sim, tour)
+
+
+@scenario((22, -10.0), monsters=[("Pig", 21, -86.0), ("Orange Mushroom", 21, -90.0)], seed=1, limit=200,
+          expects=(check("a monster on 21 dies before she leaves 22",
+                         lambda tr: min(_first(tr["world_log"], "kills pig"), _first(tr["world_log"], "kills orange"))
+                         < _left_from(tr, 22)),
+                   _rule("in passing")))
+def loop_shoots_21_from_22(sim):
+    """She stands on 22's left part, on her way up to 18 (by the value map the best ground) over 21, 60 above,
+    whose right end is 12 units left of 22's left end, and a pig and an Orange Mushroom stand near it: 76-80 units
+    along from her, under the star's search, which takes them from 111-113 sideways. In the live hunt loops of
+    2026-10-21 she went on from there, up onto 21 beside them, and in the simulator she jumped up 0.4 s in on all
+    of seeds 1-8 (the first kill 11-42 s in, or none). In passing she steps out from under them along 22, 40-76
+    units (hunt.PASS_STEP), and shoots them first: the first kill comes 3.5-5.5 s in, and she leaves 22 at 9.1-9.4
+    s, on all of seeds 1-8."""
+    return _loop_up_from_22(sim)
 
 
 @scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
