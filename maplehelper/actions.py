@@ -16,9 +16,11 @@ PICK_UP_GAP_MS = 260  # between pick-up presses; one item per press
 # about 30 ms: after three steps of the arrow she runs at 85% of her walking speed, too fast for the jump's
 # kick (which takes her to full speed from below 80% of it) and short of it herself, so a jump that comes then
 # leaves at 85% and lands short (a flat jump about 18 px short). In game on 2026-10-21, of 4 jumps keyed 120 ms
-# after the arrow 3 left at 84-85%, and of 4 keyed 100 ms after it 3 did; none of the 10 keyed 130-160 ms after
-# it. By gamelab's movement engine fitted to those (gamelab/motion/body.py), from 150 ms on at most 5% leave
-# short (physics.BLIND_ENDS_MS, which gamelab keys its own jumps from standing after; at 120 ms, 16-44%).
+# after the arrow 3 left short (at 80-84%: the first sweep's two read 77-79% by how far they went, which reads a
+# few % low, the second's one 84% by its speed in the air), and of 4 keyed 100 ms after it 3 did; none of the 10
+# keyed 130-160 ms after it. By gamelab's movement engine fitted to those (gamelab/motion/body.py), from 150 ms
+# on at most 5% leave short (physics.BLIND_ENDS_MS, which gamelab keys its own jumps from standing after; at
+# 120 ms, 16-44%).
 RUN_JUMP_AFTER_MS = 150
 
 
@@ -89,7 +91,8 @@ def jump_to_ledge(c: Ctx, direction: str, ledge_px: float, height_px: float, own
     from her own platform, which ends `own_edge_px` away in the same direction.
 
     She walks to just short of her own edge (walking past it drops her), then makes a running jump.
-    Raises ValueError if the ledge is too high or too far to make it from there.
+    Raises ValueError if the ledge is too high or too far to make it from there, or if she stands too close
+    to her own edge to get up to speed (RUN_JUMP_AFTER_MS of run-up).
 
     Not yet confirmed in game: two attempts at ~90 px ledges with ~60 px gaps both fell short (the
     second stopped before jumping, which this version no longer does). Ropes are the sure way up.
@@ -103,13 +106,20 @@ def jump_to_ledge(c: Ctx, direction: str, ledge_px: float, height_px: float, own
     if takeoff_gap > reach:
         raise ValueError(f"too far: she'd take off {takeoff_gap:.0f} px from the ledge, "
                          f"but can only reach a {height_px:.0f} px ledge from ~{reach:.0f} px")
+    # The jump goes no sooner than RUN_JUMP_AFTER_MS after the arrow, by when she has run about 31 px: from
+    # closer to her own edge than that and EDGE_MARGIN_PX, she'd take off past the margin, or past the edge
+    # (from 25 px off it, 6 px past it, where at 120 ms she left right at it). The caller steps back first.
+    run_up_px = m.walk_px_per_ms * RUN_JUMP_AFTER_MS
+    if run_up_px > takeoff_at_px:
+        raise ValueError(f"too close to her own edge: a running jump needs ~{run_up_px:.0f} px of run-up "
+                         f"({RUN_JUMP_AFTER_MS} ms) and she has {takeoff_at_px:.0f}; step back first")
     # One continuous run: stopping first and jumping from a standstill carries her ~30% less far.
-    # The jump key goes down early enough that she takes off (one reaction later) at takeoff_at_px, but
-    # not sooner than RUN_JUMP_AFTER_MS after the arrow: keyed at 100 ms (as it was for take-offs within
-    # ~21 px) most such jumps leave short (3 of 4 in game).
+    # The jump key goes down early enough that she takes off (one reaction later) at takeoff_at_px, which
+    # (above) is never sooner than RUN_JUMP_AFTER_MS after the arrow: keyed at 100 ms (as it was for take-offs
+    # within ~21 px) most such jumps leave short (3 of 4 in game).
     arrow = _arrow(c, direction)
     run_ms = m.reaction_ms + max(0.0, takeoff_at_px - m.walk_px_per_ms * m.reaction_ms) / m.walk_px_per_ms
-    run_ms = max(run_ms, RUN_JUMP_AFTER_MS)
+    run_ms = max(run_ms, RUN_JUMP_AFTER_MS)  # (rounding)
     c.down(arrow)
     c.wait(round(run_ms))
     c.tap(c.keys.jump)

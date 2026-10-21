@@ -77,12 +77,27 @@ def test_jump_to_ledge_runs_and_jumps_without_stopping():
 
 def test_jump_to_ledge_never_keys_the_jump_before_she_has_reached_full_speed():
     # Taking off within ~21 px, it keyed the jump 100 ms after the arrow, where by gamelab's engine a
-    # quarter of jumps leave short: too fast for the kick, short of full speed.
-    c = Clock()
-    actions.jump_to_ledge(c, LEFT, ledge_px=40, height_px=60, own_edge_px=25)
-    arrow = next(t for t, k, kind in c.events if k == "left" and kind == "down")
-    jump = next(t for t, k, kind in c.events if k == "alt" and kind == "down")
-    assert jump - arrow == actions.RUN_JUMP_AFTER_MS >= 150
+    # quarter of jumps leave short: too fast for the kick, short of full speed. Then 150 ms after it, where from
+    # 25 px off her edge her run took her past it (31 px). Now any jump it makes is keyed 150 ms in or later,
+    # taking off short of her edge by the margin at least; from closer it asks for a step back.
+    m = MOVEMENT
+    made = 0
+    for own_edge in range(0, 120, 3):
+        c = Clock()
+        try:
+            actions.jump_to_ledge(c, LEFT, ledge_px=own_edge + 25, height_px=60, own_edge_px=own_edge)
+        except ValueError as e:
+            assert "too close to her own edge" in str(e)
+            assert m.walk_px_per_ms * actions.RUN_JUMP_AFTER_MS > own_edge - actions.EDGE_MARGIN_PX
+            continue
+        made += 1
+        arrow = next(t for t, k, kind in c.events if k == "left" and kind == "down")
+        jump = next(t for t, k, kind in c.events if k == "alt" and kind == "down")
+        assert jump - arrow >= actions.RUN_JUMP_AFTER_MS >= 150
+        assert m.walk_px_per_ms * (jump - arrow) <= own_edge - actions.EDGE_MARGIN_PX + 0.5  # its takeoff
+    assert made == 24  # from 48 px off her edge (31 px of run-up and the 15 px margin)
+    with pytest.raises(ValueError, match="too close to her own edge"):
+        actions.jump_to_ledge(Clock(), LEFT, ledge_px=40, height_px=60, own_edge_px=25)
 
 
 def test_jump_to_ledge_refuses_what_it_cant_make():
