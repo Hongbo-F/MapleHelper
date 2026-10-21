@@ -64,6 +64,23 @@ def test_who_counts_as_in_front_keeps_to_the_wall_switch(monkeypatch):
     assert choose(s, p) is s.monsters[0]
 
 
+def test_a_monster_behind_a_wall_still_counts_as_in_front(monkeypatch):
+    # The client checks the line to its pick alone: a monster behind a wall of her group that the attack takes
+    # first takes it, and the star stops at the wall. test_attack's shield map: from A at 25, a pig up on B at
+    # 215 (band 5, past the step wall) comes before a pig on L at 190, 60 below (band 6): the one on L isn't alone
+    # in front, and with a crowd it's still shielded. With the rule off, as before.
+    from test_attack import shield_map
+    model, a, b, low = shield_map()
+    up, under = target(215, 440, platform=b.id), target(190, 560, platform=low.id)
+    p = Probe("toy", "a test", a.id, 25.0, RIGHT, (low.id,), ("pig",), (150, 200))
+    s = scene(up, under, x=25.0, y=500.0, platform=a)
+    monkeypatch.setattr(reach, "WALLS_BLOCK", True)
+    assert probe.in_front(s, RIGHT) == [up, under]
+    assert choose(s, p) is None and choose(s, p, crowd=1) is None
+    monkeypatch.setattr(reach, "WALLS_BLOCK", False)
+    assert choose(s, p) is None and choose(s, p, crowd=1) is under
+
+
 def test_a_probe_s_place_is_checked_before_it_runs():
     model, a, b, _ = step_map()
     ok = Probe("toy", "a test", a.id, 100.0, RIGHT, (b.id,), ("pig",), (150, 300))
@@ -114,6 +131,26 @@ def test_a_hit_is_a_bar_new_or_lower_and_a_kill_her_exp_with_it_gone():
     row = {"exp": 1, "evidence": [entry(None, [(0.5, None)], gone=True), entry(None, [(0.5, None)], gone=True,
                                                                                   target=False)]}
     assert [s for _, s in outcomes(row)] == [False, False]  # two gone: the kill can't be placed
+
+
+def test_one_odd_throw_never_decides_a_question_alone():
+    # Throws both answers have the attack take, every one a star's hit (as in the simulator), and one that only
+    # one of them has it take, where none showed (a misread bar, a monster walked off where the pick had it):
+    # the rates are kept 5% from 0 and 1 (RATE_FLOOR), so it weighs under DECIDES however many hits come with
+    # it (at 2%, 3.6 with 19). Nor is a question decided on fewer than DECIDE_THROWS throws they differ on.
+    for agree in (10, 19, 50):
+        rows = [{"exp": 0, "evidence": [entry(None, [(0.5, 0.6)])]} for _ in range(agree)]
+        rows.append({"exp": 0, "evidence": [entry(None, [(0.5, None)])]})
+
+        def took(last: float):
+            return lambda r: [(e, 0.0, last if r is rows[-1] else 1.0) for e in r["evidence"]]
+        (taken, _), (not_taken, _) = probe.likelihood(rows, took(1.0)), probe.likelihood(rows, took(0.0))
+        assert 2.5 < not_taken - taken < probe.DECIDES, agree
+    q = probe.QUESTIONS["LINE"]
+    lls = {"the level line": 0.0, "the v83 line": -10.0}
+    assert probe.Answers(q, lls, 20, probe.DECIDE_THROWS - 1).decided is None
+    assert probe.Answers(q, lls, 20, probe.DECIDE_THROWS).decided == "the level line"
+    assert "on only 4 throws" in probe.answers_text(probe.Answers(q, lls, 20, 4))[-1]
 
 
 # --- runs in the simulator, and the scorer ---------------------------------------------------------------
@@ -208,15 +245,17 @@ RECOVERS = [
                          ids=[f"{n}-{w or 'reach'}-{k}" for n, w, k, _ in RECOVERS])
 def test_each_probe_s_log_decides_the_answer_its_world_has(name, world, key, answer):
     # Every probe, run in a world with reach's answer to its question and in one with the other: from its log
-    # the scorer decides on the world's answer, and on throws where the two have the attack take something
-    # else (so on seeds 1-8 too). below-42 also asks the claw off her level, but its few throws at pigs within
-    # 99 decide it alone on 3 of those seeds in a world with the swings: claw-down's 40 throws do on all 8.
+    # the scorer decides on the world's answer, on DECIDE_THROWS throws or more where the two have the attack
+    # take something else (so on seeds 1-8 too, but for three runs with fewer such throws: below-42 on seed 7,
+    # 2 and 1; hanging-wall on seed 6 in reach's world, 4; never on the other answer). below-42 also asks the
+    # claw off her level, but its few throws at pigs within 99 decide it alone on 2 of those seeds in a world
+    # with the swings: claw-down's 40 throws do on all 8.
     q, model = probe.QUESTIONS[key], scenarios.real_map()
     rows = _probe_run(name, world)
     assert rows and {r["probe"] for r in rows} == {name}
     scored = probe.answers(rows, model, q)
     assert scored.decided == q.answers[answer][0], (name, world, scored.lls, scored.differ)
-    assert scored.differ >= 4
+    assert scored.differ >= probe.DECIDE_THROWS
     assert f"-> {q.answers[answer][0]}:" in "\n".join(probe.answers_text(scored))
 
 

@@ -26,9 +26,11 @@ hit by one has stopped flinching (0.6 s, taller) when the next attack picks. A m
 probe doesn't throw at that comes close on her platform is fought off first (behavior.fight.clear, her
 platform only); knocked off her place, she walks or goes back to it, the last walk the way she throws, so
 that no throw turns her (a turn's tap walks her on). Nor does she walk or throw from a look a touch's knock
-may still be moving her in (Hunter.knocked). What her decisions take as stopping
-a star (reach.WALLS_BLOCK: the counting of who's in front, and the fights) is switched for the run: off
-for the probes that measure it, so it throws at monsters behind such a wall too.
+may still be moving her in (Hunter.knocked). Every monster in front counts, its star stopped or not (the
+client checks the line to its pick alone, so a walled one still takes the attack). What her decisions take as
+stopping a star (reach.WALLS_BLOCK: whether a target behind such a wall, or behind one, is thrown at, and the
+fights) is switched for the run: off for the probes that measure it, so it throws at monsters behind such a
+wall too.
 
 Each throw is a line of lab/probe_geometry.jsonl: the probe, how she threw (and the attack key's delay
 after the jump key, `gap_ms`), whether the wall rule was on, where she stood and her foothold group, the
@@ -51,7 +53,8 @@ likelihood (`likelihood`) is that of every monster's hit or none and every hit's
 rates fitted (a monster taken shows a hit with chance a, one not taken with chance f), as the research fitted
 the shot log and the telemetry. Then:
 - each question (`QUESTIONS`) over the throws of the probes that ask it: each answer's log-likelihood, on how
-  many throws the two best differ, and the answer the throws decide on (DECIDES better than the next);
+  many throws the two best differ, and the answer the throws decide on (DECIDES better than the next, on
+  DECIDE_THROWS throws or more where they differ);
 - the window's top and floor (SEARCH_TOP0, SEARCH_FLOOR0) fitted to every throw from the ground, and the
   level line's height (SHOT_H, raised in a jump: reach.air_rise) to every throw;
 - the claw probes' hits by how far off the target was, each the claw's or a star's.
@@ -113,7 +116,10 @@ A_MIN = 0.3          # a monster the attack takes shows a hit at least this ofte
                      # throws hit; the telemetry missed about half the bars)
 F_MAX = 0.2          # one it doesn't take shows one at most this often (the telemetry's monsters behind her,
                      # which no star can hit: 7.6% of 224)
-RATE_FLOOR = 0.02    # and neither rate quite 0 or 1
+RATE_FLOOR = 0.05    # and neither rate within this of 0 or 1: a hit or none is read wrong now and then too (a bar
+                     # misread, a monster that walked out of where the look before the pick had it), so where every
+                     # throw both answers agree on hits (as in the simulator), one odd none on a throw they differ on
+                     # weighs at most log(0.95 / 0.05) = 2.9, under DECIDES (at 0.02, up to 3.9)
 CLAW_SPLIT_HP = 20   # a hit that takes less of its target's HP than this was the claw's: 9-11 damage against a star's
                      # 30-70; of a pig's bar 16% (a swipe takes 7-9%, a star 23-55%), of a snail's 44% (a swipe 20-24%,
                      # a star kills it or leaves it under a third) ...
@@ -431,32 +437,29 @@ def _fight_off(h: "Hunter", probe: Probe, s: Scene) -> bool:
     return True
 
 
-def in_front(s: Scene, side: str, rise: float = 0.0, walls: bool = True) -> list[Monster]:
-    """The monsters of look `s` that could take a star she throws `side`: in front of her (a body reaching in
-    front of her counts) within FRONT by their middle, from FRONT_UP above her feet to FRONT_DOWN below; with
-    `walls`, none her decisions take as behind a wall of her foothold group (reach.wall_to, `rise` up in a
-    jump; with reach.WALLS_BLOCK off, none is)."""
+def in_front(s: Scene, side: str) -> list[Monster]:
+    """The monsters of look `s` that could take the attack of a star she throws `side`: in front of her (a body
+    reaching in front of her counts) within FRONT by their middle, from FRONT_UP above her feet to FRONT_DOWN
+    below. Whatever stops their stars: the client checks the line to its pick alone, so one behind a wall still
+    takes the attack if it comes first, and the star stops at the wall."""
     x, y, d = s.where.x, s.where.y, directions.sign(side)
-    out = []
-    for m in s.monsters:
-        ahead, half = (m.x - x) * d, reach.body_of(m.kind)[1]
-        if not (-half < ahead <= FRONT and -FRONT_UP <= m.y - y <= FRONT_DOWN):
-            continue
-        if walls and reach.wall_to(s.platform, x, y, m, rise) is not None:
-            continue
-        out.append(m)
-    return out
+    return [m for m in s.monsters
+            if -reach.body_of(m.kind)[1] < (m.x - x) * d <= FRONT and -FRONT_UP <= m.y - y <= FRONT_DOWN]
 
 
 def choose(s: Scene, probe: Probe, crowd: int = 0) -> Monster | None:
     """What to throw at in look `s`, if anything: the nearest monster in front of her (in_front) that the probe
     throws at (its kind, its platform, its middle in range sideways: for a jump back, its far end JUMP_BACK_OUT
-    nearer), when it's the only one in front (or with at most `crowd` others)."""
-    front = in_front(s, probe.side, rise_of(probe.style))
-    x = s.where.x
+    nearer), when it's the only one in front (or with at most `crowd` others). While her decisions keep to what
+    stops a star (reach.WALLS_BLOCK), not one whose star is stopped (reach.wall_to), nor one behind another in
+    front that the attack takes first whose star is (reach.shielded: with a crowd)."""
+    front = in_front(s, probe.side)
+    x, y, rise = s.where.x, s.where.y, rise_of(probe.style)
     out = JUMP_BACK_OUT if probe.style == "jump_back" else 0.0  # she's that much farther off when it picks
     fits = [m for m in front if m.kind in probe.kinds and m.platform in probe.at
-            and probe.range_of(m.kind)[0] <= abs(m.x - x) <= probe.range_of(m.kind)[1] - out]
+            and probe.range_of(m.kind)[0] <= abs(m.x - x) <= probe.range_of(m.kind)[1] - out
+            and reach.wall_to(s.platform, x, y, m, rise) is None
+            and reach.shielded(s.platform, x, y, m, front, rise) is None]
     if not fits or len(front) > 1 + crowd:
         return None
     return min(fits, key=lambda m: abs(m.x - x))
@@ -496,7 +499,7 @@ def _row(h: "Hunter", s: Scene, probe: Probe, target: Monster) -> dict:
     """A throw's line in the probe log, as far as the look before it tells (the rest comes with _Flying)."""
     here, x, y = s.platform, s.where.x, s.where.y
     on = h.model.platform(target.platform) if target.platform is not None else None
-    front = in_front(s, probe.side, walls=False)
+    front = in_front(s, probe.side)
     return {"probe": probe.name, "style": probe.style, "gap_ms": gap_ms(probe.style), "walls_block": reach.WALLS_BLOCK,
             "map": h.model.id, "side": probe.side, "x": round(x, 1), "y": round(y, 1), "her": here.id,
             "her_group": list(here.group) if here.group is not None else None,
@@ -516,7 +519,7 @@ class _Flying:
         self.exp = 0
         self.looks = 0  # looks from when the star could have landed on (BEFORE_HIT_S after the key)
         self.picked = False
-        self.entries = [self._entry(m, m is target) for m in in_front(s, self.side, walls=False)]
+        self.entries = [self._entry(m, m is target) for m in in_front(s, self.side)]
         if not any(e["target"] for e in self.entries):
             self.entries.append(self._entry(target, True))
 
@@ -554,7 +557,7 @@ class _Flying:
         if self.picked:
             return
         self.picked = True  # the first look after the throw: about when the attack picked its target
-        front = in_front(s, self.side, walls=False)
+        front = in_front(s, self.side)
         for m in front:
             if id(m) not in claimed:  # in front now, not at the throw: it may have taken the star
                 e = self._entry(m, False)
@@ -952,7 +955,9 @@ QUESTIONS = {q.key: q for q in (
              (("the area fixed to her feet (reach.in_area)", {"air": "area"}),
               ("as from the ground, from as high as she is (the v83 client's)", {"air": "v83"}))),
 )}
-DECIDES = 3.0        # an answer this much log-likelihood better than the next is the game's: about 20 to 1
+DECIDES = 3.0        # an answer this much log-likelihood better than the next is the game's: about 20 to 1 ...
+DECIDE_THROWS = 5    # ... on at least this many throws where the two have the attack take something else (one or two
+                     # decided below-42 on some seeds in the simulator: a misread bar could have settled a constant)
 
 
 @dataclass
@@ -976,8 +981,9 @@ class Answers:
 
     @property
     def decided(self) -> str | None:
-        """The answer the throws decide on (DECIDES better than the next), if any."""
-        return self.ranked[0] if self.differ and self.lead >= DECIDES else None
+        """The answer the throws decide on (DECIDES better than the next, on DECIDE_THROWS throws or more where
+        they differ), if any."""
+        return self.ranked[0] if self.differ >= DECIDE_THROWS and self.lead >= DECIDES else None
 
 
 def answers(rows: list[dict], model: MapModel, question: Question) -> Answers:
@@ -1003,6 +1009,9 @@ def answers_text(ans: Answers) -> list[str]:
         lines.append(f"    -> can't tell: {best} and {nxt} have the attack take the same on every throw")
     elif ans.decided:
         lines.append(f"    -> {best}: {ans.lead:.1f} better than {nxt}, on the {ans.differ} throws they differ on")
+    elif ans.differ < DECIDE_THROWS:
+        lines.append(f"    -> not decided: {best} {ans.lead:.1f} better than {nxt}, but on only {ans.differ} throws "
+                     f"they differ on (decided from {DECIDE_THROWS})")
     else:
         lines.append(f"    -> not decided: {best} only {ans.lead:.1f} better than {nxt} (decided from {DECIDES:g}), "
                      f"on the {ans.differ} throws they differ on")
