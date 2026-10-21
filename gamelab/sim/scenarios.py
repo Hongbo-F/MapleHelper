@@ -556,6 +556,28 @@ def nav_fight_across(sim):
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
+# Two known failures, pinned on the seeds they had before monsters walked as fast as the game data says: the
+# faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
+# timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
+
+@scenario((14, 760.0), monsters="all", seed=10,
+          expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
+def nav_fight_up_runs_out(sim):
+    """nav_fight_up on seed 10: from 3 she ends up in the basin, and on the long way up, fighting 28 monsters
+    on the way and hit mid-jump four times (landing back a platform or two down), she runs out of her 180 s
+    on 18 (it arrived here before monsters walked 125 units/s; over 16 seeds 10 arrive now, 12 then)."""
+    return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
+
+
+@scenario((12, -300.0), monsters="all", seed=3,
+          expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
+def nav_fight_across_runs_out(sim):
+    """nav_fight_across on seed 3: knocked off 12 down to 34 at the start, then on the long way round,
+    fighting 34 monsters on the way, she runs out of her 180 s on 18 (it arrived here before monsters walked
+    125 units/s; over 16 seeds 12 arrive now, 11 then)."""
+    return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
+
+
 # One move each, carried out by Mover.do from a look.
 
 def _one_move(sim, kind: str, src: int, dst: int) -> dict:
