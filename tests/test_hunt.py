@@ -223,6 +223,10 @@ def test_a_pile_a_little_off_her_way_is_picked_up_on_the_way():
     h.obj = Objective("spot", 16, 636.0)
     assert h._detour(_at(13)) == (2.0 + hunt.PICK_S + 4.4 - 5.7, near)
     assert h._detour(_at(13, monsters=[SimpleNamespace(platform=19, x=120.0)])) is None  # guarded
+    # Coins on 12, 3 s away, 1.1 s more: past DETOUR_REACH, they'd make the trip their own.
+    times.update({(12, 16): 3.2, (13, 19): 3.0})
+    assert hunt.DETOUR_REACH < 3.0 and h._detour(_at(13)) is None
+    times.update({(13, 19): 2.0})
     h.obj.detours = hunt.DETOURS                    # bounded: so many on one trip, then on her way
     assert h._detour(_at(13)) is None
     for why in ("on the way", "valuable pile", "urgent pile"):  # not from a pile on the way, nor to one that can't wait
