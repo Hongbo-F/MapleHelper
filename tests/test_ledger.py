@@ -205,5 +205,7 @@ def test_the_ledger_counts_every_kill_and_places_most_of_them_right(name):
     # 0.58 on the pinned seeds, hunt_clear_basin's, tour_hunt_basin's and nav_fight_basin's). A throw's path
     # is taken from the look before it, and faster monsters walk further from where that look saw them by the
     # time its star lands. So placed is back at 0.9, and placed right is 0.55 (two of the 33 below it: 0.50
-    # and 0.55).
+    # and 0.55). With the client's search and stab on top of all three tracks, the same 33: placed 0.98-1.0,
+    # placed right 0.46-0.83 (pooled 0.66-0.72; 0.78, 0.76 and 0.60 on the pinned seeds), one below the bar:
+    # nav_fight_basin's seed 4, 0.46.
     assert len(placed) >= 0.9 * len(kills) and right >= 0.55 * len(placed)

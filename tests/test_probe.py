@@ -246,10 +246,13 @@ RECOVERS = [
 def test_each_probe_s_log_decides_the_answer_its_world_has(name, world, key, answer):
     # Every probe, run in a world with reach's answer to its question and in one with the other: from its log
     # the scorer decides on the world's answer, on DECIDE_THROWS throws or more where the two have the attack
-    # take something else (so on seeds 1-8 too, but for three runs with fewer such throws: below-42 on seed 7,
-    # 2 and 1; hanging-wall on seed 6 in reach's world, 4; never on the other answer). below-42 also asks the
-    # claw off her level, but its few throws at pigs within 99 decide it alone on 2 of those seeds in a world
-    # with the swings: claw-down's 40 throws do on all 8.
+    # take something else (so on seeds 1-8 too, but for five runs: top-120 on seed 5 in the logs' top's world,
+    # 2.4 on 8 such throws; claw-edge on seed 4 in both worlds and on seed 8 in the old claw's, on 3-4 such
+    # throws, and on seed 2 in the old claw's, leaning 2.9 the stabs' way: pigs walking at her at the game
+    # data's 125 units/s were logged 120-124 off by the look 30 ms after the pick, inside the old box, and were
+    # at its edge, 124, or past it at the pick; never on the other answer). below-42 also asks the claw off her level, but its few throws at
+    # pigs within 99 decide it alone on 2 of those seeds (5 and 6) in a world with the swings: claw-down's 40
+    # throws do on all 8.
     q, model = probe.QUESTIONS[key], scenarios.real_map()
     rows = _probe_run(name, world)
     assert rows and {r["probe"] for r in rows} == {name}
@@ -367,9 +370,9 @@ def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     # The game's hit monsters hide under their damage numbers for 1-3 s: the evidence waits up to
     # HIDDEN_MAX_S for the target to show again. With the client's top in the world (reach's), a star picks the
     # pig from 111 units off: none of the throws its attack took may be read as a miss (seen again with its bar
-    # unchanged), and most are read as hits (19 of the 30; 22 with pigs walking 70 units/s, not the game data's
-    # 125). Throws at a pig that walked out of the search's window by the pick (two 128-129 off that walked to
-    # 105) the world's star missed, and so they're read.
+    # unchanged), and most are read as hits (21 of the 30 on the scenario's seed 6, where every star hits; 9
+    # can't be told). A throw at a pig that walks out of the search's window by the pick (on seed 1, three
+    # walked to 90-105 off, under the 111) the world's star misses, and so it's read as a miss.
     sc = dataclasses.replace(scenarios.SCENARIOS["probe_top"], noise=Noise(hit_hidden=(1.0, 3.0)))
     trace = scenarios.run_scenario(sc)
     model = scenarios.real_map()
