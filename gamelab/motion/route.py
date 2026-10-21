@@ -46,16 +46,23 @@ JUMP_FROM = 33
 # flow.JUMP_FROM_FAR, "players jump from a little further back too"). By the landing planned, 16 of 102
 # that were to land under 12 in from an end missed, and 1 of 61 of those 20 or more in. So a jump's takeoff
 # is placed where it still lands TAKEOFF_ROOM_WANTED in if she takes off up to TAKEOFF_SPREAD earlier (flow
-# takes off that much earlier than the move's takeoff with rng: Flow._jump) and TAKEOFF_SLOP early or late
+# takes off that much earlier than the move's takeoff with rng: Flow._takeoffs) and TAKEOFF_SLOP early or late
 # on top of that (sure_landing's slop); if no takeoff manages that, where she has the most room with the
 # slop alone. And never nearer the end than TAKEOFF_EDGE, so that leaving TAKEOFF_SLOP late still leaves the
-# 3 units flow keeps. Up the staircase that's 15 back (it was 33): she lands 34 in, 24 with flow's spread.
+# 3 units flow kept, and flow's own takeoff is never nearer her platform's end than the 8 it keeps now (flow.
+# TAKEOFF_SLOP). Up the staircase that's 15 back (it was 33): she lands 34 in, 24 with flow's spread. Flow then
+# takes a jump off only where it lands with room to spare from where she really leaves the ground (Flow.
+# sure_takeoff: 9 in, and on it from 8 units early or late, 10% slower or at SLOW_TAKEOFF): it takes every
+# route jump off from its own takeoff, and from the 10 units before it but on 4 of the map's 55 jumps (down from
+# along a platform, where a slower takeoff from further back comes down on her own platform's end: no takeoff
+# lands with room from all of the spread there, so the slop alone placed it), where it keeps to the route's
+# (tests/test_flow.py).
 TAKEOFF_EDGE = 15
 TAKEOFF_SPREAD = 10.0
 TAKEOFF_SLOP = 12.0
 TAKEOFF_ROOM_WANTED = 20  # landing room enough (no better takeoff is sought)
 TAKEOFF_SEARCH = 30       # how far from where a jump was found its takeoff may be moved
-RUN_UP = 20               # a running jump starts this far before its takeoff (mover.MIN_RUN 12 and some)
+RUN_UP = 20               # a running jump starts this far before its takeoff (mover.MIN_RUN 15 and some)
 LANDING_ROOM = LAND_MARGIN * 0.5  # a running jump must land at least this far in from the landing platform's ends,
                                   # and a walk-off this far more than her slide from its far end
 NEEDLESS_DROP = 10       # a running jump down more than this, where walking off gets there too, is needless

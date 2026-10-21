@@ -44,8 +44,9 @@ CLIMB_EXTRA_MS = 500      # up (or down) is held this much longer than the climb
 # A jump off a rope (rope_jump): once on the rope, a look; off by more than HANG_TOLERANCE from the height it jumps
 # from (her dot's raw height: it's good to ~11 units, and snaps to a platform within 25 of her), a climb up or down
 # to it and another look. On the rope means her dot within ON_ROPE_X of it and between its ends, not at the floor she
-# jumped from. The jump key goes ROPE_JUMP_KEY_MS after the arrow: the game sees the arrow 60 ms after its key, and
-# acts on the jump 67 ms after its own (off_rope's, 30).
+# jumped from. The jump key goes ROPE_JUMP_KEY_MS after the arrow (off_rope's, 30): the game acts on the arrow 66 ms
+# after its key and on the jump 65 ms after its own, each at its next 30 ms step (motion.body: Lags, STEP), so the
+# arrow is held by the jump's step.
 HANG_TOLERANCE = 15
 ON_ROPE_X = 25
 ROPE_JUMP_KEY_MS = 40

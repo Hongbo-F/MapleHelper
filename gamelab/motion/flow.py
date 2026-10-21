@@ -60,7 +60,11 @@ JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far be
 # the takeoff and used that up: of the 81 route jumps on this map, 40 had takeoffs the chains could pick that
 # came down 2-7 units onto the platform and missed it from 8 units further back or 6% slower. In game on
 # 2026-10-21 jumps from short platforms took off too early (the player's eye), and the jumps 32 -> 29, 29 ->
-# 28 and 16 -> 14 that came down short were planned to land 5-16 units onto their platforms.
+# 28 and 16 -> 14 that came down short were planned to land 5-16 units onto their platforms. Since the route
+# places every jump's takeoff for room (route._placed: 55 jumps, each from along its platform, up a staircase
+# step 15 units from the end), the chains take each from the move's takeoff or up to 10 before it, the least
+# room 16.5 units; on 4 of them (jumps down from along a platform) only the move's own takeoff lands surely,
+# and that's the one taken.
 TAKEOFF_SLOP = 8.0
 TAKEOFF_STEP = 2.0
 # Standing this close to where a move wants her she doesn't step: a step that short is an arrow tap of

@@ -53,3 +53,38 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(alarm, "page", refuse("gamelab.control.alarm.page"))
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
+
+
+@pytest.fixture
+def old_route_takeoffs(monkeypatch):
+    """The route's running jumps as they were before their takeoffs were placed for room (route._placed, from the
+    user's watching on 2026-10-21), as the game played with them on the night of the live fixes: off an end looked
+    for and left to flow from route.JUMP_FROM back (flow takes off JUMP_FROM to JUMP_FROM_FAR from the end), its
+    run from RUN_START back; along a platform from where it was found, its run RUN_START - JUMP_FROM before it.
+    The map's 81 route jumps of then, exactly (test_flow). For the tests that pin what a fix of that night does at
+    the takeoffs it was found with."""
+    from gamelab import directions
+    from gamelab.motion import route
+    state = {"end": False}
+    end_moves = route._end_moves
+
+    def ends(model, a):
+        state["end"] = True
+        try:
+            return end_moves(model, a)
+        finally:
+            state["end"] = False
+
+    def placed(model, a, x0, sign, land):
+        jump = route._sure_running_jump(model, a, x0, sign)
+        if jump is None or jump[0] is not land:
+            return None
+        edge = a.right if sign > 0 else a.left
+        start = edge - sign * route.RUN_START if state["end"] else x0 - sign * (route.RUN_START - route.JUMP_FROM)
+        if not a.covers(start):
+            return None
+        return route.Move("jump", a.id, land.id, start, jump[1], directions.toward(sign),
+                          seconds=route._running_jump_seconds(jump[2]), takeoff=None if state["end"] else x0)
+
+    monkeypatch.setattr(route, "_end_moves", ends)
+    monkeypatch.setattr(route, "_placed", placed)

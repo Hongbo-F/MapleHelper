@@ -282,12 +282,12 @@ def _real_moves(*wanted):
 
 
 @REAL
-def test_a_step_after_a_climb_goes_down_when_planned_and_a_run_before_the_top():
-    """After the climb 36 -> 32 the jump onto 29 needs a step back (right, ~20 units): its arrow goes down where
-    the plan has her standing after the climb, not before the top (in game, pressed before the top it walked
-    her 8-30 units too far and the jumps after it came down in the basin). After the climb 6 -> 3, the run to
-    walk off 3's left end goes down before the top (flow.PRE_ARROW), as before: she sets off as the climb-over
-    ends."""
+def test_a_step_after_a_climb_goes_down_when_planned_and_a_run_before_the_top(old_route_takeoffs):
+    """After the climb 36 -> 32 the jump onto 29 needs a step back (right, ~20 units) at the route's takeoffs of
+    the night of 2026-10-21 (old_route_takeoffs: 33-45 units from 32's left end): its arrow goes down where the
+    plan has her standing after the climb, not before the top (in game, pressed before the top it walked her
+    8-30 units too far and the jumps after it came down in the basin). After the climb 6 -> 3, the run to walk
+    off 3's left end goes down before the top (flow.PRE_ARROW), as before: she sets off as the climb-over ends."""
     from gamelab.motion.flow import CLIMB_OVER, PRE_ARROW, STEP_EARLY_MAX_MS, ms
     m, (climb, jump) = _real_moves(("climb", 36, 32), ("jump", 32, 29))
     legs, keys, why = Flow(m, KEYS).chain([climb, jump], Body(0.0, 470.0, m.platform(36)))
@@ -304,12 +304,33 @@ def test_a_step_after_a_climb_goes_down_when_planned_and_a_run_before_the_top():
 
 
 @REAL
-def test_every_route_jump_takes_off_where_it_lands_with_room_to_spare():
+def test_with_the_placed_takeoffs_a_step_after_a_climb_still_goes_down_when_planned():
+    """With the route's takeoffs placed for room (route._placed) the jump 32 -> 29 takes off 15 units from 32's
+    left end (516), 23 left of the rope she climbs from 36: after the climb she runs at it, the arrow down before
+    the top (PRE_ARROW), with no step back. The climb 7 -> 1 and the jump right off 1 onto 0 (taking off at 1170,
+    18 left of the rope) has the step back now (left, about 30 units): its arrow goes down where the plan has her
+    standing after the climb, and is let go within STEP_EARLY_MAX_MS."""
+    from gamelab.motion.flow import CLIMB_OVER, PRE_ARROW, STEP_EARLY_MAX_MS, ms
+    m, (climb, jump) = _real_moves(("climb", 36, 32), ("jump", 32, 29))
+    assert jump.takeoff == 516
+    legs, keys, why = Flow(m, KEYS).chain([climb, jump], Body(0.0, 470.0, m.platform(36)))
+    assert why == "done" and [leg.move.kind for leg in legs] == ["climb", "jump"]
+    down = [e for e in keys.sorted() if e[0] > ms(legs[0].start.t) + 1000][0]
+    assert down[1:] == ["left", "down"] and down[0] == ms(legs[0].end.t - CLIMB_OVER - PRE_ARROW)
+    m, (climb, jump) = _real_moves(("climb", 7, 1), ("jump", 1, 0))
+    legs, keys, why = Flow(m, KEYS).chain([climb, jump], Body(0.0, 1188.0, m.platform(7)))
+    assert why == "done" and [leg.move.kind for leg in legs] == ["climb", "jump"]
+    ev = [e for e in keys.sorted() if e[0] > ms(legs[0].start.t) + 1000]
+    down, up = ev[0], next(e for e in ev if e[1] == "left" and e[2] == "up")
+    assert down[1:] == ["left", "down"] and down[0] == ms(legs[0].end.t)
+    assert 0 < up[0] - down[0] <= STEP_EARLY_MAX_MS
+
+
+def _route_jumps_land_with_room() -> int:
     """Each of the map's running jumps as chains do it, from where they pick (with rng), from standing at its
     spot and 20 units either side, and running in: from where she really leaves the ground it lands on its
     platform LANDING_ROOM in from its ends, and still does if she leaves 8 units early or 6% slower (the check
-    the investigation of 2026-10-21's misses ran). Before Flow.sure_takeoff, 47 of the 81 had takeoffs a chain
-    could pick that failed it, landing as little as 2.6 units onto their platform."""
+    the investigation of 2026-10-21's misses ran). How many route jumps there are."""
     import random
 
     from gamelab import directions
@@ -318,7 +339,6 @@ def test_every_route_jump_takes_off_where_it_lands_with_room_to_spare():
     m = scenarios.real_map()
     jumps = [mv for mv in Planner(m).moves if mv.kind == "jump"]
     flow = Flow(m, KEYS, rng=random.Random(1))
-    assert len(jumps) == 81
     for mv in jumps:
         a, q, d = m.platform(mv.src), m.platform(mv.dst), directions.sign(mv.direction)
         spot = mv.takeoff if mv.takeoff is not None else (a.right if d > 0 else a.left) - d * JUMP_FROM
@@ -333,3 +353,38 @@ def test_every_route_jump_takes_off_where_it_lands_with_room_to_spare():
                 assert land is q and q.covers(lx - LANDING_ROOM) and q.covers(lx + LANDING_ROOM), (mv, x, lx)
                 assert fly(m, x - d * 8, a.y_at(x), d * WALK_SPEED, -JUMP_SPEED, group=a.group)[0] is q, (mv, x)
                 assert fly(m, x, a.y_at(x), d * WALK_SPEED * 0.94, -JUMP_SPEED, group=a.group)[0] is q, (mv, x)
+    return len(jumps)
+
+
+@REAL
+def test_every_route_jump_takes_off_where_it_lands_with_room_to_spare(old_route_takeoffs):
+    """_route_jumps_land_with_room at the route's takeoffs of the night of 2026-10-21 (old_route_takeoffs), its 81
+    jumps. Before Flow.sure_takeoff, 47 of the 81 had takeoffs a chain could pick that failed it, landing as little
+    as 2.6 units onto their platform."""
+    assert _route_jumps_land_with_room() == 81
+
+
+@REAL
+def test_every_placed_route_jump_takes_off_where_it_lands_with_room_to_spare_and_flow_takes_its_takeoff():
+    """_route_jumps_land_with_room at the route's takeoffs placed for room (route._placed: 55 jumps, a jump off an
+    end and one along the platform that take off at the same spot being one), the least room 16.5 units, not 9.2.
+    And the route and the chains agree: from standing at its spot and running in, Flow takes every route jump off
+    from its own takeoff (Flow._jump_from passes sure_takeoff there), and from the 10 units before it that its rng
+    may pick (_takeoffs) for all but the 4 jumps down from along a platform (10 -> 15, 13 -> 20, 18 -> 32, 19 ->
+    24) where a slower takeoff from further back comes down on her own platform's end: there no takeoff lands
+    with room from all of them (route._placed took the one with the most under the slop alone), and the chain
+    takes off from the route's."""
+    from gamelab import directions
+    assert _route_jumps_land_with_room() == 55
+    m = scenarios.real_map()
+    flow, narrow = Flow(m, KEYS), set()
+    for mv in (mv for mv in Planner(m).moves if mv.kind == "jump"):
+        a, d = m.platform(mv.src), directions.sign(mv.direction)
+        assert mv.takeoff is not None and (a.right - mv.takeoff if d > 0 else mv.takeoff - a.left) >= 15, mv
+        for b in (Body(0.0, mv.x, a), Body(0.0, mv.takeoff - d * 60, a, run=d)):
+            if not a.covers(b.x, -6):
+                continue
+            assert flow._jump_from(mv, b, Keys(KEYS), "run", mv.takeoff) is not None, (mv, b)
+            if any(flow._jump_from(mv, b, Keys(KEYS), "run", mv.takeoff - d * v) is None for v in range(2, 11, 2)):
+                narrow.add((mv.src, mv.dst))
+    assert narrow == {(10, 15), (13, 20), (18, 32), (19, 24)}

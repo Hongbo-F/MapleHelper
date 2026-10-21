@@ -1280,14 +1280,9 @@ def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_mov
     assert trace["result"]["moves"] == ["walk_off 3->4: landed on 3", "walk_off 3->4: landed on 4"]
 
 
-@REAL
-def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_back_only_to_0_6_s(monkeypatch):
-    """nav_jump_after_kill with the chain's first arrow held back only to 0.6 s after her last throw's key (as
-    played in game from 00:49 on 2026-10-21): she sets off about 0.12 s late, the jump goes at its planned time
-    from short of where it was meant to, and she falls to 25 on every seed of 1-8 that kills the pig, as 8 of 10
-    such chains did in game. (With the swallowed arrow seen at 0.835 s, as fitted to her dot's first move before,
-    3 of the 7 fell to 25 and 4 were cut short on 16, standing still where the run starts while the plan had her
-    on: navigator.OFF_SPAN.) Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
+def _after_kill_landings(monkeypatch) -> dict[int, list[str]]:
+    """nav_jump_after_kill on seeds 1-8, the chain's first arrow held back to 0.6 and to 0.8 s after her last
+    throw's key (actions.ARROW_LOCK_MS): where each trip that killed the pig ended up ('6': arrived)."""
     from gamelab.control import actions
     sc = scenarios.SCENARIOS["nav_jump_after_kill"]
     landed = {600: [], 800: []}
@@ -1297,8 +1292,33 @@ def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_ba
             r = scenarios.run_scenario(dataclasses.replace(sc, seed=seed))["result"]
             if r["killed"] == "killed":
                 landed[lock].append(r["moves"][1].split(": landed on ")[-1] if r["misses"] else "6")
+    return landed
+
+
+@REAL
+def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_back_only_to_0_6_s(
+        monkeypatch, old_route_takeoffs):
+    """nav_jump_after_kill at the route's takeoffs of that night (old_route_takeoffs: 16 -> 14 off 16's right end
+    from 33-45 units back), with the chain's first arrow held back only to 0.6 s after her last throw's key (as
+    played in game from 00:49 on 2026-10-21): she sets off about 0.12 s late, the jump goes at its planned time
+    from short of where it was meant to, and she falls to 25 on every seed of 1-8 that kills the pig, as 8 of 10
+    such chains did in game. (With the swallowed arrow seen at 0.835 s, as fitted to her dot's first move before,
+    3 of the 7 fell to 25 and 4 were cut short on 16, standing still where the run starts while the plan had her
+    on: navigator.OFF_SPAN.) Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
+    landed = _after_kill_landings(monkeypatch)
     assert landed[800] == ["6"] * 7
     assert landed[600] == ["25"] * 7
+
+
+@REAL
+def test_with_the_placed_takeoffs_the_jump_onto_14_lands_even_with_the_arrows_held_back_only_to_0_6_s(monkeypatch):
+    """nav_jump_after_kill at the route's takeoffs placed for room (route._placed: 16 -> 14 takes off 15 units
+    from 16's right end, at 654, landing with room if she leaves up to 22 units early): set off late, held back
+    only to 0.6 s, the jump from 15-30 units short still lands on 14 on every seed of 1-8 that kills the pig, as
+    held back to 0.8 s. Each of the night's two fixes alone keeps her off 25 here; the hold-back is for every
+    other plan that sets off right after a throw."""
+    landed = _after_kill_landings(monkeypatch)
+    assert landed[800] == ["6"] * 7 and landed[600] == ["6"] * 7
 
 
 def _climb_then_jump(seed: int, x: float) -> dict:
@@ -1311,7 +1331,8 @@ def _climb_then_jump(seed: int, x: float) -> dict:
 def test_a_climb_a_step_back_and_two_jumps_land_on_every_seed():
     """nav_climb_then_jump on seeds 1-32 from x 300, 470 and 760 (under the rope from either side), the lags
     spread: every trip climbs 36 -> 32 and jumps on to 29 and 28 without a miss (28 of 144 trips missed one at
-    the branch before: flow.STEP_EARLY_MAX_MS, TAKEOFF_SLOP)."""
+    the branch before: flow.STEP_EARLY_MAX_MS, TAKEOFF_SLOP). With the route's takeoffs placed for room
+    (route._placed) she runs at the jump onto 29 from the top, with no step back."""
     for x in (300.0, 470.0, 760.0):
         for seed in range(1, 33):
             r = _climb_then_jump(seed, x)
@@ -1319,10 +1340,13 @@ def test_a_climb_a_step_back_and_two_jumps_land_on_every_seed():
 
 
 @REAL
-def test_a_step_after_a_climb_pressed_before_the_top_throws_the_jumps_after_it(monkeypatch):
-    """With every arrow after a climb pressed before the top again, the step back on 32 included
-    (flow.STEP_EARLY_MAX_MS -1), some of nav_climb_then_jump's seeds miss 28 again: the step walks from the
-    climb-over on, and the run on 29 to the jump onto 28 starts further on (7 of seeds 1-48, as in game)."""
+def test_a_step_after_a_climb_pressed_before_the_top_throws_the_jumps_after_it(monkeypatch, old_route_takeoffs):
+    """At the route's takeoffs of that night (old_route_takeoffs: the jump 32 -> 29 from 33-45 units in from 32's
+    left end, which after the climb from 36 needs a step back), with every arrow after a climb pressed before the
+    top again, the step back on 32 included (flow.STEP_EARLY_MAX_MS -1), some of nav_climb_then_jump's seeds miss
+    28 again: the step walks from the climb-over on, and the run on 29 to the jump onto 28 starts further on (7 of
+    seeds 1-48, as in game). At the takeoffs placed for room (route._placed) there is no step there: she runs at
+    the jump from the top (test_flow), and test_a_climb_a_step_back_and_two_jumps_land_on_every_seed lands them."""
     monkeypatch.setattr(flow, "STEP_EARLY_MAX_MS", -1)
     missed = [seed for seed in range(1, 25) if _climb_then_jump(seed, 470.0)["misses"]]
     assert missed, "every seed landed every move"

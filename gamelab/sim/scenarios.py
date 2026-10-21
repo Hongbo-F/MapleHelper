@@ -492,7 +492,10 @@ def nav_climb_then_jump(sim):
     the lags spread as measured and walks a few units off. In game on 2026-10-21 17 of 25 such chains came down
     in the basin: the step after the climb, its arrow pressed before the top, went too far, and the jumps
     planned to land 5-16 units onto 29 and 28 then fell short (flow.STEP_EARLY_MAX_MS, TAKEOFF_SLOP). Here, at
-    the branch before, 28 of 144 trips (seeds 1-48 from x 300, 470 and 760) missed a landing; now none does."""
+    the branch before, 28 of 144 trips (seeds 1-48 from x 300, 470 and 760) missed a landing; now none does.
+    Since the route's takeoffs are placed for room (route._placed: the jump onto 29 from 15 units in from 32's
+    left end, not 33-45) there is no step back on 32: she runs at the jump from the top of the rope. The
+    night's takeoffs, with the step back, are tests' (old_route_takeoffs)."""
     return _nav(28)(sim)
 
 
@@ -731,8 +734,9 @@ def nav_jump_after_kill(sim):
     arrow pressed while her attack plays moves her only from about 0.79 s after its key. In game, with the
     chain's first arrow held back to 0.6 s after the key, she set off about 0.12 s late, the jump went at its
     planned time from 15-30 units short, and 8 of 10 such chains fell to 25; here too she falls to 25 on every
-    seed of 1-8 that kills the pig (a test pins it). Held back to 0.8 s (actions.ARROW_LOCK_MS), she lands on
-    14."""
+    seed of 1-8 that kills the pig (a test pins it, at that night's route takeoffs: old_route_takeoffs). Held
+    back to 0.8 s (actions.ARROW_LOCK_MS), she lands on 14. At the takeoffs placed for room (route._placed: 15
+    units from 16's right end, not 33-45) she lands on 14 held back to 0.6 s too."""
     return _go_after_kill(sim, 6)
 
 
