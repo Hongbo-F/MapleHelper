@@ -627,7 +627,8 @@ def nav_fight_up(sim):
     SNAIL_FAR_END), 43, and 85 of seeds 1-96 against 80. Seed 1 again since the play track was rebased onto the
     game's steps and the live fixes: on seed 2 she's knocked off 3 down to 17 at 88 s and off 17 down to 25
     three times, and runs out of her 180 s on her way up again (nav_fight_up_runs_out now); on seed 1 she
-    arrives at 141 s, 40 monsters killed. Of seeds 1-48, 38 arrive.)"""
+    arrives at 141 s, 40 monsters killed. Of seeds 1-48, 38 arrive; 37 since a climb from under its rope is timed
+    by her arms' reach, Flow._climb.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -959,7 +960,8 @@ def fight_snail_short_platform(sim):
     all of this (24 when she stepped back to 22's far end once the snail had walked off: stance.SNAIL_FAR_END; of
     seeds 1-96, 68 against 71), against 11 with the jump throws in this world, whose jump throws' area picks the
     snail; on most of the others the snail walks into her first, and a touch knocks her off the end of 22 (she
-    stands 29 units from it)."""
+    stands 29 units from it). Since the rebase onto the game's steps and the live fixes, 27 of seeds 1-32 meet all
+    of it, 80 of 1-96."""
     h = sim.hunter()
     r = h.clear(max_kills=1, seconds=20, approach=False)
     return {"report": str(r)}
@@ -1538,7 +1540,7 @@ def loop_shoots_21_from_22(sim):
     2026-10-21 she went on from there, up onto 21 beside them, and in the simulator she jumped up 0.4 s in on all
     of seeds 1-8 (the first kill 11-42 s in, or none). In passing she steps out from under them along 22, 40-76
     units (hunt.PASS_STEP), and shoots them first: the first kill comes 3.5-5.5 s in, and she leaves 22 at 9.1-9.4
-    s, on all of seeds 1-8."""
+    s, on all of seeds 1-8 (since the rebase onto the game's steps and the live fixes, 3.45-5.15 s and 6.8-9.7 s)."""
     return _loop_up_from_22(sim)
 
 
@@ -1562,9 +1564,10 @@ def loop_pile_on_the_way(sim):
     kill of hers on 19, a platform off her route (13 -> 15 -> 18 -> 16): a stop at them costs 1.3 s more than the
     trip without it by the planner (hunt.DETOUR_S: 2), so she takes them on the way (rule 5b). In the live hunt loops
     of 2026-10-21 she passed such piles and went back across the map for them when they were about to vanish (rule
-    6). On seeds 1-16 she picks them up 2.4 s in and is at the spot 7.4-8.6 s in (the stop took 3 s in all, with
-    the look for what's left after it, looting.mop_up); without the rule she's there at 4.4-5.7 s, and picks them up
-    on 11, 11.8-27.0 s in, on a trip back."""
+    6). On seeds 1-16 she picks them up 2.0 s in and is at the spot 6.8-8.0 s in (the stop took 2.2 s in all, with
+    the look for what's left after it, looting.mop_up); without the rule she's there at 4.6-5.8 s, and picks them up
+    on 11, 11.7-28.3 s in, on a trip back. (Before the rebase onto the game's steps and the live fixes: 2.4 s,
+    7.4-8.6 s and 3 s; 4.4-5.7 s, and on 11, 11.8-27.0 s in.)"""
     return _loop_to_17_past_a_pile(sim)
 
 

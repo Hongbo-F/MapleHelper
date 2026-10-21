@@ -78,7 +78,8 @@ SNAIL_FAR_END = False
 SMALL_STEP_END = 40  # ... and how near her platform's end that step may take her then: not to EDGE_MARGIN's 25, the
                      # step's walk is planned before her last attack's lock runs out, and a touch meanwhile knocked
                      # her 40 units toward the end and a step of 110 took her off 3 (nav_fight_up, seed 1). Of that
-                     # scenario's seeds 1-48, 36 arrive with 25, 38 with 35, 41 with 40 and with 50
+                     # scenario's seeds 1-48, 36 arrived with 25, 38 with 35, 41 with 40 and with 50, with the step
+                     # to the far end on; with it off (SNAIL_FAR_END False) this isn't used: 37 arrive with any
 
 _THROW_VERBS = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back": "jumping back, throwing"}
 
