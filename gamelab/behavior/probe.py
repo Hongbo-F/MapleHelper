@@ -229,9 +229,13 @@ PROBES = {p.name: p for p in (
     # the stabs' boxes, which the client tests, reach down to 15 above her feet, into neither in any frame. So it
     # tells the swings from the stabs, not the stabs from a claw kept to her level. From 35 inside 3's left end,
     # at 4: a pig on 4 is never closer than 81 (4 ends at 669), and the swings reach one out to 99, so pigs are
-    # thrown at only out to 100; Orange Mushrooms out to 125, where stars from 113 show how often a hit is seen.
+    # thrown at only out to 100, and only from 88: one closer at the look is at 4's end, about to turn, and
+    # walking the game data's 125 units/s it's mostly out past 99 by the pick (in the simulator, seed 1: 13 of
+    # the 18 thrown at 81-88 at the look, 1 of the 22 at 88-100). Thrown at from 60, 40 throws no longer decided
+    # the stabs, on none of seeds 1-8 (leads 1.9-2.5, 3 needed); from 88, on all 8 (3.2-3.6). Orange Mushrooms
+    # out to 125, where stars from 113 show how often a hit is seen.
     Probe("claw-down", "whether the claw swipes a monster off her level (reach.claw_takes: its stab boxes)", 3,
-          716.0, LEFT, (4,), ("pig", "orange-mushroom"), (60, 100), by_kind=(("orange-mushroom", (60, 125)),),
+          716.0, LEFT, (4,), ("pig", "orange-mushroom"), (88, 100), by_kind=(("orange-mushroom", (60, 125)),),
           throws=40, source="bodies D",
           expect="by the stab boxes (reach's), no hit at a pig (the search picks one 60 below from 151) and stars "
                  "at Orange Mushrooms from 113; by the swings' boxes, a third of the throws at both within 99 and 97 "

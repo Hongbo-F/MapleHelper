@@ -215,12 +215,12 @@ def _probe_run(name: str, world: str | None = None, throws: int = 20, **changes)
     if key not in _RUNS:
         def run(sim):
             h = sim.hunter()
-            return str(probe.run(h, sim.navigator(h), p, seconds=600))
+            return str(probe.run(h, sim.navigator(h), p, seconds=900))
         with pytest.MonkeyPatch.context() as mp:
             if world is not None:
                 WORLDS[world](mp)
             _RUNS[key] = _rows(scenarios.run_scenario(
-                scenarios.Scenario(f"probe_{name}", run, start, monsters=monsters, limit=800)))
+                scenarios.Scenario(f"probe_{name}", run, start, monsters=monsters, limit=1100)))
     return _RUNS[key]
 
 
