@@ -16,6 +16,7 @@ data), then blended with what visits really gave (lab/grounds.json).
 import json
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .. import paths, telemetry
@@ -36,6 +37,7 @@ WORTH = 0.25         # monsters giving under this share of the map's best EXP ar
 SEEN_SHARE = 0.3     # share of a platform's spawn EXP a visit gives (platform 36: 13-52 of 100), the prior
 PRIOR = 2            # visits the spawn data counts for, against what visits really gave
 MIN_VALUE = 0.15     # grounds expected to give under this share of the best one's EXP per visit are skipped
+                     # (the hunt loop's: per second of a visit, its visits being as long as they give)
 MIN_REST_WIDTH = 120  # narrower safe platforms aren't rested on
 REST_SECONDS = 120   # longest she sits on the chair waiting for her HP to come back
 GOES_PER_STOP = 5    # trips to a spot and fights there, at most, per stop
@@ -123,9 +125,15 @@ class Tour:
             out[pid] = (PRIOR * prior + st.get("exp", 0)) / (PRIOR + st.get("visits", 0))
         return out
 
-    def hunting_grounds(self) -> list[int]:
-        """The platforms worth a visit: expected to give at least MIN_VALUE of the best one's EXP."""
+    def hunting_grounds(self, visit_s: Callable[[int], float] | None = None) -> list[int]:
+        """The platforms worth a visit: expected to give at least MIN_VALUE of the best one's EXP a visit,
+        or with `visit_s` (a platform's expected visit length, s: the hunt loop's) its EXP a second. The
+        hunt loop stays at a ground while it keeps giving (15 s to GROUND_S): by EXP a visit, one long
+        visit to the basin (351 s, 136 EXP expected a visit) put every other ground under the cut, and the
+        loop went back to the basin it had just left empty, and again, for the rest of the run."""
         values = self.ground_values()
+        if visit_s is not None:
+            values = {pid: v / visit_s(pid) for pid, v in values.items()}
         best = max(values.values(), default=0)
         return [pid for pid, v in values.items() if v >= MIN_VALUE * best]
 

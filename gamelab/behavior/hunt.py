@@ -193,7 +193,7 @@ class Hunt:
         self._kills_seen = len(self.h.ledger.kills)
         self._gone = self.h.drops.gone_tried
         self._progress = start
-        telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds())
+        telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
         self._next_ground(self.nav.mover.settle())
         while time.monotonic() < end:
             if self._pass() == "stop":
@@ -679,7 +679,7 @@ class Hunt:
         """The best other ground's EXP per second, the trip there included."""
         best, now = None, time.monotonic()
         values = self.tour.ground_values()
-        for g in self.tour.hunting_grounds():
+        for g in self.tour.hunting_grounds(self._visit_s):
             if g == self.visit.ground or self._skip.get(g, 0) > now:
                 continue
             at = spots.spot_at(self.model, g, self.kinds)
@@ -697,7 +697,7 @@ class Hunt:
         self._exit_piles = self._exit_reason = None
         now, values, best = time.monotonic(), self.tour.ground_values(), None
         here = s.where.platform if s.where is not None else None
-        for g in self.tour.hunting_grounds():
+        for g in self.tour.hunting_grounds(self._visit_s):
             if self._skip.get(g, 0) > now or (self.visit is not None and g == self.visit.ground):
                 continue
             at = spots.spot_at(self.model, g, self.kinds)
@@ -711,7 +711,7 @@ class Hunt:
             if best is None or score > best[0]:
                 best = (score, g)
         if best is None:  # every ground skipped: the soonest back
-            grounds = self.tour.hunting_grounds()
+            grounds = self.tour.hunting_grounds(self._visit_s)
             if not self._skip and not grounds:
                 raise RuntimeError("no hunting ground on this map")
             failed = self.visit.ground if self.visit is not None else None

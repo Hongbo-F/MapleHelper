@@ -488,6 +488,31 @@ def test_grounds_are_ranked_by_exp_and_learn_from_visits(monkeypatch, tmp_path):
     assert Tour(hunter, SimpleNamespace(model=model), log=lambda m: None).stats["2"]["seconds"] == 60.0
 
 
+def test_the_hunt_loop_keeps_the_grounds_worth_a_visit_by_their_exp_a_second(monkeypatch, tmp_path):
+    # The hunt loop stays at a ground while it gives. One visit of 600 s to 2 (240 EXP) puts its EXP a visit at
+    # 85, and every other ground under MIN_VALUE of that: by EXP a visit the loop, leaving 2 empty, could only
+    # go back to 2 (harness seed 7: 1,150 of its 1,200 s on the basin). A second of 2 is worth 0.36 EXP, and
+    # 4's 0.14 and 3's 0.06 are worth a visit by that.
+    from types import SimpleNamespace
+
+    from gamelab import paths
+    from gamelab.behavior.hunt import Hunt
+    from gamelab.behavior.tour import Tour
+    monkeypatch.setattr(paths, "GROUNDS", tmp_path / "grounds.json")
+    spawns = {1: ["Snail", "Snail", "Snail"], 2: ["Pig", "Pig"], 3: ["Slime", "Snail"], 4: ["Pig", "Orange Mushroom"]}
+    model = SimpleNamespace(id=5, mob_exp={"Snail": 2, "Pig": 13, "Slime": 12, "Orange Mushroom": 15},
+                            monsters_by_platform=spawns, platforms=[], safe=lambda pid: False)
+    hunter = SimpleNamespace(senses=SimpleNamespace(eyes=SimpleNamespace(
+        kinds={"snail", "pig", "slime", "orange-mushroom"})))
+    tour = Tour(hunter, SimpleNamespace(model=model), log=lambda m: None)
+    tour.record_visit(2, 240.0, 600.0)
+    loop = object.__new__(Hunt)
+    loop.tour = tour
+    assert round(tour.ground_values()[2], 1) == 85.2 and loop._visit_s(2) == 240.0 and loop._visit_s(4) == 60.0
+    assert tour.hunting_grounds() == [2]                              # the tour's sweep: by EXP a visit
+    assert sorted(tour.hunting_grounds(loop._visit_s)) == [2, 3, 4]   # the hunt loop's: by EXP a second
+
+
 def test_monsters_left_out_of_reach_are_shot_from_another_spot_before_looting():
     from gamelab.attack.spots import Spot
     log = []

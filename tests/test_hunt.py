@@ -128,7 +128,7 @@ def test_the_ground_is_judged_empty_only_from_looks_that_cover_it_for_a_while():
     h.visit = Visit(17, Spot(16, 636.0, 0.35, True), arrived=time.monotonic() - 30)
     h.kinds, h._skip, h._idle_since = None, {}, None
     h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=17, left=861.0, right=1389.0))
-    h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda: [])
+    h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: [])
 
     def look(pid, strips):
         return SimpleNamespace(platform=SimpleNamespace(id=pid), looked=strips, monsters=[],

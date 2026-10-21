@@ -1180,12 +1180,14 @@ def loop_basin(sim):
     return _loop(3)(sim)
 
 
-@scenario((36, 300.0), monsters={17, 12, 4}, seed=25, limit=400,
+@scenario((36, 300.0), monsters={17, 12, 4}, seed=1, limit=400,
           expects=(logs("leaving platform 36: nothing left here"), logs("at platform 17's spot (platform 16)"),
                    check("every kill counted", _every_kill)))
 def loop_spot_off_ground(sim):
     """tour_hunt_from_safe_spot's twin: nothing in the basin, so on to platform 17, hunted from the safe
-    spot on 16 above it."""
+    spot on 16 above it. (Seed 1 since the hunt loop keeps the grounds worth a visit by their EXP a second:
+    the basin's 4 s visit then leaves 35 out, the draws that vary her choice fall otherwise, and on seed 25
+    she went to 4 first. 23 of seeds 1-32 show it, 22 before.)"""
     return _loop(3)(sim)
 
 
