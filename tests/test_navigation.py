@@ -552,11 +552,85 @@ def test_tour_seed_seeds_the_route_choices_too(monkeypatch):
     monkeypatch.setattr(cli, "_hunter", lambda args, **kw: hunter)
     monkeypatch.setattr(cli, "_record", lambda command, map_id: None)
     monkeypatch.setattr(cli, "_game_title", lambda: "game")
-    monkeypatch.setattr(cli.window, "bring_to_front", lambda title: None)
+    monkeypatch.setattr(cli.window, "bring_to_front", lambda title, wait=0.0: True)
     monkeypatch.setattr(tour, "Tour", Tour)
     assert cli.cmd_tour(cli.build_parser().parse_args(["tour", "--seed", "7"])) == 0
     want = random.Random(7).random()
     assert rngs["nav"].random() == want and rngs["tour"].random() == want
+
+
+@pytest.mark.parametrize("argv", [["tour"], ["tour", "--loop"], ["nav", "3"], ["hunt", "clear"], ["hunt", "kill"],
+                                  ["probe", "run", "top-60"]])
+def test_a_hunting_command_brings_the_game_forward_and_stops_if_it_wont_come(argv, monkeypatch, capsys):
+    """Before its first look and plan, a hunting command brings the game to the front and waits for it
+    (FRONT_WAIT_S): the player refuses every plan while another window is in front (live on 2026-10-21 at
+    01:01:30, a tour's first plan was refused, 'game not in front'). If it doesn't come, the command says so
+    and stops there: nothing is looked at, no plan goes out."""
+    from types import SimpleNamespace
+
+    from gamelab import __main__ as cli
+    from gamelab.behavior import probe, tour
+    from gamelab.localization import mapdata
+    asked, started = [], []
+
+    def bring(title, wait=0.0):
+        asked.append((title, wait))
+        return False
+
+    def refuse(*a, **k):
+        raise AssertionError("went on with the game not in front")
+    hunter = SimpleNamespace(model=SimpleNamespace(id=1), navigator=lambda *a, **k: SimpleNamespace(),
+                             look=refuse, clear=refuse, kill=refuse)
+    monkeypatch.setattr(cli, "_hunter", lambda args, **kw: hunter)
+    monkeypatch.setattr(cli, "_record", lambda command, map_id: started.append(command))
+    monkeypatch.setattr(cli, "_game_title", lambda: "game")
+    monkeypatch.setattr(cli.window, "bring_to_front", bring)
+    monkeypatch.setattr(cli.window, "foreground_title", lambda: "Claude")
+    monkeypatch.setattr(tour, "Tour", refuse)
+    monkeypatch.setattr(probe, "run", refuse)
+    monkeypatch.setattr(probe, "problems", lambda model, p: [])
+    monkeypatch.setattr(mapdata, "load", lambda map_id: None)
+    args = cli.build_parser().parse_args(argv)
+    assert args.func(args) == 1
+    assert asked == [("game", cli.FRONT_WAIT_S)] and len(started) == 1
+    assert "'Claude' is in front" in capsys.readouterr().out
+
+
+def test_bring_to_front_says_whether_the_game_came_and_switches_to_it_half_way(monkeypatch):
+    """window.bring_to_front: SetForegroundWindow (attached to the window in front's input), then a wait of
+    up to `wait` s for the game to be in front; with SWITCH_FALLBACK, from half way it also switches to it as
+    Alt+Tab does. With no wait (the elevated player's call) it only says whether it's in front now."""
+    import importlib.util
+
+    from gamelab import paths
+    spec = importlib.util.spec_from_file_location("window_copy", paths.REPO / "gamelab" / "window.py")
+    win = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(win)  # a copy of its own: the tests' window module refuses every call
+    calls, clock, front = [], [0.0], {"title": "Claude"}
+
+    class User32:
+        def __getattr__(self, name):
+            return lambda *a: calls.append(name) or 0
+    monkeypatch.setattr(win, "user32", User32())
+    monkeypatch.setattr(win, "kernel32", User32())
+    monkeypatch.setattr(win, "find_game", lambda title: 7)
+    monkeypatch.setattr(win, "foreground_title", lambda: front["title"])
+    monkeypatch.setattr(win.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(win.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    assert win.bring_to_front("game") is False and "SetForegroundWindow" in calls
+    assert "SwitchToThisWindow" not in calls
+    calls.clear()
+    assert win.bring_to_front("game", wait=1.0) is False and clock[0] >= 1.0
+    assert calls.count("SwitchToThisWindow") == 1
+    calls.clear()
+
+    def switch_brings_it(*a):
+        calls.append("SwitchToThisWindow")
+        front["title"] = "game"
+    monkeypatch.setattr(win.user32.__class__, "SwitchToThisWindow", staticmethod(switch_brings_it), raising=False)
+    assert win.bring_to_front("game", wait=1.0) is True and calls.count("SwitchToThisWindow") == 1
+    calls.clear()
+    assert win.bring_to_front("game", wait=1.0) is True and calls == []  # in front already: nothing to do
 
 
 def test_a_trip_mode_needs_an_escort_unless_it_avoids_monsters(model):

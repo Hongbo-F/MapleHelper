@@ -26,6 +26,7 @@ from .control.timeline import action_events, chain, her_setup
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
 
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
+FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the front before it gives up (_to_game)
 # `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes 10
 # times a second and tracks twice a second: on the saved frames a scene was 276 bytes and the tracks 845, so
 # about 16 MB an hour, 400 MB a day: the 2 GB telemetry keeps (telemetry.KEEP_BYTES) hold 5 days of it.
@@ -309,6 +310,20 @@ def _close_feeds() -> None:
               f"{client.served} looks and glances from it, {client.refused} taken without it; {client.why or ''}")
 
 
+def _to_game() -> bool:
+    """Bring the game to the front before a hunting command's first look and plan, and see that it came: the
+    player refuses every plan while another window is in front, and a look captures whatever is (on 2026-10-21
+    at 01:01:30 a tour's first looks saw another window for 2.5 s and its first plan was refused, "game not in
+    front"). If Windows won't bring it forward (window.bring_to_front, FRONT_WAIT_S), the command says so and
+    doesn't start."""
+    title = _game_title()
+    if window.bring_to_front(title, wait=FRONT_WAIT_S):
+        return True
+    print(f"the game didn't come to the front ({window.foreground_title()!r} is in front): click on it, then run "
+          "this again")
+    return False
+
+
 def _log(message: str) -> None:
     print(time.strftime("%H:%M:%S"), message, flush=True)
     telemetry.emit("log", text=message)
@@ -331,7 +346,8 @@ def cmd_hunt(args) -> int:
         return _hunt_look(hunter)
     kinds = set(args.kinds.split(",")) if args.kinds else None
     _record(f"hunt-{args.mode}", hunter.model.id)
-    window.bring_to_front(_game_title())
+    if not _to_game():
+        return 1
     if args.mode == "kill":
         s = hunter.look()
         targets = [t for t in s.monsters if kinds is None or t.kind in kinds]
@@ -435,7 +451,8 @@ def cmd_probe(args) -> int:
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)  # the regular attack: no --skill
     nav = hunter.navigator()
     _record(f"probe-{p.name}", hunter.model.id)
-    window.bring_to_front(_game_title())
+    if not _to_game():
+        return 1
     report = probe.run(hunter, nav, p, seconds=args.seconds, crowd=args.crowd)
     print(f"done: {report}. Logged to {paths.PROBE_LOG}: `python -m gamelab probe score` reads it")
     return 0
@@ -480,7 +497,8 @@ def cmd_nav(args) -> int:
     hunter = _hunter(args)
     nav = hunter.navigator(fighting=args.fight)
     _record("nav", hunter.model.id)
-    window.bring_to_front(_game_title())
+    if not _to_game():
+        return 1
     start = time.monotonic()
     trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
     print(f"{trip.result} in {time.monotonic() - start:.1f} s: {len(trip.moves)} moves in {trip.chains} chains, "
@@ -498,7 +516,8 @@ def cmd_tour(args) -> int:
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)
     nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
     _record("tour", hunter.model.id)
-    window.bring_to_front(_game_title())
+    if not _to_game():
+        return 1
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below,
                 rest_avoid=args.rest_avoid)
     kinds = set(args.kinds.split(",")) if args.kinds else None
