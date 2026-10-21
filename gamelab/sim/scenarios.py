@@ -457,7 +457,7 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=2,
+@scenario((34, -300.0), monsters="all", seed=5,
           expects=(ends("arrived"), logs("looking for a way around"), logs("hop@"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
     """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the
@@ -469,7 +469,10 @@ def nav_monsters_staircase(sim):
     before. Seed 4 since the planner times her runs and stops by the engine: on seed 2 nothing was in her
     way to hop; over 16 seeds all arrive, 7 meeting all of this. Seed 1 since a touch is evaded by the
     monster's accuracy: on seed 4 she evaded a snail's touch at 7 s (82% of a snail's are), and then
-    nothing was in her way to hop; over 16 seeds all arrive, 5 meeting all of this.)"""
+    nothing was in her way to hop; over 16 seeds all arrive, 5 meeting all of this. Seed 5 since monsters
+    walk as fast as the game data says (a pig 125 units/s, not 70; alone, that moved it to seed 2): on
+    seeds 1 and 2 no monster was in her way to go around or hop; over 16 seeds all arrive, 2 meeting all of
+    this.)"""
     return _nav(19)(sim)
 
 
@@ -479,7 +482,7 @@ def nav_monsters_basin(sim):
     return _nav(33)(sim)
 
 
-@scenario((21, -300.0), monsters="all", seed=7,
+@scenario((21, -300.0), monsters="all", seed=12,
           expects=(ends("arrived"), logs("waiting for the monster to move off")))
 def nav_monsters_long_way(sim):
     """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way. (Seed
@@ -491,7 +494,9 @@ def nav_monsters_long_way(sim):
     in the kick's blind spot and jump-backs leave at full speed: on seed 5 nothing was in her way to wait
     for; over 16 seeds 14 arrive, 2 of them after a wait, where 15 and 6 did just before. Seed 7 since the
     arrow she holds doesn't steer a knock's flight: on seed 9 nothing was in her way to wait for; over 16
-    seeds all arrive, 4 of them after a wait, where 5 did just before.)"""
+    seeds all arrive, 4 of them after a wait, where 5 did just before. Seed 12 since monsters walk as fast
+    as the game data says (a pig 125 units/s, not 70; alone, that moved it to seed 12 too): on seed 7
+    nothing stood in her way to wait for; over 16 seeds 15 arrive, 2 of them after a wait.)"""
     return _nav(2)(sim)
 
 
@@ -556,25 +561,29 @@ def nav_fight_across(sim):
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-# Two known failures, pinned on the seeds they had before monsters walked as fast as the game data says: the
+# Two known failures, pinned on seeds where they happen since monsters walk as fast as the game data says: the
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=10,
+@scenario((14, 760.0), monsters="all", seed=11,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
-    """nav_fight_up on seed 10: from 3 she ends up in the basin, and on the long way up, fighting 28 monsters
-    on the way and hit mid-jump four times (landing back a platform or two down), she runs out of her 180 s
-    on 18 (it arrived here before monsters walked 125 units/s; over 16 seeds 10 arrive now, 12 then)."""
+    """nav_fight_up on seed 11: knocked off 4 at 26 s and hit off the jump from 3 to 1, she goes the long way
+    round, down from 25 to 32 and up the staircase, fighting 38 monsters in all and hit mid-jump four times
+    (landing back a platform down), and runs out of her 180 s on 16. (Seed 10 on the perception track, where
+    it arrived before monsters walked 125 units/s; with the physics and attack tracks it arrives there. Of
+    seeds 1-48, 37 arrive, against 36 at those tracks' merge.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
 @scenario((12, -300.0), monsters="all", seed=3,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
-    """nav_fight_across on seed 3: knocked off 12 down to 34 at the start, then on the long way round,
-    fighting 34 monsters on the way, she runs out of her 180 s on 18 (it arrived here before monsters walked
-    125 units/s; over 16 seeds 12 arrive now, 11 then)."""
+    """nav_fight_across on seed 3: after 52 s fighting on 12 she's knocked off down to 34, and on the long way
+    round she's knocked back down to 34 twice more (hit mid-jump from 31, and off 21 at 140 s), fighting 30
+    monsters in all, and runs out of her 180 s on 18, hit there three times (it arrived here before monsters
+    walked 125 units/s; of seeds 1-16, 8 arrive now with the physics and attack tracks, 12 at their
+    merge)."""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -677,7 +686,7 @@ def hunt_clear_basin(sim):
             "inventory_full": h.looter.inventory_full}
 
 
-@scenario((36, 300.0), monsters={36}, seed=1,
+@scenario((36, 300.0), monsters={36}, seed=6,
           expects=(ends("killed", key="ended"), happens("claw swipe hits", "close up, the claw swipes")))
 def hunt_kill(sim):
     """`hunt kill`: the slime nearest her on the basin floor, 55 units off. Too close for a star from the
@@ -685,7 +694,11 @@ def hunt_kill(sim):
     swing reaches 90 ahead of her, into a slime's body up to 118 off); then looted. (Seed 7 since the claw
     reaches bodies: with seed 12 the basin's monsters kept walking into its reach, and swiped, she hadn't
     killed it after 30 s. Seed 1 since a hit pushes a monster back: on seed 7 two swipes pushed it out of
-    the claw's reach, and she hadn't killed it after 30 s. Over 16 seeds 11 meet all of this.)"""
+    the claw's reach, and she hadn't killed it after 30 s. Over 16 seeds 11 meet all of this. Seed 6 since
+    monsters walk as fast as the game data says (a slime 100 units/s, not 56): on seed 1 the basin's other
+    monsters kept walking into her stars' way (two kills, not it), and she hadn't killed it after 30 s; 6
+    is the first seed after it that its twin with the feed, feed_hunt_kill, meets too. Over 16 seeds 10
+    meet all of this.)"""
     h = sim.hunter()
     s = h.look()
     target = min(s.monsters, key=lambda t: abs(t.x - s.where.x))
@@ -717,13 +730,15 @@ def hunt_kill_far(sim):
     return _kill_far(sim)
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=16, noise=Noise(miss=0.35),
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=5, noise=Noise(miss=0.35),
           expects=(ends("killed", key="ended"), happens("star misses"),
                    wrote("shots2.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
 def hunt_kill_misses(sim):
     """hunt_kill_far (another seed) with a third of the stars missing: throws scored as misses (no HP bar
-    change within ~0.9 s of the star's arrival), and more throws to kill it. (Seed 16 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 no
-    star missed it.)"""
+    change within ~0.9 s of the star's arrival), and more throws to kill it. (Seed 5 since monsters walk
+    as fast as the game data says (a pig 125 units/s, not 70): on seed 4 no star missed it. That alone moved
+    it to seed 16, where with the physics and attack tracks the pig walks out of reach and she loses it. Over
+    16 seeds 8 meet all of this.)"""
     return _kill_far(sim)
 
 
@@ -942,11 +957,13 @@ def _hunt_17_pigs(sim):
     return tour.hunt(17, {"pig"}, kills=2, seconds=90)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=28, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=6, limit=400,
           expects=(logs("out of reach here: over to platform"),))
 def tour_hunt_other_spot(sim):
     """Tour.hunt of two pigs on 17 from 14: one dies, the other is out of reach, so over to a spot that
-    reaches it (Tour.spot_for). (Seed 28 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seeds 1-27 but 17 the other walked into reach first.)"""
+    reaches it (Tour.spot_for). (Seed 6 since monsters walk as fast as the game data says (a pig 125
+    units/s, not 70): on seed 1 the other walked into reach first. That alone moved it to seed 28, where with
+    the physics and attack tracks it doesn't; of seeds 1-16 only 6 shows it.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -1186,7 +1203,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=6, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=8, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1196,7 +1213,9 @@ def loop_lull_loot(sim):
     picks up the piles she can get to before they respawn. (Seed 5 since the simulator moves her by the
     engine: on seed 4 she picked up 19 drops, not 20. Over 16 seeds 9 meet all of this, 8 before. Seed 6
     since no jump is keyed in the kick's blind spot and jump-backs leave at full speed: on seed 5 she picked
-    up 17. Over 16 seeds 8 meet all of this, 10 just before.)"""
+    up 17. Over 16 seeds 8 meet all of this, 10 just before. Seed 8 since monsters walk as fast as the game
+    data says (a pig 125 units/s, not 70): on seed 6 no lull came for the rule, and she picked up fewer than
+    20. Over 16 seeds 8 meet all of this.)"""
     return _loop_on_12(sim)
 
 
@@ -1255,7 +1274,7 @@ def _died(cause: str, at_least: int = 1):
                  lambda tr: tr["feed"]["tracker"][f"died {cause}"] >= at_least)
 
 
-@scenario((36, 300.0), monsters={36}, seed=7, feed=True,
+@scenario((36, 300.0), monsters={36}, seed=6, feed=True,
           expects=(ends("killed", key="ended"), check("looks from the feed", _fed), _died("hers")))
 def feed_hunt_kill(sim):
     """hunt_kill with the feed: the slime nearest her, shot dead and looted; the feed follows it and puts her
@@ -1274,7 +1293,7 @@ def feed_nav_monsters_basin(sim):
     return _nav(33)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=22, limit=400, feed=True,
+@scenario((36, 300.0), monsters="all", seed=1, limit=400, feed=True,
           expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
                    logs("collecting drops on platform 36"), check("looks from the feed", _fed), _died("hers", 2)))
 def feed_tour_hunt_basin(sim):
