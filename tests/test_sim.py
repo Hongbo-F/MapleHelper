@@ -233,9 +233,9 @@ def test_landing_while_an_attack_plays_stops_her(model):
 
 
 def test_an_arrow_pressed_right_after_an_attack_moves_her_only_once_it_stops_swallowing_it(model):
-    """In game (2026-10-21) an arrow pressed within about 0.55 s of an attack's key didn't move her: still
-    held, she set off about 1.0 s after the key, and let go before then she didn't move at all; pressed
-    0.575 s after the key, it moved her at once (world.ARROW_LOCK, ARROW_HELD; Realism.lock_arrows)."""
+    """In game (2026-10-21) an arrow pressed while her attack played didn't move her until it was over: still
+    held, she set off about 0.85 s after the key (pressed 0.6 s after it, 0.19 s late), and let go before then
+    she didn't move at all (world.ARROW_LOCK, ARROW_HELD; Realism.lock_arrows)."""
     from gamelab.sim.world import ARROW_HELD, Realism
     c = plat(model, 500, 400)
 
@@ -246,9 +246,10 @@ def test_an_arrow_pressed_right_after_an_attack_moves_her_only_once_it_stops_swa
         w.advance(until)
         return w.x - 100.0
 
-    assert walk(True, 0.3, 1.0, ARROW_HELD) == 0 and walk(True, 0.3, 1.0, 1.3) > 15  # still held: from 1.0 s
+    assert walk(True, 0.3, 1.0, ARROW_HELD) == 0 and walk(True, 0.3, 1.0, 1.3) > 15  # still held: from 0.84 s
     assert walk(True, 0.3, 0.5, 2.0) == 0                                          # let go before: nothing
-    assert walk(True, 0.6, 0.3, 0.75) > 0                                           # pressed after: at once
+    assert walk(True, 0.6, 0.4, 0.8) == 0 and walk(True, 0.6, 0.4, 1.0) > 0        # 0.6 s after: late
+    assert walk(True, 0.8, 0.3, 0.95) > 0                                           # pressed after: at once
     assert walk(False, 0.3, 0.3, 0.45) > 0                                          # the default world: at once
     w = world(model, c.id, 100.0, realism=Realism(lock_arrows=True))
     w.attack_lock_ms = 10_000  # an attack key the game doesn't take (inside the lock) swallows nothing
@@ -1224,6 +1225,22 @@ def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_mov
     assert set(scenarios.unmet(trace)) == {"the walk-off right after the kill lands",
                                            "no log line says 'instead of platform 4'"}
     assert trace["result"]["moves"] == ["walk_off 3->4: landed on 3", "walk_off 3->4: landed on 4"]
+
+
+@REAL
+def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_back_only_to_0_6_s(monkeypatch):
+    """nav_jump_after_kill with the chain's first arrow held back only to 0.6 s after her last throw's key (as
+    played in game from 00:49 on 2026-10-21): she sets off about 0.2 s late, the jump goes at its planned time
+    from short of where it was meant to, and she falls to 25, on every seed of 1-8 that kills the pig, as 8 of 10
+    such chains did in game. Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
+    from gamelab.control import actions
+    sc = scenarios.SCENARIOS["nav_jump_after_kill"]
+    for lock, first in ((800, "jump 16->14"), (600, "climb 14->6: landed on 25")):
+        monkeypatch.setattr(actions, "ARROW_LOCK_MS", lock)
+        for seed in range(1, 9):
+            r = scenarios.run_scenario(dataclasses.replace(sc, seed=seed))["result"]
+            if r["killed"] == "killed":
+                assert r["moves"][1 if lock == 600 else 0] == first and r["misses"] == (lock == 600), (lock, seed)
 
 
 def _climb_then_jump(seed: int, x: float) -> dict:

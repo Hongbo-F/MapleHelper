@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from maplehelper.engine import RIGHT
+from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
 from ..control import client
@@ -640,11 +640,17 @@ def nav_fight_across_runs_out(sim):
                    no_log("instead of platform 4")))
 def nav_walk_off_after_kill(sim):
     """From 3 she shoots an Orange Mushroom on 4 below dead, then, from the look that saw it die (as the hunt
-    loop goes on from its own look), walks off 3's left end onto 4, in a world where an arrow pressed within
-    0.55 s of an attack's key is swallowed (Realism.lock_arrows, as measured in game on 2026-10-21). In game
-    such a walk-off went out about 0.3 s after her last throw's key, twice, and she didn't move; here it would
-    go 0.34 s after it, and she'd stay on 3 until the walk-off sent again a second later. Its first arrow is
-    held back to 0.6 s after the key (actions.ARROW_LOCK_MS), and she lands on 4 at once."""
+    loop goes on from its own look), walks off 3's left end onto 4, in a world where an arrow pressed while
+    her attack plays is swallowed until about 0.85 s after its key (Realism.lock_arrows, as measured in game on
+    2026-10-21). In game such a walk-off went out about 0.3 s after her last throw's key, twice, and she didn't
+    move; here it would go 0.34 s after it, and she'd stay on 3 until the walk-off sent again a second later.
+    Its first arrow is held back to 0.8 s after the key (actions.ARROW_LOCK_MS), and she lands on 4 at once."""
+    return _go_after_kill(sim, 4, x=520)
+
+
+def _go_after_kill(sim, dst: int, x: float | None = None) -> dict:
+    """Shoot the first monster seen dead, then a trip to `dst` from the look that saw it die, as the hunt loop
+    goes on from its own look."""
     h = sim.hunter()
     looks = []
     look = h.look
@@ -654,9 +660,24 @@ def nav_walk_off_after_kill(sim):
         return looks[-1]
     h.look = keep
     killed = h.kill(h.look().monsters[0], seconds=30)
-    out = plain(sim.navigator(h, fight=True).go(4, x=520, scene=looks[-1]))
+    out = plain(sim.navigator(h, fight=True).go(dst, x=x, scene=looks[-1]))
     out["killed"] = killed
     return out
+
+
+@scenario((16, 537.0), monsters=[("Pig", 18, 300.0)], seed=1, facing=LEFT, realism=Realism(lock_arrows=True),
+          expects=(ends("killed", key="killed"), ends("arrived"),
+                   check("jumps up onto 14 and climbs to 6 in one go",
+                         lambda tr: _result(tr, "moves") == ["jump 16->14", "climb 14->6: landed on 6"]),
+                   no_log("instead of platform 6")))
+def nav_jump_after_kill(sim):
+    """From 16 she shoots a pig on 18 below dead, then, from the look that saw it die, runs right along 16 and
+    jumps up onto 14 for the rope to 6 (the hunt loop's way up to 4 in game on 2026-10-21), in a world where an
+    arrow pressed while her attack plays moves her only from about 0.85 s after its key. In game, with the
+    chain's first arrow held back to 0.6 s after the key, she set off about 0.2 s late, the jump went at its
+    planned time from 15-30 units short, and 8 of 10 such chains fell to 25; here too, on every seed of 1-8
+    that kills the pig (a test pins it). Held back to 0.8 s (actions.ARROW_LOCK_MS), she lands on 14."""
+    return _go_after_kill(sim, 6)
 
 
 # One move each, carried out by Mover.do from a look.

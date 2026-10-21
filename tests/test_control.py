@@ -81,10 +81,11 @@ def test_a_plan_with_a_jump_waits_out_the_attack_lock_and_one_without_doesnt(mon
 
 
 def test_a_plans_first_arrow_waits_until_her_attack_stops_swallowing_arrows(monkeypatch):
-    """An arrow pressed within about 0.55 s of an attack's key doesn't move her (in game on 2026-10-21: chains
-    sent about 0.3 s after a throw's key stood still), so a plan's first arrow goes down ARROW_LOCK_MS (0.6 s)
-    after the last attack key at the soonest: an arrow-first plan 0.3 s after a throw waits 0.3 s. Jumps and
-    attacks still wait for the attack lock, as before."""
+    """An arrow pressed while her attack plays doesn't move her until about 0.85 s after its key (in game on
+    2026-10-21: chains sent about 0.3 s after a throw's key stood still, and those held back to 0.6 s set off
+    0.19 s late), so a plan's first arrow goes down ARROW_LOCK_MS (0.8 s) after the last attack key at the
+    soonest: an arrow-first plan 0.3 s after a throw waits 0.5 s, one whose arrow comes 0.3 s in waits 0.2 s.
+    Jumps and attacks still wait for the attack lock, as before."""
     from gamelab.control import actions as actions_mod
     from maplehelper.game import COMBAT
     now, slept = [100.0], []
@@ -93,13 +94,14 @@ def test_a_plans_first_arrow_waits_until_her_attack_stops_swallowing_arrows(monk
     a = actions([])
     a.facing = RIGHT
     a.throw(RIGHT)  # no turn: the attack key goes down as the plan starts, at 100.0
-    assert a.arrow_until == pytest.approx(100.0 + actions_mod.ARROW_LOCK_MS / 1000) == pytest.approx(100.6)
+    assert a.arrow_until == pytest.approx(100.0 + actions_mod.ARROW_LOCK_MS / 1000) == pytest.approx(100.8)
     now[0] = 100.3
-    a.hold_back([[0, "left", "down"], [500, "left", "up"]])                   # waits until 0.6 s after the key
-    a.hold_back([[0, "z", "down"], [40, "z", "up"], [300, "left", "down"]])  # its arrow is 0.6 s after it anyway
+    a.hold_back([[0, "left", "down"], [500, "left", "up"]])                   # waits until 0.8 s after the key
+    a.hold_back([[0, "z", "down"], [40, "z", "up"], [300, "left", "down"]])  # its arrow 0.3 s in: 0.2 s more
+    a.hold_back([[0, "z", "down"], [40, "z", "up"], [500, "left", "down"]])  # 0.5 s in: 0.8 s after it anyway
     a.hold_back([[0, "alt", "down"], [40, "alt", "up"]])                      # a jump: the attack lock, as before
     lock = (COMBAT.attack_lock_ms + actions_mod.THROW_LOCK_EXTRA_MS) / 1000
-    assert slept == [0.3, round(100.0 + lock - 100.3, 3)]
+    assert slept == [0.5, 0.2, round(100.0 + lock - 100.3, 3)]
     # A jump back's and a jump throw's attack keys come into the plan: the arrows wait from there.
     for method, key_ms in (("jump_back", actions_mod.JB_THROW_MS), ("jump_throw", JUMP_ATTACK_MS)):
         now[0] = 200.0

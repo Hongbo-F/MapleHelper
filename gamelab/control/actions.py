@@ -26,13 +26,17 @@ TURN_SETTLE_MS = 30  # after the arrow tap that turns her, before the next key
 # next attack: after a throw, and after a jump throw.
 THROW_LOCK_EXTRA_MS = 60
 JUMP_THROW_LOCK_EXTRA_MS = 160
-# An arrow pressed while her attack plays doesn't move her: in game on 2026-10-21, of 13 chains sent within 0.35 s
-# of the look after a throw (their first arrow about 0.3 s after its attack key), 6 first moved her 0.73-0.92 s
-# after they went out (about 1.0 s after the key: the arrow was still held) and 2 never did (a step let go
-# before then), while arrows pressed 0.575 and 0.66 s after the key moved her at once. So a plan's first arrow
-# waits until this long after the last attack key (hold_back): in the five runs played with it, all seven
-# walk-offs from 3 onto 4 set off at once, and every move that missed was a jump.
-ARROW_LOCK_MS = 600
+# An arrow pressed while her attack plays doesn't move her until it's over: in game on 2026-10-21, of 13 chains
+# sent within 0.35 s of the look after a throw (their first arrow about 0.3 s after its attack key), 6 first moved
+# her 0.73-0.92 s after they went out (about 1.0 s after the key: the arrow was still held) and 2 never did (a
+# step let go before then). From 00:49 a plan's first arrow waited until 0.6 s after the key, and those still set
+# off late: of the walk-offs from 3 onto 4, her dot first moved 0.41 s after the plan went out (the median of 11),
+# against 0.23 s (of 6) when the first arrow came later after the key. So she moves from about 0.85 s after the
+# key. Of the 10 chains that set off for the jump from 16 up onto 14 right after a throw, 8 came down short of 14
+# and fell to 25 (taking off 15-30 units short where tracked) and one overshot onto 17 off a step back gone late,
+# where the 18 sent with no throw in the 1.5 s before all landed. So a plan's first arrow waits until this long
+# after the last attack key (hold_back): the game acts on it 66 ms later, about when she can move.
+ARROW_LOCK_MS = 800
 
 # A jump back: run away a moment, jump, turn toward the monster in mid-air and throw.
 # The arrow away is held this long before the jump, to get her moving. Keyed 80 ms after the arrow, the jump
