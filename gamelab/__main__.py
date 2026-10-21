@@ -301,13 +301,17 @@ def _feed(model, title: str):
 
 
 def _close_feeds() -> None:
+    """Stop the command's feeds, and say what each did. Its child sends its counts (`bye`) only once asked to
+    stop, so they're read after close: read before it, on 2026-10-21 (`tour --feed`), every count was '?'."""
     while _FEEDS:
         client = _FEEDS.pop()
-        bye = client.bye or {}
+        down = "" if client.alive else client.why  # it went down before the command ended
         client.close()
+        bye = client.bye or {}
         print(f"feed: {bye.get('frames', '?')} frames, {bye.get('placed', '?')} placing her, "
               f"{bye.get('band', '?')} band and {bye.get('wide', '?')} whole-screen searches; "
-              f"{client.served} looks and glances from it, {client.refused} taken without it; {client.why or ''}")
+              f"{client.served} looks and glances from it, {client.refused} taken without it"
+              + (f"; {down}" if down else ""))
 
 
 def _to_game() -> bool:

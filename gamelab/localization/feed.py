@@ -350,8 +350,9 @@ class FeedClient(Feed):
         self.dropped = 0          # events lost because nothing drained them
         self.served = self.refused = 0  # states handed out by latest(), and times it had none to give
         self.hello: dict | None = None
-        self.bye: dict | None = None
+        self.bye: dict | None = None  # the world step's counts, which the child sends once asked to stop
         self.alive, self.why = False, "not started"
+        self._closing = False  # asked to stop (close): its process ending then is no news
         self._cond = threading.Condition()
         self._send_lock = threading.Lock()
         self._seen_seq = 0
@@ -403,7 +404,7 @@ class FeedClient(Feed):
             pass
         with self._cond:
             if self.alive:
-                self.alive, self.why = False, self.why or "the feed's process ended"
+                self.alive, self.why = False, self.why or ("closed" if self._closing else "the feed's process ended")
             self._cond.notify_all()
 
     def _send(self, *msg) -> None:
@@ -455,11 +456,17 @@ class FeedClient(Feed):
         if self.alive:
             self._send("throw", t, side)
 
-    def close(self) -> None:
-        """Stop the child (asked, then made to) and free the ring."""
+    def close(self, timeout: float = 2.0) -> None:
+        """Stop the child (asked, then made to) and free the ring. Asked, the child sends what it did (`bye`)
+        as it ends, and that's waited for (`timeout` s at most) before the pipes close: closed at once, the
+        reader thread could lose it to the closed pipe."""
         if self.proc is not None:
+            with self._cond:
+                self._closing = True
             self._send("stop")
-            self.proc.join(2.0)
+            with self._cond:
+                self._cond.wait_for(lambda: self.bye is not None or not self.alive, timeout)
+            self.proc.join(timeout)
             if self.proc.is_alive():
                 self.proc.terminate()
                 self.proc.join(2.0)

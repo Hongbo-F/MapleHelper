@@ -233,6 +233,22 @@ def test_the_child_runs_below_normal_and_hands_out_states_frames_and_events():
     assert client.bye is not None and client.bye["frames"] > 10
 
 
+def test_a_command_s_feed_says_what_it_did_when_it_ends(capsys):
+    # The real child, as `--feed` starts it for a command: closed at the command's end, it sends the world step's
+    # counts, and the summary has them (each was '?' on 2026-10-21, read before the child was asked to stop).
+    from gamelab import __main__ as cli
+    client = FeedClient(functools.partial(drawn_runner, 0), hz=60.0)
+    assert client.alive, client.why
+    assert client.latest(Asks(time.monotonic(), band=True), timeout=5.0) is not None
+    cli._FEEDS.append(client)
+    capsys.readouterr()
+    cli._close_feeds()
+    out = capsys.readouterr().out
+    assert cli._FEEDS == [] and "?" not in out and client.bye["frames"] > 0 and client.why == "closed"
+    assert out.startswith(f"feed: {client.bye['frames']} frames, {client.bye['placed']} placing her, ")
+    assert out.rstrip().endswith("taken without it")  # closed, not gone down: no reason given
+
+
 def test_when_the_child_dies_the_stack_is_told_and_gets_nothing_more():
     client = FeedClient(functools.partial(drawn_runner, 0), hz=60.0)
     try:
@@ -377,7 +393,7 @@ def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_ga
     assert [t["kind"] for t in next(r for r in records if r["topic"] == "tracks")["list"]] == ["pig"]
 
 
-def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_start(monkeypatch):
+def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_start(monkeypatch, capsys):
     from gamelab import __main__ as cli
     from gamelab.analysis import calibration
     for cmd in (["hunt", "clear", "--feed"], ["nav", "35", "--feed"], ["tour", "--loop", "--feed"]):
@@ -388,18 +404,23 @@ def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_s
     class Client:
         def __init__(self, make, alive):
             self.make, self.alive, self.why, self.hz, self.bye = make, alive, "" if alive else "no game", 30.0, None
-            self.served = self.refused = 0
+            self.served, self.refused = 12, 1
             self.hello = {"pid": 1, "priority": feed.BELOW_NORMAL}
             started.append(self)
 
-        def close(self):
-            self.alive = False
+        def close(self):  # the child sends its counts once asked to stop, as the real one does
+            self.alive, self.why = False, "closed"
+            self.bye = {"frames": 900, "placed": 880, "band": 150, "wide": 30}
     monkeypatch.setattr(calibration, "load", lambda: type("Cal", (), {"template": np.zeros((10, 36), np.uint8)}))
     monkeypatch.setattr(feed, "FeedClient", lambda make: Client(make, True))
     model = small_map()
     client = cli._feed(model, "MapleStory")
     assert client is started[0] and cli._FEEDS == [client] and client.make.func is feed.screen_world
+    capsys.readouterr()
     cli._close_feeds()
     assert cli._FEEDS == [] and not client.alive
+    # Its counts, read once it's closed (on 2026-10-21 `tour --feed` read them before and printed '?' for each).
+    assert capsys.readouterr().out.strip() == ("feed: 900 frames, 880 placing her, 150 band and 30 whole-screen "
+                                               "searches; 12 looks and glances from it, 1 taken without it")
     monkeypatch.setattr(feed, "FeedClient", lambda make: Client(make, False))
     assert cli._feed(model, "MapleStory") is None and cli._FEEDS == []
