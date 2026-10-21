@@ -543,11 +543,12 @@ def nav_fight_up(sim):
     merge, before the drops and walk-offs kept clear of the basin's cliffs. The 12 others ran out of time at
     180-194 s, 10 of them knocked off 3 or 4 and climbing back up from 32 or the basin, which took 164-180 s
     on the seeds that went that way and arrived at the merge. Seed 1 arrives with each. With monsters
-    walking those speeds 37 arrive, the 11 others running out of time at 181-195 s.)"""
+    walking those speeds 37 arrive, the 11 others running out of time at 181-195 s; with the client's star
+    search and claw stab too, 41, the 7 others at 181-193 s.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=10,
+@scenario((12, -300.0), monsters="all", seed=1,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down
@@ -559,7 +560,8 @@ def nav_fight_across(sim):
     skipped the fights on 18 and 17. Seed 10 since a hit pushes a monster back: on seed 2 a knock down to
     34 at 5 s left her fighting and looting there until the 180 s ran out. Over 16 seeds 12 arrived, 5
     showing all of this; with monsters walking the game data's speeds 8 arrive, 4 showing all of it: 7, 9,
-    11 and this one, 10.)"""
+    11 and 10. Seed 1 since the star's search and the claw's stab are the client's too: on seed 10 nothing
+    knocked her off 12 any more. Over 16 seeds 12 arrive, 8 showing all of it.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -567,25 +569,29 @@ def nav_fight_across(sim):
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=11,
+@scenario((14, 760.0), monsters="all", seed=4,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
-    """nav_fight_up on seed 11: knocked off 4 at 26 s and hit off the jump from 3 to 1, she goes the long way
-    round, down from 25 to 32 and up the staircase, fighting 38 monsters in all and hit mid-jump four times
-    (landing back a platform down), and runs out of her 180 s on 16. (Seed 10 on the perception track, where
-    it arrived before monsters walked 125 units/s; with the physics and attack tracks it arrives there. Of
-    seeds 1-48, 37 arrive, against 36 at those tracks' merge.)"""
+    """nav_fight_up on seed 4: knocked off 3 down to 17 at 84 s, she goes the long way round, down from 25 to
+    32 and up the staircase, fighting 48 monsters in all, is knocked off 20 down to 21 at 180 s and runs out of
+    her 180 s there. (Seed 10 on the perception track, where it arrived before monsters walked 125 units/s;
+    with the physics and attack tracks it arrives there. Seed 11 then, where with the client's star search
+    and claw stab it arrives too: knocked off 4 at 26 s and hit off the jump from 3 to 1, it had gone the long
+    way round, fighting 38 monsters, and run out of time on 16. Of seeds 1-48, 41 arrive, against 37 before
+    and 36 at the physics and attack tracks' merge.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=3,
+@scenario((12, -300.0), monsters="all", seed=2,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
-    """nav_fight_across on seed 3: after 52 s fighting on 12 she's knocked off down to 34, and on the long way
-    round she's knocked back down to 34 twice more (hit mid-jump from 31, and off 21 at 140 s), fighting 30
-    monsters in all, and runs out of her 180 s on 18, hit there three times (it arrived here before monsters
-    walked 125 units/s; of seeds 1-16, 8 arrive now with the physics and attack tracks, 12 at their
-    merge)."""
+    """nav_fight_across on seed 2: after 25 s fighting on 12 she's knocked off down to 34, and on the long way
+    round up the staircase she's knocked off 20 to 19 at 93 s, hit back onto 14 off its walk-off to 17 and
+    back down to 36 off the jump from 32, fighting 36 monsters in all, and runs out of her 180 s on 22. (Seed 3
+    before, where with the client's star search and claw stab she now arrives: after 52 s fighting on 12
+    she'd been knocked off down to 34, and twice more on the long way round, and run out of time on 18; it
+    arrived there before monsters walked 125 units/s. Of seeds 1-16, 12 arrive now, 8 with the physics and
+    attack tracks before the client's search and stab, 12 at their merge.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -821,7 +827,7 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
                               for r in rows)
 
 
-@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400,
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=6, limit=400,
           expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
@@ -831,10 +837,12 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 def probe_top(sim):
     """`probe run top-60`: from 13 at a lone pig on 12, 60 above her, 110-200 units off sideways. The world's
     search window has reach's top (the client's, 44 above her feet in the first band), so a star picks the pig
-    from 111 units: every throw hits, the closest 127 off at the pick on seed 1 (with the logs' lower top, 21,
-    one would from 191, and on seed 1 one did, 196 off). Each throw waits for its evidence before the next, and
-    the log has where the pig was at the pick and what it showed (`probe score` fits the top to it:
-    tests/test_probe.py)."""
+    from 111 units: every throw hits, the closest 117 off at the pick (with the logs' lower top, 21, one would
+    from 191: on this seed 6 do, 195-220 off). Each throw waits for its evidence before the next, and the log has
+    where the pig was at the pick and what it showed (`probe score` fits the top to it: tests/test_probe.py).
+    (Seed 6 since monsters walk as fast as the game data says, a pig 125 units/s, not 70: on seed 1, 27 of the
+    30 hit, the 3 others at the pig walked to 90-105 off by the pick, under the 111 a star picks it from. Of
+    seeds 1-16, 6 and 12 have all 30 hit, the others 25-29.)"""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
@@ -945,10 +953,13 @@ def tour_hunt_basin(sim):
     return _tour_hunt(36, 5)(sim)
 
 
-@scenario((15, 100.0), monsters="all", seed=23, limit=400,
+@scenario((15, 100.0), monsters="all", seed=1, limit=400,
           expects=(logs("shooting platform 12 from platform 13"), logs("nothing left on platform 12")))
 def tour_hunt_platform_12(sim):
-    """Tour.hunt of platform 12 (pigs, Orange Mushrooms) from the safe platform 13 beside it."""
+    """Tour.hunt of platform 12 (pigs, Orange Mushrooms) from the safe platform 13 beside it. (Seed 1 since the
+    star's search has the client's top, and from 13 86% of 12 is in reach, not 63%: with monsters walking the
+    game data's speeds too, on seed 23 she made the stop's 4 kills before 12 was clear. Of seeds 1-16, 15 meet
+    all of it; on 14 the scenario's 400 s ran out.)"""
     return _tour_hunt(12, 4)(sim)
 
 
@@ -1206,7 +1217,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=8, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=1, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1219,7 +1230,9 @@ def loop_lull_loot(sim):
     up 17. Over 16 seeds 8 meet all of this, 10 just before. Seed 8 since monsters walk as fast as the game
     data says (a pig 125 units/s, not 70): on seed 6 no lull came for the rule, and she picked up fewer than
     20. Over 16 seeds 8 meet all of this. On the attack track alone, seed 4 since the star's search has the
-    client's top (from 13 a star picks a pig on 12 from 111 units, not 191): on seed 6 no lull came.)"""
+    client's top (from 13 a star picks a pig on 12 from 111 units, not 191): on seed 6 no lull came. Seed 1
+    since both are together: on seed 8 no lull came. Over 16 seeds 10 meet all of this; of the 6 others, 5 had
+    no lull and 2 picked up fewer than 20 drops, seed 3 both.)"""
     return _loop_on_12(sim)
 
 
