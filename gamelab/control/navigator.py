@@ -111,9 +111,10 @@ class Escort(Protocol):
     def in_way(self, s: Scene, x: float) -> Monster | None:
         """The monster on her platform in her way to map x that clear_way would shoot (None if none)."""
 
-    def clear_way(self, s: Scene, x: float) -> int | None:
+    def clear_way(self, s: Scene, x: float, finish: bool = True) -> int | None:
         """Shoot a monster on her platform in her way to map x (where her next move starts, or where she's
-        sent to on arrival); the kills, or None if none was in the way."""
+        sent to on arrival); the kills, or None if none was in the way. `finish`: finishing what she has
+        hurt too (not in transit)."""
 
 
 @dataclass
@@ -382,10 +383,11 @@ class Navigator:
     def _clear_the_way(self, st: TripState, s: Scene, x: float) -> bool:
         """With an escort: shoot a monster on her platform in her way to map x (where the route's first move
         starts, or where she's sent to on arrival), up to MAX_FIGHTS times in a row without a move between;
-        its kills count in the trip's. True if she fought."""
+        its kills count in the trip's. In transit the fight doesn't go on to finish what she has hurt
+        (FightOnTheWay.clear_way). True if she fought."""
         if not self.fight:
             return False
-        if st.fights < MAX_FIGHTS and (kills := self.escort.clear_way(s, x)) is not None:
+        if st.fights < MAX_FIGHTS and (kills := self.escort.clear_way(s, x, finish=st.mode != TRANSIT)) is not None:
             st.fights += 1
             st.trip.kills += kills
             return True

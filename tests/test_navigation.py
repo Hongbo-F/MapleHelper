@@ -934,6 +934,24 @@ def test_a_look_in_the_air_waits_for_her_to_land_again_after_a_long_fall(model):
     assert nav._onto_platform(in_air) is landed and len(settled) == FALL_LOOKS
 
 
+def test_in_transit_the_fights_in_her_way_dont_go_on_to_finish_what_she_has_hurt(model):
+    """Navigator._clear_the_way: on a hunting trip the escort's fight off a monster in her way finishes what she
+    has hurt (FightOnTheWay.clear_way's `finish`); in transit (a trip to rest at low HP, the hunt loop's trips,
+    whose rule 4b finishes within FINISH_S) it doesn't. Finishing there, the rest trips' fights in the basin ran
+    to their GUARD_SECONDS twice as often, and loop_rest_hp_low's trip to rest ran out on 3 of seeds 1-72."""
+    from types import SimpleNamespace
+
+    from gamelab.control.navigator import HUNT, TRANSIT
+    asked = []
+    escort = SimpleNamespace(clear_way=lambda s, x, finish=True: asked.append(finish) or 1)
+    nav = _navigator(model, escort=escort)
+    c = by_y(model, 500, 400)
+    for mode in (HUNT, TRANSIT):
+        st = nav.begin(c.id, mode=mode)
+        assert nav._clear_the_way(st, SimpleNamespace(), 300.0) and st.trip.kills == 1
+    assert asked == [True, False]
+
+
 def test_a_trip_starts_from_the_callers_look_while_it_still_shows_where_she_is(model, monkeypatch):
     """Navigator.begin(scene=...): the first pass uses the caller's last look (one look less before she sets
     off) if no key plan was sent since and it's fresh, with the monsters the mode looks for."""

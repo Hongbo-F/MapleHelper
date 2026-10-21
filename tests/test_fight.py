@@ -227,6 +227,21 @@ def test_a_probe_fights_off_one_close_to_her_without_finishing_its_own_targets(m
     assert asked["finish_wounds"] is False and asked["max_kills"] == probe.CLEAR_KILLS and report.fights == 2
 
 
+def test_the_escorts_fight_in_her_way_finishes_wounds_only_when_asked():
+    # FightOnTheWay.clear_way: a fight off the monster in her way, up to two kills, finishing what she has hurt
+    # (clear's finish_wounds) unless `finish` is off, as the navigator has it in transit.
+    asked = {}
+    h = SimpleNamespace(log=lambda *a: None, clear=lambda kinds=None, **kw: asked.update(kw),
+                        report=SimpleNamespace(exp_kills=0))
+    escort = fight_mod.FightOnTheWay(h)
+    s = SimpleNamespace(where=SimpleNamespace(x=50.0, y=0.0), platform=SimpleNamespace(id=2),
+                        monsters=[target(200, 0.0, platform=2)])
+    assert escort.clear_way(s, 300.0) == 0 and asked["finish_wounds"] is True and asked["max_kills"] == 2
+    assert escort.clear_way(s, 300.0, finish=False) == 0 and asked["finish_wounds"] is False
+    asked.clear()
+    assert escort.clear_way(s, -400.0) is None and not asked  # nothing in her way that way
+
+
 def test_a_kill_seen_while_she_sweeps_up_still_counts(monkeypatch):
     # Her EXP goes up again during the sweep after a kill (a star in flight killed the other pig), seen by a
     # look of the sweep's: the fight ends at its kill count there, and that kill is still told apart (the

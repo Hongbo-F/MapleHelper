@@ -821,12 +821,15 @@ class FightOnTheWay:
         in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE]
         return min(in_way, key=lambda m: abs(m.x - s.where.x)) if in_way else None
 
-    def clear_way(self, s: Scene, x: float) -> int | None:
+    def clear_way(self, s: Scene, x: float, finish: bool = True) -> int | None:
         """Shoot the monster in her way to map x (in_way). Returns the kills, or None if nothing was in
-        the way."""
+        the way. `finish`: the fight finishes what she has hurt (clear's finish_wounds). Not in transit
+        (the navigator's TRANSIT: to rest at low HP, and the hunt loop's trips, whose rule 4b finishes what
+        she hurt within its FINISH_S): finishing there, a rest trip's fights in the basin, where respawns
+        never stop, ran to their GUARD_SECONDS twice as often as before it, and some trips ran out."""
         if (m := self.in_way(s, x)) is None:
             return None
         self.h.log(f"  {m.kind} in the way at x {m.x:.0f}: shooting it first")
         before = self.h.report.exp_kills
-        self.h.clear(max_kills=2, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False)
+        self.h.clear(max_kills=2, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False, finish_wounds=finish)
         return self.h.report.exp_kills - before
