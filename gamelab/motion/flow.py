@@ -700,8 +700,9 @@ class Flow:
         k.set_arrow(b.t, d)
         k.tap(press, "jump")
         move = Move("hop", a.id, a.id, x_off, lx, directions.toward(d))
-        return Leg(move, b, Body(t_off + ta, lx, a, run=d, landed=True, slack=b.slack + SLACK_PER_LEG, v=v_land),
-                   [Span(a.id, b.t, t_off, b.x, x_off)])
+        # Running on from where she lands, as any landing (_landing): from the game's next step after it.
+        return Leg(move, b, Body(t_off + ta + body.landing_wait(), lx, a, run=d, landed=True,
+                                 slack=b.slack + SLACK_PER_LEG, v=v_land), [Span(a.id, b.t, t_off, b.x, x_off)])
 
     def _hop_then(self, m: Move, b: Body, k: Keys, variant: str, monsters: list[MonsterTrack],
                   linger: float) -> tuple[Leg, Leg, Keys] | None:

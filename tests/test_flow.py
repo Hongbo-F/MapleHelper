@@ -157,6 +157,22 @@ def test_a_hop_leaves_the_ground_before_she_can_touch_it_on_the_way_up(model):
     assert hop.end.x > 420  # comes down past its middle: any knockback pushes her on
 
 
+def test_after_a_hop_she_runs_on_from_the_games_next_step_as_after_any_landing(model):
+    # Landing between two of the game's steps she stands until the next (body.LANDING_ENDS_STEP), so the leg
+    # after a hop (often the move's jump: _hop_then) starts half a step after she lands, as after a jump's
+    # landing (Flow._landing). Without it the next jump was keyed 15 ms early and took off about 2 units short.
+    from gamelab.motion import body
+    from gamelab.motion.physics import JUMP_SPEED, flight
+    c = by_y(model, 500, 400)
+    pig = MonsterTrack(c.id, 420, speed=70.0, half=34.0, vx=0.0, height=46.0)
+    k = Keys(KEYS)
+    hop = Flow(model, KEYS).hop(Body(0.0, 100, c), pig, 1, k)
+    t_off = hop.spans[0].t1
+    _, _, ta, _ = flight(model, hop.move.x, c.y_at(hop.move.x), WALK_SPEED, -JUMP_SPEED, group=c.group)
+    assert body.landing_wait() == pytest.approx(0.015)
+    assert hop.end.t == pytest.approx(t_off + ta + body.landing_wait(), abs=0.002) and hop.end.run == 1
+
+
 def test_no_hop_over_a_monster_walking_away_from_her(model):
     c = by_y(model, 500, 400)
     away = MonsterTrack(c.id, 420, speed=70.0, half=34.0, vx=70.0)
