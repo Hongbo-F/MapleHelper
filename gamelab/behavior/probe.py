@@ -34,11 +34,12 @@ wall too.
 
 Each throw is a line of lab/probe_geometry.jsonl: the probe, how she threw (and the attack key's delay
 after the jump key, `gap_ms`), whether the wall rule was on, where she stood and her foothold group, the
-target, every monster in front at the throw (`front`, walls or not) and at the first look after it, about
-when the attack picked its target (`pick`: that look's frame is taken once the throw's key plan is done,
-about when the attack starts, ~67 ms after its key), the rule's verdict on the target (`clear`), her EXP
-gains from the key to the end (`exp`), and for every monster in front then its `evidence`: its HP bar
-before the star could land, every bar seen after (with when, from the star's due time), the looks it
+target, every monster in front at the throw (`front`, walls or not; each with the way it faced and its pose,
+as the look read them) and at the first look after it, about when the attack picked its target (`pick`: that
+look's frame is taken once the throw's key plan is done, about when the attack starts, ~67 ms after its
+key), the rule's verdict on the target (`clear`), her EXP gains from the key to the end (`exp`), and for
+every monster in front then its `evidence`: where it was, the way it faced and its pose at that look, its HP
+bar before the star could land, every bar seen after (with when, from the star's due time), the looks it
 wasn't seen in, and whether it was still there at the end.
 
 The scorer (`score`) reads the log with the map's game data. What each monster showed (`shown`, `seen`): a
@@ -48,8 +49,9 @@ can't tell (hidden). A model of the attack (`Model`: reach's, `reach_model`, wit
 answer a question weighs) gives every monster in front at the pick its chance of the claw's swipe and of a
 star that gets there (`chances`: the claw's stance, one per attack; the search's first band, any monster in
 it as likely; from a jump the area, or the search from as high as she is; then the line to the star's pick
-alone, stopped and the star lost), by the positions at the pick and each kind's walking body. Its
-likelihood (`likelihood`) is that of every monster's hit or none and every hit's size, with the two hit
+alone, stopped and the star lost), by the positions at the pick (a monster seen walking as likely anywhere it
+can have walked to within PICK_SLACK_S of the look that logged it: `placings`) and each kind's walking body.
+Its likelihood (`likelihood`) is that of every monster's hit or none and every hit's size, with the two hit
 rates fitted (a monster taken shows a hit with chance a, one not taken with chance f), as the research fitted
 the shot log and the telemetry. Then:
 - each question (`QUESTIONS`) over the throws of the probes that ask it: each answer's log-likelihood, on how
@@ -77,7 +79,7 @@ from ..attack.stance import JUMP_BACK_SPAN, open_above, pct
 from ..control import client
 from ..control.actions import JB_RUN_MS, JB_THROW_MS, JB_TURN_MS, STAR_DELAY_MS, TAP_MS
 from ..localization.mapdata import MapModel, MobBody
-from ..localization.monsters import Monster, bodies, same
+from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, same, speeds
 from ..localization.scene import Scene
 from ..motion import body, physics
 from .fight import GUARD_PATIENCE, GUARD_SECONDS, IN_HER_WAY, UNPLACED_LOOKS
@@ -494,9 +496,9 @@ def _throw(h: "Hunter", s: Scene, probe: Probe, target: Monster) -> "_Flying":
 
 
 def _monster(m: Monster, target: bool = False) -> dict:
-    """A monster as the probe log keeps it."""
+    """A monster as the probe log keeps it (with the way it faced and its pose, as the look read them)."""
     return {"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1), "platform": m.platform, "bar": m.bar,
-            **({"target": True} if target else {})}
+            "facing": m.facing, "pose": m.pose, **({"target": True} if target else {})}
 
 
 def _row(h: "Hunter", s: Scene, probe: Probe, target: Monster) -> dict:
@@ -530,7 +532,8 @@ class _Flying:
     @staticmethod
     def _entry(m: Monster, target: bool) -> dict:
         return {"m": m, "kind": m.kind, "target": target, "at_pick": False, "x": m.x, "y": m.y,
-                "platform": m.platform, "bar_before": m.bar, "after": [], "unseen": [], "seen_last": True}
+                "platform": m.platform, "facing": m.facing, "pose": m.pose, "bar_before": m.bar, "after": [],
+                "unseen": [], "seen_last": True}
 
     def see(self, s: Scene, exp_gains: int) -> None:
         """A look after the throw that placed her (in the air too; `exp_gains`: the hunter's EXP gains so far).
@@ -549,7 +552,8 @@ class _Flying:
                 claimed.add(id(again))
                 e["m"] = again
                 if not self.picked:
-                    e.update(at_pick=True, x=again.x, y=again.y, platform=again.platform)
+                    e.update(at_pick=True, x=again.x, y=again.y, platform=again.platform, facing=again.facing,
+                             pose=again.pose)
                 if early:
                     e["bar_before"] = again.bar
                 else:
@@ -592,6 +596,7 @@ class _Flying:
         row["due_s"] = round(self.due - self.key, 3)
         row["exp"], row["looks"] = self.exp, self.looks
         row["evidence"] = [{"kind": e["kind"], "x": round(e["x"], 1), "y": round(e["y"], 1), "platform": e["platform"],
+                            "facing": e["facing"], "pose": e["pose"],
                             "target": e["target"], "at_pick": e["at_pick"], "bar_before": e["bar_before"],
                             "after": e["after"], "unseen": e["unseen"], "gone": not e["seen_last"]}
                            for e in self.entries]
@@ -677,6 +682,45 @@ def _her(row: dict) -> tuple[float, float]:
     return (pick["x"] if pick else row["x"]), row["y"]
 
 
+# The look that logs where each monster was at the pick (`pick`: the first after the key) isn't taken when the
+# attack picks, JUMP_LAG after its key, and by how much isn't measured in game. By the looks' own times it's
+# pick.t - JUMP_LAG after it (33 ms with the simulator's looks); but the simulator's look shows its monsters
+# LOOK_LAG (40 ms) before its time, and the key goes down START_LATENCY (10 ms) after the plan is handed over,
+# so there the look comes 20 ms before the pick. A pig walking 125 units/s is a few units off either way, which
+# at the edge of a box decides what the attack took: claw-edge in the old claw's world on seed 2 (40 throws), pigs
+# walking away seen 120-125 off, inside the old box (to 124), were 125-128 off at the pick, and the stars they
+# took leaned the scorer 2.9 toward the stabs; moved back 4 units by the looks' times, 14.7 toward them. So the
+# pick is taken as likely at any of PICK_STEPS moments from PICK_SLACK_S before that look to as long after it:
+# 5.3 the old box's way there, and none of test_probe's runs on seeds 1-8 leans the wrong way.
+PICK_SLACK_S = 0.04
+PICK_STEPS = 5
+
+
+def _walked(e: dict, dt: float, walk: dict[str, float], model: MapModel | None) -> float:
+    """Where monster `e` of a throw's evidence was `dt` after the look that logged it, by its middle: seen walking
+    (its pose 'move', its way read), its kind's walking speed (`walk`) that long the way it faced, kept to its
+    platform's walk (its half width inside the ends, on `model`); else (standing, flinching, or neither read: a log
+    from before they were kept) where that look had it."""
+    if not dt or e.get("pose") != "move" or not e.get("facing"):
+        return e["x"]
+    x = e["x"] + e["facing"] * walk.get(e["kind"], DEFAULT_SPEED) * dt
+    if model is not None and e["platform"] is not None and 0 <= e["platform"] < len(model.platforms):
+        p, half = model.platform(e["platform"]), reach.body_of(e["kind"])[1]
+        x = min(max(x, p.left + half), max(p.left + half, p.right - half))
+    return x
+
+
+def placings(row: dict, model: MapModel | None = None) -> list[list[dict]]:
+    """A throw's evidence, each monster where it was at each moment the attack may have picked its target
+    (PICK_STEPS from PICK_SLACK_S before the look after the key to as long after it, `_walked`); one placing when
+    none of them was seen walking."""
+    evidence, walk = list(row.get("evidence", ())), speeds(model)
+    if PICK_STEPS < 2 or not any(e.get("pose") == "move" and e.get("facing") for e in evidence):
+        return [evidence]
+    steps = [PICK_SLACK_S * (2 * i / (PICK_STEPS - 1) - 1) for i in range(PICK_STEPS)]
+    return [[{**e, "x": _walked(e, dt, walk, model)} for e in evidence] for dt in steps]
+
+
 def _rise(row: dict) -> float:
     return 0.0 if row["gap_ms"] is None else reach.air_rise(row["gap_ms"])
 
@@ -756,15 +800,15 @@ def chances(row: dict, model: MapModel, body: dict[str, MobBody], m: Model) -> l
     `m.ramp`, none below her closer by its middle than the old ramp). From a jump (`m.air`), by the area: the
     star goes to the nearest whose body reaches into it (reach.in_area, as high as she is then, by the least
     height of its kind standing or walking); or ('v83') the claw and the search as from the ground, from as
-    high as she is then; each as likely from either height the attack may start at (`_rises`). Then the line
-    to the star's pick alone (gets_to): stopped, the star is lost, and no other monster takes it. Positions at
-    the pick (`_her`), bodies as the fight goes by them (reach.body_of)."""
+    high as she is then; each as likely from either height the attack may start at (`_rises`), and at each
+    moment it may have picked (`placings`). Then the line to the star's pick alone (gets_to): stopped, the star
+    is lost, and no other monster takes it. Positions at the pick (hers `_her`), bodies as the fight goes by
+    them (reach.body_of)."""
     entries = list(row.get("evidence", ()))
     x, y = _her(row)
     d, jump = directions.sign(row["side"]), row["gap_ms"] is not None
-    shapes = [((e["x"] - x) * d, e["y"] - y, *reach.body_of(e["kind"], body)) for e in entries]
 
-    def picks(rise: float) -> list[tuple[float, float]]:
+    def picks(rise: float, shapes: list[tuple]) -> list[tuple[float, float]]:
         if jump and m.air == "area":
             out = [(0.0, 0.0)] * len(entries)
             inside = [i for i, (e, (ahead, dy, top, half)) in enumerate(zip(entries, shapes))
@@ -779,10 +823,14 @@ def chances(row: dict, model: MapModel, body: dict[str, MobBody], m: Model) -> l
                 return None
             return reach.search_band(*reach.body_box(*b), top0=m.top0, floor0=m.floor0)
         return reach.attack_chances(lifted, m.claw, band)
-    each = [picks(rise) for rise in _rises(row)]
-    pairs = [tuple(sum(c) / len(each) for c in zip(*at)) for at in zip(*each)]
-    return [(e, swipe, star if star and gets_to(row, e, model, m, body) else 0.0)
-            for e, (swipe, star) in zip(entries, pairs)]
+    each = []
+    for placed in placings(row, model):
+        shapes = [((p["x"] - x) * d, p["y"] - y, *reach.body_of(p["kind"], body)) for p in placed]
+        at = [picks(rise, shapes) for rise in _rises(row)]
+        pairs = [tuple(sum(c) / len(at) for c in zip(*one)) for one in zip(*at)]
+        each.append([(swipe, star if star and gets_to(row, p, model, m, body) else 0.0)
+                     for p, (swipe, star) in zip(placed, pairs)])
+    return [(e, *(sum(c) / len(each) for c in zip(*one))) for e, one in zip(entries, zip(*each))]
 
 
 def seen(row: dict) -> list[tuple[dict, str | None]]:

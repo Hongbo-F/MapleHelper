@@ -133,6 +133,20 @@ def test_a_hit_is_a_bar_new_or_lower_and_a_kill_her_exp_with_it_gone():
     assert [s for _, s in outcomes(row)] == [False, False]  # two gone: the kill can't be placed
 
 
+def test_the_scorer_takes_a_walking_monster_as_anywhere_it_can_have_got_to_by_the_pick():
+    # The look that logged where each monster was at the pick isn't taken at the pick: one it saw walking is as
+    # likely anywhere it walks from PICK_SLACK_S before that look to as long after it (a pig 5 units either way),
+    # one standing where it was. So at an answer's edge a throw weighs less, and none tips a question alone.
+    walking = {**entry(), "x": 100.0, "facing": 1, "pose": "move"}
+    standing = {**entry(target=False), "x": 50.0, "facing": -1, "pose": "stand"}
+    row = {"pick": {"x": 0.0, "y": 0.0, "t": 0.1}, "evidence": [walking, standing]}
+    placed = probe.placings(row)
+    assert [p[0]["x"] for p in placed] == pytest.approx([95, 97.5, 100, 102.5, 105])
+    assert {p[1]["x"] for p in placed} == {50.0}
+    assert len(probe.placings({**row, "evidence": [standing, {**walking, "pose": "stand"}]})) == 1
+    assert len(probe.placings({**row, "evidence": [entry()]})) == 1  # a log from before poses were kept
+
+
 def test_one_odd_throw_never_decides_a_question_alone():
     # Throws both answers have the attack take, every one a star's hit (as in the simulator), and one that only
     # one of them has it take, where none showed (a misread bar, a monster walked off where the pick had it):
@@ -169,7 +183,7 @@ PLACES = {
     "step-down": ((2, 50.0), [("Pig", 4, 280.0)], {}),
     "hanging-wall": ((14, 706.0), [("Pig", 17, 910.0)], {}),
     "below-42": ((0, 1222.0), [("Pig", 1, 1110.0)], {}),
-    "claw-edge": ((21, -225.0), [("Pig", 21, -90.0)], {}),
+    "claw-edge": ((21, -225.0), [("Pig", 21, -90.0)], {"throws": 40}),
     "claw-down": ((3, 716.0), [("Pig", 4, 620.0)], {"throws": 40}),
 }
 
@@ -246,13 +260,11 @@ RECOVERS = [
 def test_each_probe_s_log_decides_the_answer_its_world_has(name, world, key, answer):
     # Every probe, run in a world with reach's answer to its question and in one with the other: from its log
     # the scorer decides on the world's answer, on DECIDE_THROWS throws or more where the two have the attack
-    # take something else (so on seeds 1-8 too, but for five runs: top-120 on seed 5 in the logs' top's world,
-    # 2.4 on 8 such throws; claw-edge on seed 4 in both worlds and on seed 8 in the old claw's, on 3-4 such
-    # throws, and on seed 2 in the old claw's, leaning 2.9 the stabs' way: pigs walking at her at the game
-    # data's 125 units/s were logged 120-124 off by the look 30 ms after the pick, inside the old box, and were
-    # at its edge, 124, or past it at the pick; never on the other answer). below-42 also asks the claw off her level, but its few throws at
-    # pigs within 99 decide it alone on 2 of those seeds (5 and 6) in a world with the swings: claw-down's 40
-    # throws do on all 8.
+    # take something else (so on seeds 1-8 too, but for top-120 on seed 5 in the logs' top's world, 2.6 on 10
+    # such throws; none leans the other way). claw-edge makes 40 throws, as in game: with 20, both worlds were
+    # decided on seed 1 on 5 throws that differ, the least that decides. below-42 also asks the claw off her
+    # level, but its few throws at pigs within 99 decide it alone on 2 of those seeds (5 and 6) in a world with
+    # the swings: claw-down's 40 throws do on all 8.
     q, model = probe.QUESTIONS[key], scenarios.real_map()
     rows = _probe_run(name, world)
     assert rows and {r["probe"] for r in rows} == {name}
