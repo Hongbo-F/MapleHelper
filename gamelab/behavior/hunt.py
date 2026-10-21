@@ -309,11 +309,15 @@ class Hunt:
         if self.obj.why == "valuable pile":  # at once: only close quarters (above) and her HP stop her
             return self._travel("valuable pile")
         # In passing she shoots her targets, and steps out from under any wanted monster above her (which isn't a
-        # target, out of reach: as _interrupt has them, or a trip stopped for one went on, then again)
-        passing = targets + [m for m in visible if (self.kinds is None or m.kind in self.kinds)
-                             and not any(m is t for t in targets)]
-        if self._can_pass_shoot(s, passing):
-            return self._passing_shot(s, passing, visible, hidden, now)
+        # target, out of reach: as _interrupt has them, or a trip stopped for one went on, then again). Those are
+        # only stepped from, never thrown at, and not one seen fading out where a kill died (this look's kill is
+        # among `visible`, which was taken before it was counted): thrown at, a kill took a star, and then its
+        # "hidden" ghost more (fight.HIDDEN_FOR), 4 of them after each kill in loop_finishes_what_she_hurt.
+        fading = self.fs.fading(visible)
+        others = [m for m in visible if (self.kinds is None or m.kind in self.kinds)
+                  and not any(m is t for t in targets) and not any(m is f for f in fading)]
+        if self._can_pass_shoot(s, targets, others):
+            return self._passing_shot(s, targets, others, visible, hidden, now)
         if (owed := self._owed(s, visible + hidden)) is not None:
             return self._finish(s, owed, visible, hidden, now)
         if (pile := self._pile_here(s)) is not None and pile is not self.obj.pile:  # one she passes
@@ -582,12 +586,13 @@ class Hunt:
             self._idle_since = None
         return None
 
-    def _can_pass_shoot(self, s: Scene, targets) -> bool:
-        """Rule 4: a wanted target in reach while travelling, or one a short step brings into reach (_pass_step),
-        with this platform's budget not spent."""
+    def _can_pass_shoot(self, s: Scene, targets, others=()) -> bool:
+        """Rule 4: a wanted target in reach while travelling, or one a short step brings into reach (_pass_step; of
+        the targets and `others`, wanted monsters in view that aren't targets), with this platform's budget not
+        spent."""
         if self.obj is None or self.obj.passing.get(s.platform.id, 0.0) >= PASSING_S:
             return False
-        return any(self._hits(s, m) for m in targets) or self._pass_step(s, targets) is not None
+        return any(self._hits(s, m) for m in targets) or self._pass_step(s, [*targets, *others]) is not None
 
     def _pass_step(self, s: Scene, targets) -> tuple | None:
         """In passing, a step along her platform out from under a target above her too close sideways for the
@@ -608,7 +613,9 @@ class Hunt:
                      around=s.monsters)
         return act if act[0] == "back" and act[2] <= PASS_STEP else None
 
-    def _passing_shot(self, s: Scene, targets, visible, hidden, now: float) -> None:
+    def _passing_shot(self, s: Scene, targets, others, visible, hidden, now: float) -> None:
+        """Rule 4: a throw at `targets` from where she is, else a step out from under one of them or of `others`
+        above her (_pass_step), else on her way."""
         t0 = time.monotonic()
         self._note("in passing")
         act = self._stance(s, targets, visible, hidden, approach=False)
@@ -620,9 +627,9 @@ class Hunt:
              "jump_back": self.h.actions.jump_back}[act[0]](act[1])
             self.h.report.throws += 1
             self.report.throws += 1
-        elif (step := self._pass_step(s, targets)) is not None:  # out from under one: a star picks it there
+        elif (step := self._pass_step(s, [*targets, *others])) is not None:  # out from under one: a star picks it
             if step != act:
-                self.h.log(f"  {act_text(step, targets, s.where.x, hidden)} (HP {s.hp:.0%})")
+                self.h.log(f"  {act_text(step, [*targets, *others], s.where.x, hidden)} (HP {s.hp:.0%})")
             self.h.actions.walk(step[1], step[2])
         else:  # nothing to throw from here without walking after it: on her way
             self.obj.passing[s.platform.id] = PASSING_S

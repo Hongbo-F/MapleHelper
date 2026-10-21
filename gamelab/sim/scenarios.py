@@ -1472,14 +1472,17 @@ def _left_from(tr: dict, pid: int) -> float:
 @scenario((3, 760.0), monsters=[("Pig", 4, 584.0)], seed=1, limit=200, facing=LEFT,
           expects=(happens("star hits pig", "her first star hurts the pig"),
                    check("the pig dies before she leaves platform 3",
-                         lambda tr: _first(tr["world_log"], "kills pig") < _left_from(tr, 3))))
+                         lambda tr: _first(tr["world_log"], "kills pig") < _left_from(tr, 3)),
+                   _rule("finish")))
 def loop_finishes_what_she_hurt(sim):
     """A live hunt loop of 2026-10-21 (00:49:51): from platform 3 she threw at a pig on 4, 60 below, and hurt it;
     it stood at x 584, 130 units along from her at 714, too close sideways for a star (151 for a pig 60 below),
     and she set off for drops on 7 with its bar at 27%. Here: one star from 760 hurts it, it stands where it is,
-    and she walks to 714; then the hunt loop, its next ground on another platform. She finishes it first: a step
-    back along 3 to where a star picks it, and the stars. Before she stepped out from under a target in passing
-    (hunt.PASS_STEP) that was the finish rule's (4b); since, it's shooting in passing's."""
+    and she walks to 714; then the hunt loop, its next ground on another platform. She finishes it first: the
+    finish rule (4b) takes her step back along 3 to where a star picks it (shooting in passing steps out only from
+    under a monster above her, hunt._pass_step, and the pig is below), and shooting in passing throws the stars.
+    With the finish rule off (hunt.FINISH_S 0) she sets off 2.2 s in on all of seeds 1-8 and the pig dies 34-51 s
+    later, when she comes back."""
     tour = sim.tour_stack()
     h = tour.h
     _hold(sim, 0, 3.0)

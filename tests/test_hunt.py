@@ -189,6 +189,24 @@ def test_in_passing_she_steps_out_from_under_a_target_off_her_level(monkeypatch)
     assert not h._can_pass_shoot(s, [pig])
 
 
+def test_in_passing_she_throws_at_her_targets_only_and_never_at_a_kill_fading_out():
+    # The wanted monsters in view that aren't targets (out of reach) are only stepped out from under; and one seen
+    # fading out where this look's kill died (in `visible`, which was taken before the kill was counted) not even
+    # that: thrown at, it took a star, then its "hidden" ghost more.
+    h = _hunt([])
+    h.kinds, h.obj = None, Objective("spot", 19, 36.0)
+    dead, above, pig = (SimpleNamespace(kind=kind, x=x, y=-85.0, platform=21, bar=None)
+                        for kind, x in (("slime", -60.0), ("orange-mushroom", -86.0), ("pig", -300.0)))
+    h.fs.dying = [(dead, time.monotonic())]
+    got = {}
+    h._can_pass_shoot = lambda s, targets, others=(): got.update(can=(list(targets), list(others))) or True
+    h._passing_shot = lambda s, targets, others, visible, hidden, now: got.update(shot=(list(targets), list(others)))
+    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=22), where=SimpleNamespace(x=-10.0, y=-25.0),
+                        monsters=[dead, above, pig])
+    h._while_travelling(s, [pig], [dead, above, pig], [], time.monotonic())
+    assert got["can"] == got["shot"] == ([pig], [above])
+
+
 def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():
     bubble = _pile(5, items=("slime-bubble", "mesos"), worth=65.0, dearest=50.0)
     coins = _pile(5, items=("mesos", "mesos", "leather"), worth=40.0, dearest=15.0)  # worth more than 30, but cheap drops
