@@ -303,7 +303,7 @@ Each one was learned the hard way, and each gets a scenario in the loop's own se
 - Keep 50 units from her platform's ends while monsters share it: knockback is 82-109 units on a narrow platform.
 - Monsters in her way, or close on her platform, are shot whatever their kind.
 - Monsters are placed only on platforms their kind spawns on: screen feet can be 20 units off.
-- Off her level, keep the room sideways the star's search needs for the monster's kind (`reach.shot_dx`: 60 below, an Orange Mushroom 113, a pig 151, a slime 177; 60 above, 191-207).
+- Off her level, keep the room sideways the star's search needs for the monster's kind (`reach.shot_dx`: 60 below, an Orange Mushroom 113, a pig 151, a slime 177; 60 above, 111-126 by the client's window, 191-207 by the logs' top it had before).
 - She's on a platform only when her minimap dot has stopped.
 - After a cut, move on before shooting (`nav_fight_across` arrives in about 12 s).
 - Low HP never stops the trip to rest (`tour_rest_hp_low`).
