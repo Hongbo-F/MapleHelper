@@ -105,6 +105,7 @@ APEX_T = JUMP_SPEED / GRAVITY  # s from leaving the ground to the top of a jump 
 HOP_HORIZON = 3.0    # s ahead a hop over a monster is looked for
 END_LINGER = 1.0     # s she may stand where a chain ends: a monster mustn't reach her there either
 MAX_LEGS = 5
+EXPECT_MARGIN = 0.12  # s around a takeoff or landing when where she should be isn't said (Flow.expected)
 MAX_SECONDS = 3.5    # a chain this long gets a fresh look before the next one
 HOLD_MERGE_MS = 5    # a key held again within this many ms of its release stays down
 
@@ -729,17 +730,39 @@ class Flow:
     def expected(legs: list[Leg], t: float) -> int | None:
         """The platform she should be on (on the ground) t s into the plan, or None while she's in
         the air, on a rope, or within a moment of a takeoff or landing."""
-        margin = 0.12
         for i, leg in enumerate(legs):
-            m0 = margin + min(leg.start.slack, 2 * MAX_SLACK)  # timings drift as the chain goes on
+            m0 = EXPECT_MARGIN + min(leg.start.slack, 2 * MAX_SLACK)  # timings drift as the chain goes on
             for sp in leg.spans:
                 if sp.t0 + m0 <= t <= sp.t1 - m0:
                     return sp.platform
-            m1 = margin + min(leg.end.slack, 2 * MAX_SLACK)
+            m1 = EXPECT_MARGIN + min(leg.end.slack, 2 * MAX_SLACK)
             nxt = legs[i + 1].spans[0].t0 if i + 1 < len(legs) and legs[i + 1].spans else None
             # Where the leg ends: for good after the last leg, else from a landing until the next run.
             if leg.end.t + m1 <= t and (nxt is None or (t <= nxt - m1 and leg.end.landed)):
                 return leg.end.platform.id
+        return None
+
+    @staticmethod
+    def airborne(legs: list[Leg], t: float) -> bool:
+        """Whether she's in the air t s into the plan: from leaving the ground on a jump, a hop, a walk-off or a
+        drop until a moment after she lands (EXPECT_MARGIN, and the slack built up). A climb's flight onto the
+        rope isn't counted: once there she's on the rope, and standing below it, she missed it."""
+        for leg in legs:
+            if leg.move.kind == "climb":
+                continue
+            off = leg.spans[-1].t1 if leg.spans else leg.start.t
+            if off <= t <= leg.end.t + EXPECT_MARGIN + min(leg.end.slack, 2 * MAX_SLACK):
+                return True
+        return False
+
+    @staticmethod
+    def span_at(legs: list[Leg], t: float) -> Span | None:
+        """Her run along a platform t s into the plan (away from its ends as `expected` has them), or None."""
+        for leg in legs:
+            m0 = EXPECT_MARGIN + min(leg.start.slack, 2 * MAX_SLACK)
+            for sp in leg.spans:
+                if sp.t0 + m0 <= t <= sp.t1 - m0:
+                    return sp
         return None
 
     # --- chains ----------------------------------------------------------------------------------

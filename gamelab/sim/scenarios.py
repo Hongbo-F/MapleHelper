@@ -675,8 +675,9 @@ def nav_jump_after_kill(sim):
     jumps up onto 14 for the rope to 6 (the hunt loop's way up to 4 in game on 2026-10-21), in a world where an
     arrow pressed while her attack plays moves her only from about 0.85 s after its key. In game, with the
     chain's first arrow held back to 0.6 s after the key, she set off about 0.2 s late, the jump went at its
-    planned time from 15-30 units short, and 8 of 10 such chains fell to 25; here too, on every seed of 1-8
-    that kills the pig (a test pins it). Held back to 0.8 s (actions.ARROW_LOCK_MS), she lands on 14."""
+    planned time from 15-30 units short, and 8 of 10 such chains fell to 25; here too she misses 14 on every
+    seed of 1-8 that kills the pig: she falls to 25, or her dot still where the run starts cuts the plan short
+    (navigator.OFF_SPAN; a test pins it). Held back to 0.8 s (actions.ARROW_LOCK_MS), she lands on 14."""
     return _go_after_kill(sim, 6)
 
 

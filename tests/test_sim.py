@@ -1230,17 +1230,22 @@ def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_mov
 @REAL
 def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_back_only_to_0_6_s(monkeypatch):
     """nav_jump_after_kill with the chain's first arrow held back only to 0.6 s after her last throw's key (as
-    played in game from 00:49 on 2026-10-21): she sets off about 0.2 s late, the jump goes at its planned time
-    from short of where it was meant to, and she falls to 25, on every seed of 1-8 that kills the pig, as 8 of 10
-    such chains did in game. Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
+    played in game from 00:49 on 2026-10-21): she sets off about 0.2 s late and misses 14 on every seed of 1-8
+    that kills the pig, as 8 of 10 such chains did in game: the jump goes at its planned time from short of
+    where it was meant to and she falls to 25 (3 of the 7), or her dot is seen still where the run starts while
+    the plan has her on along 16 and the plan is cut short there (navigator.OFF_SPAN, 4). Held back to 0.8 s
+    (actions.ARROW_LOCK_MS), every one lands on 14."""
     from gamelab.control import actions
     sc = scenarios.SCENARIOS["nav_jump_after_kill"]
-    for lock, first in ((800, "jump 16->14"), (600, "climb 14->6: landed on 25")):
+    landed = {600: [], 800: []}
+    for lock in landed:
         monkeypatch.setattr(actions, "ARROW_LOCK_MS", lock)
         for seed in range(1, 9):
             r = scenarios.run_scenario(dataclasses.replace(sc, seed=seed))["result"]
             if r["killed"] == "killed":
-                assert r["moves"][1 if lock == 600 else 0] == first and r["misses"] == (lock == 600), (lock, seed)
+                landed[lock].append(r["moves"][1].split(": landed on ")[-1] if r["misses"] else "6")
+    assert landed[800] == ["6"] * 7
+    assert sorted(set(landed[600])) == ["16", "25"]
 
 
 def _climb_then_jump(seed: int, x: float) -> dict:

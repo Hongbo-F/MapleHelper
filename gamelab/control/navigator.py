@@ -70,7 +70,17 @@ AFTER_STILL_S = 0.35  # s at most waited for her to stand still after a chain, b
 PLAN_START_S = 0.015  # a chain's plan is taken to start this long after it's sent
 GLANCE_S = 0.03      # between glances at her dot while a plan runs, or while she recovers
 OFF_PATH = 3         # glances off the planned path (counting 2 where the leg doesn't go) that cut a plan short
-STILL = 0.6          # minimap px: a dot that moved less than this on both axes has stopped
+STILL = 0.6          # minimap px: a dot that moved less than this on both axes has stopped ...
+STILL_GLANCES = 3    # ... for this many glances in a row: she stands on the platform under it. Over 2 glances
+                     # (63 ms apart) a dot can sit still in the air too: near the top of a jump, or at full
+                     # speed within a minimap pixel (11-16 units: 149 units/s covers 9 between two glances)
+# Standing still where her run along a platform starts while the plan has her this far along it (Span.x_at) is
+# off the path too. In game on 2026-10-21 chains whose first arrow went down 0.6 s after a throw's key set off
+# about 0.2 s late, the jump at the end of the run went at its planned time from 15-30 units short, and she fell
+# off: 8 of 10 jumps from 16 up onto 14 fell to 25. Her dot stood still at the start for the first 0.35-0.48 s
+# while the plan had her running. (She speeds up from standing, so the plan's straight line runs ahead of her
+# by up to 15 units early on; her dot is read to whole minimap pixels.)
+OFF_SPAN = 30
 HIT = 0.004          # HP lost (fraction) that counts as a hit
 # Looks at most, each after waiting up to 2 s for her to land and stand still (Mover.settle), for one that puts
 # her on a platform, when a look shows her in the air: a slime's touch as she walked off platform 3 onto 4
@@ -566,7 +576,7 @@ class Navigator:
         """follow's loop: watch the running chain, queue the next, cut both short when she's hit or off
         her path."""
         queued, sent, cut = None, list(current.legs), ""
-        last_dot, off = None, 0  # off: glances in a row on another platform than planned
+        dots, off = [], 0  # the last glances' dots; off: glances in a row off the planned path
         ahead = None  # the look around for what follows the running chain, once taken
         over = False  # the running chain's plan has ended (its result read)
         while True:
@@ -618,18 +628,19 @@ class Navigator:
             if now_hp < hp - HIT:
                 cut = f"hit ({hp:.0%} -> {now_hp:.0%})"
             elif dot is not None:
-                on, want, leg = self._placed(dot, last_dot, current)
+                on, want, leg, behind = self._placed(dot, dots, current)
                 if on is not None and on.id not in (leg.start.platform.id, leg.end.platform.id):
                     # Standing where this leg doesn't go (e.g. a drop that fell one platform too far):
                     # stop before the plan's next keys fire there.
                     off += 2
-                elif on is not None and want is not None and on.id != want:
+                elif on is not None and (want is not None and on.id != want or behind is not None):
                     off += 1
                 else:
                     off = 0
                 if off >= OFF_PATH:
-                    cut = f"off the path (on {on.id if on else 'nothing'}, planned {want or leg.end.platform.id})"
-            last_dot = dot
+                    where = f"still at x {behind:.0f}" if behind is not None else f"on {on.id if on else 'nothing'}"
+                    cut = f"off the path ({where}, planned {want or leg.end.platform.id})"
+            dots = [*dots, dot][-(STILL_GLANCES - 1):] if dot is not None else []
             if cut:
                 for pid in [current.plan_id] + ([queued.plan_id] if queued else []):
                     if not client.cancel(pid):
@@ -642,19 +653,29 @@ class Navigator:
                 over = True  # the queued chain takes over, or the next one is still to come (see above)
         return cut, sent
 
-    def _placed(self, dot, last_dot, running: _Running) -> tuple[Platform | None, int | None, Leg]:
+    def _placed(self, dot, dots: list, running: _Running) -> tuple[Platform | None, int | None, Leg, float | None]:
         """Where a glance at her dot puts her against the running plan: the platform she stands on
-        (None if none, or the dot is still moving), the platform she should be on by now (None: in the
-        air, or about to take off or land), and the leg she's on."""
+        (None if none, or the dot moved in the last STILL_GLANCES glances: `dots` are the ones before), the
+        platform she should be on by now (None: in the air, or about to take off or land), the leg she's
+        on, and her x if she's standing where her run along that platform starts while the plan has her
+        OFF_SPAN or more along it (else None). While the plan has her in the air (Flow.airborne) she stands
+        nowhere: near the top of a jump her dot can sit still over a platform she's flying past."""
         t = time.monotonic() - running.start
         want = self.flow.expected(running.legs, t)
-        still = _still(dot, last_dot)
+        seen = [*dots, dot][-STILL_GLANCES:]
+        still = len(seen) == STILL_GLANCES and all(_still(b, a) for a, b in zip(seen, seen[1:]))
         # On a platform only when the dot sits at its height and has stopped: in the air the dot
         # passes 40-60 units under the platforms above, which read as "on" them before.
         mx, my = self.senses.localizer.to_map(dot)
-        on = self.model.platform_under(mx, my - 6, reach=16) if still else None
+        on = self.model.platform_under(mx, my - 6, reach=16) if still and not self.flow.airborne(running.legs, t) \
+            else None
         leg = next((lg for lg in running.legs if lg.start.t <= t <= lg.end.t + 0.3), running.legs[-1])
-        return on, want, leg
+        span = self.flow.span_at(running.legs, t) if on is not None else None
+        behind = None
+        if span is not None and span.platform == on.id and abs(mx - span.x0) <= OFF_SPAN / 2 \
+                and abs(span.x_at(t) - mx) > OFF_SPAN:
+            behind = mx
+        return on, want, leg, behind
 
     def weight(self, m: Move) -> float:
         """This trip's random weight for a move (see `variety`)."""

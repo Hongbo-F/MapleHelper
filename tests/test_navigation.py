@@ -748,6 +748,60 @@ def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(mode
     assert calls["cancel"] == ["running", "queued"] and calls["wait"] == ["running"]  # the queued one withdrawn
 
 
+def _watch_still_dot(model, monkeypatch, legs, x, y):
+    """Navigator._watch over a plan of `legs` (nothing queued after it) while her dot sits still at map (x, y):
+    why it was cut ('' if not), and when (s into the plan; the plan's end if it wasn't)."""
+    from types import SimpleNamespace
+
+    import gamelab.control.navigator as nv
+    from gamelab.localization.pose import Localizer
+    nav = _navigator(model)
+    localizer = Localizer(model)
+    nav.senses = SimpleNamespace(glance=lambda: (localizer.to_dot(x, y), 1.0), wait_frame=nv.time.sleep,
+                                 localizer=localizer)
+    start = nv.time.monotonic()
+    cut_at = []
+    monkeypatch.setattr(nv.client, "done", lambda pid: nv.time.monotonic() - start > legs[-1].end.t + 0.2)
+    monkeypatch.setattr(nv.client, "cancel", lambda pid: cut_at.append(nv.time.monotonic() - start) or True)
+    monkeypatch.setattr(nv.client, "wait", lambda pid, timeout=120: {})
+    nav._sent_plans = ["running"]
+    cut, _ = nav._watch(nv._Running("running", legs, start, False), 1.0, legs[-1].end.platform.id, send=None,
+                        st=SimpleNamespace())
+    return cut, (cut_at[0] if cut_at else legs[-1].end.t)
+
+
+def test_standing_still_where_her_run_starts_cuts_the_plan_short(model, monkeypatch):
+    """Navigator._watch: her dot still (STILL_GLANCES glances) where a run along her platform starts while the
+    plan has her OFF_SPAN or more along it cuts the plan short (in game, a chain whose first arrow the game
+    took 0.2 s late jumped at its planned time from 15-30 units short and fell off), and before the jump at
+    the end of the run; where the plan has her, it doesn't."""
+    from gamelab.control.navigator import OFF_SPAN
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.route import Move
+    c = by_y(model, 500, 400)
+    run = Leg(Move("walk_off", c.id, c.id, 300, 300, "right"), Body(0.0, 100, c), Body(1.0, 250, c, run=1),
+              [Span(c.id, 0.0, 1.0, 100, 250)])
+    cut, at = _watch_still_dot(model, monkeypatch, [run], 100, 500)
+    assert cut.startswith("off the path (still at x 100") and OFF_SPAN / 150 < at < 0.6
+    standing = Leg(run.move, Body(0.0, 100, c), Body(1.0, 100, c), [Span(c.id, 0.0, 1.0, 100, 100)])
+    assert _watch_still_dot(model, monkeypatch, [standing], 100, 500)[0] == ""
+
+
+def test_her_dot_still_over_another_platform_counts_only_once_the_plan_has_her_down(model, monkeypatch):
+    """Navigator._watch: while the plan has her in the air (Flow.airborne: a jump from A onto B), her dot
+    sitting still over C isn't her standing on C (near the top of a jump it can sit still over what she
+    flies past); once the plan has her landed, it is, and the plan is cut short."""
+    from gamelab.motion.flow import EXPECT_MARGIN, Body, Leg, Span
+    from gamelab.motion.route import Move
+    a, b = by_y(model, 300, 100), by_y(model, 360, 300)
+    jump = Leg(Move("jump", a.id, b.id, 150, 260, "right"), Body(0.0, 150, a),
+               Body(0.7, 260, b, run=1, landed=True), [Span(a.id, 0.0, 0.1, 150, 165)])
+    on = Leg(Move("walk_off", b.id, b.id, 380, 380, "right"), jump.end, Body(1.5, 380, b, run=1),
+             [Span(b.id, 0.7, 1.5, 260, 380)])  # and runs on along B
+    cut, at = _watch_still_dot(model, monkeypatch, [jump, on], 500, 500)  # over C, below them both
+    assert cut.startswith(f"off the path (on {by_y(model, 500, 500).id}") and 0.7 + EXPECT_MARGIN <= at < 1.2
+
+
 def test_a_look_searches_for_ropes_where_the_maps_ropes_can_show(model, tmp_path, monkeypatch):
     """Ropes are looked for only around where her minimap dot puts the map's ropes on screen (ROPE_PAD):
     she's placed by the rope there as with the whole screen searched, and a rope-coloured post elsewhere
