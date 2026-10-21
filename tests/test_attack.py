@@ -38,7 +38,7 @@ def test_shoots_a_monster_on_a_lower_platform_from_hers():
 def test_walks_just_into_reach_when_too_far():
     move = decide(300, 500, PLAT, target(800), [])
     assert move[:2] == ("walk", RIGHT)
-    assert reach.MIN_SHOT < 800 - (300 + move[2]) <= reach.SHOT_RANGE
+    assert reach.shot_dx(0) < 800 - (300 + move[2]) <= reach.SHOT_RANGE
 
 
 def test_backs_off_from_a_monster_too_close_on_her_platform():
@@ -120,7 +120,8 @@ def test_a_monster_right_under_her_makes_her_step_away_not_throw():
     below = target(530, y=560, platform=1)       # 60 below, 30 to the side: a star misses it
     act = stance(500, 500, PLAT, [below])
     assert act[:2] == ("back", LEFT) and reach.can_shoot(530 - (500 - act[2]), 60)
-    assert not reach.can_shoot(30, 60) and reach.can_shoot(30 + 150, 60) and not reach.can_shoot(170, -60)
+    assert not reach.can_shoot(30, 60) and reach.can_shoot(30 + 150, 60)
+    assert not reach.can_shoot(100, -60) and reach.can_shoot(120, -60)  # 60 above her, a pig from 111
 
 
 def test_under_a_low_platform_she_does_not_jump_at_a_monster():
@@ -130,41 +131,64 @@ def test_under_a_low_platform_she_does_not_jump_at_a_monster():
 
 
 def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_monsters_size():
-    # The claw's swing (90 ahead of her) takes a body that reaches into it: a pig up to 124 off by its
-    # middle, a snail up to 109. Her decisions count on a star 12 past that (reach.claw_edge).
+    # Each of the claw's two stab stances (one per attack) takes a body that reaches into its box, cut to 65
+    # ahead of her: on her level a pig up to 99 off by its middle, a snail up to 84. Her decisions count on a
+    # star 12 past that (reach.claw_edge).
+    assert {s: reach.claw_box(s) for s in reach.CLAW_STANCES} == {"stabO1": (20, 65, 15, 30),
+                                                                  "stabO2": (12, 65, 16, 30)}
     edge = {kind: reach.claw_edge(half) for kind, half in monsters.MONSTER_HALF.items()}
-    assert edge == {"pig": 136, "orange-mushroom": 134, "slime": 130, "snail": 121}
-    assert reach.claw_takes(124, 0, 46, 34) and not reach.claw_takes(125, 0, 46, 34)
-    assert reach.star_sure(19) == reach.STAR_SURE == 124 and reach.star_sure(34) == 139
-    # A pig 115 away on her platform isn't a throw from the ground (the claw would swipe it, where by its
+    assert edge == {"pig": 111, "orange-mushroom": 109, "slime": 105, "snail": 96}
+    for s in reach.CLAW_STANCES:
+        assert reach.claw_takes(99, 0, 46, 34, s) and not reach.claw_takes(100, 0, 46, 34, s)
+    assert reach.claw_chance(99, 0, 46, 34) == 1 and reach.claw_chance(100, 0, 46, 34) == 0
+    assert reach.star_sure(19) == reach.STAR_SURE == 99 and reach.star_sure(34) == 114
+    # A pig 105 away on her platform isn't a throw from the ground (the claw would swipe it, where by its
     # middle she used to count on a star from 100): a jump back with room behind her, straight up with a
-    # monster there; one target (decide) she steps away from. From 140 it's a star.
-    pig = target(615)
+    # monster there; one target (decide) she steps away from. From 115 it's a star.
+    pig = target(605)
     assert stance(500, 500, PLAT, [pig]) == ("jump_back", RIGHT)
     assert stance(500, 500, PLAT, [pig, target(350)]) == ("jump_throw", RIGHT)
     assert decide(500, 500, PLAT, pig, []) == ("walk", LEFT, 120)
-    assert stance(500, 500, PLAT, [target(640)]) == ("throw", RIGHT)
-    assert decide(500, 500, PLAT, target(640), []) == ("throw", RIGHT)
-    # A snail 115 away is too close as well (121), one 125 away isn't; by the map's game data (half 18.5)
-    # one 120.8 away isn't either (120.5). A slime 125 away is (130), an Orange Mushroom 135 away isn't (134).
-    assert stance(500, 500, PLAT, [target(615, kind="snail")]) == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(625, kind="snail")]) == ("throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(620.8, kind="snail")]) == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(620.8, kind="snail")], halves={"snail": 18.5}) == ("throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(625, kind="slime")]) == ("jump_back", RIGHT)
-    assert stance(500, 500, PLAT, [target(635, kind="orange-mushroom")]) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(615)]) == ("throw", RIGHT)
+    assert decide(500, 500, PLAT, target(615), []) == ("throw", RIGHT)
+    # A snail 90 away is too close as well (96), one 100 away isn't; by the map's game data (half 18.5)
+    # one 95.8 away isn't either (95.5). A slime 100 away is (105), an Orange Mushroom 110 away isn't (109).
+    assert stance(500, 500, PLAT, [target(590, kind="snail")]) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(600, kind="snail")]) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(595.8, kind="snail")]) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(595.8, kind="snail")], halves={"snail": 18.5}) == ("throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(600, kind="slime")]) == ("jump_back", RIGHT)
+    assert stance(500, 500, PLAT, [target(610, kind="orange-mushroom")]) == ("throw", RIGHT)
+
+
+def test_the_claw_takes_what_its_stance_reaches_on_her_level_or_off_it():
+    # No gate for her level: a body that reaches 15-30 above her feet is in the boxes (a pig 20 below her, its
+    # top 26 above her feet), one 40 or more off isn't (an Orange Mushroom 42 below, its top 13 up; a pig 42
+    # above, its feet over the boxes' tops). The boxes differ only in slivers: a snail within a unit of her
+    # middle is in stabO2's alone (it starts 12 ahead of her, stabO1's 20), so half the attacks swipe it.
+    assert reach.claw_chance(60, 20, 46, 34) == 1
+    assert reach.claw_chance(60, 42, 55, 32) == 0 and reach.claw_chance(30, -42, 46, 34) == 0
+    assert reach.claw_chance(0.5, 0, 26, 19) == 0.5 and reach.claw_chance(1.5, 0, 26, 19) == 1
+    assert reach.claw_dx(0) == 99 and reach.claw_dx(0, 26, 19) == 84
+    assert reach.claw_dx(60) == reach.claw_dx(-42) == 0
 
 
 # --- the star's search from the ground -------------------------------------------------------------------
 
 def test_the_star_search_opens_one_in_four():
-    # Bands 20 wide from 65 ahead of her out to 400, each one's window 5 higher and 5 lower than the last.
-    assert reach.window(0) == (12, reach.SEARCH_TOP0) and reach.window(16) == (-68, reach.SEARCH_TOP0 + 80)
+    # Bands 20 wide from 65 ahead of her out to 400, each one's window reaching a unit up and one down from
+    # SHOT_H (28 above her feet) for every 4 its near edge is ahead of her, as the client has it: 12 to 44,
+    # then each 5 higher and 5 lower than the last, to -68 to 124 (meowdb's Lucky Seven figure).
+    assert reach.window(0) == (12, 44) == (reach.SEARCH_FLOOR0, reach.SEARCH_TOP0)
+    assert reach.window(16) == (-68, 124) and reach.spread(16) == 96
+    assert all(reach.window(k) == (reach.SHOT_H - reach.spread(k), reach.SHOT_H + reach.spread(k))
+               for k in range(reach.BANDS))
+    assert reach.window(1, top0=21) == (7, 26)  # the logs' lower top, opening as the client's does
     assert reach.band_of(64) is None and reach.band_of(65) == 0 and reach.band_of(84.9) == 0
     assert reach.band_of(400) == 16 and reach.band_of(401) is None and reach.BANDS == 17
-    # A body across several bands is taken in the first whose window it reaches into: 30 to 70 above her
-    # feet, from 80 to 150 ahead (bands 0-4), it's under band 2's top (31), not band 1's (26).
-    assert reach.search_band(80, 150, 30, 70) == 2
+    # A body across several bands is taken in the first whose window it reaches into: 50 to 90 above her
+    # feet, from 80 to 150 ahead (bands 0-4), it's under band 2's top (54), not band 1's (49).
+    assert reach.search_band(80, 150, 50, 90) == 2
     assert reach.search_band(10, 60, 0, 40) is None and reach.search_band(405, 440, 0, 40) is None
 
 
@@ -187,45 +211,54 @@ def test_off_level_a_star_needs_more_room_the_smaller_the_monster():
             "orange-mushroom": mapdata.MobBody(55, 65, 32), "snail": mapdata.MobBody(24, 33, 18.5)}
     below = {k: reach.min_dx(60, *reach.body_of(k, body)) for k in body}
     assert below == {"pig": 150.5, "slime": 176.5, "orange-mushroom": 113, "snail": 246.5}
-    assert reach.min_dx(-60, *reach.body_of("pig", body)) == 190.5
+    assert reach.min_dx(-60, *reach.body_of("pig", body)) == 110.5
     assert reach.min_dx(0, *reach.body_of("pig", body)) == 30.5 and reach.max_dx(34.5) == 434.5
-    # A pig flinching after a hit (54 tall) is picked from 111, one standing (38) from 171. 120 above her
-    # none is.
+    # A pig flinching after a hit (54 tall) is picked from 111, one standing (38) from 171. 120 above her the
+    # last bands pick each kind (a pig from 351), but nothing that high is in band (in_band: 60 is measured).
     assert reach.min_dx(60, 54, 34) == 111 and reach.min_dx(60, 38, 34) == 171
-    assert all(reach.min_dx(-120, *reach.body_of(k)) == math.inf for k in body)
-    # Her decisions: never closer than the claw's reach, and a kind she doesn't know is taken as a pig.
-    assert reach.shot_dx(0) == reach.MIN_SHOT and reach.shot_dx(60, "orange-mushroom") == 113
+    assert reach.min_dx(-120, *reach.body_of("pig")) == 351 and not reach.can_shoot(360, -120)
+    # Her decisions: never where the claw would swipe it (on her level a pig to 99), and a kind she doesn't
+    # know is taken as a pig.
+    assert reach.shot_dx(0) == 99 and reach.shot_dx(0, "snail") == 84
+    assert reach.shot_dx(60, "orange-mushroom") == 113
     assert reach.shot_dx(60, "dragon") == reach.shot_dx(60, "pig") == 151
     assert reach.can_shoot(120, 60, kind="orange-mushroom") and not reach.can_shoot(120, 60)
     assert not reach.can_shoot(170, 60, kind="slime") and reach.can_shoot(180, 60, kind="slime")
 
 
 def test_between_her_level_and_60_below_her_decisions_keep_to_the_old_ramp(monkeypatch):
-    # 42 below her (0 -> 1) the search picks a pig or an Orange Mushroom from 90, a slime from 97, but the only
-    # throws logged there missed pigs 124-125 off and an Orange Mushroom 91 off. Her decisions keep to the old
-    # ramp there (126) until a probe settles it; the search alone with the switch off. 60 below, and above
-    # her, the search alone either way.
+    # 42 below her (0 -> 1) the search picks a pig from 71, an Orange Mushroom from 33, a slime from 97, but the
+    # only throws logged there missed pigs 124-125 off and an Orange Mushroom 91 off. Her decisions keep to the
+    # old ramp there (126) until a probe settles it; the search alone with the switch off. 60 below, and above
+    # her, the search alone either way: 42 above her a pig is picked from 31, its feet just under the first
+    # window's top (44).
     assert reach.ramp_dx(42) == 126 and reach.ramp_dx(15) == reach.ramp_dx(60) == reach.ramp_dx(-42) == 0
     assert [reach.shot_dx(42, k) for k in ("pig", "orange-mushroom", "slime", "snail")] == [126, 126, 126, 166]
     assert not reach.can_shoot(120, 42, kind="pig") and reach.can_shoot(130, 42, kind="pig")
-    assert reach.shot_dx(60, "orange-mushroom") == 113 and reach.shot_dx(-42, "pig") == 131
+    assert reach.shot_dx(60, "orange-mushroom") == 113 and reach.shot_dx(-42, "pig") == 31
     monkeypatch.setattr(reach, "RAMP_BELOW", False)
-    assert [reach.shot_dx(42, k) for k in ("pig", "orange-mushroom", "slime", "snail")] == [90, 90, 97, 166]
+    assert [reach.shot_dx(42, k) for k in ("pig", "orange-mushroom", "slime", "snail")] == [71, 33, 97, 166]
     assert reach.can_shoot(410, 0, kind="snail") and not reach.can_shoot(420, 0, reach=500, kind="snail")
 
 
 def test_from_the_ground_the_claw_first_then_the_search_band_by_band():
-    # The claw's swing takes what it reaches on her level (90 ahead, into a pig's body up to 124 off), not
-    # an Orange Mushroom right under her, 60 below.
-    assert reach.claw_takes(120, 0, 46, 34) and not reach.claw_takes(130, 0, 46, 34)
-    assert not reach.claw_takes(60, 60, 55, 32)
+    # The claw takes what its stance reaches (65 ahead, into a pig's body up to 99 off), not an Orange
+    # Mushroom right under her, 60 below.
+    assert reach.claw_chance(95, 0, 46, 34) == 1 and reach.claw_chance(105, 0, 46, 34) == 0
+    assert reach.claw_chance(60, 60, 55, 32) == 0
     # Then the search, its first band first: a slime 60 below 200 along (band 7) before a pig on her level
     # 300 along (band 10); one 60 below 150 along isn't picked at all (it needs 177).
     assert reach.ground_pick(30, 0, 26, 19) == (0, 30)
     assert reach.ground_pick(200, 60, 41, 28) == (8, 200) < reach.ground_pick(300, 0, 46, 34) == (11, 300)
     assert reach.ground_pick(150, 60, 41, 28) is None
+    # Of the monsters it can take, each stance swipes the nearest in its box; else any monster in the search's
+    # first band takes the star, as likely as another (the client's order there can't be seen).
+    assert reach.take_chances([(50, 0, 46, 34), (60, 0, 26, 19)]) == [1, 0]
+    assert reach.take_chances([(200, 0, 46, 34), (205, 0, 46, 34), (300, 0, 46, 34)]) == [0.5, 0.5, 0]
+    assert reach.take_chances([(0.5, 0, 26, 19), (200, 0, 46, 34)]) == [0.5, 0.5]
+    assert reach.take_chances([(150, 60, 41, 28)]) == [0]
     # An attack from a jump keeps to the area fixed to her feet: as high as she is then, a pig 60 above her
-    # 100 along is in it; from the ground, the search doesn't pick it (it needs 191).
+    # 100 along is in it; from the ground, the search doesn't pick it (it needs 111).
     assert reach.in_area(100, -60, 46, rise=reach.air_rise(physics.JUMP_ATTACK_MS), half=34)
     assert not reach.in_area(100, -60, 46, half=34)
 
@@ -491,22 +524,22 @@ def test_she_doesnt_throw_at_or_walk_for_a_monster_behind_a_wall_of_her_group(mo
     assert pick_target(100, 500, a, [up, target(390, 440, platform=b.id, bar=0.5)]) is up  # none in reach: nearest
     # Down from B the star gets there: thrown, from B, at the monster on A.
     assert decide(300, 440, b, target(100, 500, platform=a.id), []) == ("throw", LEFT)
-    # Where to shoot B from: nothing of it from A (by distance, from 191 sideways for a pig 60 above: 109 of
+    # Where to shoot B from: nothing of it from A (by distance, from 111 sideways for a pig 60 above: 189 of
     # its 200 units).
-    assert spots.coverage(b, 100, 500, a) == 0 and spots.coverage(b, 100, 500) == pytest.approx(0.545)
+    assert spots.coverage(b, 100, 500, a) == 0 and spots.coverage(b, 100, 500) == pytest.approx(0.945)
     # With the rule off (an in-game probe), as before.
     monkeypatch.setattr(reach, "WALLS_BLOCK", False)
     assert decide(100, 500, a, up, []) == ("throw", RIGHT) and stance(100, 500, a, [up]) == ("throw", RIGHT)
 
 
 def test_no_spot_on_platform_4_for_platform_2():
-    """On the real map (skipped without its parsed game data): by distance a spot on 4 (x 244) has 41% of
+    """On the real map (skipped without its parsed game data): by distance a spot on 4 (x 244) has 57% of
     platform 2 in reach, but it's all behind the step wall; 2 is shot from itself."""
     if not (mapdata.CACHE / "10000012.json").is_file():
         pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
     model = mapdata.load(10000012)
     assert [sp.platform for sp in spots.spots(model, 2)] == [2]
-    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244)) == pytest.approx(0.415, abs=0.002)
+    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244)) == pytest.approx(0.566, abs=0.002)
     assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244), model.platform(4)) == 0
 
 

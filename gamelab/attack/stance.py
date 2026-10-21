@@ -3,8 +3,8 @@ close in. Pure decisions from map positions; the fight loop (behavior.fight) car
 
 `stance` is the policy for a group (fight.clear, what tours use) and `decide` the one for a single
 target (fight.kill, `hunt kill`). Both take a monster on her platform as too close while a throw from the
-ground at it would be a claw swipe, by its size (`close_to`, reach.claw_edge: a pig within 136 units, a
-snail within 121), decide at least within TOO_CLOSE; stance closes in to SHOT_RANGE - 40 of a target where
+ground at it would be a claw swipe, by its size (`close_to`, reach.claw_edge: a pig within 111 units, a
+snail within 96), decide at least within TOO_CLOSE; stance closes in to SHOT_RANGE - 40 of a target where
 decide walks to the nearest of SHOT_RANGE - 30 and 20 past the claw's edge from it (off her level, a band
 past reach.shot_dx), either side.
 `pick_target` says which monster to shoot first, `open_above` whether a jump keeps her on her
@@ -124,7 +124,8 @@ def close_to(t: Monster, x: float, halves: dict[str, float] | None = None) -> bo
     """Whether monster `t` (on her level) is too close to map x for a throw from the ground at it to be a
     star: the claw would swipe it (reach.claw_edge, by half its width: `halves`, as half_of). By its middle
     alone (a star from 100 units, whatever the kind), the claw swiped pigs, slimes and Orange Mushrooms she
-    counted on a star for, out to 118-124 units off (in the simulator, as the game data has the swing)."""
+    counted on a star for (in the simulator, out to 118-124 units off with the claw's old reach, 90 ahead;
+    by the client's, 65 ahead, out to 93-99)."""
     return abs(t.x - x) < reach.claw_edge(half_of(t.kind, halves))
 
 
@@ -272,9 +273,9 @@ def decide(x: float, y: float, platform: Platform, target: Monster, threats: lis
     if not reach.in_band(dy):
         return ("skip", "not level enough with her platform")
     # Walk to the nearest spot on her platform that has the target in reach (either side of it): near it,
-    # 20 past where the claw would swipe it (reach.claw_edge, by its size; it was MIN_SHOT + 60, 150, for
-    # every kind), or off her level one band of the star's search past where it first picks the target
-    # (reach.shot_dx, by its kind: a pig standing needs that band more than one walking).
+    # 20 past where the claw would swipe it (reach.claw_edge, by its size; it was 150 for every kind), or off
+    # her level one band of the star's search past where it first picks the target (reach.shot_dx, by its
+    # kind: a pig standing needs that band more than one walking).
     far = reach.SHOT_RANGE - 30
     near = max(reach.claw_edge(half_of(target.kind, halves)) + 20,
                reach.shot_dx(dy, target.kind) + reach.SEARCH_STEP)

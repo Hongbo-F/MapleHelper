@@ -130,7 +130,7 @@ Checked after every look, before the mode's own decision.
 - **MP:** none is used with the regular attack, which tours use. With `--skill` (about 7 MP a throw) an MP check would be needed; tours don't offer it.
 - **Knocked off, falling, on a rope, dot hidden:** the navigator and mover deal with it as today. In hunt mode being knocked onto another platform ends nothing: the next decision starts from where she is, and rule 2 takes her back up if she's below her spot.
 - **After a hit cuts a plan short:**
-  - Until one chain has run, she may only answer a monster on her platform the claw would swipe (`stance.close_to`, by its size: a pig within 136, a snail within 121; 100 for every kind before) by stepping away from it, at most once, and doesn't shoot (a jump back throws a star).
+  - Until one chain has run, she may only answer a monster on her platform the claw would swipe (`stance.close_to`, by its size: a pig within 111, a snail within 96; 136 and 121 with the claw's old reach, 100 for every kind before) by stepping away from it, at most once, and doesn't shoot (a jump back throws a star).
   - Shooting from wherever a hit knocked her made a 12 s trip (`nav_fight_across`) run out its 180 s, and `tour_hunt_platform_12` take 79 s longer. Both stay pinned.
 - **Stuck guard:** no kill, pick-up or new ground for 120 s, or the same objective dropped 3 times. She stands by on a safe platform and logs why.
 
@@ -188,7 +188,7 @@ These are today's rules (`_wanted`, `IN_HER_WAY`, `clear_way`).
 
 | # | Rule | When | What she does | Bounds |
 |---|---|---|---|---|
-| 1 | Close quarters | a target on her platform the claw would swipe (`stance.close_to`, by its size: a pig within 136, a snail within 121; 100 for every kind before) | `stance`'s answer: jump back if there's 110 units of room and open sky; else jump and throw; else step back; else throw from the ground | always on, also during rules 5, 6 and 8; right after a cut, only stepping away |
+| 1 | Close quarters | a target on her platform the claw would swipe (`stance.close_to`, by its size: a pig within 111, a snail within 96; 136 and 121 with the claw's old reach, 100 for every kind before) | `stance`'s answer: jump back if there's 110 units of room and open sky; else jump and throw; else step back; else throw from the ground | always on, also during rules 5, 6 and 8; right after a cut, only stepping away |
 | 2 | Back to the high ground | she's on a platform that isn't standable, and a standable spot reaches her current ground | one chain toward the spot, shooting only rule 1 and rule 4 targets | applies after a knock-off and after looting below a spot |
 | 3 | Shoot | a target in reach, and she's on her spot or standable | `stance`: throw (the side she faces while it has targets), step out from under a monster right below or above her, or close in along her platform | walks of at most 300 (stance's own walks aren't capped today) |
 | 4 | In passing | a target in reach while she's on another platform that isn't standable, or a monster in the way of her next move | throw from where she is; no walking after targets | 15 s of shooting per platform per objective, counted on the objective's clock |

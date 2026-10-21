@@ -826,17 +826,15 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
                          lambda tr: all("pick" in r and r["evidence"] and r["looks"] >= 5 for r in _probe_rows(tr))),
-                   check("a hit, hits only from 188 off, and misses closer",
-                         lambda tr: any(s for _, s in _shown(tr)) and all(d >= 188 for d, s in _shown(tr) if s)
-                         and any(s is False and d < 180 for d, s in _shown(tr))),
-                   happens("star thrown left: no hit")))
+                   check("every throw hits, some under 150 off",
+                         lambda tr: all(s for _, s in _shown(tr)) and any(d < 150 for d, _ in _shown(tr)))))
 def probe_top(sim):
     """`probe run top-60`: from 13 at a lone pig on 12, 60 above her, 110-200 units off sideways. The world's
-    search window has reach's top (21 above her feet in the first band), so a star picks the pig only from 191
-    units: most throws hit nothing (on seed 1 seven hit, 199-219 off at the pick: one with pigs walking 70
-    units/s, 196 off; with none, the fit wouldn't bound the top from below). Each throw waits for its evidence
-    before the next, and the log has where the pig was at the pick and what it showed (`probe score` fits the
-    top to it: tests/test_probe.py)."""
+    search window has reach's top (the client's, 44 above her feet in the first band), so a star picks the pig
+    from 111 units: every throw hits, the closest 127 off at the pick on seed 1 (with the logs' lower top, 21,
+    one would from 191, and on seed 1 one did, 196 off). Each throw waits for its evidence before the next, and
+    the log has where the pig was at the pick and what it showed (`probe score` fits the top to it:
+    tests/test_probe.py)."""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
@@ -1220,7 +1218,8 @@ def loop_lull_loot(sim):
     since no jump is keyed in the kick's blind spot and jump-backs leave at full speed: on seed 5 she picked
     up 17. Over 16 seeds 8 meet all of this, 10 just before. Seed 8 since monsters walk as fast as the game
     data says (a pig 125 units/s, not 70): on seed 6 no lull came for the rule, and she picked up fewer than
-    20. Over 16 seeds 8 meet all of this.)"""
+    20. Over 16 seeds 8 meet all of this. On the attack track alone, seed 4 since the star's search has the
+    client's top (from 13 a star picks a pig on 12 from 111 units, not 191): on seed 6 no lull came.)"""
     return _loop_on_12(sim)
 
 

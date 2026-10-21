@@ -2,15 +2,16 @@
 of attack.reach shows, throws only when a single monster can take the star, and logs every throw so the
 question can be settled from the log alone (`score`).
 
-The questions (attack.reach, gamelab/README.md): the target search's window, its top (SEARCH_TOP0: 21
-fitted to the logs, 44 as meowdb draws it) and its floor by kind, and the search between her level and 60
-below her (against the old ramp her decisions keep to there, RAMP_BELOW); whether an attack from a jump
-picks by the area or by the search; what stops a star (the walls of her own foothold group where they
-cross a level line SHOT_H above her feet, against a line from her to the target's feet, or every wall);
-and how far the claw swipes, on her level (CLAW_FAR, CLAW_MARGIN) and off it (claw_takes). A `Probe`
-is a place on Thicket Around the Beach II (the platform she stands on, her x, the way she throws), the
-monsters it throws at (their kinds, their platforms, how far off sideways by their middle), and how she
-throws: from the ground, a jump throw or a jump back, always with the regular attack.
+The questions (attack.reach, gamelab/README.md): the target search's window, its top (SEARCH_TOP0: the
+client's 44, as a port of the v83 client and meowdb have it; 21 fitted to the logs) and its floor by kind,
+and the search between her level and 60 below her (against the old ramp her decisions keep to there,
+RAMP_BELOW); whether an attack from a jump picks by the area or by the search; what stops a star (the walls
+of her own foothold group where they cross a level line SHOT_H above her feet, against a line from her to
+the target's feet, or every wall); and how far the claw swipes, on her level (CLAW_FAR, CLAW_MARGIN) and
+off it (claw_takes: its stab boxes). A `Probe` is a place on Thicket Around the Beach II (the platform she
+stands on, her x, the way she throws), the monsters it throws at (their kinds, their platforms, how far off
+sideways by their middle), and how she throws: from the ground, a jump throw or a jump back, always with
+the regular attack.
 
 A run (`run`) sends her to her place (the navigator, keeping clear of monsters) and keeps her there. After
 every look she throws only when exactly one monster is in front of her (`in_front`: within FRONT by its
@@ -40,10 +41,11 @@ The scorer (`score`) reads the log with the map's game data. What each monster s
 HP bar new or lower after the star was due, or killed: her EXP up and it gone), none (seen with its bar as
 before), or can't tell (hidden). Then:
 - the window's top and floor (SEARCH_TOP0, SEARCH_FLOOR0), fitted to the throws from the ground: for each
-  value, which monster each attack takes (`taken`: the claw on her level first, then the search's first
-  band, the nearest in it, by the positions at the pick and each kind's walking body; none behind the
-  rule's walls), scored by likelihood with its two hit rates fitted (a monster taken shows a hit with
-  chance a, one not taken with chance f), as the research fitted the shot log and the telemetry;
+  value, which monster each attack takes (`taken`: the claw first where a stance's box reaches, then the
+  search's first band, the nearest in it, by the positions at the pick and each kind's walking body (a
+  probe throws at a lone monster, so the claw's stance and the order within a band rarely matter); none
+  behind the rule's walls), scored by likelihood with its two hit rates fitted (a monster taken shows a hit
+  with chance a, one not taken with chance f), as the research fitted the shot log and the telemetry;
 - what stops a star: the rule against no walls, every wall at the same line, and a line from her to the
   target's feet through her group's walls, over every throw, with what each attack picks (the search
   from the ground, the area from a jump); and the line's height (SHOT_H), raised in a jump (reach.air_rise);
@@ -83,8 +85,8 @@ if TYPE_CHECKING:
 
 FRONT = 420          # map units: a monster this far in front of her by its middle could take the star (a pig's
                      # body reaches into the search out to 434) ...
-FRONT_UP = reach.LOOK_UP  # ... from this far above her feet (140: the search's highest window reaches 101, 124
-                     # with meowdb's top, and a jump's area 65 above her as high as 49 up in the jump) ...
+FRONT_UP = reach.LOOK_UP  # ... from this far above her feet (140: the search's highest window reaches 124, 101
+                     # with the logs' lower top, and a jump's area 65 above her as high as 49 up in the jump) ...
 FRONT_DOWN = 140     # ... to this far below (the search's lowest floor is 68 below her feet, and the tallest body
                      # here, an Orange Mushroom, 67). A look searches only LOOK_DOWN (75) below her, unless wide.
 STAND_SLACK = 20     # she walks back to her place when she's farther off it than this (a jump back carries her 85)
@@ -103,7 +105,7 @@ STYLES = ("throw", "jump_throw", "jump_back")  # from the ground, a jump throw, 
 TOP0_GRID = range(0, 81)
 FLOOR0_GRID = range(-30, 41)
 SHOT_H_GRID = range(0, 101)
-MEOWDB_TOP0 = 44     # the window's top as meowdb's Lucky Seven page draws it (12 to 44 above her feet: 28 +- 16)
+LOGS_TOP0 = 21       # the window's top the shot log and the telemetry fit (reach has the client's, 44: 28 + 16)
 FITS = 1.92          # values within this much log-likelihood of the best fit (95%, one parameter)
 # The two hit rates the likelihood fits are kept to what the logs have measured, or a model saying "not
 # taken" would explain a run of hits as well as one saying "taken" (most probe throws have one monster):
@@ -144,11 +146,11 @@ class Probe:
 PROBES = {p.name: p for p in (
     Probe("top-60", "the search window's top (reach.SEARCH_TOP0)", 13, -14.0, LEFT, (12,),
           ("pig", "orange-mushroom"), (110, 200), throws=30, source="geometry P1",
-          expect="60 above her, a pig is hit from 111 units with meowdb's top (44), from 191 with the fitted one "
-                 "(21); an Orange Mushroom from 113 or 193"),
+          expect="60 above her, a pig is hit from 111 units with the client's top (44, reach's), from 191 with the "
+                 "logs' fitted one (21); an Orange Mushroom from 113 or 193"),
     Probe("top-120", "the window's top, two platforms up", 15, 76.0, LEFT, (12,), ("pig", "orange-mushroom"),
           (340, 420), wide=True, source="geometry P2",
-          expect="120 above her: hits from about 350 units with meowdb's top (44), none with the fitted one (21)"),
+          expect="120 above her: hits from about 350 units with the client's top (44), none with the logs' (21)"),
     Probe("floor", "the window's floor by kind (reach.SEARCH_FLOOR0)", 14, 824.0, RIGHT, (17,),
           ("orange-mushroom", "pig", "slime"), (90, 200),
           by_kind=(("orange-mushroom", (90, 150)), ("pig", (120, 190)), ("slime", (130, 200))), throws=40,
@@ -188,16 +190,18 @@ PROBES = {p.name: p for p in (
     # level, in the middle of 21 (two slimes and a pig spawn there; 174 units to either end, past a knockback).
     Probe("claw-edge", "how far off the claw still swipes, by kind (reach.CLAW_FAR, CLAW_MARGIN, claw_edge)", 21,
           -225.0, RIGHT, (21,), ("pig", "slime"), (95, 160), throws=40, source="bodies D",
-          expect="by the swing's boxes (73-102 ahead, taken as 90) and the bodies, swipes (a small bar drop: 9-11 "
-                 "damage of a pig's 128 HP) up to about 124 off a pig and 118 off a slime, stars from there; her "
-                 "decisions count on a star from 136 and 130 (claw_edge)"),
-    # The claw off her level: its swings reach 17 below her feet, into a walking pig's or an Orange Mushroom's
-    # body 60 below her (46 and 55 tall), not a slime's (41). From 35 inside 3's left end, at 4.
-    Probe("claw-down", "whether the claw swipes a monster off her level (reach.claw_takes: on her level only)", 3,
+          expect="by the client's stab boxes (cut to 65 ahead, reach's) and the bodies, swipes (a small bar drop: "
+                 "9-11 damage of a pig's 128 HP) up to about 99 off a pig and 93 off a slime, stars from there (her "
+                 "decisions count on a star from 111 and 105: claw_edge); by the swings' boxes (73-102 ahead, taken "
+                 "as 90, as reach had it before), swipes out to 124 and 118"),
+    # The claw off her level: the swings' boxes reach 17 below her feet, into a walking pig's or an Orange
+    # Mushroom's body 60 below her (46 and 55 tall), not a slime's (41); the stabs' boxes, which the client
+    # tests, reach down to 15 above her feet, into neither. So it tells the swings from the stabs, not the stabs
+    # from a claw kept to her level. From 35 inside 3's left end, at 4.
+    Probe("claw-down", "whether the claw swipes a monster off her level (reach.claw_takes: its stab boxes)", 3,
           716.0, LEFT, (4,), ("pig", "orange-mushroom"), (60, 125), source="bodies D",
-          expect="if the claw keeps to her level, no hit at a pig (the search picks one 60 below from 151) and "
-                 "stars at Orange Mushrooms from 113; if it swipes off her level, small bar drops at both within "
-                 "about 124"),
+          expect="by the stab boxes (reach's), no hit at a pig (the search picks one 60 below from 151) and stars "
+                 "at Orange Mushrooms from 113; by the swings' boxes, small bar drops at both within about 124"),
     Probe("hanging-wall", "a level line or a line to the feet, down past her own block's hanging wall", 14, 730.0,
           RIGHT, (17,), ("pig", "orange-mushroom", "slime"), (180, 360), walls=False, source="terrain 3",
           expect="by the level line hits at every distance; by a line to the feet none from 198 units on (from x 730 "
@@ -639,8 +643,9 @@ def _rise(row: dict) -> float:
 def _key(row: dict, e: dict, body: dict[str, MobBody], top0: float | None = None, floor0: float | None = None,
          air: str = "area", ramp: bool = False) -> tuple | None:
     """Where monster `e` comes in the order the throw's attack takes them (the least first), or None if it
-    can't take it, terrain aside: from the ground the claw (on her level) then the search's bands (`top0`,
-    `floor0`: the first window's edges; with `ramp`, none below her closer by its middle than the old ramp,
+    can't take it, terrain aside: from the ground the claw (if a stance's box reaches it: reach.claw_chance)
+    then the search's bands, the nearest first within one (as reach.ground_pick; `top0`, `floor0`: the first
+    window's edges; with `ramp`, none below her closer by its middle than the old ramp,
     reach.ramp_dx); from a jump (`air`) the area ("area", reach.in_area), or the search from as high as she is
     then ("search"), or from the ground she jumped from ("ground"). Bodies as the fight goes by them
     (fight._in_path)."""
@@ -648,8 +653,8 @@ def _key(row: dict, e: dict, body: dict[str, MobBody], top0: float | None = None
     ahead, dy = (e["x"] - x) * directions.sign(row["side"]), e["y"] - y
     top, half = reach.body_of(e["kind"], body)
     if row["gap_ms"] is None:
-        if reach.claw_takes(ahead, dy, top, half):
-            return 0, abs(ahead)
+        if reach.claw_chance(ahead, dy, top, half) > 0:
+            return 0, math.hypot(ahead, dy)
         if ramp and abs(ahead) < reach.ramp_dx(dy):
             return None
         k = reach.search_band(*reach.body_box(ahead, dy, top, half), top0=top0, floor0=floor0)
@@ -780,7 +785,7 @@ def ground(rows: list[dict]) -> list[dict]:
 
 def fit_top0(rows: list[dict], model: MapModel) -> Fit:
     """The search window's top (SEARCH_TOP0) fitted to the throws from the ground (the rule's walls kept)."""
-    body, grid = bodies(model), sorted(set(TOP0_GRID) | {reach.SEARCH_TOP0, MEOWDB_TOP0})
+    body, grid = bodies(model), sorted(set(TOP0_GRID) | {reach.SEARCH_TOP0, LOGS_TOP0})
     return _fit("SEARCH_TOP0", ground(rows), grid, lambda v: lambda r: taken(r, model, body, top0=v))
 
 
@@ -915,7 +920,7 @@ def score(rows: list[dict], model: MapModel) -> str:
     lines.append("By the target's kind and how far off it was at the pick (20-unit bins, middle to middle):")
     lines += _table(rows, lambda r: (r["probe"], r["style"], r["target"]["kind"], _bin(r)))
     lines.append("The search's window, from the throws from the ground:")
-    lines.append("  " + _fit_text(fit_top0(rows, model), reach.SEARCH_TOP0, ("meowdb's", MEOWDB_TOP0)))
+    lines.append("  " + _fit_text(fit_top0(rows, model), reach.SEARCH_TOP0, ("the logs' fit", LOGS_TOP0)))
     lines.append("  " + _fit_text(fit_floor0(rows, model), reach.SEARCH_FLOOR0))
     if under := below(rows):
         lines.append(f"Between her level and 60 below her, from {len(under)} throws (log-likelihood; reach.RAMP_BELOW "

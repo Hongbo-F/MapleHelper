@@ -7,7 +7,7 @@ After each look, the first rule that applies decides (the design's numbering; at
 in the order listed, 6 before 3):
 
    1  close quarters   a target on her platform the claw would swipe (stance.close_to, by its size: a pig
-                       within 136, a snail within 121): stance's answer (jump back, jump-throw, step back)
+                       within 111, a snail within 96): stance's answer (jump back, jump-throw, step back)
    2  high ground      on a platform she can't safely stand on, with a spot that reaches her ground: back up;
                        also back to the spot from any other platform (after a pile there), unless the
                        ground is in reach from it or she's leaving

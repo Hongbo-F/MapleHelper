@@ -42,11 +42,13 @@ on the world's 5 ms tick:
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
   whether its damage shows when it gets there isn't measured, so the shot log allows for both:
-  behavior.fight.LANDS_FROM_S). On the ground, the nearest monster on her level (reach.LEVEL) whose body
-  reaches into the claw's swing (reach.CLAW_FAR ahead of her, reach.CLAW_DOWN below to reach.CLAW_UP
-  above her feet) is swiped (a fifth of a star's damage); else the star's search picks (reach.search_band:
-  of the monsters whose body overlaps one of its bands, the first band's, the nearest of those), so off
-  her level a star needs room sideways, by the monster's body (right under or over her, none is hit).
+  behavior.fight.LANDS_FROM_S). On the ground the attack takes one of the claw's stances
+  (reach.CLAW_STANCES, drawn per attack, seeded), and the nearest monster (by distance, feet to feet) whose
+  body reaches into its box (reach.claw_takes: cut to reach.CLAW_FAR ahead of her, on her level or not) is
+  swiped (a fifth of a star's damage); else the star's search picks (reach.search_band: of the monsters
+  whose body overlaps one of its bands, the first band's, one of those drawn at random, seeded, as the
+  client's order there, by when each entered the map, can't be seen), so off her level a star needs room
+  sideways, by the monster's body (right under or over her, none is hit).
   In the air, the nearest whose body reaches into the attack's area (its near side within
   reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is
   then) takes a star. For all of these, bodies are their kind's half width either side and as tall as
@@ -1059,11 +1061,11 @@ class World:
         pigs 60 below were hit. The attack and the frames don't agree there yet (README: Found offline)."""
         return max(m.height, m.flinch_top) if self.flinching(m) else m.height
 
-    def nearest_in(self, facing: str, far: float, down: float, up: float, level: bool = False) -> SimMonster | None:
+    def nearest_in(self, facing: str, far: float, down: float, up: float) -> SimMonster | None:
         """The live monster nearest her whose body reaches into a box on her `facing` side, from her to
-        `far` ahead and `down` below to `up` above her feet (reach.reaches_into); with `level`, only one
-        on her level (reach.LEVEL: the claw's swing, as reach.claw_takes). Not one behind a wall of the
-        foothold group she last stood on (reach.wall_between, from her height now)."""
+        `far` ahead and `down` below to `up` above her feet (reach.reaches_into): the attack's area from a
+        jump. Not one behind a wall of the foothold group she last stood on (reach.wall_between, from her
+        height now)."""
         t, d, best = self.t, directions.sign(facing), None
         for m in self.monsters:
             if not m.alive:
@@ -1072,19 +1074,36 @@ class World:
             ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
             if not reach.reaches_into(ahead, dy, self.top(m), m.half, far, down, up):
                 continue
-            if level and abs(dy) > reach.LEVEL:
-                continue
             if reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
                 continue
             if best is None or abs(ahead) < best[0]:
                 best = (abs(ahead), m)
         return None if best is None else best[1]
 
-    def nearest_star(self, facing: str) -> SimMonster | None:
-        """The live monster the star's search from the ground picks on her `facing` side: of those whose
-        body overlaps one of its bands (reach.search_band), the first band's, the nearest of those. Not
-        one behind a wall of the foothold group she last stood on (reach.wall_between)."""
+    def swiped(self, facing: str, stance: str) -> SimMonster | None:
+        """The live monster the claw's `stance` swipes on her `facing` side: the nearest her (by distance,
+        feet to feet, as the client has it) whose body reaches into the stance's box (reach.claw_takes), on
+        her level or not. Not one behind a wall of the foothold group she last stood on (reach.wall_between)."""
         t, d, best = self.t, directions.sign(facing), None
+        for m in self.monsters:
+            if not m.alive:
+                continue
+            mx = m.at(t)
+            ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
+            if not reach.claw_takes(ahead, dy, self.top(m), m.half, stance):
+                continue
+            if reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
+                continue
+            if best is None or math.hypot(ahead, dy) < best[0]:
+                best = (math.hypot(ahead, dy), m)
+        return None if best is None else best[1]
+
+    def search_pick(self, facing: str) -> SimMonster | None:
+        """The live monster the star's search from the ground picks on her `facing` side: of those whose
+        body overlaps one of its bands (reach.search_band), the first band's; of those, one drawn at random
+        (seeded, per attack), as the client takes the one that entered the map first, which nothing tells.
+        Not one behind a wall of the foothold group she last stood on (reach.wall_between)."""
+        t, d, band, first = self.t, directions.sign(facing), None, []
         for m in self.monsters:
             if not m.alive:
                 continue
@@ -1093,21 +1112,27 @@ class World:
             k = reach.search_band(*reach.body_box(ahead, m.y(mx) - self.y, self.top(m), m.half))
             if k is None or reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
                 continue
-            if best is None or (k, abs(ahead)) < best[0]:
-                best = ((k, abs(ahead)), m)
-        return None if best is None else best[1]
+            if band is None or k < band:
+                band, first = k, [m]
+            elif k == band:
+                first.append(m)
+        if len(first) > 1:
+            return first[int(self.chance("band") * len(first))]
+        return first[0] if first else None
 
     def _aim(self, key_ms: int) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
-        lands STAR_DELAY after the key (_attack). On the ground, the claw swipes the nearest monster on her
-        level its swing reaches; else the star's search picks (nearest_star). In the air, the nearest in
-        the attack's area takes the star."""
+        lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
+        seeded: reach.CLAW_STANCES), and the claw swipes the nearest monster that stance's box reaches
+        (swiped); else the star's search picks (search_pick). In the air, the nearest in the attack's area
+        takes the star."""
         self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
         if self.mode == "ground":
-            target = self.nearest_in(self.facing, reach.CLAW_FAR, reach.CLAW_DOWN, reach.CLAW_UP, level=True)
+            stances = reach.CLAW_STANCES
+            target = self.swiped(self.facing, stances[int(self.chance("stance") * len(stances))])
             swipe = target is not None
             if target is None:
-                target = self.nearest_star(self.facing)
+                target = self.search_pick(self.facing)
         else:
             target = self.nearest_in(self.facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP)
             swipe = False

@@ -124,18 +124,19 @@ def _rows(trace: dict) -> list[dict]:
 
 @REAL
 def test_the_scorer_finds_the_window_top_the_world_has(monkeypatch):
-    # From 13 at a lone pig on 12, 60 above her, 110-200 off: with the window's top at 21 the star picks it
-    # only from 191, with meowdb's 44 from 111. Each world's log fits its own top and rules out the other. With
-    # no hit at all the fit would be flat down to 0, not bounding the top from below (the scenario expects one).
+    # From 13 at a lone pig on 12, 60 above her, 110-200 off: with the client's top (44, reach's) the star picks
+    # it from 111, with the logs' lower one (21) only from 191. Each world's log fits its own top and rules out
+    # the other. With no hit at all the fit would be flat down to 0, not bounding the top from below (on seed 1
+    # the lower top's world has one).
     model = scenarios.real_map()
     rows = _rows(scenarios.run("probe_top"))
-    low = probe.fit_top0(rows, model)
-    assert low.holds(21) and not low.holds(44) and low.fits[0] >= 16 and low.fits[1] <= 30
-    assert "SEARCH_TOP0: fits" in probe.score(rows, model)
-    monkeypatch.setattr(reach, "SEARCH_TOP0", 44)
-    high = probe.fit_top0(_rows(scenarios.run("probe_top")), model)
-    monkeypatch.undo()
+    high = probe.fit_top0(rows, model)
     assert high.holds(44) and not high.holds(21) and high.fits[0] >= 35
+    assert "SEARCH_TOP0: fits" in probe.score(rows, model) and "the logs' fit 21" in probe.score(rows, model)
+    monkeypatch.setattr(reach, "SEARCH_TOP0", probe.LOGS_TOP0)
+    low = probe.fit_top0(_rows(scenarios.run("probe_top")), model)
+    monkeypatch.undo()
+    assert low.holds(21) and not low.holds(44) and low.fits[0] >= 16 and low.fits[1] <= 30
 
 
 @REAL
@@ -227,10 +228,10 @@ def test_the_scorer_tells_the_search_from_the_old_ramp_42_below_her(monkeypatch)
 @REAL
 def test_the_scorer_tells_the_claw_s_swipes_from_stars_by_the_bar_they_take():
     # On 21 at a lone pig, then a lone slime, walking at her 95-160 off: the world's claw swipes a body that reaches
-    # into its 90 units, a pig out to 124 by its middle and a slime to 118, for a fifth of a star's damage (a pig's
-    # bar by 7%, a slime's by 10%); stars from there. Down at 4, 60 below her, the world's claw (on her level only)
-    # swipes nothing.
-    for kind, edge in (("Pig", 124), ("Slime", 118.5)):
+    # into its stance's box (65 ahead of her), a pig out to 99 by its middle and a slime to 93.5, for a fifth of a
+    # star's damage (a pig's bar by 7%, a slime's by 10%); stars from there. Down at 4, 60 below her, the world's
+    # claw (its boxes 15-30 above her feet) swipes nothing.
+    for kind, edge in (("Pig", 99.5), ("Slime", 93.5)):
         table = probe.claw_table(_probe_run("claw-edge", (21, -225.0), [(kind, 21, -90.0)]))
         claw = [lo for (_, _, dy, lo), g in table.items() if g["claw"]]
         star = [lo for (_, _, dy, lo), g in table.items() if g["star"]]  # a kill can be either
@@ -244,12 +245,11 @@ def test_the_scorer_tells_the_claw_s_swipes_from_stars_by_the_bar_they_take():
 @REAL
 def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     # The game's hit monsters hide under their damage numbers for 1-3 s: the evidence waits up to
-    # HIDDEN_MAX_S for the target to show again. With meowdb's top in the world, a star picks the pig from 111
-    # units off: none of the throws its attack took may be read as a miss (seen again with its bar unchanged),
-    # and most are read as hits (19 of the 30; 22 with pigs walking 70 units/s, not the game data's 125). Throws
-    # at a pig that walked out of the search's window by the pick (two 128-129 off that walked to 105) the world's
-    # star missed, and so they're read.
-    monkeypatch.setattr(reach, "SEARCH_TOP0", 44)
+    # HIDDEN_MAX_S for the target to show again. With the client's top in the world (reach's), a star picks the
+    # pig from 111 units off: none of the throws its attack took may be read as a miss (seen again with its bar
+    # unchanged), and most are read as hits (19 of the 30; 22 with pigs walking 70 units/s, not the game data's
+    # 125). Throws at a pig that walked out of the search's window by the pick (two 128-129 off that walked to
+    # 105) the world's star missed, and so they're read.
     sc = dataclasses.replace(scenarios.SCENARIOS["probe_top"], noise=Noise(hit_hidden=(1.0, 3.0)))
     trace = scenarios.run_scenario(sc)
     model = scenarios.real_map()

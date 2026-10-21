@@ -417,13 +417,14 @@ def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], g
 def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None = None,
              body: dict[str, MobBody] | None = None, flinching: list[Monster] = ()) -> list[Monster]:
     """Everything in a star's path that way, whatever its kind: a snail in front of a far pig takes the
-    star (and its EXP isn't the pig's kill). From the ground, what the claw's swing or the star's search
-    can pick (reach.ground_pick, by each kind's body walking: reach.body_of, half its width from `body`,
-    the map's game data): on her platform and off it, a monster off her level only as close as the
-    search picks it. From a jump (the attack keyed `gap_ms` after the jump key), what the attack's area
-    takes in from as high as she is when it picks its target (reach.in_area, by how tall each kind is at
-    least, `body`'s top): monsters on the platform above too, as far as a star reaches, but none that
-    stays under its floor (a snail beside her: an EXP gain then came from one of those above). Those of
+    star (and its EXP isn't the pig's kill). From the ground, what the claw or the star's search can pick
+    (reach.ground_pick, by each kind's body walking: reach.body_of, half its width from `body`, the map's
+    game data): on her platform and off it, a monster off her level only as close as the search picks it,
+    and every monster in a band, as the client's order within one can't be seen. From a jump (the attack
+    keyed `gap_ms` after the jump key), what the attack's area takes in from as high as she is when it
+    picks its target (reach.in_area, by how tall each kind is at least, `body`'s top): monsters on the
+    platform above too, as far as a star reaches, but none that stays under its floor (a snail beside
+    her: an EXP gain then came from one of those above). Those of
     `flinching` (hit lately, FightState.just_hit) as tall as they flinch (`body`'s flinch_top): a pig 60
     below her is picked from 111 units then, from 151 walking. None behind a wall of her foothold group
     (reach.wall_to: from 4, those on 2)."""

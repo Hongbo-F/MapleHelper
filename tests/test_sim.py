@@ -475,8 +475,9 @@ def test_the_ground_attack_swipes_what_the_claw_reaches(model):
     w.advance(1.0)
     assert w.monsters[0].hp == pytest.approx(3 - world_mod.CLAW) and w.monsters[1].hp == 3
     assert any("claw swipe hits pig #0" in line for line in w.log)
-    # The swing reaches 90 ahead of her, into a pig's body (34 either side) up to 124 off: a star beyond.
-    for x, swiped in ((420.0, True), (430.0, False)):
+    # Either stab stance reaches 65 ahead of her, into a pig's body (34 either side) up to 99 off: a star
+    # beyond.
+    for x, swiped in ((395.0, True), (405.0, False)):
         w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, x)], facing="right"))
         tap(w, 0.0, "f", 0.04)
         w.advance(1.0)
@@ -535,7 +536,7 @@ def test_a_star_hits_the_first_monster_in_its_path_but_passes_one_right_under_he
 def test_the_star_search_picks_by_body(model):
     # A (y 300) is 60 above B (y 360). From A a pig on B is picked from 151 units sideways (walking, 46 tall:
     # its far side in the band whose window takes it in), an Orange Mushroom from 113; from B, a pig up on A
-    # from 191.
+    # from 111.
     a, b, c = plat(model, 300, 100), plat(model, 360, 300), plat(model, 500, 400)
 
     def throw(w):
@@ -546,11 +547,26 @@ def test_the_star_search_picks_by_body(model):
     for x, hp in ((330.0, 3), (355.0, 2)):  # 140 and 165 along
         assert throw(still(world(model, a.id, 190.0, monsters=[("Pig", b.id, x)], facing="right"))) == hp, x
     assert throw(still(world(model, a.id, 190.0, monsters=[("Orange Mushroom", b.id, 310.0)], facing="right"))) == 2
-    for her, hp in ((346.0, 3), (366.0, 2)):  # 180 and 200 along
+    for her, hp in ((266.0, 3), (286.0, 2)):  # 100 and 120 along
         assert throw(still(world(model, b.id, her, monsters=[("Pig", a.id, 166.0)], facing="left"))) == hp, her
     # On her level, out to 400 to its near side: a pig 430 along (its near side 396) is hit, one 440 along isn't.
     for x, hp in ((530.0, 2), (540.0, 3)):
         assert throw(still(world(model, c.id, 100.0, monsters=[("Pig", c.id, x)], facing="right"))) == hp, x
+
+
+def test_the_star_goes_to_any_monster_of_the_searchs_first_band(model):
+    # Two pigs 200 and 210 along, both in band 5 (their near sides 165 and 175 ahead): the client takes the one
+    # that entered the map first, which nothing tells, so the world draws one per attack (seeded). Over a
+    # dozen seeds each takes some of the stars; a third one, 300 along (band 10), never does.
+    c = plat(model, 500, 400)
+    hit = set()
+    for seed in range(1, 13):
+        w = still(world(model, c.id, 100.0, monsters=[("Pig", c.id, 300.0), ("Pig", c.id, 310.0),
+                                                      ("Pig", c.id, 400.0)], facing="right", seed=seed))
+        tap(w, 0.0, "f", 0.04)
+        w.advance(1.0)
+        hit |= {i for i, m in enumerate(w.monsters) if m.hp < m.hp_max}
+    assert hit == {0, 1}
 
 
 def test_a_flinching_pig_below_is_picked_closer(model):

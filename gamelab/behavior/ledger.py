@@ -2,9 +2,11 @@
 throw (Actions.throw_listeners): the kill ledger and the drop store.
 
 - **The ledger** (`Ledger`): every EXP gain the hunter sees (at most one a look: her EXP number only says
-  it changed) is a kill. It's placed (kind, platform, where) when a star of hers explains it: the first
-  monster in the path of a throw made in the last STAR_WINDOW s (or, with none, that long before the look
-  before, as the gain came after it), preferring one that's gone from view.
+  it changed) is a kill. It's placed (kind, platform, where) when a star of hers explains it: a monster
+  that can have taken the attack of a throw made in the last STAR_WINDOW s (or, with none, that long before
+  the look before, as the gain came after it; any of them: which of the claw's stances an attack takes is
+  drawn, and the client's order within a band of the star's search can't be seen), preferring one that's
+  gone from view, the newest throw's and the likeliest first.
   A gain no throw explains (party EXP, or a kill seen only from a look without monsters) still counts,
   credited to where she is, but has no place and so no drops.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
@@ -55,7 +57,8 @@ class Kill:
 class _Throw:
     t: float                  # when its attack key went down
     side: str
-    path: list[Monster]       # what was in its path then, nearest first (from the last look with monsters)
+    path: list[Monster]       # what can have taken its attack then, the likeliest first (from the last look
+                              # with monsters)
 
 
 class Ledger:
@@ -93,15 +96,16 @@ class Ledger:
             self._last = s
 
     def _place(self, s: Scene) -> Kill:
-        """The kill a gain seen in look `s` was: the first monster in the path of a throw made in the last
-        STAR_WINDOW s, preferring one not seen any more (the newest throw first); with none, of a throw made
-        up to STAR_WINDOW s before the look before, which the gain came after; else unplaced. A fight's last
-        star often lands after its last look, and the walks and pick-ups of the sweep after it take no look
-        for up to 7 s: in the simulator, 2 of tour_hunt_basin's 61 kills went unplaced that way, and 9 of 58
-        once its monsters walked as fast as in the game. Going back that far for every gain placed more
-        kills on the wrong monster (458 of 612 right in 10 scenarios, against 437 of 628)."""
+        """The kill a gain seen in look `s` was: a monster that can have taken the attack of a throw made in
+        the last STAR_WINDOW s (its path), preferring one not seen any more (the newest throw first, the
+        likeliest of its path first); with none, of a throw made up to STAR_WINDOW s before the look before,
+        which the gain came after; else unplaced. A fight's last star often lands after its last look, and the
+        walks and pick-ups of the sweep after it take no look for up to 7 s: in the simulator, 2 of
+        tour_hunt_basin's 61 kills went unplaced that way, and 9 of 58 once its monsters walked as fast as in
+        the game. Going back that far for every gain placed more kills on the wrong monster (458 of 612 right
+        in 10 scenarios, against 437 of 628)."""
         recent = [th for th in self._throws if s.t - th.t <= STAR_WINDOW and th.path]
-        firsts = [(th, th.path[0]) for th in reversed(recent or self._throws) if th.path]
+        firsts = [(th, m) for th in reversed(recent or self._throws) for m in th.path]
         if s.searched:
             gone = [(th, m) for th, m in firsts if not any(same(o, m) for o in s.monsters)]
             firsts = gone or firsts
@@ -118,18 +122,14 @@ class Ledger:
 
 
 def in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:
-    """The monsters an attack from the ground that way from where she stands in look `s` can take, in the
-    order it takes them (attack.reach.ground_pick, by each kind's body: the claw's swing on her level
-    first, then the star's search, its first band first, the nearest in it), and none behind a wall of
-    her foothold group (a kill after a throw from 4 isn't put on a monster on 2)."""
+    """The monsters an attack from the ground that way from where she stands in look `s` can take, the
+    likeliest first (attack.reach.take_chances, by each kind's body: the nearest the claw's stance reaches,
+    else the star's search's first band, any monster in it), and none behind a wall of her foothold group
+    (a kill after a throw from 4 isn't put on a monster on 2)."""
     x, y = s.where.x, s.where.y
-    out = []
-    for m in monsters:
-        if (m.x > x) == (side == RIGHT) and reach.wall_to(s.platform, x, y, m) is None:
-            order = reach.ground_pick(abs(m.x - x), m.y - y, *reach.body_of(m.kind))
-            if order is not None:
-                out.append((order, m))
-    return [m for _, m in sorted(out, key=lambda om: om[0])]
+    ahead = [m for m in monsters if (m.x > x) == (side == RIGHT) and reach.wall_to(s.platform, x, y, m) is None]
+    chances = reach.take_chances([(abs(m.x - x), m.y - y, *reach.body_of(m.kind)) for m in ahead])
+    return [m for c, m in sorted(zip(chances, ahead), key=lambda cm: -cm[0]) if c > 0]
 
 
 @dataclass
