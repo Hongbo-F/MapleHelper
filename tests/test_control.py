@@ -2,11 +2,12 @@
 
 from types import SimpleNamespace
 
+import pytest
 from maplehelper.engine import RIGHT
 
 from gamelab.control.actions import STAR_DELAY_MS, Actions
 from gamelab.motion.flow import JUMP_LAG
-from gamelab.motion.physics import LAGS, air_time
+from gamelab.motion.physics import JUMP_ATTACK_MS, LAGS, air_time
 
 
 def actions(sent: list) -> Actions:
@@ -77,6 +78,33 @@ def test_a_plan_with_a_jump_waits_out_the_attack_lock_and_one_without_doesnt(mon
     a.hold_back([[0, "right", "down"], [400, "right", "up"]])        # no jump: nothing to wait for
     a.hold_back([[0, "right", "down"], [600, "alt", "down"]])        # its jump comes after the lock anyway
     assert slept == [0.3]
+
+
+def test_a_plans_first_arrow_waits_until_her_attack_stops_swallowing_arrows(monkeypatch):
+    """An arrow pressed within about 0.55 s of an attack's key doesn't move her (in game on 2026-10-21: chains
+    sent about 0.3 s after a throw's key stood still), so a plan's first arrow goes down ARROW_LOCK_MS (0.6 s)
+    after the last attack key at the soonest: an arrow-first plan 0.3 s after a throw waits 0.3 s. Jumps and
+    attacks still wait for the attack lock, as before."""
+    from gamelab.control import actions as actions_mod
+    from maplehelper.game import COMBAT
+    now, slept = [100.0], []
+    monkeypatch.setattr(actions_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(actions_mod.time, "sleep", lambda s: slept.append(round(s, 3)))
+    a = actions([])
+    a.facing = RIGHT
+    a.throw(RIGHT)  # no turn: the attack key goes down as the plan starts, at 100.0
+    assert a.arrow_until == pytest.approx(100.0 + actions_mod.ARROW_LOCK_MS / 1000) == pytest.approx(100.6)
+    now[0] = 100.3
+    a.hold_back([[0, "left", "down"], [500, "left", "up"]])                   # waits until 0.6 s after the key
+    a.hold_back([[0, "z", "down"], [40, "z", "up"], [300, "left", "down"]])  # its arrow is 0.6 s after it anyway
+    a.hold_back([[0, "alt", "down"], [40, "alt", "up"]])                      # a jump: the attack lock, as before
+    lock = (COMBAT.attack_lock_ms + actions_mod.THROW_LOCK_EXTRA_MS) / 1000
+    assert slept == [0.3, round(100.0 + lock - 100.3, 3)]
+    # A jump back's and a jump throw's attack keys come into the plan: the arrows wait from there.
+    for method, key_ms in (("jump_back", actions_mod.JB_THROW_MS), ("jump_throw", JUMP_ATTACK_MS)):
+        now[0] = 200.0
+        getattr(a, method)(RIGHT)
+        assert a.arrow_until == pytest.approx(200.0 + (key_ms + actions_mod.ARROW_LOCK_MS) / 1000), method
 
 
 def test_the_movers_walks_press_pick_up_as_every_walk_does():

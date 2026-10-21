@@ -131,6 +131,17 @@ HER_HEIGHT = 55.0
 JUMP_TAKEN_LATE = False
 STAR_DELAY = STAR_DELAY_MS / 1000
 ATTACK_LOCK = COMBAT.attack_lock_ms / 1000
+# An arrow pressed while her attack plays doesn't move her (Realism.lock_arrows). In game on 2026-10-21, of 13
+# chains sent within 0.35 s of the look after a throw (their first arrow about 0.3 s after its attack key), 6
+# first moved her 0.73-0.92 s after they went out, about 1.0 s after the key, with the arrow still held; and 2
+# never did, a step let go before then (two walk-offs off platform 3's left end onto 4, the arrow held 0.48-0.52 s
+# from about 0.3 s after the key: her dot never moved, and the walk-off sent again 0.9 s later went). Arrows
+# pressed 0.575 and 0.66 s after the key moved her at once.
+# So an arrow pressed (as it goes out) less than ARROW_LOCK after the key of an attack the game took is seen
+# ARROW_HELD after that key, if it's still held then, and else never. Arrows pressed before the key and held
+# through it aren't measured (no plan does that): they move her as ever.
+ARROW_LOCK = 0.55
+ARROW_HELD = 1.0
 # Her HP: her HP bar read "HP[642/642]" in game (2026-10-18, at level 19; maplehelper.ocr.parse's test).
 MAX_HP = 642.0
 # A touch takes TOUCH_SHARE of the monster's touch damage (PADamage in the game data: snail 3, slime 13,
@@ -253,15 +264,17 @@ class Realism:
     """How busy and how hard the map is. The defaults are the simulator's own world (every spawn point
     filled, an 8 s respawn, nobody else hunting, endless potions), which is denser and easier than the
     game: tour_run makes about 143 EXP a minute where a sweep in game made about 76. The other values are
-    knobs for comparing policies in a world closer to the game's; none of them is measured."""
+    knobs for comparing policies in a world closer to the game's; none of them is measured but lock_arrows."""
     respawn: float = RESPAWN     # s from a kill until the monster is back at its spawn point
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
     rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)
     rival_owns: float = 15.0     # s a rival's drops can't be picked up by her
     rival_takes: float = 20.0    # s after landing that a rival picks up its own drops
     potions: int | None = None   # potions she has (None: endless)
-    lock_arrows: bool = False    # arrows don't move her during the attack lock (unmeasured in game;
-                                 # Actions.walk waits the lock out, the default world lets her walk)
+    lock_arrows: bool = False    # an arrow pressed within ARROW_LOCK of an attack's key moves her only from
+                                 # ARROW_HELD after it, if still held (as measured in game on 2026-10-21;
+                                 # control.actions holds a plan's first arrow back for it). Preset game and
+                                 # the noisy scenarios have it; the default world lets her walk at once
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -561,6 +574,7 @@ class World:
         self.mp = 1.0
         self.exp = 0
         self.attack_lock_ms = -10_000
+        self.attack_key_at = -10_000.0  # when the key of the last attack the game took went out (clock time)
         self.invulnerable_ms = -10_000
         self.inventory_full = inventory_full
         self.kills: dict[str, int] = {}
@@ -699,6 +713,12 @@ class World:
                 self._released(action, self._sent(e), self.held.pop(action))
         elif e.kind == "seen":
             self._seen(*e.data)
+        elif e.kind == "unlock":
+            action, since = e.data
+            if self.held.get(action) == since:  # the press swallowed by her attack, still held: seen now
+                self.note(f"{action} still held: seen now")
+                self._seen_due[action] = max(self.ms, self._seen_due.get(action, -10_000))
+                self._seen(action, True)
         elif e.kind == "liftoff":
             self._liftoff(e.data)
         elif e.kind == "drop":
@@ -776,6 +796,11 @@ class World:
     def _pressed(self, action: str, at: float) -> None:
         ground = self.mode == "ground"
         if action in ("left", "right"):
+            if self.realism.lock_arrows and at - self.attack_key_at < ARROW_LOCK - 1e-9:
+                # Pressed while her attack plays: seen only ARROW_HELD after its key, if still held then.
+                self.note(f"{action} pressed {at - self.attack_key_at:.2f} s after the attack's key: swallowed")
+                self._push(self.ms_of(self.attack_key_at + ARROW_HELD), "unlock", (action, at))
+                return
             self._seen_later(action, True, at, self._lag(action, LAGS.on, LAGS.sd_on))
         elif action == "jump":
             if self.ms < self.attack_lock_ms:
@@ -797,6 +822,7 @@ class World:
             if self.ms < self.attack_lock_ms or self.mode == "rope":
                 return
             self.attack_lock_ms = self.ms + int(ATTACK_LOCK * 1000)
+            self.attack_key_at = at
             self.sitting = False
             self._push(self.ms_of(at + JUMP_LAG), "aim", self.ms)  # it starts then (_aim)
         elif action == "up":
@@ -849,8 +875,7 @@ class World:
         if "down" in self.held and self._grab_from_top():
             return
         lying = "down" in self.held or self.sitting
-        locked = self.realism.lock_arrows and self.ms < self.attack_lock_ms
-        d = 0 if lying or locked or self.ms < self.still_ms else self.arrow()
+        d = 0 if lying or self.ms < self.still_ms else self.arrow()
         if not d and not self.vx:
             return
         v, dx = body.ground_step(self.vx, d, SHOE, dt)

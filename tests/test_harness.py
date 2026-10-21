@@ -92,7 +92,7 @@ def test_another_player_kills_monsters_and_its_drops_are_not_hers_for_a_while(mo
     assert d.gone and d.taken_by == "rival"  # the rival picked it up
 
 
-def test_potions_run_out_and_arrows_can_be_locked_during_an_attack(model):
+def test_potions_run_out_and_arrows_can_be_swallowed_after_an_attack(model):
     c = plat(model, 500, 400)
     w = world(model, c.id, 100.0, hp=0.2, realism=Realism(potions=1))
     tap(w, 0.0, "r", 0.04)
@@ -102,9 +102,10 @@ def test_potions_run_out_and_arrows_can_be_locked_during_an_attack(model):
     for lock, moved in ((False, True), (True, False)):
         w = world(model, c.id, 100.0, realism=Realism(lock_arrows=lock))
         tap(w, 0.0, "f", 0.04)
-        tap(w, 0.1, "right", 0.4)  # inside the 730 ms lock
-        w.advance(0.7)
+        tap(w, 0.1, "right", 0.4)  # pressed 0.1 s after the attack's key, let go before 1.0 s: swallowed
+        w.advance(2.0)
         assert (w.x > 110) == moved
+    assert harness.PRESETS["game"][1].lock_arrows and not harness.PRESETS["plain"][1].lock_arrows
 
 
 def test_the_knobs_are_off_by_default_and_spawn_share_thins_the_monsters():

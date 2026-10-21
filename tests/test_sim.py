@@ -206,6 +206,32 @@ def test_landing_while_an_attack_plays_stops_her(model):
     assert stopped.x == at2 and at2 == pytest.approx(at, abs=0.01)
 
 
+def test_an_arrow_pressed_right_after_an_attack_moves_her_only_once_it_stops_swallowing_it(model):
+    """In game (2026-10-21) an arrow pressed within about 0.55 s of an attack's key didn't move her: still
+    held, she set off about 1.0 s after the key, and let go before then she didn't move at all; pressed
+    0.575 s after the key, it moved her at once (world.ARROW_LOCK, ARROW_HELD; Realism.lock_arrows)."""
+    from gamelab.sim.world import ARROW_HELD, Realism
+    c = plat(model, 500, 400)
+
+    def walk(lock: bool, press: float, hold: float, until: float) -> float:
+        w = world(model, c.id, 100.0, realism=Realism(lock_arrows=lock))
+        tap(w, 0.0, "f", 0.04)
+        tap(w, press, "right", hold)
+        w.advance(until)
+        return w.x - 100.0
+
+    assert walk(True, 0.3, 1.0, ARROW_HELD) == 0 and walk(True, 0.3, 1.0, 1.3) > 15  # still held: from 1.0 s
+    assert walk(True, 0.3, 0.5, 2.0) == 0                                          # let go before: nothing
+    assert walk(True, 0.6, 0.3, 0.75) > 0                                           # pressed after: at once
+    assert walk(False, 0.3, 0.3, 0.45) > 0                                          # the default world: at once
+    w = world(model, c.id, 100.0, realism=Realism(lock_arrows=True))
+    w.attack_lock_ms = 10_000  # an attack key the game doesn't take (inside the lock) swallows nothing
+    tap(w, 0.0, "f", 0.04)
+    tap(w, 0.3, "right", 0.3)
+    w.advance(0.45)
+    assert w.x > 100.0
+
+
 def test_a_jump_back_leaves_at_full_speed_and_lands_about_90_units_away(model):
     # control.actions' key plan, on the engine with the lags spread as measured: keyed 130 ms after the arrow
     # the jump is past the kick's blind spot (at 80 ms, 29% left below 140 and landed 68-89 units away).
@@ -1157,6 +1183,19 @@ def test_real_map_scenarios_show_what_they_are_there_for(name):
 
 
 @REAL
+def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_move_her(monkeypatch):
+    """nav_walk_off_after_kill with no wait for her attack to stop swallowing arrows (actions.ARROW_LOCK_MS 0):
+    the walk-off goes 0.34 s after her last throw's key, she stays on 3 as in game, and only the walk-off sent
+    again once she's seen there lands."""
+    from gamelab.control import actions
+    monkeypatch.setattr(actions, "ARROW_LOCK_MS", 0)
+    trace = scenarios.run("nav_walk_off_after_kill")
+    assert set(scenarios.unmet(trace)) == {"the walk-off right after the kill lands",
+                                           "no log line says 'instead of platform 4'"}
+    assert trace["result"]["moves"] == ["walk_off 3->4: landed on 3", "walk_off 3->4: landed on 4"]
+
+
+@REAL
 def test_a_real_map_scenario_is_deterministic():
     assert scenarios.run("nav_monsters_long_way") == scenarios.run("nav_monsters_long_way")
 
@@ -1193,9 +1232,9 @@ def test_a_telemetry_failure_stops_recording_not_the_run():
     assert recorded == plain
 
 
-def _stepped_go(self, dst, x=None, seconds=180, max_misses=6, until=None, *, mode=None):
+def _stepped_go(self, dst, x=None, seconds=180, max_misses=6, until=None, *, mode=None, scene=None):
     """Navigator.go written out as the hunt loop drives a trip: begin(), then step() until it's over."""
-    st = self.begin(dst, x, seconds, max_misses, until, mode=mode)
+    st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene)
     while (trip := self.step(st)) is None:
         pass
     return trip

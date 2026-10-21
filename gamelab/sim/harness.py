@@ -47,12 +47,13 @@ START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12
             (24, 120.0), (4, 450.0), (1, 1200.0)]  # where seed k starts: START_AT[k % len]
 # Worlds to compare in. "plain" is the simulator's own (every spawn filled, 8 s respawns, nobody else,
 # perfect eyes). "game" adds the game's errors and a less crowded, contested map; its values are guesses
-# (nothing about respawns, other players or potions is measured), chosen to be harder than "plain".
+# (nothing about respawns, other players or potions is measured), chosen to be harder than "plain"; and arrows
+# pressed right after an attack's key swallowed, as measured in game (world.ARROW_LOCK).
 PRESETS = {
     "plain": (Noise(), Realism()),
     "game": (Noise(miss=0.275, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, hit_hidden=(1.0, 3.0),
                    detect_miss=0.1),
-             Realism(spawn_share=0.6, rival_every=25.0, potions=60)),
+             Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True)),
 }
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as

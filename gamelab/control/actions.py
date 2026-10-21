@@ -26,6 +26,13 @@ TURN_SETTLE_MS = 30  # after the arrow tap that turns her, before the next key
 # next attack: after a throw, and after a jump throw.
 THROW_LOCK_EXTRA_MS = 60
 JUMP_THROW_LOCK_EXTRA_MS = 160
+# An arrow pressed while her attack plays doesn't move her: in game on 2026-10-21, of 13 chains sent within 0.35 s
+# of the look after a throw (their first arrow about 0.3 s after its attack key), 6 first moved her 0.73-0.92 s
+# after they went out (about 1.0 s after the key: the arrow was still held) and 2 never did (a step let go
+# before then), while arrows pressed 0.575 and 0.66 s after the key moved her at once. So a plan's first arrow
+# waits until this long after the last attack key (hold_back): in the five runs played with it, all seven
+# walk-offs from 3 onto 4 set off at once, and every move that missed was a jump.
+ARROW_LOCK_MS = 600
 
 # A jump back: run away a moment, jump, turn toward the monster in mid-air and throw.
 # The arrow away is held this long before the jump, to get her moving. Keyed 80 ms after the arrow, the jump
@@ -80,6 +87,8 @@ class Actions:
         self.pressed = False  # keys sent since the last look (then a move isn't a knockback)
         self.sent_at = 0.0     # when the last key plan was sent (a look older than that may be out of date)
         self.lock_until = 0.0  # when her last attack stops locking out the next one
+        self.arrow_until = 0.0  # ... and stops swallowing arrows (ARROW_LOCK_MS after its key)
+        self._attack_at = 0.0   # when the last attack key went down (time.monotonic)
         # Called at every throw with (when its attack key goes down, the way she throws): the kill ledger
         # (behavior.ledger) matches EXP gains to the stars that could have made them.
         self.throw_listeners: list = []
@@ -94,14 +103,22 @@ class Actions:
 
     def hold_back(self, events: list) -> None:
         """Wait just long enough that no jump or attack key in a plan of `events` (starting now) goes down
-        before her attack lock ends: pressed inside it, they're ignored. Every plan that can press them
-        comes through here: Actions' own, the mover's single moves (via play), and the navigator's chains."""
+        before her attack lock ends, and no arrow before her attack stops swallowing arrows (ARROW_LOCK_MS):
+        pressed inside them, they're ignored. Every plan that can press them comes through here: Actions'
+        own, the mover's single moves (via play), and the navigator's chains."""
         locked = {self.keys.jump.name, self.keys.attack.name}
         if self.keys.lucky_seven is not None:
             locked.add(self.keys.lucky_seven.name)
+        arrows = {self.keys.left.name, self.keys.right.name}
+        now, wait = time.monotonic(), 0.0
         first = min((e[0] for e in events if len(e) == 3 and e[1] in locked and e[2] == "down"), default=None)
-        if first is not None and (left := self.lock_until - (time.monotonic() + first / 1000)) > 0:
-            time.sleep(left)
+        if first is not None:
+            wait = max(wait, self.lock_until - (now + first / 1000))
+        first = min((e[0] for e in events if len(e) == 3 and e[1] in arrows and e[2] == "down"), default=None)
+        if first is not None:
+            wait = max(wait, self.arrow_until - (now + first / 1000))
+        if wait > 0:
+            time.sleep(wait)
 
     def arrow(self, direction: str) -> str:
         """The name of the arrow key for `direction`."""
@@ -124,6 +141,7 @@ class Actions:
         self.play(events + tap(t, self._attack_key()), "throw")
         self.facing = direction
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
+        self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
 
     def jump_throw(self, direction: str) -> None:
         """Face `direction`, jump straight up and attack in mid-air: in the air the attack throws a
@@ -142,6 +160,7 @@ class Actions:
         self.play(events, "jump_throw")
         self.facing = direction
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
+        self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
 
     def jump_back(self, direction: str) -> None:
         """At a monster too close to throw at (on `direction`'s side): jump away from it, turn toward it
@@ -162,10 +181,12 @@ class Actions:
         self.facing = direction
         # Locked until the attack's lock ends, which is after she lands.
         self.lock_until = time.monotonic() + (JB_THROW_MS + COMBAT.attack_lock_ms) / 1000
+        self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
 
     def _thrown(self, key_ms: int, direction: str) -> None:
         """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent."""
         when = time.monotonic() + key_ms / 1000
+        self._attack_at = when
         for listener in self.throw_listeners:
             listener(when, direction)
 

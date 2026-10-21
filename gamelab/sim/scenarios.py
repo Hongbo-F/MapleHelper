@@ -595,6 +595,31 @@ def nav_fight_across_runs_out(sim):
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
+@scenario((3, 720.0), monsters=[("Orange Mushroom", 4, 430.0)], seed=1, realism=Realism(lock_arrows=True),
+          expects=(ends("killed", key="killed"), ends("arrived"), moves("walk_off"),
+                   check("the walk-off right after the kill lands", lambda tr: _result(tr, "misses") == 0),
+                   no_log("instead of platform 4")))
+def nav_walk_off_after_kill(sim):
+    """From 3 she shoots an Orange Mushroom on 4 below dead, then, from the look that saw it die (as the hunt
+    loop goes on from its own look), walks off 3's left end onto 4, in a world where an arrow pressed within
+    0.55 s of an attack's key is swallowed (Realism.lock_arrows, as measured in game on 2026-10-21). In game
+    such a walk-off went out about 0.3 s after her last throw's key, twice, and she didn't move; here it would
+    go 0.34 s after it, and she'd stay on 3 until the walk-off sent again a second later. Its first arrow is
+    held back to 0.6 s after the key (actions.ARROW_LOCK_MS), and she lands on 4 at once."""
+    h = sim.hunter()
+    looks = []
+    look = h.look
+
+    def keep(*a, **k):
+        looks.append(look(*a, **k))
+        return looks[-1]
+    h.look = keep
+    killed = h.kill(h.look().monsters[0], seconds=30)
+    out = plain(sim.navigator(h, fight=True).go(4, x=520, scene=looks[-1]))
+    out["killed"] = killed
+    return out
+
+
 # One move each, carried out by Mover.do from a look.
 
 def _one_move(sim, kind: str, src: int, dst: int) -> dict:
@@ -1140,6 +1165,7 @@ def tour_rest_no_escort(sim):
 
 @scenario((36, 300.0), monsters="all", seed=22, limit=400,
           noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, tag_hidden=((20.0, 23.0),)),
+          realism=Realism(lock_arrows=True),
           expects=(check("kills", lambda tr: _kills(tr) >= 1), happens("star misses")))
 def tour_hunt_noisy(sim):
     """tour_hunt_basin with the real game's errors: stars missing (28%), walks off by a few units, the
@@ -1220,7 +1246,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=1, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1235,7 +1261,10 @@ def loop_lull_loot(sim):
     20. Over 16 seeds 8 meet all of this. On the attack track alone, seed 4 since the star's search has the
     client's top (from 13 a star picks a pig on 12 from 111 units, not 191): on seed 6 no lull came. Seed 1
     since both are together: on seed 8 no lull came. Over 16 seeds 10 meet all of this; of the 6 others, 5 had
-    no lull and 2 picked up fewer than 20 drops, seed 3 both.)"""
+    no lull and 2 picked up fewer than 20 drops, seed 3 both. Seed 2 since a plan's first arrow waits until
+    0.6 s after her last attack's key (actions.ARROW_LOCK_MS): on seed 1 her first walk to a better spot went
+    0.39 s later, and no lull came. Over 16 seeds 5 meet all of this; of the 11 others, 9 had no lull and 3
+    picked up fewer than 20, seed 16 both.)"""
     return _loop_on_12(sim)
 
 
@@ -1263,6 +1292,7 @@ def loop_run(sim):
 
 @scenario((36, 300.0), monsters="all", seed=22, limit=300,
           noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, tag_hidden=((20.0, 23.0),)),
+          realism=Realism(lock_arrows=True),
           expects=(check("kills", lambda tr: sum(tr["world"]["kills"].values()) >= 3), happens("star misses")))
 def loop_noisy(sim):
     """loop_basin with the real game's errors (tour_hunt_noisy's): stars missing, walks off by a few
