@@ -779,6 +779,34 @@ def test_a_hit_pushes_a_monster_back_and_stands_it_while_it_flinches(model, monk
     assert m.at(0.5) == m.hi  # at its platform's end it stays on it
 
 
+def test_simulated_monsters_walk_the_maps_speeds_and_stand_through_a_hits_push():
+    """The game data's walking speeds (MapModel.mob_speeds, localization.monsters.speeds) and the push of a
+    hit: a pig on a map whose data says 120 units/s (walkSpeed 100, speed stat +20; the table says 125)
+    walks at 120, the tracker expects as much, a hit pushes it 18 units away from her over 0.25 s and stands
+    it until FLINCH_S after the hit, and then it walks at 120 again."""
+    class Walks:  # its draws after the stand: walk right, for 4 s
+        def random(self):
+            return 0.9
+
+        def uniform(self, lo, hi):
+            return hi
+
+    fast = mapdata.parse(1, tree(), "Test Map", {"walkSpeed": 100.0}, {"2": "Snail", "8": "Pig"}, {"2": 2},
+                         mob_speeds={"8": 20})
+    assert monsters.speeds(fast)["pig"] == 120.0 and monsters.Tracker(fast).walking["pig"] == 120.0
+    c = plat(fast, 500, 400)
+    w = world(fast, c.id, 300.0, monsters=[("Pig", c.id, 600.0)])
+    m = w.monsters[0]
+    assert m.speed == 120.0
+    m.t0, m.x0, m.d, m.t1, m.rng = 0.0, 600.0, -1, 1e9, Walks()  # walking at her
+    assert m.at(1.0) == pytest.approx(480.0)
+    m.knock(1.0, 1)
+    assert m.at(1.125) == pytest.approx(489.0) and m.at(1.25) == m.at(1.0 + monsters.FLINCH_S - 0.01) == 498.0
+    assert m.faces(1.3) == (-1, False)  # standing, still facing her
+    t = 1.0 + monsters.FLINCH_S
+    assert m.at(t + 0.2) == pytest.approx(498.0 + 120.0 * 0.2) and m.faces(t + 0.2) == (1, True)
+
+
 def test_she_evades_some_touches_and_dies_at_no_hp(model, monkeypatch):
     c = plat(model, 500, 400)
     monkeypatch.setattr(world_mod, "EVADE", 1.0)
