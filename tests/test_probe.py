@@ -122,6 +122,117 @@ def _rows(trace: dict) -> list[dict]:
     return [json.loads(line) for line in trace["files"]["probe_geometry.jsonl"]]
 
 
+# Where each probe's simulated run starts, the monster it throws at, and what the run changes of the probe.
+PLACES = {
+    "top-60": ((13, -14.0), [("Pig", 12, -170.0)], {}),
+    "top-120": ((15, 76.0), [("Pig", 12, -300.0)], {}),
+    "air": ((22, 30.0), [("Snail", 22, 70.0)], {}),
+    "other-wall": ((19, 104.0), [("Pig", 18, 330.0)], {}),
+    "step-up": ((4, 260.0), [("Orange Mushroom", 2, -50.0)], {"x": 260.0}),
+    "step-down": ((2, 50.0), [("Pig", 4, 280.0)], {}),
+    "hanging-wall": ((14, 706.0), [("Pig", 17, 910.0)], {}),
+    "below-42": ((0, 1222.0), [("Pig", 1, 1110.0)], {}),
+    "claw-edge": ((21, -225.0), [("Pig", 21, -90.0)], {}),
+    "claw-down": ((3, 716.0), [("Pig", 4, 620.0)], {"throws": 40}),
+}
+
+
+def _reach_with(**changes) -> SimpleNamespace:
+    """attack.reach as the simulator's world sees it, with `changes`."""
+    out = SimpleNamespace(**{k: getattr(reach, k) for k in dir(reach) if not k.startswith("__")})
+    for k, v in changes.items():
+        setattr(out, k, v)
+    return out
+
+
+def _search_by_the_ramp(near, far, bottom, top, *a, **k):  # none below her closer by its middle than the ramp
+    return None if (near + far) / 2 < reach.ramp_dx(-bottom) else reach.search_band(near, far, bottom, top, *a, **k)
+
+
+def _every_wall(platform, x, y, tx, rise=0.0, **k):  # any group's wall across the level line stops a star
+    line, (lo, hi) = y - rise - reach.SHOT_H, sorted((x, tx))
+    return next((w for w in scenarios.real_map().walls
+                 if w.x1 == w.x2 and lo < w.x1 < hi and min(w.y1, w.y2) <= line < max(w.y1, w.y2)), None)
+
+
+# Worlds with the other answer to a question: what's set for the run.
+WORLDS = {
+    "the logs' top": lambda mp: mp.setattr(reach, "SEARCH_TOP0", probe.LOGS_TOP0),
+    "the old claw": lambda mp: mp.setattr(reach, "CLAW", probe.OLD_CLAW),
+    "the swings": lambda mp: mp.setattr(reach, "CLAW", probe.SWINGS),
+    "the ramp": lambda mp: mp.setattr(world_mod, "reach", _reach_with(search_band=_search_by_the_ramp)),
+    "the v83 line": lambda mp: mp.setattr(reach, "LINE", "v83"),
+    "no walls": lambda mp: mp.setattr(world_mod, "reach", _reach_with(wall_between=lambda *a, **k: None)),
+    "every wall": lambda mp: mp.setattr(world_mod, "reach", _reach_with(wall_between=_every_wall)),
+    "the v83 air": lambda mp: mp.setattr(world_mod, "AIR_PICK", "v83"),
+}
+_RUNS: dict = {}
+
+
+def _probe_run(name: str, world: str | None = None, throws: int = 20, **changes) -> list[dict]:
+    """A simulated run of probe `name` from its PLACES, in reach's world or one of WORLDS (its log's rows; each
+    run once)."""
+    start, monsters, place = PLACES[name]
+    p = probe.adjust(probe.PROBES[name], **{"throws": throws, **place, **changes})
+    key = (p, world)
+    if key not in _RUNS:
+        def run(sim):
+            h = sim.hunter()
+            return str(probe.run(h, sim.navigator(h), p, seconds=600))
+        with pytest.MonkeyPatch.context() as mp:
+            if world is not None:
+                WORLDS[world](mp)
+            _RUNS[key] = _rows(scenarios.run_scenario(
+                scenarios.Scenario(f"probe_{name}", run, start, monsters=monsters, limit=800)))
+    return _RUNS[key]
+
+
+# Each probe in reach's world and in one with the other answer to its question: the answer the scorer must
+# decide on (DECIDES better than the other), its index in the question's answers (0: reach's).
+RECOVERS = [
+    ("top-60", None, "SEARCH_TOP0", 0), ("top-60", "the logs' top", "SEARCH_TOP0", 1),
+    ("top-120", None, "SEARCH_TOP0", 0), ("top-120", "the logs' top", "SEARCH_TOP0", 1),
+    ("claw-edge", None, "CLAW_FAR", 0), ("claw-edge", "the old claw", "CLAW_FAR", 1),
+    ("claw-down", None, "claw_takes", 0), ("claw-down", "the swings", "claw_takes", 1),
+    ("below-42", None, "RAMP_BELOW", 0), ("below-42", "the ramp", "RAMP_BELOW", 1),
+    ("step-down", None, "LINE", 0), ("step-down", "the v83 line", "LINE", 1),
+    ("hanging-wall", None, "LINE", 0), ("hanging-wall", "the v83 line", "LINE", 1),
+    ("step-up", None, "WALLS", 0), ("step-up", "no walls", "WALLS", 1),
+    ("other-wall", None, "OTHER_WALLS", 0), ("other-wall", "every wall", "OTHER_WALLS", 1),
+    ("air", None, "in_area", 0), ("air", "the v83 air", "in_area", 1),
+]
+
+
+@REAL
+@pytest.mark.parametrize("name,world,key,answer", RECOVERS,
+                         ids=[f"{n}-{w or 'reach'}-{k}" for n, w, k, _ in RECOVERS])
+def test_each_probe_s_log_decides_the_answer_its_world_has(name, world, key, answer):
+    # Every probe, run in a world with reach's answer to its question and in one with the other: from its log
+    # the scorer decides on the world's answer, and on throws where the two have the attack take something
+    # else (so on seeds 1-8 too). below-42 also asks the claw off her level, but its few throws at pigs within
+    # 99 decide it alone on 3 of those seeds in a world with the swings: claw-down's 40 throws do on all 8.
+    q, model = probe.QUESTIONS[key], scenarios.real_map()
+    rows = _probe_run(name, world)
+    assert rows and {r["probe"] for r in rows} == {name}
+    scored = probe.answers(rows, model, q)
+    assert scored.decided == q.answers[answer][0], (name, world, scored.lls, scored.differ)
+    assert scored.differ >= 4
+    assert f"-> {q.answers[answer][0]}:" in "\n".join(probe.answers_text(scored))
+
+
+@REAL
+def test_the_step_up_s_throws_cant_tell_the_two_lines_apart():
+    # From 4 at 2 behind the step wall: the v83 line to a walking body on 2 ends at its feet, 60 up, below the
+    # step's top corner whatever the distance, so it meets the wall where the level line does (from the
+    # ground and jump throws) or clears it with it (jump backs). So the lines are asked only of step-down and
+    # hanging-wall.
+    model = scenarios.real_map()
+    rows = _probe_run("step-up") + _probe_run("step-up", style="jump_back")
+    scored = probe.answers(rows, model, dataclasses.replace(probe.QUESTIONS["LINE"], probes=("step-up",)))
+    assert scored.throws == len(rows) and scored.differ == 0 and scored.decided is None
+    assert "can't tell" in probe.answers_text(scored)[-1]
+
+
 @REAL
 def test_the_scorer_finds_the_window_top_the_world_has(monkeypatch):
     # From 13 at a lone pig on 12, 60 above her, 110-200 off: with the client's top (44, reach's) the star picks
@@ -140,89 +251,50 @@ def test_the_scorer_finds_the_window_top_the_world_has(monkeypatch):
 
 
 @REAL
-def test_the_scorer_finds_the_window_floor():
+def test_the_scorer_finds_the_window_floor(monkeypatch):
     # From 14's right end at an Orange Mushroom on 17, 60 below her, 90-150 off: with the window's floor 12 above
-    # her feet in the first band, its body (55 tall) is picked from 113; with 7 from 93, with 17 from 133.
+    # her feet in the first band, its body (55 tall) is picked from 113; with 7 from 93, with 17 from 133. In a
+    # world whose floor is 20 (the logs rule out 20 and up), from 153, and the fit finds that instead.
     def run(sim):
         h = sim.hunter()
         return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["floor"], throws=20), seconds=300))
     sc = scenarios.Scenario("probe_floor", run, (14, 824.0), monsters=[("Orange Mushroom", 17, 940.0)], limit=400)
     fit = probe.fit_floor0(_rows(scenarios.run_scenario(sc)), scenarios.real_map())
     assert fit.holds(12) and not fit.holds(5) and not fit.holds(20)
+    monkeypatch.setattr(reach, "SEARCH_FLOOR0", 20)
+    rows = _rows(scenarios.run_scenario(sc))
+    monkeypatch.undo()
+    fit = probe.fit_floor0(rows, scenarios.real_map())
+    assert fit.holds(20) and not fit.holds(12)
 
 
 @REAL
-def test_the_scorer_checks_the_wall_rule_and_its_line(monkeypatch):
+def test_the_scorer_brackets_the_line_s_height_from_the_step_up():
     # From 4 at an Orange Mushroom on 2 behind the step wall: the world's stars stop at the wall from the
-    # ground (the line 28 up), not from jump backs (44 up when the attack starts: 72). The rule fits that
-    # better than no walls, and the line's height fits from 16 (under it, jump backs would be stopped too) to
-    # 60 (over it, the throws from the ground would get past).
+    # ground (the line 28 up), not from jump backs (44 up when the attack starts: 72). The line's height fits
+    # from 16 (under it, jump backs would be stopped too) to 60 (over it, the throws from the ground would get
+    # past); and her group's walls fit far better than none.
     model = scenarios.real_map()
     rows = _rows(scenarios.run("probe_step_up"))
-    lls = probe.terrain_lls(rows, model)
-    rule, none = lls["her group's walls, a level line (the rule)"], lls["no wall stops a star"]
-    assert rule > none + 5
     line = probe.fit_shot_h(rows, model)
     assert line.holds(28) and not line.holds(10) and not line.holds(65)
-    # A world where no wall stops a star: the throws from the ground hit too (all 12 on seed 1; one whose Orange
-    # Mushroom had walked to within 193 of her by the pick, where the search doesn't take it yet, may not), and no
-    # walls fits better.
-    open_world = SimpleNamespace(**{k: getattr(reach, k) for k in dir(reach) if not k.startswith("__")})
-    open_world.wall_between = lambda *a, **k: None
-    monkeypatch.setattr(world_mod, "reach", open_world)
-    rows = _rows(scenarios.run("probe_step_up"))
-    monkeypatch.undo()
-    assert [s for r in rows for e, s in outcomes(r) if e["target"]].count(True) >= 10
-    lls = probe.terrain_lls(rows, model)
-    assert lls["no wall stops a star"] > lls["her group's walls, a level line (the rule)"] + 5
+    scored = probe.answers(rows, model, probe.QUESTIONS["WALLS"])
+    assert scored.decided == "they do" and scored.lead > 5
 
 
 @REAL
 def test_the_scorer_tells_the_area_of_an_attack_from_a_jump_from_the_search():
     # Jump throws at a snail about 40 units off: the world's attack picks by the area, and the snail dies to
-    # every star; the search (from 65 ahead, as from the ground or from as high as she is) wouldn't pick it.
-    # She takes her place facing the way she throws, so no jump throw turns her (a turn's tap walked her 8 units
-    # on, to 32 off where the snail came back, and it touched her) and each goes straight up from x 30: the
-    # snail is 40 off at all but the first, before which it walked on to 72 off (inside the probe's 35-85) while
-    # she took her place.
+    # every star; the v83 client's, as from the ground but from 21-26 up, wouldn't pick it. She takes her place
+    # facing the way she throws, so no jump throw turns her (a turn's tap walked her 8 units on, to 32 off
+    # where the snail came back, and it touched her) and each goes straight up from x 30: the snail is 40 off
+    # at all but the first, before which it walked on to 72 off (inside the probe's 35-85) while she took her
+    # place.
     rows = _rows(scenarios.run("probe_air"))
     assert {r["x"] for r in rows} == {30.0} and all(35 <= abs(r["dx"]) <= 85 for r in rows)
     assert sum(35 <= abs(r["dx"]) <= 50 for r in rows) >= len(rows) - 1
-    lls = probe.air_lls(rows, scenarios.real_map())
-    assert lls["area"] > max(lls["search"], lls["ground"]) + 5
-
-
-def _probe_run(name: str, start: tuple, monsters: list, throws: int = 20) -> list[dict]:
-    """A simulated run of probe `name` (its log's rows), from `start` with `monsters` placed."""
-    def run(sim):
-        h = sim.hunter()
-        return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES[name], throws=throws), seconds=400))
-    return _rows(scenarios.run_scenario(scenarios.Scenario(f"probe_{name}", run, start, monsters=monsters, limit=500)))
-
-
-@REAL
-def test_the_scorer_tells_the_search_from_the_old_ramp_42_below_her(monkeypatch):
-    # From 0 at a lone pig on 1, 42 below her, 70-160 off: the world's search picks it from 71 by its middle; the old
-    # ramp (reach.RAMP_BELOW, what her decisions keep to there) from 126. Each world's log fits its own: the
-    # search's by 19.9 (log-likelihood), the ramp's by 4.5 (9.3 with pigs walking 70 units/s, not the game data's
-    # 125: they walk further between her look and the pick).
-    model = scenarios.real_map()
-    run = lambda: _probe_run("below-42", (0, 1222.0), [("Pig", 1, 1110.0)])  # noqa: E731
-    rows = run()
-    assert len(probe.below(rows)) == 20
-    lls = probe.ramp_lls(rows, model)
-    assert lls["the search"] > lls["the search, the old ramp below her"] + 5
-    assert "the search, the old ramp below her" in probe.score(rows, model)
-    ramp_world = SimpleNamespace(**{k: getattr(reach, k) for k in dir(reach) if not k.startswith("__")})
-
-    def search_band(near, far, bottom, top, *a, **k):  # none below her closer by its middle than the ramp
-        return None if (near + far) / 2 < reach.ramp_dx(-bottom) else reach.search_band(near, far, bottom, top, *a, **k)
-    ramp_world.search_band = search_band
-    monkeypatch.setattr(world_mod, "reach", ramp_world)
-    rows = run()
-    monkeypatch.undo()
-    lls = probe.ramp_lls(rows, model)
-    assert lls["the search, the old ramp below her"] > lls["the search"] + 4
+    scored = probe.answers(rows, scenarios.real_map(), probe.QUESTIONS["in_area"])
+    assert scored.decided == "the area fixed to her feet (reach.in_area)" and scored.lead > 5
 
 
 @REAL
@@ -230,16 +302,25 @@ def test_the_scorer_tells_the_claw_s_swipes_from_stars_by_the_bar_they_take():
     # On 21 at a lone pig, then a lone slime, walking at her 95-160 off: the world's claw swipes a body that reaches
     # into its stance's box (65 ahead of her), a pig out to 99 by its middle and a slime to 93.5, for a fifth of a
     # star's damage (a pig's bar by 7%, a slime's by 10%); stars from there. Down at 4, 60 below her, the world's
-    # claw (its boxes 15-30 above her feet) swipes nothing.
+    # claw (its boxes 15-30 above her feet) swipes nothing; by the swings' boxes (17 below her feet) a third of
+    # the throws at a pig within 99.
+    def claw_run(kind: str) -> list[dict]:
+        def run(sim):
+            h = sim.hunter()
+            return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["claw-edge"], throws=20), seconds=400))
+        return _rows(scenarios.run_scenario(scenarios.Scenario("probe_claw", run, (21, -225.0),
+                                                               monsters=[(kind, 21, -90.0)], limit=500)))
     for kind, edge in (("Pig", 99.5), ("Slime", 93.5)):
-        table = probe.claw_table(_probe_run("claw-edge", (21, -225.0), [(kind, 21, -90.0)]))
+        table = probe.claw_table(claw_run(kind))
         claw = [lo for (_, _, dy, lo), g in table.items() if g["claw"]]
         star = [lo for (_, _, dy, lo), g in table.items() if g["star"]]  # a kill can be either
         assert claw and star and max(claw) < edge <= max(star) + 10 and min(star) >= edge - 10, (kind, table)
-    rows = _probe_run("claw-down", (3, 716.0), [("Pig", 4, 620.0)])
+    rows = _probe_run("claw-down")
     table = probe.claw_table(rows)
-    assert sum(g["throws"] for g in table.values()) == 20 and not any(g["claw"] for g in table.values())
+    assert sum(g["throws"] for g in table.values()) == 40 and not any(g["claw"] for g in table.values())
     assert all(dy == 60 for _, _, dy, _ in table) and "the claw's" in probe.score(rows, scenarios.real_map())
+    table = probe.claw_table(_probe_run("claw-down", "the swings"))
+    assert 8 <= sum(g["claw"] for g in table.values()) <= 20
 
 
 @REAL
@@ -253,10 +334,12 @@ def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     sc = dataclasses.replace(scenarios.SCENARIOS["probe_top"], noise=Noise(hit_hidden=(1.0, 3.0)))
     trace = scenarios.run_scenario(sc)
     model = scenarios.real_map()
-    body = bodies(model)
+    body, client_top = bodies(model), dataclasses.replace(probe.reach_model(), top0=44)
     told = [(r, s) for r in _rows(trace) for e, s in outcomes(r) if e["target"]]
     assert len(told) == 30 and [s for _, s in told].count(True) > len(told) / 2
-    assert all(probe.taken(r, model, body, top0=44) is None for r, s in told if s is False)
+    for r, s in told:
+        if s is False:
+            assert all(swipe + star == 0 for e, swipe, star in probe.chances(r, model, body, client_top) if e["target"])
     assert any(r["looks"] > 12 for r in _rows(trace))  # looked on past EVIDENCE_S for a hidden one
 
 

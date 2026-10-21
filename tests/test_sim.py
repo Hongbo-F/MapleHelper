@@ -464,7 +464,7 @@ def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model
 
 def test_with_the_v83_air_pick_a_jump_throw_picks_as_from_the_ground_from_where_she_is(model, monkeypatch):
     # world.AIR_PICK 'v83' (the other answer `probe run air` weighs): the attack 40 ms after the jump key starts
-    # about 26 up, and the claw and the search go from there as from the ground. A snail 30 off is under the
+    # 21 up, and the claw and the search go from there as from the ground. A snail 30 off is under the
     # stabs' boxes and short of the search's first band, so the star hits nothing (by the area it dies); a pig
     # 120 off, its body reaching above the first window's floor, takes a star.
     c = plat(model, 500, 400)

@@ -34,7 +34,7 @@ then (`in_area`), from AREA_DOWN below them to AREA_UP above, STAR_RANGE ahead. 
 keyed 100 ms after the jump started 42-49 units up, its area over a snail (24-26 tall): in 45 jump-throws
 at snails 3-77 units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60
 above took the stars. RustMS's port of the v83 client has no case for the air: the claw and the search as
-from the ground, from as high as she is, which picks no snail 35-85 off from 26 up (`probe run air` weighs
+from the ground, from as high as she is, which picks no snail 35-85 off from 21-26 up (`probe run air` weighs
 the two; the simulator's world has either, sim.world.AIR_PICK).
 
 What stops a star is checked on the attack's pick alone, as the client does it (RustMS Combat.cpp:1289-1307;
@@ -199,9 +199,10 @@ CLAW_MARGIN = 12     # kept past the claw's reach, for a monster walking at her 
 # blocked, carried over from Energy Bolt's tests). The two differ only below her: by the v83 line a star needs
 # room past her platform's end, |dx| > e (28 + t) / 28, e her distance to the end and t how far below her feet
 # the monster's top is (a walking pig 60 below, t 14: 1.5 e). Every throw logged was made from near an end,
-# where the two agree (299 decided, the same verdict on all). Unmeasured in game: from 2 (x 50) at pigs on 4,
-# 200-255 off, the v83 line has none hit, the level line as many as anywhere (`python -m gamelab probe run
-# step-down --dx 200-255`; from 14 at 17, `hanging-wall --x 690 --dx 175-235`). SHOT_H is the client's row, 28;
+# where the two agree (299 decided, the same verdict on all). Unmeasured in game: from 2 (x 50) at pigs on 4
+# 200-253 off and slimes 200-283, the v83 line has none hit, the level line as many as anywhere (`python -m
+# gamelab probe run step-down`; from 14 at x 706 at 17, pigs 189-214 and slimes 183-240, `hanging-wall`; then
+# `probe score`, which weighs the two lines on them). SHOT_H is the client's row, 28;
 # the logs fit any height from 1 to 59 for the level line (on this map it matters only for steps lower than 60,
 # and there are none), and the step-up probe's jump throws and jump backs (the line 26 and 44 higher: `probe run
 # step-up --style jump_throw`, `jump_back`) bracket it: from 4 at 2, a 60 step, stopped and through put it at
