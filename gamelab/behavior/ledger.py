@@ -11,7 +11,8 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   A gain no throw explains (party EXP, or a kill seen only from a look without monsters) still counts,
   credited to where she is, but has no place and so no drops.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
-  first seen), when it was last seen, whether a kill of hers explains it, and its status. A pile is gone
+  first seen), when it was last seen, whether a kill of hers explains it, what the last look that saw it saw
+  in it and what that's worth (looting.worth: the game data's prices), and its status. A pile is gone
   as the Looter forgets drops: never before SETTLE after the kill, and only after two empty looks
   EMPTY_LOOKS apart, because monsters are drawn over drops. Gone piles are dropped from the store
   GONE_KEEP_S later; what the hunt loop counts of them is kept in counters (`gone_tried`).
@@ -33,7 +34,7 @@ from ..attack import reach
 from ..localization.monsters import TRACK_SLACK, Monster, same, seen_again
 from ..localization.scene import Loot, Scene
 from . import looting
-from .looting import EMPTY_LOOKS, LOOT_REACH, SETTLE, standing
+from .looting import COINS, EMPTY_LOOKS, LOOT_REACH, SETTLE, standing, worth
 
 STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be its kill: 520 ms to the
                    # release, up to 0.65 s of flight (434 units at 690 a second), and up to a look later
@@ -42,6 +43,10 @@ DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded a
 # count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
 # forever, every kill added a pile, and every look went through all of them.
 GONE_KEEP_S = 300.0
+# What a pile no look has seen yet is worth (Pile.value), in mesos: a kill's pile is coins most often (63-80% of
+# each kind's piles seen where her kills died on 2026-10-21; looting.COINS), and its item is worth less than they are
+# but for the Slime Bubble (looting.PRICES).
+PILE_WORTH = COINS["bronze"]
 # Her wounds (Wounds). A bar new, or this much other than at the throw, is a hit (fight.HURT). A wound unseen this long
 # is gone: a hit monster hides under its damage numbers for 1-3 s (fight.HIDDEN_FOR is how long she keeps
 # throwing at one unseen; seen again within this, it's still hers), and seen without its bar it's still kept
@@ -231,7 +236,16 @@ class Pile:
     empty_since: float | None = None  # when a look first saw it empty (see EMPTY_LOOKS)
     status: str = "expected"  # expected (a kill's, not seen yet) | seen | gone (seen empty twice)
     tries: int = 0            # times the hunt loop went for it (DropStore.tried)
+    rushed: int = 0           # ... of those, at once for what it's worth (hunt's rule 6a)
     gone_at: float | None = None  # when it was seen gone
+    items: tuple[str, ...] = ()   # what the latest look that saw it saw in it (one kind per drop) ...
+    worth: float | None = None    # ... what those are worth together (looting.worth); None until a look sees it ...
+    dearest: float | None = None  # ... and the dearest of them on its own
+
+    @property
+    def value(self) -> float:
+        """What it's worth, in mesos: what was seen in it last, or PILE_WORTH before it's been seen."""
+        return PILE_WORTH if self.worth is None else self.worth
 
 
 @dataclass
@@ -266,9 +280,10 @@ class DropStore:
         self.piles = [p for p in self.piles if p.gone_at is None or s.t - p.gone_at <= GONE_KEEP_S]
         seen, ground = list(s.loot), not looting.STANDING_ONLY or standing(s)
         for p in self.known:
-            if any(_in_pile(p, d) for d in seen):
+            if inside := [d for d in seen if _in_pile(p, d)]:
                 p.status, p.last_seen, p.empty_since = "seen", s.t, None
-                p.mesos = p.mesos or any(d.mesos for d in seen if _in_pile(p, d))
+                p.mesos = p.mesos or any(d.mesos for d in inside)
+                p.items, p.worth, p.dearest = _contents(inside)
             elif ground and s.t - p.since >= SETTLE and s.in_view(p.platform, p.x):
                 if p.empty_since is None:
                     p.empty_since = s.t
@@ -279,8 +294,16 @@ class DropStore:
             if not any(_in_pile(p, d) for p in self.known):
                 self.piles.append(Pile(d.x, d.y, d.platform, s.t, hers=False, mesos=d.mesos, last_seen=s.t,
                                        status="seen"))
+                new = self.piles[-1]
+                new.items, new.worth, new.dearest = _contents([e for e in seen if _in_pile(new, e)])
 
 
 def _in_pile(p: Pile, d: Loot) -> bool:
     return p.platform == d.platform and abs(p.x - d.x) <= LOOT_REACH
+
+
+def _contents(seen: list[Loot]) -> tuple[tuple[str, ...], float, float]:
+    """The drops seen in a pile: their kinds, what they're worth together (looting.worth), and the dearest's worth."""
+    each = [worth(d.item.kind, d.item.coin) for d in seen]
+    return tuple(d.item.kind for d in seen), float(sum(each)), float(max(each, default=0.0))
 

@@ -18,7 +18,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    counts against the bar as a death does
   touches, hurt    monsters touching her, and those of the touches she didn't evade
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
-                   the share she picked up
+                   the share she picked up; value_share, the same weighed by what each is worth (behavior.
+                   looting.worth: the game data's prices), and value_per_min, the mesos' worth she picked up a minute
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
   rest_hp_lost     HP lost to touches on the trips to rest (from 'rest_trip' to 'rest' events), and
@@ -38,8 +39,9 @@ import sys
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 
+from ..behavior.looting import worth
 from ..paths import LAB, REPO
-from .world import DROP_LIFE, Noise, Realism
+from .world import DROP_LIFE, GAME_DROPS, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -49,11 +51,15 @@ START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12
 # perfect eyes). "game" adds the game's errors and a less crowded, contested map; its values are guesses
 # (nothing about respawns, other players or potions is measured), chosen to be harder than "plain"; and arrows
 # pressed right after an attack's key swallowed, as measured in game (world.ARROW_LOCK).
+_GAME_NOISE = Noise(miss=0.275, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, hit_hidden=(1.0, 3.0),
+                    detect_miss=0.1)
 PRESETS = {
     "plain": (Noise(), Realism()),
-    "game": (Noise(miss=0.275, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, hit_hidden=(1.0, 3.0),
-                   detect_miss=0.1),
-             Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True)),
+    "game": (_GAME_NOISE, Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True)),
+    # "game" with the drops seen in game (world.GAME_DROPS: a slime's Slime Bubble one kill in 10, and its other
+    # monsters' items) instead of mesos and a pig's leather every time: the hunt loop's valuable piles (hunt.VALUABLE)
+    "game-drops": (_GAME_NOISE, Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True,
+                                        drops=GAME_DROPS)),
 }
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
@@ -147,6 +153,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     drops = [d for d in world.drops if d.owner == "her" and d.since <= horizon]
     known = [d for d in drops if d.taken_by == "her" or d.since + DROP_LIFE <= horizon]
     picked = [d for d in known if d.taken_by == "her"]
+    worth_known, worth_picked = sum(worth(d.kind) for d in known), sum(worth(d.kind) for d in picked)
     times = sorted([0.0] + [k[0] for k in mine] + [d.taken_at for d in world.drops if d.taken_by == "her"] + [end])
     gaps = [b - a for a, b in zip(times, times[1:])]
     events = [r for r in records if r.get("topic") == "event"]
@@ -165,6 +172,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "fell_out_at": world.fell_out_at,
         "drops": len(drops),
         "drops_share": round(len(picked) / len(known), 3) if known else None,
+        "value_share": round(worth_picked / worth_known, 3) if worth_known else None,
+        "value_per_min": round(sum(worth(d.kind) for d in drops if d.taken_by == "her") / (horizon / 60), 2),
         "longest_idle": round(max(gaps, default=0.0), 1),
         "stuck_s": round(sum(max(0.0, g - IDLE_GRACE) for g in gaps), 1),
         "rests": sum(1 for r in events if r.get("kind") == "rest"),
@@ -212,7 +221,7 @@ def _run_one_args(a: tuple) -> dict:
 
 
 COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "died_at", "fell_out_at",
-           "drops_share", "longest_idle", "stuck_s", "rests", "rest_hp_lost")
+           "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost")
 
 
 def table(results: list[dict]) -> str:

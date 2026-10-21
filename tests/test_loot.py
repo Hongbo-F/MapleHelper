@@ -89,6 +89,20 @@ def test_finds_coins_and_items_lying_on_the_ground(detector):
     assert detector.detect(frame, (0, 270, 960, 306), mesos_only=True)[0].kind == "mesos"
 
 
+def test_coins_say_which_coin_they_are_drawn_as(tmp_path):
+    # The amount picks the coin (bronze, gold): what they're worth (behavior.looting.worth) goes by it.
+    Image.fromarray(coin(), "RGBA").save(tmp_path / "mesos_bronze0.png")
+    Image.fromarray(coin(colour=(235, 190, 40)), "RGBA").save(tmp_path / "mesos_gold1.png")
+    Image.fromarray(leather(), "RGBA").save(tmp_path / "leather_0.png")
+    frame = scene()
+    paste(frame, coin(), 300, 300)
+    paste(frame, coin(colour=(235, 190, 40)), 600, 300)
+    paste(frame, leather(), 800, 300)
+    found = LootDetector(tmp_path).detect(frame, (0, 270, 960, 306))
+    assert sorted((i.x, i.kind, i.coin) for i in found) == [(300, "mesos", "bronze"), (600, "mesos", "gold"),
+                                                             (800, "leather", None)]
+
+
 def test_drops_in_several_boxes_searched_together_are_each_boxs(detector):
     frame = scene()
     for x in (100, 300, 700):
@@ -357,6 +371,36 @@ def test_far_drops_are_collected_nearest_by_route_first():
 
 LAB = ROOT / "gamelab" / "lab"
 COPY = ROOT / "gamedata" / "data" / "copy"
+
+
+def test_a_drop_is_worth_its_shop_price_and_mesos_by_their_coin():
+    from gamelab.behavior.looting import COINS, PRICES, UNKNOWN_WORTH, worth
+    assert worth("slime-bubble") == 50 and worth("squishy-liquid") == 6 and worth("red-potion") == 5
+    assert worth("mesos") == worth("mesos", "bronze") == COINS["bronze"] and worth("mesos", "gold") == 75
+    assert worth("a scroll the table doesn't know") == UNKNOWN_WORTH == max(PRICES.values())
+
+
+@pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
+def test_the_prices_are_the_game_data_s():
+    """looting.PRICES against each item's info/price in the game data (the first id of its name with one)."""
+    from gamedata.wz import Package
+    from gamelab.behavior.looting import PRICES
+    from gamelab.perception.kinds import kind_of
+    from gamelab.perception.loot import ITEMS, item_ids
+    ids, found = item_ids(COPY), {}
+    for folder in ("Etc", "Consume"):
+        pack = Package(COPY / "Item" / folder / f"{folder}_000.wz")
+        for name in ITEMS:
+            for item in ids.get(name, []):
+                if kind_of(name) in found:
+                    break
+                try:
+                    entry = pack.image(f"{item // 10_000:04d}.img").get(f"{item:08d}")
+                except (KeyError, ValueError):
+                    continue
+                if entry is not None and "price" in entry.get("info", {}):
+                    found[kind_of(name)] = entry["info"]["price"]
+    assert found == PRICES
 
 
 @pytest.mark.skipif(not (COPY / "Item").is_dir() or not (LAB / "z2_loot2.png").exists(),

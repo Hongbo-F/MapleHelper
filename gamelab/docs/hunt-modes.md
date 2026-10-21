@@ -275,7 +275,7 @@ The rules for forgetting stay: never before 3 s after the kill, and only after t
   - Until it's measured, there is one constant in one place.
 - **Guards:** a pile with any monster within 110 isn't a candidate, and that monster, of any kind, is a rule 3 target. No loot trip can turn into a 60 s fight: the time goes on the objective's clock.
 - **Other players' drops:** piles no kill of hers explains are probably someone else's, and can't be picked up until their ownership runs out. They're skipped until then, and that time is unmeasured too. Today she travels to them and finds out after standing on each one twice.
-- **Value:** 1 per pile, mesos and items alike, until prices are known.
+- **Value:** 1 per pile, mesos and items alike, until prices are known. (Built since, 2026-10-21: each drop is worth the game data's shop price, mesos by their coin, and a pile with one worth 30 mesos or more is gone for at once: README, Valuable drops at once.)
 - **Full inventory:** mesos only, as today.
 - **Drops from kills on the way:** drops noted while going after other drops wait for the next pass of the rules. Going after them at once is what made every kill on a trip make another trip.
 

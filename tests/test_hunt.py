@@ -20,7 +20,7 @@ def _hunt(piles, kills=(), travel=5.0):
     h.fs = FightState()
     h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel))
     h.visit = Visit(1, Spot(1, 0.0, 1.0, True), kills=list(kills))
-    h._exit_piles = None
+    h._exit_piles, h.obj = None, None
     return h
 
 
@@ -186,3 +186,17 @@ def test_in_passing_she_steps_out_from_under_a_target_off_her_level(monkeypatch)
     assert not h._can_pass_shoot(s, [pig]) and not h._interrupt(s)
     acts["act"] = ("approach", "left", 60.0)  # closing in on one isn't for passing through
     assert not h._can_pass_shoot(s, [pig])
+
+
+def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():
+    bubble = _pile(5, items=("slime-bubble", "mesos"), worth=65.0, dearest=50.0)
+    coins = _pile(5, items=("mesos", "mesos", "leather"), worth=40.0, dearest=15.0)  # worth more than 30, but cheap drops
+    h = _hunt([coins, bubble])
+    assert h._valuable_pile(_scene()) is bubble
+    assert _hunt([coins])._valuable_pile(_scene()) is None
+    assert _hunt([bubble], travel=hunt.VALUABLE_TRAVEL + 1)._valuable_pile(_scene()) is None
+    h.obj = Objective("pile", 2, 100.0, pile=bubble, why="valuable pile")  # going for it already
+    assert h._valuable_pile(_scene()) is None
+    h.obj = None
+    bubble.rushed = hunt.VALUABLE_TRIES  # gone for at once that often (a monster by it): a pile like the others
+    assert h._valuable_pile(_scene()) is None

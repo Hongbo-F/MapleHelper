@@ -231,6 +231,18 @@ PORTAL_REACH = (25.0, 40.0)
 MESSAGE_FOR = 5.0        # s a pickup message stays in the log on screen
 FULL_MESSAGE = "You can't get anymore items."
 ITEM_OF = {"pig": "leather"}
+# What a kill drops in a world closer to the game's (Realism.drops; the harness's preset `game-drops`): for each
+# monster kind, each drop and the chance a kill drops it, as seen where her kills died in the hunts of 2026-10-21
+# (of the kills whose place a look saw drops at 2-12 s after, within 60 units: 52 slimes, 45 pigs, 23 Orange
+# Mushrooms, 19 snails; an item there of another kind's, a slime's Squishy Liquid by a pig in the basin, is left
+# out). The default world drops mesos, and leather from a pig (ITEM_OF), every time.
+GAME_DROPS = (
+    ("slime", "mesos", 0.75), ("slime", "squishy-liquid", 0.65), ("slime", "slime-bubble", 0.10),
+    ("slime", "red-potion", 0.04),
+    ("pig", "mesos", 0.80), ("pig", "pig's-head", 0.07), ("pig", "leather", 0.02),
+    ("orange-mushroom", "mesos", 0.70), ("orange-mushroom", "orange-mushroom-cap", 0.70),
+    ("snail", "mesos", 0.63), ("snail", "snail-shell", 0.47), ("snail", "red-potion", 0.11),
+)
 
 
 class SimDied(Exception):
@@ -293,6 +305,8 @@ class Realism:
     rival_owns: float = 15.0     # s a rival's drops can't be picked up by her
     rival_takes: float = 20.0    # s after landing that a rival picks up its own drops
     potions: int | None = None   # potions she has (None: endless)
+    drops: tuple = ()            # what a kill drops: (monster kind, drop kind, chance) (GAME_DROPS), drawn per
+                                 # kill from a generator of their own; (): mesos, and a pig's leather (ITEM_OF)
     lock_arrows: bool = False    # an arrow pressed within ARROW_LOCK of an attack's key moves her only from
                                  # ARROW_HELD after it, if still held (as measured in game on 2026-10-21;
                                  # control.actions holds a plan's first arrow back for it). Preset game and
@@ -562,6 +576,7 @@ class World:
         self.realism = realism or Realism()
         # The knobs draw from rngs of their own, so with them off the world is the same as without them.
         self._rival_rng = random.Random(f"rival:{seed}")
+        self._drop_rng = random.Random(f"drops:{seed}")  # Realism.drops' draws (the others' unchanged by them)
         self.potions_left = self.realism.potions
         self.potions_used = 0
         self.hp_low = hp                # her lowest HP so far
@@ -1266,11 +1281,19 @@ class World:
         self.note(f"{what} kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
         p = m.platform
         drops = []
-        for kind in ["mesos"] + ([ITEM_OF[m.kind]] if m.kind in ITEM_OF else []):
-            x = min(max(mx + self.rng.uniform(-10, 10), p.left + 3), p.right - 3)
+        rng = self._drop_rng if self.realism.drops else self.rng
+        for kind in self._drop_kinds(m.kind, rng):
+            x = min(max(mx + rng.uniform(-10, 10), p.left + 3), p.right - 3)
             drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
         self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
+
+    def _drop_kinds(self, kind: str, rng: random.Random) -> list[str]:
+        """What a kill of a monster of this kind drops: by Realism.drops' chances (drawn from `rng`), else mesos
+        and its item (ITEM_OF)."""
+        if not self.realism.drops:
+            return ["mesos"] + ([ITEM_OF[kind]] if kind in ITEM_OF else [])
+        return [drop for mob, drop, chance in self.realism.drops if mob == kind and rng.random() < chance]
 
     def _rival_due(self) -> int:
         """The tick of another player's next kill: every Realism.rival_every s on average."""
@@ -1288,7 +1311,7 @@ class World:
         self.kill_log.append((t, m.kind, m.platform.id, "rival"))
         self.note(f"another player kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
         p, drops = m.platform, []
-        for kind in ["mesos"] + ([ITEM_OF[m.kind]] if m.kind in ITEM_OF else []):
+        for kind in self._drop_kinds(m.kind, self._rival_rng):
             x = min(max(mx + self._rival_rng.uniform(-10, 10), p.left + 3), p.right - 3)
             drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY, owner="rival"))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
@@ -1306,7 +1329,8 @@ class World:
                 d.gone, d.taken_at, d.taken_by = True, t, "her"
                 self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
                 self.messages.append((t, "You have gained mesos (+15)" if d.mesos else
-                                      f"{d.kind.replace('-', ' ').title()} x1 earned. (Etc)"))
+                                      f"{d.kind.replace('-', ' ').title()} x1 earned. "
+                                      + ("(Use)" if d.kind.endswith("-potion") else "(Etc)")))
                 self.note(f"picks up {d.kind} at x {d.x:.0f}")
                 return
         if near:

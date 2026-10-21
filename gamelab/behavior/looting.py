@@ -19,7 +19,7 @@ from ..attack.stance import TOO_CLOSE
 from ..control.navigator import MIN_GROUND_PX
 from ..localization.monsters import Monster
 from ..localization.scene import Loot, Scene
-from ..perception.loot import says_full
+from ..perception.loot import MESOS, says_full
 
 if TYPE_CHECKING:
     from .hunter import Hunter
@@ -46,6 +46,43 @@ MIN_WALK = 10      # a sweep's stops nearer to her than this aren't walked to: s
 # pile rules weigh that. (In game it's the same: in mid-jump her y is put on the platform under her, so the
 # strips sit as high above its ground as she is.)
 STANDING_ONLY = False
+
+# What a drop is worth, in mesos (`worth`; the drop store's Pile.value, which the hunt loop ranks piles by and
+# goes for the valuable ones by at once, hunt.VALUABLE). An item's is what a shop pays for it, the game data's own
+# price: `info/price` of each item in Item/Etc/Etc_000.wz and Item/Consume/Consume_000.wz, read by item id on
+# 2026-10-21 (the ids by name from String, perception.loot.item_ids). The potions with what they restore (their
+# `spec`), which doesn't add to it: her HP key is bound to Meat and her MP key to the Blue Potion, which the
+# regular attack never needs (maplehelper/game.py), so a potion picked up is one to sell. Of the drops seen
+# where her kills died in the hunts of 2026-10-21, a Slime Bubble lay in 5 of the 52 slimes' piles seen
+# (Squishy Liquid in 34), and no White Potion was seen.
+PRICES = {
+    "squishy-liquid": 6,       # Etc 4000006 (slimes)
+    "slime-bubble": 50,        # Etc 4000007 (slimes)
+    "leather": 10,             # Etc 4000049 (pigs)
+    "pig's-head": 7,           # Etc 4000008 (pigs)
+    "pig's-ribbon": 10,        # Etc 4000010 (pigs)
+    "orange-mushroom-cap": 8,  # Etc 4000009
+    "snail-shell": 1,          # Etc 4000001
+    "red-potion": 5,           # Use 2000000: 100 HP
+    "orange-potion": 15,       # Use 2000001: 250 HP
+    "white-potion": 35,        # Use 2000002: 500 HP
+    "blue-potion": 22,         # Use 2000003: 200 MP
+}
+# Mesos by the coin they're drawn as (perception.loot: Item.coin), which their amount picks: the game data has a
+# bronze coin, a gold one, a bundle of bills and a sack (Item/Special 0900000k). This map's monsters drop 10-20
+# (13 seen in game: maplehelper/game.py), always bronze coins; gold ones are worth more, and bills and sacks aren't
+# looked for (perception.loot.MESO_KINDS). A coin of no known kind counts as bronze.
+COINS = {"bronze": 15, "gold": 75}
+# A drop the table doesn't know (none yet: equipment and scrolls aren't looked for, README Limits): at this level
+# those are worth the most, so as much as the dearest drop here.
+UNKNOWN_WORTH = max(PRICES.values())
+
+
+def worth(kind: str, coin: str | None = None) -> float:
+    """What a drop of this kind (perception.loot.Item.kind; mesos by their coin) is worth, in mesos (PRICES)."""
+    if kind == MESOS:
+        return COINS.get(coin or "bronze", COINS["bronze"])
+    return PRICES.get(kind, UNKNOWN_WORTH)
 
 
 @dataclass

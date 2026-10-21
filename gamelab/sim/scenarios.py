@@ -1459,6 +1459,34 @@ def loop_shoots_21_from_22(sim):
     return _loop_up_from_22(sim)
 
 
+def _loop_bubble(sim):
+    tour = sim.tour_stack()
+    tour.stats["17"] = {"visits": 4, "exp": 600.0}
+    return _loop(1.0)(sim, tour)
+
+
+@scenario((16, 636.0), monsters=[("Slime", 17, 940.0), ("Orange Mushroom", 17, 1300.0), ("Orange Mushroom", 17, 1350.0)],
+          seed=1, limit=200, realism=Realism(respawn=120.0, drops=(("slime", "slime-bubble", 1.0),)),
+          expects=(_rule("valuable pile"), happens("picks up slime-bubble"),
+                   check("she sets off for the Slime Bubble while an Orange Mushroom is still about",
+                         lambda tr: _first(tr["log"], "picking it up now") < _nth(tr["world_log"], "kills", 3))))
+def loop_valuable_drop_at_once(sim):
+    """On 17's spot on 16, shooting a slime and two Orange Mushrooms on 17; the slime drops a Slime Bubble (50 mesos
+    by the game data's price, 8 times a Squishy Liquid's). Once it has landed a look at the whole screen sees it
+    (hunt._far_drops), and she goes for it at once (rule 6a, hunt.VALUABLE), ahead of shooting the mushrooms. The
+    user, watching her hunt on 2026-10-21: "Expensive items should attempt to pick immediately". On seeds 1-16 she
+    sets off before the mushrooms are dead on all 16, and picks it up 11.3 s after the slime's kill at the median
+    (7.5-33.7); without the rule on none, 17.2 s (9.6-35.1), shooting the mushrooms from 16 first; without the look
+    (hunt.FAR_DROPS_LOOK) on 12."""
+    return _loop_bubble(sim)
+
+
+def _nth(lines: list[str], text: str, n: int) -> float:
+    """When the n-th of a trace's lines with `text` came (s; infinity if fewer did)."""
+    at = [float(line.split()[0]) for line in lines if text in line]
+    return at[n - 1] if len(at) >= n else float("inf")
+
+
 @scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
           expects=(logs("rest: HP"), logs("resting on platform 32"),
                    no_log("couldn't reach a safe platform", "low HP doesn't end the trip to rest"),

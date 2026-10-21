@@ -478,6 +478,23 @@ def test_a_star_kills_gives_exp_and_drops_that_can_be_picked_up(model):
     assert w.live_drops() == [] and w.picked == {"mesos": 1}
 
 
+def test_with_a_drop_table_a_kill_drops_by_its_chances_from_a_generator_of_their_own(model):
+    from gamelab.sim.world import Realism
+    c = plat(model, 500, 400)
+
+    def kill(realism):
+        w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right", realism=realism)
+        tap(w, 0.0, "f", 0.04)
+        w.advance(4.0)
+        return w
+    plain = kill(Realism())
+    table = kill(Realism(drops=(("snail", "snail-shell", 1.0), ("snail", "red-potion", 0.0), ("pig", "leather", 1.0))))
+    none = kill(Realism(drops=(("snail", "snail-shell", 0.0),)))
+    assert [d.kind for d in plain.live_drops()] == ["mesos"]
+    assert [d.kind for d in table.live_drops()] == ["snail-shell"]  # the shell always, the potion never
+    assert none.live_drops() == [] and table.rng.random() == none.rng.random()  # the world's own draws untouched
+
+
 def test_a_star_goes_the_way_she_faces_and_not_past_its_reach(model):
     c = plat(model, 500, 400)
     w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="left")

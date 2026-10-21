@@ -71,6 +71,8 @@ class Item:
     w: int
     h: int
     score: float
+    coin: str | None = None  # mesos: the coin they're drawn as (MESO_KINDS: "bronze", "gold"), which their
+                             # amount picks (what they're worth: behavior.looting.worth); None if not known
 
     @property
     def bottom(self) -> int:
@@ -144,6 +146,12 @@ def _kind(path: Path) -> str:
     return path.stem.rsplit("_", 1)[0]
 
 
+def _coin(path: Path) -> str | None:
+    """The coin a mesos template is of, from its file name (mesos_<coin><frame>.png), else None."""
+    kind, _, rest = path.stem.rpartition("_")
+    return (rest.rstrip("0123456789") or None) if kind == MESOS else None
+
+
 def ensure(folder: Path = LOOT) -> Path:
     """Build the templates if any of them are missing; returns the folder."""
     have = {_kind(p) for p in folder.glob("*.png")}
@@ -159,6 +167,7 @@ class LootTemplate(NamedTuple):
     rgb: np.ndarray    # its colours
     mask3: np.ndarray  # where the picture is (uint8, one copy per colour channel)
     solid: np.ndarray  # where its colours are checked (bool)
+    coin: str | None = None  # mesos: the coin it's a frame of
 
 
 class LootDetector:
@@ -179,7 +188,8 @@ class LootDetector:
             # Slime Bubble's string) is half line, half background at half size, and was 41 off.
             solid = cover >= SOLID_COVER
             solid = solid if solid.sum() >= MIN_SOLID else mask > 0
-            self.templates.append(LootTemplate(_kind(path), np.ascontiguousarray(rgb), np.dstack([mask] * 3), solid))
+            self.templates.append(LootTemplate(_kind(path), np.ascontiguousarray(rgb), np.dstack([mask] * 3), solid,
+                                               _coin(path)))
         if not self.templates:
             raise RuntimeError(f"no loot templates in {folder}")
         self.height = max(t.rgb.shape[0] for t in self.templates)
@@ -213,7 +223,7 @@ class LootDetector:
 
     def _match(self, area: np.ndarray, origin: tuple[int, int], template: LootTemplate) -> list[Item]:
         """Where one template is in `area`, whose top left is at `origin` in the frame."""
-        kind, rgb, mask3, solid = template
+        kind, rgb, mask3, solid, coin = template
         own = rgb[solid].astype(np.float32)
         th, tw = rgb.shape[:2]
         res = masked_match(area, rgb, mask3)
@@ -223,5 +233,5 @@ class LootDetector:
             seen = area[y:y + th, x:x + tw][solid].astype(np.float32)
             if float(np.abs(seen - own).mean()) <= PIXEL_SLACK:
                 hits.append(Item(kind, origin[0] + int(x) + tw // 2, origin[1] + int(y) + th // 2, tw, th,
-                                 round(float(res[y, x]), 3)))
+                                 round(float(res[y, x]), 3), coin))
         return hits

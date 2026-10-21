@@ -8,6 +8,9 @@ in the order listed, 6 before 3):
 
    1  close quarters   a target on her platform the claw would swipe (stance.close_to, by its size: a pig
                        within 111, a snail within 96): stance's answer (jump back, jump-throw, step back)
+  6a  valuable pile    a pile with a drop worth VALUABLE mesos or more on its own (looting.worth: the game
+                       data's prices; a Slime Bubble, a White Potion, a gold coin) within VALUABLE_TRAVEL: at
+                       once, ahead of shooting, travelling or not; on the way only close quarters and HP stop her
    2  high ground      on a platform she can't safely stand on, with a spot that reaches her ground: back up;
                        also back to the spot from any other platform (after a pile there), unless the
                        ground is in reach from it or she's leaving
@@ -27,7 +30,7 @@ in the order listed, 6 before 3):
    7  better spot      wanted monsters seen out of reach, and a spot that reaches clearly more of them
    8  lull loot        nothing wanted on this ground and a kill of hers due back: piles she can pick up first
    9  wait             monsters about or due back: stand still, for the patience at most
-  10  loot elsewhere   leaving: the piles left when she decided, most per second of travel first
+  10  loot elsewhere   leaving: the piles left when she decided, the most worth per second of travel first
   11  advance          leaving: one trip to the next ground's spot
 
 She leaves a ground by the rate rule (`_leaving`): her EXP rate there falls clearly below what the best
@@ -55,7 +58,7 @@ from ..motion.physics import WALK_SPEED
 from . import fight
 from .fight import THROWS, FightState, Report, kills_text
 from .ledger import Pile
-from .looting import DROPS_LAST, DropSpot
+from .looting import DROPS_LAST, SETTLE, DropSpot
 from .tour import PRIOR
 
 IN_HER_WAY = fight.IN_HER_WAY  # any monster this close on her platform is a target, whatever its kind
@@ -92,6 +95,21 @@ OBJECTIVE_S = 60.0     # backstop: s on one objective, suspensions included
 GROUND_S = 600.0       # backstop: s at one ground
 STUCK_S = 120.0        # backstop: s without a kill, a pick-up or a new ground before she stands by
 PICK_S = 0.6           # s standing on a pile (4 presses)
+# Rule 6a: a pile with a drop in it worth this many mesos on its own (looting.worth, the game data's prices: Pile.
+# dearest) is gone for at once, ahead of shooting: of this map's drops a Slime Bubble (50) and a White Potion (35),
+# 2-8 times a pile's coins (15) or its other items (the user, watching her hunt on 2026-10-21: "Expensive items
+# should attempt to pick immediately"). By a pile's worth all together, two pigs' coins and leather lying together in
+# the simulator's basin (50) took her off shooting there 8 times in 3 minutes (loop_basin) ...
+VALUABLE = 30.0
+VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (URGENT_TRAVEL's 12, and a little),
+VALUABLE_TRIES = 2      # ... this many times at most (then it's a pile like the others): by one, a monster can stand
+                        # (guarded: looting.collect leaves it, not a try), and she can't shoot it from where it lies
+# Whether her look is at the whole screen, with the drops on every platform in view, once a kill's of hers on another
+# platform have landed (Hunt._far_drops): from a spot the band's drops are her own platform's, and one on the ground
+# she shoots was seen only once she stopped shooting. In the simulator (loop_valuable_drop_at_once, seeds 1-16) she
+# set off for the Slime Bubble before the mushrooms were dead on 16 seeds with it, on 12 without; the look takes about
+# 120 ms more in game than the band's (README: What a look costs), once a far kill.
+FAR_DROPS_LOOK = True
 
 
 @dataclass
@@ -114,6 +132,7 @@ class Objective:
     trip: TripState | None = None
     passing: dict[int, float] = field(default_factory=dict)  # platform -> s shot there while passing (rule 4)
     finishing: float = 0.0     # s spent finishing what she had hurt (rule 4b)
+    why: str = ""              # the rule that set it ("valuable pile", "urgent pile", ...)
 
     def text(self) -> str:
         what = f"spot for {self.ground}" if self.kind == "spot" else "pile"
@@ -249,6 +268,10 @@ class Hunt:
         targets, visible, hidden = self._targets(s, now)
         if self._close_quarters(s, targets):
             return self._shoot(s, targets, visible, hidden, now, "close quarters", approach=False)
+        if (pile := self._valuable_pile(s)) is not None:
+            self.log(f"  {_contents(pile)} on platform {pile.platform} at x {pile.x:.0f} (worth {pile.value:.0f}): "
+                     f"picking it up now")
+            return self._go_for(pile, "valuable pile", s)
         if self._owe_move and self.obj is not None:
             return self._travel("move on first")
         if self.obj is not None:  # travelling: shoot in passing, an urgent pile, else on its way
@@ -256,6 +279,8 @@ class Hunt:
         return self._at_ground(s, targets, visible, hidden, now)
 
     def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
+        if self.obj.why == "valuable pile":  # at once: only close quarters (above) and her HP stop her
+            return self._travel("valuable pile")
         # In passing she shoots her targets, and steps out from under any wanted monster above her (which isn't a
         # target, out of reach: as _interrupt has them, or a trip stopped for one went on, then again)
         passing = targets + [m for m in visible if (self.kinds is None or m.kind in self.kinds)
@@ -326,11 +351,25 @@ class Hunt:
     # --- looking and bookkeeping ------------------------------------------------------------------
 
     def _look(self) -> Scene:
-        """A look at the band around her, with her platform's drops."""
-        s = self._seen = self.h.look(mobs=True, wide=False, loot=True)
+        """A look at the band around her, with her platform's drops; at the whole screen, with the drops on every
+        platform in view, once a kill's of hers on another platform have landed since the last such look
+        (`_far_drops`): from her spot the band's drops are her own platform's, and a valuable drop on the ground
+        she shoots wasn't seen until she stopped shooting (rule 6a goes for it at once)."""
+        wide = self._far_drops()
+        s = self._seen = self.h.look(mobs=True, wide=wide, loot=True)
+        if wide and s.where is not None and s.platform is not None:
+            self._wide_at = time.monotonic()
         if telemetry.recording() and s.where is not None:
             telemetry.emit("monsters", **tracks_record(self._tracker.update(s.t, s.monsters), self.model))
         return s
+
+    def _far_drops(self) -> bool:
+        """Whether a kill's drops of hers, on another platform than the last look put her on, have landed (SETTLE
+        after it) since the last whole-screen look."""
+        s, now = self._s, time.monotonic()
+        here = None if s is None or s.platform is None else s.platform.id
+        return FAR_DROPS_LOOK and any(p.hers and p.status == "expected" and p.platform != here
+                                      and self._wide_at < p.since + SETTLE <= now for p in self.h.drops.known)
 
     def _wide(self, s: Scene) -> Scene:
         """A whole-screen look (monsters and drops on every platform in view), at most every WIDE_EVERY s."""
@@ -633,21 +672,38 @@ class Hunt:
         return self._best_pile(s, near_only=True, budget=due - time.monotonic())
 
     def _best_pile(self, s: Scene, near_only: bool, budget: float = 1e6, among: list[Pile] | None = None) -> Pile | None:
-        """The pile with the most drops per second of travel (1 a pile: no prices yet), within `budget` s
-        (of `among`, if given)."""
+        """The pile worth the most per second of travel (Pile.value: what was seen in it, by the game data's
+        prices), within `budget` s (of `among`, if given)."""
         best = None
         for p in self.h.drops.known if among is None else among:
             if not self._fresh(p):
                 continue
             t = self._travel_to_pile(s, p) + PICK_S
-            if t <= budget and (not near_only or t < 20) and (best is None or t < best[0]):
-                best = (t, p)
+            if t <= budget and (not near_only or t < 20) and (best is None or p.value / t > best[0]):
+                best = (p.value / t, p)
+        return None if best is None else best[1]
+
+    def _valuable_pile(self, s: Scene) -> Pile | None:
+        """Rule 6a: of the piles seen to hold a drop worth VALUABLE mesos or more (looting.worth: Pile.dearest),
+        VALUABLE_TRAVEL s away at most and gone for at once fewer than VALUABLE_TRIES times, the one worth the most
+        per second of travel; None while she's going for one already."""
+        if self.obj is not None and self.obj.why == "valuable pile":
+            return None
+        best = None
+        for p in self.h.drops.known:
+            if p.dearest is None or p.dearest < VALUABLE or p.rushed >= VALUABLE_TRIES or not self._fresh(p):
+                continue
+            t = self._travel_to_pile(s, p) + PICK_S
+            if t <= VALUABLE_TRAVEL + PICK_S and (best is None or p.worth / t > best[0]):
+                best = (p.worth / t, p)
         return None if best is None else best[1]
 
     def _go_for(self, pile: Pile, rule: str, s: Scene) -> None:
         if self.obj is not None:
             self.stack.append(self.obj)  # suspended
-        self.obj = Objective("pile", pile.platform, pile.x, pile=pile)
+        if rule == "valuable pile":
+            pile.rushed += 1
+        self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule)
         return self._travel(rule)
 
     # --- spots and grounds --------------------------------------------------------------------------
@@ -843,11 +899,15 @@ class Hunt:
         if s.hp < self.h.low_hp:
             return True
         here = s.platform.id
-        if self._close_quarters(s, s.monsters) or self._owed(s, s.monsters) is not None:
+        if self._close_quarters(s, s.monsters):
             return True
         o = self.obj
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):
             return True  # not worth it any more (`_pass` drops it)
+        if o is not None and o.why == "valuable pile":
+            return False  # at once: nothing else stops her
+        if self._valuable_pile(s) is not None or self._owed(s, s.monsters) is not None:
+            return True
         wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
         in_reach = [m for m in wanted if self._hits(s, m)]
         if (in_reach or self._pass_step(s, wanted) is not None) and o is not None \
@@ -914,7 +974,8 @@ class Hunt:
             return
         urgent = self._urgent_pile(s)
         piles = [{"x": round(p.x, 1), "y": round(p.y, 1), "platform": p.platform, "status": p.status,
-                  "hers": p.hers, "urgent": p is urgent} for p in self.h.drops.known if self._fresh(p)]
+                  "hers": p.hers, "urgent": p is urgent, "worth": round(p.value)}
+                 for p in self.h.drops.known if self._fresh(p)]
         v, o = self.visit, self.obj
         key = (self._rule, None if o is None else o.text(), None if v is None else v.ground,
                tuple((d["x"], d["platform"], d["status"], d["urgent"]) for d in piles))
@@ -925,3 +986,11 @@ class Hunt:
         telemetry.emit("hunt", mode="hunt", rule=self._rule, objective=key[1], ground=key[2],
                        rate_here=None if v is None or v.arrived is None else round(self._rate_here(), 3),
                        rate_to_beat=None if best is None else [round(best[0], 3), best[1]], piles=piles)
+
+
+def _contents(p: Pile) -> str:
+    """What a pile holds, for the log: "slime-bubble, 2 mesos" (as the last look that saw it saw it), or "drops"
+    before a look has."""
+    if not p.items:
+        return "drops"
+    return ", ".join(k if n == 1 else f"{n} {k}" for k, n in Counter(p.items).most_common())

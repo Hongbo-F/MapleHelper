@@ -293,3 +293,21 @@ def test_a_kill_is_placed_where_its_monster_was_seen_last_and_its_pile_expected_
     h.exp_gains = 1
     ledger.on_look(_seen_at(11.3, []))
     assert [(k.kind, k.x) for k in ledger.kills] == [("slime", 880.0)] and store.piles[0].x == 880.0
+
+
+def test_a_pile_seen_holds_what_was_seen_in_it_and_what_that_is_worth():
+    from gamelab.behavior.ledger import PILE_WORTH
+    store = DropStore()
+    store.on_kill(Kill(0.0, "slime", 3, 500.0, 300.0, 3))
+    (p,) = store.known
+    assert p.worth is None and p.value == PILE_WORTH  # not seen yet: a pile's coins
+    seen = [Loot(Item("mesos", 0, 0, 13, 13, 0.9, "bronze"), 510.0, 300.0, 3),
+            Loot(Item("slime-bubble", 0, 0, 19, 18, 0.9), 520.0, 300.0, 3)]
+    store.on_look(_look(SETTLE, loot=seen, looked=[(3, 300.0, 700.0)]))
+    assert p.items == ("mesos", "slime-bubble") and p.worth == p.value == 65 and p.dearest == 50 and p.mesos
+    store.on_look(_look(SETTLE + 1, loot=seen[:1], looked=[(3, 300.0, 700.0)]))  # the bubble picked up
+    assert p.items == ("mesos",) and p.worth == 15 and p.dearest == 15
+    store.on_look(_look(SETTLE + 2, loot=[Loot(Item("leather", 0, 0, 20, 18, 0.9), 900.0, 300.0, 3)],
+                        looked=[(3, 300.0, 1000.0)]))
+    other = store.known[-1]
+    assert not other.hers and other.items == ("leather",) and other.worth == 10  # someone else's, seen
