@@ -81,7 +81,7 @@ python -m gamelab stop
 ```
 
 1. `player --elevate` starts the player. Approve the UAC prompt.
-2. `calibrate` finds her on screen. Stand her on flat, textured ground, such as a girder, with nothing around.
+2. `calibrate` finds her on screen and keeps her name tag's template. Stand her on flat, textured ground, such as a girder, with nothing around. The recordings (`--record`, `do`, `combo`, `lock`) are cropped around her name tag where it is when they start, found with that template (`calibration.crop_now`): calibrate's own crop is kept while her tag is within 40 px of where it put it, and used, with a warning, only when the tag isn't found. (On 2026-10-21 the 16 runs of a sweep of `act --record` were cropped from a calibration she had walked away from, and none had her.)
 3. `combo` plays the combo, here 4 runs of 8 shots in a row, and reports every jump and throw.
 4. `stop` shuts the player down.
 

@@ -168,14 +168,25 @@ def _tap(key: str, at_ms: int) -> list[list]:
     return [[at_ms, key, "down"], [at_ms + TAP_MS, key, "up"]]
 
 
+def _crop_on_her(cal: calibration.Calibration) -> list[int]:
+    """The crop to record her in: around her name tag as the game shows it now, or the stored one if the tag
+    isn't found (calibration.crop_now: a short capture, no keys); what it found is said."""
+    crop, note = calibration.crop_now(cal)
+    if note:
+        print(note)
+    return crop
+
+
 def cmd_act(args) -> int:
-    """Run a few explore steps, then save a screenshot (and optionally a recording around her)."""
+    """Run a few explore steps, then save a screenshot (and optionally a recording around her: where her name tag
+    is when it starts, not where calibrate found her)."""
     window.bring_to_front(_game_title())
     events, end = parse_steps(args.steps)
     duration = end + args.settle
     if args.record:
         cal = calibration.load()
-        rec = recordings.record(events, name=args.name, duration_ms=duration, crop=cal.crop, scale=cal.scale, fps=30)
+        crop = _crop_on_her(cal)
+        rec = recordings.record(events, name=args.name, duration_ms=duration, crop=crop, scale=cal.scale, fps=30)
         path = LAB / f"{args.name}_sheet.png"
         recordings.contact_sheet(rec.frames, rec.times, path, cols=8, every=args.every)
         print(path)
@@ -208,7 +219,8 @@ def cmd_do(args) -> int:
         return 1
     window.bring_to_front(cfg.game_window_title)
     cal = calibration.load()
-    rec = recordings.record(events, name=args.name, duration_ms=end + 400, crop=cal.crop, scale=cal.scale, fps=30)
+    rec = recordings.record(events, name=args.name, duration_ms=end + 400, crop=_crop_on_her(cal), scale=cal.scale,
+                            fps=30)
     recordings.contact_sheet(rec.frames, rec.times, LAB / f"{args.name}_sheet.png", cols=8, every=args.every)
     path = LAB / f"{args.name}.png"
     Image.fromarray(recordings.screenshot("do", scale=2, duration_ms=100)).save(path)
@@ -668,9 +680,10 @@ def cmd_lock(args) -> int:
         return 1
     cal = calibration.load()
     window.bring_to_front(cfg.game_window_title)
+    crop = _crop_on_her(cal)  # she jumps in place: where she is at the start does for every run
     for d in args.delays:
         events = _tap(attack.name, 0) + _tap(keys.jump.name, d)
-        rec = recordings.record(events, name=f"lock_{args.action}_{d}", duration_ms=d + 900, crop=cal.crop, scale=cal.scale)
+        rec = recordings.record(events, name=f"lock_{args.action}_{d}", duration_ms=d + 900, crop=crop, scale=cal.scale)
         jumped = [s for s in airborne(track(rec.frames, rec.times, cal.template)) if s[0] >= d]
         print(f"jump {d:4d} ms after {args.action}: " +
               (f"airborne at {jumped[0][0]:.0f} ms" if jumped else "IGNORED (still locked)"))
@@ -683,6 +696,7 @@ def cmd_combo(args) -> int:
     cfg, keys, timing = her_setup(regular_attack=args.regular_attack)
     cal = calibration.load()
     window.bring_to_front(cfg.game_window_title)
+    crop = _crop_on_her(cal)  # the runs alternate their facing, so she ends about where she started
     good_jump = {"back"} if args.name in MOVES_BACK else {"back", "up", "forward"}
     totals = {"back": 0, "up": 0, "forward": 0, "front": 0, "wrong": 0}
     for run in range(args.runs):
@@ -693,7 +707,7 @@ def cmd_combo(args) -> int:
         events = [[0, front.name, "down"], [timing.turn_tap, front.name, "up"]] + \
                  [[t + FACE_MS, k, kind] for t, k, kind in events]
         starts, end = [s + FACE_MS for s in starts], end + FACE_MS
-        rec = recordings.record(events, name=f"{args.name}_{run}", duration_ms=end + 600, crop=cal.crop, scale=cal.scale)
+        rec = recordings.record(events, name=f"{args.name}_{run}", duration_ms=end + 600, crop=crop, scale=cal.scale)
         print(f"{rec.name} (facing {facing}, {args.chain} in a row):")
         for i, r in enumerate(analyze.combos(rec, starts, end, facing, cal.template)):
             jumps = ", ".join(f"{j.direction} ({j.dx:+.0f})" for j in r.jumps) or "none"

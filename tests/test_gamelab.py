@@ -139,3 +139,72 @@ def test_a_result_file_still_locked_is_read_again(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_text", flaky)
     monkeypatch.setattr(time, "sleep", lambda s: None)
     assert client._read_result(path) == {"ok": True} and len(calls) == 3
+
+
+def _game_frame(tag=None, size=(1080, 1920)):
+    """A full-size frame of the game (a plain sky), with her name tag (a dark box with white strokes) centred at
+    `tag` if given."""
+    frame = np.full((*size, 3), (200, 120, 150), np.uint8)
+    if tag is not None:
+        cx, cy = tag
+        frame[cy - 9:cy + 9, cx - 40:cx + 40] = 20
+        frame[cy - 5:cy + 5, cx - 32:cx + 32:3] = 255
+    return frame
+
+
+def _calibration(crop):
+    from gamelab.analysis import calibration, track
+    half = _game_frame((1000, 600))[::2, ::2]
+    return calibration.Calibration(list(crop), 2, track.make_template(half, (500, 300), scale=2))
+
+
+def test_a_recording_is_cropped_around_her_name_tag_where_it_is_when_it_starts():
+    # Calibrate's crop is around wherever she stood then: on 2026-10-21 a sweep's 16 `act --record` runs never had
+    # her in theirs. The crop is taken around her name tag as the game shows it at the start (her tag at the
+    # crop's 400, 300, as calibrate puts it), saying so when that isn't the stored one; where the tag isn't
+    # found, the stored crop, with a warning.
+    from gamelab.analysis import calibration
+    stale = _calibration([0, 482, 800, 400])
+    assert calibration.match_tag(_game_frame((1000, 600)), stale.template)[0] == pytest.approx((1000, 600), abs=2)
+    crop, note = calibration.crop_on_her(stale, _game_frame((1000, 600)), 1920, 1080)
+    assert crop == pytest.approx([600, 300, 800, 400], abs=2)
+    assert note.startswith("her name tag is at ") and note.endswith("(the stored [0, 482, 800, 400] hasn't her)")
+    crop, note = calibration.crop_on_her(stale, _game_frame((1800, 1000)), 1920, 1080)  # kept inside the client
+    assert crop[0] == 1120 and crop[1] == 680
+    crop, note = calibration.crop_on_her(stale, _game_frame(), 1920, 1080)
+    assert crop == [0, 482, 800, 400] and "wasn't found" in note and "calibrate" in note
+    # Her tag where calibrate put it in the stored crop, or within TAG_SLACK of it: that crop is kept, unsaid.
+    fresh = _calibration(calibration.crop_around((1000, 600), 1920, 1080))
+    for tag in ((1000, 600), (1030, 580)):
+        assert calibration.crop_on_her(fresh, _game_frame(tag), 1920, 1080) == (fresh.crop, "")
+    crop, note = calibration.crop_on_her(fresh, _game_frame((1100, 600)), 1920, 1080)
+    assert crop == pytest.approx([700, 300, 800, 400], abs=2) and note.endswith("had her too)")
+
+
+def test_act_record_records_the_crop_around_her_not_the_stored_one(monkeypatch, tmp_path, capsys):
+    from gamelab import __main__ as cli
+    from gamelab import window
+    from gamelab.analysis import calibration, recordings
+    frame, plans, recorded = _game_frame((1000, 600)), [], {}
+
+    def submit(events=(), **capture):  # the player: one capture of the game as it is, keys or not
+        plans.append(capture)
+        crop = capture.get("crop")
+        shot = frame if crop is None else frame[crop[1]:crop[1] + crop[3], crop[0]:crop[0] + crop[2]]
+        return {"frames": [shot[::capture.get("scale", 1), ::capture.get("scale", 1)]],
+                "client": {"width": 1920, "height": 1080}, "times": [0], "sent": [], "problems": []}
+
+    def record(events, **kw):
+        recorded.update(kw)
+        return recordings.Recording(kw["name"], np.zeros((1, 200, 400, 3), np.uint8), np.zeros(1))
+    monkeypatch.setattr(window, "bring_to_front", lambda *a, **k: True)
+    monkeypatch.setattr(client, "submit", submit)
+    monkeypatch.setattr(calibration, "load", lambda: _calibration([0, 482, 800, 400]))
+    monkeypatch.setattr(recordings, "record", record)
+    monkeypatch.setattr(recordings, "contact_sheet", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "LAB", tmp_path)
+    args = cli.build_parser().parse_args(["act", "right+", "52", "alt", "700", "right-", "--record"])
+    assert cli.cmd_act(args) == 0
+    assert recorded["crop"] == pytest.approx([600, 300, 800, 400], abs=2) and recorded["scale"] == 2
+    assert plans[0].get("crop") is None and plans[0]["scale"] == 1  # the first capture found her, full size
+    assert "recording [" in capsys.readouterr().out
