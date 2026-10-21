@@ -19,7 +19,7 @@ def _hunt(piles, kills=(), travel=5.0):
                           wounds=SimpleNamespace(seen_within=lambda now, seconds, hurt_by=None: []))
     h.fs = FightState()
     h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel,
-                                                    arrive=lambda src, x, dst, dst_x=None: travel))
+                                                    arrive=lambda src, x, dst, dst_x=None, keep_off=(): travel))
     h.visit = Visit(1, Spot(1, 0.0, 1.0, True), kills=list(kills))
     h._exit_piles, h.obj = None, None
     return h
@@ -222,9 +222,11 @@ def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():
 
 
 def _detour_hunt(piles, times):
-    """A Hunt whose route times are `times`: {(from platform, to platform): s} (Planner.arrive's)."""
+    """A Hunt whose route times are `times`: {(from platform, to platform): s} (Planner.arrive's), or keeping off
+    platforms, {(from, to, keep_off): s}."""
     h = _hunt(piles)
-    h.nav.planner.arrive = lambda src, x, dst, dst_x=None: times.get((src, dst))
+    h.nav.planner.arrive = lambda src, x, dst, dst_x=None, keep_off=(): times.get((src, dst, tuple(keep_off)),
+                                                                                  times.get((src, dst)))
     h._standable = lambda pid: True
     return h
 
@@ -250,6 +252,28 @@ def test_a_pile_a_little_off_her_way_is_picked_up_on_the_way():
     for why in ("on the way", "valuable pile", "urgent pile"):  # not from a pile on the way, nor to one that can't wait
         h.obj = Objective("pile", 16, 600.0, why=why)
         assert h._detour(_at(13)) is None
+
+
+def test_a_pile_on_the_way_is_weighed_by_the_route_the_trip_takes():
+    # A trip to a spot off its ground keeps off the ground (hunt._keep_off, route.KEEP_OFF_S), and her ways to the
+    # spot, from here and from the pile, are weighed so; her way to the pile is the stop's own trip's, which keeps off
+    # nothing. From 36 at x 0 to 17's spot on 16, a pile on 36 0.5 s away: by the plain routes (up the right side,
+    # past 17) 15.0 s from here and 15.2 from the pile, 1.3 s more; by the trip's (up the left), 18.0 and 21.3: 4.4 s.
+    pile = _pile(20, platform=36)
+    h = _detour_hunt([pile], {})
+    asked = []
+
+    def arrive(src, x, dst, dst_x=None, keep_off=()):
+        asked.append((dst, tuple(keep_off)))
+        if dst == 36:
+            return 0.5
+        return (18.0 if x == 0.0 else 21.3) if tuple(keep_off) == (17,) else (15.0 if x == 0.0 else 15.2)
+    h.nav.planner.arrive = arrive
+    h.obj = Objective("spot", 16, 636.0, ground=17)
+    assert h._detour(_at(36)) is None
+    assert sorted(set(asked)) == [(16, (17,)), (36, ())]
+    h.obj = Objective("spot", 16, 636.0, ground=16)  # a spot on its ground: nothing to keep off
+    assert h._detour(_at(36)) == (0.5 + hunt.PICK_S + 15.2 - 15.0, pile)
 
 
 def test_the_wait_for_drops_to_land_counts_in_what_a_pile_on_the_way_costs():

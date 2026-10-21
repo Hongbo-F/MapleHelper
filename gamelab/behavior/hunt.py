@@ -741,21 +741,25 @@ class Hunt:
         """Rule 5b: travelling, the pile a stop at costs DETOUR_S at most on top of the trip (and `slack` more):
         her way to it (and its drops' landing, for one not seen yet), PICK_S on it and her way on from it to the
         objective's place, less her way there from here (Planner.arrive), the most worth per second of that first;
-        with what it costs. Not for a pile more than DETOUR_REACH s away, nor one with a monster by it, nor on a
-        platform she can't stand on with monsters on it, as rule 5 has them; not while the objective is a pile on
-        the way itself, a valuable or an urgent one, nor after DETOURS."""
+        with what it costs. Her ways to the objective's place by the routes its trip takes, keeping off what it
+        keeps off (_keep_off: a spot's ground): weighed by the planner's plain routes, from 36 at x 449 a pile at
+        779 on her way to 17's spot on 16 was 1.3 s more by the right side, past 17, where the trip goes by the
+        left, and 3.8 s more by that. Her way to the pile is the stop's own trip's, which keeps off nothing. Not
+        for a pile more than DETOUR_REACH s away, nor one with a monster by it, nor on a platform she can't stand
+        on with monsters on it, as rule 5 has them; not while the objective is a pile on the way itself, a
+        valuable or an urgent one, nor after DETOURS."""
         o = self.obj
         if o is None or o.why in ("on the way", "valuable pile", "urgent pile") or o.detours >= DETOURS:
             return None
-        plan, here, x = self.nav.planner, s.platform.id, s.where.x
-        direct = plan.arrive(here, x, o.platform, o.x)
+        plan, here, x, keep = self.nav.planner, s.platform.id, s.where.x, _keep_off(o)
+        direct = plan.arrive(here, x, o.platform, o.x, keep_off=keep)
         if direct is None:
             return None
         now, best = time.monotonic(), None
         for p in self.h.drops.known:
             if p is o.pile or not self._fresh(p) or self._guarded(s, p):
                 continue
-            to, on = plan.arrive(here, x, p.platform, p.x), plan.arrive(p.platform, p.x, o.platform, o.x)
+            to, on = plan.arrive(here, x, p.platform, p.x), plan.arrive(p.platform, p.x, o.platform, o.x, keep_off=keep)
             if to is None or on is None or to > DETOUR_REACH:
                 continue
             lands = max(0.0, p.since + DROP_LANDS - now - to) if p.status == "expected" else 0.0

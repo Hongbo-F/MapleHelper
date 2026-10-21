@@ -261,6 +261,46 @@ def test_arriving_at_an_x_is_the_quickest_landing_and_the_walk_from_it(model):
         assert planner.arrive(p.id, p.left + 20, p.id) == planner.travel(p.id, p.left + 20, p.id)
 
 
+def test_arriving_keeps_off_what_a_trip_keeps_off(model):
+    """Planner.arrive with `keep_off`: route.KEEP_OFF_S more for each move onto one of those platforms (but the one
+    she goes to), as `travel` and the navigator's trips have it: never less than without, the same going onto it, and
+    never under `travel`'s keeping off the same (that ends wherever she lands)."""
+    planner = Planner(model)
+    for k in model.platforms:
+        for p in model.platforms:
+            for q in model.platforms:
+                x = (q.left + q.right) / 2
+                plain = planner.arrive(p.id, p.left + 20, q.id, x)
+                kept = planner.arrive(p.id, p.left + 20, q.id, x, keep_off=(k.id,))
+                if plain is None:
+                    assert kept is None
+                    continue
+                assert kept >= plain - 1e-9 and (q.id != k.id or kept == plain)
+                assert planner.travel(p.id, p.left + 20, q.id, keep_off=(k.id,)) <= kept + 1e-9
+                assert planner.arrive(p.id, p.left + 20, q.id, keep_off=(k.id,)) == \
+                    planner.travel(p.id, p.left + 20, q.id, keep_off=(k.id,))
+
+
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_a_pile_on_the_way_is_weighed_against_the_route_the_trip_takes():
+    # The hunt loop's trip to 17's spot on 16 keeps off 17 (route.KEEP_OFF_S): from the basin it goes up the left
+    # side, where the planner's plain routes go up the right, past 17. A stop at a pile 330 along 36 from her costs
+    # 1.3 s more by the right side, 3.8 s by the left (hunt._detour gives arrive the trip's keep_off). And from 2,
+    # going to 4's spot on 3, a pile on 10 lies on the way that keeps off 4: 1.2 s more, not 5.6.
+    from gamelab.behavior import hunt
+    from gamelab.sim import scenarios
+    planner = Planner(scenarios.real_map())
+
+    def extra(here, x, pid, px, spot, sx, keep=()):
+        return (planner.arrive(here, x, pid, px) + hunt.PICK_S + planner.arrive(pid, px, spot, sx, keep_off=keep)
+                - planner.arrive(here, x, spot, sx, keep_off=keep))
+    assert extra(36, 449, 36, 779, 16, 636) == pytest.approx(1.3, abs=0.05)
+    assert extra(36, 449, 36, 779, 16, 636, keep=(17,)) == pytest.approx(3.8, abs=0.05) and 3.8 > hunt.DETOUR_S
+    assert extra(2, -109, 10, 51, 3, 706) == pytest.approx(5.6, abs=0.05)
+    assert extra(2, -109, 10, 51, 3, 706, keep=(4,)) == pytest.approx(1.2, abs=0.05) and 1.2 < hunt.DETOUR_S
+
+
 @pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
                     reason="needs the map's game data (gamedata/data)")
 def test_route_times_on_the_real_map_are_each_platforms_own_search():
