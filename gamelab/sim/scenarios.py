@@ -168,6 +168,11 @@ class Sim:
             raise SimViolation("the simulator's stack runs only inside `with Sim(model, scenario) as sim:` "
                                "(with the fake player in place of gamelab.control.client)")
 
+    def sleep_then(self, result, seconds: float):
+        """`result`, once `seconds` of fake time have gone by (the feed goes on looking meanwhile)."""
+        self.clock.sleep(seconds)
+        return result
+
     def log(self, message: str) -> None:
         self.trace.log.append(f"{self.clock.elapsed:9.3f} {message}")
         telemetry.emit("log", text=message)
@@ -1232,8 +1237,11 @@ def _died(cause: str, at_least: int = 1):
           expects=(ends("killed", key="ended"), check("looks from the feed", _fed), _died("hers")))
 def feed_hunt_kill(sim):
     """hunt_kill with the feed: the slime nearest her, shot dead and looted; the feed follows it and puts her
-    EXP gain on it."""
-    return hunt_kill(sim)
+    EXP gain on it. She then stands for the 1.8 s a gain waits for the monster it was to fade
+    (tracking.FADE_S + MISSING_S): with the feed's costs as measured after the profiling pass, its drops
+    were guarded, the run ended at the kill, and the feed hadn't judged the death yet."""
+    from ..localization.tracking import FADE_S, MISSING_S
+    return sim.sleep_then(hunt_kill(sim), FADE_S + MISSING_S + 0.2)
 
 
 @scenario((36, 200.0), monsters="all", seed=4, feed=True,

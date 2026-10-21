@@ -477,14 +477,17 @@ def _drain(events: deque[Event], upto: float | None) -> list[Event]:
 @dataclass(frozen=True)
 class Costs:
     """What each part of a frame takes the feed (s), as measured offline (bench-look medians on the 17 saved
-    frames; the re-finds on them, refind_bench in the step-5 report)."""
+    frames after the profiling pass; the re-finds on them, refind_bench in the step-5 report). Before that
+    pass: her place 0.016, her band 0.032, the whole screen 0.122."""
     capture: float = 0.002     # the frame copied off the graphics card and converted (bench-capture: 2.0 ms)
-    look: float = 0.016        # her place, ropes included (Senses.look without monsters: 16.0 ms)
+    look: float = 0.012        # her place, ropes included (Senses.look without monsters: 13.3 ms, 1.3 of it the
+                               # saved frame's conversion, which `capture` counts)
     refind: float = 0.0007     # a monster re-found with the template that matched it last (0.69 ms)
     fallback: float = 0.0034   # ... and with its kind's whole set, when that missed (3.4 ms)
-    band: float = 0.032        # her band searched (48.0 - 16.0 ms)
-    wide: float = 0.122        # the whole screen
-    loot_strip: float = 0.007  # a strip searched for drops (her platform's 14.6 ms in about two)
+    band: float = 0.022        # her band searched (the feed step with it 34.2 ms, without 12.9)
+    wide: float = 0.086        # the whole screen (98.6 - 12.9 ms)
+    loot_strip: float = 0.007  # a strip searched for drops (her platform's 15.6 ms in 1.9 strips; every platform
+                               # in view, 71 ms in 28.6)
 
     def of(self, st: WorldState) -> float:
         w = st.work

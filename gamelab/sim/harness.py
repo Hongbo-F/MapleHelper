@@ -57,13 +57,15 @@ PRESETS = {
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
-# measured them offline: a look placing her 16.0 ms of computing plus the wait for a frame (5.6 ms median with
-# the screen changing) and its copy (2.0), her band 32.0 ms more, the whole screen 122.0, a strip of drops
-# about 8 (her platform's 14.6). Glances keep their pace (Eyes.GLANCE_EVERY_S). With `--feed`, her looks come
-# from the feed, whose own costs are localization.feed.COSTS.
+# measured them offline (17 saved frames x 5, medians, after the profiling pass): a look placing her 12.0 ms of
+# computing plus the wait for a frame (5.6 ms median with the screen changing) and its copy off the card and
+# conversion (2.0), her band 23.8 ms more, the whole screen 83.8, a strip of drops about 8 (her platform's
+# 15.6 ms in 1.9 strips). Before the profiling pass (as step 5 measured them): 0.024, 0.006, 0.032, 0.122 and
+# 0.008. Glances keep their pace (Eyes.GLANCE_EVERY_S). With `--feed`, her looks come from the feed, whose
+# own costs are localization.feed.COSTS.
 COSTS = {
     "coded": {},
-    "measured": {"LOOK_S": 0.024, "LOOK_LAG": 0.006, "DETECT_S": 0.032, "DETECT_WIDE_S": 0.122, "LOOT_S": 0.008},
+    "measured": {"LOOK_S": 0.020, "LOOK_LAG": 0.006, "DETECT_S": 0.024, "DETECT_WIDE_S": 0.084, "LOOT_S": 0.008},
 }
 
 
