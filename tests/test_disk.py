@@ -124,6 +124,46 @@ def test_the_part_being_written_is_the_newest_run_by_its_last_write(tmp_path):
     assert fresh and source.path == part3 and records[0]["part"] == 3
 
 
+def test_a_run_s_next_part_is_followed_on_from_the_part_before_not_started_over(tmp_path):
+    # A run's next part starts with its session record marked `continues`: LiveSource reads the rest of the
+    # part it follows and goes on into the next (not a new run, for the window and the page to start over
+    # at), so what the run sent once (the hunt loop's safe platforms and grounds) stays, and no record is
+    # lost or read twice.
+    from gamelab.ui.sources import LiveSource
+    from gamelab.ui.state import State
+    clock = [0.0]
+    source, state, seen, fresh = LiveSource(tmp_path, clock=lambda: clock[0]), State(), [], []
+    telemetry.record_to("hunt", folder=tmp_path, max_bytes=600)
+    try:
+        telemetry.emit("session", map=1, command="hunt", mode="live")
+        telemetry.emit("tour", order=[], safe=[5, 9], grounds=[36, 17])
+        for i in range(40):
+            telemetry.emit("log", text=f"line {i:02d} " + "x" * 30)
+            clock[0] += 0.5  # the folder is looked through every other poll
+            started, records = source.poll()
+            fresh.append(started)
+            seen += records
+    finally:
+        telemetry.stop()
+    clock[0] += 1.0
+    fresh.append(source.poll()[0])
+    for r in seen:
+        state.apply(r)
+    parts = list(tmp_path.glob("*.jsonl"))
+    assert len(parts) >= 3 and source.path == telemetry.newest(tmp_path)
+    assert source.path.name.endswith(f"-hunt-part{len(parts)}.jsonl")
+    assert fresh[0] and not any(fresh[1:])  # one run, started over at no part
+    assert [r["text"] for r in seen if r["topic"] == "log"] == [f"line {i:02d} " + "x" * 30 for i in range(40)]
+    assert state.tour["safe"] == [5, 9] and state.tour["grounds"] == [36, 17]
+    # A part that continues another run's file is a new run, as is one that continues none.
+    other = tmp_path / "20991231-235959-watch-part2.jsonl"
+    other.write_text('{"t": 3, "topic": "session", "continues": "20991231-200000-watch.jsonl", "part": 2}\n',
+                     encoding="utf-8")
+    clock[0] += 1.0
+    started, records = source.poll()
+    assert started and source.path == other and records[0]["part"] == 2
+
+
 class _Listing:
     """os.scandir's listing, with the directory's copy of some files' last write out of date (as NTFS keeps
     it for a file still being written that nothing else opened): name -> the last write it says."""

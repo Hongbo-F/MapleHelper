@@ -12,7 +12,11 @@ from .. import telemetry
 class LiveSource:
     """The newest telemetry file in a folder, followed as it grows; a newer run's file replaces it. The
     file is read on every poll, but the folder looked through at most once every `rescan_s`: the web page
-    polls 40 times a second, and a new run is still picked up within a second."""
+    polls 40 times a second, and a new run is still picked up within a second. A run's next part (its
+    first record the session record that `continues` the file followed, telemetry.Recorder) isn't a new
+    run: the rest of the part before is read, then the new part, and the window and the page go on with
+    what they had (the tour's and the hunt loop's grounds and safe platforms are sent once a run, her
+    trail and the log lines go back further)."""
 
     def __init__(self, folder: Path = telemetry.FOLDER, rescan_s: float = 1.0,
                  clock: Callable[[], float] = time.monotonic):
@@ -23,15 +27,26 @@ class LiveSource:
 
     def poll(self) -> tuple[bool, list[dict]]:
         """(whether a new run started, the records since the last poll)."""
-        fresh = False
         now = self._clock()
         if self._scanned is None or now - self._scanned >= self.rescan_s:
             self._scanned = now
             newest = telemetry.newest(self.folder)
-            fresh = newest is not None and newest != self.path
-            if fresh:
-                self.path, self._follower = newest, telemetry.Follower(newest)
-        return fresh, (self._follower.poll() if self._follower else [])
+            if newest is not None and newest != self.path:
+                follower = telemetry.Follower(newest)
+                records = follower.poll()
+                if self._follower is None or (records and not self._continues(records[0])):
+                    self.path, self._follower = newest, follower
+                    return True, records
+                if records:  # the run's next part: the rest of this one, then on into it
+                    rest = self._follower.poll()
+                    self.path, self._follower = newest, follower
+                    return False, rest + records
+                # nothing in it yet (a part is made a moment before its first line): the next scan sees
+        return False, (self._follower.poll() if self._follower else [])
+
+    def _continues(self, first: dict) -> bool:
+        """Whether a file starting with record `first` is the next part of the one followed."""
+        return first.get("topic") == "session" and self.path is not None and first.get("continues") == self.path.name
 
 
 class ReplaySource:

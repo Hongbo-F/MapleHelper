@@ -537,6 +537,31 @@ def test_a_seek_or_a_new_run_restarts_the_stream_with_a_snapshot(tmp_path):
         conn.close()
 
 
+def test_the_page_goes_on_into_a_run_s_next_part_without_starting_over(tmp_path):
+    # The tour's and the hunt loop's safe platforms and grounds are sent once a run: had the page started over
+    # at each new part (a run past 64 MB), they'd be gone from it, with her trail and the log.
+    from gamelab.ui.sources import LiveSource
+    from gamelab.ui.web import Feed
+    m = model()
+    now = [0.0]
+    telemetry.record_to("hunt", folder=tmp_path, max_bytes=500)
+    try:
+        telemetry.emit("session", map=1, command="hunt", mode="live")
+        telemetry.emit("tour", order=[], safe=[2], grounds=[3, 4])
+        feed = Feed(lambda map_id: MapView(m, width=300), LiveSource(tmp_path, clock=lambda: now[0]), live=True)
+        feed.step()
+        epoch = feed.epoch
+        for i in range(30):
+            telemetry.emit("log", text=f"line {i:02d} " + "x" * 30)
+            now[0] += 1.0
+            feed.step()
+    finally:
+        telemetry.stop()
+    assert len(list(tmp_path.glob("*.jsonl"))) >= 3
+    assert feed.epoch == epoch and feed.state.tour["safe"] == [2] and feed.state.tour["grounds"] == [3, 4]
+    assert list(feed.logs)[-2:] == [f"line {i:02d} " + "x" * 30 for i in (28, 29)]
+
+
 def test_a_client_that_fell_behind_gets_a_snapshot(monkeypatch):
     from gamelab.ui import web
     monkeypatch.setattr(web, "RING", 8)
