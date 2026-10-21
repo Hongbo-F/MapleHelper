@@ -526,6 +526,27 @@ def test_a_monster_is_never_past_its_platforms_end():
     assert reach.wall_in_way(a, 100, 500, 200, target=b) is not None
 
 
+def test_her_decisions_take_a_monster_on_its_own_platform_by_its_id():
+    # A wide floor A (-400..200, y 500), the step wall at 200 and B (200..400, y 440) above it. From A at -190 a
+    # pig on B at 205, 395 off: the star's row ends inside its body, and the client's hit point (the middle of the
+    # body's part within the row, 190.5) is on A's side of the wall. Taken on B, as the pig is (Platform.peer, by
+    # the monster's id), the wall stops it, as the world's line does (it knows the pig's platform): from 4 at the
+    # monsters at 2's end her decisions threw where the world's stars, and the game's, stop at the step.
+    tree = {"info": {"VRLeft": -500, "VRTop": 0, "VRRight": 800, "VRBottom": 800},
+            "foothold": {"1": {"1": {"1": _fh(-400, 500, 200, 500, 0, 2), "2": _fh(200, 500, 200, 440, 1, 3),
+                                     "3": _fh(200, 440, 400, 440, 2, 0)}}}}
+    model = mapdata.parse(1, tree, "Wide step", {})
+    a, b = (next(p for p in model.platforms if p.left == left) for left in (-400, 200))
+    assert a.peer(b.id) is b and a.peer(None) is None and a.peer(99) is None
+    pig = target(205, 440, platform=b.id)
+    assert reach.hit_point(-190, 500 - reach.SHOT_H, 1, 205, 440, *reach.PIG)[0] < 200
+    assert reach.wall_between(a, -190, 500, 205, ty=440) is None  # its platform unknown: short of the wall
+    assert reach.wall_to(a, -190, 500, pig) == reach.wall_between(a, -190, 500, 205, target=b, ty=440) == a.walls[0]
+    assert not reach.can_hit(a, -190, 500, pig) and stance(-190, 500, a, [pig])[0] != "throw"
+    alone = Platform(a.id, a.segments, a.walls, a.floors)  # no map attached (peers): as before, where it was seen
+    assert reach.wall_to(alone, -190, 500, pig) is None
+
+
 def test_walls_block_can_be_switched_off_for_probes(monkeypatch):
     model, a, b, c = step_map()
     monkeypatch.setattr(reach, "WALLS_BLOCK", False)
@@ -584,6 +605,9 @@ def test_what_stops_a_star_on_the_real_map():
     assert reach.hit_point(609, -893, -1, 211, -925, *pig)[0] == 227  # 209-245 of the pig's 177-245
     assert reach.sight_stop(p(4), 609, -893, 227, -925) is None
     assert reach.wall_between(p(4), 609, -865, 211, target=p(2), ty=-925, body=pig) is not None
+    # So do her decisions, which take the pig on 2 by its id (reach.wall_to): from 4 at 600 no throw at one at 207.
+    on_2 = target(207, p(2).y_at(207), platform=2)
+    assert not reach.can_hit(p(4), 600, p(4).y_at(600), on_2) and stance(600, p(4).y_at(600), p(4), [on_2])[0] != "throw"
     # The logged hits (research/terrain's 299 decided throws): up past other groups' walls, and down from near
     # her platform's end.
     for her, x, there, txs in ((19, -14, 18, (150, 300, 380)), (19, 52, 18, (300, 439)), (3, 706, 1, (870, 930)),

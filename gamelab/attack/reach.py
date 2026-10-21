@@ -608,9 +608,13 @@ def wall_in_way(platform: Platform | None, x: float, y: float, tx: float, rise: 
 def wall_to(platform: Platform | None, x: float, y: float, m: Monster, rise: float = 0.0,
             target: Platform | None = None) -> Segment | None:
     """wall_in_way from map (x, y) on `platform` to monster `m`, by its body (body_of). `target`: m's platform
-    if known (if m is on hers, it's hers)."""
-    if target is None and platform is not None and m.platform == platform.id:
-        target = platform
+    if known; by default the one its id names on her platform's map (Platform.peer; hers, if it's on hers): the
+    star's hit point is taken on it, as the simulator's world and the spots take it (wall_between). Without it,
+    from 4 at monsters within 22 of 2's end, 368-410 off, the hit point fell short of the step wall, and her
+    decisions threw at them (115 of 118,739 places in reach on the map, every kind, all 4 -> 2: the only ones
+    where they and the world's line differed), where the world's stars, and the game's, stop at the step."""
+    if target is None and platform is not None:
+        target = platform if m.platform == platform.id else platform.peer(m.platform)
     return wall_in_way(platform, x, y, m.x, rise, target, m.y, body_of(m.kind))
 
 

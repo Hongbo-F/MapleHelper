@@ -65,11 +65,17 @@ class Platform:
     `walls`: the walls of its foothold group (MapModel.walls_of; parse attaches them): the walls that stop
     a star thrown from it (attack.reach). `floors`: every floor of the map (all its platforms' footholds,
     one tuple for every platform; parse attaches it): what can stop a star's line going down, by the v83
-    client's rule (attack.reach.LINE)."""
+    client's rule (attack.reach.LINE). `peers`: every platform of the map, by id (parse attaches it): a
+    monster's own platform, by its id (Monster.platform), where a star at it is checked (attack.reach.wall_to)."""
     id: int
     segments: list[Segment]
     walls: tuple[Segment, ...] = field(default=(), repr=False, compare=False)
     floors: tuple[Segment, ...] = field(default=(), repr=False, compare=False)
+    peers: tuple["Platform", ...] = field(default=(), repr=False, compare=False)
+
+    def peer(self, pid: int | None) -> "Platform | None":
+        """Platform `pid` of its map (peers), or None if that isn't known (no id, or no map attached)."""
+        return self.peers[pid] if pid is not None and 0 <= pid < len(self.peers) else None
 
     @property
     def left(self) -> float:
@@ -349,9 +355,9 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         mob_bodies={mob_names.get(i, i): MobBody(**b, die_s=(mob_die_s or {}).get(i, 0.0))
                     for i, b in (mob_bodies or {}).items()},
         mob_speeds={mob_names.get(i, i): mob_walk_speed(v, physics) for i, v in (mob_speeds or {}).items()})
-    floors = tuple(s for p in model.platforms for s in p.segments)
+    floors, peers = tuple(s for p in model.platforms for s in p.segments), tuple(model.platforms)
     for p in model.platforms:
-        p.walls, p.floors = tuple(model.walls_of(p.group)), floors
+        p.walls, p.floors, p.peers = tuple(model.walls_of(p.group)), floors, peers
     return model
 
 
