@@ -1101,8 +1101,9 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--walls", choices=["on", "off"],
                    help="whether her decisions keep to the wall rule during the run: who counts as in front, and "
                         "fights (default: the probe's; off for those that measure it)")
-    q.add_argument("--crowd", type=int, default=0,
-                   help="also throw with this many other monsters in front (each is logged with what it showed)")
+    q.add_argument("--crowd", type=int,
+                   help="also throw with this many other monsters in front (each is logged with what it showed; "
+                        "default: the probe's, 2 for claw-edge, else 0)")
     q.add_argument("--seconds", type=float, default=900, help="stop after this long")
     q.add_argument("--map", type=int, default=DEFAULT_MAP)
     q.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")

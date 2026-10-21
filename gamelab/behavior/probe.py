@@ -189,6 +189,7 @@ class Probe:
     style: str = "throw"    # how she throws (STYLES)
     throws: int = 20
     wide: bool = False      # looks over the whole screen: the targets stand above what a look's band searches
+    crowd: int = 0          # it also throws with this many others in front (`choose`; `probe run --crowd`)
     walls: bool = True      # whether her decisions keep to the wall rule during the run (off: it's measured)
     at_pick: bool = False   # the range sideways is where a monster will be when the attack picks (`x_after`),
                             # not where the look has it
@@ -259,8 +260,14 @@ PROBES = {p.name: p for p in (
                  "missed pigs 124-125 off 3 times of 4 and an Orange Mushroom 91 off there"),
     # The claw's reach (reach.CLAW_FAR, CLAW_MARGIN), told by how much of the bar a hit takes (claw_drop). On her
     # level, in the middle of 21 (two slimes and a pig spawn there; 174 units to either end, past a knockback).
+    # With two others in front: a snail on 20 (60 above) or 22 (60 below) is in front of her nearly always, and in
+    # game on 2026-10-21 it threw none in 90 s, a pig or slime in range in front of her at 82 looks and never alone
+    # (the snails on 20 and 22 both there at 81). In the simulator, with 20's, 21's and 22's monsters and the
+    # game's errors, alone it threw none in 300 s; with two others, its 40 throws in 4-6.5 minutes decided reach's
+    # world on 7 of seeds 1-8 and the old claw's on 6, one the other way (the old claw's seed 5, by 4.8): neither
+    # claw reaches 60 above or below her, so a snail there takes a star the same by either.
     Probe("claw-edge", "how far off the claw still swipes, by kind (reach.CLAW_FAR, CLAW_MARGIN, claw_edge)", 21,
-          -225.0, RIGHT, (21,), ("pig", "slime"), (95, 160), throws=40, source="bodies D",
+          -225.0, RIGHT, (21,), ("pig", "slime"), (95, 160), throws=40, crowd=2, source="bodies D",
           expect="by the client's stab boxes (cut to 65 ahead, reach's) and the bodies, swipes (a small bar drop: "
                  "9-11 damage of a pig's 128 HP) up to 99 off a pig and 93 off a slime, stars from there (her "
                  "decisions count on a star from 111 and 105: claw_edge); by the box reach had until 2026-10-20 "
@@ -386,9 +393,10 @@ class _Guard:
 
 # --- a run ---------------------------------------------------------------------------------------------
 
-def run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float = 900, crowd: int = 0) -> ProbeReport:
+def run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float = 900, crowd: int | None = None) -> ProbeReport:
     """Run `probe` (see the module's docstring) until it has thrown probe.throws times, for at most
     `seconds`, or until her HP is too low (h.health_check) or she can't be placed or get back to her place.
+    `crowd`: how many others may be in front at a throw (None: the probe's own, Probe.crowd).
     Every throw is logged to lab/probe_geometry.jsonl. The wall switch (reach.WALLS_BLOCK) is the probe's for
     the run, and put back after it, however it ends."""
     if trouble := problems(h.model, probe):
@@ -396,7 +404,7 @@ def run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float = 900, crowd
     before, reach.WALLS_BLOCK = reach.WALLS_BLOCK, probe.walls
     h.actions.skill = False  # the regular attack: what every log measured, and no MP
     try:
-        return _run(h, nav, probe, seconds, crowd)
+        return _run(h, nav, probe, seconds, probe.crowd if crowd is None else crowd)
     finally:
         reach.WALLS_BLOCK = before
 
@@ -792,7 +800,8 @@ def listing() -> str:
         lines += [f"{p.name}: {p.asks} ({p.source})",
                   f"    on {p.platform} at x {p.x:.0f}, {p.style} {p.side} at monsters on "
                   f"{', '.join(map(str, p.at))} ({ranges} units off), {p.throws} throws"
-                  + ("" if p.walls else ", the wall rule off"),
+                  + ("" if p.walls else ", the wall rule off")
+                  + (f", with up to {p.crowd} others in front" if p.crowd else ""),
                   f"    expect: {p.expect}"]
         lines += [f"    `probe score` weighs {q.key}: {' against '.join(name for name, _ in q.answers)}"
                   for q in QUESTIONS.values() if p.name in q.probes]

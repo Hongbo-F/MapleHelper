@@ -552,6 +552,26 @@ def test_with_give_way_she_steps_away_from_one_she_throws_at_and_keeps_near_her_
                         for r in rows)
 
 
+@REAL
+def test_claw_edge_throws_with_the_snails_on_20_and_22_in_front_of_her():
+    # In game on 2026-10-21 claw-edge threw none in 90 s: a snail on 20 (60 above her) or 22 (60 below) was in front
+    # of her at every look that had a pig or slime of 21 in its range. Alone, as the other probes throw, it throws
+    # none here either; with two others allowed in front (its own crowd), it throws at the pig.
+    def run(crowd):
+        def go(sim):
+            h = sim.hunter()
+            return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["claw-edge"], throws=10), seconds=150,
+                                 crowd=crowd))
+        trace = scenarios.run_scenario(scenarios.Scenario("probe_claw_snails", go, (21, -225.0), limit=300, monsters=[
+            ("Snail", 20, -17.0), ("Snail", 22, 53.0), ("Pig", 21, -90.0)]))
+        return [json.loads(line) for line in trace["files"].get("probe_geometry.jsonl", ())]
+    assert probe.PROBES["claw-edge"].crowd == 2 and "with up to 2 others in front" in probe.listing()
+    assert run(0) == []
+    rows = run(None)
+    assert len(rows) == 10 and any(len(r["front"]) > 1 for r in rows)
+    assert all(r["target"]["kind"] == "pig" and 95 <= abs(r["dx"]) <= 160 for r in rows)
+
+
 def test_a_probe_waiting_for_a_lone_monster_stops_once_the_alarm_is_up(alarm_file, monkeypatch):
     # Waiting for a lone monster in range she sends no key, only looks, and a look brings the game to the front:
     # once the player has seen the Lie Detector (the alarm raised), the next pass stops the run, the alarm passing
