@@ -538,11 +538,12 @@ def nav_fight_up(sim):
     search, 14 with the claw's edge by size, 18 with kills fading by their death animation too, seed 10
     among them; 5 with both tracks), so it was seed 3, where she got there with each of them. (Seed 1 since a
     trip waits for her to land before it plans, Navigator._onto_platform: on seed 3 knocks back onto 4 sent
-    her the long way round, and the trip ran out of time. Of seeds 1-48 now 36 arrive: 38 without that and the
-    fight's wait for a knock to end, 43 at the tracks' merge, before the drops and walk-offs kept clear of the
-    basin's cliffs. The 12 others run out of time at 180-194 s, 10 of them knocked off 3 or 4 and climbing
-    back up from 32 or the basin, which took 164-180 s on the seeds that went that way and arrived at the
-    merge. Seed 1 arrives with each.)"""
+    her the long way round, and the trip ran out of time. Of seeds 1-48 36 arrived before monsters walked
+    the game data's speeds: 38 without that and the fight's wait for a knock to end, 43 at the tracks'
+    merge, before the drops and walk-offs kept clear of the basin's cliffs. The 12 others ran out of time at
+    180-194 s, 10 of them knocked off 3 or 4 and climbing back up from 32 or the basin, which took 164-180 s
+    on the seeds that went that way and arrived at the merge. Seed 1 arrives with each. With monsters
+    walking those speeds 37 arrive, the 11 others running out of time at 181-195 s.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -556,8 +557,9 @@ def nav_fight_across(sim):
     nothing knocked her off any more. On seed 6 before, her first chain from 11 waited out the attack lock
     of her last throw: before it did, she was touched on the way, and the quick looks after those cuts
     skipped the fights on 18 and 17. Seed 10 since a hit pushes a monster back: on seed 2 a knock down to
-    34 at 5 s left her fighting and looting there until the 180 s ran out. Over 16 seeds 12 arrive, 5
-    showing all of this.)"""
+    34 at 5 s left her fighting and looting there until the 180 s ran out. Over 16 seeds 12 arrived, 5
+    showing all of this; with monsters walking the game data's speeds 8 arrive, 4 showing all of it: 7, 9,
+    11 and this one, 10.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 

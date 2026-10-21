@@ -130,6 +130,8 @@ def test_with_standing_only_a_look_from_mid_jump_doesnt_see_a_pile_empty(monkeyp
     look(SETTLE + 3.0, (60, 140))                    # standing
     look(SETTLE + 3.1 + EMPTY_LOOKS, (60, 140))
     assert store.known == []
+
+
 def test_gone_piles_are_dropped_a_while_later_and_the_ones_she_went_for_still_count():
     """The store keeps a gone pile GONE_KEEP_S (kept for ever, every kill added one that every look went
     through); the hunt loop's count of the piles she went for that were seen gone (its progress) stays."""
