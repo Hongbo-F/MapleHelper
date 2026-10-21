@@ -352,14 +352,19 @@ def test_a_snail_too_close_is_never_jump_thrown_at_but_stepped_back_from_or_stab
     # With room behind her: a step back past where a throw from the ground is a star, then the star.
     assert stance(500, 500, PLAT, [target(560, kind="snail")])[:2] == ("back", LEFT)
     assert stance(500, 500, PLAT, [target(560)]) == ("jump_back", RIGHT)  # a pig: as before
-    # On a short platform (168 units, as 3, 20 and 22), to its far end if that's what it takes: with a monster
-    # about she keeps 50 from its ends, and the step back goes on to 40 from it (SMALL_STEP_END).
+    # On a short platform (168 units, as 3, 20 and 22) with a monster about she keeps 50 from its ends: where only
+    # its far end has the room she stabs it (SNAIL_FAR_END: in the simulator the snail was soon back at her there,
+    # and a touch knocked her off the end).
     short = Platform(3, [Segment(681, -925, 849, -925)])
-    act = stance(780, -925, short, [target(820, -925, platform=3, kind="snail")])
-    assert act[:2] == ("back", LEFT) and short.left + stance_mod.SMALL_STEP_END <= 780 - act[2] < short.left + 50
-    assert stance(780 - act[2], -925, short, [target(820, -925, platform=3, kind="snail")]) == ("throw", RIGHT)
-    # Not far enough even at the end (the snail in the middle): she stabs it.
+    snail = target(820, -925, platform=3, kind="snail")
+    assert stance(780, -925, short, [snail]) == ("throw", RIGHT)
     assert stance(745, -925, short, [target(770, -925, platform=3, kind="snail")]) == ("throw", RIGHT)
+    # With SNAIL_FAR_END the step back goes on to 40 from its end (SMALL_STEP_END).
+    monkeypatch.setattr(stance_mod, "SNAIL_FAR_END", True)
+    act = stance(780, -925, short, [snail])
+    assert act[:2] == ("back", LEFT) and short.left + stance_mod.SMALL_STEP_END <= 780 - act[2] < short.left + 50
+    assert stance(780 - act[2], -925, short, [snail]) == ("throw", RIGHT)
+    assert stance(745, -925, short, [target(770, -925, platform=3, kind="snail")]) == ("throw", RIGHT)  # nor there
     # Never a jump back at a snail either: its attack has to come after the turn in mid-air (85 ms).
     # JUMP_THROW_SNAILS brings back the jump throw at one, cornered or not.
     monkeypatch.setattr(stance_mod, "JUMP_THROW_SNAILS", True)

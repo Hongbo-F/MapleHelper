@@ -936,10 +936,11 @@ def fight_snail_short_platform(sim):
     a dying one. Now it's shot from the ground: with no room to step back to where that throws a star, the
     claw stabs it, each stab pushing it back, until a star picks it. Keyed 40 ms after the jump the jump throw's
     attack picks a snail by its area, and she went back to jump throws at them; but in game on 2026-10-21 they
-    mostly missed (stance.JUMP_THROW_SNAILS), and from the ground she never jumps at one. Of seeds 1-32, 24 meet
-    all of this, against 11 with the jump throws in this world, whose jump throws' area picks the snail; on
-    most of the others the snail walks into her first, and a touch knocks her off the end of 22 (she stands 29
-    units from it).)"""
+    mostly missed (stance.JUMP_THROW_SNAILS), and from the ground she never jumps at one. Of seeds 1-32, 21 meet
+    all of this (24 when she stepped back to 22's far end once the snail had walked off: stance.SNAIL_FAR_END; of
+    seeds 1-96, 68 against 71), against 11 with the jump throws in this world, whose jump throws' area picks the
+    snail; on most of the others the snail walks into her first, and a touch knocks her off the end of 22 (she
+    stands 29 units from it)."""
     h = sim.hunter()
     r = h.clear(max_kills=1, seconds=20, approach=False)
     return {"report": str(r)}
@@ -955,18 +956,18 @@ def _snail_fight(sim):
     return {"report": str(r)}
 
 
-@scenario((20, -65.0), monsters=[("Snail", 20, -100.0)], seed=1, limit=60, facing=LEFT,
+@scenario((34, -200.0), monsters=[("Snail", 34, -165.0)], seed=1, limit=60,
           expects=(check("no jump throw or jump back", lambda tr: not any(p[1] in JUMP_PLANS for p in tr["plans"])),
                    sends("walk", "a step back"), happens("star kills snail", "a star kills the snail"),
                    check("the snail dies within 6 s", lambda tr: _first(tr["world_log"], "kills snail") <= 6),
-                   check("she stays on platform 20", lambda tr: tr["world"]["platform"] == 20)))
-def fight_snail_far_end(sim):
-    """A snail 35 units from her on platform 20 (168 units wide), near its left end: too close for a star from
-    the ground, and she never jump-throws at a snail (stance.JUMP_THROW_SNAILS: in game jump throws mostly missed
-    them). She steps back toward 20's right end, past the 50 she keeps from its ends with monsters about, to 40
-    (stance.SMALL_STEP_END), 99 from it, where a throw from the ground is a star, and a star kills it (if it
-    walks after her, she stabs it, each stab pushing it back, until a star picks it). Of seeds 1-16, 15 meet all of
-    this."""
+                   check("she stays on platform 34", lambda tr: tr["world"]["platform"] == 34)))
+def fight_snail_step_back(sim):
+    """A snail 35 units from her on platform 34 (618 units wide): too close for a star from the ground, and she
+    never jump-throws at a snail (stance.JUMP_THROW_SNAILS: in game jump throws mostly missed them). With the room
+    behind her she steps back to where a throw from the ground is a star (99 from it, and as much more as it walks
+    at her meanwhile), and a star kills it. On a short platform only its far end would have that room, and there
+    she stabs it where she stands instead (stance.SNAIL_FAR_END; fight_snail_stab). Of seeds 1-16, 15 meet all of
+    this (on 12 the snail walks after her, and she stabs it until a star picks it: 8.6 s)."""
     return _snail_fight(sim)
 
 
