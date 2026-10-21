@@ -683,6 +683,31 @@ def test_with_the_v83_line_a_spot_covers_only_what_her_floor_lets_a_star_down_to
     assert spots.coverage(low, 100, 500, h) == pytest.approx(0.149 + 0.110, abs=0.003)
 
 
+def test_clear_length_answers_as_its_lines_one_at_a_time():
+    # reach.clear_length tries every star's line at once (reach._sight_clear): the length of the target, tried in
+    # the middle of every 2 units, that a star gets to by the v83 line, as wall_between has it one line at a time,
+    # with every answer the same (the ledge map's floors, corners and another group's ledge, and the real map's).
+    def one_at_a_time(here, x, y, there, lo, hi, body=reach.PIG):
+        n = max(1, math.ceil((hi - lo) / 2))
+        width = (hi - lo) / n
+        xs = [reach._inside(lo + (i + 0.5) * width, there) for i in range(n)]
+        return width * sum(reach.wall_between(here, x, y, t, target=there, ty=there.y_at(t), body=body, line="v83")
+                           is None for t in xs)
+
+    model, h, low, up = ledge_map()
+    cases = [(h, x, 500, there, lo, hi, body) for x in (0, 25, 100, 160, 240, 290, 300)
+             for there, lo, hi in ((low, -200, 0), (low, 150, 560), (low, 300, 800), (up, 350, 700))
+             for body in (reach.PIG, (25, 19))]
+    if (mapdata.CACHE / "10000012.json").is_file():
+        p = mapdata.load(10000012).platform
+        cases += [(p(her), x, p(her).y_at(x), p(there), lo, hi, reach.PIG)
+                  for her, there, xs, lo, hi in ((14, 17, (690, 706, 756, 824), 861, 1389), (2, 4, (50, 195), 219, 669),
+                                                 (4, 2, (260, 500, 609), -309, 219), (20, 21, (-7, 30), -399, -51))
+                  for x in xs]
+    for here, x, y, there, lo, hi, body in cases:
+        assert reach.clear_length(here, x, y, there, lo, hi, body) == one_at_a_time(here, x, y, there, lo, hi, body)
+
+
 def shield_map():
     """step_map's A, step wall and B (group (1, 1)), and a ledge L (group (1, 2): 60..300 at y 560), 60 below
     A. Returns the model and A, B, L."""

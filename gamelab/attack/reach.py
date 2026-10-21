@@ -78,6 +78,8 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import numpy as np
+
 from ..localization.mapdata import MobBody, Platform, Segment
 from ..localization.monsters import MONSTER_HALF, MONSTER_HEIGHT, Monster
 from ..motion import physics
@@ -649,12 +651,64 @@ def clear_length(platform: Platform, x: float, y: float, target: Platform, lo: f
     row, a = y - SHOT_H, _inside(x, platform)
     n = max(1, math.ceil((hi - lo) / step))
     width = (hi - lo) / n
-    xs = [_inside(lo + (i + 0.5) * width, target) for i in range(n)]
-    feet = [target.y_at(t) for t in xs]
-    near = _near_line((*platform.floors, *platform.walls), min(a, lo - half), min(row, min(feet) - top),
-                      max(a, hi + half), max(row, max(feet)))  # what any of those lines can meet
-    return width * sum(sight_stop(platform, a, row, *hit_point(a, row, 1 if t >= a else -1, t, f, top, half), near)
-                       is None for t, f in zip(xs, feet))
+    xs = np.minimum(np.maximum(lo + (np.arange(n) + 0.5) * width, target.left + 1), target.right - 1)  # _inside
+    feet = _ys_at(target, xs)
+    near = _near_line((*platform.floors, *platform.walls), min(a, lo - half), min(row, float(feet.min()) - top),
+                      max(a, hi + half), max(row, float(feet.max())))  # what any of those lines can meet
+    hx, hy = _hits_on(a, row, xs, feet, top, half)
+    return width * int(np.count_nonzero(_sight_clear(near, a, row, hx, hy)))
+
+
+def _ys_at(p: Platform, xs: np.ndarray) -> np.ndarray:
+    """Platform.y_at for many map x on `p` at once, in the same arithmetic (each x's first foothold that has it,
+    as Segment.y_at)."""
+    ys = np.where(xs < p.left, p.segments[0].y1, p.segments[-1].y2)
+    for s in reversed(p.segments):
+        y = s.y1 if s.x2 == s.x1 else s.y1 + (xs - s.x1) / (s.x2 - s.x1) * (s.y2 - s.y1)
+        ys = np.where((s.x1 <= xs) & (xs <= s.x2), y, ys)
+    return ys
+
+
+def _hits_on(a: float, row: float, b: np.ndarray, feet: np.ndarray, top: float,
+             half: float) -> tuple[np.ndarray, np.ndarray]:
+    """hit_point for many bodies at once, facing each (their middles at map x `b`, their feet at map y `feet`),
+    in the same arithmetic, so with the same answers."""
+    d = np.where(b >= a, 1.0, -1.0)
+    near, far = a + d * SEARCH_START, a + d * STAR_RANGE
+    lo, hi = np.minimum(near, far), np.maximum(near, far)
+    left, right = b - half, b + half
+    hx = np.where(lo >= right, right, np.where(hi <= left, left, (np.maximum(lo, left) + np.minimum(hi, right)) / 2))
+    return hx, np.minimum(np.maximum(row, feet - top), feet)
+
+
+def _sight_clear(footholds: list[Segment], sx: float, sy: float, ex: np.ndarray, ey: np.ndarray) -> np.ndarray:
+    """Whether each line of sight from map (sx, sy) to (ex, ey) gets there, none of `footholds` stopping it:
+    sight_stop for many lines at once, by the same tests in the same arithmetic (so with the same answers), for
+    clear_length, where the spots try tens of thousands (one at a time, every platform's spots took 1.5 s, 1.0 s
+    so)."""
+    stopped = np.zeros(ex.shape, bool)
+    for f in footholds:
+        line = (f.x1, f.y1, f.x2, f.y2)
+        start = _side(line, sx, sy)
+        if start > 0:
+            continue
+        end = _side(line, ex, ey)
+        first, second = _side((sx, sy, ex, ey), f.x1, f.y1), _side((sx, sy, ex, ey), f.x2, f.y2)
+        hit = ~(end < 0) & ~((first < 0) & (second < 0)) & ~((first > 0) & (second > 0))
+        if start == 0:
+            hit &= ~(end == 0)
+        at_start = first == 0
+        hit &= ~at_start if f.prev is None else ~at_start | _behind_corners(f.prev, line, ex, ey)
+        at_end = ~at_start & (second == 0)
+        hit &= ~at_end if f.next is None else ~at_end | _behind_corners(line, f.next, ex, ey)
+        stopped |= hit
+    return ~stopped | ((ex == sx) & (ey == sy))
+
+
+def _behind_corners(first: tuple, second: tuple, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """_behind_corner for many points at once."""
+    behind = _side(first, x, y) > 0, _side(second, x, y) > 0
+    return behind[0] | behind[1] if _side(first, second[2], second[3]) <= 0 else behind[0] & behind[1]
 
 
 def clear_span(platform: Platform | None, x: float, y: float, rise: float = 0.0) -> tuple[float, float]:
