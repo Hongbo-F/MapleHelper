@@ -304,8 +304,10 @@ def soak_sim(meter: Meter, seed: int = 0) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if os.environ.get("PYTHONHASHSEED") != "0":  # the same set order in every run, as the harness's
-        env = dict(os.environ, PYTHONHASHSEED="0")
+    from ..motion.physics import FIXED_STATS
+    # As the harness's runs: the same set order in every run, and her stats as measured, not config.toml's.
+    if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1":
+        env = dict(os.environ, PYTHONHASHSEED="0", **{FIXED_STATS: "1"})
         return subprocess.call([sys.executable, "-X", "utf8", "-m", "gamelab.sim.soak", *argv], env=env,
                                cwd=str(paths.REPO))
     p = argparse.ArgumentParser(prog="python -m gamelab.sim.soak", description=__doc__.splitlines()[0])

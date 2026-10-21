@@ -170,7 +170,7 @@ The move into the layers above was checked this way: all 50 traces stayed identi
 
 **The stack's own computing** (`python -m gamelab.sim.latency loop|tour [--seeds 5] [--minutes 10] [--profile FILE]`): the harness's hunts, with every stretch of the stack's computing between two of its calls to the game (a look, a key plan, a sleep) timed with the real clock, by the call that ended it, and not charged to the fake clock, so the runs are the harness's own. What a look's answer waits for before her next keys go out is the "before a key plan" row; in game it comes on top of the look itself (see Where the time goes).
 
-Tests can't press keys, page anyone or write under `gamelab/lab` (`tests/conftest.py` stops them), and the simulator refuses to run unless its fakes are in place. The tests, the golden traces and the harness take her stats as measured (SPEED 119.2, JUMP 100), not as `config.toml` `[character]` has them (`physics.FIXED_STATS`), so editing those for her gear changes nothing they check: with SPEED 125 in the file, 16 tests failed and every golden trace changed.
+Tests can't press keys, page anyone or write under `gamelab/lab` (`tests/conftest.py` stops them), and the simulator refuses to run unless its fakes are in place. The tests, the golden traces, the harness and the simulator's latency and soak runs take her stats as measured (SPEED 119.2, JUMP 100), not as `config.toml` `[character]` has them (`physics.FIXED_STATS`), so editing those for her gear changes nothing they check: with SPEED 125 in the file, 16 tests failed and every golden trace changed.
 
 ## Perception
 

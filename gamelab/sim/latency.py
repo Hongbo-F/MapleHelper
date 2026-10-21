@@ -93,8 +93,10 @@ def measure(policy: str, seeds: list[int], minutes: float, preset: str = "game",
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if os.environ.get("PYTHONHASHSEED") != "0":  # the same set order as the harness's runs
-        env = dict(os.environ, PYTHONHASHSEED="0")
+    from ..motion.physics import FIXED_STATS
+    # The harness's runs: the same set order, and her stats as measured, not as config.toml has them.
+    if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1":
+        env = dict(os.environ, PYTHONHASHSEED="0", **{FIXED_STATS: "1"})
         return subprocess.call([sys.executable, "-X", "utf8", "-m", "gamelab.sim.latency", *argv], env=env,
                                cwd=str(REPO))
     from .harness import POLICIES, PRESETS
