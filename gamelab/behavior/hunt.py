@@ -370,9 +370,9 @@ class Hunt:
 
     @staticmethod
     def _hits(s: Scene, m: Monster) -> bool:
-        """Whether a star from where she stands in look `s` hits `m` (reach.can_hit: in reach, and no wall of
-        her foothold group in the way)."""
-        return reach.can_hit(s.platform, s.where.x, s.where.y, m)
+        """Whether a star from where she stands in look `s` hits `m` (reach.can_hit: in reach, and nothing
+        stops its star, nor that of a monster of the look the attack takes first)."""
+        return reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters)
 
     def _standable(self, pid: int) -> bool:
         v = self.visit
@@ -443,7 +443,7 @@ class Hunt:
         here = s.platform
         return stance(s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
                       can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops,
-                      halves=self._halves)
+                      halves=self._halves, around=visible + hidden)
 
     def _shoot(self, s: Scene, targets, visible, hidden, now: float, rule: str, approach: bool) -> None:
         """One step of stance's answer: a throw (fight's bookkeeping kept), or a walk."""
@@ -604,7 +604,7 @@ class Hunt:
         if nxt is None:
             return None
         p = self.model.platform(nxt.platform)
-        n = sum(reach.can_hit(p, nxt.x, p.y_at(nxt.x), m) for m in left)
+        n = sum(reach.can_hit(p, nxt.x, p.y_at(nxt.x), m, others=s.monsters) for m in left)
         travel = (abs(nxt.x - s.where.x) / WALK_SPEED if nxt.platform == s.platform.id
                   else self.nav.planner.travel(s.platform.id, s.where.x, nxt.platform))
         if travel is None or travel > SPOT_TRAVEL or not (n >= now_n + SPOT_MORE or n >= SPOT_TIMES * max(now_n, 1)):

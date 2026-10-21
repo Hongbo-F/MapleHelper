@@ -256,6 +256,21 @@ def test_a_monster_just_hit_is_in_the_path_as_tall_as_it_flinches():
     assert st.just_hit(seen) == [seen[0], seen[2]]
 
 
+def test_no_kill_is_matched_behind_a_monster_whose_star_is_stopped():
+    # test_attack's shield map: from A at 10, the search picks a pig up on B at 215 first (band 5), and the
+    # step wall stops its star; the client doesn't refill its pick, so the pig on L at 170 (band 6, its own
+    # line clear) can't have taken that throw's attack either. Neither the fight's path nor the ledger's has
+    # one: a kill then isn't put on either. Alone, the one on L is in both.
+    from gamelab.behavior.fight import _in_path
+    from gamelab.behavior.ledger import in_path
+    from test_attack import shield_map
+    model, a, b, low = shield_map()
+    up, under = target(215, 440, platform=b.id), target(170, 560, platform=low.id)
+    s = SimpleNamespace(where=SimpleNamespace(x=10, y=500), platform=a, monsters=[up, under])
+    assert _in_path(s, RIGHT, [up, under]) == [] and in_path(s, RIGHT, [up, under]) == []
+    assert _in_path(s, RIGHT, [under]) == [under] and in_path(s, RIGHT, [under]) == [under]
+
+
 def test_a_kill_is_left_alone_as_long_as_its_death_animation_runs():
     # Seen fading out where it died for its die1 frames' delays (game data): a pig 0.66 s, a snail 1.26; a
     # kind the data doesn't have, FADING. Counted from the look that saw her EXP go up.

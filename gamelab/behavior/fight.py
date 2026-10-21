@@ -13,6 +13,7 @@ Kills are counted in the hunter's Report; their drops go to her Looter (behavior
 """
 
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -301,7 +302,8 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     body = bodies(h.model)  # each kind's body (game data)
     tops, halves = body_sizes(h.model)
     act = stance(s.where.x, s.where.y, here, fight, approach, h.actions.facing,
-                 can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves)
+                 can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
+                 around=visible + hidden)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
@@ -381,7 +383,7 @@ def _wanted(s: Scene, kinds, ground: set[int] | None, far: bool) -> list[Monster
     here, x, y = s.platform.id, s.where.x, s.where.y
     wanted = [m for m in s.monsters if (kinds is None or m.kind in kinds)
               and (ground is None or m.platform in ground or m.platform == here
-                   or (far and reach.can_hit(s.platform, x, y, m)))]
+                   or (far and reach.can_hit(s.platform, x, y, m, others=s.monsters)))]
     wanted += [m for m in s.monsters if m not in wanted and m.platform == here and abs(m.x - x) < IN_HER_WAY]
     return wanted
 
@@ -426,12 +428,14 @@ def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None 
     platform above too, as far as a star reaches, but none that stays under its floor (a snail beside
     her: an EXP gain then came from one of those above). Those of
     `flinching` (hit lately, FightState.just_hit) as tall as they flinch (`body`'s flinch_top): a pig 60
-    below her is picked from 111 units then, from 151 walking. None behind a wall of her foothold group
-    (reach.wall_to: from 4, those on 2)."""
+    below her is picked from 111 units then, from 151 walking. None whose star terrain stops (reach.wall_to:
+    from 4, those on 2; one the claw's stance reaches is swiped whatever the terrain), nor any behind one of
+    those in the attack's order (the client checks the line to its pick alone, and stopped, no other monster
+    takes the star): in a later band of the search from the ground, farther off from a jump."""
     x, y = s.where.x, s.where.y
     body = body or bodies()
     ahead = [m for m in monsters if (m.x > x) == (side == RIGHT)]
-    rise, out = (0.0 if gap_ms is None else reach.air_rise(gap_ms)), []
+    rise, keyed = (0.0 if gap_ms is None else reach.air_rise(gap_ms)), []
     for m in ahead:
         b = body.get(m.kind)  # its body (a pig's if unknown)
         walking, half = reach.body_of(m.kind, body)
@@ -440,12 +444,15 @@ def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None 
         if any(m is f for f in flinching):
             top = max(top, b.flinch_top if b is not None else MONSTER_FLINCH_TOP["pig"])
         if gap_ms is None:
-            picked = reach.ground_pick(abs(m.x - x), m.y - y, top, half) is not None
+            order = reach.ground_pick(abs(m.x - x), m.y - y, top, half)
+            order = None if order is None else order[0]  # 0: the claw's; 1 + k: the search's band k
         else:
-            picked = reach.in_area(abs(m.x - x), m.y - y, top, rise, half)
-        if picked and reach.wall_to(s.platform, x, y, m, rise) is None:
-            out.append(m)
-    return out
+            order = abs(m.x - x) if reach.in_area(abs(m.x - x), m.y - y, top, rise, half) else None
+        if order is not None:
+            keyed.append((order, m, reach.wall_to(s.platform, x, y, m, rise) is None))
+    stopped = [k for k, _, clear in keyed if not clear and (gap_ms is not None or k > 0)]
+    first = min(stopped, default=math.inf)  # a star at what comes after it ends at what stops it
+    return [m for k, m, clear in keyed if (clear or (gap_ms is None and k == 0)) and k <= first]
 
 
 @dataclass
@@ -546,7 +553,7 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
         st.dying_since = time.monotonic()  # its bar gone: it died, and fades out where it died
     _score_shots(st.flying, bar, st.dying_since is not None, s.t)
     threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]
-    act = decide(s.where.x, s.where.y, s.platform, t, threats, body_sizes(h.model)[1])
+    act = decide(s.where.x, s.where.y, s.platform, t, threats, body_sizes(h.model)[1], around=s.monsters)
     h.log(f"  {st.kind} {t.x - s.where.x:+.0f},{t.y - s.where.y:+.0f} (bar {pct(bar)}), "
           f"HP {s.hp:.0%}: {' '.join(str(v if isinstance(v, str) else round(v)) for v in act)}")
     if act[0] == "skip":
@@ -592,7 +599,7 @@ def _shot(s: Scene, t: Monster, dx: float, dy: float, model: MapModel | None = N
     on = here if t.platform == here.id else None  # the target's platform, if known
     if on is None and model is not None and t.platform is not None:
         on = model.platform(t.platform)
-    clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on) is None
+    clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on, ty=t.y, body=reach.body_of(t.kind)) is None
     now = time.monotonic()
     return {"kind": t.kind, "dx": int(round(dx)), "dy": int(round(dy)), "her": here.id,
             "target": t.platform, "bar": t.bar, "seen": bool(s.tag_seen),
@@ -716,9 +723,9 @@ class FightOnTheWay:
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice)."""
-        in_reach = [m for m in s.monsters if reach.can_hit(s.platform, s.where.x, s.where.y, m)
+        in_reach = [m for m in s.monsters if reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters)
                     and (self.kinds is None or m.kind in self.kinds)]
-        return pick_target(s.where.x, s.where.y, s.platform, in_reach) if in_reach else None
+        return pick_target(s.where.x, s.where.y, s.platform, in_reach, s.monsters) if in_reach else None
 
     def shoot(self) -> int:
         """A short fight at what's in reach (up to 3 kills, never walking after them); its kills."""

@@ -470,7 +470,8 @@ def _row(h: "Hunter", s: Scene, probe: Probe, target: Monster) -> dict:
             "map": h.model.id, "side": probe.side, "x": round(x, 1), "y": round(y, 1), "her": here.id,
             "her_group": list(here.group) if here.group is not None else None,
             "target": _monster(target, True), "dx": round(target.x - x, 1), "dy": round(target.y - y, 1),
-            "clear": reach.wall_between(here, x, y, target.x, rise_of(probe.style), target=on) is None,
+            "clear": reach.wall_between(here, x, y, target.x, rise_of(probe.style), target=on, ty=target.y,
+                                        body=reach.body_of(target.kind)) is None,
             "front": [_monster(m, m is target) for m in front], "time": time.strftime("%Y-%m-%d %H:%M:%S")}
 
 
@@ -672,13 +673,13 @@ Terrain = Callable[[dict, dict, MapModel], bool]  # (throw, monster, map) -> whe
 
 
 def by_rule(shot_h: float | None = None) -> Terrain:
-    """The wall rule (reach.wall_between): her own group's walls across the level line `shot_h` (SHOT_H) above
-    her feet, raised in a jump."""
+    """The wall rule (reach.wall_between, its level line): her own group's walls gone into at their outer face
+    across the level line `shot_h` (SHOT_H) above her feet, raised in a jump."""
     def ok(row: dict, e: dict, model: MapModel) -> bool:
         x, y = _her(row)
         on = model.platform(e["platform"]) if e["platform"] is not None else None
         return reach.wall_between(model.platform(row["her"]), x, y, e["x"], _rise(row), target=on,
-                                  shot_h=shot_h) is None
+                                  shot_h=shot_h, line="level") is None
     return ok
 
 

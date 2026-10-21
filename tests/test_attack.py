@@ -532,6 +532,149 @@ def test_she_doesnt_throw_at_or_walk_for_a_monster_behind_a_wall_of_her_group(mo
     assert decide(100, 500, a, up, []) == ("throw", RIGHT) and stance(100, 500, a, [up]) == ("throw", RIGHT)
 
 
+def test_a_wall_stops_a_star_only_going_in_at_its_outer_face():
+    # A wall standing in the middle of a group, drawn downward (its outer face looks right), across the line 28
+    # above the floor: from its right a star at a monster on its left stops there; from its left one goes on
+    # through its back (RustMS's port of the client: only a line from a foothold's open side to its closed one).
+    tree = {"info": {"VRLeft": -100, "VRTop": 0, "VRRight": 600, "VRBottom": 700},
+            "foothold": {"1": {"1": {"1": _fh(0, 500, 400, 500), "2": _fh(200, 440, 200, 480)}}}}
+    model = mapdata.parse(1, tree, "Fin", {})
+    a = model.platforms[0]
+    (w,) = a.walls
+    assert reach.faces(w) == 1
+    for line in reach.LINES:
+        assert reach.wall_between(a, 300, 500, 100, target=a, line=line) is w, line
+        assert reach.wall_between(a, 100, 500, 300, target=a, line=line) is None, line
+    assert reach.clear_span(a, 300, 500) == (200, math.inf)
+    assert reach.clear_span(a, 100, 500) == (-math.inf, math.inf)
+    # The step map's step wall is drawn upward, from A up to B: its face looks left, at A, below it.
+    model, a, b, c = step_map()
+    assert [reach.faces(w) for w in a.walls] == [-1] and sorted(reach.faces(w) for w in c.walls) == [-1, 1]
+
+
+def test_on_the_real_map_every_wall_faces_out_from_the_platform_it_hangs_from():
+    """Thicket Around the Beach II (skipped without its parsed game data): every wall hangs below the end of
+    one platform of its foothold group, and its outer face looks away from it, out of the block: so the step
+    between 2 and 4 faces 4, below it, and the basin's sides face its floor (36). One-sided walls change
+    nothing here: a star thrown from a platform never meets the back of a wall of its group across its line."""
+    if not (mapdata.CACHE / "10000012.json").is_file():
+        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
+    model = mapdata.load(10000012)
+    for w in model.walls:
+        ends = [(p, 1 if x == p.right else -1) for p in model.platforms if p.group == w.group
+                for x in (p.left, p.right) if x == w.x1 and min(w.y1, w.y2) >= p.y_at(x)]
+        assert len(ends) == 1, w
+        p, out = ends[0]
+        assert reach.faces(w) == out, (w, p.id)
+    p = model.platform
+    assert {reach.faces(w) for w in p(4).walls if w.x1 == 219} == {1}
+    assert {(w.x1, reach.faces(w)) for w in p(36).walls if w.x1 in (129, 951)} == {(129, 1), (951, -1)}
+
+
+def ledge_map():
+    """Her block H (group (1, 1): 0..300 at y 500, its walls hanging 25 below its ends), the ground L under
+    it (group (1, 2): -200..800 at y 560, 60 below), a block U (group (1, 3): 350..700 at y 440, 60 above H),
+    a ledge G (group (1, 4): 420..460 at y 505) and a ledge F (group (1, 5): 420..470 at y 452). Returns the
+    model and H, L, U."""
+    tree = {"info": {"VRLeft": -300, "VRTop": 0, "VRRight": 900, "VRBottom": 800},
+            "foothold": {"1": {"1": {"1": _fh(0, 525, 0, 500, 0, 2), "2": _fh(0, 500, 300, 500, 1, 3),
+                                     "3": _fh(300, 500, 300, 525, 2, 0)},
+                               "2": {"4": _fh(-200, 560, 800, 560)},
+                               "3": {"5": _fh(350, 465, 350, 440, 0, 6), "6": _fh(350, 440, 700, 440, 5, 7),
+                                     "7": _fh(700, 440, 700, 465, 6, 0)},
+                               "4": {"8": _fh(420, 505, 460, 505)},
+                               "5": {"9": _fh(420, 452, 470, 452)}}}}
+    model = mapdata.parse(1, tree, "Ledges", {})
+    h, low, up = (next(p for p in model.platforms if p.left == left) for left in (0, -200, 350))
+    return model, h, low, up
+
+
+def test_the_v83_line_runs_to_where_the_star_hits_and_floors_stop_it_going_down(monkeypatch):
+    # LINE 'v83' (RustMS's port of the client): from 28 above her feet to the hit point, a pig's top 60 below
+    # her. From H at 100, 200 from its end, her own floor stops a star at a pig on L under 300 off (1.5 x 200:
+    # the line drops 28 to her floor's level for 42 to the pig's top), and the level line doesn't.
+    model, h, low, up = ledge_map()
+    assert reach.LINE == "level"  # the default, until the probes settle it
+    assert reach.hit_point(100, 472, 1, 400, 560, 46, 34) == (400, 514)  # its top: the pig is below the row
+    assert reach.hit_point(100, 472, 1, 300, 440, 46, 34) == (300, 440)  # its feet: above the row
+    assert reach.hit_point(100, 472, 1, 300, 500, 46, 34) == (300, 472)  # the row: it crosses the body
+    assert reach.hit_point(100, 472, 1, 140, 500, 46, 34) == (169.5, 472)  # its part past the shot's start, 65 on
+
+    def stop(x, tx, there=low, y=500, here=h, line="v83"):
+        return reach.wall_between(here, x, y, tx, target=there, ty=there.y_at(tx), body=reach.PIG, line=line)
+
+    assert stop(100, 300) in h.segments and stop(100, 399) in h.segments and stop(100, 401) is None
+    assert stop(100, 300, line="level") is None
+    assert stop(100, -100) is None  # the other way, past her floor's end at 0, 100 from it: from 150 off
+    # Through its end exactly (the line from 100 to a pig at 400 meets the floor's level at 300): it ends past
+    # the hanging wall there, so it isn't behind that corner (a ledge: behind both, the floor and the wall).
+    assert stop(100, 400) is None
+    # From 280, 19 from her end: clear down to L at 480, but for the ledge G (another group's floor), which the
+    # line goes down through at 437.
+    g = next(p for p in model.platforms if (p.left, p.top) == (420, 505))
+    assert stop(280, 480) in g.segments
+    assert stop(280, 540) is None
+    # Up through a floor it goes on: from H at 250 to a pig up on U at 560, through the ledge F from below.
+    assert stop(250, 560, there=up) is None
+    # A wall of her group at its outer face stops it as the level line does: the step map's, from A up at B.
+    steps, a, b, _ = step_map()
+    assert stop(100, 300, there=b, here=a) == stop(100, 300, there=b, here=a, line="level") == a.walls[0]
+    assert stop(300, 100, there=a, y=440, here=b) is None  # down past the wall's back, clear of B's floor
+    # Her decisions keep to the switch: a pig on L at 380 is thrown at from 100 by the level line, and by the
+    # v83 line only from past 140 (where 380 - x > 1.5 (300 - x)). She walks there: to 145, the nearest of the
+    # places 10 apart from 25, her platform's limit (stance._clear_from).
+    pig = target(380, 560, platform=low.id)
+    assert reach.can_hit(h, 100, 500, pig) and stance(100, 500, h, [pig]) == ("throw", RIGHT)
+    monkeypatch.setattr(reach, "LINE", "v83")
+    assert not reach.can_hit(h, 135, 500, pig) and reach.can_hit(h, 145, 500, pig)
+    assert stance(100, 500, h, [pig]) == ("approach", RIGHT, 45)
+    assert decide(100, 500, h, pig, []) == ("walk", RIGHT, 109)  # to its own near goal, 171 off: clear
+
+
+def test_with_the_v83_line_a_spot_covers_only_what_her_floor_lets_a_star_down_to(monkeypatch):
+    # From H at 100, a pig on L 60 below is in reach 151-410 off either way: 149 + 259 of L's 1000 units.
+    # By the v83 line her floor stops a star under 300 off to the right (200 to her end) and none to the
+    # left (100 to it: under 150).
+    model, h, low, up = ledge_map()
+    assert spots.coverage(low, 100, 500, h) == pytest.approx(0.408)
+    monkeypatch.setattr(reach, "LINE", "v83")
+    assert spots.coverage(low, 100, 500, h) == pytest.approx(0.149 + 0.110, abs=0.003)
+
+
+def shield_map():
+    """step_map's A, step wall and B (group (1, 1)), and a ledge L (group (1, 2): 60..300 at y 560), 60 below
+    A. Returns the model and A, B, L."""
+    tree = {"info": {"VRLeft": -100, "VRTop": 0, "VRRight": 800, "VRBottom": 800},
+            "foothold": {"1": {"1": {"1": _fh(0, 500, 200, 500, 0, 2), "2": _fh(200, 500, 200, 440, 1, 3),
+                                     "3": _fh(200, 440, 400, 440, 2, 0)},
+                               "2": {"4": _fh(60, 560, 300, 560)}}}}
+    model = mapdata.parse(1, tree, "Shield", {})
+    a, b, low = (next(p for p in model.platforms if p.left == left) for left in (0, 200, 60))
+    return model, a, b, low
+
+
+def test_a_monster_the_attack_takes_first_whose_star_is_stopped_shields_those_behind_it(monkeypatch):
+    # The client checks the line to its pick alone, and stopped, the attack hits nothing (RustMS Combat.cpp
+    # 1290-1307; ohmi69 and meowdb on this game: the slot isn't refilled). From A at 10, a pig up on B at 215,
+    # just past the step wall, is in the search's band 5; a pig on L 60 below at 170, short of the wall, in band
+    # 6 (it needs room sideways). The star goes to the one on B and stops at the wall: the one on L, in reach and
+    # its line clear, gets none.
+    model, a, b, low = shield_map()
+    up, under = target(215, 440, platform=b.id), target(170, 560, platform=low.id)
+    assert reach.search_band(*reach.body_box(205, -60, *reach.PIG)) == 5
+    assert reach.search_band(*reach.body_box(160, 60, *reach.PIG)) == 6
+    assert reach.can_hit(a, 10, 500, under) and not reach.can_hit(a, 10, 500, up)
+    assert reach.shielded(a, 10, 500, under, [up, under]) is up
+    assert not reach.can_hit(a, 10, 500, under, others=[up, under])
+    assert stance(10, 500, a, [under]) == ("throw", RIGHT)
+    assert stance(10, 500, a, [under], around=[up, under]) == ("wait",)
+    # In the same band they'd take the stars by turns: no shield.
+    assert reach.shielded(a, 10, 500, target(180, 560, platform=low.id), [target(235, 440, platform=b.id)]) is None
+    # Off (an in-game probe), as before.
+    monkeypatch.setattr(reach, "WALLS_BLOCK", False)
+    assert reach.can_hit(a, 10, 500, under, others=[up, under])
+
+
 def test_no_spot_on_platform_4_for_platform_2():
     """On the real map (skipped without its parsed game data): by distance a spot on 4 (x 244) has 57% of
     platform 2 in reach, but it's all behind the step wall; 2 is shot from itself."""

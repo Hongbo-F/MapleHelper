@@ -54,10 +54,13 @@ on the world's 5 ms tick:
   then) takes a star. For all of these, bodies are their kind's half width either side and as tall as
   their kind walking (monster_data.MONSTER_HEIGHT), taller while they flinch after a hit
   (monster_data.FLINCH_S, flinch tops from the game data); not their frames (World.top says why). So a
-  jump throw's attack, starting 46 units up, passes over a snail. Neither the claw nor a star gets past a
-  wall of the foothold group of the platform she last stood on, where it crosses the level line
-  reach.SHOT_H above her feet (reach.wall_between): from platform 4 a throw at a monster on 2 hits
-  nothing, or a monster short of the wall (live, no star from 4 ever reached one on 2). Kills give EXP
+  jump throw's attack, starting 46 units up, passes over a snail. All of these pick by the bodies alone,
+  whatever the terrain; then, as the client does, the line to a star's pick alone is checked
+  (World.sight_stop, reach.wall_between by reach.LINE: a wall of the foothold group of the platform she
+  last stood on, gone into at its outer face, where it crosses the level line reach.SHOT_H above her feet
+  now; or by the v83 line, that or a floor it goes down through). Stopped, the attack hits nothing, and no
+  other monster takes the star: from platform 4 a throw whose search picks a monster on 2 hits nothing
+  (live, no star from 4 ever reached one on 2). Kills give EXP
   (model.mob_exp) and, 2 s later, drops on its platform; a killed monster is seen fading out where it
   died as long as its death animation runs (MobBody.die_s: a pig 0.66 s, a snail 1.26), and respawns 8 s
   later where it spawned;
@@ -1064,8 +1067,7 @@ class World:
     def nearest_in(self, facing: str, far: float, down: float, up: float) -> SimMonster | None:
         """The live monster nearest her whose body reaches into a box on her `facing` side, from her to
         `far` ahead and `down` below to `up` above her feet (reach.reaches_into): the attack's area from a
-        jump. Not one behind a wall of the foothold group she last stood on (reach.wall_between, from her
-        height now)."""
+        jump, whatever the terrain (_aim checks the line to it)."""
         t, d, best = self.t, directions.sign(facing), None
         for m in self.monsters:
             if not m.alive:
@@ -1074,8 +1076,6 @@ class World:
             ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
             if not reach.reaches_into(ahead, dy, self.top(m), m.half, far, down, up):
                 continue
-            if reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
-                continue
             if best is None or abs(ahead) < best[0]:
                 best = (abs(ahead), m)
         return None if best is None else best[1]
@@ -1083,7 +1083,7 @@ class World:
     def swiped(self, facing: str, stance: str) -> SimMonster | None:
         """The live monster the claw's `stance` swipes on her `facing` side: the nearest her (by distance,
         feet to feet, as the client has it) whose body reaches into the stance's box (reach.claw_takes), on
-        her level or not. Not one behind a wall of the foothold group she last stood on (reach.wall_between)."""
+        her level or not, whatever the terrain (the client's whack has no line to check)."""
         t, d, best = self.t, directions.sign(facing), None
         for m in self.monsters:
             if not m.alive:
@@ -1092,17 +1092,15 @@ class World:
             ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
             if not reach.claw_takes(ahead, dy, self.top(m), m.half, stance):
                 continue
-            if reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
-                continue
             if best is None or math.hypot(ahead, dy) < best[0]:
                 best = (math.hypot(ahead, dy), m)
         return None if best is None else best[1]
 
     def search_pick(self, facing: str) -> SimMonster | None:
-        """The live monster the star's search from the ground picks on her `facing` side: of those whose
-        body overlaps one of its bands (reach.search_band), the first band's; of those, one drawn at random
-        (seeded, per attack), as the client takes the one that entered the map first, which nothing tells.
-        Not one behind a wall of the foothold group she last stood on (reach.wall_between)."""
+        """The live monster the star's search from the ground picks on her `facing` side, whatever the
+        terrain (_aim checks the line to it): of those whose body overlaps one of its bands
+        (reach.search_band), the first band's; of those, one drawn at random (seeded, per attack), as the
+        client takes the one that entered the map first, which nothing tells."""
         t, d, band, first = self.t, directions.sign(facing), None, []
         for m in self.monsters:
             if not m.alive:
@@ -1110,7 +1108,7 @@ class World:
             mx = m.at(t)
             ahead = (mx - self.x) * d
             k = reach.search_band(*reach.body_box(ahead, m.y(mx) - self.y, self.top(m), m.half))
-            if k is None or reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform) is not None:
+            if k is None:
                 continue
             if band is None or k < band:
                 band, first = k, [m]
@@ -1120,12 +1118,21 @@ class World:
             return first[int(self.chance("band") * len(first))]
         return first[0] if first else None
 
+    def sight_stop(self, m: SimMonster):
+        """What stops the star's line from her now to monster `m` (reach.wall_between, by reach.LINE: from the
+        foothold group of the platform she last stood on, her feet where they are now, in a jump too; m's body
+        as the attack picks it, World.top), or None."""
+        mx = m.at(self.t)
+        return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
+                                  body=(self.top(m), m.half))
+
     def _aim(self, key_ms: int) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
         lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
         seeded: reach.CLAW_STANCES), and the claw swipes the nearest monster that stance's box reaches
         (swiped); else the star's search picks (search_pick). In the air, the nearest in the attack's area
-        takes the star."""
+        takes the star. Each picks by the bodies alone; then, as the client does, the line to a star's pick
+        alone is checked (sight_stop): stopped, the attack hits nothing, and no other monster takes it."""
         self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
         if self.mode == "ground":
             stances = reach.CLAW_STANCES
@@ -1136,11 +1143,20 @@ class World:
         else:
             target = self.nearest_in(self.facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP)
             swipe = False
-        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe))
+        stop = None if target is None or swipe else self.sight_stop(target)
+        if stop is not None:
+            target, stop = None, (target, stop)
+        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe, stop))
 
-    def _attack(self, facing: str, m: SimMonster | None, swipe: bool) -> None:
+    def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None) -> None:
         """The attack's damage, STAR_DELAY after its key: on the monster it picked when it started (_aim),
-        a claw swipe or a star."""
+        a claw swipe or a star; none if what stops a star stopped it (`stop`: the monster picked, and the
+        foothold)."""
+        if stop is not None:
+            picked, f = stop
+            where = f"the wall at x {f.x1:.0f}" if f.x1 == f.x2 else f"the floor at y {f.y1:.0f}"
+            self.note(f"star thrown {facing} at {picked.kind} #{picked.idx}: stopped by {where}")
+            return
         if m is None or not m.alive:
             self.note(f"star thrown {facing}: no hit")
             return

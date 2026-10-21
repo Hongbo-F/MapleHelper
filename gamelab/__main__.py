@@ -368,8 +368,10 @@ def _hunt_look(hunter) -> int:
           f"{s.room('right', reach.EDGE_MARGIN):.0f} right")
     for t in s.monsters:
         dx, dy = t.x - s.where.x, t.y - s.where.y
-        in_reach = ("in reach" if reach.can_hit(p, s.where.x, s.where.y, t)
-                    else "behind a wall" if reach.can_shoot(dx, dy, kind=t.kind) else "out of reach")
+        in_reach = ("in reach" if reach.can_hit(p, s.where.x, s.where.y, t, others=s.monsters)
+                    else "out of reach" if not reach.can_shoot(dx, dy, kind=t.kind)
+                    else "behind a wall" if reach.wall_to(p, s.where.x, s.where.y, t) is not None
+                    else "behind one behind a wall")
         facing = {1: ", facing right", -1: ", facing left"}.get(t.facing, "")
         frame = f", {t.mob.template} ({t.mob.frame})" if t.mob.frame else f", {t.mob.template}"
         print(f"  {t.kind} on platform {t.platform}: {dx:+.0f}, {dy:+.0f} ({in_reach}, score {t.mob.score}{facing}{frame})")

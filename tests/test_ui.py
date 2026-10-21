@@ -1,5 +1,7 @@
 """Telemetry and the mini-map, offline: records in, pictures out (no window, no game)."""
 
+import math
+
 import numpy as np
 
 from gamelab.localization import mapdata
@@ -747,7 +749,8 @@ def test_the_page_s_clock_follows_the_run(tmp_path):
 
 def test_the_page_s_map_cuts_the_reach_band_where_the_window_does():
     # The page cuts her band with the walls map.json gives each platform, as MapView._reach does with
-    # attack.reach.clear_span: on the step map, A's step wall (x 200) and none of B's to the right.
+    # attack.reach.clear_span: on the step map, A's step wall (x 200, its outer face to the left, toward A)
+    # and none of B's to the right. From B the same wall is behind its face: it cuts nothing.
     from test_attack import step_map
     from gamelab.attack.reach import SHOT_H, clear_span
     m, a, b, _ = step_map()
@@ -755,5 +758,7 @@ def test_the_page_s_map_cuts_the_reach_band_where_the_window_does():
     payload = web.map_payload(MapView(m, width=400))
     assert payload["reach"]["shot_h"] == SHOT_H
     line = 500 - SHOT_H
-    xs = [x for x, top, bottom in payload["stops"][a.id] if top <= line < bottom]
-    assert min(v for v in xs if v >= 20) == clear_span(a, 20, 500)[1] == 200
+    stops = [(x, faces) for x, top, bottom, faces in payload["stops"][a.id] if top <= line < bottom]
+    assert stops == [(200, -1)]  # the right end of A's band: a wall facing left, to its right
+    assert min(x for x, faces in stops if x >= 20 and faces < 0) == clear_span(a, 20, 500)[1] == 200
+    assert clear_span(a, 20, 500)[0] == -math.inf

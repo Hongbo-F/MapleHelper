@@ -39,13 +39,18 @@ class Segment:
     walls hanging from its ends; steps joined by a wall share one. The client's collisions go by it
     (walls of another group are passed through in the air), and so, by the live logs, does what stops a
     star (attack.reach). `no_drop`: the game won't drop her through this foothold (forbidFallDown, on
-    14,197 footholds in 51 of the 306 map images; none on this map)."""
+    14,197 footholds in 51 of the 306 map images; none on this map). `prev`, `next`: the footholds joined
+    to its start and its end, as (x1, y1, x2, y2) (the map image's prev and next; None at a free end):
+    where a star's line runs exactly through a foothold's end, the client asks which side of them it ends
+    on (attack.reach.sight_stop)."""
     x1: float
     y1: float
     x2: float
     y2: float
     group: tuple[int, int] | None = field(default=None, compare=False, repr=False)
     no_drop: bool = field(default=False, compare=False, repr=False)
+    prev: tuple[float, float, float, float] | None = field(default=None, compare=False, repr=False)
+    next: tuple[float, float, float, float] | None = field(default=None, compare=False, repr=False)
 
     def y_at(self, x: float) -> float:
         if self.x2 == self.x1:
@@ -57,11 +62,14 @@ class Segment:
 @dataclass
 class Platform:
     """A walkable stretch of ground: footholds joined end to end, left to right, with no wall between.
-    `walls`: the walls of its foothold group (MapModel.walls_of; parse attaches them): the only terrain
-    that stops a star thrown from it (attack.reach)."""
+    `walls`: the walls of its foothold group (MapModel.walls_of; parse attaches them): the walls that stop
+    a star thrown from it (attack.reach). `floors`: every floor of the map (all its platforms' footholds,
+    one tuple for every platform; parse attaches it): what can stop a star's line going down, by the v83
+    client's rule (attack.reach.LINE)."""
     id: int
     segments: list[Segment]
     walls: tuple[Segment, ...] = field(default=(), repr=False, compare=False)
+    floors: tuple[Segment, ...] = field(default=(), repr=False, compare=False)
 
     @property
     def left(self) -> float:
@@ -272,9 +280,13 @@ def _platforms(footholds: list[dict]) -> tuple[list[Platform], list[Segment]]:
     numbered by the height of their left end (top first), then left to right."""
     by_key = {(f["layer"], f["group"], f["id"]): f for f in footholds}
 
+    def line(f: dict, joined: str) -> tuple[float, float, float, float] | None:
+        g = by_key.get((f["layer"], f["group"], f.get(joined, "0")))
+        return None if g is None else (g["x1"], g["y1"], g["x2"], g["y2"])
+
     def segment(f: dict) -> Segment:
         return Segment(f["x1"], f["y1"], f["x2"], f["y2"], (int(f["layer"]), int(f["group"])),
-                       f.get("no_drop", False))
+                       f.get("no_drop", False), line(f, "prev"), line(f, "next"))
 
     walls = [segment(f) for f in footholds if f["x1"] == f["x2"]]
     walkable = {k for k, f in by_key.items() if f["x2"] > f["x1"]}
@@ -337,8 +349,9 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         mob_bodies={mob_names.get(i, i): MobBody(**b, die_s=(mob_die_s or {}).get(i, 0.0))
                     for i, b in (mob_bodies or {}).items()},
         mob_speeds={mob_names.get(i, i): mob_walk_speed(v, physics) for i, v in (mob_speeds or {}).items()})
+    floors = tuple(s for p in model.platforms for s in p.segments)
     for p in model.platforms:
-        p.walls = tuple(model.walls_of(p.group))
+        p.walls, p.floors = tuple(model.walls_of(p.group)), floors
     return model
 
 

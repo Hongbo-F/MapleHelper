@@ -346,9 +346,10 @@ def map_payload(view: MapView) -> dict:
         "kind": {name: _hex(c) for name, c in KIND.items()},
         "reach": {"star": STAR_REACH, "up": SHOT_UP, "down": SHOT_DOWN, "min": shot_dx(0), "alpha": REACH_ALPHA,
                   "shot_h": SHOT_H},
-        # per platform, the walls of its foothold group that stop a star (attack.reach.clear_span): x, top, bottom
-        "stops": [[[w.x1, min(w.y1, w.y2), max(w.y1, w.y2)] for w in p.walls] if reach.WALLS_BLOCK else []
-                  for p in m.platforms],
+        # per platform, the walls of its foothold group that stop a star (attack.reach.clear_span): x, top,
+        # bottom, and the way its outer face looks (+1 right, -1 left: a star stops going in there only)
+        "stops": [[[w.x1, min(w.y1, w.y2), max(w.y1, w.y2), reach.faces(w)] for w in p.walls]
+                  if reach.WALLS_BLOCK else [] for p in m.platforms],
         "jump_arc": JUMP_ARC, "zoom": ZOOM, "around": AROUND,
     }
 
@@ -1001,14 +1002,14 @@ function draw(v, her, at, when) {
   // where a star from her reaches (_reach), from where she's drawn
   if (her) {
     const R = M.reach, pid = her.platform;
-    let lo = -Infinity, hi = Infinity;  // cut short by a wall of her platform's foothold group (clear_span)
+    let lo = -Infinity, hi = Infinity;  // cut short by a wall of her platform's foothold group facing her (clear_span)
     if (known(pid) && M.stops) {
       const segs = M.platforms[pid], line = at[1] - R.shot_h;
       const a = Math.min(Math.max(at[0], segs[0][0] + 1), segs[segs.length - 1][2] - 1);
-      for (const [wx, top, bottom] of M.stops[pid] || []) {
+      for (const [wx, top, bottom, faces] of M.stops[pid] || []) {
         if (!(top <= line && line < bottom)) continue;
-        if (wx <= a) lo = Math.max(lo, wx);
-        if (wx >= a) hi = Math.min(hi, wx);
+        if (wx <= a && faces > 0) lo = Math.max(lo, wx);
+        if (wx >= a && faces < 0) hi = Math.min(hi, wx);
       }
     }
     ctx.globalAlpha = R.alpha;

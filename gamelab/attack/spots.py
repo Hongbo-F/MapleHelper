@@ -1,6 +1,7 @@
 """Where to stand to shoot a platform's monsters: the spots on other platforms that have the most of it
-in reach, and of those, one she can stand on safely and get to quickly. In reach counts only what no wall
-of her foothold group stands in front of (reach.wall_in_way): from platform 4, nothing on 2.
+in reach, and of those, one she can stand on safely and get to quickly. In reach counts only what terrain
+doesn't stop a star at (reach.wall_in_way): from platform 4, nothing on 2 (a wall of her foothold group),
+and by the v83 line (reach.LINE) nothing down close past her platform's end.
 
 A spot is good to stand on (`spot_ok`) when no monster can touch her there (MapModel.safe), or only
 ones not worth hunting can (the snails on 3, 20 and 22: those she shoots when they come close). Of the
@@ -45,14 +46,21 @@ class Spot:
 def coverage(target: Platform, x: float, y: float, here: Platform | None = None, kind: str | None = None) -> float:
     """Fraction of `target` in reach of a star thrown from (x, y), either way, at a monster of `kind` (by
     its body, reach.shot_dx; a pig by default): on platform `here`, only as far as the walls of its
-    foothold group let a star (reach.clear_span)."""
+    foothold group let a star (reach.clear_span), and by the v83 line only where no floor stops it either
+    (reach.clear_length)."""
     dy = target.y_at(min(max(x, target.left), target.right)) - y
     if not -SHOT_UP <= dy <= SHOT_DOWN:
         return 0.0
     covered, near, far = 0.0, shot_dx(dy, kind), min(SHOT_RANGE, max_dx(body_of(kind)[1]))
     left, right = clear_span(here, x, y)
     for lo, hi in ((max(x - far, left), x - near), (x + near, min(x + far, right))):
-        covered += max(0.0, min(hi, target.right) - max(lo, target.left))
+        lo, hi = max(lo, target.left), min(hi, target.right)
+        if hi <= lo:
+            continue
+        if reach.LINE == "v83" and here is not None and reach.WALLS_BLOCK:
+            covered += reach.clear_length(here, x, y, target, lo, hi, body_of(kind))
+        else:
+            covered += hi - lo
     return covered / max(1.0, target.right - target.left)
 
 
@@ -164,7 +172,7 @@ def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here
     on = {t.platform: model.platform(t.platform) for t in left if t.platform is not None}
 
     def reached(p: Platform, x: float, y: float) -> int:
-        return sum(can_hit(p, x, y, t, target=on.get(t.platform)) for t in left)
+        return sum(can_hit(p, x, y, t, target=on.get(t.platform), others=left) for t in left)
 
     cur = model.platform(current.platform)
     now = reached(cur, current.x, cur.y_at(current.x)) if current.platform != pid else 0
