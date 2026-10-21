@@ -175,7 +175,7 @@ Step 7 tests it with its own bar: HP lost on rest trips, and no deaths.
 **Chains keep moving.** In hunt mode the next chain is planned on the move, as without an escort today. Rules 1-4 are checked on the look the navigator already takes 0.9 s before a chain ends, and the queued chain is cancelled only if one of them fires.
 - Today, with the fighting escort, every chain ends in a full stop: a 27-unit slide, two looks and a standing start. That costs a quarter to a half of a 3.5 s chain.
 
-**The attack lock:** every plan that can press jump or attack waits out the 730 ms lock in one place, which both the navigator's chains and the mover's single moves go through. The lock's remaining time goes into the chain's start, so only its first jump waits. Its first arrow waits too, until 0.6 s after the attack's key (`actions.ARROW_LOCK_MS`): in game on 2026-10-21 an arrow pressed sooner didn't move her (gamelab README: In game).
+**The attack lock:** every plan that can press jump or attack waits out the 730 ms lock in one place, which both the navigator's chains and the mover's single moves go through. The lock's remaining time goes into the chain's start, so only its first jump waits. Its first arrow waits too, until 0.8 s after the attack's key (`actions.ARROW_LOCK_MS`): in game on 2026-10-21 an arrow pressed sooner didn't move her until about 0.85 s after the key (gamelab README: In game).
 
 ### The rules
 
