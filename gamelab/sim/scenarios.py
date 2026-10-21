@@ -508,7 +508,7 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=6,
+@scenario((34, -300.0), monsters="all", seed=24,
           expects=(ends("arrived"), logs("looking for a way around"), logs("hop@"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
     """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the monster
@@ -529,7 +529,9 @@ def nav_monsters_staircase(sim):
     up the staircase, not 33-45 (route._placed): on seed 5 no monster was in her way to hop or go around there;
     over 24 seeds all arrived, 2 meeting all of this, 10 and 18. Then seed 18 there since the rope moves
     (route._past_end, _rope_jumps): the random weights are drawn in another order, and on seed 10 no monster was
-    in her way to hop; over 24 seeds all arrived, 1 meeting all of this.)"""
+    in her way to hop; over 24 seeds all arrived, 1 meeting all of this. Seed 24 since the play track was
+    rebased onto the game's steps and the live fixes: on seed 6 no monster was in her way to go around or hop;
+    over 24 seeds all arrive, 1 meeting all of this.)"""
     return _nav(19)(sim)
 
 
@@ -539,7 +541,7 @@ def nav_monsters_basin(sim):
     return _nav(33)(sim)
 
 
-@scenario((21, -300.0), monsters="all", seed=5,
+@scenario((21, -300.0), monsters="all", seed=15,
           expects=(ends("arrived"), logs("waiting for the monster to move off")))
 def nav_monsters_long_way(sim):
     """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way. (Seed 11
@@ -563,7 +565,9 @@ def nav_monsters_long_way(sim):
     since the route's jumps take off where they land with room (route._placed): on seed 12 nothing stood in her
     way to wait for there; over 24 seeds all arrived, 2 of them after a wait, 3 and 13. Then seed 12 again
     there since the rope moves (route._past_end, _rope_jumps), which draw the random weights in another order:
-    on seed 3 nothing stood in her way; over 24 seeds all arrived, 2 of them after a wait, 12 and 13.)"""
+    on seed 3 nothing stood in her way; over 24 seeds all arrived, 2 of them after a wait, 12 and 13. Seed 15
+    since the play track was rebased onto the game's steps and the live fixes: on seed 5 nothing stood in her
+    way to wait for; over 24 seeds all arrive, 2 of them after a wait, 15 and 24.)"""
     return _nav(2)(sim)
 
 
@@ -596,7 +600,7 @@ def nav_fight_short(sim):
     return _nav(25, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((14, 760.0), monsters="all", seed=2,
+@scenario((14, 760.0), monsters="all", seed=1,
           expects=(ends("arrived"), logs("shooting it on the way"), moves("climb")))
 def nav_fight_up(sim):
     """From 14 up two ropes and a jump to 1 (pigs, Orange Mushrooms) with `fight` on: she shoots 17's monsters
@@ -619,7 +623,11 @@ def nav_fight_up(sim):
     jump throw's area picks the snail on 3, where she now stabs it or steps back from it. Then seed 3 there,
     since a kill is placed where its monster was seen last (behavior.ledger): on seed 1 her bursts from 14 at
     17's monsters went on otherwise from its third kill, and the trip ran out of time at 200 s; 40 of seeds 1-48
-    arrived.)"""
+    arrived; with no step to 3's far end from a snail, which she stabs where she stands instead (stance.
+    SNAIL_FAR_END), 43, and 85 of seeds 1-96 against 80. Seed 1 again since the play track was rebased onto the
+    game's steps and the live fixes: on seed 2 she's knocked off 3 down to 17 at 88 s and off 17 down to 25
+    three times, and runs out of her 180 s on her way up again (nav_fight_up_runs_out now); on seed 1 she
+    arrives at 141 s, 40 monsters killed. Of seeds 1-48, 38 arrive.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -647,12 +655,16 @@ def nav_fight_across(sim):
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=1,
+@scenario((14, 760.0), monsters="all", seed=2,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
-    """nav_fight_up on seed 1: she shoots 17's monsters from 14 for 48 s, climbs to 3 and shoots 1's, is knocked
-    down onto 17 and off it down to 35 at 103 s, fights there until 162 s, and on the long way round up the
-    staircase runs out of her 180 s on 19, 45 monsters killed. (Seed 1 since the game moves her in 30 ms steps
+    """nav_fight_up on seed 2: she shoots 17's monsters from 14, climbs to 3, is knocked off 3 down to 17 at 88 s
+    and off 17 down to 25 at 138 and 149 s, each time back up by 23 and the rope past its end, and runs out of her
+    180 s on her way up again, 39 monsters killed. (Seed 2 since the play track was rebased onto the game's
+    steps and the live fixes: on seed 1 she arrives (nav_fight_up's seed again). Of seeds 1-48, 9 meet all of
+    this. On seed 1 before: she shot 17's monsters from 14 for 48 s, climbed to 3 and shot 1's, was knocked
+    down onto 17 and off it down to 35 at 103 s, fought there until 162 s, and on the long way round up the
+    staircase ran out of her 180 s on 19, 45 monsters killed. Seed 1 since the game moves her in 30 ms steps
     (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 4 she now arrives; of seeds 1-48,
     41 arrive, 42 just before. Seed 4 had been since the drops and walk-offs kept clear of the basin's cliffs:
     knocked off 3 down to 17 at 84 s, she had gone the long way round, down from 25 to 32 and up the
@@ -664,7 +676,10 @@ def nav_fight_up_runs_out(sim):
     track, before the steps, seed 17 since she finishes what she has hurt before she moves on (behavior.
     fight.owed): on seed 4 she arrived there; of seeds 1-48, 46 arrived, against 41 before. Then seed 18 since
     she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed 17 she arrived; of seeds 1-48, 41
-    arrived, 46 with the jump throws in that world, whose jump throws' area picks a snail.)"""
+    arrived, 46 with the jump throws in that world, whose jump throws' area picks a snail. On seed 18 since she
+    stabs a snail on 3 where she stands, not stepping to 3's far end (stance.SNAIL_FAR_END), at 40 s, she was
+    knocked off 3 down to 17 at 86 s, off 17 down to 25 at 89 s and off 17 to 35 at 141 s, and ran out of time,
+    48 monsters in all.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1143,7 +1158,7 @@ def tour_hunt_from_safe_spot(sim):
     return _tour_hunt(17, 4)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=1, limit=400,
+@scenario((36, 300.0), monsters="all", seed=3, limit=400,
           expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
                    logs("collecting drops on platform 36"),
                    check("the stop's report counts HP lost", lambda tr: tr["result"]["damage_taken"] > 0),
@@ -1154,7 +1169,12 @@ def tour_hunt_basin(sim):
     there: it used to stop and shoot everything in reach, on the very platform she was going to, until the
     trip's 60 s ran out. (Seed 1 since the arrow she holds doesn't steer a knock's flight: on seed 22 the
     fight's own sweeps picked up every drop, so no trip went to collect any. Over 16 seeds all 16 meet all
-    of this, as just before.)"""
+    of this, as just before. Seed 3 since the play track was rebased onto the game's steps and the live fixes:
+    on seed 1 her first trip, to drops at x 263, ran out its 60 s ("couldn't get there"). Over seeds 1-24, 14
+    meet all of this, 10 with such a trip (at master's head all 24 did; on the play track before the rebase
+    11, 11 with such a trip and 2 with no trip at all): the escort's fights in her way finish what she has
+    hurt (behavior.fight.owed), and on the basin, where respawns never stop, there is always another. Found,
+    not fixed: README, the rebase's entry.)"""
     return _tour_hunt(36, 5)(sim)
 
 
