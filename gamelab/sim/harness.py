@@ -31,6 +31,7 @@ PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden trac
 """
 
 import argparse
+import dataclasses
 import json
 import os
 import statistics
@@ -60,6 +61,10 @@ PRESETS = {
     # monsters' items) instead of mesos and a pig's leather every time: the hunt loop's valuable piles (hunt.VALUABLE)
     "game-drops": (_GAME_NOISE, Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True,
                                         drops=GAME_DROPS)),
+    # "game" with jump throws missing a snail close by as often as in game (world.Noise.air_snail): what
+    # stance.JUMP_THROW_SNAILS saves, which "game"'s jump throws, taking every snail their area picks, can't show
+    "game-air": (dataclasses.replace(_GAME_NOISE, air_snail=(46.0, 0.35)),
+                 Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True)),
 }
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as

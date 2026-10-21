@@ -538,6 +538,28 @@ def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model
     assert not w.monsters[0].alive and w.kills == {"snail": 1}
 
 
+def test_noise_can_have_a_jump_throw_miss_a_snail_close_by_as_in_game(model):
+    # Noise.air_snail (near, take): the area's pick of a snail under `near` ahead takes it with chance `take`, else
+    # the star hits nothing (live, 6 of 29 jump throws at a snail under 46 off hurt it). Farther, and other kinds,
+    # as before.
+    from gamelab.sim.world import Noise
+    c = plat(model, 500, 400)
+    never = Noise(air_snail=(46.0, 0.0))
+    w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right", noise=never))
+    _jump_throw(w, 0.04)
+    assert w.monsters[0].alive and any("star thrown right: no hit" in l for l in w.log)
+    w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 360.0)], facing="right", noise=never))
+    _jump_throw(w, 0.04)
+    assert not w.monsters[0].alive  # 60 off: past `near`
+    w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right",
+                    noise=Noise(air_snail=(46.0, 1.0))))
+    _jump_throw(w, 0.04)
+    assert not w.monsters[0].alive
+    w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 330.0)], facing="right", noise=never))
+    _jump_throw(w)
+    assert w.monsters[0].hp == 2
+
+
 def test_with_the_v83_air_pick_a_jump_throw_picks_as_from_the_ground_from_where_she_is(model, monkeypatch):
     # world.AIR_PICK 'v83' (the other answer `probe run air` weighs): the attack 40 ms after the jump key starts
     # 21 up, and the claw and the search go from there as from the ground. A snail 30 off is under the

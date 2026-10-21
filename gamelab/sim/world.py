@@ -212,10 +212,14 @@ KNOCK_MOB = 18.0
 KNOCK_MOB_S = 0.25
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
 # How the world's attack from a jump picks its target: 'area', the nearest in the area fixed to her feet
-# (reach.in_area, as her decisions have it: the 40 ms jump throws' kills of snails 36-66 off fit it); or
-# 'v83', as from the ground, from where she is then (the claw's stance, then the star's search), as RustMS's
-# port of the v83 client has it, with no case for the air. Unmeasured in game (`probe run air`): this lets the
-# probe's scorer be checked in a world of either.
+# (reach.in_area, as her decisions have it: the 40 ms jump throws' kills of snails 36-66 off on 2026-10-20 fit
+# it); or 'v83', as from the ground, from where she is then (the claw's stance, then the star's search), as
+# RustMS's port of the v83 client has it, with no case for the air. Neither fits the live hunts of 2026-10-21:
+# of 78 jump throws at a snail on her platform, 6 of 29 under 46 units off hurt or killed it, 20 of 36 at 46-84
+# and 8 of 12 at 85-130 (and 6 of 8 throws from the ground at 85-130), where 'area' takes every one of them and
+# 'v83' none at 35-85. Noise.air_snail has the area's pick of a snail that close miss as often as that (preset
+# `game-air`), so the harness can weigh stance.JUMP_THROW_SNAILS. Which picture holds, `probe run air` asks: this
+# lets the probe's scorer be checked in a world of either.
 AIR_PICK = "area"
 DROP_DELAY = 2.0
 RESPAWN = 8.0
@@ -287,6 +291,10 @@ class Noise:
                                  # that matched said so for 18% of the sightings of monsters walking and 22% of
                                  # those standing (3 recordings with the camera still), mostly a frame at a time
                                  # but for up to 1.4 s on end, most of the time wrong in such long stretches
+    air_snail: tuple = ()        # (near, take): an attack from a jump whose area picks a snail (AIR_PICK 'area')
+                                 # under `near` units ahead takes it only with chance `take`, else hits nothing.
+                                 # In the live hunts of 2026-10-21 such jump throws hurt or killed the snail 6
+                                 # times in 29 under 46 units off, against 28 in 48 at 46-130: (46, 0.35); () off
 
     @staticmethod
     def during(spells: tuple, t: float) -> bool:
@@ -1240,6 +1248,10 @@ class World:
         else:
             target = self.nearest_in(self.facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP)
             swipe = False
+            if target is not None and target.kind == "snail" and self.noise.air_snail:
+                near, take = self.noise.air_snail
+                if abs(target.at(self.t) - self.x) < near and self.chance("air_snail", key_ms) >= take:
+                    target = None  # over it (Noise.air_snail): the star hits nothing
         stop = None if target is None or swipe else self.sight_stop(target)
         if stop is not None:
             target, stop = None, (target, stop)
