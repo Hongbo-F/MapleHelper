@@ -202,7 +202,9 @@ def _probe_run(name: str, start: tuple, monsters: list, throws: int = 20) -> lis
 @REAL
 def test_the_scorer_tells_the_search_from_the_old_ramp_42_below_her(monkeypatch):
     # From 0 at a lone pig on 1, 42 below her, 70-160 off: the world's search picks it from 71 by its middle; the old
-    # ramp (reach.RAMP_BELOW, what her decisions keep to there) from 126. Each world's log fits its own.
+    # ramp (reach.RAMP_BELOW, what her decisions keep to there) from 126. Each world's log fits its own: the
+    # search's by 19.9 (log-likelihood), the ramp's by 4.5 (9.3 with pigs walking 70 units/s, not the game data's
+    # 125: they walk further between her look and the pick).
     model = scenarios.real_map()
     run = lambda: _probe_run("below-42", (0, 1222.0), [("Pig", 1, 1110.0)])  # noqa: E731
     rows = run()
@@ -219,7 +221,7 @@ def test_the_scorer_tells_the_search_from_the_old_ramp_42_below_her(monkeypatch)
     rows = run()
     monkeypatch.undo()
     lls = probe.ramp_lls(rows, model)
-    assert lls["the search, the old ramp below her"] > lls["the search"] + 5
+    assert lls["the search, the old ramp below her"] > lls["the search"] + 4
 
 
 @REAL
@@ -244,15 +246,16 @@ def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     # The game's hit monsters hide under their damage numbers for 1-3 s: the evidence waits up to
     # HIDDEN_MAX_S for the target to show again. With meowdb's top in the world, a star picks the pig from 111
     # units off: none of the throws its attack took may be read as a miss (seen again with its bar unchanged),
-    # and most are read as hits. One throw is at a pig 112 off that walked to 100 off by the pick: the world's
-    # star missed it, and so it's read.
+    # and most are read as hits (19 of the 30; 22 with pigs walking 70 units/s, not the game data's 125). Throws
+    # at a pig that walked out of the search's window by the pick (one 112 off that walked to 100) the world's
+    # star missed, and so they're read.
     monkeypatch.setattr(reach, "SEARCH_TOP0", 44)
     sc = dataclasses.replace(scenarios.SCENARIOS["probe_top"], noise=Noise(hit_hidden=(1.0, 3.0)))
     trace = scenarios.run_scenario(sc)
     model = scenarios.real_map()
     body = bodies(model)
     told = [(r, s) for r in _rows(trace) for e, s in outcomes(r) if e["target"]]
-    assert len(told) == 30 and [s for _, s in told].count(True) >= 20
+    assert len(told) == 30 and [s for _, s in told].count(True) > len(told) / 2
     assert all(probe.taken(r, model, body, top0=44) is None for r, s in told if s is False)
     assert any(r["looks"] > 12 for r in _rows(trace))  # looked on past EVIDENCE_S for a hidden one
 
