@@ -833,9 +833,10 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 def probe_top(sim):
     """`probe run top-60`: from 13 at a lone pig on 12, 60 above her, 110-200 units off sideways. The world's
     search window has reach's top (21 above her feet in the first band), so a star picks the pig only from 191
-    units: most throws hit nothing (on seed 1 one hits, 196 off at the pick; with none, the fit wouldn't bound
-    the top from below). Each throw waits for its evidence before the next, and the log has where the pig was at
-    the pick and what it showed (`probe score` fits the top to it: tests/test_probe.py)."""
+    units: most throws hit nothing (on seed 1 seven hit, 199-219 off at the pick: one with pigs walking 70
+    units/s, 196 off; with none, the fit wouldn't bound the top from below). Each throw waits for its evidence
+    before the next, and the log has where the pig was at the pick and what it showed (`probe score` fits the
+    top to it: tests/test_probe.py)."""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 

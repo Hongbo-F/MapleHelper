@@ -182,7 +182,7 @@ def test_the_scorer_tells_the_area_of_an_attack_from_a_jump_from_the_search():
     # every star; the search (from 65 ahead, as from the ground or from as high as she is) wouldn't pick it.
     # She takes her place facing the way she throws, so no jump throw turns her (a turn's tap walked her 8 units
     # on, to 32 off where the snail came back, and it touched her) and each goes straight up from x 30: the
-    # snail is 40 off at all but the first, before which it walked on to 67 off (inside the probe's 35-85) while
+    # snail is 40 off at all but the first, before which it walked on to 72 off (inside the probe's 35-85) while
     # she took her place.
     rows = _rows(scenarios.run("probe_air"))
     assert {r["x"] for r in rows} == {30.0} and all(35 <= abs(r["dx"]) <= 85 for r in rows)
@@ -247,7 +247,7 @@ def test_a_hidden_target_is_waited_for_and_never_read_as_a_miss(monkeypatch):
     # HIDDEN_MAX_S for the target to show again. With meowdb's top in the world, a star picks the pig from 111
     # units off: none of the throws its attack took may be read as a miss (seen again with its bar unchanged),
     # and most are read as hits (19 of the 30; 22 with pigs walking 70 units/s, not the game data's 125). Throws
-    # at a pig that walked out of the search's window by the pick (one 112 off that walked to 100) the world's
+    # at a pig that walked out of the search's window by the pick (two 128-129 off that walked to 105) the world's
     # star missed, and so they're read.
     monkeypatch.setattr(reach, "SEARCH_TOP0", 44)
     sc = dataclasses.replace(scenarios.SCENARIOS["probe_top"], noise=Noise(hit_hidden=(1.0, 3.0)))
