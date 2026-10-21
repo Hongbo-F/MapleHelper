@@ -553,8 +553,9 @@ class Navigator:
             _no_follow("no room to look where it lands")
         if why == "long" and not more:
             keys.set_arrow(legs[-1].end.t, 0)  # nothing follows: she stops where it ends (held on, she ran past it)
-        # Right after a throw, a jump pressed inside the attack lock is ignored, and an arrow pressed within
-        # about 0.55 s of its key doesn't move her: the chain waits just enough for both (Actions.hold_back).
+        # Right after a throw, a jump pressed inside the attack lock is ignored, and an arrow pressed within about
+        # 0.62 s of its key (from 0.63 to 0.78 s it isn't measured) moves her only from about 0.79 s after it: the
+        # chain waits just enough for both (Actions.hold_back: its first arrow 0.8 s after the key, ARROW_LOCK_MS).
         # (A chain queued on the move starts when this one ends, past any lock.)
         self.actions.hold_back(keys.sorted())
         plan_id, length = send(legs, keys, why, tail)

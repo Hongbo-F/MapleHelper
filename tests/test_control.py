@@ -81,9 +81,9 @@ def test_a_plan_with_a_jump_waits_out_the_attack_lock_and_one_without_doesnt(mon
 
 
 def test_a_plans_first_arrow_waits_until_her_attack_stops_swallowing_arrows(monkeypatch):
-    """An arrow pressed while her attack plays doesn't move her until about 0.85 s after its key (in game on
+    """An arrow pressed while her attack plays doesn't move her until about 0.79 s after its key (in game on
     2026-10-21: chains sent about 0.3 s after a throw's key stood still, and those held back to 0.6 s set off
-    0.19 s late), so a plan's first arrow goes down ARROW_LOCK_MS (0.8 s) after the last attack key at the
+    0.12 s late), so a plan's first arrow goes down ARROW_LOCK_MS (0.8 s) after the last attack key at the
     soonest: an arrow-first plan 0.3 s after a throw waits 0.5 s, one whose arrow comes 0.3 s in waits 0.2 s.
     Jumps and attacks still wait for the attack lock, as before."""
     from gamelab.control import actions as actions_mod

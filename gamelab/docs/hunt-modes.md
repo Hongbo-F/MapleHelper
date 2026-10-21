@@ -175,7 +175,7 @@ Step 7 tests it with its own bar: HP lost on rest trips, and no deaths.
 **Chains keep moving.** In hunt mode the next chain is planned on the move, as without an escort today. Rules 1-4 are checked on the look the navigator already takes 0.9 s before a chain ends, and the queued chain is cancelled only if one of them fires.
 - Today, with the fighting escort, every chain ends in a full stop: a 27-unit slide, two looks and a standing start. That costs a quarter to a half of a 3.5 s chain.
 
-**The attack lock:** every plan that can press jump or attack waits out the 730 ms lock in one place, which both the navigator's chains and the mover's single moves go through. The lock's remaining time goes into the chain's start, so only its first jump waits. Its first arrow waits too, until 0.8 s after the attack's key (`actions.ARROW_LOCK_MS`): in game on 2026-10-21 an arrow pressed sooner didn't move her until about 0.85 s after the key (gamelab README: In game).
+**The attack lock:** every plan that can press jump or attack waits out the 730 ms lock in one place, which both the navigator's chains and the mover's single moves go through. The lock's remaining time goes into the chain's start, so only its first jump waits. Its first arrow waits too, until 0.8 s after the attack's key (`actions.ARROW_LOCK_MS`): in game on 2026-10-21 an arrow pressed up to 0.62 s after it didn't move her until about 0.79 s after the key (gamelab README: In game; from 0.63 to 0.78 s it isn't measured).
 
 ### The rules
 
@@ -387,7 +387,7 @@ These need a measurement in game, or your call:
 
 - **How long do drops last, and how long are they only hers?** This drives rules 6 and 10. Measure it by watching a drop left alone in a recording.
 - **The respawn time, and how many monsters are really out** with other players about. Rules 8 and 9 and the fast exit depend on it; today's 8 s is the simulator's guess.
-- **Can she walk during the 730 ms attack lock?** If so, rule 4 could become throw-and-walk instead of stop, throw, go. In part, by the live runs of 2026-10-21: an arrow pressed in its first 0.55 s or so is swallowed (held on, she sets off about 1.0 s after the attack's key), one pressed 0.575 s after the key moves her at once. So throw-and-walk could gain the lock's last 0.15 s at most.
+- **Can she walk during the 730 ms attack lock?** If so, rule 4 could become throw-and-walk instead of stop, throw, go. In part, by the live runs of 2026-10-21: an arrow pressed up to 0.62 s after the attack's key is swallowed (held on, she sets off about 0.79 s after it), one pressed 0.79 s after it moves her at once, and between them it isn't measured (the one read as moving her at once at 0.575 s set off 0.07 s late, timed by when she went off the end). So she can't walk inside the 730 ms lock: throw-and-walk would gain nothing, and a plan could set off at most about 0.08 s sooner than its 0.8 s hold-back.
 - **What does a look cost end to end in game?** Detection alone is measured: about 100 ms for the band, 300 ms for the whole screen. That sets how many looks fit in a throw's cooldown.
 - **Should hunt mode's chains see monsters?** Today, with the fighting escort, chains are planned with no monsters at all: no danger checks, no waits, no hops. The recorded reason is "it fights them instead". With rule 4 shooting only within a budget, a monster on a later leg is caught only by the hit cut.
 - **Should a full inventory ever be cleared?** Today it lasts the whole session, and items stop being looked for.

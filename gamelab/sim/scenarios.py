@@ -641,7 +641,7 @@ def nav_fight_across_runs_out(sim):
 def nav_walk_off_after_kill(sim):
     """From 3 she shoots an Orange Mushroom on 4 below dead, then, from the look that saw it die (as the hunt
     loop goes on from its own look), walks off 3's left end onto 4, in a world where an arrow pressed while
-    her attack plays is swallowed until about 0.85 s after its key (Realism.lock_arrows, as measured in game on
+    her attack plays is swallowed until about 0.79 s after its key (Realism.lock_arrows, as measured in game on
     2026-10-21). In game such a walk-off went out about 0.3 s after her last throw's key, twice, and she didn't
     move; here it would go 0.34 s after it, and she'd stay on 3 until the walk-off sent again a second later.
     Its first arrow is held back to 0.8 s after the key (actions.ARROW_LOCK_MS), and she lands on 4 at once."""
@@ -673,11 +673,11 @@ def _go_after_kill(sim, dst: int, x: float | None = None) -> dict:
 def nav_jump_after_kill(sim):
     """From 16 she shoots a pig on 18 below dead, then, from the look that saw it die, runs right along 16 and
     jumps up onto 14 for the rope to 6 (the hunt loop's way up to 4 in game on 2026-10-21), in a world where an
-    arrow pressed while her attack plays moves her only from about 0.85 s after its key. In game, with the
-    chain's first arrow held back to 0.6 s after the key, she set off about 0.2 s late, the jump went at its
-    planned time from 15-30 units short, and 8 of 10 such chains fell to 25; here too she misses 14 on every
-    seed of 1-8 that kills the pig: she falls to 25, or her dot still where the run starts cuts the plan short
-    (navigator.OFF_SPAN; a test pins it). Held back to 0.8 s (actions.ARROW_LOCK_MS), she lands on 14."""
+    arrow pressed while her attack plays moves her only from about 0.79 s after its key. In game, with the
+    chain's first arrow held back to 0.6 s after the key, she set off about 0.12 s late, the jump went at its
+    planned time from 15-30 units short, and 8 of 10 such chains fell to 25; here too she falls to 25 on every
+    seed of 1-8 that kills the pig (a test pins it). Held back to 0.8 s (actions.ARROW_LOCK_MS), she lands on
+    14."""
     return _go_after_kill(sim, 6)
 
 

@@ -30,12 +30,14 @@ JUMP_THROW_LOCK_EXTRA_MS = 160
 # sent within 0.35 s of the look after a throw (their first arrow about 0.3 s after its attack key), 6 first moved
 # her 0.73-0.92 s after they went out (about 1.0 s after the key: the arrow was still held) and 2 never did (a
 # step let go before then). From 00:49 a plan's first arrow waited until 0.6 s after the key, and those still set
-# off late: of the walk-offs from 3 onto 4, her dot first moved 0.41 s after the plan went out (the median of 11),
-# against 0.23 s (of 6) when the first arrow came later after the key. So she moves from about 0.85 s after the
-# key. Of the 10 chains that set off for the jump from 16 up onto 14 right after a throw, 8 came down short of 14
-# and fell to 25 (taking off 15-30 units short where tracked) and one overshot onto 17 off a step back gone late,
-# where the 18 sent with no throw in the 1.5 s before all landed. So a plan's first arrow waits until this long
-# after the last attack key (hold_back): the game acts on it 66 ms later, about when she can move.
+# off late: timed by when her dot went off the end of 3 (sim.world.ARROW_HELD has how), the 17 walk-offs whose
+# first arrow went 0.59-0.62 s after the key were acted on about 0.79 s after it, 0.12 s late, and the 3 whose arrow
+# went 0.79-0.82 s after it at once. Of the 10 chains that set off for the jump from 16 up onto 14 right after a
+# throw, 8 came down short of 14 and fell to 25 (taking off 15-30 units short where tracked) and one overshot onto
+# 17 off a step back gone late, where the 18 sent with no throw in the 1.5 s before all landed. So a plan's first
+# arrow waits until this long after the last attack key (hold_back): the game acts on it 66 ms later, about 0.08 s
+# after she could first move. Whether an arrow pressed from about 0.65 s on (acted on from 0.72) is swallowed isn't
+# measured: none was pressed then (gamelab README, In game: the check to make before going sooner).
 ARROW_LOCK_MS = 800
 
 # A jump back: run away a moment, jump, turn toward the monster in mid-air and throw.

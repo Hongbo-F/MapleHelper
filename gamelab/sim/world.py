@@ -142,17 +142,26 @@ ATTACK_LOCK = COMBAT.attack_lock_ms / 1000
 # chains sent within 0.35 s of the look after a throw (their first arrow about 0.3 s after its attack key), 6
 # first moved her 0.73-0.92 s after they went out, about 1.0 s after the key, with the arrow still held; and 2
 # never did, a step let go before then (two walk-offs off platform 3's left end onto 4, the arrow held 0.48-0.52 s
-# from about 0.3 s after the key: her dot never moved, and the walk-off sent again 0.9 s later went). With the
-# first arrow held back to 0.6 s after the key she still set off about 0.19 s late, from about 0.85 s after it
-# (control.actions.ARROW_LOCK_MS, now 0.8 s).
+# from about 0.3 s after the key: her dot never moved, though the next look had her 7 units on in the first, and
+# the walk-off sent again 0.9 s later went). With the first arrow held back to 0.6 s after the key she still set
+# off late: timed by when her dot went off the end of the platform in the walk-offs (less the fall to her dot's
+# first drop, and her run to the end by the engine), 17
+# whose first arrow went out 0.59-0.62 s after the key were acted on 0.75-0.88 s after it by her dot (the median
+# 0.81: 0.21 s after going out, where an arrow with no attack before it is 0.09 s, the median of 73), so about
+# 0.79 s after the key by the game's clock; the 3 that went out 0.79-0.82 s after the key went at once (0.03-0.09).
+# (By her dot's first move, a pixel per 11 units, it read as 0.85 s.)
 # So an arrow pressed (as it goes out) less than ARROW_LOCK after the key of an attack the game took is seen
 # ARROW_HELD after that key, if it's still held then, and else never: the game acts on it at its next step, about
-# 0.85 s after the key (ARROW_LOCK is ARROW_HELD less the time the game takes to see an arrow, Lags.seen, so a
-# press just after it is seen as late). Those pressed early in the attack seemed to wait longer (about 1.0 s),
-# which no plan does now. Arrows pressed before the key and held through it aren't measured (no plan does that):
-# they move her as ever. (0.55 and 1.0 s before the hold-back's 0.6 s was seen to fall short.)
-ARROW_HELD = 0.835
-ARROW_LOCK = ARROW_HELD - body.Lags.seen(LAGS.on)  # 0.784
+# 0.79 s after the key on average (ARROW_LOCK is ARROW_HELD less the time the game takes to see an arrow,
+# Lags.seen, so a press just after it is seen as late). Fitted so, of the chains for the jump from 16 up onto 14
+# held back only to 0.6 s (nav_jump_after_kill, seeds 1-16), 14 of the 15 that kill the pig fall to 25 as 8 of 10
+# did in game; with 0.835 (fitted to the dot's first move) 5 did and 10 were cut short on 16. Those pressed early
+# in the attack seemed to wait longer (about 1.0 s, by the dot's first move), which no plan does now; none was
+# pressed from 0.63 to 0.78 s after the key, which is unmeasured. Arrows pressed before the key and held through
+# it aren't measured (no plan does that): they move her as ever. (0.55 and 1.0 s before the hold-back's 0.6 s was
+# seen to fall short; 0.835 until the review of 2026-10-21.)
+ARROW_HELD = 0.77
+ARROW_LOCK = ARROW_HELD - body.Lags.seen(LAGS.on)  # 0.719
 # Her HP: her HP bar read "HP[642/642]" in game (2026-10-18, at level 19; maplehelper.ocr.parse's test).
 MAX_HP = 642.0
 # A touch takes TOUCH_SHARE of the monster's touch damage (PADamage in the game data: snail 3, slime 13,
