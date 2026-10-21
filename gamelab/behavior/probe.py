@@ -591,9 +591,11 @@ def _give_way(probe: Probe, s: Scene, m: Monster) -> float | None:
 
 
 def _fight(h: "Hunter", guard: _Guard, report: ProbeReport, here: int, **kw) -> None:
-    """A fight on her platform only, where she stands (fight.clear), timed for the report and FIGHT_MAX_S."""
+    """A fight on her platform only, where she stands (fight.clear), timed for the report and FIGHT_MAX_S; not
+    going on to finish the monsters she has hurt (finish_wounds off): those are the probe's own targets, and its
+    stars at them would be outside the probe's log."""
     began = time.monotonic()
-    h.clear(None, ground={here}, approach=False, **kw)
+    h.clear(None, ground={here}, approach=False, finish_wounds=False, **kw)
     took = time.monotonic() - began
     report.fights += 1
     report.fight_s += took

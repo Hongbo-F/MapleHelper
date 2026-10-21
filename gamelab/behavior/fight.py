@@ -186,7 +186,8 @@ _DONE = "done"    # finished: sweep up what fell on her platform, and stop on th
 
 
 def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: int = 10, seconds: float = 120,
-          patience: float = 1.5, approach: bool = True, finish: bool = False, far: bool = False) -> Report:
+          patience: float = 1.5, approach: bool = True, finish: bool = False, far: bool = False,
+          finish_wounds: bool = True) -> Report:
     """Fight like a player: a star hits the nearest monster in reach on the side she faces, so
     she keeps throwing toward the side with the most monsters in reach, one throw per attack
     cooldown, looking around during the cooldown, never idle while one is in reach. She keeps
@@ -204,7 +205,9 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
     (finish_act): she finishes it, closing in on it even without `approach`, before the fight ends,
     and before she waits on nothing (she used to leave monsters half hunted). Only those hurt by the
     look that saw the kill count reached: in the simulator's basin, where respawns never stop, there was
-    always another, and the escort's fights in her way to drops ran out the trips.
+    always another, and the escort's fights in her way to drops ran out the trips. Not without
+    `finish_wounds`: a probe's fight off a monster close to her went on to finish the probe's own targets, its
+    throws outside the probe's log (behavior.probe._fight: its fights off one close and its clears of her platform).
     Monsters of other kinds on her platform that come close are in her way, and fought too. With
     `far`, monsters (of `kinds`) on any platform in reach are fought too: her darts reach far, and
     their drops are left to the tour (looter.pending)."""
@@ -231,7 +234,7 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
         targets, closing = fight, approach and not enough
         if enough and enough_at is None:
             enough_at = now
-        wounds = owed(h, s, st, enough_at)
+        wounds = owed(h, s, st, enough_at) if finish_wounds else []
         owing = finish_act(h, s, wounds, visible + hidden) is not None
         if owing and ((enough and not finish) or _plain_stance(h, s, fight, visible + hidden, closing)[0] == "wait"):
             targets, closing = finish_targets(s, wounds, visible + hidden), True  # finish hers (finish_act)

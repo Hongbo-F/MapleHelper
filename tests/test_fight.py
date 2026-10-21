@@ -178,6 +178,7 @@ def test_a_fight_finishes_one_she_has_hurt_before_it_ends(monkeypatch):
     h.wounds.seen_within = lambda now, seconds, hurt_by=None: [hurt] if h.report.exp_kills < 2 else []
     h.clear(max_kills=1, patience=2.0)
     assert [side for _, side in throws][-3:] == [LEFT] * 3 and h.report.kills == {"pig": 2}
+    finished = len(throws)
     # Out of reach but a short walk away, she closes in on it even in a fight that doesn't (approach off).
     walks = []
     h, throws = _fighter(monkeypatch, [[target(950, bar=0.5)]] * 4)
@@ -193,6 +194,37 @@ def test_a_fight_finishes_one_she_has_hurt_before_it_ends(monkeypatch):
     h.wounds.seen_within = lambda now, seconds, hurt_by=None: [far]
     r = h.clear(seconds=1.0, patience=0.3, approach=False)
     assert not walks and r.stop == "nothing left in reach"
+    # Without finish_wounds (a probe's fight off one close to her: the wounds are the probe's targets) it ends at
+    # its kill count, and doesn't close in on one.
+    h, throws = _fighter(monkeypatch, looks, on_look=kills)
+    h.looter.sweep_after = lambda deaths: None
+    h.wounds.seen_within = lambda now, seconds, hurt_by=None: [hurt] if h.report.exp_kills < 2 else []
+    h.clear(max_kills=1, patience=2.0, finish_wounds=False)
+    assert h.report.kills == {"pig": 1} and len(throws) < finished
+    walks.clear()
+    h, throws = _fighter(monkeypatch, [[target(950, bar=0.5)]] * 4)
+    h.actions.walk = lambda direction, units: walks.append((direction, round(units)))
+    h.wounds.seen_within = lambda now, seconds, hurt_by=None: [target(950, bar=0.5)]
+    h.clear(seconds=1.0, patience=0.3, approach=False, finish_wounds=False)
+    assert not walks and not throws
+
+
+def test_a_probe_fights_off_one_close_to_her_without_finishing_its_own_targets(monkeypatch):
+    # probe._keep_clear's fights (probe._fight): one off a monster close to her on her platform, up to one kill,
+    # and a clear of her platform first, both leaving the monsters she has hurt alone (the probe's own targets:
+    # its stars at them would be outside the probe's log).
+    from gamelab.behavior import probe
+    asked = {}
+    h = SimpleNamespace(log=lambda *a: None, clear=lambda kinds, **kw: asked.update(kw))
+    p = probe.PROBES["step-down"]
+    s = SimpleNamespace(where=SimpleNamespace(x=50.0, y=0.0), platform=SimpleNamespace(id=2),
+                        monsters=[target(70, 0.0, platform=2, kind="orange-mushroom")])
+    report = probe.ProbeReport(p.name)
+    assert probe._keep_clear(h, p, s, probe._Guard(False, p.x), report)
+    assert asked["finish_wounds"] is False and asked["max_kills"] == 1
+    asked.clear()
+    assert probe._keep_clear(h, p, s, probe._Guard(True, p.x), report)  # clears_first: step-down from 2
+    assert asked["finish_wounds"] is False and asked["max_kills"] == probe.CLEAR_KILLS and report.fights == 2
 
 
 def test_a_kill_seen_while_she_sweeps_up_still_counts(monkeypatch):
