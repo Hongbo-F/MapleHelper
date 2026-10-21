@@ -180,6 +180,18 @@ def test_one_she_threw_at_that_vanished_as_her_exp_went_up_was_hers():
     assert tracker.tracks[1].state == DEAD and tracker.tracks[1].cause == "hers"
 
 
+def test_a_throw_aims_at_the_monsters_a_star_can_pick_and_none_beyond():
+    # A star picks a body whose near side is within 400 (attack.reach.STAR_RANGE): a pig's middle up to 434
+    # (STAR_REACH). The tracker allows 40 more for what moves before the pick (THROW_REACH, a number: localization
+    # doesn't import attack); a pig 520 off isn't in a throw's path, and her EXP isn't put on it.
+    from gamelab.attack import reach
+    assert reach.STAR_REACH <= tracking.THROW_REACH <= reach.STAR_REACH + 60
+    tracker = MonsterTracker()
+    run(tracker, [([sighting(HER[0] + dx, pose="stand") for dx in (300, 460, 520)], view())] * 6)
+    tracker.throw(100.0 + 6 / FPS, "right")
+    assert sorted(round(tracker.tracks[i].x - HER[0]) for i in tracker.throws[-1].aimed) == [300, 460]
+
+
 def test_her_kill_is_the_one_that_faded_not_the_one_hiding_under_its_damage_numbers():
     tracker = MonsterTracker()
     t0 = 100.0

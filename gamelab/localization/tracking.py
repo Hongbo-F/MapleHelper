@@ -65,10 +65,13 @@ STAR_WINDOW = 2.5   # s after a throw's key that a kill or a hit can be its star
 HIT_AFTER_S = 1.2   # s after a throw's key that its star may hit at the latest (it leaves 0.52 s after the key and
                     # flies up to 0.7 s): a monster hidden under her damage numbers stays hidden HIDE_S from then. In
                     # the simulator's game-like world a slime clawed every 0.85 s hid for 5 s and was taken for dead
-# Units a throw can reach ahead of her: 460 to a body's edge (attack.reach: the farthest hit counted on, and the
-# target is whatever body reaches into the attack's area), so its middle up to about 30 more, and a monster
-# walking in during the half second before the star leaves (a slime killed 417 units off was 470 off at the key).
-THROW_REACH = 460.0 + 80.0
+# Units ahead of her, by its middle as the tracker has it at the throw's key, that a monster her star picks can
+# be: 434 (attack.reach.STAR_REACH: a star picks a body whose near side is within STAR_RANGE 400, so the widest
+# kind's middle up to 434), and 40 for what she and it move between the frame and the pick (physics.JUMP_LAG after
+# the key) and the tracker's error. Of 724 picks by the simulator's stars in the tracker table's seven runs
+# (README: Continuous perception), the farthest was 449 ahead at the throw, 3 past 434. It was 460 + 80, from
+# when a star was taken to reach 460 to a body's edge: a kill could be put on a monster 500-540 off.
+THROW_REACH = 434.0 + 40.0
 THROW_DY = 70.0     # ... and above or below her feet (60 measured, and a little slack)
 BAR_STEP = 0.03     # a bar this much lower than its lowest seen before: a hit
 # The velocity filter (alpha-beta on x, map units), for sightings whose pose isn't known. Simulated at 30 Hz
