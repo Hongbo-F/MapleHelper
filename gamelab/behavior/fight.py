@@ -47,7 +47,8 @@ UNPLACED_LOOKS = 10  # looks in a row that can't place her before a fight gives 
 IN_HER_WAY = TOO_CLOSE + 40  # a monster of any kind this close on her platform is in her way: fought too
 THROWS = ("throw", "jump_throw", "jump_back")  # the stances that throw a star (each an Actions method)
 JUMPS = ("jump_throw", "jump_back")  # ... and of those, the ones that jump
-STEADY_WAIT_S = 0.05  # s before the next look when a jump waits out a touch's knock (knocked_jump)
+MOVES = JUMPS + ("back", "approach")  # the stances that move her (each but a throw from the ground)
+STEADY_WAIT_S = 0.05  # s before the next look when a jump or a step waits out a touch's knock (knocked_move)
 GUARD_SECONDS = 15  # longest spent shooting a monster out of the way while travelling
 GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she travels on
 # A monster she has hurt (Hunter.wounds) is finished before she moves on, from where she is or from a walk this
@@ -235,7 +236,7 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
         if owing and ((enough and not finish) or _plain_stance(h, s, fight, visible + hidden, closing)[0] == "wait"):
             targets, closing = finish_targets(s, wounds, visible + hidden), True  # finish hers (finish_act)
         act = _take_stance(h, st, s, targets, visible, hidden, closing)
-        if knocked_jump(h, s, act):
+        if knocked_move(h, s, act):
             continue
         if (step := _carry_out(h, st, s, act, fight, now, patience, enough)) == _OVER:
             return report
@@ -340,19 +341,21 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     return act
 
 
-def knocked_jump(h: "Hunter", s: Scene, act: tuple) -> bool:
-    """Whether stance `act` is a jump (a jump throw or a jump back) decided from a look a touch's knock may still
-    be moving her in (Hunter.knocked): then it waits a moment for the next look. Keyed from such a look, the jump
-    key came while she was still in the air, and did nothing (in loop_run 21 jump keys were lost so, 9 now: those
-    left come from a touch after the look, in the plan's lead-in), or once she had landed and still slid on, from
-    where she no longer was: in the harness (tour, seed 5, both tracks) a jump throw keyed from a look taken
-    mid-knock went in after she had landed on 34 sliding at 104 units/s, took her off its end up onto 31 (that
-    nothing was overhead was checked where she was at the look, 55 units back) and landed her 0.4 units from
-    31's end, which the next throw's turn walked her off, and out of the map."""
-    if act[0] in JUMPS and h.knocked(s):
+def knocked_move(h: "Hunter", s: Scene, act: tuple) -> bool:
+    """Whether stance `act` is a jump (a jump throw or a jump back) or a step (stepping away, closing in) decided
+    from a look a touch's knock may still be moving her in (Hunter.knocked): then it waits a moment for the next
+    look. Keyed from such a look, the jump key came while she was still in the air, and did nothing (in loop_run
+    21 jump keys were lost so, 9 now: those left come from a touch after the look, in the plan's lead-in), or once
+    she had landed and still slid on, from where she no longer was: in the harness (tour, seed 5, both tracks) a
+    jump throw keyed from a look taken mid-knock went in after she had landed on 34 sliding at 104 units/s, took
+    her off its end up onto 31 (that nothing was overhead was checked where she was at the look, 55 units back)
+    and landed her 0.4 units from 31's end, which the next throw's turn walked her off, and out of the map. A step
+    so walks her on from where the knock leaves her: on 22, a snail's touch knocked her 40 units toward its end
+    and a step back of 106 from where she'd been took her off it (fight_snail_short_platform, seed 4)."""
+    if act[0] in MOVES and h.knocked(s):
         if h.knock_waited != h.hit_at:  # logged once a knock
             h.knock_waited = h.hit_at
-            h.log("    hit: the jump waits for the knock to end")
+            h.log(f"    hit: the {'jump' if act[0] in JUMPS else 'step'} waits for the knock to end")
         time.sleep(STEADY_WAIT_S)
         return True
     return False

@@ -9,6 +9,7 @@ import pytest
 from maplehelper.engine import LEFT, RIGHT
 
 from gamelab.attack import reach, spots
+from gamelab.attack import stance as stance_mod
 from gamelab.attack.stance import TOO_CLOSE, decide, pick_target, stance
 from gamelab.localization import mapdata, monsters
 from gamelab.localization.mapdata import Platform, Segment
@@ -151,11 +152,12 @@ def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_mons
     assert decide(500, 500, PLAT, pig, []) == ("walk", LEFT, 120)
     assert stance(500, 500, PLAT, [target(615)]) == ("throw", RIGHT)
     assert decide(500, 500, PLAT, target(615), []) == ("throw", RIGHT)
-    # A snail 90 away is too close as well (96), one 100 away isn't; by the map's game data (half 18.5)
-    # one 95.8 away isn't either (95.5). A slime 100 away is (105), an Orange Mushroom 110 away isn't (109).
-    assert stance(500, 500, PLAT, [target(590, kind="snail")]) == ("jump_throw", RIGHT)
+    # A snail 90 away is too close as well (96: she steps back from it), one 100 away isn't; by the map's game
+    # data (half 18.5) one 95.8 away isn't either (95.5). A slime 100 away is (105), an Orange Mushroom 110 away
+    # isn't (109).
+    assert stance(500, 500, PLAT, [target(590, kind="snail")])[:2] == ("back", LEFT)
     assert stance(500, 500, PLAT, [target(600, kind="snail")]) == ("throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(595.8, kind="snail")]) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(595.8, kind="snail")])[:2] == ("back", LEFT)
     assert stance(500, 500, PLAT, [target(595.8, kind="snail")], halves={"snail": 18.5}) == ("throw", RIGHT)
     assert stance(500, 500, PLAT, [target(600, kind="slime")]) == ("jump_back", RIGHT)
     assert stance(500, 500, PLAT, [target(610, kind="orange-mushroom")]) == ("throw", RIGHT)
@@ -328,9 +330,11 @@ def test_with_the_attack_keyed_late_a_cornered_snail_is_shot_from_the_ground(mon
     assert stance(60, 500, PLAT, [snail]) == ("throw", RIGHT)
     assert stance(60, 500, PLAT, [snail], can_jump=lambda a, b: False) == ("throw", RIGHT)
     # With room behind her: never a jump back (its attack starts too high too), but a step back to where a
-    # throw from the ground is a star, and then the star.
+    # throw from the ground is a star (and as far as the snail walks at her meanwhile), and then the star.
     act = stance(500, 500, PLAT, [target(560, kind="snail")])
-    assert act == ("back", LEFT, reach.star_sure(monsters.MONSTER_HALF["snail"]) - 60)
+    need = reach.star_sure(monsters.MONSTER_HALF["snail"]) - 60
+    walk = monsters.MONSTER_SPEED["snail"] * (need / physics.WALK_SPEED + stance_mod.SMALL_STEP_REACT_S)
+    assert act == ("back", LEFT, pytest.approx(need + walk)) and 30 < walk < 40
     assert stance(500 - act[2], 500, PLAT, [target(560, kind="snail")]) == ("throw", RIGHT)
     # Another monster behind her: no step back either.
     assert stance(500, 500, PLAT, [target(560, kind="snail"), target(400)]) == ("throw", RIGHT)
@@ -340,13 +344,27 @@ def test_with_the_attack_keyed_late_a_cornered_snail_is_shot_from_the_ground(mon
         assert stance(60, 500, PLAT, [target(110, kind=kind)]) == ("jump_throw", RIGHT)
 
 
-def test_with_the_attack_keyed_40_ms_after_the_jump_a_cornered_snail_gets_a_jump_throw():
-    # Everything follows from the attack's timing: at 40 ms (JUMP_ATTACK_MS) the jump throw's attack starts
-    # low enough.
+def test_a_snail_too_close_is_never_jump_thrown_at_but_stepped_back_from_or_stabbed(monkeypatch):
+    # The attack's area keyed 40 ms after the jump (JUMP_ATTACK_MS) takes a snail in, but in game on 2026-10-21
+    # jump throws mostly missed snails (5 of 26 under 46 units off hurt one): cornered at the left end, the claw
+    # stabs it from the ground, and every stab hits.
+    assert stance(60, 500, PLAT, [target(110, kind="snail")]) == ("throw", RIGHT)
+    # With room behind her: a step back past where a throw from the ground is a star, then the star.
+    assert stance(500, 500, PLAT, [target(560, kind="snail")])[:2] == ("back", LEFT)
+    assert stance(500, 500, PLAT, [target(560)]) == ("jump_back", RIGHT)  # a pig: as before
+    # On a short platform (168 units, as 3, 20 and 22), to its far end if that's what it takes: with a monster
+    # about she keeps 50 from its ends, and the step back goes on to 40 from it (SMALL_STEP_END).
+    short = Platform(3, [Segment(681, -925, 849, -925)])
+    act = stance(780, -925, short, [target(820, -925, platform=3, kind="snail")])
+    assert act[:2] == ("back", LEFT) and short.left + stance_mod.SMALL_STEP_END <= 780 - act[2] < short.left + 50
+    assert stance(780 - act[2], -925, short, [target(820, -925, platform=3, kind="snail")]) == ("throw", RIGHT)
+    # Not far enough even at the end (the snail in the middle): she stabs it.
+    assert stance(745, -925, short, [target(770, -925, platform=3, kind="snail")]) == ("throw", RIGHT)
+    # Never a jump back at a snail either: its attack has to come after the turn in mid-air (85 ms).
+    # JUMP_THROW_SNAILS brings back the jump throw at one, cornered or not.
+    monkeypatch.setattr(stance_mod, "JUMP_THROW_SNAILS", True)
     assert stance(60, 500, PLAT, [target(110, kind="snail")]) == ("jump_throw", RIGHT)
-    # Never a jump back at a snail: its attack has to come after the turn in mid-air (85 ms).
     assert stance(500, 500, PLAT, [target(560, kind="snail")]) == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(560)]) == ("jump_back", RIGHT)
     # The kinds' sizes can come from the map's game data instead of the tables.
     assert stance(60, 500, PLAT, [target(110, kind="snail")], tops={"snail": 5.0}) == ("throw", RIGHT)
 

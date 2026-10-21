@@ -19,6 +19,8 @@ is one behind a monster the attack takes first whose star is stopped (reach.shie
 line to its pick alone), so all of them go by every monster around her (`around`).
 Off her level, how much room a star needs sideways goes by the monster's kind (reach.shot_dx: the star's
 search picks a small or a short one from farther off).
+A snail too close for a star from the ground is never jump-thrown at (JUMP_THROW_SNAILS): she steps back to
+where a throw from the ground is a star, to her platform's far end if that's what it takes, else stabs it.
 """
 
 from collections.abc import Callable
@@ -27,9 +29,9 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
-from ..localization.monsters import MONSTER_TOP, Monster
+from ..localization.monsters import DEFAULT_SPEED, MONSTER_SPEED, MONSTER_TOP, Monster
 from ..motion import physics
-from ..motion.physics import JUMP_HEIGHT
+from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from . import reach
 
 
@@ -47,6 +49,25 @@ JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less
 JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
 JUMP_BACK_SPAN = 95  # how far a jump back carries her (by the engine 87-97 units with the lags spread as measured,
                      # 94 at the median: control.actions.JB_RUN_MS)
+# Whether she jump-throws at a monster too close for a star from the ground that's too short for a jump back's
+# attack to pick (a snail: reach.air_hits). By the attack's area keyed 40 ms after the jump (physics.JUMP_ATTACK_MS)
+# it's picked, and in game on 2026-10-20 one such star killed a snail. But the user, watching her hunt on
+# 2026-10-21, saw jump throws mostly miss snails, "especially on short platform[s]", and the day's telemetry says
+# so: of 26 jump throws at a snail under 46 units off on her platform (in reach of a stab from the ground, out of
+# the star's search), 5 hurt or killed it; at 46-84 off 18 of 33, at 85-130 6 of 10. RustMS's port of the v83
+# client, from as high as she is then (21-26 up), picks no snail 35-85 off. False: never; she steps back to where
+# a throw from the ground is a star, to her platform's far end if that's what it takes, else stabs it from the
+# ground (the claw, weak but always hitting: 5 swipes kill one). `python -m gamelab probe run air` weighs the two
+# pictures of the attack from a jump.
+JUMP_THROW_SNAILS = False
+SMALL_STEP_REACT_S = 0.45  # s from the end of a step back to her next attack's pick (the slide, a look, the key's
+                           # lag): a monster walking at her closes in that much more (a snail 43.75 units/s: 20)
+SMALL_STEP_END = 40  # ... and how near her platform's end that step may take her: past the 50 she keeps with monsters
+                     # about (stand limits), so on the 168-unit platforms she gets to the far end, but not to
+                     # EDGE_MARGIN's 25: the step's walk is planned before her last attack's lock runs out, and a
+                     # touch meanwhile knocked her 40 units toward the end and a step of 110 took her off 3
+                     # (nav_fight_up, seed 1). Of that scenario's seeds 1-48, 36 arrive with 25, 38 with 35, 41
+                     # with 40 and with 50 (46 with jump throws at snails, in a world whose jump throws pick them)
 
 _THROW_VERBS = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back": "jumping back, throwing"}
 
@@ -127,7 +148,8 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     close = [t for t in mine if close_to(t, x, halves)]  # a throw from the ground would be a claw swipe
     in_reach = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around)]
     if close:
-        return _close_quarters(x, close, mine, facing, lo, hi, can_jump, tops or MONSTER_TOP, halves)
+        return _close_quarters(x, close, mine, facing, lo, hi, can_jump, tops or MONSTER_TOP, halves,
+                               (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END))
     if in_reach:
         return ("throw", _throw_side(x, in_reach, facing))
     act = _step_from_under(x, y, platform, wanted, lo, hi, around)
@@ -160,7 +182,7 @@ def close_to(t: Monster, x: float, halves: dict[str, float] | None = None) -> bo
 
 def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing: str | None, lo: float,
                     hi: float, can_jump: Callable[[float, float], bool], tops: dict[str, float],
-                    halves: dict[str, float] | None = None) -> tuple:
+                    halves: dict[str, float] | None = None, ends: tuple[float, float] | None = None) -> tuple:
     """A monster on her platform too close for a throw from the ground (`close`; `mine`: all on her
     platform), the nearest one deciding (on the side she faces, if any is): jump away from it and throw
     back from the air, if there's room behind her and no monster there; cornered, straight up. Each only
@@ -168,7 +190,10 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     least: `tops`). A jump throw's starts 42-49 units up, over a snail: at most one of 45 jump-throws at
     snails hurt one, and monsters on the platform above took the stars. One too short for either is shot
     from the ground: from reach.star_sure away if she can step back that far (a star; by half its width,
-    `halves`), else from where she is (the claw swipes it: weak, but every swipe hits)."""
+    `halves`), else from where she is (the claw swipes it: weak, but every swipe hits). So is a snail
+    (too short for a jump back's attack) unless JUMP_THROW_SNAILS: she steps back as far as it walks at her
+    meanwhile past star_sure, to SMALL_STEP_END from her platform's end at most (`ends`: on a short platform,
+    its far end), else stabs it. `lo`, `hi`: where she keeps to with monsters about."""
     on_facing = [t for t in close if _side_of(t, x) == facing]
     nearest = _nearest(on_facing or close, x)
     side = _side_of(nearest, x)
@@ -177,9 +202,17 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     room = (hi - x) if away == RIGHT else (x - lo)
     behind = [t for t in mine if 0 < (t.x - x) * back < JUMP_BACK_CLEAR]
     top = tops.get(nearest.kind, MONSTER_TOP["pig"])  # a kind of unknown size: a pig's
-    if (reach.air_hits(top, physics.JUMP_BACK_ATTACK_MS) and room >= JUMP_BACK_ROOM and not behind
-            and can_jump(x, x + back * JUMP_BACK_SPAN)):
+    small = not reach.air_hits(top, physics.JUMP_BACK_ATTACK_MS)  # a snail
+    if not small and room >= JUMP_BACK_ROOM and not behind and can_jump(x, x + back * JUMP_BACK_SPAN):
         return ("jump_back", side)
+    if small and not JUMP_THROW_SNAILS:
+        need = reach.star_sure(half_of(nearest.kind, halves)) - abs(nearest.x - x)
+        lo_far, hi_far = ends or (lo, hi)
+        far = max(room, (hi_far - x) if away == RIGHT else (x - lo_far))
+        if far >= need and not behind:
+            walk = MONSTER_SPEED.get(nearest.kind, DEFAULT_SPEED) * (need / WALK_SPEED + SMALL_STEP_REACT_S)
+            return ("back", away, min(far, need + walk))
+        return ("throw", side)
     if not reach.air_hits(top, physics.JUMP_ATTACK_MS):
         step = reach.star_sure(half_of(nearest.kind, halves)) - abs(nearest.x - x)
         if room >= step and not behind:

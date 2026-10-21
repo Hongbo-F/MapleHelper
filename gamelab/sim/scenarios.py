@@ -569,7 +569,9 @@ def nav_fight_up(sim):
     others at 181-193 s. Seed 2 since the game moves her in 30 ms steps (body.STEP) and jumps from standing
     wait 150 ms after the arrow: on seed 1 she was knocked off 17 down to 35 at 103 s and ran out of time on
     the long way round (nav_fight_up_runs_out now). Of seeds 1-48 41 arrive, 42 just before; on seed 2 knocked
-    off 3 to 25 at 122 s, she goes the long way round and arrives.)"""
+    off 3 to 25 at 122 s, she goes the long way round and arrives. On the play track, before the steps: with her
+    finishing what she has hurt, 46; with no jump throw at a snail (stance.JUMP_THROW_SNAILS), 41: in this world a
+    jump throw's area picks the snail on 3, where she now stabs it or steps back from it.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -612,7 +614,9 @@ def nav_fight_up_runs_out(sim):
     the jump from 3 to 1, it had gone the long way round, fighting 38 monsters, and run out of time on 16. Of
     seeds 1-48, 41 arrive, against 37 before and 36 at the physics and attack tracks' merge. On the play
     track, before the steps, seed 17 since she finishes what she has hurt before she moves on (behavior.
-    fight.owed): on seed 4 she arrived there; of seeds 1-48, 46 arrived, against 41 before.)"""
+    fight.owed): on seed 4 she arrived there; of seeds 1-48, 46 arrived, against 41 before. Then seed 18 since
+    she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed 17 she arrived; of seeds 1-48, 41
+    arrived, 46 with the jump throws in that world, whose jump throws' area picks a snail.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -634,7 +638,9 @@ def nav_fight_across_runs_out(sim):
     round, and run out of time on 18; it arrived there before monsters walked 125 units/s. Of seeds 1-16, 12
     arrived then, 8 with the physics and attack tracks before the client's search and stab, 12 at their merge.
     On the play track, before the steps, seed 15 since she finishes what she has hurt before she moves on
-    (behavior.fight.owed): on seed 2 she arrived there; of seeds 1-16, 14 arrived, against 12 before.)"""
+    (behavior.fight.owed): on seed 2 she arrived there; of seeds 1-16, 14 arrived, against 12 before. Then seed 7
+    since she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed 15 she arrived; of seeds 1-16, 12
+    arrived.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -870,14 +876,53 @@ def fight_snail_short_platform(sim):
     attack starts 46 units up, over the snail: it used to jump-throw at it, and the stars went to the slimes
     up there; their EXP was taken for the snail's ("snail down"), and the live snail was then left alone as
     a dying one. Now it's shot from the ground: with no room to step back to where that throws a star, the
-    claw swipes it, five times. (In about 2 seeds of 5 the snail walks into her first, and a touch knocks
-    her off the end of 22: she stands 29 units from it.)"""
+    claw stabs it, each stab pushing it back, until a star picks it. Keyed 40 ms after the jump the jump throw's
+    attack picks a snail by its area, and she went back to jump throws at them; but in game on 2026-10-21 they
+    mostly missed (stance.JUMP_THROW_SNAILS), and from the ground she never jumps at one. Of seeds 1-32, 24 meet
+    all of this, against 11 with the jump throws in this world, whose jump throws' area picks the snail; on
+    most of the others the snail walks into her first, and a touch knocks her off the end of 22 (she stands 29
+    units from it).)"""
     h = sim.hunter()
     r = h.clear(max_kills=1, seconds=20, approach=False)
     return {"report": str(r)}
 
 
 THROWS = ("throw", "jump_throw", "jump_back")  # the key plans that attack (control.actions)
+JUMP_PLANS = ("jump_throw", "jump_back")
+
+
+def _snail_fight(sim):
+    h = sim.hunter()
+    r = h.clear(max_kills=1, seconds=20, approach=False)
+    return {"report": str(r)}
+
+
+@scenario((20, -65.0), monsters=[("Snail", 20, -100.0)], seed=1, limit=60, facing=LEFT,
+          expects=(check("no jump throw or jump back", lambda tr: not any(p[1] in JUMP_PLANS for p in tr["plans"])),
+                   sends("walk", "a step back"), happens("star kills snail", "a star kills the snail"),
+                   check("the snail dies within 6 s", lambda tr: _first(tr["world_log"], "kills snail") <= 6),
+                   check("she stays on platform 20", lambda tr: tr["world"]["platform"] == 20)))
+def fight_snail_far_end(sim):
+    """A snail 35 units from her on platform 20 (168 units wide), near its left end: too close for a star from
+    the ground, and she never jump-throws at a snail (stance.JUMP_THROW_SNAILS: in game jump throws mostly missed
+    them). She steps back toward 20's right end, past the 50 she keeps from its ends with monsters about, to 40
+    (stance.SMALL_STEP_END), 99 from it, where a throw from the ground is a star, and a star kills it (if it
+    walks after her, she stabs it, each stab pushing it back, until a star picks it). Of seeds 1-16, 15 meet all of
+    this."""
+    return _snail_fight(sim)
+
+
+@scenario((3, 760.0), monsters=[("Snail", 3, 775.0)], seed=1, limit=60,
+          expects=(check("no jump throw or jump back", lambda tr: not any(p[1] in JUMP_PLANS for p in tr["plans"])),
+                   happens("claw swipe hits snail", "the claw stabs the snail"),
+                   check("the snail dies within 8 s", lambda tr: _first(tr["world_log"], "kills snail") <= 8),
+                   check("she stays on platform 3", lambda tr: tr["world"]["platform"] == 3)))
+def fight_snail_stab(sim):
+    """A snail 15 units from her in the middle of platform 3 (168 units wide): no room to step back to where a
+    throw from the ground is a star, even at its far end, so she stabs it from the ground (the claw's 9-11
+    damage, every one a hit, each pushing it back) until it's dead or pushed out to where a star picks it. Of
+    seeds 1-16, 16 meet all of this."""
+    return _snail_fight(sim)
 
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),

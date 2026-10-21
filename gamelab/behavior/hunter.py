@@ -65,7 +65,7 @@ class Hunter:
         self._last_hp: float | None = None
         self._last_where: Where | None = None
         self.hit_at: float | None = None  # the time of the last look that saw her HP drop (a touch)
-        self.knock_waited: float | None = None  # ... the hit_at a jump last waited out (fight.knocked_jump)
+        self.knock_waited: float | None = None  # ... the hit_at a jump or step last waited out (fight.knocked_move)
         self._last_potion = 0.0
         # The hunt's bookkeeping from every look and throw (behavior.ledger): the hunt loop reads the drop store,
         # and the fights and the hunt loop her wounds (the monsters she has hurt, finished before she moves on).
