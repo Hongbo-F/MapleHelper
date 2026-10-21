@@ -56,6 +56,17 @@ NOT_VISIBLE_S = 0.25  # s between checks while the game isn't wholly on screen
 KEEP = 8             # states the stack's side keeps
 EVENTS_KEPT = 10_000  # events kept for the next drain at most (the oldest go: a stack that never drains)
 BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS
+# True: a look asks the next frame only for what the newest state wouldn't have fresh by then (to_ask); False:
+# for everything it wants, as a blocking look searches it all on its own frame. Asking only for what's stale,
+# the feed's own loop on the saved frames (a look every 0.1 s, every 5th with the drops) searched her band 4.9
+# times a second instead of 7.0 and looked at 21.7 frames a second instead of 18.3. But a look's monsters were
+# then up to 0.3 s older than its frame, and in the simulator (harness, preset game, 20 seeds x 20 min, --costs
+# measured, --feed; the feed's frames charged their measured costs, so its slower frame rate counts) asking for
+# everything made the hunt loop 7.1% +- 1.8% better (15 of 19 seeds; one fell out of the map at the basin's
+# end), rests 3.32 -> 2.63 a run, and the tour 9.0% +- 2.7% (15 of 20). Asking for her band always and the
+# whole screen only when stale was no better (-0.5% and -1.6%). Searching her band every 0.1 s instead of 0.2
+# gained 3.5% in both.
+ASK_ONLY_STALE = False
 
 
 # --- frames in shared memory --------------------------------------------------------------------------
@@ -261,9 +272,10 @@ def wanted(after: float, mobs: bool, wide: bool, loot: bool, mesos_only: bool) -
 
 
 def to_ask(want: Asks, newest: WorldState | None, frame_s: float = 1.0 / HZ) -> Asks:
-    """What to ask of the next frame for a look that wants `want`: only what the next frame wouldn't have fresh
-    anyway, judging by the newest state (a look with the drops asked for her band too, though it was searched
-    a moment before, and a third of the frames searched it)."""
+    """What to ask of the next frame for a look that wants `want`: all of it, or (ASK_ONLY_STALE) only what the
+    next frame wouldn't have fresh anyway, judging by the newest state."""
+    if not ASK_ONLY_STALE:
+        return want
     soon = want.after + frame_s
     stale = lambda at, fresh_s: newest is None or at is None or soon - at > fresh_s
     return Asks(want.after, band=want.band and stale(newest and newest.band_at, MOBS_FRESH_S),
