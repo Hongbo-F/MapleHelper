@@ -349,6 +349,61 @@ def test_jumps_need_a_sure_landing(model):
     assert not sure_landing(model, 167, 300, WALK_SPEED, -JUMP_SPEED, a)  # it doesn't land back on A
 
 
+def landing_room(model, a, x, sign, q):
+    """How far in from q's nearer end a running jump off a at x lands (None: not on q)."""
+    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly
+    got, lx, _ = fly(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, group=a.group)
+    return min(lx - q.left, q.right - lx) if got is q else None
+
+
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_a_jump_up_a_staircase_step_takes_off_near_the_end_with_room_to_land():
+    """32 -> 29: 60 up, 29's end 12 across from 32's. Taking off 33 back, she lands 16 in, 4 when flow takes off
+    12 further back (tonight's misses, coming down short); placed, she takes off 15 back and lands 34 in, and
+    still 20 or more in taking off flow's spread earlier."""
+    from gamelab.motion import route
+    from gamelab.sim import scenarios
+    model = scenarios.real_map()
+    a, q = model.platform(32), model.platform(29)
+    jump, = [m for m in route.moves(model) if (m.kind, m.src, m.dst) == ("jump", 32, 29)]
+    assert jump.takeoff - a.left == route.TAKEOFF_EDGE
+    assert landing_room(model, a, a.left + route.JUMP_FROM, -1, q) < 17
+    assert landing_room(model, a, jump.takeoff, -1, q) >= 30
+    assert landing_room(model, a, jump.takeoff + route.TAKEOFF_SPREAD, -1, q) >= route.TAKEOFF_ROOM_WANTED
+    assert jump.x - jump.takeoff == route.RUN_UP  # the run-up starts before it
+
+
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_every_route_jump_takes_off_where_it_lands_with_the_most_room_nearby():
+    """No running jump on the map takes off nearer its end than TAKEOFF_EDGE, each lands on its platform taking
+    off its slop late or early (as sure_landing has it), and none could land with more room under its spread by
+    taking off a few units away (where it was found)."""
+    from gamelab.motion import route
+    from gamelab.sim import scenarios
+    model = scenarios.real_map()
+    jumps = [m for m in route.moves(model) if m.kind == "jump"]
+    assert len({(m.src, m.dst, m.direction, m.takeoff) for m in jumps}) == len(jumps)  # no two the same
+    for m in jumps:
+        a, q, sign = model.platform(m.src), model.platform(m.dst), 1 if m.direction == "right" else -1
+        edge = a.right if sign > 0 else a.left
+        assert (edge - m.takeoff) * sign >= route.TAKEOFF_EDGE
+        assert all(landing_room(model, a, m.takeoff + sign * o, sign, q) is not None
+                   for o in (route.TAKEOFF_SLOP, -route.TAKEOFF_SLOP)), m
+
+        def worst(x):
+            rooms = [landing_room(model, a, x - sign * o, sign, q) for o in route._SPREAD if a.covers(x - sign * o)]
+            return None if None in rooms else min(min(rooms), route.TAKEOFF_ROOM_WANTED)
+        here = worst(m.takeoff)
+        for dx in (-4, -2, 2, 4):
+            x = m.takeoff + dx
+            sure = route._sure_running_jump(model, a, x, sign)
+            if a.covers(x) and (edge - x) * sign >= route.TAKEOFF_EDGE and sure is not None and sure[0] is q \
+                    and (there := worst(x)) is not None:
+                assert here is not None and there <= here, (m, dx)
+
+
 def test_a_landing_is_worked_out_from_the_rounded_start_so_the_cache_never_changes_it(model, monkeypatch):
     from collections import OrderedDict
     from gamelab.motion import physics

@@ -19,7 +19,8 @@ from ..localization.mapdata import MapModel, Platform
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..motion.body import ROPE_GROUP
-from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_SPEED, ROPE_REACH, WALK_SPEED, air_time, fly, hold_ms, run_ms
+from ..motion.flow import ARROW_LAG
+from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_LAG, JUMP_SPEED, ROPE_REACH, WALK_SPEED, fly, hold_ms, run_ms
 from ..motion.route import JUMP_FROM, Move, drop_clear, drop_spots
 from ..screen import SCALE, SCREEN_SCALE
 from .actions import WALK_PICK_AFTER_MS, Actions, tap
@@ -197,7 +198,8 @@ class Mover:
         time.sleep(0.3)  # then settle looks for her standing still
 
     def _run_and_jump(self, m: Move, s: Scene) -> None:
-        """Run towards the end and jump on the way: jump is pressed when she's JUMP_FROM from it."""
+        """Run towards the end and jump on the way: jump is pressed for her to leave the ground at the move's takeoff
+        (JUMP_FROM from the end, for a move without one)."""
         sign = directions.sign(m.direction)
         p = self.model.platform(m.src)
         edge = p.right if sign > 0 else p.left
@@ -208,7 +210,11 @@ class Mover:
             run = (takeoff - s.where.x) * sign
         arrow, jump = self.actions.arrow(m.direction), self.actions.keys.jump.name
         t = run_ms(max(run, MIN_RUN))
-        hold = int(t + 1000 * (air_time(0) or 0.56) + 150)  # the arrow: through a level jump's air time, +150 ms
+        # The arrow is let go just before she lands (flow.ARROW_LAG, as a chain's stop on landing), and she slides
+        # 14 units on. Held through a level jump's air time and 150 ms more, it ran her 59 units on past a landing
+        # 60 up (0.41 s in the air, not 0.56), and off the far end of 19 from 20 (move_jump_short_landing).
+        _, _, air = fly(self.model, takeoff, p.y_at(takeoff), sign * WALK_SPEED, -JUMP_SPEED, group=p.group)
+        hold = int(t + 1000 * (JUMP_LAG + air - ARROW_LAG))
         self._send([[0, arrow, "down"], *tap(t, jump), [hold, arrow, "up"]], "jump")
 
     def _climb(self, m: Move, s: Scene) -> None:

@@ -29,10 +29,30 @@ JUMP_MARGIN = 12         # don't plan jumps that need the last few units of heig
 MIN_JUMP_UP_RISE = 8     # a platform overhead must be more than this above to jump up onto it
 # Running jumps: she stands RUN_START back from the end, runs, and presses jump RUN_MS later, which
 # (after ~100 ms before she moves) puts the takeoff about JUMP_FROM back. Standing closer, she walked
-# off the end before the jump started (5 of 5 tries); from 30-40 back it landed.
+# off the end before the jump started (5 of 5 tries); from 30-40 back it landed. (That was the mover's
+# old open-loop timing, from standing. JUMP_FROM is where a jump off an end is looked for; where it takes
+# off is placed below.)
 RUN_START = 40
 RUN_MS = 150
 JUMP_FROM = 33
+# Where a running jump takes off (_placed). Of tonight's 293 chained jumps up onto the next step of a
+# staircase (60 up, the next platform's end 12 across: 3 -> 1, 19 -> 18, 29 -> 28, 32 -> 29 and the like;
+# telemetry of 2026-10-21), the jumps that took off 33-36 units back from the end missed 4 of 117 times,
+# 36-39 back 5 of 75, 39-42 back 9 of 47 and 42-45 back 8 of 36, coming down short of the platform: from
+# there the jump lands 16 units onto it at most, 4 when flow takes off 12 further back (JUMP_FROM to
+# flow.JUMP_FROM_FAR, "players jump from a little further back too"). By the landing planned, 16 of 102
+# that were to land under 12 in from an end missed, and 1 of 61 of those 20 or more in. So a jump's takeoff
+# is placed where it still lands TAKEOFF_ROOM_WANTED in if she takes off up to TAKEOFF_SPREAD earlier (flow
+# takes off that much earlier than the move's takeoff with rng: Flow._jump) and TAKEOFF_SLOP early or late
+# on top of that (sure_landing's slop); if no takeoff manages that, where she has the most room with the
+# slop alone. And never nearer the end than TAKEOFF_EDGE, so that leaving TAKEOFF_SLOP late still leaves the
+# 3 units flow keeps. Up the staircase that's 15 back (it was 33): she lands 34 in, 24 with flow's spread.
+TAKEOFF_EDGE = 15
+TAKEOFF_SPREAD = 10.0
+TAKEOFF_SLOP = 12.0
+TAKEOFF_ROOM_WANTED = 20  # landing room enough (no better takeoff is sought)
+TAKEOFF_SEARCH = 30       # how far from where a jump was found its takeoff may be moved
+RUN_UP = 20               # a running jump starts this far before its takeoff (mover.MIN_RUN 12 and some)
 LANDING_ROOM = LAND_MARGIN * 0.5  # a running jump must land at least this far in from the landing platform's ends,
                                   # and a walk-off this far more than her slide from its far end
 NEEDLESS_DROP = 10       # a running jump down more than this, where walking off gets there too, is needless
@@ -97,7 +117,20 @@ def moves(model: MapModel) -> list[Move]:
     # wherever her feet first cross a platform on the way down (not the one aimed at).
     for a in model.platforms:
         mine = _jump_up_moves(model, a) + _end_moves(model, a) + _along_jumps(model, a)
-        out += _without_needless_jumps(model, a, mine) + _drop_moves(model, a)
+        out += _without_needless_jumps(model, a, _distinct(mine)) + _drop_moves(model, a)
+    return out
+
+
+def _distinct(mine: list[Move]) -> list[Move]:
+    """a's moves without a jump that takes off where one before it does for the same platform (a jump off an
+    end and one found along the platform are placed at the same takeoff when that lands with the most room)."""
+    seen: set[tuple] = set()
+    out = []
+    for m in mine:
+        key = (m.kind, m.dst, m.direction, m.takeoff)
+        if m.kind != "jump" or key not in seen:
+            seen.add(key)
+            out.append(m)
     return out
 
 
@@ -148,13 +181,13 @@ def _end_moves(model: MapModel, a: Platform) -> list[Move]:
     out: list[Move] = []
     for direction, sign in SIDES:
         edge = a.right if sign > 0 else a.left
-        # Running jump off this end.
-        start, takeoff = edge - sign * RUN_START, edge - sign * JUMP_FROM
-        if a.covers(start):
-            jump = _sure_running_jump(model, a, takeoff, sign)
+        # Running jump off this end: looked for from JUMP_FROM back, taking off where it lands with room (_placed).
+        if a.covers(edge - sign * RUN_START):
+            jump = _sure_running_jump(model, a, edge - sign * JUMP_FROM, sign)
             if jump is not None:
-                land, land_x, t = jump
-                out.append(Move("jump", a.id, land.id, start, land_x, direction, seconds=_running_jump_seconds(t)))
+                placed = _placed(model, a, edge - sign * JUMP_FROM, sign, jump[0])
+                if placed is not None:
+                    out.append(placed)
         # Walking off this end: from just inside it when a wall of her group rises there (it stops her),
         # else from just past it. A cliff dropping from the end (34 down to 36) isn't in her way, but
         # starting inside it read as bumping into the cliff's top.
@@ -193,10 +226,9 @@ def _along_jumps(model: MapModel, a: Platform) -> list[Move]:
                 if all(abs(opt[0] - k[0]) >= ALONG_SPREAD for k in kept):
                     kept.append(opt)
             for takeoff, land_x, t in kept[:ALONG_KEEP] + kept[ALONG_KEEP:][-1:]:  # the first few and the last
-                start = takeoff - sign * (RUN_START - JUMP_FROM)
-                if a.covers(start):
-                    out.append(Move("jump", a.id, land_id, start, land_x, direction,
-                                    seconds=_running_jump_seconds(t), takeoff=takeoff))
+                placed = _placed(model, a, takeoff, sign, model.platform(land_id))
+                if placed is not None:
+                    out.append(placed)  # (two placed at the same takeoff: _distinct keeps one)
     return out
 
 
@@ -290,6 +322,51 @@ def _sure_running_jump(model: MapModel, a: Platform, x: float, sign: int) -> tup
             and land.covers(land_x + sign * LANDING_ROOM) \
             and sure_landing(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, land, group=a.group):
         return land, land_x, t
+    return None
+
+
+def _room(model: MapModel, a: Platform, x: float, sign: int, land: Platform) -> float | None:
+    """How far in from the nearer end of `land` a running jump leaving a at x (going that way) lands on it;
+    None if it lands elsewhere, or nowhere."""
+    got, lx, _ = fly(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, group=a.group)
+    return min(lx - land.left, land.right - lx) if got is land else None
+
+
+# A takeoff's spread: how much earlier (further back from the end she jumps off) than planned she may leave
+# the ground, flow's spread and her slop together (_placed); and her slop alone, either way.
+_SPREAD = (-TAKEOFF_SLOP, 0.0, TAKEOFF_SPREAD, TAKEOFF_SPREAD + TAKEOFF_SLOP)
+_SLOP = (-TAKEOFF_SLOP, 0.0, TAKEOFF_SLOP)
+
+
+def _placed(model: MapModel, a: Platform, x0: float, sign: int, land: Platform) -> Move | None:
+    """The running jump off a onto `land` found taking off at x0 (going that way), taking off where it lands
+    with the most room (TAKEOFF_*, above): within TAKEOFF_SEARCH of x0 and TAKEOFF_EDGE in from the end she
+    jumps off at least, where she lands TAKEOFF_ROOM_WANTED in whether she leaves the ground on time,
+    TAKEOFF_SLOP late or up to TAKEOFF_SPREAD + TAKEOFF_SLOP early (or else the most in under the worst of
+    those); failing that, under her slop alone. Of the takeoffs as good, the nearest x0. It has to be a sure
+    running jump there (_sure_running_jump). None if no takeoff is."""
+    edge = a.right if sign > 0 else a.left
+    xs = [x for x in (x0 + sign * i for i in range(-TAKEOFF_SEARCH, TAKEOFF_SEARCH + 1, 2))
+          if a.covers(x) and (edge - x) * sign >= TAKEOFF_EDGE]
+    known: dict[float, float | None] = {}
+
+    def room(x: float) -> float | None:
+        if x not in known:
+            known[x] = _room(model, a, x, sign, land)
+        return known[x]
+
+    def worst(x: float, offsets) -> float | None:
+        # (a takeoff behind the platform's other end can't happen: not counted)
+        rooms = [room(x - sign * o) for o in offsets if a.covers(x - sign * o)]
+        return None if not rooms or None in rooms else min(min(rooms), TAKEOFF_ROOM_WANTED)
+
+    for offsets in (_SPREAD, _SLOP):
+        rated = [(r, x) for x in xs if (r := worst(x, offsets)) is not None]
+        for _, x in sorted(rated, key=lambda rx: (-rx[0], abs(rx[1] - x0))):
+            jump = _sure_running_jump(model, a, x, sign)
+            if jump is not None and jump[0] is land:
+                return Move("jump", a.id, land.id, a.clamp(x - sign * RUN_UP), jump[1],
+                            directions.toward(sign), seconds=_running_jump_seconds(jump[2]), takeoff=x)
     return None
 
 

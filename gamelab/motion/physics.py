@@ -121,7 +121,8 @@ ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fp
 # came first, or which landings were dropped, can't change an answer. (Worked out from the exact start, a
 # landing cached by one call was handed to every later one that rounded the same, so the simulator's
 # scenarios each had to start from the same cache to give the same trace.) On this map the planner's own
-# jumps and falls are 3,128 landings (about 1.4 MB), and the 8-minute simulated hunt loop loop_run adds none.
+# jumps and falls are 5,726 landings (about 2.6 MB) since its jumps' takeoffs are placed for room (route._placed;
+# 3,128 before, and the 8-minute simulated hunt loop loop_run added none).
 FLY_CACHE_SIZE = 20_000  # landings (about 9 MB when full)
 MODELS_KEPT = 4          # maps fly knows at a time (their walls, and the serial numbers keying their landings)
 _FLY_CACHE: OrderedDict[tuple, tuple] = OrderedDict()

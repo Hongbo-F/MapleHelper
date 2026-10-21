@@ -357,11 +357,13 @@ def nav_basin_up_two_ropes(sim):
     return _nav(25)(sim)
 
 
-@scenario((25, 760.0), seed=1, expects=(ends("arrived"), moves("walk_off", "drop")))
+@scenario((25, 760.0), seed=62, expects=(ends("arrived"), moves("walk_off", "drop")))
 def nav_down_to_basin(sim):
     """From platform 25 down into the basin: a walk-off onto 32, then a drop through it. (Seed 1 since the
     planner flies her by the engine: on seed 2 the route's random weights now pick two drops, through 30,
-    as on 14 other seeds of 16; just before, seed 2 walked off onto 33.)"""
+    as on 14 other seeds of 16; just before, seed 2 walked off onto 33. Seed 62 since the route's jumps take
+    off where they land with room (route._placed): its random weights are drawn in another order, and of
+    seeds 1-100 5 walk off onto 32, 62 the first, where 4 did before, 1 the first.)"""
     return _nav(36, x=600)(sim)
 
 
@@ -399,9 +401,12 @@ def nav_drops(sim):
     return _nav(21)(sim)
 
 
-@scenario((12, -300.0), expects=(ends("arrived"), moves("jump_up", "walk_off", "jump")))
+@scenario((12, -300.0), seed=36, expects=(ends("arrived"), moves("jump_up", "walk_off", "jump")))
 def nav_walk_offs(sim):
-    """From 12 across to 17: a jump up, walk-offs and jumps."""
+    """From 12 across to 17: a jump up, walk-offs and jumps. (Seed 36 since the route's jumps take off where
+    they land with room, route._placed: the random weights are drawn in another order, and of seeds 1-100,
+    on 6 she jumps straight up onto 11 first, 36 the first of them, where 8 did before, 1 the first. The
+    other ways: by the walk-offs down onto 13, 15 and 18, on half the seeds, or by a running jump onto 11.)"""
     return _nav(17)(sim)
 
 
@@ -488,7 +493,10 @@ def nav_monsters_staircase(sim):
     units/s, not 70; alone, that moved it to seed 2): on seeds 1 and 2 no monster was in her way to go around
     or hop; over 16 seeds all arrive, 2 meeting all of this. Seed 6 since the game moves her in 30 ms steps
     (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 5 no monster was in her way to go
-    around or hop; over 16 seeds 15 arrive, 1 meeting all of this; 16 and 2 just before.)"""
+    around or hop; over 16 seeds 15 arrive, 1 meeting all of this; 16 and 2 just before. On the play track,
+    before the steps, seed 10 since the route's jumps take off where they land with room, 15 units from the end
+    up the staircase, not 33-45 (route._placed): on seed 5 no monster was in her way to hop or go around there;
+    over 24 seeds all arrived, 2 meeting all of this, 10 and 18.)"""
     return _nav(19)(sim)
 
 
@@ -518,7 +526,9 @@ def nav_monsters_long_way(sim):
     jumps take off where they land with room to spare (flow.TAKEOFF_SLOP): on seed 2 nothing stood in her
     way to wait for; over 16 seeds all arrive, 2 of them after a wait. Two of them, seeds 2 and 4, were
     knocked down the gap beside platform 3 to the basin and ended "lost: not on any platform" before the
-    navigator waited out a long fall too: navigator.FALL_LOOKS.)"""
+    navigator waited out a long fall too: navigator.FALL_LOOKS. On the play track, before the steps, seed 3
+    since the route's jumps take off where they land with room (route._placed): on seed 12 nothing stood in her
+    way to wait for there; over 24 seeds all arrived, 2 of them after a wait, 3 and 13.)"""
     return _nav(2)(sim)
 
 
@@ -753,10 +763,13 @@ def move_jump(sim):
     return _one_move(sim, "jump", 4, 2)
 
 
-@scenario((20, 0.0), expects=(check("she doesn't stay on 19", lambda tr: _result(tr, "landed") != 19),))
+@scenario((20, 0.0), expects=(ends(19, key="landed"),
+                               check("standing a slide past the landing", lambda tr: 60 <= _result(tr, "x") <= 100)))
 def move_jump_short_landing(sim):
-    """Mover.do: the jump from 20 up onto 19 lands, but the arrow is held on 150 ms past the landing (and
-    she slides on): on a platform this short she runs off its far end."""
+    """Mover.do: the jump from 20 up onto 19, a short platform (60 up, landing at x 67): the arrow is let go
+    just before she lands, and she stops 14 units on. (Held through a level jump's air time and 150 ms more,
+    it ran her 59 units past the landing: off 19's far end, onto 24, while the jump took off 12 units late,
+    and 3 units short of that end once the route's takeoffs were placed for room.)"""
     return _one_move(sim, "jump", 20, 19)
 
 
