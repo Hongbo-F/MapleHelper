@@ -462,6 +462,35 @@ def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model
     assert not w.monsters[0].alive and w.kills == {"snail": 1}
 
 
+def test_with_the_v83_air_pick_a_jump_throw_picks_as_from_the_ground_from_where_she_is(model, monkeypatch):
+    # world.AIR_PICK 'v83' (the other answer `probe run air` weighs): the attack 40 ms after the jump key starts
+    # about 26 up, and the claw and the search go from there as from the ground. A snail 30 off is under the
+    # stabs' boxes and short of the search's first band, so the star hits nothing (by the area it dies); a pig
+    # 120 off, its body reaching above the first window's floor, takes a star.
+    c = plat(model, 500, 400)
+    monkeypatch.setattr(world_mod, "AIR_PICK", "v83")
+    w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))
+    _jump_throw(w, 0.04)
+    assert w.monsters[0].alive and w.monsters[0].hp == 1 and any("star thrown right: no hit" in l for l in w.log)
+    w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 420.0)], facing="right"))
+    _jump_throw(w, 0.04)
+    assert w.monsters[0].hp == 2
+
+
+def test_the_world_s_claw_is_reach_s_model(model, monkeypatch):
+    # The world swipes by reach.CLAW: with the one box reach had until 2026-10-20 (90 ahead of her, on her level
+    # only: the other answer `probe run claw-edge` weighs), a pig 120 off is swiped, where the client's stabs
+    # (cut to 65) leave it to a star.
+    c = plat(model, 500, 400)
+    old = reach.Claw((("swing", ((-90, -62), (0, 17))),), 90, level=15)
+    for claw, hp in ((reach.CLAW, 2), (old, 3 - world_mod.CLAW)):
+        monkeypatch.setattr(reach, "CLAW", claw)
+        w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 420.0)], facing="right"))
+        tap(w, 0.0, "f", 0.04)
+        w.advance(1.0)
+        assert w.monsters[0].hp == pytest.approx(hp)
+
+
 def test_the_ground_attack_swipes_what_the_claw_reaches(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))

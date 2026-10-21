@@ -33,7 +33,9 @@ picks), so an attack from a jump keeps to the area that does: a box fixed to her
 then (`in_area`), from AREA_DOWN below them to AREA_UP above, STAR_RANGE ahead. A jump throw's attack
 keyed 100 ms after the jump started 42-49 units up, its area over a snail (24-26 tall): in 45 jump-throws
 at snails 3-77 units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60
-above took the stars.
+above took the stars. RustMS's port of the v83 client has no case for the air: the claw and the search as
+from the ground, from as high as she is, which picks no snail 35-85 off from 26 up (`probe run air` weighs
+the two; the simulator's world has either, sim.world.AIR_PICK).
 
 What stops a star is checked on the attack's pick alone, as the client does it (RustMS Combat.cpp:1289-1307;
 ohmi69's reading of this game's client and meowdb's page on it say the same): the claw and the star's search
@@ -73,6 +75,8 @@ All in map units; dy is the target's feet minus hers (+ = below her).
 """
 
 import math
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from ..localization.mapdata import MobBody, Platform, Segment
 from ..localization.monsters import MONSTER_HALF, MONSTER_HEIGHT, Monster
@@ -161,6 +165,25 @@ AIR_MARGIN = 6       # how far into the area a body must reach for an attack fro
 CLAW_FAR = 65
 CLAW_BOXES = {"stabO1": ((-84, -30), (-20, -15)), "stabO2": ((-83, -30), (-12, -16))}
 CLAW_STANCES = tuple(CLAW_BOXES)  # one of these per attack, each as likely
+
+
+@dataclass(frozen=True)
+class Claw:
+    """How the claw takes a monster up close: each attack takes one of its stances, each as likely, and the
+    stance's box (`boxes`: (stance, (lt, rb)), as she faces left, lt.x its front) with its front cut to `far`
+    ahead of her takes the nearest monster whose body reaches into it; with `level`, only one within that of
+    her height (the client has no such gate). CLAW is the client's; the probes' scorer (behavior.probe) keeps
+    the models it tells from it, and the simulator's world goes by whichever CLAW is."""
+    boxes: tuple
+    far: float
+    level: float | None = None
+
+    @property
+    def stances(self) -> tuple[str, ...]:
+        return tuple(s for s, _ in self.boxes)
+
+
+CLAW = Claw(tuple(CLAW_BOXES.items()), CLAW_FAR)
 CLAW_MARGIN = 12     # kept past the claw's reach, for a monster walking at her while the attack starts (a pig,
                      # 125 units/s by the game data, walks 12 in 0.1 s). In the simulator 6 cut the swipes as
                      # much, but gained less in the hunt loop (+1.8% EXP a minute against +5.6%; +1.6% against
@@ -308,41 +331,46 @@ def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE, kind: str | None 
 
 # --- the claw, up close --------------------------------------------------------------------------------
 
-def claw_box(stance: str) -> tuple[float, float, float, float]:
+def claw_box(stance: str, claw: Claw | None = None) -> tuple[float, float, float, float]:
     """The box the client tests for the claw's `stance` (CLAW_STANCES), (near, far) ahead of her and
     (bottom, top) above her feet: its box in the game data (CLAW_BOXES, as she faces left: lt.x is its front)
     with its front cut to CLAW_FAR, as RustMS's point_blank::range has it. stabO1 20-65 ahead and 15-30 above
-    her feet, stabO2 12-65 and 16-30."""
-    (left, up), (right, down) = CLAW_BOXES[stance]
-    front = min(max(left, -CLAW_FAR), right - 1)
+    her feet, stabO2 12-65 and 16-30. `claw`: another model's stances and cut (Claw), if not CLAW."""
+    claw = claw or CLAW
+    (left, up), (right, down) = dict(claw.boxes)[stance]
+    front = min(max(left, -claw.far), right - 1)
     return -right, -front, -down, -up
 
 
-def claw_takes(ahead: float, dy: float, top: float, half: float, stance: str) -> bool:
+def claw_takes(ahead: float, dy: float, top: float, half: float, stance: str, claw: Claw | None = None) -> bool:
     """Whether the claw's `stance` box (claw_box) takes a monster `ahead` in front of her (its middle), its
     feet dy below hers (+ below), `top` tall and `half` wide either side: its body reaches into it, on her
-    level or not (the client doesn't ask). Of those it takes, the nearest is swiped instead of shot."""
-    near, far, bottom, roof = claw_box(stance)
-    return reaches_into(ahead, dy, top, half, far, -bottom, roof, near)
+    level or not (the client doesn't ask; a `claw` model with a level gate does). Of those it takes, the
+    nearest is swiped instead of shot."""
+    claw = claw or CLAW
+    near, far, bottom, roof = claw_box(stance, claw)
+    return ((claw.level is None or abs(dy) <= claw.level)
+            and reaches_into(ahead, dy, top, half, far, -bottom, roof, near))
 
 
-def claw_chance(ahead: float, dy: float, top: float, half: float) -> float:
+def claw_chance(ahead: float, dy: float, top: float, half: float, claw: Claw | None = None) -> float:
     """The chance an attack from the ground takes a stance of the claw whose box reaches this monster (as in
     claw_takes): the share of CLAW_STANCES that do, one taken per attack, each as likely. 1 for a monster on
     her level with its near side within 65 of her, 0 for one 40 or more off her level; the two boxes differ
     only in slivers (stabO2's starts 12 ahead of her, stabO1's 20, so a snail within a unit of her middle is
     in stabO2's alone; and stabO1's reaches down to 15 above her feet, stabO2's 16), where it's 0.5. It's
-    swiped if it's also the nearest of those the stance takes (take_chances)."""
-    return sum(claw_takes(ahead, dy, top, half, s) for s in CLAW_STANCES) / len(CLAW_STANCES)
+    swiped if it's also the nearest of those the stance takes (take_chances). `claw`: as in claw_box."""
+    stances = (claw or CLAW).stances
+    return sum(claw_takes(ahead, dy, top, half, s, claw) for s in stances) / len(stances)
 
 
 def claw_dx(dy: float, top: float = PIG[0], half: float = PIG[1]) -> float:
     """How far off sideways (middle to middle) a monster dy below (+) her feet, `top` tall and `half` wide
     either side, is out of the claw's reach in front of her: CLAW_FAR plus half its width if a stance's box
     reaches its height (on her level a pig 99, a snail 84), else 0."""
-    fronts = [claw_box(s)[1] for s in CLAW_STANCES]
+    fronts = [claw_box(s)[1] for s in CLAW.stances]
     # at a box's front edge, only the monster's height decides whether the box takes it
-    reached = [far for s, far in zip(CLAW_STANCES, fronts) if claw_takes(far, dy, top, half, s)]
+    reached = [far for s, far in zip(CLAW.stances, fronts) if claw_takes(far, dy, top, half, s)]
     return max(reached) + half if reached else 0.0
 
 
@@ -383,19 +411,31 @@ def take_chances(bodies: list[tuple[float, float, float, float]]) -> list[float]
     first band, any of the monsters in it as likely as another (the client takes the one that entered the map
     first: RustMS Combat.cpp:1695-1720). So a monster both stances reach, nearest, is surely swiped; one only
     stabO2 reaches, half the time; two in the same band each take half the stars."""
-    bands = [search_band(*body_box(*b)) for b in bodies]
+    return [swipe + star for swipe, star in attack_chances(bodies)]
+
+
+Band = Callable[[tuple[float, float, float, float]], int | None]  # a body (as in claw_takes) -> its search band
+
+
+def attack_chances(bodies: list[tuple[float, float, float, float]], claw: Claw | None = None,
+                   band: Band | None = None) -> list[tuple[float, float]]:
+    """take_chances, each monster's chance of the claw's swipe and of the star apart: (swipe, star). `claw`:
+    the claw's model (Claw), if not CLAW; `band`: the band of the star's search a body is picked in (None: not
+    picked), if not search_band's (the probes' scorer tries other windows)."""
+    claw = claw or CLAW
+    bands = [search_band(*body_box(*b)) if band is None else band(b) for b in bodies]
     first = min((k for k in bands if k is not None), default=None)
     star = [i for i, k in enumerate(bands) if k is not None and k == first]
-    out = [0.0] * len(bodies)
-    share = 1 / len(CLAW_STANCES)
-    for s in CLAW_STANCES:
-        swiped = [i for i, b in enumerate(bodies) if claw_takes(*b, s)]
+    out = [[0.0, 0.0] for _ in bodies]
+    share = 1 / len(claw.stances)
+    for s in claw.stances:
+        swiped = [i for i, b in enumerate(bodies) if claw_takes(*b, s, claw)]
         if swiped:
-            out[min(swiped, key=lambda i: math.hypot(bodies[i][0], bodies[i][1]))] += share
+            out[min(swiped, key=lambda i: math.hypot(bodies[i][0], bodies[i][1]))][0] += share
         else:
             for i in star:
-                out[i] += share / len(star)
-    return out
+                out[i][1] += share / len(star)
+    return [(swipe, st) for swipe, st in out]
 
 
 # --- what stops a star ---------------------------------------------------------------------------------

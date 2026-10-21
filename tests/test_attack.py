@@ -241,6 +241,25 @@ def test_between_her_level_and_60_below_her_decisions_keep_to_the_old_ramp(monke
     assert reach.can_shoot(410, 0, kind="snail") and not reach.can_shoot(420, 0, reach=500, kind="snail")
 
 
+def test_the_claw_is_a_model_of_stances_their_cut_and_a_level_gate():
+    # reach.CLAW is the client's (the two stabs, cut to 65 ahead); another model is tried without changing it,
+    # as the probes' scorer does. The one box reach had until 2026-10-20 (90 ahead, 17 below to 62 above her
+    # feet, on her level only) swipes a pig out to 124 on her level and none 20 below; the throw's swings, cut
+    # to 65, reach a pig 60 below in one stance of three (swingO2, down to 17 below her feet), the stabs never.
+    old = reach.Claw((("swing", ((-90, -62), (0, 17))),), 90, level=reach.LEVEL)
+    assert reach.claw_box("swing", old) == (0, 90, -17, 62)
+    assert reach.claw_chance(124, 0, 46, 34, old) == 1 and reach.claw_chance(125, 0, 46, 34, old) == 0
+    assert reach.claw_chance(60, 20, 46, 34, old) == 0 and reach.claw_chance(60, 20, 46, 34) == 1
+    swings = reach.Claw((("swingO1", ((-88, -62), (-18, -6))), ("swingO2", ((-73, -50), (5, 17))),
+                         ("swingO3", ((-102, -50), (-22, -10)))), reach.CLAW_FAR)
+    assert reach.claw_box("swingO2", swings) == (-5, 65, -17, 50)
+    assert reach.claw_chance(90, 60, 46, 34, swings) == pytest.approx(1 / 3) and reach.claw_chance(90, 60, 46, 34) == 0
+    # Each monster's chance of the swipe and of the star apart: a snail by her middle is in stabO2's box alone,
+    # so half the attacks swipe it and the other half throw the pig in the first band a star.
+    assert reach.attack_chances([(0.5, 0, 26, 19), (200, 0, 46, 34)]) == [(0.5, 0.0), (0.0, 0.5)]
+    assert reach.attack_chances([(90, 60, 46, 34), (200, 0, 46, 34)], swings) == [(1 / 3, 0.0), (0.0, 2 / 3)]
+
+
 def test_from_the_ground_the_claw_first_then_the_search_band_by_band():
     # The claw takes what its stance reaches (65 ahead, into a pig's body up to 99 off), not an Orange
     # Mushroom right under her, 60 below.

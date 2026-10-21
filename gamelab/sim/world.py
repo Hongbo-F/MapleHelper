@@ -43,7 +43,7 @@ on the world's 5 ms tick:
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
   whether its damage shows when it gets there isn't measured, so the shot log allows for both:
   behavior.fight.LANDS_FROM_S). On the ground the attack takes one of the claw's stances
-  (reach.CLAW_STANCES, drawn per attack, seeded), and the nearest monster (by distance, feet to feet) whose
+  (reach.CLAW's, drawn per attack, seeded), and the nearest monster (by distance, feet to feet) whose
   body reaches into its box (reach.claw_takes: cut to reach.CLAW_FAR ahead of her, on her level or not) is
   swiped (a fifth of a star's damage); else the star's search picks (reach.search_band: of the monsters
   whose body overlaps one of its bands, the first band's, one of those drawn at random, seeded, as the
@@ -51,7 +51,8 @@ on the world's 5 ms tick:
   sideways, by the monster's body (right under or over her, none is hit).
   In the air, the nearest whose body reaches into the attack's area (its near side within
   reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is
-  then) takes a star. For all of these, bodies are their kind's half width either side and as tall as
+  then) takes a star (with AIR_PICK 'v83', the claw and the search as from the ground, from where she is
+  then). For all of these, bodies are their kind's half width either side and as tall as
   their kind walking (monster_data.MONSTER_HEIGHT), taller while they flinch after a hit
   (monster_data.FLINCH_S, flinch tops from the game data); not their frames (World.top says why). So a
   jump throw's attack, starting 46 units up, passes over a snail. All of these pick by the bodies alone,
@@ -177,6 +178,12 @@ MOB_KNOCKBACK = True
 KNOCK_MOB = 18.0
 KNOCK_MOB_S = 0.25
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
+# How the world's attack from a jump picks its target: 'area', the nearest in the area fixed to her feet
+# (reach.in_area, as her decisions have it: the 40 ms jump throws' kills of snails 36-66 off fit it); or
+# 'v83', as from the ground, from where she is then (the claw's stance, then the star's search), as RustMS's
+# port of the v83 client has it, with no case for the air. Unmeasured in game (`probe run air`): this lets the
+# probe's scorer be checked in a world of either.
+AIR_PICK = "area"
 DROP_DELAY = 2.0
 RESPAWN = 8.0
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
@@ -1129,13 +1136,14 @@ class World:
     def _aim(self, key_ms: int) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
         lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
-        seeded: reach.CLAW_STANCES), and the claw swipes the nearest monster that stance's box reaches
-        (swiped); else the star's search picks (search_pick). In the air, the nearest in the attack's area
-        takes the star. Each picks by the bodies alone; then, as the client does, the line to a star's pick
-        alone is checked (sight_stop): stopped, the attack hits nothing, and no other monster takes it."""
+        seeded: reach.CLAW's), and the claw swipes the nearest monster that stance's box reaches (swiped);
+        else the star's search picks (search_pick). In the air, the nearest in the attack's area takes the
+        star (AIR_PICK 'area'), or as on the ground from where she is then ('v83'). Each picks by the bodies
+        alone; then, as the client does, the line to a star's pick alone is checked (sight_stop): stopped, the
+        attack hits nothing, and no other monster takes it."""
         self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
-        if self.mode == "ground":
-            stances = reach.CLAW_STANCES
+        if self.mode == "ground" or (AIR_PICK == "v83" and self.mode == "air"):
+            stances = reach.CLAW.stances
             target = self.swiped(self.facing, stances[int(self.chance("stance") * len(stances))])
             swipe = target is not None
             if target is None:
