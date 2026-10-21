@@ -654,6 +654,32 @@ def test_a_chain_runs_on_past_its_end_only_as_far_as_the_next_move_and_the_monst
     assert nav._tail([running], [running.move, far]) == 0.0  # she's on the ground long before its end
 
 
+def test_a_look_in_the_air_waits_for_her_to_land_again_after_a_long_fall(model):
+    """Navigator._onto_platform: a look that shows her in the air waits for her to land (Mover.settle) and looks
+    again; a look still in the air then (a knock down the gap between two blocks: 2.5 s to the basin) waits
+    once more (FALL_LOOKS) rather than ending the trip 'lost: not on any platform' with her still falling."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from gamelab.control.navigator import FALL_LOOKS
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    c = by_y(model, 500, 400)
+    nav = _navigator(model)
+
+    def scene(platform, tag_seen=True, ground=None):
+        return Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0,
+                     where=Where(400, 500, platform, (0, 0)), tag_seen=tag_seen, ground=ground)
+    falling, landed = scene(None), scene(c)
+    looks = [falling] * (FALL_LOOKS - 1) + [landed]
+    settled = []
+    nav.mover = SimpleNamespace(settle=lambda seconds: settled.append(seconds) or falling,
+                                locate=lambda mobs=False, wide=False: looks.pop(0))
+    in_air = scene(c, ground=(10, 12))  # her dot over C, no ground under her feet on screen
+    assert nav._onto_platform(in_air) is landed and len(settled) == FALL_LOOKS
+
+
 def test_a_trip_starts_from_the_callers_look_while_it_still_shows_where_she_is(model, monkeypatch):
     """Navigator.begin(scene=...): the first pass uses the caller's last look (one look less before she sets
     off) if no key plan was sent since and it's fresh, with the monsters the mode looks for."""

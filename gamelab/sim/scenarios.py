@@ -448,6 +448,21 @@ def nav_noisy_long_way(sim):
     return _nav(2)(sim)
 
 
+@scenario((36, 470.0), seed=1, noise=Noise(lag_sd=1.0, walk_jitter=6.0, dot_px=True),
+          expects=(ends("arrived"), moves("climb", "jump"),
+                   check("climbs to 32 and jumps on to 29 and 28 in one chain",
+                         lambda tr: _result(tr, "moves")[:3] == ["climb 36->32", "jump 32->29",
+                                                                  "jump 29->28: landed on 28"]),
+                   check("every move lands", lambda tr: _result(tr, "misses") == 0)))
+def nav_climb_then_jump(sim):
+    """Up the rope from the basin onto 32, a step back on it and the jumps on to 29 and 28, in one chain, with
+    the lags spread as measured and walks a few units off. In game on 2026-10-21 17 of 25 such chains came down
+    in the basin: the step after the climb, its arrow pressed before the top, went too far, and the jumps
+    planned to land 5-16 units onto 29 and 28 then fell short (flow.STEP_EARLY_MAX_MS, TAKEOFF_SLOP). Here, at
+    the branch before, 28 of 144 trips (seeds 1-48 from x 300, 470 and 760) missed a landing; now none does."""
+    return _nav(28)(sim)
+
+
 # Navigation with monsters about, not fighting: hops, waits, ways around, plans cut short.
 
 @scenario((36, 200.0), monsters=[("Pig", 36, 600.0)], seed=1,
@@ -483,7 +498,7 @@ def nav_monsters_basin(sim):
     return _nav(33)(sim)
 
 
-@scenario((21, -300.0), monsters="all", seed=2,
+@scenario((21, -300.0), monsters="all", seed=5,
           expects=(ends("arrived"), logs("waiting for the monster to move off")))
 def nav_monsters_long_way(sim):
     """From 21 up to 2 with monsters about, not fighting: she waits for monsters to move off her way. (Seed 11
@@ -499,7 +514,11 @@ def nav_monsters_long_way(sim):
     125 units/s, not 70; alone, that moved it to seed 12 too): on seed 7 nothing stood in her way to wait for;
     over 16 seeds 15 arrive, 2 of them after a wait. Seed 2 since the game moves her in 30 ms steps
     (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 12 nothing stood in her way to
-    wait for; over 16 seeds all arrive, 3 of them after a wait; 15 and 2 just before.)"""
+    wait for; over 16 seeds all arrive, 3 of them after a wait; 15 and 2 just before. Seed 5 since chained
+    jumps take off where they land with room to spare (flow.TAKEOFF_SLOP): on seed 2 nothing stood in her
+    way to wait for; over 16 seeds all arrive, 2 of them after a wait. Two of them, seeds 2 and 4, were
+    knocked down the gap beside platform 3 to the basin and ended "lost: not on any platform" before the
+    navigator waited out a long fall too: navigator.FALL_LOOKS.)"""
     return _nav(2)(sim)
 
 
@@ -595,16 +614,20 @@ def nav_fight_up_runs_out(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=2,
+@scenario((12, -300.0), monsters="all", seed=9,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
-    """nav_fight_across on seed 2: knocked off 12 down to 34, on the long way round up the staircase she fights
-    80 s on 22, is knocked off 18 back to 19 at 138 s and hit off it down to 32 at 150 s and to 34 at 158 s,
-    fighting 40 monsters in all, and runs out of her 180 s on her way up again. (On seed 2 still since the
+    """nav_fight_across on seed 9: knocked off 12 down to 34 at 10 s, on the long way round up the staircase she
+    fights her way up to 21, is knocked off it down to 22 at 119 s and off 22 to 24 at 169 s, fighting 37
+    monsters in all, and runs out of her 180 s shooting a pig on 18. (Seed 9 since chained jumps take off
+    where they land with room to spare (flow.TAKEOFF_SLOP): on seed 2 she now arrives. Of seeds 1-16 11
+    arrive. On seed 2 before: knocked off 12 down to 34, on the long way round up the staircase she fought
+    80 s on 22, was knocked off 18 back to 19 at 138 s and hit off it down to 32 at 150 s and to 34 at 158 s,
+    fighting 40 monsters in all, and ran out of her 180 s on her way up again. (On seed 2 still since the
     game moves her in 30 ms steps (body.STEP) and jumps from standing wait 150 ms after the arrow, a different
     run: before, after 25 s fighting on 12 she was knocked off down to 34, then off 20 to 19 at 93 s, back
     onto 14 off its walk-off to 17 and down to 36 off the jump from 32, and ran out of time on 22. Of seeds
-    1-16 10 arrive, 11 just before. Seed 3 before, where with the client's star search and claw stab she now
+    1-16 10 arrive, 11 just before.) Seed 3 before, where with the client's star search and claw stab she now
     arrives: after 52 s fighting on 12 she'd been knocked off down to 34, and twice more on the long way
     round, and run out of time on 18; it arrived there before monsters walked 125 units/s. Of seeds 1-16, 12
     arrived then, 8 with the physics and attack tracks before the client's search and stab, 12 at their merge.)"""
@@ -1272,7 +1295,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=3, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=4, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1291,7 +1314,9 @@ def loop_lull_loot(sim):
     last attack's key (actions.ARROW_LOCK_MS): on seed 1 her first walk to a better spot went 0.39 s later,
     and no lull came. Over 16 seeds 5 meet all of this; of the 11 others, 9 had no lull and 3 picked up fewer
     than 20, seed 16 both. Seed 3 since the game moves her in 30 ms steps (body.STEP) and jumps from standing
-    wait 150 ms after the arrow: on seed 2 no lull came. Over 16 seeds 9 meet all of this, 5 just before.)"""
+    wait 150 ms after the arrow: on seed 2 no lull came. Over 16 seeds 9 meet all of this, 5 just before. Seed
+    4 since chained jumps take off where they land with room to spare (flow.TAKEOFF_SLOP): on seed 3 no lull
+    came. Over 16 seeds 8 meet all of this.)"""
     return _loop_on_12(sim)
 
 

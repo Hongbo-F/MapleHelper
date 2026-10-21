@@ -72,6 +72,12 @@ GLANCE_S = 0.03      # between glances at her dot while a plan runs, or while sh
 OFF_PATH = 3         # glances off the planned path (counting 2 where the leg doesn't go) that cut a plan short
 STILL = 0.6          # minimap px: a dot that moved less than this on both axes has stopped
 HIT = 0.004          # HP lost (fraction) that counts as a hit
+# Looks at most, each after waiting up to 2 s for her to land and stand still (Mover.settle), for one that puts
+# her on a platform, when a look shows her in the air: a slime's touch as she walked off platform 3 onto 4
+# knocked her back into the 12-unit gap between the blocks at x 669-681, down which she fell to the basin for
+# 2.5 s, and with one look the trip ended "lost: not on any platform" while she still fell (simulator,
+# nav_monsters_long_way on seeds 2 and 4).
+FALL_LOOKS = 2
 
 # How a trip treats monsters (Navigator.go's `mode`).
 AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
@@ -451,12 +457,16 @@ class Navigator:
         platform her dot puts her on it: a chain planned from there as if she stood ran its first steps in
         the air. In the harness (loop, seed 30) a trip right after a jump throw ran for a drop from 33 onto
         35 mostly in mid-jump, dropped 30 units short, onto the basin by its cliff, and a pig's knock took
-        her through the cliff and out of the map."""
+        her through the cliff and out of the map. A look still in the air once she's settled waits for her to
+        land again (FALL_LOOKS)."""
         if s.where.platform is not None:
             if standing(s):
                 return s
-            self.mover.settle(2)  # in the air: once she's landed and stopped, a look with the monsters
-            return self.mover.locate(mobs=True, wide=not self.fight)
+            for _ in range(FALL_LOOKS):  # in the air: once she's landed and stopped, a look with the monsters
+                self.mover.settle(2)
+                s = self.mover.locate(mobs=True, wide=not self.fight)
+                if s.where.platform is not None:
+                    return s
         s = self.mover.settle(2)
         if s.where.platform is None:  # hanging on a rope
             self.log(f"  on a rope at x {s.where.x:.0f}: getting off")

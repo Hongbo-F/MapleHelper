@@ -4,6 +4,7 @@ reaching the real player or gamelab/lab), and scenarios that give the same trace
 what they're there for. Synthetic maps need no game data; the real-map tests are skipped without it, and
 fail (not skip) when it's there but doesn't load."""
 
+import dataclasses
 import os
 import sys
 import time
@@ -1223,6 +1224,33 @@ def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_mov
     assert set(scenarios.unmet(trace)) == {"the walk-off right after the kill lands",
                                            "no log line says 'instead of platform 4'"}
     assert trace["result"]["moves"] == ["walk_off 3->4: landed on 3", "walk_off 3->4: landed on 4"]
+
+
+def _climb_then_jump(seed: int, x: float) -> dict:
+    """nav_climb_then_jump from (36, x) on `seed`: its result."""
+    sc = scenarios.SCENARIOS["nav_climb_then_jump"]
+    return scenarios.run_scenario(dataclasses.replace(sc, seed=seed, start=(36, x)))["result"]
+
+
+@REAL
+def test_a_climb_a_step_back_and_two_jumps_land_on_every_seed():
+    """nav_climb_then_jump on seeds 1-32 from x 300, 470 and 760 (under the rope from either side), the lags
+    spread: every trip climbs 36 -> 32 and jumps on to 29 and 28 without a miss (28 of 144 trips missed one at
+    the branch before: flow.STEP_EARLY_MAX_MS, TAKEOFF_SLOP)."""
+    for x in (300.0, 470.0, 760.0):
+        for seed in range(1, 33):
+            r = _climb_then_jump(seed, x)
+            assert r["result"] == "arrived" and r["misses"] == 0, (x, seed, r["moves"])
+
+
+@REAL
+def test_a_step_after_a_climb_pressed_before_the_top_throws_the_jumps_after_it(monkeypatch):
+    """With every arrow after a climb pressed before the top again, the step back on 32 included
+    (flow.STEP_EARLY_MAX_MS -1), some of nav_climb_then_jump's seeds miss 28 again: the step walks from the
+    climb-over on, and the run on 29 to the jump onto 28 starts further on (7 of seeds 1-48, as in game)."""
+    monkeypatch.setattr(flow, "STEP_EARLY_MAX_MS", -1)
+    missed = [seed for seed in range(1, 25) if _climb_then_jump(seed, 470.0)["misses"]]
+    assert missed, "every seed landed every move"
 
 
 @REAL

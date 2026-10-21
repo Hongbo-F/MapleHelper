@@ -33,8 +33,8 @@ from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import MonsterTrack
 from . import body
 from .physics import (DROP_LAG, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
-                      RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms, sure_jump_ms)
-from .route import DROP_STEP, JUMP_FROM, ROPE_CLEAR, Move, drop_clear, drop_spots
+                      RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms, sure_jump_ms, sure_landing)
+from .route import DROP_STEP, JUMP_FROM, LANDING_ROOM, ROPE_CLEAR, Move, drop_clear, drop_spots
 
 # Her measured lags and slides (RUN_LAG, JUMP_LAG, DROP_LAG, STOP_RUN, STOP_S, LAND_SLIDE) describe her body,
 # so they're in physics, with how they were measured (still importable from here). Her walk, stops and
@@ -51,6 +51,18 @@ TAP = 0.04           # s a jump/down tap is held
 PICK_EVERY = 0.15    # s between pick-up presses while she runs
 MIN_RUNUP = 15.0     # units of run before a running jump from standing (keyed 155 ms after the arrow: full speed)
 JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
+# A chained jump lands with room to spare from where she really leaves the ground (Flow.sure_takeoff), or it's
+# taken from another spot (every TAKEOFF_STEP units of its takeoffs, nearest the one picked first): LANDING_ROOM
+# (9) in from the ends of the platform it lands on, and on it still if she leaves TAKEOFF_SLOP units early or
+# late (and nothing nearer than that to her platform's end), 10% slower or at 0.85 x her speed (physics.
+# sure_landing). The route checks each jump so at its own takeoff with 12 units' slop; chained, the pick up to
+# 10 units further back (from along a platform; 12 off an end), the kick's wait and the landing before it moved
+# the takeoff and used that up: of the 81 route jumps on this map, 40 had takeoffs the chains could pick that
+# came down 2-7 units onto the platform and missed it from 8 units further back or 6% slower. In game on
+# 2026-10-21 jumps from short platforms took off too early (the player's eye), and the jumps 32 -> 29, 29 ->
+# 28 and 16 -> 14 that came down short were planned to land 5-16 units onto their platforms.
+TAKEOFF_SLOP = 8.0
+TAKEOFF_STEP = 2.0
 # Standing this close to where a move wants her she doesn't step: a step that short is an arrow tap of
 # under 50 ms (physics.hold_ms), and of three 50 ms taps in game two didn't move her and one moved her 7.1
 # units. A longer step from standing is a hold the engine works out, whatever its length (body.hold_for:
@@ -76,7 +88,18 @@ APEX = JUMP_HEIGHT   # 77 units: how high a jump rises
 ROPE_SPEED = 130.0
 UP_EXTRA = 0.35
 CLIMB_OVER = 0.23    # her body after a climb: a standing start this long after the top (+ RUN_LAG = 0.35)
-PRE_ARROW = 0.1      # s before the predicted top that the next move's arrow is pressed
+PRE_ARROW = 0.1      # s before the predicted top that the next move's arrow is pressed ...
+# ... unless it's a step: an arrow let go this soon after where the plan has her standing after the climb
+# stays at its planned time. Pressed early, a step's walk starts with the climb-over, whenever that comes,
+# while its release is timed from the plan's standing start. In game on 2026-10-21, of the 25 chains that
+# climbed 36 -> 32 and stepped back on 32 for the jump onto 29 (a step of 18-30 units, held 104-170 ms) before
+# 01:13, her dot went 8-30 units past the stop planned (575 or more, for 557-567) in 13, the jump off 32 left
+# that much further on, and 17 of the 25 came down in the basin: 8 short of 29, 9 short of 28 off the jump
+# after it, whose run on 29 started that much further on too. With the step pressed at its planned time (a
+# live patch), the 6 chains after stopped at their spot or a few units short (her dot under 558 in 5) and
+# landed every jump. A run after a climb (held longer) still goes down early: she gets going as the
+# climb-over ends, as the plan has her.
+STEP_EARLY_MAX_MS = 250
 HER_HALF = 15        # half her body's width
 APEX_T = JUMP_SPEED / GRAVITY  # s from leaving the ground to the top of a jump (0.28)
 HOP_HORIZON = 3.0    # s ahead a hop over a monster is looked for
@@ -162,11 +185,14 @@ class Keys:
         self.arrow = d
 
     def press_arrow_early(self, t: float, early: float) -> None:
-        """Move the arrow press at t (if there is one) to `early`."""
-        at = ms(t)
-        for e in self.events:
-            if e[0] == at and e[2] == "down" and e[1] in (self.names[LEFT], self.names[RIGHT]):
-                e[0] = ms(early)
+        """Move the arrow press at t (if there is one) to `early`, if it starts a run: one let go
+        STEP_EARLY_MAX_MS or less after t is a step, and stays where it is (see STEP_EARLY_MAX_MS)."""
+        at, arrows = ms(t), (self.names[LEFT], self.names[RIGHT])
+        for i, e in enumerate(self.events):
+            if e[0] == at and e[2] == "down" and e[1] in arrows:
+                up = min((u[0] for u in self.events if u[1] == e[1] and u[2] == "up" and u[0] > at), default=None)
+                if up is None or up - at > STEP_EARLY_MAX_MS:
+                    self.events[i] = [ms(early), e[1], e[2]]  # (a list of its own: copies share the old one)
                 break
 
     def tap(self, t: float, key: str, hold: float = TAP) -> None:
@@ -368,18 +394,46 @@ class Flow:
         return Body(step[0], step[1], a, slack=b.slack)
 
     def _jump(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
+        """A running jump, from the first of its takeoffs (_takeoffs) that lands with room to spare where she
+        really leaves the ground (sure_takeoff)."""
         if variant == "stand":
             return None
         a, d = b.platform, directions.sign(m.direction)
         edge = a.right if d > 0 else a.left
-        if m.takeoff is not None:  # a jump from along the platform (up to 10 units early with rng)
-            takeoff = m.takeoff - d * self.pick(0.0, 10.0)
-        else:
-            takeoff = edge - d * self.pick(JUMP_FROM, JUMP_FROM_FAR)  # players jump from a little further back too
-        if b.run == d and (takeoff - b.x) * d < -JUST_PASSED:
-            if (edge - b.x) * d <= 12:
-                return None
-            takeoff = b.x  # already past the usual spot, still room: now
+        for takeoff in self._takeoffs(m, b, d, edge):
+            trial = k.copy()
+            leg = self._jump_from(m, b, trial, variant, takeoff)
+            if leg is not None:
+                k.events, k.arrow = trial.events, trial.arrow
+                return leg
+        return None
+
+    def _takeoffs(self, m: Move, b: Body, d: int, edge: float) -> list[float]:
+        """Where a running jump may take off, the one to try first first: from along the platform, the move's
+        takeoff or up to 10 units before it; off the end, JUMP_FROM to JUMP_FROM_FAR before it (players jump
+        from a little further back too). With rng the first is picked at random, usually near the move's own,
+        the rest every TAKEOFF_STEP units by how near they are to it. Running that way past one already, she
+        jumps now instead (if she's more than 12 units from the end)."""
+        base, near, far = (m.takeoff, 0.0, 10.0) if m.takeoff is not None else (edge, JUMP_FROM, JUMP_FROM_FAR)
+        first = self.pick(near, far)
+        back = [first] + sorted((near + i * TAKEOFF_STEP for i in range(int((far - near) / TAKEOFF_STEP) + 1)),
+                                key=lambda v: abs(v - first))
+        out: list[float] = []
+        for v in back:
+            x = base - d * v
+            if b.run == d and (x - b.x) * d < -JUST_PASSED:
+                if (edge - b.x) * d <= 12:
+                    continue
+                x = b.x  # already past this spot, still room: now
+            if all(abs(x - o) > 0.5 for o in out):
+                out.append(x)
+        return out
+
+    def _jump_from(self, m: Move, b: Body, k: Keys, variant: str, takeoff: float) -> Leg | None:
+        """The running jump of _jump from `takeoff` (or from where she really leaves the ground, which can be
+        later and further on), if it lands surely (sure_takeoff); its keys added to k."""
+        a, d = b.platform, directions.sign(m.direction)
+        edge = a.right if d > 0 else a.left
         start = self._runup(b, d, takeoff, k)
         if start is None:
             return None
@@ -389,13 +443,20 @@ class Flow:
         k.set_arrow(start.t, d)
         # Later than planned, and further on, if she had to land first or wait out the kick's blind spot.
         t_off, takeoff, vx = self.press_jump(k, start, d, t)
-        if (edge - takeoff) * d < 3:
+        if (edge - takeoff) * d < TAKEOFF_SLOP:
             return None
         land, lx, ta, v_land = flight(self.model, takeoff, a.y_at(takeoff), vx, -JUMP_SPEED, group=a.group)
-        if land is None or land.id != m.dst:
+        if land is None or land.id != m.dst or not self.sure_takeoff(a, takeoff, vx, land, lx):
             return None
         return self._landing(m, b, k, variant, t_off + ta, lx, land, d, v_land,
                              [Span(a.id, b.t, t_off, b.x, takeoff)])
+
+    def sure_takeoff(self, a: Platform, x: float, vx: float, land: Platform, lx: float) -> bool:
+        """Whether a jump off platform a from x at vx, which lands on `land` at lx, does so with room to spare:
+        LANDING_ROOM in from its ends, and still on it if she leaves TAKEOFF_SLOP units early or late, 10%
+        slower or as slow as physics.SLOW_TAKEOFF (sure_landing)."""
+        return land.covers(lx - LANDING_ROOM) and land.covers(lx + LANDING_ROOM) and \
+            sure_landing(self.model, x, a.y_at(x), vx, -JUMP_SPEED, land, slop=TAKEOFF_SLOP, group=a.group)
 
     def _walk_off(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
         if variant == "stand":
@@ -633,8 +694,8 @@ class Flow:
         if (mo.at(t_off, a) - x_off) * d < gap - 15 or not a.covers(x_off, -EDGE_ROOM):
             return None  # too close by then, or no room
         land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED, group=a.group)
-        if land is not a or (lx - mo.at(t_off + ta, a)) * d < 0:
-            return None  # off the platform, or she'd come down short of it
+        if land is not a or (lx - mo.at(t_off + ta, a)) * d < 0 or not self.sure_takeoff(a, x_off, vx, a, lx):
+            return None  # off the platform (or too near its end to be sure), or she'd come down short of it
         k.set_arrow(b.t, d)
         k.tap(press, "jump")
         move = Move("hop", a.id, a.id, x_off, lx, directions.toward(d))

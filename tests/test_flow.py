@@ -249,3 +249,71 @@ def test_a_stop_landing_slides_from_her_landing_speed(model):
     ran = Flow(model, KEYS)._landing(m, Body(0.0, 100.0, c), Keys(KEYS), "run", 1.0, 300.0, c, 1, 127.0, [])
     assert ran.end.run == 1 and ran.end.v == 127.0 and ran.end.landed
     assert ran.end.x == 300.0 and ran.end.t == pytest.approx(1.0 + wait) and wait == pytest.approx(0.015)
+
+
+# --- on the real map ------------------------------------------------------------------------------------
+
+from gamelab.sim import scenarios  # noqa: E402
+
+REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
+
+
+def _real_moves(*wanted):
+    """The real map and its route moves of each (kind, src, dst) wanted (the first of each)."""
+    m = scenarios.real_map()
+    moves = Planner(m).moves
+    return m, [next(mv for mv in moves if (mv.kind, mv.src, mv.dst) == w) for w in wanted]
+
+
+@REAL
+def test_a_step_after_a_climb_goes_down_when_planned_and_a_run_before_the_top():
+    """After the climb 36 -> 32 the jump onto 29 needs a step back (right, ~20 units): its arrow goes down where
+    the plan has her standing after the climb, not before the top (in game, pressed before the top it walked
+    her 8-30 units too far and the jumps after it came down in the basin). After the climb 6 -> 3, the run to
+    walk off 3's left end goes down before the top (flow.PRE_ARROW), as before: she sets off as the climb-over
+    ends."""
+    from gamelab.motion.flow import CLIMB_OVER, PRE_ARROW, STEP_EARLY_MAX_MS, ms
+    m, (climb, jump) = _real_moves(("climb", 36, 32), ("jump", 32, 29))
+    legs, keys, why = Flow(m, KEYS).chain([climb, jump], Body(0.0, 470.0, m.platform(36)))
+    assert why == "done" and [leg.move.kind for leg in legs] == ["climb", "jump"]
+    ev = [e for e in keys.sorted() if e[0] > ms(legs[0].start.t) + 1000]  # after the run at the rope
+    down, up = ev[0], next(e for e in ev if e[1] == "right" and e[2] == "up")
+    assert down[1:] == ["right", "down"] and down[0] == ms(legs[0].end.t)  # where she stands after the climb
+    assert 0 < up[0] - down[0] <= STEP_EARLY_MAX_MS
+    m, (climb, walk) = _real_moves(("climb", 6, 3), ("walk_off", 3, 4))
+    legs, keys, why = Flow(m, KEYS).chain([climb, walk], Body(0.0, 790.0, m.platform(6)))
+    assert why == "done" and [leg.move.kind for leg in legs] == ["climb", "walk_off"]
+    left = [e[0] for e in keys.sorted() if e[1:] == ["left", "down"]]
+    assert left[-1] == ms(legs[0].end.t - CLIMB_OVER - PRE_ARROW)
+
+
+@REAL
+def test_every_route_jump_takes_off_where_it_lands_with_room_to_spare():
+    """Each of the map's running jumps as chains do it, from where they pick (with rng), from standing at its
+    spot and 20 units either side, and running in: from where she really leaves the ground it lands on its
+    platform LANDING_ROOM in from its ends, and still does if she leaves 8 units early or 6% slower (the check
+    the investigation of 2026-10-21's misses ran). Before Flow.sure_takeoff, 47 of the 81 had takeoffs a chain
+    could pick that failed it, landing as little as 2.6 units onto their platform."""
+    import random
+
+    from gamelab import directions
+    from gamelab.motion.physics import JUMP_SPEED, flight, fly
+    from gamelab.motion.route import JUMP_FROM, LANDING_ROOM
+    m = scenarios.real_map()
+    jumps = [mv for mv in Planner(m).moves if mv.kind == "jump"]
+    flow = Flow(m, KEYS, rng=random.Random(1))
+    assert len(jumps) == 81
+    for mv in jumps:
+        a, q, d = m.platform(mv.src), m.platform(mv.dst), directions.sign(mv.direction)
+        spot = mv.takeoff if mv.takeoff is not None else (a.right if d > 0 else a.left) - d * JUMP_FROM
+        starts = [Body(0.0, mv.x + d * dx, a) for dx in (0, -20, 20) if a.covers(mv.x + d * dx, -6)]
+        starts += [Body(0.0, spot - d * 60, a, run=d)] if a.covers(spot - d * 60, -6) else []
+        for b in starts:
+            for _ in range(3):
+                leg = flow.leg(mv, b, Keys(KEYS))
+                assert leg is not None, (mv, b.x)
+                x = leg.spans[-1].x1
+                land, lx, _, _ = flight(m, x, a.y_at(x), d * WALK_SPEED, -JUMP_SPEED, group=a.group)
+                assert land is q and q.covers(lx - LANDING_ROOM) and q.covers(lx + LANDING_ROOM), (mv, x, lx)
+                assert fly(m, x - d * 8, a.y_at(x), d * WALK_SPEED, -JUMP_SPEED, group=a.group)[0] is q, (mv, x)
+                assert fly(m, x, a.y_at(x), d * WALK_SPEED * 0.94, -JUMP_SPEED, group=a.group)[0] is q, (mv, x)
