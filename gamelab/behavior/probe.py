@@ -396,7 +396,8 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
             continue
         if _fight_off(h, probe, s):
             continue
-        # The attack key goes down as soon as it's chosen, and the attack picks JUMP_LAG after it.
+        # The attack key goes down as soon as it's chosen, and the attack picks JUMP_LAG after it (the look's frame
+        # is a little older than its time: a few units more for a walking pig, inside the probes' margins).
         lead = time.monotonic() - s.t + physics.JUMP_LAG if probe.at_pick else 0.0
         target = choose(s, probe, crowd, h.model, lead)
         if target is None:
@@ -712,14 +713,15 @@ def _her(row: dict) -> tuple[float, float]:
 
 # The look that logs where each monster was at the pick (`pick`: the first after the key) isn't taken when the
 # attack picks, JUMP_LAG after its key, and by how much isn't measured in game. By the looks' own times it's
-# pick.t - JUMP_LAG after it (33 ms with the simulator's looks); but the simulator's look shows its monsters
-# LOOK_LAG (40 ms) before its time, and the key goes down START_LATENCY (10 ms) after the plan is handed over,
-# so there the look comes 20 ms before the pick. A pig walking 125 units/s is a few units off either way, which
-# at the edge of a box decides what the attack took: claw-edge in the old claw's world on seed 2 (40 throws), pigs
-# walking away seen 120-125 off, inside the old box (to 124), were 125-128 off at the pick, and the stars they
-# took leaned the scorer 2.9 toward the stabs; moved back 4 units by the looks' times, 14.7 toward them. So the
-# pick is taken as likely at any of PICK_STEPS moments from PICK_SLACK_S before that look to as long after it:
-# 5.3 the old box's way there, and none of test_probe's runs on seeds 1-8 leans the wrong way.
+# pick.t - JUMP_LAG after it (33 ms with the simulator's looks), but a look's frame is older than its time: in
+# game its time is when its reading ends, after the frame was grabbed (eyes.look_at), and the simulator draws its
+# monsters LOOK_LAG (40 ms) before it; with the key going down START_LATENCY (10 ms) after the plan is handed
+# over, there the look shows them 20 ms before the pick. A pig walking 125 units/s is a few units off either
+# way, which at the edge of a box decides what the attack took: claw-edge in the old claw's world on seed 2 (40
+# throws), pigs walking away seen 120-125 off, inside the old box (to 124), were 125-128 off at the pick, and the
+# stars they took leaned the scorer 2.9 toward the stabs; moved back 4 units by the looks' times, 14.7 toward
+# them. So the pick is taken as likely at any of PICK_STEPS moments from PICK_SLACK_S before that look to as
+# long after it: 5.3 the old box's way there, and none of test_probe's runs on seeds 1-8 leans the wrong way.
 PICK_SLACK_S = 0.04
 PICK_STEPS = 5
 
