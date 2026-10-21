@@ -523,6 +523,23 @@ def test_spots_are_worked_out_again_when_walls_are_switched(monkeypatch):
     assert spots.spots(model, b.id) == on
 
 
+def test_spots_are_worked_out_again_when_reach_s_other_answers_are_switched(monkeypatch):
+    """The spots go by the line terrain stops (reach.LINE) and by what the attack picks (the search's window,
+    the claw, the old ramp) too, which the probes' tests switch for their worlds: switched, spots answers as
+    worked out afresh, and switched back, as before."""
+    model, a, b, c = step_map()
+    level = spots.spots(model, a.id)
+    monkeypatch.setattr(reach, "LINE", "v83")  # from C down at A, its own floor stops the line close in
+    v83 = spots.spots(model, a.id)
+    assert v83 != level and v83 == spots._spots(model, a.id)
+    monkeypatch.setattr(reach, "LINE", "level")
+    monkeypatch.setattr(reach, "SEARCH_FLOOR0", -20)
+    lower = spots.spots(model, a.id)
+    assert lower != level and lower == spots._spots(model, a.id)
+    monkeypatch.undo()
+    assert spots.spots(model, a.id) == level
+
+
 def test_what_stops_a_star_on_the_real_map():
     """Thicket Around the Beach II (skipped without its parsed game data): from platform 4 a star never
     reaches 2, behind the step wall of their group (3, 63); the shots that hit in the live logs, past other

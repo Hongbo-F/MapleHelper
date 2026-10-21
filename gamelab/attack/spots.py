@@ -72,13 +72,14 @@ def _stand_xs(lo: float, hi: float) -> list[float]:
 def spots(model: MapModel, target: int) -> list[Spot]:
     """Places to shoot platform `target` from, best first: safe ones (no spawns where she stands),
     then by how much of the target platform is in reach. Worked out once per map and platform (`_KEPT`), and
-    again if what stops a star is switched (reach.WALLS_BLOCK: a probe does, for its run)."""
+    again if what reach's answers that coverage goes by are switched (`_switches`: a probe switches
+    reach.WALLS_BLOCK for its run, and the probes' tests put the other answers in their worlds)."""
     kept = _KEPT.get(id(model))
     if kept is None or kept[0] is not model:
         if len(_KEPT) >= MODELS_KEPT:
             _KEPT.clear()
         kept = _KEPT[id(model)] = (model, {})
-    key = (target, reach.WALLS_BLOCK)
+    key = (target, *_switches())
     found = kept[1].get(key)
     if found is None:
         found = kept[1][key] = tuple(_spots(model, target))
@@ -86,12 +87,19 @@ def spots(model: MapModel, target: int) -> list[Spot]:
 
 
 # spots' answers by id(model), with the model (kept, so its id can't go to another one while it's here) and
-# the answers by target platform and reach.WALLS_BLOCK. They depend on the map and on what stops a star (her own
-# foothold group's walls, unless a probe switches that off), and take 3.6 ms a platform to work out: the hunt
-# loop asked for every hunting ground's after most looks (its rate rule, and the 'hunt' record for the mini-map),
-# 30-60 ms between a look and her next keys.
-_KEPT: dict[int, tuple[MapModel, dict[tuple[int, bool], tuple[Spot, ...]]]] = {}
+# the answers by target platform and reach's switches (_switches). They depend on the map, on what stops a star
+# (her own foothold group's walls, unless a probe switches that off; and by which line, reach.LINE) and on what
+# the attack picks (the search's window, the claw, the old ramp: coverage's shot_dx), and take 3.6 ms a platform
+# to work out: the hunt loop asked for every hunting ground's after most looks (its rate rule, and the 'hunt'
+# record for the mini-map), 30-60 ms between a look and her next keys.
+_KEPT: dict[int, tuple[MapModel, dict[tuple, tuple[Spot, ...]]]] = {}
 MODELS_KEPT = 4  # maps whose spots are kept (a run has one; tests make many)
+
+
+def _switches() -> tuple:
+    """What of reach coverage goes by that a run or a test may switch: the wall rule and its line, the
+    search window's edges, the claw's model and the old ramp."""
+    return (reach.WALLS_BLOCK, reach.LINE, reach.SEARCH_TOP0, reach.SEARCH_FLOOR0, reach.CLAW, reach.RAMP_BELOW)
 
 
 def _spots(model: MapModel, target: int) -> list[Spot]:
