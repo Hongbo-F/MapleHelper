@@ -15,8 +15,9 @@ from gamelab.attack import reach
 from gamelab.behavior import probe
 from gamelab.behavior.probe import Probe, choose, outcomes, shown
 from gamelab.control import alarm, client
-from gamelab.localization.monsters import bodies
-from gamelab.sim import scenarios
+from gamelab.localization.monsters import Monster, bodies
+from gamelab.perception.mobs import Mob
+from gamelab.sim import harness, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.world import Noise
 
@@ -79,6 +80,28 @@ def test_a_monster_behind_a_wall_still_counts_as_in_front(monkeypatch):
     assert choose(s, p) is None and choose(s, p, crowd=1) is None
     monkeypatch.setattr(reach, "WALLS_BLOCK", False)
     assert choose(s, p) is None and choose(s, p, crowd=1) is under
+
+
+def test_where_a_monster_will_be_when_the_attack_picks(monkeypatch):
+    # A pig seen walking goes on at its kind's speed (125 units/s) the way it faces, turning back at the ends of
+    # its walk (its half width, 34, inside its platform's: B runs 200-400 on the step map); one standing, or with
+    # its way or its pose not read, stays where the look had it. A probe with at_pick throws by that (claw-down).
+    model, a, b, _ = step_map()
+
+    def pig(x, facing=-1, pose="move"):
+        return Monster(Mob("pig", 0, 0, 30, 30, 0.9), x, 440.0, b.id, None, facing, pose)
+    assert probe.x_after(pig(300, 1), 0.1, model) == pytest.approx(312.5)
+    assert probe.x_after(pig(360, 1), 0.1, model) == pytest.approx(359.5)   # to 366 and back
+    assert probe.x_after(pig(240), 0.1, model) == pytest.approx(240.5)      # to 234 and back
+    for still in (pig(360, 1, "stand"), pig(360, 1, "hit1"), pig(360, 0), pig(360, 1, "")):
+        assert probe.x_after(still, 0.1, model) == 360
+    # 220 off at the look, walking at her: 195 off 0.2 s later.
+    p = Probe("toy", "a test", a.id, 100.0, RIGHT, (b.id,), ("pig",), (150, 200))
+    s = scene(pig(320), x=100.0, y=500.0, platform=a)
+    monkeypatch.setattr(reach, "WALLS_BLOCK", False)  # B is behind the step wall of her group
+    assert choose(s, p, model=model, lead=0.2) is None
+    assert choose(s, dataclasses.replace(p, at_pick=True), model=model, lead=0.2) is s.monsters[0]
+    assert choose(s, dataclasses.replace(p, at_pick=True), model=model, lead=0.0) is None
 
 
 def test_a_probe_s_place_is_checked_before_it_runs():
@@ -184,7 +207,7 @@ PLACES = {
     "hanging-wall": ((14, 706.0), [("Pig", 17, 910.0)], {}),
     "below-42": ((0, 1222.0), [("Pig", 1, 1110.0)], {}),
     "claw-edge": ((21, -225.0), [("Pig", 21, -90.0)], {"throws": 40}),
-    "claw-down": ((3, 716.0), [("Pig", 4, 620.0)], {"throws": 40}),
+    "claw-down": ((3, 716.0), [("Pig", 4, 620.0)], {"throws": 80}),
 }
 
 
@@ -220,21 +243,23 @@ WORLDS = {
 _RUNS: dict = {}
 
 
-def _probe_run(name: str, world: str | None = None, throws: int = 20, **changes) -> list[dict]:
-    """A simulated run of probe `name` from its PLACES, in reach's world or one of WORLDS (its log's rows; each
-    run once)."""
+def _probe_run(name: str, world: str | None = None, throws: int = 20, seed: int = 1, preset: str = "plain",
+               **changes) -> list[dict]:
+    """A simulated run of probe `name` from its PLACES, in reach's world or one of WORLDS, on `seed`, with the
+    errors of the harness's `preset` (`game`: the game's; `plain`: none), its log's rows (each run once)."""
     start, monsters, place = PLACES[name]
     p = probe.adjust(probe.PROBES[name], **{"throws": throws, **place, **changes})
-    key = (p, world)
+    key = (p, world, seed, preset)
     if key not in _RUNS:
         def run(sim):
             h = sim.hunter()
-            return str(probe.run(h, sim.navigator(h), p, seconds=900))
+            return str(probe.run(h, sim.navigator(h), p, seconds=1800))
         with pytest.MonkeyPatch.context() as mp:
             if world is not None:
                 WORLDS[world](mp)
-            _RUNS[key] = _rows(scenarios.run_scenario(
-                scenarios.Scenario(f"probe_{name}", run, start, monsters=monsters, limit=1100)))
+            noise = harness.PRESETS[preset][0]
+            _RUNS[key] = _rows(scenarios.run_scenario(scenarios.Scenario(
+                f"probe_{name}", run, start, monsters=monsters, limit=2000, seed=seed, noise=noise)))
     return _RUNS[key]
 
 
@@ -264,7 +289,7 @@ def test_each_probe_s_log_decides_the_answer_its_world_has(name, world, key, ans
     # such throws; none leans the other way). claw-edge makes 40 throws, as in game: with 20, both worlds were
     # decided on seed 1 on 5 throws that differ, the least that decides. below-42 also asks the claw off her
     # level, but its few throws at pigs within 99 decide it alone on 2 of those seeds (5 and 6) in a world with
-    # the swings: claw-down's 40 throws do on all 8.
+    # the swings: claw-down's 80 throws do on all 8.
     q, model = probe.QUESTIONS[key], scenarios.real_map()
     rows = _probe_run(name, world)
     assert rows and {r["probe"] for r in rows} == {name}
@@ -272,6 +297,25 @@ def test_each_probe_s_log_decides_the_answer_its_world_has(name, world, key, ans
     assert scored.decided == q.answers[answer][0], (name, world, scored.lls, scored.differ)
     assert scored.differ >= probe.DECIDE_THROWS
     assert f"-> {q.answers[answer][0]}:" in "\n".join(probe.answers_text(scored))
+
+
+# With the game's errors (the harness's game preset: stars that miss, walks that stop early or late, lags spread,
+# lost taps, her dot read to whole pixels, hit monsters hidden 1-3 s, sightings missed), she stands at 704-720 on
+# seeds 1-8, not 714, and a pig on 4 comes within 69-85 of her, not 81. claw-down throws at a pig only where it
+# will be within 95 at the pick (at_pick), so most of its throws are at one within the swings' reach then (63-74
+# of 80 on seeds 1-8, by the look after the key), and its 80 throws decide either world's answer on all 8 (seed 1
+# here). By where the look had a pig (88-100 off), 13-37 of 40 were, and 40 throws decided the stabs on 1 of the 8
+# seeds, the swings on 2.
+@REAL
+@pytest.mark.parametrize("world,answer", [(None, 0), ("the swings", 1)], ids=["reach", "the-swings"])
+def test_claw_down_decides_with_the_game_s_errors(world, answer):
+    q, model = probe.QUESTIONS["claw_takes"], scenarios.real_map()
+    rows = _probe_run("claw-down", world, preset="game")
+    assert len(rows) == 80 and all(abs(r["pick"]["x"] - 716) > 4 for r in rows)  # seed 1: she's at 709
+    near = [r for r in rows for e in r["evidence"] if e["target"] and abs(e["x"] - r["pick"]["x"]) <= 97]
+    assert len(near) >= 60
+    scored = probe.answers(rows, model, q)
+    assert scored.decided == q.answers[answer][0], (scored.lls, scored.differ)
 
 
 @REAL
@@ -371,10 +415,10 @@ def test_the_scorer_tells_the_claw_s_swipes_from_stars_by_the_bar_they_take():
         assert claw and star and max(claw) < edge <= max(star) + 10 and min(star) >= edge - 10, (kind, table)
     rows = _probe_run("claw-down")
     table = probe.claw_table(rows)
-    assert sum(g["throws"] for g in table.values()) == 40 and not any(g["claw"] for g in table.values())
+    assert sum(g["throws"] for g in table.values()) == 80 and not any(g["claw"] for g in table.values())
     assert all(dy == 60 for _, _, dy, _ in table) and "the claw's" in probe.score(rows, scenarios.real_map())
     table = probe.claw_table(_probe_run("claw-down", "the swings"))
-    assert 8 <= sum(g["claw"] for g in table.values()) <= 20
+    assert 16 <= sum(g["claw"] for g in table.values()) <= 40  # 29 of the 80
 
 
 @REAL

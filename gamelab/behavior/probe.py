@@ -19,18 +19,18 @@ A run (`run`) sends her to her place (the navigator, keeping clear of monsters) 
 every look she throws only when exactly one monster is in front of her (`in_front`: within FRONT by its
 middle, from FRONT_UP above her feet to FRONT_DOWN below, all an attack could pick) and it's one the
 probe throws at, its middle in the probe's range sideways (`crowd`: or with that many others in front
-too). After a throw she neither moves nor throws until its star's evidence is in: every look up to
-EVIDENCE_S after the star was due (longer while the target is hidden, up to HIDDEN_MAX_S: a hit monster
-flinches under its damage numbers for 1-3 s). So one throw's evidence is never another's, and a monster
-hit by one has stopped flinching (0.6 s, taller) when the next attack picks. A monster of a kind the
-probe doesn't throw at that comes close on her platform is fought off first (behavior.fight.clear, her
-platform only); knocked off her place, she walks or goes back to it, the last walk the way she throws, so
-that no throw turns her (a turn's tap walks her on). Nor does she walk or throw from a look a touch's knock
-may still be moving her in (Hunter.knocked). Every monster in front counts, its star stopped or not (the
-client checks the line to its pick alone, so a walled one still takes the attack). What her decisions take as
-stopping a star (reach.WALLS_BLOCK: whether a target behind such a wall, or behind one, is thrown at, and the
-fights) is switched for the run: off for the probes that measure it, so it throws at monsters behind such a
-wall too.
+too; for a probe that asks it, `at_pick`, where it will be when the attack picks: `x_after`). After a
+throw she neither moves nor throws until its star's evidence is in: every look up to EVIDENCE_S after the
+star was due (longer while the target is hidden, up to HIDDEN_MAX_S: a hit monster flinches under its
+damage numbers for 1-3 s). So one throw's evidence is never another's, and a monster hit by one has stopped
+flinching (0.6 s, taller) when the next attack picks. A monster of a kind the probe doesn't throw at that
+comes close on her platform is fought off first (behavior.fight.clear, her platform only); knocked off her
+place, she walks or goes back to it, the last walk the way she throws, so that no throw turns her (a turn's
+tap walks her on). Nor does she walk or throw from a look a touch's knock may still be moving her in
+(Hunter.knocked). Every monster in front counts, its star stopped or not (the client checks the line to its
+pick alone, so a walled one still takes the attack). What her decisions take as stopping a star
+(reach.WALLS_BLOCK: whether a target behind such a wall, or behind one, is thrown at, and the fights) is
+switched for the run: off for the probes that measure it, so it throws at monsters behind such a wall too.
 
 Each throw is a line of lab/probe_geometry.jsonl: the probe, how she threw (and the attack key's delay
 after the jump key, `gap_ms`), whether the wall rule was on, where she stood and her foothold group, the
@@ -153,6 +153,8 @@ class Probe:
     throws: int = 20
     wide: bool = False      # looks over the whole screen: the targets stand above what a look's band searches
     walls: bool = True      # whether her decisions keep to the wall rule during the run (off: it's measured)
+    at_pick: bool = False   # the range sideways is where a monster will be when the attack picks (`x_after`),
+                            # not where the look has it
     expect: str = ""        # what each model predicts
     source: str = ""        # the research's name for it
 
@@ -230,15 +232,17 @@ PROBES = {p.name: p for p in (
     # Mushroom's body 60 below her (46 and 55 tall; 67 in an Orange Mushroom's tallest frame), not a slime's (41);
     # the stabs' boxes, which the client tests, reach down to 15 above her feet, into neither in any frame. So it
     # tells the swings from the stabs, not the stabs from a claw kept to her level. From 35 inside 3's left end,
-    # at 4: a pig on 4 is never closer than 81 (4 ends at 669), and the swings reach one out to 99, so pigs are
-    # thrown at only out to 100, and only from 88: one closer at the look is at 4's end, about to turn, and
-    # walking the game data's 125 units/s it's mostly out past 99 by the pick (in the simulator, seed 1: 13 of
-    # the 18 thrown at 81-88 at the look, 1 of the 22 at 88-100). Thrown at from 60, 40 throws no longer decided
-    # the stabs, on none of seeds 1-8 (leads 1.9-2.5, 3 needed); from 88, on all 8 (3.2-3.6). Orange Mushrooms
-    # out to 125, where stars from 113 show how often a hit is seen.
+    # at 4: a pig on 4 is never closer than 81 (4 ends at 669; 69-85 as she stands within STAND_SLACK of her
+    # place, at 704-720 in the simulator with the game's errors), and the swings reach one out to 99, so pigs are
+    # thrown at only where they'll be within 95 when the attack picks (at_pick: one walking the game data's 125
+    # units/s goes on 20 units or so from the look to the pick, and turns back at 4's end). Thrown at by where
+    # the look had them (88-100 off, she at 716), a pig was within 97 at the pick on 13-37 of 40 throws with the
+    # game's errors, and 40 throws decided the stabs on 1 of seeds 1-8, the swings on 2; by where they'd be, on
+    # 32-39, and 80 throws decide both on all 8 (leads 5.8-7.0 and 5.2-8.3; without the errors 6.8-7.2 and 10.1
+    # and up). Orange Mushrooms out to 125, where stars from 113 show how often a hit is seen.
     Probe("claw-down", "whether the claw swipes a monster off her level (reach.claw_takes: its stab boxes)", 3,
-          716.0, LEFT, (4,), ("pig", "orange-mushroom"), (88, 100), by_kind=(("orange-mushroom", (60, 125)),),
-          throws=40, source="bodies D",
+          716.0, LEFT, (4,), ("pig", "orange-mushroom"), (60, 95), by_kind=(("orange-mushroom", (60, 125)),),
+          throws=80, at_pick=True, source="bodies D",
           expect="by the stab boxes (reach's), no hit at a pig (the search picks one 60 below from 151) and stars "
                  "at Orange Mushrooms from 113; by the swings' boxes, a third of the throws at both within 99 and 97 "
                  "swiped (small bar drops)"),
@@ -392,7 +396,9 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
             continue
         if _fight_off(h, probe, s):
             continue
-        target = choose(s, probe, crowd)
+        # The attack key goes down as soon as it's chosen, and the attack picks JUMP_LAG after it.
+        lead = time.monotonic() - s.t + physics.JUMP_LAG if probe.at_pick else 0.0
+        target = choose(s, probe, crowd, h.model, lead)
         if target is None:
             time.sleep(WAIT_S)
             continue
@@ -453,17 +459,39 @@ def in_front(s: Scene, side: str) -> list[Monster]:
             if -reach.body_of(m.kind)[1] < (m.x - x) * d <= FRONT and -FRONT_UP <= m.y - y <= FRONT_DOWN]
 
 
-def choose(s: Scene, probe: Probe, crowd: int = 0) -> Monster | None:
+def x_after(m: Monster, lead: float, model: MapModel | None = None) -> float:
+    """Where monster `m` (its middle) is `lead` s after the look that saw it: seen walking (its pose 'move', its
+    way read), its kind's walking speed (monsters.speeds) that long the way it faces, turning back at the ends of
+    its platform's walk (its half width inside them, on `model`); else where the look has it."""
+    if lead <= 0 or m.pose != "move" or not m.facing:
+        return m.x
+    walk = speeds(model).get(m.kind, DEFAULT_SPEED) * lead
+    if model is None or m.platform is None or not 0 <= m.platform < len(model.platforms):
+        return m.x + m.facing * walk
+    p, half = model.platform(m.platform), reach.body_of(m.kind)[1]
+    lo, hi = p.left + half, max(p.left + half, p.right - half)
+    if hi <= lo:
+        return lo
+    u = (min(max(m.x, lo), hi) - lo + m.facing * walk) % (2 * (hi - lo))  # as it walks there and back
+    return lo + (u if u <= hi - lo else 2 * (hi - lo) - u)
+
+
+def choose(s: Scene, probe: Probe, crowd: int = 0, model: MapModel | None = None,
+           lead: float = 0.0) -> Monster | None:
     """What to throw at in look `s`, if anything: the nearest monster in front of her (in_front) that the probe
     throws at (its kind, its platform, its middle in range sideways: for a jump back, its far end JUMP_BACK_OUT
-    nearer), when it's the only one in front (or with at most `crowd` others). While her decisions keep to what
+    nearer; with `probe.at_pick`, where it will be when the attack picks, `lead` s after the look: x_after on
+    `model`), when it's the only one in front (or with at most `crowd` others). While her decisions keep to what
     stops a star (reach.WALLS_BLOCK), not one whose star is stopped (reach.wall_to), nor one behind another in
     front that the attack takes first whose star is (reach.shielded: with a crowd)."""
     front = in_front(s, probe.side)
     x, y, rise = s.where.x, s.where.y, rise_of(probe.style)
     out = JUMP_BACK_OUT if probe.style == "jump_back" else 0.0  # she's that much farther off when it picks
+
+    def off(m: Monster) -> float:
+        return abs((x_after(m, lead, model) if probe.at_pick else m.x) - x)
     fits = [m for m in front if m.kind in probe.kinds and m.platform in probe.at
-            and probe.range_of(m.kind)[0] <= abs(m.x - x) <= probe.range_of(m.kind)[1] - out
+            and probe.range_of(m.kind)[0] <= off(m) <= probe.range_of(m.kind)[1] - out
             and reach.wall_to(s.platform, x, y, m, rise) is None
             and reach.shielded(s.platform, x, y, m, front, rise) is None]
     if not fits or len(front) > 1 + crowd:
