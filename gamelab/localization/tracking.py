@@ -96,7 +96,11 @@ POSE_VELOCITY = True
 #   the filter alone           41, 46         41, 46
 #   the pose alone (None)      10, 7          34, 36
 #   gated, 0.25 s              13, 5          12, 19   (0.15 s: 12, 19 and 15, 22; 0.4 s: 16, 7 and 13, 28)
-# Her kills were judged right about as often every way (88-93%). Not checked in game.
+# Her kills were judged right about as often every way (88-93%). With the feed's costs and asks as they are
+# now (feed.COSTS, ASK_ONLY_STALE): the filter alone 32, 34; the pose alone 10, 11 and 25, 38; gated 9, 12
+# and 14, 30; her kills 90-94%. And `bodies --tracks` on feed_loop_basin's tracks, 20% of poses wrong: a
+# track that stood said under 15 units/s 90% of the time gated, 76% with the pose alone; one that walked,
+# its speed 88% and 72% (with the poses right, 90% and 93%, 88% and 88%). Not checked in game.
 POSE_GATE_S: float | None = 0.25
 LONG_GAP_S = 1.0    # a track seen again after longer than this starts its velocity afresh
 FRAME_SLACK = 0.05  # s: a monster last seen this little before a gain went out of sight as it died
