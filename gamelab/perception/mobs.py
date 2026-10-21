@@ -25,9 +25,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .. import paths
+from .. import native, paths
 from ..screen import SCALE
-from . import kernels
 from .match import masked_match, suppress_overlaps
 
 
@@ -196,7 +195,7 @@ class MobDetector:
             raise RuntimeError(f"no monster templates in {folder}")
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
-        kernels.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
+        native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         """Monsters in `frame` (RGB, game window / SCALE). `rows` limits the search to a band."""
@@ -341,8 +340,8 @@ def _spots(coarse: np.ndarray, cover: Cover, template: MobTemplate, i: int) -> l
     # is noise that can reach 1.0. In the basin, such windows took all MAX_CHECKS checks,
     # so snails and pigs at her level were never checked.
     least = MIN_COVER * float(silhouette.mean())
-    # In C if it's built (kernels.peaks: the same, but without holding Python's lock), else in numpy.
-    found = kernels.peaks(res, cover.integral, *silhouette.shape, least, SILHOUETTE_THRESHOLD)
+    # In C if it's built (native.peaks: the same, but without holding Python's lock), else in numpy.
+    found = native.peaks(res, cover.integral, *silhouette.shape, least, SILHOUETTE_THRESHOLD)
     if found is None:
         res[cover.sums(*silhouette.shape) / silhouette.size < least] = 0
         ys, xs = np.nonzero((res >= SILHOUETTE_THRESHOLD) & (res == cv2.dilate(res, np.ones((3, 3), np.uint8))))

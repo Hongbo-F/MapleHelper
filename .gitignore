@@ -4,5 +4,5 @@ __pycache__/
 gamelab/lab/
 .claude/worktrees/
 
-# Native kernels built from gamelab/perception/kernels.c on first use
-gamelab/perception/build/
+# gamelab's C pieces, built from gamelab/native.c on first use
+gamelab/build/

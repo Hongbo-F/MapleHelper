@@ -13,6 +13,7 @@ from collections import OrderedDict
 from maplehelper import config
 
 from . import body
+from .. import native
 from ..localization.mapdata import MapModel, Platform
 from ..paths import CONFIG
 
@@ -106,27 +107,30 @@ FLY_CACHE_SIZE = 20_000  # landings (about 9 MB when full)
 MODELS_KEPT = 4          # maps fly knows at a time (their walls, and the serial numbers keying their landings)
 _FLY_CACHE: OrderedDict[tuple, tuple] = OrderedDict()
 # The last MODELS_KEPT models fly was used on, by id(model): each kept with its serial number (its landings'
-# key) and the walls that stop her by foothold group (body.walls_for). Keyed by id(model) alone, a freed
-# model's id was reused by the next one, which then got the old one's walls and landings (tests failed
-# depending on their order). A model is kept while it's in here, so its id can't be taken, and a model seen
-# again after it was let go gets a new serial: no landing cached for another model can ever be handed to it.
-_MODELS: OrderedDict[int, tuple[MapModel, int, dict]] = OrderedDict()
+# key), the walls that stop her by foothold group (body.walls_for), and the same laid out for the flight in C
+# (native: the platforms, and the walls by group; made the first time she flies there with the DLL in use).
+# Keyed by id(model) alone, a freed model's id was reused by the next one, which then got the old one's walls
+# and landings (tests failed depending on their order). A model is kept while it's in here, so its id can't be
+# taken, and a model seen again after it was let go gets a new serial: no landing cached for another model can
+# ever be handed to it.
+_MODELS: OrderedDict[int, tuple[MapModel, int, dict, dict]] = OrderedDict()
 _SERIALS = itertools.count()
+_SHOES: dict[body.Shoe, object] = {}  # each shoe as the C flight takes it (native.shoe_of)
 
 
-def _known(model: MapModel, group) -> tuple[int, body.Walls]:
-    """The model's serial number, and the vertical walls that stop her with foothold `group`, sorted by x:
-    their xs, and each one's (top, bottom)."""
+def _known(model: MapModel, group) -> tuple[int, body.Walls, dict]:
+    """The model's serial number, the vertical walls that stop her with foothold `group`, sorted by x (their
+    xs, and each one's (top, bottom)), and its layouts for the C flight (_native_flight's)."""
     known = _MODELS.get(id(model))
     if known is None or known[0] is not model:
-        known = _MODELS[id(model)] = (model, next(_SERIALS), {})
+        known = _MODELS[id(model)] = (model, next(_SERIALS), {}, {})
     _MODELS.move_to_end(id(model))
     if len(_MODELS) > MODELS_KEPT:
         _MODELS.popitem(last=False)
     walls = known[2].get(group)
     if walls is None:
         walls = known[2][group] = body.vertical_walls(body.walls_for(model, group))
-    return known[1], walls
+    return known[1], walls, known[3]
 
 
 def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
@@ -152,7 +156,7 @@ def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Plat
     or runs on."""
     if not body.OWN_GROUP_WALLS:
         group = body.EVERY_WALL  # (one set of landings, whatever group is asked for)
-    serial, walls = _known(model, group)
+    serial, walls, laid_out = _known(model, group)
     x, y, vx, vy = round(x, 2), round(y, 2), round(vx, 1), round(vy, 1)
     if arrow is None:
         arrow = (vx > 0) - (vx < 0)
@@ -161,12 +165,43 @@ def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Plat
     if result is not None:
         _FLY_CACHE.move_to_end(key)
         return result
-    f = body.fly(model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls, dt=dt, limit=limit)
-    result = (f.platform, f.land_x, f.seconds, f.vx_land)
+    # The same flight in C (native.c: fly), when it's built: 0.0xx ms a flight, against 1.0 in Python.
+    result = _native_flight(model, laid_out, group, walls, x, y, vx, vy, skip, dt, limit, arrow) if limit > 0 else None
+    if result is None:
+        f = body.fly(model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls, dt=dt, limit=limit)
+        result = (f.platform, f.land_x, f.seconds, f.vx_land)
     _FLY_CACHE[key] = result
     if len(_FLY_CACHE) > FLY_CACHE_SIZE:
         _FLY_CACHE.popitem(last=False)
     return result
+
+
+def _native_flight(model: MapModel, laid_out: dict, group, walls: body.Walls, x: float, y: float, vx: float,
+                   vy: float, skip: Platform | None, dt: float, limit: float,
+                   arrow: int) -> tuple[Platform | None, float, float, float] | None:
+    """flight's body.fly in C (native.fly), with the model's platforms and the group's walls laid out for it once
+    (`laid_out`, kept with the model in _MODELS); None if the DLL isn't there. The answers are body.fly's to the
+    bit (the same steps in the same order, IEEE double), and of the same types: where no step changed her x or
+    her speed (a wall at her start stopping her every step; no arrow and no speed), Python hands back the start's
+    own, an int if it was one, and so does this. (With no step at all, limit 0, it would be the start's whatever
+    it was: flight leaves that to Python.)"""
+    if native.lib() is None:
+        return None
+    m = laid_out.get("platforms")
+    if m is None:
+        m = laid_out["platforms"] = native.Map(model.platforms)
+    w = laid_out.get(group)
+    if w is None:
+        w = laid_out[group] = native.Walls(walls)
+    shoe = _SHOES.get(SHOE)
+    if shoe is None:
+        shoe = _SHOES[SHOE] = native.shoe_of(SHOE)
+    s = -1 if skip is None else next((i for i, q in enumerate(model.platforms) if q is skip), -1)
+    found = native.fly(m, w, x, y, vx, vy, int(arrow), dt, limit, shoe, s)
+    if found is None:
+        return None
+    q, lx, t, vl, same_x, same_vx = found
+    return None if q < 0 else model.platforms[q], x if same_x else lx, t, vx if same_vx else vl
 
 
 # A route jump has to land on its platform at this share of her walking speed too: a jump the mover keys

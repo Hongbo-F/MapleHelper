@@ -247,6 +247,71 @@ def test_route_times_on_the_real_map_are_each_platforms_own_search():
             assert planner.travel(p.id, x, q.id) == (None if found is None else found[1])
 
 
+def flights(model, rng, n):
+    """Random flights on a map: from on, above and beside its platforms (at their ends and at walls too), walking,
+    running, jumping and falling (past the fall cap too), through a platform or not, with the arrow held her way,
+    the other way or none, stopped by every wall or by a foothold group's, with the planner's step and others; and
+    a fifth through a platform's corner (just above its surface by an end, going out and down)."""
+    from gamelab.motion import body
+    walls = sorted({w.x1 for w in model.walls if w.x1 == w.x2}) or [0.0]
+    out = []
+    for _ in range(n):
+        p = rng.choice(model.platforms)
+        x = rng.choice([rng.uniform(p.left - 80, p.right + 80), float(round(rng.uniform(p.left, p.right))),
+                        int(rng.uniform(p.left, p.right)), p.left, p.right, float(p.right), rng.choice(walls)])
+        y = p.y_at(min(max(x, p.left), p.right)) - rng.choice([0, 1, 0.5, 0.004, rng.uniform(0, 400)])
+        vx = rng.choice([0.0, -0.0, 0, 149.0, -149.0, 149, 134.1, 8.9, 5, rng.uniform(-400, 400)])
+        vy = rng.choice([0.0, -555.0, 670.0, 900.0, rng.uniform(-700, 700)])
+        group = rng.choice([body.EVERY_WALL, p.group, p.group, body.ROPE_GROUP, rng.choice(model.platforms).group])
+        if rng.random() < 0.2:
+            way = rng.choice([-1, 1])
+            x = (p.right if way > 0 else p.left) - way * rng.uniform(0, 4)
+            y, vx, vy = p.y_at(x) - rng.uniform(0, 3), way * rng.uniform(100, 700), rng.uniform(0, 700)
+        dt, limit = rng.choice([(body.TICK, 4.0), (body.TICK, 4.0), (0.004, 4.0), (0.002, 1.0), (0.01, 0.5),
+                                (body.TICK, 0)])
+        out.append((x, y, vx, vy, rng.choice([None, None, p, rng.choice(model.platforms)]), dt, limit, group,
+                    rng.choice([None, None, -1, 0, 1])))
+    return out
+
+
+def same_flights(model, cases, monkeypatch):
+    """physics.flight (body.fly's flight) with the C flight and without it: the same platform, x, t and speed at
+    landing, to the bit (a zero's sign too) and the type, with each wall rule (body.OWN_GROUP_WALLS)."""
+    from collections import OrderedDict
+
+    from gamelab import native
+    from gamelab.motion import body, physics
+    for own in (True, False):
+        monkeypatch.setattr(body, "OWN_GROUP_WALLS", own)
+        got = []
+        for use in (True, False):
+            monkeypatch.setattr(native, "USE", use)
+            monkeypatch.setattr(physics, "_FLY_CACHE", OrderedDict())
+            monkeypatch.setattr(physics, "_MODELS", OrderedDict())
+            got.append([physics.flight(model, *c) for c in cases])
+        for c, a, b in zip(cases, *got):
+            assert a[0] is b[0] and [(type(v), repr(v)) for v in a[1:]] == [(type(v), repr(v)) for v in b[1:]], c
+
+
+def test_her_flight_in_c_is_pythons(model, monkeypatch):
+    import random
+    from gamelab import native
+    if native.lib() is None:
+        pytest.skip(f"gamelab's C pieces aren't here: {native.why}")
+    same_flights(model, flights(model, random.Random(2), 1500), monkeypatch)
+
+
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_her_flight_in_c_is_pythons_on_the_real_map(monkeypatch):
+    import random
+    from gamelab import native
+    from gamelab.sim import scenarios
+    if native.lib() is None:
+        pytest.skip(f"gamelab's C pieces aren't here: {native.why}")
+    same_flights(scenarios.real_map(), flights(scenarios.real_map(), random.Random(3), 1500), monkeypatch)
+
+
 def test_jumps_need_a_sure_landing(model):
     from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly, sure_landing
     a = by_y(model, 300, 100)

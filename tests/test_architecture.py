@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 PKG = Path(__file__).resolve().parents[1] / "gamelab"
-SHARED = {"capture", "directions", "paths", "screen", "telemetry", "window"}
+SHARED = {"capture", "directions", "native", "paths", "screen", "telemetry", "window"}
 # Each layer and the gamelab layers it may import (besides itself and SHARED).
 ALLOWED = {
     "perception": set(),
@@ -67,7 +67,7 @@ def test_every_module_belongs_to_a_layer():
 def test_the_elevated_player_loads_only_what_it_needs():
     """`python -m gamelab player` runs as administrator and loads its code once: it goes through the
     command line (gamelab.__main__), then the player, and nothing of the stack (fights, navigation,
-    planning, the simulator, the mini-map) or the game data may come along."""
+    planning, the simulator, the mini-map), the game data or gamelab's C pieces may come along."""
     code = ("import sys, json; import gamelab.__main__ as m; m.build_parser(); "
             "import gamelab.control.player, gamelab.control.alarm, gamelab.perception.lie_detector; "
             "print(json.dumps(sorted(m for m in sys.modules if m.startswith(('gamelab', 'gamedata', 'tkinter')))))")
@@ -77,3 +77,4 @@ def test_the_elevated_player_loads_only_what_it_needs():
     stack = ("gamelab.behavior", "gamelab.motion", "gamelab.localization", "gamelab.attack", "gamelab.ui",
              "gamelab.sim", "gamedata", "tkinter")
     assert not [m for m in loaded if m.startswith(stack)], sorted(loaded)
+    assert "gamelab.native" not in loaded  # it loads a DLL built from the tree: never into the elevated player

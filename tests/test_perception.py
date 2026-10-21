@@ -492,17 +492,17 @@ def typed(spots: list) -> list:
     return [tuple((type(v).__name__, v) for v in s) for s in spots]
 
 
-def needs_kernels():
-    from gamelab.perception import kernels
-    if kernels.lib() is None:
-        pytest.skip(f"the C kernels aren't here: {kernels.why}")
+def needs_native():
+    from gamelab import native
+    if native.lib() is None:
+        pytest.skip(f"gamelab's C pieces aren't here: {native.why}")
 
 
 def test_silhouette_peaks_in_c_are_numpys(monkeypatch):
-    """Step 1's bookkeeping in C (kernels.peaks) against numpy's, on random colour, templates and scores, with
+    """Step 1's bookkeeping in C (native.peaks) against numpy's, on random colour, templates and scores, with
     ties and plateaus (quarters of colour make equal scores)."""
-    from gamelab.perception import kernels
-    needs_kernels()
+    from gamelab import native
+    needs_native()
     rng = np.random.default_rng(7)
     peaks = 0
     for k in range(400):
@@ -513,9 +513,9 @@ def test_silhouette_peaks_in_c_are_numpys(monkeypatch):
         sil = (rng.random((th, tw)) < 0.6).astype(np.float32)
         sil.flat[0] = 1.0
         t = mobs.MobTemplate(np.zeros((1, 1, 3), np.uint8), np.zeros((1, 1, 3), np.uint8), sil)
-        monkeypatch.setattr(kernels, "USE", True)
+        monkeypatch.setattr(native, "USE", True)
         a = mobs._spots(coarse, mobs.Cover(coarse), t, 3)
-        monkeypatch.setattr(kernels, "USE", False)
+        monkeypatch.setattr(native, "USE", False)
         b = mobs._spots(coarse, mobs.Cover(coarse), t, 3)
         assert typed(a) == typed(b), k
         peaks += len(a)
@@ -523,29 +523,29 @@ def test_silhouette_peaks_in_c_are_numpys(monkeypatch):
 
 
 def test_without_a_compiler_the_search_goes_on_in_numpy(monkeypatch, tmp_path):
-    from gamelab.perception import kernels
-    monkeypatch.setattr(kernels, "BUILD", tmp_path / "build")
-    monkeypatch.setattr(kernels, "VCVARS", tmp_path / "no-vcvars64.bat")
-    monkeypatch.setattr(kernels, "_tried", False)
-    monkeypatch.setattr(kernels, "_lib", None)
-    assert kernels.lib() is None and "Build Tools" in kernels.why
-    assert kernels.peaks(np.zeros((3, 3), np.float32), np.zeros((4, 4)), 1, 1, 0.1, 0.35) is None
+    from gamelab import native
+    monkeypatch.setattr(native, "BUILD", tmp_path / "build")
+    monkeypatch.setattr(native, "VCVARS", tmp_path / "no-vcvars64.bat")
+    monkeypatch.setattr(native, "_tried", False)
+    monkeypatch.setattr(native, "_lib", None)
+    assert native.lib() is None and "Build Tools" in native.why
+    assert native.peaks(np.zeros((3, 3), np.float32), np.zeros((4, 4)), 1, 1, 0.1, 0.35) is None
     found = MobDetector(threads=1).detect(with_monsters(("pig_0", 100, 420, False)))
     assert [m.kind for m in found] == ["pig"]
 
 
 def test_monsters_found_with_the_c_kernel_are_numpys(monkeypatch):
-    from gamelab.perception import kernels
-    needs_kernels()
+    from gamelab import native
+    needs_native()
     frames = [with_monsters(("pig_0", 100, 420, False), ("slime_4", 400, 300, True), ("snail_8", 700, 460, False),
                             ("pig_2", 800, 200, True), ("snail_10", 300, 470, True)), with_monsters()]
     detector, found = MobDetector(), 0
     for frame in frames:
         for search in (lambda: detector.detect(frame), lambda: detector.detect(frame, (250, 401)),
                        lambda: detector.detect_wide(frame, (0, 486))):
-            monkeypatch.setattr(kernels, "USE", True)
+            monkeypatch.setattr(native, "USE", True)
             a = search()
-            monkeypatch.setattr(kernels, "USE", False)
+            monkeypatch.setattr(native, "USE", False)
             b = search()
             assert typed(dataclasses.astuple(m) for m in a) == typed(dataclasses.astuple(m) for m in b)
             found += len(a)
