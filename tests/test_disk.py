@@ -124,6 +124,59 @@ def test_the_part_being_written_is_the_newest_run_by_its_last_write(tmp_path):
     assert fresh and source.path == part3 and records[0]["part"] == 3
 
 
+class _Listing:
+    """os.scandir's listing, with the directory's copy of some files' last write out of date (as NTFS keeps
+    it for a file still being written that nothing else opened): name -> the last write it says."""
+
+    def __init__(self, listing, stale: dict):
+        self.listing, self.stale = listing, stale
+
+    def __enter__(self):
+        self.listing.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self.listing.__exit__(*exc)
+
+    def __iter__(self):
+        for e in self.listing:
+            yield _Entry(e, self.stale.get(e.name))
+
+
+class _Entry:
+    def __init__(self, entry, stale):
+        self._entry, self._stale, self.name, self.path = entry, stale, entry.name, entry.path
+
+    def is_file(self):
+        return self._entry.is_file()
+
+    def stat(self):
+        if self._stale is None:
+            return self._entry.stat()
+        return os.stat_result((0o100666, 0, 0, 0, 0, 0, 0, self._stale, self._stale, self._stale))
+
+
+def test_a_part_still_being_written_is_the_newest_though_the_directory_says_it_was_written_when_made(tmp_path,
+                                                                                                       monkeypatch):
+    # On NTFS os.scandir reads the directory's copy of a file's last write and size, brought up to date only when
+    # the file is opened or closed: a part `watch` is still writing, that nothing opens, shows as written when it
+    # was made, 0 bytes long. A tour that finished after `watch` began stayed the newest, and the page froze on
+    # it until that part closed (hours). newest asks os.stat of the files the directory says are recent, and
+    # files_in (prune, lab-usage) asks it of every file.
+    now = time.time()
+    watch = _make(tmp_path, "20261020-100000-watch.jsonl", 1 / 86400, 5000, now)   # made an hour ago, written 1 s ago
+    tour = _make(tmp_path, "20261020-103000-tour.jsonl", 600 / 86400, 300, now)   # finished 10 minutes ago
+    old = _make(tmp_path, "20260901-100000-watch.jsonl", 40, 200, now)
+    real = os.scandir
+    monkeypatch.setattr(os, "scandir", lambda path: _Listing(real(path), {watch.name: now - 3600}))
+    assert telemetry.newest(tmp_path, now=now) == watch
+    assert {p.name: st.st_size for p, st in telemetry.files_in(tmp_path)} == {watch.name: 5000, tour.name: 300,
+                                                                            old.name: 200}
+    # Past RECENT_S the directory's word is taken (a part is never open that long): no os.stat per old file.
+    monkeypatch.setattr(os, "scandir", lambda path: _Listing(real(path), {watch.name: now - telemetry.RECENT_S - 1}))
+    assert telemetry.newest(tmp_path, now=now) == tour
+
+
 def test_the_player_moves_its_log_aside_when_it_starts_past_5_mb(tmp_path, monkeypatch):
     from gamelab.control import player
     log, older = tmp_path / "player.log", tmp_path / "player.log.1"

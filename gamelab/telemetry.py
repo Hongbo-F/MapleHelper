@@ -60,6 +60,7 @@ MAX_BYTES = 64 * 1024 * 1024
 # size cap alone bounds the disk. A number of days here deletes files last written longer ago than that too.
 KEEP_DAYS: float | None = None
 KEEP_BYTES = 2 * 1024 ** 3
+RECENT_S = 7 * 86400  # s: files the directory says were written this recently are asked their last write (newest)
 _DEFAULT = object()  # prune's keep_days when not given: KEEP_DAYS
 
 _sink: Callable[[dict], None] | None = None
@@ -241,32 +242,49 @@ class Follower:
         return _records(lines)
 
 
-def newest(folder: Path = FOLDER) -> Path | None:
+def newest(folder: Path = FOLDER, now: float | None = None) -> Path | None:
     """The telemetry file written to last (the run in progress, while there is one), if any.
 
     The window and the web page look for a newer run every second. On Windows os.scandir has each file's
     last write without a call per file: 0.10 ms with 40 files and 2.9 ms with 1000, where Path.glob and a
-    stat of each took 1.2 ms and 44 ms. Comparing the names `record_to` gives was no faster (3.3 ms with
-    1000) and is wrong once a year: they're in local time, so in the hour that repeats when the clocks go
-    back, a finished run's name sorts after the one in progress."""
+    stat of each took 1.2 ms and 44 ms. But on NTFS what it has is the directory's copy, brought up to date
+    only when the file is opened or closed: a part a run is still writing, that nothing else opens, shows
+    as last written when it was made, 0 bytes long. A run that finished after it began then stayed the
+    newest until that part closed (hours, for `watch`), and the page froze on it. So the files the
+    directory says were written in the last RECENT_S are asked with os.stat (it opens them), the rest go
+    by the directory: a part still open was made in that time (a part is MAX_BYTES at most: hunting writes
+    that in 15 hours, `watch` in 4). 1.0 ms with 40 recent files, 24 ms with 1000. Comparing the names
+    `record_to` gives was no faster (3.3 ms with 1000) and is wrong once a year: they're in local time, so
+    in the hour that repeats when the clocks go back, a finished run's name sorts after the one in
+    progress."""
+    now = time.time() if now is None else now
     try:
         with os.scandir(folder) as entries:
-            files = [(e.stat().st_mtime, e.name) for e in entries if e.name.endswith(".jsonl")]
+            listed = [(e.stat().st_mtime, e.name) for e in entries if e.name.endswith(".jsonl")]
     except OSError:  # no folder yet (or a file gone while looking: the next look finds the rest)
         return None
+    files = []
+    for mtime, name in listed:
+        if now - mtime < RECENT_S:
+            try:
+                mtime = os.stat(folder / name).st_mtime
+            except OSError:  # gone meanwhile
+                continue
+        files.append((mtime, name))
     return folder / max(files)[1] if files else None
 
 
 def files_in(folder: Path = FOLDER) -> Iterator[tuple[Path, os.stat_result]]:
-    """Each telemetry file in `folder` and its stat (none if there's no folder; one deleted meanwhile is
-    left out)."""
+    """Each telemetry file in `folder` and its os.stat (none if there's no folder; one deleted meanwhile is
+    left out). Not the directory's copy that os.scandir has: on NTFS a file still being written shows
+    there as it was when last opened, 0 bytes long if never, and `prune` would count it so."""
     try:
         with os.scandir(folder) as entries:
             for e in entries:
                 if e.name.endswith(".jsonl"):
                     try:
                         if e.is_file():
-                            yield Path(e.path), e.stat()
+                            yield Path(e.path), os.stat(e.path)
                     except OSError:
                         continue
     except OSError:
