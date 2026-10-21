@@ -72,9 +72,10 @@ def crop_on_her(cal: Calibration, frame: np.ndarray, width: int, height: int) ->
     """Where to record her: the crop around her name tag in `frame` (full size, of a client `width` x `height`,
     as the game shows it now), where the saved template finds it, unless the stored crop has it within TAG_SLACK of
     where calibrate puts it; where it isn't found, the stored crop. And what to tell the user: nothing when the
-    stored crop is kept; else where she is and whether the stored one had her, or that her tag wasn't found. The stored crop is calibrate's, around wherever she stood then: in game on
-    2026-10-21 the 16 `act --record` runs of a sweep never had her in their crop, from a calibration she had walked
-    away from (its outcomes were read off the screenshots after each run instead)."""
+    stored crop is kept; else where she is and whether the stored one had her, or that her tag wasn't found. The
+    stored crop is calibrate's, around wherever she stood then: in game on 2026-10-21 the 16 `act --record` runs
+    of a sweep never had her in their crop, from a calibration she had walked away from (its outcomes were read
+    off the screenshots after each run instead)."""
     tag, score = match_tag(frame, cal.template)
     if tag is None:
         return list(cal.crop), (f"her name tag wasn't found on screen (the best match {score:.2f}, under "

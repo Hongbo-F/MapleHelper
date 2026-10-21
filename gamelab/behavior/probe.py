@@ -24,7 +24,10 @@ throw she neither moves nor throws until its star's evidence is in: every look u
 star was due (longer while the target is hidden, up to HIDDEN_MAX_S: a hit monster flinches under its
 damage numbers for 1-3 s). So one throw's evidence is never another's, and a monster hit by one has stopped
 flinching (0.6 s, taller) when the next attack picks. A monster of a kind the probe doesn't throw at that
-comes close on her platform is fought off first (behavior.fight.clear, her platform only); knocked off her
+comes close on her platform is fought off first (behavior.fight.clear, her platform only); one it throws at,
+closer than its range, is left be (GIVE_WAY: or stepped away from). Standing where monsters spawn and throwing
+at those of other platforms, she clears her platform first, and again whenever one of its monsters is in front
+of her or in her way; a run that fights FIGHT_MAX_S without a throw stops (clears_first); knocked off her
 place, she walks or goes back to it, the last walk the way she throws, so that no throw turns her (a turn's
 tap walks her on). Nor does she walk or throw from a look a touch's knock may still be moving her in
 (Hunter.knocked). Every monster in front counts, its star stopped or not (the client checks the line to its
@@ -105,6 +108,39 @@ BEFORE_HIT_S = (STAR_DELAY_MS - 50) / 1000  # s after the attack key a look stil
 SETTLED_S = 0.3      # a monster seen this long after the star was due with its bar as before wasn't hit
 HURT = 0.02          # a bar this much lower than before is a hit
 WAIT_S = 0.1         # s between looks while there's nothing to throw at
+# Her own platform's monsters (`_keep_clear`). One closer than the probe's range is in her way (`in_her_way`):
+# one of a kind it throws at, on a platform it throws at (hers: claw-edge, air), closer than its kind's range;
+# any other closer than fight.IN_HER_WAY. Any other is fought off (fight.clear on her platform, up to one kill;
+# she steps away first if she can, as in any fight), never thrown at as the probe's. One it throws at isn't:
+# in the simulator (claw-edge on 21 with its pig and two slimes, the snails on 20 and 22, the game's errors, two
+# others allowed in front, 300 s, seeds 1 and 3-6) fighting them off left 1-4 throws where she made 30-40, and
+# she was knocked off 21 into the basin on the way. GIVE_WAY has her step away from it instead.
+GIVE_WAY = False     # Off: on those runs stepping away (to have it past its range's start, STEP_LEASH of her place at
+                     # most) made 15-37 throws, not 30-40, 6-14 of them where the claw's answers differ, not 11-16,
+                     # and decided 2 of the 5 seeds, not 3; it saved HP (0.75-0.80 left, not 0.60-0.73), but in game
+                     # on 2026-10-21 a pig or slime was inside claw-edge's 95 at 288 of 533 looks, touching her 4
+                     # times in 90 s for 1% of her HP. Stepping away only once one touches (her half width and 25)
+                     # did no better: 25-38 throws, and one of the 5 seeds decided the old claw's way
+STEP_LEASH = 60      # ... how far from her place she steps away at most ...
+END_ROOM = 90        # ... and never nearer than this to her platform's end (a touch's knock is 21-87 units)
+STEP_PAST = 10       # ... to have it this far past its range's start
+# A probe that throws at monsters on other platforms, standing on one where monsters spawn (clears_first:
+# step-down from 2, step-up from 4, claw-down from 3), clears it first: its monsters come back in front of her
+# and beside her (2's spawn points are 103 units right of step-down's x 50, and 9, 120 and 234 left of it), and
+# one in front takes any star before a monster below does. In game on 2026-10-21 step-down fought 2's monsters
+# one at a time as they came close for all of its 150 s, knocked off onto 4 three times, and threw none. So she
+# clears it (fight.clear: every monster on it in reach) when she gets to her place, again whenever one of its
+# monsters is in front of her or in her way, and waits for a throw in between ...
+CLEAR_KILLS = 8      # ... a clear stopping after this many kills (2 has 4 spawn points) ...
+CLEAR_S = 30.0       # ... or this long ...
+CLEAR_PATIENCE = 1.0  # ... or once nothing on it has been in reach this long
+FIGHT_MAX_S = 120.0  # a run stops once she's fought this long (clears and fights off) without a throw: where they
+                     # come back faster than she kills them there is nothing to wait for. In the simulator
+                     # (step-down for 300 s with 2's and 4's monsters, seeds 1-3): back 8 or 15 s after a kill,
+                     # fighting them one at a time as they came close she threw once in the six runs and was
+                     # touched 153-205 times a run; clearing, she threw none either and stopped after 126-150 s.
+                     # Back after 30 s: one at a time 3 throws on each seed (93-119 touches), clearing 7, 4 and 5
+                     # (52-79). How soon they're back in game isn't measured
 STYLES = ("throw", "jump_throw", "jump_back")  # from the ground, a jump throw, a jump back (control.Actions)
 # The scorer's grids: the first window's top and floor (above her feet), the line's height.
 TOP0_GRID = range(0, 81)
@@ -328,10 +364,23 @@ class ProbeReport:
     misses: int = 0     # ... showed none
     unknown: int = 0    # ... couldn't be told (hidden throughout)
     stop: str = ""
+    fights: int = 0     # fights with her own platform's monsters (clears and fights off: _keep_clear) ...
+    fight_s: float = 0.0  # ... and how long they took
 
     def __str__(self):
+        fought = f"; fought her platform's monsters {self.fights} times ({self.fight_s:.0f} s)" if self.fights else ""
         return (f"{self.probe}: {self.throws} throws, the target hit by {self.hits}, not by {self.misses}, "
-                f"{self.unknown} can't tell; stopped: {self.stop}")
+                f"{self.unknown} can't tell{fought}; stopped: {self.stop}")
+
+
+@dataclass
+class _Guard:
+    """Her own platform's monsters over a run (_keep_clear): whether she clears it first (clears_first) and has
+    yet, where she stands while she gives way to one (GIVE_WAY), and how long she's fought since her last throw."""
+    clears: bool
+    place: float
+    cleared: bool = False
+    fought: float = 0.0
 
 
 # --- a run ---------------------------------------------------------------------------------------------
@@ -356,6 +405,7 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
     deadline = time.monotonic() + seconds
     flying: _Flying | None = None
     unplaced = 0
+    guard = _Guard(clears_first(h.model, probe), probe.x)
     out = JUMP_BACK_OUT if probe.style == "jump_back" else 0.0
     ranges = ", ".join(f"{k} {lo:.0f}-{hi - out:.0f}" for k in probe.kinds for lo, hi in (probe.range_of(k),))
     h.log(f"probe {probe.name} ({probe.asks}): on {probe.platform} at x {probe.x:.0f}, {probe.style} {probe.side} "
@@ -391,12 +441,17 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
         if h.knocked(s):  # a touch's knock may still be moving her: neither a walk nor a throw from this look
             time.sleep(WAIT_S)
             continue
-        if (stop := _to_place(h, nav, probe, s)) is not None:
+        if guard.place != probe.x and s.platform.id == probe.platform and not in_her_way(probe, s, probe.x):
+            guard.place = probe.x  # what she gave way to has gone from her place: back to it
+        if (stop := _to_place(h, nav, replace(probe, x=guard.place), s)) is not None:
             if stop:
                 report.stop = stop
                 break
             continue
-        if _fight_off(h, probe, s):
+        if _keep_clear(h, probe, s, guard, report):
+            if guard.fought >= FIGHT_MAX_S:
+                report.stop = f"her platform's monsters kept her fighting {guard.fought:.0f} s without a throw"
+                break
             continue
         # The attack key goes down as soon as it's chosen, and the attack picks JUMP_LAG after it (the look's frame
         # is a little older than its time: a few units more for a walking pig, inside the probes' margins).
@@ -407,6 +462,7 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
             continue
         flying = _throw(h, s, probe, target)
         report.throws += 1
+        guard.fought = 0.0
     if flying is not None:  # stopped while its evidence came in: kept as far as it got
         _done(h, report, flying)
     report.stop = report.stop or ("throws done" if report.throws >= probe.throws else "time limit")
@@ -438,18 +494,83 @@ def _to_place(h: "Hunter", nav: "Navigator", probe: Probe, s: Scene) -> str | No
     return ""
 
 
-def _fight_off(h: "Hunter", probe: Probe, s: Scene) -> bool:
-    """A monster the probe doesn't throw at close to her on her platform (within IN_HER_WAY): fought (a fight
-    on her platform only, up to one kill). Whether there was one."""
-    here, x = s.platform.id, s.where.x
-    close = [m for m in s.monsters if m.platform == here and abs(m.x - x) < IN_HER_WAY
-             and not (here in probe.at and m.kind in probe.kinds)]
+def clears_first(model: MapModel, probe: Probe) -> bool:
+    """Whether a run of `probe` clears her platform before it throws (see CLEAR_KILLS): monsters spawn on it (the
+    map's spawn points) and it throws at those of other platforms."""
+    return probe.platform in model.spawn_platforms and probe.platform not in probe.at
+
+
+def _thrown_at(probe: Probe, platform: int, m: Monster) -> bool:
+    """Whether monster `m` (on `platform`) is of a kind and on a platform `probe` throws at."""
+    return platform in probe.at and m.kind in probe.kinds
+
+
+def in_her_way(probe: Probe, s: Scene, x: float | None = None) -> list[Monster]:
+    """The monsters of look `s` on her platform closer to her (or to map x `x`) than the probe's range: one it
+    throws at closer than its kind's range starts, any other closer than fight.IN_HER_WAY."""
+    here = s.platform.id
+    x = s.where.x if x is None else x
+    return [m for m in s.monsters if m.platform == here
+            and abs(m.x - x) < (probe.range_of(m.kind)[0] if _thrown_at(probe, here, m) else IN_HER_WAY)]
+
+
+def _keep_clear(h: "Hunter", probe: Probe, s: Scene, guard: _Guard, report: ProbeReport) -> bool:
+    """Her own platform's monsters, before a throw (see GIVE_WAY, CLEAR_KILLS): with clears_first, the platform
+    cleared when she first gets to her place with any on it, and whenever one is in front of her or in her way;
+    else one in her way fought off, or (GIVE_WAY) one she throws at stepped away from. Whether she did any."""
+    here = s.platform.id
+    on = [m for m in s.monsters if m.platform == here]
+    close = in_her_way(probe, s)
+    if guard.clears and on:
+        front = [m for m in in_front(s, probe.side) if m.platform == here]
+        if guard.cleared and not front and not close:
+            return False
+        h.log(f"  clearing platform {here} first: {len(on)} on it, {len(front)} in front of her")
+        _fight(h, guard, report, here, max_kills=CLEAR_KILLS, seconds=CLEAR_S, patience=CLEAR_PATIENCE)
+        guard.cleared = True
+        return True
     if not close:
         return False
+    x = s.where.x
     m = min(close, key=lambda m: abs(m.x - x))
+    if _thrown_at(probe, here, m):
+        if GIVE_WAY and (to := _give_way(probe, s, m)) is not None:
+            h.log(f"  {m.kind} close on her platform at {m.x - x:+.0f}: stepping away to x {to:.0f}")
+            h.actions.walk(RIGHT if to > x else LEFT, abs(to - x))
+            guard.place = to
+            return True
+        others = [o for o in close if not _thrown_at(probe, here, o)]
+        if not others:
+            return False
+        m = min(others, key=lambda m: abs(m.x - x))
     h.log(f"  {m.kind} close on her platform at {m.x - x:+.0f}: fighting it off first")
-    h.clear(None, ground={here}, max_kills=1, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False)
+    _fight(h, guard, report, here, max_kills=1, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE)
     return True
+
+
+def _give_way(probe: Probe, s: Scene, m: Monster) -> float | None:
+    """Where she steps to away from monster `m`, one the probe throws at, to have it STEP_PAST its range's start:
+    None if that's past STEP_LEASH from her place or END_ROOM from her platform's ends, too short a step to take,
+    or into another monster's way."""
+    p, x = s.platform, s.where.x
+    toward = 1 if m.x > x else -1
+    to = m.x - toward * (probe.range_of(m.kind)[0] + STEP_PAST)
+    lo, hi = max(probe.x - STEP_LEASH, p.left + END_ROOM), min(probe.x + STEP_LEASH, p.right - END_ROOM)
+    if not lo <= to <= hi or abs(to - x) < APPROACH:
+        return None
+    if any(o is not m for o in in_her_way(probe, s, to)):
+        return None
+    return to
+
+
+def _fight(h: "Hunter", guard: _Guard, report: ProbeReport, here: int, **kw) -> None:
+    """A fight on her platform only, where she stands (fight.clear), timed for the report and FIGHT_MAX_S."""
+    began = time.monotonic()
+    h.clear(None, ground={here}, approach=False, **kw)
+    took = time.monotonic() - began
+    report.fights += 1
+    report.fight_s += took
+    guard.fought += took
 
 
 def in_front(s: Scene, side: str) -> list[Monster]:

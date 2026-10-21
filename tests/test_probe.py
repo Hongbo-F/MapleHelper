@@ -464,6 +464,94 @@ def test_a_probe_throws_with_the_regular_attack_and_puts_the_wall_switch_back():
     assert attack_keys == {sim_keys.attack.name} and keys == [True]
 
 
+@REAL
+def test_which_probes_clear_their_platform_first():
+    # Those that throw at monsters on other platforms from one where monsters spawn: step-down from 2, step-up
+    # from 4, claw-down from 3. claw-edge and air throw at monsters on their own platform; the rest stand where
+    # none spawn.
+    model = scenarios.real_map()
+    assert {n for n, p in probe.PROBES.items() if probe.clears_first(model, p)} == {"step-down", "step-up", "claw-down"}
+
+
+def test_who_is_in_her_way_on_her_platform():
+    # One of a kind it throws at, on its platform (hers), closer than its kind's range starts; any other closer
+    # than fight.IN_HER_WAY (150); those on other platforms never.
+    p = Probe("toy", "a test", 0, 500.0, RIGHT, (0,), ("pig",), (110, 200), by_kind=(("slime", (60, 90)),))
+    pig, far_pig, snail = target(600), target(390), target(640, kind="snail")
+    below = target(520, 560, platform=1)
+    s = scene(pig, far_pig, snail, below)
+    assert probe.in_her_way(p, s) == [pig, snail]  # 100 off: under the pig's 110; the snail 140 off, under 150
+    assert probe.in_her_way(p, s, x=400.0) == [far_pig]  # the pig 10 off; the snail 240 off, the other pig 200
+    both, slime = dataclasses.replace(p, kinds=("pig", "slime")), target(550, kind="slime")
+    assert probe.in_her_way(both, scene(slime)) == [slime]  # a slime by its own range, 60-90: 50 off
+    assert probe.in_her_way(both, scene(target(570, kind="slime"))) == []
+
+
+SPAWN_WORLD = {2, 4}  # 2's monsters, and 4's, which step-down throws at
+
+
+def _step_down(respawn: float, seed: int = 1):
+    """step-down for 300 s in a world with 2's and 4's monsters, back `respawn` s after each kill: its log's rows,
+    the report and the run's log."""
+    out = {}
+
+    def run(sim):
+        h = sim.hunter()
+        out["report"] = probe.run(h, sim.navigator(h), probe.PROBES["step-down"], seconds=300)
+        return str(out["report"])
+    trace = scenarios.run_scenario(scenarios.Scenario("probe_step_down", run, (2, 50.0), monsters=SPAWN_WORLD,
+                                                      limit=600, seed=seed, realism=world_mod.Realism(respawn=respawn)))
+    return [json.loads(line) for line in trace["files"].get("probe_geometry.jsonl", ())], out["report"], trace
+
+
+@REAL
+def test_step_down_clears_her_platform_first_and_throws_between_its_respawns():
+    # In game on 2026-10-21 step-down fought 2's monsters one at a time as they came close, for its whole 150 s,
+    # and threw none. She clears 2 when she gets there and again whenever one of its monsters is in front of her
+    # or in her way. With them back 30 s after a kill, she throws in between (7 times in 300 s on seed 1; fighting
+    # them one at a time, 3), each with none of 2's in front of her, and they touch her 53 times, not 102.
+    rows, report, trace = _step_down(30.0)
+    assert any("clearing platform 2 first" in line for line in trace["log"])
+    assert not any("fighting it off" in line for line in trace["log"])
+    assert len(rows) >= 5 and report.fights >= 5 and report.stop == "time limit"
+    assert all(m["platform"] != 2 for r in rows for m in r["front"])
+    assert trace["world"]["touches"] < 80
+
+
+@REAL
+def test_a_probe_that_only_fights_its_platform_s_monsters_stops_and_says_so():
+    # Back 8 s after a kill, 2's monsters come back faster than she kills them, there and on 4: she'd fight the
+    # probe's whole time through (fighting them one at a time she did: 0-1 throws in 300 s on seeds 1-3). She
+    # stops once she's fought FIGHT_MAX_S without a throw, and says why.
+    rows, report, trace = _step_down(8.0)
+    assert rows == [] and report.stop.startswith("her platform's monsters kept her fighting")
+    assert probe.FIGHT_MAX_S <= report.fight_s <= probe.FIGHT_MAX_S + probe.CLEAR_S + 5
+    assert trace["seconds"] < 250
+
+
+@REAL
+def test_with_give_way_she_steps_away_from_one_she_throws_at_and_keeps_near_her_place(monkeypatch):
+    # GIVE_WAY (off by default: see it) has her step away from a monster she throws at that comes closer than
+    # its range starts, rather than stand in it: never past STEP_LEASH of her place or END_ROOM of her
+    # platform's ends, and back to her place once it's gone from there. A slime spawns 25 units from claw-edge's
+    # place on 21, a pig 135 off; she throws only at them 95-160 off, from within the leash.
+    monkeypatch.setattr(probe, "GIVE_WAY", True)
+
+    def run(sim):
+        h = sim.hunter()
+        return str(probe.run(h, sim.navigator(h), probe.adjust(probe.PROBES["claw-edge"], throws=12), seconds=300))
+    trace = scenarios.run_scenario(scenarios.Scenario("probe_give_way", run, (21, -225.0),
+                                                      monsters=[("Slime", 21, -200.0), ("Pig", 21, -90.0)], limit=500))
+    rows, here = _rows(trace), scenarios.real_map().platform(21)
+    steps = [line for line in trace["log"] if "stepping away to x" in line]
+    assert steps and not any("fighting it off" in line for line in trace["log"])
+    to = [float(line.rsplit("x ", 1)[1]) for line in steps]
+    assert all(abs(x + 225) <= probe.STEP_LEASH and here.left + probe.END_ROOM <= x <= here.right - probe.END_ROOM
+               for x in to)
+    assert rows and all(95 <= abs(r["dx"]) <= 160 and abs(r["x"] + 225) <= probe.STEP_LEASH + probe.STAND_SLACK
+                        for r in rows)
+
+
 def test_a_probe_waiting_for_a_lone_monster_stops_once_the_alarm_is_up(alarm_file, monkeypatch):
     # Waiting for a lone monster in range she sends no key, only looks, and a look brings the game to the front:
     # once the player has seen the Lie Detector (the alarm raised), the next pass stops the run, the alarm passing
