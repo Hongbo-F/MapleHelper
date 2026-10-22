@@ -13,11 +13,12 @@ The searches run off the feed's frame loop (localization.worldstate), so what on
 a few after its own, the tracks followed meanwhile (`merge`): its sightings are matched to the tracks as they
 were at its frame (the tracks re-found in that frame are those sightings already). A track seen since learns
 nothing from it; one found dead since isn't brought back, nor made anew (it's the same monster: `late
-sightings of the dead`); one gone off screen since stays off; a new one is new as of the search's frame, and
-re-found from the next frame on. And a track hidden too long isn't judged gone (dead, or lost in a crowd)
-while a search for monsters is out of a frame after it was last seen and by the frame it was due (`searching`,
-LATE_SEARCH_S): it may have been seen there, as that search inline would have shown before the track was
-judged.
+sightings of the dead`); one gone off screen since stays off; a new one is new as of the search's frame,
+re-found from the next frame on, and aimed at by her throws since that frame that went its way (as it would
+have been, followed from then; so is one back from off screen). And a track hidden too long isn't judged
+gone (dead, or lost in a crowd) while a search for monsters is out of a frame after it was last seen and by
+the frame it was due (`searching`, LATE_SEARCH_S): it may have been seen there, as that search inline would
+have shown before the track was judged.
 
 A track not seen in a frame:
 - where it should be is off screen: `offscreen` (event `left`), remembered OFFSCREEN_S to know it again
@@ -206,6 +207,7 @@ class _Throw:
     t: float
     side: str
     aimed: set[int]  # the tracks a star thrown then could meet
+    her: tuple[float, float] | None = None  # where she was then (in the last frame placed)
 
 
 class MonsterTracker:
@@ -241,14 +243,9 @@ class MonsterTracker:
     def throw(self, t: float, side: str) -> None:
         """She threw toward `side` at t (Actions.throw_listeners): the monsters a star could meet from where
         she was in the last frame."""
-        her = self.her
-        aimed = set()
-        if her is not None:
-            sign = 1 if side == RIGHT else -1
-            aimed = {tr.id for tr in self.tracks.values() if tr.state not in (DEAD, OFFSCREEN)
-                     and -10 <= sign * (self.predicted(tr, t) - her[0]) <= THROW_REACH
-                     and abs(tr.y - her[1]) <= THROW_DY}
-        self.throws.append(_Throw(t, side, aimed))
+        th = _Throw(t, side, set(), self.her)
+        th.aimed = {tr.id for tr in self.tracks.values() if tr.state not in (DEAD, OFFSCREEN) and self._in_path(th, tr)}
+        self.throws.append(th)
 
     # --- each frame ---------------------------------------------------------------------------------
 
@@ -299,12 +296,13 @@ class MonsterTracker:
         reach); `view`, what that frame showed. One no track explains is new, as of t. A track seen since t
         learns nothing from it; one found dead since t isn't brought back, nor made anew; one off screen now
         (where it should be at `t_now`, in the newest view `now`) stays off, else it's `back`. The events are
-        of the frame at t."""
+        of the frame at t. A new one (or one back) is put in the throws since t whose path it was in."""
         events: list[Event] = []
         for m, tr in self._match(t, found, known, late=True):
             if tr is None:
                 tr = self._new(t, m, view)
                 events.append(Event(tr.how, t, tr.id, {"kind": m.kind, "x": round(m.x), "platform": m.platform}))
+                self._aimed_since(tr, t)
             elif tr.state == DEAD:
                 self.counts["late sightings of the dead"] += 1
             elif tr.last_seen < t - 1e-9:
@@ -313,6 +311,7 @@ class MonsterTracker:
                 if was == OFFSCREEN:
                     if now is not None and t_now is not None and now.shows(tr.kind, self.predicted(tr, t_now), tr.y):
                         events.append(Event("back", t, tr.id, {"kind": m.kind, "after": after}))
+                        self._aimed_since(tr, t)
                     else:
                         tr.state = OFFSCREEN  # in view at t, gone since
         return events
@@ -377,6 +376,23 @@ class MonsterTracker:
                 out[i] = self.tracks[tid]
                 used.add(tid)
         return [(m, out.get(i)) for i, m in enumerate(found)]
+
+    def _in_path(self, th: _Throw, tr: Track) -> bool:
+        """Whether a star of throw `th` could meet track `tr`: where it should be at the throw's key, ahead of
+        where she was then by THROW_REACH at most, THROW_DY above or below her feet."""
+        if th.her is None:
+            return False
+        sign = 1 if th.side == RIGHT else -1
+        return (-10 <= sign * (self.predicted(tr, th.t) - th.her[0]) <= THROW_REACH
+                and abs(tr.y - th.her[1]) <= THROW_DY)
+
+    def _aimed_since(self, tr: Track, t: float) -> None:
+        """A track a late search made (or brought back) as of t, put in the throws since t whose path it was in:
+        followed from t, as inline it would have been, it was there for them (else her kill of it is someone
+        else's, and her gain unexplained: 3 tracks in about 7,500 merges of three feed scenarios)."""
+        for th in self.throws:
+            if th.t > t and self._in_path(th, tr):
+                th.aimed.add(tr.id)
 
     def _new(self, t: float, m: Monster, view: View) -> Track:
         how = "entered" if view.at_edge(m.mob) else "spawned" if self._near_spawn(m) else "appeared"

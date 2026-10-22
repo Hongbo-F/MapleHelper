@@ -324,3 +324,51 @@ def test_a_track_hidden_too_long_waits_for_a_search_out_that_may_have_seen_it():
     other.searching = 100.3 + tracking.HIDE_S + 2 * tracking.LATE_SEARCH_S
     run(other, [(None, view())] * (5 * FPS), start=100.4)
     assert other.tracks[1].state == DEAD
+
+
+@pytest.mark.parametrize("late", [False, True])
+def test_a_monster_a_late_search_found_is_aimed_at_by_her_throws_since_its_frame_and_her_kill_is_hers(late):
+    # Inline, the pig found by the search of frame 1 is followed from then, and her throw at 100.05 is aimed at
+    # it. Its answer back at frame 3, the throw came before its track did: it's put in that throw's path all the
+    # same, and the kill her EXP shows is hers (it had been someone else's, and her gain unexplained).
+    tracker = MonsterTracker(throws=True)
+    pig = sighting(1200, pose="stand")
+    ahead = sighting(700, pose="stand")  # one behind her: the throw went the other way
+    t = lambda k: 100.0 + k / FPS
+    tracker.update(t(0), {}, [], view(), HER)
+    if late:
+        tracker.update(t(1), {}, [], view(), HER)
+        tracker.throw(100.05, "right")
+        tracker.update(t(2), {}, [], view(), HER)
+        tracker.update(t(3), {}, [], view(), HER)
+        tracker.merge(t(1), [pig, ahead], set(), view(), view(), t(3))
+    else:
+        tracker.update(t(1), {}, [pig, ahead], view(), HER)
+        tracker.throw(100.05, "right")
+        tracker.update(t(2), {1: pig, 2: ahead}, [], view(), HER)
+        tracker.update(t(3), {1: pig, 2: ahead}, [], view(), HER)
+    assert [sorted(th.aimed) for th in tracker.throws] == [[1]]
+    k, events = 4, []
+    while t(k) < 100.3:  # re-found until 100.3, then gone: her EXP went up at 100.35
+        events += tracker.update(t(k), {1: pig, 2: ahead}, [], view(), HER)
+        k += 1
+    tracker.gain(100.35)
+    while t(k) < 104.5:
+        events += tracker.update(t(k), {2: ahead}, [], view(), HER)
+        k += 1
+    assert [(e.track, e.data["cause"]) for e in events if e.kind == "died"] == [(1, "hers")]
+    assert tracker.counts["gains unexplained"] == 0
+
+
+def test_one_a_late_search_brought_back_from_off_screen_is_aimed_at_by_the_throws_since():
+    tracker = MonsterTracker(throws=True)
+    run(tracker, walk(1400, 125, 0.3))  # walking right, then off screen as she walks left
+    run(tracker, [(None, view(her_x=700))], start=100.4)
+    tr = tracker.tracks[1]
+    assert tr.state == OFFSCREEN
+    tr.last_seen = 100.2  # (its re-finds missed it from then on: a search of 100.3 saw it)
+    tracker.her = (1100.0, HER[1])  # she has come back right, and throws its way
+    tracker.throw(100.45, "right")
+    assert tracker.throws[-1].aimed == set()  # off screen as far as the tracker knew
+    tracker.merge(100.3, [sighting(1480)], set(), view(), view(), 100.5)  # in view now: back
+    assert tr.state == LIVE and tracker.throws[-1].aimed == {1}
