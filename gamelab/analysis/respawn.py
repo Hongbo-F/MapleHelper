@@ -20,14 +20,19 @@ jump; the hunt loop's own looks that saw a drop on her platform looked for drops
 navigator's looks for her landing, the looter's, the rests') say nothing. Where the screen was is put by the camera's
 model (localization.pose.Camera: her at its offset, stopped at the map's edges), which the caller passes in.
 
-**(a) Respawn: an episode** starts at a kill on a platform (her 'kill' events; with the continuous feed, its 'died',
-others' too) whose monster was seen there in the KILL_SEEN_S before (a kill placed on the wrong monster would start
-one on a platform empty long since), if the looks covering the platform after it see it empty: EMPTY_N of them,
+**(a) Respawn: an episode** starts at a kill on a platform (her 'kill' events; and the deaths the continuous feed
+saw, 'died': `watch`'s, hers and others', and from late on 2026-10-21 a hunt's with `--feed`, others' only, hers being
+its 'kill' events) whose monster was seen there in the KILL_SEEN_S before (a kill placed on the wrong monster would
+start one on a platform empty long since), if the looks covering the platform after it see it empty: EMPTY_N of them,
 EMPTY_S apart at least, from FADE_S after the kill (its monster is seen dying where it died for up to 1.26 s:
 MobBody.die_s). A monster seen there then (or a later kill there) ends it at the midpoint between that look and the
-last that saw the platform empty, if they're MAX_GAP apart at most; a longer gap (she was away) censors it at the last
-empty look, as does the end of the run or HORIZON. A monster seen first with an HP bar is one she had hurt, hidden for a
-while under its damage numbers (1-3 s): it never left, and the episode is dropped ('a hurt one back'); so is one never
+last that saw the platform empty, if they're MAX_GAP apart at most. A longer gap between the looks covering it, the
+next seeing a monster or not, censors it at the last empty look (she was away: a monster may have come back and been
+killed by someone else meanwhile, and the telemetry has others' kills only from the feed), as does the end of the run
+or HORIZON. (Until late on 2026-10-21 an empty look after a gap went on with the episode, as if the platform had been
+empty all along: of the 77 live episodes, 34 spanned such a gap, of up to 111 s.) A monster seen first with an HP
+bar is one she had hurt, hidden for a while under its damage numbers (1-3 s): it never left, and the episode is
+dropped ('a hurt one back'); so is one never
 seen emptied ('not emptied': another monster was there). 'lone' episodes have no other kill on the platform in the
 LONE_S before: under a respawn per spawn point (each point's monster back a fixed time after its own death), an
 earlier kill's monster coming back first cuts the time short, and in the simulator (8 s, at the spawn point) the
@@ -86,7 +91,8 @@ KILL_DX = 60.0     # within this: the live kills' events came 0.9 s after their 
                    # 1.9 s at the 90th percentile, 2.5 s at the 95th (a hit monster hides under its damage numbers)
 EMPTY_N = 2        # looks covering a platform that must see it empty, ...
 EMPTY_S = 0.5      # ... this far apart at least, before it counts as emptied: a look misses a monster now and then
-MAX_GAP = 2.0      # s: a monster seen this soon after the last look that saw its platform empty came in between
+MAX_GAP = 2.0      # s: a monster seen this soon after the last look that saw its platform empty came in between;
+                   # a platform seen emptied is followed only while the looks covering it are this close
 HORIZON = 180.0    # s an episode is followed at most
 LONE_S = 15.0      # s with no other kill on the platform before an episode's: 'lone' (MeowDB's slowest respawn per
                    # spawn point is 12.56 s: a 5 s cooldown and the 7.56 s tick)
@@ -148,7 +154,8 @@ class Episode:
     width: float       # s between the last empty look and the look that saw one back (0 when censored)
     lone: bool         # no other kill on the platform in the LONE_S before
     near: bool         # her within NEAR of one of its spawn points at the kill
-    why: str = ""      # how a censored one ended: 'away' (a gap of over MAX_GAP), 'end' (the run or HORIZON)
+    why: str = ""      # how a censored one ended: 'away' (a gap of over MAX_GAP between the looks covering it),
+                       # 'end' (the run or HORIZON)
 
 
 @dataclass
@@ -242,8 +249,8 @@ def _view(corner, x: float, y: float) -> tuple[float, float, float, float]:
 
 
 def kills(records: list[dict]) -> list[Kill]:
-    """The run's kills: hers ('kill' events: the look that saw her EXP go up), and with the continuous feed, the
-    deaths it saw ('died': hers and others')."""
+    """The run's kills: hers ('kill' events: the look that saw her EXP go up), and the deaths the continuous feed saw
+    ('died': `watch`'s, hers and others'; a hunt's with the feed, others' only)."""
     out = []
     for r in records:
         if r.get("topic") != "event":
@@ -345,7 +352,9 @@ def _episode(seq: list[Look], times: list[float], k: Kill, p, band, lone: bool, 
         if seen := (_on(lk, p.id) if lk.searched and lk.standing else []):
             return back(lk.t, any(m.get("bar") is not None for m in seen))
         if covers(lk, p, band):
-            if empties and lk.t - empties[-1] > MAX_GAP and not emptied():
+            if empties and lk.t - empties[-1] > MAX_GAP:
+                if emptied():  # unwatched for longer: a monster may have come and gone (another player's kill)
+                    return Episode(p.id, k.kind, k.t, empties[-1] - k.t, False, 0.0, lone, near, "away")
                 empties = []  # a gap before it was seen emptied: start again (its emptiness then isn't known)
             empties.append(lk.t)
     if not emptied():

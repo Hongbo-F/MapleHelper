@@ -154,7 +154,9 @@ class Hunter:
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False
 
     def _publish(self, s: Scene) -> None:
-        """The look and the drops she remembers, for the mini-map (telemetry)."""
+        """The look and the drops she remembers, for the mini-map (telemetry); with a feed, the deaths it saw that
+        weren't hers ('died', as `watch` publishes them: analysis.respawn reads them as others' kills, a platform
+        emptied by someone else; hers are the 'kill' events already)."""
         if telemetry.recording():
             record = s.record()
             if record["her"] is not None:
@@ -163,6 +165,9 @@ class Hunter:
             telemetry.emit("drops", inventory_full=self.looter.inventory_full, pending=[
                 {"x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform, "mesos": d.mesos}
                 for d in self.looter.pending])
+            for e in s.events or ():
+                if e.kind == "died" and e.data.get("cause") != "hers":
+                    telemetry.emit("event", kind="died", text=e.text(), track=e.track)
 
     def _log_hit(self, s: Scene) -> None:
         """A hit while no key was pressed since the last look: how far it pushed her (knockback), kept

@@ -92,13 +92,14 @@ SPOT_REST = 10.0       # ... not sooner than this after taking a spot ...
 SPOT_CHANGES = 4       # ... and at most this many times per visit to a ground
 # s from a kill until the monster is back (the simulator's): rules 8 and 9 wait for it, and the fast exit leaves a
 # ground RESPAWN + 2 s after her last kill there. The live telemetry of 2026-10-19 to 21 says the game doesn't refill a
-# platform she empties so (analysis.respawn: README, Respawns and drop life): of 77 platforms a kill of hers emptied, 13
-# were seen with a monster again, all within 12.8 s, and 83% weren't by 12.56 s (95% interval 72-90%, 46 followed that
-# long; MeowDB's slowest respawn at a spawn point: its 5 s cooldown and the 7.56 s tick), nor 81% by 60 s (15 followed);
-# in the simulator, by the same report, none stayed empty past 8.8 s (14 of 22 seen back, all by then). What to put here
-# instead isn't settled (the median isn't reached, and the game may send a respawn elsewhere on the map, past a cap of
-# its monsters, rather than later): it stays until the in-game check (README). It decided 11.5% of the live hunt loops'
-# time (rule 8, 6.2%; rule 9, 5.3%) and 20 of their 43 departures from a ground.
+# platform she empties so (analysis.respawn: README, Respawns and drop life): of 77 platforms a kill of hers emptied,
+# each followed while the looks covering it came 2 s apart at most, 12 were seen with a monster again, all within 10.8 s,
+# and 80% weren't by 12.56 s (95% interval 67-88%, 23 still followed then; MeowDB's slowest respawn at a spawn point:
+# its 5 s cooldown and the 7.56 s tick); none was watched so past 79 s, and too few past 30 s to say more (11 followed:
+# 80%). In the simulator, by the same report, 11 of 22 were seen back by 8.8 s, the rest watched only to 6.3 s. What to
+# put here instead isn't settled (the median isn't reached, and the game may send a respawn elsewhere on the map, past
+# a cap of its monsters, rather than later): it stays until the in-game check (README). It decided 11.5% of the live
+# hunt loops' time (rule 8, 6.2%; rule 9, 5.3%) and 20 of their 43 departures from a ground.
 RESPAWN = 8.0
 PATIENCE = {"ground": 1.0, "spot": 2.0, "none": 0.4}  # rule 9: today's patience values
 PRIOR_S = 20.0         # the rate rule: a ground's expected rate counts as this many s of hunting there

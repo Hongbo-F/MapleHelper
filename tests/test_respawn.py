@@ -66,14 +66,16 @@ def _episodes(model, records):
     return respawn.respawns(seq, respawn.kills(records), model, BAND)
 
 
-def _snail_on_22(model, back_at=9.25, bar=None, stop=None, every=0.25, other=False):
+def _snail_on_22(model, back_at=9.25, bar=None, stop=None, every=0.25, other=False, gap=None):
     """Her on 22 by its one spawn point (a snail's): the snail seen, killed at 0.3 s, the platform seen empty every
-    `every` s, then a snail seen back at `back_at` (with an HP bar, or none: None never), looks stopping at `stop`."""
+    `every` s, then a snail seen back at `back_at` (with an HP bar, or none: None never), looks stopping at `stop`, and
+    none in the span `gap` (from, to)."""
     records = [{"topic": "session", "t": 0.0, "map": model.id, "command": "tour", "mode": "live"},
                _scene(model, 0.0, 22, 60.0, [("snail", 22, 80.0, 0.3)]), _kill(0.3, "snail", 22, 80.0)]
     t = 0.5
     while t < (back_at or 20.0) - 1e-9 and (stop is None or t < stop):
-        records.append(_scene(model, t, 22, 60.0, [("snail", 22, 100.0, None)] if other else ()))
+        if gap is None or not gap[0] < t < gap[1]:
+            records.append(_scene(model, t, 22, 60.0, [("snail", 22, 100.0, None)] if other else ()))
         t += every
     if back_at is not None:
         records.append(_scene(model, back_at, 22, 60.0, [("snail", 22, 53.0, bar)]))
@@ -93,18 +95,24 @@ def test_a_platform_emptied_by_a_kill_and_seen_again_gives_the_respawn(model):
 
 @REAL
 @pytest.mark.parametrize("case, why", [("bar", "a hurt one back"), ("other", "not emptied"),
-                                       ("away", "away"), ("end", "end"), ("unseen", "its monster not seen there")])
+                                       ("away", "away"), ("gap", "away"), ("end", "end"),
+                                       ("unseen", "its monster not seen there")])
 def test_how_an_episode_ends_or_makes_none(model, case, why):
     """A snail back with an HP bar is one she had hurt, hidden for a while (dropped); another snail there all along
     leaves it not emptied; looks stopping at 5 s and a snail seen at 9.25 s censor it at the last empty look (she was
-    away); none seen by the end censors it at the last look; a kill whose monster wasn't seen there makes none."""
+    away); so do no looks from 5 to 8 s and 22 seen empty again after (a snail may have come and been killed by someone
+    else meanwhile); none seen by the end censors it at the last look; a kill whose monster wasn't seen there makes
+    none."""
     records = {"bar": lambda: _snail_on_22(model, bar=0.5), "other": lambda: _snail_on_22(model, other=True),
-               "away": lambda: _snail_on_22(model, stop=5.0), "end": lambda: _snail_on_22(model, back_at=None),
+               "away": lambda: _snail_on_22(model, stop=5.0),
+               "gap": lambda: _snail_on_22(model, back_at=None, gap=(5.0, 8.0)),
+               "end": lambda: _snail_on_22(model, back_at=None),
                "unseen": lambda: [r for r in _snail_on_22(model) if r["t"] != 0.0 or r["topic"] != "scene"]}[case]()
     eps, dropped = _episodes(model, records)
     if why in ("away", "end"):
         assert len(eps) == 1 and not eps[0].event and eps[0].why == why
-        last = max(r["t"] for r in records if r["topic"] == "scene" and not r["monsters"])
+        last = max(r["t"] for r in records if r["topic"] == "scene" and not r["monsters"]
+                   and (case != "gap" or r["t"] <= 5.0))  # (the gap's: the last before it)
         assert math.isclose(eps[0].time, last - 0.3)
     else:
         assert not eps and dropped == {why: 1}
@@ -228,6 +236,22 @@ def test_on_the_simulator_it_measures_the_simulator_s_respawn():
     assert len(eps) == 1, (eps, dropped)
     e = eps[0]
     assert e.event and e.platform == 36 and RESPAWN - 1.0 <= e.time <= RESPAWN + 0.7, e
+
+
+@REAL
+def test_a_hunt_with_the_feed_records_the_deaths_of_others_kills():
+    """With the continuous feed a hunt publishes the deaths the feed saw that weren't hers ('died', as `watch` does),
+    which the report reads as others' kills; hers stay the 'kill' events alone (not counted twice). feed_loop_rival
+    for 45 s: another player kills a monster every 20 s, and the feed sees one of those die."""
+    import dataclasses
+    sc = dataclasses.replace(scenarios.SCENARIOS["feed_loop_rival"], fn=scenarios._loop(0.75), expects=())
+    with telemetry.captured() as records:
+        trace = scenarios.run_scenario(sc)
+    died = [r for r in records if r["topic"] == "event" and r["kind"] == "died"]
+    assert died and len(died) == trace["feed"]["tracker"]["died other"]
+    dead = respawn.kills(records)
+    assert sum(not k.hers for k in dead) == len(died)
+    assert sum(k.hers for k in dead) == sum(1 for r in records if r["topic"] == "event" and r["kind"] == "kill")
 
 
 @REAL
