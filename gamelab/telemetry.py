@@ -19,9 +19,14 @@ Topics (map units; producers build the records, ui.state folds them):
 
   session   map, command, mode (live/sim); continues, part     the command line, the simulator; a new part
   scene     her {x, y, platform, how, seen, facing, grounded}, every look (behavior.hunter, after Senses;
-            hp, mp, monsters [{kind, x, y, platform, bar}],    from 2026-10-21's evening also what it
-            loot [{kind, x, y, platform}], searched, wide,     searched, for analysis.respawn)
-            looked [[platform, x0, x1]], view [x0, y0, x1, y1]
+            hp, mp, monsters [{kind, x, y, platform, bar,      `watch` 10 a second, her facing not known;
+            facing}], loot [{kind, x, y, platform}], searched, from 2026-10-21's evening also what it
+            wide, looked [[platform, x0, x1]], view [x0, y0,   searched, for analysis.respawn; players only
+            x1, y1], players [{id, kind, x, y, platform}]      when there are any: localization.players)
+  tracks    list [{id, kind, state, x, y, vx, facing,          `watch`, twice a second (localization.tracking)
+            platform, bar, hits, seen, cause}], frames
+  exp       exp, level, gain, kinds, total, per_minute         each EXP gain (behavior.hunter; `watch`), her
+                                                               number as read (localization.gains)
   drops     pending [{x, y, platform, mesos}], inventory_full  every look (behavior.hunter)
   glance    x, y, hp                                           control.navigator, while a chain runs
   route     dst, moves [{kind, src, dst, x, land_x}], from     control.navigator, each plan (from 2026-10-21 also
@@ -36,7 +41,11 @@ Topics (map units; producers build the records, ui.state folds them):
   tour      order, safe, grounds / stop, spot                  behavior.tour (stop, spot: also behavior.hunt)
   hunt      mode, rule, objective, ground, piles [{x, platform,   behavior.hunt, when the rule changes
             status, hers}]
-  event     kind (kill, hit, potion, rest), text               behavior
+  event     kind, text; track (died, exp_gain, hp_drop)        behavior: kill, hit, potion, rest, rest_trip,
+                                                               exp (what a gain's size said), player (one
+                                                               coming or going), died (the feed's deaths
+                                                               not hers), backstop, follow, probe; `watch`:
+                                                               died, exp_gain, hp_drop (the feed's events)
   log       text                                               every log line
 """
 
