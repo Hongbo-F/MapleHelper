@@ -4,7 +4,7 @@
   the fakes below (a look, a glance, a key plan), so a run is the same every time.
 - `FakeEyes`: perception.eyes.Eyes over the world: look() -> an Observation with the screen fields
   filled in as localization (Senses.look, Scene.place, find_loot, pose.refine) inverts them (her name
-  tag, the grass under her, the ropes in view, her minimap dot), glance() and messages(). Monsters and
+  tag, the grass under her, the ropes in view, her minimap dot and the other player's), glance() and messages(). Monsters and
   drops are drawn into the frame as data its fake detectors read (Eyes.monsters, monsters_wide, items),
   and hurt monsters' HP bars as pixels (Eyes.bar reads those). world.Noise can round the dot to whole
   pixels and hide her tag or her dot for a while.
@@ -40,6 +40,7 @@ from ..paths import LAB
 from ..perception.eyes import Eyes, Observation
 from ..perception.loot import Item
 from ..perception.match import suppress_overlaps
+from ..perception.minimap import OTHER_SHIFT, Marker
 from ..perception.mobs import REFIND_PAD, Mob
 from ..perception.terrain import ScreenRope
 from ..screen import SCALE
@@ -266,6 +267,18 @@ class FakeEyes(Eyes):
         dot = self.loc.to_dot(*self.world.her())
         return (float(round(dot[0])), float(round(dot[1]))) if self.noise.dot_px else dot
 
+    def _others(self) -> list[Marker]:
+        """Other players' minimap dots as minimap.other_dots reads them: the other player's (World.rival_at), drawn
+        OTHER_SHIFT right of and below where her dot would be there, read to whole pixels as hers is
+        (Noise.dot_px); none while something covers the minimap (Noise.dot_hidden)."""
+        at = self.world.rival_at()
+        if at is None or Noise.during(self.noise.dot_hidden, self.world.t):
+            return []
+        x, y = self.loc.to_dot(*at)
+        if self.noise.dot_px:
+            x, y = float(round(x)), float(round(y))
+        return [Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT)]
+
     def look(self) -> Observation:
         self._now()
         self.counts["looks"] += 1
@@ -293,7 +306,8 @@ class FakeEyes(Eyes):
         seen = not Noise.during(self.noise.tag_hidden, w.t)
         counts["tag hidden"] += not seen
         s = Observation(t=t, frame=frame, tag=her if seen else None, hp=self._hp(), mp=w.mp,
-                        ground=self._ground(her) if seen else None, dot=self._dot(counts), ropes=found)
+                        ground=self._ground(her) if seen else None, dot=self._dot(counts), others=self._others(),
+                        ropes=found)
         s.exp = exp_pixels(w.exp)
         return s
 

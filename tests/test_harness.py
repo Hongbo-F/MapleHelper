@@ -6,6 +6,7 @@ import pytest
 
 from gamelab.behavior.hunter import Hunter
 from gamelab.localization import mapdata
+from gamelab.localization.pose import Localizer
 from gamelab.sim import fakes, harness, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.fakes import Clock, FakeEyes, SimTimeout
@@ -90,6 +91,41 @@ def test_another_player_kills_monsters_and_its_drops_are_not_hers_for_a_while(mo
     assert w.picked == {}  # not hers yet
     w.advance(30.0)
     assert d.gone and d.taken_by == "rival"  # the rival picked it up
+
+
+def test_another_player_hunts_one_place_at_a_time_its_dot_on_the_minimap(model):
+    """It kills only what's within RIVAL_REACH of where it stands; with nothing left there it walks to another place
+    (RIVAL_SPEED, its minimap dot going along), and kills there once it's there."""
+    import math
+    from gamelab.localization.players import Players
+    c = plat(model, 500, 400)
+    clock = Clock()
+    w = world(model, c.id, 400.0, monsters=[("Snail", c.id, 100.0), ("Snail", c.id, 700.0)], origin=clock.now,
+              realism=Realism(rival_every=1.0, rival_stay=1000.0, respawn=1000.0))
+    w.invulnerable_ms = 1_000_000
+    still(w)
+    eyes, players = FakeEyes(w, clock, model), Players(Localizer(model))
+    start = w.rival_at()
+    near = min(w.monsters, key=lambda m: abs(m.at(w.t) - start[0]))
+    w.advance(clock.now + 1.6)
+    first = [k for k in w.kill_log if k[3] == "rival"]
+    assert len(first) == 1 and abs(near.died_x - start[0]) <= world_mod.RIVAL_REACH  # the one by it, at once
+    away = next(m for m in w.monsters if m is not near)
+    walked = []
+    for k in range(80):
+        clock.advance_to(clock.now + 0.1)
+        w.advance(clock.now)
+        walked.append(w.rival_at())
+        seen = players.update(clock.now, eyes.observe().others)
+        if seen:
+            assert abs(seen[0].x - walked[-1][0]) < 1  # its dot places it where it is
+    second = [k for k in w.kill_log if k[3] == "rival"][1:]
+    assert len(second) == 1 and not away.alive and abs(walked[-1][0] - away.died_x) <= world_mod.RIVAL_NEAR
+    steps = [abs(b[0] - a[0]) for a, b in zip(walked, walked[1:])]
+    assert max(steps) <= world_mod.RIVAL_SPEED * 0.1 + 1e-6  # it walked there, at most 12.5 units a tenth of a second
+    gone_at = next(t for t, line in ((float(x.split()[0]), x) for x in w.log) if "gets to platform" in line)
+    assert any("another player kills" in line and float(line.split()[0]) >= gone_at for line in w.log)
+    assert math.isclose(sum(steps), abs(walked[-1][0] - start[0]), abs_tol=1.0)
 
 
 def test_potions_run_out_and_arrows_can_be_swallowed_after_an_attack(model):

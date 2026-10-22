@@ -1639,7 +1639,8 @@ def loop_noisy(sim):
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills")))
 def loop_rival(sim):
     """Another player on the map: half the monsters spawn, and a rival kills one every 20 s and takes its
-    drops. Their kills give her no EXP, so the ledger has only hers."""
+    drops. Their kills give her no EXP, so the ledger has only hers. (The rival hunts one place at a time, its dot
+    on the minimap: here 21, then 2, away from her.)"""
     return _loop(3)(sim)
 
 
@@ -1694,11 +1695,14 @@ def feed_loop_basin(sim):
     return _loop(2)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=25, limit=400, may_die=True, feed=True,
+@scenario((36, 300.0), monsters="all", seed=17, limit=400, may_die=True, feed=True,
           realism=Realism(spawn_share=0.5, rival_every=20.0),
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
                    _died("other"), check("looks from the feed", _fed)))
 def feed_loop_rival(sim):
     """loop_rival with the feed, for 2 minutes: another player kills a monster every 20 s. The feed sees some
-    of those die with no EXP of hers: killed by someone else (the hunt loop doesn't read that yet)."""
+    of those die with no EXP of hers: killed by someone else (the hunt loop doesn't read that yet). (Seed 17
+    since the other player hunts one place at a time, its dot on the minimap: on seed 25 it hunted 2 and 21 all
+    2 minutes, out of her sight, and the feed saw none of its kills die; on 17 it hunts the basin with her, 7
+    kills there. Of seeds 1-30, 16 show a death someone else's.)"""
     return _loop(2)(sim)

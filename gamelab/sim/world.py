@@ -256,6 +256,16 @@ GAME_DROPS = (
     ("orange-mushroom", "mesos", 0.70), ("orange-mushroom", "orange-mushroom-cap", 0.70),
     ("snail", "mesos", 0.63), ("snail", "snail-shell", 0.47), ("snail", "red-potion", 0.11),
 )
+# Another player (Realism.rival_every) hunts one place at a time: it kills a monster within RIVAL_REACH across and
+# RIVAL_DY up or down of where it stands, every Realism.rival_every s on average, and walks to another (by a live
+# monster, RIVAL_NEAR from it at most: a platform as likely as it has monsters alive) after Realism.rival_stay s
+# there on average, or as soon as nothing is left in its reach. It walks RIVAL_SPEED straight across the map, as its
+# minimap dot goes from one place to the other, and kills nothing on the way. Its dot is on the minimap (FakeEyes),
+# so the stack sees where it is. (Before, the rival killed a monster anywhere on the map, and had no place.)
+RIVAL_REACH = 400.0
+RIVAL_DY = 60.0
+RIVAL_NEAR = 150.0
+RIVAL_SPEED = 125.0
 
 
 class SimDied(Exception):
@@ -322,6 +332,7 @@ class Realism:
     rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)
     rival_owns: float = 15.0     # s a rival's drops can't be picked up by her
     rival_takes: float = 20.0    # s after landing that a rival picks up its own drops
+    rival_stay: float = 90.0     # s a rival hunts one place before it walks to another, on average (RIVAL_REACH)
     potions: int | None = None   # potions she has (None: endless)
     drops: tuple = ()            # what a kill drops: (monster kind, drop kind, chance) (GAME_DROPS), drawn per
                                  # kill from a generator of their own; (): mesos, and a pig's leather (ITEM_OF)
@@ -560,6 +571,18 @@ class Drop:
         return self.kind == "mesos"
 
 
+@dataclass
+class Rival:
+    """Another player (Realism.rival_every): where it hunts, or the walk it's on to another place."""
+    x: float
+    y: float
+    platform: int | None          # where it hunts (None: walking to another place)
+    goal: tuple | None = None     # (platform, x, y) it walks to ...
+    start: tuple = (0.0, 0.0)     # ... from (x, y) ...
+    leaves: float = 0.0           # ... setting off then ...
+    arrives: float = 0.0          # ... and getting there then (world s)
+
+
 # --- the world ---------------------------------------------------------------------------------------
 
 @dataclass
@@ -661,8 +684,11 @@ class World:
         self.by_platform: dict[int, list[SimMonster]] = {}
         self._spawn(monsters)
         self.drops: list[Drop] = [Drop(kind, x, model.platform(pid).y_at(x), pid, 0.0) for kind, pid, x in drops]
+        self.rival: Rival | None = None
         if self.realism.rival_every > 0 and self.monsters:
+            self.rival = self._rival_start()
             self._push(self._rival_due(), "rival")
+            self._push(self._rival_stays(), "rival_moves")
 
     # --- set-up -------------------------------------------------------------------------------------
 
@@ -812,8 +838,17 @@ class World:
             m.alive, m.hp, m.died_at, m.hit_at = True, m.hp_max, None, None
             m.start(self.t, m.home)
         elif e.kind == "rival":
-            self._rival_kill()
-            self._push(self._rival_due(), "rival")
+            self._push(self._rival_kill(), "rival")
+        elif e.kind == "rival_moves":
+            if self.rival.goal is None:
+                self._rival_go()
+            self._push(self._rival_stays(), "rival_moves")
+        elif e.kind == "rival_arrives":
+            r = self.rival
+            if r.goal is not None and self.ms >= self._rival_arrival():
+                r.platform, r.x, r.y = r.goal
+                r.goal = None
+                self.note(f"another player gets to platform {r.platform} at x {r.x:.0f}")
         elif e.kind == "rival_takes":
             for d in e.data:
                 if not d.gone:
@@ -1321,12 +1356,68 @@ class World:
         """The tick of another player's next kill: every Realism.rival_every s on average."""
         return self.ms + int(self.realism.rival_every * self._rival_rng.uniform(0.5, 1.5) * 1000)
 
-    def _rival_kill(self) -> None:
-        """Another player kills a monster somewhere on the map: no EXP for her, and drops she can't pick
-        up for Realism.rival_owns s, which the rival takes Realism.rival_takes s after they land."""
-        live = [m for m in self.monsters if m.alive]
+    def _rival_stays(self) -> int:
+        """The tick another player next walks to another place: every Realism.rival_stay s on average."""
+        return self.ms + int(self.realism.rival_stay * self._rival_rng.uniform(0.5, 1.5) * 1000)
+
+    def rival_at(self) -> tuple[float, float] | None:
+        """Where the other player is now (map units, as its minimap dot places it), or None if nobody else hunts."""
+        r = self.rival
+        if r is None:
+            return None
+        if r.goal is None:
+            return r.x, r.y
+        f = 1.0 if r.arrives <= r.leaves else min(1.0, max(0.0, (self.t - r.leaves) / (r.arrives - r.leaves)))
+        return r.start[0] + (r.goal[1] - r.start[0]) * f, r.start[1] + (r.goal[2] - r.start[1]) * f
+
+    def _rival_place(self, m: "SimMonster") -> tuple[int, float, float]:
+        """A place to hunt by monster `m`: on its platform, RIVAL_NEAR from it at most."""
+        p, mx = m.platform, m.at(self.t)
+        x = min(max(mx + self._rival_rng.uniform(-RIVAL_NEAR, RIVAL_NEAR), p.left), p.right)
+        return p.id, x, p.y_at(x)
+
+    def _rival_start(self) -> Rival:
+        """Where the other player starts: by a monster alive, drawn as _rival_go draws one."""
+        pid, x, y = self._rival_place(self._rival_pick([m for m in self.monsters if m.alive]))
+        return Rival(x, y, pid)
+
+    def _rival_pick(self, live: list) -> "SimMonster":
+        """A monster to go and hunt by, any of `live` alike (so a platform as likely as it has monsters alive)."""
+        return live[self._rival_rng.randrange(len(live))]
+
+    def _rival_arrival(self) -> int:
+        """The tick the other player gets where it's walking to."""
+        return int(math.ceil(self.rival.arrives * 1000 / TICK_MS - 1e-6)) * TICK_MS
+
+    def _rival_go(self, away: bool = False) -> None:
+        """The other player sets off for another place (with `away`, by a monster out of its reach)."""
+        r, (x, y) = self.rival, self.rival_at()
+        live = [m for m in self.monsters if m.alive and not (away and self._rival_reaches(m))]
         if not live:
             return
+        pid, gx, gy = self._rival_place(self._rival_pick(live))
+        r.goal, r.start, r.platform = (pid, gx, gy), (x, y), None
+        r.leaves, r.arrives = self.t, self.t + math.hypot(gx - x, gy - y) / RIVAL_SPEED
+        self._push(self._rival_arrival(), "rival_arrives")
+
+    def _rival_reaches(self, m: "SimMonster") -> bool:
+        """Whether the other player, hunting where it stands, reaches monster `m` (RIVAL_REACH, RIVAL_DY)."""
+        r, mx = self.rival, m.at(self.t)
+        return r.goal is None and abs(mx - r.x) <= RIVAL_REACH and abs(m.y(mx) - r.y) <= RIVAL_DY
+
+    def _rival_kill(self) -> int:
+        """Another player kills a monster in its reach: no EXP for her, and drops she can't pick up for
+        Realism.rival_owns s, which the rival takes Realism.rival_takes s after they land. With none in its reach it
+        sets off for another place and kills there once it's there; walking, it kills nothing. Returns the tick of
+        its next kill."""
+        r = self.rival
+        if r.goal is None and not any(m.alive and self._rival_reaches(m) for m in self.monsters):
+            self._rival_go(away=True)
+        if r.goal is not None:  # on its way: its next kill once it's there
+            return max(self._rival_due(), self._rival_arrival() + TICK_MS)
+        live = [m for m in self.monsters if m.alive and self._rival_reaches(m)]
+        if not live:
+            return self._rival_due()
         m = live[self._rival_rng.randrange(len(live))]
         t, mx = self.t, m.at(self.t)
         m.alive, m.died_at, m.died_x = False, t, mx
@@ -1339,6 +1430,7 @@ class World:
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
         self._push(self.ms + int((DROP_DELAY + self.realism.rival_takes) * 1000), "rival_takes", drops)
         self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
+        return self._rival_due()
 
     def _pick(self) -> None:
         t = self.t
