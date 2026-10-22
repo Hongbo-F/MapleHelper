@@ -45,7 +45,7 @@ READ_BOX = (1052, 1038, 1191, 1054)
 GLYPHS = "0123456789,.[]%"
 BLANK = " "             # a blank game column: the cells after the number (and anything else's, if it doesn't fit)
 FIT = 4.0    # levels (root mean square over a cell): a glyph drawn as the game draws it. On the 32 saved 1920x1080
-             # frames every cell was within 0.6 of it; the cursor, a window or anything else over the bar, much more
+             # frames every cell was within 0.68 of it; the cursor, a window or anything else over the bar, much more
 LEAD = 10.0  # levels (as FIT): how much worse every other reading of a cell must be. On the saved frames the least was
              # 14.1, a '[' against a ']' (16.9 a ',' against a '.', 21.6 an '8' against a '6' or a '9')
 BG_SHARE = 10  # percent: each row's background is its darkest columns' (this share of them: text only brightens it,

@@ -340,6 +340,9 @@ class FakeEyes(Eyes):
                         ground=self._ground(her) if seen else None, dot=self._dot(counts), others=self._others(),
                         ropes=found)
         s.exp, s.exp_box = exp_pixels(w.exp), self._exp_box()
+        if Noise.during(self.noise.exp_hidden, w.t):  # the cursor over the number changes its pixels as it comes
+            s.exp = s.exp.copy()                       # and goes, as in game (and a kill under it the rest)
+            s.exp[:, 20:50] = True
         return s
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:

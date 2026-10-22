@@ -165,6 +165,12 @@ class Hunter:
         for t, reading, changed in reads:
             for g in self.meter.update(t, reading, changed):
                 self._gained(g, s)
+        for g in self.meter.due(s.t):  # changes it couldn't read that no reading has explained: a kill each
+            self._gained(g, s)
+        for note in self.meter.notes:
+            self.log(f"  {note}")
+            telemetry.emit("event", kind="exp", text=note)
+        self.meter.notes.clear()
         self.exp_events = [e for e in self.exp_events if s.t - e[0] < EXP_MEMORY]
         self._exp = s.exp
         if lost > 0 and self._last_hp is not None:
@@ -175,15 +181,16 @@ class Hunter:
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False
 
     def _gained(self, g: Gain, s: Scene) -> None:
-        """A gain of her EXP: its kills counted (exp_events, told, the report), or, if no kill explains it, logged;
-        with her EXP as read, for the mini-map and the run's record (telemetry 'exp')."""
-        for kind in g.kinds:
-            self.exp_events.append((g.t, kind))
-            self.told.append((g.t, kind))
+        """A gain of her EXP: its kills counted (exp_events, told, the report), each at its time, or, if no kill
+        explains it, logged; with her EXP as read, for the mini-map and the run's record (telemetry 'exp')."""
+        for i, kind in enumerate(g.kinds):
+            self.exp_events.append((g.when(i), kind))
+            self.told.append((g.when(i), kind))
             self.report.exp_kills += 1
             self.exp_gains += 1
         if g.odd:
-            text = (f"EXP down {-g.exp} (a death?)" if g.exp is not None and g.exp < 0 else
+            text = ("EXP read at a level that doesn't follow from the last: not counted" if g.exp is None else
+                    f"EXP down {-g.exp} (a death?)" if g.exp < 0 else
                     f"EXP +{g.exp}: no kill of this map's monsters gives that (a party share, a quest?)")
             self.log(f"  {text}")
             telemetry.emit("event", kind="exp", text=text)

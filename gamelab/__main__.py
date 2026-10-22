@@ -1027,6 +1027,9 @@ def cmd_watch(args) -> int:
             c, rate = runner.step.tracker.counts, w["frames"] / max(1e-9, now - w["status"])
             live = [tr for tr in st.tracks if tr.state != "dead"]
             meter = runner.step.meter  # her EXP as read off its number (localization.gains)
+            for note in meter.notes:  # (its sizes going off, or on again)
+                _log(f"  {note}")
+            meter.notes.clear()
             per_minute = meter.per_minute(now)
             exp = "" if meter.at is None else f"; EXP {meter.at[1]:,}" + (
                 "" if per_minute is None else f", {per_minute:.0f} a minute")

@@ -36,7 +36,7 @@ from ..perception.exp_number import ExpReading
 from ..perception.hud import exp_changed
 from ..perception.minimap import MINIMAP_BOX
 from ..screen import HUD_TOP, SCALE
-from .gains import ExpMeter
+from .gains import ExpMeter, Gain
 from .mapdata import MapModel
 from .monsters import Monster
 from .pose import Where
@@ -495,9 +495,8 @@ class WorldStep:
                 out.append(Event("exp_gain" if changed else "exp_read", t, data=reading_data(reading)))
             self.counts["exp gains"] += changed
             self.counts["exp read"] += reading is not None and reading.exp is not None
-            for g in self.meter.update(t, reading, changed):
-                for kind in g.kinds:
-                    self.tracker.gain(g.t, kind)
+            self._told(self.meter.update(t, reading, changed))
+        self._told(self.meter.due(t))  # changes it couldn't read that no reading has explained: a kill each
         if s.exp is not None:
             self._exp = s.exp
         if self._hp is not None and s.hp < self._hp - HP_DROP:
@@ -507,6 +506,12 @@ class WorldStep:
             self.counts["hits"] += new
         self._hp = s.hp
         return out
+
+    def _told(self, gains: list[Gain]) -> None:
+        """Her kills these gains were, told to the tracker by kind, each at its time."""
+        for g in gains:
+            for i, kind in enumerate(g.kinds):
+                self.tracker.gain(g.when(i), kind)
 
     def _box(self, s: Scene, tr: Track, t: float) -> tuple[int, int, int, int] | None:
         """Where track `tr`'s picture should be in this frame (half-size px), from where it should be on the
