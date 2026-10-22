@@ -274,3 +274,29 @@ def test_a_late_search_doesnt_bring_back_a_monster_found_dead_since_nor_make_it_
     (late,) = step.came_back()
     assert late.events == [] and step.tracker.counts["tracks"] == 1 and known
     assert step.tracker.counts["late sightings of the dead"] == 1 and step.tracker.tracks[tr.id].state == "dead"
+
+
+def test_a_re_find_the_tracker_turned_down_doesnt_hide_that_monster_from_a_late_search():
+    # A fading pig's window catches another walking by, 18 units off: the tracker turns that re-find down (a dying
+    # one doesn't follow a walker through), so the search of that frame shows the walker as inline it would have:
+    # it's not taken for the fading one's re-find.
+    step, searches = held_step()
+    step.eyes.mobs = [pig(1100)]
+    one(step, 0, Asks(band=True))
+    searches.back()
+    for k in (1, 2, 3, 4, 5):
+        one(step, k)
+    step.came_back()
+    (tr,) = step.tracker.tracks.values()
+    tr.state = "dying"
+    step.eyes.mobs = [pig(1118)]  # the fading one gone, a walker in its window
+    one(step, 6, Asks(band=True))
+    assert tr.id not in step.tracker.refound_seen
+    searches.back()
+    one(step, 7)
+    (late,) = step.came_back()
+    assert [round(m.x) for m in late.monsters] == [1118]  # the walker, seen in that frame
+    # ... and matched to a track as the search's sighting (the nearest, the one that had been fading: as inline),
+    # not dropped as one of the frame's re-finds
+    (merged,) = [t for t in late.tracks if t.id == tr.id]
+    assert merged.last_seen == pytest.approx(100.0 + 6 / FPS)

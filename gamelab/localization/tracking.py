@@ -14,7 +14,10 @@ a few after its own, the tracks followed meanwhile (`merge`): its sightings are 
 were at its frame (the tracks re-found in that frame are those sightings already). A track seen since learns
 nothing from it; one found dead since isn't brought back, nor made anew (it's the same monster: `late
 sightings of the dead`); one gone off screen since stays off; a new one is new as of the search's frame, and
-re-found from the next frame on.
+re-found from the next frame on. And a track hidden too long isn't judged gone (dead, or lost in a crowd)
+while a search is out of a frame after it was last seen and by the frame it was due (`searching`,
+LATE_SEARCH_S): it may have been seen there, as that search inline would have shown before the track was
+judged.
 
 A track not seen in a frame:
 - where it should be is off screen: `offscreen` (event `left`), remembered OFFSCREEN_S to know it again
@@ -116,6 +119,11 @@ LONG_GAP_S = 1.0    # a track seen again after longer than this starts its veloc
 FRAME_SLACK = 0.05  # s: a monster last seen this little before a gain went out of sight as it died
 FADE_MOVE = 10.0    # units a monster fading where it died may seem to move: a sighting farther off is another one
                     # walking through (it took the dying one's track, and starved its own, in the simulator)
+# A track hidden too long (HIDE_S) isn't judged gone while a search is out of a frame after it was last seen and
+# no later than this after it was due (about a frame): inline, that search was merged in its own frame, before
+# the track was judged, and could show it still there. A later frame's couldn't have saved it, so the wait is
+# bounded however often she searches.
+LATE_SEARCH_S = 0.05
 
 
 @dataclass
@@ -217,6 +225,10 @@ class MonsterTracker:
         self.throws: list[_Throw] = []
         self.her: tuple[float, float] | None = None  # where she was in the last frame placed
         self._last_t = -1e18                          # ... and when that was
+        # The frame time of a search out (localization.worldstate: its answer comes back a few frames later), or
+        # None (LATE_SEARCH_S).
+        self.searching: float | None = None
+        self.refound_seen: set[int] = set()  # the tracks the last frame's re-finds were taken for (`update`)
         self.counts = {"tracks": 0, "died hers": 0, "died other": 0, "lost in a crowd": 0, "flickers": 0,
                        "gains unexplained": 0, "late sightings of the dead": 0}
 
@@ -259,6 +271,7 @@ class MonsterTracker:
                 continue  # (two overlapping are two monsters, each found by its own track's window)
             self._seen(tr, m, t, events)
             seen.add(tid)
+        self.refound_seen = set(seen)
         fresh = [m for m in found if not any(overlap(m.mob, self.tracks[i].mob) and m.kind == self.tracks[i].kind
                                              for i in seen)]
         for m, tr in self._match(t, fresh, seen):
@@ -451,7 +464,10 @@ class MonsterTracker:
             tr.crowded = tr.crowded or any(
                 o.kind == tr.kind and o.id != tr.id and o.state in (LIVE, DYING) and beside(o.mob, tr.mob)
                 for o in self.tracks.values())
-        if tr.state == HIDDEN and t - max(tr.last_seen, self._last_hit(tr)) > HIDE_S:
+        due = max(tr.last_seen, self._last_hit(tr)) + HIDE_S
+        if tr.state == HIDDEN and t > due:
+            if self.searching is not None and tr.last_seen < self.searching <= due + LATE_SEARCH_S:
+                return  # a search out may have seen it before it was due: judged once its answer is merged
             if tr.crowded:
                 self.counts["lost in a crowd"] += 1
                 del self.tracks[tr.id]

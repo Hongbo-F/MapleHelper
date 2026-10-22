@@ -300,3 +300,27 @@ def test_a_spawn_a_late_search_saw_first_is_one_spawn_at_its_frame():
     run(tracker, [([sighting(1205, platform=pid)], view())] * 3, start=100.4)  # re-found since
     assert tracker.merge(100.45, [sighting(1205, platform=pid)], set(), view(), view(), 100.5) == []
     assert tracker.counts["tracks"] == 1
+
+
+def test_a_track_hidden_too_long_waits_for_a_search_out_that_may_have_seen_it():
+    # Inline, a search of its frame would have been merged before the track was judged; its answer coming back
+    # late, the judgement waits for it.
+    tracker = MonsterTracker()
+    run(tracker, [([sighting(1200, pose="stand")], view())] * 10)  # last seen at 100.3
+    tr = tracker.tracks[1]
+    tracker.searching = 100.35  # a search of a frame after that is out
+    run(tracker, [(None, view())] * (5 * FPS), start=100.4)
+    assert tr.state == HIDDEN and tracker.counts["died other"] == 0
+    tracker.merge(100.35, [sighting(1201, pose="stand")], set(), view(), view(), 105.4)  # it was there
+    tracker.searching = None
+    assert tr.state == LIVE and tr.last_seen == 100.35
+    tracker.searching = 100.2  # one of a frame before it was last seen can't have: no wait
+    run(tracker, [(None, view())] * (5 * FPS), start=105.4)
+    assert tr.state == DEAD and tracker.counts["died other"] == 1
+    # Nor does one of a frame after it was due (inline, it would have been judged before that frame): the wait is
+    # bounded, however often searches go out
+    other = MonsterTracker()
+    run(other, [([sighting(1200, pose="stand")], view())] * 10)
+    other.searching = 100.3 + tracking.HIDE_S + 2 * tracking.LATE_SEARCH_S
+    run(other, [(None, view())] * (5 * FPS), start=100.4)
+    assert other.tracks[1].state == DEAD

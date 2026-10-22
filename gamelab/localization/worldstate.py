@@ -143,8 +143,8 @@ class Job:
     t: float
     scene: Scene
     view: View
-    known: dict[int, Monster] = field(default_factory=dict)  # track id -> where it was re-found in this frame
-    state: WorldState | None = None
+    known: dict[int, Monster] = field(default_factory=dict)  # track id -> where it was re-found in this frame (the
+    state: WorldState | None = None                          # re-finds the tracker took)
     band: bool = False             # her band searched for monsters ...
     wide: bool = False             # ... or the whole screen
     loot: bool = False             # the drops on her platform ...
@@ -393,8 +393,8 @@ class WorldStep:
             exp_shape=exp.shape if s.exp is not None else (), where=where, how=s.how, monsters=seen,
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
             tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame)
-        if job is not None:  # (its answer is merged only after this)
-            job.known.update(refound)
+        if job is not None:  # (its answer is merged only after this) the re-finds the tracker took, as inline
+            job.known.update({tid: m for tid, m in refound.items() if tid in self.tracker.refound_seen})
             job.state = st
         return st
 
@@ -436,6 +436,7 @@ class WorldStep:
         self._last = None  # a frame is searched once
         job.band, job.wide, job.loot, job.loot_wide = band or wide, wide, loot, loot_wide
         job.mesos_only = self.mesos_only
+        self.tracker.searching = job.t
         self.searches.submit(job)
 
     def _merge(self, found: Found | None) -> None:
@@ -444,6 +445,7 @@ class WorldStep:
         if found is None:
             return
         job = found.job
+        self.tracker.searching = None
         now, t_now = self._newest or (None, None)
         events: list[Event] = []
         seen = list(job.state.monsters)
