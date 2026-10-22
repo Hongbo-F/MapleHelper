@@ -238,3 +238,65 @@ def test_nothing_is_judged_while_she_isnt_placed():
     run(tracker, [([sighting(1200, pose="stand")], view())] * 10)
     events, states = run(tracker, [(None, None)] * (5 * FPS), start=101.0)
     assert events == [] and states[-1] == {1: LIVE}
+
+
+# --- a search's sightings merged frames after their own (merge: the searches run off the frame loop) --------
+
+def test_a_late_sighting_of_a_track_seen_since_is_that_track_and_tells_it_nothing():
+    tracker = MonsterTracker()
+    run(tracker, walk(900, 125, 0.5))  # followed, re-found every frame to t 100.47
+    tr = tracker.tracks[1]
+    before = (tr.x, tr.last_seen, tr.seen)
+    events = tracker.merge(100.3, [sighting(900 + 125 * 0.3)], set(), view(), view(), 100.5)
+    assert events == [] and list(tracker.tracks) == [1] and (tr.x, tr.last_seen, tr.seen) == before
+
+
+def test_a_late_sighting_of_one_hidden_since_brings_it_back_as_of_its_frame():
+    tracker = MonsterTracker()
+    run(tracker, [([sighting(1200, pose="stand")], view())] * 10 + [(None, view())] * 15)  # hidden from 100.6
+    tr = tracker.tracks[1]
+    assert tr.state == HIDDEN
+    events = tracker.merge(100.7, [sighting(1203, pose="stand")], set(), view(), view(), 100.8)
+    assert events == [] and tr.state == LIVE and tr.last_seen == 100.7 and tr.x == pytest.approx(1203, abs=2)
+
+
+def test_a_late_sighting_of_one_gone_off_screen_since_leaves_it_off_and_one_in_view_now_is_back():
+    tracker = MonsterTracker()
+    run(tracker, walk(1400, 125, 0.3))  # walking right
+    gone = view(her_x=700)  # she has walked left since: where it should be now is off screen
+    run(tracker, [(None, gone)], start=100.4)
+    tr = tracker.tracks[1]
+    assert tr.state == OFFSCREEN
+    tracker.tracks[1].last_seen = 100.2  # its re-finds missed it from then on: a search of 100.3 saw it
+    assert tracker.merge(100.3, [sighting(1480)], set(), view(), gone, 100.4) == [] and tr.state == OFFSCREEN
+    tr.last_seen = 100.2
+    events = tracker.merge(100.3, [sighting(1480)], set(), view(), view(), 100.4)  # in view now: back
+    assert [e.kind for e in events] == ["back"] and tr.state == LIVE
+
+
+def test_a_late_sighting_where_a_monster_was_found_dead_since_is_it_and_one_dead_before_is_a_new_one():
+    tracker = MonsterTracker()
+    run(tracker, [([sighting(1200, pose="stand")], view())] * 10)
+    tr = tracker.tracks[1]
+    tr.state, tr.died_at, tr.judged, tr.cause = DEAD, 100.4, 100.5, "other"
+    assert tracker.merge(100.45, [sighting(1200, pose="stand")], set(), view(), view(), 100.6) == []
+    assert list(tracker.tracks) == [1] and tr.state == DEAD and tracker.counts["late sightings of the dead"] == 1
+    events = tracker.merge(100.55, [sighting(1200, pose="stand")], set(), view(), view(), 100.6)  # dead before it
+    assert [(e.kind, e.track, e.t) for e in events] == [("appeared", 2, 100.55)]
+    assert tracker.tracks[2].first_seen == 100.55
+
+
+def test_a_spawn_a_late_search_saw_first_is_one_spawn_at_its_frame():
+    from gamelab.localization import mapdata
+    tree = {"info": {"VRLeft": 0, "VRTop": 0, "VRRight": 3000, "VRBottom": 1000},
+            "foothold": {"1": {"1": {"1": {"x1": 400, "y1": 500, "x2": 1600, "y2": 500, "prev": 0, "next": 0}}}},
+            "life": {"0": {"type": "m", "id": "1210100", "x": 1200, "y": 500, "fh": 1}},
+            "miniMap": {"width": 3000, "height": 1000, "centerX": 0, "centerY": 0, "mag": 4}}
+    model = mapdata.parse(1, tree, "Test", {}, {"1210100": "Pig"})
+    tracker = MonsterTracker(model)
+    pid = model.platform_under(1200, 500).id
+    events = tracker.merge(100.3, [sighting(1205, platform=pid)], set(), view(), view(), 100.4)
+    assert [(e.kind, e.t) for e in events] == [("spawned", 100.3)]
+    run(tracker, [([sighting(1205, platform=pid)], view())] * 3, start=100.4)  # re-found since
+    assert tracker.merge(100.45, [sighting(1205, platform=pid)], set(), view(), view(), 100.5) == []
+    assert tracker.counts["tracks"] == 1

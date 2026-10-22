@@ -3,11 +3,18 @@ an id while it walks and turns, flinches out of sight under damage numbers, or l
 back, and what happens to it comes out as events.
 
 A frame's sightings come two ways: monsters re-found where their track says they should be (Eyes.refind,
-every frame), and monsters a search found (her band every few frames, the whole screen about once a second),
-which are matched to tracks not re-found: same kind, same platform, and where its track would be by now
-within 10 + 1.3 x its speed x the time since + 25 units (knockback). Greedy, nearest first: there are only a
-few at a time. One no track explains is new: `entered` at the screen's edge (the camera moved, or it walked
-in), `spawned` near a spawn point of its kind, else `appeared` (found where no search had looked yet).
+every frame), and monsters a search found (her band 5 times a second, the whole screen once a second), which
+are matched to tracks not re-found: same kind, same platform, and where its track would be by then within
+10 + 1.3 x its speed x the time since + 25 units (knockback). Greedy, nearest first: there are only a few at a
+time. One no track explains is new: `entered` at the screen's edge (the camera moved, or it walked in),
+`spawned` near a spawn point of its kind, else `appeared` (found where no search had looked yet).
+
+The searches run off the feed's frame loop (localization.worldstate), so what one found comes back a frame or
+a few after its own, the tracks followed meanwhile (`merge`): its sightings are matched to the tracks as they
+were at its frame (the tracks re-found in that frame are those sightings already). A track seen since learns
+nothing from it; one found dead since isn't brought back, nor made anew (it's the same monster: `late
+sightings of the dead`); one gone off screen since stays off; a new one is new as of the search's frame, and
+re-found from the next frame on.
 
 A track not seen in a frame:
 - where it should be is off screen: `offscreen` (event `left`), remembered OFFSCREEN_S to know it again
@@ -211,7 +218,7 @@ class MonsterTracker:
         self.her: tuple[float, float] | None = None  # where she was in the last frame placed
         self._last_t = -1e18                          # ... and when that was
         self.counts = {"tracks": 0, "died hers": 0, "died other": 0, "lost in a crowd": 0, "flickers": 0,
-                       "gains unexplained": 0}
+                       "gains unexplained": 0, "late sightings of the dead": 0}
 
     # --- told from outside -----------------------------------------------------------------------
 
@@ -271,6 +278,32 @@ class MonsterTracker:
         self._last_t = t
         return events
 
+    def merge(self, t: float, found: list[Monster], known: set[int], view: View, now: View | None,
+              t_now: float | None) -> list[Event]:
+        """What a search of the frame shown at t found, merged once it's back, the frames since already followed:
+        `found`, its sightings that weren't any track re-found in that frame (`known`: the tracks that were),
+        each matched to another track where that track was at t (as `update` matches: nearest first, the same
+        reach); `view`, what that frame showed. One no track explains is new, as of t. A track seen since t
+        learns nothing from it; one found dead since t isn't brought back, nor made anew; one off screen now
+        (where it should be at `t_now`, in the newest view `now`) stays off, else it's `back`. The events are
+        of the frame at t."""
+        events: list[Event] = []
+        for m, tr in self._match(t, found, known, late=True):
+            if tr is None:
+                tr = self._new(t, m, view)
+                events.append(Event(tr.how, t, tr.id, {"kind": m.kind, "x": round(m.x), "platform": m.platform}))
+            elif tr.state == DEAD:
+                self.counts["late sightings of the dead"] += 1
+            elif tr.last_seen < t - 1e-9:
+                was, after = tr.state, round(t - tr.last_seen, 2)
+                self._seen(tr, m, t, events)
+                if was == OFFSCREEN:
+                    if now is not None and t_now is not None and now.shows(tr.kind, self.predicted(tr, t_now), tr.y):
+                        events.append(Event("back", t, tr.id, {"kind": m.kind, "after": after}))
+                    else:
+                        tr.state = OFFSCREEN  # in view at t, gone since
+        return events
+
     def live(self) -> list[Track]:
         """The tracks of monsters alive (seen or not)."""
         return [tr for tr in self.tracks.values() if tr.state != DEAD]
@@ -287,24 +320,42 @@ class MonsterTracker:
 
     # --- inside ---------------------------------------------------------------------------------------
 
+    def _at(self, tr: Track, t: float) -> float:
+        """Where track `tr` was (or should be) at t, also before it was last seen: walked back, as long as
+        `predicted` walks it on."""
+        if t >= tr.last_seen:
+            return self.predicted(tr, t)
+        x = tr.x - tr.vx * min(tr.last_seen - t, EXTRAPOLATE_S)
+        if self.model is not None and tr.platform is not None:
+            p = self.model.platform(tr.platform)
+            half = MONSTER_HALF.get(tr.kind, 34.0)
+            x = min(max(x, p.left + half), max(p.left + half, p.right - half))
+        return x
+
     def _claim(self, tid: int, m: Monster, t: float) -> tuple[bool, float]:
         tr = self.tracks.get(tid)
         if tr is None:
             return True, 0.0
         return tr.last_seen < self._last_t - 1e-9, abs(m.x - self.predicted(tr, t))
 
-    def _match(self, t: float, found: list[Monster], seen: set[int]) -> list[tuple[Monster, Track | None]]:
-        """Each sighting and the track it is (None: a new monster): nearest pairs first, one each."""
+    def _match(self, t: float, found: list[Monster], seen: set[int],
+               late: bool = False) -> list[tuple[Monster, Track | None]]:
+        """Each sighting and the track it is (None: a new monster): nearest pairs first, one each. `late`: the
+        sightings are of a frame the tracks have been followed past (merge): each track where it was at t, and
+        one found dead since t among them."""
         pairs = []
         for i, m in enumerate(found):
             for tr in self.tracks.values():
-                if tr.id in seen or tr.state == DEAD or tr.kind != m.kind:
+                if tr.id in seen or tr.kind != m.kind:
+                    continue
+                if tr.state == DEAD and not (late and tr.judged is not None and tr.judged > t):
                     continue
                 if tr.platform is not None and m.platform is not None and tr.platform != m.platform:
                     continue
-                gap = abs(m.x - self.predicted(tr, t))
+                gap = abs(m.x - (self._at(tr, t) if late else self.predicted(tr, t)))
                 speed = self.walking.get(tr.kind, DEFAULT_SPEED)
-                if gap <= MATCH_BASE + MATCH_SPEED * speed * (t - tr.last_seen) + MATCH_KNOCKBACK:
+                dt = abs(t - tr.last_seen) if late else t - tr.last_seen
+                if gap <= MATCH_BASE + MATCH_SPEED * speed * dt + MATCH_KNOCKBACK:
                     pairs.append((gap, i, tr.id))
         out: dict[int, Track] = {}
         used: set[int] = set()
