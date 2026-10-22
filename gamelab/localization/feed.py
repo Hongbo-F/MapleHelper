@@ -168,12 +168,14 @@ def saved_world(files: list[str], map_id: int, template: np.ndarray, band: tuple
 
 
 def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bool]],
-        emit: Callable[[WorldState, Frame | None], None], until: float | None = None) -> None:
+        emit: Callable[[WorldState, Frame | None], None], until: float | None = None,
+        shown: Callable[[Frame], None] | None = None) -> None:
     """Frame after frame, `hz` a second: `poll(wait)` waits up to `wait` s for what's asked (asks, stop), and
     what's asked is done on the first frame shown at the time asked for, taken at once then (its searches on
     it, or as soon as the one out is back). Each frame's state goes to `emit`, and so do the late states of the
     frames searched, as their searches come back (with no frame: theirs is in the past). The poll should end
-    early when the searches' answer is in (the step's `searches.wake`). Ends on stop, at `until`
+    early when the searches' answer is in (the step's `searches.wake`). `shown(frame)`, if given, sees each
+    frame showing the game as soon as it's taken, before the step. Ends on stop, at `until`
     (time.monotonic), or when the frames run out."""
     period = 1.0 / hz
     due, pending = time.monotonic(), None
@@ -199,6 +201,8 @@ def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bo
             due, pending = time.monotonic() + NOT_VISIBLE_S, None  # whoever asked takes the look itself
             continue
         use = pending if asked and frame.t >= pending.after else None
+        if shown is not None:
+            shown(frame)
         if frame.new or use is not None:  # an unchanged screen nobody asked about: nothing new to say
             st = runner.step.step(runner.look(frame), frame.t, True, use)
             late = runner.step.came_back()  # merged in the step, or back since (this frame's own, if that quick)

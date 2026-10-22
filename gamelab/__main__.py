@@ -936,9 +936,8 @@ def cmd_watch(args) -> int:
     monsters tracked (ids, facing, HP bars, deaths and who killed them), her EXP gains and hits, published as
     telemetry for the mini-map. It never sends a key and never brings the game to the front: a frame the
     game isn't wholly showing isn't read. With --lie-detector it also checks the screen for the Lie Detector
-    and pages whoever is at the PC (the player keeps its own watchdog regardless)."""
-    import threading
-
+    and pages whoever is at the PC (the player keeps its own watchdog regardless): on a thread of its own, the
+    frame handed over as soon as it's taken, before its step (it had waited for the step, in the frame loop)."""
     from .localization import feed, worldstate
     from .perception.lie_detector import LieDetectorSpotter
     feed.quiet()  # below normal priority, as the feed's child runs
@@ -952,6 +951,21 @@ def cmd_watch(args) -> int:
     until = started + args.minutes * 60 if args.minutes else None
     w = {"scene": -1e9, "tracks": -1e9, "status": started, "lie": -1e9, "visible": None, "loot": [], "frames": 0,
          "seen": 0, "alarm": False}
+
+    def check(full) -> None:  # the Lie Detector, on its thread
+        if spotter.seen(full) and not w["alarm"]:
+            w["alarm"] = True
+            _lie_detector_seen(full)
+    lie = worldstate.Worker(check, "lie-detector") if spotter is not None else None
+
+    def shown(frame) -> None:
+        now = time.monotonic()
+        if lie is None or frame.full is None or now - w["lie"] < WATCH_LIE_DETECTOR_S:
+            return
+        lie.take()  # (a check that failed raises here)
+        if lie.free():
+            w["lie"] = now
+            lie.submit(frame.full)
 
     def emit(st: worldstate.WorldState, frame) -> None:
         now = time.monotonic()
@@ -984,11 +998,6 @@ def cmd_watch(args) -> int:
             if now - w["tracks"] >= WATCH_TRACKS_S:
                 w["tracks"] = now
                 telemetry.emit("tracks", list=[tr.record() for tr in st.tracks], frames=st.seq)
-            if spotter is not None and frame.full is not None and now - w["lie"] >= WATCH_LIE_DETECTOR_S:
-                w["lie"] = now
-                if spotter.seen(frame.full) and not w["alarm"]:
-                    w["alarm"] = True
-                    _lie_detector_seen(frame.full)
         if now - w["status"] >= WATCH_STATUS_S:
             c, rate = runner.step.tracker.counts, w["frames"] / max(1e-9, now - w["status"])
             live = [tr for tr in st.tracks if tr.state != "dead"]
@@ -997,20 +1006,20 @@ def cmd_watch(args) -> int:
                   flush=True)
             w["status"], w["frames"], w["seen"] = now, 0, 0
 
-    back = threading.Event()  # the searches' answer is in
-    runner.step.searches.wake = back.set
-
+    # Nobody waits for watch's searches (each is merged at the next frame), so its wait for the next frame needn't
+    # end when one is back: time.sleep's, on Windows' fine timer, not an Event's, which ends on its 15.6 ms ticks.
     def poll(wait: float):
-        back.wait(wait)
-        back.clear()
+        time.sleep(wait)
         return None, False
 
     try:
-        feed.run(runner, args.hz, poll, emit, until)
+        feed.run(runner, args.hz, poll, emit, until, shown)
     except KeyboardInterrupt:
         pass
     finally:
         runner.step.close()
+        if lie is not None:
+            lie.close()
         telemetry.stop()
     print(f"watched {time.monotonic() - started:.0f} s: {runner.step.counts['frames']} frames "
           f"({runner.step.counts['not visible']} not showing the game); deaths {runner.step.tracker.counts}")

@@ -15,8 +15,8 @@ from gamelab.localization import feed
 from gamelab.localization.feed import Asks, FeedClient, Ring, SyncFeed, fresh, run
 from gamelab.localization.senses import Senses
 from gamelab.localization.worldstate import Schedule, SearchThread, WorldState, WorldStep
-from gamelab.sim.fakes import FakeDetector
 from gamelab.perception.frames import Frame, ListFrames
+from gamelab.sim.fakes import FakeDetector
 
 from test_worldstate import Drawn, pig, small_map
 
@@ -468,6 +468,36 @@ def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_ga
     scenes = [r for r in records if r["topic"] == "scene"]
     assert 5 <= len(scenes) <= 25 and scenes[-1]["monsters"][0]["kind"] == "pig"  # 10 a second for ~1.8 s
     assert [t["kind"] for t in [r for r in records if r["topic"] == "tracks"][-1]["list"]] == ["pig"]
+
+
+def test_watch_checks_for_the_lie_detector_on_a_thread_of_its_own_twice_a_second(monkeypatch, tmp_path):
+    # It was checked in the frame loop, after each frame's step; now each frame is handed to the check's thread
+    # as soon as it's taken, before the step, every 0.5 s as before.
+    import threading
+
+    from gamelab import __main__ as cli, telemetry
+    from gamelab.localization import worldstate
+    from gamelab.perception import lie_detector
+    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
+    monkeypatch.setattr(feed, "quiet", lambda: None)
+    checked, raised = [], []
+
+    class Spotter:
+        def seen(self, full):
+            checked.append(threading.current_thread().name)
+            return len(checked) == 2
+    monkeypatch.setattr(lie_detector, "LieDetectorSpotter", Spotter)
+    monkeypatch.setattr(cli, "_lie_detector_seen", lambda frame: raised.append(threading.current_thread().name))
+    model = small_map()
+    eyes = Drawn(model)
+
+    def runner(args):
+        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
+        return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), _Look(eyes), step)
+    monkeypatch.setattr(cli, "_watch_runner", runner)
+    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30", "--lie-detector"]) == 0
+    assert 3 <= len(checked) <= 5 and set(checked) == {"lie-detector"}  # ~1.8 s
+    assert raised == ["lie-detector"]  # the alarm once, from the check's own thread
 
 
 def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_start(monkeypatch, capsys):
