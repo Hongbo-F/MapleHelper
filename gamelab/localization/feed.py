@@ -114,6 +114,11 @@ class Ring:
         """The frame numbers the ring holds now."""
         return sorted(int(s) for s in self._heads[:, 0] if s >= 0)
 
+    def slot_of(self, seq: int) -> int | None:
+        """The slot holding frame number `seq`, or None if it doesn't (never put, or overwritten since)."""
+        slot = seq % self.slots
+        return slot if self._heads[slot, 0] == seq else None
+
     def close(self, unlink: bool = False) -> None:
         del self._heads, self._frames  # the views first: shared memory with views on it can't close
         self.shm.close()
@@ -254,8 +259,13 @@ def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: floa
                 runner.step.throw(*msg[1:])
 
     def emit(st: WorldState, frame: Frame | None) -> None:
-        if st.frame is not None and not st.late:  # (a late state's frame went in when it was new)
+        if st.frame is not None and not st.late:
             st.slot = ring.put(st.seq, st.t, st.frame)
+        elif st.frame is not None and st.slot is None:
+            # A late state's frame went in when it was new, but a search back before its frame's state went out
+            # (in `run`, the frame's own, quick enough) was copied from that state before it had its slot: 14 of 42
+            # late states had none, and a look given one got a black frame.
+            st.slot = ring.slot_of(st.seq)
         states.send(("state", replace(st, frame=None)))
 
     try:

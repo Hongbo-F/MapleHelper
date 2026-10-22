@@ -31,6 +31,7 @@ def test_the_ring_holds_its_slots_frames_and_no_more():
         assert ring.held() == [7, 8, 9, 10]
         assert ring.get(10 % 4, 10)[0, 0, 0] == 10 and ring.get(6 % 4, 6) is None  # 6 was overwritten by 10
         assert ring.put(11, 0.0, np.zeros((5, 8, 3), np.uint8)) is None  # not its shape: not kept
+        assert ring.slot_of(9) == 9 % 4 and ring.slot_of(6) is None and ring.slot_of(11) is None
         other = Ring(ring.name, slots=4, shape=(6, 8, 3))  # the child's side, by name
         assert other.get(9 % 4, 9)[0, 0, 0] == 9
         other.close()
@@ -288,6 +289,24 @@ def test_the_child_runs_below_normal_and_hands_out_states_frames_and_events():
         client.close()
     assert client.proc.exitcode is not None and not client.alive
     assert client.bye is not None and client.bye["frames"] > 10
+
+
+def test_a_late_state_has_its_frames_slot_in_the_ring_even_when_its_search_was_back_before_the_frame_went_out():
+    # The drawn frames' searches are back at once, often before their own frame's state has gone out: a late state
+    # copied from it then had no slot (14 of 42 here), and a look given it got a black frame.
+    client = FeedClient(functools.partial(drawn_runner, 0), hz=30.0)
+    came = []
+    client.on_state = lambda st: came.append((st.seq, st.late, st.slot, client.ring.slot_of(st.seq)))
+    try:
+        assert client.alive, client.why
+        for k in range(20):
+            assert client.latest(Asks(time.monotonic(), band=True, loot=k % 2 == 0), timeout=2.0) is not None
+    finally:
+        client.close()
+    late = [c for c in came if c[1]]
+    assert len(late) >= 20
+    assert all(slot is not None for seq, _, slot, held in late if held is not None)  # its frame still in the ring
+    assert all(slot == seq % feed.RING_SLOTS for seq, _, slot, _ in came if slot is not None)
 
 
 def test_the_childs_frames_keep_their_rate_while_a_slow_search_is_out():
