@@ -28,8 +28,9 @@ from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
 FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the front before it gives up (_to_game)
 # `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes 10
-# times a second and tracks twice a second: on the saved frames a scene was 276 bytes and the tracks 845, so
-# about 16 MB an hour, 400 MB a day: the 2 GB telemetry keeps (telemetry.KEEP_BYTES) hold 5 days of it.
+# times a second and tracks twice a second: on the saved frames a scene is 393 bytes (with what each look searched,
+# for analysis.respawn, and the other players; 279 before those) and the tracks 848, so about 20 MB an hour, 490 MB
+# a day: the 2 GB telemetry keeps (telemetry.KEEP_BYTES) hold 4 days of it (5 before).
 WATCH_SCENE_S = 0.1
 WATCH_TRACKS_S = 0.5
 WATCH_STATUS_S = 10.0
