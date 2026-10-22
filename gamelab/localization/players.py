@@ -2,10 +2,11 @@
 map as her own dot is (pose.Localizer, snapped to the platform under it), and followed from look to look.
 
 A dot is a player once it's been seen in CONFIRM looks in a row (a marker read wrong for a look isn't anyone), and
-one is kept until its dot has been missed in MISSES looks in a row (one look missing it, say with her own marker
-drawn over it, doesn't make it go). A look that didn't see her own dot (something over the minimap) says nothing
-of theirs either. Dots are matched to the players of the look before, nearest first, the same kind, within
-MATCH_PX and what a player walks meanwhile.
+one is kept until its dot has been missed in MISSES looks in a row and for MISS_S (her own marker passing over
+theirs doesn't make them go: the continuous feed looks 30 times a second). A look that didn't see her own dot
+(something over the minimap) says nothing of theirs either. Dots are matched to the players of the look before,
+nearest first, the same kind, within MATCH_PX and what a player walks meanwhile. A look from the feed brings the
+players its own frames followed (`adopt`), so a look taken here after it goes on from them, ids and all.
 
 The minimap shows the whole map, so every look sees every player on it: the attribution of kills and the hunt loop's
 piles go by them (localization.tracking, behavior.ledger, behavior.hunt), and its choice of ground can
@@ -18,7 +19,12 @@ from ..perception.minimap import OTHER_SHIFT, Marker
 from .pose import Localizer
 
 CONFIRM = 2       # looks in a row a new dot must be seen in to be a player
-MISSES = 2        # looks in a row a player's dot must be missing for the player to be gone
+MISSES = 2        # looks in a row a player's dot must be missing for the player to be gone ...
+# ... and for this long (s): with the feed 2 looks are 67 ms, and her marker drawn over theirs as she walks past them
+# (11 px a second, a marker 7 px across from the core: the game draws hers last, or theirs, which isn't known) hides it
+# for about half a second. A player who goes stays on the map this much longer.
+MISS_S = 1.0
+LOCAL_IDS = 1_000_001  # where the ids of the players a look taken here finds begin, when a feed's looks bring theirs
 MATCH_PX = 4.0    # full-size px a player's dot may move between two looks and be the same one ...
 MATCH_PX_S = 15.0  # ... and this many px a second between them (a player walking 125 units/s, 11 px a second, and
                    # jumping) ...
@@ -67,10 +73,10 @@ class Player:
 class Players:
     """The other players on the map, kept up from every look's minimap (`update`)."""
 
-    def __init__(self, localizer: Localizer):
+    def __init__(self, localizer: Localizer, first_id: int = 1):
         self.localizer = localizer
         self.tracks: list[Player] = []  # confirmed and not yet
-        self.next_id = 1
+        self.next_id = first_id
         self._t: float | None = None    # the last look's time
 
     @property
@@ -95,8 +101,8 @@ class Players:
         for j, p in enumerate(self.tracks):
             if j not in seen:
                 p.missed += 1
-                if p.seen < CONFIRM or p.missed >= MISSES:  # a dot seen once, or a player gone
-                    continue
+                if p.seen < CONFIRM or (p.missed >= MISSES and t - p.last_seen >= MISS_S):  # a dot seen once, or a
+                    continue                                                                   # player gone
             kept.append(p)
         for i, m in enumerate(markers):
             j = taken.get(i)
@@ -109,6 +115,12 @@ class Players:
             p.seen += 1
         self.tracks = kept
         return self.current
+
+    def adopt(self, t: float, players: list["Player"]) -> None:
+        """The players of a look the feed gave at t (as its own frames followed them): the players now, so a look
+        taken here after it goes on from them."""
+        self.tracks = [replace(p, seen=max(p.seen, CONFIRM), missed=0) for p in players]
+        self._t = t
 
     def _place(self, p: Player, m: Marker) -> Player:
         """Player `p` where marker `m` puts them: their dot as hers would be at the same place (OTHER_SHIFT), placed

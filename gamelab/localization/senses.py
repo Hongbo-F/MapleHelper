@@ -21,7 +21,7 @@ from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import SCALE, SCREEN_SCALE
 from .mapdata import MapModel
 from .monsters import Monster
-from .players import Players
+from .players import LOCAL_IDS, Players
 from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
 from .scene import Scene, find_loot
 
@@ -52,7 +52,8 @@ class Senses:
         self.feed = feed
         self.localizer = Localizer(model)
         self.camera = Camera(model.bounds)
-        self.players = Players(self.localizer)  # other players, from the looks placed here (not the feed's)
+        # Other players, from the looks placed here, and from the feed's (Players.adopt): ids apart from the feed's
+        self.players = Players(self.localizer, 1 if feed is None else LOCAL_IDS)
         self.listeners: list[Callable[[Scene], None]] = []
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
@@ -81,6 +82,7 @@ class Senses:
         else:
             self.counts["from the feed"] += 1
             self._learn(s)  # the feed placed her with its own camera; this one learns too, for looks taken here
+            self.players.adopt(s.t, s.players)  # ... and the other players it follows, for them too
         if self.feed is not None:
             # What the feed saw up to the frame this look shows (all of it for a look taken here, now): an EXP
             # gain of a later frame goes with the next look, whose monsters no longer show the one it killed.

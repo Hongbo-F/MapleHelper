@@ -12,7 +12,7 @@ from PIL import Image
 
 from gamedata.paths import COPY
 from gamelab.localization import mapdata
-from gamelab.localization.players import CONFIRM, MISSES, Players
+from gamelab.localization.players import CONFIRM, LOCAL_IDS, MISS_S, MISSES, Players
 from gamelab.localization.pose import Localizer
 from gamelab.perception import minimap
 from gamelab.perception.minimap import MARKER_COLOURS, MINIMAP_BOX, OTHER_SHIFT, Marker, dot_in_box, markers_in_box
@@ -248,7 +248,7 @@ def test_a_player_is_placed_on_the_platform_under_their_dot_as_she_would_be(mode
     assert p.platform == b.id and p.x == pytest.approx(310.0) and p.y == pytest.approx(360.0) and p.rival
 
 
-def test_a_dot_is_a_player_after_two_looks_and_gone_after_two_misses(model):
+def test_a_dot_is_a_player_after_two_looks_and_gone_after_two_misses_a_second_apart(model):
     loc = Localizer(model)
     players = Players(loc)
     m = dot_of(loc, 300.0, 360.0)
@@ -258,9 +258,52 @@ def test_a_dot_is_a_player_after_two_looks_and_gone_after_two_misses(model):
     first = players.update(0.4, [m])[0]
     assert [p.id for p in players.update(0.5, [])] == [first.id]  # one look without: still there
     assert [p.id for p in players.update(0.6, [m])] == [first.id]
-    for t in range(MISSES):
-        out = players.update(0.7 + 0.1 * t, [])
-    assert out == []                                         # two in a row: gone
+    assert MISSES == 2 and MISS_S == 1.0
+    assert [p.id for p in players.update(0.7, [])] == [first.id]
+    assert [p.id for p in players.update(1.5, [])] == [first.id]  # two looks without, but 0.9 s since it was seen
+    assert players.update(1.7, []) == []                     # two looks and a second: gone
+
+
+def test_with_the_feeds_30_looks_a_second_her_marker_passing_over_theirs_doesnt_make_them_go(model):
+    """With the feed every frame is a look: theirs hidden for half a second (her marker drawn over it as she walks
+    past) is 15 looks without it; they're kept, the same player, and go only once missed for MISS_S."""
+    loc = Localizer(model)
+    players = Players(loc)
+    m = dot_of(loc, 300.0, 360.0)
+    frames = [k / 30 for k in range(91)]
+    seen = [t < 1.0 or 1.5 <= t < 2.0 for t in frames]  # hidden 1.0-1.5 s, gone from 2.0 s
+    ids = [[p.id for p in players.update(t, [m] if on else [])] for t, on in zip(frames, seen)]
+    assert all(i == [1] for i in ids[1:89])  # (2.93 s)
+    assert ids[90] == []  # gone 1.0 s after it was last seen (1.97 s)
+
+
+def test_a_look_taken_here_goes_on_from_the_players_the_feeds_looks_brought(model):
+    """Senses.look with a feed: a look the feed serves brings its players (its own ids); a look taken here after it
+    (the feed too slow, say) goes on from them, the same ids, so the hunter doesn't log them coming and going. A new
+    one seen here has an id the feed's can't have (LOCAL_IDS)."""
+    from types import SimpleNamespace
+    from gamelab.localization.players import Player
+    from gamelab.localization.senses import Senses
+    from gamelab.localization.worldstate import WorldState, to_scene
+    from gamelab.perception.eyes import Observation
+    frame = np.zeros((540, 960, 3), np.uint8)
+    loc = Localizer(model)
+    her, theirs = loc.to_dot(100.0, 500.0), dot_of(loc, 300.0, 360.0)
+    feed = SimpleNamespace(alive=True, scene=None, drain_events=lambda t: [])
+    feed.look = lambda senses, mobs, wide, loot, mesos_only: feed.scene
+    obs = []
+    eyes = SimpleNamespace(look=lambda: obs[-1])
+    senses = Senses(eyes, model, band=(100.0, 100.0), feed=feed)
+    p = Player(3, "stranger", 300.0, 360.0, None, (theirs.x, theirs.y), 0.0, 1.0, seen=9)
+    feed.scene = to_scene(WorldState(1, 1.0, True, dot=her, others=[theirs], players=[p], frame=frame), model,
+                          (100.0, 100.0), mobs=False)
+    assert [q.id for q in senses.look(mobs=False).players] == [3]
+    feed.scene = None  # the feed can't serve the next: it's taken here
+    other = dot_of(loc, 600.0, 360.0)
+    for t in (1.1, 1.2):
+        obs.append(Observation(t=t, frame=frame, tag=None, hp=1.0, mp=1.0, dot=her, others=[theirs, other]))
+        s = senses.look(mobs=False)
+    assert sorted(q.id for q in s.players) == [3, LOCAL_IDS]
 
 
 def test_a_player_walking_is_followed_and_one_far_off_is_another(model):
@@ -275,6 +318,8 @@ def test_a_player_walking_is_followed_and_one_far_off_is_another(model):
     out = players.update(1.75, [dot_of(loc, 700.0, 500.0)])  # 520 units off a quarter of a second later
     assert [q.id for q in out] == [1]                         # the new dot isn't anyone yet; the old one kept once
     out = players.update(2.0, [dot_of(loc, 700.0, 500.0)])
+    assert sorted(q.id for q in out) == [1, 2]  # (the old one kept until it's been missed for MISS_S)
+    out = players.update(2.3, [dot_of(loc, 700.0, 500.0)])
     assert [q.id for q in out] == [2]
 
 
@@ -318,7 +363,7 @@ def test_a_look_that_cant_see_the_minimap_says_nothing_of_the_players(model):
         s = look(t, None, [])
     assert [p.platform for p in s.players] == [b.id]
     assert s.record()["players"] == [{"id": 1, "kind": "stranger", "x": 300.0, "y": 360.0, "platform": b.id}]
-    for t in (0.5, 0.6):
+    for t in (0.5, 1.2):
         s = look(t, her, [])
     assert s.players == [] and "players" not in s.record()
 
