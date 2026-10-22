@@ -112,7 +112,8 @@ class Scene(Observation):
         monsters and the drops; and what it searched (from 2026-10-21's evening, for analysis.respawn: an empty list
         of monsters is otherwise a look that saw none or one that didn't look): `searched` and `wide` (Scene's),
         `looked` (where drops were looked for: platform, map x from, to) and `view` (the map the screen showed above
-        the bottom bar: x from, y from, x to, y to, whole units)."""
+        the bottom bar: x from, y from, x to, y to, whole units); and the other players (`players`, left out when there
+        are none)."""
         her = None if self.where is None else {
             "x": round(self.where.x, 1), "y": round(self.where.y, 1),
             "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen,
