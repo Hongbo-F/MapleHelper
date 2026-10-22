@@ -110,6 +110,9 @@ def test_grounds_about_as_good_go_to_the_one_she_was_at_longest_ago(monkeypatch)
     assert nxt({1: 50.0}) == 4 and nxt({1: 50.0, 4: 60.0}) == 2 and nxt({1: 70.0, 4: 60.0, 2: 80.0}) == 4
     monkeypatch.setattr(hunt, "GROUND_TIE", 0.02)    # 2 is 3.6% under 1: not as good
     assert nxt({1: 50.0, 4: 60.0}) == 1
+    from gamelab import __main__ as cli  # `tour --loop --ground-tie F` sets it for a run (the in-game check)
+    assert cli.build_parser().parse_args(["tour", "--loop", "--ground-tie", "0.1"]).ground_tie == 0.1
+    assert cli.build_parser().parse_args(["tour", "--loop"]).ground_tie is None
 
 
 def test_a_pile_objective_no_longer_worth_it_ends_the_trip_to_it():

@@ -555,10 +555,12 @@ def cmd_tour(args) -> int:
                 rest_avoid=args.rest_avoid)
     kinds = set(args.kinds.split(",")) if args.kinds else None
     if args.loop:  # the hunt loop (gamelab/docs/hunt-modes.md): one decision per look, for --minutes
-        from .behavior.hunt import Hunt
+        from .behavior import hunt
         if kinds is not None:
             tour.worth = kinds
-        report = Hunt(tour, log=_log).run(minutes=args.minutes)
+        if args.ground_tie is not None:  # grounds about as good: the one she left longest ago (README: Route diversity)
+            hunt.GROUND_TIE = args.ground_tie
+        report = hunt.Hunt(tour, log=_log).run(minutes=args.minutes)
         print(f"hunt done: {report}")
         return 0
     report = tour.run(stops=args.stops, kinds=kinds, kills_per_stop=args.kills, seconds_per_stop=args.seconds)
@@ -1275,6 +1277,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ways", type=int, metavar="N",
                    help="each trip chooses among the N best distinct ways by their times (route.ROUTES; default 1: "
                         "the quickest, varied by the moves' random weights; README: Route diversity)")
+    s.add_argument("--ground-tie", type=float, metavar="F",
+                   help="with --loop: of the grounds within this share of the best's score, the one she left longest "
+                        "ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
     feed_arg(s)
     s.set_defaults(func=cmd_tour)
 
