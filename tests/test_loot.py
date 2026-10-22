@@ -214,7 +214,7 @@ def _mopper(monkeypatch, looks, text="", monsters=()):
     seq, sweeps = iter(looks), []
     monkeypatch.setattr(time, "sleep", lambda s: None)
     h.look = lambda *a, **k: SimpleNamespace(where=Where(1000, 500, here, (0, 0)), platform=here, t=0.0,
-                                             loot=next(seq, []), monsters=list(monsters))
+                                             loot=next(seq, []), monsters=list(monsters), players=[])
 
     def walk_piles(s, deaths, margin):
         sweeps.append(sorted(round(d.x) for d in deaths))
@@ -286,13 +286,31 @@ def test_remembered_drops_seen_gone_twice_are_forgotten_and_drops_seen_elsewhere
     h.looter.pending = [DropSpot(1000, 500, hers, 90.0), DropSpot(2500, 500, hers, 90.0),  # in view, out of view
                       DropSpot(1200, 500, hers, 99.0)]                                 # in view, still landing
     s = SimpleNamespace(loot=[_loot("mesos", 1610, upper), _loot("leather", 1640, upper)],
-                        in_view=lambda pid, x: pid == hers and 700 <= x <= 1300)
+                        in_view=lambda pid, x: pid == hers and 700 <= x <= 1300, players=[])
     h.looter.remember(s)  # one empty look isn't enough: a pig walking over coins hid them in game
     assert [(round(d.x), d.platform, d.mesos, d.on_ground) for d in h.looter.pending] == [
         (1000, hers, False, False), (2500, hers, False, False), (1200, hers, False, False), (1610, upper, True, True)]
     clock[0] += EMPTY_LOOKS
-    h.looter.remember(SimpleNamespace(loot=[], in_view=s.in_view))
+    h.looter.remember(SimpleNamespace(loot=[], in_view=s.in_view, players=[]))
     assert [round(d.x) for d in h.looter.pending] == [2500, 1200, 1610]  # 1200's drops may still be landing
+
+
+def test_the_tour_doesnt_come_back_for_drops_by_another_player_unless_one_is_worth_it(monkeypatch):
+    """looting.PLAYER_PILES (off by default): drops seen with another player by them (400 units across) aren't
+    remembered for later, unless one is worth PLAYER_PILE_WORTH (a Slime Bubble); with her party's leader there, or
+    nobody, they are."""
+    from gamelab.behavior import looting
+    from gamelab.behavior.looting import PLAYER_PILE_WORTH, worth
+    from gamelab.localization.players import Player
+    monkeypatch.setattr(time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(looting, "PLAYER_PILES", True)
+    assert worth("slime-bubble") >= PLAYER_PILE_WORTH > worth("mesos")
+    seen = [_loot("mesos", 1610, UPPER), _loot("slime-bubble", 1900, UPPER), _loot("leather", 2400, UPPER)]
+    for kind, kept in (("stranger", [1900, 2400]), ("party", [1610, 1900, 2400]), (None, [1610, 1900, 2400])):
+        h = _hunter()
+        players = [] if kind is None else [Player(1, kind, 1700.0, 440.0, UPPER, (0.0, 0.0), 0.0, 1.0, seen=2)]
+        h.looter.remember(SimpleNamespace(loot=seen, in_view=lambda pid, x: False, players=players))
+        assert [round(d.x) for d in h.looter.pending] == kept, kind
 
 
 def test_where_a_kill_died_she_sweeps_even_when_nothing_shows(monkeypatch):
@@ -301,7 +319,7 @@ def test_where_a_kill_died_she_sweeps_even_when_nothing_shows(monkeypatch):
     h.looter.mop_up = lambda stood=None: None
     here = h.model.platform_under(1000, 500)
     s = SimpleNamespace(where=Where(1000, 500, here, (0, 0)), platform=here, t=0.0, loot=[], monsters=[],
-                        in_view=lambda pid, x: True)
+                        in_view=lambda pid, x: True, players=[])
     h.look = lambda *a, **k: s
     assert h.looter.collect(DropSpot(1100, 500, HERS, -100.0))               # a kill's spot: hidden, or still falling
     assert h.looter.collect(DropSpot(1300, 500, HERS, -100.0, on_ground=True))    # seen before, gone now: taken
@@ -327,7 +345,7 @@ def _touring(h, travel=None):
     from gamelab.behavior.tour import Tour, TourReport
     trips = []
     h.looter.collect = lambda d: True
-    h.look = lambda *a, **k: SimpleNamespace(loot=[], in_view=lambda pid, x: False)
+    h.look = lambda *a, **k: SimpleNamespace(loot=[], in_view=lambda pid, x: False, players=[])
     tour = Tour.__new__(Tour)
     tour.h, tour.log, tour.report = h, lambda m: None, TourReport()
     here = SimpleNamespace(x=1000, y=500, platform=SimpleNamespace(id=HERS))

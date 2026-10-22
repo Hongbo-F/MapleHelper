@@ -22,6 +22,7 @@ def _hunt(piles, kills=(), travel=5.0):
                                                     arrive=lambda src, x, dst, dst_x=None, keep_off=(): travel))
     h.visit = Visit(1, Spot(1, 0.0, 1.0, True), kills=list(kills))
     h._exit_piles, h.obj = None, None
+    h._seen = None  # no look yet (so no other player by any pile)
     return h
 
 
@@ -98,7 +99,7 @@ def test_grounds_about_as_good_go_to_the_one_she_was_at_longest_ago(monkeypatch)
     h._skip, h._left, h.visit, h.stack, h.obj, h.report = {}, {}, None, [], None, HuntReport()
     monkeypatch.setattr(hunt.spots, "spot_at", lambda model, g, kinds: (g, 0.0))
     monkeypatch.setattr(hunt.spots, "spot", lambda model, g, where, travel, kinds: Spot(g, 0.0, 1.0, True))
-    s = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=36), x=300.0))
+    s = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=36), x=300.0), players=[])  # nobody else
 
     def nxt(left: dict) -> int:
         h._left, h.visit = dict(left), None
@@ -314,3 +315,19 @@ def test_the_wait_for_drops_to_land_counts_in_what_a_pile_on_the_way_costs():
     assert abs(extra - (0.8 + 0.5)) < 0.05
     h.h.drops.known[0].since = time.monotonic()  # killed just now: 1.5 s to wait, 2.3 s in all
     assert h._detour(_at(13)) is None
+
+
+def test_a_pile_by_another_player_is_left_to_them_unless_it_is_valuable_or_hers():
+    """PLAYER_PILES: a pile no kill of hers explains, with another player by it in the latest look (400 units across,
+    100 up or down), isn't worth a trip, however old, unless a drop in it is worth VALUABLE; her own are."""
+    from gamelab.localization.players import Player
+    theirs = _pile(hunt.OTHERS_AFTER + 1, hers=False)
+    dear = _pile(hunt.OTHERS_AFTER + 1, hers=False, dearest=hunt.VALUABLE, worth=hunt.VALUABLE)
+    mine = _pile(10)
+    h = _hunt([theirs, dear, mine])
+    assert h._fresh(theirs) and h._fresh(dear) and h._fresh(mine)
+    for kind, left in (("stranger", True), ("party", False)):  # her party doesn't hunt against her
+        h._seen = SimpleNamespace(players=[Player(1, kind, 300.0, 0.0, 2, (0.0, 0.0), 0.0, 1.0, seen=2)])
+        assert h._fresh(theirs) != left and h._fresh(dear) and h._fresh(mine)
+    h._seen = SimpleNamespace(players=[Player(1, "stranger", 600.0, 0.0, 2, (0.0, 0.0), 0.0, 1.0, seen=2)])
+    assert h._fresh(theirs)  # 500 units off it

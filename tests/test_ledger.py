@@ -311,3 +311,26 @@ def test_a_pile_seen_holds_what_was_seen_in_it_and_what_that_is_worth():
                         looked=[(3, 300.0, 1000.0)]))
     other = store.known[-1]
     assert not other.hers and other.items == ("leather",) and other.worth == 10  # someone else's, seen
+
+
+def test_a_gain_goes_on_a_monster_gone_by_another_player_only_when_none_else_has_gone():
+    """PLAYER_KILLS: of the monsters a throw of hers can have taken, gone from view, one another player stands by
+    (they likelier killed it) comes after the others."""
+    from gamelab.behavior.ledger import _Throw
+    from gamelab.localization.monsters import Monster
+    from gamelab.localization.players import Player
+    from gamelab.perception.mobs import Mob
+
+    def seen(kind, x):
+        return Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, 500.0, 3)
+
+    for players, kind in (([], "pig"), ([Player(1, "stranger", 250.0, 500.0, 3, (0.0, 0.0), 0.0, 1.0, seen=2)], "slime"),
+                          ([Player(1, "party", 250.0, 500.0, 3, (0.0, 0.0), 0.0, 1.0, seen=2)], "pig")):
+        h = _Hunter()
+        ledger = Ledger(h)
+        ledger._throws.append(_Throw(10.0, "right", [seen("pig", 300.0), seen("slime", 800.0)]))
+        h.exp_gains = 1
+        s = _look(10.5)
+        s.searched, s.players = True, players  # both gone from view; the pig 50 units from the other player
+        ledger.on_look(s)
+        assert [k.kind for k in ledger.kills] == [kind], players

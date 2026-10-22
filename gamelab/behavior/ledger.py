@@ -6,7 +6,8 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   that can have taken the attack of a throw made in the last STAR_WINDOW s (or, with none, that long before
   the look before, as the gain came after it; any of them: which of the claw's stances an attack takes is
   drawn, and the client's order within a band of the star's search can't be seen), preferring one that's
-  gone from view, the newest throw's and the likeliest first; where that monster was seen last (a throw's
+  gone from view (and of those, one with another player by it last: PLAYER_KILLS), the newest throw's and the
+  likeliest first; where that monster was seen last (a throw's
   path is followed from look to look).
   A gain no throw explains (party EXP, or a kill seen only from a look without monsters) still counts,
   credited to where she is, but has no place and so no drops.
@@ -32,6 +33,7 @@ from maplehelper.engine import RIGHT
 
 from ..attack import reach
 from ..localization.monsters import TRACK_SLACK, Monster, same, seen_again
+from ..localization.players import near_rival
 from ..localization.scene import Loot, Scene
 from . import looting
 from .looting import COINS, EMPTY_LOOKS, LOOT_REACH, SETTLE, standing, worth
@@ -47,6 +49,12 @@ GONE_KEEP_S = 300.0
 # each kind's piles seen where her kills died on 2026-10-21; looting.COINS), and its item is worth less than they are
 # but for the Slime Bubble (looting.PRICES).
 PILE_WORTH = COINS["bronze"]
+# Whether a gain goes on a monster gone from view by another player (localization.players.near_rival) only when no
+# other a throw of hers explains has gone: one gone by them, they likelier killed. In the simulator's hunt loop (preset
+# game, 20 seeds of 20 minutes) her throws' paths rarely held the other player's kills: of about 4,200 kills, 9 were
+# placed where its kill was without this, 8 with it, and as many placed right (67%); EXP a minute 129.93 -> 129.76
+# (2 seeds' runs changed), the tour's runs the same. On for the game, where another player may hunt beside her.
+PLAYER_KILLS = True
 # Her wounds (Wounds). A bar new, or this much other than at the throw, is a hit (fight.HURT). A wound unseen this long
 # is gone: a hit monster hides under its damage numbers for 1-3 s (fight.HIDDEN_FOR is how long she keeps
 # throwing at one unseen; seen again within this, it's still hers), and seen without its bar it's still kept
@@ -135,6 +143,8 @@ class Ledger:
         firsts = [(th, m) for th in reversed(recent or self._throws) for m in th.path]
         if s.searched:
             gone = [(th, m) for th, m in firsts if not any(same(o, m) for o in s.monsters)]
+            if PLAYER_KILLS and s.players:  # (a stable sort: the newest throw's and the likeliest first as before)
+                gone.sort(key=lambda tm: near_rival(s.players, tm[1].x, tm[1].y) is not None)
             firsts = gone or firsts
         here = None if s.platform is None else s.platform.id
         if not firsts:

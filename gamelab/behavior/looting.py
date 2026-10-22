@@ -18,6 +18,7 @@ from ..attack.reach import EDGE_MARGIN
 from ..attack.stance import TOO_CLOSE
 from ..control.navigator import MIN_GROUND_PX
 from ..localization.monsters import Monster
+from ..localization.players import near_rival
 from ..localization.scene import Loot, Scene
 from ..perception.loot import MESOS, says_full
 
@@ -76,6 +77,15 @@ COINS = {"bronze": 15, "gold": 75}
 # A drop the table doesn't know (none yet: equipment and scrolls aren't looked for, README Limits): at this level
 # those are worth the most, so as much as the dearest drop here.
 UNKNOWN_WORTH = max(PRICES.values())
+# Whether drops seen by another player (localization.players.near_rival) are left to them unless one is worth
+# PLAYER_PILE_WORTH (hunt.VALUABLE's: a Slime Bubble, a White Potion): not remembered for the tour to come back for
+# (`remember`). Her own kills' drops are swept where they died, whoever stands by them. Off: the tour can't tell whose
+# drops it sees, and some by the other player were hers. In the simulator's tour (preset game, 20 seeds of 20 minutes)
+# it changed 11 seeds' runs, 7 for the better (the worst 7% down): 91.4 -> 92.8 EXP a minute, HP lost 3.00 -> 2.88
+# bars, but her drops picked up 94.2% -> 93.9% (seeds 1-10: 94.7% -> 92.6%), below the harness's bar. (The hunt
+# loop's drop store knows which piles her kills explain: hunt.PLAYER_PILES.)
+PLAYER_PILES = False
+PLAYER_PILE_WORTH = 30.0
 
 
 def worth(kind: str, coin: str | None = None) -> float:
@@ -136,6 +146,9 @@ class Looter:
         if gone := len(self.pending) - len(kept):
             self.h.log(f"  {gone} remembered drop spot(s) seen empty twice: forgotten")
         self.pending = kept
+        if PLAYER_PILES and s.players:
+            seen = [d for d in seen if near_rival(s.players, d.x, d.y) is None
+                    or worth(d.item.kind, d.item.coin) >= PLAYER_PILE_WORTH]
         self.note(seen)
 
     def note(self, seen: list[Loot]) -> None:

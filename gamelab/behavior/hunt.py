@@ -58,6 +58,7 @@ from ..attack.spots import Spot
 from ..attack.stance import act_text, close_to, open_above, stance
 from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
+from ..localization.players import near_rival
 from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
 from . import fight
@@ -152,6 +153,23 @@ DETOUR_S = 2.0
 DETOUR_SLACK = 0.5
 DETOURS = 3
 DETOUR_REACH = 2.5
+# Another player on a ground or by it (localization.players: a rival's minimap dot on it, on its spot's platform, or
+# PLAYER_NEAR across and PLAYER_DY up or down of its ends) takes its monsters: choosing the next ground, and in the
+# rate rule's best other ground, its EXP a second counts PLAYER_DISCOUNT of itself (1: as if nobody were there). Off:
+# in the simulator's game-like world (preset game, 20 seeds of 20 minutes) a discount of 0.85 or 0.7 changed 1-2
+# seeds' runs and cost seed 7 27% of its EXP a minute (129.9 -> 128.7 on average; 0.5 on seeds 1-10, 127.9 -> 125.6):
+# leaving the basin, she went to 17 (35% of it in reach) rather than to 4, where the other player had just come, and
+# spent 5 minutes there, where on 4 she had made more with it beside her. The simulator's other player kills one monster every 25 s, a
+# guess; a real one may take far more of a ground.
+PLAYER_DISCOUNT = 1.0
+PLAYER_NEAR = 200.0
+PLAYER_DY = 100.0
+# Whether a pile no kill of hers explains, with another player by it (players.near_rival), is left to them unless it
+# holds a drop worth VALUABLE: theirs, it can't be picked up for a while, and they take it. In the simulator (preset
+# game, 20 seeds of 20 minutes) it changed 9 seeds' runs, 4 for the better (129.93 -> 129.88 EXP a minute, drops
+# picked up 83.7% -> 83.9%, HP lost 2.77 -> 2.77 bars): the other player there takes its drops 22 s after its kill,
+# before OTHERS_AFTER makes them worth a trip anyway, so only piles taken for no kill of hers are left.
+PLAYER_PILES = True
 
 
 def _keep_off(o: "Objective") -> tuple[int, ...]:
@@ -676,7 +694,14 @@ class Hunt:
         now = time.monotonic()
         return (p.status != "gone" and p.platform is not None and now - p.since < DROP_LIFE
                 and p.tries < PILE_TRIES and (p.hers or now - p.since >= OTHERS_AFTER)
-                and (p.mesos or not self.h.looter.inventory_full))
+                and (p.mesos or not self.h.looter.inventory_full) and not self._theirs(p))
+
+    def _theirs(self, p: Pile) -> bool:
+        """Whether pile `p` is another player's (PLAYER_PILES): no kill of hers explains it, it holds nothing worth
+        VALUABLE, and another player is by it in the latest look."""
+        s = self._seen
+        return (PLAYER_PILES and not p.hers and (p.dearest or 0.0) < VALUABLE and s is not None
+                and near_rival(s.players, p.x, p.y) is not None)
 
     def _pile_here(self, s: Scene) -> Pile | None:
         """Rule 5: drops seen on her platform within PILE_NEAR, nothing by them, nothing in between."""
@@ -905,6 +930,19 @@ class Hunt:
         prior = self.tour.ground_values().get(v.ground, 0.0) / self._visit_s(v.ground)
         return (v.exp + prior * PRIOR_S) / (time.monotonic() - v.arrived + PRIOR_S)
 
+    def _shared(self, g: int, s: Scene) -> float:
+        """What of ground `g`'s EXP a second is hers to have as look `s` shows the other players: PLAYER_DISCOUNT with
+        a rival of hers on it, on its spot's platform, or by it (PLAYER_NEAR, PLAYER_DY), else all of it."""
+        rivals = [pl for pl in s.players if pl.rival]
+        if not rivals or PLAYER_DISCOUNT == 1.0:
+            return 1.0
+        p, spot = self.model.platform(g), spots.spot_at(self.model, g, self.kinds)[0]
+        for pl in rivals:
+            x = min(max(pl.x, p.left), p.right)
+            if pl.platform in (g, spot) or (abs(pl.x - x) <= PLAYER_NEAR and abs(pl.y - p.y_at(x)) <= PLAYER_DY):
+                return PLAYER_DISCOUNT
+        return 1.0
+
     def _visit_s(self, pid: int) -> float:
         """A visit's expected length: VISIT_S counted as PRIOR visits (as the value map's EXP per visit is),
         blended with the timed visits. Unblended, one empty ground left in 0.6 s looked like the best one:
@@ -923,7 +961,7 @@ class Hunt:
             t = self.nav.planner.travel(s.platform.id, s.where.x, at[0]) if s.platform.id != at[0] else 0.0
             if t is None:
                 continue
-            rate = values.get(g, 0.0) / (t + self._visit_s(g))
+            rate = values.get(g, 0.0) / (t + self._visit_s(g)) * self._shared(g, s)
             if best is None or rate > best[0]:
                 best = (rate, g)
         return best
@@ -945,7 +983,7 @@ class Hunt:
                 t = 0.0 if here.id == at[0] else self.nav.planner.travel(here.id, s.where.x, at[0])
             if t is None:
                 continue
-            score = values.get(g, 0.0) / (t + self._visit_s(g)) * self.rng.uniform(0.75, 1.25)
+            score = values.get(g, 0.0) / (t + self._visit_s(g)) * self.rng.uniform(0.75, 1.25) * self._shared(g, s)
             scored.append((score, g))
             if best is None or score > best[0]:
                 best = (score, g)
