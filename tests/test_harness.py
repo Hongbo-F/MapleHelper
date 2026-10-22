@@ -256,3 +256,20 @@ def test_stretches_are_timed_from_a_mark_to_the_next_charge():
     s.charge("_now")
     assert [len(s.times[k]) for k in ("send", "_now")] == [1, 1]
     assert [line.split()[0] for line in s.table()[1:]] == ["a", "a", "any"]
+
+
+def test_her_trips_are_counted_from_the_stacks_log(model):
+    """navigation: plans cut short by a hit and off the path, replans (a cut and the landing it logs next are one),
+    misses (landed elsewhere than planned) and the falls among them (onto a lower platform, or onto none)."""
+    from gamelab.control.mover import platform_text
+    a, b, c = plat(model, 300, 100), plat(model, 360, 300), plat(model, 500, 400)  # c the lowest (y is down)
+    log = [f"  4.0     hit (90% -> 80%): plan cut short; on {platform_text(b)} at x 300 after 0.40 s: replanning from there",
+           f"  4.5     hit on the way (90% -> 80%): on {platform_text(b)}; replanning",  # (the same replan)
+           f"  5.0   {platform_text(b)} at x 300 (dot): jump->4  [2 moves to go; chain ended: end]",
+           f"  6.0     off the path (on {c.id}, planned {b.id}): plan cut short; on {platform_text(c)} at x 400 after "
+           "0.30 s: replanning from there",
+           f"  6.4     ended on {platform_text(c)} instead of platform {b.id}; replanning",  # the same replan: a fall
+           f"  7.0     ended on {platform_text(a)} instead of platform {b.id}; replanning",  # up instead: a miss
+           f"  8.0     ended on air/rope instead of platform {c.id}; replanning",                # a fall
+           f"  9.0     hit on the way (80% -> 70%): on {platform_text(c)}; replanning"]
+    assert harness.navigation(log, model) == {"cut_hit": 1, "cut_off_path": 1, "replans": 5, "misses": 3, "falls": 2}

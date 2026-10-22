@@ -25,6 +25,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
   rest_hp_lost     HP lost to touches on the trips to rest (from 'rest_trip' to 'rest' events), and
                    rest_trips: how many (the bar for `--rest-avoid`: compare --bar rest)
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
+  nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
+                   path, replans, misses (landed elsewhere than planned) and falls among them, and her glances
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -34,6 +36,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -147,7 +150,38 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
                               "searches": f.get("searches"), "searching_s": f.get("searching_s"),
                               "senses": f["senses"], "tracker": f["tracker"]}
     out["looks"] = sim.eyes.counts["looks"]
+    out["nav"] = navigation(trace["log"], sim.model)
+    out["nav"]["glances"] = sim.eyes.counts["glances"] + (
+        trace["feed"]["senses"].get("glances from the feed", 0) if feed else 0)
     return out
+
+
+def navigation(log: list[str], model) -> dict:
+    """How her trips went, from the stack's log (control.navigator): plans cut short by a hit ('cut_hit') and off
+    the planned path ('cut_off_path'); replans from where she ended up rather than where planned (a cut, a hit on
+    the way, a landing elsewhere: once each, a cut and the landing after it once); misses, the landings elsewhere
+    than planned (the trip's own count); and falls, those of them onto a platform more than 10 units lower than
+    the one planned, or onto none."""
+    out = {"cut_hit": 0, "cut_off_path": 0, "replans": 0, "misses": 0, "falls": 0}
+    cut = False  # the line before was a cut: the landing it logs next is the same replan
+    for line in log:
+        if "plan cut short" in line:
+            out["cut_off_path" if "off the path" in line else "cut_hit"] += 1
+            out["replans"] += 1
+            cut = True
+            continue
+        if "replanning" in line:
+            out["replans"] += not cut
+            if (m := _MISSED.search(line)) is not None:
+                out["misses"] += 1
+                planned = model.platform(int(m["planned"]))
+                landed = None if m["landed"] is None else model.platform(int(m["landed"]))
+                out["falls"] += landed is None or landed.top > planned.top + 10
+        cut = False
+    return out
+
+
+_MISSED = re.compile(r"ended on (?:platform (?P<landed>\d+) \(.*?\)|air/rope) instead of platform (?P<planned>\d+)")
 
 
 def outcomes(world, records: list[dict], horizon: float) -> dict:
@@ -294,8 +328,14 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     if fell:
         lines.append(f"fell out of the map: seed(s) {', '.join(map(str, fell))}")
     ok &= not fell
+    if all("nav" in r for r in base + cand):  # (runs saved before it was counted have none)
+        lines.append("her trips, in all (shown only): " + ", ".join(
+            f"{key} {sum(r['nav'][key] for r in base)} -> {sum(r['nav'][key] for r in cand)}" for key in NAV))
     lines.append("PASSES the bar" if ok else "does NOT pass the bar")
     return ok, lines
+
+
+NAV = ("cut_hit", "cut_off_path", "replans", "misses", "falls", "glances")  # navigation()'s counts, and the glances
 
 
 def compare_rest(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
