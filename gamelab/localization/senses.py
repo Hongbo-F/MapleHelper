@@ -33,7 +33,12 @@ from .scene import Scene, find_loot
 ROPE_PAD: int | None = ROPE_MATCH_PX + MAX_ROPE_WIDTH
 # Glances from a feed come this far apart at the soonest (their frames' times): GLANCE_EVERY_S, as glances taken here
 # (63 ms: about 15 a second); 0, every frame the feed looks at (30 a second). The navigator judges glances in time
-# (navigator.STILL_S, OFF_PATH_S), so what it makes of them holds either way.
+# (navigator.STILL_S, OFF_PATH_S), so what it makes of them means the same either way, but every frame didn't pay in
+# the simulator (2026-10-21; README, Continuous perception): the nav_* trips on 10 seeds of the game's noise were 2.9%
+# quicker but missed 16 landings of 290 against 11 (11 falls against 6), `recover` taking her for stopped once her
+# dot had stood 46 ms twice as often while she ran (at 149 units/s it can sit 76 ms in one of this map's 11.4-unit
+# minimap pixels), and over 20 seeds of 20 minutes the tour made 5.0% less EXP a minute (standard error 2.6%), the
+# hunt loop 2.4% more (1.6%). Not tried in game.
 FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
 
 
