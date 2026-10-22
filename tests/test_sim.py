@@ -1279,11 +1279,13 @@ def test_the_navigator_records_where_each_route_was_planned_from_and_how_each_ch
         trace = scenarios.run("nav_rope_past_end")
     assert trace["result"]["result"] == "arrived"
     routes = [r for r in records if r["topic"] == "route"]
-    assert routes[0]["from"] == {"platform": 23, "x": 900.0} and "keep_off" not in routes[0] and "avoid" not in routes[0]
+    assert routes[0]["from"] == {"platform": 23, "x": 900.0}
+    assert "keep_off" not in routes[0] and "avoid" not in routes[0]
     assert [(r["planned"], r["landed"], r["hit"], [(m["kind"], m["src"], m["dst"], m["x"]) for m in r["moves"]])
             for r in records if r["topic"] == "moved"] == [(17, 17, False, [("climb", 23, 17, 998.7)])]
     assert route_record(17, [], start=(36, 512.34), keep_off={17, 4}, avoid=[("jump", 32, 29, 536)]) == {
-        "dst": 17, "moves": [], "from": {"platform": 36, "x": 512.3}, "keep_off": [4, 17], "avoid": [["jump", 32, 29, 536]]}
+        "dst": 17, "moves": [], "from": {"platform": 36, "x": 512.3}, "keep_off": [4, 17],
+        "avoid": [["jump", 32, 29, 536]]}
 
 
 @REAL

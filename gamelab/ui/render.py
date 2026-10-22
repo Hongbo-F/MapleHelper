@@ -37,6 +37,9 @@ HP_BAR, MP_BAR = (230, 70, 70), (80, 130, 255)
 BAR_BACK = (50, 55, 70)      # empty bars, and the line above the text panel
 KIND = {"pig": (255, 150, 170), "slime": (110, 235, 110), "snail": (130, 170, 255),
         "orange-mushroom": (255, 150, 40)}
+COVER_TAKEN = (90, 230, 90)     # coverage_picture: a move taken (thicker the more often)
+COVER_PLANNED = (240, 200, 60)  # ... planned, never taken
+COVER_NEVER = (200, 70, 70)     # ... never planned
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 JUMP_ARC = 77                # how high a jump's arc is drawn, in map units (physics.JUMP_HEIGHT)
 REACH_ALPHA = 0.35           # how strongly her reach's bands show over the map
@@ -189,7 +192,7 @@ class MapView:
             if i == 0:
                 cv2.circle(img, a, 3, ROUTE, -1, cv2.LINE_AA)
 
-    def _arc(self, img, a, b, colour) -> None:
+    def _arc(self, img, a, b, colour, width: int = 1) -> None:
         """A jump's path: up from a, then down onto b."""
         lift = max(8, int(JUMP_ARC * self.scale))
         pts = []
@@ -198,8 +201,8 @@ class MapView:
             x = a[0] + (b[0] - a[0]) * f
             y = a[1] + (b[1] - a[1]) * f - 4 * lift * f * (1 - f)
             pts.append((int(x), int(y)))
-        cv2.polylines(img, [np.array(pts, np.int32)], False, colour, 1, cv2.LINE_AA)
-        cv2.circle(img, b, 2, colour, -1, cv2.LINE_AA)
+        cv2.polylines(img, [np.array(pts, np.int32)], False, colour, width, cv2.LINE_AA)
+        cv2.circle(img, b, 1 + width, colour, -1, cv2.LINE_AA)
 
     def _chain(self, img, chain: dict | None) -> None:
         if not chain:
@@ -308,6 +311,24 @@ class MapView:
         if her.get("seen") is False:
             cv2.circle(img, (x, y), 9, UNSEEN, 1, cv2.LINE_AA)
 
+    # --- the coverage report's picture ---------------------------------------------------------------
+
+    def moves(self, img, rows) -> None:
+        """Route moves drawn by what runs did with them (coverage_picture): (move, planned, taken) each."""
+        plats = self.model.platforms
+        order = sorted(rows, key=lambda r: (r[2] > 0, r[1] > 0, r[2]))  # the taken ones over the rest
+        for m, planned, taken in order:
+            if not (self._known(m.src) and self._known(m.dst)):
+                continue
+            colour = COVER_TAKEN if taken else COVER_PLANNED if planned else COVER_NEVER
+            width = 1 + min(3, int(np.log2(1 + taken) / 2)) if taken else 1
+            a = self.pt(m.x, plats[m.src].y_at(m.x))
+            b = self.pt(m.land_x, plats[m.dst].y_at(m.land_x))
+            if m.kind in ("jump", "walk_off"):
+                self._arc(img, a, b, colour, width)
+            else:
+                cv2.arrowedLine(img, a, b, colour, width, cv2.LINE_AA, tipLength=0.12)
+
     # --- text panel -------------------------------------------------------------------------------
 
     def _panel(self, img, state: State) -> None:
@@ -348,3 +369,21 @@ class MapView:
         for text in list(state.logs)[-max(0, (self.size[1] - line) // 15):]:
             cv2.putText(img, text[:110], (10, line), FONT, 0.36, DIM, 1, cv2.LINE_AA)
             line += 15
+
+
+def coverage_picture(model: MapModel, rows, width: int = 1600, title: str = "") -> np.ndarray:
+    """The map with every route move drawn by what runs did with it (analysis.coverage.picture_rows: (move,
+    planned, taken) each): taken in green, thicker the more often; planned but never taken in yellow; never
+    planned in red. Jumps and walk-offs as arcs, the rest as arrows, as the planned route is drawn."""
+    view = MapView(model, width=width, panel=44)
+    img = view._base.copy()
+    view.moves(img[:view.map_h], rows)
+    top = view.map_h + 16
+    cv2.putText(img, title[:150], (10, top), FONT, 0.42, TEXT, 1, cv2.LINE_AA)
+    x = 10
+    for label, colour in (("taken (thicker: more often)", COVER_TAKEN), ("planned, never taken", COVER_PLANNED),
+                          ("never planned", COVER_NEVER)):
+        cv2.line(img, (x, top + 14), (x + 24, top + 14), colour, 2, cv2.LINE_AA)
+        cv2.putText(img, label, (x + 30, top + 18), FONT, 0.4, TEXT, 1, cv2.LINE_AA)
+        x += 40 + 9 * len(label)
+    return img

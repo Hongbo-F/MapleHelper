@@ -1049,6 +1049,54 @@ def cmd_lab_usage(args) -> int:
     return 0
 
 
+def cmd_coverage(args) -> int:
+    """How often each move of the map's routes was planned, taken and missed, where she spent her time, and the
+    moves never taken with their cost gap and why they lost (analysis/coverage.py): from saved harness runs and the
+    live telemetry, with a picture of the map. Offline: no game, no keys."""
+    from .analysis import coverage
+    from .localization import mapdata
+    from .sim import harness
+    from .ui import render
+    model = mapdata.load(args.map)
+    graph = coverage.Graph(model)
+    sets = []
+    for name in args.runs:
+        try:
+            runs = harness.load(name)
+        except FileNotFoundError:
+            print(f"{name}: no such saved run in {harness.FOLDER}: left out")
+            continue
+        tallies = [r["coverage"] for r in runs if "coverage" in r]
+        if not tallies:
+            print(f"{name}: its runs keep no coverage (saved before the harness kept it): left out")
+            continue
+        first = runs[0]
+        sets.append((f"harness {name} ({first['policy']}, preset {first['preset']}, {len(tallies)} seeds of "
+                     f"{first['minutes']:g} min)", coverage.merge(tallies, graph)))
+    if args.live or not args.runs:
+        files = [p for p in sorted(paths.TELEMETRY.glob("*.jsonl")) if "-sim-" not in p.name]
+        tallies = []
+        for path in files:
+            records = telemetry.read(path)
+            session = next((r for r in records if r.get("topic") == "session"), {})
+            if session.get("map", args.map) == args.map:  # (another map's moves aren't this one's)
+                tallies.append(coverage.tally(records, graph))
+        sets.append((f"live telemetry ({len(tallies)} files in {paths.TELEMETRY})", coverage.merge(tallies, graph)))
+    if not sets:
+        return 1
+    lines = coverage.report(graph, sets)
+    print("\n".join(lines))
+    if args.text:
+        Path(args.text).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"report: {args.text}")
+    picture = Path(args.picture) if args.picture else LAB / f"coverage_{args.map}.png"
+    for i, (name, t) in enumerate(sets):
+        path = picture if i == 0 else picture.with_name(f"{picture.stem}-{i + 1}{picture.suffix}")
+        Image.fromarray(render.coverage_picture(model, coverage.picture_rows(graph, t), title=name)).save(path)
+        print(f"picture of {name}: {path}")
+    return 0
+
+
 # --- the command line ------------------------------------------------------------------------------------
 
 def feed_arg(s) -> None:
@@ -1293,6 +1341,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="delete the telemetry a run starting now would (the oldest past 2 GB in all; none for "
                         "its age); recordings and screenshots are never deleted")
     s.set_defaults(func=cmd_lab_usage)
+    s = sub.add_parser("coverage", help="how often each route move was planned, taken and missed, the moves never "
+                                        "taken and why, from harness runs and live telemetry; a picture of the map "
+                                        "(offline; no game, no keys)")
+    s.add_argument("runs", nargs="*", help="saved harness runs (names in gamelab/lab/harness; default: none, the live "
+                                           "telemetry alone)")
+    s.add_argument("--live", action="store_true", help="the live telemetry too (gamelab/lab/telemetry, but the "
+                                                       "simulator's files)")
+    s.add_argument("--text", help="also write the report to this file")
+    s.add_argument("--picture", help="the map with the first set's moves drawn, the others' beside it (-2, -3: "
+                                     "default gamelab/lab/coverage_<map>.png)")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.set_defaults(func=cmd_coverage)
     return p
 
 

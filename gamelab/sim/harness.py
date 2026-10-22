@@ -27,6 +27,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances
+  coverage         her moves, platforms and plans, for the coverage report (analysis.coverage.tally: what it
+                   keeps of the run's telemetry, 3-7 KB a run as saved)
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -43,6 +45,7 @@ import sys
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 
+from ..analysis import coverage
 from ..behavior.looting import worth
 from ..paths import LAB, REPO
 from .world import DROP_LIFE, GAME_DROPS, Noise, Realism
@@ -68,6 +71,11 @@ PRESETS = {
     # stance.JUMP_THROW_SNAILS saves, which "game"'s jump throws, taking every snail their area picks, can't show
     "game-air": (dataclasses.replace(_GAME_NOISE, air_snail=(46.0, 0.35)),
                  Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True)),
+    # "game" with 15% of the spawns filled, not 60%: few monsters in the basin, so the trips aren't spent fighting
+    # there (in "game" a quarter of the tour's trips time out, 28 of 246 before she set off: analysis.coverage), and
+    # what's left to decide where she goes is the routes and the grounds chosen. The coverage test's world
+    # (tests/test_coverage.py: every platform monsters spawn on reached).
+    "game-sparse": (_GAME_NOISE, Realism(spawn_share=0.15, rival_every=25.0, potions=60, lock_arrows=True)),
 }
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
@@ -144,6 +152,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     out = outcomes(sim.world, records, minutes * 60)
     out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=feed, costs=costs,
                result=str(trace["result"])[:120])
+    out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     if feed:
         f = trace["feed"]
         out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
