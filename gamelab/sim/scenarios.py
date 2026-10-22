@@ -892,8 +892,8 @@ def hunt_kill(sim):
     the claw's reach, and she hadn't killed it after 30 s. Over 16 seeds 11 meet all of this. Seed 6 since
     monsters walk as fast as the game data says (a slime 100 units/s, not 56): on seed 1 the basin's other
     monsters kept walking into her stars' way (two kills, not it), and she hadn't killed it after 30 s; 6
-    is the first seed after it that its twin with the feed, feed_hunt_kill, meets too. Over 16 seeds 10
-    meet all of this.)"""
+    is the first seed after it that its twin with the feed, feed_hunt_kill, met too; the twin is on 7 since
+    her EXP gains name their kinds. Over 16 seeds 10 meet all of this.)"""
     h = sim.hunter()
     s = h.look()
     target = min(s.monsters, key=lambda t: abs(t.x - s.where.x))
@@ -1666,13 +1666,17 @@ def _died(cause: str, at_least: int = 1):
                  lambda tr: tr["feed"]["tracker"][f"died {cause}"] >= at_least)
 
 
-@scenario((36, 300.0), monsters={36}, seed=6, feed=True,
+@scenario((36, 300.0), monsters={36}, seed=7, feed=True,
           expects=(ends("killed", key="ended"), check("looks from the feed", _fed), _died("hers")))
 def feed_hunt_kill(sim):
     """hunt_kill with the feed: the slime nearest her, shot dead and looted; the feed follows it and puts her
     EXP gain on it. She then stands for the 1.8 s a gain waits for the monster it was to fade
     (tracking.FADE_S + MISSING_S): with the feed's costs as measured after the profiling pass, its drops
-    were guarded, the run ended at the kill, and the feed hadn't judged the death yet."""
+    were guarded, the run ended at the kill, and the feed hadn't judged the death yet. (Seed 7 since her EXP
+    gains name their kinds with the searches off the feed's frame loop: on seed 6 the kill that ended it was a
+    pig's, her claw's at 24.0 s, taken for the slime's while a gain's kind wasn't known; known, she fought on,
+    the basin's other monsters walked into her way, and she hadn't killed it after 30 s. Of seeds 1-16, 8 meet
+    all of this.)"""
     from ..localization.tracking import FADE_S, MISSING_S
     return sim.sleep_then(hunt_kill(sim), FADE_S + MISSING_S + 0.2)
 
