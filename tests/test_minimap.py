@@ -26,7 +26,7 @@ X0, Y0 = MINIMAP_BOX[:2]  # where the fixtures' crops start on the 1920x1080 scr
 
 def crop(name: str) -> np.ndarray:
     """A saved minimap (the screen's MINIMAP_BOX, RGB): `stranger`, another player on this map (hover_D.png of
-    2026-10-21); `party`, a leader of her party on the safe platform 32, her dot over a portal's (calibrate.png);
+    2026-10-18); `party`, a leader of her party on the safe platform 32, her dot over a portal's (calibrate.png);
     `crowd`, nine strangers and an NPC in Kerning City Construction Site, whose minimap reaches further right
     (lie_detector_025439.png, 330 px wide)."""
     return np.asarray(Image.open(FIXTURES / f"minimap_{name}.png").convert("RGB")).copy()
@@ -74,10 +74,100 @@ def test_saved_frames_of_this_map_show_no_other_player_but_the_two_seen():
         pytest.skip("needs the saved 1920x1080 screenshots (gamelab/lab)")
     seen = {p.name: minimap.other_dots(np.asarray(Image.open(p).convert("RGB"))) for p in full}
     with_others = {name: [m.kind for m in ms] for name, ms in seen.items() if ms}
-    # A stranger in the two frames of 2026-10-21 taken while the user hovered over the key bindings; the party
-    # leader on platform 32 in two frames five minutes apart; nothing in the other 27.
+    # A stranger in the two frames of 2026-10-18 (17:29) taken while the user hovered over the key bindings; the
+    # party leader on platform 32 in two frames of 2026-10-21 five minutes apart; nothing in the other 27.
     assert with_others == {"hover_D.png": ["stranger"], "hover_G.png": ["stranger"], "calibrate.png": ["party"],
                            "lie_detector_012504.png": ["party"]}
+
+
+# The saved half-size (960x540) frames of this map that show other players (the rest, 93 of them, show none: checked by
+# eye on enlarged crops of every one, with what was found marked), and what is found on each, enlarged back to full
+# size bilinearly (the stack itself reads the minimap at full size): of 2026-10-18 to 2026-10-21. A leader of her party
+# is in 42: standing on the safe platform 32 in 37 (LEADER), at another spot in 5 of 2026-10-20; strangers in 43, two at
+# once in 3 (kick2_140_l: one touching the leader's marker on either side), one touching her dot in 2 (esc_walk,
+# kick2_120_r: 7-8 game px apart).
+LEADER = ("party", 161.0, 245.0)
+HALF_SIZE = {
+    "act": [LEADER], "back_up": [("stranger", 89.3, 176.1)], "do_turn3": [("stranger", 197.5, 242.1)],
+    "drop2": [("stranger", 120.3, 160.6)], "dropthru": [("stranger", 118.6, 185.9)],
+    "esc_climb": [("stranger", 205.9, 250.6)], "esc_walk": [("stranger", 155.3, 254.7)],
+    "hunt_descend": [("stranger", 172.3, 181.7)], "hunt_end": [("party", 160.3, 244.5)],
+    "hunt_look": [("stranger", 118.4, 229.1)],
+    "kick2_100_l": [("stranger", 201.7, 242.3), LEADER], "kick2_100_r": [("stranger", 148.4, 239.4), LEADER],
+    "kick2_120_l": [LEADER, ("stranger", 154.0, 266.0)], "kick2_120_r": [LEADER, ("stranger", 110.4, 250.7)],
+    "kick2_130_l": [LEADER, ("stranger", 172.3, 254.8)], "kick2_130_r": [LEADER, ("stranger", 177.8, 266.2)],
+    "kick2_140_l": [("stranger", 154.2, 236.1), LEADER, ("stranger", 172.3, 254.8)],
+    "kick2_140_r": [("stranger", 127.3, 245.0), LEADER, ("stranger", 172.3, 254.8)],
+    "kick2_150_l": [("stranger", 189.0, 245.0), LEADER],
+    "kick2_150_r": [("stranger", 203.1, 239.3), LEADER, ("stranger", 172.3, 254.8)],
+    "kick2_160_l": [LEADER], "kick2_160_r": [LEADER], "kick2_40_l": [LEADER], "kick2_40_r": [LEADER],
+    "kick2_60_l": [LEADER], "kick2_60_r": [LEADER], "kick2_80_l": [LEADER, ("stranger", 102.0, 250.6)],
+    "kick2_80_r": [LEADER], "kick_0_l": [LEADER, ("stranger", 172.2, 246.4)],
+    "kick_0_r": [LEADER, ("stranger", 183.5, 265.9)],
+    "kick_100_l": [("stranger", 193.3, 187.4), LEADER], "kick_100_r": [("stranger", 173.7, 181.6), LEADER],
+    "kick_120_l": [("stranger", 156.6, 187.4), LEADER], "kick_120_r": [("stranger", 176.4, 181.6), LEADER],
+    "kick_160_l": [("stranger", 156.6, 187.4), LEADER], "kick_160_r": [("stranger", 156.6, 187.4), LEADER],
+    "kick_20_l": [("stranger", 208.6, 187.4), LEADER], "kick_20_r": [("stranger", 190.5, 209.6), LEADER],
+    "kick_40_l": [("stranger", 179.2, 181.7), LEADER], "kick_40_r": [("stranger", 193.3, 187.4), LEADER],
+    "kick_60_l": [("stranger", 193.3, 187.4), LEADER], "kick_60_r": [("stranger", 180.6, 181.6), LEADER],
+    "kick_80_l": [("stranger", 187.7, 187.4), LEADER], "kick_80_r": [("stranger", 179.2, 181.7), LEADER],
+    "loot_0_after": [("stranger", 173.0, 239.0)], "loot_check_3_after": [("stranger", 136.5, 265.6)],
+    "loot_check_3_debug": [("stranger", 206.7, 129.3)], "nav_end": [("stranger", 152.2, 265.5)],
+    "snail_jt100a": [("party", 173.8, 239.3)], "snail_jt100b": [("party", 173.8, 239.3)],
+    "snail_jt40a": [("party", 173.8, 239.3)], "snail_jt40b": [("party", 173.8, 239.3)], "snap": [LEADER],
+    "w0": [("stranger", 97.0, 201.0)], "w1": [("stranger", 109.9, 181.4)], "w2": [("stranger", 94.4, 172.9)],
+    "walk_to_snail": [("party", 173.8, 239.3)], "where": [("stranger", 142.3, 238.9)],
+}
+NOT_THIS_MAP = {"early_snap", "desktop", "screen"}  # Kerning City's crowd (the full-size one is `crowd`), and no game
+
+
+def enlarged(path: Path) -> np.ndarray:
+    """A saved half-size frame's minimap (MINIMAP_BOX), enlarged back to full size bilinearly."""
+    a = np.asarray(Image.open(path).convert("RGB"))
+    x0, y0, x1, y1 = MINIMAP_BOX
+    up = cv2.resize(a[y0 // 2:y1 // 2 + 1, x0 // 2:x1 // 2 + 1], None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
+    return np.ascontiguousarray(up[:y1 - y0, :x1 - x0])
+
+
+def test_the_half_size_frames_other_players_are_each_found_and_nothing_else(monkeypatch):
+    """Every saved half-size frame of this map, enlarged back: the other players' markers found are those seen there
+    (HALF_SIZE), of the right kind, within 0.3 px of where they were found when checked; none where there are none.
+    Her dot is found in each, and where a stranger's marker touches it (esc_walk, kick2_120_r) it isn't pulled off:
+    taking it from its side that shows (DOT_UNCOVER: there her yellow, blurred by the shrinking, is narrower than
+    DOT_FULL) moves it 0.75 px across and down at most (1.06 px)."""
+    lab = Path(__file__).resolve().parents[1] / "gamelab" / "lab"
+    frames = []
+    for path in sorted(lab.glob("*.png")) if lab.is_dir() else []:
+        try:
+            if Image.open(path).size == (960, 540) and path.stem not in NOT_THIS_MAP:
+                frames.append(path)
+        except OSError:
+            pass
+    if len(frames) < 100:
+        pytest.skip("needs the saved half-size screenshots (gamelab/lab)")
+    seen = {}
+    for path in frames:
+        box = enlarged(path)
+        found = markers_in_box(box)
+        if found:
+            seen[path.stem] = found
+        uncovered = dot_in_box(box)
+        monkeypatch.setattr(minimap, "DOT_UNCOVER", False)
+        plain = dot_in_box(box)
+        monkeypatch.setattr(minimap, "DOT_UNCOVER", True)
+        if path.stem == "now":  # (a window over the top of the minimap and her: no dot)
+            assert uncovered is None and plain is None
+            continue
+        assert uncovered is not None and np.hypot(uncovered[0] - plain[0], uncovered[1] - plain[1]) < 1.1, path.stem
+    assert set(seen) == set(HALF_SIZE)
+    for name, want in HALF_SIZE.items():
+        got = sorted(seen[name], key=lambda m: (m.x, m.y))
+        want = sorted(want, key=lambda m: (m[1], m[2]))
+        assert len(got) == len(want), name
+        for m, (kind, x, y) in zip(got, want):
+            assert m.kind == kind and abs(m.x - x) < 0.3 and abs(m.y + Y0 - y) < 0.3, (name, m)
+    strangers = sum(1 for ms in HALF_SIZE.values() if any(m[0] == "stranger" for m in ms))
+    assert len(HALF_SIZE) == 58 and strangers == 43
 
 
 # --- the game's own markers pasted on them ------------------------------------------------------------------
@@ -144,11 +234,15 @@ def test_each_kind_of_marker_is_found_where_it_is_drawn_and_nothing_else(markers
 
 
 @pytest.mark.parametrize("name", ["stranger", "party"])
-def test_npcs_and_portals_are_never_players(markers, name):
+def test_npcs_portals_and_every_other_marker_are_never_players(markers, name):
+    """Every marker of the game data's that isn't a player's (25: NPCs of every kind, portals, shops, traders, runes,
+    the compass): the cyan ones (eventNerota, the zeronpc NPCs, compassActive) were each found as a buddy before the
+    buddy's hues and a core's size were narrowed."""
     box = crop(name)
     before = markers_in_box(box)
-    for sprite in ("npc", "portal", "enchantportal", "hiddenportal", "eventnpc", "startnpc", "shop", "trunk",
-                   "transport", "rune", "usertrader", "anothertrader"):
+    others = sorted(set(markers) - set(KIND_OF) - {"user"})
+    assert len(others) == 25 and {"zeronpc", "zeronpc2", "zeroendnpc", "eventNerota", "compassActive"} <= set(others)
+    for sprite in others:
         for gx, gy in SPOTS:
             drawn = paste(box, markers[sprite][0], ORIGINS.get(sprite, (5, 5)), gx, gy)
             assert markers_in_box(drawn) == before, (sprite, gx, gy)

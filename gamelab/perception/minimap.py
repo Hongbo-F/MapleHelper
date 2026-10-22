@@ -46,17 +46,22 @@ class Marker:
 # `friend` 00ccee-44ddff and 44bbdd (94-97); `guild` 6666ff-ccccff and aaaadd (120, washed out: saturation 51-153).
 # Her yellow (ffdd44, ffee22: hue 25-28), the party leader's crown (ffcc00: 24), the NPCs' green (60) and the
 # minimap's dark blue (18334c: hue 102, value 76) are none of them. Portals' cyan is a buddy's, but drawn as two rings
-# with dark between them, never a solid core of a buddy's size.
+# with dark between them, never a solid core of a buddy's size. The buddy's range stops 2 short of the other cyan
+# markers' in the data: `eventNerota`'s 44ffff (90) and the `zeronpc` NPCs' 11aaff (101), which with 88-102 were each
+# found as a buddy wherever they were drawn.
 MARKER_COLOURS = {
     "stranger": (((0, 170, 160), (8, 255, 255)), ((172, 170, 160), (180, 255, 255))),
     "party": (((10, 190, 190), (22, 255, 255)),),
-    "buddy": (((88, 120, 190), (102, 255, 255)),),
+    "buddy": (((92, 120, 190), (99, 255, 255)),),
     "guild": (((114, 40, 190), (126, 175, 255)),),
 }
-# A core on screen: 32-40 px (the 3 saved frames with other players' markers, 11 of them), 6-7 px wide and tall. A
-# core partly under another marker is smaller; under 14 px it isn't counted.
-MARKER_AREA = (14, 70)
-MARKER_SIDE = (4, 11)
+# A core on screen: 32-40 px (the 3 saved frames with other players' markers, 11 of them), 6-7 px wide and tall; 31-40
+# and 6-7 for the game's markers pasted at 34 places; 24-44 and 5-8 for the 105 found on the saved frames, half-size
+# ones enlarged back among them. A core partly under another marker is smaller; under 14 px it isn't counted. Bigger
+# than these, it's not a player's: `compassActive`'s cyan star (its middle 10 px across, 60 px) passed as a buddy's
+# with up to 11 px and 70.
+MARKER_AREA = (14, 52)
+MARKER_SIDE = (4, 9)
 # Around a core, its dark grey ring (333333-555555, 3 game px from its middle: 4.2 on screen): at most RING_RADII
 # from the core's middle, at least RING_DARK of RING_ANGLES directions must reach a dark grey pixel. 15-16 of 16 do
 # on the saved frames; another marker drawn over a side covers a few.
