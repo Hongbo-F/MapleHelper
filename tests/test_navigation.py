@@ -253,6 +253,11 @@ def test_the_ways_a_trip_chooses_among_are_each_the_best_route_through_a_move():
     assert 12 not in [m.dst for m in up.moves] and 12 in [m.dst for m in left.moves]
     assert up.cost == pytest.approx(13.02, abs=0.01) and left.cost == pytest.approx(16.04, abs=0.01)
     assert planner.alternatives(23, 903, 17, n=1) == [climb]
+    # No way is through a move of the quickest: with no weights a tie gave one (from 0 at x 1290 to 18, through
+    # walk_off 0->1 at no cost more), and `through` that move gave back the quickest itself.
+    for src, x, dst in ((0, 1290, 18), (3, 765, 31), (15, 135, 31)):
+        ways = planner.alternatives(src, x, dst, n=4)
+        assert all(w.via not in ways[0].moves for w in ways[1:])
 
 
 def test_a_trip_takes_a_way_by_a_softmax_over_their_times_with_a_floor_for_stale_moves():

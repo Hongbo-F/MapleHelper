@@ -152,8 +152,8 @@ KEEP_OFF_S = 8.0
 # at least, so the moves no trip makes quickest get tried now and then. A trip with a deadline (drops, a rest:
 # Navigator.go's `vary`) goes the quickest way. ROUTES 1 is the quickest by the weights alone, as before, and stays the
 # default: in the harness (preset game, 40 seeds of 20 minutes against ROUTES 1) 3 ways made as much EXP a minute (the
-# tour +1.4% +- 1.4%, the hunt loop +0.0% +- 1.4%) and widened her moves (distinct moves a run 23.9 -> 26.4 and 8.2 ->
-# 9.1), but picked up fewer of her drops (94.4% -> 92.7%, 84.4% -> 82.1%; every setting tried did, 2 and 3 ways,
+# tour +1.5% +- 1.4%, the hunt loop -0.0% +- 1.4%) and widened her moves (distinct moves a run 23.9 -> 26.1 and 8.2 ->
+# 9.1), but picked up fewer of her drops (94.4% -> 92.9%, 84.4% -> 82.1%; every setting tried did, 2 and 3 ways,
 # temperatures 0.05-0.2, the noise at 0.1), and none passed the bar on seeds 1-10 (README: Route diversity). `--ways 3`
 # (nav, tour, the harness, coverage) turns it on for a run.
 NOISE = 0.35
@@ -675,12 +675,12 @@ class Planner:
                      weight: Callable[[Move], float] | None = None, n: int | None = None,
                      stretch: float | None = None) -> list[Way]:
         """Up to `n` (ROUTES) distinct ways from (platform src, x) onto platform dst, the quickest first (`plan`'s,
-        weighed and penalized as there), then the cheapest of the others: the best route through each move (to
-        where it starts, the move, and on from where it lands: one search out from her and one back from dst, the
-        via-node alternatives of road maps), costing at most `stretch` (STRETCH) more than the quickest, onto no
-        platform twice. A way is the platforms it goes through and the ropes it takes between them (`way_of`):
-        another takeoff, or a jump for a walk-off between the same platforms, is the same way, which the weights
-        already vary. Empty if there's no way."""
+        weighed and penalized as there), then the cheapest of the others: the best route through each move the
+        quickest doesn't make (to where it starts, the move, and on from where it lands: one search out from her and
+        one back from dst, the via-node alternatives of road maps), costing at most `stretch` (STRETCH) more than the
+        quickest, onto no platform twice. A way is the platforms it goes through and the ropes it takes between them
+        (`way_of`): another takeoff, or a jump for a walk-off between the same platforms, is the same way, which the
+        weights already vary. Empty if there's no way."""
         n = ROUTES if n is None else n
         stretch = STRETCH if stretch is None else stretch
         first = self.quickest(src, x, dst, penalty, weight)
@@ -692,10 +692,13 @@ class Planner:
         start = (src, round(x))
         best, back = self._out(start, dst, penalty, weight)
         ahead, onward = self._back(dst, start, penalty, weight)
+        # The best route through a move of the quickest is the quickest: only a tie (no random weights) gives another
+        # as cheap, which `through` its move doesn't give back (from 0 at x 1290 to 18, through walk_off 0->1).
+        quickest = set(first.moves)
         priced = []
         for m in self.moves:
             v = (m.dst, round(m.land_x))
-            if m.src == dst or v not in ahead:
+            if m.src == dst or v not in ahead or m in quickest:
                 continue
             to = self._to_start(m, best, start, penalty, weight)
             if to is not None:

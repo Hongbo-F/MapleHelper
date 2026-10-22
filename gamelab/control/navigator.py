@@ -164,11 +164,15 @@ class _Ahead(NamedTuple):
 class Choice:
     """Which of its ways a trip takes (route.choose, at its first plan: Navigator._route), kept through its replans
     and, in the hunt loop, its objective's later trips: the move the way goes through (None: the quickest), until
-    she has set off on it, or the way got too dear from where she is; and how much dearer than the quickest it may
-    be (s: route.STRETCH of the quickest when it chose)."""
+    she has set off on it, she is past it (on a platform the way reaches from it on: `beyond`), or the way from where
+    she is got too dear or would take her back (onto a platform twice, or onto one she has set off from since it
+    chose, `left`, that the quickest from there doesn't go onto); and how much dearer than the quickest it may be (s:
+    route.STRETCH of the quickest when it chose)."""
     made: bool = False
     via: Move | None = None
     leeway: float = 0.0
+    beyond: frozenset = frozenset()
+    left: set = field(default_factory=set)
 
 
 @dataclass
@@ -409,8 +413,11 @@ class Navigator:
         route.FLOOR at least). Replanned, it goes the way it chose (Planner.through the way's move) until she has set
         off on that move, unless from where she is that costs more than the quickest by more than the ways offered
         could (route.STRETCH of the quickest's time when it chose: a share of what's left would drop a way whose
-        detour is near the end, as 23 -> 17 by the rope hops at the end of a trip from 35): then, as with the
-        quickest chosen, the quickest from where she is."""
+        detour is near the end, as 23 -> 17 by the rope hops at the end of a trip from 35), or she is past the move
+        (on a platform the way reaches from it on), or the way from where she is goes back (_goes_back): then, as
+        with the quickest chosen, the quickest from where she is. (Kept whatever it took, from 34 to 2 by the hops,
+        ended on 17 by the climb past 23's end, she was sent down to 23 to hop back up; off the way at the quickest's
+        landings, 677 of 5,112 replans that kept a way chosen on the map went back onto a platform she had been on.)"""
         penalty = self._penalty(st)
         if route.ROUTES <= 1 or not st.vary:
             return self.planner.plan(src, x, dst, weight=self.weight, penalty=penalty), None
@@ -424,13 +431,14 @@ class Navigator:
             c.via, c.leeway = ways[i].via, route.STRETCH * ways[0].cost
             if i:
                 v = ways[i].via
+                c.beyond = frozenset(m.dst for m in ways[i].moves[ways[i].moves.index(v):])
                 self.log(f"  of {len(ways)} ways, the one through {v.kind} {v.src}->{v.dst} "
                          f"({ways[i].cost / ways[0].cost - 1:+.0%}, chance {chances[i]:.0%})")
             return list(ways[i].moves), (ways, chances, i)
         best = self.planner.quickest(src, x, dst, penalty, self.weight)
         if c.via is not None and best is not None:
-            way = self.planner.through(src, x, dst, c.via, penalty, self.weight)
-            if way is not None and way.cost - best.cost <= c.leeway:
+            way = None if src in c.beyond else self.planner.through(src, x, dst, c.via, penalty, self.weight)
+            if way is not None and way.cost - best.cost <= c.leeway and not _goes_back(way, best, src, c.left):
                 return list(way.moves), None
             c.via = None
         return (None if best is None else list(best.moves)), None
@@ -441,13 +449,22 @@ class Navigator:
         return time.monotonic() - self._used.get(_key(m), self._since) >= route.STALE_S
 
     def _made(self, st: TripState, moved: list[Move]) -> None:
-        """Note the moves she set off on (route.STALE_S). With the trip's chosen way's move among them, it has gone
-        the way it chose, and goes on by the quickest."""
+        """Note the moves she set off on (route.STALE_S), and the trip's way (_gone_by)."""
         now = time.monotonic()
         for m in moved:
             self._used[_key(m)] = now
-        if st.choice.via is not None and any(_key(m) == _key(st.choice.via) for m in moved):
-            st.choice.via = None
+        self._gone_by(st, moved)
+
+    @staticmethod
+    def _gone_by(st: TripState, moved: list[Move]) -> None:
+        """The moves she set off on, for the way the trip chose: the platforms she set them off from are behind her
+        (Choice.left); with its move among them, it has gone the way it chose, and goes on by the quickest."""
+        c = st.choice
+        if c.via is None:
+            return
+        c.left.update(m.src for m in moved)
+        if any(_key(m) == _key(c.via) for m in moved):
+            c.via = None
 
     @staticmethod
     def _penalty(st: TripState) -> Callable[[Move], float]:
@@ -866,10 +883,10 @@ class Navigator:
                               f"{time.monotonic() - starts:+.3f} s from the plan's end)")
         # Where she'll be when the running plan ends: running on with the arrow held, or standing.
         x = min(max(s.where.x + end.run * WALK_SPEED * max(0.0, starts - s.t), p.left), p.right)
-        if st.choice.via is not None and any(_key(leg.move) == _key(st.choice.via) for leg in running.legs):
-            # The chosen way's move is in the running chain: she has gone that way (planned through it still, from 9
-            # after walking off 5 on the way through 12 from 19 to 3 she jumped back onto 5 to walk off it again).
-            st.choice.via = None
+        # The running chain's moves are made as far as the way chosen goes: with its move among them she has gone
+        # that way (planned through it still, from 9 after walking off 5 on the way through 12 from 19 to 3 she
+        # jumped back onto 5 to walk off it again), and the platforms they set off from are behind her.
+        self._gone_by(st, [leg.move for leg in running.legs])
         path, _ = self._route(st, p.id, x, dst)
         if not path:
             return None
@@ -931,6 +948,15 @@ def _no_follow(why: str) -> None:
 def _key(m: Move) -> tuple:
     """A move's identity across replans."""
     return (m.kind, m.src, m.dst, round(m.x))
+
+
+def _goes_back(way: route.Way, best: route.Way, src: int, left: set) -> bool:
+    """Whether a trip's chosen way, replanned from platform src (Planner.through), takes her back: onto a platform
+    twice (src included), or onto one she has set off from since the trip chose (`left`) that the quickest from there
+    (`best`) doesn't go onto (knocked back below it, the quickest goes over it again too)."""
+    onto = [m.dst for m in way.moves]
+    quickest = {m.dst for m in best.moves}
+    return len(set(onto) | {src}) < len(onto) + 1 or any(p in left and p not in quickest for p in onto)
 
 
 def _route_record(st: TripState, dst: int, path: list[Move], src: int, x: float, offered: tuple | None = None) -> dict:

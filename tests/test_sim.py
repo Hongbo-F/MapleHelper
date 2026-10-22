@@ -1322,6 +1322,51 @@ def test_a_trip_goes_the_way_it_chose_through_its_replans(monkeypatch):
 
 
 @REAL
+def test_a_way_chosen_is_dropped_once_she_is_past_its_move_or_it_would_take_her_back(monkeypatch):
+    """Replanned, a trip keeps to the way it chose only while it takes her on: not once she stands on a platform the
+    way reaches from its move on (got there another way), nor when the way from there goes onto a platform twice or
+    back onto one she has set off from that the quickest doesn't go onto. From 34 at x -180 to 2, the way by the rope
+    hops from 23 chosen (29.96 s, the quickest 28.88): the climb past 23's end made instead, then from 17 (and then 14)
+    the quickest, where kept it went down to 23 to hop back onto 17 (and from 14 walked back off onto 17 for it).
+    Knocked from 25 back down to 30 before the hops, the way on up through 25 is still hers (the quickest goes over
+    25 again too)."""
+    from gamelab.control.navigator import TripState
+    from gamelab.motion import route
+    monkeypatch.setattr(route, "ROUTES", 3)
+    monkeypatch.setattr(route, "NOISE", 0.0)
+    monkeypatch.setattr(route, "choose", lambda ways, rng, **kw: (
+        next(i for i, w in enumerate(ways) if w.via is not None and w.via.kind == "rope_jump"), [1 / len(ways)] * 3))
+
+    def fn(sim):
+        nav = sim.navigator(sim.hunter())
+        kinds = lambda path: [(m.kind, m.src, m.dst) for m in path]  # noqa: E731
+        st = TripState(2)
+        first, _ = nav._route(st, 34, -180.0, 2)
+        chosen = st.choice.via
+        out = {"first": kinds(first), "beyond": sorted(st.choice.beyond)}
+        hop = first.index(chosen)
+        nav._gone_by(st, first[:hop])  # 34 -> ... -> 23: all of it but the hops
+        climb = next(m for m in nav.planner.moves if m.kind == "climb" and (m.src, m.dst) == (23, 17))
+        nav._gone_by(st, [climb])
+        out["kept"] = st.choice.via is chosen
+        path, _ = nav._route(st, 17, climb.land_x, 2)
+        out["from 17"] = kinds(path) == kinds(nav.planner.plan(17, climb.land_x, 2, weight=nav.weight))
+        out["dropped"] = st.choice.via is None
+        st = TripState(2)
+        nav._route(st, 34, -180.0, 2)
+        nav._gone_by(st, first[:hop])
+        back = next(m for m in first if (m.src, m.dst) == (30, 25))
+        path, _ = nav._route(st, 30, back.x, 2)  # knocked from 25 down to 30
+        out["from 30"] = kinds(path)
+        out["still"] = st.choice.via is chosen
+        return out
+    got = scenarios.run_scenario(scenarios.Scenario("past it", fn, (34, -180.0)))["result"]
+    assert got["first"][6] == ["rope_jump", 23, 17] and got["beyond"] == [2, 3, 4, 6, 14, 17]
+    assert got["kept"] and got["from 17"] and got["dropped"]
+    assert got["from 30"][:3] == [["climb", 30, 25], ["jump", 25, 23], ["rope_jump", 23, 17]] and got["still"]
+
+
+@REAL
 def test_the_navigator_records_where_each_route_was_planned_from_and_how_each_chain_ended():
     """For the coverage report (analysis.coverage): a route's record says where it was planned from (and what its
     trip keeps off and the moves it avoided for a monster, when there are any), and after each chain or move made
