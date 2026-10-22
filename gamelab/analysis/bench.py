@@ -26,7 +26,7 @@ from ..paths import LAB
 from ..perception.eyes import EXP_TEXT, TAG_BELOW_FEET, Eyes, rgb_of
 from ..perception.hud import BAR_ROW, EXP_NUMBER, HP_BAR, bars
 from ..perception.lie_detector import LieDetectorSpotter
-from ..perception.minimap import MINIMAP_BOX, her_dot
+from ..perception.minimap import MINIMAP_BOX, her_dot, other_dots
 from ..perception.terrain import find_ropes, ground_extent
 from ..screen import GAME_SIZE, SCALE
 
@@ -145,6 +145,7 @@ def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDete
     if tag is not None:
         timer.time("ground under her", lambda: ground_extent(half, tag[0], tag[1] - TAG_BELOW_FEET))
     dot = timer.time("minimap dot", lambda: her_dot(full))
+    timer.time("other players' minimap dots", lambda: other_dots(full))
     whole = timer.time("ropes: whole screen", lambda: find_ropes(full))
     if eyes.rope_columns is not None:  # Senses gives where the map's ropes can show
         columns = eyes.rope_columns(dot, tag) or []

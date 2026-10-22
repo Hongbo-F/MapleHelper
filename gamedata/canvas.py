@@ -124,3 +124,19 @@ def meso_frames(copy: Path = COPY, kinds=range(4)) -> dict[int, list[np.ndarray]
         out[kind] = [pixels(c) for _, c in sorted(frames.items(), key=lambda kv: int(kv[0]))
                      if isinstance(c, Canvas)]
     return out
+
+
+def minimap_markers(copy: Path = COPY) -> dict[str, tuple[np.ndarray, tuple[int, int] | None]]:
+    """The minimap's markers (Map/MapHelper.img/minimap: user, another, party, partymaster, guild, guildmaster,
+    friend, npc, portal, ...): each one's picture (RGBA) and its origin, the point drawn at the place it marks
+    (None where the data gives none: party, guild, npc, portal and the rest). The data image holds 1x1 placeholders
+    with the origins; the pictures are at the same path in Map/_Canvas/_Canvas_000.wz."""
+    info = Package(copy / "Map" / "Map_000.wz").image("MapHelper.img").get("minimap") or {}
+    pictures = Package(copy / "Map" / "_Canvas" / "_Canvas_000.wz").image("MapHelper.img").get("minimap") or {}
+    out = {}
+    for name, picture in pictures.items():
+        if isinstance(picture, Canvas):
+            entry = info.get(name)
+            origin = entry.props.get("origin") if isinstance(entry, Canvas) else None
+            out[name] = (pixels(picture), _point(origin))
+    return out

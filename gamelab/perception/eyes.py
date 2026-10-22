@@ -2,7 +2,7 @@
 pixels, without the player (screen capture needs no admin rights).
 
 Eyes is perception's only door to pixels. `look` gives an Observation (her name tag, HP and MP, the
-ground under her, her minimap dot, ropes, her EXP number); localization then asks about that look's
+ground under her, her minimap dot and other players', ropes, her EXP number); localization then asks about that look's
 frame through Eyes (`monsters`, `items`, `bar`) instead of reading pixels itself, so the simulator
 (gamelab.sim) can stand in for the game by answering the same questions.
 """
@@ -18,7 +18,7 @@ from .. import capture, paths, window
 from ..screen import GAME_SIZE, HUD_TOP, SCALE, UNITS_PER_HALF_PX
 from .hud import BAR_ROW, EXP_NUMBER, HP_BAR, bars, hp_bar, hp_fill
 from .loot import Item, LootDetector
-from .minimap import MINIMAP_BOX, dot_in_box, her_dot
+from .minimap import MINIMAP_BOX, Marker, dot_in_box, her_dot, other_dots
 from .mobs import Mob, MobDetector
 from .nametag import NameTag
 from .terrain import ScreenRope, find_ropes, ground_extent
@@ -59,6 +59,7 @@ class Observation:
     mp: float
     ground: tuple[int, int] | None = None    # screen x range of the ground under her
     dot: tuple[float, float] | None = None   # her minimap dot (full-size px)
+    others: list[Marker] = field(default_factory=list)  # other players' minimap dots (full-size px)
     ropes: list[ScreenRope] = field(default_factory=list)  # ropes and ladders on screen (full-size px)
     exp: np.ndarray | None = None            # the text pixels of her EXP number (EXP_NUMBER)
 
@@ -91,7 +92,7 @@ class Eyes:
                                     list[tuple[int, int]] | None] | None = None
 
     def look(self) -> Observation:
-        """HP/MP, her name tag, the ground under her and her minimap dot; no monsters (`monsters`)."""
+        """HP/MP, her name tag, the ground under her, her minimap dot and other players'; no monsters (`monsters`)."""
         return self.look_at(self._capture())
 
     def look_at(self, full: np.ndarray, t: float | None = None, ropes: bool | None = None) -> Observation:
@@ -104,12 +105,14 @@ class Eyes:
         tag = self.name_tag.find(full)
         ground = ground_extent(frame, tag[0], tag[1] - TAG_BELOW_FEET) if tag else None
         dot = her_dot(full)
+        others = other_dots(full)  # 0.4-0.6 ms (the 31 saved frames of this map)
         found = []
         if self.want_ropes if ropes is None else ropes:
             found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None)
         x0, y0, x1, y1 = EXP_NUMBER
         return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=tag, hp=hp, mp=mp,
-                           ground=ground, dot=dot, ropes=found, exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
+                           ground=ground, dot=dot, others=others, ropes=found,
+                           exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from the newest frame (with DXGI 0.2 ms, with mss two grabs of 16.7

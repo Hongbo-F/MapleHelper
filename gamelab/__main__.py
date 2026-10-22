@@ -389,6 +389,7 @@ def _hunt_look(hunter) -> int:
     """`hunt look`: what she sees now, printed and drawn on the frame (no keys)."""
     from .attack import reach
     from .localization.scene import find_loot
+    from .perception.minimap import OTHER_SHIFT
     s = hunter.look()
     if s.where is None:
         print("can't find her minimap dot")
@@ -398,6 +399,10 @@ def _hunt_look(hunter) -> int:
     print(f"her: map ({s.where.x:.0f}, {s.where.y:.0f}) on platform {p.id if p else None} ({how}); "
           f"HP {s.hp:.0%}, MP {s.mp:.0%}; room: {s.room('left', reach.EDGE_MARGIN):.0f} left, "
           f"{s.room('right', reach.EDGE_MARGIN):.0f} right")
+    for m in s.others:  # other players' minimap dots (perception.minimap), placed as hers is
+        w = hunter.senses.localizer.where_dot((m.x - OTHER_SHIFT, m.y - OTHER_SHIFT))
+        print(f"  another player ({m.kind}): map ({w.x:.0f}, {w.y:.0f}) on platform "
+              f"{w.platform.id if w.platform else None} (their minimap dot at {m.x:.1f}, {m.y:.1f})")
     for t in s.monsters:
         dx, dy = t.x - s.where.x, t.y - s.where.y
         stop = reach.wall_to(p, s.where.x, s.where.y, t)

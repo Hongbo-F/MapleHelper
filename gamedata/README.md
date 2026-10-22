@@ -42,7 +42,7 @@ To look around:
 ## Limits
 
 - **Not in the data files:** chat and pickup message templates, the EXP table, damage and attack-speed formulas, and drop tables. Those live in the game program or on the server.
-- **Pictures:** `canvas.pixels()` decodes BGRA4444, BGRA8888 and RGB565, which covers monster sprites. DXT-compressed pictures aren't decoded yet. `canvas.mob_frames()` collects a monster's frames: the frame data is in `Packs/Mob_00000.ms`, the pixels at the same path in `Mob/_Canvas/_Canvas_000.wz`, and repeated frames point to others with `_inlink`.
+- **Pictures:** `canvas.pixels()` decodes BGRA4444, BGRA8888 and RGB565, which covers monster sprites. DXT-compressed pictures aren't decoded yet. `canvas.mob_frames()` collects a monster's frames: the frame data is in `Packs/Mob_00000.ms`, the pixels at the same path in `Mob/_Canvas/_Canvas_000.wz`, and repeated frames point to others with `_inlink`. `canvas.minimap_markers()` gives the minimap's markers (hers, other players', NPCs', portals'): the pictures are in `Map/_Canvas/_Canvas_000.wz`, the origins in `Map/Map_000.wz`, both under `MapHelper.img/minimap`.
 - **Sounds and the embedded font** are listed but not decoded.
 - **IDs differ from the old game** for monsters, skills and maps (Snail is mob 2, Lucky Seven is skill 4001003). Item IDs are the old ones.
 - **Only .ms version 4** is supported. A patch that changes the format makes `MsPack` refuse the file rather than misread it.
