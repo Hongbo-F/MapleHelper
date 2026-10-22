@@ -465,14 +465,19 @@ def _plain_stance(h: "Hunter", s: Scene, targets: list[Monster], around: list[Mo
 
 def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], gains: int,
                  now: float, drops: bool = True) -> list[Monster]:
-    """Her EXP went up `gains` times since the last look: those are the kills, among what she was
-    throwing at (the last throw's path, and what she's thrown at lately: a kill can come in after she's
-    turned to the next one). Each kill's drops go to the sweep after the fight (on her platform) or to
-    the tour (unless not `drops`). Returns `wanted` without the dead."""
+    """Her EXP told of `gains` kills since the last look: those are among what she was throwing at (the last
+    throw's path, and what she's thrown at lately: a kill can come in after she's turned to the next one), each of
+    the kind its gain's size named when it named one (Hunter.kinds_told). Each kill's drops go to the sweep after the
+    fight (on her platform) or to the tour (unless not `drops`). A kill of a kind she wasn't throwing at still counts
+    by its kind, with no place and no drops. Returns `wanted` without the dead."""
     here = s.platform.id
-    for _ in range(gains):
+    for kind in h.kinds_told(gains):
         dead = dead_one(st.aimed + [e[0] for e in st.thrown if not any(e[0] is a for a in st.aimed)],
-                        s.monsters, s.where.x)
+                        s.monsters, s.where.x, kind)
+        if dead is None and kind is not None:
+            h.report.count_kill(kind)
+            h.log(f"  {kind} down (by her EXP), not one she was throwing at: its drops are left")
+            continue
         if dead is None:
             h.log("  a kill (EXP up) she can't place: its drops are left")
             break
@@ -594,7 +599,7 @@ def _target_gone(h: "Hunter", st: KillState) -> str | None:
     # isn't enough: hit monsters flinch and hide behind damage numbers, and other
     # players kill monsters too (about half the "kills" counted by vanishing alone
     # weren't hers).
-    if st.first_throw is not None and h.take_exp(st.first_throw):
+    if st.first_throw is not None and h.take_exp(st.first_throw, st.kind):
         # Dead since before it was seen without its bar (else before it was gone: a kill is seen fading out
         # for 0.7-1.3 s): _credit_kill.
         _credit_kill(st.flying, st.dying_since or st.gone_since)
@@ -618,7 +623,7 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
     st.misses, st.gone_since = 0, None
     # An EXP gain while it's still alive was another monster dying (a star hits the first
     # monster in its way): it isn't this one's.
-    h.exp_events = [e for e in h.exp_events if s.t - e < 1.5]
+    h.exp_events = [e for e in h.exp_events if s.t - e[0] < 1.5]
     t = st.nearest(found)
     st.last, st.platform = (t.x, t.y), t.platform if t.platform is not None else st.platform
     bar = t.bar

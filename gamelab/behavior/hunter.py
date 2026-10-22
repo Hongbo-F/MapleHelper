@@ -65,8 +65,10 @@ class Hunter:
         self.actions = Actions(keys, skill)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
-        self.exp_events: list[float] = []  # when her EXP told of a kill (the last EXP_MEMORY s), for kill() to match
-        # The latest kills her EXP told of: when, and the kind its gain's size named (None: not known).
+        # Her kills her EXP told of: when, and the kind its gain's size named (None: not known). The last EXP_MEMORY s
+        # of them, for kill() to match to its target (`take_exp`), and the latest few for the fights and the ledger to
+        # place (`told`).
+        self.exp_events: list[tuple[float, str | None]] = []
         self.told: deque[tuple[float, str | None]] = deque(maxlen=64)
         self.exp_gains = 0  # kills her EXP told of, ever (reports are replaced; this isn't)
         self.meter = ExpMeter(model.mob_exp)  # her EXP as read off its number, and what each gain was
@@ -129,13 +131,19 @@ class Hunter:
                 self.report.potions += 1
                 telemetry.emit("event", kind="potion", text=f"potion at {s.hp:.0%} HP")
 
-    def take_exp(self, since: float) -> bool:
-        """Use up one kill her EXP told of since `since`, if there is one."""
-        for i, t in enumerate(self.exp_events):
-            if t >= since:
+    def take_exp(self, since: float, kind: str | None = None) -> bool:
+        """Use up one kill her EXP told of since `since`, if there is one: of `kind`, or of a kind not known (a gain
+        whose size named another kind is another monster's death)."""
+        for i, (t, k) in enumerate(self.exp_events):
+            if t >= since and (kind is None or k is None or k == kind):
                 del self.exp_events[i]
                 return True
         return False
+
+    def kinds_told(self, n: int) -> list[str | None]:
+        """The kinds of the last `n` kills her EXP told of (None where not known), the oldest first."""
+        last = list(self.told)[-n:] if n > 0 else []
+        return [None] * (n - len(last)) + [k for _, k in last]
 
     # --- after every look ---------------------------------------------------------------------
 
@@ -157,7 +165,7 @@ class Hunter:
         for t, reading, changed in reads:
             for g in self.meter.update(t, reading, changed):
                 self._gained(g, s)
-        self.exp_events = [t for t in self.exp_events if s.t - t < EXP_MEMORY]
+        self.exp_events = [e for e in self.exp_events if s.t - e[0] < EXP_MEMORY]
         self._exp = s.exp
         if lost > 0 and self._last_hp is not None:
             self.report.damage_taken += lost
@@ -170,7 +178,7 @@ class Hunter:
         """A gain of her EXP: its kills counted (exp_events, told, the report), or, if no kill explains it, logged;
         with her EXP as read, for the mini-map and the run's record (telemetry 'exp')."""
         for kind in g.kinds:
-            self.exp_events.append(g.t)
+            self.exp_events.append((g.t, kind))
             self.told.append((g.t, kind))
             self.report.exp_kills += 1
             self.exp_gains += 1

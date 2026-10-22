@@ -467,16 +467,18 @@ class Hunt:
         return wide
 
     def _book(self, s: Scene) -> None:
-        """New kills in the ledger: the visit's EXP and kill times, the report, and progress."""
+        """New kills in the ledger: the visit's EXP and kill times, the report, and progress. A kill's EXP is its
+        kind's, placed or named by its gain's size (localization.gains), else the average kind's worth hunting."""
         kills = self.h.ledger.kills[self._kills_seen:]
         self._kills_seen = len(self.h.ledger.kills)
         avg = self._avg_exp()
         for k in kills:
-            exp = self.tour.exp.get(k.kind, avg) if k.placed else avg
+            kind = k.kind or k.named
+            exp = self.tour.exp.get(kind, avg) if kind is not None else avg
             self.report.exp_gains += 1
             self.report.exp += exp
-            if k.placed:
-                self.report.kills[k.kind] = self.report.kills.get(k.kind, 0) + 1
+            if kind is not None:
+                self.report.kills[kind] = self.report.kills.get(kind, 0) + 1
             v = self.visit
             mine = v is not None and v.arrived is not None and k.t >= v.arrived and (  # not on her way there
                 (k.placed and (k.platform == v.ground  # on the ground, or a far kill from it or its spot

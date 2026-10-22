@@ -49,7 +49,7 @@ def test_a_kill_is_confirmed_by_her_exp_number_changing():
     h = hunter(_Eyes(looks))
     for _ in looks:
         h.look(mobs=False)
-    assert h.exp_events == [2.0] and h.report.exp_kills == 1
+    assert h.exp_events == [(2.0, None)] and h.report.exp_kills == 1  # (no box to read it from: a kind not known)
     assert not h.take_exp(since=2.5)   # gains before she started throwing aren't this target's
     assert h.take_exp(since=1.8) and h.exp_events == []
 
@@ -472,7 +472,7 @@ def test_a_kill_is_credited_to_one_throw_in_the_shot_log(monkeypatch, tmp_path):
     monkeypatch.setattr(time, "monotonic", lambda: 10.0)
     monkeypatch.setattr(time, "sleep", lambda s: None)
     h = hunter()
-    h.take_exp = lambda since: True
+    h.take_exp = lambda since, kind=None: True
     h.looter.collect = lambda spot: None
 
     def gone(flying: list, **kw) -> list:

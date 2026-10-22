@@ -4,7 +4,7 @@ the simulator's world, gamelab.sim.world: this is what the stack sees of a world
 
 Every frame: her place (the same look as Senses.look takes: her name tag, HP and MP, the ground, her minimap
 dot, ropes, the other players' dots), her EXP gains and HP drops (events, each at the frame it showed: a gain with
-her EXP number as read then, perception.exp_number, the kills its size was going to the tracker,
+her EXP number as read then, perception.exp_number, the kills its size was going to the tracker by kind,
 localization.gains), and each monster tracked re-found around where it should be (Eyes.refind: the template that
 matched it last, else its kind's).
 
@@ -496,8 +496,8 @@ class WorldStep:
             self.counts["exp gains"] += changed
             self.counts["exp read"] += reading is not None and reading.exp is not None
             for g in self.meter.update(t, reading, changed):
-                for _ in g.kinds:
-                    self.tracker.gain(g.t)
+                for kind in g.kinds:
+                    self.tracker.gain(g.t, kind)
         if s.exp is not None:
             self._exp = s.exp
         if self._hp is not None and s.hp < self._hp - HP_DROP:

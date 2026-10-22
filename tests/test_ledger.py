@@ -45,6 +45,10 @@ def test_a_kill_is_placed_where_her_star_went_and_its_drops_are_expected_there(m
 
 class _Hunter:
     exp_gains = 0
+    named: list = []  # the kinds her gains named, the latest last (None: not known)
+
+    def kinds_told(self, n):
+        return ([None] * n + list(self.named))[-n:] if n > 0 else []
 
 
 def _look(t, x=100.0, platform=None, loot=(), looked=()):
@@ -56,7 +60,7 @@ def _look(t, x=100.0, platform=None, loot=(), looked=()):
 def test_a_gain_no_throw_explains_counts_without_a_place_or_drops():
     h, store = _Hunter(), DropStore()
     ledger = Ledger(h, store)
-    h.exp_gains = 1  # party EXP, say: she threw nothing
+    h.exp_gains = 1  # a kill seen only after a look without monsters, say: she threw nothing
     ledger.on_look(_look(10.0))
     (k,) = ledger.kills
     assert not k.placed and ledger.placed == [] and store.piles == []
@@ -213,8 +217,11 @@ def test_the_ledger_counts_every_kill_and_places_most_of_them_right(name):
     # placed right is 0.5 (one of the 33 below it: nav_fight_basin's seed 7, 0.40). On the play track, before
     # the steps, with her finishing what she has hurt before she moves on (fight.owed), the same 33: placed
     # 0.97-1.0, placed right 0.42-0.83, pooled 0.70 as before (0.69), but three below 0.55: nav_fight_basin's
-    # pinned seed, and its seeds 2 and 8 (0.53, 0.53, 0.42). So 0.5 there too.
-    assert len(placed) >= 0.9 * len(kills) and right >= 0.5 * len(placed)
+    # pinned seed, and its seeds 2 and 8 (0.53, 0.53, 0.42). So 0.5 there too. With her EXP number read, each gain
+    # naming its kind and a kill put only on a monster of that kind (ledger.KIND_ANY off), over seeds 1-10 of each:
+    # placed 0.79-1.0 (pooled 0.90), placed right 0.91-1.0 (pooled 0.96), and of all the kills 0.86 right against
+    # 0.70 (the pinned seeds: placed 0.91, 0.90 and 0.88, right 1.0, 0.98 and 0.93). The bars: 0.75 and 0.9.
+    assert len(placed) >= 0.75 * len(kills) and right >= 0.9 * len(placed)
 
 
 # --- her wounds ---------------------------------------------------------------------------------------------

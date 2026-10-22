@@ -32,15 +32,16 @@ A track not seen in a frame:
   monsters to each other, so such a track is let go without a death (`lost in a crowd`); or (OTHERS_BY_PLAYER) no
   other player on the minimap is by it, nobody who could have killed it (`nobody by it`).
 
-Her EXP gains (worldstate, from the EXP number each frame) are kills of hers. A killed monster is still seen
-fading where it died for about a second, so a gain waits that long (FADE_S + MISSING_S) for the monster it was
-to go out of sight: one she threw at (a throw toward it in the STAR_WINDOW before; with her throws unknown,
-as in `watch`, any monster within a star's reach of her), out of sight by then. The likeliest first: one that
-stood still where it was from the gain until it went (a killed monster fades where it died), then one that
+Her EXP gains (worldstate, from the EXP number each frame) are kills of hers: each kill a gain's size was, of the
+kind it names when it names one (localization.gains; a gain no kill explains isn't one). A killed monster is still
+seen fading where it died for about a second, so a gain waits that long (FADE_S + MISSING_S) for the monster it was
+to go out of sight: one she threw at (a throw toward it in the STAR_WINDOW before; with her throws unknown, as in
+`watch`, any monster within a star's reach of her), of the kind named, out of sight by then. The likeliest first:
+one that stood still where it was from the gain until it went (a killed monster fades where it died), then one that
 went after the gain (else one already out of sight when it came: killed while it hid), then (PLAYERS_LAST) one
-with no other player by it, then the least HP left, then the nearest her: `dead`, cause "hers". Meanwhile the likeliest one still seen is `dying`. A
-monster's HP bar going down is a `bar_hit`, by her when a throw of hers went its way ("other" otherwise;
-None with her throws unknown).
+with no other player by it, then the least HP left, then the nearest her: `dead`, cause "hers". Meanwhile the
+likeliest one still seen is `dying`. A monster's HP bar going down is a `bar_hit`, by her when a throw of hers went
+its way ("other" otherwise; None with her throws unknown).
 
 A track seen in fewer than MIN_SEEN frames that goes is dropped without a death: a match on scenery for a
 frame or two isn't a monster someone killed. Nothing grows without bound: dead tracks go DEAD_KEEP_S after
@@ -235,7 +236,8 @@ class MonsterTracker:
         self.throws_known = throws
         self.tracks: dict[int, Track] = {}
         self.next_id = 1
-        self.gains: list[float] = []      # her EXP gains not yet put on a monster
+        self.gains: list[tuple[float, str | None]] = []  # her kills her EXP told of, not yet put on a monster: when,
+                                                         # and the kind the gain's size named (None: not known)
         self.throws: list[_Throw] = []
         self.her: tuple[float, float] | None = None  # where she was in the last frame placed
         self._last_t = -1e18                          # ... and when that was
@@ -249,9 +251,10 @@ class MonsterTracker:
 
     # --- told from outside -----------------------------------------------------------------------
 
-    def gain(self, t: float) -> None:
-        """Her EXP went up in the frame shown at t."""
-        self.gains.append(t)
+    def gain(self, t: float, kind: str | None = None) -> None:
+        """Her EXP went up in the frame shown at t, by a kill of `kind` (by the gain's size: localization.gains; None:
+        not known). A gain of several kills is told once for each."""
+        self.gains.append((t, kind))
 
     def throw(self, t: float, side: str) -> None:
         """She threw toward `side` at t (Actions.throw_listeners): the monsters a star could meet from where
@@ -517,12 +520,12 @@ class MonsterTracker:
             if tr.state == DYING:
                 tr.state = LIVE if t - tr.last_seen < MISSING_S else HIDDEN
         left = []
-        for g in self.gains:  # the oldest first: each has first pick before the gains after it
+        for g, kind in self.gains:  # the oldest first: each has first pick before the gains after it
             cands = [tr for tr in self.tracks.values() if tr.state in (LIVE, HIDDEN, DYING)
-                     and tr.last_seen >= g - HIDE_S and self._aimed(tr, g)]
+                     and tr.last_seen >= g - HIDE_S and self._aimed(tr, g) and (kind is None or tr.kind == kind)]
             gone = [tr for tr in cands if tr.state == HIDDEN]
             if t - g <= FADE_S + MISSING_S:
-                left.append(g)  # wait for the fade (a newer gain's monster may be an older one's)
+                left.append((g, kind))  # wait for the fade (a newer gain's monster may be an older one's)
                 live = [tr for tr in cands if tr.state == LIVE]
                 if live:
                     min(live, key=lambda tr: self._likely(tr, g)).state = DYING

@@ -164,9 +164,11 @@ def seen_again(m: Monster, now: list[Monster]) -> Monster | None:
     return min(near, key=lambda o: abs(o.x - m.x)) if near else None
 
 
-def dead_one(aimed: list[Monster], now: list[Monster], her_x: float) -> Monster | None:
-    """Which of the monsters she was throwing at died: one no longer seen (nearest her), else the
-    nearest (it may still be seen fading out)."""
+def dead_one(aimed: list[Monster], now: list[Monster], her_x: float, kind: str | None = None) -> Monster | None:
+    """Which of the monsters she was throwing at died: of `kind`, when her EXP's gain named it (None: any), one no
+    longer seen (nearest her), else the nearest (it may still be seen fading out)."""
+    if kind is not None:
+        aimed = [t for t in aimed if t.kind == kind]
     gone = [t for t in aimed if not any(same(o, t) for o in now)]
     pool = gone or aimed
     return min(pool, key=lambda t: abs(t.x - her_x)) if pool else None

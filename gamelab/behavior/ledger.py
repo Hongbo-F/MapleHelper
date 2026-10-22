@@ -1,16 +1,15 @@
 """The hunt's bookkeeping, kept up from every look, whoever takes it (Senses.listeners), and from every
 throw (Actions.throw_listeners): the kill ledger and the drop store.
 
-- **The ledger** (`Ledger`): every EXP gain the hunter sees (at most one a look: her EXP number only says
-  it changed) is a kill. It's placed (kind, platform, where) when a star of hers explains it: a monster
-  that can have taken the attack of a throw made in the last STAR_WINDOW s (or, with none, that long before
-  the look before, as the gain came after it; any of them: which of the claw's stances an attack takes is
-  drawn, and the client's order within a band of the star's search can't be seen), preferring one that's
-  gone from view (and of those, one with another player by it last: PLAYER_KILLS), the newest throw's and the
-  likeliest first; where that monster was seen last (a throw's
-  path is followed from look to look).
-  A gain no throw explains (party EXP, or a kill seen only from a look without monsters) still counts,
-  credited to where she is, but has no place and so no drops.
+- **The ledger** (`Ledger`): every kill the hunter's EXP gains tell of is a kill (a gain's size names its kind, or
+  says it was two kills, or none: localization.gains). It's placed (kind, platform, where) when a star of hers
+  explains it: a monster of the kind named (when one was) that can have taken the attack of a throw made in the
+  last STAR_WINDOW s (or, with none, that long before the look before, as the gain came after it; any of them:
+  which of the claw's stances an attack takes is drawn, and the client's order within a band of the star's search
+  can't be seen), preferring one that's gone from view (and of those, one with another player by it last:
+  PLAYER_KILLS), the newest throw's and the likeliest first; where that monster was seen last (a throw's path is
+  followed from look to look). A kill no throw explains (a kill seen only from a look without monsters) still
+  counts, credited to where she is, by the kind its gain named, but has no place and so no drops.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
   first seen), when it was last seen, whether a kill of hers explains it, what the last look that saw it saw
   in it and what that's worth (looting.worth: the game data's prices), and its status. A pile is gone
@@ -55,6 +54,13 @@ PILE_WORTH = COINS["bronze"]
 # placed where its kill was without this, 8 with it, and as many placed right (67%); EXP a minute 129.93 -> 129.76
 # (2 seeds' runs changed), the tour's runs the same. On for the game, where another player may hunt beside her.
 PLAYER_KILLS = True
+# Whether a kill whose gain named a kind (localization.gains) that none of her recent throws' paths holds goes on the
+# likeliest monster of any kind (True), or unplaced (False: no pile expected; its kind still counted). Over the three
+# basin scenarios' seeds 1-10 (30 runs, 1,111 kills): with the kind placed only on one of that kind, 90% of the kills
+# were placed and 96% of those right (kind, platform, within 2.5 s of the world's kill), 86% of all; with any kind as
+# well, 99.5% placed and 86% of those right, 85% of all; without the kind (before her EXP number was read), 99.9%
+# and 70%.
+KIND_ANY = False
 # Her wounds (Wounds). A bar new, or this much other than at the throw, is a hit (fight.HURT). A wound unseen this long
 # is gone: a hit monster hides under its damage numbers for 1-3 s (fight.HIDDEN_FOR is how long she keeps
 # throwing at one unseen; seen again within this, it's still hers), and seen without its bar it's still kept
@@ -69,13 +75,14 @@ WOUND_S = 15.0
 
 @dataclass
 class Kill:
-    """One EXP gain of hers, and what it was if a throw explains it."""
+    """One kill her EXP told of, and what it was if a throw explains it."""
     t: float                  # the look that saw her EXP go up
     kind: str | None          # None: no throw of hers explains it (no place, no drops)
     platform: int | None      # where the monster died ...
     x: float
     y: float
     ground: int | None        # ... and the platform the kill is credited to (hers, when unplaced)
+    named: str | None = None  # the kind her EXP gain's size named (None: not known)
 
     @property
     def placed(self) -> bool:
@@ -119,8 +126,8 @@ class Ledger:
         self._looked = s.t
         self._throws = [th for th in self._throws if since - th.t <= STAR_WINDOW]
         new, self._accounted = self.h.exp_gains - self._accounted, self.h.exp_gains
-        for _ in range(new):
-            self.kills.append(self._place(s))
+        for kind in self.h.kinds_told(new):
+            self.kills.append(self._place(s, kind))
         if s.searched:
             self._last = s
             # What can have taken a throw's attack is followed from look to look (as Wounds follows them), so a
@@ -130,17 +137,18 @@ class Ledger:
             for th in self._throws:
                 th.path = [seen_again(m, s.monsters) or m for m in th.path]
 
-    def _place(self, s: Scene) -> Kill:
-        """The kill a gain seen in look `s` was: a monster that can have taken the attack of a throw made in
-        the last STAR_WINDOW s (its path), preferring one not seen any more (the newest throw first, the
-        likeliest of its path first); with none, of a throw made up to STAR_WINDOW s before the look before,
-        which the gain came after; else unplaced. A fight's last star often lands after its last look, and the
-        walks and pick-ups of the sweep after it take no look for up to 7 s: in the simulator, 2 of
-        tour_hunt_basin's 61 kills went unplaced that way, and 9 of 58 once its monsters walked as fast as in
-        the game. Going back that far for every gain placed more kills on the wrong monster (458 of 612 right
-        in 10 scenarios, against 437 of 628)."""
-        recent = [th for th in self._throws if s.t - th.t <= STAR_WINDOW and th.path]
-        firsts = [(th, m) for th in reversed(recent or self._throws) for m in th.path]
+    def _place(self, s: Scene, kind: str | None = None) -> Kill:
+        """The kill a gain seen in look `s` was (of `kind`, when its size named one): a monster of that kind that
+        can have taken the attack of a throw made in the last STAR_WINDOW s (its path), preferring one not seen any
+        more (the newest throw first, the likeliest of its path first); with none, of a throw made up to STAR_WINDOW
+        s before the look before, which the gain came after; else unplaced (or, with KIND_ANY, of any kind). A
+        fight's last star often lands after its last look, and the walks and pick-ups of the sweep after it take no
+        look for up to 7 s: in the simulator, 2 of tour_hunt_basin's 61 kills went unplaced that way, and 9 of 58 once
+        its monsters walked as fast as in the game. Going back that far for every gain placed more kills on the
+        wrong monster (458 of 612 right in 10 scenarios, against 437 of 628)."""
+        firsts = self._candidates(s.t, kind)
+        if not firsts and kind is not None and KIND_ANY:
+            firsts = self._candidates(s.t, None)
         if s.searched:
             gone = [(th, m) for th, m in firsts if not any(same(o, m) for o in s.monsters)]
             if PLAYER_KILLS and s.players:  # (a stable sort: the newest throw's and the likeliest first as before)
@@ -149,13 +157,21 @@ class Ledger:
         here = None if s.platform is None else s.platform.id
         if not firsts:
             x, y = (s.where.x, s.where.y) if s.where is not None else (0.0, 0.0)
-            return Kill(s.t, None, None, x, y, here)
+            return Kill(s.t, None, None, x, y, here, kind)
         th, m = firsts[0]
         self._throws.remove(th)  # one star, one kill
-        kill = Kill(s.t, m.kind, m.platform, m.x, m.y, m.platform if m.platform is not None else here)
+        kill = Kill(s.t, m.kind, m.platform, m.x, m.y, m.platform if m.platform is not None else here, kind)
         if self.store is not None:
             self.store.on_kill(kill)
         return kill
+
+    def _candidates(self, t: float, kind: str | None) -> list[tuple[_Throw, Monster]]:
+        """What a gain seen at t can have been (of `kind`, if not None): the monsters in the paths of the throws of
+        the last STAR_WINDOW s, else of those kept (see _place), the newest throw's first, each path's likeliest
+        first."""
+        ok = (lambda m: True) if kind is None else (lambda m: m.kind == kind)
+        recent = [th for th in self._throws if t - th.t <= STAR_WINDOW and any(ok(m) for m in th.path)]
+        return [(th, m) for th in reversed(recent or self._throws) for m in th.path if ok(m)]
 
 
 @dataclass
