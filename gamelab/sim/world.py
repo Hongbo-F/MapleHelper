@@ -224,10 +224,11 @@ AIR_PICK = "area"
 DROP_DELAY = 2.0
 # s from a kill until the monster is back at its spawn point (a guess; Realism.respawn). Not the game's, by its live
 # telemetry of 2026-10-19 to 21 (analysis.respawn: README, Respawns and drop life): there a platform she emptied had a
-# monster again within 12.56 s on 17% of 77 (95% interval 10-28%) and mostly not by 60 s, where in this world all are
-# back by 8.8 s (the same report on 8 runs of preset game); the game's basin had a monster at 12% of its spawn points,
-# none 45% of the time, this world's 27% and 7%. Kept until the game's refill is settled (a delay, or MeowDB's cap of
-# the map's monsters, a respawn going to any free spawn point): the in-game check there.
+# monster again within 12.56 s on 17% of 77 (95% interval 10-28%) and mostly not by 60 s, where in this world none
+# stayed empty past 8.8 s (14 of 22 seen back by then: the same report on 8 runs of preset game); the game's basin had a
+# monster at 12% of its spawn points, none 45% of the time, this world's 27% and 7%. Kept until the game's refill is
+# settled (a delay, or MeowDB's cap of the map's monsters, a respawn going to any free spawn point): the in-game check
+# there.
 RESPAWN = 8.0
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
                          # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
