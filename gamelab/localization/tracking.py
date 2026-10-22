@@ -26,18 +26,19 @@ A track not seen in a frame:
 - on screen but unseen for MISSING_S: `hidden`. Hit, a monster flinches under its damage numbers and the
   detector loses it for 1-3 s; one back within HIDE_S is the same one;
 - hidden for longer than HIDE_S (counted from her last attack its way, when her throws are told: every hit
-  renews its damage numbers): `dead`, killed by someone else (`died`, cause "other"): no EXP gain of hers
-  explains it. Unless it went out of sight right beside another of its kind, or a new one was seen where it
-  was meanwhile: in a crowd of one kind, tracks lose their monsters to each other, so such a track is let go
-  without a death (`lost in a crowd`).
+  renews its damage numbers): `dead`, killed by someone else (`died`, cause "other", `by` the other player by it,
+  localization.players.near_rival): no EXP gain of hers explains it. Unless it went out of sight right beside
+  another of its kind, or a new one was seen where it was meanwhile: in a crowd of one kind, tracks lose their
+  monsters to each other, so such a track is let go without a death (`lost in a crowd`); or (OTHERS_BY_PLAYER) no
+  other player on the minimap is by it, nobody who could have killed it (`nobody by it`).
 
 Her EXP gains (worldstate, from the EXP number each frame) are kills of hers. A killed monster is still seen
 fading where it died for about a second, so a gain waits that long (FADE_S + MISSING_S) for the monster it was
 to go out of sight: one she threw at (a throw toward it in the STAR_WINDOW before; with her throws unknown,
 as in `watch`, any monster within a star's reach of her), out of sight by then. The likeliest first: one that
 stood still where it was from the gain until it went (a killed monster fades where it died), then one that
-went after the gain (else one already out of sight when it came: killed while it hid), then the least HP
-left, then the nearest her: `dead`, cause "hers". Meanwhile the likeliest one still seen is `dying`. A
+went after the gain (else one already out of sight when it came: killed while it hid), then (PLAYERS_LAST) one
+with no other player by it, then the least HP left, then the nearest her: `dead`, cause "hers". Meanwhile the likeliest one still seen is `dying`. A
 monster's HP bar going down is a `bar_hit`, by her when a throw of hers went its way ("other" otherwise;
 None with her throws unknown).
 
@@ -54,6 +55,7 @@ from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from .mapdata import MapModel
 from .monsters import DEFAULT_SPEED, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds
+from .players import Player, near_rival
 
 LIVE, HIDDEN, OFFSCREEN, DYING, DEAD = "live", "hidden", "offscreen", "dying", "dead"
 STATES = (LIVE, HIDDEN, OFFSCREEN, DYING, DEAD)
@@ -125,6 +127,16 @@ FADE_MOVE = 10.0    # units a monster fading where it died may seem to move: a s
 # before the track was judged, and could show it still there. A later frame's couldn't have saved it, so the wait
 # is bounded however often she searches. (A search for the drops alone can't see it, and isn't waited for.)
 LATE_SEARCH_S = 0.05
+# Other players on the minimap (localization.players: told each frame, `update`'s `players`). With OTHERS_BY_PLAYER, a
+# monster gone from sight on screen past HIDE_S is someone else's kill only with another player by it (near_rival:
+# 400 units across, 100 up or down); with nobody by it, nobody else can have killed it, and it's let go without a
+# death. Over the seven runs of the README's table (Continuous perception), with the other player hunting one place
+# at a time: deaths judged someone else's 14 -> 4, right 4 -> 4 (10 let go, nobody by them); hers the same (263 judged,
+# 254 right, of 274). With PLAYERS_LAST, of the monsters her EXP gain may be, one with another player by it comes after
+# those without (as behavior.ledger.PLAYER_KILLS has hers): the same 263 there. Either way a death someone else's
+# names the player by it (`by`).
+OTHERS_BY_PLAYER = True
+PLAYERS_LAST = True
 
 
 @dataclass
@@ -231,8 +243,9 @@ class MonsterTracker:
         # later), or None (LATE_SEARCH_S).
         self.searching: float | None = None
         self.refound_seen: set[int] = set()  # the tracks the last frame's re-finds were taken for (`update`)
+        self.players: list[Player] | None = None     # the other players on the map in the last frame (None: not told)
         self.counts = {"tracks": 0, "died hers": 0, "died other": 0, "lost in a crowd": 0, "flickers": 0,
-                       "gains unexplained": 0, "late sightings of the dead": 0}
+                       "gains unexplained": 0, "late sightings of the dead": 0, "nobody by it": 0}
 
     # --- told from outside -----------------------------------------------------------------------
 
@@ -250,11 +263,14 @@ class MonsterTracker:
     # --- each frame ---------------------------------------------------------------------------------
 
     def update(self, t: float, refound: dict[int, Monster], found: list[Monster], view: View | None,
-               her: tuple[float, float] | None) -> list[Event]:
+               her: tuple[float, float] | None, players: list[Player] | None = None) -> list[Event]:
         """The frame shown at t: `refound`, the tracks re-found in it (id -> where), and `found`, what its
         searches found (re-found ones among them are told apart); `view`, what it shows of the map (None:
-        she isn't placed, and nothing can be judged); `her`, where she is. Returns what happened."""
+        she isn't placed, and nothing can be judged); `her`, where she is; `players`, the other players on the map
+        (localization.players; None: not known). Returns what happened."""
         events: list[Event] = []
+        if players is not None:
+            self.players = players
         if view is None:
             return events
         self.her = her
@@ -488,6 +504,10 @@ class MonsterTracker:
                 self.counts["lost in a crowd"] += 1
                 del self.tracks[tr.id]
                 return
+            if OTHERS_BY_PLAYER and self.players is not None and near_rival(self.players, tr.x, tr.y) is None:
+                self.counts["nobody by it"] += 1  # nobody else on the map could have killed it
+                del self.tracks[tr.id]
+                return
             self._dies(tr, tr.last_seen, "other", events, t)
 
     def _resolve(self, t: float, events: list[Event]) -> None:
@@ -526,15 +546,17 @@ class MonsterTracker:
         """Which of the monsters gain `g` may be comes first (see the top)."""
         went = tr.last_seen >= g - FRAME_SLACK
         faded = went and tr.still_since <= g + FRAME_SLACK
-        return (not faded, not went, 1.0 if tr.bar is None else tr.bar,
+        theirs = PLAYERS_LAST and bool(self.players) and near_rival(self.players, tr.x, tr.y) is not None
+        return (not faded, not went, theirs, 1.0 if tr.bar is None else tr.bar,
                 abs(tr.x - self.her[0]) if self.her is not None else 0.0)
 
     def _dies(self, tr: Track, when: float, cause: str, events: list[Event], t: float) -> None:
         tr.state, tr.died_at, tr.cause, tr.judged = DEAD, when, cause, t
         self.counts[f"died {cause}"] += 1
+        by = near_rival(self.players, tr.x, tr.y) if cause == "other" and self.players else None
         events.append(Event("died", t, tr.id, {"kind": tr.kind, "cause": cause, "x": round(tr.x),
                                                 "platform": tr.platform, "hurt": tr.bar is not None,
-                                                "at": round(when, 3)}))
+                                                "at": round(when, 3), **({"by": by.id} if by is not None else {})}))
 
 
 def overlap(a: Mob, b: Mob) -> bool:

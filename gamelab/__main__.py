@@ -1002,8 +1002,10 @@ def cmd_watch(args) -> int:
                 if e.kind in WATCH_EVENTS or (e.kind == "hp_drop" and e.data.get("new")):
                     telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)
                 if e.kind == "died":
+                    by = e.data.get("by")  # the other player by it (localization.players)
                     _log(f"  {e.data['kind']} #{e.track} died on platform {e.data['platform']}: "
-                         + ("hers" if e.data["cause"] == "hers" else "someone else's"))
+                         + ("hers" if e.data["cause"] == "hers" else "someone else's"
+                            + (f" (another player's, #{by})" if by is not None else "")))
             if st.loot is not None:
                 w["loot"], w["looked"] = st.loot, st.looked
             if now - w["scene"] >= WATCH_SCENE_S:

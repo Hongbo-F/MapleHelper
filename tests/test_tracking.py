@@ -372,3 +372,38 @@ def test_one_a_late_search_brought_back_from_off_screen_is_aimed_at_by_the_throw
     assert tracker.throws[-1].aimed == set()  # off screen as far as the tracker knew
     tracker.merge(100.3, [sighting(1480)], set(), view(), view(), 100.5)  # in view now: back
     assert tr.state == LIVE and tracker.throws[-1].aimed == {1}
+
+
+def _player(x: float, kind: str = "stranger", pid: int = 7):
+    from gamelab.localization.players import Player
+    return Player(pid, kind, x, HER[1], 1, (0.0, 0.0), 0.0, 0.0, seen=2)
+
+
+def test_one_gone_by_another_player_is_theirs_and_one_gone_with_nobody_by_it_is_nobodys():
+    """With the other players on the minimap told (OTHERS_BY_PLAYER): a monster gone from sight in plain view is
+    someone else's kill only with another player by it, and the death names them; with nobody else by it (her
+    party doesn't count), it's let go without a death."""
+    gone = [([sighting(1200, pose="stand")], view())] * 30 + [(None, view())] * (5 * FPS)
+    for players, deaths in (([_player(1400)], [(1, "other", 7)]), ([_player(2000)], []),
+                            ([_player(1250, kind="party")], []), ([], [])):
+        tracker = MonsterTracker()
+        tracker.update(99.0, {}, [], view(), HER, players)
+        events, _ = run(tracker, gone)
+        assert [(e.track, e.data["cause"], e.data.get("by")) for e in events if e.kind == "died"] == deaths
+        assert tracker.counts["nobody by it"] == (not deaths)
+
+
+def test_her_gain_goes_on_one_gone_with_nobody_else_by_it():
+    """Two monsters her throws went toward go at once, one by another player (350 units off it, 500 off the other):
+    her EXP gain is the other one, and the one by them is theirs (PLAYERS_LAST). With nobody else about, the nearer
+    her is hers."""
+    t0 = 100.0
+    for players, hers in (([], 1), ([_player(800, pid=3)], 2)):
+        tracker = MonsterTracker()
+        tracker.update(t0 - 1.0, {}, [], view(), HER, players)
+        run(tracker, [([sighting(1150, pose="stand"), sighting(1300, pose="stand")], view())] * 10, start=t0)
+        tracker.throw(t0 + 0.3, "right")
+        tracker.gain(t0 + 0.4)
+        events, _ = run(tracker, [(None, view())] * (5 * FPS), start=t0 + 0.4)
+        died = {e.track: (e.data["cause"], e.data.get("by")) for e in events if e.kind == "died"}
+        assert died[hers] == ("hers", None) and died.get(3 - hers) == (("other", 3) if players else None)

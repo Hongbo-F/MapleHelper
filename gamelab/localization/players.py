@@ -27,6 +27,11 @@ MATCH_MAX_PX = 40.0  # ... up to this; farther, it's a new dot (it went through 
 # their EXP, and in the saved frames of 2026-10-21 a leader of her party stood on the safe platform 32 for the five
 # minutes between two of them (lie_detector_012504.png, calibrate.png).
 RIVALS = ("stranger", "guild", "buddy")
+# How far from another player a monster they kill, or a pile of theirs, can be: about a star's reach across (434,
+# attack.reach.STAR_REACH; the simulator's other player kills within 400) and a step up or down. A guess: what other
+# players' classes reach isn't known.
+REACH_X = 400.0
+REACH_DY = 100.0
 
 
 @dataclass
@@ -116,3 +121,10 @@ class Players:
 def rivals(players: list[Player]) -> list[Player]:
     """Those of `players` who hunt against her (Player.rival)."""
     return [p for p in players if p.rival]
+
+
+def near_rival(players: list[Player], x: float, y: float, dx: float = REACH_X, dy: float = REACH_DY) -> Player | None:
+    """Of `players`, the nearest who hunts against her within `dx` map units across and `dy` up or down of (x, y)
+    (by default REACH_X and REACH_DY: one who can have killed a monster there), or None."""
+    close = [p for p in players if p.rival and p.near(x, y, dx, dy)]
+    return min(close, key=lambda p: abs(p.x - x)) if close else None

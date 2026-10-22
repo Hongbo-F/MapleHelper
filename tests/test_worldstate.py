@@ -15,6 +15,7 @@ from gamelab.localization.senses import Senses
 from gamelab.localization.worldstate import Asks, Schedule, Searches, WorldStep, search, to_scene
 from gamelab.perception.eyes import Eyes, Observation
 from gamelab.perception.loot import Item
+from gamelab.perception.minimap import OTHER_SHIFT, Marker
 from gamelab.perception.mobs import Mob
 from gamelab.screen import UNITS_PER_HALF_PX as U
 from gamelab.sim.fakes import FakeDetector, FakeLoot, Frame, Screen
@@ -45,6 +46,7 @@ class Drawn(Eyes):
         self.want_ropes, self.rope_columns = False, None
         self.mobs: list[Mob] = []
         self.drops: list[Item] = []
+        self.others: list[Marker] = []  # other players' minimap dots
         self.hp, self.exp = 1.0, 0
 
     def look(self) -> Observation:
@@ -62,7 +64,7 @@ class Drawn(Eyes):
         exp = np.zeros((26, 140), bool)
         exp[5:15, :self.exp] = True
         return Observation(t=t, frame=frame, tag=(480, 308), hp=self.hp, mp=1.0, ground=(300, 700),
-                           dot=self.loc.to_dot(1000, 500), exp=exp)
+                           dot=self.loc.to_dot(1000, 500), others=list(self.others), exp=exp)
 
 
 def pig(x: float, y: float = 500.0, facing: int = 1) -> Mob:
@@ -305,9 +307,12 @@ def test_a_re_find_the_tracker_turned_down_doesnt_hide_that_monster_from_a_late_
 @pytest.mark.parametrize("out", ["drops", "band"])
 def test_a_hidden_track_waits_to_be_judged_for_a_search_for_monsters_out_and_not_for_one_for_the_drops(out):
     # Its frame's search for monsters, inline, would have been merged before the track was judged; one for the
-    # drops alone can't see it. Once due, the track is judged at the next frame with only that out.
+    # drops alone can't see it. Once due, the track is judged at the next frame with only that out: someone else's
+    # kill, another player by it on the minimap (with nobody by it, it would be let go: tracking.OTHERS_BY_PLAYER).
     step, searches = held_step()
     step.eyes.mobs = [pig(1100)]
+    x, y = step.eyes.loc.to_dot(1250, 500)
+    step.eyes.others = [Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT)]
     one(step, 0, Asks(band=True))
     searches.back()
     for k in range(1, 8):
@@ -327,6 +332,7 @@ def test_a_hidden_track_waits_to_be_judged_for_a_search_for_monsters_out_and_not
         one(step, k)
     if out == "drops":
         assert step.tracker.tracks[tr.id].state == "dead" and step.tracker.counts["died other"] == 1
+        assert step.tracker.tracks[tr.id].cause == "other"
     else:
         assert step.tracker.tracks[tr.id].state == "hidden" and step.tracker.counts["died other"] == 0
         searches.back()

@@ -380,7 +380,7 @@ class WorldStep:
             self.counts["re-found"] += len(refound)
             self.counts["fallbacks"] += work["fallbacks"]
         her = (s.where.x, s.where.y) if placed else None
-        events += self.tracker.update(t, refound, [], view, her)
+        events += self.tracker.update(t, refound, [], view, her, s.players)
         seen: list[Monster] = []  # re-found (two tracks may have found one)
         for m in refound.values():
             if not any(same(m.mob, k.mob) for k in seen):
