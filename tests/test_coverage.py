@@ -80,10 +80,31 @@ def test_a_hit_is_not_a_miss_and_a_chain_that_ends_where_planned_made_every_move
                                                                              "x": 536.0}]}
     t = coverage.tally(_up_the_left_side(graph) + _standing(graph, 32, 560) + [moved], graph)
     assert t["moves"]["jump 32->29 @536"] == [1, 1, 0, 1] and not t["elsewhere"]
+    assert t["arrived"] == {"32": 1, "36": 1}  # knocked off the jump from 32 into the basin: there by the hit's move
     made = dict(moved, landed=28, hit=False, moves=moved["moves"] + [{"kind": "jump", "src": 29, "dst": 28,
                                                                        "x": 356.0}])
+    keys = ("climb 36->32 @539", "jump 32->29 @536", "jump 29->28 @356")
     t = coverage.tally(_up_the_left_side(graph) + [made], graph)  # seen nowhere in between: the navigator's word
-    assert [t["moves"][k][1:] for k in ("climb 36->32 @539", "jump 32->29 @536", "jump 29->28 @356")] == [[1, 0, 0]] * 3
+    assert [t["moves"][k][1:] for k in keys] == [[1, 0, 0]] * 3
+    # Hit on the way and still where it was to end: every move made, and she got onto 28 (the jump onto it was
+    # counted a hit's, and 28 left out of where she got).
+    t = coverage.tally(_up_the_left_side(graph) + [dict(made, hit=True)], graph)
+    assert [t["moves"][k][1:] for k in keys] == [[1, 0, 0]] * 3 and t["arrived"] == {"28": 1, "29": 1, "32": 1}
+    t = coverage.tally(_up_the_left_side(graph, older=True) + _standing(graph, 28, 300) + [
+        {"topic": "log", "t": 0.0, "text": "    hit on the way: HP 90% -> 85%"}], graph)  # the older telemetry's
+    assert [t["moves"][k][1:] for k in keys] == [[1, 0, 0]] * 3 and t["arrived"] == {"28": 1, "29": 1, "32": 1}
+
+
+@REAL
+def test_the_tour_s_stops_are_its_sweep_s_not_the_hunt_loop_s_grounds(graph):
+    """The hunt loop's 'tour' records name its next ground (Hunt._next_ground), with the grounds so far: counted as its
+    grounds (from its 'hunt' records), not as the tour's stops."""
+    records = [{"topic": "tour", "t": 0.0, "stop": 17, "spot": {"platform": 14, "x": 700.0, "coverage": 0.8}},
+               {"topic": "tour", "t": 1.0, "order": [36], "stop": 36, "spot": {"platform": 36, "x": 500.0,
+                                                                               "coverage": 1.0}},
+               {"topic": "hunt", "t": 2.0, "ground": 36}]
+    t = coverage.tally(records, graph)
+    assert t["stops"] == {"17": 1} and t["grounds"] == {"36": 1}
 
 
 @REAL

@@ -10,12 +10,14 @@ A run (a harness seed, or a live telemetry file) is tallied once, from its telem
   the navigator's 'moved' record after each; before, its chains and log lines); missed: of those, the ones she
   ended elsewhere than on their platform after, not from a hit. Which move of a chain it was is read from where she
   was seen standing in between (`stood`: her looks and the glances at her dot, on a platform's surface twice in a
-  row), against the platforms the chain goes through; a hit's move is counted apart ('hit');
+  row), against the platforms the chain goes through; a hit's move (hit on the way, and ended elsewhere than the
+  chain was to: one that still got her there made every move) is counted apart ('hit');
 - per platform: visits (runs of looks on it) and seconds (from each look to the next, GAP_S at most), and
-  'arrived': the moves that got her onto it (made, or missed onto it), which the regression test reads;
+  'arrived': the moves that got her onto it (made, or missed or knocked onto it on the way: a hit's move that left her
+  elsewhere than where it set off), which the regression test reads;
 - the plans: where each was planned from and to, and what its route costs by the planner's own times (no random
   weights, no penalties), against the quickest; and what it kept off and avoided (for why a cheaper move lost);
-- the trips' ends, and the grounds the tour stopped at and the hunt loop hunted.
+- the trips' ends, and the grounds the tour stopped at (the sweep's stops) and the hunt loop hunted.
 
 `report` then gives, for every move of the graph, what the runs did with it, and for those never taken, the gap from
 the best route through it to the route chosen on the plans that could have used it, and why it lost (`why`):
@@ -204,7 +206,8 @@ class _Tally:
                 self.idle[f"{r.get('dst')} {_result(r.get('result', ''))}"] += 1
             self.routes_in_trip = 0
             self.points, self.sent = [], False
-        elif topic == "tour" and r.get("stop") is not None:
+        elif topic == "tour" and r.get("stop") is not None and "order" not in r:
+            # (the hunt loop's 'tour' records name its next ground, with the grounds so far: its grounds, below)
             self.stops[str(r["stop"])] += 1
         elif topic == "hunt" and r.get("ground") is not None and r.get("ground") != self.ground:
             self.ground = r["ground"]
@@ -267,8 +270,9 @@ class _Tally:
         legs = [m for m in r.get("moves") or [] if m["kind"] != "hop"]
         self.hops += len(r.get("moves") or []) - len(legs)
         landed, hit = r.get("landed"), bool(r.get("hit"))
-        self._outcome([(m["kind"], m["src"], m["dst"], m.get("x")) for m in legs], landed, hit,
-                      not hit and landed != r.get("planned"))
+        off = landed != r.get("planned")  # hit on the way and still where it was to end: every move made
+        self._outcome([(m["kind"], m["src"], m["dst"], m.get("x")) for m in legs], landed, hit and off,
+                      off and not hit)
         self.points, self.sent = [], False
 
     # before the 'moved' record: chains, moves made alone and the verdicts from the log
@@ -312,7 +316,8 @@ class _Tally:
     def _outcome(self, legs: list[tuple], landed: int | None, hit: bool, miss: bool) -> None:
         """Count a chain's (or a move's) legs, (kind, src, dst, x) each: made, missed (and where she ended), a hit's,
         or not reached. The navigator says whether it ended where planned (`miss`) and whether she was hit on the
-        way; where she was seen standing in between (and `landed`, where she ended) says which leg it was."""
+        way, ending elsewhere (`hit`); where she was seen standing in between (and `landed`, where she ended) says which
+        leg it was. The platform a missed or hit leg left her on, if not the one it set off from, is one she got onto."""
         if not legs:
             return
         failed = where = None
@@ -322,11 +327,12 @@ class _Tally:
             if landed is not None:
                 seq.append(landed)
             reached, where = follow(plan, seq)
-            if where is None:  # seen on its platforms only: the leg after the last she got to
+            if where is not None:
+                failed = reached
+            elif reached < len(legs) or miss:  # seen on its platforms only: the leg after the last she got to
                 failed = min(reached, len(legs) - 1)
                 where = landed if landed is not None else plan[failed]
-            else:
-                failed = reached
+            # (else hit, but seen standing where it was to end, before the 'moved' record: every move made)
         for i, (kind, src, dst, x) in enumerate(legs):
             if failed is not None and i > failed:
                 break  # sent, but not reached
@@ -338,13 +344,14 @@ class _Tally:
             counts[1] += 1
             if i != failed:
                 self.arrived[dst] += 1
-            elif hit:
+                continue
+            if hit:
                 counts[3] += 1
             else:
                 counts[2] += 1
                 self.elsewhere[key][str(where)] += 1
-                if where is not None:
-                    self.arrived[where] += 1
+            if where is not None and where != src:
+                self.arrived[where] += 1
 
     def done(self) -> dict:
         self._close()
