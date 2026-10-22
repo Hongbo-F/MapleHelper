@@ -25,7 +25,8 @@ Topics (map units; producers build the records, ui.state folds them):
   drops     pending [{x, y, platform, mesos}], inventory_full  every look (behavior.hunter)
   glance    x, y, hp                                           control.navigator, while a chain runs
   route     dst, moves [{kind, src, dst, x, land_x}], from     control.navigator, each plan (from 2026-10-21 also
-            {platform, x}, keep_off, avoid                     where it was planned from and what it kept off)
+            {platform, x}, keep_off, avoid; ways [{via, cost,  where it was planned from and what it kept off; a
+            chance}], chose                                    trip's first, the ways it chose among: route.ROUTES)
   chain     why, text, legs [{kind, src, dst, spans, end}]     control.navigator, each key plan sent
   moved     moves [{kind, src, dst, x}], planned, landed, hit  control.navigator, after a chain or a move (from
                                                                2026-10-21: the coverage report's)

@@ -1268,6 +1268,60 @@ def test_real_map_scenarios_show_what_they_are_there_for(name):
 
 
 @REAL
+def test_a_trip_goes_the_way_it_chose_through_its_replans(monkeypatch):
+    """With route.ROUTES over 1 a trip chooses among the planner's ways at its first plan (route.choose), and replanned
+    goes the one it took (Planner.through its move) until she has set off on that move. From 23 by its right end to
+    17, of the climb past the end and the two rope hops, the hops drawn: she goes by the hops, and the first route
+    record has the ways she chose among. Replanned from 13, across the map, the hops would cost more than the ways
+    offered could (route.STRETCH of the quickest's time when it chose): the quickest, and the choice is dropped. A trip
+    with a deadline (`vary` False: drops, a rest) goes the quickest way. From 19 to 3 up the left side through 12 (the
+    way through walk_off 5->9, made in a chain the next is planned from on the move): each move once. (No random
+    weights: drawn, they can put the hops past STRETCH.)"""
+    from gamelab import telemetry
+    from gamelab.control.navigator import TripState
+    from gamelab.motion import route
+    monkeypatch.setattr(route, "ROUTES", 2)
+    monkeypatch.setattr(route, "NOISE", 0.0)
+    monkeypatch.setattr(route, "choose", lambda ways, rng, **kw: (len(ways) - 1, [1.0 / len(ways)] * len(ways)))
+
+    def hops(sim):
+        return sim.navigator(sim.hunter()).go(17)
+    with telemetry.captured() as records:
+        trace = scenarios.run_scenario(scenarios.Scenario("hops", hops, (23, 900.0)))
+    assert trace["result"]["result"] == "arrived"
+    routes = [r for r in records if r["topic"] == "route"]
+    assert [w["via"] for w in routes[0]["ways"]] == [None, ["rope_jump", 23, 17, 959]] and routes[0]["chose"] == 1
+    assert all("ways" not in r for r in routes[1:])
+    assert [[(m["kind"], m["src"], m["dst"]) for m in r["moves"]] for r in records if r["topic"] == "moved"] == [
+        [("rope_jump", 23, 17)]]
+
+    def replans(sim):
+        nav = sim.navigator(sim.hunter())
+        st = TripState(17)
+        first, _ = nav._route(st, 23, 903.0, 17)
+        again, _ = nav._route(st, 23, 903.0, 17)
+        via = st.choice.via
+        far, _ = nav._route(st, 13, 0.0, 17)
+        quickest = nav.planner.plan(13, 0.0, 17, weight=nav.weight)
+        st2 = TripState(17)
+        nav._route(st2, 23, 903.0, 17)
+        nav._made(st2, [m for m in first])
+        hurried, offered = nav._route(TripState(17, vary=False), 23, 903.0, 17)
+        return {"first": [m.kind for m in first], "again": [m.kind for m in again], "via": via.kind,
+                "far": far == quickest, "dropped": st.choice.via is None, "made": st2.choice.via is None,
+                "hurried": [m.kind for m in hurried], "offered": offered}
+    got = scenarios.run_scenario(scenarios.Scenario("replans", replans, (23, 900.0)))["result"]
+    assert got == {"first": ["rope_jump"], "again": ["rope_jump"], "via": "rope_jump", "far": True, "dropped": True,
+                   "made": True, "hurried": ["climb"], "offered": None}
+
+    def through_12(sim):  # its move in a chain the next is planned on the move from: gone that way, it goes on
+        trip = sim.navigator(sim.hunter()).go(3)
+        return {"result": trip.result, "moves": [m.split(":")[0] for m in trip.moves]}
+    got = scenarios.run_scenario(scenarios.Scenario("through 12", through_12, (19, 3.0)))["result"]
+    assert got["result"] == "arrived" and got["moves"].count("walk_off 5->9") == 1 and "jump 13->12" in got["moves"]
+
+
+@REAL
 def test_the_navigator_records_where_each_route_was_planned_from_and_how_each_chain_ended():
     """For the coverage report (analysis.coverage): a route's record says where it was planned from (and what its
     trip keeps off and the moves it avoided for a monster, when there are any), and after each chain or move made

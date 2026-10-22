@@ -33,6 +33,7 @@ from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.scene import Scene
 from ..localization.senses import Senses
+from ..motion import route
 from ..motion.flow import Body, Flow, Leg, Span, chain_record, ms
 from ..motion.physics import WALK_SPEED
 from ..motion.route import Move, Planner, keeping_off, route_record
@@ -160,6 +161,17 @@ class _Ahead(NamedTuple):
 
 
 @dataclass
+class Choice:
+    """Which of its ways a trip takes (route.choose, at its first plan: Navigator._route), kept through its replans
+    and, in the hunt loop, its objective's later trips: the move the way goes through (None: the quickest), until
+    she has set off on it, or the way got too dear from where she is; and how much dearer than the quickest it may
+    be (s: route.STRETCH of the quickest when it chose)."""
+    made: bool = False
+    via: Move | None = None
+    leeway: float = 0.0
+
+
+@dataclass
 class TripState:
     """A trip in progress (Navigator.begin, then Navigator.step until it's over): where it goes and how,
     and what it keeps from one look to the next."""
@@ -172,6 +184,7 @@ class TripState:
     mode: str = AVOID
     trip: Trip = field(default_factory=Trip)  # how it's going so far (returned at the end)
     weights: dict[tuple, float] = field(default_factory=dict)  # its random move weights, kept through its replans
+    choice: Choice = field(default_factory=Choice)  # the way it takes, of the ways the route planner offers
     over: bool = False
     fights: int = 0      # clearing the way, in a row without a move between (see MAX_FIGHTS)
     tries: dict[int, int] = field(default_factory=dict)  # platform -> monsters engaged there on the way
@@ -185,6 +198,8 @@ class TripState:
     last: Scene | None = None   # the last pass's look (the one `until` said 'in position' to, if it did)
     keep_off: frozenset = frozenset()  # platforms its routes go onto only at a cost (route.KEEP_OFF_S): the hunting
                                        # ground a spot it goes to shoots
+    vary: bool = True  # it chooses among the planner's ways (route.ROUTES); not a trip with a deadline (drops, a rest):
+                       # that goes the quickest way, by its weights
 
     def end(self, result: str) -> Trip:
         """The trip, over: `result` says how it ended."""
@@ -198,9 +213,10 @@ class Navigator:
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
                  health: Callable[[Scene], str | None] | None = None,
                  potions: Callable[[Scene], None] | None = None, escort: Escort | None = None,
-                 variety: float = 0.35, rng: random.Random | None = None):
+                 variety: float | None = None, rng: random.Random | None = None):
         """`health(scene)` returns a reason to stop (low HP), and may drink a potion; `potions(scene)` only
-        drinks (transit trips); `escort` fights on the way (without one she avoids monsters instead)."""
+        drinks (transit trips); `escort` fights on the way (without one she avoids monsters instead).
+        `variety`: the moves' random weights (route.NOISE by default; 0 for none)."""
         self.senses, self.actions, self.model, self.log = senses, actions, model, log
         self.health = health or (lambda s: None)
         self.potions = potions or (lambda s: None)
@@ -211,14 +227,17 @@ class Navigator:
         self.mover = Mover(senses, actions, model, log)
         self.rng = rng or random.Random()
         # Like a player, not the same way every time: each trip weighs every move by a random 1 to
-        # 1 + variety, so routes within ~variety of the quickest take turns (the basin's two ropes, a
-        # drop or a walk-off), and moves start from varied spots (flow.Flow's rng).
-        self.variety = variety
+        # 1 + variety, so near-equal variants take turns (the basin's two ropes, a drop or a walk-off), moves
+        # start from varied spots (flow.Flow's rng), and with route.ROUTES over 1 it chooses among the ways
+        # the planner offers (route.choose: _route).
+        self.variety = route.NOISE if variety is None else variety
         self._weights: dict[tuple, float] = {}
+        self._used: dict[tuple, float] = {}  # move -> when she last set off on it (route.STALE_S) ...
+        self._since = time.monotonic()       # ... (one she never set off on: since it began)
         names = {k: getattr(actions.keys, k).name for k in ("left", "right", "jump", "up", "down")}
         if actions.keys.pick_up is not None:
             names["pick"] = actions.keys.pick_up.name  # pressed all through her runs: loot on the way
-        self.flow = Flow(model, names, rng=self.rng if variety else None)
+        self.flow = Flow(model, names, rng=self.rng if self.variety else None)
         self.tracker = Tracker(model)  # which way the monsters walk, from look to look
         self._checked: Scene | None = None  # follow: the last look placing her for the next chain
 
@@ -229,21 +248,22 @@ class Navigator:
 
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-           scene: Scene | None = None, keep_off=()) -> Trip:
+           scene: Scene | None = None, keep_off=(), vary: bool = True) -> Trip:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
         with a look that includes monsters (late in the chain before, when it follows on from that one):
         True ends the trip early ('in position'). `mode` (AVOID, HUNT or TRANSIT; the navigator's own by
         default) says how the trip treats monsters. `scene`: the caller's last look, used for the first
         pass instead of a new one if it's fresh (no keys sent since). `keep_off`: platforms its routes go onto
-        only at a cost (TripState.keep_off)."""
-        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off)
+        only at a cost (TripState.keep_off). `vary`: it chooses among the planner's ways (route.ROUTES; TripState.
+        vary)."""
+        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary)
         while not st.over:
             self.step(st)
         return st.trip
 
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-              scene: Scene | None = None, keep_off=()) -> TripState:
+              scene: Scene | None = None, keep_off=(), vary: bool = True) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time."""
         mode = mode or self.mode
         if mode not in MODES or (mode in FIGHTING and self.escort is None):
@@ -251,7 +271,7 @@ class Navigator:
         # Transit: low HP is why she's going (to rest), so potions only.
         health = self.potions if mode in (TRANSIT, TRANSIT_AVOID) else self.health
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode,
-                       keep_off=frozenset(keep_off))
+                       keep_off=frozenset(keep_off), vary=vary)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -323,6 +343,7 @@ class Navigator:
             moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, st.dst, near)
         else:
             moved, planned, after = self._carry_out_move(st, s, path)
+        self._made(st, moved)
         if self._note_landing(st.trip, moved, planned, after, hp):  # a miss
             st.trip.misses += 1
             if st.trip.misses >= st.max_misses:
@@ -375,10 +396,58 @@ class Navigator:
         if there is one."""
         now = time.monotonic()
         st.avoid = {key: t for key, t in st.avoid.items() if now - t < AVOID_MEMORY_S}
-        path = self.planner.plan(s.where.platform.id, s.where.x, dst, weight=self.weight, penalty=self._penalty(st))
+        path, offered = self._route(st, s.where.platform.id, s.where.x, dst)
         if path and telemetry.recording():
-            telemetry.emit("route", **_route_record(st, dst, path, s.where.platform.id, s.where.x))
+            telemetry.emit("route", **_route_record(st, dst, path, s.where.platform.id, s.where.x, offered))
         return path, now
+
+    def _route(self, st: TripState, src: int, x: float, dst: int) -> tuple[list[Move] | None, tuple | None]:
+        """Trip `st`'s route from (platform src, x) to `dst`, weighed by its weights and penalized as `_penalty`
+        says; and, at its first plan with route.ROUTES over 1, the ways it chose among, the chances they were drawn
+        with and which it took (route_record's `ways`). At its first plan the trip chooses among the planner's ways
+        (Planner.alternatives, route.choose: a way through a move she hasn't set off on for route.STALE_S has
+        route.FLOOR at least). Replanned, it goes the way it chose (Planner.through the way's move) until she has set
+        off on that move, unless from where she is that costs more than the quickest by more than the ways offered
+        could (route.STRETCH of the quickest's time when it chose: a share of what's left would drop a way whose
+        detour is near the end, as 23 -> 17 by the rope hops at the end of a trip from 35): then, as with the
+        quickest chosen, the quickest from where she is."""
+        penalty = self._penalty(st)
+        if route.ROUTES <= 1 or not st.vary:
+            return self.planner.plan(src, x, dst, weight=self.weight, penalty=penalty), None
+        c = st.choice
+        if not c.made:
+            c.made = True
+            ways = self.planner.alternatives(src, x, dst, penalty, self.weight)
+            if not ways:
+                return None, None
+            i, chances = route.choose(ways, self.rng, stale=self._stale)
+            c.via, c.leeway = ways[i].via, route.STRETCH * ways[0].cost
+            if i:
+                v = ways[i].via
+                self.log(f"  of {len(ways)} ways, the one through {v.kind} {v.src}->{v.dst} "
+                         f"({ways[i].cost / ways[0].cost - 1:+.0%}, chance {chances[i]:.0%})")
+            return list(ways[i].moves), (ways, chances, i)
+        best = self.planner.quickest(src, x, dst, penalty, self.weight)
+        if c.via is not None and best is not None:
+            way = self.planner.through(src, x, dst, c.via, penalty, self.weight)
+            if way is not None and way.cost - best.cost <= c.leeway:
+                return list(way.moves), None
+            c.via = None
+        return (None if best is None else list(best.moves)), None
+
+    def _stale(self, m: Move) -> bool:
+        """Whether she hasn't set off on move m for route.STALE_S (this navigator's memory: since it began, if
+        never)."""
+        return time.monotonic() - self._used.get(_key(m), self._since) >= route.STALE_S
+
+    def _made(self, st: TripState, moved: list[Move]) -> None:
+        """Note the moves she set off on (route.STALE_S). With the trip's chosen way's move among them, it has gone
+        the way it chose, and goes on by the quickest."""
+        now = time.monotonic()
+        for m in moved:
+            self._used[_key(m)] = now
+        if st.choice.via is not None and any(_key(m) == _key(st.choice.via) for m in moved):
+            st.choice.via = None
 
     @staticmethod
     def _penalty(st: TripState) -> Callable[[Move], float]:
@@ -797,7 +866,11 @@ class Navigator:
                               f"{time.monotonic() - starts:+.3f} s from the plan's end)")
         # Where she'll be when the running plan ends: running on with the arrow held, or standing.
         x = min(max(s.where.x + end.run * WALK_SPEED * max(0.0, starts - s.t), p.left), p.right)
-        path = self.planner.plan(p.id, x, dst, weight=self.weight, penalty=self._penalty(st))
+        if st.choice.via is not None and any(_key(leg.move) == _key(st.choice.via) for leg in running.legs):
+            # The chosen way's move is in the running chain: she has gone that way (planned through it still, from 9
+            # after walking off 5 on the way through 12 from 19 to 3 she jumped back onto 5 to walk off it again).
+            st.choice.via = None
+        path, _ = self._route(st, p.id, x, dst)
         if not path:
             return None
         here = replace(ahead.scene, where=replace(ahead.scene.where, x=x, y=p.y_at(x)))
@@ -860,10 +933,12 @@ def _key(m: Move) -> tuple:
     return (m.kind, m.src, m.dst, round(m.x))
 
 
-def _route_record(st: TripState, dst: int, path: list[Move], src: int, x: float) -> dict:
+def _route_record(st: TripState, dst: int, path: list[Move], src: int, x: float, offered: tuple | None = None) -> dict:
     """Trip `st`'s route `path` to `dst`, planned from platform src at x, as telemetry ('route'), with what its
-    plan weighed besides the moves' times: the platforms it keeps off and the moves a monster was in the way of."""
-    return route_record(dst, path, start=(src, x), keep_off=st.keep_off - {dst}, avoid=sorted(st.avoid))
+    plan weighed besides the moves' times: the platforms it keeps off and the moves a monster was in the way of; and
+    the ways it chose among (`offered`: Navigator._route's), if it did."""
+    return route_record(dst, path, start=(src, x), keep_off=st.keep_off - {dst}, avoid=sorted(st.avoid),
+                        ways=offered)
 
 
 def _ground_from(leg: Leg) -> float:

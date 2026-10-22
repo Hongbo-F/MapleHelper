@@ -514,7 +514,15 @@ def cmd_map(args) -> int:
     return 0
 
 
+def _ways(args) -> None:
+    """`--ways N`: the ways each trip of the command chooses among (route.ROUTES; README: Route diversity)."""
+    if getattr(args, "ways", None) is not None:
+        from .motion import route
+        route.ROUTES = args.ways
+
+
 def cmd_nav(args) -> int:
+    _ways(args)
     hunter = _hunter(args)
     nav = hunter.navigator(fighting=args.fight)
     if args.avoid:  # those kinds of move cost 20 times as much: any other way wins
@@ -537,6 +545,7 @@ def cmd_nav(args) -> int:
 
 def cmd_tour(args) -> int:
     from .behavior.tour import Tour
+    _ways(args)
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)
     nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
     _record("tour", hunter.model.id)
@@ -1057,6 +1066,7 @@ def cmd_coverage(args) -> int:
     from .localization import mapdata
     from .sim import harness
     from .ui import render
+    _ways(args)  # (what the navigator's choice would do on the runs' plans: coverage.drawn)
     model = mapdata.load(args.map)
     graph = coverage.Graph(model)
     sets = []
@@ -1238,6 +1248,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--avoid", action="append", default=[], metavar="KIND",
                    help="a kind of move (climb, rope_jump, jump, ...) the route takes only if nothing else gets there: "
                         "from 23, `nav 17 --avoid climb` goes by the two rope hops")
+    s.add_argument("--ways", type=int, metavar="N",
+                   help="each trip chooses among the N best distinct ways by their times (route.ROUTES; default 1: "
+                        "the quickest, varied by the moves' random weights; README: Route diversity)")
     feed_arg(s)
     s.set_defaults(func=cmd_nav)
 
@@ -1259,6 +1272,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="hunt with the hunt loop instead of the sweep's stops (gamelab/docs/hunt-modes.md)")
     s.add_argument("--minutes", type=float, default=20, help="with --loop: how long to hunt, then stand by")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--ways", type=int, metavar="N",
+                   help="each trip chooses among the N best distinct ways by their times (route.ROUTES; default 1: "
+                        "the quickest, varied by the moves' random weights; README: Route diversity)")
     feed_arg(s)
     s.set_defaults(func=cmd_tour)
 
@@ -1382,6 +1398,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--picture", help="the map with the first set's moves drawn, the others' beside it (-2, -3: "
                                      "default gamelab/lab/coverage_<map>.png)")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--ways", type=int, metavar="N",
+                   help="how often the runs' plans would go through a move with each trip choosing among N ways "
+                        "(route.ROUTES; default: the navigator's own)")
     s.set_defaults(func=cmd_coverage)
     s = sub.add_parser("respawn", help="how long monsters take to come back after a kill, how long drops lie, and "
                                        "how full the platforms are, from telemetry (offline; no game, no keys)")

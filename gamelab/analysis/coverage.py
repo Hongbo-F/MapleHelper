@@ -20,7 +20,8 @@ A run (a harness seed, or a live telemetry file) is tallied once, from its telem
 `report` then gives, for every move of the graph, what the runs did with it, and for those never taken, the gap from
 the best route through it to the route chosen on the plans that could have used it, and why it lost (`why`):
 replanned (planned, but replanned before she got to it), the weights (each trip weighs every move by a random 1 to
-1 + VARIETY: it was cheaper and still not drawn), a penalty (a trip's keep-off or a monster in the way made a
+1 + VARIETY, and with route.ROUTES over 1 chooses among the planner's ways: it was cheaper and still not drawn), a
+penalty (a trip's keep-off or a monster in the way made a
 cheaper route through it lose), the ground choice (it is the quickest way between two places on the map, but no
 trip went between them) or its cost (it is that nowhere); 'then', on runs planned on an older graph that may not
 have had it. Moves the chains can't take from their own start (no takeoff passing flow's Flow.sure_takeoff) are
@@ -33,9 +34,10 @@ import random
 import re
 from collections import Counter, defaultdict
 
+from ..motion import route
 from ..motion.flow import Body, Flow, Keys
 from ..motion.physics import WALK_SPEED
-from ..motion.route import RISK, Move, Planner
+from ..motion.route import NOISE, RISK, Move, Planner
 
 GAP_S = 5.0        # s: a look's time counts toward its platform up to this long (a longer gap is a pause)
 STAND_DX = 6       # units: a look or a glance this near a platform's span ...
@@ -44,11 +46,13 @@ STAND_N = 2        # ... jump margins read it so), this many in a row as standin
 MATCH_DX = 3       # units: a move in a record is the graph's move of its kind and platforms that starts this near
 PLAN_DX = 5        # units: plans from within this of each other (and to the same platform, at the same cost) are one
 NEAR_TIE_S = 0.05  # s: a route through a move this near the quickest is a quickest one
-VARIETY = 0.35     # the navigator's variety (Navigator(variety=0.35)): a trip weighs each move 1 to 1.35 times, so a
+VARIETY = NOISE    # the navigator's variety (route.NOISE, 0.35): a trip weighs each move 1 to 1.35 times, so a
                    # route up to 35% dearer than the one chosen can be drawn instead, and no dearer one ever is
 START_STEP = 60    # units between the starts tried along each platform, for where each move is the quickest
 DRAWS = 40         # draws of the navigator's weights a plan, for how often they'd send her through a move (drawn):
                    # a total of about 1 over 200 plans is then some 13 hits of 8,000 draws
+WAY_DRAWS = 8      # ... with route.ROUTES over 1: each draw gives the ways' own chances (route.chances), not one of
+                   # them, and a draw is the planner's ways (8 ms on this map) where the weights' was one search (1 ms)
 NAMES = {k: k for k in ("left", "right", "jump", "up", "down")}  # flow's key names (no keys are sent: any do)
 
 # The navigator's log lines before the 'moved' record (2026-10-21): a move made alone, a miss, a hit.
@@ -512,22 +516,28 @@ def _path_via(graph: Graph, m: Move, src: int, x: float, dst: int) -> list[Move]
     return head + [m] + tail
 
 
-def drawn(graph: Graph, plans: list[list], moves: list[Move], draws: int = DRAWS, seed: int = 0) -> tuple[float, int]:
-    """How many of `plans` (those keeping nothing off, avoiding nothing, within VARIETY of a route through one of
-    `moves`) the navigator's random weights would be expected to send through one of them: each trip weighs every
-    move by its own draw of 1 to 1 + VARIETY (Navigator.weight), and its route is the quickest so weighed. `draws`
-    draws a plan. Returns (that expectation, the plans tried)."""
+def drawn(graph: Graph, plans: list[list], moves: list[Move], draws: int | None = None,
+          seed: int = 0) -> tuple[float, int]:
+    """How many of `plans` (those keeping nothing off, avoiding nothing, within VARIETY, or route.STRETCH with
+    route.ROUTES over 1, of a route through one of `moves`) the navigator would be expected to send through one of
+    them: each trip weighs every move by its own draw of 1 to 1 + VARIETY (Navigator.weight), and its route is the
+    quickest so weighed; with route.ROUTES over 1 it chooses among the planner's ways so weighed (by route.chances,
+    without its floor: which moves were stale then isn't known here). `draws` draws a plan (DRAWS, or
+    WAY_DRAWS with route.ROUTES over 1). Returns (that expectation, the plans tried)."""
     rng = random.Random(seed)
     keys = {key_of(m) for m in moves}
+    ways = route.ROUTES > 1
+    draws = draws if draws is not None else WAY_DRAWS if ways else DRAWS
+    window = max(VARIETY, route.STRETCH) if ways else VARIETY
     expected, tried = 0.0, 0
     for src, x, dst, chosen, _, keep_off, avoid, n in plans:
         if keep_off or avoid or chosen is None:
             continue
         through = [v for m in moves if (v := graph.via(m, src, x, dst)) is not None]
-        if not through or min(through) > (1 + VARIETY) * chosen:
+        if not through or min(through) > (1 + window) * chosen:
             continue
         tried += n
-        hits = 0
+        hits = 0.0
         for _ in range(draws):
             w: dict[str, float] = {}
 
@@ -536,8 +546,13 @@ def drawn(graph: Graph, plans: list[list], moves: list[Move], draws: int = DRAWS
                 if k not in w:
                     w[k] = 1.0 + VARIETY * rng.random()
                 return w[k]
-            path = graph.planner.plan(src, x, dst, weight=weight) or []
-            hits += any(key_of(q) in keys for q in path)
+            if ways:
+                offered = graph.planner.alternatives(src, x, dst, weight=weight)
+                chances = route.chances(offered, floor=0.0) if offered else []
+                hits += sum(p for way, p in zip(offered, chances) if any(key_of(q) in keys for q in way.moves))
+            else:
+                path = graph.planner.plan(src, x, dst, weight=weight) or []
+                hits += any(key_of(q) in keys for q in path)
         expected += n * hits / draws
     return expected, tried
 
@@ -551,8 +566,8 @@ def why(m: Move, counts: list[int], gaps: dict, wide: tuple | None, older: bool 
         return "then", (f"cheaper on today's graph than the route chosen then on {_plans(gaps['cheaper'])}: not in "
                         "the graph then, or the random weights drew the other")
     if gaps["cheaper"]:
-        return "weights", (f"cheaper than the route chosen on {_plans(gaps['cheaper'])}: the random weights drew "
-                           "the other")
+        return "weights", (f"cheaper than the route chosen on {_plans(gaps['cheaper'])}: the random weights (or the "
+                           "trip's choice of way) drew the other")
     if gaps["penalty"]:
         return "penalty", (f"cheaper on {_plans(sum(gaps['penalty'].values()))}, but its route paid what they kept "
                            "it from: " + ", ".join(f"{why} {n}" for why, n in gaps["penalty"].most_common()))
@@ -658,6 +673,13 @@ def _set_lines(graph: Graph, name: str, t: dict, wide: dict) -> list[str]:
     return out
 
 
+def _drawer() -> str:
+    """Who sends her along a route, for the report (`drawn`): the weights, or with route.ROUTES over 1 the trip's
+    choice of way."""
+    return (f"the choice among {route.ROUTES} ways (temperature {route.TEMPERATURE:g})" if route.ROUTES > 1
+            else "the weights")
+
+
 def _times(n: int) -> str:
     return "once" if n == 1 else f"{n} times"
 
@@ -707,7 +729,7 @@ def _platform_lines(graph: Graph, pid: int, sets: list[tuple[str, dict]]) -> lis
                    f"{t['grounds'].get(str(pid), 0)}. Through it, on the plans going elsewhere: "
                    + ("none could" if least is None else
                       f"at best {least[0]:+.2f} s ({least[1]:+.0%}) more than the route chosen (from {least[2]} at x "
-                      f"{least[3]:.0f} to {least[4]}), within {VARIETY:.0%} on {close} of {could}; the weights would "
+                      f"{least[3]:.0f} to {least[4]}), within {VARIETY:.0%} on {close} of {could}; {_drawer()} would "
                       f"send her through it on {expected:.1f} of those"))
     out.append("")
     return out
@@ -739,7 +761,7 @@ def _hop_lines(graph: Graph, sets: list[tuple[str, dict]]) -> list[str]:
                    f"{g['could']}, within {VARIETY:.0%} {g['close']}"
                    + ("" if least is None else
                       f", at best {least[0]:+.2f} s ({least[1]:+.0%}; from {least[2]} at x {least[3]:.0f} to "
-                      f"{least[4]})") + f"; the weights would send her by the hops on {expected:.1f} of them")
+                      f"{least[4]})") + f"; {_drawer()} would send her by the hops on {expected:.1f} of them")
     out.append("")
     return out
 

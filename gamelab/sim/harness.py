@@ -1,7 +1,7 @@
 """Results of simulated hunts, and A/B comparisons of hunting policies on the same seeds.
 
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
-                                             [--feed] [--costs coded|measured]
+                                             [--feed] [--costs coded|measured] [--ways N]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
     python -m gamelab.sim.harness rests [--trips 40]            trips to rest at low HP, transit vs --rest-avoid
@@ -136,22 +136,28 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-            feed: bool = False, costs: str = "coded") -> dict:
-    """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS)."""
+            feed: bool = False, costs: str = "coded", ways: int | None = None) -> dict:
+    """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS); `ways`:
+    the ways her trips choose among (route.ROUTES; None: as it is)."""
     from .. import telemetry
+    from ..motion import route
     from . import fakes, scenarios
     before = {name: getattr(fakes, name) for name in COSTS[costs]}
+    routes = route.ROUTES
     try:
         for name, value in COSTS[costs].items():
             setattr(fakes, name, value)
+        if ways is not None:
+            route.ROUTES = ways
         with telemetry.captured() as records:
             trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed))
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
+        route.ROUTES = routes
     out = outcomes(sim.world, records, minutes * 60)
     out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=feed, costs=costs,
-               result=str(trace["result"])[:120])
+               ways=routes if ways is None else ways, result=str(trace["result"])[:120])
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     if feed:
         f = trace["feed"]
@@ -256,8 +262,8 @@ def _rest_trips(records: list[dict]) -> list[tuple[float, float]]:
 # --- many runs -----------------------------------------------------------------------------------------
 
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
-             feed: bool = False, costs: str = "coded") -> list[dict]:
-    args = [(policy, k, preset, minutes, think, feed, costs) for k in range(1, seeds + 1)]
+             feed: bool = False, costs: str = "coded", ways: int | None = None) -> list[dict]:
+    args = [(policy, k, preset, minutes, think, feed, costs, ways) for k in range(1, seeds + 1)]
     if jobs <= 1:
         return [run_one(*a) for a in args]
     from gamelab.sim import harness  # by its module name, so worker processes can find it (not __main__)
@@ -481,8 +487,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--jobs", type=int, default=1)
     r.add_argument("--think", type=float, default=0.0,
                    help="charge the stack's computing to the fake clock, times this (1: this computer's speed)")
-    r.add_argument("--save", help="name to save the results under (default: POLICY-PRESET, then -feed and -COSTS)")
+    r.add_argument("--save",
+                   help="name to save the results under (default: POLICY-PRESET, then -feed, -COSTS and -waysN)")
     r.add_argument("--feed", action="store_true", help="her looks and glances from a continuous feed (SyncFeed)")
+    r.add_argument("--ways", type=int, help="the ways her trips choose among (route.ROUTES; default: route's own)")
     r.add_argument("--costs", choices=sorted(COSTS), default="coded",
                    help="what the simulator's looks take: coded (the fakes' own), measured (today's)")
     c = sub.add_parser("compare")
@@ -509,10 +517,12 @@ def main(argv: list[str] | None = None) -> int:
         ok, lines = (compare_rest if args.bar == "rest" else compare)(load(args.baseline), load(args.candidate))
         print("\n".join(lines))
         return 0 if ok else 1
-    results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs)
+    results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs,
+                       args.ways)
     print(table(results))
     name = args.save or (f"{args.policy}-{args.preset}" + ("-feed" if args.feed else "")
-                         + (f"-{args.costs}" if args.costs != "coded" else ""))
+                         + (f"-{args.costs}" if args.costs != "coded" else "")
+                         + (f"-ways{args.ways}" if args.ways is not None else ""))
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
     return 0

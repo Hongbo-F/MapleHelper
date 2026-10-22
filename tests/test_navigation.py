@@ -220,6 +220,66 @@ def test_route_weights_let_near_equal_routes_take_turns(model):
     assert other[0].kind != first.kind
 
 
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
+                    reason="needs the map's game data (gamedata/data)")
+def test_the_ways_a_trip_chooses_among_are_each_the_best_route_through_a_move():
+    """Planner.alternatives on the real map: the quickest first (plan's own), then the best route through each other
+    move, cheapest first, none more than STRETCH dearer, onto no platform twice, each a way of its own (its platforms
+    and the ropes it takes); `through` its move costs the same from there. From 23 by its right end (x 903) to 17:
+    the climb past its end at 1040's rope, 3.79 s, then the two rope hops off 959's, 4.87 s (+29%). From 19 to 3:
+    by 18, 16, 14 and 6, 13.0 s, then up the map's left side through 12, 16.0 s (+23%)."""
+    from gamelab.motion import route
+    from gamelab.sim import scenarios
+    planner = Planner(scenarios.real_map())
+    hops, = planner.alternatives(23, 903, 17, n=4)[1:]
+    climb = planner.alternatives(23, 903, 17, n=4)[0]
+    assert [(m.kind, m.src, m.dst) for m in climb.moves] == [("climb", 23, 17)] and climb.via is None
+    assert climb.cost == pytest.approx(3.79, abs=0.01) and hops.cost == pytest.approx(4.87, abs=0.01)
+    assert [(m.kind, m.rope_x) for m in hops.moves] == [("rope_jump", 959)] and hops.via is hops.moves[0]
+    for src, x, dst in ((23, 903, 17), (19, 3, 3), (36, 300, 3), (13, -10, 4), (2, -100, 21)):
+        ways = planner.alternatives(src, x, dst, n=4)
+        assert list(ways[0].moves) == planner.plan(src, x, dst) and ways[0].cost == planner.travel(src, x, dst)
+        assert [w.cost for w in ways] == sorted(w.cost for w in ways)
+        assert ways[-1].cost <= (1 + route.STRETCH) * ways[0].cost
+        assert len({route.way_of(w.moves) for w in ways}) == len(ways)
+        for w in ways:
+            platforms = [w.moves[0].src] + [m.dst for m in w.moves]
+            assert platforms[0] == src and platforms[-1] == dst and all(
+                a.dst == b.src for a, b in zip(w.moves, w.moves[1:]))
+            assert len(set(platforms)) == len(platforms) or w is ways[0]
+            if w.via is not None:
+                assert w.via in w.moves and planner.through(src, x, dst, w.via).cost == pytest.approx(w.cost)
+    up, left = planner.alternatives(19, 3, 3, n=4)
+    assert 12 not in [m.dst for m in up.moves] and 12 in [m.dst for m in left.moves]
+    assert up.cost == pytest.approx(13.02, abs=0.01) and left.cost == pytest.approx(16.04, abs=0.01)
+    assert planner.alternatives(23, 903, 17, n=1) == [climb]
+
+
+def test_a_trip_takes_a_way_by_a_softmax_over_their_times_with_a_floor_for_stale_moves():
+    """route.chances: a way dearer than the quickest by the temperature's share of its time weighs 1/e of it; a way
+    through a move she hasn't made for STALE_S (and the quickest doesn't make) has the floor at least, the others
+    scaled down for it, half the chances at most between them. One way: no draw (the trip's random numbers go on
+    as before)."""
+    import math
+    import random
+    from gamelab.motion import route
+    from gamelab.motion.route import Move, Way
+    a, b, c = (Move("jump", 1, 2, x, 0.0) for x in (0.0, 10.0, 20.0))
+    ways = [Way((a,), 10.0), Way((b,), 11.0, b), Way((c,), 12.0, c)]
+    p = route.chances(ways, temperature=0.1, floor=0.0)
+    assert p[1] / p[0] == pytest.approx(math.exp(-1)) and p[2] / p[0] == pytest.approx(math.exp(-2))
+    assert sum(p) == pytest.approx(1.0)
+    q = route.chances(ways, temperature=0.1, floor=0.3, stale=lambda m: m is c)
+    assert q[2] == pytest.approx(0.3) and q[1] / q[0] == pytest.approx(p[1] / p[0]) and sum(q) == pytest.approx(1.0)
+    assert route.chances(ways, temperature=0.1, floor=0.3, stale=lambda m: m is a) == pytest.approx(p)  # the quickest's
+    assert sum(route.chances(ways, temperature=0.1, floor=0.4, stale=lambda m: True)[1:]) == pytest.approx(0.5)
+    rng = random.Random(5)
+    drawn = [route.choose(ways, rng, temperature=0.1, floor=0.0)[0] for _ in range(4000)]
+    assert [drawn.count(i) / 4000 for i in range(3)] == pytest.approx(p, abs=0.03)
+    rng, state = random.Random(5), random.Random(5).getstate()
+    assert route.choose(ways[:1], rng) == (0, [1.0]) and rng.getstate() == state
+
+
 def test_route_times_from_one_search_are_each_platforms_own_search(model):
     """Planner.times searches to every platform at once: the same seconds as a search for each, from x
     rounded as a search starts; kept, and the oldest start goes past TIMES_KEPT."""

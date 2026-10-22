@@ -119,10 +119,13 @@ def test_the_navigator_s_records_put_each_move_made_on_its_move_of_the_graph():
 
 
 @REAL
-def test_the_two_rope_hops_lose_to_the_climb_past_23_s_end_by_their_cost(graph):
+def test_the_two_rope_hops_lose_to_the_climb_past_23_s_end_by_their_cost(graph, monkeypatch):
     """By the planner's times the hops are 1.1 s (29%) slower than the climb from where the map's quickest routes
     leave 23 (x 903), so they are the quickest way nowhere ('cost'). The weights (each move 1 to 1.35 times, a trip)
-    make that up only when the climb's draw is 1.28 times the hops' or more: on 1.2% of the trips from there."""
+    make that up only when the climb's draw is 1.28 times the hops' or more: on 1.2% of the trips from there. With a
+    choice of two ways (route.ROUTES 2, temperature 0.1) the hops are offered when the weights leave them within
+    route.STRETCH of the climb, and taken then by the softmax: on about 10% of the trips."""
+    from gamelab.motion import route
     hop, climb = graph.by_key["rope_jump 23->17 @959"], graph.by_key["climb 23->17 @999"]
     wide = coverage.map_wide(graph)
     assert abs(wide[coverage.key_of(climb)][0]) < 1e-9 and 1.0 < wide[coverage.key_of(hop)][0] < 1.2
@@ -130,8 +133,14 @@ def test_the_two_rope_hops_lose_to_the_climb_past_23_s_end_by_their_cost(graph):
                            wide[coverage.key_of(hop)])
     assert code == "cost"
     chosen = graph.cost([climb], 903)
-    expected, tried = coverage.drawn(graph, [[23, 903, 17, chosen, chosen, [], [], 1]], [hop], draws=2000)
+    plan = [[23, 903, 17, chosen, chosen, [], [], 1]]
+    monkeypatch.setattr(route, "ROUTES", 1)
+    expected, tried = coverage.drawn(graph, plan, [hop], draws=2000)
     assert tried == 1 and 0.005 < expected < 0.02
+    monkeypatch.setattr(route, "ROUTES", 2)
+    monkeypatch.setattr(route, "TEMPERATURE", 0.1)
+    expected, tried = coverage.drawn(graph, plan, [hop], draws=300)
+    assert tried == 1 and 0.07 < expected < 0.13
 
 
 @REAL

@@ -212,9 +212,12 @@ def test_a_trip_to_rest_is_measured_both_ways():
 def test_a_short_harness_run_on_the_real_map():
     if not scenarios.available():
         pytest.skip("needs the real map's data")
+    from gamelab.motion import route
     out = harness.run_one("tour", 1, "game", minutes=1.0)
     assert out["policy"] == "tour" and "SimTimeout" in out["result"] and out["exp_per_min"] >= 0
-    assert set(harness.COLUMNS) - {"seed"} <= set(out)
+    assert set(harness.COLUMNS) - {"seed"} <= set(out) and out["ways"] == route.ROUTES
+    ways = harness.run_one("tour", 1, "game", minutes=1.0, ways=3)  # (--ways: route.ROUTES for the run, put back)
+    assert ways["ways"] == 3 and route.ROUTES == out["ways"]
 
 
 def test_a_harness_run_with_the_feed_and_todays_look_costs():

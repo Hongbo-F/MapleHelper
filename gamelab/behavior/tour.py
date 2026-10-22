@@ -201,7 +201,7 @@ class Tour:
         # reason to stop on the way (potions are still drunk): it used to end the trip at its first look,
         # and she sat down among the monsters.
         telemetry.emit("event", kind="rest_trip", text=f"to platform {pid} to rest")
-        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT))
+        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT), vary=False)
         self.report.on_the_way += trip.kills
         if trip.result != "arrived":
             self.log(f"  couldn't reach a safe platform ({trip.result}); resting here")
@@ -395,7 +395,7 @@ class Tour:
             d, rest = fresh[0], fresh[1:]
             self.log(f"  collecting drops on platform {d.platform} at x {d.x:.0f}")
             self.report.loot_trips += 1
-            trip = self.nav.go(d.platform, x=d.x, seconds=60)
+            trip = self.nav.go(d.platform, x=d.x, seconds=60, vary=False)
             self.report.on_the_way += trip.kills
             later += looter.pending  # these used to be forgotten here (unless a later look saw them again)
             looter.pending = rest

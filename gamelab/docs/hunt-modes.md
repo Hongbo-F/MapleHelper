@@ -215,7 +215,7 @@ These are today's rules (`_wanted`, `IN_HER_WAY`, `clear_way`).
 ### Objectives are suspended, not ended
 
 When a higher rule fires, the current objective is paused, not dropped. It keeps:
-- its route's random weights (drawn once per objective, as today once per trip);
+- its route's random weights (drawn once per objective, as today once per trip), and the way its trips take (with `route.ROUTES` over 1: README, Route diversity);
 - the pick of the next ground;
 - its clock.
 

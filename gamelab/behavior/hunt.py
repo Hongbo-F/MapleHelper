@@ -56,7 +56,7 @@ from .. import telemetry
 from ..attack import reach, spots
 from ..attack.spots import Spot
 from ..attack.stance import act_text, close_to, open_above, stance
-from ..control.navigator import TRANSIT, TripState
+from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
@@ -161,7 +161,8 @@ class Objective:
     ground: int | None = None  # the ground a spot is for
     pile: Pile | None = None
     spot: Spot | None = None
-    weights: dict = field(default_factory=dict)  # its route weights, kept through its suspensions
+    weights: dict = field(default_factory=dict)  # its route weights, kept through its suspensions ...
+    choice: Choice = field(default_factory=Choice)  # ... and the way its trips take (route.ROUTES)
     # Its clock (OBJECTIVE_S) runs while it's suspended and while rules 1-4 shoot: that bounds a
     # shoot-respawns-on-the-way loop. (Counting only its own trips, in the harness's seed-7 world she tried
     # for platform 4's spot for 270 s and never got there.)
@@ -971,8 +972,9 @@ class Hunt:
         self._note(rule)
         o = self.obj
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
-                                until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o))
-        o.trip.weights = o.weights
+                                until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o),
+                                vary=o.kind != "pile")
+        o.trip.weights, o.trip.choice = o.weights, o.choice
         chains = o.trip.trip.chains
         while not o.trip.over:
             self.nav.step(o.trip)

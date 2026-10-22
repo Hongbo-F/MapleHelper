@@ -138,6 +138,30 @@ TIMES_KEPT = 256     # Planner.times: starts whose route times to every platform
 # on 14 climbs into the middle of 17's monsters; in loop_spot_off_ground the transit's fights there and their knocks
 # (off onto 35, twice) kept her from the spot until its 60 s ran out.
 KEEP_OFF_S = 8.0
+# Route diversity (the navigator's trips: Navigator._route). Like a player, not the same way every time. Each trip
+# weighs every move's cost by a random 1 to 1 + NOISE (Navigator.weight, kept through its replans): near-equal variants
+# take turns (the basin's two ropes, a drop or a walk-off, which takeoff). On its own that hardly ever swaps whole ways
+# more than a few percent apart: a route's draws average out (the mean of n has a spread of NOISE / sqrt(12 n)), so
+# ways 12% or more apart never swapped (the map's left side through 12, against 18 and 16), and over the 685 live plans
+# of 2026-10-19 to 21, on today's graph, the weights would have sent her through 12 on about 1, where a way through it
+# was within 35% of the one chosen on 205, and by the two rope hops from 23 on about 1 (analysis.coverage). With ROUTES
+# over 1 a trip chooses among the ROUTES best distinct ways (Planner.alternatives: the best route through each move,
+# the quickest first, none STRETCH or more dearer; a way is the platforms it goes through and the ropes it takes
+# between them), by a softmax over their times: a way dearer by TEMPERATURE of the quickest's time weighs 1/e of it
+# (chances). A way through a move she hasn't set off on for STALE_S (the navigator's memory, since it began) has FLOOR
+# at least, so the moves no trip makes quickest get tried now and then. A trip with a deadline (drops, a rest:
+# Navigator.go's `vary`) goes the quickest way. ROUTES 1 is the quickest by the weights alone, as before, and stays the
+# default: in the harness (preset game, 40 seeds of 20 minutes against ROUTES 1) 3 ways made as much EXP a minute (the
+# tour +1.4% +- 1.4%, the hunt loop +0.0% +- 1.4%) and widened her moves (distinct moves a run 23.9 -> 26.4 and 8.2 ->
+# 9.1), but picked up fewer of her drops (94.4% -> 92.7%, 84.4% -> 82.1%; every setting tried did, 2 and 3 ways,
+# temperatures 0.05-0.2, the noise at 0.1), and none passed the bar on seeds 1-10 (README: Route diversity). `--ways 3`
+# (nav, tour, the harness, coverage) turns it on for a run.
+NOISE = 0.35
+ROUTES = 1
+TEMPERATURE = 0.1
+STRETCH = 0.35
+FLOOR = 0.2
+STALE_S = 120.0
 
 SIDES = tuple((d, directions.sign(d)) for d in (RIGHT, LEFT))  # a direction and its sign along x
 
@@ -159,6 +183,15 @@ class Move:
     takeoff: float | None = None  # running jumps from along a platform: where she leaves the ground
     hang: float | None = None     # rope_jump: the height (her feet's map y) she jumps off the rope from ...
     onto: Rope | None = None      # ... and the rope she jumps onto (None: a platform, dst)
+
+
+@dataclass(frozen=True)
+class Way:
+    """One of the ways from a place onto a platform (Planner.alternatives): its moves, what they cost the trip (its
+    weights and penalties included), and the move it's the best route through (None: the quickest)."""
+    moves: tuple[Move, ...]
+    cost: float
+    via: Move | None = None
 
 
 def moves(model: MapModel) -> list[Move]:
@@ -613,6 +646,15 @@ class Planner:
         self._times: dict[tuple[int, int], dict[int, float]] = {}  # travel's, by where from (TIMES_KEPT)
         # arrive's, by where from and what they keep off (TIMES_KEPT)
         self._landings: dict[tuple[int, int, frozenset], dict[int, list[tuple[int, float]]]] = {}
+        # The search's nodes, (platform, x landed at), each platform's, and the moves that land at each (alternatives'
+        # search back from where a trip goes).
+        self._xs: dict[int, list[int]] = {}
+        self._into: dict[tuple[int, int], list[Move]] = {}
+        for m in self.moves:
+            node = (m.dst, round(m.land_x))
+            if node not in self._into:
+                self._xs.setdefault(m.dst, []).append(node[1])
+            self._into.setdefault(node, []).append(m)
 
     def plan(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
              weight: Callable[[Move], float] | None = None) -> list[Move] | None:
@@ -622,6 +664,116 @@ class Planner:
         scales its cost (a little randomness lets near-equal routes take turns)."""
         found = self._search(src, x, dst, penalty, weight)
         return None if found is None else found[0]
+
+    def quickest(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
+                 weight: Callable[[Move], float] | None = None) -> Way | None:
+        """`plan`'s route as a Way, with what it costs so weighed and penalized (None: there's no way)."""
+        found = self._search(src, x, dst, penalty, weight)
+        return None if found is None else Way(tuple(found[0]), found[1])
+
+    def alternatives(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
+                     weight: Callable[[Move], float] | None = None, n: int | None = None,
+                     stretch: float | None = None) -> list[Way]:
+        """Up to `n` (ROUTES) distinct ways from (platform src, x) onto platform dst, the quickest first (`plan`'s,
+        weighed and penalized as there), then the cheapest of the others: the best route through each move (to
+        where it starts, the move, and on from where it lands: one search out from her and one back from dst, the
+        via-node alternatives of road maps), costing at most `stretch` (STRETCH) more than the quickest, onto no
+        platform twice. A way is the platforms it goes through and the ropes it takes between them (`way_of`):
+        another takeoff, or a jump for a walk-off between the same platforms, is the same way, which the weights
+        already vary. Empty if there's no way."""
+        n = ROUTES if n is None else n
+        stretch = STRETCH if stretch is None else stretch
+        first = self.quickest(src, x, dst, penalty, weight)
+        if first is None:
+            return []
+        out = [first]
+        if n <= 1 or src == dst:
+            return out
+        start = (src, round(x))
+        best, back = self._out(start, dst, penalty, weight)
+        ahead, onward = self._back(dst, start, penalty, weight)
+        priced = []
+        for m in self.moves:
+            v = (m.dst, round(m.land_x))
+            if m.src == dst or v not in ahead:
+                continue
+            to = self._to_start(m, best, start, penalty, weight)
+            if to is not None:
+                priced.append((to[0] + ahead[v], to[1], m))
+        seen = {way_of(first.moves)}
+        for cost, u, m in sorted(priced, key=lambda c: c[0]):
+            if len(out) >= n or cost > (1 + stretch) * first.cost:
+                break
+            moves = _back_trace(back, u) + [m] + _onward(onward, (m.dst, round(m.land_x)), dst)
+            platforms = [moves[0].src] + [q.dst for q in moves]
+            if len(set(platforms)) < len(platforms) or way_of(moves) in seen:
+                continue
+            seen.add(way_of(moves))
+            out.append(Way(tuple(moves), cost, m))
+        return out
+
+    def through(self, src: int, x: float, dst: int, via: Move, penalty: Callable[[Move], float] | None = None,
+                weight: Callable[[Move], float] | None = None) -> Way | None:
+        """The best route from (platform src, x) onto dst through move `via` (a trip's chosen way, replanned: Navigator.
+        _route), weighed and penalized as `plan`'s; None if there's none (or via starts on dst)."""
+        if via.src == dst:
+            return None
+        start = (src, round(x))
+        best, back = self._out(start, dst, penalty, weight)
+        to = self._to_start(via, best, start, penalty, weight)
+        if to is None:
+            return None
+        rest = (Way((), 0.0) if via.dst == dst else self.quickest(via.dst, via.land_x, dst, penalty, weight))
+        if rest is None:
+            return None
+        return Way(tuple(_back_trace(back, to[1]) + [via] + list(rest.moves)), to[0] + rest.cost, via)
+
+    def _out(self, start: tuple[int, int], dst: int, penalty, weight) -> tuple[dict, dict]:
+        """`_search` from `start` to the end, for alternatives and `through`: every node's cost and the move into it.
+        A route ends on dst, so nothing goes on from there."""
+        best, back = {start: 0.0}, {}
+        heap = [(0.0, start)]
+        while heap:
+            t, (pid, px) = heapq.heappop(heap)
+            if t > best.get((pid, px), math.inf) or pid == dst:
+                continue
+            for m in self.by_src.get(pid, []):
+                cost = t + _edge(m, px, penalty, weight)
+                node = (m.dst, round(m.land_x))
+                if cost < best.get(node, math.inf):
+                    best[node] = cost
+                    back[node] = ((pid, px), m)
+                    heapq.heappush(heap, (cost, node))
+        return best, back
+
+    def _back(self, dst: int, start: tuple[int, int], penalty, weight) -> tuple[dict, dict]:
+        """The search back from dst: each node's cost to get onto dst from it (0 on dst), and its first move."""
+        ahead = {(dst, px): 0.0 for px in self._xs.get(dst, [])}
+        onward: dict[tuple, Move] = {}
+        heap = [(0.0, node) for node in ahead]
+        while heap:
+            t, v = heapq.heappop(heap)
+            if t > ahead.get(v, math.inf):
+                continue
+            for m in self._into.get(v, []):
+                if m.src == dst:
+                    continue
+                xs = self._xs.get(m.src, [])
+                for px in (xs + [start[1]] if m.src == start[0] else xs):
+                    u = (m.src, px)
+                    cost = t + _edge(m, px, penalty, weight)
+                    if cost < ahead.get(u, math.inf):
+                        ahead[u] = cost
+                        onward[u] = m
+                        heapq.heappush(heap, (cost, u))
+        return ahead, onward
+
+    def _to_start(self, m: Move, best: dict, start: tuple[int, int], penalty, weight) -> tuple[float, tuple] | None:
+        """The cheapest way to set off on move m from a node `_out` reached: (cost with m's, the node)."""
+        xs = self._xs.get(m.src, [])
+        options = [(best[(m.src, px)] + _edge(m, px, penalty, weight), (m.src, px))
+                   for px in (xs + [start[1]] if m.src == start[0] else xs) if (m.src, px) in best]
+        return min(options, key=lambda o: o[0]) if options else None
 
     def travel(self, src: int, x: float, dst: int, keep_off=()) -> float | None:
         """Seconds the quickest route from (platform src, x) to platform dst takes (by the model); keeping off the
@@ -751,6 +903,80 @@ class Planner:
         return seen
 
 
+def way_of(moves) -> tuple:
+    """A route as a way (Planner.alternatives): the platforms it goes through and the rope each move takes (None for
+    the jumps, walk-offs and drops: between the same two platforms they're variants of one way)."""
+    return tuple((m.src, m.dst, m.rope_x) for m in moves)
+
+
+def _edge(m: Move, px: float, penalty, weight) -> float:
+    """What setting off on move m from x px on its platform costs a search: the walk to it and the move, weighed,
+    and its penalty (as `_search` adds them)."""
+    step = abs(m.x - px) / WALK_SPEED + m.seconds + RISK.get(m.kind, 0.0)
+    return step * (weight(m) if weight is not None else 1.0) + (penalty(m) if penalty is not None else 0.0)
+
+
+def _back_trace(back: dict, node: tuple) -> list[Move]:
+    """The moves of `_out`'s search into `node`, in order."""
+    path = []
+    while node in back:
+        node, m = back[node]
+        path.append(m)
+    return path[::-1]
+
+
+def _onward(onward: dict, node: tuple, dst: int) -> list[Move]:
+    """The moves of `_back`'s search from `node` onto platform dst, in order."""
+    path = []
+    while node[0] != dst:
+        m = onward[node]
+        path.append(m)
+        node = (m.dst, round(m.land_x))
+    return path
+
+
+def chances(ways: list[Way], temperature: float | None = None, floor: float | None = None,
+            stale: Callable[[Move], bool] | None = None) -> list[float]:
+    """The chance a trip takes each of `ways` (Planner.alternatives, the quickest first): a softmax over their times, a
+    way dearer than the quickest by `temperature` (TEMPERATURE) of its time weighing 1/e of it; and, with
+    `stale(move)` (she hasn't set off on it for STALE_S), each way through a stale move the quickest doesn't make has
+    `floor` (FLOOR) at least, the others' shares scaled down for it."""
+    if len(ways) <= 1:
+        return [1.0] * len(ways)
+    temperature = TEMPERATURE if temperature is None else temperature
+    floor = FLOOR if floor is None else floor
+    t0 = ways[0].cost
+    if t0 > 0 and temperature > 0:
+        w = [math.exp(-(way.cost / t0 - 1) / temperature) for way in ways]
+    else:
+        w = [1.0] + [0.0] * (len(ways) - 1)
+    total = sum(w)
+    p = [v / total for v in w]
+    if floor > 0 and stale is not None:
+        first = {(m.kind, m.src, m.dst, round(m.x)) for m in ways[0].moves}
+        low = [i for i, way in enumerate(ways[1:], 1) if p[i] < floor
+               and any(stale(m) for m in way.moves if (m.kind, m.src, m.dst, round(m.x)) not in first)]
+        if low:
+            give = min(floor * len(low), 0.5)  # (half the chances at most between them)
+            rest = sum(v for i, v in enumerate(p) if i not in low)
+            p = [give / len(low) if i in low else v * (1 - give) / rest for i, v in enumerate(p)]
+    return p
+
+
+def choose(ways: list[Way], rng, temperature: float | None = None, floor: float | None = None,
+           stale: Callable[[Move], bool] | None = None) -> tuple[int, list[float]]:
+    """Which of `ways` a trip takes, drawn with `rng` by their `chances`, and those chances. One way: no draw."""
+    p = chances(ways, temperature, floor, stale)
+    if len(p) <= 1:
+        return 0, p
+    r, acc = rng.random(), 0.0
+    for i, v in enumerate(p):
+        acc += v
+        if r < acc:
+            return i, p
+    return len(p) - 1, p
+
+
 def keeping_off(platforms, dst: int) -> Callable[[Move], float]:
     """A route penalty (Planner.plan's) of KEEP_OFF_S for each move onto one of `platforms`, but dst."""
     off = frozenset(platforms) - {dst}
@@ -758,11 +984,12 @@ def keeping_off(platforms, dst: int) -> Callable[[Move], float]:
 
 
 def route_record(dst: int, moves: list[Move], start: tuple[int, float] | None = None, keep_off=(),
-                 avoid=()) -> dict:
+                 avoid=(), ways: tuple | None = None) -> dict:
     """A planned route as telemetry data ('route'). With `start` (platform, x: where it was planned from), the
     platforms its trip keeps off (`keep_off`, KEEP_OFF_S a move onto one) and the moves it costs extra for a
     monster in their way (`avoid`: (kind, src, dst, x) keys), the coverage report (analysis.coverage) can weigh
-    the moves it didn't take against it. Those three only when given."""
+    the moves it didn't take against it; with `ways` (the Ways a trip chose among, their chances and the one taken:
+    route.choose), each way's move, cost and chance, and which it took. Those only when given."""
     out = {"dst": dst, "moves": [{"kind": m.kind, "src": m.src, "dst": m.dst, "x": round(m.x, 1),
                                   "land_x": round(m.land_x, 1)} for m in moves]}
     if start is not None:
@@ -771,4 +998,9 @@ def route_record(dst: int, moves: list[Move], start: tuple[int, float] | None = 
         out["keep_off"] = sorted(keep_off)
     if avoid:
         out["avoid"] = [list(key) for key in avoid]
+    if ways is not None:
+        offered, chances, i = ways
+        out["ways"] = [{"via": None if w.via is None else [w.via.kind, w.via.src, w.via.dst, round(w.via.x)],
+                        "cost": round(w.cost, 2), "chance": round(p, 3)} for w, p in zip(offered, chances)]
+        out["chose"] = i
     return out

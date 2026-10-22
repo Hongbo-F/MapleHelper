@@ -322,7 +322,8 @@ def test_a_mop_up_sweep_stands_right_on_each_drop(monkeypatch):
 
 
 def _touring(h, travel=None):
-    """A Tour around Hunter `h` whose trips are recorded; `travel` gives route times (platform -> s)."""
+    """A Tour around Hunter `h` whose trips are recorded; `travel` gives route times (platform -> s). A trip for drops
+    goes the quickest way (not one of the ways a trip may choose among: route.ROUTES)."""
     from gamelab.behavior.tour import Tour, TourReport
     trips = []
     h.looter.collect = lambda d: True
@@ -334,7 +335,8 @@ def _touring(h, travel=None):
         mover=SimpleNamespace(locate=lambda: SimpleNamespace(where=here)),
         planner=SimpleNamespace(travel=lambda a, x, b: (travel or {}).get(b)),
         model=h.model,
-        go=lambda pid, x, seconds: trips.append((pid, x)) or SimpleNamespace(result="arrived", kills=0))
+        go=lambda pid, x, seconds, vary=True: trips.append((pid, x) if not vary else ("varied", pid, x))
+        or SimpleNamespace(result="arrived", kills=0))
     return tour, trips
 
 
