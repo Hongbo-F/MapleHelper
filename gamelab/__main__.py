@@ -389,7 +389,6 @@ def _hunt_look(hunter) -> int:
     """`hunt look`: what she sees now, printed and drawn on the frame (no keys)."""
     from .attack import reach
     from .localization.scene import find_loot
-    from .perception import exp_number
     from .perception.minimap import OTHER_SHIFT
     s = hunter.look()
     if s.where is None:
@@ -400,7 +399,7 @@ def _hunt_look(hunter) -> int:
     print(f"her: map ({s.where.x:.0f}, {s.where.y:.0f}) on platform {p.id if p else None} ({how}); "
           f"HP {s.hp:.0%}, MP {s.mp:.0%}; room: {s.room('left', reach.EDGE_MARGIN):.0f} left, "
           f"{s.room('right', reach.EDGE_MARGIN):.0f} right")
-    exp = exp_number.read(s.exp_box) if s.exp_box is not None else None  # her EXP number (perception.exp_number)
+    exp = _exp_reading(hunter, s)
     if exp is not None and exp.exp is not None:
         print(f"  EXP {exp.text.strip()}: {exp.exp:,} into level {'/'.join(map(str, exp.levels))} (every glyph within "
               f"{exp.fit:.1f} levels of the game's, every other reading {exp.lead:.0f} or more off)")
@@ -428,6 +427,17 @@ def _hunt_look(hunter) -> int:
     _annotate(s, LAB / "hunt_look.png")
     print(LAB / "hunt_look.png")
     return 0
+
+
+def _exp_reading(hunter, s):
+    """Her EXP number as `hunt look` reads it (perception.exp_number), off the look's box; a look the feed served has
+    none (the feed's frames are half size, the box full size: worldstate.to_scene), so then off a look of its own (a
+    capture, no keys). None: no box."""
+    from .perception import exp_number
+    box = s.exp_box
+    if box is None and s.events is not None:  # (a look from the feed: it comes with the feed's events)
+        box = hunter.senses.eyes.look().exp_box
+    return exp_number.read(box) if box is not None else None
 
 
 def _shot_summary(path) -> int:

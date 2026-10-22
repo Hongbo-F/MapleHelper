@@ -256,3 +256,22 @@ def test_in_the_simulator_a_number_covered_for_a_while_counts_its_kills_and_not_
         assert 0 <= told - fakes.START - t < 0.6  # (the look after the kill)
     assert h.exp_gains == len(world) and h.meter.total == sim.world.exp  # every kill counted once, and the EXP
     assert h.meter.counts["over"] == 0
+
+
+@needs_map
+def test_hunt_look_reads_her_number_on_a_look_the_feed_served():
+    """`hunt look --feed`: the feed's looks have no box for the number (its frames are half size), so `hunt look`
+    reads it off a look of its own; it had printed "EXP number not read: no box"."""
+    from gamelab import __main__ as cli
+    got = {}
+
+    def fn(sim):
+        h = sim.hunter()
+        s = h.look()
+        got[sim.scenario.name] = (s.exp_box is None, s.events is not None, cli._exp_reading(h, s))
+        return {}
+    for name in ("feed_hunt_kill", "hunt_kill"):
+        scenarios.run_sim(dataclasses.replace(scenarios.SCENARIOS[name], fn=fn, expects=()))
+    assert got["feed_hunt_kill"][:2] == (True, True) and got["hunt_kill"][:2] == (False, False)
+    for name, (*_, reading) in got.items():
+        assert reading is not None and reading.exp == fakes.EXP_START[1] and fakes.EXP_START[0] in reading.levels, name
