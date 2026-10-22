@@ -7,8 +7,9 @@ drawn over it, doesn't make it go). A look that didn't see her own dot (somethin
 of theirs either. Dots are matched to the players of the look before, nearest first, the same kind, within
 MATCH_PX and what a player walks meanwhile.
 
-The minimap shows the whole map, so every look sees every player on it: the hunt loop's ground choice, the
-attribution of kills and the drop store go by them (behavior.hunt, behavior.ledger, localization.tracking).
+The minimap shows the whole map, so every look sees every player on it: the attribution of kills and the hunt loop's
+piles go by them (localization.tracking, behavior.ledger, behavior.hunt), and its choice of ground can
+(hunt.PLAYER_DISCOUNT, off).
 """
 
 from dataclasses import dataclass, replace
