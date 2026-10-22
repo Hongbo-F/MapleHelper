@@ -1716,5 +1716,7 @@ def feed_loop_rival(sim):
     of those die with no EXP of hers: killed by someone else (the hunt loop doesn't read that yet). (Seed 17
     since the other player hunts one place at a time, its dot on the minimap: on seed 25 it hunted 2 and 21 all
     2 minutes, out of her sight, and the feed saw none of its kills die; on 17 it hunts the basin with her, 7
-    kills there. Of seeds 1-30, 16 show a death someone else's.)"""
+    kills there. Of seeds 1-30, 16 showed a death someone else's then, 10 once such a death needed another player
+    by it (tracking.OTHERS_BY_PLAYER), and 13 with the searches off the feed's frame loop too, each of them
+    meeting all of this.)"""
     return _loop(2)(sim)

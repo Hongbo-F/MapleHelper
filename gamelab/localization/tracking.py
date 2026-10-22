@@ -136,7 +136,9 @@ LATE_SEARCH_S = 0.05
 # 254 right, of 274). With PLAYERS_LAST, of the monsters her EXP gain may be, one with another player by it comes after
 # those without (as behavior.ledger.PLAYER_KILLS has hers): the same 263 there, and with her gains naming their kinds
 # the same 283 judged hers (all right) of 299 on or off; on as PLAYER_KILLS is, nothing measured against it. Either way
-# a death someone else's names the player by it (`by`).
+# a death someone else's names the player by it (`by`). On the three tracks together (the feed's searches off its frame
+# loop too; the README's table): 7 judged someone else's of the other player's 44, all right and named, 11 let go;
+# 290 judged hers, all right, of 304.
 OTHERS_BY_PLAYER = True
 PLAYERS_LAST = True
 
