@@ -2,9 +2,9 @@
 pixels, without the player (screen capture needs no admin rights).
 
 Eyes is perception's only door to pixels. `look` gives an Observation (her name tag, HP and MP, the
-ground under her, her minimap dot and other players', ropes, her EXP number); localization then asks about that look's
-frame through Eyes (`monsters`, `items`, `bar`) instead of reading pixels itself, so the simulator
-(gamelab.sim) can stand in for the game by answering the same questions.
+ground under her, her minimap dot and other players', ropes, her EXP number and the box it's read from);
+localization then asks about that look's frame through Eyes (`monsters`, `items`, `bar`) instead of reading pixels
+itself, so the simulator (gamelab.sim) can stand in for the game by answering the same questions.
 """
 
 import time
@@ -16,6 +16,7 @@ import numpy as np
 
 from .. import capture, paths, window
 from ..screen import GAME_SIZE, HUD_TOP, SCALE, UNITS_PER_HALF_PX
+from .exp_number import READ_BOX
 from .hud import BAR_ROW, EXP_NUMBER, HP_BAR, bars, hp_bar, hp_fill
 from .loot import Item, LootDetector
 from .minimap import MINIMAP_BOX, Marker, dot_in_box, her_dot, other_dots
@@ -61,7 +62,9 @@ class Observation:
     dot: tuple[float, float] | None = None   # her minimap dot (full-size px)
     others: list[Marker] = field(default_factory=list)  # other players' minimap dots (full-size px)
     ropes: list[ScreenRope] = field(default_factory=list)  # ropes and ladders on screen (full-size px)
-    exp: np.ndarray | None = None            # the text pixels of her EXP number (EXP_NUMBER)
+    exp: np.ndarray | None = None            # the text pixels of her EXP number (EXP_NUMBER): changed, she gained EXP
+    exp_box: np.ndarray | None = None        # the box her EXP number is read from (exp_number.READ_BOX, full size,
+                                             # RGB): read (exp_number.read) only when `exp` changes
 
     @property
     def floor_y(self) -> int | None:
@@ -110,9 +113,10 @@ class Eyes:
         if self.want_ropes if ropes is None else ropes:
             found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None)
         x0, y0, x1, y1 = EXP_NUMBER
+        bx0, by0, bx1, by1 = READ_BOX
         return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=tag, hp=hp, mp=mp,
                            ground=ground, dot=dot, others=others, ropes=found,
-                           exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
+                           exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy())
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from the newest frame (with DXGI 0.2 ms, with mss two grabs of 16.7

@@ -389,6 +389,7 @@ def _hunt_look(hunter) -> int:
     """`hunt look`: what she sees now, printed and drawn on the frame (no keys)."""
     from .attack import reach
     from .localization.scene import find_loot
+    from .perception import exp_number
     from .perception.minimap import OTHER_SHIFT
     s = hunter.look()
     if s.where is None:
@@ -399,6 +400,12 @@ def _hunt_look(hunter) -> int:
     print(f"her: map ({s.where.x:.0f}, {s.where.y:.0f}) on platform {p.id if p else None} ({how}); "
           f"HP {s.hp:.0%}, MP {s.mp:.0%}; room: {s.room('left', reach.EDGE_MARGIN):.0f} left, "
           f"{s.room('right', reach.EDGE_MARGIN):.0f} right")
+    exp = exp_number.read(s.exp_box) if s.exp_box is not None else None  # her EXP number (perception.exp_number)
+    if exp is not None and exp.exp is not None:
+        print(f"  EXP {exp.text.strip()}: {exp.exp:,} into level {'/'.join(map(str, exp.levels))} (every glyph within "
+              f"{exp.fit:.1f} levels of the game's, every other reading {exp.lead:.0f} or more off)")
+    else:
+        print(f"  EXP number not read: {exp.why if exp is not None else 'no box'}")
     for m in s.others:  # other players' minimap dots (perception.minimap), placed as hers is
         w = hunter.senses.localizer.where_dot((m.x - OTHER_SHIFT, m.y - OTHER_SHIFT))
         print(f"  another player ({m.kind}): map ({w.x:.0f}, {w.y:.0f}) on platform "

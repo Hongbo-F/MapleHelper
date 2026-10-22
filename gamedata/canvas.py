@@ -126,6 +126,22 @@ def meso_frames(copy: Path = COPY, kinds=range(4)) -> dict[int, list[np.ndarray]
     return out
 
 
+def status_numbers(copy: Path = COPY) -> dict[str, np.ndarray]:
+    """The status bar's number pictures (UI StatusBar.img gauge/number), by the character each draws: the digits,
+    ',', '.', '%' and 'slash' white, '[' and ']' green; RGBA, 7 px tall. The data image holds the pictures itself,
+    but for '%', which points (`_outlink`) to the same path in UI/_Canvas/_Canvas_000.wz."""
+    info = Package(copy / "UI" / "UI_000.wz").image("StatusBar.img")["gauge"]["number"]
+    out = {}
+    for name, picture in info.items():
+        if not isinstance(picture, Canvas):
+            continue
+        if "_outlink" in picture.props:
+            pictures = Package(copy / "UI" / "_Canvas" / "_Canvas_000.wz").image("StatusBar.img")
+            picture = pictures["gauge"]["number"][name]
+        out[name] = pixels(picture)
+    return out
+
+
 def minimap_markers(copy: Path = COPY) -> dict[str, tuple[np.ndarray, tuple[int, int] | None]]:
     """The minimap's markers (Map/MapHelper.img/minimap: user, another, party, partymaster, guild, guildmaster,
     friend, npc, portal, ...): each one's picture (RGBA) and its origin, the point drawn at the place it marks

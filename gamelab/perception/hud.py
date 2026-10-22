@@ -1,5 +1,6 @@
 """Bars on screen: her HP and MP in the bottom bar, her EXP number (it changes only when she
-gains EXP), the purple text when a monster touches her, and a monster's own HP bar.
+gains EXP; what it says is read by exp_number, only then), the purple text when a monster touches her, and a
+monster's own HP bar.
 """
 
 import numpy as np

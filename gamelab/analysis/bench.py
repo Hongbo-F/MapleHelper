@@ -23,7 +23,9 @@ from PIL import Image
 
 from .. import capture, window
 from ..paths import LAB
+from ..perception import exp_number
 from ..perception.eyes import EXP_TEXT, TAG_BELOW_FEET, Eyes, rgb_of
+from ..perception.exp_number import READ_BOX
 from ..perception.hud import BAR_ROW, EXP_NUMBER, HP_BAR, bars
 from ..perception.lie_detector import LieDetectorSpotter
 from ..perception.minimap import MINIMAP_BOX, her_dot, other_dots
@@ -156,6 +158,9 @@ def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDete
                                                                   for r in inside))
     x0, y0, x1, y1 = EXP_NUMBER
     timer.time("EXP number", lambda: full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
+    x0, y0, x1, y1 = READ_BOX
+    read = timer.time("EXP number read (only when it changes)", lambda: exp_number.read(full[y0:y1, x0:x1]))
+    timer.count("EXP numbers read", int(read.exp is not None))
     timer.time("Lie Detector check (the player's)", lambda: spotter.seen(full))
     timer.time("glance (her dot and HP)", eyes.glance)
     obs = timer.time("Eyes.look", eyes.look)
