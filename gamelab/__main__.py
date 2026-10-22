@@ -1033,10 +1033,16 @@ def cmd_watch(args) -> int:
             if now - w["tracks"] >= WATCH_TRACKS_S:
                 w["tracks"] = now
                 telemetry.emit("tracks", list=[tr.record() for tr in st.tracks], frames=st.seq)
+        meter = runner.step.meter  # her EXP as read off its number (localization.gains)
+        while runner.step.gains:  # each gain as the hunter records it (Hunter._gained), for the mini-map's EXP line
+            g = runner.step.gains.popleft()
+            if meter.at is not None:
+                rate = meter.per_minute(now)
+                telemetry.emit("exp", exp=meter.at[1], level=meter.at[0], gain=g.exp, kinds=list(g.kinds),
+                               total=meter.total, per_minute=None if rate is None else round(rate, 1))
         if now - w["status"] >= WATCH_STATUS_S:
             c, rate = runner.step.tracker.counts, w["frames"] / max(1e-9, now - w["status"])
             live = [tr for tr in st.tracks if tr.state != "dead"]
-            meter = runner.step.meter  # her EXP as read off its number (localization.gains)
             for note in meter.notes:  # (its sizes going off, or on again)
                 _log(f"  {note}")
             meter.notes.clear()

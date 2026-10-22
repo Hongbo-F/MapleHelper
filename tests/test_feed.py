@@ -514,6 +514,37 @@ def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_ga
     assert [t["kind"] for t in [r for r in records if r["topic"] == "tracks"][-1]["list"]] == ["pig"]
 
 
+def test_watch_records_her_exp_gains_as_the_hunter_does(monkeypatch, tmp_path):
+    # Its 'exp' records (her EXP and level as read, the gain and its kinds, the total, EXP a minute) are what the
+    # mini-map's EXP line folds, and what the in-game check of the mouse over the number reads; watch had none.
+    from gamelab import __main__ as cli, telemetry
+    from gamelab.localization import worldstate
+    from gamelab.perception.exp_number import ExpReading
+    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
+    monkeypatch.setattr(feed, "quiet", lambda: None)
+    model = small_map()
+    model.mob_exp["Pig"] = 13  # (as on Thicket Around the Beach II: a pig's kill)
+    eyes = Drawn(model)
+
+    class Gaining(_Look):  # the number drawn as data: 421 EXP, then a pig's 13 more 0.5 s in
+        def look_at(self, full, t, ropes):
+            obs = super().look_at(full, t, ropes)
+            eyes.exp = 10 if t - self.t0 >= 0.5 else 0
+            obs.exp, obs.exp_box = eyes.frame(t, ropes).exp, np.full((1, 1), eyes.exp, np.uint8)
+            return obs
+    monkeypatch.setattr(worldstate.exp_number, "read",
+                        lambda box: ExpReading(421 + (13 if box[0, 0] else 0), 2.5, (19,)))
+
+    def runner(args):
+        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
+        return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), Gaining(eyes), step)
+    monkeypatch.setattr(cli, "_watch_runner", runner)
+    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30"]) == 0
+    (path,) = tmp_path.glob("*-watch.jsonl")
+    exp = [r for r in telemetry.read(path) if r["topic"] == "exp"]
+    assert [(r["exp"], r["level"], r["gain"], r["kinds"], r["total"]) for r in exp] == [(434, 19, 13, ["pig"], 13)]
+
+
 def test_watch_checks_for_the_lie_detector_on_a_thread_of_its_own_twice_a_second(monkeypatch, tmp_path):
     # It was checked in the frame loop, after each frame's step; now each frame is handed to the check's thread
     # as soon as it's taken, before the step, every 0.5 s as before.

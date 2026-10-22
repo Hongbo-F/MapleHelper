@@ -25,6 +25,7 @@ process; `to_scene` turns it back into the Scene a look of the stack's would hav
 
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
@@ -327,6 +328,7 @@ class WorldStep:
         self._late: list[WorldState] = []  # late states made in a step, for came_back
         self._exp: np.ndarray | None = None
         self.meter = ExpMeter(self.model.mob_exp)  # what her EXP gains were, for the tracker
+        self.gains: deque[Gain] = deque(maxlen=64)  # ... the newest of them, as told (for watch's 'exp' records)
         self._hp: float | None = None
         self._hit_at = -1e9
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "fallbacks": 0,
@@ -508,8 +510,9 @@ class WorldStep:
         return out
 
     def _told(self, gains: list[Gain]) -> None:
-        """Her kills these gains were, told to the tracker by kind, each at its time."""
+        """Her kills these gains were, told to the tracker by kind, each at its time (and the gains kept: `gains`)."""
         for g in gains:
+            self.gains.append(g)
             for i, kind in enumerate(g.kinds):
                 self.tracker.gain(g.when(i), kind)
 
