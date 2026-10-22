@@ -1026,8 +1026,12 @@ def cmd_watch(args) -> int:
         if now - w["status"] >= WATCH_STATUS_S:
             c, rate = runner.step.tracker.counts, w["frames"] / max(1e-9, now - w["status"])
             live = [tr for tr in st.tracks if tr.state != "dead"]
+            meter = runner.step.meter  # her EXP as read off its number (localization.gains)
+            per_minute = meter.per_minute(now)
+            exp = "" if meter.at is None else f"; EXP {meter.at[1]:,}" + (
+                "" if per_minute is None else f", {per_minute:.0f} a minute")
             print(f"{time.strftime('%H:%M:%S')} {rate:.1f} frames a second ({w['seen']} with the game on screen); "
-                  f"{len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'",
+                  f"{len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'{exp}",
                   flush=True)
             w["status"], w["frames"], w["seen"] = now, 0, 0
 

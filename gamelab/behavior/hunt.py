@@ -229,6 +229,7 @@ class HuntReport:
     kills: dict[str, int] = field(default_factory=dict)
     exp_gains: int = 0
     exp: float = 0.0
+    exp_read: int | None = None  # EXP her number rose by, as read (None: never read)
     throws: int = 0
     piles: int = 0             # piles gone after (picked up, or tried)
     on_the_way: int = 0        # EXP gains while travelling to an objective
@@ -237,9 +238,11 @@ class HuntReport:
     stop: str = ""
 
     def __str__(self):
+        read = ("not read" if self.exp_read is None else
+                f"+{self.exp_read}" + (f", {self.exp_read * 60 / self.seconds:.1f} a minute" if self.seconds else ""))
         return (f"{self.seconds:.0f} s; grounds {self.grounds}; kills: {kills_text(self.kills)} "
-                f"(EXP gains {self.exp_gains}, EXP {self.exp:.0f}); throws {self.throws}; piles {self.piles}; "
-                f"rests {self.rests}; ended: {self.stop}")
+                f"(EXP gains {self.exp_gains}, EXP {self.exp:.0f}; off her EXP number {read}); throws {self.throws}; "
+                f"piles {self.piles}; rests {self.rests}; ended: {self.stop}")
 
 
 class Hunt:
@@ -294,12 +297,16 @@ class Hunt:
         self._gone = self.h.drops.gone_tried
         self._progress = start
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
+        meter = self.h.meter
+        read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         self._next_ground(self.nav.mover.settle())
         while time.monotonic() < end:
             if self._pass() == "stop":
                 break
         self._leave_ground()
         self.report.seconds = time.monotonic() - start
+        if meter.since is not None:
+            self.report.exp_read = meter.total - (read or 0)
         self.report.stop = self.report.stop or "time up"
         self.tour.rest_and_stand_by(mode=TRANSIT)
         return self.report

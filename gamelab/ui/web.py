@@ -252,6 +252,7 @@ class Feed:
                 "moving": (s.chain or {}).get("text"),
                 "hunt": None if not hunt else {k: hunt.get(k) for k in
                                                ("rule", "objective", "ground", "rate_here", "rate_to_beat")},
+                "exp": None if not s.exp else {k: s.exp.get(k) for k in ("exp", "level", "per_minute")},
                 "stop": (s.tour or {}).get("stop"),
             })
         text = self._text[1]
@@ -1071,6 +1072,10 @@ function show(s) {
   if (h && h.rate_here != null) {
     rates = h.rate_here.toFixed(2) + " EXP/s here";
     if (h.rate_to_beat) rates += ", " + h.rate_to_beat[0].toFixed(2) + " at platform " + h.rate_to_beat[1];
+  }
+  if (s.exp && s.exp.exp != null) {  // her EXP as read off its number
+    rates += (rates ? " · " : "") + "EXP " + s.exp.exp.toLocaleString("en-US") +
+             (s.exp.per_minute != null ? " (" + Math.round(s.exp.per_minute) + " a minute)" : "");
   }
   $("rates").textContent = rates;
   text("fight", s.fight); text("moving", s.moving);

@@ -6,8 +6,9 @@
   filled in as localization (Senses.look, Scene.place, find_loot, pose.refine) inverts them (her name
   tag, the grass under her, the ropes in view, her minimap dot and the other player's), glance() and messages(). Monsters and
   drops are drawn into the frame as data its fake detectors read (Eyes.monsters, monsters_wide, items),
-  and hurt monsters' HP bars as pixels (Eyes.bar reads those). world.Noise can round the dot to whole
-  pixels and hide her tag or her dot for a while.
+  and hurt monsters' HP bars as pixels (Eyes.bar reads those); her EXP number as the bar shows it
+  (perception.exp_number draws it with the game's glyphs: EXP_START and what she has gained), read as in game.
+  world.Noise can round the dot to whole pixels and hide her tag, her dot or her EXP number for a while.
 - `FakePlayer`: what gamelab.control.client offers (submit, send, done, wait, cancel), running each plan's keys
   on the world: plans run one after another, `end_ms` makes one last longer, every key still held is let
   go at a plan's end, and cancel withdraws a plan not started yet or cuts a running one short.
@@ -30,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from maplehelper.config import GameKeys
+from maplehelper.ocr.exp_table import EXP_TO_NEXT
 
 from ..control import client
 from ..localization.mapdata import MapModel
@@ -37,6 +39,7 @@ from ..localization.monsters import FLINCH_S
 from ..localization.pose import GRASS_OVERHANG
 from ..localization.pose import Camera, Localizer
 from ..paths import LAB
+from ..perception import exp_number
 from ..perception.eyes import Eyes, Observation
 from ..perception.loot import Item
 from ..perception.match import suppress_overlaps
@@ -64,6 +67,7 @@ DETECT_WIDE_S = 0.25            # ... on the whole screen: a wide look takes ~0.
 LOOT_S = 0.02             # per strip searched
 GLANCE_S = 0.035          # with Navigator.follow's 30 ms sleep, ~15 glances a second (as Navigator.follow says)
 MESSAGES_S = 0.4
+EXP_START = (19, 421)     # her level and EXP when a run starts (as on the saved frames of 2026-10-18)
 START_LATENCY = 0.01      # a plan starts this long after it's handed over (the player polls its inbox)
 RESULT_LATENCY = 0.01     # ... and its result is seen this long after it ends
 
@@ -226,6 +230,16 @@ class FakeLoot:
         return [self.detect(frame, box, mesos_only) for box in boxes]  # each charged as a strip of its own
 
 
+def shown_exp(start: tuple[int, int], gained: int) -> tuple[int, int]:
+    """Her level and EXP into it, from `start` (level, EXP) with `gained` EXP more: each level's requirement
+    (the EXP table) carried into the next."""
+    level, exp = start[0], start[1] + gained
+    while level in EXP_TO_NEXT and exp >= EXP_TO_NEXT[level]:
+        exp -= EXP_TO_NEXT[level]
+        level += 1
+    return level, exp
+
+
 class FakeEyes(Eyes):
     def __init__(self, world: World, clock: Clock, model: MapModel, guard: Callable[[], None] | None = None):
         """`guard`: called before every look; it raises when the fakes aren't in place (sim.scenarios.Sim)."""
@@ -238,6 +252,7 @@ class FakeEyes(Eyes):
         self.guard = guard
         self.counts = {"looks": 0, "glances": 0, "tag hidden": 0, "dot hidden": 0}  # for the trace
         self.frame_counts = {"frames": 0, "tag hidden": 0, "dot hidden": 0}  # the feed's frames (observe)
+        self._exp_drawn: tuple[int, np.ndarray] | None = None  # her EXP number's box, for the EXP she has gained
 
     @property
     def noise(self) -> Noise:
@@ -279,6 +294,22 @@ class FakeEyes(Eyes):
             x, y = float(round(x)), float(round(y))
         return [Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT)]
 
+    def _exp_box(self) -> np.ndarray:
+        """Her EXP number as the bar shows it, from EXP_START and what she has gained (exp_number.draw: the game's
+        glyphs as the game draws them; read only when it changes); with a block of white over it while something
+        covers it (Noise.exp_hidden): then it can't be read."""
+        gained = self.world.exp
+        if self._exp_drawn is None or self._exp_drawn[0] != gained:
+            level, exp = shown_exp(EXP_START, gained)
+            box = exp_number.draw(exp_number.shown(exp, level))
+            box.flags.writeable = False
+            self._exp_drawn = (gained, box)
+        box = self._exp_drawn[1]
+        if Noise.during(self.noise.exp_hidden, self.world.t):
+            box = box.copy()
+            box[:, 20:50] = 255
+        return box
+
     def look(self) -> Observation:
         self._now()
         self.counts["looks"] += 1
@@ -308,7 +339,7 @@ class FakeEyes(Eyes):
         s = Observation(t=t, frame=frame, tag=her if seen else None, hp=self._hp(), mp=w.mp,
                         ground=self._ground(her) if seen else None, dot=self._dot(counts), others=self._others(),
                         ropes=found)
-        s.exp = exp_pixels(w.exp)
+        s.exp, s.exp_box = exp_pixels(w.exp), self._exp_box()
         return s
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:

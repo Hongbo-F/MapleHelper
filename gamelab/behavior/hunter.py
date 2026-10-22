@@ -11,12 +11,15 @@ Detector watchdog stops everything the moment the game's anti-bot check appears.
 
 It's made of the layers below: Senses (perception and localization: every look), Actions (control:
 her keys), a Looter (what she picks up and remembers), and the fight loops (behavior.fight). After every
-look, whoever took it, the hunter keeps count of her EXP (a kill is her EXP going up) and her HP.
+look, whoever took it, the hunter keeps count of her EXP and her HP: a kill is her EXP going up, its number read
+when it changes (perception.exp_number), and the gain's size says what kind it was, or that it was several kills,
+or none (localization.gains).
 """
 
 import json
 import random
 import time
+from collections import deque
 from collections.abc import Callable
 
 import numpy as np
@@ -27,11 +30,14 @@ from .. import paths, telemetry
 from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control.actions import Actions
 from ..control.navigator import Navigator
+from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
 from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..localization.senses import Senses
+from ..localization.worldstate import reading_of
+from ..perception import exp_number
 from ..perception.eyes import Eyes
 from ..perception.hud import exp_changed
 from . import fight
@@ -59,8 +65,11 @@ class Hunter:
         self.actions = Actions(keys, skill)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
-        self.exp_events: list[float] = []  # when her EXP went up (the last EXP_MEMORY s)
-        self.exp_gains = 0  # times her EXP went up, ever (reports are replaced; this isn't)
+        self.exp_events: list[float] = []  # when her EXP told of a kill (the last EXP_MEMORY s), for kill() to match
+        # The latest kills her EXP told of: when, and the kind its gain's size named (None: not known).
+        self.told: deque[tuple[float, str | None]] = deque(maxlen=64)
+        self.exp_gains = 0  # kills her EXP told of, ever (reports are replaced; this isn't)
+        self.meter = ExpMeter(model.mob_exp)  # her EXP as read off its number, and what each gain was
         self._exp: np.ndarray | None = None  # the last look's EXP number (text pixels)
         self._last_hp: float | None = None
         self._last_where: Where | None = None
@@ -121,7 +130,7 @@ class Hunter:
                 telemetry.emit("event", kind="potion", text=f"potion at {s.hp:.0%} HP")
 
     def take_exp(self, since: float) -> bool:
-        """Use up one EXP gain seen since `since`, if there is one."""
+        """Use up one kill her EXP told of since `since`, if there is one."""
         for i, t in enumerate(self.exp_events):
             if t >= since:
                 del self.exp_events[i]
@@ -131,20 +140,23 @@ class Hunter:
     # --- after every look ---------------------------------------------------------------------
 
     def _vitals(self, s: Scene) -> None:
-        """Her EXP number changed since the last look: a kill of hers. Her HP dropped: a hit (logged
-        with how far it pushed her when no key was pressed). With a feed, from what it saw frame by frame
-        (s.events): two gains between two looks are two kills, and the HP lost is every drop's, a potion
-        drunk between them or not."""
+        """Her EXP number changed since the last look: read, the kills of hers its gain was (one if it can't be
+        read; none if no kill explains it: logged). Her HP dropped: a hit (logged with how far it pushed her when no
+        key was pressed). With a feed, from what it saw frame by frame (s.events, with the number as read then): two
+        gains between two looks are two gains, and the HP lost is every drop's, a potion drunk between them or not."""
         if s.events is None:
-            gains = int(exp_changed(self._exp, s.exp))
+            reads = []
+            changed = exp_changed(self._exp, s.exp)
+            if changed or self.meter.wants_reading(s.t):
+                reads.append((s.t, exp_number.read(s.exp_box) if s.exp_box is not None else None, changed))
             lost = 0.0 if self._last_hp is None or s.hp >= self._last_hp else self._last_hp - s.hp
         else:
-            gains = sum(1 for e in s.events if e.kind == "exp_gain")
+            reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in s.events
+                     if e.kind in ("exp_gain", "exp_read")]
             lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
-        for _ in range(gains):
-            self.exp_events.append(s.t)
-            self.report.exp_kills += 1
-            self.exp_gains += 1
+        for t, reading, changed in reads:
+            for g in self.meter.update(t, reading, changed):
+                self._gained(g, s)
         self.exp_events = [t for t in self.exp_events if s.t - t < EXP_MEMORY]
         self._exp = s.exp
         if lost > 0 and self._last_hp is not None:
@@ -153,6 +165,25 @@ class Hunter:
             telemetry.emit("event", kind="hit", text=f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
             self._log_hit(s)
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False
+
+    def _gained(self, g: Gain, s: Scene) -> None:
+        """A gain of her EXP: its kills counted (exp_events, told, the report), or, if no kill explains it, logged;
+        with her EXP as read, for the mini-map and the run's record (telemetry 'exp')."""
+        for kind in g.kinds:
+            self.exp_events.append(g.t)
+            self.told.append((g.t, kind))
+            self.report.exp_kills += 1
+            self.exp_gains += 1
+        if g.odd:
+            text = (f"EXP down {-g.exp} (a death?)" if g.exp is not None and g.exp < 0 else
+                    f"EXP +{g.exp}: no kill of this map's monsters gives that (a party share, a quest?)")
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="exp", text=text)
+        if telemetry.recording() and self.meter.at is not None:
+            level, exp = self.meter.at
+            rate = self.meter.per_minute(s.t)
+            telemetry.emit("exp", exp=exp, level=level, gain=g.exp, kinds=list(g.kinds), total=self.meter.total,
+                           per_minute=None if rate is None else round(rate, 1))
 
     def _others(self, s: Scene) -> None:
         """Other players coming onto the map (their minimap dots, confirmed: localization.players) and leaving it,

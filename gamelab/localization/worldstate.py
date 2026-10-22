@@ -3,8 +3,10 @@ the feed (localization.feed) to hand to whoever asks and for `python -m gamelab 
 the simulator's world, gamelab.sim.world: this is what the stack sees of a world.)
 
 Every frame: her place (the same look as Senses.look takes: her name tag, HP and MP, the ground, her minimap
-dot, ropes, the other players' dots), her EXP gains and HP drops (events, each at the frame it showed), and each
-monster tracked re-found around where it should be (Eyes.refind: the template that matched it last, else its kind's).
+dot, ropes, the other players' dots), her EXP gains and HP drops (events, each at the frame it showed: a gain with
+her EXP number as read then, perception.exp_number, the kills its size was going to the tracker,
+localization.gains), and each monster tracked re-found around where it should be (Eyes.refind: the template that
+matched it last, else its kind's).
 
 The searches run off that frame loop (`Searches`: in the feed, a thread of its own, `SearchThread`), one at a
 time, on the newest frame placed when one is due: monsters not tracked yet in her band every BAND_EVERY_S,
@@ -28,10 +30,13 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from ..perception import exp_number
 from ..perception.eyes import Observation, band_rows
+from ..perception.exp_number import ExpReading
 from ..perception.hud import exp_changed
 from ..perception.minimap import MINIMAP_BOX
 from ..screen import HUD_TOP, SCALE
+from .gains import ExpMeter
 from .mapdata import MapModel
 from .monsters import Monster
 from .pose import Where
@@ -321,10 +326,12 @@ class WorldStep:
         self._newest: tuple[View, float] | None = None  # what the newest frame placed showed of the map, and when
         self._late: list[WorldState] = []  # late states made in a step, for came_back
         self._exp: np.ndarray | None = None
+        self.meter = ExpMeter(self.model.mob_exp)  # what her EXP gains were, for the tracker
         self._hp: float | None = None
         self._hit_at = -1e9
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "fallbacks": 0,
-                       "band": 0, "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "hits": 0, "searches": 0}
+                       "band": 0, "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "exp read": 0, "hits": 0,
+                       "searches": 0}
 
     def throw(self, t: float, side: str) -> None:
         """She threw toward `side` at t."""
@@ -477,13 +484,20 @@ class WorldStep:
             tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=found.work, late=True))
 
     def _vitals(self, s: Scene, t: float) -> list[Event]:
-        """Her EXP number changed since the last frame (a kill of hers: the tracker puts it on a monster), or
-        her HP dropped (a hit)."""
+        """Her EXP number changed since the last frame (`exp_gain`, with the number as read: the kills its size was go
+        to the tracker, which puts each on a monster), or was read unchanged (`exp_read`: to start from, or to confirm a
+        jump: ExpMeter.wants_reading); her HP dropped (a hit)."""
         out = []
-        if exp_changed(self._exp, s.exp):
-            out.append(Event("exp_gain", t))
-            self.tracker.gain(t)
-            self.counts["exp gains"] += 1
+        changed = exp_changed(self._exp, s.exp)
+        if changed or self.meter.wants_reading(t):
+            reading = exp_number.read(s.exp_box) if s.exp_box is not None else None
+            if changed or (reading is not None and reading.exp is not None):
+                out.append(Event("exp_gain" if changed else "exp_read", t, data=reading_data(reading)))
+            self.counts["exp gains"] += changed
+            self.counts["exp read"] += reading is not None and reading.exp is not None
+            for g in self.meter.update(t, reading, changed):
+                for _ in g.kinds:
+                    self.tracker.gain(g.t)
         if s.exp is not None:
             self._exp = s.exp
         if self._hp is not None and s.hp < self._hp - HP_DROP:
@@ -538,3 +552,15 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
         s.loot = [d for d in st.loot if keep(d.platform) and (d.mesos or not mesos_only)]
         s.looked = [lk for lk in st.looked if keep(lk[0])]
     return s
+
+
+def reading_data(reading: ExpReading | None) -> dict:
+    """An EXP reading as an event's data (plain, for the pipe): its EXP, percent and the levels it fits; {} unread."""
+    if reading is None or reading.exp is None:
+        return {}
+    return {"exp": reading.exp, "percent": reading.percent, "levels": list(reading.levels)}
+
+
+def reading_of(data: dict) -> ExpReading | None:
+    """The EXP reading an event's data holds (reading_data), or None."""
+    return ExpReading(data["exp"], data.get("percent"), tuple(data.get("levels", ()))) if "exp" in data else None

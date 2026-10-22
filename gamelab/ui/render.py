@@ -358,6 +358,9 @@ class MapView:
         where = "lost" if her is None else (f"x {her['x']:.0f}  platform {her.get('platform')}  ({her.get('how', '?')})")
         if others := len(scene.get("players") or []):
             where += f"   {others} other player{'s' if others > 1 else ''}"
+        if state.exp and state.exp.get("exp") is not None:  # her EXP as read off its number
+            rate = state.exp.get("per_minute")
+            where += f"   EXP {state.exp['exp']:,}" + ("" if rate is None else f" ({rate:.0f} a minute)")
         cv2.putText(img, f"{mode}  {when}   {where}", (x, top + 12), FONT, 0.4, TEXT, 1, cv2.LINE_AA)
         line = top + 30
         stance = state.stance

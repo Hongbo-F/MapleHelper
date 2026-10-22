@@ -301,6 +301,7 @@ class Noise:
     dot_px: bool = False         # her minimap dot read to whole pixels (11.4 map units each), not exact
     tag_hidden: tuple = ()       # (from, to) s since the start: her name tag can't be seen (behind a box)
     dot_hidden: tuple = ()       # (from, to) s: her minimap dot can't be seen (a tooltip over the minimap)
+    exp_hidden: tuple = ()       # (from, to) s: her EXP number can't be read (the cursor or a window over it)
     hit_hidden: tuple = ()       # (shortest, longest) s a monster hit by a star (and not killed) can't be
                                  # seen: in game it flinches under its damage numbers and the detector loses
                                  # it for 1-3 s (README); () off
