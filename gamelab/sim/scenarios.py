@@ -128,14 +128,16 @@ class Sim:
         return feed
 
     def feed_record(self) -> dict:
-        """What the feed did (the trace's 'feed'): frames, how many were asked for, the world step's and the
-        tracker's counts, and how many of her looks and glances came from it."""
+        """What the feed did (the trace's 'feed'): frames, how many were asked for, how long its frame loop was
+        busy, its searches (on their thread) and how long they took, the world step's and the tracker's counts,
+        and how many of her looks and glances came from it."""
         f = self.feed
         senses = {}
         for s in self.senses:
             for k, v in s.counts.items():
                 senses[k] = senses.get(k, 0) + v
         return {"frames": f.counts["frames"], "asked": f.counts["asked"], "busy_s": round(f.counts["busy"], 3),
+                "searches": f.counts["searches"], "searching_s": round(f.counts["searching"], 3),
                 "step": dict(f.step.counts), "tracker": dict(f.step.tracker.counts), "senses": senses}
 
     def __enter__(self) -> "Sim":

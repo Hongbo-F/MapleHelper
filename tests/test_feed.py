@@ -1,7 +1,8 @@
 """The continuous feed (localization.feed): the ring of frames in shared memory never holds more than its
 slots, a look is never handed a frame from before it was asked for, every event is drained once, what's
-asked is done on the next frame, and the child process itself, started and stopped, with a list of frames
-for a screen. When the child dies, the stack's side says so and hands out nothing more."""
+asked is done on the next frame (its searches off the frame loop, back their cost later), and the child
+process itself, started and stopped, with a list of frames for a screen, its frames coming at their rate
+while a slow search is out. When the child dies, the stack's side says so and hands out nothing more."""
 
 import functools
 import sys
@@ -13,7 +14,8 @@ import pytest
 from gamelab.localization import feed
 from gamelab.localization.feed import Asks, FeedClient, Ring, SyncFeed, fresh, run
 from gamelab.localization.senses import Senses
-from gamelab.localization.worldstate import Schedule, WorldState, WorldStep
+from gamelab.localization.worldstate import Schedule, SearchThread, WorldState, WorldStep
+from gamelab.sim.fakes import FakeDetector
 from gamelab.perception.frames import Frame, ListFrames
 
 from test_worldstate import Drawn, pig, small_map
@@ -42,12 +44,16 @@ def state(seq, t, **kw) -> WorldState:
     return WorldState(seq, t, True, **kw)
 
 
-def test_a_look_is_never_handed_a_frame_from_before_it_asked():
+def test_a_look_is_never_handed_a_frame_from_before_it_asked(monkeypatch):
     want = Asks(after=10.0)
     assert not fresh(state(1, 9.99), want) and fresh(state(2, 10.0), want)
     assert not fresh(WorldState(3, 10.5, False), want)  # the game wasn't on screen
     band = Asks(after=10.0, band=True)
+    assert fresh(state(4, 10.1, band_at=10.0), band) and not fresh(state(5, 10.4, band_at=10.05), band)
+    assert not fresh(state(5, 10.1, band_at=9.95), band)  # searched before the look asked: not the search it asked for
+    monkeypatch.setattr(feed, "ASK_ONLY_STALE", True)  # (it asked only for what was stale: any recent search)
     assert fresh(state(4, 10.1, band_at=9.95), band) and not fresh(state(5, 10.1, band_at=9.75), band)
+    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)
     assert not fresh(state(6, 10.1, band_at=10.1), Asks(after=10.0, wide=True))
     loot = Asks(after=10.0, loot=True)
     assert not fresh(state(7, 10.1), loot) and fresh(state(8, 10.1, loot=[]), loot)
@@ -91,14 +97,42 @@ def test_the_sync_feed_hands_a_look_the_frame_after_it_asked_its_cost_later(sync
     f, clock, eyes = sync
     eyes.mobs = [pig(1100)]
     clock.sleep(0.5)
+    c = feed.COSTS
     for _ in range(20):
         asked = clock.now
         st = f.latest(Asks(asked, band=True))
         assert st is not None and st.t >= asked and fresh(st, Asks(asked, band=True))
-        assert clock.now >= st.t + feed.COSTS.of(st) - 1e-9  # ready only once it's been worked out
-        assert clock.now - asked < 0.2  # (at worst the frame searched the whole screen, 0.14 s)
+        assert st.band_at >= asked  # her band searched on a frame shown after the look asked: its own search
+        # ready only once worked out: the searched frame's step, then the search on its thread
+        assert clock.now >= st.band_at + c.capture + c.look + c.band - 1e-9
+        assert clock.now - asked < 0.25  # (at worst a search of the whole screen was out, 0.11 s)
         clock.sleep(0.037)
     assert f.counts["frames"] >= 30  # it went on looking between the looks, 30 times a second
+
+
+def test_the_sync_feeds_searches_come_back_their_cost_later_merged_as_of_their_frame(sync):
+    f, clock, eyes = sync
+    clock.sleep(0.5)  # (the first frame's search of the whole screen is back)
+    eyes.mobs = [pig(1100)]
+    asked = clock.now
+    st = f.latest(Asks(asked, band=True))
+    c = feed.COSTS
+    searched = [(ready, s) for ready, s in f.states if s.late and s.t >= asked]
+    assert searched and searched[0][1].work["band"] == 1
+    ready, late = searched[0]
+    back = late.t + c.capture + c.look + c.band  # its frame's step, then the search on its thread
+    # Merged as it came (the frame loop idle), or by the frame it was on (placing her, then the re-finds)
+    assert back - 1e-9 <= ready <= back + c.capture + c.look + 2 * c.refind + 1e-9
+    assert [m.kind for m in late.monsters] == ["pig"] and [e.kind for e in late.events] == ["appeared"]
+    assert clock.now == pytest.approx(ready) and st.band_at == late.t  # the look had waited for it
+    clock.sleep(0.1)
+    # The frames stepped while it was out don't have the pig; the first after it does, re-found
+    between = [s for r, s in f.states if not s.late and late.t < s.t and r < ready - 1e-9]
+    after = [s for r, s in f.states if not s.late and s.t > late.t and r >= ready - 1e-9]
+    assert all(s.monsters == [] and (s.band_at or 0) < late.t for s in between)
+    assert after and [m.kind for m in after[0].monsters] == ["pig"] and after[0].band_at == late.t
+    (tr,) = f.step.tracker.tracks.values()
+    assert tr.first_seen == late.t
 
 
 def test_every_event_is_drained_once(sync):
@@ -146,9 +180,12 @@ def test_the_loop_does_what_was_asked_on_the_first_frame_at_its_time():
             return eyes.frame(t, ropes)
     runner = feed.Runner(ListFrames(frames, loop=False), Eyes2(), step)
     out, asks = [], {2: Asks(0.0, band=True), 5: Asks(0.0, wide=True)}  # asked once 2 (5) frames are out
-    run(runner, 200.0, lambda wait: (asks.pop(len(out), None), False), lambda st, fr: out.append(st))
-    assert len(out) == 12
-    assert [s.seq for s in out if s.work["band"]] == [3] and [s.seq for s in out if s.work["wide"]] == [6]
+    run(runner, 200.0, lambda wait: (asks.pop(sum(not s.late for s in out), None), False),
+        lambda st, fr: out.append(st))
+    assert [s.seq for s in out if not s.late] == list(range(1, 13))
+    late = [s for s in out if s.late]  # each frame searched, given again as its searches came back
+    assert [s.seq for s in late if s.work["band"]] == [3] and [s.seq for s in late if s.work["wide"]] == [6]
+    assert out.index(late[0]) < out.index(next(s for s in out if s.seq == 4))  # back before the next frame's
 
 
 def test_frames_the_game_isnt_showing_say_so_and_are_not_read():
@@ -201,12 +238,32 @@ class _Look:
         return self.eyes.frame(t, ropes)
 
 
-def drawn_runner(n: int = 0) -> feed.Runner:
+class Slow(FakeDetector):
+    """A detector whose searches take `s` seconds (of the real clock); re-finds are as quick as ever."""
+
+    def __init__(self, s: float):
+        super().__init__()
+        self.s = s
+
+    def detect(self, frame, rows=None):
+        time.sleep(self.s)
+        return super().detect(frame, rows)
+
+    def detect_wide(self, frame, rows, band=120, step=90):
+        time.sleep(self.s)
+        return super().detect_wide(frame, rows, band, step)
+
+
+def drawn_runner(n: int = 0, slow: float = 0.0) -> feed.Runner:
     """The child's runner for the smoke test: a list of blank frames (a stand-in for the screen), read by eyes
-    that draw a pig walking (built in the child, from this module)."""
+    that draw a pig walking (built in the child, from this module); its searches on their thread, as the
+    feed's, each taking `slow` s."""
     model = small_map()
     eyes = Drawn(model)
-    step = WorldStep(Senses(eyes, model, band=(100, 100)))
+    if slow:
+        eyes.detector = Slow(slow)
+    senses = Senses(eyes, model, band=(100, 100))
+    step = WorldStep(senses, searches=SearchThread(senses))
     return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)] * 3), _Look(eyes), step)
 
 
@@ -231,6 +288,26 @@ def test_the_child_runs_below_normal_and_hands_out_states_frames_and_events():
         client.close()
     assert client.proc.exitcode is not None and not client.alive
     assert client.bye is not None and client.bye["frames"] > 10
+
+
+def test_the_childs_frames_keep_their_rate_while_a_slow_search_is_out():
+    # Each search takes 0.15 s; in the frame loop (as they were) the feed made fewer than 7 frames a second.
+    client = FeedClient(functools.partial(drawn_runner, 0, 0.15), hz=30.0)
+    try:
+        assert client.alive, client.why
+        assert client.latest(Asks(time.monotonic(), band=True), timeout=5.0) is not None
+        first = client.states[-1].seq
+        t0 = time.monotonic()
+        asked = client.latest(Asks(t0, band=True), timeout=2.0)  # a look waits for its own search ...
+        waited = time.monotonic() - t0
+        time.sleep(1.0)
+        rate = (client.states[-1].seq - first) / (time.monotonic() - t0)
+        assert asked is not None and asked.band_at >= t0 and 0.15 <= waited < 0.6
+        assert rate > 15  # ... while the frames go on (30 a second asked for, Windows' timer ticks and a busy CPU
+        # losing some; with the searches in the frame loop it would be under 7)
+    finally:
+        client.close()
+    assert client.bye["band"] + client.bye["wide"] >= 5
 
 
 def test_a_command_s_feed_says_what_it_did_when_it_ends(capsys):
@@ -390,7 +467,7 @@ def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_ga
     assert records[0]["mode"] == "watch"
     scenes = [r for r in records if r["topic"] == "scene"]
     assert 5 <= len(scenes) <= 25 and scenes[-1]["monsters"][0]["kind"] == "pig"  # 10 a second for ~1.8 s
-    assert [t["kind"] for t in next(r for r in records if r["topic"] == "tracks")["list"]] == ["pig"]
+    assert [t["kind"] for t in [r for r in records if r["topic"] == "tracks"][-1]["list"]] == ["pig"]
 
 
 def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_start(monkeypatch, capsys):

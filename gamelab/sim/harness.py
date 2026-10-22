@@ -144,6 +144,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     if feed:
         f = trace["feed"]
         out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
+                              "searches": f.get("searches"), "searching_s": f.get("searching_s"),
                               "senses": f["senses"], "tracker": f["tracker"]}
     out["looks"] = sim.eyes.counts["looks"]
     return out

@@ -827,9 +827,11 @@ def cmd_bench_look(args) -> int:
     step = WorldStep(Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)),
                      schedule=Schedule(band_s=None, wide_s=None))
 
-    def frame_step(asks=None):
+    def frame_step(asks=None):  # the searches asked for at once, on this thread, and merged (InlineSearches)
         full = eyes._capture()
-        return step.step(lambda ropes: eyes.look_at(full, None, ropes), time.monotonic(), True, asks)
+        st = step.step(lambda ropes: eyes.look_at(full, None, ropes), time.monotonic(), True, asks)
+        step.came_back()
+        return st
     looks = {"Senses.look: no monsters": lambda: senses.look(mobs=False),
              "Senses.look: her band": lambda: senses.look(),
              "Senses.look: band + loot on her platform": lambda: senses.look(loot=True),
@@ -935,6 +937,8 @@ def cmd_watch(args) -> int:
     telemetry for the mini-map. It never sends a key and never brings the game to the front: a frame the
     game isn't wholly showing isn't read. With --lie-detector it also checks the screen for the Lie Detector
     and pages whoever is at the PC (the player keeps its own watchdog regardless)."""
+    import threading
+
     from .localization import feed, worldstate
     from .perception.lie_detector import LieDetectorSpotter
     feed.quiet()  # below normal priority, as the feed's child runs
@@ -951,6 +955,13 @@ def cmd_watch(args) -> int:
 
     def emit(st: worldstate.WorldState, frame) -> None:
         now = time.monotonic()
+        if st.late:  # a frame searched, given again with what its searches found: its drops, its events
+            if st.loot is not None:
+                w["loot"] = st.loot
+            for e in st.events:
+                if e.kind in WATCH_EVENTS:
+                    telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)
+            return
         w["frames"] += 1
         if st.visible != w["visible"]:
             w["visible"] = st.visible
@@ -986,8 +997,12 @@ def cmd_watch(args) -> int:
                   flush=True)
             w["status"], w["frames"], w["seen"] = now, 0, 0
 
+    back = threading.Event()  # the searches' answer is in
+    runner.step.searches.wake = back.set
+
     def poll(wait: float):
-        time.sleep(wait)
+        back.wait(wait)
+        back.clear()
         return None, False
 
     try:
@@ -995,6 +1010,7 @@ def cmd_watch(args) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        runner.step.close()
         telemetry.stop()
     print(f"watched {time.monotonic() - started:.0f} s: {runner.step.counts['frames']} frames "
           f"({runner.step.counts['not visible']} not showing the game); deaths {runner.step.tracker.counts}")
