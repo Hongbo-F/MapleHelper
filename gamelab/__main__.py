@@ -981,8 +981,8 @@ def cmd_watch(args) -> int:
     def emit(st: worldstate.WorldState, frame) -> None:
         now = time.monotonic()
         if st.late:  # a frame searched, given again with what its searches found: its drops, its events
-            if st.loot is not None:
-                w["loot"] = st.loot
+            if st.loot is not None:  # (and where it looked for them, for the scene records: Scene.record's `looked`)
+                w["loot"], w["looked"] = st.loot, st.looked
             for e in st.events:
                 if e.kind in WATCH_EVENTS:
                     telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)

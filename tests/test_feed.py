@@ -509,6 +509,8 @@ def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_ga
     assert records[0]["mode"] == "watch"
     scenes = [r for r in records if r["topic"] == "scene"]
     assert 5 <= len(scenes) <= 25 and scenes[-1]["monsters"][0]["kind"] == "pig"  # 10 a second for ~1.8 s
+    # Where the last search for drops looked (a late state's: the drops come back with it), her platform among them.
+    assert scenes[-1]["her"]["platform"] in {lk[0] for lk in scenes[-1]["looked"]}
     assert [t["kind"] for t in [r for r in records if r["topic"] == "tracks"][-1]["list"]] == ["pig"]
 
 
