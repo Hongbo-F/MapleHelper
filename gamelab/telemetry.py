@@ -22,8 +22,11 @@ Topics (map units; producers build the records, ui.state folds them):
             monsters [{kind, x, y, platform, bar}], loot [{kind, x, y, platform}]
   drops     pending [{x, y, platform, mesos}], inventory_full  every look (behavior.hunter)
   glance    x, y, hp                                           control.navigator, while a chain runs
-  route     dst, moves [{kind, src, dst, x, land_x}]           control.navigator, each plan
+  route     dst, moves [{kind, src, dst, x, land_x}], from     control.navigator, each plan (from 2026-10-21 also
+            {platform, x}, keep_off, avoid                     where it was planned from and what it kept off)
   chain     why, text, legs [{kind, src, dst, spans, end}]     control.navigator, each key plan sent
+  moved     moves [{kind, src, dst, x}], planned, landed, hit  control.navigator, after a chain or a move (from
+                                                               2026-10-21: the coverage report's)
   monsters  list [{platform, x, vx, heading, reach}]           control.navigator (avoiding monsters)
   trip      dst, result                                        control.navigator, at every trip's end
   stance    act, text, aimed [{kind, x, y}]                    behavior.fight, each look of a fight

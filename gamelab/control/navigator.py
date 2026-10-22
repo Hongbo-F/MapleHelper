@@ -377,7 +377,7 @@ class Navigator:
         st.avoid = {key: t for key, t in st.avoid.items() if now - t < AVOID_MEMORY_S}
         path = self.planner.plan(s.where.platform.id, s.where.x, dst, weight=self.weight, penalty=self._penalty(st))
         if path and telemetry.recording():
-            telemetry.emit("route", **route_record(dst, path))
+            telemetry.emit("route", **_route_record(st, dst, path, s.where.platform.id, s.where.x))
         return path, now
 
     @staticmethod
@@ -531,6 +531,10 @@ class Navigator:
         monster hit her (the caller counts misses)."""
         landed = after.where.platform
         hit = after.hp < hp - HIT
+        if telemetry.recording():  # (for the coverage report: analysis.coverage)
+            telemetry.emit("moved", moves=[{"kind": m.kind, "src": m.src, "dst": m.dst, "x": round(m.x, 1)}
+                                           for m in moved],
+                           planned=planned.id, landed=landed.id if landed else None, hit=hit)
         trip.moves += [f"{m.kind} {m.src}->{m.dst}" for m in moved]
         trip.moves[-1] += f": landed on {landed.id if landed else None}" + (" (hit)" if hit else "")
         if hit:
@@ -821,7 +825,7 @@ class Navigator:
         self.log(f"    then from platform {p.id} at x {x:.0f} (planned on the move): "
                  + _chain_text(legs, len(path), why))
         if telemetry.recording():
-            telemetry.emit("route", **route_record(dst, path))
+            telemetry.emit("route", **_route_record(st, dst, path, p.id, x))
         plan_id, length = send(legs, keys, why, tail or 0.0)
         return _Running(plan_id, legs, start, tail is not None, tail or 0.0, length)
 
@@ -854,6 +858,12 @@ def _no_follow(why: str) -> None:
 def _key(m: Move) -> tuple:
     """A move's identity across replans."""
     return (m.kind, m.src, m.dst, round(m.x))
+
+
+def _route_record(st: TripState, dst: int, path: list[Move], src: int, x: float) -> dict:
+    """Trip `st`'s route `path` to `dst`, planned from platform src at x, as telemetry ('route'), with what its
+    plan weighed besides the moves' times: the platforms it keeps off and the moves a monster was in the way of."""
+    return route_record(dst, path, start=(src, x), keep_off=st.keep_off - {dst}, avoid=sorted(st.avoid))
 
 
 def _ground_from(leg: Leg) -> float:

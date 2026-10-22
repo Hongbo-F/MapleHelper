@@ -757,7 +757,18 @@ def keeping_off(platforms, dst: int) -> Callable[[Move], float]:
     return lambda m: KEEP_OFF_S if m.dst in off else 0.0
 
 
-def route_record(dst: int, moves: list[Move]) -> dict:
-    """A planned route as telemetry data ('route')."""
-    return {"dst": dst, "moves": [{"kind": m.kind, "src": m.src, "dst": m.dst, "x": round(m.x, 1),
-                                   "land_x": round(m.land_x, 1)} for m in moves]}
+def route_record(dst: int, moves: list[Move], start: tuple[int, float] | None = None, keep_off=(),
+                 avoid=()) -> dict:
+    """A planned route as telemetry data ('route'). With `start` (platform, x: where it was planned from), the
+    platforms its trip keeps off (`keep_off`, KEEP_OFF_S a move onto one) and the moves it costs extra for a
+    monster in their way (`avoid`: (kind, src, dst, x) keys), the coverage report (analysis.coverage) can weigh
+    the moves it didn't take against it. Those three only when given."""
+    out = {"dst": dst, "moves": [{"kind": m.kind, "src": m.src, "dst": m.dst, "x": round(m.x, 1),
+                                  "land_x": round(m.land_x, 1)} for m in moves]}
+    if start is not None:
+        out["from"] = {"platform": start[0], "x": round(start[1], 1)}
+    if keep_off:
+        out["keep_off"] = sorted(keep_off)
+    if avoid:
+        out["avoid"] = [list(key) for key in avoid]
+    return out

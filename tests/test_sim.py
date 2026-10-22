@@ -1268,6 +1268,25 @@ def test_real_map_scenarios_show_what_they_are_there_for(name):
 
 
 @REAL
+def test_the_navigator_records_where_each_route_was_planned_from_and_how_each_chain_ended():
+    """For the coverage report (analysis.coverage): a route's record says where it was planned from (and what its
+    trip keeps off and the moves it avoided for a monster, when there are any), and after each chain or move made
+    alone a 'moved' record says what was made, where it was to end and where she did. nav_rope_past_end: 23 -> 17
+    by the climb past 23's end, in one chain."""
+    from gamelab import telemetry
+    from gamelab.motion.route import route_record
+    with telemetry.captured() as records:
+        trace = scenarios.run("nav_rope_past_end")
+    assert trace["result"]["result"] == "arrived"
+    routes = [r for r in records if r["topic"] == "route"]
+    assert routes[0]["from"] == {"platform": 23, "x": 900.0} and "keep_off" not in routes[0] and "avoid" not in routes[0]
+    assert [(r["planned"], r["landed"], r["hit"], [(m["kind"], m["src"], m["dst"], m["x"]) for m in r["moves"]])
+            for r in records if r["topic"] == "moved"] == [(17, 17, False, [("climb", 23, 17, 998.7)])]
+    assert route_record(17, [], start=(36, 512.34), keep_off={17, 4}, avoid=[("jump", 32, 29, 536)]) == {
+        "dst": 17, "moves": [], "from": {"platform": 36, "x": 512.3}, "keep_off": [4, 17], "avoid": [["jump", 32, 29, 536]]}
+
+
+@REAL
 def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_move_her(monkeypatch):
     """nav_walk_off_after_kill with no wait for her attack to stop swallowing arrows (actions.ARROW_LOCK_MS 0):
     the walk-off goes 0.34 s after her last throw's key, she stays on 3 as in game, and only the walk-off sent
