@@ -18,8 +18,10 @@ run left going for days (`watch`) keeps the folder bounded too.
 Topics (map units; producers build the records, ui.state folds them):
 
   session   map, command, mode (live/sim); continues, part     the command line, the simulator; a new part
-  scene     her {x, y, platform, how, seen, facing}, hp, mp,   every look (behavior.hunter, after Senses)
-            monsters [{kind, x, y, platform, bar}], loot [{kind, x, y, platform}]
+  scene     her {x, y, platform, how, seen, facing, grounded}, every look (behavior.hunter, after Senses;
+            hp, mp, monsters [{kind, x, y, platform, bar}],    from 2026-10-21's evening also what it
+            loot [{kind, x, y, platform}], searched, wide,     searched, for analysis.respawn)
+            looked [[platform, x0, x1]], view [x0, y0, x1, y1]
   drops     pending [{x, y, platform, mesos}], inventory_full  every look (behavior.hunter)
   glance    x, y, hp                                           control.navigator, while a chain runs
   route     dst, moves [{kind, src, dst, x, land_x}], from     control.navigator, each plan (from 2026-10-21 also

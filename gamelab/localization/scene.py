@@ -105,17 +105,28 @@ class Scene(Observation):
         return any(p == platform and lo <= x <= hi for p, lo, hi in self.looked)
 
     def record(self) -> dict:
-        """This look as telemetry data ('scene'): where she is, HP and MP, the monsters and the drops."""
+        """This look as telemetry data ('scene'): where she is (and whether she stands: `grounded`), HP and MP, the
+        monsters and the drops; and what it searched (from 2026-10-21's evening, for analysis.respawn: an empty list
+        of monsters is otherwise a look that saw none or one that didn't look): `searched` and `wide` (Scene's),
+        `looked` (where drops were looked for: platform, map x from, to) and `view` (the map the screen showed above
+        the bottom bar: x from, y from, x to, y to, whole units)."""
         her = None if self.where is None else {
             "x": round(self.where.x, 1), "y": round(self.where.y, 1),
-            "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen}
+            "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen,
+            "grounded": self.grounded}
+        view = None
+        if self.tag is not None and self.where is not None and getattr(self.frame, "shape", None) is not None:
+            h, w = self.frame.shape[:2]
+            view = [round(self.map_x(0)), round(self.map_y(0)), round(self.map_x(w)), round(self.map_y(h * HUD_TOP))]
         return {"her": her, "hp": round(self.hp, 3), "mp": round(self.mp, 3),
                 "monsters": [{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1), "platform": m.platform,
                               "bar": None if m.bar is None else round(m.bar, 2),
                               **({"facing": m.facing} if m.facing else {})}  # left out when not known
                              for m in self.monsters],
                 "loot": [{"kind": d.item.kind, "x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform}
-                         for d in self.loot]}
+                         for d in self.loot],
+                "searched": self.searched, "wide": self.wide,
+                "looked": [[pid, round(lo), round(hi)] for pid, lo, hi in self.looked], "view": view}
 
     def room(self, direction: str, margin: float) -> float:
         """Map units she can walk that way before the end of her platform (less a margin)."""

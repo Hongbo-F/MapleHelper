@@ -1289,6 +1289,33 @@ def test_the_navigator_records_where_each_route_was_planned_from_and_how_each_ch
 
 
 @REAL
+def test_a_scene_record_says_what_its_look_searched():
+    """From 2026-10-21's evening each scene record says whether the look searched for monsters and how, where it looked
+    for drops, what the screen showed, and whether she stood: analysis.respawn then needs to infer none of it. The screen
+    is where the camera's model puts it, with her standing in the basin."""
+    from gamelab import telemetry
+    from gamelab.localization.pose import VIEW, Camera
+
+    def fn(sim):
+        h = sim.hunter()
+        h.look(loot=True)
+        h.look(mobs=False)
+        return {}
+
+    sc = scenarios.Scenario("record", fn, (36, 500.0), monsters=[("Pig", 36, 800.0)])
+    with telemetry.captured() as records:
+        _, sim = scenarios.run_sim(sc)
+    looks = [r for r in records if r["topic"] == "scene"]
+    a, b = looks[-2], looks[-1]
+    assert a["searched"] and not a["wide"] and a["her"]["grounded"]
+    assert a["looked"] and all(lk[0] == 36 for lk in a["looked"])
+    assert not b["searched"] and b["looked"] == []
+    cx, cy = Camera(sim.model.bounds).corner(a["her"]["x"], a["her"]["y"])
+    assert abs(a["view"][0] - cx) <= 2 and abs(a["view"][1] - cy) <= 2
+    assert abs(a["view"][2] - a["view"][0] - VIEW[0]) <= 2
+
+
+@REAL
 def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_move_her(monkeypatch):
     """nav_walk_off_after_kill with no wait for her attack to stop swallowing arrows (actions.ARROW_LOCK_MS 0):
     the walk-off goes 0.34 s after her last throw's key, she stays on 3 as in game, and only the walk-off sent

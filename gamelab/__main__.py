@@ -949,8 +949,8 @@ def cmd_watch(args) -> int:
     spotter = LieDetectorSpotter() if args.lie_detector else None
     started = time.monotonic()
     until = started + args.minutes * 60 if args.minutes else None
-    w = {"scene": -1e9, "tracks": -1e9, "status": started, "lie": -1e9, "visible": None, "loot": [], "frames": 0,
-         "seen": 0, "alarm": False}
+    w = {"scene": -1e9, "tracks": -1e9, "status": started, "lie": -1e9, "visible": None, "loot": [], "looked": [],
+         "frames": 0, "seen": 0, "alarm": False}
 
     def check(full) -> None:  # the Lie Detector, on its thread
         if spotter.seen(full) and not w["alarm"]:
@@ -989,11 +989,11 @@ def cmd_watch(args) -> int:
                     _log(f"  {e.data['kind']} #{e.track} died on platform {e.data['platform']}: "
                          + ("hers" if e.data["cause"] == "hers" else "someone else's"))
             if st.loot is not None:
-                w["loot"] = st.loot
+                w["loot"], w["looked"] = st.loot, st.looked
             if now - w["scene"] >= WATCH_SCENE_S:
                 w["scene"] = now
                 s = worldstate.to_scene(st, model, band, mobs=True, wide=True)
-                s.loot = w["loot"]
+                s.loot, s.looked = w["loot"], w["looked"]  # as of the last frame searched for drops (LOOT_EVERY_S)
                 telemetry.emit("scene", **s.record())
             if now - w["tracks"] >= WATCH_TRACKS_S:
                 w["tracks"] = now
