@@ -436,7 +436,8 @@ class WorldStep:
         self._last = None  # a frame is searched once
         job.band, job.wide, job.loot, job.loot_wide = band or wide, wide, loot, loot_wide
         job.mesos_only = self.mesos_only
-        self.tracker.searching = job.t
+        if job.band:  # (a search for the drops alone can't see a monster: hidden tracks don't wait for it)
+            self.tracker.searching = job.t
         self.searches.submit(job)
 
     def _merge(self, found: Found | None) -> None:

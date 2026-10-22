@@ -9,7 +9,7 @@ import time
 import numpy as np
 import pytest
 
-from gamelab.localization import mapdata, worldstate
+from gamelab.localization import mapdata, tracking, worldstate
 from gamelab.localization.pose import Localizer
 from gamelab.localization.senses import Senses
 from gamelab.localization.worldstate import Asks, Schedule, Searches, WorldStep, search, to_scene
@@ -300,3 +300,35 @@ def test_a_re_find_the_tracker_turned_down_doesnt_hide_that_monster_from_a_late_
     # not dropped as one of the frame's re-finds
     (merged,) = [t for t in late.tracks if t.id == tr.id]
     assert merged.last_seen == pytest.approx(100.0 + 6 / FPS)
+
+
+@pytest.mark.parametrize("out", ["drops", "band"])
+def test_a_hidden_track_waits_to_be_judged_for_a_search_for_monsters_out_and_not_for_one_for_the_drops(out):
+    # Its frame's search for monsters, inline, would have been merged before the track was judged; one for the
+    # drops alone can't see it. Once due, the track is judged at the next frame with only that out.
+    step, searches = held_step()
+    step.eyes.mobs = [pig(1100)]
+    one(step, 0, Asks(band=True))
+    searches.back()
+    for k in range(1, 8):
+        one(step, k)
+        step.came_back()
+    (tr,) = step.tracker.tracks.values()
+    step.eyes.mobs = []  # out of sight: hidden, then due HIDE_S after it was last seen
+    due = tr.last_seen + tracking.HIDE_S
+    k = 8
+    while 100.0 + (k + 1) / FPS <= due:
+        one(step, k)
+        k += 1
+    one(step, k, Asks(loot=True) if out == "drops" else Asks(band=True))  # handed over on the frame before it's due
+    assert not searches.free()
+    while 100.0 + k / FPS < due + 0.2:
+        k += 1
+        one(step, k)
+    if out == "drops":
+        assert step.tracker.tracks[tr.id].state == "dead" and step.tracker.counts["died other"] == 1
+    else:
+        assert step.tracker.tracks[tr.id].state == "hidden" and step.tracker.counts["died other"] == 0
+        searches.back()
+        one(step, k + 1)  # it wasn't there: judged as soon as that search is merged
+        assert step.tracker.tracks[tr.id].state == "dead"

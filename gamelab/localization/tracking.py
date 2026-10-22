@@ -15,7 +15,7 @@ were at its frame (the tracks re-found in that frame are those sightings already
 nothing from it; one found dead since isn't brought back, nor made anew (it's the same monster: `late
 sightings of the dead`); one gone off screen since stays off; a new one is new as of the search's frame, and
 re-found from the next frame on. And a track hidden too long isn't judged gone (dead, or lost in a crowd)
-while a search is out of a frame after it was last seen and by the frame it was due (`searching`,
+while a search for monsters is out of a frame after it was last seen and by the frame it was due (`searching`,
 LATE_SEARCH_S): it may have been seen there, as that search inline would have shown before the track was
 judged.
 
@@ -119,10 +119,10 @@ LONG_GAP_S = 1.0    # a track seen again after longer than this starts its veloc
 FRAME_SLACK = 0.05  # s: a monster last seen this little before a gain went out of sight as it died
 FADE_MOVE = 10.0    # units a monster fading where it died may seem to move: a sighting farther off is another one
                     # walking through (it took the dying one's track, and starved its own, in the simulator)
-# A track hidden too long (HIDE_S) isn't judged gone while a search is out of a frame after it was last seen and
-# no later than this after it was due (about a frame): inline, that search was merged in its own frame, before
-# the track was judged, and could show it still there. A later frame's couldn't have saved it, so the wait is
-# bounded however often she searches.
+# A track hidden too long (HIDE_S) isn't judged gone while a search for monsters is out of a frame after it was last
+# seen and no later than this after it was due (about a frame): inline, that search was merged in its own frame,
+# before the track was judged, and could show it still there. A later frame's couldn't have saved it, so the wait
+# is bounded however often she searches. (A search for the drops alone can't see it, and isn't waited for.)
 LATE_SEARCH_S = 0.05
 
 
@@ -225,8 +225,8 @@ class MonsterTracker:
         self.throws: list[_Throw] = []
         self.her: tuple[float, float] | None = None  # where she was in the last frame placed
         self._last_t = -1e18                          # ... and when that was
-        # The frame time of a search out (localization.worldstate: its answer comes back a few frames later), or
-        # None (LATE_SEARCH_S).
+        # The frame time of a search for monsters out (localization.worldstate: its answer comes back a few frames
+        # later), or None (LATE_SEARCH_S).
         self.searching: float | None = None
         self.refound_seen: set[int] = set()  # the tracks the last frame's re-finds were taken for (`update`)
         self.counts = {"tracks": 0, "died hers": 0, "died other": 0, "lost in a crowd": 0, "flickers": 0,
