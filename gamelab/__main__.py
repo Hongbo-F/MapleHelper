@@ -1097,6 +1097,36 @@ def cmd_coverage(args) -> int:
     return 0
 
 
+def cmd_respawn(args) -> int:
+    """Respawns, drop life and how full the platforms are, from telemetry (analysis/respawn.py): by default the
+    live telemetry (but the simulator's files), against the map's own spawn fields. Offline: no game, no keys."""
+    import json
+    from .analysis import respawn
+    from .attack import reach
+    from .behavior.probe import PROBES
+    from .localization import mapdata
+    from .localization.pose import Camera
+    model = mapdata.load(args.map)
+    corner, band = Camera(model.bounds).corner, (reach.LOOK_UP, reach.LOOK_DOWN)
+    files = ([Path(f) for f in args.files] if args.files else
+             [p for p in sorted(paths.TELEMETRY.glob("*.jsonl")) if "-sim-" not in p.name])
+    runs = respawn.Runs()
+    for path in files:
+        records = telemetry.read(path)
+        session = next((r for r in records if r.get("topic") == "session"), {})
+        if session.get("map", args.map) != args.map:
+            continue
+        probe = PROBES.get(str(session.get("command", "")).removeprefix("probe-"))
+        runs.add(records, model, corner, band, probe_wide=probe is not None and probe.wide)
+    raw = json.loads((mapdata.CACHE / f"{args.map}.json").read_text(encoding="utf-8"))
+    lines = respawn.report(runs, model, respawn.spawn_fields(raw["tree"]))
+    print("\n".join(lines))
+    if args.text:
+        Path(args.text).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"report: {args.text}")
+    return 0
+
+
 # --- the command line ------------------------------------------------------------------------------------
 
 def feed_arg(s) -> None:
@@ -1353,6 +1383,13 @@ def build_parser() -> argparse.ArgumentParser:
                                      "default gamelab/lab/coverage_<map>.png)")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_coverage)
+    s = sub.add_parser("respawn", help="how long monsters take to come back after a kill, how long drops lie, and "
+                                       "how full the platforms are, from telemetry (offline; no game, no keys)")
+    s.add_argument("files", nargs="*", help="telemetry files (.jsonl; default: the live ones in gamelab/lab/telemetry, "
+                                            "but the simulator's)")
+    s.add_argument("--text", help="also write the report to this file")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.set_defaults(func=cmd_respawn)
     return p
 
 
