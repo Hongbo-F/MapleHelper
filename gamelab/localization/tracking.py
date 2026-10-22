@@ -134,8 +134,9 @@ LATE_SEARCH_S = 0.05
 # death. Over the seven runs of the README's table (Continuous perception), with the other player hunting one place
 # at a time: deaths judged someone else's 14 -> 4, right 4 -> 4 (10 let go, nobody by them); hers the same (263 judged,
 # 254 right, of 274). With PLAYERS_LAST, of the monsters her EXP gain may be, one with another player by it comes after
-# those without (as behavior.ledger.PLAYER_KILLS has hers): the same 263 there. Either way a death someone else's
-# names the player by it (`by`).
+# those without (as behavior.ledger.PLAYER_KILLS has hers): the same 263 there, and with her gains naming their kinds
+# the same 283 judged hers (all right) of 299 on or off; on as PLAYER_KILLS is, nothing measured against it. Either way
+# a death someone else's names the player by it (`by`).
 OTHERS_BY_PLAYER = True
 PLAYERS_LAST = True
 

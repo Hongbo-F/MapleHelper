@@ -8,9 +8,9 @@ theirs doesn't make them go: the continuous feed looks 30 times a second). A loo
 nearest first, the same kind, within MATCH_PX and what a player walks meanwhile. A look from the feed brings the
 players its own frames followed (`adopt`), so a look taken here after it goes on from them, ids and all.
 
-The minimap shows the whole map, so every look sees every player on it: the attribution of kills and the hunt loop's
-piles go by them (localization.tracking, behavior.ledger, behavior.hunt), and its choice of ground can
-(hunt.PLAYER_DISCOUNT, off).
+The minimap shows the whole map, so every look sees every player on it: the attribution of kills goes by them
+(localization.tracking, behavior.ledger), and the hunt loop's piles and choice of ground can (hunt.PLAYER_PILES,
+hunt.PLAYER_DISCOUNT, both off by the harness).
 """
 
 from dataclasses import dataclass, replace

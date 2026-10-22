@@ -160,16 +160,22 @@ DETOUR_REACH = 2.5
 # seeds' runs and cost seed 7 27% of its EXP a minute (129.9 -> 128.7 on average; 0.5 on seeds 1-10, 127.9 -> 125.6):
 # leaving the basin, she went to 17 (35% of it in reach) rather than to 4, where the other player had just come, and
 # spent 5 minutes there, where on 4 she had made more with it beside her. The simulator's other player kills one monster every 25 s, a
-# guess; a real one may take far more of a ground.
+# guess; a real one may take far more of a ground. With one killing every 8 s (20 seeds), 0.85 changed no run and 0.7
+# one (+0.4% on average): too little to turn it on.
 PLAYER_DISCOUNT = 1.0
 PLAYER_NEAR = 200.0
 PLAYER_DY = 100.0
 # Whether a pile no kill of hers explains, with another player by it (players.near_rival), is left to them unless it
-# holds a drop worth VALUABLE: theirs, it can't be picked up for a while, and they take it. In the simulator (preset
-# game, 20 seeds of 20 minutes) it changed 9 seeds' runs, 4 for the better (129.93 -> 129.88 EXP a minute, drops
-# picked up 83.7% -> 83.9%, HP lost 2.77 -> 2.77 bars): the other player there takes its drops 22 s after its kill,
-# before OTHERS_AFTER makes them worth a trip anyway, so only piles taken for no kill of hers are left.
-PLAYER_PILES = True
+# holds a drop worth VALUABLE: theirs, it can't be picked up for a while, and they take it. Off, by the harness (preset
+# game, 20 seeds of 20 minutes, against the same code with it off): with the preset's other player (a kill every 25 s)
+# it changed 11 seeds' runs, 6 for the better, 130.80 -> 131.16 EXP a minute (+0.4%, standard error 0.8%), but her
+# drops picked up fell 83.7% -> 82.7%; with one killing every 8 s (more like a real player), 11 changed, 4 for the
+# better, 124.43 -> 122.15 (-1.9%, standard error 1.1%; the worst seed 11% down, and seed 6 fell out of the map at
+# 1168 s, a corner of the simulator's walls), drops 85.3% -> 85.8%. (Before her EXP gains named their kinds: 9 seeds
+# changed, 4 better, 129.93 -> 129.88, drops 83.7% -> 83.9%: it was on.) The other player there takes its drops 22 s
+# after its kill, before OTHERS_AFTER makes them worth a trip anyway, so only piles taken for no kill of hers are
+# left; whether a real player's are worth leaving is for the game to say.
+PLAYER_PILES = False
 
 
 def _keep_off(o: "Objective") -> tuple[int, ...]:

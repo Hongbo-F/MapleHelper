@@ -49,10 +49,14 @@ GONE_KEEP_S = 300.0
 # but for the Slime Bubble (looting.PRICES).
 PILE_WORTH = COINS["bronze"]
 # Whether a gain goes on a monster gone from view by another player (localization.players.near_rival) only when no
-# other a throw of hers explains has gone: one gone by them, they likelier killed. In the simulator's hunt loop (preset
-# game, 20 seeds of 20 minutes) her throws' paths rarely held the other player's kills: of about 4,200 kills, 9 were
-# placed where its kill was without this, 8 with it, and as many placed right (67%); EXP a minute 129.93 -> 129.76
-# (2 seeds' runs changed), the tour's runs the same. On for the game, where another player may hunt beside her.
+# other a throw of hers explains has gone: one gone by them, they likelier killed. The harness can't tell: with her
+# gains naming their kinds (localization.gains) it changes no run at all (preset game, hunt loop and tour, 20 seeds of
+# 20 minutes, with the preset's other player and with one killing every 8 s: 0 of 80 runs), and the ledger put none of
+# her kills on the other player's (0 of 3,569 placed, 98.8% right, on or off, with the busy one). (Before the kinds:
+# 9 of about 4,200 kills placed where its kill was without it, 8 with it, EXP a minute 129.93 -> 129.76 on 2 seeds.)
+# On because the request was for her kills to go by the other players, and all it does is put last, of the monsters
+# of the kind named gone from her throws' paths, one by another player; whether a real one's kills are ever in her
+# throws' paths is for the game to say (README: Other players, to check in game).
 PLAYER_KILLS = True
 # Whether a kill whose gain named a kind (localization.gains) that none of her recent throws' paths holds goes on the
 # likeliest monster of any kind (True), or unplaced (False: no pile expected; its kind still counted). Over the three

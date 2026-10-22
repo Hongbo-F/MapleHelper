@@ -317,10 +317,12 @@ def test_the_wait_for_drops_to_land_counts_in_what_a_pile_on_the_way_costs():
     assert h._detour(_at(13)) is None
 
 
-def test_a_pile_by_another_player_is_left_to_them_unless_it_is_valuable_or_hers():
-    """PLAYER_PILES: a pile no kill of hers explains, with another player by it in the latest look (400 units across,
-    100 up or down), isn't worth a trip, however old, unless a drop in it is worth VALUABLE; her own are."""
+def test_a_pile_by_another_player_is_left_to_them_unless_it_is_valuable_or_hers(monkeypatch):
+    """PLAYER_PILES (off by default): a pile no kill of hers explains, with another player by it in the latest look
+    (400 units across, 100 up or down), isn't worth a trip, however old, unless a drop in it is worth VALUABLE; her own
+    are."""
     from gamelab.localization.players import Player
+    monkeypatch.setattr(hunt, "PLAYER_PILES", True)
     theirs = _pile(hunt.OTHERS_AFTER + 1, hers=False)
     dear = _pile(hunt.OTHERS_AFTER + 1, hers=False, dearest=hunt.VALUABLE, worth=hunt.VALUABLE)
     mine = _pile(10)

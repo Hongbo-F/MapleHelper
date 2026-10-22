@@ -82,8 +82,9 @@ UNKNOWN_WORTH = max(PRICES.values())
 # (`remember`). Her own kills' drops are swept where they died, whoever stands by them. Off: the tour can't tell whose
 # drops it sees, and some by the other player were hers. In the simulator's tour (preset game, 20 seeds of 20 minutes)
 # it changed 11 seeds' runs, 7 for the better (the worst 7% down): 91.4 -> 92.8 EXP a minute, HP lost 3.00 -> 2.88
-# bars, but her drops picked up 94.2% -> 93.9% (seeds 1-10: 94.7% -> 92.6%), below the harness's bar. (The hunt
-# loop's drop store knows which piles her kills explain: hunt.PLAYER_PILES.)
+# bars, but her drops picked up 94.2% -> 93.9% (seeds 1-10: 94.7% -> 92.6%), below the harness's bar; with the other
+# player killing every 8 s, 15 changed, 11 for the better, 85.39 -> 88.47 (+4.1%, standard error 2.3%; the worst 19%
+# down), drops 94.2% -> 93.4%. (The hunt loop's drop store knows which piles her kills explain: hunt.PLAYER_PILES.)
 PLAYER_PILES = False
 PLAYER_PILE_WORTH = 30.0
 
