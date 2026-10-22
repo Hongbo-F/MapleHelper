@@ -222,11 +222,18 @@ CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star'
 # lets the probe's scorer be checked in a world of either.
 AIR_PICK = "area"
 DROP_DELAY = 2.0
+# s from a kill until the monster is back at its spawn point (a guess; Realism.respawn). Not the game's, by its live
+# telemetry of 2026-10-19 to 21 (analysis.respawn: README, Respawns and drop life): there a platform she emptied had a
+# monster again within 12.56 s on 17% of 77 (95% interval 10-28%) and mostly not by 60 s, where in this world all are
+# back by 8.8 s (the same report on 8 runs of preset game); the game's basin had a monster at 12% of its spawn points,
+# none 45% of the time, this world's 27% and 7%. Kept until the game's refill is settled (a delay, or MeowDB's cap of
+# the map's monsters, a respawn going to any free spawn point): the in-game check there.
 RESPAWN = 8.0
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
                          # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
 POSE_SPELL_S = 1.0       # s a monster's pose reads right or wrong at a time (Noise.pose_wrong)
-DROP_LIFE = 180.0        # s drops lie before they vanish
+DROP_LIFE = 180.0        # s drops lie before they vanish (a guess: in game they lie over a minute, 95% at 60 s of 337
+                         # followed, and the hunts' telemetry can't say more; analysis.respawn)
 PICK_REACH = 15.0
 POTION_HP = 0.30
 CHAIR_HP_PER_S = 0.03
@@ -306,7 +313,8 @@ class Realism:
     """How busy and how hard the map is. The defaults are the simulator's own world (every spawn point
     filled, an 8 s respawn, nobody else hunting, endless potions), which is denser and easier than the
     game: tour_run makes about 143 EXP a minute where a sweep in game made about 76. The other values are
-    knobs for comparing policies in a world closer to the game's; none of them is measured but lock_arrows."""
+    knobs for comparing policies in a world closer to the game's; none of them is measured but lock_arrows (and the
+    respawn, which the live telemetry says isn't the game's: RESPAWN)."""
     respawn: float = RESPAWN     # s from a kill until the monster is back at its spawn point
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
     rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)

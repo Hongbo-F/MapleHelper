@@ -43,7 +43,8 @@ are suspended, not ended, when a higher rule fires: they keep their route weight
 (OBJECTIVE_S, suspensions included).
 
 The numbers marked "guess" are starting values for the simulator's A/B runs (gamelab.sim.harness); none
-is measured in game (respawns, how long drops last).
+is measured in game. Respawns and how long drops last were measured on the live telemetry (analysis.respawn), and
+didn't settle RESPAWN and DROP_LIFE: their comments say what they did show.
 """
 
 import random
@@ -79,13 +80,26 @@ PILE_TRIES = 2         # a pile is gone after at most this many times (a suspens
 URGENT_MARGIN = 30.0   # rule 6: s of slack before a pile's expected end (time for a guard to be shot first) ...
 URGENT_TRAVEL = 12.0   # ... for piles at most this far (s of travel): farther ones wait until she leaves a
                        # ground (rule 10); one 84 s round trip for a pile from the basin took a quarter of a run
-DROP_LIFE = DROPS_LAST  # guess: s a drop is still worth going for (the code's own assumption; sim: 180)
+# s a drop is still worth going for (looting.DROPS_LAST, the code's own assumption; the simulator's lie 180 s). The live
+# telemetry of 2026-10-19 to 21 doesn't settle it (analysis.respawn: README, Respawns and drop life): of 337 drops
+# followed, 95% were still lying at 60 s (95% interval 89-97%; 7 followed that long, none past 88 s, as she picks
+# hers up within seconds and the next kill lands by the rest). Longer than a minute, which 90 and 180 both are.
+DROP_LIFE = DROPS_LAST
 OTHERS_AFTER = 30.0    # guess: s before drops no kill of hers explains are worth a trip (not hers before)
 SPOT_MORE, SPOT_TIMES = 2, 1.5  # rule 7: another spot must reach 2 more monsters, or 1.5 times as many ...
 SPOT_TRAVEL = 8.0      # ... within this many s of travel ...
 SPOT_REST = 10.0       # ... not sooner than this after taking a spot ...
 SPOT_CHANGES = 4       # ... and at most this many times per visit to a ground
-RESPAWN = 8.0          # guess: s from a kill until the monster is back (the simulator's; unmeasured)
+# s from a kill until the monster is back (the simulator's): rules 8 and 9 wait for it, and the fast exit leaves a ground
+# RESPAWN + 2 s after her last kill there. The live telemetry of 2026-10-19 to 21 says the game doesn't refill a
+# platform she empties so (analysis.respawn: README, Respawns and drop life): of 77 platforms a kill of hers emptied,
+# 13 were seen with a monster again, all within 12.8 s, and 83% weren't by 12.56 s (95% interval 72-90%, 46 followed
+# that long; MeowDB's slowest respawn at a spawn point: its 5 s cooldown and the 7.56 s tick), nor 81% by 60 s (15
+# followed); in the simulator, by the same report, all were back by 8.8 s. What to put here instead isn't settled (the
+# median isn't reached, and the game may send a respawn elsewhere on the map, past a cap of its monsters, rather than
+# later): it stays until the in-game check (README). It decided 11.5% of the live hunt loops' time (rule 8, 6.2%;
+# rule 9, 5.3%) and 20 of their 43 departures from a ground.
+RESPAWN = 8.0
 PATIENCE = {"ground": 1.0, "spot": 2.0, "none": 0.4}  # rule 9: today's patience values
 PRIOR_S = 20.0         # the rate rule: a ground's expected rate counts as this many s of hunting there
 MIN_STAY, MIN_THROWS = 15.0, 6  # ... judged only after this long there, or this many throws
