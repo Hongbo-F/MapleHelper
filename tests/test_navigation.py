@@ -982,6 +982,21 @@ def test_a_trip_starts_from_the_callers_look_while_it_still_shows_where_she_is(m
     assert alone.begin(c.id, mode=AVOID, scene=look).fresh is look
 
 
+def _glancing(localizer, glance):
+    """Senses as Navigator._watch and recover use them, glancing with `glance` (her dot and HP), each glance's frame
+    shown as it's taken."""
+    from types import SimpleNamespace
+
+    import gamelab.control.navigator as nv
+    senses = SimpleNamespace(wait_frame=nv.time.sleep, localizer=localizer, glanced_at=None)
+
+    def glanced():
+        senses.glanced_at = nv.time.monotonic()
+        return glance()
+    senses.glance = glanced
+    return senses
+
+
 def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(model, monkeypatch):
     """Navigator._watch: once the next chain is queued (after the look placing her), a hit cuts the running
     plan short and withdraws the queued one before it starts; the legs sent leave out the withdrawn chain's."""
@@ -995,8 +1010,7 @@ def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(mode
     nav = _navigator(model)
     localizer = Localizer(model)
     hp = {"now": 1.0}
-    nav.senses = SimpleNamespace(glance=lambda: (localizer.to_dot(150, 500), hp["now"]), wait_frame=nv.time.sleep,
-                                 localizer=localizer)
+    nav.senses = _glancing(localizer, lambda: (localizer.to_dot(150, 500), hp["now"]))
     nav.flow.expected = lambda legs, t: c.id
     walk = Leg(Move("walk_off", c.id, c.id, 300, 300, "right"), Body(0.0, 100, c, run=1), Body(0.5, 175, c, run=1),
                [Span(c.id, 0.0, 0.5, 100, 175)])
@@ -1020,17 +1034,21 @@ def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(mode
     assert calls["cancel"] == ["running", "queued"] and calls["wait"] == ["running"]  # the queued one withdrawn
 
 
-def _watch_still_dot(model, monkeypatch, legs, x, y):
-    """Navigator._watch over a plan of `legs` (nothing queued after it) while her dot sits still at map (x, y):
-    why it was cut ('' if not), and when (s into the plan; the plan's end if it wasn't)."""
+def _watch_still_dot(model, monkeypatch, legs, x, y, every=0.03):
+    """Navigator._watch over a plan of `legs` (nothing queued after it) while her dot sits still at map (x, y), on a
+    clock of its own, glanced at every `every` s (each glance's frame shown as it's taken): why it was cut ('' if
+    not), and when (s into the plan; the plan's end if it wasn't)."""
     from types import SimpleNamespace
 
     import gamelab.control.navigator as nv
     from gamelab.localization.pose import Localizer
+    clock = {"now": 100.0}
+    monkeypatch.setattr(nv, "time", SimpleNamespace(monotonic=lambda: clock["now"],
+                                                     sleep=lambda s: clock.update(now=clock["now"] + max(0.0, s))))
     nav = _navigator(model)
     localizer = Localizer(model)
-    nav.senses = SimpleNamespace(glance=lambda: (localizer.to_dot(x, y), 1.0), wait_frame=nv.time.sleep,
-                                 localizer=localizer)
+    nav.senses = _glancing(localizer, lambda: (localizer.to_dot(x, y), 1.0))
+    nav.senses.wait_frame = lambda timeout: nv.time.sleep(every)
     start = nv.time.monotonic()
     cut_at = []
     monkeypatch.setattr(nv.client, "done", lambda pid: nv.time.monotonic() - start > legs[-1].end.t + 0.2)
@@ -1043,7 +1061,7 @@ def _watch_still_dot(model, monkeypatch, legs, x, y):
 
 
 def test_standing_still_where_her_run_starts_cuts_the_plan_short(model, monkeypatch):
-    """Navigator._watch: her dot still (STILL_GLANCES glances) where a run along her platform starts while the
+    """Navigator._watch: her dot still (for STILL_S) where a run along her platform starts while the
     plan has her OFF_SPAN or more along it cuts the plan short (in game, a chain whose first arrow the game
     took 0.2 s late jumped at its planned time from 15-30 units short and fell off), and before the jump at
     the end of the run; where the plan has her, it doesn't."""
@@ -1057,6 +1075,38 @@ def test_standing_still_where_her_run_starts_cuts_the_plan_short(model, monkeypa
     assert cut.startswith("off the path (still at x 100") and OFF_SPAN / 150 < at < 0.6
     standing = Leg(run.move, Body(0.0, 100, c), Body(1.0, 100, c), [Span(c.id, 0.0, 1.0, 100, 100)])
     assert _watch_still_dot(model, monkeypatch, [standing], 100, 500)[0] == ""
+
+
+def test_what_her_glances_show_is_judged_by_how_long_it_lasts_not_by_how_many_show_it(model, monkeypatch):
+    """Navigator._watch: standing still where her run starts while the plan has her running is cut short OFF_PATH_S
+    after the plan has her OFF_SPAN along (her dot still since it began, for STILL_S and more), at the first glance
+    after that, whether she's glanced at 30 times a second (a feed's frames) or every 63 ms (as before): 0.37 and
+    0.38 s in. Counted in glances (3 for both), at 30 a second it was cut 0.30 s in."""
+    from gamelab.control.navigator import OFF_PATH_S, OFF_SPAN, STILL_S
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.route import Move
+    c = by_y(model, 500, 400)
+    run = Leg(Move("walk_off", c.id, c.id, 300, 300, "right"), Body(0.0, 100, c), Body(1.0, 250, c, run=1),
+              [Span(c.id, 0.0, 1.0, 100, 250)])
+    behind = OFF_SPAN / 150  # (150 units/s along it)
+    assert STILL_S < behind
+    for every in (1 / 30, 0.063):
+        cut, at = _watch_still_dot(model, monkeypatch, [run], 100, 500, every)
+        assert cut.startswith("off the path (still at x 100")
+        assert behind + OFF_PATH_S <= at < behind + OFF_PATH_S + 2 * every
+
+
+def test_her_dot_stands_where_it_stood_until_it_moves_away_from_there():
+    """navigator._stood: since when, and where, her dot has stood: within STILL of where it stood (on both axes) it
+    stands there still, however it creeps; once it's further from there, it stands where it is from then; a glance
+    without it starts over."""
+    from gamelab.control.navigator import STILL, _stood
+    stood = _stood(None, 1.0, (10.0, 20.0))
+    assert stood == (1.0, (10.0, 20.0)) and _stood(stood, 1.1, (10.0, 20.0)) is stood
+    assert _stood(stood, 1.2, (10.0 + 0.9 * STILL, 20.0 - 0.9 * STILL)) is stood  # (the start of a creep it allows)
+    assert _stood(stood, 1.3, (10.0 + 1.1 * STILL, 20.0)) == (1.3, (10.0 + 1.1 * STILL, 20.0))
+    assert _stood(stood, 1.3, (10.0, 21.0)) == (1.3, (10.0, 21.0))  # a pixel down
+    assert _stood(stood, 1.4, None) is None and _stood(None, 1.5, (10.0, 20.0)) == (1.5, (10.0, 20.0))
 
 
 def test_her_dot_still_over_another_platform_counts_only_once_the_plan_has_her_down(model, monkeypatch):

@@ -31,6 +31,10 @@ from .scene import Scene, find_loot
 # puts it from her refined position: the same ropes while her dot is within about 30 units. None
 # searches the whole screen.
 ROPE_PAD: int | None = ROPE_MATCH_PX + MAX_ROPE_WIDTH
+# Glances from a feed come this far apart at the soonest (their frames' times): GLANCE_EVERY_S, as glances taken here
+# (63 ms: about 15 a second); 0, every frame the feed looks at (30 a second). The navigator judges glances in time
+# (navigator.STILL_S, OFF_PATH_S), so what it makes of them holds either way.
+FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
 
 
 class Senses:
@@ -45,6 +49,7 @@ class Senses:
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
         self._glanced = -1e18  # the frame time of the last glance from the feed
+        self.glanced_at: float | None = None  # when the frame the last glance saw was shown (time.monotonic)
         self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0}
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False) -> Scene:
@@ -77,16 +82,17 @@ class Senses:
         return s
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
-        """Her minimap dot and HP (Eyes.glance): with a feed, from its newest frame shown GLANCE_EVERY_S after
-        the last glance's at the soonest, so what the navigator makes of two glances in a row (her dot
-        standing still) holds as without it."""
+        """Her minimap dot and HP (Eyes.glance), and when its frame was shown (`glanced_at`): with a feed, from its
+        newest frame, one shown FEED_GLANCE_EVERY_S after the last glance's at the soonest (and after it)."""
         if self.feed is not None and self.feed.alive:
-            st = self.feed.glance(self._glanced + GLANCE_EVERY_S)
+            st = self.feed.glance(self._glanced + max(FEED_GLANCE_EVERY_S, 1e-3))
             if st is not None:
-                self._glanced = st.t
+                self._glanced = self.glanced_at = st.t
                 self.counts["glances from the feed"] += 1
                 return st.dot, st.hp
-        return self.eyes.glance()
+        out = self.eyes.glance()
+        self.glanced_at = self.eyes.seen_at if self.eyes.seen_at is not None else time.monotonic()
+        return out
 
     def wait_frame(self, timeout: float) -> None:
         """Until the feed's next frame comes, `timeout` s at most; without a feed, `timeout` s."""

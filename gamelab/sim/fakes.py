@@ -300,7 +300,7 @@ class FakeEyes(Eyes):
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         self._now()
         self.counts["glances"] += 1
-        dot, hp = self._dot(), self._hp()
+        dot, hp, self.seen_at = self._dot(), self._hp(), self.clock.now
         self.clock.sleep(GLANCE_S)
         return dot, hp
 

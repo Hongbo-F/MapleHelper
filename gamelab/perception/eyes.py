@@ -28,10 +28,11 @@ TAG_BELOW_FEET = 8  # half-size px from the ground line she stands on down to he
 EXP_TEXT = 150      # her EXP number's text pixels are brighter than this (in any channel)
 # Glances start this far apart at least. With mss a glance was two grabs that each waited for the
 # compositor's next frame (33 ms), so with the navigator's 30 ms between glances her dot was seen about
-# every 63 ms, and what the navigator makes of two glances in a row was set at that pace (her dot standing
-# still: STILL, so OFF_PATH and `recover`). From the latest frame a glance takes 0.2 ms, so glances keep
-# the pace until those are worked out per second instead of per glance; 0: as often as asked (about every
-# 30 ms in the navigator). Not tried in game.
+# every 63 ms, and what the navigator makes of glances in a row was set at that pace (her dot standing
+# still, so cutting a plan off its path and `recover`); it's judged in time now (navigator.STILL_S,
+# OFF_PATH_S), so it means the same at any pace. From the latest frame a glance takes 0.2 ms; 0: as often
+# as asked (about every 30 ms in the navigator). Glances keep this pace without a feed: the simulator
+# charges a glance mss's 35 ms (sim.fakes.GLANCE_S), so a faster one isn't tried there. Not tried in game.
 GLANCE_EVERY_S = 0.063
 
 
@@ -71,6 +72,7 @@ class Eyes:
     """The game window, looked at. `title`: the game window's title; `tag_template`: her name tag at half
     size (calibration). The monster detector defaults to the screenshot cut-outs; the loot detector is
     made on first use."""
+    seen_at: float | None = None  # when the screen last captured looked like that (time.monotonic)
 
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
                  loot: LootDetector | None = None, screen=None):
@@ -80,7 +82,6 @@ class Eyes:
         self.detector = detector or MobDetector()
         self._loot = loot
         self.screen = screen or capture.shared()
-        self.seen_at: float | None = None  # when the screen last captured looked like that (time.monotonic)
         self._glanced = -GLANCE_EVERY_S    # when the last glance began
         self.name_tag = NameTag(tag_template, paths.TAG_FULL)
         self.want_ropes = False  # Senses turns this on

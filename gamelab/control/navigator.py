@@ -69,11 +69,18 @@ AFTER_STILL_S = 0.35  # s at most waited for her to stand still after a chain, b
                       # (a stop slides her ~0.26 s; knocked about, she isn't held up longer)
 PLAN_START_S = 0.015  # a chain's plan is taken to start this long after it's sent
 GLANCE_S = 0.03      # between glances at her dot while a plan runs, or while she recovers
-OFF_PATH = 3         # glances off the planned path (counting 2 where the leg doesn't go) that cut a plan short
-STILL = 0.6          # minimap px: a dot that moved less than this on both axes has stopped ...
-STILL_GLANCES = 3    # ... for this many glances in a row: she stands on the platform under it. Over 2 glances
-                     # (63 ms apart) a dot can sit still in the air too: near the top of a jump, or at full
-                     # speed within a minimap pixel (11-16 units: 149 units/s covers 9 between two glances)
+# What her glances show is judged by how long it lasts, not by how many glances show it, so it means the same however
+# often she's glanced at (with a feed, as often as it looks: senses.FEED_GLANCE_EVERY_S). These were counts of glances
+# at the pace glances had when they were set, 63 ms apart (eyes.GLANCE_EVERY_S): n of them are (n - 1) x 63 ms, less
+# a game frame (16.7 ms), since each glance sees the newest frame when it's taken, up to a frame before.
+OFF_PATH_S = 0.109   # s off the planned path, from the first glance in a row off it, that cut a plan short (3
+                     # glances) ...
+OFF_LEG_S = 0.046    # ... or this long once a glance among them had her where the leg doesn't go (2 glances)
+STILL = 0.6          # minimap px: her dot within this on both axes of where it stood ...
+STILL_S = 0.109      # ... in every glance for this long has stopped: she stands on the platform under it (3 glances).
+                     # For 63 ms a dot can sit still in the air too: near the top of a jump, or at full speed within a
+                     # minimap pixel (11-16 units; 11.4 on this map: 149 units/s covers 9 in 63 ms, 16 in 109)
+RECOVER_STILL_S = 0.046  # s her dot stands still for `recover` to take it she's stopped moving (2 glances)
 # Standing still where her run along a platform starts while the plan has her this far along it (Span.x_at) is
 # off the path too. In game on 2026-10-21 chains whose first arrow went down 0.6 s after a throw's key set off
 # about 0.2 s late, the jump at the end of the run went at its planned time from 15-30 units short, and she fell
@@ -589,7 +596,9 @@ class Navigator:
         """follow's loop: watch the running chain, queue the next, cut both short when she's hit or off
         her path."""
         queued, sent, cut = None, list(current.legs), ""
-        dots, off = [], 0  # the last glances' dots; off: glances in a row off the planned path
+        stood = None  # since when, and where, her dot has stood (_stood)
+        off_since, off_leg = None, False  # the first glance in a row off the planned path, and whether one of them
+                                          # had her where the leg doesn't go
         ahead = None  # the look around for what follows the running chain, once taken
         over = False  # the running chain's plan has ended (its result read)
         while True:
@@ -635,25 +644,26 @@ class Navigator:
                     continue
             self.senses.wait_frame(GLANCE_S)
             dot, now_hp = self.senses.glance()
+            seen_at = self.senses.glanced_at
+            stood = _stood(stood, seen_at, dot)
             if dot is not None and telemetry.recording():
                 gx, gy = self.senses.localizer.to_map(dot)
                 telemetry.emit("glance", x=round(gx, 1), y=round(gy, 1), hp=round(now_hp, 3))
             if now_hp < hp - HIT:
                 cut = f"hit ({hp:.0%} -> {now_hp:.0%})"
             elif dot is not None:
-                on, want, leg, behind = self._placed(dot, dots, current)
+                on, want, leg, behind = self._placed(dot, seen_at - stood[0] >= STILL_S, current)
                 if on is not None and on.id not in (leg.start.platform.id, leg.end.platform.id):
                     # Standing where this leg doesn't go (e.g. a drop that fell one platform too far):
-                    # stop before the plan's next keys fire there.
-                    off += 2
+                    # stop sooner, before the plan's next keys fire there.
+                    off_since, off_leg = seen_at if off_since is None else off_since, True
                 elif on is not None and (want is not None and on.id != want or behind is not None):
-                    off += 1
+                    off_since = seen_at if off_since is None else off_since
                 else:
-                    off = 0
-                if off >= OFF_PATH:
+                    off_since, off_leg = None, False
+                if off_since is not None and seen_at - off_since >= (OFF_LEG_S if off_leg else OFF_PATH_S):
                     where = f"still at x {behind:.0f}" if behind is not None else f"on {on.id if on else 'nothing'}"
                     cut = f"off the path ({where}, planned {want or leg.end.platform.id})"
-            dots = [*dots, dot][-(STILL_GLANCES - 1):] if dot is not None else []
             if cut:
                 for pid in [current.plan_id] + ([queued.plan_id] if queued else []):
                     if not client.cancel(pid):
@@ -666,17 +676,15 @@ class Navigator:
                 over = True  # the queued chain takes over, or the next one is still to come (see above)
         return cut, sent
 
-    def _placed(self, dot, dots: list, running: _Running) -> tuple[Platform | None, int | None, Leg, float | None]:
+    def _placed(self, dot, still: bool, running: _Running) -> tuple[Platform | None, int | None, Leg, float | None]:
         """Where a glance at her dot puts her against the running plan: the platform she stands on
-        (None if none, or the dot moved in the last STILL_GLANCES glances: `dots` are the ones before), the
+        (None if none, or her dot isn't `still`: it hasn't stood where it is for STILL_S), the
         platform she should be on by now (None: in the air, or about to take off or land), the leg she's
         on, and her x if she's standing where her run along that platform starts while the plan has her
         OFF_SPAN or more along it (else None). While the plan has her in the air (Flow.airborne) she stands
         nowhere: near the top of a jump her dot can sit still over a platform she's flying past."""
         t = time.monotonic() - running.start
         want = self.flow.expected(running.legs, t)
-        seen = [*dots, dot][-STILL_GLANCES:]
-        still = len(seen) == STILL_GLANCES and all(_still(b, a) for a, b in zip(seen, seen[1:]))
         # On a platform only when the dot sits at its height and has stopped: in the air the dot
         # passes 40-60 units under the platforms above, which read as "on" them before.
         mx, my = self.senses.localizer.to_map(dot)
@@ -701,14 +709,14 @@ class Navigator:
         """Right after a plan: wait until she's stopped moving (a hit knocks her back and she can't be
         steered for a moment; a stop slides her on), glancing at her dot, then one look to place her (with
         the monsters, if `mobs`; on the whole screen, if `wide`)."""
-        end, last = time.monotonic() + longest, None
+        end, stood = time.monotonic() + longest, None
         while time.monotonic() < end:
             dot, _ = self.senses.glance()
-            if dot is not None and _still(dot, last):
+            stood = _stood(stood, self.senses.glanced_at, dot)
+            if stood is not None and self.senses.glanced_at - stood[0] >= RECOVER_STILL_S:
                 w = self.senses.localizer.where_dot(dot)
                 if w.platform is not None:
                     break
-            last = dot
             self.senses.wait_frame(GLANCE_S)
         return self.mover.locate(mobs=mobs, wide=wide)
 
@@ -858,8 +866,17 @@ def _ground_from(leg: Leg) -> float:
 
 
 def _still(dot, last) -> bool:
-    """Whether her minimap dot has stopped since the last glance (`last`: None if there was none)."""
+    """Whether her minimap dot is where it was (within STILL on both axes of `last`: None if there was none)."""
     return last is not None and abs(dot[0] - last[0]) < STILL and abs(dot[1] - last[1]) < STILL
+
+
+def _stood(stood: tuple[float, tuple] | None, t: float, dot) -> tuple[float, tuple] | None:
+    """Since when her dot has stood where it is, and where it stood then, once a glance at `t` (its frame's time) saw
+    it at `dot` (None: hidden), from `stood` as the glances before had it (None: none, or the last didn't see it):
+    within STILL of where it stood, it stands there still; else it stands here from now."""
+    if dot is None:
+        return None
+    return stood if stood is not None and _still(dot, stood[1]) else (t, dot)
 
 
 def _chain_text(legs, to_go: int, why: str) -> str:

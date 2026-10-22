@@ -402,6 +402,29 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     assert eyes.glances == 1
 
 
+def test_glances_from_the_feed_come_as_often_as_its_frames_or_63_ms_apart(sync, monkeypatch):
+    """Senses.glance from the feed, a frame waited for before each (as the navigator glances): with
+    FEED_GLANCE_EVERY_S 0, every frame it looks at (30 a second), with GLANCE_EVERY_S every other one; each glance's
+    frame time in `glanced_at`. At the feed's rate no frame is asked for on their account; 63 ms apart each glance
+    asks for its frame, the next one coming too soon."""
+    from gamelab.localization import senses as senses_mod
+    from gamelab.perception.eyes import GLANCE_EVERY_S
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    clock.sleep(0.5)
+    for every, apart in ((0.0, 1 / feed.HZ), (GLANCE_EVERY_S, 2 / feed.HZ)):
+        monkeypatch.setattr(senses_mod, "FEED_GLANCE_EVERY_S", every)
+        senses.glance()
+        times, asked = [], f.counts["asked"]
+        for _ in range(8):
+            senses.wait_frame(0.03)
+            senses.glance()
+            times.append(senses.glanced_at)
+        assert [round(b - a, 4) for a, b in zip(times, times[1:])] == [round(apart, 4)] * 7
+        assert f.counts["asked"] - asked == (0 if every == 0.0 else 8)
+    assert senses.counts["glances from the feed"] == 18
+
+
 def test_looks_from_the_feed_teach_the_stacks_camera_for_the_looks_it_takes_itself(sync):
     # Placed by the feed's child, a look skips Senses' own placing; without this, a look taken here with her
     # name tag hidden (the feed slow or gone) placed her by the default camera.
