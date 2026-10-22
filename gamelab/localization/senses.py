@@ -1,6 +1,7 @@
 """Senses: every look at the game, placed on the map. Eyes (perception) says what's on screen; Senses
 works out where she is (her minimap dot, refined by a rope or her platform's end on screen), where she
-is on screen when her name tag is hidden (the camera), and where the monsters and drops are.
+is on screen when her name tag is hidden (the camera), where the monsters and drops are, and where other
+players are (their minimap dots, followed from look to look: localization.players).
 
 Every look anyone takes goes through `Senses.look`, and the listeners run after each one, in order:
 the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there.
@@ -20,6 +21,7 @@ from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import SCALE, SCREEN_SCALE
 from .mapdata import MapModel
 from .monsters import Monster
+from .players import Players
 from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
 from .scene import Scene, find_loot
 
@@ -50,6 +52,7 @@ class Senses:
         self.feed = feed
         self.localizer = Localizer(model)
         self.camera = Camera(model.bounds)
+        self.players = Players(self.localizer)  # other players, from the looks placed here (not the feed's)
         self.listeners: list[Callable[[Scene], None]] = []
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
@@ -107,9 +110,11 @@ class Senses:
             time.sleep(timeout)
 
     def place(self, obs: Observation) -> Scene:
-        """A look placed on the map: where she is (see _place_her); no monsters or drops yet."""
+        """A look placed on the map: where she is (see _place_her), and the other players (Players: a look that
+        didn't see her own dot, the minimap covered, keeps the players as they were); no monsters or drops yet."""
         s = Scene.of(obs)
         self._place_her(s)
+        s.players = self.players.update(s.t, obs.others) if s.dot is not None else self.players.current
         return s
 
     def search(self, s: Scene, wide: bool = False) -> list[Monster]:

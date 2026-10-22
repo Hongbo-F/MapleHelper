@@ -1,6 +1,7 @@
 """Other players on the minimap: their markers found in pictures of it (perception.minimap), on real minimaps and
 on the game's own marker pictures pasted onto them as the game draws them, never taking her dot, an NPC or a portal
-for one, nor pulling her dot off."""
+for one, nor pulling her dot off; and the players they are, placed on the map and followed from look to look
+(localization.players)."""
 
 from pathlib import Path
 
@@ -10,9 +11,14 @@ import pytest
 from PIL import Image
 
 from gamedata.paths import COPY
+from gamelab.localization import mapdata
+from gamelab.localization.players import CONFIRM, MISSES, Players
+from gamelab.localization.pose import Localizer
 from gamelab.perception import minimap
 from gamelab.perception.minimap import MARKER_COLOURS, MINIMAP_BOX, OTHER_SHIFT, Marker, dot_in_box, markers_in_box
 from gamelab.screen import SCREEN_SCALE
+
+from test_sim import plat, tree
 
 FIXTURES = Path(__file__).parent / "fixtures"
 X0, Y0 = MINIMAP_BOX[:2]  # where the fixtures' crops start on the 1920x1080 screen
@@ -218,3 +224,110 @@ def test_marker_shift_is_the_pictures_half_pixel():
     """A stranger's core is drawn half a game px right of and below where her dot's would be (origins (5, 5) of
     11 px and (6, 6) of 12): 0.70 screen px."""
     assert OTHER_SHIFT == pytest.approx(0.703, abs=0.001)
+
+
+# --- the players they are ------------------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def model():
+    return mapdata.parse(1, tree(), "Test Map", {}, {"2": "Snail"}, {"2": 2})
+
+
+def dot_of(loc: Localizer, x: float, y: float) -> Marker:
+    """A stranger's marker where it would be for a player with their feet at map (x, y)."""
+    dx, dy = loc.to_dot(x, y)
+    return Marker("stranger", dx + OTHER_SHIFT, dy + OTHER_SHIFT)
+
+
+def test_a_player_is_placed_on_the_platform_under_their_dot_as_she_would_be(model):
+    loc = Localizer(model)
+    players = Players(loc)
+    b = plat(model, 360, 300)
+    for t in range(CONFIRM):
+        (p,) = players.update(float(t), [dot_of(loc, 310.0, 352.0)]) or [None]
+    assert p.platform == b.id and p.x == pytest.approx(310.0) and p.y == pytest.approx(360.0) and p.rival
+
+
+def test_a_dot_is_a_player_after_two_looks_and_gone_after_two_misses(model):
+    loc = Localizer(model)
+    players = Players(loc)
+    m = dot_of(loc, 300.0, 360.0)
+    assert players.update(0.0, [m]) == []                   # seen once: not anyone yet
+    assert players.update(0.1, []) == []                    # ... and gone
+    assert players.update(0.2, [m]) == [] and len(players.update(0.3, [m])) == 1  # two looks in a row: a player
+    first = players.update(0.4, [m])[0]
+    assert [p.id for p in players.update(0.5, [])] == [first.id]  # one look without: still there
+    assert [p.id for p in players.update(0.6, [m])] == [first.id]
+    for t in range(MISSES):
+        out = players.update(0.7 + 0.1 * t, [])
+    assert out == []                                         # two in a row: gone
+
+
+def test_a_player_walking_is_followed_and_one_far_off_is_another(model):
+    loc = Localizer(model)
+    players = Players(loc)
+    x = 100.0
+    for t in range(6):
+        out = players.update(0.25 * t, [dot_of(loc, x, 500.0)])
+        x += 30.0  # 120 units/s
+    (p,) = out
+    assert p.id == 1 and p.x == pytest.approx(x - 30.0)
+    out = players.update(1.75, [dot_of(loc, 700.0, 500.0)])  # 520 units off a quarter of a second later
+    assert [q.id for q in out] == [1]                         # the new dot isn't anyone yet; the old one kept once
+    out = players.update(2.0, [dot_of(loc, 700.0, 500.0)])
+    assert [q.id for q in out] == [2]
+
+
+def test_players_are_copies_the_next_looks_dont_change(model):
+    loc = Localizer(model)
+    players = Players(loc)
+    for t in range(CONFIRM):
+        (p,) = players.update(float(t), [dot_of(loc, 300.0, 360.0)]) or [None]
+    players.update(5.0, [dot_of(loc, 330.0, 360.0)])
+    assert p.x == pytest.approx(300.0)
+
+
+def test_her_party_doesnt_hunt_against_her(model):
+    loc = Localizer(model)
+    players = Players(loc)
+    dx, dy = loc.to_dot(300.0, 360.0)
+    for t in range(CONFIRM):
+        out = players.update(float(t), [Marker(kind, dx + 30 * i, dy) for i, kind in
+                                         enumerate(("stranger", "party", "guild", "buddy"))])
+    assert {p.kind: p.rival for p in out} == {"stranger": True, "party": False, "guild": True, "buddy": True}
+
+
+def test_a_look_that_cant_see_the_minimap_says_nothing_of_the_players(model):
+    """Senses.place: a look without her dot (a tooltip over the minimap) keeps the players as they were, and a scene's
+    record (telemetry) lists them."""
+    from types import SimpleNamespace
+    from gamelab.localization.senses import Senses
+    from gamelab.perception.eyes import Observation
+    senses = Senses(SimpleNamespace(), model, band=(100.0, 100.0))
+    loc, frame = senses.localizer, np.zeros((540, 960, 3), np.uint8)
+
+    def look(t, dot, others):
+        return senses.place(Observation(t=t, frame=frame, tag=None, hp=1.0, mp=1.0, dot=dot, others=others))
+
+    her = loc.to_dot(100.0, 500.0)
+    for t in (0.0, 0.1):
+        s = look(t, her, [dot_of(loc, 300.0, 360.0)])
+    b = plat(model, 360, 300)
+    assert [p.platform for p in s.players] == [b.id]
+    for t in (0.2, 0.3, 0.4):
+        s = look(t, None, [])
+    assert [p.platform for p in s.players] == [b.id]
+    assert s.record()["players"] == [{"id": 1, "kind": "stranger", "x": 300.0, "y": 360.0, "platform": b.id}]
+    for t in (0.5, 0.6):
+        s = look(t, her, [])
+    assert s.players == [] and "players" not in s.record()
+
+
+def test_the_feeds_state_carries_the_players_to_the_look(model):
+    from gamelab.localization.players import Player
+    from gamelab.localization.worldstate import WorldState, to_scene
+    p = Player(3, "guild", 300.0, 360.0, 1, (10.0, 20.0), 0.0, 1.0, seen=4)
+    st = WorldState(1, 1.0, True, tag=(10, 10), others=[Marker("guild", 10.0, 20.0)], players=[p],
+                    frame=np.zeros((540, 960, 3), np.uint8))
+    s = to_scene(st, model, (100.0, 100.0), mobs=False)
+    assert s.players == [p] and s.others == [Marker("guild", 10.0, 20.0)]

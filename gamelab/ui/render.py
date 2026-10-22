@@ -40,6 +40,9 @@ KIND = {"pig": (255, 150, 170), "slime": (110, 235, 110), "snail": (130, 170, 25
 COVER_TAKEN = (90, 230, 90)     # coverage_picture: a move taken (thicker the more often)
 COVER_PLANNED = (240, 200, 60)  # ... planned, never taken
 COVER_NEVER = (200, 70, 70)     # ... never planned
+# Other players (a scene's `players`), by kind, in their minimap markers' colours (perception.minimap): anyone red, her
+# party orange, a guild lavender, a buddy cyan.
+PLAYERS = {"stranger": (235, 40, 40), "party": (255, 150, 0), "guild": (170, 170, 255), "buddy": (60, 205, 245)}
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 JUMP_ARC = 77                # how high a jump's arc is drawn, in map units (physics.JUMP_HEIGHT)
 REACH_ALPHA = 0.35           # how strongly her reach's bands show over the map
@@ -109,6 +112,7 @@ class MapView:
             self._reach(img, her)
         self._monsters_seen(img, scene.get("monsters") or [], state.stance)
         self._loot(img, scene.get("loot") or [])
+        self._players(img, scene.get("players") or [])
         self._trail(img, state.trail)
         if her is not None:
             self._her(img, her)
@@ -244,6 +248,13 @@ class MapView:
             if t.get("bar") is not None:
                 cv2.line(img, (x - 6, y - 7), (x - 6 + int(12 * t["bar"]), y - 7), MOB_HP, 2)
 
+    def _players(self, img, players: list) -> None:
+        """Other players where their minimap dots put them: a dot of their kind's colour, ringed dark."""
+        for p in players:
+            x, y = self.pt(p["x"], p["y"] - 8)
+            cv2.circle(img, (x, y), 5, PLAYERS.get(p.get("kind"), TEXT), -1, cv2.LINE_AA)
+            cv2.circle(img, (x, y), 6, BACKGROUND, 1, cv2.LINE_AA)
+
     def _loot(self, img, loot: list) -> None:
         for d in loot:
             x, y = self.pt(d["x"], d["y"] - 4)
@@ -345,6 +356,8 @@ class MapView:
         mode = state.session.get("mode", "live")
         when = time.strftime("%H:%M:%S", time.localtime(state.t)) if state.t else "--:--:--"
         where = "lost" if her is None else (f"x {her['x']:.0f}  platform {her.get('platform')}  ({her.get('how', '?')})")
+        if others := len(scene.get("players") or []):
+            where += f"   {others} other player{'s' if others > 1 else ''}"
         cv2.putText(img, f"{mode}  {when}   {where}", (x, top + 12), FONT, 0.4, TEXT, 1, cv2.LINE_AA)
         line = top + 30
         stance = state.stance

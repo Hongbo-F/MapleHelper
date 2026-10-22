@@ -72,7 +72,8 @@ class Hunter:
         self.drops = DropStore()
         self.ledger = Ledger(self, self.drops)
         self.wounds = Wounds(self.ledger)
-        self.senses.listeners += [self._vitals, self._publish, self.ledger.on_look, self.drops.on_look,
+        self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
+        self.senses.listeners += [self._vitals, self._others, self._publish, self.ledger.on_look, self.drops.on_look,
                                   self.wounds.on_look]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw]
         if feed is not None:  # whose kills are whose (localization.tracking)
@@ -152,6 +153,22 @@ class Hunter:
             telemetry.emit("event", kind="hit", text=f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
             self._log_hit(s)
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False
+
+    def _others(self, s: Scene) -> None:
+        """Other players coming onto the map (their minimap dots, confirmed: localization.players) and leaving it,
+        logged and sent to the mini-map."""
+        now = {p.id: p for p in s.players}
+        for pid, p in now.items():
+            if pid not in self._players:
+                text = f"another player ({p.kind}) on the map: platform {p.platform} at x {p.x:.0f}"
+                self.log(f"  {text}")
+                telemetry.emit("event", kind="player", text=text)
+        for pid, p in self._players.items():
+            if pid not in now:
+                text = f"another player ({p.kind}) gone from the minimap (last on platform {p.platform} at x {p.x:.0f})"
+                self.log(f"  {text}")
+                telemetry.emit("event", kind="player", text=text)
+        self._players = now
 
     def _publish(self, s: Scene) -> None:
         """The look and the drops she remembers, for the mini-map (telemetry); with a feed, the deaths it saw that

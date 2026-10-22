@@ -45,7 +45,7 @@ import cv2
 
 from ..attack import reach
 from ..attack.reach import SHOT_DOWN, SHOT_H, SHOT_UP, STAR_REACH, shot_dx
-from .render import JUMP_ARC, KIND, REACH_ALPHA, STYLE, MapView
+from .render import JUMP_ARC, KIND, PLAYERS, REACH_ALPHA, STYLE, MapView
 from .state import LATEST, TRAIL, State
 
 POLL_S = 0.025          # how often the telemetry is read: on average a record waits half of it (at 0.1 s,
@@ -247,6 +247,7 @@ class Feed:
                 "her": None if her is None else {k: her.get(k) for k in ("x", "y", "platform", "how")},
                 "hp": scene.get("hp"), "mp": scene.get("mp"),
                 "monsters": len(scene.get("monsters") or []), "loot": len(scene.get("loot") or []),
+                "players": len(scene.get("players") or []),
                 "fight": (s.stance or {}).get("text") or (s.stance or {}).get("act"),
                 "moving": (s.chain or {}).get("text"),
                 "hunt": None if not hunt else {k: hunt.get(k) for k in
@@ -344,6 +345,7 @@ def map_payload(view: MapView) -> dict:
         "portals": [[p.x, p.y] for p in m.portals],
         "style": {name: _hex(c) for name, c in STYLE.items()},
         "kind": {name: _hex(c) for name, c in KIND.items()},
+        "players": {name: _hex(c) for name, c in PLAYERS.items()},
         "reach": {"star": STAR_REACH, "up": SHOT_UP, "down": SHOT_DOWN, "min": shot_dx(0), "alpha": REACH_ALPHA,
                   "shot_h": SHOT_H},
         # per platform, the walls of its foothold group that stop a star (attack.reach.clear_span): x, top,
@@ -1033,6 +1035,11 @@ function draw(v, her, at, when) {
     if (mo.bar != null) stroke(C.mob_hp, 2, () => { ctx.moveTo(p[0] - 6 * u, p[1] - 7 * u); ctx.lineTo(p[0] + (Math.trunc(12 * mo.bar) - 6) * u, p[1] - 7 * u); });
   }
   for (const d of scene.loot || []) box(P(d.x, d.y - 4), 2, C.loot, -1);
+  // other players, by their minimap dots (_players)
+  for (const pl of scene.players || []) {
+    const p = P(pl.x, pl.y - 8);
+    circle(p, 5, M.players[pl.kind] || C.text, -1); circle(p, 6, C.background, 1);
+  }
   // her trail, up to where she's drawn (_trail), and her (_her)
   const trail = [];
   for (const p of S.trail) if (when == null || !(p[2] > when)) trail.push(p);
@@ -1068,7 +1075,8 @@ function show(s) {
   $("rates").textContent = rates;
   text("fight", s.fight); text("moving", s.moving);
   text("where", s.her ? "x " + Math.round(s.her.x) + " · platform " + (s.her.platform == null ? "?" : s.her.platform) +
-                        " (" + (s.her.how || "?") + ") · " + s.monsters + " monsters, " + s.loot + " drops in view" : "lost");
+                        " (" + (s.her.how || "?") + ") · " + s.monsters + " monsters, " + s.loot + " drops in view" +
+                        (s.players ? " · " + s.players + (s.players > 1 ? " other players" : " other player") : "") : "lost");
   if (s.replay) {
     $("controls").style.display = "flex";
     $("play").textContent = s.replay.paused ? "Play" : "Pause";

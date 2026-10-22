@@ -762,3 +762,20 @@ def test_the_page_s_map_cuts_the_reach_band_where_the_window_does():
     assert stops == [(200, -1)]  # the right end of A's band: a wall facing left, to its right
     assert min(x for x, faces in stops if x >= 20 and faces < 0) == clear_span(a, 20, 500)[1] == 200
     assert clear_span(a, 20, 500)[0] == -math.inf
+
+
+def test_other_players_are_drawn_where_their_dots_put_them():
+    from gamelab.ui.render import PLAYERS
+    m = model()
+    view = MapView(m, width=400)
+    c = by_y(m, 500, 400)
+    s = State()
+    s.apply({"topic": "scene", "t": 1.0, "her": {"x": 400, "y": 500, "platform": c.id}, "hp": 1.0, "mp": 1.0,
+             "monsters": [], "loot": [], "players": [{"id": 1, "kind": "stranger", "x": 650, "y": 500, "platform": c.id},
+                                                     {"id": 2, "kind": "party", "x": 200, "y": 500, "platform": c.id}]})
+    img = view.draw(s)
+    for x, kind in ((650, "stranger"), (200, "party")):
+        px, py = view.pt(x, 500 - 8)
+        assert tuple(img[py, px]) == PLAYERS[kind]
+    from gamelab.ui.web import map_payload
+    assert map_payload(view)["players"]["stranger"] == "#%02x%02x%02x" % PLAYERS["stranger"]  # the page's colours

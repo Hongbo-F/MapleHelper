@@ -3,8 +3,8 @@ the feed (localization.feed) to hand to whoever asks and for `python -m gamelab 
 the simulator's world, gamelab.sim.world: this is what the stack sees of a world.)
 
 Every frame: her place (the same look as Senses.look takes: her name tag, HP and MP, the ground, her minimap
-dot, ropes), her EXP gains and HP drops (events, each at the frame it showed), and each monster tracked
-re-found around where it should be (Eyes.refind: the template that matched it last, else its kind's).
+dot, ropes, the other players' dots), her EXP gains and HP drops (events, each at the frame it showed), and each
+monster tracked re-found around where it should be (Eyes.refind: the template that matched it last, else its kind's).
 
 The searches run off that frame loop (`Searches`: in the feed, a thread of its own, `SearchThread`), one at a
 time, on the newest frame placed when one is due: monsters not tracked yet in her band every BAND_EVERY_S,
@@ -99,6 +99,8 @@ class WorldState:
     mp: float = 0.0
     ground: tuple[int, int] | None = None
     dot: tuple[float, float] | None = None
+    others: list = field(default_factory=list)   # other players' minimap dots (perception.minimap.Marker)
+    players: list = field(default_factory=list)  # ... the players they are (localization.players.Player)
     ropes: list = field(default_factory=list)
     exp: bytes = b""               # her EXP number's text pixels, packed (np.packbits) ...
     exp_shape: tuple = ()          # ... and their shape
@@ -389,7 +391,8 @@ class WorldStep:
         work["s"] = time.perf_counter() - began  # (the real clock: what the frame loop's step took)
         st = WorldState(
             self.seq, t, True, tag=s.tag, tag_seen=s.tag_seen, hp=s.hp, mp=s.mp, ground=s.ground, dot=s.dot,
-            ropes=list(s.ropes), exp=np.packbits(exp).tobytes() if s.exp is not None else b"",
+            others=list(s.others), players=list(s.players), ropes=list(s.ropes),
+            exp=np.packbits(exp).tobytes() if s.exp is not None else b"",
             exp_shape=exp.shape if s.exp is not None else (), where=where, how=s.how, monsters=seen,
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
             tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame)
@@ -520,7 +523,8 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
     p = None if st.where is None or st.where[2] is None else model.platform(st.where[2])
     where = None if st.where is None else Where(st.where[0], st.where[1], p, st.where[3])
     s = Scene(t=st.t, frame=st.frame if frame is None else frame, tag=st.tag, hp=st.hp, mp=st.mp, ground=st.ground,
-              dot=st.dot, ropes=list(st.ropes), exp=st.exp_pixels(), where=where, how=st.how, tag_seen=st.tag_seen)
+              dot=st.dot, others=list(st.others), ropes=list(st.ropes), exp=st.exp_pixels(), where=where, how=st.how,
+              tag_seen=st.tag_seen, players=list(st.players))
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

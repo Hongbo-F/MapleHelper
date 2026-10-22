@@ -13,6 +13,7 @@ from ..perception.mobs import Mob
 from ..screen import HUD_TOP, SCALE, UNITS_PER_HALF_PX
 from .mapdata import MapModel, Platform
 from .monsters import Monster, monster_platform
+from .players import Player
 from .pose import Where
 
 # Loot strips (half-size px): drops are looked for in a strip just above each stretch of ground.
@@ -52,6 +53,8 @@ class Scene(Observation):
                                                                           # (platform, map x from, to)
     events: list | None = None    # with a continuous feed, what it saw happen since the last look, frame by
                                   # frame (tracking.Event: her EXP gains, hits, monsters' deaths); None: no feed
+    players: list[Player] = field(default_factory=list)  # other players on the map, by their minimap dots
+                                                          # (localization.players: confirmed over two looks)
 
     @classmethod
     def of(cls, obs: Observation) -> "Scene":
@@ -126,7 +129,8 @@ class Scene(Observation):
                 "loot": [{"kind": d.item.kind, "x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform}
                          for d in self.loot],
                 "searched": self.searched, "wide": self.wide,
-                "looked": [[pid, round(lo), round(hi)] for pid, lo, hi in self.looked], "view": view}
+                "looked": [[pid, round(lo), round(hi)] for pid, lo, hi in self.looked], "view": view,
+                **({"players": [p.record() for p in self.players]} if self.players else {})}
 
     def room(self, direction: str, margin: float) -> float:
         """Map units she can walk that way before the end of her platform (less a margin)."""
