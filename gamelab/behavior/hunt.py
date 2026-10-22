@@ -106,6 +106,13 @@ MIN_STAY, MIN_THROWS = 15.0, 6  # ... judged only after this long there, or this
 LEAVE_MARGIN = 0.8     # ... leave when her rate is under this share of the best other ground's
 VISIT_S = 60.0         # guess: a visit's length, until measured visits replace it
 SKIP_S = 120.0         # a ground left with nothing on it is skipped this long
+# The next ground (_next_ground): the best EXP a second, travel included, each ground's varied by a random 0.75-1.25.
+# Of those within GROUND_TIE of the best, the one she left longest ago (or never got to) goes first, so grounds about
+# as good take turns. Off, as nothing measures it: in the harness's hunt loops (preset game, 40 seeds of 20 minutes)
+# 0.25 changed not one key (nor 0.1 with route.ROUTES 3), 31 of the 40 runs taking up one ground, the basin, for the
+# whole run; live, by the value map, 17 and 1 were within 3% of each other from the basin and from 3, 4 ahead of both,
+# and her grounds already varied (4 24 times, 36 20, 17 16, 1 6: README, Route diversity).
+GROUND_TIE = 0.0
 EMPTY_CONFIRM_S = 3.0  # ... once looks covering it (GROUND_SEEN of it, at least) have seen it empty this long:
 GROUND_SEEN = 0.75     # a hit monster hides for 1-3 s, and one look missing it skipped a busy ground
 WIDE_EVERY = 2.0       # s between whole-screen looks while nothing is going on
@@ -234,6 +241,7 @@ class Hunt:
         self._fs_key = None
         self._owe_move = False               # cut short: move on (one chain) before shooting
         self._skip: dict[int, float] = {}    # ground -> until when it's skipped
+        self._left: dict[int, float] = {}    # ground -> when she last left it, having got there (GROUND_TIE)
         self._kills_seen = 0
         self._gone = 0                       # piles she went for that looks have seen gone since (progress)
         self._progress = 0.0
@@ -920,10 +928,11 @@ class Hunt:
         return best
 
     def _next_ground(self, s: Scene) -> None:
-        """The ground to hunt next: the best EXP per second, travel included (varied a little), and its spot."""
+        """The ground to hunt next: the best EXP per second, travel included (varied a little; of those about as good,
+        GROUND_TIE, the one she left longest ago), and its spot."""
         self._leave_ground()
         self._exit_piles = self._exit_reason = None
-        now, values, best = time.monotonic(), self.tour.ground_values(), None
+        now, values, best, scored = time.monotonic(), self.tour.ground_values(), None, []
         here = s.where.platform if s.where is not None else None
         for g in self.tour.hunting_grounds(self._visit_s):
             if self._skip.get(g, 0) > now or (self.visit is not None and g == self.visit.ground):
@@ -936,8 +945,12 @@ class Hunt:
             if t is None:
                 continue
             score = values.get(g, 0.0) / (t + self._visit_s(g)) * self.rng.uniform(0.75, 1.25)
+            scored.append((score, g))
             if best is None or score > best[0]:
                 best = (score, g)
+        if best is not None and GROUND_TIE > 0:  # about as good: the one she was at longest ago (never: first)
+            tied = [sg for sg in scored if sg[0] >= (1 - GROUND_TIE) * best[0]]
+            best = min(tied, key=lambda sg: (self._left.get(sg[1], float("-inf")), -sg[0]))
         if best is None:  # every ground skipped: the soonest back
             grounds = self.tour.hunting_grounds(self._visit_s)
             if not self._skip and not grounds:
@@ -962,6 +975,7 @@ class Hunt:
         v = self.visit
         if v is None or v.arrived is None:
             return
+        self._left[v.ground] = time.monotonic()
         self.tour.record_visit(v.ground, v.exp, time.monotonic() - v.arrived)
 
     # --- travelling ---------------------------------------------------------------------------------

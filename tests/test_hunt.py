@@ -85,6 +85,33 @@ def test_a_visit_s_length_is_blended_with_a_prior_so_an_empty_ground_doesnt_look
     assert h._visit_s(17) == hunt.VISIT_S  # never timed
 
 
+def test_grounds_about_as_good_go_to_the_one_she_was_at_longest_ago(monkeypatch):
+    """_next_ground: the best EXP a second, travel included; with GROUND_TIE, of the grounds within it of the best, the
+    one she left longest ago, a ground she never got to first. 1, 4 and 2 as from the basin by the spawn data (16.8,
+    16.5 and 16.2 EXP a visit, 20 s away; no random 0.75-1.25 here)."""
+    from gamelab.behavior.hunt import HuntReport
+    values = {1: 16.8, 4: 16.5, 2: 16.2}
+    h = object.__new__(Hunt)
+    h.tour = SimpleNamespace(ground_values=lambda: values, hunting_grounds=lambda visit_s=None: list(values), stats={})
+    h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: 20.0))
+    h.model, h.kinds, h.rng, h.log = None, None, SimpleNamespace(uniform=lambda a, b: 1.0), lambda text: None
+    h._skip, h._left, h.visit, h.stack, h.obj, h.report = {}, {}, None, [], None, HuntReport()
+    monkeypatch.setattr(hunt.spots, "spot_at", lambda model, g, kinds: (g, 0.0))
+    monkeypatch.setattr(hunt.spots, "spot", lambda model, g, where, travel, kinds: Spot(g, 0.0, 1.0, True))
+    s = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=36), x=300.0))
+
+    def nxt(left: dict) -> int:
+        h._left, h.visit = dict(left), None
+        h._next_ground(s)
+        return h.visit.ground
+    assert nxt({}) == 1 and nxt({1: 50.0}) == 1  # GROUND_TIE 0: the best
+    monkeypatch.setattr(hunt, "GROUND_TIE", 0.05)
+    assert nxt({}) == 1                              # none visited: the best of them
+    assert nxt({1: 50.0}) == 4 and nxt({1: 50.0, 4: 60.0}) == 2 and nxt({1: 70.0, 4: 60.0, 2: 80.0}) == 4
+    monkeypatch.setattr(hunt, "GROUND_TIE", 0.02)    # 2 is 3.6% under 1: not as good
+    assert nxt({1: 50.0, 4: 60.0}) == 1
+
+
 def test_a_pile_objective_no_longer_worth_it_ends_the_trip_to_it():
     pile = _pile(10, status="gone")  # seen gone on the way
     h = _hunt([pile])
