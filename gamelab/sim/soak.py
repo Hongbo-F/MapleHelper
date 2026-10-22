@@ -9,7 +9,9 @@ growing. Not part of pytest (they run for minutes):
                                                        for as many simulated hours as the minutes allow
     python -m gamelab.sim.soak feed [--minutes 10]     the continuous feed's child process on the saved frames,
                                                        the stack's side asking of it as a fight does; the
-                                                       child's memory is followed too
+                                                       child's memory is followed too, and its frames a
+                                                       second, its frame loop's step, its searches and its
+                                                       CPU
 
 Python's own allocations are followed with tracemalloc, and the process's private bytes too (what OpenCV and
 numpy take outside it). Every SAMPLE_S it notes both; after the warm-up (WARMUP of the run: templates
@@ -99,6 +101,34 @@ def private_bytes(pid: int | None = None) -> int | None:
     try:
         c = _Counters(cb=ctypes.sizeof(_Counters))
         return c.PagefileUsage if psapi.GetProcessMemoryInfo(handle, ctypes.byref(c), c.cb) else None
+    finally:
+        if pid is not None:
+            k32.CloseHandle(handle)
+
+
+class _FileTime(ctypes.Structure):
+    _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
+
+
+def cpu_seconds(pid: int | None = None) -> float | None:
+    """The CPU time a process has used, all its threads, kernel and user (this one's by default), or None
+    elsewhere (or if it can't be read)."""
+    if sys.platform != "win32":
+        return None
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    k32.OpenProcess.restype = ctypes.c_void_p
+    k32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    k32.GetProcessTimes.argtypes = [ctypes.c_void_p] + [ctypes.POINTER(_FileTime)] * 4
+    handle = k32.GetCurrentProcess() if pid is None else k32.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return None
+    try:
+        times = [_FileTime() for _ in range(4)]  # created, exited, kernel, user (100 ns ticks)
+        if not k32.GetProcessTimes(handle, *(ctypes.byref(f) for f in times)):
+            return None
+        return sum((f.high << 32 | f.low) for f in times[2:]) / 1e7
     finally:
         if pid is not None:
             k32.CloseHandle(handle)
@@ -213,7 +243,9 @@ def soak_feed(meter: Meter) -> dict:
     frame HOLD frames in a row as the screen, 30 a second. The stack's side asks of it as a fight does: a
     look with her band every 0.1 s (with the drops on her platform every 5th, the whole screen every 30th),
     a glance between, its events drained, a throw every 10th look. The child's private bytes are sampled
-    with the meter's (the report's last lines)."""
+    with the meter's (the report's last lines); after the warm-up, its frames a second, its frame loop's
+    step (each state's work["s"]), its searches (each late state's) and its CPU (cores: CPU seconds a
+    second, all its threads)."""
     import functools
 
     from maplehelper.engine import RIGHT
@@ -230,6 +262,16 @@ def soak_feed(meter: Meter) -> dict:
     if not client.alive:
         raise SystemExit(f"the feed didn't start: {client.why}")
     child, n, missed, events, glanced, waits = [], 0, 0, 0, 0, {"band": [], "loot": [], "wide": []}
+    took: dict[str, list[float]] = {"step": [], "band": [], "wide": [], "drops": []}
+    warm: list = []  # (time, the child's CPU seconds, its newest frame) once warmed up
+
+    def seen(st) -> None:  # (the client's reader thread)
+        if not warm or not st.visible:
+            return
+        w = st.work
+        kind = ("wide" if w.get("wide") else "band" if w.get("band") else "drops") if st.late else "step"
+        took[kind].append(w.get("s", 0.0))
+    client.on_state = seen
     try:
         while not meter.due() and client.alive:
             now = time.monotonic()
@@ -247,17 +289,41 @@ def soak_feed(meter: Meter) -> dict:
             meter.sample()
             if len(meter.samples) > before:
                 child.append((meter.samples[-1][0], private_bytes(client.proc.pid)))
+            if not warm and meter.warm is not None:
+                warm.append((time.perf_counter(), cpu_seconds(client.proc.pid), newest_seq(client)))
             time.sleep(max(0.0, now + 0.1 - time.monotonic()))
+        end = (time.perf_counter(), cpu_seconds(client.proc.pid), newest_seq(client))
     finally:
         client.close()
-    warm = meter.warm[0] if meter.warm else 0.0
-    points = [(t, b) for t, b in child if t >= warm and b is not None]
-    ms = {k: sorted(v) for k, v in waits.items() if v}
-    return {"looks asked": n, "the wait for one (median, p90 ms)": ", ".join(
-                f"{k} {1000 * v[len(v) // 2]:.0f}, {1000 * v[int(0.9 * (len(v) - 1))]:.0f}" for k, v in ms.items()),
+    since = meter.warm[0] if meter.warm else 0.0
+    points = [(t, b) for t, b in child if t >= since and b is not None]
+    rate = cpu = "not read"
+    if warm:
+        (t0, c0, f0), (t1, c1, f1) = warm[0], end
+        rate = f"{(f1 - f0) / (t1 - t0):.1f}"
+        cpu = f"{(c1 - c0) / (t1 - t0):.2f}" if c0 is not None and c1 is not None else "not read"
+    return {"looks asked": n, "the wait for one (median, p90 ms)": _ms(waits),
             "not given in time": missed, "glances": glanced, "events drained": events,
             "dropped events": client.dropped, "child's frames": (client.bye or {}).get("frames"),
+            "child's frames a second after the warm-up": rate, "child's CPU (cores)": cpu,
+            "child's frame step and searches (median, p90 ms; how many)": _ms(took, counts=True),
             "child's private bytes": _trend(points) if len(points) >= 2 else "not read"}
+
+
+def newest_seq(client) -> int:
+    """The newest frame number the feed's client has had a state of."""
+    return max((st.seq for st in list(client.states)), default=0)
+
+
+def _ms(samples: dict[str, list[float]], counts: bool = False) -> str:
+    """Each list's median and 90th percentile (in s) in ms, and with `counts` how many; empty ones left out."""
+    out = []
+    for k, v in samples.items():
+        if v:
+            v = sorted(v)
+            out.append(f"{k} {1000 * v[len(v) // 2]:.1f}, {1000 * v[int(0.9 * (len(v) - 1))]:.1f}"
+                       + (f" ({len(v)})" if counts else ""))
+    return ", ".join(out)
 
 
 def soak_sim(meter: Meter, seed: int = 0) -> dict:

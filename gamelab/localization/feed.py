@@ -406,6 +406,7 @@ class FeedClient(Feed):
         self.events: deque[Event] = deque(maxlen=EVENTS_KEPT)
         self.dropped = 0          # events lost because nothing drained them
         self.served = self.refused = 0  # states handed out by latest(), and times it had none to give
+        self.on_state: Callable[[WorldState], None] | None = None  # sees every state as it comes (soak feed)
         self.hello: dict | None = None
         self.bye: dict | None = None  # the world step's counts, which the child sends once asked to stop
         self.alive, self.why = False, "not started"
@@ -447,6 +448,8 @@ class FeedClient(Feed):
                     if msg[0] == "state":
                         st = msg[1]
                         self.states.append(st)
+                        if self.on_state is not None:
+                            self.on_state(st)
                         room = EVENTS_KEPT - len(self.events)
                         self.dropped += max(0, len(st.events) - room)
                         self.events.extend(st.events)

@@ -34,3 +34,22 @@ def test_a_short_run_reports_what_grew(monkeypatch):
         tracemalloc.stop()
     assert meter.warm is not None and meter.end is not None and len(meter.samples) >= 3
     assert any("test_soak.py" in line for line in lines[:-1]) and lines[-1] == f"held at the end: steps {len(kept)}"
+
+
+def test_a_process_s_cpu_time_counts_its_threads_work():
+    import sys
+    import threading
+    import time
+    if sys.platform != "win32":
+        assert soak.cpu_seconds() is None
+        return
+    before = soak.cpu_seconds()
+
+    def spin():
+        end = time.perf_counter() + 0.2
+        while time.perf_counter() < end:
+            pass
+    th = threading.Thread(target=spin)
+    th.start()
+    th.join()
+    assert soak.cpu_seconds() - before >= 0.1
