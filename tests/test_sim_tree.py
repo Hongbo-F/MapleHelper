@@ -278,3 +278,35 @@ def test_other_players_dots_show_in_the_minimap_windows_view_and_not_under_hers(
     if (rocky := scenarios.real_map(scenarios.ROCKY)) is not None:  # its whole picture shows
         eyes = fakes.FakeEyes(World(rocky, KEYS, (22, -700.0), monsters=None, origin=clock.now), clock, rocky)
         assert eyes.in_window(-5000) and eyes.in_window(5000)
+
+
+# --- landing on a floor that rises the way she flies ---------------------------------------------------------------
+
+def test_a_step_onto_a_floor_that_rises_the_way_she_flies_lands_her():
+    from gamelab.motion.body import _lands_at
+    t = tree()
+    t["foothold"] = {"1": {"1": dict([seg(1, 0, 500, 200, 480)])}}  # rises 0.1 a unit to the right, as 33 does
+    t["life"], t["ladderRope"] = {}, {}
+    floor = mapdata.parse(1, t, "Test Map", {}).platforms[0]
+    # From 0.05 above the surface under her at x 100 (499.95 against 490: 9.95 below it at 100.75, where the step ends,
+    # whose surface is at 489.925) to 0.5 below it: she was above it where the step started and is below it where it
+    # ends, as HeavenClient's crossing has it; weighed against the surface at its end alone, she went through.
+    y0 = floor.y_at(100.0) - 0.05
+    assert _lands_at(floor, 100.0, y0, 100.75, floor.y_at(100.75) + 0.5) == 100.75
+    assert y0 > floor.y_at(100.75)  # (below the surface at the step's end when it starts)
+    assert _lands_at(floor, 100.0, floor.y_at(100.0) + 1.0, 100.75, floor.y_at(100.75) + 2.0) is None  # under it
+    assert _lands_at(floor, 100.75, floor.y_at(100.75) - 0.05, 100.0, floor.y_at(100.0) + 0.5) == 100.0  # downhill too
+
+
+def test_knocked_right_off_30_she_lands_on_tree_dungeons_floor_not_through_it():
+    # The floor (33) rises to the right, 248 to 225. In the hunt loop (seed 4, 16 s; 5 minutes from 28) a touch knocked
+    # her right off 30 at x 143.7 (180 out, 220 up): she came down at x 266 and, weighed against the surface at each
+    # step's end alone, through the floor and out of the map. (Of 6 five-minute hunt loops from 28, 4 fell out of the
+    # map, two of them inside the tower: none of those now.)
+    m = tree_map()
+    floor = m.platform(33)
+    assert floor.y_at(-220) > floor.y_at(310)
+    w = world(m, 30, 143.7)
+    w._launch(180.0, -220.0, w.ms)
+    w.advance(2.0)
+    assert w.plat is floor and w.fell_out_at is None and 250 < w.x < 300

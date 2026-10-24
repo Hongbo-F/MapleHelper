@@ -162,7 +162,9 @@ def test_the_jumps_that_land_only_from_near_an_end_are_found_and_the_steps_on_th
     planner = route.Planner(model)
     jumps = {(m.src, m.dst, m.direction) for m in planner.moves if m.kind == "jump"}
     new = {(17, 16, "right"), (15, 17, "left"), (5, 4, "right"), (3, 5, "left")}
-    assert new <= jumps and len(planner.moves) == 181
+    # (179: since a step onto a floor rising the way she flies lands her, body._lands_at, the walk-off off 8's left end
+    # lands on 10, not through it onto 17, and the two running jumps from 8 onto 10 are needless; 181 before)
+    assert new <= jumps and len(planner.moves) == 179
     [up] = [m for m in planner.moves if (m.kind, m.src, m.dst) == ("jump", 17, 16)]
     assert up.takeoff == -164 - route.TAKEOFF_EDGE and model.platform(16).left + route.LANDING_ROOM <= up.land_x
     assert route._sure_running_jump(model, model.platform(17), -164 - route.JUMP_FROM, 1) is None
@@ -172,7 +174,7 @@ def test_the_jumps_that_land_only_from_near_an_end_are_found_and_the_steps_on_th
     monkeypatch.setattr(route, "END_LOOK", (route.JUMP_FROM,))  # looked for at JUMP_FROM alone, as before
     before = route.Planner(load())
     assert not new & {(m.src, m.dst, m.direction) for m in before.moves if m.kind == "jump"}
-    assert len(before.moves) == 176
+    assert len(before.moves) == 175
     assert before.travel(17, -277.5, 10) == pytest.approx(22.2, abs=0.1)
 
 

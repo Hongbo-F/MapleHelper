@@ -460,9 +460,17 @@ def _lands_at(q, x: float, y: float, nx: float, ny: float) -> float | None:
     ends, if q is under that and the step went through its surface; or, if the step starts over q and ends
     past its end, where it went through q's surface before the end. Checked only where the step ends, a
     knock in the air took her through the basin's corner (36's right end, under the foot of the wall
-    above it) and out of the map (harness, tour seed 10)."""
+    above it) and out of the map (harness, tour seed 10).
+    Through its surface: from at or above it where the step starts or where it ends, to at or below it where it ends.
+    HeavenClient (FootholdTree::limit_movement, read 2026-10-24) takes the start's height against the surface under
+    the start, `crnt_y <= ground(crnt_x) && next_y >= ground(next_x)`; weighed against the surface under the end
+    alone (as here until then), a step onto a floor that rises the way she flies, starting above the surface under it
+    but less than the rise below the surface at its end, went through: on West Rocky Mountain II from 13 up onto 10
+    (0.15 a unit, 3 of 6 seeds), and on Tree Dungeon, Forest Up North II, where most floors slope 0.1 a unit, down
+    through the floor (33, 248 to 225) and out of the map. Either reading lands her: no landing of before is lost."""
     if q.covers(nx):
-        return nx if y <= q.y_at(nx) <= ny + 0.01 else None
+        surface = q.y_at(nx)
+        return nx if (y <= surface or y <= q.y_at(x)) and surface <= ny + 0.01 else None
     if nx == x or not q.covers(x):
         return None
     end = q.right if nx > x else q.left

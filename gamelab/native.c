@@ -164,7 +164,7 @@ static int lands_at(const Platforms *m, int q, double x, double y, double nx, do
 {
     if (covers(m, q, nx)) {
         double surface = y_at(m, q, nx);
-        if (y <= surface && surface <= ny + 0.01) {
+        if ((y <= surface || y <= y_at(m, q, x)) && surface <= ny + 0.01) {  /* either end's reading */
             *at = nx;
             return 2;
         }
