@@ -371,6 +371,20 @@ def _hunter(args, **kw):
     return Hunter(eyes, keys, model, log=_log, feed=feed, **kw)
 
 
+def cmd_pet(args) -> int:
+    """Check her pet's fullness on her Character Info and feed it while it's low (behavior.pet); with --every, again
+    every that many minutes until stopped. Keys: pet food, Esc, and a double-click on her."""
+    hunter = _hunter(args)
+    _record("pet", args.map)
+    while True:
+        window.bring_to_front(_game_title())
+        fullness = hunter.pet.check()
+        print(f"pet fullness: {'not read' if fullness is None else fullness}")
+        if not args.every:
+            return 0
+        time.sleep(args.every * 60)
+
+
 def _feed(model, title: str, geo=STRETCHED):
     """A continuous feed of the game for this command (its child process; closed when the command ends), for its
     window at geometry `geo` (the command's eyes'), or None if it can't start (the command then looks for itself)."""
@@ -1477,6 +1491,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
     feed_arg(s)
     s.set_defaults(func=cmd_tour)
+
+    s = sub.add_parser("pet", help="check her pet's fullness (double-clicks her to open her Character Info) and feed "
+                                   "it while it's low; --every N: again every N minutes")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--every", type=float, default=0, help="minutes between checks (0: once)")
+    s.set_defaults(func=cmd_pet)
 
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "
                                      "followed, deaths and who killed them), for the mini-map; never sends keys or "
