@@ -371,8 +371,12 @@ were, and the 86 golden traces are byte-identical.
 - **One lookup a pixel:** each colour bin's byte has a bit for each learned kind (`gates.Gates`), so step 1 bins each
   pixel once and looks it up once for all of them (1.5-1.8 ms a band at 1366x768, on one thread).
 - **The whole screen's bands overlap by the tallest picture** and step 2's slack (an Axe Stump's flinch is 93 game px
-  tall, a band's overlap 43 at 1366x768), so one standing across a band's edge is whole in the next band. The first
-  map's four still go by the bands as they were (on Tree Dungeon a hopping slime on platform 30 can straddle one).
+  tall, a band's overlap 43 at 1366x768), so one standing across a band's edge is whole in the next band. The bands
+  are every kind's, so on a map with learned kinds the first map's kinds go by them too (on the first map, with none,
+  they're as they were): on Tree Dungeon they overlap by the mushrooms' 56 rows and 9, and of 927 slimes drawn standing
+  on its footholds (any frame of theirs, both ways, on its 19 frames from 28) the whole screen's search found 923, all
+  117 on platform 30, whose surface lies on a band's edge (59 of 82 there with the bands as they were, in the map's
+  study); overlapping by the slime's hop frame and the slack (93 rows), 925.
 - **The fine gate tries a place's first two templates** (`mobs.GATE_TRIES`), not only its first. A stump's frames'
   silhouettes match a blob of its colour about alike, its flinch frame's (the largest) most often best, and gated with
   it a place failed where its own frame, the place's second or third, would have passed: on West Rocky Mountain II's
