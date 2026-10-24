@@ -107,7 +107,7 @@ def test_a_hungry_pet_is_fed_until_it_is_full_enough_and_the_window_closed(state
     assert game.plans == ["pet_info", "pet_food", "pet_food", "pet_food", "pet_close"]
     assert not game.open
     saved = json.loads(state.read_text())
-    assert saved == {"checked": 1000.0, "fed": 1000.0, "fullness": 99}
+    assert saved == {"checked": 1000.0, "fed": 1000.0, "fullness": 99, "level": 99.0, "at": 1000.0, "read_at": 1000.0}
 
 
 def test_a_fed_pet_gets_no_food_and_its_window_is_closed(state):
@@ -171,3 +171,36 @@ def test_a_plan_name_keeps_only_what_the_player_keeps(monkeypatch, tmp_path):
     monkeypatch.setattr(client, "INBOX", tmp_path)
     plan_id = client.send([], name="pet food")
     assert "_petfood_" in plan_id and (tmp_path / f"{plan_id}.json").exists()
+
+
+def test_read_once_then_followed_in_time_and_fed_when_it_falls_under_the_line(state):
+    game = _Game(85)
+    now = [10_000.0]
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: now[0])
+    assert care.tend() == 85  # never read: read once
+    assert game.plans == ["pet_info", "pet_close"]
+    now[0] += 10 * pet.TICK_S  # ten ticks out: 75, nothing pressed
+    assert care.tend() == pytest.approx(85 - 10 * pet.HUNGRY)
+    assert game.plans == ["pet_info", "pet_close"]
+    now[0] += 20 * pet.TICK_S  # 55: under the line, one food
+    assert care.tend() == pytest.approx(55 + pet.FOOD)
+    assert game.plans == ["pet_info", "pet_close", "pet_food"]
+    saved = json.loads(state.read_text())
+    assert saved["level"] == pytest.approx(85) and saved["fed"] == now[0] and saved["read_at"] == 10_000.0
+
+
+def test_time_away_from_the_game_does_not_count(state):
+    game = _Game(70)
+    now = [0.0]
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: now[0])
+    care.tend()
+    now[0] += 100 * pet.TICK_S
+    assert care.tend(present=False) == pytest.approx(70)  # the game closed meanwhile: the pet wasn't out
+    now[0] += 5 * pet.TICK_S
+    assert care.tend() == pytest.approx(65)
+
+
+def test_a_hunt_reads_it_only_with_no_monster_near_her(state):
+    game = _Game(90)
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: 0.0)
+    assert care.tend(read_ok=False) is None and game.plans == []

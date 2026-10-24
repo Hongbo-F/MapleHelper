@@ -372,18 +372,28 @@ def _hunter(args, **kw):
 
 
 def cmd_pet(args) -> int:
-    """Check her pet's fullness on her Character Info and feed it while it's low (behavior.pet); with --every, again
-    every that many minutes until stopped. Keys: pet food, Esc, and a double-click on her."""
+    """Her pet kept fed (behavior.pet): its fullness followed in time and a food given when it's low, read once off her
+    Character Info to start from (or now, with --read); with --every, followed every that many minutes until stopped,
+    counting only time the game window is there. Keys: pet food; for a read Esc and a double-click on her."""
     hunter = _hunter(args)
     _record("pet", args.map)
-    while True:
-        window.bring_to_front(_game_title())
-        fullness = hunter.pet.check()
-        print(f"pet fullness: {'not read' if fullness is None else fullness}")
+    title = _game_title()
+    if args.read:
+        window.bring_to_front(title)
+        print(f"pet fullness: {hunter.pet.check()}")
         if not args.every:
             return 0
-        from .behavior.pet import RETRY_S
-        time.sleep(args.every * 60 if fullness is not None else min(args.every * 60, RETRY_S))  # soon after a miss
+    while True:
+        try:
+            present = not window.minimized(window.find_game(title))
+        except RuntimeError:  # no game window: the pet isn't out
+            present = False
+        level = hunter.pet.tend(present=present)
+        print(f"pet fullness: {'not known' if level is None else f'about {level:.0f}'}"
+              + ("" if present else " (the game isn't there: time not counted)"))
+        if not args.every:
+            return 0
+        time.sleep(args.every * 60)
 
 
 def _feed(model, title: str, geo=STRETCHED):
@@ -1493,10 +1503,12 @@ def build_parser() -> argparse.ArgumentParser:
     feed_arg(s)
     s.set_defaults(func=cmd_tour)
 
-    s = sub.add_parser("pet", help="check her pet's fullness (double-clicks her to open her Character Info) and feed "
-                                   "it while it's low; --every N: again every N minutes")
+    s = sub.add_parser("pet", help="keep her pet fed: its fullness followed in time (read once off her Character Info) "
+                                   "and a food when it's low; --every N: every N minutes")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
-    s.add_argument("--every", type=float, default=0, help="minutes between checks (0: once)")
+    s.add_argument("--every", type=float, default=0, help="minutes between follows (0: once; 1 counts only minutes "
+                                                            "the game is there)")
+    s.add_argument("--read", action="store_true", help="read its fullness off her Character Info now (a double-click)")
     s.set_defaults(func=cmd_pet)
 
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "

@@ -48,9 +48,9 @@ from .pet import PetCare
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
-# Her pet (it drinks her potions since 2026-10-23; a hungry pet stops) is checked and fed by its fullness
-# (behavior.pet): every pet.CHECK_EVERY_S, at a moment no monster is within PET_CLEAR of her (a check takes a few s).
-# Until 2026-10-24 it was fed blind every 10 minutes, and only while hunting: found at fullness 9.
+# Her pet (it drinks her potions since 2026-10-23; a hungry pet stops) is fed by its fullness (behavior.pet), read once
+# (at a moment no monster is within PET_CLEAR of her: the read takes a few s) and followed in time from there. Until
+# 2026-10-24 it was fed blind every 10 minutes, and only while hunting: found at fullness 9.
 PET_CLEAR = 250  # map units
 # s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
 # (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
@@ -139,15 +139,12 @@ class Hunter:
                 telemetry.emit("event", kind="potion", text=f"potion at {s.hp:.0%} HP")
 
     def feed_pet_if_due(self, s: Scene | None = None) -> bool:
-        """Check her pet's fullness and feed it (behavior.pet.PetCare) if a check is due and no monster is within
-        PET_CLEAR of her in look `s`. True if it checked. Nothing without a pet food key."""
-        if not self.pet.due():
-            return False
-        if s is not None and s.where is not None and any(abs(m.x - s.where.x) < PET_CLEAR and abs(m.y - s.where.y) < 120
-                                                          for m in s.monsters):
-            return False
-        self.pet.check()
-        return True
+        """Follow her pet's fullness and give it a food when it's low (behavior.pet.PetCare.tend); never read yet, it's
+        read first, but only with no monster within PET_CLEAR of her in look `s` (the read takes a few s). True if
+        its fullness is known. Nothing without a pet food key."""
+        clear = s is None or s.where is None or not any(
+            abs(m.x - s.where.x) < PET_CLEAR and abs(m.y - s.where.y) < 120 for m in s.monsters)
+        return self.pet.tend(read_ok=clear) is not None
 
     def take_exp(self, since: float, kind: str | None = None) -> bool:
         """Use up one kill her EXP told of since `since`, if there is one: of `kind`, or of a kind not known (a gain

@@ -1,4 +1,5 @@
-"""Her pet kept fed: its fullness read off her Character Info, and Pet Food given while it's low.
+"""Her pet kept fed: its fullness read once off her Character Info, then followed in time, and Pet Food given when
+it's low.
 
 Her pet drinks her potions for her (since 2026-10-23), and a hungry pet stops: on 2026-10-24 it was found at fullness
 9 of 100 after a night and a morning summoned, fed only every 10 minutes while she hunted and never while she only
@@ -15,7 +16,15 @@ double-click on 2026-10-24 and opened theirs (a level 20 magician's). Hers is th
 later. Opened by a double-click on her, her window shows its pet panel collapsed ("SHOW PET INFO", read by the OCR as
 "SHO U PET IHFO"): that button is clicked first. If the panel can't be read, Pet Food is given anyway once FALLBACK_S
 have passed since the last feed, so a pet is never left to starve for a reading.
-When it was last checked and fed, and its fullness then, are kept in paths.PET.
+
+Read once, then followed (PetCare.tend): the game data gives each pet how much fullness it loses at a time (Item.wz
+Pet/<id>.img info/hungry: 1 for both Snail pets, 5000054 and 5000033; 1-5 across the game's pets), and the server
+takes that every TICK_S while the pet is out. Measured live on 2026-10-24: 99 at 10:04:47, 85 at 10:21:14 and 82 at
+10:25:46 (70-74 s a point); the v83 server emulators take it every 60 s and send the pet home at PACKED_AT ("packed").
+No key opens the Character Info (the key bindings' unbound functions are MUTE and KEYS1-3; the equipment window shows
+the pet's equipment, not its fullness), so the double-click is used once, to start from, or when asked (`pet --read`).
+The fullness followed, when it was, and the last feed are kept in paths.PET. Time counts only while the game window is
+there (the pet is out only with her in the game): `pet --every` looks for it every minute.
 
 Keys: pet food (config.toml [keys] pet_food), Esc, two left clicks on her and one on her window's SHOW PET INFO.
 Nothing else.
@@ -29,7 +38,13 @@ import numpy as np
 
 from .. import paths, telemetry
 
-FEED_BELOW = 70        # fullness under which she feeds it ...
+HUNGRY = 1             # fullness the pet loses a tick (the game data's info/hungry of the Snail pets)
+TICK_S = 70            # s between the server's ticks, as measured (70-74 s a point; the emulators' 60 s)
+FOOD = 30              # fullness a Pet Food gives (9 -> 39 -> 69 -> 99)
+PACKED_AT = 5          # at or under it the server sends the pet home (v83 emulators)
+FOLLOW_FEED_BELOW = 60  # followed fullness under which she gives it a food: 30 above PACKED_AT and then some, for
+                        # a followed rate a few s a tick off over an hour (an hour at 60 s a tick instead is 10 lower)
+FEED_BELOW = 70        # read fullness under which she feeds it ...
 FEED_TO = 80           # ... and fed until at least this (a food gives 30: 50 -> 80, 40 -> 70 -> 100)
 MAX_FEEDS = 3          # Pet Food at most in one check (9 -> 99 took three)
 CHECK_EVERY_S = 20 * 60  # s between checks; the pet lost about 90 fullness over a night and a morning summoned
@@ -88,6 +103,14 @@ def read_fullness(full: np.ndarray, ocr) -> int | None:
     return read_panel(full, ocr)["fullness"]
 
 
+def follow(state: dict, now: float, present: bool = True) -> None:
+    """Bring the followed fullness (state "level" as of "at") up to `now`: HUNGRY a TICK_S while the game is there
+    (`present`); away, the time doesn't count."""
+    if "level" in state and "at" in state and present:
+        state["level"] = max(0.0, state["level"] - max(0.0, now - state["at"]) / TICK_S * HUNGRY)
+    state["at"] = now
+
+
 def _state() -> dict:
     try:
         return json.loads(paths.PET.read_text(encoding="utf-8"))
@@ -120,6 +143,27 @@ class PetCare:
         if self.actions.keys.pet_food is None:
             return False
         return self.clock() - _state().get("checked", 0.0) >= CHECK_EVERY_S
+
+    def tend(self, present: bool = True, read_ok: bool = True) -> float | None:
+        """Follow the pet's fullness in time (TICK_S, HUNGRY) and give it a food when that's under FOLLOW_FEED_BELOW.
+        `present`: the game window is there (time away from the game doesn't count). Never read yet, it's read first
+        (`check`, if `read_ok`). Returns the fullness followed (None if not known yet)."""
+        if self.actions.keys.pet_food is None:
+            return None
+        now = self.clock()
+        state = _state()
+        follow(state, now, present)
+        if "level" not in state:
+            _save(state)
+            return self.check() if present and read_ok else None
+        if present and state["level"] < FOLLOW_FEED_BELOW:
+            self._feed()
+            before = state["level"]
+            state["level"], state["fed"] = min(100.0, before + FOOD), now
+            self.log(f"pet: fullness about {before:.0f}, fed it -> about {state['level']:.0f}")
+            telemetry.emit("event", kind="pet", text=f"fed her pet at about {before:.0f}")
+        _save(state)
+        return state["level"]
 
     def check(self) -> int | None:
         """Open her Character Info, read the pet's fullness, feed it while low, close the window. Returns the
@@ -154,6 +198,7 @@ class PetCare:
         if feeds:
             state["fed"] = self.clock()
         state["fullness"] = fullness
+        state["level"], state["at"], state["read_at"] = float(fullness), self.clock(), self.clock()  # followed from here
         _save(state)
         self.log(f"pet: fullness {start}" + (f", fed {feeds} -> {fullness}" if feeds else ""))
         telemetry.emit("event", kind="pet", text=f"pet fullness {start}" + (f", fed {feeds} -> {fullness}" if feeds else ""))
