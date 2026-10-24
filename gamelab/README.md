@@ -52,8 +52,7 @@ MapleStory runs as administrator, and Windows blocks key presses from normal pro
 
 What keeps the player safe:
 - **No code from plans:** it runs no code it receives; plans are data.
-- **Her keys only:** it only presses the keys `config.toml` `[keys]` binds to her actions, plus `\` (key bindings window) and Esc (close windows). Enter is never pressed, so nothing typed in chat can be sent.
-- **No clicks:** it can move the mouse inside the game window to hover over things, but it cannot click.
+- **Any key, and clicks inside the game** (since 2026-10-23, at the user's request: the key bindings window, `\`, needs a click on Confirm to save a change): it presses any key `config.toml` can name (`player.ALL_KEYS`) and both mouse buttons (`lbutton`, `rbutton` events; `act`'s `click@X,Y` and `rclick@X,Y`), and moves the pointer only inside the game window. Until then it pressed only her bound keys, `\` and Esc, never Enter, and never clicked.
 - **Game in front only:** it stops pressing keys if the game leaves the foreground.
 - **Fixed at start:** it loads its code and key list once, when it starts, and loads as little of gamelab as it can (a test checks).
 - **Stops itself:** it exits when `lab/STOP` appears or after 3 idle hours.
@@ -94,7 +93,7 @@ Other commands (`python -m gamelab -h` lists them all):
 | `hunt kill --near -200` | Kill one monster (the one closest to that many map units away) and loot it |
 | `hunt shots` | Hits and misses of every throw logged so far, by how far above or below her the target was. `lab/shots2.jsonl` also keeps her x, the target's x, her foothold group, whether a wall of it stood in the way, every monster in front of her at the throw and at the first look after it that placed her (about when the attack picked its target, timed from the key), and the target's HP bar at every look until the throw was scored. A bar drop or a kill is a throw's only if no other throw's damage can have shown then: from 0.47 s after its key (the star's release) to 0.3 s past when it was due (with its flight), as the game may show it at either and the simulator shows it at the release. Else the throw stays undecided. `lab/shots.jsonl`, logged until 2026-10-20, made every throw in flight at a kill a hit |
 | `probe list`, `probe run NAME`, `probe score` | The in-game probes of what a star hits (see Probes to run): what each settles, running one, and weighing each question's two answers on their log, `lab/probe_geometry.jsonl` (`list` and `score` send no keys) |
-| `map`, `map --offline` | The map's platforms and her position on them (`lab/map_<id>.png`); sends no keys |
+| `map`, `map --offline` | The map's platforms and her position on them (`lab/shots/map_<id>.png`); sends no keys |
 | `nav 35`, `nav 35 --fight` | Go to platform 35; with `--fight`, shoot monsters on the way instead of avoiding them |
 | `nav 17 --avoid climb` | A kind of move the route takes only if nothing else gets there (each costs 20 times as much): from 23, the two rope hops instead of the climb past its end |
 | `nav 3 --ways 3`, `tour --loop --ways 3` | Each trip chooses among the 3 best distinct ways to where it's going, by a softmax over their times, not only the quickest (`route.ROUTES`; off by default: in the simulator as much EXP, and fewer of her drops picked up; see Route diversity; not tried in game) |
@@ -111,7 +110,7 @@ Other commands (`python -m gamelab -h` lists them all):
 | `combo NAME --regular-attack` | A combo test, throwing with the plain attack key (no MP) |
 | `track RECORDING`, `sheet RECORDING --around-her`, `check RECORDING`, `list` | Her path through a recording; a zoomed contact sheet; whether keys went out on time and the game kept a steady frame rate; saved recordings |
 | `lock attack 700 740 780` | Whether a jump that many ms after an attack goes through |
-| `snap` | Screenshot of the game in `lab/snap.png` |
+| `snap` | Screenshot of the game in `lab/shots/snap.png` (commands save their pictures in `lab/shots`: the lab's own screenshots are test data) |
 | `spot`, `spot --image FILE` | Whether the Lie Detector is on screen now (or in a screenshot); sends no keys |
 | `bench-look [FILES]`, `bench-look --live --n 100` | Each stage of a look timed (median, p90, fastest): on saved 1920×1080 screenshots (by default 17 in `lab`), or on the game as it is on screen (`--capture dxgi` or `mss`: how; by default as config.toml says). Also counted: looks that didn't find her name tag near where it was, and ropes on the whole screen that the search where the map's ropes can show missed. Live it refuses unless the game is in front already, and never brings it forward; sends no keys |
 | `bodies`, `bodies FILES --recordings NAMES`, `bodies --tracks FILES` | Where the monster detector puts monsters, offline: their feet against the surface of the platform each is put on, on saved screenshots where she stands (by default bench-look's), by the matched template's origin and by its bottom; and on recordings with the camera still (by default `stand_snail` and `walk_snail`), how far their x strays from frame to frame, whether they face the way they move, how often their pose (the matched template's frame) is what they do, walking or standing, by cut-outs and sprites, and how fast each kind walks. `--tracks` reads `watch`'s telemetry instead: each track's velocity against how far its x went by the next record, for those standing and those walking. No game, no keys |
@@ -603,6 +602,31 @@ Her EXP number in the bottom bar, "13,549[67.02%]" (the EXP she has into her lev
 - **Jumps from standing** (2026-10-21, 34 jumps from platform 34 keyed 0-160 ms after the arrow): the game moves her in 30 ms steps, and a jump three steps into a run leaves at 126 units/s and lands 13 units short; from 150 ms after the arrow a jump leaves at full speed but for at most 5% (none of the 10 keyed 130 ms or later left short; of the 8 keyed 100 and 120 ms after it, 6 did). The kick: all 4 at 40 ms and 3 of 4 at 60 left at full speed, not reliable enough to plan on. Motion planning has the tables.
 - **Respawns, and how full the map is** (the telemetry of 2026-10-19 to 21, offline: Respawns and drop life): a platform she emptied was mostly still empty 12.56 s later (of 77, watched without a gap over 2 s, 80% weren't back, 23 watched that long; past 30 s too few were watched to say; in the simulator about half were back within 5 s), and the platforms in view had a monster at 26% of their spawn points (the basin 12%, and none 45% of the time). Drops lay over a minute (95% at 60 s); how much longer, no hunt has shown.
 - **Not yet checked on its own:** placing her from the minimap dot and the camera when her name tag is hidden.
+
+## In game, on West Rocky Mountain II (map 10004021, from 2026-10-23)
+
+The second map: Stump, Dark Stump, Axe Stump and Red Snail; a stone bridge (21, 22) over floating steps (23-25) down
+into a pit of stairs (26-32), a higher bridge (11, 14) reached by a rope from 22, ledges above it (0-10) and to the
+right (12-19, the way out to West Rocky Mountain I at 19). Her keys changed with it: attack Ctrl, Lucky Seven Shift,
+and her pet drinks her potions (on C and V), so `hp_potion` and `mp_potion` are unbound and she feeds it (`pet_food`,
+U) every `hunter.PET_FEED_S` (600 s; when she last did is kept in `lab/pet.json`). The bindings were checked in the
+key bindings window (`act ''`). The simulator keeps her old keys (`timeline.SIM_KEYS`), so the golden traces don't
+change with config.toml.
+
+First look, explore only (no attacks):
+- **Seen right:** her place from the minimap (`map --map 10004021`), HP and MP, her EXP number (31,736 at level 23,
+  every glyph within 0.6 levels), and other players and their platforms.
+- **Not seen:** the monsters. A kind is searched for only with a colour gate (`mobs.PALETTES`), and only the first
+  map's four have one.
+- **Overlapping platforms:** 21 lies on 22's footholds and 11 on 14's, in other groups; she stands on either, and
+  trips between them were planned as jumps and counted as landing elsewhere (4 of 8 moves on one trip).
+- **The stairs:** she jumps onto a stair 60 up from the one below (from 30 to 29, 29 to 28, 28 to 27), but the
+  planner has no route out of the pit ("no route from platform 30 to 19"), and from 27 to the floating step 25 (44
+  across, 60 up) she twice fell back to 28.
+- **Her x from the minimap** read 32-43 units left of the stair she stood on (y 10 low), three times.
+- **Ropes:** the map has four (at x -414, -1463, -536, -303); the climb from 14 to 7 missed and ended on 17.
+- Full-size frames from 24, the bridge (22), the high bridge (11), 17 and the stairs (30) are in
+  `D:/MapleHelper-scratch/newmap/frames` (`<platform>_<n>.png`).
 
 ## Probes to run
 

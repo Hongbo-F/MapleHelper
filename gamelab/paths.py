@@ -9,6 +9,7 @@ CONFIG = REPO / "config.toml"
 ASSETS = ROOT / "assets"          # screenshot cut-outs and Lie Detector templates (in git)
 
 LAB = ROOT / "lab"
+SHOTS = LAB / "shots"            # the pictures commands save (snap, act, hunt look, map, ...)
 INBOX = LAB / "inbox"            # plans waiting for the player
 OUTBOX = LAB / "outbox"          # player results
 STOP = LAB / "STOP"              # create this file to stop the player
@@ -23,5 +24,6 @@ OLD_SHOT_LOG = LAB / "shots.jsonl"  # ... as logged until 2026-10-20: a kill mad
 PROBE_LOG = LAB / "probe_geometry.jsonl"  # the in-game probes' throws (behavior.probe): every monster in front,
                                            # where at the pick, and what each showed after the star was due
 HIT_LOG = LAB / "hits.jsonl"     # hits taken standing still: how far each pushed her
+PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)

@@ -1114,7 +1114,7 @@ def test_a_plan_due_to_start_the_moment_it_is_cancelled_is_withdrawn(model):
 def test_a_plan_the_real_player_would_refuse_fails_the_same_way(model):
     clock, w, player, _ = _player(model)
     with pytest.raises(client.PlayerError):
-        player.submit([[0, "enter", "down"], [40, "enter", "up"]], lead_ms=0, name="bad")
+        player.submit([[0, "mbutton", "down"], [40, "mbutton", "up"]], lead_ms=0, name="bad")
     with pytest.raises(client.PlayerError):
         player.submit([[100, "right", "down"], [0, "right", "up"]], lead_ms=0, name="unsorted")
 

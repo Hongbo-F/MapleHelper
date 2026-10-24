@@ -23,7 +23,7 @@ from .analysis import analyze, calibration, recordings
 from .analysis.track import airborne, track
 from .control import client
 from .control.timeline import action_events, chain, her_setup
-from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, STOP
+from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, SHOTS, STOP
 
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
 FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the front before it gives up (_to_game)
@@ -131,10 +131,18 @@ def cmd_calibrate(args) -> int:
     return 0
 
 
+def _shot(name: str) -> Path:
+    """Where a command saves a picture: gamelab/lab/shots (the lab's own screenshots are test data: `snap` and
+    `hunt look` once wrote over two of them)."""
+    shots = LAB / SHOTS.name  # LAB as it is when called (tests point it elsewhere)
+    shots.mkdir(parents=True, exist_ok=True)
+    return shots / name
+
+
 def cmd_snap(args) -> int:
     window.bring_to_front(_game_title())
     frame = recordings.screenshot("snap", scale=args.scale)
-    path = LAB / "snap.png"
+    path = _shot("snap.png")
     Image.fromarray(frame).save(path)
     print(path)
     return 0
@@ -144,13 +152,20 @@ def parse_steps(steps: list[str], tap_ms: int = TAP_MS) -> tuple[list, int]:
     """Explore-step mini language -> (plan events, end ms).
 
     KEY       tap the key          KEY*MS   hold it MS ms        KEY+ / KEY-   press / release
-    MS        wait MS ms           @X,Y     move the mouse to client pixel X,Y (no click)
+    MS        wait MS ms           @X,Y     move the mouse to client pixel X,Y
+    click@X,Y / rclick@X,Y         move the mouse there and click (left / right button)
     Steps run one after another; KEY+ / KEY- let a key stay held across later steps (e.g. right+ alt right-).
     """
     events, t = [], 0
     for step in steps:
         if step.isdigit():
             t += int(step)
+        elif step.startswith(("click@", "rclick@")):
+            button, _, at = step.partition("@")
+            x, y = (int(v) for v in at.split(","))
+            name = "lbutton" if button == "click" else "rbutton"
+            events += [[t, "mouse", x, y], [t, name, "down"], [t + tap_ms, name, "up"]]
+            t += tap_ms
         elif step.startswith("@"):
             x, y = (int(v) for v in step[1:].split(","))
             events.append([t, "mouse", x, y])
@@ -188,7 +203,7 @@ def cmd_act(args) -> int:
         cal = calibration.load()
         crop = _crop_on_her(cal)
         rec = recordings.record(events, name=args.name, duration_ms=duration, crop=crop, scale=cal.scale, fps=30)
-        path = LAB / f"{args.name}_sheet.png"
+        path = _shot(f"{args.name}_sheet.png")
         recordings.contact_sheet(rec.frames, rec.times, path, cols=8, every=args.every)
         print(path)
         frame = recordings.screenshot("act", scale=args.scale, duration_ms=100)  # the steps already ran
@@ -196,7 +211,7 @@ def cmd_act(args) -> int:
         fps = max(2, min(10, int(9000 / (duration + 100))))
         frame = client.submit(events, fps=fps, duration_ms=max(duration, 200), scale=args.scale, lead_ms=0,
                               name="act")["frames"][-1]
-    path = LAB / f"{args.name}.png"
+    path = _shot(f"{args.name}.png")
     Image.fromarray(frame).save(path)
     print(path)
     return 0
@@ -222,8 +237,8 @@ def cmd_do(args) -> int:
     cal = calibration.load()
     rec = recordings.record(events, name=args.name, duration_ms=end + 400, crop=_crop_on_her(cal), scale=cal.scale,
                             fps=30)
-    recordings.contact_sheet(rec.frames, rec.times, LAB / f"{args.name}_sheet.png", cols=8, every=args.every)
-    path = LAB / f"{args.name}.png"
+    recordings.contact_sheet(rec.frames, rec.times, _shot(f"{args.name}_sheet.png"), cols=8, every=args.every)
+    path = _shot(f"{args.name}.png")
     Image.fromarray(recordings.screenshot("do", scale=2, duration_ms=100)).save(path)
     print(f"{args.action}{tuple(values)}: {len(events)} key events, {end} ms; "
           f"saved {path} and recording '{args.name}'")
@@ -379,7 +394,7 @@ def cmd_hunt(args) -> int:
         hunter.clear(kinds, ground=ground, max_kills=args.kills, seconds=args.seconds)
         hunter.looter.mop_up()  # drops still on her platform: kills the fight couldn't place, or left before
     final = hunter.look(loot=True)
-    _annotate(final, LAB / "hunt_end.png")
+    _annotate(final, _shot("hunt_end.png"))
     left = ", ".join(f"{d.item.kind} at {d.x - final.where.x:+.0f}" for d in final.loot) or "none"
     print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}; drops left on her platform: {left}"
           + ("; her inventory is full" if hunter.looter.inventory_full else ""))
@@ -425,8 +440,8 @@ def _hunt_look(hunter) -> int:
     for d in s.loot:
         print(f"  drop: {d.item.kind} on platform {d.platform}: {d.x - s.where.x:+.0f}, "
               f"{d.y - s.where.y:+.0f} (score {d.item.score})")
-    _annotate(s, LAB / "hunt_look.png")
-    print(LAB / "hunt_look.png")
+    _annotate(s, _shot("hunt_look.png"))
+    print(_shot("hunt_look.png"))
     return 0
 
 
@@ -531,7 +546,7 @@ def cmd_map(args) -> int:
             marks.append((w.x, w.y, "her"))
     print(f"{model.name}: {len(model.platforms)} platforms, {len(model.ropes)} ropes; monster spawns by platform:",
           dict(sorted(model.spawn_platforms.items())))
-    path = LAB / f"map_{args.map}.png"
+    path = _shot(f"map_{args.map}.png")
     mapdata.render(model, path, marks=marks)
     print(path)
     return 0
@@ -783,7 +798,7 @@ def cmd_sheet(args) -> int:
     if args.around_her:
         rows = track(frames, times, calibration.load().template)
         frames = np.stack([_around_her(f, x, y) for f, (_, x, y, _) in zip(frames, rows)])
-    path = LAB / f"{args.recording}_sheet.png"
+    path = _shot(f"{args.recording}_sheet.png")
     recordings.contact_sheet(frames, times, path, cols=args.cols, every=1,
                              zoom=AROUND_HER_ZOOM if args.around_her else 1)
     print(path)
@@ -1139,7 +1154,7 @@ def cmd_coverage(args) -> int:
     if args.text:
         Path(args.text).write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"report: {args.text}")
-    picture = Path(args.picture) if args.picture else LAB / f"coverage_{args.map}.png"
+    picture = Path(args.picture) if args.picture else _shot(f"coverage_{args.map}.png")
     for i, (name, t) in enumerate(sets):
         path = picture if i == 0 else picture.with_name(f"{picture.stem}-{i + 1}{picture.suffix}")
         Image.fromarray(render.coverage_picture(model, coverage.picture_rows(graph, t), title=name)).save(path)

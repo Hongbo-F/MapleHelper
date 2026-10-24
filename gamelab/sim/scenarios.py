@@ -34,7 +34,7 @@ from ..behavior.hunter import Hunter
 from ..behavior.looting import DropSpot
 from ..localization.mapdata import MapModel
 from ..control.navigator import Navigator
-from ..control.timeline import her_setup
+from ..control.timeline import SIM_KEYS
 from ..behavior.tour import Tour
 from .fakes import Clock, FakeDetector, FakeEyes, FakeLoot, FakePlayer, SimTimeout, SimViolation, Trace, patched
 from .world import Noise, Realism, SimDied, World
@@ -101,7 +101,7 @@ class Sim:
     def __init__(self, model: MapModel, sc: Scenario, pace: float | None = None):
         """`pace`: also let simulated time pass in real time, this many times faster (to watch it)."""
         self.model, self.scenario = model, sc
-        _, self.keys, _ = her_setup()
+        self.keys = SIM_KEYS  # fixed, not config.toml's (control.timeline)
         self.clock = Clock(limit=sc.limit, pace=pace, think=sc.think)
         self.world = World(model, self.keys, sc.start, seed=sc.seed, monsters=sc.monsters, hp=sc.hp,
                            inventory_full=sc.inventory_full, facing=sc.facing, origin=self.clock.now,

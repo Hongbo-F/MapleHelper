@@ -29,6 +29,7 @@ class GameKeys:
     sit: Key | None = None
     hp_potion: Key | None = None
     mp_potion: Key | None = None
+    pet_food: Key | None = None  # feeds her pet (which drinks her potions for her)
 
 
 @dataclass(frozen=True)

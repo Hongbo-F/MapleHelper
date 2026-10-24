@@ -243,6 +243,14 @@ class Actions:
         self.play(tap(0, self.keys.hp_potion.name), "potion")
         return True
 
+    def feed_pet(self) -> bool:
+        """Feed her pet (it drinks her potions for her); False if no pet food key is bound."""
+        if self.keys.pet_food is None:
+            return False
+        self.wait_lock()
+        self.play(tap(0, self.keys.pet_food.name), "pet_food")
+        return True
+
     def sit(self) -> None:
         """Sit on the chair (HP comes back faster)."""
         if self.keys.chair is not None:

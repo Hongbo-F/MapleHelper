@@ -9,8 +9,22 @@ from maplehelper import config
 from maplehelper.combos import COMBOS
 from maplehelper.config import GameKeys, Timing
 from maplehelper.engine import Ctx, _Silent
+from maplehelper.keys import parse as parse_key
 
 from ..paths import CONFIG
+
+
+# The keys the simulator plays with: her bindings up to 2026-10-22 (attack f, Lucky Seven g, potions r and t, no
+# pet), kept fixed so that a change to her live bindings in config.toml doesn't change what the simulator records
+# (the golden traces name the keys). They're names only there: the simulator acts on what each is bound to.
+SIM_KEYS = GameKeys(left=parse_key("left"), right=parse_key("right"), jump=parse_key("alt"), attack=parse_key("f"),
+                    lucky_seven=parse_key("g"), up=parse_key("up"), down=parse_key("down"), pick_up=parse_key("z"),
+                    chair=parse_key("d"), sit=parse_key("x"), hp_potion=parse_key("r"), mp_potion=parse_key("t"))
+
+
+def sim_setup() -> tuple[GameKeys, Timing]:
+    """The simulator's keys (SIM_KEYS) and config.toml's timing."""
+    return SIM_KEYS, her_setup()[2]
 
 
 def her_setup(regular_attack: bool = False) -> tuple[config.Config, GameKeys, Timing]:

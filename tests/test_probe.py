@@ -477,7 +477,7 @@ def test_a_probe_throws_with_the_regular_attack_and_puts_the_wall_switch_back():
         return "done"
     sc = scenarios.Scenario("probe_keys", run, (4, 260.0), monsters=[("Orange Mushroom", 2, -50.0)], limit=200)
     trace = scenarios.run_scenario(sc)
-    sim_keys = scenarios.her_setup()[1]
+    sim_keys = scenarios.SIM_KEYS
     attack_keys = {e[1] for p in trace["plans"] if p[1] == "throw" for e in p[2]} - {sim_keys.left.name}
     assert attack_keys == {sim_keys.attack.name} and keys == [True]
 

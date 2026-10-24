@@ -47,6 +47,10 @@ from .looting import Looter
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
+# s between two feeds of her pet (since 2026-10-23 it drinks her potions; a hungry pet stops): Pet Food gives a pet
+# 30 fullness, and a pet loses about one a minute or more (by kind), so every 10 minutes keeps it fed with food to
+# spare. When she last fed it is kept in paths.PET, so runs one after another don't feed it again at once.
+PET_FEED_S = 600
 # s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
 # (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
 # from a look in that time comes while she's in the air (and is lost) or still sliding, from where she no longer is.
@@ -78,6 +82,7 @@ class Hunter:
         self.hit_at: float | None = None  # the time of the last look that saw her HP drop (a touch)
         self.knock_waited: float | None = None  # ... the hit_at a jump or step last waited out (fight.knocked_move)
         self._last_potion = 0.0
+        self.pet_feed_s = PET_FEED_S
         # The hunt's bookkeeping from every look and throw (behavior.ledger): the hunt loop reads the drop store,
         # and the fights and the hunt loop her wounds (the monsters she has hurt, finished before she moves on).
         self.drops = DropStore()
@@ -122,14 +127,34 @@ class Hunter:
         return None
 
     def drink_if_low(self, s: Scene) -> None:
-        """Drink an HP potion below `potion_hp` (one every POTION_EVERY s at most). The health check on
-        the way to rest: low HP is why she's going, not a reason to stop."""
+        """Drink an HP potion below `potion_hp` (one every POTION_EVERY s at most), and feed her pet when it's due
+        (feed_pet_if_due). The health check on the way to rest: low HP is why she's going, not a reason to stop."""
+        self.feed_pet_if_due()
         if s.hp < self.potion_hp and time.monotonic() - self._last_potion > POTION_EVERY:
             self.log(f"HP {s.hp:.0%}: drinking a potion")
             if self.actions.drink():
                 self._last_potion = time.monotonic()
                 self.report.potions += 1
                 telemetry.emit("event", kind="potion", text=f"potion at {s.hp:.0%} HP")
+
+    def feed_pet_if_due(self) -> bool:
+        """Feed her pet if PET_FEED_S (`pet_feed_s`) have passed since she last did (paths.PET; never yet: now).
+        True if she fed it. Nothing without a pet food key."""
+        if self.actions.keys.pet_food is None:
+            return False
+        now = time.time()
+        try:
+            last = json.loads(paths.PET.read_text(encoding="utf-8"))["fed"]
+        except (OSError, ValueError, KeyError, TypeError):
+            last = 0.0
+        if now - last < self.pet_feed_s:
+            return False
+        if not self.actions.feed_pet():
+            return False
+        paths.PET.write_text(json.dumps({"fed": now}), encoding="utf-8")
+        self.log("fed her pet")
+        telemetry.emit("event", kind="pet", text="fed her pet")
+        return True
 
     def take_exp(self, since: float, kind: str | None = None) -> bool:
         """Use up one kill her EXP told of since `since`, if there is one: of `kind`, or of a kind not known (a gain

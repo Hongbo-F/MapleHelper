@@ -5,9 +5,9 @@ windows. So this one process runs elevated (one UAC prompt per test session) and
 runs normally and talks to it through files. To keep that safe it only ever:
 
 - reads plans from gamelab/lab/inbox (plain JSON data, never code),
-- presses keys that config.toml binds to her in-game actions plus a few exploring keys (EXPLORE_KEYS),
-  never Enter, and only while the game is in front,
-- moves the mouse pointer inside the game window (never clicks),
+- presses keys (any key config.toml can name: ALL_KEYS) and the mouse buttons, only while the game is in
+  front,
+- moves the mouse pointer and clicks only inside the game window,
 - watches the game for the Lie Detector (the game's anti-bot check) the whole time it runs; if it
   appears, input stops at once, the player pages whoever is at the PC and shuts down, and it won't
   start again until `python -m gamelab clear-alarm` (it never tries to answer it),
@@ -34,7 +34,7 @@ import numpy as np
 from maplehelper import config, win32
 from maplehelper.combos import COMBOS
 from maplehelper.config import GameKeys
-from maplehelper.keys import Key
+from maplehelper.keys import KEY_CODES, Key
 from maplehelper.keys import parse as parse_key
 
 from .. import window
@@ -49,24 +49,23 @@ LIE_DETECTOR_ERROR = "Lie Detector on screen: all input stopped"
 # about 40 bytes a plan, some 150 KB an hour of hunting, and was never cut: 5 MB is about 30 hours.
 LOG_MAX_BYTES = 5 * 1024 * 1024
 
-# Beyond the actions bound in config.toml [keys] (moving, climbing, attacking, looting, chair,
-# potions), exploring needs the key bindings window (\) and closing windows (esc).
-EXPLORE_KEYS = ("\\", "esc")
-# Never pressed, whatever the config says: Enter sends whatever is typed in the chat box.
-NEVER_KEYS = {"enter"}
+# Every key config.toml can name, and both mouse buttons: since 2026-10-23 the player may press any of
+# them (the key bindings window, \, needs clicks to save a change). The Lie Detector still stops all of it.
+ALL_KEYS = tuple(KEY_CODES)
+MOUSE_BUTTONS = ("lbutton", "rbutton")
 
 
-def allowed_keys(keys: GameKeys, extra=EXPLORE_KEYS) -> dict[str, Key]:
-    """Her bound in-game actions plus the exploring keys, minus anything in NEVER_KEYS."""
-    bound = [getattr(keys, f.name) for f in fields(GameKeys)] + [parse_key(name) for name in extra]
-    return {k.name: k for k in bound if k and k.name not in NEVER_KEYS}
+def allowed_keys(keys: GameKeys | None = None, extra=ALL_KEYS) -> dict[str, Key]:
+    """Her bound in-game actions and every other key (`extra`), by name."""
+    bound = ([getattr(keys, f.name) for f in fields(GameKeys)] if keys else []) + [parse_key(n) for n in extra]
+    return {k.name: k for k in bound if k}
 
 
 def validate(plan: dict, allowed: dict[str, Key]) -> None:
     """Raise ValueError unless the plan is well-formed and only uses allowed keys.
 
-    Events are [ms, key, 'down'|'up'] or [ms, 'mouse', x, y] (move the cursor to client pixel x, y;
-    there is deliberately no way to click).
+    Events are [ms, key, 'down'|'up'] (a key, or a mouse button: 'lbutton', 'rbutton', where the pointer
+    is) or [ms, 'mouse', x, y] (move the pointer to client pixel x, y).
     """
     events = plan.get("events", [])
     if not isinstance(events, list) or len(events) > MAX_EVENTS:
@@ -79,7 +78,7 @@ def validate(plan: dict, allowed: dict[str, Key]) -> None:
                 raise ValueError(f"bad mouse position in {event!r}")
         elif isinstance(event, list) and len(event) == 3:
             t, name, kind = event
-            if name not in allowed:
+            if name not in allowed and name not in MOUSE_BUTTONS:
                 raise ValueError(f"key {name!r} is not allowed; allowed: {sorted(allowed)}")
             if kind not in ("down", "up"):
                 raise ValueError(f"bad event kind {kind!r}")
@@ -215,7 +214,7 @@ class Player:
                     window.move_cursor(client_area["left"] + x, client_area["top"] + y)
                 else:
                     _, name, kind = event
-                    win32.send_key(self.allowed[name], kind == "down")
+                    _press(self.allowed, name, kind == "down")
                     (held.add if kind == "down" else held.discard)(name)
                 sent.append([round((time.perf_counter() - t0) * 1000, 1), *event[1:]])
             if plan.get("end_ms") is not None:  # the plan lasts this long (the next one follows on)
@@ -237,7 +236,7 @@ class Player:
         finally:
             presser.join()
             for name in held:
-                win32.send_key(self.allowed[name], False)
+                _press(self.allowed, name, False)
             cancel.unlink(missing_ok=True)
         result = {"sent": sent, "problems": problems, "region": region, "scale": scale, "client": client_area}
         if self.alarm.is_set():
@@ -246,6 +245,14 @@ class Player:
             np.savez_compressed(OUTBOX / f"{plan['id']}.npz", frames=np.stack(frames), times=np.array(times))
             result["frames"] = len(frames)
         return result
+
+
+def _press(allowed: dict[str, Key], name: str, down: bool) -> None:
+    """Press or release a key or a mouse button by name."""
+    if name in MOUSE_BUTTONS:
+        win32.send_mouse_button(name, down)
+    else:
+        win32.send_key(allowed[name], down)
 
 
 def _log(msg: str) -> None:
@@ -294,7 +301,7 @@ def serve() -> None:
     win32.enable_dpi_awareness()
     watchdog = Watchdog(cfg.game_window_title, alarm)
     watchdog.start()
-    _log(f"player started; allowed keys {sorted(player.allowed)}; watching for the Lie Detector")
+    _log(f"player started; {len(player.allowed)} keys and the mouse buttons allowed; watching for the Lie Detector")
     idle_since = time.monotonic()
     with win32.precise_timers():
         while not STOP.exists() and not alarm.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:

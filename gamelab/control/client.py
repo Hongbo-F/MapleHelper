@@ -44,7 +44,10 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     `end_ms`: the plan lasts this long even after its last key (the next plan starts then)."""
     check_alarm()
     INBOX.mkdir(parents=True, exist_ok=True)
-    plan_id = f"{time.strftime('%H%M%S')}_{name}_{uuid.uuid4().hex[:4]}"
+    # Only what the player keeps of a plan's file name (player._answer): a name with a space in it ("pet food")
+    # was answered as "petfood", and its result never found.
+    name = "".join(ch for ch in name if ch.isalnum() or ch in "-_") or "plan"
+    plan_id = f"{time.strftime('%H%M%S')}_{name}_{uuid.uuid4().hex[:4]}"[:64]
     capture = {"fps": fps, "duration_ms": duration_ms, "scale": scale, "lead_ms": lead_ms}
     if crop:
         capture["crop"] = [int(v) for v in crop]
