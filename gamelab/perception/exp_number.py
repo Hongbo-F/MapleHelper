@@ -5,10 +5,12 @@ How the game draws it (on calibrate.png, drawn so, every pixel of the box read c
 screen, 0.3 on average): at its own 1366x768, with the status bar's number pictures (gamedata.canvas.status_numbers:
 the digits, ',', '.' and '%' white, '[' and ']' green, 5x7 game px for a digit), each glyph its picture's width plus
 one blank column after the one before, the first with its top left at game px (749, 740): the bar's left (279) plus
-StatusBar.img's posNumberExp (470). The screen shows the whole picture stretched to 1920x1080 with bilinear
-filtering, game px (gx, gy)'s middle at screen ((gx + 0.5) * SX - 0.5, (gy + 0.5) * SY - 0.5): SX is 1920/1366, not
-the 1080/768 = 1.40625 down (with that across, the number came out 11 levels off on average, half a pixel to the
-right; at the minimap, on the screen's left, the two differ by 0.1 px at most).
+StatusBar.img's posNumberExp (470). A 1920x1080 window shows the whole picture stretched with bilinear filtering,
+game px (gx, gy)'s middle at screen ((gx + 0.5) * SX - 0.5, (gy + 0.5) * SY - 0.5): SX is 1920/1366, not the 1080/768
+= 1.40625 down (with that across, the number came out 11 levels off on average, half a pixel to the right; at the
+minimap, on the screen's left, the two differ by 0.1 px at most). At the game's own 1366x768 (since 2026-10-23) both
+are 1: every glyph is its picture, pixel for pixel. The model goes by the frame's geometry (screen.Geometry:
+stretch_x and stretch), and so does the box read (`read_box`).
 
 How it's read (`read`): over the box READ_BOX, every glyph the number can hold is drawn as the game would draw it
 at every game x from the first one on, and so is a blank column. As glyphs never share a column (each has a blank
@@ -30,18 +32,37 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
+import math
+
 import numpy as np
 
 from maplehelper.ocr.exp_table import EXP_TO_NEXT
 
-SX, SY = 1920 / 1366, 1080 / 768  # screen px per game px across (the game's 1366 columns stretched to 1920) and down
+from ..screen import LOOK_SCALES, STRETCHED, Geometry, geometry
+
+SX, SY = STRETCHED.stretch_x, STRETCHED.stretch  # at 1920x1080: screen px per game px across (the game's 1366
+                                                  # columns stretched to 1920) and down
 NUMBER_AT = (749, 740)  # game px where the number's first glyph has its top left
 NUMBER_END = 848        # game px: the number's cells end before this (the bar's right edge, screen column 1193,
                         # samples game x 848.6)
-# The full-size screen box read (x0, y0, x1, y1): from the first screen column whose sample falls past game px 748
-# (left of it the "EXP." label's dark outline reaches 1050) to the last before NUMBER_END - 1, and two rows of plain
-# bar above the glyphs' and three below (row 1054 is the gauge's border).
-READ_BOX = (1052, 1038, 1191, 1054)
+GLYPH_ROWS = 7          # game px: a glyph's height
+
+
+def read_box(geo: Geometry = STRETCHED) -> tuple[int, int, int, int]:
+    """The full-size screen box read (x0, y0, x1, y1): from the first screen column whose sample falls at or past
+    game px 748, the first cell's (left of it the "EXP." label's dark outline reaches 1050 at 1920x1080, 746 at
+    1366x768), to the last before NUMBER_END - 1, and two rows of plain bar above the rows the glyphs reach and three
+    below (the gauge's border under them: row 1054 at 1920x1080, 750 at 1366x768). (1052, 1038, 1191, 1054) at
+    1920x1080, (748, 738, 847, 750) at 1366x768."""
+    sx, sy = geo.stretch_x, geo.stretch
+    x0 = math.ceil((NUMBER_AT[0] - 0.5) * sx - 0.5)               # the first column sampling game x 748 or past
+    x1 = math.ceil((NUMBER_END - 0.5) * sx - 0.5)                 # ... past the last sampling before 847
+    first = math.floor((NUMBER_AT[1] - 0.5) * sy - 0.5) + 1      # the first row sampling past game y 739
+    last = math.ceil((NUMBER_AT[1] + GLYPH_ROWS + 0.5) * sy - 0.5) - 1  # the last sampling before 747
+    return x0, first - 2, x1, last + 1 + 3
+
+
+READ_BOX = read_box()  # at 1920x1080
 GLYPHS = "0123456789,.[]%"
 BLANK = " "             # a blank game column: the cells after the number (and anything else's, if it doesn't fit)
 FIT = 4.0    # levels (root mean square over a cell): a glyph drawn as the game draws it. On the 32 saved 1920x1080
@@ -113,15 +134,16 @@ class _Cells:
     index: dict          # (character, game x) -> its cell
 
 
-@lru_cache(maxsize=1)
-def _cells() -> _Cells:
-    """The cells (from the game data's pictures: 30 ms, and 150 to draw them all, once)."""
+@lru_cache(maxsize=4)
+def _cells(geo: Geometry = STRETCHED) -> _Cells:
+    """The cells of a frame of this geometry (from the game data's pictures: 30 ms, and 150 to draw them all, once a
+    geometry)."""
     from gamedata.canvas import status_numbers
     pictures = status_numbers()
-    x0, y0, x1, y1 = READ_BOX
+    x0, y0, x1, y1 = read_box(geo)
     width = x1 - x0
-    across = sample_at(np.arange(width), SX, x0)
-    down = sample_at(np.arange(y1 - y0), SY, y0)
+    across = sample_at(np.arange(width), geo.stretch_x, x0)
+    down = sample_at(np.arange(y1 - y0), geo.stretch, y0)
     chars, xs, advances, c0, c1, cell, pixel, row, a, c = [], [], [], [], [], [], [], [], [], []
     for char in GLYPHS + BLANK:
         rgba = pictures[char].astype(float) / 255 if char != BLANK else np.zeros((7, 0, 4))
@@ -148,11 +170,17 @@ def _cells() -> _Cells:
                   {(ch, int(x)): i for i, (ch, x) in enumerate(zip(chars, xs))})
 
 
-def read(box: np.ndarray) -> ExpReading:
-    """Her EXP number in `box`, the screen's READ_BOX (full size, RGB, as Eyes.look_at cuts it)."""
-    if box is None or box.shape[:2] != (READ_BOX[3] - READ_BOX[1], READ_BOX[2] - READ_BOX[0]):
+def read(box: np.ndarray, geo: Geometry | None = None) -> ExpReading:
+    """Her EXP number in `box`, the screen's `read_box` (full size, RGB, as Eyes.look_at cuts it) in a frame of
+    geometry `geo` (by default the client size whose box is the size of this one: 139 x 16 px at 1920x1080, 99 x 12
+    at 1366x768)."""
+    geo = geo or _geometry_of(box)
+    if box is None or geo is None:
         return ExpReading(None, why="no EXP number box")
-    cells = _cells()
+    x0, y0, x1, y1 = read_box(geo)
+    if box.shape[:2] != (y1 - y0, x1 - x0):
+        return ExpReading(None, why="no EXP number box")
+    cells = _cells(geo)
     s = box.astype(np.float32)
     rows = s.shape[0]
     bg = np.percentile(s, BG_SHARE, axis=1).astype(np.float32)  # (rows, 3)
@@ -214,18 +242,42 @@ def read(box: np.ndarray) -> ExpReading:
     return ExpReading(exp, percent, levels, text, fit, lead)
 
 
+def _geometry_of(box: np.ndarray | None) -> Geometry | None:
+    """The client size (of those the stack knows: screen.LOOK_SCALES) whose `read_box` is the size of `box`."""
+    if box is None:
+        return None
+    for size in LOOK_SCALES:
+        geo = geometry(*size)
+        x0, y0, x1, y1 = read_box(geo)
+        if box.shape[:2] == (y1 - y0, x1 - x0):
+            return geo
+    return None
+
+
 def shown(exp: int, level: int) -> str:
     """What the bar shows with `exp` into `level`: "13,549[67.02%]" (the percent to the nearest hundredth, as the
     game rounds it)."""
     return f"{exp:,}[{exp * 100 / EXP_TO_NEXT[level]:.2f}%]"
 
 
-def draw(text: str, under: np.ndarray | None = None) -> np.ndarray:
-    """`text` drawn over READ_BOX as the game draws its EXP number (the reader's own model of it: the simulator's
-    number), over the box `under` (RGB; by default the bar's own, BAR). Glyphs past the bar's end are left out."""
-    cells = _cells()
-    x0, y0, x1, y1 = READ_BOX
-    out = (np.broadcast_to(np.array(BAR, np.float32)[:, None, :], (y1 - y0, x1 - x0, 3)) if under is None
+def bar_rows(geo: Geometry = STRETCHED) -> np.ndarray:
+    """BAR's colours on each row of `read_box(geo)` (rows x 3): the 1920x1080 row whose sample is nearest the same
+    game y's."""
+    y0, y1 = read_box(geo)[1::2]
+    if geo == STRETCHED:
+        return np.array(BAR, np.float32)
+    game = sample_at(np.arange(y1 - y0), geo.stretch, y0)
+    rows = np.rint((game + 0.5) * SY - 0.5) - READ_BOX[1]
+    return np.array(BAR, np.float32)[np.clip(rows, 0, len(BAR) - 1).astype(int)]
+
+
+def draw(text: str, under: np.ndarray | None = None, geo: Geometry = STRETCHED) -> np.ndarray:
+    """`text` drawn over `read_box(geo)` as the game draws its EXP number (the reader's own model of it: the
+    simulator's number), over the box `under` (RGB; by default the bar's own, BAR). Glyphs past the bar's end are left
+    out."""
+    cells = _cells(geo)
+    x0, y0, x1, y1 = read_box(geo)
+    out = (np.broadcast_to(bar_rows(geo)[:, None, :], (y1 - y0, x1 - x0, 3)) if under is None
            else under.astype(np.float32)).reshape(-1, 3).copy()
     x = NUMBER_AT[0]
     for ch in text:

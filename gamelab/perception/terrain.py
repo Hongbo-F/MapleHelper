@@ -1,11 +1,17 @@
-"""The ground and ropes on screen: how far the ground under her goes (half-size frame px), and ropes
+"""The ground and ropes on screen: how far the ground under her goes (look-frame px), and ropes
 and ladders (full-size px).
+
+The px below were measured on the 1920x1080 window (half size for the ground, full size for ropes) and go by the
+frame's geometry (screen.Geometry): at the game's own 1366x768 a rope is drawn pixel for pixel, 1/1.40625 as wide
+and its strands' twists as close.
 """
 
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
+
+from ..screen import STRETCHED, Geometry, of_frame
 
 
 ROPE_ROWS = 0.9        # ropes are looked for in this top share of the screen
@@ -24,11 +30,18 @@ ROPE_RED_GREEN = 30            # ... and red and green at most this far apart
 CROP_PAD = (4, 32)
 
 
-def ground_extent(frame: np.ndarray, x: int, floor_y: int) -> tuple[int, int]:
-    """Screen x range of the ground she stands on: from her x outwards along the row just under
-    her feet, until sky or sea shows (3 pixels in a row). Walls of dirt count as ground, so on a
-    floor between cliffs it reaches the walls; on a floating platform it stops at the edges."""
-    rows = frame[max(0, floor_y + 2):floor_y + 7].astype(np.int16)
+GROUND_ROWS = (2, 7)   # look-frame px under her feet looked at (half size at 1920x1080) ...
+OPEN_RUN = 3           # ... and how many columns of sky or sea in a row end the ground
+
+
+def ground_extent(frame: np.ndarray, x: int, floor_y: int, geo: Geometry = STRETCHED) -> tuple[int, int]:
+    """Screen x range of the ground she stands on (a look's frame, of geometry `geo`): from her x outwards along
+    the rows just under her feet, until sky or sea shows (3 pixels in a row at 1920x1080 half size). Walls of dirt
+    count as ground, so on a floor between cliffs it reaches the walls; on a floating platform it stops at the
+    edges."""
+    below, low = geo.ifpx(GROUND_ROWS[0]), geo.ifpx(GROUND_ROWS[1])
+    run_out = geo.ifpx(OPEN_RUN)
+    rows = frame[max(0, floor_y + below):floor_y + low].astype(np.int16)
     if rows.size == 0:
         return x, x
     r, g, b = rows[..., 0], rows[..., 1], rows[..., 2]
@@ -40,8 +53,8 @@ def ground_extent(frame: np.ndarray, x: int, floor_y: int) -> tuple[int, int]:
         while 0 <= pos + step < frame.shape[1]:
             pos += step
             run = run + 1 if open_air[pos] else 0
-            if run >= 3:
-                return pos - step * 3
+            if run >= run_out:
+                return pos - step * run_out
         return pos
 
     return scan(-1), scan(1)
@@ -72,26 +85,41 @@ def _rope_pixels(rgb: np.ndarray) -> np.ndarray:
     return cv2.bitwise_and(cv2.bitwise_and(colour, red_over_blue), red_green)
 
 
-def find_ropes(full: np.ndarray, columns: list[tuple[int, int]] | None = None) -> list[ScreenRope]:
+def find_ropes(full: np.ndarray, columns: list[tuple[int, int]] | None = None,
+               geo: Geometry | None = None) -> list[ScreenRope]:
     """Ropes and ladders: long, thin, vertical runs of rope colour (strands may break up a little).
-    `columns`: only these ranges of x (from, to; full-size px) are searched; None: the whole screen."""
+    `columns`: only these ranges of x (from, to; full-size px) are searched; None: the whole screen. `geo`: the
+    frame's geometry (by default from its size)."""
+    geo = geo or of_frame(full)
     h, width = int(full.shape[0] * ROPE_ROWS), full.shape[1]
     ropes = []
     for x0, x1 in [(0, width)] if columns is None else _spans(columns, width):
-        ropes += _ropes_in(full[:h, x0:x1], x0)
+        ropes += _ropes_in(full[:h, x0:x1], x0, geo)
     # One rope can split into pieces where something passes in front: merge pieces in one column.
     ropes.sort(key=lambda r: (r.x, r.top))
     merged: list[ScreenRope] = []
+    gap_x, gap_y = geo.px(ROPE_GAP[0]), geo.px(ROPE_GAP[1])
     for rope in ropes:
         last = merged[-1] if merged else None
-        if last and abs(last.x - rope.x) <= ROPE_GAP[0] and rope.top - last.bottom <= ROPE_GAP[1]:
+        if last and abs(last.x - rope.x) <= gap_x and rope.top - last.bottom <= gap_y:
             merged[-1] = ScreenRope((last.x + rope.x) // 2, last.top, max(last.bottom, rope.bottom))
         else:
             merged.append(rope)
     return merged
 
 
-def _ropes_in(strip: np.ndarray, x0: int) -> list[ScreenRope]:
+def _kernels(geo: Geometry) -> tuple[np.ndarray, np.ndarray]:
+    """The closing (9 rows by 3 at 1920x1080) and opening (31 by 1) kernels of `_ropes_in`, in a frame of `geo`."""
+    if geo == STRETCHED:
+        return _CLOSE, _OPEN
+    return (np.ones((max(1, geo.ipx(9)), max(1, geo.ipx(3))), np.uint8),
+            np.ones((max(1, geo.ipx(31)), 1), np.uint8))
+
+
+_CLOSE, _OPEN = np.ones((9, 3), np.uint8), np.ones((31, 1), np.uint8)
+
+
+def _ropes_in(strip: np.ndarray, x0: int, geo: Geometry = STRETCHED) -> list[ScreenRope]:
     """The ropes in a strip of the screen whose left edge is at x0. The strip is copied out of the screen
     first: OpenCV split a strip viewed in place 8 times slower (2.9 ms a look against 0.4). After the colour
     test the shapes are made only in the box around its pixels (CROP_PAD; on the saved frames 58% of a
@@ -106,17 +134,19 @@ def _ropes_in(strip: np.ndarray, x0: int) -> list[ScreenRope]:
     left, top = _even(bx - px), _even(by - py)
     mask = mask[top:min(h, by + bh + py), left:min(w, bx + bw + px)]
     # Join the twisted strands vertically, then keep only tall, narrow shapes.
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 3), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((31, 1), np.uint8))
+    close, open_ = _kernels(geo)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_)
     sx, sy, sw, sh = cv2.boundingRect(mask)  # the shapes are connected in their own box: the same shapes
     if not sw:
         return []
     sw, sh, sx, sy = sw + sx % 2, sh + sy % 2, _even(sx), _even(sy)
     left, top = left + sx, top + sy
     count, _, stats, _ = cv2.connectedComponentsWithStats(mask[sy:sy + sh, sx:sx + sw])
+    length, width, fill = geo.px(MIN_ROPE_LENGTH), geo.px(MAX_ROPE_WIDTH), geo.px(MIN_ROPE_FILL)
     return [ScreenRope(int(x0 + left + x + w // 2), int(top + y), int(top + y + rh))
             for x, y, w, rh, area in stats[1:count]
-            if rh >= MIN_ROPE_LENGTH and w <= MAX_ROPE_WIDTH and area >= rh * MIN_ROPE_FILL]
+            if rh >= length and w <= width and area >= rh * fill]
 
 
 def _even(n: int) -> int:

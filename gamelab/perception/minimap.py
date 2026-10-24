@@ -7,16 +7,22 @@ grey ring and a white halo, 11-12 px in all; `npc` (green, taller), `portal` (cy
 game draws them at its own 1366x768, each at a whole game pixel, and the whole picture is shown 1.40625x larger
 with bilinear filtering: a stranger's marker pasted so onto a saved frame came out within half a level of the one
 the game drew there (`hover_D.png`, on average over a 30 px square). So a core is 7 px across on screen.
+
+At the game's own 1366x768 (since 2026-10-23) every marker is its picture, pixel for pixel: her yellow core 6 px
+across (24 px of yellow), another's red core 5 across (21 px), on West Rocky Mountain II's 31 saved frames of that
+size. The px below were measured on the 1920x1080 window and go by the frame's geometry (`sizes`: screen.Geometry).
 """
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import cv2
 import numpy as np
 
-from ..screen import SCREEN_SCALE
+from ..screen import STRETCHED, Geometry, of_frame
 
-# The minimap window sits at the top left; its map picture is inside this box (full-size px).
+# The minimap window sits at the top left; its map picture is inside this box (full-size px at 1920x1080; at
+# 1366x768 (0, 68, 213, 213)).
 MINIMAP_BOX = (0, 95, 300, 300)  # x0, y0, x1, y1
 DOT_AREA = (12, 200)  # px a yellow blob covers to be her dot (smallest, largest) ...
 DOT_SIZE = 16         # ... and its widest and tallest
@@ -24,6 +30,7 @@ DOT_SIZE = 16         # ... and its widest and tallest
 # for her marker pasted at 32 places across the minimap). A dot narrower or shorter than this has something drawn
 # over part of it: another player's marker, if one touches it (DOT_UNCOVER).
 DOT_FULL = 7
+DOT_CORE = 6  # game px: her marker's yellow core, which no window size shows narrower (1366x768 shows it 6 px wide)
 # Whether her dot, partly under another player's marker, is taken from its side that shows (as wide as DOT_FULL). Drawn
 # over hers 4-5 game px off (46-57 map units), another's marker pulled her yellow's middle 1.3-1.7 px its way on
 # average (15-19 units), up to 2.2; 6 px off 0.6; taken so, 0.4 (up to 1.2). (The game's markers pasted at 600 places
@@ -62,6 +69,11 @@ MARKER_COLOURS = {
 # with up to 11 px and 70.
 MARKER_AREA = (14, 52)
 MARKER_SIDE = (4, 9)
+# ... and solid: at least this share of its box (at 1366x768, where nothing blurs the markers: a core is 21 of its
+# 5 x 5, and a portal's inner ring, 4 x 4 with a hole, 8, passed as a buddy's core at both portals on all 31 saved
+# frames of that size). At 1920x1080 the filtering blurs a portal's rings into its dark, and no part of one was ever a
+# core's size: not asked there (Sizes.marker_fill 0), as before.
+MARKER_FILL = 0.7
 # Around a core, its dark grey ring (333333-555555, 3 game px from its middle: 4.2 on screen): at most RING_RADII
 # from the core's middle, at least RING_DARK of RING_ANGLES directions must reach a dark grey pixel. 15-16 of 16 do
 # on the saved frames; another marker drawn over a side covers a few.
@@ -74,68 +86,112 @@ _RING = np.stack([np.outer(np.cos(_ANGLES), RING_RADII), np.outer(np.sin(_ANGLES
 # and below theirs (origins (6, 6) and (5, 5) in the game data): another player's core is drawn 0.5 game px (0.70
 # screen px) right of and below where hers would be at the same place. Measured on the saved frames: hers 0.66 and
 # 0.50 px left of and above the game pixel she's drawn at, a stranger's 0.16 and 0.17 right of and below its.
-OTHER_SHIFT = 0.5 * SCREEN_SCALE
+OTHER_SHIFT = 0.5 * STRETCHED.stretch  # at 1920x1080 (Sizes.other_shift)
 
 
-def her_dot(full: np.ndarray) -> tuple[float, float] | None:
-    """Her yellow dot on the minimap, in game-window pixels (full size), or None if hidden."""
-    x0, y0, x1, y1 = MINIMAP_BOX
-    return dot_in_box(full[y0:y1, x0:x1])
+@dataclass(frozen=True)
+class Sizes:
+    """The px above in a frame of one geometry: the 1920x1080 window's own, else scaled with the game's stretch
+    (areas with its square), but for a full dot (DOT_CORE at least: no size shows the core narrower, and 1366x768
+    shows it exactly) and its middle (at 1366x768 the core's own: 2.5 px from its edges)."""
+    box: tuple[int, int, int, int]
+    dot_area: tuple[float, float]
+    dot_size: int
+    dot_full: int
+    dot_half: float
+    marker_area: tuple[float, float]
+    marker_side: tuple[float, float]
+    marker_fill: float
+    ring: np.ndarray
+    other_shift: float
 
 
-def dot_in_box(box: np.ndarray) -> tuple[float, float] | None:
-    """Her dot in a capture of just MINIMAP_BOX (RGB), in game-window pixels: the biggest yellow blob of
+@lru_cache(maxsize=8)
+def sizes(geo: Geometry = STRETCHED) -> Sizes:
+    """The minimap's px in a frame of geometry `geo`."""
+    area = lambda n: geo.px(geo.px(n))  # px squared (exactly n at 1920x1080)
+    full = max(DOT_CORE, geo.ipx(DOT_FULL))
+    # A full dot's middle from its first and last px: 7-8 px blurred at 1920x1080 (3-3.5); the core itself at 1366x768
+    half = (DOT_CORE - 1) / 2 if geo.native else (full - 0.5) / 2
+    ring = _RING if geo == STRETCHED else _RING * geo.px(1.0)
+    return Sizes(geo.box(MINIMAP_BOX), (area(DOT_AREA[0]), area(DOT_AREA[1])), geo.ipx(DOT_SIZE), full, half,
+                 (area(MARKER_AREA[0]), area(MARKER_AREA[1])), (geo.px(MARKER_SIDE[0]), geo.px(MARKER_SIDE[1])),
+                 0.0 if geo == STRETCHED else MARKER_FILL, ring, 0.5 * geo.stretch)
+
+
+def minimap_box(geo: Geometry = STRETCHED) -> tuple[int, int, int, int]:
+    """MINIMAP_BOX in a frame of geometry `geo` (full-size px)."""
+    return sizes(geo).box
+
+
+def her_dot(full: np.ndarray, geo: Geometry | None = None) -> tuple[float, float] | None:
+    """Her yellow dot on the minimap, in game-window pixels (full size), or None if hidden. `geo`: the frame's
+    geometry (by default from its size)."""
+    geo = geo or of_frame(full)
+    x0, y0, x1, y1 = minimap_box(geo)
+    return dot_in_box(full[y0:y1, x0:x1], geo)
+
+
+def dot_in_box(box: np.ndarray, geo: Geometry = STRETCHED) -> tuple[float, float] | None:
+    """Her dot in a capture of just `minimap_box(geo)` (RGB), in game-window pixels: the biggest yellow blob of
     a dot's size. Partly under another player's marker, from the side of it that shows (DOT_UNCOVER)."""
-    x0, y0 = MINIMAP_BOX[:2]
+    px = sizes(geo)
+    x0, y0 = px.box[:2]
     area = box.astype(np.int16)
     r, g, b = area[..., 0], area[..., 1], area[..., 2]
     yellow = ((r > 220) & (g > 190) & (b < 90)).astype(np.uint8)
     count, _, stats, centroids = cv2.connectedComponentsWithStats(yellow)
     blobs = [(stats[i, cv2.CC_STAT_AREA], i) for i in range(1, count)
-             if DOT_AREA[0] <= stats[i, cv2.CC_STAT_AREA] <= DOT_AREA[1]
-             and stats[i, cv2.CC_STAT_WIDTH] <= DOT_SIZE and stats[i, cv2.CC_STAT_HEIGHT] <= DOT_SIZE]
+             if px.dot_area[0] <= stats[i, cv2.CC_STAT_AREA] <= px.dot_area[1]
+             and stats[i, cv2.CC_STAT_WIDTH] <= px.dot_size and stats[i, cv2.CC_STAT_HEIGHT] <= px.dot_size]
     if not blobs:
         return None
     _, i = max(blobs, key=lambda blob: blob[0])
     cx, cy = float(centroids[i][0]), float(centroids[i][1])
-    if DOT_UNCOVER and (stats[i, cv2.CC_STAT_WIDTH] < DOT_FULL or stats[i, cv2.CC_STAT_HEIGHT] < DOT_FULL):
-        cx, cy = _uncovered(box, stats[i], cx, cy)
+    if DOT_UNCOVER and (stats[i, cv2.CC_STAT_WIDTH] < px.dot_full or stats[i, cv2.CC_STAT_HEIGHT] < px.dot_full):
+        cx, cy = _uncovered(box, stats[i], cx, cy, geo)
     return cx + x0, cy + y0
 
 
-def _uncovered(box: np.ndarray, st: np.ndarray, cx: float, cy: float) -> tuple[float, float]:
+def _uncovered(box: np.ndarray, st: np.ndarray, cx: float, cy: float,
+               geo: Geometry = STRETCHED) -> tuple[float, float]:
     """Her dot's middle when its yellow blob (stats `st`, middle (cx, cy), box px) is cut short across or up and down:
     with another player's marker touching it on one side, from its edge on the other, as if it were DOT_FULL px. A
     yellow cut short with no marker by it (the minimap's edge) stays as it is."""
+    px = sizes(geo)
     left, top, w, h = (int(v) for v in st[:4])
-    pad = DOT_SIZE
+    pad = px.dot_size
     wx, wy = max(0, left - pad), max(0, top - pad)
-    near = markers_in_box(box[wy:top + h + pad, wx:left + w + pad])
-    touching = [(m.x + wx, m.y + wy) for m in near if abs(m.x + wx - cx) <= 2 * DOT_FULL and abs(m.y + wy - cy) <= 2 * DOT_FULL]
+    near = markers_in_box(box[wy:top + h + pad, wx:left + w + pad], geo)
+    touching = [(m.x + wx, m.y + wy) for m in near
+                if abs(m.x + wx - cx) <= 2 * px.dot_full and abs(m.y + wy - cy) <= 2 * px.dot_full]
     if not touching:
         return cx, cy
     mx, my = min(touching, key=lambda p: (p[0] - cx) ** 2 + (p[1] - cy) ** 2)
-    half = (DOT_FULL - 0.5) / 2  # a full dot's middle from its first and last px (7-8 px: 3-3.5)
-    if w < DOT_FULL and abs(mx - cx) >= abs(my - cy) / 2:
+    half = px.dot_half
+    if w < px.dot_full and abs(mx - cx) >= abs(my - cy) / 2:
         cx = left + half if mx > cx else left + w - 1 - half
-    if h < DOT_FULL and abs(my - cy) >= abs(mx - cx) / 2:
+    if h < px.dot_full and abs(my - cy) >= abs(mx - cx) / 2:
         cy = top + half if my > cy else top + h - 1 - half
     return cx, cy
 
 
-def other_dots(full: np.ndarray) -> list[Marker]:
-    """Other players' dots on the minimap (full-size px), in a capture of the whole game window."""
-    x0, y0, x1, y1 = MINIMAP_BOX
-    return [Marker(m.kind, m.x + x0, m.y + y0) for m in markers_in_box(full[y0:y1, x0:x1])]
+def other_dots(full: np.ndarray, geo: Geometry | None = None) -> list[Marker]:
+    """Other players' dots on the minimap (full-size px), in a capture of the whole game window (of geometry `geo`,
+    by default from its size)."""
+    geo = geo or of_frame(full)
+    x0, y0, x1, y1 = minimap_box(geo)
+    return [Marker(m.kind, m.x + x0, m.y + y0) for m in markers_in_box(full[y0:y1, x0:x1], geo)]
 
 
-def markers_in_box(box: np.ndarray) -> list[Marker]:
+def markers_in_box(box: np.ndarray, geo: Geometry = STRETCHED) -> list[Marker]:
     """Other players' markers in a picture of (part of) the minimap (RGB), in its px: a core of a kind's colour
     (MARKER_COLOURS), of a core's size (MARKER_AREA, MARKER_SIDE), in a dark grey ring (RING_DARK). Two markers
     5 game px apart or more (57 map units) are two; 4 px apart, a third of the time; nearer, the one drawn last hides
-    most of the other's core, and they're one."""
+    most of the other's core, and they're one. `geo`: the geometry of the frame it's from."""
     if box.size == 0:
         return []
+    px = sizes(geo)
     hsv = cv2.cvtColor(np.ascontiguousarray(box), cv2.COLOR_RGB2HSV)
     out = []
     for kind, ranges in MARKER_COLOURS.items():
@@ -150,20 +206,21 @@ def markers_in_box(box: np.ndarray) -> list[Marker]:
         count, _, stats, centroids = cv2.connectedComponentsWithStats(mask[y0:y0 + h0, x0:x0 + w0], connectivity=8)
         for i in range(1, count):
             a, w, h = stats[i, cv2.CC_STAT_AREA], stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
-            if not (MARKER_AREA[0] <= a <= MARKER_AREA[1] and MARKER_SIDE[0] <= w <= MARKER_SIDE[1]
-                    and MARKER_SIDE[0] <= h <= MARKER_SIDE[1]):
+            if not (px.marker_area[0] <= a <= px.marker_area[1] and px.marker_side[0] <= w <= px.marker_side[1]
+                    and px.marker_side[0] <= h <= px.marker_side[1] and a >= px.marker_fill * w * h):
                 continue
             cx, cy = float(centroids[i][0]) + x0, float(centroids[i][1]) + y0
-            if _ringed(box, cx, cy):
+            if _ringed(box, cx, cy, px.ring):
                 out.append(Marker(kind, cx, cy))
     return sorted(out, key=lambda m: (m.y, m.x))
 
 
-def _ringed(box: np.ndarray, cx: float, cy: float) -> bool:
-    """Whether a core at (cx, cy) has a marker's dark grey ring around it (RING_DARK of the directions)."""
+def _ringed(box: np.ndarray, cx: float, cy: float, ring: np.ndarray = _RING) -> bool:
+    """Whether a core at (cx, cy) has a marker's dark grey ring around it (RING_DARK of the directions; `ring`: the
+    offsets looked at, Sizes.ring)."""
     h, w = box.shape[:2]
-    xs = np.clip(np.rint(cx + _RING[..., 0]).astype(int), 0, w - 1)
-    ys = np.clip(np.rint(cy + _RING[..., 1]).astype(int), 0, h - 1)
+    xs = np.clip(np.rint(cx + ring[..., 0]).astype(int), 0, w - 1)
+    ys = np.clip(np.rint(cy + ring[..., 1]).astype(int), 0, h - 1)
     px = box[ys, xs].astype(np.int16)  # directions x radii x RGB
     hi, lo = px.max(axis=2), px.min(axis=2)
     dark = (hi < 130) & (hi - lo < 50)

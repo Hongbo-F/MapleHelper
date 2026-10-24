@@ -3,7 +3,8 @@ as the screen shows it, captured without ever bringing it to the front (`ScreenF
 played back (`ListFrames`).
 
 A capture sees whatever is on top. So a frame the game isn't wholly showing (another window in front of it or
-over part of it, the game minimized or not 1920x1080, not running) is marked not visible, and nothing is read
+over part of it, the game minimized or not the client size the feed's eyes are for, not running) is marked not
+visible, and nothing is read
 from it: the feed waits for the game to come back rather than bring it forward (Eyes._capture does that for a
 command that sends keys; nothing here ever does).
 """
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import capture, window
-from ..screen import GAME_SIZE
+from ..screen import STRETCHED, Geometry
 from .eyes import rgb_of
 
 
@@ -23,17 +24,19 @@ class Frame:
     """One moment of the game window."""
     full: np.ndarray | None  # full size, RGB (None: not visible)
     t: float                 # when the screen showed it (time.monotonic's clock), at the latest known
-    visible: bool            # the game wholly on screen, in front, at the size the templates were made at
+    visible: bool            # the game wholly on screen, in front, at the size the templates were made for
     new: bool = True         # False: the same picture as the frame before (nothing on screen changed)
     why: str = ""            # why it isn't visible
 
 
 class ScreenFrames:
     """The game window as the screen shows it, through the process's grabber (DXGI desktop duplication or
-    mss, capture.shared). Reads the screen only: no keys, and the game is never brought to the front."""
+    mss, capture.shared). Reads the screen only: no keys, and the game is never brought to the front. `geo`: the
+    client size the eyes reading the frames are for (screen.Geometry); at any other, not visible."""
 
-    def __init__(self, title: str, grabber: capture.Grabber | None = None):
+    def __init__(self, title: str, grabber: capture.Grabber | None = None, geo: Geometry = STRETCHED):
         self.title = title
+        self.geo = geo
         self.grabber = grabber or capture.shared()
         self._last: float | None = None  # the last frame's present time
 
@@ -48,9 +51,9 @@ class ScreenFrames:
         if window.minimized(hwnd):
             return Frame(None, now, False, why="the game is minimized")
         area = window.client_rect(hwnd)
-        if (area["width"], area["height"]) != GAME_SIZE:
+        if (area["width"], area["height"]) != self.geo.client:
             return Frame(None, now, False, why=f"the game window is {area['width']}x{area['height']}, "
-                                               f"not {GAME_SIZE[0]}x{GAME_SIZE[1]}")
+                                               f"not {self.geo.client[0]}x{self.geo.client[1]}")
         if window.foreground_title() != self.title or not window.shows(hwnd, area):
             return Frame(None, now, False, why="the game isn't in front")
         shot = self.grabber.shot(area, after=after)

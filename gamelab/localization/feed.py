@@ -7,9 +7,10 @@ So the feed is a child process (`serve`, started with spawn, at below-normal pri
 on one core, keeps its frame pacing). Each frame it runs the world step (localization.worldstate): her
 place, the monsters tracked, her EXP gains and hits; the searches (her band, the whole screen, the drops) run
 on a thread of the child's own beside that frame loop (worldstate.SearchThread), and each frame's state
-searched is given again once they're back (`late`). The half-size frames go into a ring of RING_SLOTS in
-shared memory (`Ring`: the oldest overwritten, never more), and each frame's state (plain data, a few KB)
-down a pipe; the stack's requests (what it wants searched on the next frame, her throws) go up another.
+searched is given again once they're back (`late`). The look frames (half size at 1920x1080, full size at the game's
+own 1366x768: screen.Geometry) go into a ring of RING_SLOTS in shared memory (`Ring`: the oldest overwritten, never
+more), and each frame's state (plain data, a few KB) down a pipe; the stack's requests (what it wants searched on the
+next frame, her throws) go up another.
 
 The stack's side (`FeedClient`) keeps the last few states, read off the pipe by a thread of its own:
 - `latest(after, want)`: the newest state of a frame shown at `after` or later (a look sees what came of
@@ -43,13 +44,14 @@ import numpy as np
 
 from ..perception.eyes import Eyes, Observation
 from ..perception.frames import Frame
+from ..screen import STRETCHED, Geometry
 from .senses import Senses
 from .tracking import Event
 from .worldstate import Asks, Found, Job, Schedule, SearchThread, Searches, WorldState, WorldStep, search, to_scene
 
 HZ = 30.0            # frames a second the feed looks at (the game shows 60; a frame's step takes 15-20 ms)
-RING_SLOTS = 4       # half-size frames kept in shared memory: at 30 Hz the newest 133 ms
-FRAME_SHAPE = (540, 960, 3)
+RING_SLOTS = 4       # look frames kept in shared memory: at 30 Hz the newest 133 ms
+FRAME_SHAPE = (540, 960, 3)  # ... each of this shape at 1920x1080 (frame_shape)
 MOBS_FRESH_S = 0.3   # a look's monsters: her band searched at most this long before its frame. It's searched every
                      # 0.2 s (worldstate.BAND_EVERY_S), and the frame after that and the search itself take about 0.1 s
                      # more: with 0.25, on the saved frames a third of the frames searched it, every look asking.
@@ -77,8 +79,14 @@ ASK_ONLY_STALE = False
 
 # --- frames in shared memory --------------------------------------------------------------------------
 
+def frame_shape(geo: Geometry = STRETCHED) -> tuple[int, int, int]:
+    """The shape of a look frame of geometry `geo` (RGB): (540, 960, 3) at 1920x1080, (768, 1366, 3) at 1366x768."""
+    w, h = geo.frame_size
+    return h, w, 3
+
+
 class Ring:
-    """Half-size frames in shared memory, `slots` of them, each with its frame number and time: the child
+    """Look frames in shared memory, `slots` of them, each with its frame number and time: the child
     writes them in turn (the oldest overwritten), the stack copies one out by its number. Made by the stack's
     side (`name` None) and opened by name in the child."""
 
@@ -142,31 +150,33 @@ class Runner:
 
 
 def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[float, float], throws: bool = True,
-                 schedule: Schedule = Schedule()) -> Runner:
+                 schedule: Schedule = Schedule(), geo: Geometry = STRETCHED) -> Runner:
     """The game on screen (perception.frames.ScreenFrames: never brought to the front), with monster
-    templates for map `map_id` and her name tag (`template`, calibration's)."""
+    templates for map `map_id` and her name tag (`template`, calibration's), for a game window of geometry `geo`."""
     from ..perception.frames import ScreenFrames
     from ..perception.sprites import detector_for
     from . import mapdata
     model = mapdata.load(map_id)
-    frames = ScreenFrames(title)
-    eyes = Eyes(title, template, detector_for(model), screen=frames.grabber)
+    frames = ScreenFrames(title, geo=geo)
+    eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo)
     senses = Senses(eyes, model, band)
     return Runner(frames, eyes, WorldStep(senses, throws, schedule, SearchThread(senses)), title)
 
 
 def saved_world(files: list[str], map_id: int, template: np.ndarray, band: tuple[float, float], hold: int = 30,
                 schedule: Schedule = Schedule()) -> Runner:
-    """Saved screenshots (full-size game frames) for a screen, each `hold` frames in a row, round and round:
-    the feed run offline (`python -m gamelab.sim.soak feed`)."""
+    """Saved screenshots (full-size game frames, all of one size: its geometry's) for a screen, each `hold` frames in
+    a row, round and round: the feed run offline (`python -m gamelab.sim.soak feed`)."""
     from PIL import Image
 
     from ..perception.frames import ListFrames
     from ..perception.sprites import detector_for
+    from ..screen import of_frame
     from . import mapdata
     model = mapdata.load(map_id)
     frames = [np.asarray(Image.open(f).convert("RGB")) for f in files]
-    eyes = Eyes("saved frames", template, detector_for(model), screen=object())  # it's handed its frames
+    geo = of_frame(frames[0])
+    eyes = Eyes("saved frames", template, detector_for(model, geo), screen=object(), geo=geo)  # handed its frames
     senses = Senses(eyes, model, band)
     return Runner(ListFrames([f for f in frames for _ in range(hold)]), eyes,
                   WorldStep(senses, schedule=schedule, searches=SearchThread(senses)))
@@ -224,14 +234,15 @@ def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bo
             due = max(due + period, time.monotonic())
 
 
-def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: float = HZ) -> None:
-    """The child process: builds its runner with `make()`, then runs it, frames into the ring and states down
-    `states`, asks and throws read from `requests`, until asked to stop or the stack's end of a pipe closes.
-    The searches' thread wakes the frame loop through a pipe of the child's own when an answer is in."""
+def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: float = HZ,
+          shape: tuple = FRAME_SHAPE) -> None:
+    """The child process: builds its runner with `make()`, then runs it, frames into the ring (of frames of `shape`)
+    and states down `states`, asks and throws read from `requests`, until asked to stop or the stack's end of a pipe
+    closes. The searches' thread wakes the frame loop through a pipe of the child's own when an answer is in."""
     quiet()
     try:
         runner = make()
-        ring = Ring(ring_name)
+        ring = Ring(ring_name, shape=shape)
     except Exception as e:
         states.send(("error", f"the feed couldn't start: {type(e).__name__}: {e}"))
         return
@@ -408,10 +419,10 @@ class Feed:
 
 class FeedClient(Feed):
     """The feed's child process, from the stack's side. `make`: a picklable callable building the child's
-    Runner (screen_world, with its arguments, for the game)."""
+    Runner (screen_world, with its arguments, for the game); `shape`: its look frames' (frame_shape of its geometry)."""
 
-    def __init__(self, make: Callable[[], Runner], hz: float = HZ, start: bool = True):
-        self.make, self.hz = make, hz
+    def __init__(self, make: Callable[[], Runner], hz: float = HZ, start: bool = True, shape: tuple = FRAME_SHAPE):
+        self.make, self.hz, self.shape = make, hz, tuple(shape)
         self.states: deque[WorldState] = deque(maxlen=KEEP)
         self.events: deque[Event] = deque(maxlen=EVENTS_KEPT)
         self.dropped = 0          # events lost because nothing drained them
@@ -431,11 +442,11 @@ class FeedClient(Feed):
     def start(self, timeout: float = 30.0) -> bool:
         """Start the child and wait (`timeout` s at most) for it to be ready; False (with `why`) if it isn't."""
         ctx = multiprocessing.get_context("spawn")
-        self.ring = Ring()
+        self.ring = Ring(shape=self.shape)
         child_requests, self._requests = ctx.Pipe(duplex=False)  # each (receiving end, sending end)
         self._states, child_states = ctx.Pipe(duplex=False)
-        self.proc = ctx.Process(target=serve, args=(child_requests, child_states, self.ring.name, self.make, self.hz),
-                                name="gamelab-feed", daemon=True)
+        self.proc = ctx.Process(target=serve, args=(child_requests, child_states, self.ring.name, self.make, self.hz,
+                                                    self.shape), name="gamelab-feed", daemon=True)
         self.proc.start()
         child_requests.close()
         child_states.close()
@@ -512,7 +523,7 @@ class FeedClient(Feed):
 
     def frame_of(self, st: WorldState) -> np.ndarray:
         frame = None if st.slot is None else self.ring.get(st.slot, st.seq)
-        return frame if frame is not None else np.zeros(FRAME_SHAPE, np.uint8)
+        return frame if frame is not None else np.zeros(self.shape, np.uint8)
 
     def wait_frame(self, timeout: float) -> bool:
         with self._cond:

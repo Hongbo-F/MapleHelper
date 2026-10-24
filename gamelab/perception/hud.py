@@ -1,24 +1,36 @@
 """Bars on screen: her HP and MP in the bottom bar, her EXP number (it changes only when she
 gains EXP; what it says is read by exp_number, only then), the purple text when a monster touches her, and a
 monster's own HP bar.
+
+The px below were measured on the 1920x1080 window and are converted to the frame's own geometry (screen.Geometry):
+at the game's own 1366x768 the HP bar's red is on row 756 from x 503 to 607, the MP bar's blue from 611 to 715, and
+her EXP number's text on rows 740-746 from x 749 (n28_000.png, West Rocky Mountain II).
 """
 
 import numpy as np
+
+from ..screen import STRETCHED, Geometry
 
 
 # Her EXP number in the bottom bar ("1,385 [8.30%]"), full-size px: it only changes when she gains
 # EXP, i.e. when a monster she hit dies. It sits on the bar's plain dark background, so its text pixels
 # are identical from look to look otherwise. (The "You received EXP" message at the bottom right was
 # tried first, but it's faint and was missed over a bright background.)
-EXP_NUMBER = (1060, 1030, 1200, 1056)  # x0, y0, x1, y1
-# HP and MP bars in the bottom bar, as fractions of the game window (measured at 1920x1080).
+EXP_NUMBER = (1060, 1030, 1200, 1056)  # x0, y0, x1, y1 (at 1920x1080: exp_number_box)
+# HP and MP bars in the bottom bar, as fractions of the game window (measured at 1920x1080; they hold at 1366x768).
 HP_BAR = (707 / 1920, 854 / 1920)
 MP_BAR = (859 / 1920, 1006 / 1920)
 BAR_ROW = 1064 / 1080
 BAR_SEARCH = 45   # half-size px either side of a monster's centre searched for its own HP bar
 BAR_ABOVE = 30    # ... and how far above its top
 BAR_MIN_RUN = 22  # half-size px of bar colours in a row that make a monster's HP bar
-EXP_CHANGED = 3   # pixels of her EXP number that must differ from the last look's for an EXP gain
+EXP_CHANGED = 3   # pixels of her EXP number that must differ from the last look's for an EXP gain (at 1366x768 a
+                  # digit's own change is 5 or more of its 35)
+
+
+def exp_number_box(geo: Geometry = STRETCHED) -> tuple[int, int, int, int]:
+    """EXP_NUMBER in a client area of this geometry's (screen px)."""
+    return geo.box(EXP_NUMBER)
 
 
 def bars(full: np.ndarray) -> tuple[float, float]:
@@ -50,28 +62,31 @@ def exp_changed(before: np.ndarray | None, now: np.ndarray | None) -> bool:
             and int((now != before).sum()) >= EXP_CHANGED)
 
 
-def touch_popup(frame: np.ndarray, tag: tuple[int, int]) -> int:
-    """Purple pixels above her head (half-size frame; `tag`: her name tag's centre). The "MISS" a
+def touch_popup(frame: np.ndarray, tag: tuple[int, int], geo: Geometry = STRETCHED) -> int:
+    """Purple pixels above her head (a look's frame, of geometry `geo`; `tag`: her name tag's centre). The "MISS" a
     thief's evasion shows when a monster touches her without damage, and the numbers of damage she
-    takes, are both purple, and nothing else on screen is. A count of 40+ means a monster touched her.
-    (Used to count touches when hops over monsters were timed; nothing calls it during a hunt.)"""
+    takes, are both purple, and nothing else on screen is. A count of 40+ means a monster touched her (in a half-size
+    frame of the 1920x1080 window). (Used to count touches when hops over monsters were timed; nothing calls it during
+    a hunt.)"""
     x, y = tag
-    box = frame[max(0, y - 120):max(0, y - 15), max(0, x - 70):x + 70].astype(np.int16)
+    up, low, side = geo.ifpx(120), geo.ifpx(15), geo.ifpx(70)
+    box = frame[max(0, y - up):max(0, y - low), max(0, x - side):x + side].astype(np.int16)
     if box.size == 0:
         return 0
     r, g, b = box[..., 0], box[..., 1], box[..., 2]
     return int(((r > 120) & (b > 150) & (g < 110) & (b - g > 80) & (r - g > 50)).sum())
 
 
-def hp_bar(frame: np.ndarray, x: int, top: int) -> float | None:
+def hp_bar(frame: np.ndarray, x: int, top: int, geo: Geometry = STRETCHED) -> float | None:
     """A monster's HP bar, shown above it once it has been hit: the fraction still green, or None
-    if there's no bar. `frame` is a half-size RGB game frame; (x, top) the monster's centre and top.
+    if there's no bar. `frame` is a look's RGB frame (of geometry `geo`); (x, top) the monster's centre and top.
 
     The bar's inside is pure colours, rare in the scenery: green (0, g, 0) for the HP left, black for
     HP lost, and for a moment dark red (r, 0, 0) for the latest damage. It sits ~18 px above the
-    monster (half size) and is ~35 px wide."""
-    y0, x0 = max(0, top - BAR_ABOVE), max(0, x - BAR_SEARCH)
-    box = frame[y0:max(y0, top + 2), x0:x + BAR_SEARCH].astype(np.int16)
+    monster (half size, at 1920x1080) and is ~35 px wide."""
+    above, search = geo.ifpx(BAR_ABOVE), geo.ifpx(BAR_SEARCH)
+    y0, x0 = max(0, top - above), max(0, x - search)
+    box = frame[y0:max(y0, top + 2), x0:x + search].astype(np.int16)
     if box.size == 0:
         return None
     r, g, b = box[..., 0], box[..., 1], box[..., 2]
@@ -85,7 +100,7 @@ def hp_bar(frame: np.ndarray, x: int, top: int) -> float | None:
     steps = np.diff(np.pad(inside, ((0, 0), (1, 1))).view(np.int8), axis=1)
     rows, starts = np.nonzero(steps == 1)
     runs = np.nonzero(steps == -1)[1] - starts
-    if runs.size == 0 or runs.max() < BAR_MIN_RUN:
+    if runs.size == 0 or runs.max() < geo.fpx(BAR_MIN_RUN):
         return None
     i = int(np.argmax(runs))
     run, y, start = int(runs[i]), int(rows[i]), int(starts[i])

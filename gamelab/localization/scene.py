@@ -8,15 +8,16 @@ from maplehelper.engine import RIGHT
 
 from ..perception.eyes import Eyes, Observation
 from ..perception.loot import ABOVE, BELOW, Item
-from ..perception.minimap import MINIMAP_BOX
+from ..perception.minimap import minimap_box
 from ..perception.mobs import Mob
-from ..screen import HUD_TOP, SCALE, UNITS_PER_HALF_PX
+from ..screen import HUD_TOP
 from .mapdata import MapModel, Platform
 from .monsters import Monster, monster_platform
 from .players import Player
 from .pose import Where
 
-# Loot strips (half-size px): drops are looked for in a strip just above each stretch of ground.
+# Loot strips (half-size px of the 1920x1080 window; the look's geometry converts them): drops are looked for in a
+# strip just above each stretch of ground.
 STRIP_PAD = 4    # a strip reaches this far past each end of its ground
 MIN_STRIP = 12   # narrower ones (cut short by the screen's side or the minimap) aren't searched
 SAME_ITEM = 4    # items this close (across and down) are one item, found in two platforms' strips
@@ -70,7 +71,8 @@ class Scene(Observation):
         her feet. In the air every monster's y is off by her height above where her dot puts her (up to her
         77-unit jump)."""
         g = self.ground
-        return self.tag_seen and self.platform is not None and g is not None and g[1] - g[0] >= GROUNDED_PX
+        return (self.tag_seen and self.platform is not None and g is not None
+                and g[1] - g[0] >= self.geo.fpx(GROUNDED_PX))
 
     def place(self, m: Mob, model: MapModel, bar: float | None) -> Monster:
         """Put a monster seen on screen onto the map, by its offset from her: where it stands (its origin,
@@ -86,22 +88,22 @@ class Scene(Observation):
         x = p.clamp(x)
         return Monster(m, x, p.y_at(x), p.id, bar, m.facing, m.pose)
 
-    # Half-size screen px <-> map units, by the offset from her (the camera doesn't scale, so offsets
+    # Look-frame px <-> map units, by the offset from her (the camera doesn't scale, so offsets
     # from her hold anywhere on screen).
 
     def screen_x(self, map_x: float) -> float:
-        """Half-size screen x of a map x."""
-        return self.tag[0] + (map_x - self.where.x) / UNITS_PER_HALF_PX
+        """Look-frame x of a map x."""
+        return self.tag[0] + (map_x - self.where.x) / self.geo.units_per_px
 
     def screen_y(self, map_y: float) -> float:
-        """Half-size screen y of a map y."""
-        return self.floor_y + (map_y - self.where.y) / UNITS_PER_HALF_PX
+        """Look-frame y of a map y."""
+        return self.floor_y + (map_y - self.where.y) / self.geo.units_per_px
 
     def map_x(self, screen_x: float) -> float:
-        return self.where.x + (screen_x - self.tag[0]) * UNITS_PER_HALF_PX
+        return self.where.x + (screen_x - self.tag[0]) * self.geo.units_per_px
 
     def map_y(self, screen_y: float) -> float:
-        return self.where.y + (screen_y - self.floor_y) * UNITS_PER_HALF_PX
+        return self.where.y + (screen_y - self.floor_y) * self.geo.units_per_px
 
     def in_view(self, platform: int, x: float) -> bool:
         """Whether loot was looked for at map x on that platform in this look."""
@@ -148,17 +150,19 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
     if s.tag is None or s.where is None:
         return []
     h, w = s.frame.shape[:2]
-    bottom = int(h * HUD_TOP)
-    mini_x, mini_y = MINIMAP_BOX[2] // SCALE, MINIMAP_BOX[3] // SCALE  # the minimap's bottom-right corner
+    bottom, geo = int(h * HUD_TOP), s.geo
+    box = minimap_box(geo)
+    mini_x, mini_y = box[2] // geo.look_scale, box[3] // geo.look_scale  # the minimap's bottom-right corner
+    pad, above, below, narrow = geo.fpx(STRIP_PAD), geo.fpx(ABOVE), geo.fpx(BELOW), geo.fpx(MIN_STRIP)
     platforms = model.platforms if wide else [p for p in (s.platform,) if p is not None]
     strips: list[tuple[Platform, tuple[int, int, int, int]]] = []
     for p in platforms:
         for x0, x1, high, low in level_runs(p):
-            left, right = max(0.0, s.screen_x(x0) - STRIP_PAD), min(float(w), s.screen_x(x1) + STRIP_PAD)
-            top, under = max(0.0, s.screen_y(high) - ABOVE), min(float(bottom), s.screen_y(low) + BELOW)
+            left, right = max(0.0, s.screen_x(x0) - pad), min(float(w), s.screen_x(x1) + pad)
+            top, under = max(0.0, s.screen_y(high) - above), min(float(bottom), s.screen_y(low) + below)
             if top < mini_y and left < mini_x:  # the minimap covers the strip's left end
                 left = max(left, float(mini_x))
-            if right - left < MIN_STRIP or under - top < eyes.item_height:
+            if right - left < narrow or under - top < eyes.item_height:
                 continue
             s.looked.append((p.id, s.map_x(left), s.map_x(right)))
             strips.append((p, (int(left), int(top), int(right), int(under))))
@@ -168,15 +172,15 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
             x = p.clamp(s.map_x(it.x))
             ground = p.y_at(x)
             found.append((abs(it.bottom - s.screen_y(ground)), Loot(it, x, ground, p.id)))
-    return _on_nearest_platform(found)
+    return _on_nearest_platform(found, geo.fpx(SAME_ITEM))
 
 
-def _on_nearest_platform(found: list[tuple[float, Loot]]) -> list[Loot]:
+def _on_nearest_platform(found: list[tuple[float, Loot]], same: float = SAME_ITEM) -> list[Loot]:
     """Platforms close above one another share strips, so an item may be found for each: it goes to
-    the one it lies on (whose ground is nearest its bottom)."""
+    the one it lies on (whose ground is nearest its bottom). Items within `same` look-frame px (SAME_ITEM) are one."""
     kept: list[Loot] = []
     for _, loot in sorted(found, key=lambda f: f[0]):
-        if not any(abs(loot.item.x - k.item.x) <= SAME_ITEM and abs(loot.item.y - k.item.y) <= SAME_ITEM
+        if not any(abs(loot.item.x - k.item.x) <= same and abs(loot.item.y - k.item.y) <= same
                    for k in kept):
             kept.append(loot)
     return kept

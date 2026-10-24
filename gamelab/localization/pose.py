@@ -8,19 +8,23 @@ dot on the basin floor (y 575) and right after climbing the rope at x 734 onto p
 which agree within a pixel. `Localizer.anchor` refits it from any spot whose map position is known.
 
 `Camera` places her on screen from her map position, for when her name tag is hidden.
+
+Screen px go by the look's geometry (screen.Geometry): at the game's own 1366x768 the minimap is drawn pixel for
+pixel, one minimap pixel 16 map units, and DOT_ORIGIN (fitted at 1920x1080) is where the same game px is at that
+size (`Localizer.use`).
 """
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..screen import GAME_SIZE, SCALE, SCREEN_SCALE
+from ..screen import STRETCHED, Geometry
 from .mapdata import MapModel, Platform
 
 if TYPE_CHECKING:
     from .scene import Scene
 
 
-# Screen px (full size) where map point (-centerX, -centerY) would put her dot. x refined against
+# Screen px (full size, 1920x1080) where map point (-centerX, -centerY) would put her dot. x refined against
 # ropes in view (the dot read ~8 units right of the rope-based position on three platforms).
 DOT_ORIGIN = (65.1, 91.3)
 # The dot snaps to a platform up to ~25 units above or below it: the closest one at or below a point
@@ -28,17 +32,19 @@ DOT_ORIGIN = (65.1, 91.3)
 DOT_SNAP_LIFT = 25
 DOT_SNAP_REACH = 50
 
-VIEW = (GAME_SIZE[0] / SCREEN_SCALE, GAME_SIZE[1] / SCREEN_SCALE)  # map units on screen: 1365 x 768
+# Map units on screen: the game lays out the same view at any window size (1366 x 768 at 1366x768; by the height's
+# stretch, which the camera's numbers were fitted with, 1365.3 x 768 at 1920x1080).
+VIEW = (STRETCHED.client[0] / STRETCHED.stretch, STRETCHED.client[1] / STRETCHED.stretch)
 CAMERA_OFFSET = (674.0, 489.0)  # where the camera keeps her: map units from the screen's top-left corner
 CAMERA_LEARN_RATE = 0.2         # how far each look nudges that towards where she was seen
 CAMERA_STOPPED = 0.5            # map units the camera may lag where it would keep her before it counts as
                                 # stopped at an edge
 
-# Screen px the drawn ground sticks out past a platform's real end. Negative: measured against ropes
+# Screen px (1920x1080) the drawn ground sticks out past a platform's real end. Negative: measured against ropes
 # on platforms 32, 30 and 14, the real ends are 21-27 px beyond where the grass seems to end.
 GRASS_OVERHANG = -24
-ROPE_MATCH_PX = 40   # full-size px a rope on screen may be from where the dot puts a map rope and be that one
-SCREEN_EDGE_PX = 12  # full-size px: a platform end this close to the screen's side may be cut off, not its end
+ROPE_MATCH_PX = 40   # full-size px (1920x1080) a rope on screen may be from where the dot puts a map rope and be it
+SCREEN_EDGE_PX = 12  # full-size px (1920x1080): a platform end this close to the screen's side may be cut off
 DOT_AGREE = 45       # map units a screen-based x may be from the dot's and still be believed
 
 
@@ -52,14 +58,27 @@ class Where:
 
 
 class Localizer:
-    """Her map position from her minimap dot, and back."""
+    """Her map position from her minimap dot, and back, in a game window of geometry `geo` (`use` changes it)."""
 
-    def __init__(self, model: MapModel, origin: tuple[float, float] = DOT_ORIGIN):
+    def __init__(self, model: MapModel, origin: tuple[float, float] = DOT_ORIGIN, geo: Geometry = STRETCHED):
         self.model = model
-        self.origin = origin
+        self.origin = origin   # screen px of `geo`'s (DOT_ORIGIN is 1920x1080's)
+        self.geo = STRETCHED
         mm = model.minimap
-        self.per_px = (2 ** mm["mag"]) / SCREEN_SCALE   # map units per minimap pixel
+        self.mag = 2 ** mm["mag"]
         self.centre = (mm["centerX"], mm["centerY"])
+        self.use(geo)
+
+    @property
+    def per_px(self) -> float:
+        """Map units per minimap pixel (11.4 at 1920x1080, 16 at 1366x768 for a minimap at 1/16)."""
+        return self.mag / self.geo.stretch
+
+    def use(self, geo: Geometry) -> None:
+        """Dots from now on are in a game window of geometry `geo`: the origin moves to the same game px there."""
+        if geo != self.geo:
+            self.origin = tuple(geo.from_game(self.geo.to_game(v)) for v in self.origin)
+            self.geo = geo
 
     def to_map(self, dot: tuple[float, float]) -> tuple[float, float]:
         return ((dot[0] - self.origin[0]) * self.per_px - self.centre[0],
@@ -108,20 +127,22 @@ class Camera:
         cx, cy = self.corner(x, y)
         return abs(cx - (x - self.offset[0])) > CAMERA_STOPPED, abs(cy - (y - self.offset[1])) > CAMERA_STOPPED
 
-    def to_screen(self, x: float, y: float, at: tuple[float, float]) -> tuple[float, float]:
-        """Full-size screen px of map point (x, y) while her feet are at `at`."""
+    def to_screen(self, x: float, y: float, at: tuple[float, float],
+                  geo: Geometry = STRETCHED) -> tuple[float, float]:
+        """Full-size screen px (of a game window of geometry `geo`) of map point (x, y) while her feet are at `at`."""
         cx, cy = self.corner(*at)
-        return (x - cx) * SCREEN_SCALE, (y - cy) * SCREEN_SCALE
+        return (x - cx) * geo.stretch, (y - cy) * geo.stretch
 
-    def learn(self, at: tuple[float, float], screen: tuple[float, float], rate: float = CAMERA_LEARN_RATE) -> None:
-        """Her feet at map `at` were seen at full-size screen px `screen`: nudge the offset towards it
-        (in each direction the camera isn't stopped at an edge)."""
+    def learn(self, at: tuple[float, float], screen: tuple[float, float], rate: float = CAMERA_LEARN_RATE,
+              geo: Geometry = STRETCHED) -> None:
+        """Her feet at map `at` were seen at full-size screen px `screen` (of a game window of geometry `geo`): nudge
+        the offset towards it (in each direction the camera isn't stopped at an edge)."""
         cx, cy = self.clamped(*at)
         ox, oy = self.offset
         if not cx:
-            ox += rate * (screen[0] / SCREEN_SCALE - ox)
+            ox += rate * (screen[0] / geo.stretch - ox)
         if not cy:
-            oy += rate * (screen[1] / SCREEN_SCALE - oy)
+            oy += rate * (screen[1] / geo.stretch - oy)
         self.offset = (ox, oy)
 
 
@@ -129,13 +150,14 @@ def rope_x(where: Where, s: "Scene", model: MapModel) -> float | None:
     """Her x from ropes in view: each is drawn exactly at its map x, and detected to ~2 px."""
     if s.tag is None or not s.ropes:
         return None
-    her_x = SCALE * s.tag[0]
+    geo = s.geo
+    her_x, match = geo.look_scale * s.tag[0], geo.px(ROPE_MATCH_PX)
     estimates = []
     for seen in s.ropes:
         for rope in model.ropes:
-            expected = her_x + (rope.x - where.x) * SCREEN_SCALE  # where the dot says it should be
-            if abs(seen.x - expected) <= ROPE_MATCH_PX:
-                estimates.append(rope.x - (seen.x - her_x) / SCREEN_SCALE)
+            expected = her_x + (rope.x - where.x) * geo.stretch  # where the dot says it should be
+            if abs(seen.x - expected) <= match:
+                estimates.append(rope.x - (seen.x - her_x) / geo.stretch)
     if not estimates:
         return None
     estimates.sort()
@@ -147,14 +169,16 @@ def edge_x(where: Where, s: "Scene") -> float | None:
     p = where.platform
     if p is None or s.tag is None or s.ground is None:
         return None
-    her_x = SCALE * s.tag[0]
-    left, right = SCALE * s.ground[0] + GRASS_OVERHANG, SCALE * s.ground[1] - GRASS_OVERHANG
-    width = s.frame.shape[1] * SCALE
+    geo = s.geo
+    k, grass, edge = geo.look_scale, geo.px(GRASS_OVERHANG), geo.px(SCREEN_EDGE_PX)
+    her_x = k * s.tag[0]
+    left, right = k * s.ground[0] + grass, k * s.ground[1] - grass
+    width = s.frame.shape[1] * k
     candidates = []
-    if right < width - SCREEN_EDGE_PX - GRASS_OVERHANG:  # her platform's right end is on screen
-        candidates.append(p.right - (right - her_x) / SCREEN_SCALE)
-    if left > SCREEN_EDGE_PX + GRASS_OVERHANG:
-        candidates.append(p.left + (her_x - left) / SCREEN_SCALE)
+    if right < width - edge - grass:  # her platform's right end is on screen
+        candidates.append(p.right - (right - her_x) / geo.stretch)
+    if left > edge + grass:
+        candidates.append(p.left + (her_x - left) / geo.stretch)
     good = [x for x in candidates if abs(x - where.x) <= DOT_AGREE]  # must agree with the dot roughly
     return sum(good) / len(good) if good else None
 

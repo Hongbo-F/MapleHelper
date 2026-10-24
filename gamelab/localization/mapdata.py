@@ -3,8 +3,9 @@ spawns (and each monster's EXP and body) and the minimap's scale, in the game's 
 x to the right, y downward).
 Also which platforms monsters can reach (`MapModel.safe`), and a picture of the map (`render`).
 
-The screen shows the world 1080/768 = 1.40625x larger at a 1920x1080 window (the game lays out a
-1366x768 view), so world units are converted with screen.SCREEN_SCALE wherever screen pixels are involved.
+The game lays out a 1366x768 view, one game px to a world unit, and shows it stretched to its window: 1080/768 =
+1.40625x larger at 1920x1080, pixel for pixel at its own 1366x768. So world units are converted with the look's
+screen.Geometry wherever screen pixels are involved.
 
 Game data stays on this computer (gamedata/data, git-ignored); nothing here is committed.
 """

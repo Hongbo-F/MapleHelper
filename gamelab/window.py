@@ -48,7 +48,7 @@ user32.AdjustWindowRectEx.argtypes = (ctypes.POINTER(wintypes.RECT), wintypes.DW
 user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                 wintypes.UINT)
 # The game's client sizes the player may set (resize_client): the game lays out a 1366x768 view and stretches it to
-# its window (screen.SCREEN_SCALE), so a 1366x768 client shows it pixel for pixel; 1920x1080 is how it was set until
+# its window (screen.Geometry.stretch), so a 1366x768 client shows it pixel for pixel; 1920x1080 is how it was set until
 # 2026-10-23. A normal program can't resize the game's window (it runs as administrator: "access denied", tried
 # 2026-10-23), so only the elevated player does it.
 CLIENT_SIZES = ((1366, 768), (1920, 1080))

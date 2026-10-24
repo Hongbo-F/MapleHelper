@@ -2,8 +2,9 @@
 
 Templates are the game's own pictures of the items as they lie on the ground (gamedata.canvas: `iconRaw`
 of each item, and the spinning coin frames of mesos), drawn the size they appear on a 1920x1080 screen,
-like the monster sprites (sprites.py). They're extracted game data, so they're kept with the other extracts
-(git-ignored). Classic World's item ids differ from GMS's, so this map's drops are looked up by name.
+like the monster sprites (sprites.py), and for the game's own 1366x768 as they are (`folder_for`); a detector
+brings them to its frames' scale (screen.Geometry). They're extracted game data, so they're kept with the other
+extracts (git-ignored). Classic World's item ids differ from GMS's, so this map's drops are looked up by name.
 
 A spot counts as an item when the masked colour template matches (THRESHOLD) and its pixels under the
 template's mask are close to the template's own colours (PIXEL_SLACK): the normalised match ignores
@@ -14,6 +15,7 @@ platforms are searched (localization.scene.find_loot, with ABOVE and BELOW): a w
 The pickup log's full-inventory message (`says_full`) is here too.
 """
 
+import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -26,9 +28,10 @@ from PIL import Image
 
 from gamedata.paths import COPY, OUT
 
-from ..screen import SCALE
+from ..screen import STRETCHED, Geometry
 from .kinds import kind_of
 from .match import masked_match, suppress_overlaps
+from .mobs import SCALE_FILE, frame_size, picture_scale
 from .sprites import OPAQUE, screen_size
 
 
@@ -115,16 +118,25 @@ def item_ids(copy: Path = COPY) -> dict[str, list[int]]:
     return {name: sorted(ids) for name, ids in out.items()}
 
 
-def build(folder: Path = LOOT) -> list[Path]:
-    """Write `<kind>_<n>.png` (RGBA, screen size at 1920x1080) for each of ITEMS, and
-    `mesos_<coin><frame>.png` for the coins' spinning frames (the edge-on one, 5 px wide, is left out)."""
+def folder_for(stretch: float) -> Path:
+    """Where the drops drawn `stretch` times larger are kept: LOOT for the 1920x1080 window's 1.40625, else
+    `loot_x<stretch>` ("loot_x1": the game's own pictures, for 1366x768)."""
+    return LOOT if stretch == STRETCHED.stretch else OUT / f"loot_x{stretch:g}"
+
+
+def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch) -> list[Path]:
+    """Write `<kind>_<n>.png` (RGBA, drawn `stretch` times larger: by default screen size at 1920x1080) for each of
+    ITEMS, and `mesos_<coin><frame>.png` for the coins' spinning frames (the edge-on one, 5 px wide, is left out).
+    Another stretch than 1920x1080's is written in the folder's mobs.SCALE_FILE."""
     from gamedata.canvas import item_icon, meso_frames
     folder.mkdir(parents=True, exist_ok=True)
+    if stretch != STRETCHED.stretch:
+        (folder / SCALE_FILE).write_text(json.dumps({"px_per_game_px": stretch}), encoding="utf-8")
     ids, written = item_ids(COPY), []
 
     def save(rgba: np.ndarray, name: str) -> None:
         path = folder / f"{name}.png"
-        Image.fromarray(resample_rgba(rgba, screen_size(rgba)), "RGBA").save(path)
+        Image.fromarray(resample_rgba(rgba, screen_size(rgba, stretch)), "RGBA").save(path)
         written.append(path)
 
     for name in ITEMS:
@@ -152,12 +164,14 @@ def _coin(path: Path) -> str | None:
     return (rest.rstrip("0123456789") or None) if kind == MESOS else None
 
 
-def ensure(folder: Path = LOOT) -> Path:
-    """Build the templates if any of them are missing; returns the folder."""
+def ensure(folder: Path | None = None, stretch: float = STRETCHED.stretch) -> Path:
+    """Build the templates (drawn `stretch` times larger, in `folder`: by default `folder_for(stretch)`) if any of
+    them are missing; returns the folder."""
+    folder = folder_for(stretch) if folder is None else folder
     have = {_kind(p) for p in folder.glob("*.png")}
     wanted = {kind_of(n) for n in ITEMS} | {MESOS}
     if not wanted <= have:
-        build(folder)
+        build(folder, stretch)
     return folder
 
 
@@ -172,15 +186,17 @@ class LootTemplate(NamedTuple):
 
 class LootDetector:
     """Templates come from `folder` (built from the game data if not given): PNGs named
-    <kind>_<anything>.png, RGBA at full screen size."""
+    <kind>_<anything>.png, RGBA at full screen size (mobs.picture_scale's), brought to look frames of geometry
+    `geo` (by default the 1920x1080 window's, at half size)."""
 
-    def __init__(self, folder: Path | None = None):
-        folder = ensure() if folder is None else folder
+    def __init__(self, folder: Path | None = None, geo: Geometry = STRETCHED):
+        folder = ensure(stretch=geo.stretch) if folder is None else folder
+        shrink = picture_scale(folder) / geo.frame_scale
         self.templates: list[LootTemplate] = []
         for path in sorted(folder.glob("*.png")):
             rgba = np.asarray(Image.open(path).convert("RGBA"))
             h, w = rgba.shape[:2]
-            rgb, cover = resample_opaque(rgba, (max(1, w // SCALE), max(1, h // SCALE)))
+            rgb, cover = resample_opaque(rgba, frame_size(w, h, shrink))
             mask = (cover >= HALF_COVER).astype(np.uint8)
             if mask.sum() < MIN_MASK:
                 continue
@@ -197,7 +213,7 @@ class LootDetector:
 
     def detect(self, frame: np.ndarray, box: tuple[int, int, int, int] | None = None,
                mesos_only: bool = False) -> list[Item]:
-        """Items in `frame` (RGB, game window / SCALE), within `box` (x0, y0, x1, y1) if given. The
+        """Items in `frame` (RGB, a look frame of the detector's geometry), within `box` (x0, y0, x1, y1) if given. The
         templates are matched on a few threads: 30 ms a platform's strip instead of 90."""
         return self.detect_each(frame, [box or (0, 0, frame.shape[1], frame.shape[0])], mesos_only)[0]
 

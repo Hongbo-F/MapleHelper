@@ -27,3 +27,10 @@ HIT_LOG = LAB / "hits.jsonl"     # hits taken standing still: how far each pushe
 PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)
+
+
+def calibrated(path: Path, suffix: str) -> Path:
+    """One of the calibration's files (CALIBRATION, TAG_TEMPLATE, TAG_FULL) for a game window of another client size
+    than 1920x1080 (screen.Geometry.suffix: "_1366x768"); `suffix` "" is the file itself. Her name tag is drawn at
+    the game's size, so each size has its own."""
+    return path.with_name(f"{path.stem}{suffix}{path.suffix}")

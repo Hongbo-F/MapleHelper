@@ -35,8 +35,8 @@ from ..perception import exp_number
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.hud import exp_changed
-from ..perception.minimap import MINIMAP_BOX
-from ..screen import HUD_TOP, SCALE
+from ..perception.minimap import minimap_box
+from ..screen import HUD_TOP, STRETCHED, Geometry
 from .gains import ExpMeter, Gain
 from .mapdata import MapModel
 from .monsters import Monster
@@ -123,10 +123,11 @@ class WorldState:
     events: list[Event] = field(default_factory=list)  # what happened, as of this frame
     work: dict = field(default_factory=dict)  # what this frame took: re-finds, and `s` on the real clock; a
                                               # late state, its searches (Found.work)
-    frame: np.ndarray | None = None  # the half-size frame (in-process; the feed's child puts it in its ring)
+    frame: np.ndarray | None = None  # the look's frame (in-process; the feed's child puts it in its ring)
     slot: int | None = None          # ... the ring's slot it's in
     late: bool = False             # this frame's state given again, now with what its searches found (seq, t and
                                    # slot are the frame's; given after the states of frames since)
+    geo: Geometry = STRETCHED      # the frame's geometry (Observation.geo)
 
     @property
     def placed(self) -> bool:
@@ -404,7 +405,7 @@ class WorldStep:
             exp=np.packbits(exp).tobytes() if s.exp is not None else b"",
             exp_shape=exp.shape if s.exp is not None else (), where=where, how=s.how, monsters=seen,
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
-            tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame)
+            tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame, geo=s.geo)
         if job is not None:  # (its answer is merged only after this) the re-finds the tracker took, as inline
             job.known.update({tid: m for tid, m in refound.items() if tid in self.tracker.refound_seen})
             job.state = st
@@ -532,7 +533,8 @@ class WorldStep:
     def _view(s: Scene) -> View:
         h, w = s.frame.shape[:2]
         bottom = int(h * HUD_TOP)
-        mx, my = MINIMAP_BOX[2] / SCALE, MINIMAP_BOX[3] / SCALE
+        box = minimap_box(s.geo)
+        mx, my = box[2] / s.geo.look_scale, box[3] / s.geo.look_scale
         return View(s.map_x(0), s.map_x(w), s.map_y(0), s.map_y(bottom), w, bottom,
                     (s.map_x(0), s.map_y(0), s.map_x(mx), s.map_y(my)))
 
@@ -546,7 +548,7 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
     where = None if st.where is None else Where(st.where[0], st.where[1], p, st.where[3])
     s = Scene(t=st.t, frame=st.frame if frame is None else frame, tag=st.tag, hp=st.hp, mp=st.mp, ground=st.ground,
               dot=st.dot, others=list(st.others), ropes=list(st.ropes), exp=st.exp_pixels(), where=where, how=st.how,
-              tag_seen=st.tag_seen, players=list(st.players))
+              tag_seen=st.tag_seen, players=list(st.players), geo=st.geo)
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

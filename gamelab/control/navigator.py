@@ -62,7 +62,8 @@ RUN_ON_ROOM = 50     # units of run she keeps in hand before the route's next mo
                      # its last leg (a running jump takes off up to flow.JUMP_FROM_FAR before its edge)
 QUEUE_SLACK = 0.03   # s of timing error a chain planned from that look starts with
 SEND_S = 0.03        # s before the running plan ends that the next chain must be sent by (planned: ~5 ms, 22 at p90)
-MIN_GROUND_PX = 6    # half-size px of ground under her feet that show she's standing (in the air: none)
+MIN_GROUND_PX = 6    # half-size px (1920x1080; the look's geometry converts them) of ground under her feet that show
+                     # she's standing (in the air: none)
 END_WATCH = 0.1      # s before a plan with nothing queued after it ends: glances stop, its end is waited for ...
 END_POLL_S = 0.005   # ... this closely (noticed late, the next look and plan came ~70 ms later)
 FRESH_S = 0.3        # s a look stays good enough to plan from, if no key plan was sent since
@@ -936,7 +937,7 @@ def standing(s: Scene) -> bool:
     """Whether look `s` shows her standing, as far as it tells: ground under her feet on screen (in the air
     there's none: the minimap dot alone puts her on a platform she's falling past or jumping over), unless her
     name tag is hidden or no ground was read."""
-    return not s.tag_seen or s.ground is None or s.ground[1] - s.ground[0] >= MIN_GROUND_PX
+    return not s.tag_seen or s.ground is None or s.ground[1] - s.ground[0] >= s.geo.fpx(MIN_GROUND_PX)
 
 
 def _no_follow(why: str) -> None:

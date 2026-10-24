@@ -16,19 +16,19 @@ glance is taken here as without it. Without a feed (the default) nothing changes
 import time
 from collections.abc import Callable
 
-from ..perception.eyes import GLANCE_EVERY_S, TAG_BELOW_FEET, Eyes, Observation
+from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, tag_below_feet
 from ..perception.terrain import MAX_ROPE_WIDTH
-from ..screen import SCALE, SCREEN_SCALE
+from ..screen import STRETCHED
 from .mapdata import MapModel
 from .monsters import Monster
 from .players import LOCAL_IDS, Players
 from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
 from .scene import Scene, find_loot
 
-# Full-size px either side of where her minimap dot puts each of the map's ropes on screen that a look
-# searches for ropes: all `pose.rope_x` can use (a rope within ROPE_MATCH_PX of there, up to MAX_ROPE_WIDTH
-# wide). 8.6 ms a look (median, bench-look), against 19 for the whole screen. On 17 saved frames the
-# ropes seen were 0-20 px from there (her dot 0-14.5 map units off), the same ropes as on the whole
+# Full-size px (1920x1080; the look's geometry converts them) either side of where her minimap dot puts each of the
+# map's ropes on screen that a look searches for ropes: all `pose.rope_x` can use (a rope within ROPE_MATCH_PX of
+# there, up to MAX_ROPE_WIDTH wide). 8.6 ms a look (median, bench-look), against 19 for the whole screen. On 17 saved
+# frames the ropes seen were 0-20 px from there (her dot 0-14.5 map units off), the same ropes as on the whole
 # screen, and she was placed the same. The mover's line-up on a rope looks 70 px around where the map
 # puts it from her refined position: the same ropes while her dot is within about 30 units. None
 # searches the whole screen.
@@ -50,7 +50,7 @@ class Senses:
         continuous feed to take looks and glances from (localization.feed.Feed), or None."""
         self.eyes, self.model, self.band = eyes, model, band
         self.feed = feed
-        self.localizer = Localizer(model)
+        self.localizer = Localizer(model, geo=getattr(eyes, "geo", STRETCHED))  # (the simulator's: 1920x1080)
         self.camera = Camera(model.bounds)
         # Other players, from the looks placed here, and from the feed's (Players.adopt): ids apart from the feed's
         self.players = Players(self.localizer, 1 if feed is None else LOCAL_IDS)
@@ -128,7 +128,8 @@ class Senses:
     def _learn(self, s: Scene) -> None:
         """With her name tag seen and her placed, the camera learns where it keeps her."""
         if s.tag is not None and s.tag_seen and s.where is not None:
-            self.camera.learn((s.where.x, s.where.y), (SCALE * s.tag[0], SCALE * s.floor_y))
+            k = s.geo.look_scale
+            self.camera.learn((s.where.x, s.where.y), (k * s.tag[0], k * s.floor_y), geo=s.geo)
 
     def _rope_columns(self, dot: tuple[float, float] | None,
                       tag: tuple[int, int] | None) -> list[tuple[int, int]] | None:
@@ -138,15 +139,18 @@ class Senses:
             return None
         if dot is None or tag is None:
             return []
-        where, her_x = self.localizer.where_dot(dot), SCALE * tag[0]
-        xs = (her_x + (rope.x - where.x) * SCREEN_SCALE for rope in self.model.ropes)
-        return [(int(x) - ROPE_PAD, int(x) + ROPE_PAD + 1) for x in xs]
+        geo = getattr(self.eyes, "geo", STRETCHED)  # (asked by the eyes, in the middle of a look of their frames)
+        self.localizer.use(geo)
+        where, her_x, pad = self.localizer.where_dot(dot), geo.look_scale * tag[0], geo.ipx(ROPE_PAD)
+        xs = (her_x + (rope.x - where.x) * geo.stretch for rope in self.model.ropes)
+        return [(int(x) - pad, int(x) + pad + 1) for x in xs]
 
     def _place_her(self, s: Scene) -> None:
         """Her map position (`s.where`, `s.how`) from her minimap dot, refined on screen. Then, with her
         name tag seen, the camera learns where it keeps her; with it hidden, the camera places her
         on screen instead (`s.tag`, and `s.tag_seen` False)."""
         if s.dot is not None:
+            self.localizer.use(s.geo)
             s.where = self.localizer.where_dot(s.dot)
             if s.tag is not None:
                 s.where, s.how = refine(s.where, s, self.model)
@@ -155,5 +159,6 @@ class Senses:
         if s.tag is not None:
             self._learn(s)
         else:
-            sx, sy = self.camera.to_screen(s.where.x, s.where.y, (s.where.x, s.where.y))
-            s.tag, s.tag_seen = (round(sx / SCALE), round(sy / SCALE) + TAG_BELOW_FEET), False
+            k = s.geo.look_scale
+            sx, sy = self.camera.to_screen(s.where.x, s.where.y, (s.where.x, s.where.y), s.geo)
+            s.tag, s.tag_seen = (round(sx / k), round(sy / k) + tag_below_feet(s.geo)), False

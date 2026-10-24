@@ -4,7 +4,9 @@ Each monster type has a few templates (sprites cut out with a mask, gamelab/asse
 RGBA with the alpha as mask) and a colour test for its body. Step 1 matches each template's body-colour
 silhouette against the frame's body-colour mask (one fast single-channel pass over the frame). Step 2
 checks only the best few spots with the full masked colour template, which rejects scenery that merely
-shares the colour (leaves, clouds). Frames are game-window pictures downscaled by SCALE.
+shares the colour (leaves, clouds). Frames are look frames (the game window shrunk as screen.Geometry says: half
+size at 1920x1080, full size at the game's own 1366x768), and the templates are brought to their scale; the px below
+were measured in half-size frames of the 1920x1080 window and go by it too.
 
 The matches run on a few threads (OpenCV lets go of Python's lock while it matches). Which spots step 2
 checks doesn't depend on what the checks find, so they're all picked first, and the answers are the same
@@ -26,7 +28,7 @@ import numpy as np
 from PIL import Image
 
 from .. import native, paths
-from ..screen import SCALE
+from ..screen import STRETCHED
 from .match import masked_match, suppress_overlaps
 
 
@@ -50,6 +52,26 @@ REFIND_PAD = 16
 # sprites face left), its frame in the game data ("frame": "move/2") and that frame's body box ("lt", "rb").
 INDEX = "index.json"      # the game's sprites (sprites.build)
 CUTOUTS = "cutouts.json"  # the screenshot cut-outs, matched against the sprites (sprites.cutout_origins)
+# A folder's pictures are drawn this many px per game px ({"px_per_game_px": 1.0}: sprites.build at the game's own
+# size); without the file, as the 1920x1080 window shows them (1.40625: the cut-outs, and the sprites made for it).
+SCALE_FILE = "scale.json"
+
+
+def picture_scale(folder: Path) -> float:
+    """How many px per game px a folder's pictures are drawn at (SCALE_FILE)."""
+    path = folder / SCALE_FILE
+    if not path.is_file():
+        return STRETCHED.stretch
+    return float(json.loads(path.read_text(encoding="utf-8"))["px_per_game_px"])
+
+
+def frame_size(w: int, h: int, shrink: float) -> tuple[int, int]:
+    """A w x h picture's size in frames it's `shrink` times as big as (its px per frame px): a whole shrink cuts as
+    before (half size: w // 2), any other rounds."""
+    k = round(shrink)
+    if abs(shrink - k) < 1e-9 and k >= 1:
+        return max(1, w // k), max(1, h // k)
+    return max(1, round(w / shrink)), max(1, round(h / shrink))
 
 
 @dataclass(frozen=True)
@@ -168,19 +190,24 @@ class MobDetector:
     """Templates come from `folder` (or a list of folders): PNGs named <kind>_<anything>.png, RGBA at full
     screen size. gamelab/assets/mobs has cut-outs from screenshots; sprites.py makes them from the game data.
     What the folders say about their templates (INDEX, CUTOUTS) comes along, and `meta` (by file name) on top.
-    `threads`: how many matches run at once (1: all on the caller's thread)."""
+    `threads`: how many matches run at once (1: all on the caller's thread). `frame_scale`: the frames' px per game px
+    (screen.Geometry.frame_scale; by default the 1920x1080 window's at half size), which each folder's pictures are
+    brought to from theirs (`picture_scale`)."""
 
-    def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None):
+    def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None,
+                 frame_scale: float = STRETCHED.frame_scale):
         self.templates: dict[str, list[MobTemplate]] = {}
         folders = folder if isinstance(folder, list) else [folder]
         meta = {**read_meta(folders), **(meta or {})}
+        shrinks = {f: picture_scale(f) / frame_scale for f in folders}
+        self.px = frame_scale / STRETCHED.frame_scale  # this frame's px per px of a half-size 1920x1080 frame
         for path in sorted(p for f in folders for p in f.glob("*.png")):
             kind = path.stem.split("_")[0]
             if kind not in KINDS_WITH_PALETTE:
                 continue
             rgba = np.asarray(Image.open(path).convert("RGBA"))
             h, w = rgba.shape[:2]
-            size = (max(1, w // SCALE), max(1, h // SCALE))
+            size = frame_size(w, h, shrinks[path.parent])
             rgb = cv2.resize(np.ascontiguousarray(rgba[..., :3]), size, interpolation=cv2.INTER_AREA)
             mask = cv2.resize((rgba[..., 3] > 0).astype(np.uint8), size, interpolation=cv2.INTER_NEAREST)
             for flip in (False, True):  # monsters face either way
@@ -198,7 +225,7 @@ class MobDetector:
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
-        """Monsters in `frame` (RGB, game window / SCALE). `rows` limits the search to a band."""
+        """Monsters in `frame` (RGB, a look frame at `frame_scale`). `rows` limits the search to a band."""
         return self._detect(frame, rows, self._map)
 
     def detect_wide(self, frame: np.ndarray, rows: tuple[int, int]) -> list[Mob]:
@@ -206,8 +233,9 @@ class MobDetector:
         foliage took all of the slime candidate spots and three slimes in plain view were missed;
         each band gets its own best spots. The bands are searched at once, each on one thread."""
         # A band starts every WIDE_STEP rows until one reaches rows[1] (it's cut short there); always one.
-        starts = range(rows[0], max(rows[0] + 1, rows[1] - WIDE_BAND + WIDE_STEP), WIDE_STEP)
-        bands = self._map(lambda y0: self._detect(frame, (y0, min(rows[1], y0 + WIDE_BAND)), _serial), starts)
+        band, step = round(WIDE_BAND * self.px), round(WIDE_STEP * self.px)
+        starts = range(rows[0], max(rows[0] + 1, rows[1] - band + step), step)
+        bands = self._map(lambda y0: self._detect(frame, (y0, min(rows[1], y0 + band)), _serial), starts)
         return suppress_overlaps([hit for band in bands for hit in band])
 
     def refind(self, frame: np.ndarray, box: tuple[int, int, int, int], kind: str, template: str = "",
@@ -221,8 +249,9 @@ class MobDetector:
         hand-offs cost more."""
         h, w = frame.shape[:2]
         bx0, by0, bx1, by1 = bounds or (0, 0, w, h)
-        x0, y0 = max(bx0, int(box[0]) - REFIND_PAD), max(by0, int(box[1]) - REFIND_PAD)
-        x1, y1 = min(bx1, int(box[2]) + REFIND_PAD), min(by1, int(box[3]) + REFIND_PAD)
+        pad = round(REFIND_PAD * self.px)
+        x0, y0 = max(bx0, int(box[0]) - pad), max(by0, int(box[1]) - pad)
+        x1, y1 = min(bx1, int(box[2]) + pad), min(by1, int(box[3]) + pad)
         if x1 <= x0 or y1 <= y0 or kind not in self.templates:
             return None
         window = frame[y0:y1, x0:x1]
@@ -264,19 +293,19 @@ class MobDetector:
             if only is not None and kind not in only:
                 continue
             colour = palette(kind, frame, channels)
-            if colour.sum() < MIN_BODY_PIXELS:
+            if colour.sum() < MIN_BODY_PIXELS * self.px * self.px:
                 continue
             coarse = cv2.resize(colour.astype(np.float32), coarse_size, interpolation=cv2.INTER_AREA)
             kinds.append((kind, templates, coarse, Cover(coarse)))
         # Step 1, every template of every kind; then the spots each kind checks; then step 2, all at once.
         jobs = [(coarse, cover, t, i) for _, templates, coarse, cover in kinds for i, t in enumerate(templates)]
         found = run(lambda job: _spots(*job), jobs)
-        checks, start = [], 0
+        checks, start, slack = [], 0, round(CHECK_SLACK * self.px)
         for kind, templates, _, _ in kinds:
             spots = sorted((s for f in found[start:start + len(templates)] for s in f), reverse=True)
             start += len(templates)
-            checks += [(kind, templates[i], cx, cy) for cx, cy, i in _to_check(spots)]
-        results = run(lambda c: _check(frame, c[1], c[2], c[3]), checks)
+            checks += [(kind, templates[i], cx, cy) for cx, cy, i in _to_check(spots, slack)]
+        results = run(lambda c: _check(frame, c[1], c[2], c[3], slack), checks)
         hits = []
         for (kind, template, *_), result in zip(checks, results):
             if result and result[0] >= THRESHOLD:
@@ -350,26 +379,26 @@ def _spots(coarse: np.ndarray, cover: Cover, template: MobTemplate, i: int) -> l
              COARSE * y + COARSE * silhouette.shape[0] // 2, i) for y, x, v in zip(*found)]
 
 
-def _to_check(spots: list[tuple[float, int, int, int]]) -> list[tuple[int, int, int]]:
-    """Step 2's spots (centre x, y, template), best first: at most MAX_CHECKS, none within CHECK_SLACK of
-    one already picked."""
+def _to_check(spots: list[tuple[float, int, int, int]], slack: int = CHECK_SLACK) -> list[tuple[int, int, int]]:
+    """Step 2's spots (centre x, y, template), best first: at most MAX_CHECKS, none within `slack` (CHECK_SLACK in
+    the frame's px) of one already picked."""
     picked = []
     for _, cx, cy, i in spots:
         if len(picked) >= MAX_CHECKS:
             break
-        if any(abs(cx - x) < CHECK_SLACK and abs(cy - y) < CHECK_SLACK for x, y, _ in picked):
+        if any(abs(cx - x) < slack and abs(cy - y) < slack for x, y, _ in picked):
             continue
         picked.append((cx, cy, i))
     return picked
 
 
-def _check(frame: np.ndarray, template: MobTemplate, cx: int, cy: int):
-    """Masked colour match of one template centred within CHECK_SLACK of (cx, cy): (score, x, y, w, h),
-    or None if it doesn't fit in the frame there."""
+def _check(frame: np.ndarray, template: MobTemplate, cx: int, cy: int, slack: int = CHECK_SLACK):
+    """Masked colour match of one template centred within `slack` (CHECK_SLACK in the frame's px) of (cx, cy):
+    (score, x, y, w, h), or None if it doesn't fit in the frame there."""
     tpl, mask = template.rgb, template.mask3
     th, tw = tpl.shape[:2]
-    x0, y0 = max(0, cx - tw // 2 - CHECK_SLACK), max(0, cy - th // 2 - CHECK_SLACK)
-    window = frame[y0:y0 + th + 2 * CHECK_SLACK, x0:x0 + tw + 2 * CHECK_SLACK]
+    x0, y0 = max(0, cx - tw // 2 - slack), max(0, cy - th // 2 - slack)
+    window = frame[y0:y0 + th + 2 * slack, x0:x0 + tw + 2 * slack]
     if window.shape[0] < th or window.shape[1] < tw:
         return None
     _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, tpl, mask))

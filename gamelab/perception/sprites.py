@@ -4,6 +4,11 @@ monster's feet), its body's box, its head and how long it shows. The screenshot 
 matched against the sprites once, for where their monster's feet are and which way it faces (mobs.CUTOUTS).
 They're extracted game data, so they're written next to the other extracts (git-ignored).
 
+The pictures are drawn as a game window of one size shows them (`stretch`, its px per game px): SPRITES as the
+1920x1080 window does (1.40625, linearly), and for the game's own 1366x768 a folder of the game's pictures as they
+are, pixel for pixel (`folder_for`). The cut-outs are of the 1920x1080 window, so they're matched against its
+sprites, and what that says of them (CUTOUTS, in their own px) goes for every size.
+
 A monster's kind is its name in lower case with dashes ("orange-mushroom"; perception.kinds).
 """
 
@@ -16,10 +21,10 @@ from PIL import Image
 
 from gamedata.paths import OUT
 
-from ..screen import SCREEN_SCALE
+from ..screen import STRETCHED, Geometry
 from .kinds import kind_of
 from .match import masked_match
-from .mobs import ASSETS, CUTOUTS, INDEX, KINDS_WITH_PALETTE, MobDetector
+from .mobs import ASSETS, CUTOUTS, INDEX, KINDS_WITH_PALETTE, SCALE_FILE, MobDetector
 
 
 SPRITES = OUT / "sprites"
@@ -32,26 +37,37 @@ CUTOUT_PAD = 30  # full-size px around a cut-out a sprite may reach out to: the 
                  # the feet (58 px tall, their frame 60)
 
 
-def screen_size(picture: np.ndarray) -> tuple[int, int]:
-    """(width, height) of a game picture as it shows on a 1920x1080 screen."""
+def screen_size(picture: np.ndarray, stretch: float = STRETCHED.stretch) -> tuple[int, int]:
+    """(width, height) of a game picture as a game window shows it `stretch` times larger (by default on a 1920x1080
+    screen)."""
     h, w = picture.shape[:2]
-    return max(1, round(w * SCREEN_SCALE)), max(1, round(h * SCREEN_SCALE))
+    return max(1, round(w * stretch)), max(1, round(h * stretch))
 
 
-def build(names_by_id: dict[int, str], folder: Path = SPRITES) -> list[Path]:
-    """Write `<kind>_<action><index>.png` (RGBA, screen size at 1920x1080) for each monster id -> name:
+def folder_for(stretch: float) -> Path:
+    """Where the sprites drawn `stretch` times larger are kept: SPRITES for the 1920x1080 window's 1.40625, else
+    `sprites_x<stretch>` ("sprites_x1": the game's own pictures, for 1366x768)."""
+    return SPRITES if stretch == STRETCHED.stretch else OUT / f"sprites_x{stretch:g}"
+
+
+def build(names_by_id: dict[int, str], folder: Path = SPRITES, stretch: float = STRETCHED.stretch) -> list[Path]:
+    """Write `<kind>_<action><index>.png` (RGBA, drawn `stretch` times larger: by default the size they show at on a
+    1920x1080 screen) for each monster id -> name:
     every frame of gamedata.canvas.mob_frames' poses (stand, move and hit); and each one's frame in the
     game data into the folder's INDEX (origin, lt, rb and head in game px from the picture's top-left and
-    from the feet, the picture's size `w` x `h` in game px, the delay in ms)."""
+    from the feet, the picture's size `w` x `h` in game px, the delay in ms). Another stretch than 1920x1080's is
+    written in the folder's mobs.SCALE_FILE."""
     from gamedata.canvas import mob_frames
     folder.mkdir(parents=True, exist_ok=True)
+    if stretch != STRETCHED.stretch:
+        _write(folder / SCALE_FILE, {"px_per_game_px": stretch})
     index = _read(folder / INDEX)
     written = []
     for mob_id, name in names_by_id.items():
         kind = kind_of(name)
         for frame in mob_frames(mob_id):
             rgba = frame["rgba"]
-            size = screen_size(rgba)
+            size = screen_size(rgba, stretch)
             rgb = cv2.resize(np.ascontiguousarray(rgba[..., :3]), size, interpolation=cv2.INTER_LINEAR)
             alpha = cv2.resize(np.ascontiguousarray(rgba[..., 3]), size, interpolation=cv2.INTER_LINEAR)
             alpha = np.where(alpha >= OPAQUE, 255, 0).astype(np.uint8)
@@ -66,11 +82,30 @@ def build(names_by_id: dict[int, str], folder: Path = SPRITES) -> list[Path]:
     return written
 
 
-def ensure(names_by_id: dict[int, str], folder: Path = SPRITES, cutouts: Path = ASSETS) -> Path:
-    """Build templates for any of these monsters (id -> name) that don't have them yet, or whose pictures
-    the folder's INDEX doesn't have (made before it was kept); then match the cut-outs of their kinds that
-    the folder's CUTOUTS doesn't have yet. Returns the folder. (loot.ensure, unlike this, rebuilds every
-    template when any is missing.)"""
+def ensure(names_by_id: dict[int, str], folder: Path | None = None, cutouts: Path = ASSETS,
+           stretch: float = STRETCHED.stretch, stretched: Path = SPRITES) -> Path:
+    """Build templates (drawn `stretch` times larger, in `folder`, by default `folder_for(stretch)`) for any of these
+    monsters (id -> name) that don't have them yet, or whose pictures the folder's INDEX doesn't have (made before
+    it was kept); then match the cut-outs of their kinds that the folder's CUTOUTS doesn't have yet. The cut-outs
+    are of the 1920x1080 window, so they're matched against its sprites (in `stretched`), and another stretch's
+    folder takes what that says of them. Returns the folder. (loot.ensure, unlike this, rebuilds every template
+    when any is missing.)"""
+    folder = folder_for(stretch) if folder is None else folder
+    _sprites_at(names_by_id, folder, stretch)
+    if stretch != STRETCHED.stretch:
+        folder.mkdir(parents=True, exist_ok=True)  # (a map none of whose monsters has a colour test builds none)
+        _write(folder / CUTOUTS, _read(ensure(names_by_id, stretched, cutouts) / CUTOUTS))
+        return folder
+    kinds = {kind_of(n) for n in names_by_id.values()}
+    known = _read(folder / CUTOUTS)
+    if any(p.name not in known for p in cutouts.glob("*.png") if p.stem.split("_")[0] in kinds):
+        known.update(cutout_origins(kinds, folder, cutouts))
+        _write(folder / CUTOUTS, known)
+    return folder
+
+
+def _sprites_at(names_by_id: dict[int, str], folder: Path, stretch: float) -> None:
+    """ensure's first part: the pictures and their INDEX."""
     index = _read(folder / INDEX)
     missing, unindexed = {}, {}
     for mob_id, name in names_by_id.items():
@@ -79,19 +114,14 @@ def ensure(names_by_id: dict[int, str], folder: Path = SPRITES, cutouts: Path = 
             missing[mob_id] = name
         elif any(p.name not in index for p in pictures):
             unindexed[mob_id] = name
+    more = () if stretch == STRETCHED.stretch else (stretch,)  # (build's own default otherwise)
     if missing:
-        build(missing, folder)
+        build(missing, folder, *more)
     if unindexed:
         try:
-            build(unindexed, folder)
+            build(unindexed, folder, *more)
         except OSError:  # no game data copy here: the pictures still work, without where the feet are
             pass
-    kinds = {kind_of(n) for n in names_by_id.values()}
-    known = _read(folder / CUTOUTS)
-    if any(p.name not in known for p in cutouts.glob("*.png") if p.stem.split("_")[0] in kinds):
-        known.update(cutout_origins(kinds, folder, cutouts))
-        _write(folder / CUTOUTS, known)
-    return folder
 
 
 def cutout_origins(kinds: set[str], folder: Path = SPRITES, cutouts: Path = ASSETS) -> dict[str, dict]:
@@ -140,11 +170,12 @@ def cutout_origins(kinds: set[str], folder: Path = SPRITES, cutouts: Path = ASSE
     return out
 
 
-def detector_for(model) -> MobDetector:
-    """A MobDetector for a map: screenshot cut-outs (good at monsters half hidden in plants) plus the
-    game's sprites of every monster that spawns there (every pose, any monster with a colour gate)."""
+def detector_for(model, geo: Geometry = STRETCHED) -> MobDetector:
+    """A MobDetector for a map, for look frames of geometry `geo`: screenshot cut-outs (good at monsters half hidden
+    in plants) plus the game's sprites of every monster that spawns there (every pose, any monster with a colour
+    gate), drawn as that window shows them (at 1366x768 the game's own pictures)."""
     names_by_id = {s.mob_id: s.name for s in model.spawns if s.name and kind_of(s.name) in KINDS_WITH_PALETTE}
-    return MobDetector([ASSETS, ensure(names_by_id)])
+    return MobDetector([ASSETS, ensure(names_by_id, stretch=geo.stretch)], frame_scale=geo.frame_scale)
 
 
 def _read(path: Path) -> dict:

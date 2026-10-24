@@ -1,5 +1,9 @@
-"""Looking at the game: a capture of the game window turned into what's on screen, in half-size frame
-pixels, without the player (screen capture needs no admin rights).
+"""Looking at the game: a capture of the game window turned into what's on screen, in look-frame pixels,
+without the player (screen capture needs no admin rights).
+
+Eyes looks at a game window of one client size (screen.Geometry: 1920x1080, its looks at half size, or the game's
+own 1366x768, at full size), which its templates were made for, and every Observation says which (`geo`): what
+reads it converts its px with it.
 
 Eyes is perception's only door to pixels. `look` gives an Observation (her name tag, HP and MP, the
 ground under her, her minimap dot and other players', ropes, her EXP number and the box it's read from);
@@ -15,17 +19,17 @@ import cv2
 import numpy as np
 
 from .. import capture, paths, window
-from ..screen import GAME_SIZE, HUD_TOP, SCALE, UNITS_PER_HALF_PX
-from .exp_number import READ_BOX
-from .hud import BAR_ROW, EXP_NUMBER, HP_BAR, bars, hp_bar, hp_fill
+from ..screen import HUD_TOP, STRETCHED, Geometry
+from .exp_number import read_box
+from .hud import BAR_ROW, HP_BAR, bars, exp_number_box, hp_bar, hp_fill
 from .loot import Item, LootDetector
-from .minimap import MINIMAP_BOX, Marker, dot_in_box, her_dot, other_dots
+from .minimap import Marker, dot_in_box, her_dot, minimap_box, other_dots
 from .mobs import Mob, MobDetector
 from .nametag import NameTag
 from .terrain import ScreenRope, find_ropes, ground_extent
 
 
-TAG_BELOW_FEET = 8  # half-size px from the ground line she stands on down to her name tag's centre
+TAG_BELOW_FEET = 8  # half-size px (1920x1080) from the ground line she stands on down to her name tag's centre
 EXP_TEXT = 150      # her EXP number's text pixels are brighter than this (in any channel)
 # Glances start this far apart at least. With mss a glance was two grabs that each waited for the
 # compositor's next frame (33 ms), so with the navigator's 30 ms between glances her dot was seen about
@@ -37,10 +41,15 @@ EXP_TEXT = 150      # her EXP number's text pixels are brighter than this (in an
 GLANCE_EVERY_S = 0.063
 
 
+def tag_below_feet(geo: Geometry = STRETCHED) -> int:
+    """TAG_BELOW_FEET in a look frame of geometry `geo` (8 at 1920x1080 half size, 11 at 1366x768 full size)."""
+    return geo.ifpx(TAG_BELOW_FEET)
+
+
 def band_rows(obs: Observation, up: float, down: float) -> tuple[int, int]:
     """The rows of a look's frame from `up` map units above her feet to `down` below, above the bottom bar."""
-    feet, bottom = obs.floor_y, int(obs.frame.shape[0] * HUD_TOP)
-    return max(0, int(feet - up / UNITS_PER_HALF_PX)), min(bottom, int(feet + down / UNITS_PER_HALF_PX))
+    feet, bottom, per_px = obs.floor_y, int(obs.frame.shape[0] * HUD_TOP), obs.geo.units_per_px
+    return max(0, int(feet - up / per_px)), min(bottom, int(feet + down / per_px))
 
 
 def rgb_of(bgra: np.ndarray) -> np.ndarray:
@@ -52,9 +61,9 @@ def rgb_of(bgra: np.ndarray) -> np.ndarray:
 
 @dataclass(kw_only=True)
 class Observation:
-    """What one look at the game shows (half-size frame px unless noted)."""
+    """What one look at the game shows (look-frame px unless noted)."""
     t: float                                 # when (time.monotonic)
-    frame: np.ndarray                        # the game window, half size, RGB
+    frame: np.ndarray                        # the game window shrunk geo.look_scale times (half size at 1920x1080), RGB
     tag: tuple[int, int] | None              # her name tag's centre; her feet are just above it
     hp: float                                # HP and MP left (0-1)
     mp: float
@@ -63,31 +72,36 @@ class Observation:
     others: list[Marker] = field(default_factory=list)  # other players' minimap dots (full-size px)
     ropes: list[ScreenRope] = field(default_factory=list)  # ropes and ladders on screen (full-size px)
     exp: np.ndarray | None = None            # the text pixels of her EXP number (EXP_NUMBER): changed, she gained EXP
-    exp_box: np.ndarray | None = None        # the box her EXP number is read from (exp_number.READ_BOX, full size,
+    exp_box: np.ndarray | None = None        # the box her EXP number is read from (exp_number.read_box, full size,
                                              # RGB): read (exp_number.read) only when `exp` changes
+    geo: Geometry = STRETCHED                # the game window's client size and the look's scale (the simulator's
+                                             # frames are the 1920x1080 window's)
 
     @property
     def floor_y(self) -> int | None:
         """The ground line she stands on (her name tag hangs just below it)."""
-        return None if self.tag is None else self.tag[1] - TAG_BELOW_FEET
+        return None if self.tag is None else self.tag[1] - tag_below_feet(self.geo)
 
 
 class Eyes:
-    """The game window, looked at. `title`: the game window's title; `tag_template`: her name tag at half
-    size (calibration). The monster detector defaults to the screenshot cut-outs; the loot detector is
-    made on first use."""
+    """The game window, looked at. `title`: the game window's title; `tag_template`: her name tag as calibration
+    keeps it (calibration.load(geo).template). The monster detector defaults to the screenshot cut-outs; the loot
+    detector is made on first use. `geo`: the game window's geometry, which the templates and the detectors given
+    are for (screen.Geometry; by default 1920x1080's): a capture of another size is refused."""
     seen_at: float | None = None  # when the screen last captured looked like that (time.monotonic)
+    geo: Geometry = STRETCHED     # the game window's geometry (a subclass that doesn't call __init__ has 1920x1080's)
 
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
-                 loot: LootDetector | None = None, screen=None):
+                 loot: LootDetector | None = None, screen=None, geo: Geometry = STRETCHED):
         """`screen`: what takes shots of the screen (by default the process's capture.Grabber: DXGI or mss,
         as config.toml says; analysis.bench passes saved frames)."""
         self.title = title
-        self.detector = detector or MobDetector()
+        self.geo = geo
+        self.detector = detector or MobDetector(frame_scale=geo.frame_scale)
         self._loot = loot
         self.screen = screen or capture.shared()
         self._glanced = -GLANCE_EVERY_S    # when the last glance began
-        self.name_tag = NameTag(tag_template, paths.TAG_FULL)
+        self.name_tag = NameTag(tag_template, paths.calibrated(paths.TAG_FULL, geo.suffix), geo)
         self.want_ropes = False  # Senses turns this on
         # Where ropes are looked for, from her minimap dot and her name tag's centre: ranges of x on screen
         # (full-size px; None: the whole screen). Senses works them out from the map's ropes.
@@ -102,35 +116,42 @@ class Eyes:
         """What a capture of the game window shows (full size, RGB), as `look` reads it: `t` is when the
         screen showed it (by default now, the end of the look); `ropes` False leaves the rope search out
         (by default `want_ropes`). The continuous feed (localization.feed) looks at frames it captured
-        itself this way."""
+        itself this way. The capture must be of the client size the eyes are for (`geo`)."""
+        geo = self.geo
+        if (full.shape[1], full.shape[0]) != geo.client:
+            raise ValueError(f"a frame of {full.shape[1]}x{full.shape[0]}; these eyes are for "
+                             f"{geo.client[0]}x{geo.client[1]}")
         hp, mp = bars(full)
-        frame = cv2.resize(full, (full.shape[1] // SCALE, full.shape[0] // SCALE), interpolation=cv2.INTER_AREA)
+        k = geo.look_scale
+        frame = full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
+                                               interpolation=cv2.INTER_AREA)
         tag = self.name_tag.find(full)
-        ground = ground_extent(frame, tag[0], tag[1] - TAG_BELOW_FEET) if tag else None
-        dot = her_dot(full)
-        others = other_dots(full)  # 0.4-0.6 ms (the 31 saved frames of this map)
+        ground = ground_extent(frame, tag[0], tag[1] - tag_below_feet(geo), geo) if tag else None
+        dot = her_dot(full, geo)
+        others = other_dots(full, geo)  # 0.4-0.6 ms (the 31 saved frames of this map)
         found = []
         if self.want_ropes if ropes is None else ropes:
-            found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None)
-        x0, y0, x1, y1 = EXP_NUMBER
-        bx0, by0, bx1, by1 = READ_BOX
+            found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None, geo)
+        x0, y0, x1, y1 = exp_number_box(geo)
+        bx0, by0, bx1, by1 = read_box(geo)
         return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=tag, hp=hp, mp=mp,
                            ground=ground, dot=dot, others=others, ropes=found,
-                           exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy())
+                           exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy(),
+                           geo=geo)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from the newest frame (with DXGI 0.2 ms, with mss two grabs of 16.7
         ms each), GLANCE_EVERY_S after the last glance began at the soonest: for watching a plan run."""
         begun = time.monotonic()
         area = self._client_area()
-        x0, y0, x1, y1 = MINIMAP_BOX
+        x0, y0, x1, y1 = minimap_box(self.geo)
         w, h = area["width"], area["height"]
         a, b = int(HP_BAR[0] * w), int(HP_BAR[1] * w)
         shot = self.screen.shot(area, at=self._glanced + GLANCE_EVERY_S)
         self._glanced = max(begun, self._glanced + GLANCE_EVERY_S)
         box, row = shot.crops([(x0, y0, x1 - x0, y1 - y0), (a, int(BAR_ROW * h), b - a, 1)], rgb_of)
         self.seen_at = shot.t
-        return dot_in_box(box), hp_fill(row[0].astype(np.int16))
+        return dot_in_box(box, self.geo), hp_fill(row[0].astype(np.int16))
 
     def messages(self) -> str:
         """The pickup log at the bottom right, read by OCR (~0.4 s): "Leather x1 earned. (Etc)", and what
@@ -161,13 +182,14 @@ class Eyes:
     def _capture(self) -> np.ndarray:
         """The whole client area, full size, RGB, with the game in front, as the screen showed it after
         this began (a look sees what came of the keys before it). It must be the size the templates were
-        made at."""
+        made for (`geo`)."""
         self._to_front()
         begun = time.monotonic()
         area = self._client_area()
-        if (area["width"], area["height"]) != GAME_SIZE:
-            raise RuntimeError(f"the game window is {area['width']}x{area['height']}; monster "
-                               f"templates and her name tag were made at {GAME_SIZE[0]}x{GAME_SIZE[1]}")
+        if (area["width"], area["height"]) != self.geo.client:
+            raise RuntimeError(f"the game window is {area['width']}x{area['height']}; the monster templates and "
+                               f"her name tag here are for {self.geo.client[0]}x{self.geo.client[1]} (it was that "
+                               f"size when this began): run it again")
         shot = self.screen.shot(area, after=begun)
         full = shot.crop(0, 0, area["width"], area["height"], rgb_of)
         self.seen_at = shot.t
@@ -193,7 +215,7 @@ class Eyes:
 
     def bar(self, obs: Observation, mob: Mob) -> float | None:
         """A monster's HP bar (the fraction left), or None if it hasn't been hit."""
-        return hp_bar(obs.frame, mob.x, mob.y - mob.h // 2)
+        return hp_bar(obs.frame, mob.x, mob.y - mob.h // 2, obs.geo)
 
     def items(self, obs: Observation, box: tuple[int, int, int, int], mesos_only: bool = False) -> list[Item]:
         """Drops lying in a box (x0, y0, x1, y1) of the frame."""
@@ -206,7 +228,7 @@ class Eyes:
 
     @property
     def item_height(self) -> int:
-        """The tallest drop picture (half-size px): a box shorter than this can't hold one."""
+        """The tallest drop picture (look-frame px): a box shorter than this can't hold one."""
         return self.loot_detector().height
 
     @property
@@ -215,7 +237,7 @@ class Eyes:
         return set(self.detector.templates)
 
     def loot_detector(self) -> LootDetector:
-        """The loot detector, made (from the game's item pictures) on first use."""
+        """The loot detector, made (from the game's item pictures, for frames of `geo`) on first use."""
         if self._loot is None:
-            self._loot = LootDetector()
+            self._loot = LootDetector(geo=self.geo)
         return self._loot

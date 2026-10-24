@@ -15,7 +15,7 @@ hunt.PLAYER_DISCOUNT, both off by the harness).
 
 from dataclasses import dataclass, replace
 
-from ..perception.minimap import OTHER_SHIFT, Marker
+from ..perception.minimap import Marker, sizes
 from .pose import Localizer
 
 CONFIRM = 2       # looks in a row a new dot must be seen in to be a player
@@ -123,9 +123,10 @@ class Players:
         self._t = t
 
     def _place(self, p: Player, m: Marker) -> Player:
-        """Player `p` where marker `m` puts them: their dot as hers would be at the same place (OTHER_SHIFT), placed
-        and snapped to a platform as hers is."""
-        where = self.localizer.where_dot((m.x - OTHER_SHIFT, m.y - OTHER_SHIFT))
+        """Player `p` where marker `m` puts them: their dot as hers would be at the same place (minimap.OTHER_SHIFT, in
+        the localizer's geometry), placed and snapped to a platform as hers is."""
+        shift = sizes(self.localizer.geo).other_shift
+        where = self.localizer.where_dot((m.x - shift, m.y - shift))
         p.x, p.y, p.dot = where.x, where.y, (m.x, m.y)
         p.platform = None if where.platform is None else where.platform.id
         return p

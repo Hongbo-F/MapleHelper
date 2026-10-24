@@ -14,6 +14,7 @@ from maplehelper.game import COMBAT, MOVEMENT
 
 from .. import directions
 from ..motion.physics import BLIND_ENDS_MS, JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS, KICK_JUMPS, hold_ms
+from ..screen import STRETCHED_CLIENT
 from . import client
 
 TAP_MS = 40          # a key tap: released this long after it's pressed
@@ -262,7 +263,10 @@ class Actions:
         self.play([[0, arrow, "down"], [50, arrow, "up"]], "stand")
         self.facing = RIGHT
 
-    def nudge_mouse(self) -> None:
-        """Move the mouse inside the game (moves only, never clicks): a tooltip from another program
-        once sat over the minimap until the mouse moved."""
-        self.play([[0, "mouse", 1000, 620], [120, "mouse", 960, 600]], "mouse")
+    def nudge_mouse(self, client: tuple[int, int] = STRETCHED_CLIENT) -> None:
+        """Move the mouse inside the game (moves only, never clicks), in a client area that size (client px): a
+        tooltip from another program once sat over the minimap until the mouse moved. Just below the middle: at
+        1920x1080 (1000, 620) then (960, 600)."""
+        w, h = client
+        self.play([[0, "mouse", round(1000 * w / 1920), round(620 * h / 1080)],
+                   [120, "mouse", round(960 * w / 1920), round(600 * h / 1080)]], "mouse")

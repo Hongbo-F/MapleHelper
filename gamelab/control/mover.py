@@ -23,15 +23,14 @@ from ..motion.body import ROPE_GROUP
 from ..motion.flow import ARROW_LAG
 from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_LAG, JUMP_SPEED, ROPE_REACH, WALK_SPEED, fly, hold_ms, run_ms
 from ..motion.route import JUMP_FROM, ROPE_TOP_DY, Move, drop_clear, drop_spots, grab_height, hung_from, side_jump
-from ..screen import SCALE, SCREEN_SCALE
 from .actions import WALK_PICK_AFTER_MS, Actions, tap
 
 
 SLIDE_MS = 220            # after releasing the arrow she slides to a stop within this
 X_TOLERANCE = 8           # map units: close enough when lining up
 SPOT_TOLERANCE = 6        # map units: close enough to a run-up spot, or under a rope
-ROPE_TOLERANCE = 6        # screen px: close enough to a rope's top to climb down it
-ROPE_SEARCH_PX = 70       # screen px: a rope this close to where the map puts it is the one
+ROPE_TOLERANCE = 6        # screen px (1920x1080; the look's geometry converts them): close enough to a rope's top
+ROPE_SEARCH_PX = 70       # ... and a rope this close to where the map puts it is the one
 GRAB_MARGIN = 8           # grab with at least this much rope to spare
 # The shortest run-up a jump is timed for: 15 units is keyed 155 ms after the arrow (physics.run_ms), past
 # the blind spot (physics.BLIND_ENDS_MS, 150), and leaves at full speed but for 0.01% of jumps by the median
@@ -81,7 +80,7 @@ class Mover:
             if s.where is not None:
                 return s
             if i == 3:
-                self.actions.nudge_mouse()  # a tooltip from another program once hid the minimap
+                self.actions.nudge_mouse(s.geo.client)  # a tooltip from another program once hid the minimap
             time.sleep(0.25)
         raise RuntimeError("can't find her minimap dot")
 
@@ -134,19 +133,20 @@ class Mover:
         for _ in range(3):
             if not (s.tag and s.tag_seen):
                 return s
-            her = SCALE * s.tag[0]
-            expected = her + (rope_x - s.where.x) * SCREEN_SCALE
-            near = [r for r in s.ropes if abs(r.x - expected) <= ROPE_SEARCH_PX]
+            geo = s.geo
+            her = geo.look_scale * s.tag[0]
+            expected = her + (rope_x - s.where.x) * geo.stretch
+            near = [r for r in s.ropes if abs(r.x - expected) <= geo.px(ROPE_SEARCH_PX)]
             if not near:
                 return s
             target = min(near, key=lambda r: abs(r.x - expected)).x
             dx = target - her
-            if abs(dx) <= ROPE_TOLERANCE:
+            if abs(dx) <= geo.px(ROPE_TOLERANCE):
                 return s
             arrow = self.actions.arrow(directions.toward(dx))
-            # As long as the engine says a nudge that far takes (physics.hold_ms: 13 px, 9 units, is 57 ms).
-            # Timed by her walking speed alone, 13 px was 87 ms, which by the engine walks her 19 units.
-            ms = hold_ms(abs(dx) / SCREEN_SCALE)
+            # As long as the engine says a nudge that far takes (physics.hold_ms: 13 px, 9 units, is 57 ms, at
+            # 1920x1080). Timed by her walking speed alone, 13 px was 87 ms, which by the engine walks her 19 units.
+            ms = hold_ms(abs(dx) / geo.stretch)
             self._send([[0, arrow, "down"], [ms, arrow, "up"]], "nudge")
             time.sleep(0.2)
             s = self.locate()
