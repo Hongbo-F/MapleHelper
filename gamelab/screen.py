@@ -23,7 +23,7 @@ STRETCHED_CLIENT = (1920, 1080)  # the client size the templates and constants w
 #   pixels (the name tag is matched at full size).
 # - At the game's own 1366x768, full size: 1366x768 is about twice 960x540's pixels at 1.42 times the detail, every
 #   pixel the game's own, and half size (683x384) is half 960x540's pixels at 0.71 of its detail. Measured on the
-#   saved frames (README, Native resolution).
+#   saved frames (README, Screen size).
 LOOK_SCALES = {STRETCHED_CLIENT: 2, GAME_VIEW: 1}
 HUD_TOP = 0.88               # the bottom bar starts this far down: monsters and drops are looked for above it
 
