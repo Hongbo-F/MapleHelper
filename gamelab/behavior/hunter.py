@@ -43,7 +43,7 @@ from ..perception.hud import exp_changed
 from . import fight
 from .fight import Report
 from .ledger import DropStore, Ledger, Wounds
-from .looting import Looter
+from .looting import Looter, worth_for
 from .pet import PetCare
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
@@ -68,6 +68,7 @@ class Hunter:
         self.low_hp, self.potion_hp = low_hp, potion_hp
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.actions = Actions(keys, skill)
+        self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
         # Her kills her EXP told of: when, and the kind its gain's size named (None: not known). The last EXP_MEMORY s
@@ -86,7 +87,7 @@ class Hunter:
         self.pet = PetCare(self.actions, eyes, log=log)
         # The hunt's bookkeeping from every look and throw (behavior.ledger): the hunt loop reads the drop store,
         # and the fights and the hunt loop her wounds (the monsters she has hurt, finished before she moves on).
-        self.drops = DropStore()
+        self.drops = DropStore(self.worth)
         self.ledger = Ledger(self, self.drops)
         self.wounds = Wounds(self.ledger)
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id

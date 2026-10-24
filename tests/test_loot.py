@@ -400,14 +400,14 @@ def test_remembered_drops_seen_gone_twice_are_forgotten_and_drops_seen_elsewhere
 
 def test_the_tour_doesnt_come_back_for_drops_by_another_player_unless_one_is_worth_it(monkeypatch):
     """looting.PLAYER_PILES (off by default): drops seen with another player by them (400 units across) aren't
-    remembered for later, unless one is worth PLAYER_PILE_WORTH (a Slime Bubble); with her party's leader there, or
-    nobody, they are."""
+    remembered for later, unless one is valuable on the map (looting.Worth.valuable: a Slime Bubble); with her party's
+    leader there, or nobody, they are."""
     from gamelab.behavior import looting
-    from gamelab.behavior.looting import PLAYER_PILE_WORTH, worth
+    from gamelab.behavior.looting import FIRST, worth
     from gamelab.localization.players import Player
     monkeypatch.setattr(time, "monotonic", lambda: 100.0)
     monkeypatch.setattr(looting, "PLAYER_PILES", True)
-    assert worth("slime-bubble") >= PLAYER_PILE_WORTH > worth("mesos")
+    assert worth("slime-bubble") >= FIRST.valuable > worth("mesos")
     seen = [_loot("mesos", 1610, UPPER), _loot("slime-bubble", 1900, UPPER), _loot("leather", 2400, UPPER)]
     for kind, kept in (("stranger", [1900, 2400]), ("party", [1610, 1900, 2400]), (None, [1610, 1900, 2400])):
         h = _hunter()
@@ -497,23 +497,55 @@ COPY = ROOT / "gamedata" / "data" / "copy"
 
 
 def test_a_drop_is_worth_its_shop_price_and_mesos_by_their_coin():
-    from gamelab.behavior.looting import COINS, PRICES, UNKNOWN_WORTH, worth
+    from gamelab.behavior.looting import COINS, UNKNOWN_WORTH, worth
     assert worth("slime-bubble") == 50 and worth("squishy-liquid") == 6 and worth("red-potion") == 5
     assert worth("mesos") == worth("mesos", "bronze") == COINS["bronze"] and worth("mesos", "gold") == 75
-    assert worth("a scroll the table doesn't know") == UNKNOWN_WORTH == max(PRICES.values())
+    # Not the dearest drop known (the Magic Potion's 250: every drop not known would be valuable), the first map's.
+    assert worth("a scroll the table doesn't know") == UNKNOWN_WORTH == 50 == worth("magic-potion") / 5
+
+
+def test_on_each_map_mesos_are_worth_what_its_monsters_drop():
+    """looting.coins_for: a coin stands for the mean of the amounts it's drawn for (bronze under 50, gold 50-99) that the
+    map's monsters drop (perception.drops), by their spawn points; a drop is valuable at twice a bronze coin."""
+    from gamelab.behavior.hunt import VALUABLE
+    from gamelab.behavior.looting import COINS, FIRST, VALUABLE_COINS, coins_for, worth_for
+    from gamelab.perception.drops import FIRST_MAP
+    first = _map(FIRST_MAP, *["Pig"] * 18, *["Slime"] * 12, *["Snail"] * 9, *["Orange Mushroom"] * 9)
+    assert worth_for(first) is FIRST and FIRST.valuable == VALUABLE == VALUABLE_COINS * COINS["bronze"]
+    assert coins_for(first) == {"bronze": 15.0, "gold": 75}  # its slimes' 10-20, as seen there: the same as COINS
+    tree = worth_for(_map(10002073, *["Horny Mushroom"] * 15, *["Green Mushroom"] * 14, *["Slime"] * 2))
+    assert tree.coins == {"bronze": 33.4, "gold": 51.5} and tree.valuable == 66.8
+    assert tree("mesos") == 33.4 and tree("mesos", "gold") == 51.5 and tree("sapphire-ore") == 120
+    assert tree("slime-bubble") < tree.valuable < tree("topaz-ore")  # a bubble is under two of its coins there
+    rocky = worth_for(_map(10004021, *["Stump"] * 20, *["Red Snail"] * 12, *["Dark Stump"] * 10, *["Axe Stump"] * 7))
+    assert rocky.coins == {"bronze": 25.9, "gold": 75} and rocky.valuable == 51.8  # no amount reported for a Red Snail
+    assert rocky("garnet-ore") < rocky.valuable < rocky("adamantium-ore")
+
+
+def test_every_maps_drops_have_a_price():
+    from gamelab.behavior.looting import PRICES
+    from gamelab.perception import drops
+    from gamelab.perception.kinds import kind_of
+    names = {n for m in drops.MONSTERS.values() for n in m.items} | set(drops.POTIONS)
+    names |= {n for items in drops.PINNED.values() for n in items}
+    assert {kind_of(n) for n in names} == set(PRICES)
 
 
 @pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
 def test_the_prices_are_the_game_data_s():
-    """looting.PRICES against each item's info/price in the game data (the first id of its name with one)."""
+    """looting.PRICES against each item's info/price in the game data (the first id of its name with one), every map's
+    drops'."""
     from gamedata.wz import Package
     from gamelab.behavior.looting import PRICES
+    from gamelab.perception import drops
     from gamelab.perception.kinds import kind_of
-    from gamelab.perception.loot import ITEMS, item_ids
+    from gamelab.perception.loot import item_ids
+    names = sorted({n for m in drops.MONSTERS.values() for n in m.items} | set(drops.POTIONS)
+                   | {n for items in drops.PINNED.values() for n in items})
     ids, found = item_ids(COPY), {}
     for folder in ("Etc", "Consume"):
         pack = Package(COPY / "Item" / folder / f"{folder}_000.wz")
-        for name in ITEMS:
+        for name in names:
             for item in ids.get(name, []):
                 if kind_of(name) in found:
                     break

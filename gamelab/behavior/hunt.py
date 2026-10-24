@@ -8,9 +8,10 @@ in the order listed, 6 before 3):
 
    1  close quarters   a target on her platform the claw would swipe (stance.close_to, by its size: a pig
                        within 111, a snail within 96): stance's answer (jump back, jump-throw, step back)
-  6a  valuable pile    a pile with a drop worth VALUABLE mesos or more on its own (looting.worth: the game
-                       data's prices; a Slime Bubble, a White Potion, a gold coin) within VALUABLE_TRAVEL: at
-                       once, ahead of shooting, travelling or not; on the way only close quarters and HP stop her
+  6a  valuable pile    a pile with a drop worth VALUABLE mesos or more on its own (looting.Worth: the game
+                       data's prices; on the first map a Slime Bubble, a White Potion, a gold coin; on another
+                       twice its bronze coin, `valuable`) within VALUABLE_TRAVEL: at once, ahead of shooting,
+                       travelling or not; on the way only close quarters and HP stop her
    2  high ground      on a platform she can't safely stand on, with a spot that reaches her ground: back up;
                        also back to the spot from any other platform (after a pile there), unless the
                        ground is in reach from it or she's leaving
@@ -122,11 +123,14 @@ OBJECTIVE_S = 60.0     # backstop: s on one objective, suspensions included
 GROUND_S = 600.0       # backstop: s at one ground
 STUCK_S = 120.0        # backstop: s without a kill, a pick-up or a new ground before she stands by
 PICK_S = 0.6           # s standing on a pile (4 presses)
-# Rule 6a: a pile with a drop in it worth this many mesos on its own (looting.worth, the game data's prices: Pile.
-# dearest) is gone for at once, ahead of shooting: of this map's drops a Slime Bubble (50) and a White Potion (35),
+# Rule 6a: a pile with a drop in it worth this many mesos on its own (looting.Worth, the game data's prices: Pile.
+# dearest) is gone for at once, ahead of shooting: of the first map's drops a Slime Bubble (50) and a White Potion (35),
 # 2-8 times a pile's coins (15) or its other items (the user, watching her hunt on 2026-10-21: "Expensive items
 # should attempt to pick immediately"). By a pile's worth all together, two pigs' coins and leather lying together in
-# the simulator's basin (50) took her off shooting there 8 times in 3 minutes (loop_basin) ...
+# the simulator's basin (50) took her off shooting there 8 times in 3 minutes (loop_basin) ... This is the first
+# map's, twice its bronze coin; on another map twice its own (Hunt.valuable, looting.Worth.valuable: on Tree Dungeon
+# 66.8, its ores but Bronze and the Magic Potion; on West Rocky Mountain II 51.8, its Opal, Orihalcon, Silver, Emerald
+# and Adamantium Ores and a gold coin).
 VALUABLE = 30.0
 VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (URGENT_TRAVEL's 12, and a little),
 VALUABLE_TRIES = 2      # ... this many times at most (then it's a pile like the others): by one, a monster can stand
@@ -254,9 +258,11 @@ class HuntReport:
 class Hunt:
     """Hunt mode over a Tour's knowledge of the map (its value map, kinds worth hunting, safe platforms,
     spots and rest) and its hunter and navigator."""
+    valuable: float = VALUABLE  # rule 6a's: what a drop must be worth on its own, on her map (looting.Worth.valuable)
 
     def __init__(self, tour, log=print, rng: random.Random | None = None):
         self.tour, self.h, self.nav, self.model = tour, tour.h, tour.nav, tour.nav.model
+        self.valuable = self.h.worth.valuable
         self.log = log
         self.rng = rng or tour.rng
         self.kinds = tour.worth
@@ -712,10 +718,10 @@ class Hunt:
                 and (p.mesos or not self.h.looter.inventory_full) and not self._theirs(p))
 
     def _theirs(self, p: Pile) -> bool:
-        """Whether pile `p` is another player's (PLAYER_PILES): no kill of hers explains it, it holds nothing worth
-        VALUABLE, and another player is by it in the latest look."""
+        """Whether pile `p` is another player's (PLAYER_PILES): no kill of hers explains it, it holds nothing
+        valuable, and another player is by it in the latest look."""
         s = self._seen
-        return (PLAYER_PILES and not p.hers and (p.dearest or 0.0) < VALUABLE and s is not None
+        return (PLAYER_PILES and not p.hers and (p.dearest or 0.0) < self.valuable and s is not None
                 and near_rival(s.players, p.x, p.y) is not None)
 
     def _pile_here(self, s: Scene) -> Pile | None:
@@ -787,14 +793,14 @@ class Hunt:
         return None if best is None else best[1]
 
     def _valuable_pile(self, s: Scene) -> Pile | None:
-        """Rule 6a: of the piles seen to hold a drop worth VALUABLE mesos or more (looting.worth: Pile.dearest),
+        """Rule 6a: of the piles seen to hold a drop worth `valuable` mesos or more (looting.Worth: Pile.dearest),
         VALUABLE_TRAVEL s away at most and gone for at once fewer than VALUABLE_TRIES times, the one worth the most
         per second of travel; None while she's going for one already."""
         if self.obj is not None and self.obj.why == "valuable pile":
             return None
         best = None
         for p in self.h.drops.known:
-            if p.dearest is None or p.dearest < VALUABLE or p.rushed >= VALUABLE_TRIES or not self._fresh(p):
+            if p.dearest is None or p.dearest < self.valuable or p.rushed >= VALUABLE_TRIES or not self._fresh(p):
                 continue
             t = self._travel_to_pile(s, p) + PICK_S
             if t <= VALUABLE_TRAVEL + PICK_S and (best is None or p.worth / t > best[0]):

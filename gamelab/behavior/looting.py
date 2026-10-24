@@ -10,7 +10,7 @@ inventory is full: the game says so in the pickup log, and then she only takes m
 
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .. import directions
@@ -20,6 +20,7 @@ from ..control.navigator import MIN_GROUND_PX
 from ..localization.monsters import Monster
 from ..localization.players import near_rival
 from ..localization.scene import Loot, Scene
+from ..perception import drops
 from ..perception.loot import MESOS, says_full
 
 if TYPE_CHECKING:
@@ -48,15 +49,17 @@ MIN_WALK = 10      # a sweep's stops nearer to her than this aren't walked to: s
 # strips sit as high above its ground as she is.)
 STANDING_ONLY = False
 
-# What a drop is worth, in mesos (`worth`; the drop store's Pile.value, which the hunt loop ranks piles by and
-# goes for the valuable ones by at once, hunt.VALUABLE). An item's is what a shop pays for it, the game data's own
-# price: `info/price` of each item in Item/Etc/Etc_000.wz and Item/Consume/Consume_000.wz, read by item id on
-# 2026-10-21 (the ids by name from String, perception.loot.item_ids). The potions with what they restore (their
-# `spec`), which doesn't add to it: her HP key is bound to Meat and her MP key to the Blue Potion, which the
-# regular attack never needs (maplehelper/game.py), so a potion picked up is one to sell. Of the drops seen
-# where her kills died in the hunts of 2026-10-21, a Slime Bubble lay in 5 of the 52 slimes' piles seen
-# (Squishy Liquid in 34), and no White Potion was seen.
+# What a drop is worth, in mesos (`worth`, a map's `Worth`; the drop store's Pile.value, which the hunt loop ranks
+# piles by and goes for the valuable ones by at once, hunt.VALUABLE). An item's is what a shop pays for it, the game
+# data's own price: `info/price` of each item in Item/Etc/Etc_000.wz and Item/Consume/Consume_000.wz, read by item id
+# (the ids by name from String, perception.loot.item_ids; the first map's on 2026-10-21, the new maps' on 2026-10-24):
+# every drop of every map (perception.drops), the same on all of them. The potions with what they restore (their
+# `spec`), which doesn't add to it: her HP key is bound to Meat and her MP key to the Blue Potion, which the regular
+# attack never needs (maplehelper/game.py; on the new maps her pet drinks her potions), so a potion picked up is one
+# to sell. Of the drops seen where her kills died in the hunts of 2026-10-21, a Slime Bubble lay in 5 of the 52 slimes'
+# piles seen (Squishy Liquid in 34), and no White Potion was seen.
 PRICES = {
+    # the first map's
     "squishy-liquid": 6,       # Etc 4000006 (slimes)
     "slime-bubble": 50,        # Etc 4000007 (slimes)
     "leather": 10,             # Etc 4000049 (pigs)
@@ -68,17 +71,48 @@ PRICES = {
     "orange-potion": 15,       # Use 2000001: 250 HP
     "white-potion": 35,        # Use 2000002: 500 HP
     "blue-potion": 22,         # Use 2000003: 200 MP
+    # Tree Dungeon, Forest Up North II's
+    "horny-mushroom-cap": 22,  # Etc 4000019
+    "green-mushroom-cap": 14,  # Etc 4000013
+    "fragment-of-magic": 10,   # Etc 4000063 (Green Mushrooms)
+    "bronze-ore": 20,          # Etc 4010000 (Horny Mushrooms; Stumps, Axe Stumps)
+    "silver-ore": 80,          # Etc 4010004 (Green Mushrooms; Red Snails)
+    "orihalcon-ore": 100,      # Etc 4010005 (Green Mushrooms, slimes; Axe Stumps)
+    "emerald-ore": 80,         # Etc 4020003 (Green Mushrooms; Stumps)
+    "sapphire-ore": 120,       # Etc 4020005 (Horny Mushrooms, slimes)
+    "topaz-ore": 80,           # Etc 4020006 (Horny Mushrooms)
+    "magic-potion": 250,       # Use 2002001: magic attack +10 for 600 s (Horny Mushrooms)
+    # West Rocky Mountain II's
+    "tree-branch": 5,          # Etc 4000005 (Stumps, Dark Stumps)
+    "leaf": 11,                # Etc 4000011 (Dark Stumps)
+    "firewood": 17,            # Etc 4000015 (Axe Stumps)
+    "red-snail-shell": 4,      # Etc 4000004
+    "iron-ore": 20,            # Etc 4010001 (Dark Stumps)
+    "adamantium-ore": 60,      # Etc 4010003 (Stumps)
+    "garnet-ore": 40,          # Etc 4020000 (Dark Stumps)
+    "opal-ore": 160,           # Etc 4020004 (Axe Stumps, Red Snails)
+    "lemon": 15,               # Use 2010005: 150 MP (Dark Stumps)
 }
 # Mesos by the coin they're drawn as (perception.loot: Item.coin), which their amount picks: the game data has a
-# bronze coin, a gold one, a bundle of bills and a sack (Item/Special 0900000k). This map's monsters drop 10-20
-# (13 seen in game: maplehelper/game.py), always bronze coins; gold ones are worth more, and bills and sacks aren't
-# looked for (perception.loot.MESO_KINDS). A coin of no known kind counts as bronze.
+# bronze coin, a gold one, a bundle of bills and a sack (Item/Special 0900000k); by the v83 client (HeavenClient's
+# MapDrops; not checked for Classic) a bronze coin under 50 mesos, gold to 99. The first map's monsters drop 10-20 (13
+# seen in game: maplehelper/game.py), always bronze coins; gold ones are worth more, and bills and sacks aren't looked
+# for (perception.loot.MESO_KINDS). A coin of no known kind counts as bronze. These are the first map's; another map's
+# go by what its monsters drop (`coins_for`).
 COINS = {"bronze": 15, "gold": 75}
-# A drop the table doesn't know (none yet: equipment and scrolls aren't looked for, README Limits): at this level
-# those are worth the most, so as much as the dearest drop here.
-UNKNOWN_WORTH = max(PRICES.values())
-# Whether drops seen by another player (localization.players.near_rival) are left to them unless one is worth
-# PLAYER_PILE_WORTH (hunt.VALUABLE's: a Slime Bubble, a White Potion): not remembered for the tour to come back for
+# A drop the table doesn't know (none: every map's drops are in PRICES, and equipment and scrolls aren't looked for,
+# README Limits): at this level those are worth the most, so as much as the first map's dearest drop, a Slime Bubble.
+# (It had followed the dearest in PRICES, which is now the Magic Potion's 250: every drop not known would have been
+# valuable, hunt's rule 6a.)
+UNKNOWN_WORTH = 50
+# A drop worth this many times a bronze coin on its own is valuable (`Worth.valuable`: hunt's rule 6a goes for it at
+# once, and PLAYER_PILES keeps it): on the first map 30 mesos (hunt.VALUABLE), a Slime Bubble (50), a White Potion (35)
+# and a gold coin (75), 2-8 times a pile's coins there (15); on Tree Dungeon 66.8 (the Magic Potion, the ores but
+# Bronze, its 33.4 a coin twice), on West Rocky Mountain II 51.8 (the Opal, Orihalcon, Silver, Emerald and Adamantium
+# Ores, and a gold coin). Not weighed by the simulator on those maps: it doesn't run them yet.
+VALUABLE_COINS = 2.0
+# Whether drops seen by another player (localization.players.near_rival) are left to them unless one is valuable (the
+# map's Worth.valuable: on the first map a Slime Bubble, a White Potion): not remembered for the tour to come back for
 # (`remember`). Her own kills' drops are swept where they died, whoever stands by them. Off: the tour can't tell whose
 # drops it sees, and some by the other player were hers. In the simulator's tour (preset game, 20 seeds of 20 minutes)
 # it changed 11 seeds' runs, 7 for the better (the worst 7% down): 91.4 -> 92.8 EXP a minute, HP lost 3.00 -> 2.88
@@ -86,14 +120,60 @@ UNKNOWN_WORTH = max(PRICES.values())
 # player killing every 8 s, 15 changed, 11 for the better, 85.39 -> 88.47 (+4.1%, standard error 2.3%; the worst 19%
 # down), drops 94.2% -> 93.4%. (The hunt loop's drop store knows which piles her kills explain: hunt.PLAYER_PILES.)
 PLAYER_PILES = False
-PLAYER_PILE_WORTH = 30.0
+
+
+@dataclass(frozen=True)
+class Worth:
+    """What drops are worth on one map, in mesos: an item what a shop pays for it (PRICES, the same on every map);
+    mesos by their coin (`coins`: on the first map COINS, on another what its monsters drop, `coins_for`)."""
+    coins: dict = field(default_factory=lambda: dict(COINS))
+
+    def __call__(self, kind: str, coin: str | None = None) -> float:
+        """What a drop of this kind (perception.loot.Item.kind; mesos by their coin) is worth."""
+        if kind == MESOS:
+            return self.coins.get(coin or "bronze", self.coins["bronze"])
+        return PRICES.get(kind, UNKNOWN_WORTH)
+
+    @property
+    def valuable(self) -> float:
+        """What a drop must be worth on its own to be valuable on this map: VALUABLE_COINS bronze coins."""
+        return VALUABLE_COINS * self.coins["bronze"]
+
+
+FIRST = Worth(COINS)  # the first map's
 
 
 def worth(kind: str, coin: str | None = None) -> float:
-    """What a drop of this kind (perception.loot.Item.kind; mesos by their coin) is worth, in mesos (PRICES)."""
-    if kind == MESOS:
-        return COINS.get(coin or "bronze", COINS["bronze"])
-    return PRICES.get(kind, UNKNOWN_WORTH)
+    """What a drop of this kind (perception.loot.Item.kind; mesos by their coin) is worth on the first map, in mesos."""
+    return FIRST(kind, coin)
+
+
+def worth_for(model) -> Worth:
+    """What drops are worth on map `model` (a MapModel, or anything with its `id` and `spawns`)."""
+    return FIRST if getattr(model, "id", None) == drops.FIRST_MAP else Worth(coins_for(model))
+
+
+def coins_for(model) -> dict[str, float]:
+    """What a bronze and a gold coin are worth on map `model`: the mean of the amounts each stands for (a bronze coin
+    under 50 mesos, gold 50-99) that its monsters drop (perception.drops: what players report, each amount in the range
+    taken as likely as another), weighed by the monster's spawn points and the share of its amounts in that coin. A
+    monster none is reported for counts for nothing; a coin none of the map's drops is worth what it is on the first
+    map (COINS). Tree Dungeon: a bronze coin 33.4 (a Horny Mushroom's 40-49, a Green's 25-30, a slime's 10-20), gold
+    51.5 (a Horny's 50-53); West Rocky Mountain II: bronze 25.9 (a Stump's 1-49, a Dark Stump's 19-23, an Axe Stump's
+    30-41; none reported for a Red Snail), gold 75."""
+    spawns = drops.monsters_of(model)
+    sums = {coin: [0.0, 0.0] for coin in COINS}  # coin -> [weight, weight x mean amount]
+    for name, n in spawns.items():
+        known = drops.MONSTERS.get(name)
+        if known is None or known.mesos is None:
+            continue
+        lo, hi = known.mesos
+        for coin, (a, b) in (("bronze", (lo, min(hi, 49))), ("gold", (max(lo, 50), min(hi, 99)))):
+            if a <= b:
+                w = n * (b - a + 1) / (hi - lo + 1)
+                sums[coin][0] += w
+                sums[coin][1] += w * (a + b) / 2
+    return {coin: round(s / w, 1) if w else COINS[coin] for coin, (w, s) in sums.items()}
 
 
 @dataclass
@@ -148,8 +228,9 @@ class Looter:
             self.h.log(f"  {gone} remembered drop spot(s) seen empty twice: forgotten")
         self.pending = kept
         if PLAYER_PILES and s.players:
+            value = self.h.worth
             seen = [d for d in seen if near_rival(s.players, d.x, d.y) is None
-                    or worth(d.item.kind, d.item.coin) >= PLAYER_PILE_WORTH]
+                    or value(d.item.kind, d.item.coin) >= value.valuable]
         self.note(seen)
 
     def note(self, seen: list[Loot]) -> None:

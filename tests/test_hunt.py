@@ -252,6 +252,20 @@ def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():
     assert h._valuable_pile(_scene()) is None
 
 
+def test_on_another_map_a_drop_is_valuable_at_twice_its_bronze_coin():
+    # Tree Dungeon's monsters drop 25-53 mesos (looting.coins_for: a bronze coin there 33.4): a Slime Bubble (50) is
+    # under two of them, a Topaz Ore (80) not; on the first map a bubble is 3 of its coins (15), valuable.
+    from gamelab.behavior.looting import Worth
+    bubble = _pile(5, items=("slime-bubble", "mesos"), worth=83.4, dearest=50.0)
+    topaz = _pile(5, items=("topaz-ore",), worth=80.0, dearest=80.0)
+    h = _hunt([bubble])
+    assert h.valuable == hunt.VALUABLE and h._valuable_pile(_scene()) is bubble
+    h.valuable = Worth({"bronze": 33.4, "gold": 51.5}).valuable
+    assert h._valuable_pile(_scene()) is None
+    h.h.drops.known.append(topaz)
+    assert h._valuable_pile(_scene()) is topaz
+
+
 def _detour_hunt(piles, times):
     """A Hunt whose route times are `times`: {(from platform, to platform): s} (Planner.arrive's), or keeping off
     platforms, {(from, to, keep_off): s}."""

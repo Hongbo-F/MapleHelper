@@ -341,3 +341,20 @@ def test_a_gain_goes_on_a_monster_gone_by_another_player_only_when_none_else_has
         s.searched, s.players = True, players  # both gone from view; the pig 50 units from the other player
         ledger.on_look(s)
         assert [k.kind for k in ledger.kills] == [kind], players
+
+
+def test_on_another_map_a_pile_is_worth_its_drops_there():
+    # Tree Dungeon's monsters drop 25-53 mesos: a bronze coin there stands for 33.4 (looting.coins_for), a pile not
+    # seen yet too; its items are worth their shop prices, as on every map.
+    from gamelab.behavior.looting import Worth
+    store = DropStore(Worth({"bronze": 33.4, "gold": 51.5}))
+    store.on_kill(Kill(0.0, "horny-mushroom", 3, 500.0, 300.0, 3))
+    (p,) = store.known
+    assert p.worth is None and p.value == 33.4
+    seen = [Loot(Item("mesos", 0, 0, 13, 13, 0.9, "gold"), 510.0, 300.0, 3),
+            Loot(Item("horny-mushroom-cap", 0, 0, 30, 27, 0.9), 520.0, 300.0, 3)]
+    store.on_look(_look(SETTLE, loot=seen, looked=[(3, 300.0, 700.0)]))
+    assert p.worth == p.value == 51.5 + 22 and p.dearest == 51.5
+    store.on_look(_look(SETTLE + 1, loot=[Loot(Item("mesos", 0, 0, 13, 13, 0.9), 900.0, 300.0, 3)],
+                        looked=[(3, 300.0, 1000.0)]))
+    assert store.known[-1].worth == 33.4 and store.known[-1].unseen == 33.4  # someone else's, seen
