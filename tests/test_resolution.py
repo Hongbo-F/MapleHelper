@@ -126,6 +126,27 @@ def test_her_place_at_this_size(rocky, monkeypatch):
     assert [(r.x, r.top) for r in s.ropes] == [(941, 0), (1174, 71)]
 
 
+def test_the_map_command_places_her_dot_at_this_size(rocky, monkeypatch, capsys, tmp_path):
+    """`map` (not --offline) places her dot as Senses does: with 1920x1080's Localizer it put her at (-1319, 1897)."""
+    from types import SimpleNamespace
+
+    from gamelab import __main__ as cli
+    from gamelab.analysis import bench
+    from gamelab.localization import mapdata
+    eyes = bench.SavedEyes(np.load(TAG), detector=object(), geo=NATIVE)
+    monkeypatch.setattr(eyes.name_tag, "full", np.load(TAG))
+    eyes.show(cv2.cvtColor(frame("n28_000.png"), cv2.COLOR_RGB2BGRA))
+    monkeypatch.setattr(cli, "_eyes", lambda model, title: eyes)
+    monkeypatch.setattr(cli, "_game_title", lambda: "MapleStory")
+    monkeypatch.setattr(cli.client, "check_alarm", lambda: None)
+    monkeypatch.setattr(cli, "LAB", tmp_path)
+    drawn = []
+    monkeypatch.setattr(mapdata, "render", lambda model, path, marks=(): drawn.extend(marks))
+    assert cli.cmd_map(SimpleNamespace(map=MAP, offline=False)) == 0
+    assert "she's at map (-880, 2697)" in capsys.readouterr().out
+    assert [(round(x), round(y), label) for x, y, label in drawn] == [(-880, 2697, "her")]
+
+
 # --- the game's own markers pasted at this size, pixel for pixel -------------------------------------------------
 
 @pytest.fixture(scope="module")

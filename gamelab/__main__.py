@@ -571,7 +571,7 @@ def cmd_map(args) -> int:
         eyes = _eyes(model, _game_title())
         s = eyes.look()
         if s.dot:
-            w = Localizer(model).where_dot(s.dot)
+            w = Localizer(model, geo=s.geo).where_dot(s.dot)  # (the dot's px are the look's window's)
             print(f"she's at map ({w.x:.0f}, {w.y:.0f}) on {platform_text(w.platform)} (dot {s.dot[0]:.1f},{s.dot[1]:.1f})")
             marks.append((w.x, w.y, "her"))
     print(f"{model.name}: {len(model.platforms)} platforms, {len(model.ropes)} ropes; monster spawns by platform:",
