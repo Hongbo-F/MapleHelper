@@ -18,7 +18,8 @@ TAG_ASPECT = 2.2
 LETTER_GAP = 13
 # Claw swing effect: bright white/lavender pixels next to her (both regular attack and Lucky Seven),
 # counted in a box SWING_SIDE px wide on each side of her name tag, from SWING_ABOVE px above it to
-# just above it.
+# just above it: half-size px of the 1920x1080 window's recordings (a recording's geometry converts them, the
+# count by the square).
 SWING_MIN_PIXELS = 40
 SWING_ABOVE, SWING_SIDE = 45, 70
 BURST_GAP_MS = 150  # swing frames closer together than this are one swing
@@ -107,13 +108,15 @@ def track(frames, times, template: np.ndarray) -> list[tuple[float, int, int, fl
     return rows
 
 
-def airborne(rows, lift: int = 6, min_ms: float = 150, merge_ms: float = 60) -> list[tuple[float, float | None]]:
-    """(takeoff, landing) spans where the tag is at least `lift` px above where she stood at the start.
+def airborne(rows, lift: int = 6, min_ms: float = 150, merge_ms: float = 60,
+             geo: Geometry = STRETCHED) -> list[tuple[float, float | None]]:
+    """(takeoff, landing) spans where the tag is at least `lift` px above where she stood at the start (half-size
+    px of the 1920x1080 window: in a recording of geometry `geo`, converted).
 
     A mis-matched frame can make one jump look like two (merged when less than `merge_ms` apart)
     or make a blip that isn't a jump (dropped when shorter than `min_ms`; a jump lasts ~530 ms).
     """
-    rest_y = rows[0][2]
+    rest_y, lift = rows[0][2], geo.fpx(lift)
     raw, start = [], None
     for t, _, y, _ in rows:
         up = rest_y - y >= lift
@@ -139,23 +142,26 @@ def _bright(region: np.ndarray) -> int:
     return int(((r.min(axis=2) > 170) & (r[..., 2] >= r[..., 1])).sum())
 
 
-def swing_side(frame, x: int, y: int, tag_width: int) -> tuple[int, int]:
-    """Swing-effect pixels to her left and to her right (x, y: name tag's top-left)."""
-    top, bottom = max(0, y - SWING_ABOVE), y - 2
-    left = _bright(frame[top:bottom, max(0, x - SWING_SIDE):x])
-    right = _bright(frame[top:bottom, x + tag_width:x + tag_width + SWING_SIDE])
+def swing_side(frame, x: int, y: int, tag_width: int, geo: Geometry = STRETCHED) -> tuple[int, int]:
+    """Swing-effect pixels to her left and to her right (x, y: name tag's top-left), in a recording's frame of
+    geometry `geo`."""
+    above, side = geo.ifpx(SWING_ABOVE), geo.ifpx(SWING_SIDE)
+    top, bottom = max(0, y - above), y - 2
+    left = _bright(frame[top:bottom, max(0, x - side):x])
+    right = _bright(frame[top:bottom, x + tag_width:x + tag_width + side])
     return left, right
 
 
-def swings(frames, rows, tag_width: int) -> list[dict]:
-    """Claw swings as {'t': start ms, 'side': 'L'|'R'}, one per burst of swing frames. The side is the
-    one with more swing pixels in the burst's strongest frame."""
-    counts = [swing_side(f, x, y, tag_width) for f, (_, x, y, _) in zip(frames, rows)]
+def swings(frames, rows, tag_width: int, geo: Geometry = STRETCHED) -> list[dict]:
+    """Claw swings as {'t': start ms, 'side': 'L'|'R'}, one per burst of swing frames (of a recording of geometry
+    `geo`). The side is the one with more swing pixels in the burst's strongest frame."""
+    least = SWING_MIN_PIXELS * geo.fpx(1) ** 2
+    counts = [swing_side(f, x, y, tag_width, geo) for f, (_, x, y, _) in zip(frames, rows)]
     times = [t for t, _, _, _ in rows]
     base = max((l + r for (l, r), t in zip(counts, times) if t < 0), default=0)  # before the first key
     bursts, last_t = [], None  # [start ms, left, right] of each burst's strongest frame
     for (left, right), t in zip(counts, times):
-        if left + right <= base + SWING_MIN_PIXELS:
+        if left + right <= base + least:
             continue
         if last_t is None or t - last_t > BURST_GAP_MS:
             bursts.append([t, left, right])

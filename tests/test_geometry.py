@@ -201,7 +201,8 @@ def test_the_hunting_commands_eyes_are_made_for_the_restored_window(monkeypatch)
     monkeypatch.setattr(cli.window, "bring_to_front", lambda title, wait=0.0: game.update(iconic=False) or True)
     monkeypatch.setattr(cli, "_calibration", lambda geo: SimpleNamespace(template=np.zeros((15, 55), np.uint8)))
     monkeypatch.setattr(sprites, "detector_for", lambda model, geo: ("detector", geo))
-    monkeypatch.setattr(eyes, "Eyes", lambda title, template, detector, geo: SimpleNamespace(detector=detector, geo=geo))
+    monkeypatch.setattr(eyes, "Eyes",
+                        lambda title, template, detector, geo: SimpleNamespace(detector=detector, geo=geo))
     made = cli._eyes(SimpleNamespace(id=10004021), "MapleStory")
     assert made.geo == NATIVE and made.detector == ("detector", NATIVE)
 
@@ -234,3 +235,29 @@ def test_the_three_standing_tests_go_by_the_looks_geometry():
         s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0, geo=geo,
                   where=Where(0, 0, p, (0, 0)), ground=(100, 100 + width))
         assert looting.standing(s) == navigator.standing(s) == s.grounded == stands, (geo.client, width)
+
+
+def test_a_recordings_analyses_go_by_its_geometry(monkeypatch):
+    # combo, lock and track read recordings: at 1366x768 their frames are full size, 1.42 times the px of the
+    # 1920x1080 window's half size, where the jump's lift (6 px), a jump straight up (analyze.UP_PX, 12) and the
+    # claw swing's box beside her tag (track.SWING_SIDE, 70) were measured.
+    from types import SimpleNamespace
+
+    from maplehelper.engine import RIGHT
+
+    from gamelab.analysis import analyze, track
+    ys = [100] * 5 + [93] * 8 + [100] * 5  # her tag 7 px up: a jump at half size, not at full size (8.5)
+    rows = [(i * 30.0, 50, y, 1.0) for i, y in enumerate(ys)]
+    assert track.airborne(rows) == [(150.0, 390.0)] and track.airborne(rows, geo=NATIVE) == []
+    frame = np.zeros((200, 400, 3), np.uint8)
+    frame[60:98, 10:25] = 255  # bright 75-90 px left of her tag: outside the box at half size, inside at full size
+    assert track.swing_side(frame, 100, 100, 40) == (0, 0) and track.swing_side(frame, 100, 100, 40, NATIVE)[0] > 0
+    rows = [(i * 30.0, 50, y, 1.0) for i, y in enumerate([100] * 5 + [70] * 8 + [100] * 5)]
+    xs = [0.0] * 5 + [15.0] * 13  # 15 px across over the jump
+    monkeypatch.setattr(analyze, "track", lambda frames, times, template: rows)
+    monkeypatch.setattr(analyze, "world_x", lambda frames, rows, geo: xs)
+    monkeypatch.setattr(analyze, "swings", lambda frames, rows, width, geo: [])
+    for geo, direction in ((STRETCHED, "forward"), (NATIVE, "up")):
+        rec = SimpleNamespace(frames=None, times=[r[0] for r in rows], geo=geo)
+        (combo,) = analyze.combos(rec, [0], 600, RIGHT, np.zeros((15, 55), np.uint8))
+        assert [(j.dx, j.direction) for j in combo.jumps] == [(15.0, direction)], geo

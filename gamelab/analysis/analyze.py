@@ -12,7 +12,8 @@ from .recordings import Recording
 from .scroll import world_x
 from .track import airborne, swings, track
 
-UP_PX = 12  # a jump moving less than this (scale-2 px, world terms) went straight up; normal is ~45-65
+UP_PX = 12  # a jump moving less than this (scale-2 px of the 1920x1080 window, world terms; a recording's geometry
+            # converts it) went straight up; normal is ~45-65
 TAKEOFF_LEAD_MS = 20  # a jump's start x is read this long before its takeoff was seen
 # A throw's swing shows ~0.5 s after its key, so a combo's throws are looked for this much after its start
 # and end.
@@ -48,8 +49,9 @@ def combos(rec: Recording, starts: list[int], end_ms: int, facing: str, template
 
     `facing` is the way she faced when the first combo started: 'back' means away from that.
     """
+    geo = rec.geo  # (its px: half size at 1920x1080, full size at 1366x768)
     rows = track(rec.frames, rec.times, template)
-    xs = world_x(rec.frames, rows)
+    xs = world_x(rec.frames, rows, geo)
     times = np.asarray(rec.times)
 
     def x_at(t: float) -> float:
@@ -57,8 +59,9 @@ def combos(rec: Recording, starts: list[int], end_ms: int, facing: str, template
 
     back_sign = -directions.sign(facing)
     front_side = "R" if facing == RIGHT else "L"
-    all_swings = swings(rec.frames, rows, template.shape[1])
-    spans = airborne(rows)
+    all_swings = swings(rec.frames, rows, template.shape[1], geo)
+    spans = airborne(rows, geo=geo)
+    up_px = geo.fpx(UP_PX)
     bounds = list(starts) + [end_ms]
     out = []
     for start, end in zip(bounds, bounds[1:]):
@@ -66,7 +69,7 @@ def combos(rec: Recording, starts: list[int], end_ms: int, facing: str, template
         for takeoff, landing in spans:
             if start <= takeoff < end:
                 dx = round(x_at(landing if landing is not None else times[-1]) - x_at(takeoff - TAKEOFF_LEAD_MS), 1)
-                direction = "up" if abs(dx) < UP_PX else ("back" if np.sign(dx) == back_sign else "forward")
+                direction = "up" if abs(dx) < up_px else ("back" if np.sign(dx) == back_sign else "forward")
                 jumps.append(Jump(takeoff, landing, dx, direction))
         throws = [Throw(s["t"], s["side"], s["side"] == front_side)
                   for s in all_swings if start + SWING_SHIFT_MS <= s["t"] < end + SWING_SHIFT_MS]

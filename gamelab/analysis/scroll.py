@@ -8,13 +8,15 @@ strip under her), or the platforms anywhere in the frame (camera, in x and y).
 import cv2
 import numpy as np
 
+from ..screen import STRETCHED, Geometry
 from .track import peak
 
 
-def camera_x(frames, rows, band=(12, 30)) -> list[float]:
-    """Cumulative camera x per frame, from the textured strip `band` px below her resting name tag."""
+def camera_x(frames, rows, band=(12, 30), geo: Geometry = STRETCHED) -> list[float]:
+    """Cumulative camera x per frame, from the textured strip `band` px below her resting name tag (half-size px
+    of the 1920x1080 window: in a recording of geometry `geo`, converted)."""
     rest_y = rows[0][2]
-    y0, y1 = rest_y + band[0], rest_y + band[1]
+    y0, y1 = rest_y + geo.ifpx(band[0]), rest_y + geo.ifpx(band[1])
 
     def strip(f):
         return cv2.cvtColor(np.ascontiguousarray(f[y0:y1]), cv2.COLOR_RGB2GRAY).astype(np.float32)
@@ -33,19 +35,22 @@ def camera_x(frames, rows, band=(12, 30)) -> list[float]:
     return out
 
 
-def world_x(frames, rows) -> list[float]:
-    """Her name tag's x in world terms (frame pixels, relative to where the camera started)."""
-    return [r[1] + c for r, c in zip(rows, camera_x(frames, rows))]
+def world_x(frames, rows, geo: Geometry = STRETCHED) -> list[float]:
+    """Her name tag's x in world terms (frame pixels, relative to where the camera started), in a recording of
+    geometry `geo`."""
+    return [r[1] + c for r, c in zip(rows, camera_x(frames, rows, geo=geo))]
 
 
 # The camera from the foreground: square patches of platform (grass or dirt: this map's colours), each
 # matched in the next frame within a few px. The strip under her (camera_x) fails where her own body or a
 # drifting cloud is in it: the clouds move on their own, so scenery-wide estimates drifted too.
+# Px are half-size px of the 1920x1080 window's recordings (`camera` converts them for a recording's geometry).
 PATCH, SEARCH = 24, 10        # px: patch size, and how far it is looked for in the next frame
 PATCH_MIN_STD = 15.0          # a patch needs this much texture to be matched
 PATCH_MIN_SCORE = 0.85
 PATCH_MIN_FOREGROUND = 0.25   # share of a patch that must be grass or dirt
 HER_BOX = (40, 75)            # px either side of her, and above her name tag: patches there are her
+HER_BELOW = 22                # ... and below it
 
 
 def foreground(rgb: np.ndarray) -> np.ndarray:
@@ -56,40 +61,44 @@ def foreground(rgb: np.ndarray) -> np.ndarray:
     return grass | dirt
 
 
-def _patch_shifts(prev: np.ndarray, cur: np.ndarray, mask: np.ndarray, her: tuple[float, float]) -> np.ndarray:
-    """(dx, dy) of each textured foreground patch of `prev` (away from her) in `cur`, to a fraction of a px."""
+def _patch_shifts(prev: np.ndarray, cur: np.ndarray, mask: np.ndarray, her: tuple[float, float],
+                  geo: Geometry = STRETCHED) -> np.ndarray:
+    """(dx, dy) of each textured foreground patch of `prev` (away from her) in `cur`, to a fraction of a px, in a
+    recording of geometry `geo`."""
     h, w = prev.shape
     hx, hy = her
+    patch, search = geo.ifpx(PATCH), geo.ifpx(SEARCH)
+    side, above, below = geo.fpx(HER_BOX[0]), geo.fpx(HER_BOX[1]), geo.fpx(HER_BELOW)
     out = []
-    for y in range(SEARCH, h - PATCH - SEARCH, PATCH // 2):
-        for x in range(SEARCH, w - PATCH - SEARCH, PATCH // 2):
-            if abs(x + PATCH / 2 - hx) < HER_BOX[0] and -HER_BOX[1] < y + PATCH / 2 - hy < 22:
+    for y in range(search, h - patch - search, patch // 2):
+        for x in range(search, w - patch - search, patch // 2):
+            if abs(x + patch / 2 - hx) < side and -above < y + patch / 2 - hy < below:
                 continue
-            if mask[y:y + PATCH, x:x + PATCH].mean() < PATCH_MIN_FOREGROUND:
+            if mask[y:y + patch, x:x + patch].mean() < PATCH_MIN_FOREGROUND:
                 continue
-            p = prev[y:y + PATCH, x:x + PATCH]
+            p = prev[y:y + patch, x:x + patch]
             if p.std() < PATCH_MIN_STD:
                 continue
-            r = cv2.matchTemplate(cur[y - SEARCH:y + PATCH + SEARCH, x - SEARCH:x + PATCH + SEARCH], p,
+            r = cv2.matchTemplate(cur[y - search:y + patch + search, x - search:x + patch + search], p,
                                   cv2.TM_CCOEFF_NORMED)
             _, score, _, (mx, my) = cv2.minMaxLoc(r)
             if score < PATCH_MIN_SCORE:
                 continue
             fx = peak(r[my, mx - 1], r[my, mx], r[my, mx + 1]) if 0 < mx < r.shape[1] - 1 else 0
             fy = peak(r[my - 1, mx], r[my, mx], r[my + 1, mx]) if 0 < my < r.shape[0] - 1 else 0
-            out.append((mx + fx - SEARCH, my + fy - SEARCH))
+            out.append((mx + fx - search, my + fy - search))
     return np.array(out) if out else np.zeros((0, 2))
 
 
-def camera(frames, her) -> np.ndarray:
+def camera(frames, her, geo: Geometry = STRETCHED) -> np.ndarray:
     """Cumulative camera (x, y) per frame in frame px (positive: the camera moved right or down), from
-    the foreground patches; `her`: where she is in each frame (patches there are skipped). Each step is
-    the median shift of the patches that agree with the most common one (to half a px): moving scenery
-    and her own body make the others."""
+    the foreground patches; `her`: where she is in each frame (patches there are skipped); `geo`: the recording's
+    geometry. Each step is the median shift of the patches that agree with the most common one (to half a px):
+    moving scenery and her own body make the others."""
     gray = [cv2.cvtColor(np.ascontiguousarray(f), cv2.COLOR_RGB2GRAY).astype(np.float32) for f in frames]
     out = [np.zeros(2)]
     for i in range(1, len(frames)):
-        d = _patch_shifts(gray[i - 1], gray[i], foreground(frames[i - 1]), her[i - 1])
+        d = _patch_shifts(gray[i - 1], gray[i], foreground(frames[i - 1]), her[i - 1], geo)
         if len(d) < 2:
             out.append(out[-1].copy())
             continue

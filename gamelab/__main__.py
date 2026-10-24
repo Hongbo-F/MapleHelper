@@ -785,7 +785,7 @@ def cmd_lock(args) -> int:
     for d in args.delays:
         events = _tap(attack.name, 0) + _tap(keys.jump.name, d)
         rec = recordings.record(events, name=f"lock_{args.action}_{d}", duration_ms=d + 900, crop=crop, scale=cal.scale)
-        jumped = [s for s in airborne(track(rec.frames, rec.times, cal.template)) if s[0] >= d]
+        jumped = [s for s in airborne(track(rec.frames, rec.times, cal.template), geo=rec.geo) if s[0] >= d]
         print(f"jump {d:4d} ms after {args.action}: " +
               (f"airborne at {jumped[0][0]:.0f} ms" if jumped else "IGNORED (still locked)"))
         time.sleep(SETTLE_S)
@@ -855,13 +855,13 @@ def cmd_track(args) -> int:
     rec = recordings.load(args.recording)
     cal = _calibration(rec.geo)
     rows = track(rec.frames, rec.times, cal.template)
-    xs = world_x(rec.frames, rows)
+    xs = world_x(rec.frames, rows, rec.geo)
     rest_y = rows[0][2]
     print("   t ms   screen x,y   height   world x   match")
     for i in range(0, len(rows), args.every):
         t, x, y, score = rows[i]
         print(f"  {t:6.0f}   {x:4d},{y:4d}   {rest_y - y:5d}   {xs[i]:7.1f}   {score:.2f}")
-    print("airborne:", [(round(a), round(b) if b else None) for a, b in airborne(rows)])
+    print("airborne:", [(round(a), round(b) if b else None) for a, b in airborne(rows, geo=rec.geo)])
     print(f"net world dx {xs[-1] - xs[0]:+.1f} px (recording scale {cal.scale})")
     return 0
 
