@@ -120,8 +120,8 @@ def pictures(folder: Path, kinds: set[str] | None = None) -> list[tuple[str, np.
 def scenes(backgrounds: list[np.ndarray], todo: list[tuple], rng: np.random.Generator,
            per_scene: int = PER_SCENE) -> list[tuple[np.ndarray, int, list[Drawn]]]:
     """`todo` (kind, name, RGBA, origin, flip, coin) drawn onto the backgrounds in turn, `per_scene` to a frame at
-    random places clear of each other, of the minimap and of the bottom bar: (the frame drawn on, its background's
-    index, what was drawn where)."""
+    random places clear of each other, of the minimap and of the bottom bar (above HUD_TOP, 1920x1080's: in both
+    sizes' searches): (the frame drawn on, its background's index, what was drawn where)."""
     out, i = [], 0
     h, w = backgrounds[0].shape[:2]
     bottom = int(h * HUD_TOP)
@@ -184,12 +184,12 @@ def monsters(backgrounds: list[np.ndarray], detectors: dict[str, tuple[MobDetect
         upp = geo.units_per_px
         for bg in backgrounds:
             frame = look_frame(bg if geo.native else stretched(bg, geo.client), geo)
-            out["clean"][name] += det.detect_wide(frame, (0, int(frame.shape[0] * HUD_TOP)))
+            out["clean"][name] += det.detect_wide(frame, (0, int(frame.shape[0] * geo.hud_top)))
         tally = out["tally"][name]
         times = out["times"][name]
         for full, _, drawn in made:
             frame = look_frame(full if geo.native else stretched(full, geo.client), geo)
-            bottom = int(frame.shape[0] * HUD_TOP)
+            bottom = int(frame.shape[0] * geo.hud_top)
             found = _timed(lambda: det.detect_wide(frame, (0, bottom)), times["whole screen"])
             used = set()
             for d in drawn:
@@ -342,7 +342,7 @@ def refinds(backgrounds: list[np.ndarray], detectors: dict[str, tuple[MobDetecto
             for label, (det, geo) in detectors.items():
                 upp = geo.units_per_px
                 before, after = (look_frame(s if geo.native else stretched(s, geo.client), geo) for s in scenes)
-                bottom = int(before.shape[0] * HUD_TOP)
+                bottom = int(before.shape[0] * geo.hud_top)
                 rows = (max(0, int((fy - band[0]) / upp)), min(bottom, int((fy + band[1]) / upp)))
                 m = _nearest(det.detect(before, rows), drawn[0], upp, set())
                 if m is None:

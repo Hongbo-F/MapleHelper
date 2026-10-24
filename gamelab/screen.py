@@ -26,7 +26,13 @@ STRETCHED_CLIENT = (1920, 1080)  # the client size the templates and constants w
 #   pixel the game's own, and half size (683x384) is half 960x540's pixels at 0.71 of its detail. Measured on the
 #   saved frames (README, Screen size).
 LOOK_SCALES = {STRETCHED_CLIENT: 2, GAME_VIEW: 1}
-HUD_TOP = 0.88               # the bottom bar starts this far down: monsters and drops are looked for above it
+HUD_TOP = 0.88               # the 1920x1080 window's bottom bar starts this far down: monsters and drops are looked
+                             # for above it (Geometry.hud_top; as it always was there)
+# Where the HUD (the chat box and the bars under it) starts at the game's own size, in game px from the top: its border
+# is row 700 (dark, 8 a channel, from x 283 to 1080; row 701 white) on every 1366x768 frame of both maps of 2026-10-23
+# and 24, and at 1920x1080 at screen row 984-985 (700.2 game px). HUD_TOP's 0.88 is game row 675.8: at 1366x768 the
+# 25 rows above the chat box, where Tree Dungeon's platforms 31 and 32 show, were never searched.
+HUD_TOP_GAME = 700
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,13 @@ class Geometry:
     def frame_size(self) -> tuple[int, int]:
         """A look frame's (width, height)."""
         return self.client[0] // self.look_scale, self.client[1] // self.look_scale
+
+    @property
+    def hud_top(self) -> float:
+        """Where the HUD starts, as a share of the window's (and a look frame's) height: monsters and drops are
+        looked for above it. At 1920x1080 HUD_TOP, as it always was there (the simulator draws its world at that
+        size, and the scenes it records go by it); at any other size the chat box's top, HUD_TOP_GAME (700/768)."""
+        return HUD_TOP if self.client == STRETCHED_CLIENT else HUD_TOP_GAME / GAME_VIEW[1]
 
     @property
     def native(self) -> bool:

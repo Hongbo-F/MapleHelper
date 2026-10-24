@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 
 from .. import capture, paths, window
-from ..screen import HUD_TOP, STRETCHED, Geometry
+from ..screen import STRETCHED, Geometry
 from .exp_number import read_box
 from .hud import BAR_ROW, HP_BAR, bars, exp_number_box, hp_bar, hp_fill
 from .loot import Item, LootDetector
@@ -48,7 +48,7 @@ def tag_below_feet(geo: Geometry = STRETCHED) -> int:
 
 def band_rows(obs: Observation, up: float, down: float) -> tuple[int, int]:
     """The rows of a look's frame from `up` map units above her feet to `down` below, above the bottom bar."""
-    feet, bottom, per_px = obs.floor_y, int(obs.frame.shape[0] * HUD_TOP), obs.geo.units_per_px
+    feet, bottom, per_px = obs.floor_y, int(obs.frame.shape[0] * obs.geo.hud_top), obs.geo.units_per_px
     return max(0, int(feet - up / per_px)), min(bottom, int(feet + down / per_px))
 
 
@@ -221,15 +221,15 @@ class Eyes:
 
     def monsters_wide(self, obs: Observation) -> list[Mob]:
         """Every monster on screen (above the bottom bar)."""
-        return self.detector.detect_wide(obs.frame, (0, int(obs.frame.shape[0] * HUD_TOP)))
+        return self.detector.detect_wide(obs.frame, (0, int(obs.frame.shape[0] * obs.geo.hud_top)))
 
     def refind(self, obs: Observation, mob: Mob, box: tuple[int, int, int, int], fallback: bool = True) -> Mob | None:
         """Monster `mob`, seen in an earlier frame, looked for again where its picture should be now (`box`:
         x0, y0, x1, y1), above the bottom bar (MobDetector.refind; without `fallback`, only with the template
         that matched it last)."""
         h, w = obs.frame.shape[:2]
-        return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing, (0, 0, w, int(h * HUD_TOP)),
-                                    fallback)
+        return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing,
+                                    (0, 0, w, int(h * obs.geo.hud_top)), fallback)
 
     def bar(self, obs: Observation, mob: Mob) -> float | None:
         """A monster's HP bar (the fraction left), or None if it hasn't been hit."""

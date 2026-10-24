@@ -10,7 +10,6 @@ from ..perception.eyes import Eyes, Observation
 from ..perception.loot import ABOVE, BELOW, Item
 from ..perception.minimap import minimap_box
 from ..perception.mobs import Mob
-from ..screen import HUD_TOP
 from .mapdata import MapModel, Platform
 from .monsters import Monster, monster_platform
 from .players import Player
@@ -123,7 +122,8 @@ class Scene(Observation):
         view = None
         if self.tag is not None and self.where is not None and getattr(self.frame, "shape", None) is not None:
             h, w = self.frame.shape[:2]
-            view = [round(self.map_x(0)), round(self.map_y(0)), round(self.map_x(w)), round(self.map_y(h * HUD_TOP))]
+            view = [round(self.map_x(0)), round(self.map_y(0)), round(self.map_x(w)),
+                    round(self.map_y(h * self.geo.hud_top))]
         return {"her": her, "hp": round(self.hp, 3), "mp": round(self.mp, 3),
                 "monsters": [{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1), "platform": m.platform,
                               "bar": None if m.bar is None else round(m.bar, 2),
@@ -150,7 +150,8 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
     if s.tag is None or s.where is None:
         return []
     h, w = s.frame.shape[:2]
-    bottom, geo = int(h * HUD_TOP), s.geo
+    geo = s.geo
+    bottom = int(h * geo.hud_top)
     box = minimap_box(geo)
     mini_x, mini_y = box[2] // geo.look_scale, box[3] // geo.look_scale  # the minimap's bottom-right corner
     pad, above, below, narrow = geo.fpx(STRIP_PAD), geo.fpx(ABOVE), geo.fpx(BELOW), geo.fpx(MIN_STRIP)

@@ -36,7 +36,7 @@ from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.hud import exp_changed
 from ..perception.minimap import minimap_box
-from ..screen import HUD_TOP, STRETCHED, Geometry
+from ..screen import STRETCHED, Geometry
 from .gains import ExpMeter, Gain
 from .mapdata import MapModel
 from .monsters import Monster
@@ -525,14 +525,14 @@ class WorldStep:
         cy = s.screen_y(tr.y) + (m.y - m.feet_y)
         h, w = s.frame.shape[:2]
         box = (round(cx - m.w / 2), round(cy - m.h / 2), round(cx + m.w / 2), round(cy + m.h / 2))
-        if box[2] <= 0 or box[0] >= w or box[3] <= 0 or box[1] >= int(h * HUD_TOP):
+        if box[2] <= 0 or box[0] >= w or box[3] <= 0 or box[1] >= int(h * s.geo.hud_top):
             return None
         return box
 
     @staticmethod
     def _view(s: Scene) -> View:
         h, w = s.frame.shape[:2]
-        bottom = int(h * HUD_TOP)
+        bottom = int(h * s.geo.hud_top)
         box = minimap_box(s.geo)
         mx, my = box[2] / s.geo.look_scale, box[3] / s.geo.look_scale
         return View(s.map_x(0), s.map_x(w), s.map_y(0), s.map_y(bottom), w, bottom,

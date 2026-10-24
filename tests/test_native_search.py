@@ -14,6 +14,7 @@ from PIL import Image
 
 from gamelab.analysis import pasted
 from gamelab.perception import mobs, sprites
+from gamelab.perception.eyes import Observation, band_rows
 from gamelab.perception.loot import LootDetector
 from gamelab.perception.mobs import INDEX, SCALE_FILE, MobDetector
 from gamelab.screen import HUD_TOP, NATIVE, STRETCHED
@@ -91,6 +92,20 @@ def test_a_monster_drawn_at_the_games_own_size_is_found_where_it_stands(tmp_path
                 ("pig", feet_x, top + PIG_ORIGIN[1], 1 if flip else -1, 1.0)], (left, top, flip)
             band = detector.detect(scene, (top - 60, top + 120))
             assert [(m.foot_x, m.feet_y) for m in band] == [(feet_x, top + PIG_ORIGIN[1])]
+
+
+def test_monsters_are_looked_for_down_to_the_hud_at_the_games_own_size(tmp_path):
+    # The chat box's top is row 700 at 1366x768, where HUD_TOP (0.88) is row 675; at 1920x1080 it's as it was.
+    assert int(768 * NATIVE.hud_top) == 700 and int(540 * STRETCHED.hud_top) == int(540 * HUD_TOP) == 475
+    detector = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), threads=1, frame_scale=NATIVE.frame_scale)
+    scene = frame()
+    pasted.paste(scene, pig(), 600, 619)  # its picture down to row 682 (whole in the band from row 512)
+    assert [m.feet_y for m in detector.detect_wide(scene, (0, int(768 * NATIVE.hud_top)))] == [619 + PIG_ORIGIN[1]]
+    assert detector.detect_wide(scene, (0, int(768 * HUD_TOP))) == []  # where the search stopped before
+    obs = Observation(t=0, frame=scene, tag=(700, 640), hp=1, mp=1, geo=NATIVE)  # her feet at 629
+    assert band_rows(obs, 140, 75) == (629 - 140, 700)
+    half = Observation(t=0, frame=np.zeros((540, 960, 3), np.uint8), tag=(480, 460), hp=1, mp=1)
+    assert band_rows(half, 140, 75) == (452 - 99, 475)  # (1920x1080: 140 units are 99 half-size px)
 
 
 def test_a_band_with_no_rows_finds_nothing_at_either_size(tmp_path):
