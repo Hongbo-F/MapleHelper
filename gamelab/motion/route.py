@@ -115,6 +115,20 @@ DROP_EXTRA_S = 0.4
 # Moving one move at a time, running jumps missed often and this was 1.5 s; chained (flow.py) about
 # one move in 15 lands elsewhere, mostly drops and straight-up jumps timed off.
 RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25, "rope_jump": 0.5}  # (rope_jump's: a guess, not measured)
+# A way out of a trap (_ways_out): a place the sure moves give no way back from gets a running jump that lands only
+# from a stretch of takeoffs too short for the rules above, if one does. Takeoffs are tried every ESCAPE_STEP units at
+# full speed; the jump takes off from the middle of the longest stretch landing on a place with a way back, and lands
+# by the chance that she leaves the ground within half that stretch of it, her takeoff off by TAKEOFF_SD (sd): her x
+# from the minimap dot alone is good to half a minimap pixel of the game's (16 units at mag 4: uniform, sd 4.6; a rope
+# or her platform's end in view, about 2), the game's 30 ms step puts her lift-off on a 4.5-unit grid at full speed
+# (sd 1.3), and the lags of the arrow and the jump spread 11-13 ms each (sd 1.9 units at 149 units/s). Kept if it
+# lands ESCAPE_CHANCE of the time at least; each miss costs MISS_S (RISK's "a miss costs ~2-3 s to recover from"), so
+# its cost is its own and (1 / chance - 1) misses. Not measured: on West Rocky Mountain II the jump from 27 onto 25
+# lands from 18 units of takeoffs, 9 either side of 734.5: 0.90.
+ESCAPE_STEP = 1.0
+TAKEOFF_SD = 5.5
+ESCAPE_CHANCE = 0.5
+MISS_S = 3.0
 # Where she drops: down on a rope's top climbs onto the rope, and on a foothold that forbids it (forbidFallDown)
 # the drop does nothing. So not within ROPE_CLEAR of the top of a rope hanging from her platform, nor within
 # DROP_ROOM of a foothold that forbids it: where she stands to drop is good to about that (flow.STEP_ACCEPT,
@@ -184,6 +198,7 @@ class Move:
     takeoff: float | None = None  # running jumps from along a platform: where she leaves the ground
     hang: float | None = None     # rope_jump: the height (her feet's map y) she jumps off the rope from ...
     onto: Rope | None = None      # ... and the rope she jumps onto (None: a platform, dst)
+    chance: float = 1.0           # how likely it lands on dst: below 1 only for a way out of a trap (_ways_out)
 
 
 @dataclass(frozen=True)
@@ -204,7 +219,8 @@ def moves(model: MapModel) -> list[Move]:
     for a in model.places:
         mine = _jump_up_moves(model, a) + _end_moves(model, a) + _along_jumps(model, a)
         out += _without_needless_jumps(model, a, _distinct(mine)) + _drop_moves(model, a)
-    return out + _rope_jumps(model, out)
+    out += _rope_jumps(model, out)
+    return out + _ways_out(model, out)
 
 
 def _distinct(mine: list[Move]) -> list[Move]:
@@ -646,6 +662,59 @@ def _placed(model: MapModel, a: Platform, x0: float, sign: int, land: Platform) 
 def _running_jump_seconds(t: float) -> float:
     """A running jump's cost: t s in the air, its run-up and the jump's own extra."""
     return t + JUMP_EXTRA_S + RUN_MS / 1000
+
+
+def _ways_out(model: MapModel, moves: list[Move]) -> list[Move]:
+    """Running jumps out of a trap: places the map's sure moves (`moves`) give no way back from to the main part of
+    the map (the largest set of places each of which can get to every other), as a jump that lands only from a short
+    stretch of takeoffs (ESCAPE_*). On West Rocky Mountain II the pit of stairs (26-32): its stairs are jumped up, but
+    the one way out of it, from 27's left end (-743, 2625) up onto the floating step 25 (44 across and 60 up), lands
+    only from the last 17 units of 27 at full speed, 0 to 17 units onto 25 (7.5 units of takeoffs at 0.85 of it), where
+    a sure jump wants 9 units of room taking off on time, and her landing on it taking off 12 units early or late
+    (_sure_running_jump). None on the first map, where every place gets to every other."""
+    graph: dict[int, set[int]] = {p.id: set() for p in model.places}
+    for m in moves:
+        graph.setdefault(m.src, set()).add(m.dst)
+    reach = {pid: _closure(graph, pid) for pid in graph}
+    main = max(({q for q in reach[p] if p in reach[q]} for p in graph), key=len, default=set())
+    trapped = [model.platform(p) for p in sorted(graph) if not reach[p] & main]
+    free = {p for p in graph if reach[p] & main}
+    out: list[Move] = []
+    for a in trapped:
+        for direction, sign in SIDES:
+            runs: list[tuple[int, list[tuple[float, float, float]]]] = []  # (landing place, [(takeoff, x, s)])
+            for i in range(int((a.right - a.left) / ESCAPE_STEP) + 1):
+                x = a.left + i * ESCAPE_STEP
+                land, land_x, t = fly(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, group=a.group)
+                b = None if land is None or land is a or land.id not in free else land.id
+                if b is not None and runs and runs[-1][0] == b and x - runs[-1][1][-1][0] <= ESCAPE_STEP + 1e-6:
+                    runs[-1][1].append((x, land_x, t))
+                elif b is not None:
+                    runs.append((b, [(x, land_x, t)]))
+            best: dict[int, Move] = {}
+            for b, run in runs:
+                chance = math.erf((run[-1][0] - run[0][0] + ESCAPE_STEP) / 2 / (TAKEOFF_SD * math.sqrt(2)))
+                takeoff, land_x, t = run[len(run) // 2]
+                land = model.platform(b)
+                if chance < ESCAPE_CHANCE or not land.covers(land_x + sign * (slide(WALK_SPEED, SHOE) + LANDING_ROOM)):
+                    continue  # (she lands at full speed: she must be able to stop on it)
+                m = Move("jump", a.id, b, a.clamp(takeoff - sign * RUN_UP), land_x, direction,
+                         seconds=_running_jump_seconds(t) + (1 / chance - 1) * MISS_S, takeoff=takeoff, chance=chance)
+                if b not in best or chance > best[b].chance:
+                    best[b] = m
+            out += best.values()
+    return out
+
+
+def _closure(graph: dict[int, set[int]], start: int) -> set[int]:
+    """The places some route over `graph` (place -> the places a move from it goes to) leads to from `start`."""
+    seen, todo = {start}, [start]
+    while todo:
+        for q in graph.get(todo.pop(), ()):
+            if q not in seen:
+                seen.add(q)
+                todo.append(q)
+    return seen
 
 
 class Planner:

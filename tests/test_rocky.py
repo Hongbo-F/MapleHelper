@@ -117,13 +117,50 @@ def test_no_route_jumps_between_a_twin_and_the_platform_it_lies_on():
     assert not any(m.kind == "drop" and m.src == 22 and -1412 <= m.x <= -1141 for m in planner.moves)
 
 
-def test_in_the_simulator_she_gets_up_the_rope_from_14_and_onto_11_from_22():
-    # Two trips the live runs of 2026-10-23 missed, with her dot placed right: up the rope from 14 to 7 (it ran past
-    # 14's right end, 80 units further on than planned, and fell to 17 twice), and from under 11 to 11 (jumps between 11
-    # and 14, landings on 11 counted as elsewhere).
+# --- the pit of stairs and the way out of it ------------------------------------------------------------------
+
+def test_the_stairs_are_jumped_up_and_the_way_out_of_the_pit_is_27_onto_25():
+    from gamelab.motion.physics import JUMP_HEIGHT
+    from gamelab.motion.route import Planner
+    model = load()
+    planner = Planner(model)
+    jumps = {(m.src, m.dst) for m in planner.moves if m.kind == "jump" and m.chance == 1}
+    for low, high in ((32, 31), (31, 30), (30, 29), (29, 28), (28, 27), (27, 26)):
+        assert (low, high) in jumps  # 60 up each, 17 to spare under her jump's 77
+        assert model.platform(low).top - model.platform(high).top == 60 and JUMP_HEIGHT - 60 > 16
+    [out] = [m for m in planner.moves if m.chance < 1]
+    assert (out.kind, out.src, out.dst, out.direction) == ("jump", 27, 25, "left")
+    assert -743 < out.takeoff < -726 and out.chance == pytest.approx(0.90, abs=0.01)
+    assert model.platform(25).left < out.land_x < model.platform(25).right
+    route = planner.plan(30, -1009, 19)
+    assert [(m.src, m.dst) for m in route][:4] == [(30, 29), (29, 28), (28, 27), (27, 25)] and route[-1].dst == 19
+
+
+def test_every_place_gets_to_every_other_but_20_under_22s_slope():
+    from gamelab.motion.route import Planner
+    model = load()
+    planner = Planner(model)
+    every = set(range(len(model.platforms)))
+    for p in range(len(model.platforms)):
+        assert every - planner.reachable(p) == ({20} if p != 20 else set()), p
+    # 20 (-473..-442, y 2385) lies 0-6.4 units under 22's foothold from -481 to -442: a fall there lands on 22 first,
+    # and walking left on 22 takes 22's own foothold (83's prev is 82); off 20 she walks onto 22, or off its left end
+    # into the pit (26).
+    assert {m.dst for m in planner.moves if m.src == 20} == {22, 26}
+    first = load(FIRST)
+    fp = Planner(first)
+    assert all(fp.reachable(p.id) == set(range(len(first.platforms))) for p in first.platforms)
+    assert not any(m.chance < 1 for m in fp.moves)
+
+
+def test_in_the_simulator_she_gets_out_of_the_pit_up_the_rope_from_14_and_onto_11_from_22():
+    # The trips the live runs of 2026-10-23 missed, with her dot placed right: up the rope from 14 to 7 (it ran past
+    # 14's right end, 80 units further on than planned, and fell to 17 twice), from the pit to 19 (no route), and from
+    # under 11 to 11 (jumps between 11 and 14, landings on 11 counted as elsewhere).
     from gamelab.sim.scenarios import Scenario, _nav, run_scenario
     model = load()
-    for start, dst, made in (((14, -930.0), 7, "climb 14->7"), ((22, -1300.0), 11, "climb 22->14")):
+    for start, dst, made in (((14, -930.0), 7, "climb 14->7"), ((30, -1009.0), 19, "jump 27->25"),
+                             ((22, -1300.0), 11, "climb 22->14")):
         trace = run_scenario(Scenario(f"rocky_{start[0]}_{dst}", _nav(dst), start, limit=120), model)
         result = trace["result"]
         assert isinstance(result, dict) and result["result"] == "arrived" and result["misses"] == 0, result

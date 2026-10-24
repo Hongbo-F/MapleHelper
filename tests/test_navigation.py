@@ -137,6 +137,45 @@ def test_a_platform_lying_on_anothers_floor_is_that_platform_for_everything(mode
     assert not any(mv.dst == twin.id for mv in planner.moves)
 
 
+def trap_tree(gap: float = 44):
+    """A pit, as West Rocky Mountain II's stairs: S (-400..-200, y 480) over R (-300..-gap, y 540), each jumped onto from
+    the other; the pit Q (0..300, y 600, a wall up from its right end) that R's jump goes down onto, and whose only way
+    back up is a jump off its left end onto R, `gap` across and 60 up (44 is 27 -> 25's)."""
+    return {
+        "info": {"VRLeft": -500, "VRTop": 0, "VRRight": 500, "VRBottom": 800},
+        "foothold": {"1": {
+            "1": dict([seg(1, 1, 1, -400, 480, -200, 480)]),
+            "2": dict([seg(1, 2, 2, -300, 540, -gap, 540)]),
+            "3": dict([seg(1, 3, 3, 0, 600, 300, 600, 0, 4), seg(1, 3, 4, 300, 600, 300, 400, 3, 0)]),
+        }},
+        "miniMap": {"width": 1000, "height": 800, "centerX": 500, "centerY": 0, "mag": 4},
+    }
+
+
+def test_a_pit_whose_only_way_out_is_a_jump_from_its_very_end_gets_that_jump_by_its_chance():
+    from gamelab.motion import route
+    m = mapdata.parse(1, trap_tree(44), "Trap", {})
+    s, r, q = by_y(m, 480, -300), by_y(m, 540, -100), by_y(m, 600, 100)
+    planner = Planner(m)
+    [out] = [mv for mv in planner.moves if mv.chance < 1]
+    # Off Q's left end up onto R lands from its first 17 units at full speed (none by the sure rules: 9 units of room,
+    # and still on R taking off 12 early or late): from the middle of them, 0.90 by her takeoff's spread.
+    assert (out.kind, out.src, out.dst, out.direction) == ("jump", q.id, r.id, "left")
+    assert out.takeoff == 9.0 and out.x == 29.0 and -60 < out.land_x < r.right
+    assert out.chance == pytest.approx(0.898, abs=0.001)
+    assert out.seconds == pytest.approx(route._running_jump_seconds(0.408) + (1 / out.chance - 1) * route.MISS_S,
+                                        abs=0.02)
+    assert all(planner.reachable(p.id) == {s.id, r.id, q.id} for p in (s, r, q))
+    assert [mv.dst for mv in planner.plan(q.id, 200, s.id)] == [r.id, s.id]
+    # 6 units further, it lands from 13 (0.72); 10 further, from 9 (0.53); 16 further, from 3: not worth trying
+    # (route.ESCAPE_CHANCE), and the pit stays one.
+    chances = {}
+    for gap in (50, 54, 60):
+        mm = mapdata.parse(1, trap_tree(gap), "Trap", {})
+        chances[gap] = [round(mv.chance, 2) for mv in Planner(mm).moves if mv.chance < 1]
+    assert chances == {50: [0.72], 54: [0.53], 60: []}
+
+
 def test_physics_helpers():
     assert JUMP_HEIGHT == pytest.approx(77, abs=1)
     assert air_time(0) == pytest.approx(0.555, abs=0.01)
