@@ -27,6 +27,7 @@ import numpy as np
 from maplehelper.config import GameKeys
 
 from .. import paths, telemetry
+from ..attack import danger
 from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control.actions import Actions
 from ..control.navigator import Navigator
@@ -37,6 +38,7 @@ from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..localization.worldstate import reading_of
+from ..motion import physics
 from ..perception import drops, exp_number
 from ..perception.eyes import Eyes
 from ..perception.hud import exp_changed
@@ -65,9 +67,13 @@ class Hunter:
     """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
-                 low_hp: float = 0.35, potion_hp: float = 0.5, skill: bool = False, feed=None):
-        """`feed`: a continuous feed for her looks and glances (localization.feed), told of her throws."""
+                 low_hp: float = 0.35, potion_hp: float = 0.5, skill: bool = False, feed=None,
+                 her: danger.Her | None = None):
+        """`feed`: a continuous feed for her looks and glances (localization.feed), told of her throws. `her`: her HP and
+        level, what a touch is measured against (attack.danger; config.toml [character] by default)."""
         self.model, self.log = model, log
+        c = physics.CHARACTER
+        self.danger = danger.of_map(model, her or danger.Her(c.hp, c.level))  # where touches would cost her
         self.low_hp, self.potion_hp = low_hp, potion_hp
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.actions = Actions(keys, skill)

@@ -104,6 +104,15 @@ SPOT_CHANGES = 4       # ... and at most this many times per visit to a ground
 # hunt loops' time (rule 8, 6.2%; rule 9, 5.3%) and 20 of their 43 departures from a ground.
 RESPAWN = 8.0
 PATIENCE = {"ground": 1.0, "spot": 2.0, "none": 0.4}  # rule 9: today's patience values
+# A ground's EXP a second (the rate rule, the next ground) counts 1 - GROUND_DANGER x the danger where she stands to hunt
+# it (its spot's: attack.spots, the spawn points' monsters at their points), never under 0: on Tree Dungeon 23 shot from
+# 24 (danger 0.07) keeps 86%, 10 hunted standing among its two Horny Mushrooms (0.18) 64%. In the simulator's crowd
+# (harness: the whole map, 20 seeds of 20 minutes, Lucky Seven), with the spots by danger and without this she lost
+# 1.39 bars of HP a minute alive, as she did before them, and 14 of the 20 died; with it 1.09 and 6, with 41% more
+# kills: she hunted 23 from 24, 15 from 16 and the floor more, 10 among its Hornies less (README: Positioning). At 1.0
+# 1.12 a minute and 8 died, at 3.0 1.00 and 3 (a run each, before the spots kept GROUND_MARGIN). Where nothing counts
+# as a danger (the first map), every ground counts all of its EXP, as before.
+GROUND_DANGER = 2.0
 PRIOR_S = 20.0         # the rate rule: a ground's expected rate counts as this many s of hunting there
 MIN_STAY, MIN_THROWS = 15.0, 6  # ... judged only after this long there, or this many throws
 LEAVE_MARGIN = 0.8     # ... leave when her rate is under this share of the best other ground's
@@ -524,6 +533,11 @@ class Hunt:
         self.h.looter.pending.clear()  # drops are the drop store's here (behavior.ledger)
         return targets, visible, hidden
 
+    @property
+    def danger(self):
+        """The map's danger for her (attack.danger, the hunter's; None: none known)."""
+        return self.h.danger
+
     @staticmethod
     def _hits(s: Scene, m: Monster) -> bool:
         """Whether a star from where she stands in look `s` hits `m` (reach.can_hit: in reach, and nothing
@@ -531,8 +545,10 @@ class Hunt:
         return reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters)
 
     def _standable(self, pid: int) -> bool:
+        """Whether she can stand on platform `pid` to shoot: spots.spot_ok, or it's the visit's spot's (taken as one:
+        a place better than hunting on the ground by the map's danger, or the ground itself where none is)."""
         v = self.visit
-        return spots.spot_ok(self.model, pid, self.kinds) or (v is not None and pid == v.ground == v.spot.platform)
+        return spots.spot_ok(self.model, pid, self.kinds) or (v is not None and pid == v.spot.platform)
 
     # --- safety -------------------------------------------------------------------------------------
 
@@ -878,7 +894,8 @@ class Hunt:
         if not left:
             return None
         now_n = sum(self._hits(s, m) for m in left)
-        nxt = spots.spot_for(self.model, v.ground, left, v.spot, s.where, self._travel_off(v.ground), self.kinds)
+        nxt = spots.spot_for(self.model, v.ground, left, v.spot, s.where, self._travel_off(v.ground), self.kinds,
+                             danger=self.danger)
         if nxt is None:
             return None
         p = self.model.platform(nxt.platform)
@@ -949,7 +966,7 @@ class Hunt:
     def _rate_here(self) -> float:
         v = self.visit
         prior = self.tour.ground_values().get(v.ground, 0.0) / self._visit_s(v.ground)
-        return (v.exp + prior * PRIOR_S) / (time.monotonic() - v.arrived + PRIOR_S)
+        return (v.exp + prior * PRIOR_S) / (time.monotonic() - v.arrived + PRIOR_S) * _safe_share(v.spot)
 
     def _shared(self, g: int, s: Scene) -> float:
         """What of ground `g`'s EXP a second is hers to have as look `s` shows the other players: PLAYER_DISCOUNT with
@@ -957,7 +974,7 @@ class Hunt:
         rivals = [pl for pl in s.players if pl.rival]
         if not rivals or PLAYER_DISCOUNT == 1.0:
             return 1.0
-        p, spot = self.model.platform(g), spots.spot_at(self.model, g, self.kinds)[0]
+        p, spot = self.model.platform(g), spots.spot_at(self.model, g, self.kinds, self.danger)[0]
         for pl in rivals:
             x = min(max(pl.x, p.left), p.right)
             if pl.platform in (g, spot) or (abs(pl.x - x) <= PLAYER_NEAR and abs(pl.y - p.y_at(x)) <= PLAYER_DY):
@@ -978,11 +995,11 @@ class Hunt:
         for g in self.tour.hunting_grounds(self._visit_s):
             if g == self.visit.ground or self._skip.get(g, 0) > now:
                 continue
-            at = spots.spot_at(self.model, g, self.kinds)
-            t = self.nav.planner.travel(s.platform.id, s.where.x, at[0]) if s.platform.id != at[0] else 0.0
+            sp = spots.best_spot(self.model, g, self.kinds, self.danger)
+            t = self.nav.planner.travel(s.platform.id, s.where.x, sp.platform) if s.platform.id != sp.platform else 0.0
             if t is None:
                 continue
-            rate = values.get(g, 0.0) / (t + self._visit_s(g)) * self._shared(g, s)
+            rate = values.get(g, 0.0) / (t + self._visit_s(g)) * self._shared(g, s) * _safe_share(sp)
             if best is None or rate > best[0]:
                 best = (rate, g)
         return best
@@ -997,14 +1014,15 @@ class Hunt:
         for g in self.tour.hunting_grounds(self._visit_s):
             if self._skip.get(g, 0) > now or (self.visit is not None and g == self.visit.ground):
                 continue
-            at = spots.spot_at(self.model, g, self.kinds)
+            sp = spots.best_spot(self.model, g, self.kinds, self.danger)
             if here is None:  # on a rope or in the air: no route times, so by value alone
                 t = 0.0
             else:
-                t = 0.0 if here.id == at[0] else self.nav.planner.travel(here.id, s.where.x, at[0])
+                t = 0.0 if here.id == sp.platform else self.nav.planner.travel(here.id, s.where.x, sp.platform)
             if t is None:
                 continue
-            score = values.get(g, 0.0) / (t + self._visit_s(g)) * self.rng.uniform(0.75, 1.25) * self._shared(g, s)
+            score = (values.get(g, 0.0) / (t + self._visit_s(g)) * self.rng.uniform(0.75, 1.25) * self._shared(g, s)
+                     * _safe_share(sp))
             scored.append((score, g))
             if best is None or score > best[0]:
                 best = (score, g)
@@ -1021,7 +1039,7 @@ class Hunt:
             self._skip.pop(g, None)
         else:
             g = best[1]
-        spot = spots.spot(self.model, g, s.where, self._travel_off(g), self.kinds)
+        spot = spots.spot(self.model, g, s.where, self._travel_off(g), self.kinds, danger=self.danger)
         self.visit = Visit(g, spot)
         self.report.grounds.append(g)
         self.stack.clear()
@@ -1165,6 +1183,12 @@ class Hunt:
         telemetry.emit("hunt", mode="hunt", rule=self._rule, objective=key[1], ground=key[2],
                        rate_here=None if v is None or v.arrived is None else round(self._rate_here(), 3),
                        rate_to_beat=None if best is None else [round(best[0], 3), best[1]], piles=piles)
+
+
+def _safe_share(sp: Spot) -> float:
+    """The share of a ground's EXP a second that counts, hunted from spot `sp`: 1 - GROUND_DANGER x its danger, 0 at
+    least."""
+    return max(0.0, 1.0 - GROUND_DANGER * sp.danger)
 
 
 def _contents(p: Pile) -> str:

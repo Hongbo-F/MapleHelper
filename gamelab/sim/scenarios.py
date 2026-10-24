@@ -31,6 +31,7 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import telemetry
 from ..control import client
 from ..localization import mapdata
+from ..attack import danger
 from ..behavior import probe
 from ..behavior.hunter import Hunter
 from ..behavior.looting import DropSpot
@@ -201,6 +202,8 @@ class Sim:
     # The stack, as gamelab/__main__.py builds it.
     def hunter(self, **kw) -> Hunter:
         self.guard()
+        c = self.world.character  # what a touch is measured against: her as the world plays her
+        kw.setdefault("her", danger.Her(c.max_hp, c.level))
         h = Hunter(self.eyes, self.keys, self.model, log=self.log, feed=self.feed, **kw)
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
         self.senses.append(h.senses)
@@ -2016,15 +2019,16 @@ def nav_tree_down(sim):
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
                ends("standing by on a safe platform", key="stop"),
-               check("up the tower: a ground of the top cluster", lambda tr: bool({7, 10} & set(tr["result"]["grounds"])))))
+               check("a thousand EXP or more", lambda tr: tr["world"]["exp"] >= 1000)))
 def loop_tree_run(sim):
     """`python -m gamelab tour --loop --minutes 5 --map 10002073` from her spot by the portal on 28, with every spawn
-    filled and nobody else: up the tower to 23, 19, 7 and 15, then standing by on a safe platform (25-27). Every ground
-    is hunted standing on it, among its monsters (the rules 'close quarters' and 'in passing'; 'shoot' on 2 of seeds
-    1-10: no platform the spot picker counts as safe reaches a ground here; the study's per-x safety would). (Seed 4:
-    in this world her own group's walls alone stop her, and of seeds 1-10, 4 were knocked out past the tower's walls
-    within 5 minutes, off 25's right end or the rope at -192; with group 0's walls stopping her none:
-    loop_tree_walls.)"""
+    filled and nobody else, then standing by on a safe platform (25-27). A ground's EXP counts less the more dangerous
+    the place she'd hunt it from (hunt.GROUND_DANGER): the floor (33: a Green Mushroom, 7% of her HP a touch, and two
+    Slimes, 1%) is the safest that pays, and she hunts it the whole 5 minutes, 59 kills and 1,274 EXP; before the
+    danger she went up the tower to 23, 19, 7 and 15 for 59 kills and 1,117 EXP, most of them on the floor on her way.
+    The floor is hunted standing on it (the rules 'close quarters' and 'in passing'). (Seed 4: in this world her own
+    group's walls alone stop her, and of seeds 1-10, 4 were knocked out past the tower's walls within 5 minutes, off
+    25's right end or the rope at -192; with group 0's walls stopping her none: loop_tree_walls.)"""
     return _loop(5)(sim)
 
 

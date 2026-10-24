@@ -59,9 +59,12 @@ class Character:
     """Her stats that set how the game moves her, in % as the stat window shows them. The game walks her
     at 125 units/s x SPEED/100 and jumps her at 555 units/s x JUMP/100 (its Physics.img), counting
     SPEED from 80 to 140 and JUMP from 80 to 123. Gear and Haste raise them. gamelab plans her moves
-    with them (gamelab.motion.physics)."""
+    with them (gamelab.motion.physics). And her HP and level, which what a monster's touch takes is
+    measured against (gamelab.attack.danger: where she stands and how near she lets monsters come)."""
     speed: float = 119.2    # measured: she walks 148-151 units/s (149 = 125 x 1.192)
     jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
+    hp: float = 752.0       # her HP when full (her HP bar, level 24, 2026-10-24)
+    level: float = 24.0
 
 
 @dataclass(frozen=True)
@@ -163,8 +166,8 @@ def _character(table: dict) -> Character:
         raise ConfigError(f"[character] has unknown stat(s) {sorted(unknown)}; known: {sorted(known)}")
     for name, value in table.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-            raise ConfigError(f"character.{name} must be her {name.upper()} stat in % (a number above 0), "
-                              f"got {value!r}")
+            what = f"her {name.upper()} stat in %" if name in ("speed", "jump") else f"her {name.upper()}"
+            raise ConfigError(f"character.{name} must be {what} (a number above 0), got {value!r}")
     return Character(**{name: float(value) for name, value in table.items()})
 
 

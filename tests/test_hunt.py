@@ -24,7 +24,8 @@ def _hunt(piles, kills=(), travel=5.0):
     monster she has hurt)."""
     h = object.__new__(Hunt)
     h.h = SimpleNamespace(drops=SimpleNamespace(known=list(piles)), looter=SimpleNamespace(inventory_full=False),
-                          wounds=SimpleNamespace(seen_within=lambda now, seconds, hurt_by=None: []))
+                          wounds=SimpleNamespace(seen_within=lambda now, seconds, hurt_by=None: []),
+                          danger=None)  # (the map's danger: none here)
     h.fs = FightState()
     h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel,
                                                     arrive=lambda src, x, dst, dst_x=None, keep_off=(): travel))
@@ -105,8 +106,9 @@ def test_grounds_about_as_good_go_to_the_one_she_was_at_longest_ago(monkeypatch)
     h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: 20.0))
     h.model, h.kinds, h.rng, h.log = None, None, SimpleNamespace(uniform=lambda a, b: 1.0), lambda text: None
     h._skip, h._left, h.visit, h.stack, h.obj, h.report = {}, {}, None, [], None, HuntReport()
-    monkeypatch.setattr(hunt.spots, "spot_at", lambda model, g, kinds: (g, 0.0))
-    monkeypatch.setattr(hunt.spots, "spot", lambda model, g, where, travel, kinds: Spot(g, 0.0, 1.0, True))
+    h.h = SimpleNamespace(danger=None)  # (the map's danger: none here)
+    monkeypatch.setattr(hunt.spots, "best_spot", lambda model, g, kinds, danger=None: Spot(g, 0.0, 1.0, True))
+    monkeypatch.setattr(hunt.spots, "spot", lambda model, g, where, travel, kinds, danger=None: Spot(g, 0.0, 1.0, True))
     s = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=36), x=300.0), players=[])  # nobody else
 
     def nxt(left: dict) -> int:

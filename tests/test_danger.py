@@ -1,15 +1,18 @@
 """The danger of a place (attack.danger) on synthetic maps: a spawn point between two places, a kind that hits hard
 against a weak one, a monster on another platform that can't come over and one that hops, one walking a platform just
-under hers, how far a fight keeps a monster off, and a look's monsters standing for their spawn points."""
+under hers, how far a fight keeps a monster off, and a look's monsters standing for their spawn points. And what's
+decided by it: where she shoots a ground from (attack.spots), what she does about one too near (attack.stance), where
+she waits for respawns and how much of a ground's EXP counts (behavior.hunt)."""
 
 import math
 
 import pytest
 
-from gamelab.attack import danger
+from gamelab.attack import danger, spots
 from gamelab.attack.danger import HER_TALL, HOP_CHANCE, THREAT_S, Danger, Her, soon, touch_taken
 from gamelab.localization import mapdata
 from gamelab.localization.monsters import Monster
+from gamelab.localization.pose import Where
 from gamelab.motion.flow import HER_HALF
 from gamelab.perception.mobs import Mob
 
@@ -133,3 +136,46 @@ def test_the_simulators_touches_are_the_same_formula():
     for u in (0.0, 0.3, 0.999):
         assert world.touch_damage(info, u, world.LEVEL_24) == touch_taken(110, world.DEFENCE, 24, u) / 752
     assert world.DEFENCE == danger.DEFENCE
+
+
+# --- where she stands to shoot a ground (attack.spots), how near she lets one come (attack.stance), where she waits ---
+
+def spot_map():
+    """A ground (0..400, y 500) with two Horny Mushrooms; beside it, 10 to its right and 30 below, a platform with a
+    Green Mushroom at its far end: its monsters can't reach the ground, nor the Hornies it."""
+    return build([(0, 500, 400, 500), (410, 530, 900, 530)], [("19", 150, 500), ("19", 250, 500), ("13", 850, 530)])
+
+
+def test_a_ground_is_shot_from_where_its_monsters_cant_reach_when_that_is_safer():
+    model = spot_map()
+    d, g, side = Danger(model, HER), on(model, 200, 500), on(model, 600, 530)
+    worth = {"horny-mushroom", "green-mushroom"}
+    here = Where(100.0, 500.0, model.platform(g), (0.0, 0.0))
+    travel = lambda a, x, b: 1.0  # noqa: E731
+    assert not spots.spot_ok(model, side, worth)  # a Green, worth hunting, walks it
+    assert spots.spot(model, g, here, travel, worth) == spots.Spot(g, 200.0, 1.0, False)  # as before: its middle
+    sp = spots.spot(model, g, here, travel, worth, danger=d)
+    assert sp.platform == side and sp.coverage >= spots.MIN_COVERAGE and sp.score > 1 - spots.on_ground(model, g, d)[1]
+    assert sp.x >= 410 + spots.GROUND_MARGIN  # its Green can knock her back: as far from its end as on a ground
+    assert spots.spot_at(model, g, worth, d) == (sp.platform, sp.x) and spots.best_spot(model, g, worth, d) == sp
+    # Hunted on itself (on_it, or with no such spot), from its safest place: away from both spawn points.
+    x, there = spots.on_ground(model, g, d)
+    assert x in (50.0, 350.0) and there < d.at(g, 200.0) and spots.on_ground(model, g) == (200.0, 0.0)
+    assert spots.spot(model, g, here, travel, worth, on_it=True, danger=d).x == x
+
+
+def test_where_no_kind_counts_spots_are_as_they_were():
+    model = build([(0, 500, 400, 500), (450, 530, 900, 530)], [("7", 150, 500), ("7", 250, 500), ("7", 850, 530)])
+    d, g = Danger(model, HER), on(model, 200, 500)
+    here = Where(100.0, 500.0, model.platform(g), (0.0, 0.0))
+    assert not d.any
+    assert spots.spot(model, g, here, lambda a, x, b: 1.0, None, danger=d) == spots.spot(model, g, here,
+                                                                                         lambda a, x, b: 1.0, None)
+    assert spots.spots(model, g, d) == spots.spots(model, g) and spots.spot_at(model, g, None, d) == (g, 200.0)
+
+
+def test_a_ground_counts_less_of_its_exp_the_more_dangerous_its_stand():
+    from gamelab.behavior import hunt
+    assert hunt._safe_share(spots.Spot(1, 0.0, 1.0, False)) == 1.0
+    assert hunt._safe_share(spots.Spot(1, 0.0, 1.0, False, 0.1)) == pytest.approx(1 - hunt.GROUND_DANGER * 0.1)
+    assert hunt._safe_share(spots.Spot(1, 0.0, 1.0, False, 0.9)) == 0.0

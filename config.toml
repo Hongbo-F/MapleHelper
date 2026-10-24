@@ -50,9 +50,13 @@ recap = 3000
 # Her stats, in % as the stat window shows them: how fast the game walks her (125 units/s x SPEED/100)
 # and how high it jumps her (JUMP 100: 77 units). gamelab plans every move with them, so change them
 # when gear or Haste does. 119.2 is measured (she walks 149 units/s); her stat window would say exactly.
+# And her HP when full and her level: what a monster's touch takes is measured against them (where she
+# stands, how near she lets monsters come), so change them when she levels up.
 [character]
 speed = 119.2
 jump = 100
+hp = 752
+level = 24
 
 # How gamelab captures the game: "dxgi" (desktop duplication: each frame as the screen shows it, about 2 ms
 # for the game's window) or "mss" (a GDI copy that waits for the screen's next frame: 17 ms and more).

@@ -161,12 +161,13 @@ class Tour:
     def spot(self, pid: int, on_it: bool = False) -> Spot:
         """Where to shoot platform `pid` from (attack.spots.spot), from where she is now."""
         here = self.nav.mover.locate().where
-        return spots.spot(self.nav.model, pid, here, self._travel_off(pid), self.worth, on_it)
+        return spots.spot(self.nav.model, pid, here, self._travel_off(pid), self.worth, on_it, danger=self.h.danger)
 
     def spot_for(self, pid: int, left: list[Monster], current: Spot) -> Spot | None:
         """A spot that reaches more of the monsters `left` on `pid` (attack.spots.spot_for)."""
         here = self.nav.mover.locate().where
-        return spots.spot_for(self.nav.model, pid, left, current, here, self._travel_off(pid), self.worth)
+        return spots.spot_for(self.nav.model, pid, left, current, here, self._travel_off(pid), self.worth,
+                              danger=self.h.danger)
 
     def _travel_off(self, pid: int):
         """The planner's route times keeping off platform `pid` (route.KEEP_OFF_S): to the spots off it it's shot
@@ -506,7 +507,7 @@ class Tour:
 
     def _spot_at(self, pid: int) -> tuple[int, float]:
         """Where she'll stand to hunt platform `pid` (attack.spots.spot_at)."""
-        return spots.spot_at(self.nav.model, pid, self.worth)
+        return spots.spot_at(self.nav.model, pid, self.worth, self.h.danger)
 
     def _travel_of(self, seq: list[int], here: tuple[int, float]) -> float:
         """Seconds of travel visiting `seq` in that order (an unreachable stop counts as none)."""
