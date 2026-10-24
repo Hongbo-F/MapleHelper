@@ -112,7 +112,7 @@ Other commands (`python -m gamelab -h` lists them all):
 | `lock attack 700 740 780` | Whether a jump that many ms after an attack goes through |
 | `snap` | Screenshot of the game in `lab/shots/snap.png` (commands save their pictures in `lab/shots`: the lab's own screenshots are test data) |
 | `spot`, `spot --image FILE` | Whether the Lie Detector is on screen now (or in a screenshot); sends no keys |
-| `bench-look [FILES]`, `bench-look --live --n 100` | Each stage of a look timed (median, p90, fastest): on saved 1920×1080 screenshots (by default 17 in `lab`), or on the game as it is on screen (`--capture dxgi` or `mss`: how; by default as config.toml says). Also counted: looks that didn't find her name tag near where it was, and ropes on the whole screen that the search where the map's ropes can show missed. Live it refuses unless the game is in front already, and never brings it forward; sends no keys |
+| `bench-look [FILES]`, `bench-look --live --n 100` | Each stage of a look timed (median, p90, fastest): on saved screenshots, 1920×1080 or 1366×768 (by default 17 1920×1080 ones in `lab`; `--shrink 1366x768` times them shrunk to the game's own size, `--look-scale 1` or `2` with full- or half-size looks), or on the game as it is on screen (`--capture dxgi` or `mss`: how; by default as config.toml says). Also counted: looks that didn't find her name tag near where it was, and ropes on the whole screen that the search where the map's ropes can show missed. Live it refuses unless the game is in front already, and never brings it forward; sends no keys |
 | `bodies`, `bodies FILES --recordings NAMES`, `bodies --tracks FILES` | Where the monster detector puts monsters, offline: their feet against the surface of the platform each is put on, on saved screenshots where she stands (by default bench-look's), by the matched template's origin and by its bottom; and on recordings with the camera still (by default `stand_snail` and `walk_snail`), how far their x strays from frame to frame, whether they face the way they move, how often their pose (the matched template's frame) is what they do, walking or standing, by cut-outs and sprites, and how fast each kind walks. `--tracks` reads `watch`'s telemetry instead: each track's velocity against how far its x went by the next record, for those standing and those walking. No game, no keys |
 | `bench-capture --n 100` | A look's capture and a glance's timed through DXGI and through mss, on the game's window as it is on screen (or the screen's top-left 1920×1080 without the game), and whether the two see the same pixels; never brings anything forward; sends no keys |
 | `watch`, `watch --minutes 10 --lie-detector` | The game looked at every frame with no command running (see Continuous perception): her place, the monsters followed, their deaths and who killed them, her EXP gains (her number read: her EXP a minute every 10 s) and hits, published for the mini-map; with `--lie-detector` it also checks for the Lie Detector and pages whoever is at the PC. Never sends keys, never brings the game to the front, reads nothing while the game isn't wholly on screen |
@@ -628,6 +628,126 @@ First look, explore only (no attacks):
 - Full-size frames from 24, the bridge (22), the high bridge (11), 17 and the stairs (30) are in
   `D:/MapleHelper-scratch/newmap/frames` (`<platform>_<n>.png`).
 
+## The game at its own 1366x768 (from 2026-10-23)
+
+The game lays out a 1366x768 view, one game px to a map unit, and stretches it to its window. Until 2026-10-23 that
+was a 1920x1080 client area on this PC's 4K screen, the view stretched 1.40625 times with bilinear filtering, and every
+template, calibration and pixel constant was made on that picture. Since then the game is set to its own 1366x768
+(Options, Graphics, Resolution "1366 x 768", windowed: `GetClientRect` 1366x768), drawn pixel for pixel ("run
+detection on the native resolution, it's both more accurate and less resource consuming").
+
+**The geometry** (`gamelab/screen.py`). A `Geometry` is a client size and how much a look shrinks it: `stretch` (screen
+px per game px: 1.40625, or 1), `frame_scale` and `units_per_px` (a look frame's px per map unit and back: 0.703 and
+1.42 at 1920x1080 half size, 1 and 1 at 1366x768 full size), `px` and `fpx` (a px measured on the 1920x1080 window, at
+full or half size, in this geometry's px), `to_game` and `from_game` (where a game px's middle is on screen), and a
+`suffix` that tells the files made for a size apart. It's worked out from the client size where frames are taken
+(the commands make their `Eyes(geo=...)` from the game window's size as they start; `ScreenFrames`; a saved frame's
+own size) and goes with what's read: `Observation.geo`, so `Scene`, and `WorldState.geo` over the feed's pipe. A
+capture of another size than the eyes were made for is refused (as one not 1920x1080 was: run the command again), and
+the feed marks such frames not visible. Nothing that reads the game uses the 1920x1080 window's numbers any more
+(`GAME_SIZE`, `SCREEN_SCALE`, `SCALE`, `UNITS_PER_HALF_PX` are the simulator's, which draws its world at that size:
+`tests/test_geometry.py` checks no other module imports them). At 1920x1080 every conversion is exact (`px(n)` is `n`
+to the bit), so all of it is as it was: the full suite, the saved screenshots' tests, and the 86 golden traces.
+
+What goes by it:
+- **Her name tag** (`nametag.py`): matched at full size as before, with a template made at that size. Each client size
+  has its own calibration (`paths.calibrated`: `calibration_1366x768.json`, `tag_template_1366x768.npy`,
+  `tag_template_full_1366x768.npy`; 1920x1080's are the files they always were), and the search near where she was
+  is converted (171 x 85 px). The 1366x768 template was made offline from the 31 saved frames: her tag's box is
+  see-through and the clouds behind it move, so it's the median of the 31 (15 x 55 px, `tests/fixtures/native`). It
+  matches every one of them at 0.92 or better where her tag is, and nothing else above 0.39 (the party list's
+  "BugBaby" is another font); on the 17 bench frames shrunk to 1366x768, at 0.77-0.88.
+- **The minimap** (`minimap.sizes`): its box (0, 68, 213, 213), the dot's and the markers' sizes and the ring
+  converted (areas by the stretch's square). At 1366x768 the markers are their pictures: her yellow core 6 x 6 (24 px),
+  another's red 5 x 5 (21 px), and her dot's middle comes out on the half pixel ((94.5, 172.5) on all 31 frames).
+  There a portal's inner ring (4 x 4, hollow: 8 px) passed as a buddy's core at both of this map's portals on every
+  frame (at 1920x1080 the filtering had blurred it into its dark), so a core must fill 70% of its box (`MARKER_FILL`:
+  21 of 25), not asked at 1920x1080. Every other player's marker on the 31 frames is found (two to five at once, two
+  touching; by eye on the enlarged minimaps) and nothing else; the game's six player markers pasted at 14 spots each
+  are found where drawn (within 0.2 px), the 25 others (NPCs, portals, shops, runes) never.
+- **HP and MP** are fractions of the window, which hold (row 756, the HP bar's red from x 503 to 607).
+- **Her EXP number** (`exp_number.py`): the reader's model takes the geometry's stretch across and down (1 and 1:
+  every glyph its picture) and the box read follows from it (`read_box`: (748, 738, 847, 750), 99 x 12 px; its size
+  says which window it's from). All 31 frames read 31,736 [92.47%] at level 23, every cell within 0.69 levels of its
+  glyph and every other reading 22.7 or more off (at 1920x1080 0.68 and 14.1); the reader's own drawing reads back,
+  and the number one game px off its place doesn't. 2.8 ms a reading, against 7.9.
+- **Ropes** (`terrain.py`): widths, lengths and the closing and opening kernels converted (6 x 2, 22 x 1). This
+  map's rock passes for rope at this size, crisp: over the whole screen 2-8 ropes a frame on the 31, of which two are
+  real (x 941 and 1174, the ropes at map x -536 and -303). A look searches only where the map's ropes can show, and
+  there one or both of the real ones were found on 30 of the 31 frames (both on 23), but on 15 with rock or a rope's
+  pieces beside them, mostly in the column of the rope at x -414, which isn't drawn there; the median of what they
+  say kept her at -792 on 30 of the 31 (once her platform's end put her at -779). Not seen on the first map at this
+  size.
+- **Monsters and drops** (`mobs.py`, `sprites.py`, `loot.py`: their scale only): the game's own sprites and item
+  pictures as they are, pixel for pixel, for 1366x768 (`sprites_x1`, `loot_x1` beside the 1920x1080 ones, with a
+  `scale.json`: `mobs.picture_scale`), and the screenshot cut-outs (of the 1920x1080 window) shrunk 1.40625 times;
+  what matching the cut-outs against the sprites says of them (their feet, `cutouts.json`) is in their own px, so it
+  goes for every size. The search's slack, re-find window, bands and colour count are converted.
+- **The rest:** the feed's ring holds frames of the look's shape (`feed.frame_shape`, 768 x 1366); the Localizer's
+  origin moves to the same game px (`use`: one minimap px is 16 units at 1366x768), and the camera, ropes and
+  platform ends on screen, the loot strips, the ground under her, the mover's rope line-up, the mouse nudge, the
+  feed tracker's screen edge (`View.edge`, 34 px) and how far another player's dot may move between looks go by the
+  look's geometry. Recordings keep their client size and scale (`Recording.geo`; the older ones were 1920x1080 at
+  half size), and calibrate makes a calibration for the size the game is at, its crop covering the same part of the
+  game (569 x 284 client px) and recordings shrunk as looks are (full size at 1366x768).
+
+**Full size or half at 1366x768** (`screen.LOOK_SCALES`; `bench-look --shrink 1366x768 [--look-scale 2]` times the 17
+bench frames shrunk to 1366x768, as the game would draw them there but for what the stretch had blurred). Full size:
+1366x768 is twice 960x540's pixels at 1.42 times its detail; half size, 683x384, half its pixels at 0.71 of its detail.
+What each saw, against the frames as they are at 1920x1080 (a look with the whole screen and every drop in view, on
+each of the 17):
+- **Full size** found all 28 monsters 1920x1080 found, 0.9 units from where it put them on average (at most 3.2),
+  and 3 more that are there: a snail in plain view on `stand.png` and on `sit.png` (scored 0.93 and 0.76) and a slime
+  half behind her on `z2_shoot3.png` (0.76), which 1920x1080 missed. Snails scored 0.79-0.96 where they had 0.63-0.82.
+  All 11 drops (0.7 units off), her x 0.6 units off (at most 1.8), her tag on all 17.
+- **Half size** found 24 of the 28 (a slime and three snails missed), none more, all 11 drops (0.9 off), her x 1.3 off.
+- On West Rocky Mountain II's own 1366x768 frames (none of its monsters has a colour test yet), half-size looks took
+  its rock for the first map's monsters in 6 of 10 frames (a snail at 0.68-0.70, an Orange Mushroom at 0.61), full
+  size never.
+
+So looks are full size at 1366x768. What a look costs (`bench-look`, medians in ms, 17 frames x 5, back to back on
+2026-10-23; the frames shrunk to 1366x768 aren't the game's own pixels, so the EXP number isn't read on them):
+
+| | 1920x1080, half size | 1366x768, full size | 1366x768, half size |
+|---|---|---|---|
+| `Eyes.look` (her tag, HP and MP, the ground, her dot, ropes, EXP) | 11.0 | 5.3 | 5.5 |
+| ... her name tag, near where she was; the whole play area | 3.7; 40.6 | 1.2; 20.5 | 1.6; 17.9 |
+| ... the look's frame shrunk | 1.0 | 0 | 0.4 |
+| ... ropes where the map's can show | 4.3 | 2.2 | 2.5 |
+| Her EXP number read (when it changes) | 7.9 | 2.8 | 3.0 |
+| Monsters: her band; the whole screen | 23.7; 83.9 | 33.9; 123.6 | 20.5; 70.0 |
+| `Senses.look` without monsters (placing her) | 13.3 | 6.2 | 7.2 |
+| ... with the monsters in her band | 35.2 | 39.7 | 26.8 |
+| ... and the drops on her platform | 47.4 | 59.8 | 35.3 |
+| ... the whole screen and every drop in view | 171.5 | 226.5 | 144.9 |
+| The feed's step: her place, monsters re-found | 15.9 | 13.0 | 10.0 |
+| ... with her band searched; with the whole screen | 36.8; 101.8 | 42.8; 137.1 | 28.5; 80.4 |
+| The Lie Detector check (the player's; at 1366x768 the whole frame stretched to 1920x1080 first, whatever the look's size) | 76.6 | 84.5 | 71.8 |
+
+On 11 of West Rocky Mountain II's own frames (no monster searched for there, but each kind's colour test runs):
+`Eyes.look` 5.8, placing her 6.5, her band 32.8, the whole screen with every drop 201, the feed's step 6.5 (with her
+band 33.2, the whole screen 105.9). A look placing her takes half what it took; a monster search half again more.
+
+**Her place at 1366x768** (`tests/test_resolution.py`). Her dot, at (94.5, 172.5) on all 31 frames, puts her at x -880
+(DOT_ORIGIN moved to the same game px), 88 units left of where she stands: the two ropes in view (map x -536 and -303,
+seen at screen x 941 and 1174, her tag at 685) put her at -792, on stair 28 (-833 to -743, y 2685). That's this map's
+minimap picture, not the size: it starts 5 game px further left than on the first map, where DOT_ORIGIN was fitted, as
+on its stretched frames (80 units left on step 24; the map track's `Localizer.fit_picture`). Moved by those 5 game px
+(80 units), she's put on stair 28 and the ropes refine her to -792, y 2685 (her dot 11.5 units low). HP and MP 730/730
+and 584/584 read full, and the other players are placed (two to five, most on the bridge 22).
+
+**To check in game** (the game at 1366x768; the player started by whoever is at the PC):
+- `python -m gamelab calibrate --fresh` where she stands on flat ground with nothing around: it writes
+  `calibration_1366x768.json` and her tag at this size from the live frame (`lab/calibrate_crop_1366x768.png`: her tag
+  near the middle), and drops the offline full-size template so the next look cuts it from the new one.
+- `python -m gamelab hunt look --map 10004021` (no keys): her place, HP and MP, her EXP number (every glyph within
+  about a level), the other players; `lab/shots/hunt_look.png` at 1366x768.
+- `python -m gamelab bench-look --live --n 100 --map 10004021` with the game in front (no keys) and `bench-capture --n
+  100`: a look's stages and its capture at this size live (the 1366x768 box: about half the pixels to copy).
+- `python -m gamelab watch --minutes 2 --map 10004021` (no keys): the feed at this size (its frames 1366x768).
+- `python -m gamelab act right*400 --record`, then `python -m gamelab track act` (or the name given): a recording at
+  full size around her (569 x 284), tracked by her tag at this size.
+
 ## Probes to run
 
 What a star hits still has open questions that only the game can settle (see Attack): the search window's top and floor, the search between her level and 60 below her, how an attack from a jump picks its target, what stops a star (that her own platform stops a star down past its end, and the step wall one up to 2, the user saw on 2026-10-21; where it gets through, and how high its line runs, are left), and how far the claw swipes. Each is now between reach's answer (the client's routine, or the logs' where the sources don't reach) and one other. `python -m gamelab probe run NAME` puts one of them to the game; none has been run in game yet (built and tested in the simulator only). The player must be running, as for `hunt`. `probe score` weighs both answers on the log (below), and once one is decided, what the second column names goes its way.
@@ -1137,8 +1257,8 @@ A hunt runs for hours, and perception is to run all the time, so what the stack 
 
 ## Limits
 
-- **Recalibrate** after moving the game window, changing maps or changing resolution. Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name.
-- **`hunt` needs a 1920×1080 game window,** the size its templates were made at.
+- **Recalibrate** after moving the game window, changing maps or changing resolution (each client size keeps its own calibration). Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name.
+- **`hunt` needs a 1920×1080 or 1366×768 game window** with a calibration at that size, and the size it had when the command started (see The game at its own 1366x768). The combo analysis on recordings (`track.airborne`'s lift, the claw's swing boxes, `scroll`'s patches, `analyze.UP_PX`) is still in px of the 1920×1080 window's half-size recordings: a recording at 1366×768 has 1.42 times their px.
 - **Each new monster type needs a colour gate** (a body-colour test in `PALETTES` in `perception/mobs.py`) before its game sprites are used. Its templates come from the game data automatically.
 - **Her name tag can be hidden** behind screen widgets at the map's edge, like the party HP box. She's then placed on screen from the minimap dot and the camera, which is only good to about 11 map units.
 - **Camera correction for recordings needs ground with a pattern** under her, like a girder or tiles. Plain ground can't be tracked.
