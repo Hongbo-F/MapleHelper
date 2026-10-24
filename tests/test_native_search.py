@@ -1,6 +1,7 @@
-"""Monsters at the game's own 1366x768: the game's own pictures as they are (opaque pixels matched, no cut-outs).
-The frames are tests/fixtures/native (West Rocky Mountain II, none of whose monsters has a colour gate yet), with
-pictures drawn on them as the game draws them (analysis.pasted)."""
+"""Monsters at the game's own 1366x768: the game's own pictures as they are (opaque pixels matched, no cut-outs), and
+the search coarse to fine (step 1 at the 1920x1080 window's half size, step 2 at full size in small windows, a gate
+first and several templates a place). The frames are tests/fixtures/native (West Rocky Mountain II, none of whose
+monsters has a colour gate yet), with pictures drawn on them as the game draws them (analysis.pasted)."""
 
 import json
 from types import SimpleNamespace
@@ -39,26 +40,97 @@ def test_a_shrunk_picture_is_as_before():
     assert mask is drawn
 
 
-# --- the search -------------------------------------------------------------------------------------------------------
+def test_at_1920x1080_half_size_step_1_is_the_look_frame():
+    detector = MobDetector(threads=1)
+    assert detector.search == 1 and detector.spx == detector.px == 1
+    assert all(t.step1 is None for ts in detector.templates.values() for t in ts)
+
+
+def test_at_1366x768_full_size_step_1_is_the_1920x1080_windows_half_size(tmp_path):
+    detector = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), threads=1, frame_scale=NATIVE.frame_scale)
+    assert detector.search == pytest.approx(1366 / 960.5, abs=0.002) and detector.spx == pytest.approx(1)
+    t = detector.templates["pig"][0]
+    assert t.rgb.shape[:2] == pig().shape[:2]  # the picture as it is
+    assert t.step1[0].shape[:2] == (45, 73)    # 64 x 104 at 1/1.42
+    assert t.silhouette.shape == (45 // 2, 73 // 2)
+
+
+# --- the search, coarse to fine ----------------------------------------------------------------------------------
+
+def test_places_hold_every_template_spotted_there_best_first():
+    spots = [(0.9, 100, 50, 3), (0.85, 102, 51, 1), (0.8, 300, 50, 2), (0.7, 104, 49, 3), (0.6, 101, 52, 0),
+             (0.5, 300, 52, 1)]
+    assert mobs._places(spots, 6) == [[(100, 50, 3), (102, 51, 1), (101, 52, 0)], [(300, 50, 2), (300, 52, 1)]]
+    first = [place[0] for place in mobs._places(spots, 6)]
+    assert first == mobs._to_check(spots, 6)  # each place's first is the spot checked at 1920x1080
+    many = [(1 - i / 100, 20 * i, 0, i % 3) for i in range(30)]
+    assert len(mobs._places(many, 6)) == mobs.MAX_CHECKS
+
+
+def test_a_spot_goes_to_the_finer_frame_by_its_windows_corner():
+    t = SimpleNamespace(silhouette=np.zeros((11, 18)), rgb=np.zeros((32, 52, 3)))
+    cx, cy = 100 + 18, 40 + 11  # a window's top-left (100, 40) plus half the template, at step 1's scale
+    assert mobs._finer(t, cx, cy, 1.0, 1.0) == (100 + 26, 40 + 16)
+    assert mobs._finer(t, cx, cy, 1.5, 2.0) == (150 + 26, 80 + 16)
+
 
 def test_a_monster_drawn_at_the_games_own_size_is_found_where_it_stands(tmp_path):
-    detector = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), threads=1, frame_scale=NATIVE.frame_scale)
+    folder = game_folder(tmp_path, {"pig_move0": pig()})
+    coarse = MobDetector(folder, threads=1, frame_scale=NATIVE.frame_scale)
+    full = MobDetector(folder, threads=1, frame_scale=NATIVE.frame_scale, search_scale=1.0)
     # (each wholly inside one of the whole screen's bands: 0-171, 128-299, 256-427, 384-555, 512-675)
     for left, top, flip in ((300, 300, False), (900, 150, True), (1101, 520, False)):
         scene = frame()
         pasted.paste(scene, pig()[:, ::-1] if flip else pig(), left, top)
         feet_x = left + (pig().shape[1] - PIG_ORIGIN[0] if flip else PIG_ORIGIN[0])
-        found = detector.detect_wide(scene, (0, int(768 * HUD_TOP)))
-        assert [(m.kind, m.foot_x, m.feet_y, m.facing, m.score) for m in found] == [
-            ("pig", feet_x, top + PIG_ORIGIN[1], 1 if flip else -1, 1.0)], (left, top, flip)
-        band = detector.detect(scene, (top - 60, top + 120))
-        assert [(m.foot_x, m.feet_y) for m in band] == [(feet_x, top + PIG_ORIGIN[1])]
+        for detector in (coarse, full):
+            found = detector.detect_wide(scene, (0, int(768 * HUD_TOP)))
+            assert [(m.kind, m.foot_x, m.feet_y, m.facing, m.score) for m in found] == [
+                ("pig", feet_x, top + PIG_ORIGIN[1], 1 if flip else -1, 1.0)], (left, top, flip)
+            band = detector.detect(scene, (top - 60, top + 120))
+            assert [(m.foot_x, m.feet_y) for m in band] == [(feet_x, top + PIG_ORIGIN[1])]
 
 
 def test_nothing_is_found_on_frames_of_the_game_at_its_own_size_with_no_monster_of_its_kind(tmp_path):
     detector = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), frame_scale=NATIVE.frame_scale)
     for name in FRAMES:
         assert detector.detect_wide(frame(name), (0, int(768 * HUD_TOP))) == [], name
+
+
+def test_the_frame_checked_first_at_a_place_doesnt_hide_the_monsters_own(tmp_path, monkeypatch):
+    # Another frame of the monster drawn: its colours 2 px across inside the same outline (a pose apart),
+    # which step 1 ranks first at the place (as it ranked a snail's other frames first in bench-paste). Alone, it's
+    # what's found, 2 px off where the monster stands; with the place's other templates, its own frame, exactly.
+    right = pig().copy()
+    wrong = right.copy()
+    wrong[..., :3] = np.roll(right[..., :3], 2, axis=1)
+    detector = MobDetector(game_folder(tmp_path, {"pig_right": right, "pig_wrong": wrong}), threads=1,
+                           frame_scale=NATIVE.frame_scale)
+    names = [t.name for t in detector.templates["pig"]]
+    real = mobs._places
+    monkeypatch.setattr(mobs, "_places", lambda spots, slack: [sorted(p, key=lambda s: names[s[2]] != "pig_wrong")
+                                                               for p in real(spots, slack)])
+    scene = frame()
+    pasted.paste(scene, right, 400, 300)
+    monkeypatch.setattr(mobs, "FINE_TEMPLATES", 1)
+    found = detector.detect(scene, (250, 420))
+    assert [(m.template, m.foot_x) for m in found] == [("pig_wrong", 400 + PIG_ORIGIN[0] - 2)] and found[0].score < 1
+    monkeypatch.setattr(mobs, "FINE_TEMPLATES", 6)
+    found = detector.detect(scene, (250, 420))
+    assert [(m.template, m.score, m.foot_x) for m in found] == [("pig_right", 1.0, 400 + PIG_ORIGIN[0])]
+
+
+def test_a_monster_seen_at_the_games_own_size_is_refound(tmp_path):
+    detector = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), threads=1, frame_scale=NATIVE.frame_scale)
+    scene = frame()
+    pasted.paste(scene, pig(), 500, 300)
+    seen = detector.detect(scene, (250, 420))[0]
+    box = (seen.x - seen.w // 2, seen.y - seen.h // 2, seen.x + seen.w // 2, seen.y + seen.h // 2)
+    moved = frame()
+    pasted.paste(moved, pig(), 512, 303)  # 12 and 3 px on: within REFIND_PAD at this size (23 px)
+    again = detector.refind(moved, box, "pig", seen.template, seen.facing)
+    assert (again.foot_x - seen.foot_x, again.feet_y - seen.feet_y) == (12, 3)
+    assert detector.fallbacks == 0
 
 
 # --- which pictures, at which size --------------------------------------------------------------------------------
@@ -83,7 +155,7 @@ def test_at_the_games_own_size_the_detector_has_the_games_sprites_alone(tmp_path
     monkeypatch.setattr(sprites, "ensure", lambda names, stretch: folder)
     model = SimpleNamespace(spawns=[SimpleNamespace(mob_id=8, name="Pig")])
     native = sprites.detector_for(model, NATIVE)
-    assert {t.name for t in native.templates["pig"]} == {"pig_move0"}
+    assert {t.name for t in native.templates["pig"]} == {"pig_move0"} and native.search > 1
     stretched = sprites.detector_for(model, STRETCHED)  # the cut-outs too where the window stretches the game
     assert {"pig_0", "pig_move0"} <= {t.name for t in stretched.templates["pig"]}
 
@@ -109,3 +181,30 @@ def test_sprites_at_the_games_own_size_are_its_pictures_with_their_alpha(tmp_pat
     t = MobDetector(tmp_path, threads=1, frame_scale=1.0).templates["slime"][0]
     alpha = np.asarray(Image.open(tmp_path / f"{t.name}.png"))[..., 3]
     assert t.mask3[..., 0].sum() == (alpha == 255).sum() < (alpha >= 128).sum()  # see-through: opaque pixels only
+
+
+@pytest.fixture(scope="module")
+def first_map():
+    from gamelab.localization import mapdata
+    try:
+        return mapdata.load(10000012)
+    except (OSError, KeyError):
+        pytest.skip("needs Thicket Around the Beach II's game data")
+
+
+def test_the_first_maps_sprites_drawn_at_the_games_own_size_are_found(first_map):
+    needs_game_data()
+    from gamelab.perception import loot
+    detector = sprites.detector_for(first_map, NATIVE)
+    backgrounds = [frame(n) for n in FRAMES]
+    result = pasted.monsters(backgrounds, {"native": (detector, NATIVE)}, sprites.folder_for(1.0), (140, 75), 1, 0)
+    tallies = result["tally"]["native"]
+    assert set(tallies) == {"orange-mushroom", "pig", "slime", "snail"}
+    assert sum(t.found for t in tallies.values()) >= 0.9 * sum(t.drawn for t in tallies.values())
+    assert all(t.extra == 0 for t in tallies.values()) and result["clean"]["native"] == []
+    errors = [e for t in tallies.values() for err in t.errors for e in err]
+    assert sum(abs(e) > 1 for e in errors) <= 2  # where they stand, to the px but for a frame or two
+    drops = pasted.drops(backgrounds, {"native": (loot.LootDetector(geo=NATIVE), NATIVE)}, loot.folder_for(1.0), 1, 1)
+    found = drops["tally"]["native"]
+    assert all(t.found == t.drawn and min(t.scores) == 1.0 for t in found.values()), found
+    assert drops["clean"]["native"] == []

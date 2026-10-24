@@ -951,6 +951,7 @@ def cmd_bench_paste(args) -> int:
     from .localization import mapdata
     from .perception import loot, sprites
     from .perception.kinds import kind_of
+    from .perception.mobs import MobDetector
     from .screen import NATIVE
     files = [Path(f) for f in args.files] or sorted(NATIVE_FRAMES.glob("*.png"))
     backgrounds = [np.asarray(Image.open(f).convert("RGB")) for f in files]
@@ -964,6 +965,10 @@ def cmd_bench_paste(args) -> int:
         native = sprites.detector_for(model, NATIVE)
         detectors = {"1366x768, full size": (native, NATIVE),
                      "1920x1080 (the scene stretched), half size": (sprites.detector_for(model, STRETCHED), STRETCHED)}
+        if args.full_step_1:  # step 1 at the look's own size, as before the search went coarse to fine
+            detectors["1366x768, full size, step 1 at full size"] = (
+                MobDetector(sprites.folder_for(NATIVE.stretch), frame_scale=NATIVE.frame_scale, search_scale=1.0),
+                NATIVE)
         kinds = {kind_of(s.name) for s in model.spawns if s.name} & set(native.templates)
     except RuntimeError:  # (no picture of any kind with a colour gate there at all)
         kinds = set()
@@ -1528,6 +1533,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP, help="whose monsters (default: the first map's)")
     s.add_argument("--each", type=int, default=2, help="times each picture is drawn (monsters: each way)")
     s.add_argument("--seed", type=int, default=0, help="where they're drawn")
+    s.add_argument("--full-step-1", action="store_true", help="also search with step 1 at full size at 1366x768")
     s.set_defaults(func=cmd_bench_paste)
     s = sub.add_parser("bodies", help="where the monster detector puts monsters' feet on saved screenshots, and "
                                       "their x from frame to frame on recordings (offline; no game, no keys)")

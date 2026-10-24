@@ -6,14 +6,19 @@ silhouette against the frame's body-colour mask (one fast single-channel pass ov
 checks only the best few spots with the full masked colour template, which rejects scenery that merely
 shares the colour (leaves, clouds). Frames are look frames (the game window shrunk as screen.Geometry says: half
 size at 1920x1080, full size at the game's own 1366x768), and the templates are brought to their scale; the px below
-were measured in half-size frames of the 1920x1080 window and go by it too. A template drawn at the frames' own scale
-(the game's own pictures at the game's own 1366x768, sprites.py) is used as it is, and step 2 matches only the pixels
-the game draws as they are (opaque ones: a slime is see-through, and its half-opaque pixels on screen are partly
-what's behind it).
+were measured in half-size frames of the 1920x1080 window and go by it too.
+
+Coarse to fine: step 1 always works at that scale (SEARCH_SCALE, 0.70 px per game px), where every number it goes by
+was measured. A finer look frame (the game's own 1366x768 at full size, 1 px per game px) is shrunk to it for step 1,
+and step 2 checks the places it found at the frame's own size, with the game's own pictures as they are (sprites.py):
+only the pixels the game draws as they are (opaque ones: a slime is see-through, and its half-opaque pixels on screen
+are partly what's behind it), in small windows around the spots. There a place passes a gate at step 1's scale first,
+and then several of its templates are checked, not only its best (FINE_TEMPLATES). At 1920x1080 half size the look
+frame is at that scale already, and all of it is as it was.
 
 The matches run on a few threads (OpenCV lets go of Python's lock while it matches). Which spots step 2
-checks doesn't depend on what the checks find, so they're all picked first, and the answers are the same
-as one thread's, in the same order.
+checks doesn't depend on what the checks find (at a finer frame, on what the gate's checks find, all made
+first), so they're all picked first, and the answers are the same as one thread's, in the same order.
 
 A monster found says which template matched it, and so what that template's folder knows of it (INDEX,
 CUTOUTS): where its feet are in the picture, which way it faces (the game's sprites face left; a flipped
@@ -41,8 +46,26 @@ SILHOUETTE_THRESHOLD = 0.35  # step 1: a spot worth checking
 MAX_CHECKS = 12              # step 2: best spots checked per monster type
 MIN_COVER = 0.25             # step 1: a spot's window needs this share of the template's own body colour
 MIN_BODY_PIXELS = 20         # a monster type is looked for only where this many pixels have its colour
-COARSE = 2                   # step 1 works at 1/COARSE of the frame's size
+COARSE = 2                   # step 1 works at 1/COARSE of its frame's size (SEARCH_SCALE)
+# Step 1's frame, in px per game px: the 1920x1080 window's half size (0.703), where step 1's numbers (its
+# thresholds, MIN_COVER, MIN_BODY_PIXELS, MAX_CHECKS, the colour tests) were all measured. A finer look frame is
+# shrunk to it (area averaged) for step 1 only.
+SEARCH_SCALE = STRETCHED.frame_scale
 CHECK_SLACK = 6              # step 2 looks this far (px) around a spot, so spots closer than this are one
+# Step 2 on a look frame finer than step 1's (the game's own 1366x768 at full size). There a monster's frames differ
+# crisply: drawn as the game draws them on frames of the game at that size (analysis.pasted: the first map's sprites,
+# each frame both ways twice, on West Rocky Mountain II's 31 frames), a snail or slime checked with the frame whose
+# silhouette matched best scored 0.43-0.55 where its own frame, a few spots down at the same place, scored 1.000,
+# and 16 of 120 were missed. So each place's best FINE_TEMPLATES templates (4: 112 found) are checked, each at its
+# own spot, where the place's best scores FINE_GATE at step 1's scale first, as step 2 went at 1920x1080 (CHECK_SLACK
+# around it): 114 of the 120 were found. Of 337 drawn, 331 scored 0.55 there (333 at 0.5, 329 at 0.6), and this
+# map's rock 2.8 places a frame (10.2 at 0.5): with six drawn on each frame, the whole screen took 90 ms (97 at 0.5;
+# 83 at 1920x1080, the same scenes stretched). Each template is looked for FINE_SLACK look-frame px around its spot:
+# of the 189 matches scoring 0.85 or more, all were within 3 px of it (in windows of 11 px templates slid onto the
+# monster beside theirs, and an Orange Mushroom's frame scored 0.61 on this map's rock).
+FINE_TEMPLATES = 6
+FINE_GATE = 0.55
+FINE_SLACK = 4
 OPAQUE = 128                 # a game picture's pixel is drawn from this alpha up (sprites.build's threshold)
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
 THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the whole screen 250 -> 117 (8 are no faster)
@@ -114,7 +137,7 @@ class MobTemplate(NamedTuple):
     CUTOUTS)."""
     rgb: np.ndarray         # its colours
     mask3: np.ndarray       # where the picture is (uint8, one copy per colour channel): step 2 matches these pixels
-    silhouette: np.ndarray  # its body colour, at 1/COARSE size (step 1)
+    silhouette: np.ndarray  # its body colour, at 1/COARSE of SEARCH_SCALE (step 1)
     origin: tuple[float, float] | None = None  # where the monster's feet are, from its top-left (frame px)
     facing: int = 0         # which way the monster faces in it: 1 right, -1 left, 0 not known
     frame: str = ""         # its frame in the game data ("move/2")
@@ -122,6 +145,8 @@ class MobTemplate(NamedTuple):
     box: tuple[float, float, float, float] | None = None  # its body (left, top, right, bottom), map units
                                                           # from its feet, y up negative, facing applied
     name: str = ""          # its file's name, without ".png"
+    step1: tuple[np.ndarray, np.ndarray] | None = None  # its colours and mask at step 1's scale, where that's not the
+                                                         # frame's (FINE_GATE's check)
 
 
 def split_channels(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -214,29 +239,44 @@ class MobDetector:
     What the folders say about their templates (INDEX, CUTOUTS) comes along, and `meta` (by file name) on top.
     `threads`: how many matches run at once (1: all on the caller's thread). `frame_scale`: the frames' px per game px
     (screen.Geometry.frame_scale; by default the 1920x1080 window's at half size), which each folder's pictures are
-    brought to from theirs (`picture_scale`): a folder drawn at the frames' own scale is used as it is."""
+    brought to from theirs (`picture_scale`): a folder drawn at the frames' own scale is used as it is.
+    `search_scale`: step 1's frame, px per game px (SEARCH_SCALE; a frame no finer than it is searched as it is)."""
 
     def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None,
-                 frame_scale: float = STRETCHED.frame_scale):
+                 frame_scale: float = STRETCHED.frame_scale, search_scale: float = SEARCH_SCALE):
         self.templates: dict[str, list[MobTemplate]] = {}
         folders = folder if isinstance(folder, list) else [folder]
         meta = {**read_meta(folders), **(meta or {})}
         shrinks = {f: picture_scale(f) / frame_scale for f in folders}
         self.px = frame_scale / STRETCHED.frame_scale  # this frame's px per px of a half-size 1920x1080 frame
+        # Step 1's frame: the look frame shrunk `search` times (1: the look frame itself), its px `spx` of a half-size
+        # 1920x1080 frame's (1 at either size; 0.71 for a half-size look at 1366x768, searched as it is).
+        self.search = max(1.0, frame_scale / search_scale)
+        self.spx = self.px / self.search
         for path in sorted(p for f in folders for p in f.glob("*.png")):
             kind = path.stem.split("_")[0]
             if kind not in KINDS_WITH_PALETTE:
                 continue
             rgba = np.asarray(Image.open(path).convert("RGBA"))
             rgb, mask, drawn = _picture(rgba, shrinks[path.parent])
+            if self.search != 1:  # step 1's picture, from the picture as it is
+                small, _, small_drawn = _picture(rgba, shrinks[path.parent] * self.search)
             for flip in (False, True):  # monsters face either way
-                t, m, d = (rgb[:, ::-1], mask[:, ::-1], drawn[:, ::-1]) if flip else (rgb, mask, drawn)
+                t, m = (rgb[:, ::-1], mask[:, ::-1]) if flip else (rgb, mask)
                 t = np.ascontiguousarray(t)
-                silhouette = (palette(kind, t) & (d > 0)).astype(np.float32)
-                coarse = cv2.resize(silhouette, (max(1, t.shape[1] // COARSE), max(1, t.shape[0] // COARSE)),
+                step1 = None
+                if self.search == 1:
+                    s, d = t, (drawn[:, ::-1] if flip else drawn)
+                else:
+                    s, d = (small[:, ::-1], small_drawn[:, ::-1]) if flip else (small, small_drawn)
+                    s = np.ascontiguousarray(s)
+                    step1 = (s, np.dstack([d] * 3))
+                silhouette = (palette(kind, s) & (d > 0)).astype(np.float32)
+                coarse = cv2.resize(silhouette, (max(1, s.shape[1] // COARSE), max(1, s.shape[0] // COARSE)),
                                     interpolation=cv2.INTER_AREA)
                 self.templates.setdefault(kind, []).append(MobTemplate(
-                    t, np.dstack([m] * 3), coarse, *_known(meta.get(path.name), t.shape[:2], flip), path.stem))
+                    t, np.dstack([m] * 3), coarse, *_known(meta.get(path.name), t.shape[:2], flip), path.stem,
+                    step1))
         if not self.templates:
             raise RuntimeError(f"no monster templates in {folder}")
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
@@ -302,29 +342,46 @@ class MobDetector:
         if rows:
             y_off = max(0, rows[0])
             frame = frame[y_off:rows[1]]
+        small = frame  # step 1's frame: SEARCH_SCALE, unless the look frame is no finer
+        if self.search != 1:
+            h, w = frame.shape[:2]
+            small = cv2.resize(frame, (max(1, round(w / self.search)), max(1, round(h / self.search))),
+                               interpolation=cv2.INTER_AREA)
+            sx, sy = w / small.shape[1], h / small.shape[0]  # the look frame's px per step 1's
         # A size that's a multiple of COARSE, so step 1's mask is an exact shrink. An odd one (the fight's
         # band was 151 rows) smeared faint colour into blank windows, which then scored a perfect 1.0.
-        frame = frame[:frame.shape[0] // COARSE * COARSE, :frame.shape[1] // COARSE * COARSE]
-        channels = split_channels(frame)
-        coarse_size = (frame.shape[1] // COARSE, frame.shape[0] // COARSE)
+        small = small[:small.shape[0] // COARSE * COARSE, :small.shape[1] // COARSE * COARSE]
+        if self.search == 1:
+            frame = small
+        channels = split_channels(small)
+        coarse_size = (small.shape[1] // COARSE, small.shape[0] // COARSE)
         kinds = []  # (kind, its templates, its body colour at 1/COARSE size, that colour's cover)
         for kind, templates in self.templates.items():
             if only is not None and kind not in only:
                 continue
-            colour = palette(kind, frame, channels)
-            if colour.sum() < MIN_BODY_PIXELS * self.px * self.px:
+            colour = palette(kind, small, channels)
+            if colour.sum() < MIN_BODY_PIXELS * self.spx * self.spx:
                 continue
             coarse = cv2.resize(colour.astype(np.float32), coarse_size, interpolation=cv2.INTER_AREA)
             kinds.append((kind, templates, coarse, Cover(coarse)))
         # Step 1, every template of every kind; then the spots each kind checks; then step 2, all at once.
         jobs = [(coarse, cover, t, i) for _, templates, coarse, cover in kinds for i, t in enumerate(templates)]
         found = run(lambda job: _spots(*job), jobs)
-        checks, start, slack = [], 0, round(CHECK_SLACK * self.px)
+        checks, places, start, slack = [], [], 0, round(CHECK_SLACK * self.spx)
         for kind, templates, _, _ in kinds:
             spots = sorted((s for f in found[start:start + len(templates)] for s in f), reverse=True)
             start += len(templates)
-            checks += [(kind, templates[i], cx, cy) for cx, cy, i in _to_check(spots, slack)]
-        results = run(lambda c: _check(frame, c[1], c[2], c[3], slack), checks)
+            if self.search == 1:
+                checks += [(kind, templates[i], cx, cy) for cx, cy, i in _to_check(spots, slack)]
+            else:
+                places += [(kind, [(templates[i], cx, cy) for cx, cy, i in place]) for place in _places(spots, slack)]
+        if self.search == 1:
+            results = run(lambda c: _check(frame, c[1], c[2], c[3], slack), checks)
+        else:  # the gate at step 1's scale, then each place's templates at the look frame's, around their own spots
+            gate = run(lambda p: _match_at(small, *p[1][0][0].step1, p[1][0][1], p[1][0][2], slack), places)
+            checks = [(kind, t, *_finer(t, cx, cy, sx, sy)) for (kind, place), g in zip(places, gate)
+                      if g is not None and g[0] >= FINE_GATE for t, cx, cy in place[:FINE_TEMPLATES]]
+            results = run(lambda c: _check(frame, c[1], c[2], c[3], FINE_SLACK), checks)
         hits = []
         for (kind, template, *_), result in zip(checks, results):
             if result and result[0] >= THRESHOLD:
@@ -411,10 +468,48 @@ def _to_check(spots: list[tuple[float, int, int, int]], slack: int = CHECK_SLACK
     return picked
 
 
+def _places(spots: list[tuple[float, int, int, int]], slack: int,
+            most: int | None = None) -> list[list[tuple[int, int, int]]]:
+    """`_to_check`'s places, each with the templates whose spots are there, best first, at most `most` of them (by
+    default FINE_TEMPLATES): for each place, its spots (centre x, y, template), the first `_to_check`'s. A spot is a
+    place's when it's within `slack` of the place's first, the first such place of those `_to_check` picked (as they
+    were picked, a spot near none of those already picked made one); spots further down than `_to_check` looks only
+    join places. (Picked spot by spot in Python, every spot against every place, it took 4.4 ms a band.)"""
+    most = FINE_TEMPLATES if most is None else most
+    picked = _to_check(spots, slack)
+    places = [[p] for p in picked]
+    if not spots or not picked:
+        return places
+    a = np.array([s[1:] for s in spots])  # (x, y, template) of each spot, best first
+    p = np.array(picked)
+    near = (np.abs(a[:, None, 0] - p[None, :, 0]) < slack) & (np.abs(a[:, None, 1] - p[None, :, 1]) < slack)
+    has, which = near.any(axis=1), near.argmax(axis=1)
+    for k, place in enumerate(places):
+        for cx, cy, i in a[has & (which == k)].tolist():
+            if len(place) >= most:
+                break
+            if all(i != j for _, _, j in place):
+                place.append((cx, cy, i))
+    return places
+
+
+def _finer(template: MobTemplate, cx: int, cy: int, sx: float, sy: float) -> tuple[int, int]:
+    """A step 1 spot (its centre in step 1's frame, `_spots`) in a look frame `sx` x `sy` times finer: its window's
+    top-left corner scaled, plus half the template's size there."""
+    sh, sw = template.silhouette.shape
+    th, tw = template.rgb.shape[:2]
+    left, top = cx - COARSE * sw // 2, cy - COARSE * sh // 2
+    return int(round(left * sx)) + tw // 2, int(round(top * sy)) + th // 2
+
+
 def _check(frame: np.ndarray, template: MobTemplate, cx: int, cy: int, slack: int = CHECK_SLACK):
     """Masked colour match of one template centred within `slack` (CHECK_SLACK in the frame's px) of (cx, cy):
     (score, x, y, w, h), or None if it doesn't fit in the frame there."""
-    tpl, mask = template.rgb, template.mask3
+    return _match_at(frame, template.rgb, template.mask3, cx, cy, slack)
+
+
+def _match_at(frame: np.ndarray, tpl: np.ndarray, mask: np.ndarray, cx: int, cy: int, slack: int):
+    """`_check` with a picture and its mask (uint8, one per colour channel)."""
     th, tw = tpl.shape[:2]
     x0, y0 = max(0, cx - tw // 2 - slack), max(0, cy - th // 2 - slack)
     window = frame[y0:y0 + th + 2 * slack, x0:x0 + tw + 2 * slack]
