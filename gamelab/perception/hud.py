@@ -44,15 +44,22 @@ def bars(full: np.ndarray) -> tuple[float, float]:
     return hp_fill(span(HP_BAR)), mp_fill(span(MP_BAR))
 
 
+# A bar's fill is its colour well above the other two channels (BAR_TINT), whatever its brightness: when her HP
+# changes the game flashes the bar pink (224, 150, 147) or dark red (77, 3, 0) for a moment, where it's (231, 9, 0)
+# otherwise, and the old test (red over 150, green and blue under 90) read 0% on every flash: five times in 30 s of
+# hunting on 2026-10-24, each a trip to rest. The empty part is grey (64-214 on all three).
+BAR_TINT = 40
+
+
 def hp_fill(row: np.ndarray) -> float:
     """The share of a row of the HP bar (RGB, int16) that's red: her HP left."""
-    on = (row[:, 0] > 150) & (row[:, 1] < 90) & (row[:, 2] < 90)
+    on = row[:, 0] - np.maximum(row[:, 1], row[:, 2]) > BAR_TINT
     return float(on.sum()) / max(1, len(row))
 
 
 def mp_fill(row: np.ndarray) -> float:
     """The share of a row of the MP bar (RGB, int16) that's blue: her MP left."""
-    on = (row[:, 2] > 150) & (row[:, 0] < 90)
+    on = row[:, 2] - np.maximum(row[:, 0], row[:, 1]) > BAR_TINT
     return float(on.sum()) / max(1, len(row))
 
 
