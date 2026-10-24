@@ -2,7 +2,7 @@
 
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
                                              [--feed] [--costs coded|measured] [--ways N] [--map 10004021]
-                                             [--world zero-walls ...]
+                                             [--world zero-walls ...] [--grounds 23,...]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
     python -m gamelab.sim.harness rests [--trips 40]            trips to rest at low HP, transit vs --rest-avoid
@@ -179,14 +179,31 @@ def _loop_hp50(sim) -> None:
 POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid, "loop-hp50": _loop_hp50}
 
 
+def _only(policy, grounds: tuple[int, ...]):
+    """`policy`, hunting only `grounds` (`--grounds`): its tours' hunting grounds cut to those (all of them if none is
+    one by the value map). One ground, as live on Tree Dungeon on 2026-10-24 (23 alone: emptied, the hunt loop left it
+    for itself again, and waited there)."""
+    def run(sim):
+        make = sim.tour
+
+        def tour(*a, **kw):
+            t = make(*a, **kw)
+            every = t.hunting_grounds
+            t.hunting_grounds = lambda visit_s=None: [g for g in every(visit_s) if g in grounds] or list(grounds)
+            return t
+        sim.tour = tour
+        return policy(sim)
+    return run
+
+
 # --- one run -------------------------------------------------------------------------------------------
 
 def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-             feed: bool = False, map_id: int = FIRST_MAP, world: tuple = ()):
+             feed: bool = False, map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = ()):
     """The Scenario for one run: the policy hunting on map `map_id` from its START_AT[seed] (STARTS) in world `seed`
     until the horizon. `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a
     little); `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed); `world`: the
-    switches of WORLDS on."""
+    switches of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default)."""
     from . import scenarios
     if map_id not in PRESET_MAPS.get(preset, (map_id,)):
         raise ValueError(f"preset {preset} is map {', '.join(map(str, PRESET_MAPS[preset]))}'s alone")
@@ -196,10 +213,11 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
         fields = WORLDS[name]
         realism = dataclasses.replace(realism, **{k: v for k, v in fields.items() if k not in HER_FIELDS})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
-    fn = POLICIES[policy]
+    fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
     return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else "")
-                              + "".join(f":{w}" for w in world), fn,
+                              + "".join(f":{w}" for w in world) + (f":g{'-'.join(map(str, grounds))}" if grounds else ""),
+                              fn,
                               starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
                               realism=realism, may_die=True, think=think, feed=feed, map_id=map_id,
                               her=her if world else None)
@@ -207,7 +225,7 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
             feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
-            world: tuple = ()) -> dict:
+            world: tuple = (), grounds: tuple = ()) -> dict:
     """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS); `ways`:
     the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on."""
     from .. import telemetry
@@ -221,7 +239,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         if ways is not None:
             route.ROUTES = ways
         with telemetry.captured() as records:
-            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id, world))
+            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id, world, grounds))
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
@@ -231,6 +249,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
                ways=routes if ways is None else ways, map=map_id, result=str(trace["result"])[:120])
     if world:
         out["world"] = list(world)
+    if grounds:
+        out["grounds"] = list(grounds)
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     if feed:
         f = trace["feed"]
@@ -370,8 +390,9 @@ def _waits(records: list[dict]) -> list[tuple[float, float]]:
 
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
              feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
-             world: tuple = ()) -> list[dict]:
-    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id, tuple(world)) for k in range(1, seeds + 1)]
+             world: tuple = (), grounds: tuple = ()) -> list[dict]:
+    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id, tuple(world), tuple(grounds))
+            for k in range(1, seeds + 1)]
     if jobs <= 1:
         return [run_one(*a) for a in args]
     from gamelab.sim import harness  # by its module name, so worker processes can find it (not __main__)
@@ -623,6 +644,8 @@ def main(argv: list[str] | None = None) -> int:
                         "10002073: Tree Dungeon, Forest Up North II)")
     r.add_argument("--world", action="append", choices=sorted(WORLDS), default=[],
                    help="what isn't known of the game, switched on (WORLDS; again for another)")
+    r.add_argument("--grounds", type=lambda v: tuple(int(g) for g in v.split(",")), default=(),
+                   help="hunt only these grounds, e.g. 23 (default: all of them)")
     c = sub.add_parser("compare")
     c.add_argument("baseline")
     c.add_argument("candidate")
@@ -652,13 +675,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
         return 2
     results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs,
-                       args.ways, args.map, tuple(args.world))
+                       args.ways, args.map, tuple(args.world), args.grounds)
     print(table(results))
     name = args.save or (f"{args.policy}-{args.preset}" + ("-feed" if args.feed else "")
                          + (f"-{args.costs}" if args.costs != "coded" else "")
                          + (f"-ways{args.ways}" if args.ways is not None else "")
                          + (f"-{args.map}" if args.map != FIRST_MAP else "")
-                         + "".join(f"-{w}" for w in args.world))
+                         + "".join(f"-{w}" for w in args.world)
+                         + (f"-g{'-'.join(map(str, args.grounds))}" if args.grounds else ""))
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
     return 0

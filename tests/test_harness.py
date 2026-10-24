@@ -248,6 +248,24 @@ def test_waiting_and_the_touches_then_are_counted_from_the_hunt_loop_s_rules(mod
     assert out["alive_s"] == 20.0 and out["wait_s"] == pytest.approx(5.0) and out["wait_hp_lost"] == pytest.approx(0.05)
 
 
+def test_a_run_can_hunt_only_some_grounds():
+    """`--grounds 23`: the policy's tours hunt only those grounds (all of them if the value map has none of them)."""
+    from types import SimpleNamespace
+    got = []
+
+    class Sim:
+        def tour(self, *a, **kw):
+            return SimpleNamespace(hunting_grounds=lambda visit_s=None: [1, 2, 23])
+
+    def policy(sim):
+        got.append(sim.tour().hunting_grounds())
+    harness._only(policy, (23,))(Sim())
+    harness._only(policy, (99,))(Sim())
+    assert got == [[23], [99]]
+    sc = harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, grounds=(23,))
+    assert sc.name == "loop:crowd:1:10002073:g23" and sc.fn is not harness.POLICIES["loop"]
+
+
 def test_hp_lost_on_the_trips_to_rest_is_counted_between_their_events(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0))
