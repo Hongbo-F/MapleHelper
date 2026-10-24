@@ -46,6 +46,8 @@ CLIMB_EXTRA_MS = 500      # up (or down) is held this much longer than the climb
 # jumped from. The jump key goes ROPE_JUMP_KEY_MS after the arrow (off_rope's, 30): the game acts on the arrow 66 ms
 # after its key and on the jump 65 ms after its own, each at its next 30 ms step (motion.body: Lags, STEP), so the
 # arrow is held by the jump's step.
+PORTAL_UP_MS = 100       # by a portal, up goes down this long after a jump's key: she's off the ground (JUMP_LAG 65 ms
+                          # and the game's next 30 ms step), so it can't take the portal
 HANG_TOLERANCE = 15
 ON_ROPE_X = 25
 ROPE_JUMP_KEY_MS = 40
@@ -241,11 +243,12 @@ class Mover:
             on = grab_height(p.y_at(m.rope_x), _rope(self.model, m))
             hold_up = max(0, int(1000 * (on - to) / CLIMB_SPEED))
         dx = m.rope_x - s.where.x
+        portal = self.model.portal_near(p, m.rope_x)  # up on the ground there would take it
         if abs(dx) <= SPOT_TOLERANCE:
-            self._climb_from_under(hold_up)
+            self._climb_from_under(hold_up, portal)
             return
         sign = 1 if dx > 0 else -1
-        walk_in = gap <= 10 and not self.model.portal_near(p, m.rope_x)  # up at a portal would take it
+        walk_in = gap <= 10 and not portal
         lead = 0.0 if walk_in else grab_lead(gap)
         if lead is None:
             raise ValueError(f"rope at {m.rope_x:.0f} ends {gap:.0f} above her platform: out of reach")
@@ -259,7 +262,7 @@ class Mover:
             if back == m.rope_x:
                 # Under it now (within the walk's SPOT_TOLERANCE). Calling _climb again here recursed
                 # forever when the walk stopped 5-6 units off, past the 4 it took as "under".
-                self._climb_from_under(hold_up)
+                self._climb_from_under(hold_up, portal)
                 return
             dx = m.rope_x - s.where.x
             sign, run = (1 if dx > 0 else -1), abs(dx) - lead
@@ -275,10 +278,14 @@ class Mover:
             events += tap(t, k.jump.name)
         self._send(events, "climb")
 
-    def _climb_from_under(self, hold_up: int) -> None:
-        """Standing under the rope: jump straight up holding up."""
+    def _climb_from_under(self, hold_up: int, portal: bool = False) -> None:
+        """Standing under the rope: jump straight up holding up. By a portal (`portal`), up only once she's off the
+        ground (PORTAL_UP_MS after the jump's key: physics.JUMP_LAG and a step): up on the ground there would take it.
+        No rope on the three maps hangs within MapModel.portal_near of one."""
         k = self.actions.keys
-        self._send([[0, k.up.name, "down"], *tap(40, k.jump.name), [hold_up + 350, k.up.name, "up"]], "climb")
+        up = 40 + PORTAL_UP_MS if portal else 0
+        self._send([[up, k.up.name, "down"], *tap(40, k.jump.name),
+                    [hold_up + 350, k.up.name, "up"]], "climb")
 
     def _rope_jump(self, m: Move, s: Scene) -> None:
         """Onto the rope (as a climb does, or from its top as a climb down does) and to about the height the jump goes

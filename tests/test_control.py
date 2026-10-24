@@ -180,3 +180,30 @@ def test_the_movers_drop_steps_off_a_spot_where_it_wouldnt_go_through(monkeypatc
         mover._drop(Move("drop", a.id, c.id, 92.0, 92.0), SimpleNamespace(where=SimpleNamespace(x=here)))
         (_, events), = sent
         assert {name for _, name, how in events if name in ("left", "right") and how == "down"} == walks, here
+
+
+def test_standing_under_a_rope_by_a_portal_the_mover_holds_up_only_once_she_is_off_the_ground(monkeypatch):
+    """Up on the ground at a portal takes it (the simulator ends the run: world.SimLeftMap): under a rope there, the
+    jump's key goes first and up PORTAL_UP_MS after it; anywhere else up goes first, as ever."""
+    from gamelab.control import mover as mover_mod
+    from gamelab.localization import mapdata
+    from gamelab.motion.route import Move
+    from test_navigation import by_y, tree
+    t = tree()
+    m = mapdata.parse(1, t, "Test Map", {})
+    c, d = by_y(m, 500, 400), by_y(m, 300, 700)
+    rope = m.ropes[0]
+    sent = []
+    acts = actions(sent)
+    acts.keys.up = SimpleNamespace(name="up")
+    mover = mover_mod.Mover(None, acts, m)
+    climb = Move("climb", c.id, d.id, rope.x, rope.x, rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom)
+    here = SimpleNamespace(where=SimpleNamespace(x=rope.x))
+    for portal, first in ((False, "up"), (True, "alt")):
+        monkeypatch.setattr(m, "portal_near", lambda p, x, portal=portal: portal)
+        sent.clear()
+        mover._climb(climb, here)
+        (_, events), = sent
+        assert events[0][1] == first and events[0][2] == "down"
+        up_at = next(e[0] for e in events if e[1] == "up" and e[2] == "down")
+        assert up_at == (40 + mover_mod.PORTAL_UP_MS if portal else 0)
