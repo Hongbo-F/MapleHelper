@@ -81,8 +81,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   (Her.pet), if she has one, drinks a potion for her right after a touch leaves her under its warning.
 
 Her HP, her level and EXP when a run starts, her evasion and her pet are `Her`'s: LEVEL_19 on the first map,
-LEVEL_23 on West Rocky Mountain II, LEVEL_24 on Tree Dungeon, Forest Up North II. A monster of a kind the first map hasn't takes as many stars as its HP and defence in
-the game data say (hits_of), and its body is as tall and wide as its frames there (_body_of).
+LEVEL_23 on West Rocky Mountain II, LEVEL_24 on Tree Dungeon, Forest Up North II. A monster of a kind the first map
+hasn't takes as many stars as its HP and defence in the game data say (hits_of), and its body is as tall and wide as
+its frames there (_body_of).
 
 `Noise` (off by default) adds the errors of the real game, each one seeded and tied to the moment it
 happens, not to how often anything was looked at: stars that miss, walks that stop a few units early or
@@ -345,14 +346,14 @@ RIVAL_REACH = 400.0
 RIVAL_DY = 60.0
 RIVAL_NEAR = 150.0
 RIVAL_SPEED = 125.0
-# Other players camping (Realism.camps), as the crowding study saw them on Tree Dungeon, Forest Up North II from her spot
-# on 28 (D:/MapleHelper-scratch/map3/study/crowding.md, 2026-10-24: 19 frames 2 s apart, 35.4 s): 3-6 others in the
+# Other players camping (Realism.camps), as the crowding study saw them on Tree Dungeon, Forest Up North II from her
+# spot on 28 (D:/MapleHelper-scratch/map3/study/crowding.md, 2026-10-24: 19 frames 2 s apart, 35.4 s): 3-6 others in the
 # minimap's view at once, each staying by 1-3 neighbouring platforms for 80 s or more, killing the Green Mushrooms there
 # (8 kills seen, all Greens; of the 7 whose appearing was seen, 5 died 2.1-6.3 s later) and leaving the Horny Mushrooms
-# (none of 3-4 died; one took 192 and lived), their drops gone within one 2 s step. A camp (Camp) stands at a place,
-# its dot on the minimap there, and kills each monster of its kinds on the platforms it hunts CAMP_KILL s after it shows
-# (at the start, or respawned), drawn per monster from a generator of its own; its drops are taken CAMP_TAKES s after
-# they land. It doesn't move, and kills nothing it doesn't hunt.
+# (none of 3-4 died; one took 192 and lived), their drops gone within one 2 s step. A camp (Camp) stands at a place, its
+# dot on the minimap there, and kills each monster of its kinds on the platforms it hunts CAMP_KILL s after it shows (at
+# the start, or respawned), drawn per monster from a generator of its own; its drops are taken CAMP_TAKES s after they
+# land. It doesn't move, and kills nothing it doesn't hunt.
 CAMP_KILL = (2.0, 6.0)
 CAMP_TAKES = 1.0
 

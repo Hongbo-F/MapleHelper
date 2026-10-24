@@ -330,3 +330,28 @@ def test_knocked_off_the_rope_by_the_towers_left_wall_she_falls_out_unless_group
         assert (w.fell_out_at is not None) == out
         if not out:
             assert w.plat is m.platform(31) and w.x == pytest.approx(-220, abs=1)
+
+
+# --- the harness there ---------------------------------------------------------------------------------------------
+
+def test_the_harness_runs_tree_dungeon_with_its_crowd_and_the_unknowns_switched_on():
+    import dataclasses
+    from gamelab.sim import harness
+    from gamelab.sim.world import LEVEL_24
+    sc = harness.scenario("loop", 1, "crowd", map_id=TREE, world=("zero-walls", "touch-share"))
+    assert sc.start == harness.TREE_START_AT[1] and sc.name == "loop:crowd:1:10002073:zero-walls:touch-share"
+    assert sc.realism.camps == harness.TREE_CAMPS and sc.realism.respawn == 8.8 and sc.realism.zero_walls
+    assert sc.noise.dot_under == 56.0 and sc.realism.spawn_share == 1.0 and sc.realism.rival_every == 0
+    assert sc.her == dataclasses.replace(LEVEL_24, defence=None)
+    assert harness.scenario("loop", 1, "game", map_id=TREE).her is None  # as she is there (scenarios.HER)
+    assert harness.scenario("tour", 2, map_id=TREE, world=("client-reach",)).realism.rope_reach == ROPE_REACH_CLIENT
+    with pytest.raises(ValueError, match="10002073's alone"):
+        harness.scenario("loop", 1, "crowd")  # the camps stand on Tree Dungeon's platforms
+    assert harness.main(["run", "loop", "--preset", "crowd", "--seeds", "1"]) == 2
+
+
+def test_a_short_harness_run_on_tree_dungeon():
+    tree_map()
+    from gamelab.sim import harness
+    out = harness.run_one("loop", 1, "crowd", minutes=0.5, map_id=TREE, world=("zero-walls",))
+    assert out["map"] == TREE and out["world"] == ["zero-walls"] and "left_map_at" in out and out["coverage"]

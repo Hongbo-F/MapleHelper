@@ -230,7 +230,8 @@ def test_the_harness_runs_on_either_map_and_compares_runs_of_one_map_only():
     assert (sc.map_id, sc.start, sc.name) == (ROCKY, harness.ROCKY_START_AT[3], "loop:game:3:10004021")
     first = harness.scenario("loop", 3)
     assert (first.map_id, first.start, first.name) == (scenarios.MAP_ID, harness.START_AT[3], "loop:game:3")
-    assert harness.STARTS == {scenarios.MAP_ID: harness.START_AT, ROCKY: harness.ROCKY_START_AT}
+    assert harness.STARTS == {scenarios.MAP_ID: harness.START_AT, ROCKY: harness.ROCKY_START_AT,
+                              scenarios.TREE: harness.TREE_START_AT}
     base, better = [_run(k, 50.0) for k in range(1, 11)], [_run(k, 60.0) for k in range(1, 11)]
     assert harness.compare(base, better)[0]  # runs saved before the map was kept are the first map's
     there = [dict(r, map=ROCKY) for r in better]

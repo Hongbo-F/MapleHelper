@@ -2,14 +2,19 @@
 
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
                                              [--feed] [--costs coded|measured] [--ways N] [--map 10004021]
+                                             [--world zero-walls ...]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
     python -m gamelab.sim.harness rests [--trips 40]            trips to rest at low HP, transit vs --rest-avoid
 
 A run hunts for a fixed time (the horizon) from one of its map's START_AT, on a world seed, with the policy's own
 random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ. On the first
-map by default; `--map 10004021` on West Rocky Mountain II, with her as she plays there (sim.scenarios.HER: level 23,
-her pet drinking her potions), saved as POLICY-PRESET-10004021; the presets are the same worlds on either map.
+map by default; `--map 10004021` on West Rocky Mountain II, `--map 10002073` on Tree Dungeon, Forest Up North II, with
+her as she plays each (sim.scenarios.HER: level 23 and 24, her pet drinking her potions), saved as
+POLICY-PRESET-MAP; the presets are the same worlds on every map, but `crowd` and `crowd-slow`, Tree Dungeon's other
+players (TREE_CAMPS), which are that map's alone. `--world` switches on what isn't known of the game there (WORLDS:
+group 0's walls, the client's sides, the client's rope reach, a touch as a share of PADamage, no evasion), each saved
+as a suffix of the name.
 What a run gave is read from the simulated world, not from the bot's own reports (those miss kills):
 
   exp_per_min      EXP she got, per minute of the horizon (a death stops the count)
@@ -17,7 +22,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
   hp_lost, hp_low  HP lost to touches (each as the world took it: by the monster's touch damage), and
                    her lowest HP; potions; died_at
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
-                   counts against the bar as a death does
+                   counts against the bar as a death does; left_map_at, the same for up pressed at a portal
+                   (world.SimLeftMap)
   touches, hurt    monsters touching her, and those of the touches she didn't evade
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
                    the share she picked up; value_share, the same weighed by what each is worth (behavior.
@@ -50,7 +56,7 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth
 from ..paths import LAB, REPO
-from .world import DROP_LIFE, GAME_DROPS, Camp, Noise, Realism
+from .world import DROP_LIFE, GAME_DROPS, ROPE_REACH_CLIENT, Camp, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -61,7 +67,12 @@ START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12
 # and 9), the floating step 24 under the bridge and stair 30 in the pit.
 ROCKY_START_AT = [(22, -700.0), (14, -930.0), (17, -277.5), (19, -700.0), (10, -200.0), (7, -500.0), (30, -1009.0),
                   (24, -946.0), (6, -300.0), (9, -800.0)]
-STARTS = {FIRST_MAP: START_AT, 10004021: ROCKY_START_AT}
+# ... on Tree Dungeon, Forest Up North II: her spot by the portal on 28, the study's best stands (23 at 73, 8 at 137,
+# 20 at -95, 19 at 130, 15 at -110, 10 at -103), the mid portal's shelf 12, the floor 33 and 30.
+TREE = 10002073
+TREE_START_AT = [(28, 247.0), (23, 73.0), (8, 137.0), (20, -95.0), (19, 130.0), (12, 160.0), (33, 100.0), (15, -110.0),
+                 (10, -103.0), (30, 60.0)]
+STARTS = {FIRST_MAP: START_AT, 10004021: ROCKY_START_AT, TREE: TREE_START_AT}
 # Worlds to compare in. "plain" is the simulator's own (every spawn filled, 8 s respawns, nobody else,
 # perfect eyes). "game" adds the game's errors and a less crowded, contested map; its values are guesses
 # (nothing about respawns, other players or potions is measured), chosen to be harder than "plain"; and arrows
@@ -93,6 +104,22 @@ PRESETS = {
 GREEN, SLIME = "green-mushroom", "slime"
 TREE_CAMPS = (Camp(28, 250.0, (29, 30), (GREEN,)), Camp(21, 90.0, (21, 22), (GREEN,)), Camp(23, 0.0, (22,), (GREEN,)),
               Camp(19, 200.0, (19,), (GREEN,)), Camp(33, 120.0, (32, 33), (GREEN, SLIME)))
+# Tree Dungeon's crowd: "game"'s errors, other players' dots under hers unseen (Noise.dot_under: 56 units, the study's
+# frames), every spawn point filled (MeowDB lifts its cap from 6 players on), the camps above instead of "game"'s one
+# roaming rival, and respawns at MeowDB's mean, 8.8 s ("crowd"), or 30 s ("crowd-slow": the first map's slow refill,
+# README: Respawns and drop life). Only on that map (PRESET_MAPS).
+_CROWD_NOISE = dataclasses.replace(_GAME_NOISE, dot_under=56.0)
+PRESETS["crowd"] = (_CROWD_NOISE, Realism(respawn=8.8, camps=TREE_CAMPS, potions=60, lock_arrows=True))
+PRESETS["crowd-slow"] = (_CROWD_NOISE, Realism(respawn=30.0, camps=TREE_CAMPS, potions=60, lock_arrows=True))
+PRESET_MAPS = {"crowd": (TREE,), "crowd-slow": (TREE,)}
+# What isn't known of the game, switched on with `--world` (each a world.Realism field, or her own: world.Her):
+# group 0's walls stopping her whatever her group, the map's sides as HeavenClient has them, a rope grabbed as it does
+# (82 up at most), a touch's HP as a share of PADamage (as fitted on the first map) rather than meowdb's formula, and
+# no evasion at all (the study: at EVA 42 she'd evade no Horny Mushroom).
+WORLDS = {"zero-walls": {"zero_walls": True}, "client-sides": {"sides": "client"},
+          "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
+          "no-evade": {"evade": 1e-9}}
+HER_FIELDS = ("defence", "evade")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
@@ -139,23 +166,34 @@ POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid}
 # --- one run -------------------------------------------------------------------------------------------
 
 def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-             feed: bool = False, map_id: int = FIRST_MAP):
+             feed: bool = False, map_id: int = FIRST_MAP, world: tuple = ()):
     """The Scenario for one run: the policy hunting on map `map_id` from its START_AT[seed] (STARTS) in world `seed`
     until the horizon. `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a
-    little); `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed)."""
+    little); `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed); `world`: the
+    switches of WORLDS on."""
     from . import scenarios
+    if map_id not in PRESET_MAPS.get(preset, (map_id,)):
+        raise ValueError(f"preset {preset} is map {', '.join(map(str, PRESET_MAPS[preset]))}'s alone")
     noise, realism = PRESETS[preset]
+    her = scenarios.her_on(map_id)[1]
+    for name in world:
+        fields = WORLDS[name]
+        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items() if k not in HER_FIELDS})
+        her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
     fn = POLICIES[policy]
     starts = STARTS[map_id]
-    return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else ""), fn,
+    return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else "")
+                              + "".join(f":{w}" for w in world), fn,
                               starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
-                              realism=realism, may_die=True, think=think, feed=feed, map_id=map_id)
+                              realism=realism, may_die=True, think=think, feed=feed, map_id=map_id,
+                              her=her if world else None)
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-            feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP) -> dict:
+            feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
+            world: tuple = ()) -> dict:
     """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS); `ways`:
-    the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS)."""
+    the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on."""
     from .. import telemetry
     from ..motion import route
     from . import fakes, scenarios
@@ -167,7 +205,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         if ways is not None:
             route.ROUTES = ways
         with telemetry.captured() as records:
-            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id))
+            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id, world))
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
@@ -175,6 +213,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     out = outcomes(sim.world, records, minutes * 60)
     out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=feed, costs=costs,
                ways=routes if ways is None else ways, map=map_id, result=str(trace["result"])[:120])
+    if world:
+        out["world"] = list(world)
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     if feed:
         f = trace["feed"]
@@ -221,6 +261,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     end = min(horizon, world.died_at) if world.died_at is not None else horizon
     if world.fell_out_at is not None:
         end = min(end, world.fell_out_at)
+    if world.left_map_at is not None:
+        end = min(end, world.left_map_at)
     mine = [k for k in world.kill_log if k[3] == "her"]
     drops = [d for d in world.drops if d.owner == "her" and d.since <= horizon]
     known = [d for d in drops if d.taken_by == "her" or d.since + DROP_LIFE <= horizon]
@@ -242,6 +284,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "potions": world.potions_used,
         "died_at": world.died_at,
         "fell_out_at": world.fell_out_at,
+        "left_map_at": world.left_map_at,
         "drops": len(drops),
         "drops_share": round(len(picked) / len(known), 3) if known else None,
         "value_share": round(worth_picked / worth_known, 3) if worth_known else None,
@@ -279,8 +322,9 @@ def _rest_trips(records: list[dict]) -> list[tuple[float, float]]:
 # --- many runs -----------------------------------------------------------------------------------------
 
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
-             feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP) -> list[dict]:
-    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id) for k in range(1, seeds + 1)]
+             feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
+             world: tuple = ()) -> list[dict]:
+    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id, tuple(world)) for k in range(1, seeds + 1)]
     if jobs <= 1:
         return [run_one(*a) for a in args]
     from gamelab.sim import harness  # by its module name, so worker processes can find it (not __main__)
@@ -293,6 +337,7 @@ def _run_one_args(a: tuple) -> dict:
 
 
 COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "died_at", "fell_out_at",
+           "left_map_at",
            "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost")
 
 
@@ -310,8 +355,8 @@ def table(results: list[dict]) -> str:
 
 def _mean(results: list[dict], key: str):
     vals = [r[key] for r in results if isinstance(r.get(key), (int, float))]
-    if key in ("died_at", "fell_out_at"):
-        return sum(1 for r in results if r.get(key) is not None)  # deaths, falls out of the map
+    if key in ("died_at", "fell_out_at", "left_map_at"):
+        return sum(1 for r in results if r.get(key) is not None)  # deaths, falls out of the map, portals taken
     return round(statistics.fmean(vals), 3) if vals else None
 
 
@@ -362,6 +407,10 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     if fell:
         lines.append(f"fell out of the map: seed(s) {', '.join(map(str, fell))}")
     ok &= not fell
+    away = [r["seed"] for r in every if r.get("left_map_at") is not None]
+    if away:
+        lines.append(f"went through a portal: seed(s) {', '.join(map(str, away))}")
+    ok &= not away
     if all("nav" in r for r in base + cand):  # (runs saved before it was counted have none)
         lines.append("her trips, in all (shown only): " + ", ".join(
             f"{key} {sum(r['nav'][key] for r in base)} -> {sum(r['nav'][key] for r in cand)}" for key in NAV))
@@ -522,7 +571,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--costs", choices=sorted(COSTS), default="coded",
                    help="what the simulator's looks take: coded (the fakes' own), measured (today's)")
     r.add_argument("--map", type=int, choices=sorted(STARTS), default=FIRST_MAP,
-                   help="the map (default: the first, Thicket Around the Beach II; 10004021: West Rocky Mountain II)")
+                   help="the map (default: the first, Thicket Around the Beach II; 10004021: West Rocky Mountain II; "
+                        "10002073: Tree Dungeon, Forest Up North II)")
+    r.add_argument("--world", action="append", choices=sorted(WORLDS), default=[],
+                   help="what isn't known of the game, switched on (WORLDS; again for another)")
     c = sub.add_parser("compare")
     c.add_argument("baseline")
     c.add_argument("candidate")
@@ -548,13 +600,17 @@ def main(argv: list[str] | None = None) -> int:
         ok, lines = (compare_rest if args.bar == "rest" else compare)(load(args.baseline), load(args.candidate))
         print("\n".join(lines))
         return 0 if ok else 1
+    if args.map not in PRESET_MAPS.get(args.preset, (args.map,)):
+        print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
+        return 2
     results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs,
-                       args.ways, args.map)
+                       args.ways, args.map, tuple(args.world))
     print(table(results))
     name = args.save or (f"{args.policy}-{args.preset}" + ("-feed" if args.feed else "")
                          + (f"-{args.costs}" if args.costs != "coded" else "")
                          + (f"-ways{args.ways}" if args.ways is not None else "")
-                         + (f"-{args.map}" if args.map != FIRST_MAP else ""))
+                         + (f"-{args.map}" if args.map != FIRST_MAP else "")
+                         + "".join(f"-{w}" for w in args.world))
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
     return 0
