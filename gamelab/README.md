@@ -114,16 +114,16 @@ Other commands (`python -m gamelab -h` lists them all):
 | `spot`, `spot --image FILE` | Whether the Lie Detector is on screen now (or in a screenshot); sends no keys |
 | `bench-look [FILES]`, `bench-look --live --n 100` | Each stage of a look timed (median, p90, fastest): on saved screenshots, 1920×1080 or 1366×768 (by default 17 1920×1080 ones in `lab`; `--shrink 1366x768` times them shrunk to the game's own size, `--look-scale 1` or `2` with full- or half-size looks), or on the game as it is on screen (`--capture dxgi` or `mss`: how; by default as config.toml says). Also counted: looks that didn't find her name tag near where it was, and ropes on the whole screen that the search where the map's ropes can show missed. Live it refuses unless the game is in front already, and never brings it forward; sends no keys |
 | `bodies`, `bodies FILES --recordings NAMES`, `bodies --tracks FILES` | Where the monster detector puts monsters, offline: their feet against the surface of the platform each is put on, on saved screenshots where she stands (by default bench-look's), by the matched template's origin and by its bottom; and on recordings with the camera still (by default `stand_snail` and `walk_snail`), how far their x strays from frame to frame, whether they face the way they move, how often their pose (the matched template's frame) is what they do, walking or standing, by cut-outs and sprites, and how fast each kind walks. `--tracks` reads `watch`'s telemetry instead: each track's velocity against how far its x went by the next record, for those standing and those walking. No game, no keys |
-| `bench-paste`, `bench-paste FILES --map 10004021` | A map's monsters (each kind with a colour gate) and the drops, the game's own pictures drawn onto frames of the game at its own 1366×768 as the game draws them (alpha blended, at known places; by default the three in `tests/fixtures/native`, every frame of each kind both ways twice), looked for there and on the same scenes stretched to 1920×1080 as the window stretched them: how many the whole screen's search found and a fight's band around each, where against where they were drawn (map units), their scores, as which frame and facing, what was found that wasn't drawn (in the scenes and on the frames as they are), and how long each search took; `--full-step-1` also searches with step 1 at full size (as before the search went coarse to fine). See Screen size. No game, no keys |
+| `bench-paste`, `bench-paste FILES --map 10004021` | A map's monsters (each kind with a colour gate) and the drops, the game's own pictures drawn onto frames of the game at its own 1366×768 as the game draws them (alpha blended, at known places; by default the three in `tests/fixtures/native`, every frame of each kind both ways twice), looked for there and on the same scenes stretched to 1920×1080 as the window stretched them: how many the whole screen's search found and a fight's band around each, where against where they were drawn (map units), their scores, as which frame and facing, what was found that wasn't drawn (in the scenes and on the frames as they are), and how long each search took; then re-finds: each monster found, drawn where it stood as a frame it may show next (itself, its pose's next, standing to walking or back, a flinch) and looked for again as the feed does, with the fallback to the kind's whole set and without; `--full-step-1` also searches with step 1 at full size (as before the search went coarse to fine). See Screen size. No game, no keys |
 | `bench-capture --n 100` | A look's capture and a glance's timed through DXGI and through mss, on the game's window as it is on screen (or the screen's top-left 1920×1080 without the game), and whether the two see the same pixels; never brings anything forward; sends no keys |
-| `watch`, `watch --minutes 10 --lie-detector` | The game looked at every frame with no command running (see Continuous perception): her place, the monsters followed, their deaths and who killed them, her EXP gains (her number read: her EXP a minute every 10 s) and hits, published for the mini-map; with `--lie-detector` it also checks for the Lie Detector and pages whoever is at the PC. Never sends keys, never brings the game to the front, reads nothing while the game isn't wholly on screen |
+| `watch`, `watch --minutes 10 --lie-detector` | The game looked at every frame with no command running (see Continuous perception): her place, the monsters followed, their deaths and who killed them, her EXP gains (her number read: her EXP a minute every 10 s) and hits, published for the mini-map; with `--lie-detector` it also checks for the Lie Detector and pages whoever is at the PC. Never sends keys, never brings the game to the front, reads nothing while the game isn't wholly on screen (started with the game minimized, it waits for it to be restored before it takes the window's size) |
 | `nav 35 --feed`, `tour --loop --feed`, `hunt clear --feed` | The command's looks and glances from a continuous feed (see Continuous perception); at its end, what the feed did (frames, how many placed her, its searches) and how many looks and glances came from it |
 | `coverage tour-game loop-game --live` | How often each move of the map's routes was planned, taken and missed in saved harness runs and the live telemetry, her time on each platform, and the moves never taken with their cost gap and why they lost; a picture of the map with them (`lab/coverage_<map>.png`); with `--ways 3`, how often trips choosing among 3 ways would have gone through each move. See Route coverage. No game, no keys |
 | `respawn`, `respawn FILES` | How soon after a kill that empties a platform a monster is seen there again, how long a drop lies before it's gone without her picking it up, and how full the platforms monsters spawn on were while in view, from the live telemetry (or the files given), as survival estimates over censored observations (Kaplan-Meier: n, the median and its 95% interval, the share left at 5 s to 180 s), against the map's own spawn fields in the game data. See Respawns and drop life. No game, no keys |
 | `lab-usage`, `lab-usage --prune-telemetry` | What gamelab keeps under `gamelab/lab`, by kind (recordings, screenshots, telemetry, harness runs, golden traces, the player's inbox and outbox, the rest), and the telemetry due to go; deletes nothing, unless `--prune-telemetry`: then what a run starting now would (see Memory and disk) |
 | `clear-alarm` | After you've answered a Lie Detector yourself: lets gamelab run again |
 
-`hunt kill`, `hunt clear`, `nav`, `tour` and `probe run` bring the game to the front before their first look and wait up to 3 s for it to come (`__main__.FRONT_WAIT_S`): the player refuses every plan while another window is in front, and a look captures whatever is. Windows doesn't always let a program bring another window forward; then the command says which window is in front and stops before it looks or sends anything: click on the game and run it again. (On 2026-10-21 at 01:01:30 a tour's first looks captured the Claude window for 2.5 s and its first plan was refused, "game not in front"; `window.bring_to_front` had been called and quietly done nothing. It now also switches to the game as Alt+Tab does if it hasn't come half way through the wait: `window.SWITCH_FALLBACK`, not tried in game yet.)
+`hunt kill`, `hunt clear`, `nav`, `tour` and `probe run` bring the game to the front before their first look and wait up to 3 s for it to come (`__main__.FRONT_WAIT_S`); with `hunt look` and `map`, a game minimized is restored and brought forward first, before its window's size is taken (`_game_geometry`): the player refuses every plan while another window is in front, and a look captures whatever is. Windows doesn't always let a program bring another window forward; then the command says which window is in front and stops before it looks or sends anything: click on the game and run it again. (On 2026-10-21 at 01:01:30 a tour's first looks captured the Claude window for 2.5 s and its first plan was refused, "game not in front"; `window.bring_to_front` had been called and quietly done nothing. It now also switches to the game as Alt+Tab does if it hasn't come half way through the wait: `window.SWITCH_FALLBACK`, not tried in game yet.)
 
 ## The mini-map
 
@@ -345,7 +345,7 @@ How fast monsters walk comes from the game data too: the game's walkSpeed (125 u
 **Each frame** (`localization/worldstate.py`; 30 a second, or at once when something is asked):
 - her place, as `Senses.look` takes it: her name tag, HP and MP, the ground, her minimap dot and ropes. Ropes every frame: placed by a rope in one frame and by her dot alone in the next, her x and every monster's would step by up to 11.4 units, which the tracker would take for walking;
 - her EXP number and HP compared with the frame before: `exp_gain` and `hp_drop` events, each at the frame it showed; a changed number is read then (Her EXP number), the reading in the `exp_gain` (`exp_read` when it's read unchanged: to start from, or to confirm a jump), and the kills its gain was go to the tracker by kind;
-- every monster followed is re-found 16 px around where it should be (`MobDetector.refind`): with the template that matched it last, 0.69 ms (median), and if that misses, with every template of its kind in the window, 3.4 ms. On the 17 saved frames the last template re-found 84 of 84 monsters where they were and 84 of 84 moved 8 px;
+- every monster followed is re-found 16 px around where it should be (`MobDetector.refind`): with the template that matched it last, 0.69 ms (median), and if that misses, with every template of its kind in the window, 3.4 ms (at 1366x768, where the last one scores under 0.9, first the frames its animation most likely went to: Screen size, re-finding). On the 17 saved frames the last template re-found 84 of 84 monsters where they were and 84 of 84 moved 8 px;
 - her band is searched 5 times a second for monsters not followed yet, the whole screen once a second, the drops only when asked (`watch`: every 0.5 s on her platform and every 2 s in view), on the searches' thread: one search at a time, handed over as soon as she's placed in the frame it's due in (it needs only her place), so it runs beside that frame's re-finds. What's asked while one is out is owed, and handed over on the newest frame as soon as it's back. Its answer goes to a mailbox of one, which the frame loop empties while it waits for its next frame and in each frame once she's placed, before the re-finds, so a monster found anew is re-found in that very frame. It's merged into the tracker as of its own frame (Tracking, below), and that frame's state is given again (`late`), with the monsters and drops found in it, as the frame loop would have given it with the searches inline;
 - the tracker (`localization/tracking.py`) keeps each monster's id, velocity, facing, HP bar and state, and says what happened.
 
@@ -641,13 +641,17 @@ detection on the native resolution, it's both more accurate and less resource co
 px per game px: 1.40625, or 1), `frame_scale` and `units_per_px` (a look frame's px per map unit and back: 0.703 and
 1.42 at 1920x1080 half size, 1 and 1 at 1366x768 full size), `px` and `fpx` (a px measured on the 1920x1080 window, at
 full or half size, in this geometry's px), `to_game` and `from_game` (where a game px's middle is on screen), and a
-`suffix` that tells the files made for a size apart. It's worked out from the client size where frames are taken
-(the commands make their `Eyes(geo=...)` from the game window's size as they start; `ScreenFrames`; a saved frame's
-own size) and goes with what's read: `Observation.geo`, so `Scene`, and `WorldState.geo` over the feed's pipe. A
-capture of another size than the eyes were made for is refused (as one not 1920x1080 was: run the command again), and
-the feed marks such frames not visible. Nothing that reads the game uses the 1920x1080 window's numbers any more
-(`GAME_SIZE`, `SCREEN_SCALE`, `SCALE`, `UNITS_PER_HALF_PX` are the simulator's, which draws its world at that size:
-`tests/test_geometry.py` checks no other module imports them). At 1920x1080 every conversion is exact (`px(n)` is `n`
+`suffix` that tells the files made for a size apart. It's worked out from the client size where frames are taken (the
+commands make their `Eyes(geo=...)` from the game window's size as they start, a minimized game restored first by those
+that bring it forward anyway and waited for by `watch`; `ScreenFrames`; a saved frame's own size) and goes with what's
+read: `Observation.geo`, so `Scene`, and `WorldState.geo` over the feed's pipe. A capture of another size than the eyes
+were made for is refused (as one not 1920x1080 was: run the command again), and the feed marks such frames not visible.
+Nothing that reads the game uses the 1920x1080 window's numbers any more (`GAME_SIZE`, `SCREEN_SCALE`, `SCALE`,
+`UNITS_PER_HALF_PX` are the simulator's, which draws its world at that size). `tests/test_geometry.py` checks that
+outside the simulator no module imports them, no call leaves a `geo` at its 1920x1080 default, no module makes numbers
+of its own from STRETCHED's, and no `*_PX` constant is used but through a geometry's conversion, except where each says
+why (13 places): the import check alone had let `map` place her with 1920x1080's Localizer, `bodies` keep its own units
+per px and the looting compare her ground with 6 px unconverted. At 1920x1080 every conversion is exact (`px(n)` is `n`
 to the bit), so all of it is as it was: the full suite, the saved screenshots' tests, and the 86 golden traces.
 
 What goes by it:
@@ -663,7 +667,7 @@ What goes by it:
   another's red 5 x 5 (21 px), and her dot's middle comes out on the half pixel ((94.5, 172.5) on all 31 frames).
   There a portal's inner ring (4 x 4, hollow: 8 px) passed as a buddy's core at both of this map's portals on every
   frame (at 1920x1080 the filtering had blurred it into its dark), so a core must fill 70% of its box (`MARKER_FILL`:
-  21 of 25), not asked at 1920x1080. Every other player's marker on the 31 frames is found (two to five at once, two
+  21 of 25), not asked at 1920x1080. Every other player's marker on the 31 frames is found (one to three at once, two
   touching; by eye on the enlarged minimaps) and nothing else; the game's six player markers pasted at 14 spots each
   are found where drawn (within 0.2 px), the 25 others (NPCs, portals, shops, runes) never.
 - **HP and MP** are fractions of the window, which hold (row 756, the HP bar's red from x 503 to 607).
@@ -688,8 +692,13 @@ What goes by it:
   the best anywhere near scored 0.46 with them and 0.40 without. The screenshot cut-outs aren't used at this size:
   they're of the stretched window, and shrunk back they're neither (on the 17 bench frames shrunk, a snail's cut-out,
   with the grass it stood in, took the place where the snail's own frame scored 0.93). What matching them against the
-  sprites says of them (`cutouts.json`, in their own px) still goes for any window that stretches the game. The search
-  goes coarse to fine (below); its re-find window and bands are converted.
+  sprites says of them (`cutouts.json`, in their own px) still goes for any window that stretches the game. At this
+  size a map's detector holds its own kinds alone (`MobDetector(kinds=)`), whatever `sprites_x1` holds from other
+  maps: on West Rocky Mountain II, none of whose monsters has a colour gate yet, it finds nothing (on a checkout that
+  hadn't built the first map's sprites it had stopped every look with "no monster templates"; at 1920x1080 the
+  cut-outs and the sprites folder, every kind in them, as always). The search goes coarse to fine and re-finds a
+  monster as the frame its animation went to (below); its re-find window and bands are converted, and a band with no
+  rows finds nothing (shrunk for step 1, OpenCV had refused it).
 - **Drops** (`loot.py`): the game's item pictures as they are (`loot_x1`; every one opaque, alpha 0 or 255), searched
   at full size. Drawn on screen pixel for pixel, a drop's colours are its picture's to the pixel, so its shape is
   matched on brightness alone (one channel instead of three: `LootDetector.gray`) and its colours are checked as at
@@ -701,12 +710,18 @@ What goes by it:
   first pass saved (6 strips drawn on, 33-35 ms at full size against 34-35 checked with OpenCV's match and 41 with
   numpy's, one place each).
 - **The rest:** the feed's ring holds frames of the look's shape (`feed.frame_shape`, 768 x 1366); the Localizer's
-  origin moves to the same game px (`use`: one minimap px is 16 units at 1366x768), and the camera, ropes and
-  platform ends on screen, the loot strips, the ground under her, the mover's rope line-up, the mouse nudge, the
-  feed tracker's screen edge (`View.edge`, 34 px) and how far another player's dot may move between looks go by the
-  look's geometry. Recordings keep their client size and scale (`Recording.geo`; the older ones were 1920x1080 at
-  half size), and calibrate makes a calibration for the size the game is at, its crop covering the same part of the
-  game (569 x 284 client px) and recordings shrunk as looks are (full size at 1366x768).
+  origin moves to the same game px (`use`: one minimap px is 16 units at 1366x768), and the camera, ropes and platform
+  ends on screen, the loot strips, the ground under her, the mover's rope line-up, the mouse nudge, the feed tracker's
+  screen edge (`View.edge`, 34 px) and how far another player's dot may move between looks go by the look's geometry,
+  and `map` places her dot by it too (with 1920x1080's Localizer it had put her at (-1319, 1897) on `n28_000.png`, where
+  Senses puts her at (-880, 2697)). Recordings keep their client size and scale (`Recording.geo`,
+  `recordings.file_geometry`; the older ones were 1920x1080 at half size), and what reads them reads them at it:
+  `bodies` (each recording with a detector of its own size: with 1366x768 screenshots it had searched the half-size
+  recordings with the 1366x768 detector and found nothing), and `combo`, `lock`, `track` and the physics check, whose
+  jump lift, jump straight up, claw swing box and camera strips are converted (not yet checked on a recording made at
+  1366x768: none exists). calibrate makes a calibration for the size the game is at, says the pictures it wrote
+  (`calibrate_crop_1366x768.png`, where it had pointed at 1920x1080's old `calibrate_crop.png`), its crop covering the
+  same part of the game (569 x 284 client px) and recordings shrunk as looks are (full size at 1366x768).
 
 **Coarse to fine** (`mobs.SEARCH_SCALE`, `FINE_GATE`, `FINE_TEMPLATES`, `FINE_SLACK`). A monster search at full size
 cost half again what it had at 1920x1080 half size (below): step 1's colour tests and silhouette matches on twice the
@@ -739,11 +754,16 @@ kinds, both ways, drawn twice onto West Rocky Mountain II's 31 frames, 120 in al
 |---|---|---|---|
 | found by the whole screen's search | 114 of 120 | 111 | 116 |
 | ... by a fight's band around each | 119 | 120 | 119 |
-| as the frame and facing drawn | 112 | 99 | 69 |
-| feet against where drawn, across / down (mean; at most), units | 0.0 / 0.0; 0 / 3 | 0.1 / 0.2; 3 / 6 | 0.6 / 1.1; 4.3 / 9.3 |
+| as the frame and facing drawn, of those the game's sprites matched | 112 of 114 | 99 of 111 | 69 of 102 (14 by a cut-out, which says no frame) |
+| feet against where drawn, across / down (mean; at most), units | 0.0 / 0.0; 0 / 3 | 0.1 / 0.2; 3 / 6 | 0.6 / 1.1; 4.5 / 9.1 |
 | scores | 0.61-1.00, median 1.00 | 0.66-1.00, median 1.00 | 0.62-0.98, medians by kind 0.84-0.91 |
 | found that weren't drawn; on the 31 frames as they are | 0; 0 | 0; 0 | 2 (slimes); 3 (an Orange Mushroom, snails) |
 | the whole screen; a band (ms, medians, other work sharing the CPU) | 85.6; 26.6 | 105.3; 26.8 | 78.1; 22.0 |
+
+(A look frame's px is put in the game's picture by its middle, `(x + 0.5) * 1.42 - 0.5` at 1920x1080 half size,
+`pasted._game`: by its edge, as at first, the first map's sprites found at 1920x1080 stood 0.27 units left and 0.19 up
+of where they were drawn on average, by the middle 0.06 left and 0.02 down; and the cut-outs' matches, which had
+counted as the wrong frame, are counted apart. The means and the counts found are as before.)
 
 The 6 missed: two Orange Mushrooms and four slimes whose own frame wasn't among their place's 6 or whose place was
 crowded out; and at either size a monster drawn across two of the whole screen's bands is found only by the band
@@ -757,6 +777,30 @@ one on `z2_shoot1.png` and one on `closeup.png`), 33 with step 1 at full size an
 1920x1080 (those three, and the snails in plain view on `stand.png` and `sit.png`). Where 1920x1080 found them, the
 feet came out 0.5 units apart across on average (at most 1.4). On this map's 31 frames as they are, none of the first
 map's monsters was found at full size (at 1920x1080 half size, the stretched frames, 3).
+
+**Re-finding a monster** (`MobDetector.refind`, `mobs.REFIND_GOOD`, `REFIND_NEXT`, `_next_frames`). The feed
+re-finds every monster it follows in each frame with the picture that matched it last, and a hidden one with that
+alone. Blurred at 1920x1080, a monster's frames were alike and that one mostly did; crisp at 1366x768, once the
+animation steps on it seldom does. So at a look frame finer than step 1's, where it scores under 0.9, the frames it
+most likely went to are matched in the same window in turn (its pose's next and the one after, the other poses' first:
+standing, walking, the flinch; then the rest; 4 at most) until one scores 0.9, the best kept. `bench-paste`'s re-finds,
+on the 31 frames (the first map's standing and walking sprites, both ways: each found, then drawn where it stood as
+what it may show next; the fallback, a live track's, to the kind's whole set in the window; medians, other work
+sharing the CPU):
+
+| | 1366x768 now | 1366x768, the last frame alone (before) | 1920x1080, half size |
+|---|---|---|---|
+| unchanged: found again (feet within a unit); ms | 52 of 52 (52); 1.7 | 52 of 52 (52); 1.9 | 52 of 52 (42); 0.9 |
+| its pose's next frame: found (within a unit), going on to the whole set; ms (at 90%); found without the fallback | 50 of 50 (46), 0; 3.2 (3.9); 50 | 49 of 50 (39), 27; 5.1 (19.5); 23 | 49 of 49 (28), 10; 0.9 (4.3); 39 |
+| standing to walking or back, the same | 52 of 52 (52), 0; 7.7 (8.8); 52 | 48 of 52 (43), 39; 7.4 (21.8); 13 | 51 of 51 (25), 20; 1.0 (4.5); 31 |
+| a flinch, the same | 52 of 52 (52), 0; 6.2 (6.5); 52 | 51 of 52 (46), 43; 8.8 (21.5); 9 | 51 of 52 (22), 25; 1.2 (7.5); 27 |
+
+So at 1366x768 a hidden monster is no longer lost when it moves on to its next frame, and none goes on to the
+whole set; but a re-find across a step costs 3-8 ms there, against about 1 at 1920x1080 (where about half of those
+came out more than a unit off). `bench-look` re-finds on still frames, so its feed-step rows never had this. At 0.95
+each frame followed by its next (MobDetector.refind as here, on two frames, 200 times) came out within a unit 200
+times, at 0.9 182, at 0.8 168; 0.9 because a monster with her or another over part of it would take all 4 matches
+every frame at 0.95.
 
 **Full size or half at 1366x768** (2026-10-23, before the search went coarse to fine; `screen.LOOK_SCALES`; `bench-look
 --shrink 1366x768 [--look-scale 2]` times the 17 bench frames shrunk to 1366x768, as the game would draw them there but
@@ -792,14 +836,20 @@ so the EXP number isn't read on them):
 | ... with her band searched; with the whole screen | 34.9; 97.9 | 30.9; 85.0 |
 | The Lie Detector check (the player's; at 1366x768 the whole frame stretched to 1920x1080 first) | 65.0 | 68.6 |
 
-So every look costs less at 1366x768, by 3.5 to 15 ms; the monster search alone about the same in her band and 10 ms
-less over the whole screen. Where the monsters crowd it costs more: with six drawn on each of this map's frames
+So on these still frames each look costs less at 1366x768, by 3.5 to 15 ms; the monster search alone about the same in
+her band (22.8 against 23.0; in the review's two runs of 2026-10-24, 23.5 and 23.3 against 23.4 and 23.2) and 10 ms less
+over the whole screen. Where the monsters crowd it costs more: with six drawn on each of this map's frames
 (`bench-paste`), the whole screen took 85.6 ms against 78.1 for the same scenes stretched (more places pass the gate,
-each with up to 6 checks at full size). On 11 of West Rocky Mountain II's own frames (none of its monsters has a
-colour gate yet; the first map's four kinds are searched for there): `Eyes.look` 5.6, placing her 6.7, a fight's look
-22.8 (its monster search 17.0), the whole screen with every drop 138.9 (its monster search 57.2), the feed's step 6.4
-(with her band 23.2, the whole screen 63.8), where on 2026-10-23 a fight's look took 32.8, the whole screen with every
-drop 201 and the feed's step with the whole screen 105.9.
+each with up to 6 checks at full size). And a monster re-found as its animation steps on costs 3-8 ms against about 1
+(above), which with the feed at 30 frames a second and a monster's frames 100-300 ms each comes every 3 to 9 frames for
+each monster followed. On 11 of West Rocky Mountain II's own frames (`n28_000`, `003` ... `027` and `native_first.png`;
+none of its monsters has a colour gate yet, so at this size nothing is looked for there; 2026-10-24, twice, the test
+suite sharing the CPU): `Eyes.look` 5.6, placing her 5.7, a fight's look 7.4 (the search, finding nothing, 2.0), the
+whole screen with every drop 84 (all but 2 ms the drops), the feed's step 6.5 (with her band 8.3, the whole screen 8.2).
+With a detector holding the first map's four kinds, as on these frames before (`sprites_x1` held them): a fight's look
+22.8 (its monster search 17.1), the whole screen with every drop 142 (its monster search 58), the feed's step 6.1 (with
+her band 22.7, the whole screen 66); on 2026-10-23, before the search went coarse to fine, a fight's look took 32.8, the
+whole screen with every drop 201 and the feed's step with the whole screen 105.9.
 
 On 2026-10-23, before the search went coarse to fine and drops were matched on brightness (step 1 at full size or
 half, the cut-outs shrunk):
@@ -828,28 +878,43 @@ seen at screen x 941 and 1174, her tag at 685) put her at -792, on stair 28 (-83
 minimap picture, not the size: it starts 5 game px further left than on the first map, where DOT_ORIGIN was fitted, as
 on its stretched frames (80 units left on step 24; the map track's `Localizer.fit_picture`). Moved by those 5 game px
 (80 units), she's put on stair 28 and the ropes refine her to -792, y 2685 (her dot 11.5 units low). HP and MP 730/730
-and 584/584 read full, and the other players are placed (two to five, most on the bridge 22).
+and 584/584 read full, and the other players are placed (one to three, most on the bridge 22). `map` places her
+by her dot as Senses does (`test_resolution.py`: at (-880, 2697) on `n28_000.png`, where 1920x1080's Localizer had her
+at (-1319, 1897)).
 
-**To check in game** (the game at 1366x768; the player started by whoever is at the PC):
-- `python -m gamelab calibrate --fresh` where she stands on flat ground with nothing around: it writes
-  `calibration_1366x768.json` and her tag at this size from the live frame (`lab/calibrate_crop_1366x768.png`: her tag
-  near the middle), and drops the offline full-size template so the next look cuts it from the new one.
-- `python -m gamelab hunt look --map 10004021` (no keys): her place, HP and MP, her EXP number (every glyph within
-  about a level), the other players; `lab/shots/hunt_look.png` at 1366x768. No monster of this map has a colour gate
-  on this branch, so none is looked for; once the perception track's are in, its stumps and red snails should stand
-  on their platforms to the unit (their feet where the sprite's origin is), as the frame they show, with scores
-  near 1.00 where nothing is in front of them.
-- `python -m gamelab bench-look --live --n 100 --map 10004021` with the game in front (no keys) and `bench-capture --n
-  100`: a look's stages and its capture at this size live (the 1366x768 box: about half the pixels to copy); a fight's
-  look should take about 23 ms plus the grab, as on the saved frames.
-- `python -m gamelab spot`, if a Lie Detector comes, while it's on screen (no keys; at this size the frame is stretched
-  to 1920x1080 first, as the player's watchdog does): it should say it's on screen. The player saves its screenshot
+**To check in game** (the game at 1366x768, set in its own Options). First the ones that send no keys and need no
+player:
+- `python -m gamelab hunt look --map 10004021`: her place, HP and MP, her EXP number (every glyph within about a level),
+  the other players (one to three of them on the bridge 22 when these frames were taken); `lab/shots/hunt_look.png` at
+  1366x768. No monster of this map has a colour gate on this branch, so at this size none is looked for (no monster
+  line); once the perception track's are in, its stumps and red snails should stand on their platforms to the unit
+  (their feet where the sprite's origin is), as the frame they show, with scores near 1.00 where nothing is in front
+  of them. Then again with the game minimized: it should come back to the front and look, where it had stopped with
+  "not calibrated at 432x54".
+- `python -m gamelab map --map 10004021`: her place by her dot alone, about x -880 on stair 28 until the map track's
+  fit of this map's minimap picture is in (then -792).
+- `python -m gamelab watch --minutes 2 --map 10004021`, started with the game minimized: it should say it's waiting
+  for the game, start when it's restored (never restoring it itself), and its frames be 1366x768.
+- `python -m gamelab bench-look --live --n 100 --map 10004021` with the game in front, and `bench-capture --n 100`: a
+  look's stages and its capture at this size live (the 1366x768 box: about half the pixels to copy); with nothing of
+  this map looked for yet, a fight's look should take about 7 ms plus the grab (23 with the first map's four kinds).
+- `python -m gamelab spot`, if a Lie Detector comes, while it's on screen (at this size the frame is stretched to
+  1920x1080 first, as the player's watchdog does): it should say it's on screen. The player saves its screenshot
   (`lab/lie_detector_<time>.png`, 1366x768); after answering it yourself and `clear-alarm`, `spot --image` on that
   file should say the same, and it belongs with the six in `tests/fixtures/lie_detector` (the first seen at this
   size).
-- `python -m gamelab watch --minutes 2 --map 10004021` (no keys): the feed at this size (its frames 1366x768).
-- `python -m gamelab act right*400 --record`, then `python -m gamelab track act` (or the name given): a recording at
-  full size around her (569 x 284), tracked by her tag at this size.
+
+Then, with the player started by whoever is at the PC:
+- `python -m gamelab calibrate` where she stands on flat ground with nothing around (a capture through the player, no
+  keys): it reuses the 1366x768 template made offline (it matches every saved frame at 0.92 or better) to find her,
+  writes `calibration_1366x768.json`, and says to check `lab/calibrate_crop_1366x768.png` (her tag near the middle).
+  Not `--fresh` here: the name tag finder (`track.find_name_tag`) found her tag on none of the 31 frames, at this size
+  or stretched (her tag's see-through box over the bright clouds; it picked other spots and other players' tags), and
+  a template cut afresh from such a frame takes in the clouds (116 x 21 px from `n28_000.png`); if one is ever needed,
+  `--fresh --tag X,Y` with her tag's middle in client px.
+- `python -m gamelab act right*400 --record`, then `python -m gamelab track act` (keys: she walks right, no attack): a
+  recording at full size around her (569 x 284), tracked by her tag at this size, her jumps and the camera read with
+  the recording's px converted (lift 8.5 px, a jump straight up under 17).
 
 ## Probes to run
 
@@ -1327,9 +1392,10 @@ Profiled offline on 2026-10-20 (no game, no keys): perception with `bench-look` 
 At the game's own 1366x768 (see Screen size; 2026-10-24, back to back with 1920x1080 on the 17 bench frames shrunk to
 that size, other work sharing the CPU) a look costs less: placing her 6.0 ms against 12.0, a fight's look 28.3 against
 33.2, the hunt loop's 34.9 against 43.4, the whole screen and every drop 152.7 against 167.4, the feed's step 10.3
-against 13.8 (with her band 30.9 against 34.9, the whole screen 85.0 against 97.9). Its monster search is coarse to
-fine and its drops are matched on brightness: at full size, step 1 and the drops in colour, a fight's look had cost
-39.7 and the hunt loop's 59.8 (on 2026-10-23, against 35.2 and 47.4 at 1920x1080).
+against 13.8 (with her band 30.9 against 34.9, the whole screen 85.0 against 97.9), on still frames: a monster re-found
+as its animation steps on costs 3-8 ms there against about 1 at 1920x1080 (Screen size, re-finding). Its monster search
+is coarse to fine and its drops are matched on brightness: at full size, step 1 and the drops in colour, a fight's look
+had cost 39.7 and the hunt loop's 59.8 (on 2026-10-23, against 35.2 and 47.4 at 1920x1080).
 
 With the physics and attack tracks (the perception track rebased onto them, 2026-10-20: her flight by the engine, `body.fly`, and the monsters at the game data's speeds), the stack's rows again (`sim.latency`, preset `game`, 5 seeds of 10 minutes, the C on and off, the same hunts either way): the hunt loop (6,094 looks) before a key plan p99 2.7 ms, at most 4.6 (5.3 with the C off), before a sleep or a search 2.3 and 3.5 (4.3), all of it 6.0 s (of which the sleeps' and searches' 4.4); the tour (3,621 looks) before a key plan p99 2.2, at most 6.1, where with the C off it was 5.5 and 164: chains planned on the move fly landings the planner hasn't, 1 ms each in Python. Before a look at most 43 ms either way (planning its sweep).
 
@@ -1367,8 +1433,8 @@ A hunt runs for hours, and perception is to run all the time, so what the stack 
 
 ## Limits
 
-- **Recalibrate** after moving the game window, changing maps or changing resolution (each client size keeps its own calibration). Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name.
-- **`hunt` needs a 1920×1080 or 1366×768 game window** with a calibration at that size, and the size it had when the command started (see Screen size). The combo analysis on recordings (`track.airborne`'s lift, the claw's swing boxes, `scroll`'s patches, `analyze.UP_PX`) is still in px of the 1920×1080 window's half-size recordings: a recording at 1366×768 has 1.42 times their px.
+- **Recalibrate** after moving the game window, changing maps or changing resolution (each client size keeps its own calibration). Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name (at 1366x768 on West Rocky Mountain II the name tag finder doesn't find her tag over the clouds: pass `--tag X,Y`; see Screen size).
+- **`hunt` needs a 1920×1080 or 1366×768 game window** with a calibration at that size, and the size it had when the command started (see Screen size). The combo analysis on recordings (`track.airborne`'s lift, the claw's swing boxes, `scroll`'s strip and patches, `analyze.UP_PX`) converts its px, measured on the 1920×1080 window's half-size recordings, by the recording's geometry; no recording at 1366×768 has been made to check them on.
 - **Each new monster type needs a colour gate** (a body-colour test in `PALETTES` in `perception/mobs.py`) before its game sprites are used. Its templates come from the game data automatically.
 - **Her name tag can be hidden** behind screen widgets at the map's edge, like the party HP box. She's then placed on screen from the minimap dot and the camera, which is only good to about 11 map units.
 - **Camera correction for recordings needs ground with a pattern** under her, like a girder or tiles. Plain ground can't be tracked.
