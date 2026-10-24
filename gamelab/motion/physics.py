@@ -209,19 +209,19 @@ def _native_flight(model: MapModel, laid_out: dict, group, walls: body.Walls, x:
         return None
     m = laid_out.get("platforms")
     if m is None:
-        m = laid_out["platforms"] = native.Map(model.platforms)
+        m = laid_out["platforms"] = native.Map(model.places)  # (a twin is never landed on: MapModel.twins)
     w = laid_out.get(group)
     if w is None:
         w = laid_out[group] = native.Walls(walls)
     shoe = _SHOES.get(SHOE)
     if shoe is None:
         shoe = _SHOES[SHOE] = native.shoe_of(SHOE)
-    s = -1 if skip is None else next((i for i, q in enumerate(model.platforms) if q is skip), -1)
+    s = -1 if skip is None else next((i for i, q in enumerate(model.places) if q is skip), -1)
     found = native.fly(m, w, x, y, vx, vy, int(arrow), dt, limit, shoe, s)
     if found is None:
         return None
     q, lx, t, vl, same_x, same_vx = found
-    return None if q < 0 else model.platforms[q], x if same_x else lx, t, vx if same_vx else vl
+    return None if q < 0 else model.places[q], x if same_x else lx, t, vx if same_vx else vl
 
 
 # A route jump has to land on its platform at this share of her walking speed too: a jump from standing

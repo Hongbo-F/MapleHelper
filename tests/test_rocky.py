@@ -85,3 +85,46 @@ def test_on_the_first_map_the_picture_is_where_the_origin_was_fitted():
         finder = MinimapPicture(picture(FIRST))
         assert finder.find(crop(name)) is not None and finder.shift() == (0.0, 0.0)
 
+
+# --- one place: 11 on 14, 21 on 22 -----------------------------------------------------------------------------
+
+def test_11_and_21_lie_on_14_and_22_and_are_them():
+    model = load()
+    assert model.twins == {11: 14, 21: 22}
+    assert [p.id for p in model.places] == [p for p in range(33) if p not in (11, 21)]
+    for twin, host, x in ((11, 14, -1300.0), (21, 22, -1300.0)):
+        t, h = model.platform(twin), model.platform(host)
+        assert h.left < t.left and t.right <= h.right and abs(t.y_at(x) - h.y_at(x)) < 0.2
+        assert t.group == h.group == (5, 0)  # one foothold group: their chains join (119 -> 88, 76 -> 73)
+        assert model.platform_under(x, t.y_at(x) - 1).id == host  # her dot there: on the long one
+    # Their spawns are the long ones': 14 has 11's three, 22 has 21's two.
+    assert model.spawn_platforms[14] == 10 and model.spawn_platforms[22] == 14
+    assert 11 not in model.spawn_platforms and 21 not in model.spawn_platforms
+    first = load(FIRST)
+    assert first.twins == {} and first.places is first.platforms
+
+
+def test_no_route_jumps_between_a_twin_and_the_platform_it_lies_on():
+    from gamelab.motion.route import Planner, droppable
+    model = load()
+    planner = Planner(model)
+    assert not any({m.src, m.dst} & {11, 21} for m in planner.moves)
+    for a, b in ((14, 11), (11, 14), (22, 21), (21, 22)):
+        assert planner.plan(a, -1300, b) == []  # there already: she walks
+    # No drop under 21 (standing there she may be on 21, and a drop takes her through it alone, onto 22): 22's drop
+    # onto 31 went from -1353 before; 31 lies all under 21, so there's none.
+    assert not droppable(model, model.platform(22), -1353) and droppable(model, model.platform(22), -1506)
+    assert not any(m.kind == "drop" and m.src == 22 and -1412 <= m.x <= -1141 for m in planner.moves)
+
+
+def test_in_the_simulator_she_gets_up_the_rope_from_14_and_onto_11_from_22():
+    # Two trips the live runs of 2026-10-23 missed, with her dot placed right: up the rope from 14 to 7 (it ran past
+    # 14's right end, 80 units further on than planned, and fell to 17 twice), and from under 11 to 11 (jumps between 11
+    # and 14, landings on 11 counted as elsewhere).
+    from gamelab.sim.scenarios import Scenario, _nav, run_scenario
+    model = load()
+    for start, dst, made in (((14, -930.0), 7, "climb 14->7"), ((22, -1300.0), 11, "climb 22->14")):
+        trace = run_scenario(Scenario(f"rocky_{start[0]}_{dst}", _nav(dst), start, limit=120), model)
+        result = trace["result"]
+        assert isinstance(result, dict) and result["result"] == "arrived" and result["misses"] == 0, result
+        assert any(m.startswith(made) for m in result["moves"]), result["moves"]

@@ -102,6 +102,41 @@ def test_platform_lookups(model):
     assert model.spawn_platforms == {by_y(model, 360, 300).id: 1}
 
 
+def twin_tree():
+    """The made-up map with a twin: T (200..400, y 499.9) lies on C's floor, a chain of its own joined into C's
+    (as 11 lies on 14 on West Rocky Mountain II), and E (150..450, y 430) is over both."""
+    t = tree()
+    t["foothold"]["1"]["3"]["10"] = {"x1": 200, "y1": 499.9, "x2": 400, "y2": 499.9, "prev": 0, "next": 5}
+    t["foothold"]["1"]["5"] = dict([seg(1, 5, 11, 150, 430, 450, 430)])
+    return t
+
+
+def test_a_platform_lying_on_anothers_floor_is_that_platform_for_everything(model):
+    assert model.twins == {} and model.places is model.platforms  # none on the made-up map (none on the first map)
+    m = mapdata.parse(1, twin_tree(), "Test Map", {})
+    c, e = by_y(m, 500, 600), by_y(m, 430, 300)
+    twin = next(p for p in m.platforms if (p.left, p.right) == (200, 400))
+    assert m.twins == {twin.id: c.id} and m.place_of(twin.id) == c.id and m.place_of(c.id) == c.id
+    assert twin not in m.places and len(m.places) == len(m.platforms) - 1
+    # Where she is: on C, also where T is (0.1 above it), from her dot or a fall.
+    assert m.platform_under(300, 499).id == c.id and m.platform_below(300, 450).id == c.id
+    assert m.safe(twin.id) == m.safe(c.id)
+    # No move from or onto T; between C and T she walks: a trip to T is a trip to C.
+    planner = Planner(m)
+    assert not any(twin.id in (mv.src, mv.dst) for mv in planner.moves)
+    assert planner.plan(c.id, 600, twin.id) == [] and planner.plan(twin.id, 300, c.id) == []
+    assert twin.id in planner.reachable(e.id) and planner.travel(e.id, 300, twin.id) == planner.travel(e.id, 300, c.id)
+    # A drop off E lands on C, and none goes through C under T: standing there she may be on T, and a drop takes
+    # her through T alone.
+    drops = [mv for mv in planner.moves if mv.kind == "drop"]
+    assert any(mv.src == e.id and mv.dst == c.id for mv in drops)
+    assert not any(mv.src == c.id and 200 - 8 <= mv.x <= 400 + 8 for mv in drops)
+    from gamelab.motion.route import droppable
+    assert not droppable(m, c, 300) and not droppable(m, c, 405, room=8) and droppable(m, c, 600)
+    # A landing from E's jumps is on C, never T.
+    assert not any(mv.dst == twin.id for mv in planner.moves)
+
+
 def test_physics_helpers():
     assert JUMP_HEIGHT == pytest.approx(77, abs=1)
     assert air_time(0) == pytest.approx(0.555, abs=0.01)
@@ -716,7 +751,7 @@ def test_grounds_are_ranked_by_exp_and_learn_from_visits(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "GROUNDS", tmp_path / "grounds.json")
     spawns = {1: ["Snail", "Snail", "Snail"], 2: ["Pig", "Pig"], 3: ["Slime", "Snail"], 4: ["Pig", "Orange Mushroom"]}
     model = SimpleNamespace(id=5, mob_exp={"Snail": 2, "Pig": 13, "Slime": 12, "Orange Mushroom": 15},
-                            monsters_by_platform=spawns, platforms=[], safe=lambda pid: False)
+                            monsters_by_platform=spawns, platforms=[], places=[], safe=lambda pid: False)
     hunter = SimpleNamespace(senses=SimpleNamespace(eyes=SimpleNamespace(
         kinds={"snail", "pig", "slime", "orange-mushroom"})))
     tour = Tour(hunter, SimpleNamespace(model=model), log=lambda m: None)
@@ -753,7 +788,7 @@ def test_the_hunt_loop_keeps_the_grounds_worth_a_visit_by_their_exp_a_second(mon
     monkeypatch.setattr(paths, "GROUNDS", tmp_path / "grounds.json")
     spawns = {1: ["Snail", "Snail", "Snail"], 2: ["Pig", "Pig"], 3: ["Slime", "Snail"], 4: ["Pig", "Orange Mushroom"]}
     model = SimpleNamespace(id=5, mob_exp={"Snail": 2, "Pig": 13, "Slime": 12, "Orange Mushroom": 15},
-                            monsters_by_platform=spawns, platforms=[], safe=lambda pid: False)
+                            monsters_by_platform=spawns, platforms=[], places=[], safe=lambda pid: False)
     hunter = SimpleNamespace(senses=SimpleNamespace(eyes=SimpleNamespace(
         kinds={"snail", "pig", "slime", "orange-mushroom"})))
     tour = Tour(hunter, SimpleNamespace(model=model), log=lambda m: None)

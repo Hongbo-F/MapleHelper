@@ -269,7 +269,9 @@ class Navigator:
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
               scene: Scene | None = None, keep_off=(), vary: bool = True) -> TripState:
-        """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time."""
+        """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
+        it lies on (mapdata.MapModel.twins): she's there on either."""
+        dst = self.model.place_of(dst)
         mode = mode or self.mode
         if mode not in MODES or (mode in FIGHTING and self.escort is None):
             raise ValueError(f"no {mode!r} trip without an escort" if mode in MODES else f"unknown mode {mode!r}")

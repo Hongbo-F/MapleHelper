@@ -128,7 +128,7 @@ def open_above(model: MapModel, platform: Platform, x0: float, x1: float) -> boo
     """Whether she can jump anywhere between x0 and x1 on `platform` and land back on it: no other
     platform overhead within her jump height (she'd go up through it and land on top)."""
     lo, hi = sorted((x0, x1))
-    for q in model.platforms:
+    for q in model.places:  # (not a twin of hers, 0.15 units above her: mapdata.MapModel.twins)
         if q.id == platform.id or q.right < lo or q.left > hi:
             continue
         mid = min(max((lo + hi) / 2, q.left), q.right)

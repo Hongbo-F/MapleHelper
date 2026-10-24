@@ -10,7 +10,8 @@ Moves between platforms (all in map units, using the game's physics and her meas
 - walk_off: walk off a platform's end and fall onto the platform below;
 - drop: down + jump to fall through the platform she stands on (not where its foothold forbids it).
 In the air only walls of the foothold group she leaves stop her (body.OWN_GROUP_WALLS). Walking along a
-platform links its moves; routes are found with Dijkstra on time.
+platform links its moves; routes are found with Dijkstra on time. A twin (a platform lying on another's footholds:
+mapdata.MapModel.twins) is the platform it lies on: no move goes from or to it, and a trip to it is a trip there.
 """
 
 import heapq
@@ -198,8 +199,9 @@ def moves(model: MapModel) -> list[Move]:
     """Every move the physics allows on the map: the rope moves, then each platform's own moves."""
     out = _rope_moves(model)
     # Jumps, walk-offs and drops: simulated with the game's physics, so the landing platform is
-    # wherever her feet first cross a platform on the way down (not the one aimed at).
-    for a in model.platforms:
+    # wherever her feet first cross a platform on the way down (not the one aimed at). Not from a twin: she's
+    # never on one (it's the platform it lies on), and it's never landed on.
+    for a in model.places:
         mine = _jump_up_moves(model, a) + _end_moves(model, a) + _along_jumps(model, a)
         out += _without_needless_jumps(model, a, _distinct(mine)) + _drop_moves(model, a)
     return out + _rope_jumps(model, out)
@@ -226,7 +228,7 @@ def _rope_moves(model: MapModel) -> list[Move]:
         top = hung_from(model, rope)
         if top is None:
             continue
-        for p in model.platforms:
+        for p in model.places:
             if p is top:
                 continue
             if p.covers(rope.x):
@@ -251,7 +253,7 @@ def _rope_moves(model: MapModel) -> list[Move]:
 def _jump_up_moves(model: MapModel, a: Platform) -> list[Move]:
     """Straight up from a through each platform overhead, in the middle of where they overlap."""
     out: list[Move] = []
-    for b in model.platforms:
+    for b in model.places:
         if b is a:
             continue
         x = _overlap_middle(a, b)
@@ -342,17 +344,17 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
     won't drop her through a (forbidFallDown), or a knock could take her past a cliff of b (KNOCK_CARRY), she
     drops from the nearest spot to the middle clear of both."""
     out: list[Move] = []
-    for b in model.platforms:
+    for b in model.places:
         if b is a:
             continue
         x = _overlap_middle(a, b)
         if x is None:
             continue
         cliffs = void_ends(model, b)
-        if not (a.drop_ok(x, DROP_ROOM) and _clear_of(cliffs, x)):
+        if not (droppable(model, a, x, DROP_ROOM) and _clear_of(cliffs, x)):
             lo, hi = max(a.left, b.left) + LAND_MARGIN, min(a.right, b.right) - LAND_MARGIN
             ok = [s for s in range(math.ceil(lo), math.floor(hi) + 1, DROP_STEP)
-                  if a.drop_ok(s, DROP_ROOM) and _clear_of(cliffs, s)]
+                  if droppable(model, a, s, DROP_ROOM) and _clear_of(cliffs, s)]
             if not ok:
                 continue
             x = float(min(ok, key=lambda s: abs(s - x)))  # the nearest spot where it will
@@ -365,7 +367,7 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
 def hung_from(model: MapModel, rope: Rope) -> Platform | None:
     """The platform a rope hangs from (its top within ROPE_TOP_DX sideways and ROPE_TOP_DY up or down of it), if
     any: the one she climbs onto at its top, if the rope lets her (Rope.from_platform)."""
-    return next((p for p in model.platforms
+    return next((p for p in model.places
                  if p.covers(rope.x, ROPE_TOP_DX) and abs(p.y_at(rope.x) - rope.top) <= ROPE_TOP_DY), None)
 
 
@@ -505,7 +507,7 @@ def _rope_jumps(model: MapModel, others: list[Move]) -> list[Move]:
     for rope in model.ropes:
         top = hung_from(model, rope)
         ways = []  # (platform, where she starts, seconds before she's on the rope, her feet's y then)
-        for p in model.platforms:
+        for p in model.places:
             if p is top:
                 continue
             if p.covers(rope.x):
@@ -540,7 +542,7 @@ def drop_clear(model: MapModel, a: Platform, x: float, below: Platform | None = 
     """Whether down + jump at x drops her through platform a: not within ROPE_CLEAR of a rope's top (down
     there climbs onto it), nor on a foothold that forbids it; and onto `below` (if given), not within
     KNOCK_CARRY of a cliff of it (void_ends)."""
-    return a.drop_ok(x) and all(abs(x - rx) > ROPE_CLEAR for rx in rope_tops(model, a)) \
+    return droppable(model, a, x) and all(abs(x - rx) > ROPE_CLEAR for rx in rope_tops(model, a)) \
         and (below is None or _clear_of(void_ends(model, below), x))
 
 
@@ -551,7 +553,19 @@ def drop_spots(model: MapModel, a: Platform, below: Platform) -> list[int]:
     lo, hi = max(a.left, below.left) + LAND_MARGIN, min(a.right, below.right) - LAND_MARGIN
     ropes, cliffs = rope_tops(model, a), void_ends(model, below)
     return [x for x in range(int(lo), int(hi) + 1, DROP_STEP)
-            if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and a.drop_ok(x, DROP_ROOM) and _clear_of(cliffs, x)]
+            if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and droppable(model, a, x, DROP_ROOM)
+            and _clear_of(cliffs, x)]
+
+
+def droppable(model: MapModel, a: Platform, x: float, room: float = 0.0) -> bool:
+    """Whether down + jump at x surely drops her through platform a: its foothold there doesn't forbid it (Platform.
+    drop_ok, within `room` of x too), and no twin of a lies over it within `room` (mapdata.MapModel.twins): standing
+    there she may be on the twin (she lands on it, and walking left from a's right part takes her onto it), and a drop
+    takes her through the twin alone, onto a, 0.15 units under it. On West Rocky Mountain II 22's drop onto 31 went
+    from x -1353, under 21."""
+    return a.drop_ok(x, room) and not any(
+        model.place_of(t) == a.id and model.platform(t).left - room <= x <= model.platform(t).right + room
+        for t in model.twins)
 
 
 def void_ends(model: MapModel, q: Platform) -> list[float]:
@@ -635,7 +649,8 @@ def _running_jump_seconds(t: float) -> float:
 
 
 class Planner:
-    """The map's moves, and the quickest routes over them."""
+    """The map's moves, and the quickest routes over them. A twin asked about (from, to, or reachable from) is the
+    platform it lies on (mapdata.MapModel.place_of): routes go between places."""
 
     def __init__(self, model: MapModel):
         self.model = model
@@ -662,13 +677,13 @@ class Planner:
         route ends wherever she lands on dst.
         `penalty(move)` adds seconds to a move (e.g. one a monster is in the way of); `weight(move)`
         scales its cost (a little randomness lets near-equal routes take turns)."""
-        found = self._search(src, x, dst, penalty, weight)
+        found = self._search(self.model.place_of(src), x, self.model.place_of(dst), penalty, weight)
         return None if found is None else found[0]
 
     def quickest(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
                  weight: Callable[[Move], float] | None = None) -> Way | None:
         """`plan`'s route as a Way, with what it costs so weighed and penalized (None: there's no way)."""
-        found = self._search(src, x, dst, penalty, weight)
+        found = self._search(self.model.place_of(src), x, self.model.place_of(dst), penalty, weight)
         return None if found is None else Way(tuple(found[0]), found[1])
 
     def alternatives(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
@@ -683,6 +698,7 @@ class Planner:
         weights already vary. Empty if there's no way."""
         n = ROUTES if n is None else n
         stretch = STRETCH if stretch is None else stretch
+        src, dst = self.model.place_of(src), self.model.place_of(dst)
         first = self.quickest(src, x, dst, penalty, weight)
         if first is None:
             return []
@@ -719,6 +735,7 @@ class Planner:
                 weight: Callable[[Move], float] | None = None) -> Way | None:
         """The best route from (platform src, x) onto dst through move `via` (a trip's chosen way, replanned: Navigator.
         _route), weighed and penalized as `plan`'s; None if there's none (or via starts on dst)."""
+        src, dst = self.model.place_of(src), self.model.place_of(dst)
         if via.src == dst:
             return None
         start = (src, round(x))
@@ -781,6 +798,7 @@ class Planner:
     def travel(self, src: int, x: float, dst: int, keep_off=()) -> float | None:
         """Seconds the quickest route from (platform src, x) to platform dst takes (by the model); keeping off the
         platforms `keep_off` (but dst), KEEP_OFF_S more for each move onto one (a search of its own: not kept)."""
+        src, dst = self.model.place_of(src), self.model.place_of(dst)
         if keep_off:
             found = self._search(src, x, dst, keeping_off(keep_off, dst), None)
             return None if found is None else found[1]
@@ -792,7 +810,7 @@ class Planner:
         kept for the TIMES_KEPT starts asked for last. A search starts from x rounded (`_search`), so
         that's the start. The hunt loop asks for the route time to each hunting ground after most looks,
         from where she stands: 0.7 ms a search, against 1.6 for one to every platform."""
-        start = (src, round(x))
+        start = (self.model.place_of(src), round(x))
         found = self._times.pop(start, None)
         if found is None:
             found = self._every(*start)
@@ -812,6 +830,7 @@ class Planner:
         platform has about 210 landings on this map."""
         if dst_x is None:
             return self.travel(src, x, dst, keep_off)
+        src, dst = self.model.place_of(src), self.model.place_of(dst)
         off = frozenset(keep_off) - {dst}
         start = (src, round(x), off)
         found = self._landings.pop(start, None)
@@ -896,14 +915,15 @@ class Planner:
         return None
 
     def reachable(self, src: int) -> set[int]:
-        """The platforms some route leads to from src (src included)."""
+        """The platforms some route leads to from src (src included), their twins with them."""
+        src = self.model.place_of(src)
         seen, todo = {src}, [src]
         while todo:
             for m in self.by_src.get(todo.pop(), []):
                 if m.dst not in seen:
                     seen.add(m.dst)
                     todo.append(m.dst)
-        return seen
+        return seen | {t for t, p in self.model.twins.items() if p in seen}
 
 
 def way_of(moves) -> tuple:

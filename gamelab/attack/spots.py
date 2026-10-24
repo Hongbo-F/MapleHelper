@@ -107,7 +107,7 @@ def _switches() -> tuple:
 def _spots(model: MapModel, target: int) -> list[Spot]:
     ground = model.platform(target)
     out = []
-    for p in model.platforms:
+    for p in model.places:
         lo, hi = p.left + EDGE_MARGIN, p.right - EDGE_MARGIN
         if hi < lo:
             continue
@@ -187,7 +187,7 @@ def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here
     cur = model.platform(current.platform)
     now = reached(cur, current.x, cur.y_at(current.x)) if current.platform != pid else 0
     best = None  # (monsters reached, seconds to get there, platform, x)
-    for p in model.platforms:
+    for p in model.places:
         if p.id == pid or not spot_ok(model, p.id, worth):
             continue
         for x in _stand_xs(p.left + EDGE_MARGIN, p.right - EDGE_MARGIN):

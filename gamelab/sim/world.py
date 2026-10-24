@@ -1134,7 +1134,7 @@ class World:
             self.y -= CLIMB_UP * dt
             if self.y <= r.top:
                 self.y = r.top
-                top = next((p for p in self.model.platforms
+                top = next((p for p in self.model.places
                             if p.covers(r.x, 4) and abs(p.y_at(r.x) - r.top) <= 20), None)
                 if top is not None and r.from_platform:
                     self._leave_rope()

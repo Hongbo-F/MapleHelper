@@ -154,7 +154,7 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
     box = minimap_box(geo)
     mini_x, mini_y = box[2] // geo.look_scale, box[3] // geo.look_scale  # the minimap's bottom-right corner
     pad, above, below, narrow = geo.fpx(STRIP_PAD), geo.fpx(ABOVE), geo.fpx(BELOW), geo.fpx(MIN_STRIP)
-    platforms = model.platforms if wide else [p for p in (s.platform,) if p is not None]
+    platforms = model.places if wide else [p for p in (s.platform,) if p is not None]
     strips: list[tuple[Platform, tuple[int, int, int, int]]] = []
     for p in platforms:
         for x0, x1, high, low in level_runs(p):

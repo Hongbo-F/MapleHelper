@@ -32,6 +32,15 @@ FEET_BELOW = 8               # map units her feet may sink below a platform's su
 # 77-106 (they hop as they go).
 MOB_WALK_SPEED = 125.0       # walkSpeed, when the map's physics don't say
 MIN_FALL = 2                 # a platform must be this far below her to be one she falls onto
+# A twin: a platform lying on another's footholds, within its ends and TWIN_DY of its surface all along (less than
+# a fall: MIN_FALL), is one place with it (MapModel.twins). On West Rocky Mountain II two do, each in the same foothold
+# group as the one it lies on: 11 (-1426..-1171) on 14's foothold from -1484 to -1171, 21 (-1404..-1149) on 22's
+# from -1462 to -1149, 0.00-0.15 units above them. Each is a chain of its own whose last foothold joins the long
+# one's next (11's 119 -> 14's 88, 21's 76 -> 22's 73), with a free end on the left: she lands on the twin (it's the
+# higher), walks off its right end onto the long one without a step, and off its left end drops 0.15 units onto it;
+# from the long one's right part walking left she's on the twin (88's prev is 119). For everything the stack does she
+# is on the long one: a landing on either is arriving, and moves between them are walking. None on the first map.
+TWIN_DY = MIN_FALL
 SPAWN_REACH = 60             # how far above its platform a spawn point may be placed
 
 
@@ -128,6 +137,13 @@ class Platform:
         return min(max(x, self.left), self.right)
 
 
+def _lies_on(a: Platform, b: Platform) -> bool:
+    """Whether platform a's surface is within TWIN_DY of b's all along a (at a's ends and every foothold end of
+    either between them)."""
+    xs = {a.left, a.right} | {v for s in a.segments + b.segments for v in (s.x1, s.x2) if a.left < v < a.right}
+    return all(abs(a.y_at(x) - b.y_at(x)) <= TWIN_DY for x in xs)
+
+
 def runs_under(other: Platform, p: Platform, reach: float = MONSTER_REACH) -> bool:
     """Whether platform `other` runs under `p` within `reach`, judged at the middle of where they overlap:
     monsters walking on `other` can touch her standing on `p` (their bodies stick up that far)."""
@@ -197,13 +213,45 @@ class MapModel:
     mob_speeds: dict[str, float] = field(default_factory=dict)    # monster name -> how fast it walks (units/s;
                                                                   # game data: mob_walk_speed)
 
+    # --- one place: twins -----------------------------------------------------------------------
+
+    @cached_property
+    def twins(self) -> dict[int, int]:
+        """Platform id -> the platform it lies on (TWIN_DY): a twin is that platform for everything the stack does
+        (where she is, landings, routes, spawns). The longer of two is the one stood for (if as long, the one of
+        lower id); one lying on a twin is the place that twin stands for."""
+        def size(p: Platform) -> tuple[float, int]:
+            return p.right - p.left, -p.id
+
+        on: dict[int, int] = {}
+        for a in self.platforms:
+            hosts = [b for b in self.platforms if b is not a and b.left <= a.left and a.right <= b.right
+                     and size(b) > size(a) and _lies_on(a, b)]
+            if hosts:
+                on[a.id] = max(hosts, key=size).id
+        for a in list(on):  # one lying on a twin: the place that twin stands for
+            while on[a] in on:
+                on[a] = on[on[a]]
+        return on
+
+    def place_of(self, pid: int) -> int:
+        """The platform `pid` is, for everything the stack does: the one it lies on if it's a twin, else itself."""
+        return self.twins.get(pid, pid)
+
+    @cached_property
+    def places(self) -> list[Platform]:
+        """The platforms that are places of their own (all but twins), in id order: where she can be found to be,
+        land, stand and go. Every platform on a map without twins."""
+        return [p for p in self.platforms if p.id not in self.twins] if self.twins else self.platforms
+
     # --- where things are -------------------------------------------------------------------
 
     def platform_under(self, x: float, y: float, reach: float = 40, slack: float = 15) -> Platform | None:
         """The platform her feet are on (or just above): the closest one at or below y, within reach.
-        `slack` allows for x being a little off (the minimap dot is good to ~11 map units)."""
+        `slack` allows for x being a little off (the minimap dot is good to ~11 map units). A twin is never
+        the answer (MapModel.twins): the platform it lies on is."""
         best = None
-        for p in self.platforms:
+        for p in self.places:
             if not p.covers(x, slack):
                 continue
             gap = p.y_at(x) - y
@@ -212,9 +260,9 @@ class MapModel:
         return best[1] if best else None
 
     def platform_below(self, x: float, y: float) -> Platform | None:
-        """The first platform she'd land on falling from (x, y)."""
+        """The first platform she'd land on falling from (x, y) (never a twin: the one it lies on)."""
         best = None
-        for p in self.platforms:
+        for p in self.places:
             if p.covers(x):
                 gap = p.y_at(x) - y
                 if gap > MIN_FALL and (best is None or gap < best[0]):
@@ -242,7 +290,9 @@ class MapModel:
     def safe(self, pid: int, reach: float = MONSTER_REACH) -> bool:
         """No monster can touch her standing on this platform: none spawn on it (monsters never leave
         their platform), and no platform they spawn on runs underneath within `reach` (their bodies
-        stick up that far: pigs on platform 1 hit her on platform 0, 42 units above them)."""
+        stick up that far: pigs on platform 1 hit her on platform 0, 42 units above them). A twin is as
+        safe as the platform it lies on."""
+        pid = self.place_of(pid)
         if pid in self.spawn_platforms:
             return False
         p = self.platform(pid)

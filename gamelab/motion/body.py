@@ -502,11 +502,12 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
     # Only platforms she could reach in the time: within her sideways travel, at or below the top of the jump.
     reach = max(abs(vx), shoe.air_speed if arrow else 0.0) * limit + 1
     top = y - (vy * vy / (2 * shoe.gravity) if vy < 0 else 0) - 1
-    plats = [q for q in model.platforms if q is not skip and q.right >= x - reach and q.left <= x + reach
+    # (A twin is never landed on: the platform it lies on is, mapdata.MapModel.twins.)
+    plats = [q for q in model.places if q is not skip and q.right >= x - reach and q.left <= x + reach
              and max(q.y_at(q.left), q.y_at(q.right)) >= top]
     x0 = x
     i = bisect.bisect_left(wall_xs, x)
-    side = _side_at(model.platforms, x, y) if i < len(wall_xs) and wall_xs[i] == x and not airborne else 0
+    side = _side_at(model.places, x, y) if i < len(wall_xs) and wall_xs[i] == x and not airborne else 0
     points = [(x, y)] if path else None
     speeds = [(vx, vy)] if path else None
     t = 0.0

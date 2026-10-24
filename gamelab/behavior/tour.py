@@ -99,7 +99,7 @@ class Tour:
         self.rest_below, self.rest_to = rest_below, rest_to
         self.report = TourReport()
         model = nav.model
-        self.safe = [p.id for p in model.platforms if model.safe(p.id) and p.right - p.left >= MIN_REST_WIDTH]
+        self.safe = [p.id for p in model.places if model.safe(p.id) and p.right - p.left >= MIN_REST_WIDTH]
         self.exp = {kind_of(name): e for name, e in model.mob_exp.items()}  # kind -> EXP per kill
         best = max(self.exp.values(), default=0)
         self.worth = {k for k, e in self.exp.items() if e >= WORTH * best} or None  # kinds worth hunting

@@ -120,7 +120,7 @@ def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: floa
     platform 42-60 units above a hunting ground once had pigs "on" it, so she backed away from them and
     off her platform."""
     if exact and FEET_SNAP is not None:
-        near = [(abs(p.y_at(p.clamp(x)) - y), p.id) for p in model.platforms if p.covers(x, PLATFORM_SLACK)]
+        near = [(abs(p.y_at(p.clamp(x)) - y), p.id) for p in model.places if p.covers(x, PLATFORM_SLACK)]
         near = [g for g in near if g[0] <= FEET_SNAP]
         if near:
             return model.platform(min(near)[1])
