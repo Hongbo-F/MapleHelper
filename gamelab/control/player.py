@@ -182,6 +182,7 @@ class Watchdog(threading.Thread):
         self.cap_s = lie_recorder.CAP_S if cap_s is None else cap_s
         self.Recording = lie_recorder.Recording
         self.stopped = threading.Event()
+        self.looked = threading.Event()       # its first look is done: the player takes no plan before (serve)
         self.cleared = threading.Event()      # the alarm cleared by a person and the screen clear since: the player
                                               # stops (serve)
         self.cycle_t0: float | None = None    # when the cycle in progress was first seen (monotonic s), else None
@@ -201,6 +202,7 @@ class Watchdog(threading.Thread):
                     self.tick(time.monotonic(), sct)
                 except Exception as e:  # nothing stops the watching
                     self._trouble("a look failed", e)
+                self.looked.set()
                 # 4 a second from the start of each look (it waited `interval` after each, about 3 a second with the
                 # look's own 70 ms: 3.10 a second on a 1366x768 frame, D:/MapleHelper-scratch/ld/rate_measure.py);
                 # one that ran long (the paging's beeps) is followed at once, not caught up.
@@ -361,9 +363,13 @@ class Player:
         if plan.get("window_client"):  # before anything else: the capture's area is the new client area
             window.resize_client(hwnd, *plan["window_client"])
             time.sleep(0.5)  # let the game lay itself out again
-        if plan.get("focus") and win32.foreground_title() != self.title:
+        # The alarm looked at again after each wait: a Lie Detector seen in one had the game brought to the front all
+        # the same (the keys' own waits stop at it, but bringing it forward isn't one of them).
+        if plan.get("focus") and win32.foreground_title() != self.title and not self.alarm.is_set():
             window.bring_to_front(self.title)
             time.sleep(0.5)  # let the window come to the front
+        if self.alarm.is_set():
+            return {"error": LIE_DETECTOR_ERROR}
         if win32.foreground_title() != self.title:
             return {"error": f"game not in front (foreground: {win32.foreground_title()!r})"}
 
@@ -481,7 +487,7 @@ def serve() -> None:
     sight it refuses every plan (Player.run: the alarm Event) while the watchdog records it, and it stops once a
     person has cleared the alarm and the screen has been clear since (Watchdog.cleared): plans are taken again only
     by a player started again, which takes the user's UAC click, as when it shut down at the alarm. It won't start
-    with the alarm up."""
+    with the alarm up, takes no plan before the watchdog's first look at the game, and stops if the watchdog does."""
     for d in (LAB, INBOX, OUTBOX):
         d.mkdir(parents=True, exist_ok=True)
     _rotate_log()
@@ -503,8 +509,13 @@ def serve() -> None:
         while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:
             if watchdog.recording is not None:  # a Lie Detector's recording goes on to its end, idle or not
                 idle_since = time.monotonic()
+            if not watchdog.is_alive():  # (it can't take a picture: mss refused) nothing would see a Lie Detector
+                _log("the Lie Detector watch has stopped: stopping, as nothing would see one")
+                break
             plans = sorted(INBOX.glob("*.json"))
-            if not plans:
+            # No plan before the watchdog's first look: a Lie Detector on screen as the player starts (started again
+            # with the Truth Booth up) is seen before any key, not up to a look and its 70 ms later.
+            if not plans or not watchdog.looked.is_set():
                 time.sleep(0.01)  # idle: look for plans every 10 ms
                 continue
             path = plans[0]

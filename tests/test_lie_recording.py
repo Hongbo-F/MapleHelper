@@ -678,13 +678,17 @@ class Served:
             assert time.monotonic() < end, f"timed out; the player's log:\n{self.log()}"
             time.sleep(0.01)
 
-    def plan(self, name):
-        """A plan put in the inbox as the client does (but past its check of the alarm), and the player's answer."""
+    def send(self, name):
+        """A plan put in the inbox as the client does (but past its check of the alarm); its answer's file."""
         client.INBOX.mkdir(parents=True, exist_ok=True)
         tmp = client.INBOX / f"{name}.tmp"
         tmp.write_text(json.dumps({"events": [], "capture": {"lead_ms": 0}, "focus": False}), encoding="utf-8")
         tmp.replace(client.INBOX / f"{name}.json")
-        out = client.OUTBOX / f"{name}.json"
+        return client.OUTBOX / f"{name}.json"
+
+    def plan(self, name):
+        """A plan sent (`send`), and the player's answer."""
+        out = self.send(name)
         self.wait_for(out.exists)
         result = client._read_result(out)
         out.unlink()
@@ -752,6 +756,64 @@ def test_the_idle_limit_waits_for_a_lie_detector_s_recording_to_end(tmp_path, mo
     [folder] = (tmp_path / "lie_detector").iterdir()
     assert json.loads((folder / SUMMARY).read_text(encoding="utf-8"))["end"] == "cap"  # not "stopped"
     assert "stopping with the Lie Detector alarm up (locked)" in log
+
+
+def test_the_player_takes_no_plan_before_its_watchdog_has_looked_at_the_game(tmp_path, monkeypatch, alarm_file,
+                                                                             pages):
+    looking = threading.Event()
+
+    class Slow(Screen):
+        """The first grab held until the test lets it go."""
+
+        def __call__(self):
+            looking.wait(10)
+            return super().__call__()
+
+    served = Served(tmp_path, monkeypatch, Slow(1))  # the Lie Detector on screen as it starts (the Truth Booth, say)
+    try:
+        out = served.send("first")
+        time.sleep(0.3)
+        assert not out.exists()  # waiting for the first look
+        looking.set()
+        served.wait_for(out.exists)
+        assert client._read_result(out)["error"] == LIE_DETECTOR_ERROR  # seen before any key of it
+    finally:
+        served.stop()
+
+
+def test_the_player_stops_if_its_watchdog_does(tmp_path, monkeypatch):
+    class Dead(Watchdog):
+        def run(self):  # as when mss can't be opened: the thread ends at once
+            pass
+
+    fake_lab(tmp_path, monkeypatch, Screen())
+    monkeypatch.setattr(player_mod, "Watchdog", functools.partial(Dead, spotter=Spotter(), grab=Screen()))
+    thread = threading.Thread(target=player_mod.serve, name="served-player")
+    thread.start()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    log = (tmp_path / "player.log").read_text(encoding="utf-8")
+    assert "the Lie Detector watch has stopped: stopping, as nothing would see one" in log
+    assert log.rstrip().endswith("player stopped")
+
+
+def test_a_lie_detector_seen_while_a_plan_waits_on_the_window_brings_nothing_forward_and_sends_nothing(monkeypatch):
+    # Seen during the resize's wait (or the bring-to-front's), the plan stops before the game is brought forward and
+    # before its first key: those waits weren't watched (the keys' own are).
+    from maplehelper.keys import parse
+    flag, brought = threading.Event(), []
+    monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "resize_client", lambda hwnd, w, h: flag.set())  # seen meanwhile
+    monkeypatch.setattr(player_mod.window, "bring_to_front", lambda title: brought.append(title))
+    monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "another window")
+    plan = {"id": "p", "events": [[0, "f", "down"], [10, "f", "up"]], "window_client": [1366, 768], "focus": True}
+    assert Player({"f": parse("f")}, "MapleStory", flag).run(plan) == {"error": LIE_DETECTOR_ERROR}
+    assert brought == []  # (and no key: conftest refuses win32.send_key)
+    flag.clear()
+    monkeypatch.setattr(player_mod.window, "bring_to_front", lambda title: (brought.append(title), flag.set()))
+    plan.pop("window_client")
+    assert Player({"f": parse("f")}, "MapleStory", flag).run(plan) == {"error": LIE_DETECTOR_ERROR}
+    assert brought == ["MapleStory"]
 
 
 # --- clear-alarm waits for the recording to end, and says how it went ---
