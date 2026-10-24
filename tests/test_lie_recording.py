@@ -544,6 +544,37 @@ def test_a_second_lie_detector_after_resuming_raises_the_alarm_again_with_a_new_
     assert first[1]["outcome"] == "answered"
 
 
+def test_an_alarm_file_that_cant_be_written_is_still_paged(tmp_path, monkeypatch, pages):
+    blocker = tmp_path / "lab_is_a_file"
+    blocker.write_text("x", encoding="utf-8")
+    for mod in (alarm, client, player_mod):  # its folder can't be made, as a full or failing disk would refuse it
+        monkeypatch.setattr(mod, "ALARM", blocker / "ALARM.json")
+    with pytest.raises(OSError):
+        alarm.raise_alarm(frame())
+    assert pages == ["MapleStory Lie Detector on screen"]  # raised before the paging, it had told nobody
+    screen = Screen()
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=alarm.raise_alarm)
+    play(dog, screen, [1, 0])
+    assert flag.is_set() and len(pages) == 2 and any("raising the alarm failed" in m for m in said)
+    dog.recording.finish("stopped")
+    assert dog.recording.join(timeout=10)
+
+
+def test_an_alarm_file_that_cant_be_looked_at_is_up(tmp_path, monkeypatch):
+    # Path.exists answers False for any error (an os.stat that raises "the name is wrong", WinError 123), which
+    # had read as a person clearing it.
+    bad = tmp_path / "bad?name" / "ALARM.json"
+    with pytest.raises(OSError):
+        os.stat(bad)
+    assert not bad.exists()
+    monkeypatch.setattr(player_mod, "ALARM", bad)
+    assert Watchdog._alarm_up() is True
+    monkeypatch.setattr(player_mod, "ALARM", tmp_path / "ALARM.json")
+    assert Watchdog._alarm_up() is False
+    (tmp_path / "ALARM.json").write_text("{}", encoding="utf-8")
+    assert Watchdog._alarm_up() is True
+
+
 def test_an_alarm_file_that_couldnt_be_written_keeps_the_player_locked(tmp_path, alarm_file):
     # No alarm file means no person can be said to have cleared it: locked until the player is restarted.
     screen = Screen()

@@ -27,6 +27,7 @@ perception.lie_detector when a Watchdog is created). Plans come from control.cli
 """
 
 import json
+import os
 import threading
 import time
 import traceback
@@ -239,11 +240,16 @@ class Watchdog(threading.Thread):
 
     @staticmethod
     def _alarm_up() -> bool:
-        """Whether the alarm file (paths.ALARM) is there; when that can't be told, it is (the lock stays)."""
+        """Whether the alarm file (paths.ALARM) is there; when that can't be told, it is (the lock stays). Asked of
+        os.stat: Path.exists answers False for any error (Python 3.15 here), so an alarm file it couldn't look at
+        had read as cleared."""
         try:
-            return ALARM.exists()
+            os.stat(ALARM)
+        except FileNotFoundError:
+            return False
         except OSError:
             return True
+        return True
 
     def _look(self, sct):
         """(the frame, None), or (None, why there's none)."""

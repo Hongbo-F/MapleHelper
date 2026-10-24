@@ -19,19 +19,23 @@ BEEP_GAP_S = 0.4  # ... this far apart
 
 
 def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector") -> dict:
-    """Record the alarm (gamelab refuses to run until it's cleared) and page whoever is at the PC."""
-    ALARM.parent.mkdir(parents=True, exist_ok=True)
+    """Record the alarm (gamelab refuses to run until it's cleared) and page whoever is at the PC. An alarm that
+    can't be written (the disk full) is still paged, and its error raised after that: it had raised before the
+    paging, so then nobody was told."""
     info = {"reason": reason, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
-    _write(info)  # first: everything else may fail
-    if frame is not None:
-        shot = ALARM.parent / f"lie_detector_{time.strftime('%H%M%S')}.png"
-        try:
-            Image.fromarray(frame).save(shot)
-            info["screenshot"] = str(shot)
-            _write(info)
-        except OSError:
-            pass
-    page("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer it in the game yourself.")
+    try:
+        ALARM.parent.mkdir(parents=True, exist_ok=True)
+        _write(info)  # first: everything else may fail
+        if frame is not None:
+            shot = ALARM.parent / f"lie_detector_{time.strftime('%H%M%S')}.png"
+            try:
+                Image.fromarray(frame).save(shot)
+                info["screenshot"] = str(shot)
+                _write(info)
+            except OSError:
+                pass
+    finally:
+        page("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer it in the game yourself.")
     return info
 
 
