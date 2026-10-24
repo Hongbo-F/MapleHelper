@@ -119,7 +119,8 @@ def link(frames: list[list[Mob]], geo: Geometry = STRETCHED) -> list[list[tuple[
 
 
 def _slope(ts: np.ndarray, xs: np.ndarray) -> float:
-    """A straight line's slope through (ts, xs), least squares, by hand (numpy.linalg isn't safe here)."""
+    """A straight line's slope through (ts, xs), least squares, by hand (numpy.linalg killed the process with MKL until
+    2026-10-24, environment.yml; by hand it's as exact, and cheaper)."""
     dt = ts - ts.mean()
     return float((dt * (xs - xs.mean())).sum() / (dt * dt).sum())
 

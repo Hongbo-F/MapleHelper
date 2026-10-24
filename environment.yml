@@ -9,6 +9,10 @@ dependencies:
   # runs on the GPU (needs an NVIDIA driver with CUDA 13.4+) and also on the CPU.
   - onnxruntime=1.31.*=*cuda134
   - numpy
+  # numpy's BLAS: OpenBLAS, not MKL. MKL 2026.2's default (Intel OpenMP) threading layer asked conda-forge's
+  # llvm-openmp libiomp5md.dll for a function it doesn't have, and every numpy.linalg call killed the process
+  # (0xC06D007F) on 3.15 and 3.14 alike; its SEQUENTIAL and TBB layers worked (2026-10-24).
+  - libblas=*=*openblas
   - pillow
   - pip
   - pip:
