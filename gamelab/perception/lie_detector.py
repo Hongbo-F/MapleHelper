@@ -21,6 +21,13 @@ from ..paths import ASSETS
 
 TITLE = ASSETS / "lie_detector_title.png"
 THRESHOLD = 0.6  # yellow-letter match; the real window scores ~1.0, game scenes stay well below
+# The templates were cut from the game stretched to a 1920x1080 window. Since 2026-10-23 the game runs at its own
+# 1366x768 (pixel for pixel), where at that size none of them matched (the six saved Lie Detector screens shrunk to
+# 1366x768 scored 0.32-0.64 of the threshold, every form): a whole frame of that size is stretched to this size first,
+# as the game itself stretched its 1366x768 view before. With the templates' own frames shrunk to 1366x768 and
+# stretched back, each scores as it did (tests/test_alarm.py).
+TEMPLATE_FRAME = (1920, 1080)
+NATIVE_FRAME = (1366, 768)  # (only a whole frame of that size: crops are matched as they are)
 # Half-size grey templates and their thresholds. The real screens score 1.0; across ~190 saved game
 # screenshots and recordings nothing else scored above 0.53 (mini-game) or 0.69 (timer).
 HALF_SIZE = {
@@ -49,7 +56,10 @@ class LieDetectorSpotter:
                      for name, (png, t) in HALF_SIZE.items()}
 
     def scores(self, frame: np.ndarray) -> dict[str, float]:
-        """How well each form of the Lie Detector matches, as a fraction of its threshold (>= 1: seen)."""
+        """How well each form of the Lie Detector matches, as a fraction of its threshold (>= 1: seen). A frame that
+        the game's own size (NATIVE_FRAME) is stretched to TEMPLATE_FRAME first."""
+        if frame.shape[:2] == NATIVE_FRAME[::-1]:
+            frame = cv2.resize(np.ascontiguousarray(frame), TEMPLATE_FRAME, interpolation=cv2.INTER_LINEAR)
         out = {"countdown": self._yellow_title(frame) / THRESHOLD}
         h, w = frame.shape[:2]
         gray = cv2.cvtColor(cv2.resize(np.ascontiguousarray(frame), (w // 2, h // 2), interpolation=cv2.INTER_AREA),

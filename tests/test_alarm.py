@@ -68,6 +68,14 @@ def test_spots_every_lie_detector_seen_in_game(png):
     assert LieDetectorSpotter().scores(img(png))[form] >= 1
 
 
+@pytest.mark.parametrize("png", SEEN_IN_GAME, ids=lambda p: p.stem)
+def test_spots_every_lie_detector_seen_in_game_at_the_game_s_own_size_too(png):
+    # Since 2026-10-23 the game's window is 1366x768, pixel for pixel: the 1920x1080 screens shrunk to it.
+    form = FORMS[png.stem.split("_", 2)[2]]
+    native = np.asarray(Image.fromarray(img(png)).resize((1366, 768), Image.BOX))
+    assert LieDetectorSpotter().scores(native)[form] >= 1
+
+
 def test_the_lie_detectors_seen_in_game_are_all_there():
     assert len(SEEN_IN_GAME) >= 6
 
