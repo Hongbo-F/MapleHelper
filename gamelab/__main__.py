@@ -326,10 +326,12 @@ def _annotate(scene, path) -> None:
 def _eyes(model, title: str):
     """Eyes on the game, with monster templates for that map (screenshots + the game's sprites), for its window at
     the size it is now (its calibration at that size)."""
+    from .localization import mapdata
     from .perception.eyes import Eyes
     from .perception.sprites import detector_for
     geo = _game_geometry(title, restore=True)  # (a minimized game is brought back, as the first look would)
-    return Eyes(title, _calibration(geo).template, detector_for(model, geo), geo=geo)
+    return Eyes(title, _calibration(geo).template, detector_for(model, geo), geo=geo,
+                minimap_picture=mapdata.minimap_picture(model.id))
 
 
 _FEEDS: list = []  # continuous feeds started by this command (--feed), closed when it ends
@@ -696,7 +698,7 @@ def cmd_minimap(args) -> int:
         feed = web.Feed(_map_views(args, args.web_width), source, live)
         ends = "Ctrl+C stops it" if args.web_only else "closing the window stops it too"
         try:
-            server = web.start(feed, host=args.host, port=args.port, key=args.key, ends=ends)
+            server = web.start(feed, host=args.host, port=args.port, ends=ends)
         except OSError as e:  # the port taken (another mini-map already serving it?)
             print(f"the web page can't start on port {args.port}: {e}")
             if args.web_only:
@@ -1482,8 +1484,6 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--host", default="0.0.0.0",
                        help="the address the web page is served on: 0.0.0.0 (the default) for a phone on the network, "
                             "127.0.0.1 for this computer only")
-        s.add_argument("--key", help="the key the web page's address needs (default: a new random one each time; give "
-                                     "one to keep a phone bookmark working)")
         s.set_defaults(func=cmd_minimap)
         if web_only:
             s.set_defaults(web_only=True, window_only=False)

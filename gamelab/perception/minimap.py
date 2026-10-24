@@ -13,6 +13,7 @@ across (24 px of yellow), another's red core 5 across (21 px), on West Rocky Mou
 size. The px below were measured on the 1920x1080 window and go by the frame's geometry (`sizes`: screen.Geometry).
 """
 
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -225,3 +226,80 @@ def _ringed(box: np.ndarray, cx: float, cy: float, ring: np.ndarray = _RING) -> 
     hi, lo = px.max(axis=2), px.min(axis=2)
     dark = (hi < 130) & (hi - lo < 50)
     return dark.any(axis=1).mean() >= RING_DARK
+
+
+# Where the map's own minimap picture is in the window, by matching it (the miniMap canvas from the game data,
+# mapdata.minimap_picture): the window centres the picture under the map's name, as wide as that name needs, and on
+# a map taller than the window shows (Tree Dungeon, Forest Up North II: 67 x 183 game px in a window showing 112 rows)
+# it scrolls the picture to keep her dot in view, so where map point (-centerX, -centerY) is on screen moves as she
+# climbs. Her dot read with the first map's origin there put her x at 902 on a map 360..410 wide (2026-10-24).
+# Matched as bands of the picture (each PICTURE_BAND of the box's height, or all of it if shorter), every band's place
+# in the window telling where the picture's top-left corner is: on that map's 20 saved 1366x768 frames the best band
+# scored 0.65-0.74, the best at any other place 0.20-0.26, and her dot then fell on the platform the screen showed
+# (28 at (259, -47); 19 at (307, -639)).
+PICTURE_BASE = (47, 72)  # game px: the picture's top-left corner on the first map, where DOT_ORIGIN was fitted
+PICTURE_MATCH = 0.45     # the least match (TM_CCOEFF_NORMED) a band's place is taken at
+PICTURE_BAND = 0.55      # a band's height, as a share of the box's
+PICTURE_NEAR = 16        # px around the last corner a look searches first (a scroll is one dot's move at most)
+PICTURE_RETRY_S = 1.0    # s after a whole search found nothing before the next (the minimap closed: 5-10 ms a look)
+
+
+class MinimapPicture:
+    """Finds the map's minimap picture in captures of `minimap_box(geo)`, keeping where it last was (`corner`)."""
+
+    def __init__(self, picture: np.ndarray, geo: Geometry = STRETCHED):
+        k = geo.stretch
+        h, w = picture.shape[:2]
+        if k != 1:  # shown 1.40625x larger at 1920x1080, with bilinear filtering
+            picture = cv2.resize(picture, (max(1, round(w * k)), max(1, round(h * k))), interpolation=cv2.INTER_LINEAR)
+        self.picture = np.ascontiguousarray(picture[..., :3]).astype(np.float32)
+        self.geo = geo
+        self.corner: tuple[float, float] | None = None  # full-size px in the window, as last found
+        self._retry_at = 0.0  # time.monotonic() before which no whole search is made again (PICTURE_RETRY_S)
+
+    def find(self, box: np.ndarray) -> tuple[float, float] | None:
+        """The picture's top-left corner (full-size px in the game window) in a capture of `minimap_box` (RGB), or
+        None if no band of it matches there (the minimap closed, covered or another map's); `corner` keeps the
+        last one found."""
+        x0, y0 = minimap_box(self.geo)[:2]
+        box = box.astype(np.float32)
+        ph, pw = self.picture.shape[:2]
+        bh = min(ph, max(8, int(box.shape[0] * PICTURE_BAND)))
+        if box.shape[0] < bh or box.shape[1] < pw:
+            return None
+        best = None
+        if self.corner is not None:  # first where it was: the band across the box's middle, around its last place
+            cx, cy = self.corner[0] - x0, self.corner[1] - y0
+            top = int(round(min(max(0, box.shape[0] / 2 - bh / 2 - cy), ph - bh)))
+            ax, ay = int(round(cx)) - PICTURE_NEAR, int(round(cy + top)) - PICTURE_NEAR
+            sub = box[max(0, ay):ay + bh + 2 * PICTURE_NEAR, max(0, ax):ax + pw + 2 * PICTURE_NEAR]
+            if sub.shape[0] >= bh and sub.shape[1] >= pw:
+                best = self._best(sub, top, bh, max(0, ax), max(0, ay))
+        if (best is None or best[0] < PICTURE_MATCH) and time.monotonic() >= self._retry_at:
+            for top in range(0, ph - bh + 1, max(1, bh // 4)):  # every quarter band: one is in view
+                found = self._best(box, top, bh, 0, 0)
+                if best is None or found[0] > best[0]:
+                    best = found
+        if best is None or best[0] < PICTURE_MATCH:
+            self._retry_at = time.monotonic() + PICTURE_RETRY_S
+            return None
+        self.corner = (x0 + best[1], y0 + best[2])
+        return self.corner
+
+    def _best(self, area: np.ndarray, top: int, bh: int, ox: int, oy: int) -> tuple[float, int, int]:
+        """(score, x, y): where the band of the picture from row `top` matches best in `area`, as the corner's px in
+        the box (`area` starts at (ox, oy) in it)."""
+        r = cv2.matchTemplate(area, self.picture[top:top + bh], cv2.TM_CCOEFF_NORMED)
+        _, score, _, (x, y) = cv2.minMaxLoc(r)
+        return float(score), ox + x, oy + y - top
+
+    def shift(self, corner: tuple[float, float] | None = None) -> tuple[float, float]:
+        """How far (full-size px) the picture is from where it was on the first map (PICTURE_BASE), by whole game px
+        (it's drawn at whole game px): what to take off a dot to read it with that map's origin. Nothing until it's
+        been found."""
+        corner = corner or self.corner
+        if corner is None:
+            return 0.0, 0.0
+        g = self.geo
+        gx, gy = round(g.to_game(corner[0])), round(g.to_game(corner[1]))
+        return (gx - PICTURE_BASE[0]) * g.stretch, (gy - PICTURE_BASE[1]) * g.stretch  # a distance: no half px

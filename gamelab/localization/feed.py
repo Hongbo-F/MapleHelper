@@ -158,7 +158,8 @@ def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[floa
     from . import mapdata
     model = mapdata.load(map_id)
     frames = ScreenFrames(title, geo=geo)
-    eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo)
+    eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo,
+                minimap_picture=mapdata.minimap_picture(model.id))
     senses = Senses(eyes, model, band)
     return Runner(frames, eyes, WorldStep(senses, throws, schedule, SearchThread(senses)), title)
 

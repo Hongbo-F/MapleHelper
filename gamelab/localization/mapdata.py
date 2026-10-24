@@ -13,8 +13,10 @@ Game data stays on this computer (gamedata/data, git-ignored); nothing here is c
 import json
 import os
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
+
+import numpy as np
 
 from gamedata.paths import COPY, OUT
 from gamedata.wz import Package, jsonable
@@ -383,6 +385,18 @@ def _map_name(map_id: int) -> str:
         if isinstance(entry, dict):
             return f"{entry.get('streetName')}: {entry.get('mapName')}"
     return str(map_id)
+
+
+@lru_cache(maxsize=4)
+def minimap_picture(map_id: int) -> np.ndarray | None:
+    """The map's own minimap picture (its miniMap canvas: the map at 1/2^mag, RGB, game px), from the game data
+    copy; None if the copy or the picture isn't there (perception.minimap.MinimapPicture finds it in the window)."""
+    from gamedata.canvas import outlinked, pixels
+    try:
+        canvas, _ = outlinked(f"Map/Map/Map{map_id // 100000000}/_Canvas/{map_id:09d}.img/miniMap/canvas")
+        return np.ascontiguousarray(pixels(canvas)[..., :3])
+    except (KeyError, OSError, ValueError):
+        return None
 
 
 def load(map_id: int) -> MapModel:

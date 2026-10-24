@@ -13,7 +13,7 @@ itself, so the simulator (gamelab.sim) can stand in for the game by answering th
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import cv2
 import numpy as np
@@ -23,7 +23,7 @@ from ..screen import HUD_TOP, STRETCHED, Geometry
 from .exp_number import read_box
 from .hud import BAR_ROW, HP_BAR, bars, exp_number_box, hp_bar, hp_fill
 from .loot import Item, LootDetector
-from .minimap import Marker, dot_in_box, her_dot, minimap_box, other_dots
+from .minimap import Marker, MinimapPicture, dot_in_box, her_dot, minimap_box, other_dots
 from .mobs import Mob, MobDetector
 from .nametag import NameTag
 from .terrain import ScreenRope, find_ropes, ground_extent
@@ -92,9 +92,12 @@ class Eyes:
     geo: Geometry = STRETCHED     # the game window's geometry (a subclass that doesn't call __init__ has 1920x1080's)
 
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
-                 loot: LootDetector | None = None, screen=None, geo: Geometry = STRETCHED):
+                 loot: LootDetector | None = None, screen=None, geo: Geometry = STRETCHED,
+                 minimap_picture: np.ndarray | None = None):
         """`screen`: what takes shots of the screen (by default the process's capture.Grabber: DXGI or mss,
-        as config.toml says; analysis.bench passes saved frames)."""
+        as config.toml says; analysis.bench passes saved frames). `minimap_picture`: the map's own minimap picture
+        (mapdata.minimap_picture): with it, dots are read as if the picture were where it was on the first map
+        (minimap.MinimapPicture), wherever the window puts or scrolls it."""
         self.title = title
         self.geo = geo
         self.detector = detector or MobDetector(frame_scale=geo.frame_scale)
@@ -103,6 +106,7 @@ class Eyes:
         self._glanced = -GLANCE_EVERY_S    # when the last glance began
         self.name_tag = NameTag(tag_template, paths.calibrated(paths.TAG_FULL, geo.suffix), geo)
         self.want_ropes = False  # Senses turns this on
+        self.minimap = MinimapPicture(minimap_picture, geo) if minimap_picture is not None else None
         # Where ropes are looked for, from her minimap dot and her name tag's centre: ranges of x on screen
         # (full-size px; None: the whole screen). Senses works them out from the map's ropes.
         self.rope_columns: Callable[[tuple[float, float] | None, tuple[int, int] | None],
@@ -129,6 +133,11 @@ class Eyes:
         ground = ground_extent(frame, tag[0], tag[1] - tag_below_feet(geo), geo) if tag else None
         dot = her_dot(full, geo)
         others = other_dots(full, geo)  # 0.4-0.6 ms (the 31 saved frames of this map)
+        if self.minimap is not None:
+            mx0, my0, mx1, my1 = minimap_box(geo)
+            self.minimap.find(full[my0:my1, mx0:mx1])
+            sx, sy = self.minimap.shift()
+            dot, others = self._shifted(dot), [replace(m, x=m.x - sx, y=m.y - sy) for m in others]
         found = []
         if self.want_ropes if ropes is None else ropes:
             found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None, geo)
@@ -151,7 +160,16 @@ class Eyes:
         self._glanced = max(begun, self._glanced + GLANCE_EVERY_S)
         box, row = shot.crops([(x0, y0, x1 - x0, y1 - y0), (a, int(BAR_ROW * h), b - a, 1)], rgb_of)
         self.seen_at = shot.t
-        return dot_in_box(box, self.geo), hp_fill(row[0].astype(np.int16))
+        if self.minimap is not None:
+            self.minimap.find(box)
+        return self._shifted(dot_in_box(box, self.geo)), hp_fill(row[0].astype(np.int16))
+
+    def _shifted(self, dot: tuple[float, float] | None) -> tuple[float, float] | None:
+        """A dot as it would be with the minimap's picture where it was on the first map (minimap.MinimapPicture)."""
+        if dot is None or self.minimap is None:
+            return dot
+        sx, sy = self.minimap.shift()
+        return dot[0] - sx, dot[1] - sy
 
     def messages(self) -> str:
         """The pickup log at the bottom right, read by OCR (~0.4 s): "Leather x1 earned. (Etc)", and what

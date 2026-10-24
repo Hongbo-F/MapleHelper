@@ -396,7 +396,7 @@ def test_the_hunting_commands_eyes_are_made_for_the_restored_window(monkeypatch)
     monkeypatch.setattr(cli, "_calibration", lambda geo: SimpleNamespace(template=np.zeros((15, 55), np.uint8)))
     monkeypatch.setattr(sprites, "detector_for", lambda model, geo: ("detector", geo))
     monkeypatch.setattr(eyes, "Eyes",
-                        lambda title, template, detector, geo: SimpleNamespace(detector=detector, geo=geo))
+                        lambda title, template, detector, geo, minimap_picture=None: SimpleNamespace(detector=detector, geo=geo))
     made = cli._eyes(SimpleNamespace(id=10004021), "MapleStory")
     assert made.geo == NATIVE and made.detector == ("detector", NATIVE)
 
