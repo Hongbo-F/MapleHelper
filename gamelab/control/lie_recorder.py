@@ -57,7 +57,7 @@ CAP_S = 10 * 60.0
 # tests/fixtures/native and the six Lie Detector screens in tests/fixtures/lie_detector shrunk to 1366x768
 # (D:/MapleHelper-scratch/ld/jpeg_measure2.py): 297 KB a game frame (197 KB a Lie Detector screen), 4.9 ms to
 # encode. With the usual half-resolution colour (4:2:0) the countdown's thin yellow title lost its colour: the
-# spotter scored it 0.37 of its threshold on the decoded frame at every quality from 60 to 90, where at 4:4:4 it
+# spotter scored it 0.36-0.41 of its threshold on the decoded frame at every quality from 60 to 90; at 4:4:4 it
 # keeps 1.11 (1.22 on the PNG); every other form scored as on the PNG. The mini-game notice's small text read as
 # well as on the PNG, the HUD's 1366x768 text too (30.5 dB PSNR in the notice's box). Quality 85 is 434 KB a frame
 # for 2.4 dB more; 65 was as legible at 238 KB, but its ringing showed round the letters. A PNG is 1,307 KB.
@@ -284,9 +284,9 @@ def size_of(folder: Path) -> int:
 
 def prune(root: Path | None = None, keep_bytes: int = KEEP_BYTES, spare: Path | None = None,
           dry_run: bool = False) -> list[tuple[Path, int]]:
-    """Delete the oldest recordings in `root` (LIE_RECORDINGS) until the rest (`spare`, the one being written, left out of the sum)
-    take at most `keep_bytes`; never `spare`. Returns those deleted (folder, bytes), oldest first; with `dry_run`,
-    those it would delete. One that can't be deleted wholly is left (the rest of it goes next time)."""
+    """Delete the oldest recordings in `root` (LIE_RECORDINGS) until the rest (`spare`, the one being written, left
+    out of the sum) take at most `keep_bytes`; never `spare`. Returns those deleted (folder, bytes), oldest first;
+    with `dry_run`, those it would delete. One that can't be deleted wholly is left (the rest of it goes next time)."""
     spare = None if spare is None else Path(spare).resolve()
     folders = [(f, size_of(f)) for f in recordings(root) if spare is None or f.resolve() != spare]
     total, gone = sum(b for _, b in folders), []
@@ -311,9 +311,9 @@ def summary_of(folder: Path) -> dict | None:
 
 
 def going(root: Path | None = None, now: float | None = None) -> Path | None:
-    """The recording still being written in `root` (LIE_RECORDINGS), if any: the newest, with no summary yet and its index written in the
-    last LIVE_S (the watchdog adds a line every grab, 4 a second, even with the game minimized). One the player
-    stopped in the middle of has no summary either, but its index is old."""
+    """The recording still being written in `root` (LIE_RECORDINGS), if any: the newest, with no summary yet and its
+    index written in the last LIVE_S (the watchdog adds a line every grab, 4 a second, even with the game minimized).
+    One the player stopped in the middle of has no summary either, but its index is old."""
     folders = recordings(root)
     if not folders or (folders[-1] / SUMMARY).exists():
         return None
