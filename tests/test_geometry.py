@@ -2,11 +2,16 @@
 everything is exactly as it was before the geometry was carried (the saved screenshots, the simulator and the golden
 traces depend on it, to the bit); at the game's own 1366x768 the game is drawn pixel for pixel."""
 
+import ast
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from gamelab import screen
 from gamelab.screen import NATIVE, STRETCHED, Geometry, geometry, of_frame
+
+PKG = Path(__file__).resolve().parents[1] / "gamelab"
 
 
 def test_the_1920x1080_window_is_what_the_constants_were():
@@ -112,3 +117,26 @@ def test_the_camera_puts_map_units_on_screen_at_the_windows_stretch():
     x1920 = cam.to_screen(100.0, 50.0, at)
     xn = cam.to_screen(100.0, 50.0, at, NATIVE)
     assert x1920 == pytest.approx((xn[0] * 1.40625, xn[1] * 1.40625))
+
+
+# Modules that read the game go by the geometry their frames carry: the 1920x1080 window's numbers (screen.GAME_SIZE,
+# SCREEN_SCALE, SCALE, UNITS_PER_HALF_PX) are for the simulator, which draws its world at that size.
+ALIASES = {"GAME_SIZE", "SCREEN_SCALE", "SCALE", "UNITS_PER_HALF_PX"}
+
+
+def _alias_users() -> list[str]:
+    out = []
+    for path in sorted(PKG.rglob("*.py")):
+        rel = path.relative_to(PKG)
+        if rel.parts[0] == "sim" or rel.name == "screen.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("screen"):
+                used = {a.name for a in node.names} & ALIASES
+                if used:
+                    out.append(f"{rel}: {sorted(used)}")
+    return out
+
+
+def test_nothing_but_the_simulator_assumes_the_1920x1080_window():
+    assert _alias_users() == []

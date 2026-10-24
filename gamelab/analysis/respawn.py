@@ -69,10 +69,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from ..perception.minimap import MINIMAP_BOX
-from ..screen import GAME_SIZE, HUD_TOP, SCREEN_SCALE
+from ..screen import HUD_TOP, STRETCHED
 
-VIEW = (GAME_SIZE[0] / SCREEN_SCALE, GAME_SIZE[1] / SCREEN_SCALE)  # map units on screen (localization.pose.VIEW)
-MINIMAP = tuple(v / SCREEN_SCALE for v in MINIMAP_BOX)  # the minimap over the screen's top left, in map units
+# For scene records without their own `view` (before 2026-10-21's evening, all of the 1920x1080 window): the map
+# units on screen (localization.pose.VIEW; the game shows the same at any size) and the minimap over its top left.
+VIEW = (STRETCHED.client[0] / STRETCHED.stretch, STRETCHED.client[1] / STRETCHED.stretch)
+MINIMAP = tuple(v / STRETCHED.stretch for v in MINIMAP_BOX)
 EDGE = 40.0        # map units: a platform is in view only this far inside the screen's sides (a monster half off
                    # screen isn't found, and the camera trails her a little as she moves)
 BODY = 60.0        # map units above a platform a monster's body reaches standing (an Orange Mushroom's 55; its walk's

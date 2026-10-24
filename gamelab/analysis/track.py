@@ -8,6 +8,8 @@ first row is where she stood when the recording started.
 import cv2
 import numpy as np
 
+from ..screen import STRETCHED, Geometry
+
 # A name tag at full size: a line of white text 25-180 px wide and 8-26 px tall, at least TAG_ASPECT
 # times wider than tall. Dilating the text LETTER_GAP px sideways joins a name's letters into one cluster.
 TAG_WIDTH = (25, 180)
@@ -53,14 +55,14 @@ def find_name_tag(frame: np.ndarray):
     return min(centres, key=lambda c: abs(c[0] - w // 2) + abs(c[1] - h // 2), default=None)
 
 
-def make_template(frame: np.ndarray, centre: tuple[int, int], scale: int = 2) -> np.ndarray:
+def make_template(frame: np.ndarray, centre: tuple[int, int], scale: int = 2, geo: Geometry = STRETCHED) -> np.ndarray:
     """Grayscale name-tag template: the white text in a thin band around `centre`, cut tightly (with a
-    2 px margin). `scale` is how much the frame was downscaled.
+    2 px margin). `scale` is how much the frame was downscaled from a client area of geometry `geo`.
 
     The band (one text line high) keeps her glove, a rope or anything else above or below out.
     """
     gx, gy = centre
-    half_h, half_w = 12 // scale, 90 // scale
+    half_h, half_w = geo.ipx(12) // scale, geo.ipx(90) // scale
     y0, x0 = max(0, gy - half_h), max(0, gx - half_w)
     band = frame[y0:gy + half_h + 1, x0:gx + half_w + 1]
     white = band.min(axis=2) > 200

@@ -26,7 +26,10 @@ from pathlib import Path
 import numpy as np
 
 from ..perception.mobs import Mob, MobDetector
-from ..screen import UNITS_PER_HALF_PX
+from ..screen import STRETCHED
+
+# The recordings read here are all of the 1920x1080 window at half size (made before 2026-10-23): their px in map units
+UNITS_PER_HALF_PX = STRETCHED.units_per_px
 
 # Saved screenshots where she's off the ground though the look can't tell (the basin's dirt walls behind her
 # read as ground): in closeup.png her name tag is 9 px above where she stands, and every monster reads 5-15

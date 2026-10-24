@@ -8,6 +8,10 @@ grab itself: mss waits for the compositor's next frame, 16.7 ms whatever the siz
 duplication waits for the next frame the screen shows, and copying the game's 1920x1080 off the graphics
 card takes about 2 ms. `bench-capture` times those two on the screen as it is.
 
+Saved frames may be of any client size the stack knows (screen.LOOK_SCALES: 1920x1080, or the game's own 1366x768),
+all of one: its geometry is theirs (`geometry_of`). `shrink` makes 1366x768 frames of 1920x1080 ones, to time the
+same scenes at both sizes.
+
 A frame is timed `reps` times in a row (after one look at it that isn't timed), as a run of looks at a
 scene that barely changes from one to the next.
 """
@@ -24,13 +28,13 @@ from PIL import Image
 from .. import capture, window
 from ..paths import LAB
 from ..perception import exp_number
-from ..perception.eyes import EXP_TEXT, TAG_BELOW_FEET, Eyes, rgb_of
-from ..perception.exp_number import READ_BOX
-from ..perception.hud import BAR_ROW, EXP_NUMBER, HP_BAR, bars
+from ..perception.eyes import EXP_TEXT, Eyes, rgb_of, tag_below_feet
+from ..perception.exp_number import read_box
+from ..perception.hud import BAR_ROW, HP_BAR, bars, exp_number_box
 from ..perception.lie_detector import LieDetectorSpotter
-from ..perception.minimap import MINIMAP_BOX, her_dot, other_dots
+from ..perception.minimap import her_dot, minimap_box, other_dots
 from ..perception.terrain import find_ropes, ground_extent
-from ..screen import GAME_SIZE, SCALE
+from ..screen import LOOK_SCALES, STRETCHED, Geometry, geometry
 
 # Saved screenshots of her on Thicket Around the Beach II (gamelab/lab), with monsters, ropes and drops in
 # view: the default frames.
@@ -44,15 +48,33 @@ def saved_frames() -> list[Path]:
     return [LAB / name for name in FRAMES if (LAB / name).exists()]
 
 
-def load(paths: list[Path]) -> list[tuple[str, np.ndarray]]:
-    """Saved screenshots (at the game's size), each as the BGRA picture a screen capture gives."""
-    out = []
+def load(paths: list[Path], shrink: tuple[int, int] | None = None) -> list[tuple[str, np.ndarray]]:
+    """Saved screenshots (at a client size the stack knows, all of one), each as the BGRA picture a screen capture
+    gives; with `shrink` (a client size), each shrunk to it first (OpenCV's area average: as the game would draw
+    the same scene at that size, but for what the stretch had blurred)."""
+    out, sizes = [], set()
     for path in paths:
         rgb = np.asarray(Image.open(path).convert("RGB"))
-        if (rgb.shape[1], rgb.shape[0]) != GAME_SIZE:
-            raise RuntimeError(f"{path} is {rgb.shape[1]}x{rgb.shape[0]}; a look needs {GAME_SIZE[0]}x{GAME_SIZE[1]}")
+        if shrink is not None and (rgb.shape[1], rgb.shape[0]) != tuple(shrink):
+            rgb = cv2.resize(rgb, tuple(shrink), interpolation=cv2.INTER_AREA)
+        size = (rgb.shape[1], rgb.shape[0])
+        if size not in LOOK_SCALES:
+            known = " or ".join(f"{w}x{h}" for w, h in LOOK_SCALES)
+            raise RuntimeError(f"{path} is {size[0]}x{size[1]}; a look needs {known}")
+        sizes.add(size)
         out.append((Path(path).name, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGRA)))
+    if len(sizes) > 1:
+        raise RuntimeError(f"frames of {len(sizes)} sizes: time one size at a time")
     return out
+
+
+def geometry_of(frames: list[tuple[str, np.ndarray]], look_scale: int | None = None) -> Geometry:
+    """The geometry of loaded frames (`load`), their looks shrunk `look_scale` times (by default as LOOK_SCALES
+    says for their size)."""
+    if not frames:
+        return STRETCHED
+    h, w = frames[0][1].shape[:2]
+    return geometry(w, h, look_scale)
 
 
 class SavedScreen:
@@ -79,10 +101,11 @@ class SavedShot(capture.Shot):
 
 
 class SavedEyes(Eyes):
-    """Eyes whose captures come from saved frames (`show`), never from the screen: no window is touched."""
+    """Eyes whose captures come from saved frames (`show`) of a client of geometry `geo`, never from the screen: no
+    window is touched."""
 
-    def __init__(self, tag_template: np.ndarray, detector=None):
-        super().__init__("saved frames", tag_template, detector, screen=SavedScreen())
+    def __init__(self, tag_template: np.ndarray, detector=None, geo: Geometry = STRETCHED):
+        super().__init__("saved frames", tag_template, detector, screen=SavedScreen(), geo=geo)
 
     def show(self, bgra: np.ndarray) -> None:
         self.screen.bgra = bgra
@@ -136,30 +159,33 @@ class Timer:
 def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDetectorSpotter) -> None:
     """Each part of a look once, on what `eyes` captures now; then Eyes.look and the questions about it
     (`band`: map units above and below her feet searched for monsters)."""
+    geo = eyes.geo
     full = timer.time("capture (frame as RGB)", eyes._capture)
     if not isinstance(eyes, SavedEyes):  # live: how long ago the screen showed it
         timer.add("capture: the frame's age once RGB", time.monotonic() - eyes.seen_at)
     timer.time("HP and MP bars", lambda: bars(full))
-    half = timer.time("half size", lambda: cv2.resize(full, (full.shape[1] // SCALE, full.shape[0] // SCALE),
-                                                      interpolation=cv2.INTER_AREA))
+    k = geo.look_scale
+    half = timer.time("look frame (half size: shrunk look_scale times)",
+                      lambda: full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
+                                                             interpolation=cv2.INTER_AREA))
     tag = timer.time("name tag", lambda: eyes.name_tag.find(full))
     timer.time("name tag: whole play area", lambda: eyes.name_tag.search(full))
     if tag is not None:
-        timer.time("ground under her", lambda: ground_extent(half, tag[0], tag[1] - TAG_BELOW_FEET))
-    dot = timer.time("minimap dot", lambda: her_dot(full))
-    timer.time("other players' minimap dots", lambda: other_dots(full))
-    whole = timer.time("ropes: whole screen", lambda: find_ropes(full))
+        timer.time("ground under her", lambda: ground_extent(half, tag[0], tag[1] - tag_below_feet(geo), geo))
+    dot = timer.time("minimap dot", lambda: her_dot(full, geo))
+    timer.time("other players' minimap dots", lambda: other_dots(full, geo))
+    whole = timer.time("ropes: whole screen", lambda: find_ropes(full, None, geo))
     if eyes.rope_columns is not None:  # Senses gives where the map's ropes can show
         columns = eyes.rope_columns(dot, tag) or []
-        near = timer.time("ropes: where the map's can show", lambda: find_ropes(full, columns))
+        near = timer.time("ropes: where the map's can show", lambda: find_ropes(full, columns, geo))
         inside = [r for r in whole if any(x0 <= r.x < x1 for x0, x1 in columns)]
         timer.count("ropes seen where the map's can show", len(inside))
         timer.count("... of them missed by the search there", sum(not any(abs(r.x - n.x) <= 2 for n in near)
                                                                   for r in inside))
-    x0, y0, x1, y1 = EXP_NUMBER
+    x0, y0, x1, y1 = exp_number_box(geo)
     timer.time("EXP number", lambda: full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT)
-    x0, y0, x1, y1 = READ_BOX
-    read = timer.time("EXP number read (only when it changes)", lambda: exp_number.read(full[y0:y1, x0:x1]))
+    x0, y0, x1, y1 = read_box(geo)
+    read = timer.time("EXP number read (only when it changes)", lambda: exp_number.read(full[y0:y1, x0:x1], geo))
     timer.count("EXP numbers read", int(read.exp is not None))
     timer.time("Lie Detector check (the player's)", lambda: spotter.seen(full))
     timer.time("glance (her dot and HP)", eyes.glance)
@@ -205,7 +231,7 @@ def capture_stages(area: capture.Area, dxgi: capture.Grabber, gdi: capture.Grabb
     (nothing is brought to the front); and whether the two see the same pixels."""
     w, h = area["width"], area["height"]
     a, b = int(HP_BAR[0] * w), int(HP_BAR[1] * w)
-    x0, y0, x1, y1 = MINIMAP_BOX
+    x0, y0, x1, y1 = minimap_box(geometry(w, h))
     glance = [(x0, y0, x1 - x0, y1 - y0), (a, int(BAR_ROW * h), b - a, 1)]
 
     def look(grabber: capture.Grabber) -> np.ndarray:

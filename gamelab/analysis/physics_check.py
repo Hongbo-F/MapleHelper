@@ -29,9 +29,9 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+from .. import paths
 from ..motion import body, physics
 from ..paths import RECORDINGS, REPO, TAG_TEMPLATE
-from ..screen import UNITS_PER_HALF_PX
 from . import recordings, scroll, track
 
 FIXTURES = REPO / "tests" / "fixtures" / "tracks"
@@ -84,13 +84,15 @@ def her_key_names() -> dict[str, str]:
 
 def tracked(name: str, key_names: dict[str, str] | None = None) -> Track:
     """Her track through a saved recording: her name tag in every frame (track.fine_match, with the
-    lab's name tag template), plus the camera's movement (scroll.camera), in map units."""
+    lab's name tag template for the recording's client size), plus the camera's movement (scroll.camera), in map
+    units (at the recording's geometry: recordings.Recording.geo)."""
     rec = recordings.load(name)
-    template = np.load(TAG_TEMPLATE)
+    template = np.load(paths.calibrated(TAG_TEMPLATE, rec.geo.suffix))
     rows = np.array([track.fine_match(f, template) for f in rec.frames])
     cam = scroll.camera(rec.frames, [(r[0] + template.shape[1] / 2, r[1]) for r in rows])
-    x = (rows[:, 0] + cam[:, 0] - rows[0, 0]) * UNITS_PER_HALF_PX
-    y = (rows[:, 1] + cam[:, 1] - rows[0, 1]) * UNITS_PER_HALF_PX
+    per_px = rec.geo.units_per_px
+    x = (rows[:, 0] + cam[:, 0] - rows[0, 0]) * per_px
+    y = (rows[:, 1] + cam[:, 1] - rows[0, 1]) * per_px
     events = _actions(rec.sent, key_names if key_names is not None else her_key_names())
     return Track(name, events, np.asarray(rec.times, float) / 1000, x, y, rows[:, 2])
 

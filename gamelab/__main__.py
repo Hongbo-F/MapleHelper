@@ -24,6 +24,7 @@ from .analysis.track import airborne, track
 from .control import client
 from .control.timeline import action_events, chain, her_setup
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, SHOTS, STOP
+from .screen import STRETCHED, geometry
 
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
 FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the front before it gives up (_to_game)
@@ -57,6 +58,12 @@ AROUND_HER_ZOOM = 3
 
 def _game_title() -> str:
     return her_setup()[0].game_window_title
+
+
+def _game_geometry(title: str):
+    """The game window's geometry as it is now (screen.Geometry, from its client size; reads the window only)."""
+    area = window.client_rect(window.find_game(title))
+    return geometry(area["width"], area["height"])
 
 
 # --- the player and the Lie Detector ---------------------------------------------------------------------
@@ -195,13 +202,22 @@ def _tap(key: str, at_ms: int) -> list[list]:
     return [[at_ms, key, "down"], [at_ms + TAP_MS, key, "up"]]
 
 
-def _crop_on_her(cal: calibration.Calibration) -> list[int]:
-    """The crop to record her in: around her name tag as the game shows it now, or the stored one if the tag
-    isn't found (calibration.crop_now: a short capture, no keys); what it found is said."""
-    crop, note = calibration.crop_now(cal)
+def _recording_setup() -> tuple[calibration.Calibration, list[int]]:
+    """The calibration for the game window at the size it is now, and the crop to record her in: around her name
+    tag as the game shows it now, or the stored one if the tag isn't found (calibration.crop_on_her, on a short
+    capture through the player, no keys, which also says the window's size); what it found is said."""
+    full = client.submit(fps=10, duration_ms=100, scale=1, lead_ms=0, name="find_her")
+    w, h = full["client"]["width"], full["client"]["height"]
+    cal = _calibration(geometry(w, h))
+    crop, note = calibration.crop_on_her(cal, full["frames"][-1], w, h)
     if note:
         print(note)
-    return crop
+    return cal, crop
+
+
+def _calibration(geo) -> calibration.Calibration:
+    """The saved calibration for a game window of geometry `geo` (calibration.load)."""
+    return calibration.load() if geo == STRETCHED else calibration.load(geo)
 
 
 def cmd_act(args) -> int:
@@ -211,8 +227,7 @@ def cmd_act(args) -> int:
     events, end = parse_steps(args.steps)
     duration = end + args.settle
     if args.record:
-        cal = calibration.load()
-        crop = _crop_on_her(cal)
+        cal, crop = _recording_setup()
         rec = recordings.record(events, name=args.name, duration_ms=duration, crop=crop, scale=cal.scale, fps=30)
         path = _shot(f"{args.name}_sheet.png")
         recordings.contact_sheet(rec.frames, rec.times, path, cols=8, every=args.every)
@@ -245,9 +260,8 @@ def cmd_do(args) -> int:
               f"gamelab plans are capped at {MAX_PLAN_MS // 1000} s")
         return 1
     window.bring_to_front(cfg.game_window_title)
-    cal = calibration.load()
-    rec = recordings.record(events, name=args.name, duration_ms=end + 400, crop=_crop_on_her(cal), scale=cal.scale,
-                            fps=30)
+    cal, crop = _recording_setup()
+    rec = recordings.record(events, name=args.name, duration_ms=end + 400, crop=crop, scale=cal.scale, fps=30)
     recordings.contact_sheet(rec.frames, rec.times, _shot(f"{args.name}_sheet.png"), cols=8, every=args.every)
     path = _shot(f"{args.name}.png")
     Image.fromarray(recordings.screenshot("do", scale=2, duration_ms=100)).save(path)
@@ -295,10 +309,12 @@ def _annotate(scene, path) -> None:
 
 
 def _eyes(model, title: str):
-    """Eyes on the game, with monster templates for that map (screenshots + the game's sprites)."""
+    """Eyes on the game, with monster templates for that map (screenshots + the game's sprites), for its window at
+    the size it is now (its calibration at that size)."""
     from .perception.eyes import Eyes
     from .perception.sprites import detector_for
-    return Eyes(title, calibration.load().template, detector_for(model))
+    geo = _game_geometry(title)
+    return Eyes(title, _calibration(geo).template, detector_for(model, geo), geo=geo)
 
 
 _FEEDS: list = []  # continuous feeds started by this command (--feed), closed when it ends
@@ -312,20 +328,22 @@ def _hunter(args, **kw):
     from .localization import mapdata
     cfg, keys, _ = her_setup()
     model = mapdata.load(args.map)
-    feed = _feed(model, cfg.game_window_title) if getattr(args, "feed", False) else None
-    return Hunter(_eyes(model, cfg.game_window_title), keys, model, log=_log, feed=feed, **kw)
+    eyes = _eyes(model, cfg.game_window_title)
+    feed = _feed(model, cfg.game_window_title, eyes.geo) if getattr(args, "feed", False) else None
+    return Hunter(eyes, keys, model, log=_log, feed=feed, **kw)
 
 
-def _feed(model, title: str):
-    """A continuous feed of the game for this command (its child process; closed when the command ends), or
-    None if it can't start (the command then looks for itself)."""
+def _feed(model, title: str, geo=STRETCHED):
+    """A continuous feed of the game for this command (its child process; closed when the command ends), for its
+    window at geometry `geo` (the command's eyes'), or None if it can't start (the command then looks for itself)."""
     import functools
 
     from .attack import reach
     from .localization import feed
     try:
-        client = feed.FeedClient(functools.partial(feed.screen_world, model.id, title, calibration.load().template,
-                                                   (reach.LOOK_UP, reach.LOOK_DOWN)))
+        ring = {} if geo == STRETCHED else {"shape": feed.frame_shape(geo)}  # (FeedClient's own default otherwise)
+        client = feed.FeedClient(functools.partial(feed.screen_world, model.id, title, _calibration(geo).template,
+                                                   (reach.LOOK_UP, reach.LOOK_DOWN), geo=geo), **ring)
     except Exception as e:  # it couldn't even be started: the command goes on without
         _log(f"feed: couldn't start it ({type(e).__name__}: {e}); looking without it")
         return None
@@ -416,7 +434,7 @@ def _hunt_look(hunter) -> int:
     """`hunt look`: what she sees now, printed and drawn on the frame (no keys)."""
     from .attack import reach
     from .localization.scene import find_loot
-    from .perception.minimap import OTHER_SHIFT
+    from .perception.minimap import sizes
     s = hunter.look()
     if s.where is None:
         print("can't find her minimap dot")
@@ -432,8 +450,9 @@ def _hunt_look(hunter) -> int:
               f"{exp.fit:.1f} levels of the game's, every other reading {exp.lead:.0f} or more off)")
     else:
         print(f"  EXP number not read: {exp.why if exp is not None else 'no box'}")
+    shift = sizes(s.geo).other_shift
     for m in s.others:  # other players' minimap dots (perception.minimap), placed as hers is
-        w = hunter.senses.localizer.where_dot((m.x - OTHER_SHIFT, m.y - OTHER_SHIFT))
+        w = hunter.senses.localizer.where_dot((m.x - shift, m.y - shift))
         print(f"  another player ({m.kind}): map ({w.x:.0f}, {w.y:.0f}) on platform "
               f"{w.platform.id if w.platform else None} (their minimap dot at {m.x:.1f}, {m.y:.1f})")
     for t in s.monsters:
@@ -746,9 +765,8 @@ def cmd_lock(args) -> int:
     if attack is None:
         print(f"{args.action} isn't bound in config.toml")
         return 1
-    cal = calibration.load()
     window.bring_to_front(cfg.game_window_title)
-    crop = _crop_on_her(cal)  # she jumps in place: where she is at the start does for every run
+    cal, crop = _recording_setup()  # she jumps in place: where she is at the start does for every run
     for d in args.delays:
         events = _tap(attack.name, 0) + _tap(keys.jump.name, d)
         rec = recordings.record(events, name=f"lock_{args.action}_{d}", duration_ms=d + 900, crop=crop, scale=cal.scale)
@@ -762,9 +780,8 @@ def cmd_lock(args) -> int:
 def cmd_combo(args) -> int:
     """Play a combo (optionally several back to back) exactly as the helper would, and check each one."""
     cfg, keys, timing = her_setup(regular_attack=args.regular_attack)
-    cal = calibration.load()
     window.bring_to_front(cfg.game_window_title)
-    crop = _crop_on_her(cal)  # the runs alternate their facing, so she ends about where she started
+    cal, crop = _recording_setup()  # the runs alternate their facing, so she ends about where she started
     good_jump = {"back"} if args.name in MOVES_BACK else {"back", "up", "forward"}
     totals = {"back": 0, "up": 0, "forward": 0, "front": 0, "wrong": 0}
     for run in range(args.runs):
@@ -792,10 +809,11 @@ def cmd_combo(args) -> int:
     return 0
 
 
-def _around_her(frame: np.ndarray, x: int, y: int) -> np.ndarray:
-    """The AROUND_HER box of a frame, around a name tag whose top-left is (x, y). Cut at the frame's
-    edges, it is padded with black at its right and bottom."""
-    dx, dy, w, h = AROUND_HER
+def _around_her(frame: np.ndarray, x: int, y: int, geo=None) -> np.ndarray:
+    """The AROUND_HER box of a frame, around a name tag whose top-left is (x, y), in a recording of geometry `geo`
+    (AROUND_HER is in half-size px of the 1920x1080 window). Cut at the frame's edges, it is padded with black at
+    its right and bottom."""
+    dx, dy, w, h = AROUND_HER if geo is None else (geo.ifpx(v) for v in AROUND_HER)
     out = np.zeros((h, w, 3), np.uint8)
     src = frame[max(0, y + dy):y + dy + h, max(0, x + dx):x + dx + w]
     out[:src.shape[0], :src.shape[1]] = src
@@ -807,8 +825,8 @@ def cmd_sheet(args) -> int:
     keep = [i for i, t in enumerate(rec.times) if args.start <= t <= args.end][::args.every]
     frames, times = rec.frames[keep], rec.times[keep]
     if args.around_her:
-        rows = track(frames, times, calibration.load().template)
-        frames = np.stack([_around_her(f, x, y) for f, (_, x, y, _) in zip(frames, rows)])
+        rows = track(frames, times, _calibration(rec.geo).template)
+        frames = np.stack([_around_her(f, x, y, rec.geo) for f, (_, x, y, _) in zip(frames, rows)])
     path = _shot(f"{args.recording}_sheet.png")
     recordings.contact_sheet(frames, times, path, cols=args.cols, every=1,
                              zoom=AROUND_HER_ZOOM if args.around_her else 1)
@@ -820,7 +838,7 @@ def cmd_track(args) -> int:
     """Her path through a recording: screen position, height above the start, world x, and jumps."""
     from .analysis.scroll import world_x
     rec = recordings.load(args.recording)
-    cal = calibration.load()
+    cal = _calibration(rec.geo)
     rows = track(rec.frames, rec.times, cal.template)
     xs = world_x(rec.frames, rows)
     rest_y = rows[0][2]
@@ -868,17 +886,21 @@ def cmd_bench_look(args) -> int:
         print("the game isn't in front: bring it forward yourself and run this again (it never does)")
         return 1
     model = mapdata.load(args.map)
-    template = calibration.load().template
     frames = None
     if args.live:
-        eyes = bench.FrontEyes(title, template, detector_for(model), screen=capture.Grabber(args.capture))
+        geo = _game_geometry(title)
+        if args.look_scale:
+            geo = geometry(*geo.client, args.look_scale)
+        eyes = bench.FrontEyes(title, _calibration(geo).template, detector_for(model, geo),
+                               screen=capture.Grabber(args.capture), geo=geo)
     else:
         files = [Path(f) for f in args.files] or bench.saved_frames()
         if not files:
-            print(f"no frames: name some saved 1920x1080 screenshots (the default ones are in {LAB})")
+            print(f"no frames: name some saved screenshots (1920x1080 or 1366x768; the default ones are in {LAB})")
             return 1
-        frames = bench.load(files)
-        eyes = bench.SavedEyes(template, detector_for(model))
+        frames = bench.load(files, tuple(int(v) for v in args.shrink.lower().split("x")) if args.shrink else None)
+        geo = bench.geometry_of(frames, args.look_scale)
+        eyes = bench.SavedEyes(_calibration(geo).template, detector_for(model, geo), geo)
     from .localization.worldstate import Asks, Schedule, WorldStep
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
     # The continuous feed's step on the same frames (localization.worldstate): her place and every monster it
@@ -905,7 +927,9 @@ def cmd_bench_look(args) -> int:
     timer.count("... that tried the kind's whole set", step.counts["fallbacks"])
     from . import native
     where = f"{args.n} live captures" if frames is None else f"{len(frames)} saved frames x {args.reps}"
-    print(f"{where}; OpenCV {cv2.__version__}, {cv2.getNumThreads()} threads"
+    w, h = geo.frame_size
+    print(f"{where} of a {geo.client[0]}x{geo.client[1]} client, looks at {w}x{h}; "
+          f"OpenCV {cv2.__version__}, {cv2.getNumThreads()} threads"
           + ("" if frames is None else "; the grab itself (16.7 ms with mss, about 2 with DXGI) isn't included"))
     print("the C pieces (gamelab/native.c): " + ("in use" if native.lib() is not None
                                                   else f"not in use ({native.why}): numpy instead"))
@@ -960,9 +984,11 @@ def cmd_bodies(args) -> int:
                 print("   " + line)
         return 0
     model = mapdata.load(args.map)
-    detector = detector_for(model)
     files = [Path(f) for f in args.files] or bench.saved_frames()
-    eyes = bench.SavedEyes(calibration.load().template, detector)
+    frames = bench.load(files)
+    geo = bench.geometry_of(frames)
+    detector = detector_for(model, geo)
+    eyes = bench.SavedEyes(_calibration(geo).template, detector, geo)
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
 
     def look_at(bgra):
@@ -971,7 +997,7 @@ def cmd_bodies(args) -> int:
             return senses.look(wide=True)
         return look
 
-    scenes = [(name, look_at(bgra)) for name, bgra in bench.load(files)]
+    scenes = [(name, look_at(bgra)) for name, bgra in frames]
     names = BODY_RECORDINGS if args.recordings is None else args.recordings
     found = [Path(r) if Path(r).suffix else RECORDINGS / f"{r}.npz" for r in names]
     print("\n".join(bodies.run(scenes, model, [p for p in found if p.exists()], detector)))
@@ -987,8 +1013,10 @@ def _watch_runner(args):
     by hand), drops searched on a schedule of their own."""
     from .attack import reach
     from .localization import feed, worldstate
-    return feed.screen_world(args.map, _game_title(), calibration.load().template, (reach.LOOK_UP, reach.LOOK_DOWN),
-                             throws=False, schedule=worldstate.WATCH)
+    title = _game_title()
+    geo = _game_geometry(title)
+    return feed.screen_world(args.map, title, _calibration(geo).template, (reach.LOOK_UP, reach.LOOK_DOWN),
+                             throws=False, schedule=worldstate.WATCH, geo=geo)
 
 
 def cmd_watch(args) -> int:
@@ -1433,8 +1461,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("bench-look", help="time each stage of a look on saved frames, or --live on the game as "
                                           "it is (refuses unless it's in front; never brings it forward); no keys")
-    s.add_argument("files", nargs="*", help="saved 1920x1080 screenshots (default: the ones listed in "
-                                            "analysis/bench.py, from gamelab/lab)")
+    s.add_argument("files", nargs="*", help="saved screenshots, 1920x1080 or 1366x768, all of one size (default: the "
+                                            "1920x1080 ones listed in analysis/bench.py, from gamelab/lab)")
+    s.add_argument("--shrink", metavar="WxH", help="shrink the frames to this client size first (1366x768: the same "
+                                                   "scenes at the game's own size)")
+    s.add_argument("--look-scale", type=int, choices=(1, 2), help="looks at full (1) or half (2) size (default: as "
+                                                                  "screen.LOOK_SCALES says for the frames' size)")
     s.add_argument("--reps", type=int, default=5, help="looks at each saved frame")
     s.add_argument("--live", action="store_true", help="look at the game on screen instead (it must be in front)")
     s.add_argument("--n", type=int, default=100, help="--live: how many captures")
@@ -1447,7 +1479,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_bench_capture)
     s = sub.add_parser("bodies", help="where the monster detector puts monsters' feet on saved screenshots, and "
                                       "their x from frame to frame on recordings (offline; no game, no keys)")
-    s.add_argument("files", nargs="*", help="saved 1920x1080 screenshots (default: bench-look's, from gamelab/lab)")
+    s.add_argument("files", nargs="*", help="saved screenshots, 1920x1080 or 1366x768, all of one size (default: "
+                                            "bench-look's, from gamelab/lab)")
     s.add_argument("--recordings", nargs="*", help="recordings (names in gamelab/lab/recordings, or .npz files) "
                                                    f"with the camera still (default: {', '.join(BODY_RECORDINGS)})")
     s.add_argument("--tracks", nargs="+", help="instead: telemetry files of `watch` (.jsonl): each track's velocity "

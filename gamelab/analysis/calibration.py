@@ -1,20 +1,29 @@
 """Where she stands on screen and what her name tag looks like: the crop recordings are taken of, and the
 name tag template that finds her in them. Redo after moving to another map, moving the game window, or
-changing resolution."""
+changing resolution.
+
+Her name tag is drawn at the game's size, so each client size (screen.Geometry) has a calibration of its own
+(paths.calibrated: calibration_1366x768.json and so on; 1920x1080's are the files as they always were), its crop
+and template at that size: recordings are shrunk as looks are (half size at 1920x1080, full size at the game's own
+1366x768) and cover the same part of the game either way (800 x 400 client px at 1920x1080, 569 x 284 at 1366x768).
+"""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from PIL import Image
 
+from .. import paths
 from ..control import client
-from ..paths import CALIBRATION, LAB, TAG_TEMPLATE
+from ..paths import LAB
+from ..screen import STRETCHED, Geometry, geometry
 from . import recordings, track
 
-CROP_W, CROP_H = 800, 400   # client pixels recorded around her
+CROP_W, CROP_H = 800, 400   # client pixels recorded around her (at 1920x1080: Calibration.geo converts them)
 TAG_IN_CROP = (400, 300)     # where her name tag sits in that crop (room above for jumps)
-SCALE = 2                    # recordings are downscaled 2x: plenty for tracking, 4x less data
+SCALE = 2                    # recordings are downscaled 2x at 1920x1080 (the look's scale: Geometry.look_scale):
+                             # plenty for tracking, 4x less data
 TAG_MATCH_MIN = 0.7          # a saved template matching this well has found her
 TAG_SLACK = 40               # client px: her name tag this close to TAG_IN_CROP in the stored crop, it's kept (the
                              # runs of a sweep that end where they started then share one crop)
@@ -25,47 +34,63 @@ class Calibration:
     crop: list[int]          # x, y, width, height in client pixels
     scale: int
     template: np.ndarray     # her name tag, grayscale, at `scale`
+    geo: Geometry = field(default=STRETCHED)  # the client size it's for
+
+
+def files(geo: Geometry = STRETCHED) -> tuple:
+    """The calibration's files for a client of this geometry: its crop (json), her name tag at the recordings'
+    scale, and her name tag at full size (perception.nametag cuts that one on its first look)."""
+    return (paths.calibrated(paths.CALIBRATION, geo.suffix), paths.calibrated(paths.TAG_TEMPLATE, geo.suffix),
+            paths.calibrated(paths.TAG_FULL, geo.suffix))
 
 
 def calibrate(tag: tuple[int, int] | None = None, fresh: bool = False) -> Calibration:
-    """Find her (or use `tag`, client pixels), pick the recording crop around her, and save it.
+    """Find her (or use `tag`, client pixels), pick the recording crop around her, and save it, for the game window
+    at the size it is now.
 
     Her name tag looks the same on every map, so once a template exists it is reused to find her;
-    `fresh` rebuilds it (needed after switching characters, or if a rope crossed the tag last time).
+    `fresh` rebuilds it (needed after switching characters, or if a rope crossed the tag last time), and the full-size
+    one the next look cuts from it.
     """
     LAB.mkdir(parents=True, exist_ok=True)
     full = client.submit(fps=10, duration_ms=200, scale=1, lead_ms=0, name="calibrate")
     frame = full["frames"][-1]
-    Image.fromarray(frame).save(LAB / "calibrate.png")
-    template = None if fresh or not TAG_TEMPLATE.exists() else np.load(TAG_TEMPLATE)
+    geo = geometry(full["client"]["width"], full["client"]["height"])
+    scale = geo.look_scale
+    cal_file, small_file, full_file = files(geo)
+    Image.fromarray(frame).save(LAB / f"calibrate{geo.suffix}.png")
+    template = None if fresh or not small_file.exists() else np.load(small_file)
     if tag is None:
-        tag = _find_tag(frame, template)
-    x, y, _, _ = crop = crop_around(tag, full["client"]["width"], full["client"]["height"])
+        tag = _find_tag(frame, template, scale)
+    x, y, _, _ = crop = crop_around(tag, full["client"]["width"], full["client"]["height"], geo)
 
-    small = recordings.screenshot("calibrate", crop=crop, scale=SCALE)
-    Image.fromarray(small).save(LAB / "calibrate_crop.png")
+    small = recordings.screenshot("calibrate", crop=crop, scale=scale)
+    Image.fromarray(small).save(LAB / f"calibrate_crop{geo.suffix}.png")
     if template is None:
-        template = track.make_template(small, ((tag[0] - x) // SCALE, (tag[1] - y) // SCALE), scale=SCALE)
-        np.save(TAG_TEMPLATE, template)
-    CALIBRATION.write_text(json.dumps({"crop": crop, "scale": SCALE, "tag": list(map(int, tag))}))
-    return Calibration(crop, SCALE, template)
+        template = track.make_template(small, ((tag[0] - x) // scale, (tag[1] - y) // scale), scale=scale, geo=geo)
+        np.save(small_file, template)
+        full_file.unlink(missing_ok=True)  # cut again from the new one, on the next look
+    cal_file.write_text(json.dumps({"crop": crop, "scale": scale, "tag": list(map(int, tag)),
+                                    "client": list(geo.client)}))
+    return Calibration(crop, scale, template, geo)
 
 
-def crop_around(tag: tuple[int, int], width: int, height: int) -> list[int]:
+def crop_around(tag: tuple[int, int], width: int, height: int, geo: Geometry = STRETCHED) -> list[int]:
     """The recording crop (client px: x, y, width, height) with her name tag's centre `tag` at TAG_IN_CROP, kept
-    inside a client `width` x `height`."""
-    x = min(max(0, tag[0] - TAG_IN_CROP[0]), width - CROP_W)
-    y = min(max(0, tag[1] - TAG_IN_CROP[1]), height - CROP_H)
-    return [int(x), int(y), CROP_W, CROP_H]
+    inside a client `width` x `height` (of geometry `geo`: CROP_W and the rest are 1920x1080's)."""
+    w, h = geo.ipx(CROP_W), geo.ipx(CROP_H)
+    x = min(max(0, tag[0] - geo.ipx(TAG_IN_CROP[0])), width - w)
+    y = min(max(0, tag[1] - geo.ipx(TAG_IN_CROP[1])), height - h)
+    return [int(x), int(y), w, h]
 
 
-def match_tag(frame: np.ndarray, template: np.ndarray) -> tuple[tuple[int, int] | None, float]:
-    """Her name tag's centre in a full-size frame, where the saved template matches it (in a half-size copy)
-    TAG_MATCH_MIN or better (else None), and how well the best match did."""
-    (x, y), score = track.best_match(frame[::SCALE, ::SCALE], template)
+def match_tag(frame: np.ndarray, template: np.ndarray, scale: int = SCALE) -> tuple[tuple[int, int] | None, float]:
+    """Her name tag's centre in a full-size frame, where the saved template matches it (in a copy shrunk `scale`
+    times, the template's) TAG_MATCH_MIN or better (else None), and how well the best match did."""
+    (x, y), score = track.best_match(frame[::scale, ::scale], template)
     if score < TAG_MATCH_MIN:
         return None, score
-    return ((x + template.shape[1] // 2) * SCALE, (y + template.shape[0] // 2) * SCALE), score
+    return ((x + template.shape[1] // 2) * scale, (y + template.shape[0] // 2) * scale), score
 
 
 def crop_on_her(cal: Calibration, frame: np.ndarray, width: int, height: int) -> tuple[list[int], str]:
@@ -76,15 +101,17 @@ def crop_on_her(cal: Calibration, frame: np.ndarray, width: int, height: int) ->
     stored crop is calibrate's, around wherever she stood then: in game on 2026-10-21 the 16 `act --record` runs
     of a sweep never had her in their crop, from a calibration she had walked away from (its outcomes were read
     off the screenshots after each run instead)."""
-    tag, score = match_tag(frame, cal.template)
+    tag, score = match_tag(frame, cal.template, cal.scale)
     if tag is None:
         return list(cal.crop), (f"her name tag wasn't found on screen (the best match {score:.2f}, under "
                                 f"{TAG_MATCH_MIN}): recording the stored crop {list(cal.crop)}, which may not have "
                                 f"her (run calibrate where she stands)")
     x, y, w, h = cal.crop
-    if abs(tag[0] - x - TAG_IN_CROP[0]) <= TAG_SLACK and abs(tag[1] - y - TAG_IN_CROP[1]) <= TAG_SLACK:
+    geo = cal.geo
+    at, slack = (geo.ipx(TAG_IN_CROP[0]), geo.ipx(TAG_IN_CROP[1])), geo.px(TAG_SLACK)
+    if abs(tag[0] - x - at[0]) <= slack and abs(tag[1] - y - at[1]) <= slack:
         return list(cal.crop), ""
-    crop = crop_around(tag, width, height)
+    crop = crop_around(tag, width, height, geo)
     had = "had her too" if x <= tag[0] < x + w and y <= tag[1] < y + h else "hasn't her"
     return crop, f"her name tag is at {tag[0]},{tag[1]}: recording {crop} around it (the stored {list(cal.crop)} {had})"
 
@@ -95,10 +122,10 @@ def crop_now(cal: Calibration) -> tuple[list[int], str]:
     return crop_on_her(cal, full["frames"][-1], full["client"]["width"], full["client"]["height"])
 
 
-def _find_tag(frame: np.ndarray, template: np.ndarray | None) -> tuple[int, int]:
-    """Her name tag's centre in a full-size frame: where the saved template matches (in a half-size
-    copy), or else the name tag nearest the middle."""
-    if template is not None and (tag := match_tag(frame, template)[0]) is not None:
+def _find_tag(frame: np.ndarray, template: np.ndarray | None, scale: int = SCALE) -> tuple[int, int]:
+    """Her name tag's centre in a full-size frame: where the saved template matches (in a copy shrunk `scale`
+    times), or else the name tag nearest the middle."""
+    if template is not None and (tag := match_tag(frame, template, scale)[0]) is not None:
         return tag
     tag = track.find_name_tag(frame)
     if tag is None:
@@ -106,9 +133,11 @@ def _find_tag(frame: np.ndarray, template: np.ndarray | None) -> tuple[int, int]
     return tag
 
 
-def load() -> Calibration:
-    """The saved calibration (raises if there is none yet)."""
-    if not CALIBRATION.exists():
-        raise RuntimeError("not calibrated yet: run `python -m gamelab calibrate`")
-    data = json.loads(CALIBRATION.read_text())
-    return Calibration(data["crop"], data["scale"], np.load(TAG_TEMPLATE))
+def load(geo: Geometry = STRETCHED) -> Calibration:
+    """The saved calibration for a game window of geometry `geo` (raises if there is none yet)."""
+    cal_file, small_file, _ = files(geo)
+    if not cal_file.exists():
+        size = f"{geo.client[0]}x{geo.client[1]}"
+        raise RuntimeError(f"not calibrated at {size} yet: run `python -m gamelab calibrate` with the game at {size}")
+    data = json.loads(cal_file.read_text())
+    return Calibration(data["crop"], data["scale"], np.load(small_file), geo)
