@@ -218,3 +218,19 @@ def test_watch_waits_for_a_minimized_game_and_never_restores_it(monkeypatch, cap
     monkeypatch.setattr(cli.time, "sleep", sleep)
     assert cli._game_geometry("MapleStory") == NATIVE and waits == [cli.MINIMIZED_POLL_S] * 3
     assert "the game is minimized: waiting" in capsys.readouterr().out
+
+
+def test_the_three_standing_tests_go_by_the_looks_geometry():
+    # Ground under her feet that shows she stands: 6 half-size px of the 1920x1080 window, 8.5 px at 1366x768 full
+    # size. looting.standing had kept the 1920x1080 number (6 px), where navigator.standing and Scene.grounded convert.
+    from gamelab.behavior import looting
+    from gamelab.control import navigator
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    from types import SimpleNamespace
+    p = SimpleNamespace(id=1)
+    for geo, width, stands in ((STRETCHED, 6, True), (STRETCHED, 5, False), (NATIVE, 9, True), (NATIVE, 8, False),
+                               (NATIVE, 6, False)):
+        s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0, geo=geo,
+                  where=Where(0, 0, p, (0, 0)), ground=(100, 100 + width))
+        assert looting.standing(s) == navigator.standing(s) == s.grounded == stands, (geo.client, width)

@@ -303,8 +303,9 @@ def standing(s: Scene) -> bool:
     """Whether look `s` shows her standing: ground under her feet on screen (control.navigator's test, but not
     with her name tag hidden). With STANDING_ONLY, only such a look can see a drop spot empty: in the air or on a
     rope there's no ground under her, and a look's loot strips, put just above her platform's ground as if she
-    stood on it, lie above the drops by as high as she is, so it finds none."""
-    return s.ground is not None and s.ground[1] - s.ground[0] >= MIN_GROUND_PX
+    stood on it, lie above the drops by as high as she is, so it finds none. (MIN_GROUND_PX is in half-size px of
+    the 1920x1080 window: the look's geometry converts it, 8.5 px at 1366x768.)"""
+    return s.ground is not None and s.ground[1] - s.ground[0] >= s.geo.fpx(MIN_GROUND_PX)
 
 
 def _in_pile(spot: DropSpot, loot: Loot) -> bool:
