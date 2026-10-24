@@ -139,6 +139,17 @@ def _shot(name: str) -> Path:
     return shots / name
 
 
+def cmd_window(args) -> int:
+    """Resize the game's client area (through the player: a normal program can't), then save a full-size screenshot
+    of it. Sends no keys."""
+    width, height = (int(v) for v in args.size.lower().split("x"))
+    result = client.submit(fps=10, duration_ms=200, scale=1, lead_ms=0, name="window", window_client=(width, height))
+    path = _shot(f"window_{width}x{height}.png")
+    Image.fromarray(result["frames"][-1]).save(path)
+    print(f"client area now {result['client']['width']}x{result['client']['height']}: {path}")
+    return 0
+
+
 def cmd_snap(args) -> int:
     window.bring_to_front(_game_title())
     frame = recordings.screenshot("snap", scale=args.scale)
@@ -1219,7 +1230,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--fresh", action="store_true", help="rebuild the name tag template (stand clear of ropes)")
     s.set_defaults(func=cmd_calibrate)
 
-    s = sub.add_parser("snap", help="save a screenshot of the game to gamelab/lab/snap.png")
+    s = sub.add_parser("window", help="resize the game's client area to 1366x768 (the game's own size: pixel for "
+                                      "pixel) or 1920x1080, through the player; sends no keys")
+    s.add_argument("size", choices=["1366x768", "1920x1080"])
+    s.set_defaults(func=cmd_window)
+
+    s = sub.add_parser("snap", help="save a screenshot of the game to gamelab/lab/shots/snap.png")
     s.add_argument("--scale", type=int, default=2)
     s.set_defaults(func=cmd_snap)
 

@@ -45,10 +45,23 @@ def test_valid_plan_passes():
     (plan(fps=120), "fps"),
     (plan(crop=[0, 0, -5, 10]), "crop"),
     (plan([[0, "alt", "down"]] * 401), "at most"),
+    ({**plan(), "window_client": [800, 600]}, "window_client"),  # only window.CLIENT_SIZES
+    ({**plan(), "window_client": "1366x768"}, "window_client"),
 ])
 def test_bad_plans_are_rejected(bad, message):
     with pytest.raises(ValueError, match=message):
         validate(bad, ALLOWED)
+
+
+def test_a_plan_may_resize_the_game_to_its_own_size_or_back():
+    for size in ([1366, 768], [1920, 1080]):
+        validate({**plan(), "window_client": size}, ALLOWED)
+
+
+def test_resizing_the_window_refuses_other_sizes_before_touching_it():
+    from gamelab import window
+    with pytest.raises(ValueError, match="isn't one of"):
+        window.resize_client(0, 1280, 720)
 
 
 def test_explore_steps_become_plan_events():

@@ -42,6 +42,16 @@ user32.WindowFromPoint.restype = wintypes.HWND
 user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
 user32.GetAncestor.restype = wintypes.HWND
 GA_ROOT = 2  # GetAncestor: the top-level window
+user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+user32.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
+user32.AdjustWindowRectEx.argtypes = (ctypes.POINTER(wintypes.RECT), wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                wintypes.UINT)
+# The game's client sizes the player may set (resize_client): the game lays out a 1366x768 view and stretches it to
+# its window (screen.SCREEN_SCALE), so a 1366x768 client shows it pixel for pixel; 1920x1080 is how it was set until
+# 2026-10-23. A normal program can't resize the game's window (it runs as administrator: "access denied", tried
+# 2026-10-23), so only the elevated player does it.
+CLIENT_SIZES = ((1366, 768), (1920, 1080))
 
 
 def move_cursor(x: int, y: int) -> None:
@@ -77,6 +87,25 @@ def shows(hwnd: int, area: dict, inset: int = 8) -> bool:
     x1, y1 = area["left"] + area["width"] - 1 - inset, area["top"] + area["height"] - 1 - inset
     points = [((x0 + x1) // 2, (y0 + y1) // 2), (x0, y0), (x1, y0), (x0, y1), (x1, y1)]
     return all(user32.GetAncestor(user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) == hwnd for x, y in points)
+
+
+def resize_client(hwnd: int, width: int, height: int) -> tuple[int, int]:
+    """Resize the game window so its client area is `width` x `height` (one of CLIENT_SIZES), keeping its top-left
+    corner where it is; returns the client size it then has. Raises ValueError for any other size, OSError if
+    Windows refuses."""
+    if (width, height) not in CLIENT_SIZES:
+        raise ValueError(f"client size {width}x{height} isn't one of {CLIENT_SIZES}")
+    style, ex = user32.GetWindowLongW(hwnd, -16) & 0xFFFFFFFF, user32.GetWindowLongW(hwnd, -20) & 0xFFFFFFFF
+    want = wintypes.RECT(0, 0, width, height)
+    if not user32.AdjustWindowRectEx(ctypes.byref(want), style, False, ex):
+        raise ctypes.WinError(ctypes.get_last_error())
+    swp_nomove, swp_nozorder, swp_noactivate = 0x2, 0x4, 0x10
+    if not user32.SetWindowPos(hwnd, None, 0, 0, want.right - want.left, want.bottom - want.top,
+                               swp_nomove | swp_nozorder | swp_noactivate):
+        raise ctypes.WinError(ctypes.get_last_error())
+    got = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(got))
+    return got.right, got.bottom
 
 
 def bring_to_front(title: str, wait: float = 0.0) -> bool:

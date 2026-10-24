@@ -31,15 +31,16 @@ def check_alarm() -> None:
 
 
 def submit(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100,
-           name="plan", timeout=120) -> dict:
-    """Hand a plan to the running player and wait for the result (frames included if recorded)."""
+           name="plan", timeout=120, window_client=None) -> dict:
+    """Hand a plan to the running player and wait for the result (frames included if recorded). `window_client`:
+    (width, height) to resize the game's client area to first (window.CLIENT_SIZES)."""
     plan_id = send(events, fps=fps, duration_ms=duration_ms, crop=crop, scale=scale, focus=focus,
-                   lead_ms=lead_ms, name=name)
+                   lead_ms=lead_ms, name=name, window_client=window_client)
     return wait(plan_id, timeout)
 
 
 def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan",
-         end_ms: int | None = None) -> str:
+         end_ms: int | None = None, window_client=None) -> str:
     """Hand a plan to the running player without waiting; returns its id (for wait / cancel).
     `end_ms`: the plan lasts this long even after its last key (the next plan starts then)."""
     check_alarm()
@@ -54,6 +55,8 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     plan = {"events": [list(e) for e in events], "capture": capture, "focus": focus}
     if end_ms is not None:
         plan["end_ms"] = end_ms
+    if window_client is not None:
+        plan["window_client"] = [int(v) for v in window_client]
     tmp = INBOX / f"{plan_id}.tmp"
     tmp.write_text(json.dumps(plan), encoding="utf-8")
     tmp.replace(INBOX / f"{plan_id}.json")

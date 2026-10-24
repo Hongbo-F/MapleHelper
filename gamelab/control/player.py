@@ -8,6 +8,7 @@ runs normally and talks to it through files. To keep that safe it only ever:
 - presses keys (any key config.toml can name: ALL_KEYS) and the mouse buttons, only while the game is in
   front,
 - moves the mouse pointer and clicks only inside the game window,
+- resizes the game window to one of window.CLIENT_SIZES when a plan asks (`window_client`; a normal program can't),
 - watches the game for the Lie Detector (the game's anti-bot check) the whole time it runs; if it
   appears, input stops at once, the player pages whoever is at the PC and shuts down, and it won't
   start again until `python -m gamelab clear-alarm` (it never tries to answer it),
@@ -90,6 +91,9 @@ def validate(plan: dict, allowed: dict[str, Key]) -> None:
     end = plan.get("end_ms")
     if end is not None and not (isinstance(end, (int, float)) and last <= end <= MAX_PLAN_MS):
         raise ValueError(f"end_ms must be after the last event and within {MAX_PLAN_MS} ms")
+    size = plan.get("window_client")
+    if size is not None and (not isinstance(size, list) or tuple(size) not in window.CLIENT_SIZES):
+        raise ValueError(f"window_client must be one of {window.CLIENT_SIZES}")
     cap = plan.get("capture", {})
     fps, duration = cap.get("fps", 0), cap.get("duration_ms", 0)
     if not (0 <= fps <= 60 and 0 <= duration <= MAX_PLAN_MS):
@@ -169,6 +173,9 @@ class Player:
             return {"error": LIE_DETECTOR_ERROR}
         validate(plan, self.allowed)
         hwnd = window.find_game(self.title)
+        if plan.get("window_client"):  # before anything else: the capture's area is the new client area
+            window.resize_client(hwnd, *plan["window_client"])
+            time.sleep(0.5)  # let the game lay itself out again
         if plan.get("focus") and win32.foreground_title() != self.title:
             window.bring_to_front(self.title)
             time.sleep(0.5)  # let the window come to the front
