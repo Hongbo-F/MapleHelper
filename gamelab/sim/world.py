@@ -34,7 +34,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   does nothing, as on the bottom floor;
 - monsters walk their platform as fast as the game data says (monster_data.speeds: 125 units/s for a pig,
   43.75 for a snail), turning and stopping now and then (seeded); a hit that doesn't kill pushes one
-  KNOCK_MOB units back from her and stands it while it flinches (MOB_KNOCKBACK), never off its platform.
+  KNOCK_MOB units back from her and stands it while it flinches (MOB_KNOCKBACK), never off its platform, if its
+  damage reaches the monster's `pushed` in the game data (push_chance: any damage for the first map's kinds).
   A monster touches her when its body overlaps hers (HER_HALF either side of her feet, HER_HEIGHT tall):
   the box of the frame it shows then in the game data, walking, standing or flinching after a hit, turned
   the way it faces (SimMonster.body), so a hopping slime is off the ground and taller for 38% of its walk.
@@ -44,7 +45,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   about 1.6% for a pig, 0.3% for a snail, give or take 70%; or, her DEF known, by meowdb's formula: Her) and
   knock her back ~58 units (the median
   logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS). At 0% HP she dies, and the
-  run ends (SimDied);
+  run ends (SimDied); up pressed on the ground at a portal takes her through it, out of the map, and the run
+  ends too (SimLeftMap);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
@@ -78,8 +80,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   HP potion key gives 30% HP, the chair key sits her down (+3% HP/s) until an arrow stands her up; her pet
   (Her.pet), if she has one, drinks a potion for her right after a touch leaves her under its warning.
 
-Her HP, her level and EXP when a run starts, and her pet are `Her`'s: LEVEL_19 on the first map, LEVEL_23 on
-West Rocky Mountain II. A monster of a kind the first map hasn't takes as many stars as its HP and defence in
+Her HP, her level and EXP when a run starts, her evasion and her pet are `Her`'s: LEVEL_19 on the first map,
+LEVEL_23 on West Rocky Mountain II, LEVEL_24 on Tree Dungeon, Forest Up North II. A monster of a kind the first map hasn't takes as many stars as its HP and defence in
 the game data say (hits_of), and its body is as tall and wide as its frames there (_body_of).
 
 `Noise` (off by default) adds the errors of the real game, each one seeded and tied to the moment it
@@ -238,6 +240,15 @@ MOB_KNOCKBACK = True
 KNOCK_MOB = 18.0
 KNOCK_MOB_S = 0.25
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
+CLAW_DAMAGE = (9, 11)
+# ... but a hit pushes it (and it flinches) only if its damage, after the monster's defence (x 100 / (PDDamage + 100),
+# as STAR_DAMAGE's), reaches its `pushed` in the game data: 1 for every kind of the first map (any damage, as above),
+# 40 for a Horny Mushroom and 25 for a Green Mushroom on Tree Dungeon, Forest Up North II, 30 for an Axe Stump and 25
+# for a Dark Stump on West Rocky Mountain II (both DEF 30). So two in three of her stars push a Horny Mushroom (30-70
+# against DEF 10: 44 and up), a Green every one, an Axe Stump 78% (39 and up), a Dark Stump 93%, and no claw swipe
+# pushes a stump; the rest leave it walking at her. Drawn per hit (push_chance), seeded by its tick. Not measured: the
+# study of Tree Dungeon has "a hit under 40 doesn't knock back or flinch a Horny" from the game data alone.
+PUSH_BY_DAMAGE = True
 # How the world's attack from a jump picks its target: 'area', the nearest in the area fixed to her feet
 # (reach.in_area, as her decisions have it: the 40 ms jump throws' kills of snails 36-66 off on 2026-10-20 fit
 # it); or 'v83', as from the ground, from where she is then (the claw's stance, then the star's search), as
@@ -338,6 +349,13 @@ class SimDied(Exception):
     """Her HP reached 0: she's dead, and a simulated run ends there (nothing she does counts any more)."""
 
 
+class SimLeftMap(SimDied):
+    """Up pressed on the ground at a portal (within PORTAL_REACH of it): she went through it to another map, and a
+    simulated run ends there. The stack never presses up on the ground within 60 units of one (mapdata.MapModel.
+    portal_near, the spawn points' too: the climbs, flow and the mover keep it): on Tree Dungeon, Forest Up North II
+    nowhere right of x 118 on 28 and 12 (their exits at 282 and 281, the spawn points from 178)."""
+
+
 class SimFellOut(SimDied):
     """She fell below the map's lowest floor (a knock or a flight through a wall of another foothold group
     with nothing under it): she'd fall for good, and a simulated run ends there, named, not left standing
@@ -429,12 +447,21 @@ class Her:
     defence: float | None = None  # her DEF in meowdb's touch formula (DEFENCE); None: a share of PADamage, as fitted
     pet: float | None = None     # her pet's HP warning: it drinks a potion of hers when a touch leaves her under this
                                  # share of her HP (PET_GAP); None: no pet
+    evade: float = 0.0           # her evasion against a touch, as EVADE_ACC (her chance is this over the monster's
+                                 # accuracy); 0: EVADE_ACC, as fitted
 
 
 LEVEL_19 = Her()
 # Her pet's warning isn't known (a multiple of 5% in System Options): 45% is where the tour and the hunt loop have her
 # drink herself (Hunter's potion_hp in Sim.tour_stack and sim.harness), so the pet does what her own potions did.
 LEVEL_23 = Her(max_hp=730.0, level=23, exp=31_736, defence=DEFENCE, pet=0.45)
+# On Tree Dungeon, Forest Up North II (from 2026-10-24): level 24, HP 752 and MP 601 (the study's: her bars), her EXP
+# into the level not read yet (0). Her MP isn't kept (the regular attack costs none; Lucky Seven, 8-9 MP a cast, isn't
+# thrown by the hunt loop). A touch by meowdb's formula at DEFENCE: a Horny Mushroom (PADamage 110) takes 111-131 HP,
+# 15-17% of hers (the study's 113-134 at DEF 64), a Green (54) 49-59, a Slime 7-9; by a share of PADamage as fitted
+# on the first map (`defence` None: the harness's `--touch share`) 75, 37 and 9, give or take 70%. Which holds isn't
+# known: one Horny touch's px on her HP bar (17 px of 104 by the formula, 10 by the share, at 1366x768) tells.
+LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=0.45)
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -471,6 +498,7 @@ class MobInfo:
     hit: Frame | None = None
     hp: float = 0.0
     pdd: float = 0.0
+    pushed: float = 1.0          # the least damage that pushes it back (and flinches it): PUSH_BY_DAMAGE
 
     @staticmethod
     def frame_at(frames: tuple[Frame, ...], ms: float) -> Frame:
@@ -488,7 +516,8 @@ def mob_info(mob_id: int) -> MobInfo | None:
     """Monster `mob_id`'s MobInfo, from the game data (cached in MOBS), or None where there's none."""
     cache = MOBS / f"{mob_id:07d}.json"
     raw = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else None
-    if raw is None or "move" not in raw or "hp" not in raw:  # not cached yet, or before its frames or HP were kept
+    if raw is None or "move" not in raw or "pushed" not in raw:  # not cached yet, or before its frames, HP or push
+                                                                 # were kept
         fresh = _read_mob(mob_id)
         if fresh is None and (raw is None or "move" not in raw):
             return None
@@ -500,7 +529,7 @@ def mob_info(mob_id: int) -> MobInfo | None:
             os.replace(part, cache)
     stand, move = (tuple(Frame(*f) for f in raw[k]) for k in ("stand", "move"))
     return MobInfo(raw["pad"], raw["acc"], stand or move, move or stand, raw["hit"] and Frame(*raw["hit"]),
-                   raw.get("hp", 0.0), raw.get("pdd", 0.0))
+                   raw.get("hp", 0.0), raw.get("pdd", 0.0), raw.get("pushed", 1.0))
 
 
 def _read_mob(mob_id: int) -> dict | None:
@@ -531,7 +560,8 @@ def _read_mob(mob_id: int) -> dict | None:
     hit = frames("hit1")
     return {"pad": float(info.get("PADamage") or 0), "acc": float(info.get("acc") or 0),
             "stand": frames("stand"), "move": frames("move"), "hit": hit[0] if hit else None,
-            "hp": float(info.get("maxHP") or 0), "pdd": float(info.get("PDDamage") or 0)}
+            "hp": float(info.get("maxHP") or 0), "pdd": float(info.get("PDDamage") or 0),
+            "pushed": float(info.get("pushed") or 1)}
 
 
 def touch_damage(info: MobInfo | None, u: float, her: Her = LEVEL_19) -> float:
@@ -575,11 +605,20 @@ def hits_of(kind: str, info: MobInfo | None) -> int:
     return max(1, round(stars_to_kill(info.hp, info.pdd)))
 
 
-def evade_chance(info: MobInfo | None) -> float:
-    """The chance she evades a touch by a monster with `info`: EVADE_ACC over its accuracy."""
+def evade_chance(info: MobInfo | None, her: Her | None = None) -> float:
+    """The chance she evades a touch by a monster with `info`: EVADE_ACC (or her own, Her.evade) over its accuracy."""
     if info is None or info.acc <= 0:
         return EVADE
-    return min(1.0, EVADE_ACC / info.acc)
+    return min(1.0, (her.evade if her is not None and her.evade else EVADE_ACC) / info.acc)
+
+
+@functools.lru_cache(maxsize=None)
+def push_chance(pushed: float, pdd: float, swipe: bool = False) -> float:
+    """The chance a hit of hers pushes back a monster of `pushed` and defence `pdd` (PUSH_BY_DAMAGE): of her star's
+    damage (STAR_DAMAGE, or a claw swipe's, CLAW_DAMAGE), each whole number as likely, the share that reaches `pushed`
+    after the defence."""
+    lo, hi = CLAW_DAMAGE if swipe else STAR_DAMAGE
+    return sum(1 for d in range(lo, hi + 1) if d * 100 / (pdd + 100) >= pushed) / (hi - lo + 1)
 
 
 @dataclass
@@ -601,7 +640,8 @@ class SimMonster:
     alive: bool = True
     died_at: float | None = None
     died_x: float = 0.0
-    hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden; it flinches)
+    hit_at: float | None = None  # when a star last hit it without killing it (Noise.hit_hidden) ...
+    flinch_at: float | None = None  # ... and pushed it back: it flinches (PUSH_BY_DAMAGE)
     flinch_top: float = 54.0   # how tall it is while it flinches
     fade: float = FADE         # s it's still seen once killed, fading out where it died
     info: MobInfo | None = None  # its touch damage, accuracy and frames (game data), if known
@@ -784,6 +824,7 @@ class World:
         self.group = p.group            # her foothold group: the walls of it stop her in the air (body.fly)
         self.knocked = False            # in the air from a monster's touch (KNOCK_STEERS)
         self.fell_out_at: float | None = None  # when she fell below the map's lowest floor (SimFellOut)
+        self.left_map_at: float | None = None  # when she went through a portal (SimLeftMap)
         self.bottom = max(max(q.y_at(q.left), q.y_at(q.right)) for q in model.platforms)  # its lowest floor
         self._walls: dict = {}          # foothold group -> the walls that stop her with it (body.Walls)
         self.x, self.y = float(start[1]), p.y_at(start[1])
@@ -894,8 +935,10 @@ class World:
         """Run the world up to clock time `clock_t` (whole ticks at or before it). Raises SimDied once
         she's dead: whatever looks next finds the run over."""
         end = int(math.floor(((clock_t - self.origin) * 1000) / TICK_MS + 1e-6)) * TICK_MS
-        while self.ms < end and not self.dead and self.fell_out_at is None:
+        while self.ms < end and not self.dead and self.fell_out_at is None and self.left_map_at is None:
             self._tick()
+        if self.left_map_at is not None:
+            raise SimLeftMap(f"she went through a portal at {self.left_map_at:.3f} s (x {self.x:.0f})")
         if self.fell_out_at is not None:
             raise SimFellOut(f"she fell out of the map at {self.fell_out_at:.3f} s (x {self.x:.0f})")
         if self.dead:
@@ -981,7 +1024,7 @@ class World:
             self.drops += e.data
         elif e.kind == "respawn":
             m = e.data
-            m.alive, m.hp, m.died_at, m.hit_at = True, m.hp_max, None, None
+            m.alive, m.hp, m.died_at, m.hit_at, m.flinch_at = True, m.hp_max, None, None, None
             m.start(self.t, m.home)
         elif e.kind == "rival":
             self._push(self._rival_kill(), "rival")
@@ -1083,7 +1126,11 @@ class World:
             if ground:
                 for pt in self.portals:
                     if abs(pt.x - self.x) < PORTAL_REACH[0] and abs(pt.y - self.y) < PORTAL_REACH[1]:
-                        self.note(f"up at portal {pt.name} (to map {pt.to_map}): she'd leave the map")
+                        self.note(f"up at portal {pt.name} (to map {pt.to_map}): she leaves the map")
+                        self.left_map_at = self.t
+                        self.held.clear()
+                        self.seen.clear()
+                        return
                 self._grab_from_ground()
         elif action == "down":
             if ground:
@@ -1330,7 +1377,7 @@ class World:
     def _hit_by(self, m: SimMonster, mx: float) -> None:
         self.touches += 1
         self.invulnerable_ms = self.ms + int(INVULNERABLE * 1000)
-        evaded = self.chance("evade") < evade_chance(m.info)
+        evaded = self.chance("evade") < evade_chance(m.info, self.character)
         damage = 0.0 if evaded else touch_damage(m.info, self.chance("damage"), self.character)
         self.touch_log.append((self.t, damage))
         if evaded:
@@ -1380,7 +1427,7 @@ class World:
 
     def flinching(self, m: SimMonster) -> bool:
         """Whether monster `m` flinches now: for FLINCH_S after a star or a swipe hit it."""
-        return m.hit_at is not None and self.t - m.hit_at < monster_data.FLINCH_S
+        return m.flinch_at is not None and self.t - m.flinch_at < monster_data.FLINCH_S
 
     def body(self, m: SimMonster) -> tuple[float, float, float, float]:
         """Monster `m`'s body now (SimMonster.body): its frame's box, which is what touches her."""
@@ -1505,11 +1552,22 @@ class World:
         m.hp = round(m.hp - (CLAW if swipe else 1.0), 6)
         if m.hp > 1e-9:
             m.hit_at = self.t
-            if MOB_KNOCKBACK:
-                m.knock(self.t, 1 if mx >= self.x else -1)
-            self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left)")
+            if self._pushes(m, swipe):
+                m.flinch_at = self.t
+                if MOB_KNOCKBACK:
+                    m.knock(self.t, 1 if mx >= self.x else -1)
+                self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left)")
+            else:
+                self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left): not pushed")
             return
         self._kill(m, mx, what)
+
+    def _pushes(self, m: SimMonster, swipe: bool) -> bool:
+        """Whether this hit pushes monster `m` back (PUSH_BY_DAMAGE: drawn by push_chance, seeded by the tick)."""
+        if not PUSH_BY_DAMAGE or m.info is None or m.info.pushed <= 1:
+            return True
+        p = push_chance(m.info.pushed, m.info.pdd, swipe)
+        return p >= 1.0 or (p > 0.0 and self.chance(f"push:{m.idx}") < p)
 
     def _kill(self, m: SimMonster, mx: float, what: str) -> None:
         t = self.t
@@ -1664,6 +1722,7 @@ class World:
                 "platform": None if self.plat is None else self.plat.id, "hp": round(self.hp, 3),
                 "exp": self.exp, "kills": dict(sorted(self.kills.items())), "touches": self.touches,
                 "evaded": self.evaded, **({"fell_out_at": round(self.fell_out_at, 3)} if self.fell_out_at else {}),
+                **({"left_map_at": round(self.left_map_at, 3)} if self.left_map_at is not None else {}),
                 **({"pet_potions": self.pet_potions} if self.pet_potions else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}

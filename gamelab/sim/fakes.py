@@ -413,7 +413,7 @@ class FakeEyes(Eyes):
             # Where its feet are, which way it faces and what it's doing, as the templates tell (a dying
             # one's frames aren't among them): walking, standing, or flinching after a hit.
             way, walking = m.faces(self.world.t) if alive else (m.facing, False)
-            pose = ("hit1" if m.hit_at is not None and self.world.t - m.hit_at < FLINCH_S
+            pose = ("hit1" if m.flinch_at is not None and self.world.t - m.flinch_at < FLINCH_S
                     else "move" if walking else "stand") if alive else ""
             if pose in ("move", "stand") and self._pose_wrong(m):
                 pose = "stand" if pose == "move" else "move"

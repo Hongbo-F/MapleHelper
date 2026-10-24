@@ -84,7 +84,7 @@ def test_with_her_defence_known_a_touch_takes_hp_by_meowdbs_formula():
 
 def _touched(model, monkeypatch, hp, character, realism=None):
     """A world where a pig touches her at once for 5% of her HP (never evaded)."""
-    monkeypatch.setattr(world_mod, "evade_chance", lambda info: 0.0)
+    monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None: 0.0)
     monkeypatch.setattr(world_mod, "touch_damage", lambda info, u, her=LEVEL_19: 0.05)
     c = plat(model, 500, 400)
     w = still(World(model, KEYS, (c.id, 400.0), monsters=[("Pig", c.id, 420.0)], hp=hp, character=character,

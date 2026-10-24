@@ -41,14 +41,16 @@ from ..behavior.tour import Tour
 from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
                     Trace, detector_kinds, patched)
 from . import harness
-from .world import LEVEL_19, LEVEL_23, Her, Noise, Realism, SimDied, World
+from .world import LEVEL_19, LEVEL_23, LEVEL_24, Her, Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
+TREE = 10002073    # Victoria Road: Tree Dungeon, Forest Up North II, the third (from 2026-10-24)
 # Her keys and her (world.Her) on each map: on the first map as the golden traces were recorded with (level 19, her
 # potions on a key); on West Rocky Mountain II as she plays there (level 23, HP 730, her pet drinking her potions, her
-# bindings from 2026-10-23). Any other map (the tests' synthetic ones): the first map's.
-HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23)}
+# bindings from 2026-10-23); on Tree Dungeon, Forest Up North II at level 24 (HP 752), the same keys and pet. Any other
+# map (the tests' synthetic ones): the first map's.
+HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23), TREE: (SIM_KEYS_PET, LEVEL_24)}
 _MODEL: dict[int, MapModel] = {}
 
 
@@ -1862,8 +1864,9 @@ def nav_rocky_monsters_bridge(sim):
 def nav_rocky_fight_bridge(sim):
     """From the bridge up the rope at -1463 to 14, shooting the monsters in reach on the way (the tour's escort): a
     Stump takes 4 stars, a Dark Stump 7 and an Axe Stump 10. (Seed 1: of seeds 1-12 she arrived with ten kills or more
-    on 1 and 11, and on most of the others fell out of the map past 22's left end (-1640), where nothing is under
-    her: a touch knocked her off it, fighting or picking up drops there, or off the rope at -1463 near its top, and
+    on 1, 2, 5 and 6 since a hit pushes a Dark Stump or an Axe Stump back only from 25 or 30 damage after their
+    defence (world.PUSH_BY_DAMAGE: more of them walk on at her; on 1 and 11 before), and on most of the others fell
+    out of the map past 22's left end (-1640), where nothing is under her: a touch knocked her off it, fighting or picking up drops there, or off the rope at -1463 near its top, and
     the knock carried her past it. The world's side is the map's platforms' outer end (-1662, 14's left end), 19 units
     left of the pit's bottom stair (32, from -1643); with HeavenClient's sides, 25 in from its footholds
     (world.Realism.sides 'client', -1637), she can't get past 22's end; what the game does there isn't known:

@@ -703,7 +703,7 @@ def test_a_flinching_pig_below_is_picked_closer(model):
     tap(w, 0.0, "f", 0.04)
     w.advance(1.0)
     assert w.monsters[0].hp == 3 and any("star thrown right: no hit" in line for line in w.log)
-    w.monsters[0].hit_at = w.t  # as if a star had hit it just now
+    w.monsters[0].hit_at = w.monsters[0].flinch_at = w.t  # as if a star had hit and pushed it just now
     tap(w, 1.0, "f", 0.04)
     w.advance(2.0)
     assert w.monsters[0].hp == 2
@@ -852,7 +852,7 @@ def test_a_short_tap_can_be_lost_turning_her_without_walking_her(model):
 
 
 def test_a_touch_takes_hp_by_the_monsters_touch_damage_and_is_evaded_by_its_accuracy(model, monkeypatch):
-    monkeypatch.setattr(world_mod, "evade_chance", lambda info: 0.0)
+    monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None: 0.0)
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 420.0)]))
     w.monsters[0].info = world_mod.MobInfo(pad=15.0, acc=54.0)

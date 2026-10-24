@@ -143,3 +143,82 @@ def test_jumping_for_the_rope_from_30_at_the_clients_reach_she_misses_and_lands_
         tap(w, 0.05, "alt", 0.04)
         w.advance(4.0)
         assert w.plat is lands and w.mode == "ground", (realism, w.plat)
+
+
+# --- her at level 24, and the map's monsters -----------------------------------------------------------------------
+
+def test_she_is_level_24_there_with_her_pet_and_her_new_keys():
+    from gamelab.control.timeline import SIM_KEYS_PET
+    from gamelab.sim.world import DEFENCE, LEVEL_24
+    assert scenarios.her_on(TREE) == (SIM_KEYS_PET, LEVEL_24)
+    assert (LEVEL_24.max_hp, LEVEL_24.level, LEVEL_24.defence, LEVEL_24.pet) == (752, 24, DEFENCE, 0.45)
+
+
+def test_a_horny_mushrooms_touch_takes_111_to_131_hp_by_the_formula_and_75_give_or_take_70_percent_by_a_share():
+    import dataclasses
+    from gamelab.sim.world import LEVEL_24, MobInfo, touch_damage
+    horny, green, slime = MobInfo(110.0, 94.0), MobInfo(54.0, 79.0), MobInfo(13.0, 53.0)
+    hp = [round(touch_damage(horny, u / 100, LEVEL_24) * 752) for u in range(100)]
+    assert (min(hp), max(hp)) == (111, 131)
+    assert {round(touch_damage(green, u, LEVEL_24) * 752) for u in (0.0, 0.999)} == {49, 59}
+    assert {round(touch_damage(slime, u, LEVEL_24) * 752) for u in (0.0, 0.999)} == {7, 9}
+    share = dataclasses.replace(LEVEL_24, defence=None)  # the harness's --touch share
+    assert touch_damage(horny, 0.5, share) * 752 == pytest.approx(110 * 0.68)
+    assert touch_damage(horny, 0.0, share) * 752 == pytest.approx(110 * 0.68 * 0.3)
+
+
+def test_her_evasion_goes_against_the_monsters_accuracy():
+    import dataclasses
+    from gamelab.sim.world import EVADE_ACC, LEVEL_24, MobInfo, evade_chance
+    horny = MobInfo(110.0, 94.0)
+    assert evade_chance(horny) == evade_chance(horny, LEVEL_24) == pytest.approx(EVADE_ACC / 94)  # 29%
+    assert evade_chance(horny, dataclasses.replace(LEVEL_24, evade=9.4)) == pytest.approx(0.1)
+
+
+def test_a_hit_pushes_a_monster_back_only_from_its_pushed_damage():
+    from gamelab.sim.world import push_chance
+    assert push_chance(1.0, 10.0) == push_chance(1.0, 0.0, swipe=True) == 1.0  # the first map's kinds: any damage
+    assert push_chance(40.0, 10.0) == pytest.approx(27 / 41)   # a Horny Mushroom: 44-70 of her 30-70, after DEF 10
+    assert push_chance(25.0, 0.0) == 1.0                       # a Green Mushroom: every star
+    assert push_chance(30.0, 30.0) == pytest.approx(32 / 41)   # an Axe Stump (DEF 30): 39-70
+    assert push_chance(25.0, 30.0) == pytest.approx(38 / 41)   # a Dark Stump: 33-70
+    assert push_chance(30.0, 30.0, swipe=True) == 0.0          # no claw swipe (9-11) pushes a stump
+
+
+def test_a_star_that_doesnt_push_a_horny_mushroom_leaves_it_walking_at_her(monkeypatch):
+    m = tree_map()
+    p = m.platform(23)
+    for roll, pushed in ((0.99, False), (0.0, True)):
+        monkeypatch.setattr(World, "chance", lambda self, what, ms=None, roll=roll: roll if what.startswith("push")
+                            else 0.5)
+        w = world(m, 23, 0.0, monsters=[("Horny Mushroom", 23, 150.0)], facing="right")
+        w.monsters[0].speed = 0.0
+        w.invulnerable_ms = 10_000
+        tap(w, 0.0, "f", 0.04)
+        w.advance(0.7)
+        h = w.monsters[0]
+        assert h.alive and h.hp == h.hp_max - 1 and h.hit_at is not None
+        assert (h.flinch_at is not None) == pushed and w.flinching(h) == pushed
+        assert any("not pushed" in line for line in w.log) == (not pushed)
+        assert (h.x0 > 150.0) == pushed  # pushed 18 units away from her, or where it was
+    assert p.covers(150.0)
+
+
+# --- the portals -----------------------------------------------------------------------------------------------------
+
+def test_up_on_the_ground_at_a_portal_takes_her_out_of_the_map_and_the_stack_never_presses_it_there():
+    from gamelab.motion.route import Planner
+    from gamelab.sim.world import SimLeftMap
+    m = tree_map()
+    out00 = next(pt for pt in m.portals if pt.name == "out00")
+    w = world(m, 28, out00.x - 10)
+    w.key(0.0, "up", True)
+    with pytest.raises(SimLeftMap):
+        w.advance(0.5)
+    assert w.summary()["left_map_at"] == 0.0
+    # No move of the planner's holds up on the ground within 60 of either (MapModel.portal_near): no rope is near one.
+    for mv in Planner(m).moves:
+        if mv.kind in ("climb", "rope_jump"):
+            assert not m.portal_near(m.platform(mv.src), mv.rope_x), mv
+    for pid in (28, 12):
+        assert m.portal_near(m.platform(pid), 240.0) and not m.portal_near(m.platform(pid), 110.0)
