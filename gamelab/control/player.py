@@ -10,17 +10,18 @@ runs normally and talks to it through files. To keep that safe it only ever:
 - moves the mouse pointer and clicks only inside the game window,
 - resizes the game window to one of window.CLIENT_SIZES when a plan asks (`window_client`; a normal program can't),
 - watches the game for the Lie Detector (the game's anti-bot check) the whole time it runs; if it
-  appears, input stops at once, the player pages whoever is at the PC and records the Lie Detector's
-  whole cycle (control.lie_recorder), and it stays up refusing every plan until a person has run
-  `python -m gamelab clear-alarm` and the Lie Detector has been off the screen for a minute (it never
-  tries to answer it, and sends nothing while it's up),
+  appears, input stops at once (all that goes out after is letting go of the keys and buttons a plan
+  held), the player pages whoever is at the PC, records the Lie Detector's whole cycle
+  (control.lie_recorder) while refusing every plan, and stops once a person has run `python -m gamelab
+  clear-alarm` and the Lie Detector has been off the screen for a minute; it won't start again until
+  the alarm is cleared (it never tries to answer it),
 - records the game's client area while a plan runs,
 - writes results to gamelab/lab/outbox.
 
-Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears or after
-24 idle hours, not at the Lie Detector (starting it again takes the user's UAC click). Started with the
-alarm up, it starts locked as after one. Start it with `python -m gamelab player --elevate`; stop it
-with `python -m gamelab stop`.
+Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears, after 24 idle
+hours (not while it records a Lie Detector) or after a Lie Detector, as above: plans are taken again
+only by a player started again, which takes the user's UAC click. Start it with `python -m gamelab
+player --elevate`; stop it with `python -m gamelab stop`.
 
 Of gamelab, this module itself imports only paths and window (and control.alarm, control.lie_recorder and
 perception.lie_detector when a Watchdog is created). Plans come from control.client.
@@ -124,6 +125,19 @@ def _sleep_until(t: float, stop: threading.Event | None = None) -> bool:
     return stop is None or not stop.is_set()
 
 
+def alarm_up() -> bool:
+    """Whether the alarm file (paths.ALARM) is there; when that can't be told, it is (the lock stays). Asked of
+    os.stat: Path.exists answers False for any error (Python 3.15 here), so an alarm file it couldn't look at had
+    read as cleared."""
+    try:
+        os.stat(ALARM)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 class Watchdog(threading.Thread):
     """Looks at the game every `interval` seconds, whether or not a plan is running, and records each Lie Detector's
     whole cycle.
@@ -136,15 +150,19 @@ class Watchdog(threading.Thread):
     window gone, minimized or covered by another window (checked for the Lie Detector all the same) is recorded as
     such, with no frame, and doesn't count as the Lie Detector gone.
 
-    `alarm` stays set after the cycle: it's cleared (plans are taken again) only once both a person has cleared the
-    alarm (the alarm file, paths.ALARM, gone: `python -m gamelab clear-alarm`) and the game has shown no Lie Detector
-    for `end_s`, in either order. An alarm file that never got written (the disk full) is never cleared, so then
-    the player stays locked until it's restarted. Set when the watchdog is made (the player started with the alarm
-    up), it's cleared by the same rule.
+    `alarm` is never cleared: the player takes plans again only once a person has started it again (`player
+    --elevate`: the user's UAC click), as when it shut down at the alarm. `cleared` is set, and the player stops
+    (serve), once both a person has cleared the alarm (the alarm file, paths.ALARM, gone: `python -m gamelab
+    clear-alarm`) and the game has shown no Lie Detector for `end_s` since the cycle; until then it watches, and
+    records a new cycle as any. Taking plans again by itself, a file any program can delete (`clear-alarm` is an
+    ordinary command) would be all that stood between the keys and a Lie Detector the spotter can't see (the figure
+    tracking: lie_recorder.END_S). Seen again with the alarm file gone (cleared while it's still up), it's raised
+    again, paged too, so gamelab's commands go on refusing. An alarm file that never got written (the disk full)
+    can't be cleared: then the player stays up, locked, until it's stopped.
 
-    `grab` (for tests) stands in for grabbing the game: it returns a frame (RGB), (a frame, "covered"), or why there's
-    none ("no window", "minimized"; None is "no window"). Nothing that goes wrong in a look, the recording or the log stops the
-    watching: it's logged and the next look comes."""
+    `grab` (for tests) stands in for grabbing the game: it returns a frame (RGB), (a frame, "covered"), or why
+    there's none ("no window", "minimized"; None is "no window"). Nothing that goes wrong in a look, the recording or
+    the log stops the watching: it's logged and the next look comes."""
 
     def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
                  interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None):
@@ -164,6 +182,8 @@ class Watchdog(threading.Thread):
         self.cap_s = lie_recorder.CAP_S if cap_s is None else cap_s
         self.Recording = lie_recorder.Recording
         self.stopped = threading.Event()
+        self.cleared = threading.Event()      # the alarm cleared by a person and the screen clear since: the player
+                                              # stops (serve)
         self.cycle_t0: float | None = None    # when the cycle in progress was first seen (monotonic s), else None
         self.gone_since: float | None = None  # since when the game has shown no Lie Detector (None: seen, or the game
                                               # not showing, since the last look)
@@ -211,12 +231,20 @@ class Watchdog(threading.Thread):
             self.alarm.set()  # first: keys stop within ~10 ms
             info = self._raise(frame)  # the alarm, its screenshot, paging: before anything of the recording
             self.cycle_t0 = now
-            self.alarm_written = self._alarm_up()
-            self._say("LIE DETECTOR seen: input stopped; the player stays up, refusing every plan until "
-                      f"`clear-alarm` and none on screen for {self.end_s:g} s"
-                      + ("" if self.alarm_written else " (the alarm file couldn't be written: locked until the "
-                                                       "player is restarted)"))
+            self.alarm_written = alarm_up()
+            self._say("LIE DETECTOR seen: input stopped; the player stays up refusing every plan, records it, and "
+                      f"stops once `clear-alarm` has been run and none has been on screen for {self.end_s:g} s "
+                      "(it takes plans again only once it's started again)"
+                      + ("" if self.alarm_written else " (the alarm file couldn't be written: locked until it's "
+                                                       "stopped)"))
             self._start_recording(info)
+        elif seen and self.alarm_written and not alarm_up():
+            # Cleared while it's still up (the cycle not over): raised again, so gamelab's commands go on refusing
+            # (exit code 3) and the player doesn't stop with it on screen; paged again, as nobody may be at it.
+            self._raise(frame)
+            self.alarm_written = alarm_up()
+            self._say("the Lie Detector alarm was cleared while the Lie Detector is still on screen: raised again "
+                      f"(clear it once it has been off the screen for {self.end_s:g} s)")
         if self.recording is not None:
             self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why)
             if now - self.cycle_t0 >= self.cap_s:
@@ -226,32 +254,19 @@ class Watchdog(threading.Thread):
                 self._end_recording("gone")
             self.cycle_t0 = None
             self._say(f"the Lie Detector has been off the screen for {self.end_s:g} s: its cycle is over"
-                      + (" (waiting for `clear-alarm`)" if self.alarm.is_set() and self._alarm_up() else ""))
-        if self.alarm.is_set():
-            if self._alarm_up():
+                      + (" (waiting for `clear-alarm`, then the player stops)" if alarm_up() else ""))
+        if self.alarm.is_set() and not self.cleared.is_set():
+            if alarm_up():
                 self.alarm_written = True
             elif self.alarm_written and self.cycle_t0 is None and self.gone_for(now):
-                self.alarm.clear()  # a person cleared it, and none on screen for end_s: plans are taken again
-                self.alarm_written = False
+                self.cleared.set()  # a person cleared it, and none on screen for end_s: the player stops
                 self._say(f"the Lie Detector alarm was cleared and none has been on screen for {self.end_s:g} s: "
-                          "taking plans again")
+                          "the player stops (it takes plans again once it's started again: `python -m gamelab "
+                          "player --elevate`)")
 
     def gone_for(self, now: float) -> bool:
         """Whether the game has shown no Lie Detector for end_s, every look of it showing the game."""
         return self.gone_since is not None and now - self.gone_since >= self.end_s
-
-    @staticmethod
-    def _alarm_up() -> bool:
-        """Whether the alarm file (paths.ALARM) is there; when that can't be told, it is (the lock stays). Asked of
-        os.stat: Path.exists answers False for any error (Python 3.15 here), so an alarm file it couldn't look at
-        had read as cleared."""
-        try:
-            os.stat(ALARM)
-        except FileNotFoundError:
-            return False
-        except OSError:
-            return True
-        return True
 
     def _look(self, sct):
         """(the frame, None); (the frame, "covered"): another window is over some of the game, the frame being
@@ -461,38 +476,33 @@ def _answer(path, result: dict) -> str:
 
 
 def serve() -> None:
-    """The player: take plans from the inbox in name order and answer each (with the Lie Detector error while the
-    alarm Event is set: Player.run), until STOP or 24 idle hours. The Lie Detector doesn't stop it: the watchdog
-    locks and unlocks it.
-
-    Started with the alarm up (no one has cleared it yet), it starts locked, as it is after a Lie Detector, rather
-    than exit as it did until 2026-10-24. That's the safer of the two: the lock is the same Event every plan is
-    checked against, set before the watchdog starts or a plan is read, and lifted only by the watchdog's rule (the
-    alarm cleared by a person and none on screen for lie_recorder.END_S); it watches, and records a Lie Detector
-    still on screen, where an exit left nothing watching; and where a player started after `clear-alarm` takes
-    plans at once, with no look at the screen first, one started locked waits for the screen to be clear too."""
-    from .lie_recorder import END_S
+    """The player: take plans from the inbox in name order and answer each, until STOP, 24 idle hours (not counting
+    a Lie Detector's recording, at most lie_recorder.CAP_S) or a Lie Detector dealt with. From a Lie Detector's
+    sight it refuses every plan (Player.run: the alarm Event) while the watchdog records it, and it stops once a
+    person has cleared the alarm and the screen has been clear since (Watchdog.cleared): plans are taken again only
+    by a player started again, which takes the user's UAC click, as when it shut down at the alarm. It won't start
+    with the alarm up."""
     for d in (LAB, INBOX, OUTBOX):
         d.mkdir(parents=True, exist_ok=True)
     _rotate_log()
     STOP.unlink(missing_ok=True)
+    if alarm_up():
+        _log("refusing to start: a Lie Detector alarm hasn't been cleared (python -m gamelab clear-alarm)")
+        return
     for stale in [*INBOX.glob("*.json"), *INBOX.glob("*.cancel"), *INBOX.glob("*.running")]:  # left over
         stale.unlink()
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
     alarm = threading.Event()
-    if ALARM.exists():
-        alarm.set()  # before the watchdog starts and before any plan is read
     player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm)
     win32.enable_dpi_awareness()
     watchdog = Watchdog(cfg.game_window_title, alarm)
     watchdog.start()
     _log(f"player started; {len(player.allowed)} keys and the mouse buttons allowed; watching for the Lie Detector")
-    if alarm.is_set():
-        _log("a Lie Detector alarm hasn't been cleared: refusing every plan until `python -m gamelab clear-alarm` "
-             f"and none on screen for {END_S:g} s (watching and recording meanwhile)")
     idle_since = time.monotonic()
     with win32.precise_timers():
-        while not STOP.exists() and time.monotonic() - idle_since < IDLE_LIMIT_S:
+        while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:
+            if watchdog.recording is not None:  # a Lie Detector's recording goes on to its end, idle or not
+                idle_since = time.monotonic()
             plans = sorted(INBOX.glob("*.json"))
             if not plans:
                 time.sleep(0.01)  # idle: look for plans every 10 ms
@@ -523,5 +533,7 @@ def serve() -> None:
     if alarm.is_set():
         for path in INBOX.glob("*.json"):
             _answer(path, {"error": LIE_DETECTOR_ERROR})
-        _log("stopping with the Lie Detector alarm up (locked)")
+        _log("stopping after the Lie Detector, its alarm cleared: start the player again to take plans "
+             "(python -m gamelab player --elevate)" if watchdog.cleared.is_set() else
+             "stopping with the Lie Detector alarm up (locked)")
     _log("player stopped")

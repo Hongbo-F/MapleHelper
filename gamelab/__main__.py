@@ -39,9 +39,8 @@ WATCH_STATUS_S = 10.0
 WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for it (the player checks 4 a second)
 WATCH_EVENTS = ("died", "exp_gain")  # tracker events published as telemetry 'event' records (and hits, new ones)
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
-# subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing). Not `player`
-# since 2026-10-24: started with the alarm up, the player starts locked (control.player.serve).
-GAME_COMMANDS = {"calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
+# subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
+GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
 LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command
 
 SW_SHOWMINNOACTIVE = 7  # ShellExecute: start the player minimized, not activated
@@ -85,11 +84,7 @@ def _game_geometry(title: str, restore: bool = False):
 # --- the player and the Lie Detector ---------------------------------------------------------------------
 
 def cmd_player(args) -> int:
-    from .control.alarm import alarm_info
-    from .control.lie_recorder import END_S
-    if info := alarm_info():
-        print(f"the Lie Detector alarm from {info.get('time', '?')} is up: the player starts locked, refusing every "
-              f"plan until `clear-alarm` and none on screen for {END_S:g} s (it watches and records meanwhile)")
+    client.check_alarm()
     if not args.elevate:
         from .control.player import serve
         serve()
@@ -120,14 +115,21 @@ def cmd_stop(args) -> int:
 
 def cmd_clear_alarm(args) -> int:
     from .control import lie_recorder
-    from .control.alarm import clear_alarm
+    from .control.alarm import alarm_info, clear_alarm
+    folder = lie_recorder.going()
+    if folder is not None and alarm_info() is not None:
+        # Cleared now, a running player would stop a minute after the Lie Detector's last sight, the person maybe
+        # still at it (the spotter can't see the figure tracking: lie_recorder.END_S); and the commands would run.
+        print(f"the Lie Detector's recording is still going ({folder}): it ends once the game has shown no Lie "
+              f"Detector for {lie_recorder.END_S:g} s (with no window over it: a window over the game, or the game "
+              "minimized, doesn't count). The alarm stays up: run `clear-alarm` again then.")
+        return LIE_DETECTOR_EXIT
     info = clear_alarm()
     if info is None:
         print("no Lie Detector alarm is set")
     else:
         print(f"cleared the Lie Detector alarm from {info.get('time', '?')} "
               f"(screenshot: {info.get('screenshot', 'none')})")
-    folder = lie_recorder.going()
     if folder is not None:
         print(f"the Lie Detector recording is still going: {folder} (until it has been off the screen for "
               f"{lie_recorder.END_S:g} s)")
@@ -137,9 +139,9 @@ def cmd_clear_alarm(args) -> int:
             f"({summary['outcome']}: {summary['frames']} frames over {summary['duration_s']:.0f} s, ended: "
             f"{summary['end']})" if summary else "(unfinished: the player stopped while it was written)"))
     if info is not None:
-        print(f"gamelab's commands can run again; the player takes plans once the Lie Detector has been off the "
-              f"screen for {lie_recorder.END_S:g} s. The game flagged automated play once; keep sessions short and "
-              "supervised.")
+        print(f"a running player stops now (or, if the Lie Detector is still up, once it has been off the screen "
+              f"for {lie_recorder.END_S:g} s): gamelab's commands need it started again, `python -m gamelab player "
+              "--elevate`. The game flagged automated play once; keep sessions short and supervised.")
     return 0
 
 
@@ -1342,8 +1344,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--elevate", action="store_true", help="start it as administrator via a UAC prompt")
     s.set_defaults(func=cmd_player)
     sub.add_parser("stop", help="stop the player").set_defaults(func=cmd_stop)
-    sub.add_parser("clear-alarm", help="after you've answered a Lie Detector: let gamelab run again (and say "
-                                       "whether its recording is still going)").set_defaults(func=cmd_clear_alarm)
+    sub.add_parser("clear-alarm", help="after you've answered a Lie Detector and its recording has ended: let "
+                                       "gamelab run again (start the player again after it)"
+                   ).set_defaults(func=cmd_clear_alarm)
     s = sub.add_parser("spot", help="check the game (or an image) for the Lie Detector; sends no keys")
     s.add_argument("--image", help="check this screenshot instead of the game")
     s.set_defaults(func=cmd_spot)
@@ -1634,8 +1637,9 @@ def main(argv=None) -> int:
             client.check_alarm()
         return args.func(args)
     except client.LieDetectorAlarm as e:
-        print(f"LIE DETECTOR: {e}. gamelab stopped all input (a running player stays up, locked, and records it).\n"
-              "Answer it in the game yourself. Afterwards, run `python -m gamelab clear-alarm`.")
+        print(f"LIE DETECTOR: {e}. gamelab stopped all input (a running player stays up, locked, recording it).\n"
+              "Answer it in the game yourself. Once it has been off the screen for a minute, run "
+              "`python -m gamelab clear-alarm`, then start the player again.")
         return LIE_DETECTOR_EXIT
     except (client.PlayerError, RuntimeError) as e:
         print(f"error: {e}")

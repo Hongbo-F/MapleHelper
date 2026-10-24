@@ -194,7 +194,9 @@ def test_waits_end_early_when_the_alarm_goes_off():
     assert _sleep_until(time.perf_counter() + 0.01) is True
 
 
-def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch, capsys):
+def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch, tmp_path):
+    from gamelab.control import lie_recorder
+    monkeypatch.setattr(lie_recorder, "LIE_RECORDINGS", tmp_path / "lie_detector")  # (clear-alarm reads them)
     pages = []
     monkeypatch.setattr(alarm, "page", lambda title, text: pages.append(title))
     info = alarm.raise_alarm(scene_with_window())
@@ -207,13 +209,7 @@ def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch, caps
         client.submit([], name="x")
     assert main(["act", "100"]) == LIE_DETECTOR_EXIT  # refused before touching the game
     assert main(["map"]) == LIE_DETECTOR_EXIT         # its look would bring the game to the front
-    # The player may start (since 2026-10-24): it starts locked, refusing every plan (tests/test_lie_recording.py).
-    from gamelab.control import player as player_mod
-    started = []
-    monkeypatch.setattr(player_mod, "serve", lambda: started.append(True))
-    capsys.readouterr()
-    assert main(["player"]) == 0 and started == [True]
-    assert "the player starts locked" in capsys.readouterr().out
+    assert main(["player", "--elevate"]) == LIE_DETECTOR_EXIT  # nor is the player started again
 
     assert main(["clear-alarm"]) == 0
     assert not alarm_file.exists()
