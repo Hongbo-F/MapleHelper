@@ -215,3 +215,11 @@ def test_act_record_records_the_crop_around_her_not_the_stored_one(monkeypatch, 
     assert recorded["crop"] == pytest.approx([600, 300, 800, 400], abs=2) and recorded["scale"] == 2
     assert plans[0].get("crop") is None and plans[0]["scale"] == 1  # the first capture found her, full size
     assert "recording [" in capsys.readouterr().out
+
+
+def test_a_screen_pixel_as_sendinput_s_absolute_coordinates():
+    from maplehelper.win32 import absolute
+    desk = (0, 0, 3840, 2160)
+    assert absolute(0, 0, desk) == (9, 15)            # the first pixel's middle
+    assert absolute(3839, 2159, desk) == (65527, 65521)
+    assert absolute(1920, 1080, (-1920, 0, 5760, 2160)) == (43696, 32783)  # a monitor left of the main one

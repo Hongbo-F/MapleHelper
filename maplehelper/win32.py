@@ -76,6 +76,28 @@ def send_key(key: Key, down: bool, tag: int = INJECTED_TAG) -> None:
 
 
 MOUSE_BUTTONS = {"lbutton": (0x0002, 0x0004), "rbutton": (0x0008, 0x0010)}  # (down, up) MOUSEEVENTF_ flags
+MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_ABSOLUTE = 0x0001, 0x4000, 0x8000
+SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
+
+
+def absolute(x: int, y: int, desk: tuple[int, int, int, int]) -> tuple[int, int]:
+    """Screen pixel x, y as SendInput's absolute coordinates (0-65535 across the virtual desktop `desk`: left, top,
+    width, height), each pixel's middle."""
+    left, top, width, height = desk
+    return (round((x - left + 0.5) * 65536 / width), round((y - top + 0.5) * 65536 / height))
+
+
+def send_mouse_move(x: int, y: int, tag: int = INJECTED_TAG) -> None:
+    """Move the mouse pointer to screen pixel x, y as a mouse would (an input event, which a drag in the game follows;
+    SetCursorPos moved the pointer but didn't carry an item dragged in the game's windows, 2026-10-24)."""
+    desk = tuple(user32.GetSystemMetrics(i) for i in (SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN,
+                                                      SM_CYVIRTUALSCREEN))
+    dx, dy = absolute(x, y, desk)
+    inp = INPUT(type=INPUT_MOUSE)
+    inp.mi = MOUSEINPUT(dx=dx, dy=dy, mouseData=0, dwFlags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                        time=0, dwExtraInfo=tag)
+    if user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 def send_mouse_button(name: str, down: bool, tag: int = INJECTED_TAG) -> None:

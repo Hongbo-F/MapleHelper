@@ -7,7 +7,7 @@ import ctypes
 import time
 from ctypes import wintypes
 
-from maplehelper.win32 import foreground_title, kernel32, user32  # noqa: F401  (foreground_title re-exported)
+from maplehelper.win32 import foreground_title, kernel32, send_mouse_move, user32  # noqa: F401  (foreground_title re-exported)
 
 SW_RESTORE = 9  # ShowWindow: un-minimize
 FRONT_POLL_S = 0.05  # bring_to_front: how often it looks whether the game came to the front
@@ -55,7 +55,12 @@ CLIENT_SIZES = ((1366, 768), (1920, 1080))
 
 
 def move_cursor(x: int, y: int) -> None:
-    """Move the mouse pointer to screen pixel x, y (no click)."""
+    """Move the mouse pointer to screen pixel x, y (no click): as a mouse would (win32.send_mouse_move: an item dragged
+    in the game follows it), then exactly there (SetCursorPos: the absolute coordinates are 1/65536 of the desktop)."""
+    try:
+        send_mouse_move(x, y)
+    except OSError:
+        pass
     user32.SetCursorPos(x, y)
 
 
