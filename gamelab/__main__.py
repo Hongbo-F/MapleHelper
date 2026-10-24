@@ -939,6 +939,49 @@ def cmd_bench_look(args) -> int:
     return 0
 
 
+NATIVE_FRAMES = REPO / "tests" / "fixtures" / "native"  # bench-paste's frames of the game at 1366x768 by default
+
+
+def cmd_bench_paste(args) -> int:
+    """A map's monsters (each kind with a colour gate) and the drops, the game's own pictures drawn onto frames of
+    the game at its own 1366x768 as the game draws them, looked for at that size and on the same scenes stretched to
+    1920x1080 (analysis/pasted.py). Offline: no game, no keys."""
+    from .analysis import pasted
+    from .attack import reach
+    from .localization import mapdata
+    from .perception import loot, sprites
+    from .perception.kinds import kind_of
+    from .screen import NATIVE
+    files = [Path(f) for f in args.files] or sorted(NATIVE_FRAMES.glob("*.png"))
+    backgrounds = [np.asarray(Image.open(f).convert("RGB")) for f in files]
+    if not backgrounds or any((b.shape[1], b.shape[0]) != NATIVE.client for b in backgrounds):
+        print("bench-paste draws onto frames of the game at its own 1366x768: name some (by default "
+              "tests/fixtures/native)")
+        return 1
+    model = mapdata.load(args.map)
+    print(f"{len(backgrounds)} frames of 1366x768; map {args.map}; each picture drawn {args.each} times both ways")
+    try:
+        native = sprites.detector_for(model, NATIVE)
+        detectors = {"1366x768, full size": (native, NATIVE),
+                     "1920x1080 (the scene stretched), half size": (sprites.detector_for(model, STRETCHED), STRETCHED)}
+        kinds = {kind_of(s.name) for s in model.spawns if s.name} & set(native.templates)
+    except RuntimeError:  # (no picture of any kind with a colour gate there at all)
+        kinds = set()
+    if not kinds:
+        print(f"monsters: none of map {args.map}'s has a colour gate yet (mobs.PALETTES)")
+    else:
+        print(f"monsters ({', '.join(sorted(kinds))}):")
+        result = pasted.monsters(backgrounds, detectors, sprites.folder_for(NATIVE.stretch),
+                                 (reach.LOOK_UP, reach.LOOK_DOWN), args.each, args.seed, kinds)
+        print("\n".join("   " + line for line in pasted.lines(result)))
+    found = {"1366x768, full size": (loot.LootDetector(geo=NATIVE), NATIVE),
+             "1920x1080 (the scene stretched), half size": (loot.LootDetector(geo=STRETCHED), STRETCHED)}
+    print("drops:")
+    result = pasted.drops(backgrounds, found, loot.folder_for(NATIVE.stretch), args.each, args.seed + 1)
+    print("\n".join("   " + line for line in pasted.lines(result, "drops")))
+    return 0
+
+
 def cmd_bench_capture(args) -> int:
     """A look's capture and a glance's timed through DXGI and mss, on the game's window as it is on screen
     (or a 1920x1080 box at the screen's top left if the game isn't running). Reads the screen only: no
@@ -1477,6 +1520,15 @@ def build_parser() -> argparse.ArgumentParser:
                                              "game as it is on screen; never brings it forward; no keys")
     s.add_argument("--n", type=int, default=100, help="rounds")
     s.set_defaults(func=cmd_bench_capture)
+    s = sub.add_parser("bench-paste", help="a map's monsters (those with a colour gate) and the drops drawn onto "
+                                           "frames of the game at 1366x768 as the game draws them, looked for at "
+                                           "that size and stretched to 1920x1080 (offline; no game, no keys)")
+    s.add_argument("files", nargs="*", help="frames of the game at 1366x768 to draw on (default: "
+                                            "tests/fixtures/native)")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP, help="whose monsters (default: the first map's)")
+    s.add_argument("--each", type=int, default=2, help="times each picture is drawn (monsters: each way)")
+    s.add_argument("--seed", type=int, default=0, help="where they're drawn")
+    s.set_defaults(func=cmd_bench_paste)
     s = sub.add_parser("bodies", help="where the monster detector puts monsters' feet on saved screenshots, and "
                                       "their x from frame to frame on recordings (offline; no game, no keys)")
     s.add_argument("files", nargs="*", help="saved screenshots, 1920x1080 or 1366x768, all of one size (default: "
