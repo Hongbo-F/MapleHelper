@@ -177,7 +177,8 @@ def saved_world(files: list[str], map_id: int, template: np.ndarray, band: tuple
     model = mapdata.load(map_id)
     frames = [np.asarray(Image.open(f).convert("RGB")) for f in files]
     geo = of_frame(frames[0])
-    eyes = Eyes("saved frames", template, detector_for(model, geo), screen=object(), geo=geo)  # handed its frames
+    eyes = Eyes("saved frames", template, detector_for(model, geo), screen=object(), geo=geo,  # handed its frames
+                minimap_picture=mapdata.minimap_picture(model.id))
     senses = Senses(eyes, model, band)
     return Runner(ListFrames([f for f in frames for _ in range(hold)]), eyes,
                   WorldStep(senses, schedule=schedule, searches=SearchThread(senses)))

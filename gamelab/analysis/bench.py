@@ -102,10 +102,12 @@ class SavedShot(capture.Shot):
 
 class SavedEyes(Eyes):
     """Eyes whose captures come from saved frames (`show`) of a client of geometry `geo`, never from the screen: no
-    window is touched."""
+    window is touched. `minimap_picture`: the map's own (mapdata.minimap_picture), as the game's Eyes have it."""
 
-    def __init__(self, tag_template: np.ndarray, detector=None, geo: Geometry = STRETCHED):
-        super().__init__("saved frames", tag_template, detector, screen=SavedScreen(), geo=geo)
+    def __init__(self, tag_template: np.ndarray, detector=None, geo: Geometry = STRETCHED,
+                 minimap_picture: np.ndarray | None = None):
+        super().__init__("saved frames", tag_template, detector, screen=SavedScreen(), geo=geo,
+                         minimap_picture=minimap_picture)
 
     def show(self, bgra: np.ndarray) -> None:
         self.screen.bgra = bgra

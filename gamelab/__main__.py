@@ -955,7 +955,8 @@ def cmd_bench_look(args) -> int:
         if args.look_scale:
             geo = geometry(*geo.client, args.look_scale)
         eyes = bench.FrontEyes(title, _calibration(geo).template, detector_for(model, geo),
-                               screen=capture.Grabber(args.capture), geo=geo)
+                               screen=capture.Grabber(args.capture), geo=geo,
+                               minimap_picture=mapdata.minimap_picture(model.id))
     else:
         files = [Path(f) for f in args.files] or bench.saved_frames()
         if not files:
@@ -963,7 +964,8 @@ def cmd_bench_look(args) -> int:
             return 1
         frames = bench.load(files, tuple(int(v) for v in args.shrink.lower().split("x")) if args.shrink else None)
         geo = bench.geometry_of(frames, args.look_scale)
-        eyes = bench.SavedEyes(_calibration(geo).template, detector_for(model, geo), geo)
+        eyes = bench.SavedEyes(_calibration(geo).template, detector_for(model, geo), geo,
+                               mapdata.minimap_picture(model.id))
     from .localization.worldstate import Asks, Schedule, WorldStep
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
     # The continuous feed's step on the same frames (localization.worldstate): her place and every monster it
@@ -1141,7 +1143,7 @@ def cmd_bodies(args) -> int:
     frames = bench.load(files)
     geo = bench.geometry_of(frames)
     detector = detector_for(model, geo)
-    eyes = bench.SavedEyes(_calibration(geo).template, detector, geo)
+    eyes = bench.SavedEyes(_calibration(geo).template, detector, geo, mapdata.minimap_picture(model.id))
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
 
     def look_at(bgra):

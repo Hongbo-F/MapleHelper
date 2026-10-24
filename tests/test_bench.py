@@ -60,3 +60,29 @@ def test_live_refuses_unless_the_game_is_in_front(monkeypatch):
     with pytest.raises(RuntimeError, match="isn't in front"):
         eyes._capture()
     assert main(["bench-look", "--live"]) == 1
+
+
+TREE_DUNGEON = Path("D:/MapleHelper-scratch/map3/native")  # 10002073 at 1366x768 (skipped without them)
+
+
+def test_saved_frames_of_a_map_place_her_by_its_own_minimap_picture():
+    """bench-look (and bodies, and the saved feed) read her dot as the game's Eyes do, by the map's own minimap picture:
+    on Tree Dungeon's saved frames, by the portal on 28 (the watch of 2026-10-24 had her at x 261.6-265.3 there), where
+    read as on the first map's minimap her dot put her at x 902, off the map (770 wide)."""
+    from gamelab.attack import reach
+    from gamelab.localization import mapdata
+    from gamelab.localization.senses import Senses
+    files = sorted(TREE_DUNGEON.glob("here_00*.png")) if TREE_DUNGEON.is_dir() else []
+    picture = mapdata.minimap_picture(10002073)
+    if not files or picture is None:
+        pytest.skip("needs Tree Dungeon's saved frames and its game data")
+    model = mapdata.load(10002073)
+    frames = bench.load(files)
+    geo = bench.geometry_of(frames)
+    for pic, placed in ((picture, True), (None, False)):
+        eyes = bench.SavedEyes(np.load(FIXTURES / "native" / "tag_template_1366x768.npy"), None, geo, pic)
+        senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
+        for _, bgra in frames:
+            eyes.show(bgra)
+            s = senses.look(mobs=False)
+            assert (s.platform is not None and s.platform.id == 28 and 255 <= s.where.x <= 275) == placed
