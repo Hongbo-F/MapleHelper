@@ -677,7 +677,7 @@ def cmd_nav(args) -> int:
 def cmd_tour(args) -> int:
     from .behavior.tour import Tour
     _ways(args)
-    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)
+    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
     nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
     _record("tour", hunter.model.id)
     if not _to_game():
@@ -1523,6 +1523,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("tour", help="hunt the map: sweep the platforms worth hunting (nearest next, varied a "
                                       "little), clear each, collect the drops, rest when low")
+    s.add_argument("--skill", action="store_true", help="throw Lucky Seven instead of the regular attack (MP)")
     s.add_argument("--stops", type=int, default=None,
                    help="how many hunting platforms to visit (default: every one worth it)")
     s.add_argument("--kills", type=int, default=5, help="kills per stop")
