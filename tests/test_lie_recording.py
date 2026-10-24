@@ -482,18 +482,26 @@ def test_a_failed_alarm_or_recording_doesnt_stop_the_watchdog(tmp_path):
     assert any("starting the Lie Detector recording failed" in m for m in said)
 
 
-def test_the_watchdog_thread_records_at_4_a_second_and_finishes_its_recording_when_stopped(tmp_path):
+def test_the_watchdog_thread_looks_on_its_schedule_and_finishes_its_recording_when_stopped(tmp_path):
+    class SlowSpotter(Spotter):
+        def scores(self, frame):  # a look takes time, as the real one's 65 ms
+            time.sleep(0.05)
+            return super().scores(frame)
+
     screen = Screen(1)
-    dog, flag, said, alarms = make_dog(tmp_path, screen, interval=0.05)
+    dog = Watchdog("MapleStory", threading.Event(), spotter=SlowSpotter(), grab=screen, on_alarm=lambda f: None,
+                   folder=tmp_path / "lie_detector", log=lambda m: None, end_s=1.0, cap_s=60.0, interval=0.1)
     dog.start()
-    time.sleep(0.6)
+    time.sleep(1.2)
     dog.stopped.set()
     dog.join(timeout=10)
     assert not dog.is_alive()
     [(folder, summary, index)] = written(dog)
     assert summary["end"] == "stopped" and summary["outcome"].startswith("unknown")
+    # Every `interval` from each look's start, the look's own time inside it; waiting `interval` after each look,
+    # as it did, made it 0.15 s here.
     gaps = np.diff([r["t"] for r in index])
-    assert 8 <= len(index) <= 14 and np.median(gaps) == pytest.approx(0.05, abs=0.02)  # from each look's start
+    assert 9 <= len(index) <= 13 and np.median(gaps) == pytest.approx(0.1, abs=0.02)
 
 
 # --- the player stays up through it, locked, and stops once it's cleared and the screen clear (control.player) ---
