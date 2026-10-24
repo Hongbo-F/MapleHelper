@@ -1197,6 +1197,8 @@ def test_a_look_places_her_the_monsters_and_the_drops_where_the_world_has_them(m
     # on a wider map, the rope in view)
     assert s.how == "camera" and h.senses.camera.fixed()[0]
     eyes.want_ropes = False
+    left, top, right, bottom = h.senses.camera.bounds
+    h.senses.camera.bounds = (left - 2000, top, right + 2000, bottom)  # as if the map were wider than the view
     s = h.look()
     assert s.how == "edge" and s.where.x == pytest.approx(240, abs=1)  # ... or from her platform's end
 
