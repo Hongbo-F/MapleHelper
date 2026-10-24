@@ -7,7 +7,7 @@ at that size, pixel for pixel and alpha blended as the game draws them (`paste`)
 asked to find them: at 1366x768 as a look sees it (full size), and the same scene stretched to 1920x1080 as the game's
 window stretched it until 2026-10-23 (bilinear, `stretched`), looked at half size as that window was. Every kind of a
 map that has a colour gate (what its detector holds: mobs.PALETTES, and the gates learned for it) is drawn, every frame
-of its sprites both ways, and every drop (loot.ITEMS and the coins' frames).
+of its sprites both ways, and every drop of the map (perception.drops.items_for, and the coins' frames).
 
 What it says, by size and kind: how many were found by the whole screen's search and by a fight's band around each
 (its feet as hers), where (their feet against where they were drawn, map units), how well they scored, whether as the
@@ -35,7 +35,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from ..perception.loot import ABOVE, BELOW, LootDetector, _coin, _kind
+from ..perception.loot import ABOVE, BELOW, LootDetector, _coin, _kind, kinds_of
 from ..perception.minimap import minimap_box
 from ..perception.mobs import INDEX, MobDetector, read_meta
 from ..screen import HUD_TOP, NATIVE, STRETCHED, Geometry
@@ -225,13 +225,17 @@ def _nearest(found: list, d: Drawn, upp: float, used: set):
 
 
 def drops(backgrounds: list[np.ndarray], detectors: dict[str, tuple[LootDetector, Geometry]], folder: Path,
-          each: int = 2, seed: int = 1) -> dict:
-    """Every drop picture in `folder` (a native loot folder) drawn `each` times onto the backgrounds, each looked for
-    in a strip just above where it lies (ABOVE and BELOW of its bottom, STRIP_PAD units either side), as Senses
-    searches a platform: by kind, a Tally (its errors between the centres); 'clean' (what each found in the same
-    strips on the backgrounds as they are) and 'times' (s, a scene's strips searched together)."""
+          each: int = 2, seed: int = 1, kinds: set[str] | None = None) -> dict:
+    """Every drop picture in `folder` (a native loot folder) of `kinds` (a map's, loot.kinds_of; by default what the
+    detectors look for: the folder holds every map's drops) drawn `each` times onto the backgrounds, each looked for in
+    a strip just above where it lies (ABOVE and BELOW of its bottom, STRIP_PAD units either side), as Senses searches a
+    platform: by kind, a Tally (its errors between the centres); 'clean' (what each found in the same strips on the
+    backgrounds as they are) and 'times' (s, a scene's strips searched together)."""
+    if kinds is None:  # a detector made on a folder of its own (items None) looks for all of it
+        held = [d.items for d, _ in detectors.values()]
+        kinds = None if None in held else set().union(*(kinds_of(items) for items in held))
     todo = [(_kind(Path(name)), name, rgba, None, False, _coin(Path(name + ".png")))
-            for name, rgba, _ in pictures(folder)] * each
+            for name, rgba, _ in pictures(folder, kinds)] * each
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(todo))
     made = scenes(backgrounds, [todo[i] for i in order], rng)

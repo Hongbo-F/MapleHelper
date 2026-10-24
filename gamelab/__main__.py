@@ -1006,13 +1006,13 @@ NATIVE_FRAMES = REPO / "tests" / "fixtures" / "native"  # bench-paste's frames o
 
 
 def cmd_bench_paste(args) -> int:
-    """A map's monsters (each kind with a colour gate) and the drops, the game's own pictures drawn onto frames of
-    the game at its own 1366x768 as the game draws them, looked for at that size and on the same scenes stretched to
-    1920x1080 (analysis/pasted.py). Offline: no game, no keys."""
+    """A map's monsters (each kind with a colour gate) and its drops (perception.drops), the game's own pictures drawn
+    onto frames of the game at its own 1366x768 as the game draws them, looked for at that size and on the same scenes
+    stretched to 1920x1080 (analysis/pasted.py). Offline: no game, no keys."""
     from .analysis import pasted
     from .attack import reach
     from .localization import mapdata
-    from .perception import loot, sprites
+    from .perception import drops, loot, sprites
     from .perception.kinds import kind_of
     from .perception.mobs import MobDetector
     from .screen import NATIVE
@@ -1048,10 +1048,12 @@ def cmd_bench_paste(args) -> int:
         result = pasted.refinds(backgrounds, detectors, sprites.folder_for(NATIVE.stretch),
                                 (reach.LOOK_UP, reach.LOOK_DOWN), args.seed + 2, kinds)
         print("\n".join("   " + line for line in pasted.refind_lines(result)))
-    found = {"1366x768, full size": (loot.LootDetector(geo=NATIVE), NATIVE),
-             "1920x1080 (the scene stretched), half size": (loot.LootDetector(geo=STRETCHED), STRETCHED)}
-    print("drops:")
-    result = pasted.drops(backgrounds, found, loot.folder_for(NATIVE.stretch), args.each, args.seed + 1)
+    items = drops.items_for(model)
+    found = {"1366x768, full size": (loot.detector_for(model, NATIVE), NATIVE),
+             "1920x1080 (the scene stretched), half size": (loot.detector_for(model, STRETCHED), STRETCHED)}
+    print(f"drops: {', '.join(items)}, and mesos")
+    result = pasted.drops(backgrounds, found, loot.folder_for(NATIVE.stretch), args.each, args.seed + 1,
+                          loot.kinds_of(items))
     print("\n".join("   " + line for line in pasted.lines(result, "drops")))
     return 0
 

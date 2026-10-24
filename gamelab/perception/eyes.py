@@ -86,10 +86,14 @@ class Observation:
 class Eyes:
     """The game window, looked at. `title`: the game window's title; `tag_template`: her name tag as calibration
     keeps it (calibration.load(geo).template). The monster detector defaults to the screenshot cut-outs; the loot
-    detector is made on first use. `geo`: the game window's geometry, which the templates and the detectors given
-    are for (screen.Geometry; by default 1920x1080's): a capture of another size is refused."""
+    detector is made on first use, for the map's drops (`drop_names`). `geo`: the game window's geometry, which the
+    templates and the detectors given are for (screen.Geometry; by default 1920x1080's): a capture of another size is
+    refused."""
     seen_at: float | None = None  # when the screen last captured looked like that (time.monotonic)
     geo: Geometry = STRETCHED     # the game window's geometry (a subclass that doesn't call __init__ has 1920x1080's)
+    # The drops the loot detector looks for, by name (perception.drops.items_for: Senses tells it its map's); None: the
+    # first map's (loot.ITEMS)
+    drop_names: tuple[str, ...] | None = None
 
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
                  loot: LootDetector | None = None, screen=None, geo: Geometry = STRETCHED,
@@ -255,7 +259,7 @@ class Eyes:
         return set(self.detector.templates)
 
     def loot_detector(self) -> LootDetector:
-        """The loot detector, made (from the game's item pictures, for frames of `geo`) on first use."""
+        """The loot detector, made (from the game's item pictures of `drop_names`, for frames of `geo`) on first use."""
         if self._loot is None:
-            self._loot = LootDetector(geo=self.geo)
+            self._loot = LootDetector(geo=self.geo, items=self.drop_names)
         return self._loot

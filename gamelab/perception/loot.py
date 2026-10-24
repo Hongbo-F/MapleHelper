@@ -1,10 +1,12 @@
-"""Seeing loot on the ground: the items this map's monsters drop, and mesos, in a look frame.
+"""Seeing loot on the ground: the items a map's monsters drop (perception.drops: `detector_for`; the first map's
+ITEMS by default), and mesos, in a look frame.
 
 Templates are the game's own pictures of the items as they lie on the ground (gamedata.canvas: `iconRaw`
 of each item, and the spinning coin frames of mesos), drawn the size they appear on a 1920x1080 screen,
 like the monster sprites (sprites.py), and for the game's own 1366x768 as they are (`folder_for`); a detector
 brings them to its frames' scale (screen.Geometry). They're extracted game data, so they're kept with the other
-extracts (git-ignored). Classic World's item ids differ from GMS's, so this map's drops are looked up by name.
+extracts (git-ignored): one folder a size for every map's drops, a map's detector holding its own (`items`). Classic
+World's item ids differ from GMS's, so the drops are looked up by name.
 
 A spot counts as an item when the masked colour template matches (THRESHOLD) and its pixels under the
 template's mask are close to the template's own colours (PIXEL_SLACK): the normalised match ignores
@@ -17,7 +19,13 @@ are its picture's to the pixel: there the shape is matched on brightness alone (
 `gray`), and the colours are checked as above (PIXEL_SLACK). On the 17 bench frames shrunk to that size it found the
 11 drops found in colour (scoring 0.81-0.95, in colour 0.83-0.95), and every platform in view took 78 ms against 112
 in colour (73 at 1920x1080 half size); drawn as the game draws them on frames of the game at that size, all 32 were
-found, scoring 1.00, and on the frames as they are nothing. At 1920x1080, all of it is as it was.
+found, scoring 1.00, and on the frames as they are nothing. At 1920x1080, all of it is as it was. A picture the game
+draws partly see-through (of the drops looked for, Tree Dungeon's Fragment of Magic: a crystal in a glow, of its 917
+px drawn 404 as they are and 513 partly see-through) is kept as it is at that size (`build`), and matched and checked
+on the px drawn as they are only (`_at_size`), as the monster sprites are: on screen the others are partly what lies
+behind them. Drawn so on the new maps' frames (200 times), it scored 0.95-0.98 with its half see-through px taken as
+drawn (alpha 128 and up, as the 1920x1080 pictures are cut) and its colours were 10.4 off (15.5 at most); now 1.00
+and 0.
 
 The pickup log's full-inventory message (`says_full`) is here too.
 """
@@ -36,6 +44,7 @@ from PIL import Image
 from gamedata.paths import COPY, OUT
 
 from ..screen import STRETCHED, Geometry
+from . import drops
 from .kinds import kind_of
 from .match import masked_match, suppress_overlaps
 from .mobs import SCALE_FILE, frame_size, picture_scale
@@ -43,13 +52,14 @@ from .sprites import OPAQUE, screen_size
 
 
 LOOT = OUT / "loot"
-# This map's drops, by name: the slime's green bubble, the pig's leather (and its head and ribbon), the
-# Orange Mushroom's cap, the snail's shell (snails in her way get shot), and the potions monsters this
-# level drop (Use items: their pictures are in Item/Consume).
-ITEMS = ("Squishy Liquid", "Slime Bubble", "Leather", "Pig's Head", "Pig's Ribbon", "Orange Mushroom Cap",
-         "Snail Shell", "Red Potion", "Orange Potion", "White Potion", "Blue Potion")
+# The first map's drops, by name (drops.FIRST_ITEMS): the slime's green bubble, the pig's leather (and its head and
+# ribbon), the Orange Mushroom's cap, the snail's shell (snails in her way get shot), and the potions monsters this
+# level drop (Use items: their pictures are in Item/Consume). Another map's: drops.items_for (`detector_for`).
+ITEMS = drops.FIRST_ITEMS
 MESOS = "mesos"
-MESO_KINDS = {0: "bronze", 1: "gold"}  # these monsters drop 10-20 mesos: coins, never bills or sacks
+# The coins looked for: the first map's monsters drop 10-20 mesos, the new maps' up to 53 (perception.drops), always
+# coins (by the v83 client a bronze coin under 50, gold to 99), never bills or sacks
+MESO_KINDS = {0: "bronze", 1: "gold"}
 THRESHOLD = 0.6      # masked colour match (the drops in the saved frames: 0.63-0.87)
 PIXEL_SLACK = 24     # mean difference from the template, per pixel and channel under its mask (in saved
                      # frames: drops 12-19; scenery and UI that matched a shape 27-57)
@@ -105,6 +115,16 @@ def resample_opaque(rgba: np.ndarray, size: tuple[int, int]) -> tuple[np.ndarray
     return np.clip(rgb.round(), 0, 255).astype(np.uint8), cover
 
 
+def _at_size(rgba: np.ndarray, size: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """A template's colours and cover at frame size (`resample_opaque`); at its own size, where the game draws it
+    pixel for pixel, only the px it draws as they are (alpha 255): the others are partly what lies behind them on
+    screen. (The game's item pictures are all opaque or clear but the Fragment of Magic's glow: the same either way.)"""
+    if size != (rgba.shape[1], rgba.shape[0]):
+        return resample_opaque(rgba, size)
+    drawn = rgba[..., 3] == 255
+    return np.where(drawn[..., None], rgba[..., :3], 0).astype(np.uint8), drawn.astype(np.float32)
+
+
 def resample_rgba(rgba: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     """`resample_opaque`, as RGBA with the alpha on where the picture covers at least half the pixel."""
     rgb, cover = resample_opaque(rgba, size)
@@ -131,11 +151,15 @@ def folder_for(stretch: float) -> Path:
     return LOOT if stretch == STRETCHED.stretch else OUT / f"loot_x{stretch:g}"
 
 
-def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch) -> list[Path]:
+def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch, items: tuple[str, ...] = ITEMS) -> list[Path]:
     """Write `<kind>_<n>.png` (RGBA, drawn `stretch` times larger: by default screen size at 1920x1080) for each of
-    ITEMS, and `mesos_<coin><frame>.png` for the coins' spinning frames (the edge-on one, 5 px wide, is left out).
-    Another stretch than 1920x1080's is written in the folder's mobs.SCALE_FILE."""
+    `items` (by default the first map's), and `mesos_<coin><frame>.png` for the coins' spinning frames (the edge-on
+    one, 5 px wide, is left out). At stretch 1 (the game's own 1366x768) each is the game's picture as it is, alpha and
+    all. Another stretch than 1920x1080's is written in the folder's mobs.SCALE_FILE. An item whose kind can't be a
+    file's name (drops.safe) is refused."""
     from gamedata.canvas import item_icon, meso_frames
+    if unsafe := [n for n in items if not drops.safe(n)]:
+        raise ValueError(f"drops whose kinds can't be file names: {unsafe}")
     folder.mkdir(parents=True, exist_ok=True)
     if stretch != STRETCHED.stretch:
         (folder / SCALE_FILE).write_text(json.dumps({"px_per_game_px": stretch}), encoding="utf-8")
@@ -143,10 +167,11 @@ def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch) -> list[Path]
 
     def save(rgba: np.ndarray, name: str) -> None:
         path = folder / f"{name}.png"
-        Image.fromarray(resample_rgba(rgba, screen_size(rgba, stretch)), "RGBA").save(path)
+        picture = rgba if stretch == 1 else resample_rgba(rgba, screen_size(rgba, stretch))
+        Image.fromarray(np.ascontiguousarray(picture), "RGBA").save(path)
         written.append(path)
 
-    for name in ITEMS:
+    for name in items:
         for item_id in ids.get(name, []):  # the first id with a picture ("Red Potion" has two, one blank)
             try:
                 save(item_icon(item_id, COPY), f"{kind_of(name)}_0")
@@ -171,15 +196,25 @@ def _coin(path: Path) -> str | None:
     return (rest.rstrip("0123456789") or None) if kind == MESOS else None
 
 
-def ensure(folder: Path | None = None, stretch: float = STRETCHED.stretch) -> Path:
-    """Build the templates (drawn `stretch` times larger, in `folder`: by default `folder_for(stretch)`) if any of
-    them are missing; returns the folder."""
+def ensure(folder: Path | None = None, stretch: float = STRETCHED.stretch, items: tuple[str, ...] = ITEMS) -> Path:
+    """Build the templates of `items` and the coins (drawn `stretch` times larger, in `folder`: by default
+    `folder_for(stretch)`) if any of them are missing; returns the folder."""
     folder = folder_for(stretch) if folder is None else folder
     have = {_kind(p) for p in folder.glob("*.png")}
-    wanted = {kind_of(n) for n in ITEMS} | {MESOS}
-    if not wanted <= have:
-        build(folder, stretch)
+    if not kinds_of(items) <= have:
+        build(folder, stretch, items)
     return folder
+
+
+def kinds_of(items: tuple[str, ...]) -> set[str]:
+    """The kinds a detector for these items holds: theirs, and mesos."""
+    return {kind_of(n) for n in items} | {MESOS}
+
+
+def detector_for(model, geo: Geometry = STRETCHED) -> "LootDetector":
+    """A LootDetector for map `model`'s drops (drops.items_for: its monsters' and the potions, and mesos), for look
+    frames of geometry `geo`."""
+    return LootDetector(geo=geo, items=drops.items_for(model))
 
 
 class LootTemplate(NamedTuple):
@@ -195,18 +230,27 @@ class LootTemplate(NamedTuple):
 class LootDetector:
     """Templates come from `folder` (built from the game data if not given): PNGs named
     <kind>_<anything>.png, RGBA at full screen size (mobs.picture_scale's), brought to look frames of geometry
-    `geo` (by default the 1920x1080 window's, at half size). `gray`: match the shapes on brightness alone (by
-    default where the pictures are drawn at the frames' own scale, the game's own pixels)."""
+    `geo` (by default the 1920x1080 window's, at half size). `items`: the drops looked for, by name (a map's:
+    drops.items_for, `detector_for`), and mesos; by default the first map's (ITEMS), or with a `folder` given every
+    picture in it. `gray`: match the shapes on brightness alone (by default where the pictures are drawn at the
+    frames' own scale, the game's own pixels)."""
 
-    def __init__(self, folder: Path | None = None, geo: Geometry = STRETCHED, gray: bool | None = None):
-        folder = ensure(stretch=geo.stretch) if folder is None else folder
+    def __init__(self, folder: Path | None = None, geo: Geometry = STRETCHED, gray: bool | None = None,
+                 items: tuple[str, ...] | None = None):
+        if folder is None:
+            items = ITEMS if items is None else tuple(items)
+            folder = ensure(stretch=geo.stretch, items=items)
+        self.items = items
+        kinds = None if items is None else kinds_of(items)
         shrink = picture_scale(folder) / geo.frame_scale
         self.gray = abs(shrink - 1) < 1e-9 if gray is None else gray
         self.templates: list[LootTemplate] = []
         for path in sorted(folder.glob("*.png")):
+            if kinds is not None and _kind(path) not in kinds:
+                continue
             rgba = np.asarray(Image.open(path).convert("RGBA"))
             h, w = rgba.shape[:2]
-            rgb, cover = resample_opaque(rgba, frame_size(w, h, shrink))
+            rgb, cover = _at_size(rgba, frame_size(w, h, shrink))
             mask = (cover >= HALF_COVER).astype(np.uint8)
             if mask.sum() < MIN_MASK:
                 continue
@@ -265,3 +309,4 @@ class LootDetector:
                 hits.append(Item(kind, origin[0] + int(x) + tw // 2, origin[1] + int(y) + th // 2, tw, th,
                                  round(float(res[y, x]), 3), coin))
         return hits
+

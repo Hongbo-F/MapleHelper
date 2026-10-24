@@ -141,6 +141,84 @@ def test_an_item_with_a_thin_string_is_found(tmp_path):
     assert [(i.kind, abs(i.x - 400) <= 2) for i in found] == [("slime-bubble", True)]
 
 
+def _map(map_id, *names):
+    """A map's model as drops.items_for reads it: its id, and its spawn points' monster names."""
+    return SimpleNamespace(id=map_id, spawns=[SimpleNamespace(name=n) for n in names])
+
+
+def test_each_map_looks_for_its_own_monsters_drops():
+    from gamelab.perception import drops, loot
+    # The first map's, as they were: what was seen there in game, and the potions.
+    first = _map(drops.FIRST_MAP, "Snail", "Slime", "Pig", "Orange Mushroom")
+    assert drops.items_for(first) == loot.ITEMS == (
+        "Squishy Liquid", "Slime Bubble", "Leather", "Pig's Head", "Pig's Ribbon", "Orange Mushroom Cap",
+        "Snail Shell", "Red Potion", "Orange Potion", "White Potion", "Blue Potion")
+    # Tree Dungeon's: its monsters' drops in the order they spawn (each item once), then the potions not named yet.
+    tree = _map(10002073, "Horny Mushroom", "Green Mushroom", "Horny Mushroom", "Slime")
+    assert drops.items_for(tree) == (
+        "Horny Mushroom Cap", "Orange Potion", "Bronze Ore", "Blue Potion", "Magic Potion", "Topaz Ore",
+        "Sapphire Ore", "Fragment of Magic", "Green Mushroom Cap", "Silver Ore", "Red Potion", "Emerald Ore",
+        "Orihalcon Ore", "Slime Bubble", "Squishy Liquid", "White Potion")
+    assert drops.monsters_of(tree) == {"Horny Mushroom": 2, "Green Mushroom": 1, "Slime": 1}
+    # A monster the table doesn't know adds nothing, and is named.
+    odd = _map(5, "Stump", "Jr. Necki")
+    assert drops.items_for(odd) == drops.MONSTERS["Stump"].items + ("Orange Potion", "White Potion", "Blue Potion")
+    assert drops.unknown(odd) == ["Jr. Necki"] and drops.unknown(first) == []
+
+
+def test_a_drop_whose_kind_cant_be_a_file_name_is_refused(tmp_path):
+    # "omok-piece:-slime_0.png" would be an alternate data stream of a file "omok-piece" on Windows, and no folder
+    # listing shows it: the template would be gone without a word.
+    from gamelab.perception import drops, loot
+    assert not drops.safe("Omok Piece: Slime") and drops.safe("Pig's Head")
+    assert all(drops.safe(n) for m in drops.MONSTERS.values() for n in m.items)
+    assert all(drops.safe(n) for items in drops.PINNED.values() for n in items)
+    with pytest.raises(ValueError, match="Omok Piece"):
+        loot.build(tmp_path, 1.0, ("Squishy Liquid", "Omok Piece: Slime"))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_detector_holds_its_maps_drops_only(tmp_path):
+    # Every map's drops are built into one folder a size: a map's detector takes its own from it, and mesos.
+    Image.fromarray(coin(), "RGBA").save(tmp_path / "mesos_bronze0.png")
+    Image.fromarray(leather(), "RGBA").save(tmp_path / "leather_0.png")
+    Image.fromarray(leather(colour=(40, 90, 160)), "RGBA").save(tmp_path / "horny-mushroom-cap_0.png")
+    assert {t.kind for t in LootDetector(tmp_path).templates} == {"mesos", "leather", "horny-mushroom-cap"}
+    held = LootDetector(tmp_path, items=("Leather",))
+    assert {t.kind for t in held.templates} == {"mesos", "leather"} and held.items == ("Leather",)
+
+
+def _native_folder(tmp_path, pictures: dict) -> Path:
+    """A folder of made-up drop pictures at the game's own size (scale.json 1.0, as loot.build makes at stretch 1)."""
+    import json
+    for name, rgba in pictures.items():
+        Image.fromarray(rgba, "RGBA").save(tmp_path / f"{name}.png")
+    (tmp_path / "scale.json").write_text(json.dumps({"px_per_game_px": 1.0}), encoding="utf-8")
+    return tmp_path
+
+
+def test_a_drop_drawn_partly_see_through_is_matched_on_the_px_drawn_as_they_are(tmp_path):
+    # Tree Dungeon's Fragment of Magic is a crystal in a glow the game blends with what lies behind it. At the game's own
+    # size its template is the px it draws as they are: there it scores 1.00 whatever lies behind the glow.
+    from gamelab.analysis.pasted import paste
+    from gamelab.screen import NATIVE
+    rgba = np.zeros((30, 30, 4), np.uint8)
+    yy, xx = np.mgrid[:30, :30]
+    r = np.hypot(yy - 14.5, xx - 14.5)
+    rgba[r < 14] = (150, 220, 255, 140)                         # the glow, half see-through
+    rgba[r < 9] = (90, 120, 230, 255)                           # the crystal
+    rgba[(r < 9) & (np.abs(xx - yy) < 2)] = (240, 240, 255, 255)  # its shine
+    det = LootDetector(_native_folder(tmp_path, {"fragment-of-magic_0": rgba}), NATIVE)
+    t = det.templates[0]
+    assert t.solid.sum() == (rgba[..., 3] == 255).sum()
+    for back in ((30, 30, 30), (230, 200, 120), (60, 140, 230)):
+        frame = np.zeros((200, 300, 3), np.uint8)
+        frame[:] = back
+        paste(frame, rgba, 120, 100)
+        found = det.detect(frame)
+        assert [(i.kind, i.x, i.y, i.score) for i in found] == [("fragment-of-magic", 135, 115, 1.0)], back
+
+
 def test_full_inventory_messages():
     assert says_full("You can't get anymore items.")  # what the game said when her Etc tab was full
     assert says_full("Your inventory is full.")
@@ -177,6 +255,18 @@ class _Eyes(Eyes):
 
 def _hunter(eyes=None) -> Hunter:
     return Hunter(eyes or _Eyes(), GameKeys.__new__(GameKeys), _model(), log=lambda m: None)
+
+
+def test_her_senses_tell_her_eyes_the_maps_drops(monkeypatch):
+    # The loot detector, made on first use, looks for what the map's monsters drop (none spawn on this one: the potions).
+    from gamelab.perception import eyes as eyes_module
+    from gamelab.perception.drops import POTIONS
+    made = []
+    monkeypatch.setattr(eyes_module, "LootDetector", lambda **kw: made.append(kw) or "a detector")
+    eyes = _Eyes()
+    _hunter(eyes)
+    assert eyes.drop_names == POTIONS
+    assert eyes.loot_detector() == "a detector" and made == [{"geo": eyes.geo, "items": POTIONS}]
 
 
 def _scene(model, frame, x=1000.0) -> Scene:
@@ -438,3 +528,40 @@ def test_finds_the_drops_in_frames_saved_in_game():
     assert kinds("z2_loot2.png") == ["leather"] + ["mesos"] * 3
     assert kinds("loot_0_before.png") == ["mesos", "squishy-liquid"]
     assert kinds("loot_0_after.png") == []
+
+
+# --- the new maps' drops, the game's own pictures, on frames of those maps (Tree Dungeon's stay in
+# D:/MapleHelper-scratch: skipped without them) ------------------------------------------------------------------
+
+TREE_DUNGEON = Path("D:/MapleHelper-scratch/map3/native")  # 10002073 at 1366x768: 20 frames, no drop on any
+WEST_ROCKY = ROOT / "tests" / "fixtures" / "native"         # 10004021 at 1366x768: 3 frames, no drop on any
+
+
+@pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
+@pytest.mark.parametrize("map_id,frames", [(10004021, WEST_ROCKY), (10002073, TREE_DUNGEON)])
+def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_else_is(map_id, frames):
+    """Each of the map's drops (perception.drops) and the coins' frames, the game's own pictures drawn 1:1 onto frames
+    of the map at the game's own 1366x768, is found in the strip above where it lies, as its kind and where drawn; and
+    on the frames as they are no drop is found anywhere above the bottom bar."""
+    from gamelab.analysis import pasted
+    from gamelab.localization import mapdata
+    from gamelab.perception import loot
+    from gamelab.perception.drops import items_for
+    from gamelab.screen import HUD_TOP, NATIVE
+    files = sorted(frames.glob("*.png")) if frames.is_dir() else []
+    if not files:
+        pytest.skip(f"needs frames of map {map_id} in {frames}")
+    items = items_for(mapdata.load(map_id))
+    det = loot.LootDetector(geo=NATIVE, items=items)
+    assert {t.kind for t in det.templates} == loot.kinds_of(items)
+    backgrounds = [np.asarray(Image.open(f).convert("RGB")) for f in files]
+    result = pasted.drops(backgrounds, {"native": (det, NATIVE)}, loot.folder_for(NATIVE.stretch), each=2, seed=3,
+                          kinds=loot.kinds_of(items))
+    tally = result["tally"]["native"]
+    assert set(tally) == loot.kinds_of(items)
+    for kind, t in tally.items():
+        assert (t.found, t.as_drawn, t.extra) == (t.drawn, t.drawn, 0) and min(t.scores) == 1.0, kind
+        assert max(max(abs(dx), abs(dy)) for dx, dy in t.errors) <= 0.5, kind
+    assert result["clean"]["native"] == []
+    for full in backgrounds:
+        assert det.detect(full, (0, 0, full.shape[1], int(full.shape[0] * HUD_TOP))) == []

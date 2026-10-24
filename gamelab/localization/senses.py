@@ -16,6 +16,7 @@ glance is taken here as without it. Without a feed (the default) nothing changes
 import time
 from collections.abc import Callable
 
+from ..perception.drops import items_for
 from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, tag_below_feet
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import STRETCHED
@@ -57,6 +58,7 @@ class Senses:
         self.listeners: list[Callable[[Scene], None]] = []
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
+        eyes.drop_names = items_for(model)  # the drops looked for: the map's monsters' (perception.drops)
         self._glanced = -1e18  # the frame time of the last glance from the feed
         self.glanced_at: float | None = None  # when the frame the last glance saw was shown (time.monotonic)
         self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0}
