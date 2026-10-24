@@ -146,6 +146,40 @@ def test_adding_never_waits_for_the_disk_a_full_queue_drops_frames_and_says_how_
     assert sum("disk is behind" in m for m in said) == 1
 
 
+def test_a_grab_added_as_the_writer_finds_the_queue_empty_is_still_written(tmp_path, monkeypatch):
+    # The watchdog adds its last grab and ends the recording in the same look: the writer, between finding the
+    # queue empty and looking whether it was ended, had quit with that grab unwritten and uncounted.
+    found_empty, go_on = threading.Event(), threading.Event()
+    armed = {"on": False}
+
+    class Queue(lie_recorder.queue.Queue):
+        def get(self, block=True, timeout=None):
+            try:
+                return super().get(block, timeout)
+            except lie_recorder.queue.Empty:
+                if armed["on"]:
+                    armed["on"] = False
+                    found_empty.set()  # the writer has found it empty ...
+                    go_on.wait(5)      # ... and Python switches to the watchdog before the writer goes on
+                raise
+
+    monkeypatch.setattr(lie_recorder.queue, "Queue", Queue)
+    rec = Recording(tmp_path, log=lambda m: None)
+    rec.add(0.0, frame(), COUNTDOWN)
+    for _ in range(250):
+        if (rec.folder / INDEX).exists():
+            break
+        time.sleep(0.02)
+    armed["on"] = True
+    assert found_empty.wait(5)
+    rec.add(0.25, frame(), COUNTDOWN)  # the cycle's last look ...
+    rec.finish("cap")                  # ... and its end
+    go_on.set()
+    assert rec.join(timeout=10)
+    summary = lie_recorder.summary_of(rec.folder)
+    assert summary["grabs"] == 2 and summary["frames"] == 2 and len(lines(rec.folder)) == 2
+
+
 def test_a_recording_that_cant_make_its_folder_raises_for_the_watchdog_to_log(tmp_path):
     blocker = tmp_path / "lie_detector"
     blocker.write_text("a file where the folder should be", encoding="utf-8")
@@ -178,6 +212,22 @@ def test_the_oldest_recordings_go_past_the_cap_never_the_one_being_written(tmp_p
     assert not a.exists() and not b.exists() and c.exists() and d.exists()
     assert lie_recorder.prune(tmp_path, keep_bytes=0, spare=d) == [(c, n)] and d.exists()
     assert lie_recorder.prune(tmp_path / "none") == []
+
+
+def test_one_that_cant_be_deleted_wholly_counts_only_what_is_left_of_it(tmp_path):
+    a = tmp_path / "20261020-010000"
+    a.mkdir()
+    (a / "00000.jpg").write_bytes(b"x" * 2990)
+    (a / "00001.jpg").write_bytes(b"x" * 10)
+    b = _fake_recording(tmp_path, "20261021-010000", 280)
+    c = _fake_recording(tmp_path, "20261022-010000", 280)
+    with open(a / "00001.jpg", "rb"):  # a frame open in a viewer: Windows won't delete it
+        gone = lie_recorder.prune(tmp_path, keep_bytes=1000)
+    # The rest of the oldest went; it and the two newer ones (about 300 bytes each) fit the 1,000 kept.
+    assert gone == [] and lie_recorder.size_of(a) == 10 and b.exists() and c.exists()
+    nb, nc = lie_recorder.size_of(b), lie_recorder.size_of(c)
+    assert lie_recorder.prune(tmp_path, keep_bytes=0) == [(a, 10), (b, nb), (c, nc)]  # closed, the rest of it goes
+    assert not a.exists()
 
 
 def test_a_new_recording_deletes_the_oldest_past_the_cap(tmp_path):

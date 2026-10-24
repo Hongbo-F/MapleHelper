@@ -176,10 +176,14 @@ class Recording:
 
     def _write(self) -> None:
         while True:
+            # Whether it was ended, read before the queue is: the watchdog adds a grab and then ends it in the same
+            # look, so a grab added between an empty queue and a look at `ended` was left unwritten and uncounted.
+            # Read first, an end seen means every grab is in the queue already.
+            done = self.ended.is_set()
             try:
                 record, frame = self._queue.get(timeout=0.05)
             except queue.Empty:
-                if self.ended.is_set():  # nothing is added once it's ended: all of it is written
+                if done:  # nothing is added once it's ended: all of it is written
                     break
                 continue
             self._write_one(record, frame)
@@ -286,7 +290,8 @@ def prune(root: Path | None = None, keep_bytes: int = KEEP_BYTES, spare: Path | 
           dry_run: bool = False) -> list[tuple[Path, int]]:
     """Delete the oldest recordings in `root` (LIE_RECORDINGS) until the rest (`spare`, the one being written, left
     out of the sum) take at most `keep_bytes`; never `spare`. Returns those deleted (folder, bytes), oldest first;
-    with `dry_run`, those it would delete. One that can't be deleted wholly is left (the rest of it goes next time)."""
+    with `dry_run`, those it would delete. One that can't be deleted wholly (a frame open in a viewer: Windows
+    won't delete an open file) is left, what of it went taken off the sum, and the rest of it goes next time."""
     spare = None if spare is None else Path(spare).resolve()
     folders = [(f, size_of(f)) for f in recordings(root) if spare is None or f.resolve() != spare]
     total, gone = sum(b for _, b in folders), []
@@ -296,6 +301,9 @@ def prune(root: Path | None = None, keep_bytes: int = KEEP_BYTES, spare: Path | 
         if not dry_run:
             shutil.rmtree(folder, ignore_errors=True)
             if folder.exists():
+                # Counted whole, what was left of it had newer recordings deleted in its place: one 3,000-byte
+                # folder with a 10-byte frame held open took two newer ones of 285 bytes under a 1,000-byte cap.
+                total -= size - size_of(folder)
                 continue
         total -= size
         gone.append((folder, size))
