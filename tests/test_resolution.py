@@ -191,3 +191,32 @@ def test_each_kind_of_marker_is_found_where_it_is_drawn_and_nothing_else_is(mark
         for gx, gy in SPOTS:
             drawn = paste(box, markers[sprite][0], ORIGINS.get(sprite, (5, 5)), gx, gy, y0)
             assert markers_in_box(drawn, NATIVE) == before, (sprite, gx, gy)
+
+
+def test_calibrate_at_this_size_says_the_pictures_it_wrote(monkeypatch, capsys, tmp_path):
+    """`calibrate` at 1366x768 writes calibrate_crop_1366x768.png and says so (it said calibrate_crop.png, 1920x1080's,
+    which lies in the lab from before, correct-looking); not finding her tag, it names the frame it saved."""
+    from types import SimpleNamespace
+
+    from gamelab import __main__ as cli
+    from gamelab import paths
+    from gamelab.analysis import calibration
+    full = frame("n28_000.png")
+    monkeypatch.setattr(calibration, "LAB", tmp_path)
+    for name in ("CALIBRATION", "TAG_TEMPLATE", "TAG_FULL"):
+        monkeypatch.setattr(paths, name, tmp_path / getattr(paths, name).name)
+    monkeypatch.setattr(calibration.client, "submit", lambda **kw: {"frames": [full],
+                                                                     "client": {"width": 1366, "height": 768}})
+    monkeypatch.setattr(calibration.recordings, "screenshot",
+                        lambda name, crop, scale: full[crop[1]:crop[1] + crop[3], crop[0]:crop[0] + crop[2]])
+    monkeypatch.setattr(cli.window, "bring_to_front", lambda title: True)
+    monkeypatch.setattr(cli, "_game_title", lambda: "MapleStory")
+    assert cli.cmd_calibrate(SimpleNamespace(tag=f"{HER_TAG[0]},{HER_TAG[1]}", fresh=False)) == 0
+    out = capsys.readouterr().out
+    crop = tmp_path / "calibrate_crop_1366x768.png"
+    assert f"check {crop}:" in out and crop.is_file() and (tmp_path / "calibrate_1366x768.png").is_file()
+    assert (tmp_path / "calibration_1366x768.json").is_file() and not (tmp_path / "calibrate_crop.png").exists()
+    monkeypatch.setattr(calibration.client, "submit", lambda **kw: {"frames": [np.zeros_like(full)],
+                                                                     "client": {"width": 1366, "height": 768}})
+    with pytest.raises(RuntimeError, match="calibrate_1366x768.png"):
+        calibration.calibrate(fresh=True)

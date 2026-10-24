@@ -149,7 +149,7 @@ def cmd_calibrate(args) -> int:
     tag = tuple(int(v) for v in args.tag.split(",")) if args.tag else None
     cal = calibration.calibrate(tag, fresh=args.fresh)
     print(f"recording crop {cal.crop} (client px), name tag template {cal.template.shape[1]}x{cal.template.shape[0]}")
-    print(f"check {LAB / 'calibrate_crop.png'}: her name tag should be near the middle, a bit below centre")
+    print(f"check {calibration.pictures(cal.geo)[1]}: her name tag should be near the middle, a bit below centre")
     return 0
 
 

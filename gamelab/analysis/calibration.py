@@ -10,6 +10,7 @@ and template at that size: recordings are shrunk as looks are (half size at 1920
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -44,6 +45,13 @@ def files(geo: Geometry = STRETCHED) -> tuple:
             paths.calibrated(paths.TAG_FULL, geo.suffix))
 
 
+def pictures(geo: Geometry = STRETCHED) -> tuple[Path, Path]:
+    """What `calibrate` saves to be checked by eye, for a client of this geometry: the frame it looked at and the
+    recording crop it picked (her name tag near its middle). lab/calibrate.png and calibrate_crop.png at 1920x1080,
+    calibrate_1366x768.png and calibrate_crop_1366x768.png at the game's own size."""
+    return LAB / f"calibrate{geo.suffix}.png", LAB / f"calibrate_crop{geo.suffix}.png"
+
+
 def calibrate(tag: tuple[int, int] | None = None, fresh: bool = False) -> Calibration:
     """Find her (or use `tag`, client pixels), pick the recording crop around her, and save it, for the game window
     at the size it is now.
@@ -58,14 +66,15 @@ def calibrate(tag: tuple[int, int] | None = None, fresh: bool = False) -> Calibr
     geo = geometry(full["client"]["width"], full["client"]["height"])
     scale = geo.look_scale
     cal_file, small_file, full_file = files(geo)
-    Image.fromarray(frame).save(LAB / f"calibrate{geo.suffix}.png")
+    looked, cropped = pictures(geo)
+    Image.fromarray(frame).save(looked)
     template = None if fresh or not small_file.exists() else np.load(small_file)
     if tag is None:
-        tag = _find_tag(frame, template, scale)
+        tag = _find_tag(frame, template, scale, looked)
     x, y, _, _ = crop = crop_around(tag, full["client"]["width"], full["client"]["height"], geo)
 
     small = recordings.screenshot("calibrate", crop=crop, scale=scale)
-    Image.fromarray(small).save(LAB / f"calibrate_crop{geo.suffix}.png")
+    Image.fromarray(small).save(cropped)
     if template is None:
         template = track.make_template(small, ((tag[0] - x) // scale, (tag[1] - y) // scale), scale=scale, geo=geo)
         np.save(small_file, template)
@@ -122,14 +131,15 @@ def crop_now(cal: Calibration) -> tuple[list[int], str]:
     return crop_on_her(cal, full["frames"][-1], full["client"]["width"], full["client"]["height"])
 
 
-def _find_tag(frame: np.ndarray, template: np.ndarray | None, scale: int = SCALE) -> tuple[int, int]:
+def _find_tag(frame: np.ndarray, template: np.ndarray | None, scale: int = SCALE,
+              looked: Path = LAB / "calibrate.png") -> tuple[int, int]:
     """Her name tag's centre in a full-size frame: where the saved template matches (in a copy shrunk `scale`
-    times), or else the name tag nearest the middle."""
+    times), or else the name tag nearest the middle. `looked`: where the frame was saved, said if it isn't found."""
     if template is not None and (tag := match_tag(frame, template, scale)[0]) is not None:
         return tag
     tag = track.find_name_tag(frame)
     if tag is None:
-        raise RuntimeError(f"couldn't find her name tag; look at {LAB / 'calibrate.png'} and pass --tag X,Y")
+        raise RuntimeError(f"couldn't find her name tag; look at {looked} and pass --tag X,Y")
     return tag
 
 
