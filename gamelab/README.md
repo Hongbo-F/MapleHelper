@@ -33,7 +33,7 @@ The code is organized like a self-driving car's stack. Each layer is a package, 
 | `control` | Keys out | `Actions` (her key plans: throws, walking, pick-up, potions, the chair), `Mover` (one move, closed loop), `Navigator` (a route: chains, glances, cut-offs, replans), `client` (plans to the key player), `player` (the key player itself), `alarm` | perception, localization, motion |
 | `behavior` | What to do next | `Hunter` (the agent: senses, actions, a looter, her vitals and health), `fight` (`clear`, `kill`, fighting on the way), `Looter` (sweeps, mop-ups, drops remembered), `Tour`, `probe` (the in-game probes of what a star hits, and their scorer) | all of the above |
 | `ui` | The mini-map window | `MapView` (draws a state; pure), `State` (the latest record per topic), sources (live, replay, a planned route), `MapWindow` | localization, motion, attack |
-| `sim` | An offline game | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer`, 86 scenarios, golden traces | everything but ui |
+| `sim` | An offline game | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer`, 114 scenarios on three maps, golden traces | everything but ui |
 | `analysis` | Combo tests and her movement on recordings; how her routes are used | `track`, `scroll`, `analyze`, `calibration`, `recordings`, `physics_check` (her tracked movement against the physics models), `coverage` (each route move planned, taken and missed, and why the others lose: Route coverage), `respawn` (how soon a platform she empties has a monster again, how long drops lie, how full the platforms are, from the telemetry: Respawns and drop life) | perception, motion, control |
 
 How a look becomes keys:
@@ -145,6 +145,8 @@ Other commands (`python -m gamelab -h` lists them all):
 | `lab-usage`, `lab-usage --prune-telemetry` | What gamelab keeps under `gamelab/lab`, by kind (recordings, the Lie Detector's recordings, screenshots, telemetry, harness runs, golden traces, the player's inbox and outbox, the rest), and the telemetry and Lie Detector recordings due to go; deletes nothing, unless `--prune-telemetry`: then the telemetry a run starting now would (see Memory and disk) |
 | `clear-alarm` | After you've answered a Lie Detector yourself and it has been off the screen for a minute: lets gamelab run again (refused while its recording is still going, exit code 3); a running player then stops, and `player --elevate` starts it again |
 
+**On another map** every command that reads the map takes `--map` (by default the first, Thicket Around the Beach II, 10000012): West Rocky Mountain II is `--map 10004021`, Tree Dungeon, Forest Up North II `--map 10002073` (`hunt look --map 10002073`, `nav 8 --x 137 --map 10002073`, `tour --loop --minutes 10 --map 10002073`, `watch --map 10002073`). Offline, the simulator's scenarios carry their map (`sim nav_tree_bottom_to_top --speed 4`, `sim loop_rocky_bridge`), and the harness and the coverage report take `--map` (Offline: the simulator; In game, on each map, for what's known and what to check there first).
+
 `hunt kill`, `hunt clear`, `nav`, `tour` and `probe run` bring the game to the front before their first look and wait up to 3 s for it to come (`__main__.FRONT_WAIT_S`); with `hunt look` and `map`, a game minimized is restored and brought forward first, before its window's size is taken (`_game_geometry`): the player refuses every plan while another window is in front, and a look captures whatever is. Windows doesn't always let a program bring another window forward; then the command says which window is in front and stops before it looks or sends anything: click on the game and run it again. (On 2026-10-21 at 01:01:30 a tour's first looks captured the Claude window for 2.5 s and its first plan was refused, "game not in front"; `window.bring_to_front` had been called and quietly done nothing. It now also switches to the game as Alt+Tab does if it hasn't come half way through the wait: `window.SWITCH_FALLBACK`, not tried in game yet.)
 
 ## The mini-map
@@ -177,6 +179,8 @@ Hunting commands (`hunt clear`/`kill`, `nav`, `tour`) record what they see and p
 
 `gamelab/sim` is a small game that the whole stack runs against, with no game and no key player. `FakeEyes` answers perception's questions from a simulated world (monsters with where their feet are, which way they face and whether they walk, stand or flinch, as the templates tell; her EXP number drawn with the game's glyphs, for the stack to read), and `FakePlayer` runs key plans on it on a fake clock. Her body moves as the engine moves her (`motion/body.py`, below, which the planner's constants come from): the game sees each key a measured lag after it goes out, an arrow speeds her up and letting go brakes her, a jump gets the kick, the opposite arrow brakes her in the air, and an attack stops her landing; she climbs as measured. Monsters walk their platforms as fast as the game data says (see Localization), touch her (what a touch takes, and how often she evades it, by the monster's kind: below), are pushed back by hits, die from stars, give EXP and drop loot. An attack picks its target when it starts, about 65 ms after its key, from where she is then (as in game; see Attack): on the ground the claw stabs the nearest monster whose body its stance's box reaches, else the star goes to a monster the star's search picks, band by band; from a jump, to the nearest whose body reaches into the attack's area (with `world.AIR_PICK = 'v83'`, as from the ground, from where she is then). Each picks by the bodies, whatever the terrain; then the line to a star's pick alone is checked, and stopped, the attack hits nothing (Attack: what stops a star). The bodies are as tall as the game data has them walking (taller for 0.6 s after a hit, while they flinch). So her jump-throws go over snails as they do in game, and from the ground a star goes over a monster right under her. 86 scenarios cover navigation (every kind of move, a rope jumped at past a platform's end, two rope hops, the basin's right side up, off a rope with nothing at its top, monsters in the way, fighting on the way, cut-off plans, a walk-off and a jump onto 14 right after a kill in a world that swallows arrows pressed too soon after an attack, a climb then a step back and two jumps with the lags spread, two time-outs pinned), single moves, fights (a snail cornering her on a short platform too, a step wall between her and the monsters), kills, mop-ups, a full inventory, tours and rests (with and without the fighting escort), the hunt loop (`loop_*`: the basin, a spot off the ground, leaving an empty ground, lull loot, a rest, 8 minutes end to end, the game's errors, another player, finishing what she hurt, shooting 21 from 22, a valuable drop at once, a pile on the way), the in-game probes (`probe_*`: the window's top from 13, the step wall from 4 from the ground and jumping back, jump throws at a snail), and the continuous feed (`feed_*`: twins of five of those with her looks from a feed; see Continuous perception).
 
+**On the other maps** (from 2026-10-24). A scenario says which map it's on (`Scenario.map_id`), and the simulator plays her as she is there (`scenarios.HER`): on the first map at level 19 (HP 642, her potions on a key), as its 86 golden traces were recorded; on West Rocky Mountain II at level 23 (HP 730) and on Tree Dungeon, Forest Up North II at level 24 (HP 752), with her keys from 2026-10-23 and her pet drinking her potions. On those two a touch takes HP by meowdb's formula at DEF 75 (`world.Her.defence`; a share of PADamage on the first map, as fitted), a kind the first map hasn't takes as many stars as its HP and defence need (`world.hits_of`), and a hit pushes a monster back only from its `pushed` damage in the game data (`world.PUSH_BY_DAMAGE`; any damage pushes the first map's four). What isn't known of the game there the world runs either way (`world.Realism`: `sides`, the map's platforms' ends or HeavenClient's 25 units in from its footholds; `zero_walls`, the walls of foothold group 0 stopping her whatever her group; `rope_reach`, 95 or HeavenClient's 82), and other players can camp (`Realism.camps`: each kills the monsters of its kinds on the platforms it hunts soon after they show). Up at a portal ends the run (`world.SimLeftMap`), as a fall out of the map does. The fake eyes keep a camera that can't move across a map narrower than the view, and on a map whose minimap picture is taller than its window show other players' dots only in the rows the window scrolls to. 16 scenarios are on West Rocky Mountain II (`*_rocky_*`) and 12 on Tree Dungeon (`*_tree_*`): In game, on each.
+
 **Its monsters** (`sim/world.py`) are as the game data has them where it has them (`Mob/<id>.img`, cached in `gamedata/data/out/mobs`; without it, the flat values from before):
 - **A touch takes HP by the monster's touch damage:** 0.68 of its PADamage (snail 3, slime 13, pig 15, Orange Mushroom 17) of her 642 HP (her HP bar), give or take 70%. That is 1.6% on average for a pig, 1.4% for a slime, 1.8% for an Orange Mushroom and 0.3% for a snail, where every touch took 1.4%. It's fitted to `lab/hits.jsonl`: 100 hits on the grounds where only pigs and slimes spawn (the basin and 21) took 1, 2, 3, 4 and 5 px of the 147 px bar 30, 32, 28, 9 and 1 times (2.19 px, 9.6 HP, on average), and the fit has 26, 33, 30, 9 and 0 (and 2 too small to show). How the game takes her defence off isn't known, and no touch by a snail or an Orange Mushroom alone was logged.
 - **She evades a touch with a chance inversely proportional to the monster's accuracy** (acc: snail 33, slime 53, pig 54, Orange Mushroom 62; the form MapleStory's dodge rule is usually given in, unmeasured), fitted to the 13 touches logged hopping over pigs (7 MISS): a pig's half the time, a slime's 51%, an Orange Mushroom's 44%, a snail's 82%, where every kind's was half. In the harness she evades 50.5% (loop) and 52.5% (tour) of all touches.
@@ -194,6 +198,8 @@ Hunting commands (`hunt clear`/`kill`, `nav`, `tour`) record what they see and p
 The move into the layers above was checked this way: all 50 traces stayed identical, apart from two counters that were never read (`Report.out_of_reach`, `Hunter.skipped`), which were removed.
 
 **Comparing policies** (`python -m gamelab.sim.harness`): `run POLICY` hunts 20 simulated minutes on each of 10 world seeds (`tour`, `loop`, or `loop-avoid`), and `compare BASE CAND` applies the bar seed by seed: more EXP a minute on 8 of 10 seeds and none more than 10% worse, at least the drops share, no more HP lost, no death, no fall out of the map. What a run gave is read from the simulated world, not from her own reports. Preset `game` adds the game's errors (27.5% of stars miss, hit monsters hidden for 1-3 s, 10% of looks miss a monster, her lags spread as measured, 60% of taps of 50 ms or less lost), arrows pressed while an attack plays swallowed as in game (`Realism.lock_arrows`: pressed less than 0.72 s after the key, seen only 0.77 s after it if still held, else never; the noisy scenarios have it too), 60% of spawns filled, another player killing a monster every 25 s (hunting one place at a time, its dot on the minimap: see Other players), and 60 potions (not monsters' poses read wrong, `Noise.pose_wrong`, which no preset has yet); `game-drops` has the drops seen in game, `game-air` jump throws missing a snail close by as often as in game (`Noise.air_snail`), `game-sparse` 15% of the spawns filled (the coverage test's world: Route coverage), each `game` otherwise, the arrows swallowed too; `plain` is the simulator's own crowded world; `--think 1` also charges the stack's real computing time to the clock (those runs aren't repeatable). `--costs measured` makes the simulator's looks as fast as they're measured after the profiling pass of Where the time goes (a look placing her 20 ms with its frame's wait and copy, her band 24 more, the whole screen 84, a strip of drops 8; as step 5 measured them, 24, 32, 122 and 8), not the 100 ms they were coded at; `--feed` takes her looks and glances from a continuous feed; `--ways 3` has her trips choose among 3 ways (Route diversity). `rests` compares trips to rest at low HP with and without `--rest-avoid`. Each run also counts her trips from the stack's log (`nav`: plans cut short by a hit and off the path, replans, misses and the falls among them, her glances), and `compare` shows their totals. Runs are saved in `lab/harness` (git-ignored), each with a tally of her moves for the coverage report (3-7 KB a run).
+
+On the new maps: `--map 10004021` (West Rocky Mountain II) and `--map 10002073` (Tree Dungeon, Forest Up North II) hunt there with her as she is there, from their own starting places, saved as `POLICY-PRESET-MAP`; `compare` refuses runs of two maps. `--world NAME` (again for another) switches on what isn't known: `zero-walls`, `client-sides`, `client-reach`, `touch-share` (a touch a share of PADamage, not the formula), `no-evade`, saved as suffixes. Presets `crowd` and `crowd-slow` are Tree Dungeon's alone: the other players the crowding study saw, camping (`harness.TREE_CAMPS`), every spawn filled, respawns at 8.8 s or 30 s, other players' dots under hers unseen. The policy `loop-hp50` is the hunt loop with `--low-hp 0.5`. A run that goes through a portal keeps `left_map_at` and fails the bar as a fall does. The coverage report reads either map's runs (`coverage RUN --map M`; the first map's own questions, platform 12 and the rope hops, only there).
 
 **Soak runs** (`python -m gamelab.sim.soak`): the stack kept going for minutes on saved frames or in the simulator, to see whether its memory grows (see Memory and disk).
 
@@ -508,6 +514,8 @@ Her EXP number in the bottom bar, "13,549[67.02%]" (the EXP she has into her lev
   - one from 22 went through 21's wall onto 34, at -138 (the rule: -138; stopped: -56).
 
   None was seen stopped by one. The planner's moves go from 224 to 226. walk_off 3->17 (1.4 s) replaces walk_off 3->36 (2.7 s). Running jumps 4->3 (a second takeoff), 13->20, 19->24 and 18->32 are new, and the walk-offs 13->20 and 19->24 are gone: through the wall they come down 10 units from the far end at full speed, with no room to stop. Six jumps from along a platform can take off 20 units nearer the end now: their arc goes up through the wall hanging under the next block's end, where it used to bump into it. In the simulator (`sim/world.py`) her group goes with her, and of the 2,559 flights in the 62 scenarios 19 land further on, 2 of them on another platform: a knock off 18 carried her through 16's wall onto 32, not down it into the basin. Of the golden traces 16 changed and one was replaced. Trips without monsters make the same moves, 0-0.1 s apart, but for `nav_drops`, which with its route weights drawn anew drops 2->12->21 again, 1.4 s sooner. `move_walk_off_long_fall` (off 3 for the basin, 1,500 units down, with `Mover.settle` giving up on her still falling) is `move_walk_off_through_wall` now: no move on this map falls that long. Harness, preset `game`, 20 seeds of 20 minutes: the hunt loop 120.5 -> 123.3 EXP a minute (11 seeds the same, 7 better, 2 worse), drops 86.9% -> 88.1%; the tour 88.9 -> 88.6 (9 better, 10 worse), drops 93.5% -> 91.7%, HP lost 2.66 -> 2.52 bars.
+- **A step lands her if it crosses a floor's surface by either end's reading** (`body._lands_at`, and `native.c`'s twin): from at or above the surface under where the 5 ms step starts, or under where it ends, to at or below it where it ends. HeavenClient (`FootholdTree::limit_movement`, read 2026-10-24) judges a falling step by the start's height against the surface under the start (`crnt_y <= ground(crnt_x) && next_y >= ground(next_x)`); the engine had weighed it against the surface under the end alone, so a step onto a floor rising the way she flew, starting above the surface under her but less than the rise below the surface at its end, went through. On West Rocky Mountain II the jump from 13 up onto 10 (rising 0.15 a unit) went through on 3 of 6 seeds; on Tree Dungeon, Forest Up North II, whose floors slope 0.1 a unit, she came down through the floor itself and out of the map (In game, there). No landing of before is lost: the first map's moves and traces are as they were; West Rocky Mountain II's walk-off off 8's left end lands on 10 now, not through it onto 17, and its graph has 179 moves (181).
+- **A rope beyond a sure grab** (`route.GRAB_CHANCE`): a rope whose bottom is above `physics.GRAB_SURE` (82: HeavenClient grabs one when a point 5 above her feet is on it, `Ladder::inrange`, at the top of her 77-unit jump) but within `ROPE_REACH` (95, a guess: the highest grab tried in game was 69 up) may or may not be grabbed; its climb is kept as landing half the time, each miss 3 s. One on the three maps: Tree Dungeon's from 30 up the rope at -8 (94.3), which the ways up now go round by 29.
 - **Lags,** from a key going out to the game acting on it, on average (medians of the recordings, the wait for the game's next step included): an arrow pressed 66 ms, let go 68 ms, a jump 65 ms. The jump sweeps' 18 jumps at 30 fps had 66, 68 (from how far she went on) and 64, with sd 12, 13 and 11; the 60 fps recordings before, 60, 72 and 67 (10 starts, 7 stops, 18 jumps). The jump's 65 is between its two sets, and follows both sets' arcs best. The engine has the game see each key half a step sooner (`Lags.seen`), spread by 7.7 ms, and act at its next step: the wait spreads it by 8.7 ms more (30/√12), which makes the 11-13 measured. So a hold is seen 2 ms longer than it is, a whole number of steps one way or the other: an arrow held t ms from standing moves her, on average over the steps, along the line between 1.8, 7.0, 15.7 and 23.7 units (one to four steps of it), and 6.2 + 0.149 t from 118 ms on. One tap at a time it's one or the other: a 50 ms tap moves her 1.8 or 7.0 units; of three 50 ms taps in game, two moved her 0 and one 7.1.
 - **The step is 30 ms** (`body.STEP`). The game acts on what it has seen of the keys, sets her speed on the ground and lifts her off once every 30 ms. In the jump sweeps (below) her run when she lifted off sat in five tight groups, 0.45-0.96, 2.34-2.79, 5.19-6.54, 10.09-10.68 and 14.04-15.23 units, which are one to five steps of 30 ms at 1400 units/s² (0.63, 2.52, 5.67, 9.80, 14.27), nothing between them; and every jump that lifted off three steps after the arrow left at 124.7-126.9 units/s (five of them: 3 × 42), the only speed below full one left with from a run. With a 5 ms step those would spread over 119-149 by when the jump came (the 5 ms engine, given each jump's own lags, had three of the five leave at 133, 133 and 149, landing 4-14 units off); the game's 16.7 ms frame has 117 and 140 there, and is ruled out too. Between its steps she moves evenly, as the frames at 60 fps show her. In the air the engine still flies 5 ms steps: the arc is the same at the game's steps, and the planner's landings by platform edges stay as they were. Landing between two steps, she stands where she lands until the next (`body.LANDING_ENDS_STEP`): between landing and letting go of the arrow she ran 3.3 ± 0.8 units less than the 5 ms engine had her in all 18 jumps of the sweeps (1.6-4.8), which this makes 2.2 on average (it ends the sweeps' runs 0.65 ± 1.9 units on from where she stopped, against 2.6 running on at once); the 60 fps recordings that land and run on fit it as well either way (two better, two worse). The planner's run on from a landing starts half a step later (`body.landing_wait`). `replay` takes the steps' phase against the keys (`phase`); the closed forms are the mean over it, and `physics_check` compares that mean (or, with `--fit`, the phase fitted with the lags).
 - **Fit:** with these fixed lags the engine (its path the mean over the steps' phase) follows the 18 tracked recordings at 60 fps to 1.94 units RMS in x and 1.67 in y (medians 1.61 and 1.17), without `do_ledge2` 1.82 and 1.57; with lags and the phase fitted to each, 0.89 and 0.75. The gain over the 5 ms engine below is the jump-backs keyed 80 ms after the arrow, 0.9-1.7 in x where they were 4.3-5.6: on the steps they are kicked or not by where the steps fall, half and half, where the median lags had them all go one way. The sweeps' 18 jumps at 30 fps, each with its own lags, leave as fast as she did to 4 units/s and land within 2 units of where she did (`tests/test_recordings_physics.py`, with the sweeps as a fixture). That they lift off after as many steps as hers, as far along, follows from how those lags were read off each track (from how far she had run by lift-off, and when), so what this tests is the kick's rule over the steps. The walks are followed less well than on the 5 ms engine: over the seven at 60 fps (`walk`, `walk300`, `walk600`, `walk1000`, `do_walk`, `do_walk2`, `motion`) 1.64 units in x against 1.17, two better and five worse, the long ones ending 1.6-5.6 units short of where she stopped (`walk1000` 154.9 against 158.1, `do_walk2` -90.0 against -95.6). Most of it is the release's lag: fitted to the sweeps it is 2 ms after the press's (68 against 66), where the walks want it about 12 after, as the 5 ms engine had it (72 against 60); with 78 they are off by 1.52 (`walk` 0.91, not 1.35). Which to trust isn't settled: a recorded walk of a few lengths, let go at a known time, would tell. Before the sweeps, on its 5 ms step with the lags then, the engine followed the 60 fps recordings to 2.49 units RMS in x and 1.58 in y (medians 1.68 and 1.19), where the model the planner and the simulator used before it (a standing start that switches to full speed, an even slide, nothing in the air, with the lags then) is off by 3.20 and 2.72. Most of that gain in x is one recording's, `do_ledge2`, whose camera moved (30 fps; the research set it aside, its camera taken out only to about 15%): it is off by 15.2 units in x by the old model and 5.9 by the engine. Without it the engine is off by 2.28 and 1.45, the old model by 2.49 and 2.76, and the old model with today's lags and slides by 2.46 in x: so the engine's gain is mostly in y, from the jump's lag and her arc. With lags fitted to each recording: 0.87 and 0.78 (without `do_ledge2`, 0.72 and 0.76). What's left is mostly the lags' spread, which the kick turns into two outcomes in the jump-backs. Six of the tracks are test fixtures (`tests/fixtures/tracks`, `tests/test_recordings_physics.py`).
@@ -754,6 +762,30 @@ First look, explore only (no attacks):
   walks off onto 22 or into the pit). Before the twins and the way out of the pit, 207 pairs had no route: the pit's
   7 to the 26 others, and every one to 20. On the first map, every platform gets to every other, before and after.
 
+**In the simulator** (2026-10-24; `*_rocky_*` scenarios, `harness --map 10004021`): her at level 23 (HP 730), a touch by
+meowdb's formula at DEF 75 (an Axe Stump 78.9 HP on average, 10.8% of hers; a Dark Stump 31.3, a Stump 5.8, a Red
+Snail 3.6), her pet drinking one of her potions when a touch leaves her under 45%, a Stump taking 4 stars, a Dark Stump
+7, an Axe Stump 10, a Red Snail 2; a hit pushes a Dark Stump back only from 25 damage after its DEF 30 (93% of her
+stars), an Axe Stump from 30 (78%), and no claw swipe pushes a stump (`world.PUSH_BY_DAMAGE`). Sixteen scenarios: out
+of the pit (with the game's errors too), up its stairs, the floating steps, the twins, the ropes to 7 and 14, the right
+side up, down from the top, to the top, the bridge to the ledges, the bridge's monsters avoided and fought, the hunt
+loop for 3 and 8 minutes, the tour and a rest. What isn't known that matters here: the map's sides. 22's left end is
+at -1640, 22 units in from its platforms' outermost end (-1662, 14's), and fighting there she's knocked off it and out
+of the map; HeavenClient's sides, 25 in from the footholds (`--world client-sides`, -1637), stop her before 22's end.
+Harness, 10 seeds of 20 minutes, preset `game` (columns as for Tree Dungeon's below):
+
+| Run | EXP a minute (median) | Kills | Drops | HP lost | Deaths | Out of the map | Trips missed |
+|---|---|---|---|---|---|---|---|
+| loop | 63.7 (68.8) | 81.1 | 81% | 5.2 | 0 | 8 | 10 (10) |
+| tour | 53.2 (61.6) | 87.3 | 86% | 4.2 | 0 | 5 | 16 (9) |
+| loop, `--world client-sides` | 90.2 (90.3) | 111.6 | 93% | 8.7 | 0 | 0 | 19 (19) |
+| tour, `--world client-sides` | 69.3 (70.3) | 112.8 | 92% | 5.6 | 0 | 0 | 19 (9) |
+
+Every fall out of the map was past 22's left end (from 118 s to 1,111 s in); with the client's sides none, and the
+loop's seeds make 83.2-98.1 a minute. To check in game: walking left along 22 to its end (explore only), whether she
+stops at about -1637 or walks off at -1640 (`nav 22 --x -1630 --map 10004021`, then
+`act left*600 --record --name side22` and `track side22`).
+
 **To check in game** (explore only first: `nav` without `--fight` keeps clear of monsters; the player running):
 - Her place: `python -m gamelab map --map 10004021` where a rope is in view (on stair 28 her dot says -800, the
   ropes -792): within a minimap pixel of the game's (16 units) of where the ropes put her.
@@ -765,6 +797,210 @@ First look, explore only (no attacks):
   `python -m gamelab nav 11 --map 10004021` (14 under it is arriving too).
 - The jumps with little to spare: from 6, `python -m gamelab nav 3 --map 10004021` (0.4-1.7); from 23,
   `python -m gamelab nav 22 --map 10004021` (2.3-8.0).
+
+## In game, on Tree Dungeon, Forest Up North II (map 10002073, from 2026-10-24)
+
+The third map, "supposedly better for exp hunting", with many more other players: Horny Mushrooms (15 spawn points, HP
+403, EXP 41, a touch's PADamage 110), Green Mushrooms (14, HP 233, EXP 26, PADamage 54) and two Slimes on the floor.
+It is a tower 530 units wide (x -220..310) between two walls of foothold group 0, from the floor (33, y 248..225) up
+to 6 (y -1628): shelves of group 0 against either wall (left 7, 13, 15, 20, 22, 29, 31; right 6, 12, 19, 24, 28) and
+floating platforms of other groups between them, none with a wall; platforms 0-5 are wall caps above the VR, never
+reached. Two exits (`out00` at 282 on 28, `out01` at 281 on 12) lead to 10002070. The map is 770 wide, so the camera
+can't move across (Localization), and its minimap window shows 112 of its picture's 183 rows, scrolled with her. She's
+level 24 (HP 752, MP 601), with West Rocky Mountain II's keys and pet. The read-only study of 2026-10-24 has the rest
+(`D:/MapleHelper-scratch/map3/study/ONBOARDING.md`: structure, grounds, stands, monsters and drops, crowding, the 20
+native frames hand-labelled), and nothing of it but the motion and the simulator is done on this branch.
+
+**The motion** (offline, from the game data and the planner: 175 moves, 74 jumps, 39 drops, 36 walk-offs, 13
+jump-ups, 7 climbs, 6 climb-downs; every place gets to every other but the caps):
+- **7 (two Horny Mushrooms) is reached:** the running jump off 8's left end, 45 up and 28 across, lands only from
+  takeoffs 24-48 units in (the study's brute force); the jumps off an end looked for nearer the end
+  (`route.END_LOOK`, West Rocky Mountain II's 17 onto 16) take off at 37 and land at -32. 25 -> 29 is found the same
+  way. In the simulator 10 -> 7 by 9 and 8 arrives in 4 s (`nav_tree_top_cluster`).
+- **The rope at -8 from 30** hangs 94.3 above 30's floor: 0.7 inside `physics.ROPE_REACH` (95, a guess from the start;
+  the highest grab tried in game was 69 up) and 12.3 beyond HeavenClient's (`Ladder::inrange`: a point 5 above her feet
+  on the rope, 82 at the top of her jump, `physics.GRAB_SURE`). It was on every way up from the bottom. A climb up a
+  rope beyond a sure grab now lands half the time (`route.GRAB_CHANCE`, each miss 3 s), so the ways up go 30 -> 29 (a
+  running jump) and up the same rope from 29 (36.8 up): 2.7 s against 2.4. Missed, the jump for it passes up through 29
+  (58 above 30 there) and lands her on it; in the simulator with HeavenClient's reach (`Realism.rope_reach`) she does,
+  and goes on up from there (`nav_tree_rope_miss`). No other climb on the three maps is between the two reaches.
+- **Its floors slope** (most floating ones 17-19 units over 188, 0.1 a unit; the floor 33 rises 248 to 225 to the
+  right): a step onto a floor rising the way she flew went through it, by the engine's landing check (Motion
+  planning: now as HeavenClient judges it). Knocked right off 30 she came down through the floor and out of the map;
+  of six 5-minute hunt loops from 28 four fell out, two inside the tower; none of those now.
+- **The tower's walls** (group 0) don't stop her off a floating platform's outer end or a rope, by the client's
+  movement as reconstructed (`body.OWN_GROUP_WALLS`; off a rope, none: `body.ROPE_GROUP`): knocked off 11's left end
+  (13 from the wall), 23's (23), 25's right end (34), 10, 26, 17 or 8 toward the wall, or off the rope at -192 (28 from
+  it), she falls past it and out of the map. Whether the game stops her there isn't known: `Realism.zero_walls` has
+  group 0's walls stop her whatever her group, off a rope too, and the harness runs both (`--world zero-walls`).
+  HeavenClient has neither rule: a wall stops her if it's chained to the foothold below her (its prev or the one
+  before, `FootholdTree::get_wall`), whatever its group; that's a third reading, not modelled.
+- **The exits:** no plan presses up on the ground within 60 units of a portal (`MapModel.portal_near`: flow, the
+  mover's climbs, and standing under a rope by one the jump first: Control), and no rope hangs near either exit. In
+  the simulator up at a portal takes her out of the map and ends the run (`world.SimLeftMap`): one harness run of an
+  earlier build did, a chain played on after a knock the stack didn't see (Harness baselines, below).
+- **Trips** (the planner's seconds, from the middle of each, risks included; from her spot on 28 at 247 to the top
+  stand on 8 at 137, 27.1 s; from the mid portal's shelf 12 at 160 to 7, 9.5 s):
+
+  | from \ to | 6 | 7 | 8 | 10 | 12 | 15 | 19 | 20 | 23 | 28 | 30 | 33 |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | 6 | | 2.8 | 1.2 | 3.5 | 1.5 | 4.5 | 5.7 | 5.9 | 8.0 | 10.9 | 10.9 | 11.6 |
+  | 8 | 1.2 | 1.5 | | 2.2 | 2.8 | 5.2 | 6.9 | 6.7 | 8.8 | 12.1 | 11.7 | 12.4 |
+  | 10 | 2.9 | 2.8 | 1.6 | | 2.1 | 2.9 | 4.7 | 4.4 | 6.5 | 9.9 | 9.4 | 10.2 |
+  | 12 | 10.0 | 9.9 | 8.7 | 6.6 | | 2.8 | 4.0 | 4.2 | 6.3 | 9.2 | 9.2 | 10.0 |
+  | 15 | 9.6 | 9.5 | 8.3 | 6.2 | 2.9 | | 4.2 | 1.5 | 3.5 | 7.6 | 6.4 | 7.2 |
+  | 19 | 15.6 | 15.5 | 14.3 | 12.2 | 8.8 | 6.3 | | 2.7 | 2.5 | 5.0 | 5.6 | 6.4 |
+  | 23 | 18.7 | 18.6 | 17.4 | 15.3 | 12.0 | 9.4 | 3.6 | 3.3 | | 4.3 | 3.4 | 4.2 |
+  | 28 | 28.1 | 28.1 | 26.9 | 24.7 | 21.4 | 18.8 | 13.0 | 13.0 | 9.2 | | 1.3 | 1.2 |
+  | 33 | 30.5 | 30.4 | 29.2 | 27.1 | 23.7 | 21.2 | 15.3 | 15.3 | 11.5 | 4.0 | 3.2 | |
+
+  Up past the gaps under 10 and under 18 (230-260 units) it's the long ropes (-80 from 11, 111 from 19, -8 from 20);
+  down is drops (6 to the floor in 11.7 s, 13.4 in the simulator: `nav_tree_down`).
+
+**In the simulator** (`*_tree_*` scenarios; `harness --map 10002073`): her at level 24, a touch by meowdb's formula at
+DEF 75 (a Horny Mushroom 111-131 HP, 15-17% of hers; a Green 49-59; a Slime 7-9; the study's 113-134 at DEF 64) or
+with `--world touch-share` 0.68 of PADamage as fitted on the first map (75, 37 and 9, give or take 70%): which holds
+isn't known, and one Horny touch's px on her HP bar tells (17 of the 104-px bar by the formula, 10 by the share); her
+evasion 27 over their accuracy (29% of a Horny's touches, 34% of a Green's), or none with `--world no-evade` (the study:
+at EVA 42 she'd evade no Horny). A Horny takes 9 of her 30-70 stars, a Green 5, a Slime 2 (as fitted on the first map);
+a hit pushes a Horny back only from 40 damage after its DEF 10 (two in three of her stars), a Green from 25 (every one),
+so a Horny keeps walking at her through a third of them (`world.PUSH_BY_DAMAGE`). The monsters walk 100 units a second
+and stay on their platform (no Slime hops: unmodelled; they're 24 of the map's 1,003 spawn EXP). The camera is fixed
+across in the fake eyes as on screen, rows below the HUD's top aren't searched (the chat bar's strip), and other
+players' dots show only in the minimap window's rows (`fakes.WINDOW_ROWS`, her dot 49.5 rows from its top as on the
+study's frame from 19: from 28 nobody above y -1113 is seen) and not within 56 units of hers (`Noise.dot_under`, in
+the crowd presets). The other players (presets `crowd`, `crowd-slow`, this map's alone): five camps where the study
+saw them (`harness.TREE_CAMPS`: by 28 killing 29's and 30's Greens, by 21 and 23 killing 21's and 22's, by 19, and by
+33 killing 32's and 33's Greens and Slimes), each 2-6 s after a monster shows (`world.CAMP_KILL`), their drops gone 1 s
+after they land, every spawn point filled, respawns at 8.8 s or 30 s; with `Realism.shared_exp` (off) a kill of
+theirs she hurt gives her its EXP by the share of its HP she took. Not modelled: the two mushrooms' one body (the
+perception track's: a look naming a Green a Horny at 0.89), Lucky Seven (its 8-9 MP a cast; the sim throws it as a
+star), her MP, the Slimes' hops, the arrival band's passers-by, HeavenClient's wall rule.
+
+Twelve scenarios: `nav_tree_bottom_to_top` (the floor to 6, 22 moves in 28 s, up the four choke ropes, never the grab
+from 30), `nav_tree_up_by_29`, `nav_tree_rope_miss`, `nav_tree_top_cluster`, `nav_tree_mid_portal_to_top` (12 to 8 at
+137, 8.8 s), `nav_tree_left_ropes` (31 to 27 by -192 and -8), `nav_tree_down`, `loop_tree_run` (5 minutes from 28: 23,
+19, 7 and 15, 58 kills, 1,134 EXP), `loop_tree_walls` (its twin with `zero_walls`, on a seed where a knock off the rope
+at -192 took her out of the tower), `loop_tree_crowd` (3 minutes among the camps: 8 kills, nobody else killing a
+Horny), `tour_tree_run` (`--stops 3`: 33, 32 and 31 in 704 s), `tour_tree_rest` (low on HP on 23: down to 25). Her pet's
+care runs as in game but for its read: `sim.fakes.FakePetCare` reads her pet's fullness off the world (60 at a run's
+start: fed once, 60 -> 90) where `behavior.pet.PetCare` opens her Character Info and reads it.
+
+**Harness baselines** (10 seeds of 20 minutes each; EXP a minute over the horizon, a death or a fall stopping the
+count; HP lost in bars of her HP; trips missed: landings elsewhere than planned, those more than 10 units lower in
+brackets; `python -m gamelab.sim.harness run POLICY --map 10002073 [--preset P] [--world W]`):
+
+| Run | EXP a minute (median) | Kills | Drops | HP lost | Deaths | Out of the map | Trips missed |
+|---|---|---|---|---|---|---|---|
+| loop | 16.2 (4.7) | 10.1 | 55% | 7.0 | 1 | 9 | 47 (35) |
+| tour | 39.2 (43.1) | 27.2 | 86% | 12.8 | 5 | 5 | 80 (72) |
+| loop, `--world zero-walls` | 52.8 (54.3) | 38.7 | 84% | 21.3 | 8 | 0 | 217 (185) |
+| tour, `--world zero-walls` | 62.6 (60.8) | 48.8 | 89% | 18.2 | 8 | 0 | 129 (119) |
+| loop, `--preset crowd --world zero-walls` | 34.0 (30.6) | 19.6 | 76% | 21.4 | 9 | 0 | 165 (150) |
+| tour, `--preset crowd --world zero-walls` | 42.8 (40.3) | 24.9 | 87% | 20.1 | 10 | 0 | 156 (133) |
+| loop, `--preset crowd-slow --world zero-walls` | 31.5 (33.0) | 18.2 | 83% | 21.3 | 8 | 0 | 205 (189) |
+| tour, `--preset crowd-slow --world zero-walls` | 46.1 (47.8) | 26.5 | 93% | 19.8 | 10 | 0 | 166 (128) |
+| loop, `--world zero-walls --world touch-share` | 62.4 (61.2) | 40.0 | 87% | 19.5 | 2 | 0 | 211 (172) |
+| loop, `--world zero-walls --world client-reach` | 49.5 (54.3) | 34.9 | 81% | 21.0 | 8 | 0 | 211 (179) |
+| loop, `--world zero-walls --world no-evade` | 30.6 (27.6) | 28.0 | 79% | 20.6 | 9 | 0 | 342 (323) |
+| loop-hp50, `--world zero-walls` | 23.8 (25.1) | 18.0 | 83% | 21.9 | 1 | 0 | 241 (168) |
+| loop-hp50, `--preset crowd-slow --world zero-walls` | 21.8 (22.0) | 12.3 | 87% | 25.0 | 4 | 0 | 219 (154) |
+
+- **Out of the map:** with her own group's walls alone 9 of 10 hunt loops and 5 of 10 tours were knocked out of the
+  tower (off floating platforms' outer ends and off the rope at -192, from 10 s in): the loop's 16.2 is its falls'
+  more than its hunting's. With group 0's walls stopping her (`--world zero-walls`) none fell, and the runs below are
+  in that world: which the game has is the first thing to settle (the check below).
+- **Her HP is what ends them then:** 8 of 10 loops and tours died (9 and 10 among the crowd, 9 with no evasion), HP
+  lost 18-25 of her bars in 20 minutes, the preset's 60 potions nearly all drunk by her pet. With a touch a share of
+  PADamage (`touch-share`: a Horny's 75 give or take 70%, not 111-131) 2 of 10 died and the loop made 62.4 a minute.
+  With `--low-hp 0.5` (`loop-hp50`, a policy of the harness's for this: the loop rests under half her HP, not 30%) 1 of
+  10 died where 8 had, at 23.8 a minute where 52.8 (much of it resting); among the slow crowd 4 where 8, 21.8 where
+  31.5.
+- **The crowd** (`crowd`: every spawn filled, respawns at 8.8 s, the camps killing 534 monsters a run, 27 a minute;
+  `crowd-slow`: 30 s, 218, 11 a minute, nearer the study's 13.6 a minute on her screen): the loop 34.0 and 31.5 a
+  minute where the same world empty made 52.8; the tour 42.8 and 46.1 where 62.6.
+- **The grab's reach** (`client-reach`, HeavenClient's 82): 49.5 against 52.8 (the same median), the planner taking
+  the grab from 30 in neither (`climb 30->27` was taken in no run).
+- **A portal taken:** in one run of 130 on an earlier build of this branch (2026-10-24, `loop-hp50`, a seed's 95 s;
+  none in the 130 above) a chain went on after a Horny's knock the stack didn't see (her pet's potion came with the
+  touch, so her HP went up between two looks, and no hit cut the plan): its later moves, keyed from where she'd been
+  on 23, jumped her off 23's right end, over 24 and down onto 28 by the wall, and the chain's climb pressed up on the
+  ground at x 306, 24 units from `out00`: she'd have left the map. The rule holds where she is where the chain has
+  her; off it, nothing guards up. For the next phase (below).
+- Against West Rocky Mountain II's (63.7 and 53.2 a minute, 90.2 and 69.3 with the client's sides: In game, on West
+  Rocky Mountain II) and the first map's (the loop about 130, the tour about 90, preset `game`), this map pays least
+  in the simulator as things stand: the harness's 20 minutes are a tower climb from wherever a seed starts, Horny
+  fights at close quarters among their touches, and rests.
+
+**The coverage report** (`python -m gamelab coverage loop-game-10002073-zero-walls tour-game-10002073-zero-walls --map
+10002073`; picture `lab/shots/coverage_10002073.png`): the loop planned 118 of the 175 moves and took 114 (2,241 moves,
+217 missed, 581 a hit's), the tour 104 and 101 (1,116, 129, 285); 53 were taken in neither: the caps' 12, 4 of the 6
+climb-downs, `climb 30->27`, drops off 6 and 10 onto the shelves by the right wall, and drops, walk-offs and jumps
+between neighbours that the quickest ways didn't need (onto 26-28 from above, 30 up onto 28). The hunt loop's grounds:
+23 (17 times in 10 runs), 7 and 10 (14), 15 (10), 19 (5), 33 (3), 8 (2); she spends 18% of her time on 25, where she
+rests. The tour's stops by ground: 19 10, 24 9, 20 9, 15 8, the rest under 8; 37 of its 300 trips timed out. The moves
+that miss most (planned, taken, missed, the platforms she ended on): `jump 24->23 @229` 407/215/21 in the loop (on 25
+17 times) and 147/90/14 in the tour, `climb 32->30 @146` 83/65/15 (on 28 7 times, 33 6), `climb 11->10 @-80` 356/50/13
+(on 13 8 times), `jump_up 25->24 @226` 265/144/13, `climb 19->18 @111` 288/65/12, `jump 21->20 @29` (the tour's 13 of
+50, on 22 8), `jump_up 21->19 @142` 234/102/10, `jump 14->13 @23` 331/65/10, and `jump 8->7 @57`, the way onto 7: 7 of
+22 in the loop and 10 of 26 in the tour came down back on 8 or 9.
+
+**What looks wrong there, for the next phase** (the defaults are unchanged):
+- **Where she stands:** every ground is hunted standing on it, among its monsters: the hunt loop's rules are 'close
+  quarters' and 'in passing', hardly ever 'shoot' (`loop_tree_run`: 154 and 148 of 331; 'shoot' on 2 of seeds 1-10),
+  since no platform `MapModel.safe` counts as safe reaches a ground at ±60 (only 25, 26 and 27 are safe, and they reach
+  none). The study's best stands,
+  7 at -100 and 8 at 137 (185-190 spawn EXP in reach), are not where she goes: she took up 7 14 times in 10 runs and 8
+  twice, standing on the ground she shoots. Safety per x would give 28 at 212-255 (reaching 29 and 30, safe, but the
+  arrival band and a rival's spot) and 25 at 219-224 (23 by the search alone).
+- **Her HP:** with the formula's Horny touches she dies in most runs: 8 of 10 hunt loops and tours with group 0's walls
+  stopping her, 9 and 10 among the crowd; HP lost 18-25 of her bars in 20 minutes, the 60 potions of the preset nearly
+  all drunk by her pet. With `--low-hp 0.5` (the harness's `loop-hp50`) 1 of 10 loops died where 8 had, at 23.8 EXP a
+  minute where 52.8; the share's touches leave 2 of 10 dead. A default `--low-hp` here, shooting Hornies from a
+  platform they can't walk onto, and her potions' count are the next phase's; the touch model wants one Horny touch
+  read in game.
+- **A chain played on after a knock it didn't see** (the portal taken above): the navigator cuts a plan on a hit by
+  her HP dropping between two looks, and her pet's potion, drunk the instant a touch leaves her under 45%, can hide
+  the drop; the chain's later moves then play from where the knock put her. A knock wants telling by her dot as well,
+  and up wants guarding by where she is (not only by where the plan has her) near the exits.
+- **Ground choice with crowding:** `hunt.PLAYER_DISCOUNT` is off (1.0), so the loop goes where the camps take the Greens
+  as readily as anywhere: among the crowd she made 34.0 EXP a minute (median 30.6) where the same world empty made 52.8,
+  and in `loop_tree_crowd` 3 of her 8 kills were Greens the camps hadn't reached yet. The study's per-kind discount
+  (a Green spawn with a rival on its ground 0.3, a Horny 0.85) and its narrower contest test are to be weighed here.
+- **Lucky Seven against the regular attack:** the hunt loop throws the regular attack only, and the simulator throws
+  Lucky Seven as a star (its damage and MP aren't modelled): a Horny's 9 stars are about 11 s of throwing, while it
+  walks at her through a third of them. Lucky Seven on Hornies (the study: 5.5 casts at level 1) needs its lock
+  measured (`lock lucky_seven`) and her MP modelled first.
+- **The moves that miss:** the jump off 8's left end onto 7 (7 of 22 in the loop, 10 of 26 in the tour, back on 8:
+  it lands only from takeoffs 24-48 units in, and the game's errors spread her takeoff), the climb from 11 up the rope
+  at -80 (13 of 50) and from 32 up the one at 146 (15 of 65), the jump from 24 onto 23 (21 of 215, back on 25), the
+  jumps onto the floating platforms from 21, 19 and 14. Each is a chain onto a sloped floating platform or a short
+  stretch of takeoffs; why they miss (the takeoff's spread on a short run, or the grab's timing after a landing) is to
+  be looked at before the tower's long trips are trusted.
+- **The tour** spends its stops on the bottom grounds (33, 32, 31: their respawns keep the escort fighting on the way;
+  the three nearest from 28 took 704 s in `tour_tree_run`), and a whole sweep (23 grounds) took more than 25 minutes
+  on 8 of 8 seeds with group 0's walls stopping her.
+
+**To check in game** (explore only first: no attack keys; the player started by the user; the study's session 1 has
+the rest, `ONBOARDING.md` section 9):
+- With no keys, standing on 28 by `out00`: `python -m gamelab hunt look --map 10002073` (her on 28 near (265, -49),
+  the strangers listed) and `python -m gamelab map --map 10002073` (her dot through the scrolling picture: 28 near
+  (262, -49)).
+- The bottom rope, which decides the grab's reach: `python -m gamelab nav 30 --map 10002073`, then
+  `python -m gamelab nav 27 --avoid jump --map 10002073` (the grab from 30 at x -8, 94.3 up: on the rope means
+  `physics.ROPE_REACH` holds; back down on 29 means HeavenClient's 82 does, `Realism.rope_reach`; the navigator's
+  `moved` records say which), three times; then `python -m gamelab nav 27 --map 10002073` from 30 (by 29: what the
+  planner does now).
+- Up the tower: `python -m gamelab nav 23 --map 10002073`, `nav 19`, `nav 12 --x 160`, `nav 8 --x 137` (the rope at
+  -80 from 11, which missed most in the simulator), `nav 7` (the jump off 8's left end), each with `--map 10002073`
+  and a `hunt look --map 10002073` after it.
+- Down: `python -m gamelab nav 33 --map 10002073` from the top (16 onto 20 at full speed).
+- Optional, risky, only with the user watching (it can leave her outside the tower): the group-0 wall.
+  `python -m gamelab nav 11 --x -190 --map 10002073`, then `python -m gamelab act left*800 --record --name wall11`
+  and `python -m gamelab track wall11`: down onto 13 by the wall at -220 means group 0's walls stop her
+  (`--world zero-walls` is the game); falling past -220 means her own group's alone do.
+- Supervised, attacks (the study's session 2): one Horny touch's px on the 104-px HP bar (17: the formula, 10: the
+  share), and how many of her stars leave a Horny walking at her.
 
 ## Screen size: the game at its own 1366x768 (from 2026-10-23)
 
@@ -1013,11 +1249,11 @@ A look placing her took half what it took; a monster search half again more.
 (DOT_ORIGIN moved to the same game px), 88 units left of where she stands: the two ropes in view (map x -536 and -303,
 seen at screen x 941 and 1174, her tag at 685) put her at -792, on stair 28 (-833 to -743, y 2685). That's this map's
 minimap picture, not the size: it starts 5 game px further left than on the first map, where DOT_ORIGIN was fitted, as
-on its stretched frames (80 units left on step 24; the map track's `Localizer.fit_picture`). Moved by those 5 game px
-(80 units), she's put on stair 28 and the ropes refine her to -792, y 2685 (her dot 11.5 units low). HP and MP 730/730
-and 584/584 read full, and the other players are placed (one to three, most on the bridge 22). `map` places her
-by her dot as Senses does (`test_resolution.py`: at (-880, 2697) on `n28_000.png`, where 1920x1080's Localizer had her
-at (-1319, 1897)).
+on its stretched frames (80 units left on step 24). Read through the map's own minimap picture
+(`minimap.MinimapPicture`, Localization: its corner at game px (42, 72)), she's put on stair 28 and the ropes refine her
+to -792, y 2685 (her dot 11.5 units low). HP and MP 730/730 and 584/584 read full, and the other players are placed
+(one to three, most on the bridge 22). `map` places her by her dot as Senses does (`test_resolution.py`: at (-800, 2685)
+on 28 on `n28_000.png`; without the picture at (-880, 2697), and with 1920x1080's Localizer at (-1319, 1897)).
 
 **To check in game** (the game at 1366x768, set in its own Options). First the ones that send no keys and need no
 player:

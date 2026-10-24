@@ -301,7 +301,7 @@ PORTAL_REACH = (25.0, 40.0)
 #   for the platforms' -489 and 1479 (live, in 14,869 placements of 2026-10-19 to 21, she was never further than -432
 #   and 1446; in the simulator she stands at 34's left end, -489, in tour_run); on West Rocky Mountain II -1637 and 88
 #   for -1662 and 113 (22's left end is at -1640, 22 units in from the platforms' side, and fighting there she was
-#   knocked off it and fell out of the map in 6 of 10 of the harness's hunt loops and 2 of 10 tours, preset game, 20
+#   knocked off it and fell out of the map in 8 of 10 of the harness's hunt loops and 5 of 10 tours, preset game, 20
 #   minutes; none with the client's sides); on Tree Dungeon, Forest Up North II -475 and 565 for -500 and 590, both
 #   outside the tower (-220..310), where nothing is under her either way.
 # - The walls of foothold group 0 (a map's own: on Tree Dungeon, Forest Up North II the tower's, its shelves' and its
