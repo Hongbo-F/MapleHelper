@@ -382,7 +382,8 @@ def cmd_pet(args) -> int:
         print(f"pet fullness: {'not read' if fullness is None else fullness}")
         if not args.every:
             return 0
-        time.sleep(args.every * 60)
+        from .behavior.pet import RETRY_S
+        time.sleep(args.every * 60 if fullness is not None else min(args.every * 60, RETRY_S))  # soon after a miss
 
 
 def _feed(model, title: str, geo=STRETCHED):
