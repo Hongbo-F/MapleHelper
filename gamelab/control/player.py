@@ -18,7 +18,7 @@ runs normally and talks to it through files. To keep that safe it only ever:
 Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears or after
 24 idle hours. Start it with `python -m gamelab player --elevate`; stop it with `python -m gamelab stop`.
 
-Of gamelab, this module itself imports only paths and window (and control.alarm and
+Of gamelab, this module itself imports only paths and window (and control.alarm, control.lie_recorder and
 perception.lie_detector when a Watchdog is created). Plans come from control.client.
 """
 
@@ -39,7 +39,7 @@ from maplehelper.keys import KEY_CODES, Key
 from maplehelper.keys import parse as parse_key
 
 from .. import window
-from ..paths import ALARM, CONFIG, INBOX, LAB, OUTBOX, PLAYER_LOG, STOP
+from ..paths import ALARM, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_LOG, STOP
 
 # It used to stop after 3 idle hours; on 2026-10-23 the user asked that it not be exited proactively (starting it
 # again needs their UAC click), and it had stopped by itself overnight: a day, so it outlasts a night without plans.
@@ -120,14 +120,25 @@ def _sleep_until(t: float, stop: threading.Event | None = None) -> bool:
 
 
 class Watchdog(threading.Thread):
-    """Looks at the game every `interval` seconds, whether or not a plan is running. When the
-    Lie Detector shows up it sets `alarm` first (stopping any keys within ~10 ms, mid-plan too),
-    then records it and pages via on_alarm; the player then shuts down."""
+    """Looks at the game every `interval` seconds, whether or not a plan is running, and records each Lie Detector's
+    whole cycle.
+
+    A cycle starts when the Lie Detector is first seen: `alarm` is set first (any keys stop within ~10 ms, mid-plan
+    too), then on_alarm writes the alarm and its screenshot and pages (control.alarm.raise_alarm), as before; only
+    then does the recording start (control.lie_recorder), with that first frame. From there every grab goes into it
+    until the game has shown no Lie Detector for `end_s` (lie_recorder.END_S): the cycle's end; or, at the latest,
+    `cap_s` after the first sight, when the recording stops and the cycle goes on unrecorded. A grab with the game
+    window gone or minimized is recorded as such, with no frame, and doesn't count as the Lie Detector gone.
+
+    `grab` (for tests) stands in for grabbing the game: it returns a frame (RGB), or why there's none ("no window",
+    "minimized"; None is "no window"). Nothing that goes wrong in a look, the recording or the log stops the
+    watching: it's logged and the next look comes."""
 
     def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
-                 interval: float = 0.25, on_alarm=None):
+                 interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None):
         super().__init__(name="lie-detector-watch", daemon=True)
         from ..perception.lie_detector import LieDetectorSpotter
+        from . import lie_recorder
         from .alarm import raise_alarm
         self.title = game_title
         self.alarm = alarm
@@ -135,28 +146,134 @@ class Watchdog(threading.Thread):
         self.grab = grab
         self.interval = interval
         self.on_alarm = on_alarm or raise_alarm
+        self.folder = folder or LIE_RECORDINGS
+        self.log = log or _log
+        self.end_s = lie_recorder.END_S if end_s is None else end_s
+        self.cap_s = lie_recorder.CAP_S if cap_s is None else cap_s
+        self.Recording = lie_recorder.Recording
         self.stopped = threading.Event()
+        self.cycle_t0: float | None = None    # when the cycle in progress was first seen (monotonic s), else None
+        self.gone_since: float | None = None  # since when the game has shown no Lie Detector (None: seen, or the game
+                                              # not showing, since the last look)
+        self.recording = None                 # the cycle's recording while it's written
+        self.ended: list = []                 # recordings finished, their writers maybe still at it
+        self.troubles: dict[str, int] = {}
 
     def run(self) -> None:
         with mss.MSS() as sct:
+            due = time.monotonic()
             while not self.stopped.is_set():
-                frame = self.grab() if self.grab else self._grab(sct)
-                if frame is not None and self.spotter.seen(frame):
-                    self.alarm.set()
-                    self.on_alarm(frame)
-                    return
-                self.stopped.wait(self.interval)
+                try:
+                    self.tick(time.monotonic(), sct)
+                except Exception as e:  # nothing stops the watching
+                    self._trouble("a look failed", e)
+                # 4 a second from the start of each look (it waited `interval` after each, about 3 a second with the
+                # look's own 70 ms: 3.10 a second on a 1366x768 frame, D:/MapleHelper-scratch/ld/rate_measure.py);
+                # one that ran long (the paging's beeps) is followed at once, not caught up.
+                due = max(due + self.interval, time.monotonic())
+                self.stopped.wait(due - time.monotonic())
+        if self.recording is not None:
+            self._end_recording("stopped")
+        for rec in self.ended:
+            rec.join(timeout=20)  # its last frames and summary written before the player exits
+
+    def tick(self, now: float, sct=None) -> None:
+        """One look at the game (`now`: monotonic s), and what follows from it."""
+        frame, why = self._look(sct)
+        scores = None
+        if frame is not None:
+            try:
+                scores = self.spotter.scores(frame)
+            except Exception as e:  # (a frame it can't take, such as one smaller than its templates)
+                self._trouble("the Lie Detector check failed", e)
+                frame, why = None, "check failed"
+        seen = scores is not None and max(scores.values()) >= 1
+        if seen or frame is None:
+            self.gone_since = None  # a game not showing may have it up behind
+        elif self.gone_since is None:
+            self.gone_since = now
+        if seen and self.cycle_t0 is None:
+            self.alarm.set()  # first: keys stop within ~10 ms
+            info = self._raise(frame)  # the alarm, its screenshot, paging: before anything of the recording
+            self.cycle_t0 = now
+            self._say("LIE DETECTOR seen: input stopped")
+            self._start_recording(info)
+        if self.recording is not None:
+            self.recording.add(now - self.cycle_t0, frame, scores, why)
+            if now - self.cycle_t0 >= self.cap_s:
+                self._end_recording("cap")
+        if self.cycle_t0 is not None and self.gone_for(now):
+            if self.recording is not None:
+                self._end_recording("gone")
+            self.cycle_t0 = None
+            self._say(f"the Lie Detector has been off the screen for {self.end_s:g} s: its cycle is over")
+
+    def gone_for(self, now: float) -> bool:
+        """Whether the game has shown no Lie Detector for end_s, every look of it showing the game."""
+        return self.gone_since is not None and now - self.gone_since >= self.end_s
+
+    def _look(self, sct):
+        """(the frame, None), or (None, why there's none)."""
+        try:
+            got = self.grab() if self.grab else self._grab(sct)
+        except Exception as e:
+            self._trouble("grabbing the game failed", e)
+            return None, "grab failed"
+        if got is None or isinstance(got, str):
+            return None, got or "no window"
+        return got, None
 
     def _grab(self, sct):
-        """The game's client area (RGB), or None if the game isn't there or is minimized."""
+        """The game's client area (RGB), or why there's none: "no window" or "minimized"."""
         try:
-            client_area = window.client_rect(window.find_game(self.title))
+            hwnd = window.find_game(self.title)
         except RuntimeError:
-            return None
-        if client_area["width"] <= 0 or client_area["height"] <= 0:  # minimized
-            return None
+            return "no window"
+        # Minimized, its client area isn't 0 x 0 (GetClientRect gave 432x54 on 2026-10-24): ask Windows.
+        if window.minimized(hwnd):
+            return "minimized"
+        client_area = window.client_rect(hwnd)
+        if client_area["width"] <= 0 or client_area["height"] <= 0:
+            return "minimized"
         # RGB, full size, a picture of its own: viewed as RGB in place, every OpenCV call on it copied it first
         return cv2.cvtColor(np.asarray(sct.grab(client_area)), cv2.COLOR_BGRA2RGB)
+
+    def _raise(self, frame) -> dict | None:
+        try:
+            info = self.on_alarm(frame)
+        except Exception as e:  # (the alarm Event is up already: nothing goes out)
+            self._trouble("raising the alarm failed", e)
+            return None
+        return info if isinstance(info, dict) else None
+
+    def _start_recording(self, info) -> None:
+        try:
+            self.recording = self.Recording(self.folder, info, log=self._say, end_s=self.end_s, cap_s=self.cap_s)
+        except Exception as e:  # (no folder: the cycle goes on unrecorded)
+            self._trouble("starting the Lie Detector recording failed", e)
+            return
+        self._say(f"recording the Lie Detector, 4 frames a second until it's been off the screen {self.end_s:g} s: "
+                  f"{self.recording.folder}")
+
+    def _end_recording(self, end: str) -> None:
+        rec, self.recording = self.recording, None
+        try:
+            rec.finish(end)  # its writer logs the end once it has written the rest and the summary
+        except Exception as e:
+            self._trouble("ending the Lie Detector recording failed", e)
+        self.ended = [r for r in self.ended if not r.join(0)] + [rec]  # (those still writing, and this one)
+
+    def _trouble(self, what: str, e: Exception) -> None:
+        """Logged the first time, then every 1000th (4 a second would fill the log)."""
+        n = self.troubles[what] = self.troubles.get(what, 0) + 1
+        if n == 1 or n % 1000 == 0:
+            self._say(f"{what} ({type(e).__name__}: {e}); {n} time{'s' if n > 1 else ''} so far, watching on")
+
+    def _say(self, msg: str) -> None:
+        try:
+            self.log(msg)
+        except Exception:
+            pass  # a log that can't be written stops nothing
 
 
 class Player:
@@ -338,10 +455,10 @@ def serve() -> None:
                 running.unlink(missing_ok=True)
             idle_since = time.monotonic()
     watchdog.stopped.set()
+    # Let the watchdog finish writing the alarm, paging and its recording: it's a background thread, and exiting at
+    # once killed it mid-write once (no ALARM.json, an empty screenshot).
+    watchdog.join(timeout=30)
     if alarm.is_set():
-        # Let the watchdog finish recording the alarm and paging: it's a background thread, and
-        # exiting at once killed it mid-write once (no ALARM.json, an empty screenshot).
-        watchdog.join(timeout=20)
         for path in INBOX.glob("*.json"):
             _answer(path, {"error": LIE_DETECTOR_ERROR})
         _log("LIE DETECTOR seen: input stopped and the player shut down")

@@ -211,3 +211,208 @@ def test_whether_a_recording_is_still_being_written(tmp_path):
     assert other != again and other.exists() and again.exists()
     os.utime(again, (time.time() - 60, time.time() - 60))
     assert lie_recorder.going(tmp_path) is None  # made a minute ago, never written to
+
+
+# --- the watchdog records each cycle (control.player.Watchdog) ---
+
+from gamelab.control.player import Watchdog  # noqa: E402
+
+FORMS = [GONE, COUNTDOWN, MINI_GAME, BOOTH]
+
+
+class Spotter:
+    """Scores a made-up frame by its green value: 0 nothing, 1 the countdown, 2 the mini-game, 3 the Truth Booth."""
+
+    def scores(self, frame):
+        return FORMS[int(frame[0, 0, 1])]
+
+
+def game(kind):
+    """A made-up frame the fake spotter scores as `kind` (an index into FORMS), or why there's none (a str)."""
+    if isinstance(kind, str):
+        return kind
+    out = frame(40)
+    out[..., 1] = kind
+    return out
+
+
+class Screen:
+    """What the fake grab hands the watchdog, set as the test goes."""
+
+    def __init__(self, kind=0):
+        self.kind = kind
+
+    def __call__(self):
+        return game(self.kind)
+
+
+def make_dog(tmp_path, screen, flag=None, on_alarm=None, end_s=1.0, cap_s=60.0, **kw):
+    said, alarms = [], []
+    flag = flag or threading.Event()
+
+    def raised(frame):
+        alarms.append(flag.is_set())
+        return {"screenshot": "shot.png"}
+
+    dog = Watchdog("MapleStory", flag, spotter=Spotter(), grab=screen, on_alarm=on_alarm or raised,
+                   folder=tmp_path / "lie_detector", log=said.append, end_s=end_s, cap_s=cap_s, **kw)
+    return dog, flag, said, alarms
+
+
+def play(dog, screen, kinds, t0=0.0, step=0.25):
+    """One look a `step` for each kind on screen in turn; returns the time of the next look."""
+    t = t0
+    for kind in kinds:
+        screen.kind = kind
+        dog.tick(t)
+        t += step
+        end = time.monotonic() + 10
+        while dog.recording is not None and not dog.recording._queue.empty():  # looks 250 ms apart, not 0
+            assert time.monotonic() < end
+            time.sleep(0.001)
+    return t
+
+
+def written(dog):
+    """The recordings the watchdog ended, once their writers are done: (folder, summary, index)."""
+    out = []
+    for rec in dog.ended:
+        assert rec.join(timeout=10)
+        out.append((rec.folder, json.loads((rec.folder / SUMMARY).read_text(encoding="utf-8")), lines(rec.folder)))
+    return out
+
+
+def test_a_cycle_seen_for_a_while_then_gone_is_recorded_from_its_first_sight_to_its_end(tmp_path):
+    screen = Screen()
+    dog, flag, said, alarms = make_dog(tmp_path, screen)
+    t = play(dog, screen, [0, 0, 0])
+    assert not flag.is_set() and dog.recording is None and not (tmp_path / "lie_detector").exists()
+    t = play(dog, screen, [1] * 6 + [2] * 4, t)  # the countdown, then the mini-game's notice
+    assert flag.is_set() and alarms == [True] and dog.recording is not None
+    t = play(dog, screen, [0] * 4, t)  # gone: 0.75 s after its first look without it, not yet the 1 s
+    assert dog.recording is not None
+    play(dog, screen, [0, 0], t)        # 1.0 s: over
+    assert dog.recording is None and dog.cycle_t0 is None
+    [(folder, summary, index)] = written(dog)
+    assert len(index) == 15 and summary["frames"] == 15  # 10 seen, then 5 gone (the last at the end stretch)
+    assert index[0]["t"] == 0.0 and index[-1]["t"] == 3.5 and [r["seen"] for r in index] == [True] * 10 + [False] * 5
+    assert summary["first_seen"] == 0.0 and summary["last_seen"] == 2.25 and summary["duration_s"] == 3.5
+    assert summary["forms"] == {"countdown": {"first": 0.0, "last": 1.25, "frames": 6},
+                                "mini-game": {"first": 1.5, "last": 2.25, "frames": 4}}
+    assert summary["outcome"] == "answered" and summary["end"] == "gone" and summary["truth_booth"] is False
+    assert summary["alarm_screenshot"] == "shot.png" and summary["window"] == [64, 48]
+    assert flag.is_set()  # still locked: the alarm is lifted elsewhere (the player's rule)
+    assert any(m.startswith("recording the Lie Detector") and str(folder) in m for m in said)
+    assert any(m.startswith("Lie Detector recording ended (gone): 15 frames") for m in said)
+    first = [i for i, m in enumerate(said) if m.startswith("LIE DETECTOR seen: input stopped")]
+    assert first and first[0] < [i for i, m in enumerate(said) if m.startswith("recording the")][0]
+
+
+def test_a_flicker_shorter_than_the_end_stretch_is_the_same_cycle(tmp_path):
+    screen = Screen()
+    dog, flag, said, alarms = make_dog(tmp_path, screen)
+    t = play(dog, screen, [1, 1, 0, 0, 1, 0, 0, 0, 2, 2])  # gone 0.5 s and 0.75 s: under the 1 s
+    play(dog, screen, [0] * 5, t)
+    [(folder, summary, index)] = written(dog)
+    assert alarms == [True] and len(index) == 15
+    assert summary["first_seen"] == 0.0 and summary["last_seen"] == 2.25
+
+
+def test_the_truth_booth_is_the_outcome_when_a_failed_test_sends_her_there(tmp_path):
+    screen = Screen()
+    dog, *_ = make_dog(tmp_path, screen)
+    t = play(dog, screen, [2, 2, 0, 0, 3, 3, 3])
+    play(dog, screen, [0] * 5, t)
+    [(_, summary, _)] = written(dog)
+    assert summary["truth_booth"] is True and summary["outcome"] == "sent to the Truth Booth"
+    assert summary["forms"]["truth booth"] == {"first": 1.0, "last": 1.5, "frames": 3}
+
+
+def test_the_recording_stops_at_the_cap_and_the_cycle_goes_on_unrecorded(tmp_path):
+    screen = Screen()
+    dog, flag, said, alarms = make_dog(tmp_path, screen, cap_s=2.0)
+    t = play(dog, screen, [1] * 12)  # 3 s of it
+    assert dog.recording is None and dog.cycle_t0 is not None and flag.is_set()
+    t = play(dog, screen, [1, 1, 0, 0, 0, 0, 0], t)  # still the same cycle: no new recording, no second alarm
+    assert alarms == [True] and dog.cycle_t0 is None
+    [(folder, summary, index)] = written(dog)
+    assert summary["end"] == "cap" and summary["frames"] == 9 and index[-1]["t"] == 2.0  # 0 to 2 s
+    assert summary["outcome"].startswith("unknown")
+    assert len(list((tmp_path / "lie_detector").iterdir())) == 1
+
+
+def test_a_game_window_gone_or_minimized_mid_cycle_is_recorded_as_such_not_as_the_lie_detector_gone(tmp_path):
+    screen = Screen()
+    dog, flag, said, alarms = make_dog(tmp_path, screen)
+    t = play(dog, screen, [1, 1] + ["minimized"] * 8 + ["no window"] * 4)  # 3 s without the game: not gone
+    assert dog.recording is not None
+    t = play(dog, screen, [0, 0, "minimized", 0, 0, 0, 0], t)  # the stretch starts over after the minimized look
+    assert dog.recording is not None  # 0.75 s since then
+    play(dog, screen, [0], t)
+    [(folder, summary, index)] = written(dog)
+    assert summary["not_showing"] == {"minimized": 9, "no window": 4} and summary["frames"] == 9
+    assert index[2] == {"t": 0.5, "game": "minimized"} and index[10] == {"t": 2.5, "game": "no window"}
+    assert summary["end"] == "gone" and summary["outcome"] == "answered"
+
+
+def test_a_frame_that_cant_be_written_doesnt_stop_the_recording_or_the_watchdog(tmp_path, monkeypatch):
+    real = cv2.imencode
+
+    def imencode(ext, img, params):  # the mini-game's frames can't be written
+        if img[1, 1, 1] == 2:
+            raise PermissionError(13, "Permission denied")
+        return real(ext, img, params)
+
+    monkeypatch.setattr(lie_recorder.cv2, "imencode", imencode)
+    screen = Screen()
+    dog, flag, said, alarms = make_dog(tmp_path, screen)
+    t = play(dog, screen, [1, 1, 2, 2, 2, 1, 0, 0, 0, 0, 0])
+    [(folder, summary, index)] = written(dog)
+    assert summary["write_errors"] == 3 and summary["frames"] == 8 and len(index) == 11
+    assert sum("couldn't write frame 2" in m for m in said) == 1
+    play(dog, screen, [1], t)  # and the watchdog still sees the next one
+    assert dog.recording is not None and len(alarms) == 2
+
+
+def test_the_alarm_is_set_and_raised_before_anything_of_the_recording_is_written(tmp_path):
+    screen, events = Screen(), []
+    folder = tmp_path / "lie_detector"
+    flag = threading.Event()
+
+    def raised(frame):
+        events.append(("alarm set", flag.is_set()))
+        events.append(("anything written", folder.exists() and any(folder.rglob("*"))))
+        return None
+
+    dog, *_ = make_dog(tmp_path, screen, flag=flag, on_alarm=raised)
+    play(dog, screen, [1])
+    assert events == [("alarm set", True), ("anything written", False)]
+    assert dog.recording is not None and dog.recording.folder.exists()
+
+
+def test_a_failed_alarm_or_recording_doesnt_stop_the_watchdog(tmp_path):
+    screen = Screen()
+
+    def broken(frame):
+        raise OSError(28, "No space left on device")
+
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=broken)
+    (tmp_path / "lie_detector").write_text("a file where the folder should be", encoding="utf-8")
+    play(dog, screen, [1, 1, 0, 0, 0, 0, 0])
+    assert flag.is_set() and dog.recording is None and dog.cycle_t0 is None
+    assert any("raising the alarm failed" in m for m in said)
+    assert any("starting the Lie Detector recording failed" in m for m in said)
+
+
+def test_the_watchdog_thread_records_at_4_a_second_and_finishes_its_recording_when_stopped(tmp_path):
+    screen = Screen(1)
+    dog, flag, said, alarms = make_dog(tmp_path, screen, interval=0.05)
+    dog.start()
+    time.sleep(0.6)
+    dog.stopped.set()
+    dog.join(timeout=10)
+    assert not dog.is_alive()
+    [(folder, summary, index)] = written(dog)
+    assert summary["end"] == "stopped" and summary["outcome"].startswith("unknown")
+    gaps = np.diff([r["t"] for r in index])
+    assert 8 <= len(index) <= 14 and np.median(gaps) == pytest.approx(0.05, abs=0.02)  # from each look's start

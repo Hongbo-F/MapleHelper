@@ -117,6 +117,7 @@ def test_watchdog_grabs_the_game_as_an_rgb_picture_of_its_own(monkeypatch):
     rng = np.random.default_rng(0)
     bgra = rng.integers(0, 256, (1080, 1920, 4), np.uint8)
     monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "minimized", lambda hwnd: False)
     monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 1920, "height": 1080})
 
     class Screen:
@@ -127,20 +128,40 @@ def test_watchdog_grabs_the_game_as_an_rgb_picture_of_its_own(monkeypatch):
     assert frame.flags.c_contiguous and np.array_equal(frame, bgra[:, :, 2::-1])
 
 
-def test_watchdog_sets_the_alarm_first_then_reports_once():
-    frames = iter([SCENE, SCENE, scene_with_window(), scene_with_window()])
-    flag, reports = threading.Event(), []
-    dog = Watchdog("MapleStory", flag, grab=lambda: next(frames), interval=0.01,
-                   on_alarm=lambda frame: reports.append(flag.is_set()))
-    dog.start()
-    dog.join(timeout=5)
-    assert not dog.is_alive()
-    assert flag.is_set() and reports == [True]  # the alarm was already up when it reported
+def test_watchdog_says_why_it_has_no_picture_the_game_minimized_or_gone(monkeypatch):
+    # Minimized, the game's client area isn't 0 x 0 (432x54 on 2026-10-24): Windows is asked.
+    from gamelab.control import player as player_mod
+    monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "minimized", lambda hwnd: True)
+    monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: {"left": -32000, "top": -32000, "width": 432,
+                                                                        "height": 54})
+    dog = Watchdog("MapleStory", threading.Event(), spotter=object())
+    assert dog._grab(None) == "minimized"
+
+    def no_game(title):
+        raise RuntimeError("no window titled 'MapleStory'")
+
+    monkeypatch.setattr(player_mod.window, "find_game", no_game)
+    assert dog._grab(None) == "no window"
 
 
-def test_watchdog_keeps_watching_while_all_is_well():
+def test_watchdog_sets_the_alarm_first_then_reports_once(tmp_path):
+    frames = iter([SCENE, SCENE, scene_with_window(), scene_with_window(), SCENE])
+    flag, reports, said = threading.Event(), [], []
+    dog = Watchdog("MapleStory", flag, grab=lambda: next(frames), on_alarm=lambda frame: reports.append(flag.is_set()),
+                   folder=tmp_path, log=said.append)
+    for t in range(5):
+        dog.tick(t * 0.25)
+    assert flag.is_set() and reports == [True]  # the alarm was already up when it reported, and once a cycle
+    assert dog.recording is not None and dog.recording.grabs == 3  # and the watchdog goes on, recording it
+    dog.recording.finish("stopped")
+    assert dog.recording.join(timeout=10)
+
+
+def test_watchdog_keeps_watching_while_all_is_well(tmp_path):
     flag = threading.Event()
-    dog = Watchdog("MapleStory", flag, grab=lambda: SCENE, interval=0.01, on_alarm=lambda f: None)
+    dog = Watchdog("MapleStory", flag, grab=lambda: SCENE, interval=0.01, on_alarm=lambda f: None, folder=tmp_path,
+                   log=lambda m: None)
     dog.start()
     time.sleep(0.1)
     assert dog.is_alive() and not flag.is_set()
