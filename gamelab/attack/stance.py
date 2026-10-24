@@ -38,6 +38,12 @@ from . import reach
 
 # Distances in map units.
 TOO_CLOSE = 110    # a monster on her platform nearer than this is about to touch her: step away first
+# Kinds that hit hard enough to keep further off on her platform than the claw's reach (the group policy, `stance`,
+# reacts to others only once a throw from the ground would be a swipe, about 95 units): a Horny Mushroom touches for
+# 110 of her 752 HP (twice a Green Mushroom's 54) and walks 100 units/s, 75 in a throw's lock. Live on Tree Dungeon
+# on 2026-10-24 she fought them close and the user saw her "take a lot of hit damage from the horny mushrooms".
+# Within KEEP_OFF of one she jumps back and throws, or steps away; with no room for either, throws from where she is.
+KEEP_OFF = {"horny-mushroom": 170}
 STEP_AWAY = 120    # how far she steps away from a monster too close
 STEP_ROOM = 40     # the least room worth stepping away into (with less she fights from where she is)
 KNOCKBACK_ROOM = 25  # extra room kept from her platform's ends while monsters share it: standing ~100
@@ -157,7 +163,8 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     around = wanted if around is None else around
     mine = [t for t in wanted if t.platform == platform.id]
     lo, hi = _stand_limits(platform, crowded=bool(mine))
-    close = [t for t in mine if close_to(t, x, halves)]  # a throw from the ground would be a claw swipe
+    close = [t for t in mine if close_to(t, x, halves)  # a throw from the ground would be a claw swipe
+             or abs(t.x - x) < KEEP_OFF.get(t.kind, 0)]   # ... or it hits too hard to let it come closer
     in_reach = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around)]
     if close:
         return _close_quarters(x, close, mine, facing, lo, hi, can_jump, tops or MONSTER_TOP, halves,
@@ -231,6 +238,8 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
         if room >= step and not behind:
             return ("back", away, step)
         return ("throw", side)
+    if nearest.kind in KEEP_OFF and room >= STEP_ROOM and not behind:  # never a jump in place by one of them
+        return ("back", away, min(STEP_AWAY, room))
     if can_jump(x, x):
         return ("jump_throw", side)
     # A platform just overhead: a jump lands her on it (on 20, five jump-throws at a snail put
