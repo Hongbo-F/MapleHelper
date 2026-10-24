@@ -72,7 +72,8 @@ MIN_SEEN = 5        # frames a track must have been seen in for its going to cou
 OFFSCREEN_S = 10.0  # s a track off screen is remembered, to know it again when it comes back
 DEAD_KEEP_S = 2.0   # s a dead track is kept (shown as dead) before it goes
 MATCH_BASE, MATCH_SPEED, MATCH_KNOCKBACK = 10.0, 1.3, 25.0  # units: a sighting within 10 + 1.3 speed dt + 25
-EDGE_PX = 24        # half-size px from the play area's side: a new monster this close came in from off screen
+EDGE_PX = 24        # half-size px (1920x1080; View.edge at the look's geometry) from the play area's side: a new
+                    # monster this close came in from off screen
 SPAWN_NEAR = 60.0   # units: a new monster this close to a spawn point of its kind (on its platform), away from the
                     # screen's edges, spawned there
 STAR_WINDOW = 2.5   # s after a throw's key that a kill or a hit can be its star's (behavior.ledger.STAR_WINDOW)
@@ -194,15 +195,16 @@ class Track:
 @dataclass(frozen=True)
 class View:
     """What a frame shows of the map (map units: x from left to right, y from top to bottom), the play area
-    above the bottom bar, and its size on screen (half-size px), to tell a monster out of sight on screen
+    above the bottom bar, and its size on screen (look-frame px), to tell a monster out of sight on screen
     from one off it. A box of the map the minimap covers (`covered`) doesn't show either."""
     left: float
     right: float
     top: float
     bottom: float
-    width: int                # half-size px
+    width: int                # look-frame px
     height: int
     covered: tuple[float, float, float, float] | None = None  # x0, y0, x1, y1 (map units)
+    edge: float = EDGE_PX     # look-frame px: EDGE_PX in the look's geometry
 
     def shows(self, kind: str, x: float, y: float) -> bool:
         """Whether a monster of that kind with its feet at (x, y) would show wholly on screen."""
@@ -213,9 +215,10 @@ class View:
         return c is None or not (c[0] < x + half and x - half < c[2] and c[1] < y and y - tall < c[3])
 
     def at_edge(self, mob: Mob) -> bool:
-        """Whether a monster's picture is within EDGE_PX of the play area's sides."""
-        return (mob.x - mob.w // 2 < EDGE_PX or mob.x + mob.w // 2 > self.width - EDGE_PX
-                or mob.y - mob.h // 2 < EDGE_PX or mob.y + mob.h // 2 > self.height - EDGE_PX)
+        """Whether a monster's picture is within EDGE_PX (`edge`) of the play area's sides."""
+        e = self.edge
+        return (mob.x - mob.w // 2 < e or mob.x + mob.w // 2 > self.width - e
+                or mob.y - mob.h // 2 < e or mob.y + mob.h // 2 > self.height - e)
 
 
 @dataclass

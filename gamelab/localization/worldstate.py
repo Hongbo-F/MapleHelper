@@ -43,7 +43,7 @@ from .monsters import Monster
 from .pose import Where
 from .scene import Loot, Scene, find_loot
 from .senses import Senses
-from .tracking import DYING, HIDDEN, LIVE, Event, MonsterTracker, Track, View, overlap, same, snapshot
+from .tracking import DYING, EDGE_PX, HIDDEN, LIVE, Event, MonsterTracker, Track, View, overlap, same, snapshot
 
 # Ropes are searched every frame: placed by a rope in one frame and by her dot alone in the next, her x (and
 # with it every monster's) would step by up to a minimap pixel (11.4 units) from frame to frame, which the
@@ -536,7 +536,7 @@ class WorldStep:
         box = minimap_box(s.geo)
         mx, my = box[2] / s.geo.look_scale, box[3] / s.geo.look_scale
         return View(s.map_x(0), s.map_x(w), s.map_y(0), s.map_y(bottom), w, bottom,
-                    (s.map_x(0), s.map_y(0), s.map_x(mx), s.map_y(my)))
+                    (s.map_x(0), s.map_y(0), s.map_x(mx), s.map_y(my)), s.geo.fpx(EDGE_PX))
 
 
 def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: bool = True, wide: bool = False,

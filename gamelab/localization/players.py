@@ -25,7 +25,8 @@ MISSES = 2        # looks in a row a player's dot must be missing for the player
 # for about half a second. A player who goes stays on the map this much longer.
 MISS_S = 1.0
 LOCAL_IDS = 1_000_001  # where the ids of the players a look taken here finds begin, when a feed's looks bring theirs
-MATCH_PX = 4.0    # full-size px a player's dot may move between two looks and be the same one ...
+MATCH_PX = 4.0    # full-size px (1920x1080; the localizer's geometry converts them) a player's dot may move between
+                  # two looks and be the same one ...
 MATCH_PX_S = 15.0  # ... and this many px a second between them (a player walking 125 units/s, 11 px a second, and
                    # jumping) ...
 MATCH_MAX_PX = 40.0  # ... up to this; farther, it's a new dot (it went through a portal or teleported), and the old
@@ -89,7 +90,7 @@ class Players:
         """A look at t saw these other players' dots: the players there are now (`current`)."""
         dt = 0.0 if self._t is None else max(0.0, t - self._t)
         self._t = t
-        reach = min(MATCH_MAX_PX, MATCH_PX + MATCH_PX_S * dt)
+        reach = self.localizer.geo.px(min(MATCH_MAX_PX, MATCH_PX + MATCH_PX_S * dt))
         pairs = sorted((abs(m.x - p.dot[0]) + abs(m.y - p.dot[1]), i, j)
                        for i, m in enumerate(markers) for j, p in enumerate(self.tracks)
                        if m.kind == p.kind and abs(m.x - p.dot[0]) <= reach and abs(m.y - p.dot[1]) <= reach)

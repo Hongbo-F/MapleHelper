@@ -140,3 +140,23 @@ def _alias_users() -> list[str]:
 
 def test_nothing_but_the_simulator_assumes_the_1920x1080_window():
     assert _alias_users() == []
+
+
+def test_the_trackers_screen_edge_and_the_players_reach_go_by_the_look():
+    from gamelab.localization import mapdata
+    from gamelab.localization.players import MATCH_PX, Players
+    from gamelab.localization.pose import Localizer
+    from gamelab.localization.tracking import EDGE_PX, View
+    assert View(0, 1, 0, 1, 960, 475).edge == EDGE_PX == STRETCHED.fpx(EDGE_PX)
+    assert NATIVE.fpx(EDGE_PX) == pytest.approx(34.13, abs=0.01)
+    tree = {"foothold": {}, "miniMap": {"width": 1948, "height": 2152, "centerX": 479, "centerY": 1387, "mag": 4}}
+    loc = Localizer(mapdata.parse(1, tree, "Test", {}))
+    from gamelab.perception.minimap import Marker
+    for geo, step, same in ((STRETCHED, MATCH_PX, True), (STRETCHED, MATCH_PX + 0.5, False),
+                            (NATIVE, NATIVE.px(MATCH_PX) - 0.01, True), (NATIVE, NATIVE.px(MATCH_PX) + 0.5, False)):
+        loc.use(geo)
+        players = Players(loc)
+        players.update(0.0, [Marker("stranger", 100.0, 150.0)])
+        (p,) = players.update(0.0, [Marker("stranger", 100.0, 150.0)])
+        (q,) = players.update(0.0, [Marker("stranger", 100.0 + step, 150.0)])  # the same player, or still the old
+        assert q.id == p.id and (q.dot[0] == 100.0 + step) == same, (geo, step)  # one, missed (a new dot waits)
