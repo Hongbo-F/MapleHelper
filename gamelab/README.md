@@ -137,6 +137,7 @@ Other commands (`python -m gamelab -h` lists them all):
 | `bench-look [FILES]`, `bench-look --live --n 100` | Each stage of a look timed (median, p90, fastest): on saved screenshots, 1920×1080 or 1366×768 (by default 17 1920×1080 ones in `lab`; `--shrink 1366x768` times them shrunk to the game's own size, `--look-scale 1` or `2` with full- or half-size looks), or on the game as it is on screen (`--capture dxgi` or `mss`: how; by default as config.toml says). Also counted: looks that didn't find her name tag near where it was, and ropes on the whole screen that the search where the map's ropes can show missed. Live it refuses unless the game is in front already, and never brings it forward; sends no keys |
 | `bodies`, `bodies FILES --recordings NAMES`, `bodies --tracks FILES` | Where the monster detector puts monsters, offline: their feet against the surface of the platform each is put on, on saved screenshots where she stands (by default bench-look's), by the matched template's origin and by its bottom; and on recordings with the camera still (by default `stand_snail` and `walk_snail`), how far their x strays from frame to frame, whether they face the way they move, how often their pose (the matched template's frame) is what they do, walking or standing, by cut-outs and sprites, and how fast each kind walks. `--tracks` reads `watch`'s telemetry instead: each track's velocity against how far its x went by the next record, for those standing and those walking. No game, no keys |
 | `bench-paste`, `bench-paste FILES --map 10004021` | A map's monsters (each kind with a colour gate) and the drops, the game's own pictures drawn onto frames of the game at its own 1366×768 as the game draws them (alpha blended, at known places; by default the three in `tests/fixtures/native`, every frame of each kind both ways twice), looked for there and on the same scenes stretched to 1920×1080 as the window stretched them: how many the whole screen's search found and a fight's band around each, where against where they were drawn (map units), their scores, as which frame and facing, what was found that wasn't drawn (in the scenes and on the frames as they are), and how long each search took; then re-finds: each monster found, drawn where it stood as a frame it may show next (itself, its pose's next, standing to walking or back, a flinch) and looked for again as the feed does, with the fallback to the kind's whole set and without; `--full-step-1` also searches with step 1 at full size (as before the search went coarse to fine). See Screen size. No game, no keys |
+| `learn-colours FRAMES --map 10002073` | A map's background colours from saved frames of it (any window size, or folders of them), for its monsters with no hand-made colour test: kept in `assets/backgrounds/<map id>.npz`, from which the map's detector learns their gates (see Perception: learned gates); offline, no keys |
 | `bench-capture --n 100` | A look's capture and a glance's timed through DXGI and through mss, on the game's window as it is on screen (or the screen's top-left 1920×1080 without the game), and whether the two see the same pixels; never brings anything forward; sends no keys |
 | `watch`, `watch --minutes 10 --lie-detector` | The game looked at every frame with no command running (see Continuous perception): her place, the monsters followed, their deaths and who killed them, her EXP gains (her number read: her EXP a minute every 10 s) and hits, published for the mini-map; with `--lie-detector` it also checks for the Lie Detector and pages whoever is at the PC. Never sends keys, never brings the game to the front, reads nothing while the game isn't wholly on screen (started with the game minimized, it waits for it to be restored before it takes the window's size) |
 | `nav 35 --feed`, `tour --loop --feed`, `hunt clear --feed` | The command's looks and glances from a continuous feed (see Continuous perception); at its end, what the feed did (frames, how many placed her, its searches) and how many looks and glances came from it |
@@ -326,7 +327,7 @@ To check in game (none of this has been played):
 
 | Piece | Does |
 |---|---|
-| `mobs.py` | Finds snails, slimes, pigs and Orange Mushrooms. It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates. The matches run on 6 threads, OpenCV letting go of Python's lock while it matches; which spots get checked doesn't depend on what the checks find, so they're all picked first, and the answers are the same as on one thread, in the same order. 21.6 ms for the fight's band around her and 76 ms for the whole screen (medians on the 17 bench frames), against 92 and 350 on one thread. What step 1 does after each match (windows with too little colour out, the peaks picked) is done in C (`gamelab/native.c`, called through ctypes, which lets go of Python's lock for it): in numpy it held the lock, so the threads took turns at it, 18 of the band's 34 ms (33.5 and 120 ms before it, timed back to back). The C does numpy's arithmetic in numpy's order, so the answers are the same to the bit (on all 31 saved 1920×1080 screenshots, and tests compare them on made-up ones); it's built with MSVC 2022's Build Tools the first time it's needed (`python -m gamelab.native` builds it now; see Motion planning), and without them the search runs in numpy as before (`bench-look` says which). More than 6 threads still don't help: the colour tests before the matches are numpy's. The first pass ignores windows with almost none of the monster's colour (summed from one integral image per kind): their normalised score is noise that can reach a perfect 1.0. The frame is also cut to an even size so the half-size mask is an exact shrink. An odd size (the fight's band was 151 rows) smeared faint colour into blank windows. In the basin, those fake matches took all 12 checks per monster type, so the fight never saw the snails and pigs at her level while a whole-screen look did. That's likely also why one pass over the whole screen once missed three slimes in plain view; whole-screen looks still go band by band. A monster found says which template matched it, and so what that template knows (`sprites.py`): where its feet are, which way it faces (the game's sprites face left; flipped, right) and its pose (standing, walking, flinching). It's placed where its feet are, not at its picture's middle and bottom: a sprite's origin is up to 8.5 units off its picture's middle, a slime's hop frames end 10-17 units above its feet, and the cut-outs were cut off anywhere from 9.5 units above the feet to 16 below. On 15 saved frames where she stands (`bodies`), monsters' feet came out -1.4 to +2.5 units from the surface they stand on (18 of them; sprites +1.4 on average), against -8.5 to +16.4 by the picture's bottom, and +7.7 for a pig on platform 26 480 units above her, whose hop frame matched best though its picture's bottom sat on the surface (the walking frames scored 0.83-0.88 against 0.91); on two recordings with the camera still, a snail's x strayed from a straight line by 1.5 and 1.6 units (rms; at most 4.8 and 5.2) against 2.4 and 3.5 (at most 13.4 and 9.8), when it jumped between a sprite and an off-centre cut-out. The way it faced was the way it moved in 192 of the 199 stretches of 0.6 s where it walked (the misses at turns). For the continuous feed a monster seen before is re-found 16 px around where it should be (`refind`): with the template that matched it last, 0.69 ms, else with its kind's templates in that window, 3.4 ms; on the 17 saved frames 84 of 84 were re-found where they were, and 84 of 84 moved 8 px. At the game's own 1366x768 the search is coarse to fine: step 1 at this scale, step 2 at full size around each place with several frames a place (see Screen size). |
+| `mobs.py` | Finds snails, slimes, pigs and Orange Mushrooms, and any other kind with a colour gate learned for its map (below). It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates. The matches run on 6 threads, OpenCV letting go of Python's lock while it matches; which spots get checked doesn't depend on what the checks find, so they're all picked first, and the answers are the same as on one thread, in the same order. 21.6 ms for the fight's band around her and 76 ms for the whole screen (medians on the 17 bench frames), against 92 and 350 on one thread. What step 1 does after each match (windows with too little colour out, the peaks picked) is done in C (`gamelab/native.c`, called through ctypes, which lets go of Python's lock for it): in numpy it held the lock, so the threads took turns at it, 18 of the band's 34 ms (33.5 and 120 ms before it, timed back to back). The C does numpy's arithmetic in numpy's order, so the answers are the same to the bit (on all 31 saved 1920×1080 screenshots, and tests compare them on made-up ones); it's built with MSVC 2022's Build Tools the first time it's needed (`python -m gamelab.native` builds it now; see Motion planning), and without them the search runs in numpy as before (`bench-look` says which). More than 6 threads still don't help: the colour tests before the matches are numpy's. The first pass ignores windows with almost none of the monster's colour (summed from one integral image per kind): their normalised score is noise that can reach a perfect 1.0. The frame is also cut to an even size so the half-size mask is an exact shrink. An odd size (the fight's band was 151 rows) smeared faint colour into blank windows. In the basin, those fake matches took all 12 checks per monster type, so the fight never saw the snails and pigs at her level while a whole-screen look did. That's likely also why one pass over the whole screen once missed three slimes in plain view; whole-screen looks still go band by band. A monster found says which template matched it, and so what that template knows (`sprites.py`): where its feet are, which way it faces (the game's sprites face left; flipped, right) and its pose (standing, walking, flinching). It's placed where its feet are, not at its picture's middle and bottom: a sprite's origin is up to 8.5 units off its picture's middle, a slime's hop frames end 10-17 units above its feet, and the cut-outs were cut off anywhere from 9.5 units above the feet to 16 below. On 15 saved frames where she stands (`bodies`), monsters' feet came out -1.4 to +2.5 units from the surface they stand on (18 of them; sprites +1.4 on average), against -8.5 to +16.4 by the picture's bottom, and +7.7 for a pig on platform 26 480 units above her, whose hop frame matched best though its picture's bottom sat on the surface (the walking frames scored 0.83-0.88 against 0.91); on two recordings with the camera still, a snail's x strayed from a straight line by 1.5 and 1.6 units (rms; at most 4.8 and 5.2) against 2.4 and 3.5 (at most 13.4 and 9.8), when it jumped between a sprite and an off-centre cut-out. The way it faced was the way it moved in 192 of the 199 stretches of 0.6 s where it walked (the misses at turns). For the continuous feed a monster seen before is re-found 16 px around where it should be (`refind`): with the template that matched it last, 0.69 ms, else with its kind's templates in that window, 3.4 ms; on the 17 saved frames 84 of 84 were re-found where they were, and 84 of 84 moved 8 px. At the game's own 1366x768 the search is coarse to fine: step 1 at this scale, step 2 at full size around each place with several frames a place (see Screen size). |
 | `sprites.py` | Templates for the monsters on the current map, made from the game's own sprites (every stand, move and hit frame) at their on-screen size, with what the game data says of each frame (`index.json`: its origin, the point that stands on the monster's feet, its body's box, its head, how long it shows). They're added to the screenshot cut-outs in `assets/mobs/`, which still catch monsters half hidden in plants. Each cut-out is matched once against its kind's sprites, both ways (`cutouts.json`): all 11 matched a frame at 0.86-0.98 (the other way round 0.29-0.52), which gives where their monster's feet are and which way it faces; under 0.85 a cut-out would stand on its middle and bottom instead. The four pig cut-outs are all the hop frame cut off 9.5 units above the feet, and three slime cut-outs reach 14-16 units below them (grass). Built on first use and kept with the other extracted data (git-ignored). At the game's own 1366x768 the templates are the game's pictures as they are, alpha and all (`sprites_x1`), and the cut-outs aren't used (see Screen size). |
 | `loot.py` | Finds drops on the ground: what this map's monsters drop (Squishy Liquid, Slime Bubble, Leather, Pig's Head, Pig's Ribbon, Orange Mushroom Cap, Snail Shell), the potions monsters this level drop (Red, Orange, White and Blue Potion), and bronze and gold mesos (3 spinning frames each; a coin found says which it is, `Item.coin`: their amount picks it). Templates are the game's own item pictures at their on-screen size, scaled by their opaque pixels only. A spot counts when the masked template matches (0.6) and its colours differ from the template's by at most 24 on average, checked where the picture covers whole pixels. The sea and island backdrop matched the Blue Potion's shape at 0.60-0.63, and UI buttons the White Potion's; they differed by 27-57, real drops by 12-19. Only a strip just above each platform is searched (drops lie on the ground), on 8 threads, every strip's templates at once: 6.0 ms for her platform, 54 for every platform in view (medians on the 30 saved screenshots that place her, with and without mesos only), against 8.5 and 89 strip by strip on 4 threads, with the same drops in all 120 searches. On 110 saved frames it found all 18 drops and nothing else. Drops lay on the ground about 2 s after her EXP went up, and monsters are drawn in front of them. At the game's own 1366x768 the templates are the game's pictures as they are, and the shapes are matched on brightness alone, the colours checked as here (see Screen size). |
 | `nametag.py` | Her name tag, matched at full resolution (at half size the score swings between ~0.6 and ~0.9). Of the good matches in the play area, the one nearest where she was wins: her name also shows in the minimap, the bottom bar and the party list. A look searches within 240 px across and 120 down of where she was found last first: 3.4 ms, against 37 for the whole play area (`bench-look`, 17 saved frames, the same answers on all of them). The whole play area is searched when she isn't there (a warp, the tag hidden), and every 30th look anyway, so a wrong match can't stick. |
@@ -334,6 +335,160 @@ To check in game (none of this has been played):
 | `hud.py` | HP and MP from the bar colours; her EXP number, which only changes when she gains EXP (read only then); a monster's HP bar (the longest run of bar colours above it, from numpy's runs: 0.2 ms); the purple MISS or damage numbers when a monster touches her. |
 | `minimap.py`, `terrain.py` | Her yellow minimap dot, and other players' (see Other players); the ground under her; ropes and ladders on screen. Ropes are looked for only where the map's ropes can show: Senses hands perception the columns, 52 px either side of where her dot puts each (`ROPE_PAD`: all a rope can be off and still place her). 4.2 ms a look, against 31.4 for the whole screen with the rope colour test in numpy as before (in OpenCV now: the same pixels, checked on every colour; the whole screen 19) and 8.4 before each column was copied out of the screen for its colour test (OpenCV split a column viewed in place 8 times slower) and the shapes were made only in the box around the rope colour's pixels (58% of a column) and connected only around what was left of them (9%): the same ropes on all 31 saved 1920×1080 screenshots, over the whole screen and in random columns, and on 3,000 made-up strips. On 17 saved frames the ropes seen were 0-20 px from where her dot put them, and the same as on the whole screen. |
 | `lie_detector.py` | The Lie Detector's three forms (see above). A check of the screen takes 64.5 ms (the player's, 4 times a second, about 3 until 2026-10-24: The Lie Detector's recordings; 73.6 before its capture was turned into a picture of its own and the title's yellow tested in OpenCV, with the same scores). Most of it is matching the title's letters (about 35 ms) and the two half-size forms (about 19). |
+
+**Monsters with no hand-made colour test: learned gates** (from 2026-10-24; `perception/gates.py`, `mobs.py`,
+`sprites.learn_background`, `learn-colours`). Step 1 looks for a kind only where its body's colour is, and the first
+map's four kinds have that test written by hand (`mobs.PALETTES`). The next maps' monsters weren't looked for at all,
+and by hand their tests would be hard to write: West Rocky Mountain II's stumps are browns like its rock, and Tree
+Dungeon's mushrooms stand in a green forest, a Green Mushroom's cap pale green and a Horny Mushroom's grey-blue over the
+same beige stem. Now a kind without one gets a gate learned from data:
+- **Its colours** are its own pictures' pixels as step 1 sees them (the game's sprites shrunk to step 1's scale, as the
+  detector makes them, at either window size), as drawn and blended toward the fog's white (`gates.FOG_ALPHAS`, 0.7 and
+  0.4: West Rocky Mountain II's drifting fog; at 1920x1080 half size on 2026-10-23, red snails under it went from 48 to
+  53 of 57 found with the blends). Tree Dungeon has no fog, and they cost nothing there: without them its gates took
+  half as much of its background (0.76% for the two kinds together, against 1.63%) and a Horny Mushroom of the 17 in
+  plain view was missed.
+- **The background's** are the play area of saved frames of the map (above the HUD) at step 1's scale, with the
+  monsters on them cut out (`sprites.learn_background`): they're found with gates learned against the frames as they
+  are, monsters and all, then again with gates learned without the ones found, each one's picture cut out 6 game px
+  around (`CUT_PAD`, `CUT_ROUNDS`).
+- A colour, binned 5 bits a channel (32,768 colours), is the kind's where its share of the kind's pixels (as drawn or
+  any blend) is 5 times its share of the background's or more (`gates.RATIO`). On West Rocky Mountain II's labelled
+  frames (below) ratios of 3, 5, 8 and 12 found 55, 56, 56 and 57 of the 58 in plain view at 1366x768, but 164, 167, 164
+  and 137 of the 203 on its 1920x1080 frames shrunk to that size; each stump's gate took about 5.5%, 4.2%, 3.2% and 2.2%
+  of the background.
+- `python -m gamelab learn-colours --map ID FRAMES` (saved frames of the map at any window size, or folders of them)
+  keeps a map's background counts in `assets/backgrounds/<map id>.npz` (in git: 23 and 28 KB; the frames stay out of
+  it), and the map's detector learns its gates from them as it's made (`sprites.detector_for`); with none kept for a
+  map, its kinds without a hand-made test aren't looked for, as before. So the next map onboards the same way: its
+  sprites are built from the game data on first use, a few frames of it are saved, and `learn-colours` is run once.
+  Tree Dungeon's came from its 20 frames (53 monsters cut out; its gates take 0.98% and 1.22% of its background),
+  West Rocky Mountain II's from its 133 frames at 1920x1080 and 31 at 1366x768 (667 cut out; each stump's gate takes
+  3.8-4.4%, the Red Snail's 0.4%).
+
+Everything below goes for the learned kinds only: the first map's four, their tests, templates and searches are as they
+were, and the 86 golden traces are byte-identical.
+- **One lookup a pixel:** each colour bin's byte has a bit for each learned kind (`gates.Gates`), so step 1 bins each
+  pixel once and looks it up once for all of them (1.5-1.8 ms a band at 1366x768, on one thread).
+- **The whole screen's bands overlap by the tallest picture** and step 2's slack (an Axe Stump's flinch is 93 game px
+  tall, a band's overlap 43 at 1366x768), so one standing across a band's edge is whole in the next band. The first
+  map's four still go by the bands as they were (on Tree Dungeon a hopping slime on platform 30 can straddle one).
+- **The fine gate tries a place's first two templates** (`mobs.GATE_TRIES`), not only its first. A stump's frames'
+  silhouettes match a blob of its colour about alike, its flinch frame's (the largest) most often best, and gated with
+  it a place failed where its own frame, the place's second or third, would have passed: on West Rocky Mountain II's
+  1366x768 frames the places of Stumps and Axe Stumps in plain view scored 0.29-0.46 with the flinch frame and 0.67-0.77
+  with their own (then 0.94-1.00 at full size). Gated with the first alone, 53 of the 58 in plain view were found (143
+  of the 203 on the 1920x1080 frames shrunk), in 91 ms a whole screen; with the first two, 56 (167), in 106.
+- **Kinds of one shape are searched as one** (`MobDetector.units`, `SAME_SHAPE` 0.9 of the larger picture's pixels in
+  common, set on their feet): Horny and Green Mushroom are one sprite with two caps (95%), Stump and Dark Stump one in
+  two colours (100%). They're searched by their gates together, with one silhouette a frame for both kinds (half step
+  1's matches for the mushrooms), one set of places, and at each place step 2 checks each kind's picture side by side,
+  the better kept. Searched apart, each kind made a place at the same monster and gated and checked it there, and a
+  look where only one kind's gate fired there could have named a Green Mushroom a Horny one: the other kind's picture
+  scores 0.82-0.92 on a mushroom (median 0.895, on the labels), where `THRESHOLD` is 0.6. Together, Tree Dungeon's whole
+  screen took 65 ms against 81 apart (2026-10-24, alternating), finding the same; West Rocky Mountain II's 106 against
+  110, finding 56 of the 58 in plain view against 57 (and 167 of the 203 on the frames shrunk, against 170).
+- **An Axe Stump by its axe:** a Stump's picture matches the stump that is all of an Axe Stump but its axe about as well
+  as the Axe Stump's own picture does (0.94 and 0.94 on most), so by the score alone 10 of the 40 Axe Stumps in plain
+  view were taken for Stumps. A monster found as a kind that shares its body with one searched apart (`twins`: 80% of
+  the larger picture's pixels in common; an Axe Stump and a Stump 85%, a Red Snail inside a Stump 32-38%) is checked as
+  those at its feet (`mobs._pick_kind`): a picture with parts of its own (10% of its pixels outside the others', an Axe
+  Stump's axe 15%) is the monster's only where those parts alone match 0.6 (`OWN_MATCH`), and then over the pictures it
+  holds; otherwise the best score. On the 1920x1080 frames (shrunk, and at half size) an Axe Stump's axe matched
+  0.83-0.97 on 39 of the 40 in plain view (one at 0.25), its place on a Stump or a Dark Stump -0.6 to 0.70 (one at 0.70,
+  the next 0.52).
+
+**The HUD's top** (`screen.Geometry.hud_top`). Monsters and drops are looked for above the HUD, and `HUD_TOP` (0.88 of
+the height) put it at row 675 at 1366x768, where the chat box starts at row 700 (its dark border, from x 283 to 1080,
+on every 1366x768 frame of both maps; at 1920x1080 at screen row 984-985, game row 700.2). At 1366x768 the search now
+goes down to row 700 (`HUD_TOP_GAME`), and so do her band, the re-finds' bounds, the drops' strips and the view a scene
+records: on Tree Dungeon those 25 rows hold platforms 31 and 32 seen from 28 (the Horny Mushroom on 31 stands half under
+the chat bar there, its feet at rows 701-718, and still isn't looked for). At 1920x1080 it's as it was (the simulator
+draws its world at that size, and the scenes it records go by it; the game isn't run at that size any more). Searching
+the 25 rows more cost nothing measurable: the first map's whole screen took 89-98 ms either way (`bench-look --shrink
+1366x768`, two runs each).
+
+**On the labelled frames** (whole-screen searches; a monster counts as found where one is within 10 game px of its
+feet; in plain view: not hidden, flinching, spawning, dying, faded, in fog or behind vines):
+
+| | Tree Dungeon, 20 frames at 1366x768 | West Rocky Mountain II, 31 frames at 1366x768 | ... 42 frames at 1920x1080, half size | ... the same 42 shrunk to 1366x768 |
+|---|---|---|---|---|
+| labelled (in the rows searched); in plain view | 78 (57); 44 | 116; 58 | 287; 203 | 287; 203 |
+| the background learned on | the other run of frames (14 or 6) | the 91 1920x1080 frames not labelled | those 91 and the 31 at 1366x768 | the same |
+| found in plain view | 44 of 44 (Horny 17, Green 27) | 56 of 58 (Axe Stump 40 of 40, Stump 16 of 18) | 172 of 203 (Stump 55 of 67, Dark Stump 28 of 39, Axe Stump 35 of 40, Red Snail 54 of 57) | 167 of 203 (52, 27, 36, 52) |
+| ... of all of them | 53 of 57 | 71 of 116 | 175 of 287 | 169 of 287 |
+| of the wrong kind | none | none in plain view (1 of the others: a body facing right under an axe drawn facing left, labelled unsure) | 2 | 1 |
+| found that aren't there | none (with 52 players, 38 pets, all orange snails named Snail, and their name tags on the frames) | none (another player fighting the stumps, his hits' sparks, her pet, ropes, vines) | none of these kinds (6 of the first map's Orange Mushrooms on rock, as before at this size) | none |
+| feet against the labels, across / down: mean; at most (game px) | 0.3 / 0.8; 2 / 3 (the labels are good to 2) | 0.0 / 0.0; 1 / 0 | 0.5 / 0.5; 1.8 / 1.1 | 0.6 / 0.2; 1.7 / 0.5 |
+| facing as labelled | all 53 | all 71 | all 175 | all 169 |
+
+On Tree Dungeon, in her band (140 units above her feet to 75 below): all 5 in plain view, 10 of 13, nothing else; with
+the background learned on all 20 frames (as kept), the same, and 52 of the 57 in the rows searched. Those missed: a
+Horny and a Green Mushroom dying (their caps alone, faded), a Green spawning (fading in), and a Horny standing on the
+chat box's border on two frames (its own frame scored 0.58 above it). Horny against Green: at each of the 55 mushrooms
+above the chat box whose frame the labels' sprite fit gave, either kind's picture found there was given the right kind
+(110 of 110; the spawning, flinching and covered ones too), the closest by 0.067 and 0.074 (two Greens fading in) and
+0.077 (a Horny flinching under siwooda's tag). On West Rocky Mountain II's 1366x768 frames the two missed are Stumps in
+plain view, one of them walking. The 1920x1080 frames shrunk to 1366x768 aren't the game's own pixels (the stretch
+blurred them) and fog covers many of them: there the game's pictures score lower and miss more than on frames of the
+game at its own size. At half size, with each kind searched apart, 177 of the 203 had been found (3 of the wrong kind);
+searched as one, 172.
+
+West Rocky Mountain II's 1366x768 frames are labelled in `tests/fixtures/west_rocky_native_monsters.json` (new: each
+kind by eye on 2-3x crops, the feet and facing from its sprites' best fit), its 1920x1080 ones in
+`west_rocky_monsters.json`, and Tree Dungeon's in `tree_dungeon_monsters.json` (from the map's study, with every player
+and pet); the frames stay in `D:/MapleHelper-scratch`, and `tests/test_gates.py` checks these numbers where they are.
+
+**Drawn onto the maps' own frames** (`bench-paste FRAMES --map ID`: every frame of each kind, both ways, twice, at
+random places): on Tree Dungeon's 20 frames at 1366x768, Green Mushrooms 28 of 28, Horny Mushrooms 27 of 28 and slimes
+43 of 44 found, each as its kind and as the frame and facing drawn, scoring 1.00, the feet exact; stretched to
+1920x1080, 28, 27 and 42 (scoring 0.80-0.99, the feet within 1.1 units but for a slime's hop, 7.4). On West Rocky
+Mountain II's 31: Axe Stumps 20 of 20, Dark Stumps 18 of 20, Red Snails 20 of 20 and Stumps 20 of 20 (stretched, 16, 20,
+20 and 20). Each one found, drawn again as the frame it may show next, was found again as the feed re-finds (44 of 44 at
+each step on Tree Dungeon, all 24-32 on West Rocky Mountain II, 6 of the 32 steps between standing and walking going on
+to the kind's whole set).
+
+**What it costs** (`bench-look` on each map's own frames, 3 looks a frame, medians in ms of two runs on 2026-10-24 with
+other work sharing the CPU, beside the first map's 17 bench frames shrunk to 1366x768 in the same runs):
+
+| | Tree Dungeon (20 frames) | West Rocky Mountain II (31) | the first map's (17, shrunk) |
+|---|---|---|---|
+| monsters: her band | 18.7-19.7 | 18.0-18.2 | 26.3-29.3 |
+| ... the whole screen | 63.8-67.6 | 105.1-106.0 | 89.1-98.2 |
+| `Senses.look` with her band | 22.9-24.6 | 24.6-24.7 | 32.6-35.6 |
+| ... the whole screen and every drop in view | 109.8-117.9 | 194.4-194.9 | 176.0-193.6 |
+| the feed's step: her place, monsters re-found | 23.8-26.8 | 24.3-26.2 | 22.1-23.5 |
+| ... with the whole screen | 85.8-96.7 | 129.0-130.3 | 109.7-119.6 |
+
+(The day's CPU made the first map's search 15-35% slower than its rows above, 22.8 and 71.7.) So a fight's look costs
+less on both maps than on the first, and so does the whole screen on Tree Dungeon; on West Rocky Mountain II the whole
+screen costs about 10% more (four kinds, each stump's gate taking 4% of its rock, the bands taller for the Axe Stump),
+and 146 ms with six drawn on each frame beside the monsters there (`bench-paste`; the first map's six, 85.6). On one
+thread its whole screen takes 261 ms: step 1's 30 silhouette matches a band 90, the gates 80, step 2's checks 52, the
+Axe Stump checks 6. Tree Dungeon's slime, a kind with a hand-made test, takes about 55 of that map's 155 ms on one
+thread (22 of its 36 silhouettes a band): its colour test passes 1,000-1,500 px of trunk and platform rims a frame, none
+of whose places ever passes the gate, for 24 of the map's 1,003 spawn EXP.
+
+**To check in game** (the game at its own 1366x768; these send no keys and need no player):
+- `python -m gamelab hunt look --map 10002073`, she on 28 by the portal: the Horny Mushrooms on 23 and the Green ones on
+  22, 24, 29 and 30 listed on their platforms to a unit or two, each of its kind (a Horny's cap grey-blue, a Green's
+  pale green on `lab/shots/hunt_look.png`), and no snail (other players' pets are orange snails named Snail) or slime
+  there.
+- `python -m gamelab watch --minutes 3 --map 10002073`: monsters followed and their deaths (an hour of `watch` there on
+  2026-10-24, before the gates, followed none), the Greens other players kill near her among them.
+- `python -m gamelab bench-look --live --n 100 --map 10002073` with the game in front: a fight's look about 25 ms and a
+  whole screen about 65, the grab on top.
+- The same three on West Rocky Mountain II (`--map 10004021`): its Stumps, Dark Stumps, Axe Stumps (by their axes) and
+  Red Snails.
+- Frames saved there in game (`snap --scale 1`, copied off `lab/shots/snap.png`), more Horny Mushrooms among them (the
+  labelled ones are mostly the same one or two on 23), can go to `learn-colours` with the 20 of 2026-10-24.
+
+Not done: a monster followed is re-found as its own kind only, so a Horny walking past a Green, or a Stump past an Axe
+Stump, isn't checked for its kind again until a band or whole-screen search finds it; monsters half under the chat box
+aren't looked for (the HUD covers x 283-1080 only, and the map's sides below row 700 aren't searched either); a kind
+is looked for all over the screen, where its spawns can't show too (Tree Dungeon's slime, above); and a map's background
+is only as good as its frames (Tree Dungeon's 20 are one from platform 19 and two short runs from 28: the top of the
+tower, 6-15, isn't in them).
 
 **What a look costs** (`bench-look` on the 17 saved frames, medians in ms; each pair of columns from runs back to back on 2026-10-20, the first 5 looks at each frame, the second 3 rounds of 3 alternating; offline, so the grab itself comes on top: 16.7 ms with mss, which waits for the compositor's next frame; with DXGI the wait for the screen's next frame, 8 ms on average at 60 frames a second, and copying it off the graphics card takes about 1 ms more than converting a saved frame):
 
@@ -650,7 +805,7 @@ First look, explore only (no attacks):
 - **Seen right:** her place from the minimap (`map --map 10004021`), HP and MP, her EXP number (31,736 at level 23,
   every glyph within 0.6 levels), and other players and their platforms.
 - **Not seen:** the monsters. A kind is searched for only with a colour gate (`mobs.PALETTES`), and only the first
-  map's four have one.
+  map's four had one. Since 2026-10-24 its kinds have gates learned from its saved frames (Perception: learned gates).
 - **Overlapping platforms:** 21 lies on 22's footholds and 11 on 14's, in other groups; she stands on either, and
   trips between them were planned as jumps and counted as landing elsewhere (4 of 8 moves on one trip). Found offline
   (Localization: Twins): they're in the same group as 22 and 14, 0.00-0.15 units above them, chains of their own
@@ -1090,7 +1245,7 @@ What goes by it:
   with the grass it stood in, took the place where the snail's own frame scored 0.93). What matching them against the
   sprites says of them (`cutouts.json`, in their own px) still goes for any window that stretches the game. At this
   size a map's detector holds its own kinds alone (`MobDetector(kinds=)`), whatever `sprites_x1` holds from other
-  maps: on West Rocky Mountain II, none of whose monsters has a colour gate yet, it finds nothing (on a checkout that
+  maps: on West Rocky Mountain II, none of whose monsters had a colour gate then, it found nothing (on a checkout that
   hadn't built the first map's sprites it had stopped every look with "no monster templates"; at 1920x1080 the
   cut-outs and the sprites folder, every kind in them, as always). The search goes coarse to fine and re-finds a
   monster as the frame its animation went to (below); its re-find window and bands are converted, and a band with no
@@ -1282,11 +1437,10 @@ on 28 on `n28_000.png`; without the picture at (-880, 2697), and with 1920x1080'
 player:
 - `python -m gamelab hunt look --map 10004021`: her place, HP and MP, her EXP number (every glyph within about a level),
   the other players (one to three of them on the bridge 22 when these frames were taken); `lab/shots/hunt_look.png` at
-  1366x768. No monster of this map has a colour gate on this branch, so at this size none is looked for (no monster
-  line); once the perception track's are in, its stumps and red snails should stand on their platforms to the unit
-  (their feet where the sprite's origin is), as the frame they show, with scores near 1.00 where nothing is in front
-  of them. Then again with the game minimized: it should come back to the front and look, where it had stopped with
-  "not calibrated at 432x54".
+  1366x768. Its stumps and red snails (looked for with learned gates since 2026-10-24: Perception) should stand on their
+  platforms to the unit (their feet where the sprite's origin is), as the frame they show, with scores near 1.00 where
+  nothing is in front of them. Then again with the game minimized: it should come back to the front and look, where it
+  had stopped with "not calibrated at 432x54".
 - `python -m gamelab map --map 10004021`: her place by her dot alone, about x -880 on stair 28 until the map track's
   fit of this map's minimap picture is in (then -792).
 - `python -m gamelab watch --minutes 2 --map 10004021`, started with the game minimized: it should say it's waiting
@@ -1833,7 +1987,7 @@ A hunt runs for hours, and perception is to run all the time, so what the stack 
 
 - **Recalibrate** after moving the game window, changing maps or changing resolution (each client size keeps its own calibration). Her name-tag template is kept between calibrations; `calibrate --fresh` rebuilds it, and should be run where no rope crosses her name (at 1366x768 on West Rocky Mountain II the name tag finder doesn't find her tag over the clouds: pass `--tag X,Y`; see Screen size).
 - **`hunt` needs a 1920×1080 or 1366×768 game window** with a calibration at that size, and the size it had when the command started (see Screen size). The combo analysis on recordings (`track.airborne`'s lift, the claw's swing boxes, `scroll`'s strip and patches, `analyze.UP_PX`) converts its px, measured on the 1920×1080 window's half-size recordings, by the recording's geometry; no recording at 1366×768 has been made to check them on.
-- **Each new monster type needs a colour gate** (a body-colour test in `PALETTES` in `perception/mobs.py`) before its game sprites are used. Its templates come from the game data automatically.
+- **Each new monster type needs a colour gate** before its game sprites are used: a body-colour test in `PALETTES` in `perception/mobs.py` (the first map's four), or one learned against its map's background colours, which `learn-colours` measures on saved frames of the map (see Perception: learned gates). Its templates come from the game data automatically.
 - **Her name tag can be hidden** behind screen widgets at the map's edge, like the party HP box. She's then placed on screen from the minimap dot and the camera, which is only good to about 11 map units.
 - **Camera correction for recordings needs ground with a pattern** under her, like a girder or tiles. Plain ground can't be tracked.
 - **Swing detection is tuned to the claw's white/lavender swing effect.** Other weapons or skills may need `SWING_MIN_PIXELS` in `analysis/track.py` adjusted.
