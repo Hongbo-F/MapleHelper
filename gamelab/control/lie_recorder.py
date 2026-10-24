@@ -7,7 +7,8 @@ One folder a cycle, paths.LIE_RECORDINGS/<YYYYmmdd-HHMMSS> (when it was first se
   00000.jpg ...  every frame grabbed: the game's client area as the watchdog grabbed it, as JPEG (JPEG_PARAMS);
   index.jsonl    a line a grab: `t` (s since the first sight) and either the frame's number `i`, its `file`, the
                  spotter's per-form `scores` (match / threshold, 1 = seen) and whether the Lie Detector was `seen`,
-                 or `game`: why there is no frame ("no window", "minimized");
+                 or `game`: why there is no frame ("no window", "minimized"; or "covered": another window over the
+                 game, with the `scores` and `seen` of what was on top, its picture not saved);
   summary.json   at the end (`Recording.summary`): when it was first and last seen, how long the recording ran, its
                  frames, the forms seen and when each first and last showed, whether the Truth Booth did (the
                  outcome as far as the picture tells), how it ended, the alarm's screenshot and the window's size.
@@ -111,17 +112,22 @@ class Recording:
     def add(self, t: float, frame: np.ndarray | None, scores: dict[str, float] | None = None,
             why: str | None = None) -> None:
         """One grab, `t` s after the first sight: a frame (RGB) with the spotter's scores of it, or None and why
-        there is none (the game window gone or minimized). Never blocks: with the queue full the frame is dropped
-        (counted, and the next line in the index says how many went before it)."""
+        there is none (the game window gone or minimized; or covered by another window, with the scores of what was
+        on top, which aren't saved as a picture). Never blocks: with the queue full the frame is dropped (counted,
+        and the next line in the index says how many went before it)."""
         record: dict = {"t": round(t, 3)}
         if frame is None:
             record["game"] = why or "no window"
             self.missing[record["game"]] += 1
         else:
             scores = scores or {}
-            seen = bool(scores) and max(scores.values()) >= 1
-            record.update(i=self.numbered, seen=seen, scores={k: round(float(v), 3) for k, v in scores.items()})
+            record["i"] = self.numbered
             self.numbered += 1
+            if self.window is None:
+                self.window = [int(frame.shape[1]), int(frame.shape[0])]
+        if scores is not None:
+            seen = bool(scores) and max(scores.values()) >= 1
+            record.update(seen=seen, scores={k: round(float(v), 3) for k, v in scores.items()})
             for name, v in scores.items():
                 if v >= 1:
                     form = self.forms.setdefault(name, {"first": record["t"], "last": record["t"], "frames": 0})
@@ -130,8 +136,6 @@ class Recording:
             if seen:
                 self.first_seen = record["t"] if self.first_seen is None else self.first_seen
                 self.last_seen = record["t"]
-            if self.window is None:
-                self.window = [int(frame.shape[1]), int(frame.shape[0])]
         self.grabs += 1
         self.last_t = t
         if self._dropped_since:

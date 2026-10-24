@@ -120,13 +120,21 @@ def test_watchdog_grabs_the_game_as_an_rgb_picture_of_its_own(monkeypatch):
     monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
     monkeypatch.setattr(player_mod.window, "minimized", lambda hwnd: False)
     monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 1920, "height": 1080})
+    on_top = {"game": True}
+    monkeypatch.setattr(player_mod.window, "shows", lambda hwnd, area: on_top["game"])
 
     class Screen:
         def grab(self, box):
             return bgra
 
-    frame = Watchdog("MapleStory", threading.Event(), spotter=object())._grab(Screen())
+    dog = Watchdog("MapleStory", threading.Event(), spotter=object())
+    frame = dog._grab(Screen())
     assert frame.flags.c_contiguous and np.array_equal(frame, bgra[:, :, 2::-1])
+    # Another window over some of the game: what's on top is still handed over (checked for the Lie Detector,
+    # which may show round it), said to be covered.
+    on_top["game"] = False
+    frame, why = dog._grab(Screen())
+    assert why == "covered" and np.array_equal(frame, bgra[:, :, 2::-1])
 
 
 def test_watchdog_says_why_it_has_no_picture_the_game_minimized_or_gone(monkeypatch):

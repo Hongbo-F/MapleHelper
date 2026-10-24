@@ -133,7 +133,8 @@ class Watchdog(threading.Thread):
     then does the recording start (control.lie_recorder), with that first frame. From there every grab goes into it
     until the game has shown no Lie Detector for `end_s` (lie_recorder.END_S): the cycle's end; or, at the latest,
     `cap_s` after the first sight, when the recording stops and the cycle goes on unrecorded. A grab with the game
-    window gone or minimized is recorded as such, with no frame, and doesn't count as the Lie Detector gone.
+    window gone, minimized or covered by another window (checked for the Lie Detector all the same) is recorded as
+    such, with no frame, and doesn't count as the Lie Detector gone.
 
     `alarm` stays set after the cycle: it's cleared (plans are taken again) only once both a person has cleared the
     alarm (the alarm file, paths.ALARM, gone: `python -m gamelab clear-alarm`) and the game has shown no Lie Detector
@@ -141,8 +142,8 @@ class Watchdog(threading.Thread):
     the player stays locked until it's restarted. Set when the watchdog is made (the player started with the alarm
     up), it's cleared by the same rule.
 
-    `grab` (for tests) stands in for grabbing the game: it returns a frame (RGB), or why there's none ("no window",
-    "minimized"; None is "no window"). Nothing that goes wrong in a look, the recording or the log stops the
+    `grab` (for tests) stands in for grabbing the game: it returns a frame (RGB), (a frame, "covered"), or why there's
+    none ("no window", "minimized"; None is "no window"). Nothing that goes wrong in a look, the recording or the log stops the
     watching: it's logged and the next look comes."""
 
     def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
@@ -201,8 +202,9 @@ class Watchdog(threading.Thread):
                 self._trouble("the Lie Detector check failed", e)
                 frame, why = None, "check failed"
         seen = scores is not None and max(scores.values()) >= 1
-        if seen or frame is None:
-            self.gone_since = None  # a game not showing may have it up behind
+        shown = frame is not None and why is None  # the game itself, nothing over it: only then is the frame saved
+        if seen or not shown:
+            self.gone_since = None  # a game not showing (gone, minimized, covered) may have it up behind
         elif self.gone_since is None:
             self.gone_since = now
         if seen and self.cycle_t0 is None:
@@ -216,7 +218,7 @@ class Watchdog(threading.Thread):
                                                        "player is restarted)"))
             self._start_recording(info)
         if self.recording is not None:
-            self.recording.add(now - self.cycle_t0, frame, scores, why)
+            self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why)
             if now - self.cycle_t0 >= self.cap_s:
                 self._end_recording("cap")
         if self.cycle_t0 is not None and self.gone_for(now):
@@ -252,18 +254,22 @@ class Watchdog(threading.Thread):
         return True
 
     def _look(self, sct):
-        """(the frame, None), or (None, why there's none)."""
+        """(the frame, None); (the frame, "covered"): another window is over some of the game, the frame being
+        whatever is on top; or (None, why there's none)."""
         try:
             got = self.grab() if self.grab else self._grab(sct)
         except Exception as e:
             self._trouble("grabbing the game failed", e)
             return None, "grab failed"
+        if isinstance(got, tuple):
+            return got
         if got is None or isinstance(got, str):
             return None, got or "no window"
         return got, None
 
     def _grab(self, sct):
-        """The game's client area (RGB), or why there's none: "no window" or "minimized"."""
+        """The game's client area (RGB); with another window over some of it, (that, "covered"); or why there's none:
+        "no window" or "minimized"."""
         try:
             hwnd = window.find_game(self.title)
         except RuntimeError:
@@ -274,8 +280,14 @@ class Watchdog(threading.Thread):
         client_area = window.client_rect(hwnd)
         if client_area["width"] <= 0 or client_area["height"] <= 0:
             return "minimized"
+        # A screen capture sees whatever is on top (window.shows: the middle and near each corner). Still checked for
+        # the Lie Detector, as it always was (it may show round the window over it), but not saved, nor counted as
+        # the Lie Detector gone: a terminal opened over the game had gone to disk as frames of it, and after a
+        # minute of it ended the cycle as answered with the Lie Detector maybe up behind.
+        covered = not window.shows(hwnd, client_area)
         # RGB, full size, a picture of its own: viewed as RGB in place, every OpenCV call on it copied it first
-        return cv2.cvtColor(np.asarray(sct.grab(client_area)), cv2.COLOR_BGRA2RGB)
+        frame = cv2.cvtColor(np.asarray(sct.grab(client_area)), cv2.COLOR_BGRA2RGB)
+        return (frame, "covered") if covered else frame
 
     def _raise(self, frame) -> dict | None:
         try:

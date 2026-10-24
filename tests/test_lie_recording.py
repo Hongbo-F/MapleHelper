@@ -280,7 +280,10 @@ class Spotter:
 
 
 def game(kind):
-    """A made-up frame the fake spotter scores as `kind` (an index into FORMS), or why there's none (a str)."""
+    """A made-up frame the fake spotter scores as `kind` (an index into FORMS), or why there's none (a str); for
+    ("covered", kind), that frame with another window over the game."""
+    if isinstance(kind, tuple):
+        return game(kind[1]), kind[0]
     if isinstance(kind, str):
         return kind
     out = frame(40)
@@ -405,6 +408,29 @@ def test_a_game_window_gone_or_minimized_mid_cycle_is_recorded_as_such_not_as_th
     assert summary["not_showing"] == {"minimized": 9, "no window": 4} and summary["frames"] == 9
     assert index[2] == {"t": 0.5, "game": "minimized"} and index[10] == {"t": 2.5, "game": "no window"}
     assert summary["end"] == "gone" and summary["outcome"] == "answered"
+
+
+def test_a_game_with_another_window_over_it_is_checked_but_not_saved_nor_counted_as_the_lie_detector_gone(tmp_path):
+    screen = Screen()
+    dog, flag, said, alarms = make_dog(tmp_path, screen)
+    covered = ("covered", 0)
+    t = play(dog, screen, [("covered", 1)])  # seen round a window over the game: raised as ever
+    assert flag.is_set() and alarms == [True]
+    t = play(dog, screen, [1] + [covered] * 8, t)  # 2 s covered: not gone
+    assert dog.recording is not None
+    t = play(dog, screen, [("covered", 2), 0, 0, 0, 0], t)  # seen through it again; then gone 0.75 s
+    assert dog.recording is not None
+    play(dog, screen, [0], t)  # 1 s
+    [(folder, summary, index)] = written(dog)
+    assert summary["not_showing"] == {"covered": 10} and summary["frames"] == 6 and summary["grabs"] == 16
+    assert len(list(folder.glob("*.jpg"))) == 6  # only the game's own pictures
+    assert index[0] == {"t": 0.0, "game": "covered", "seen": True, "scores": COUNTDOWN}
+    assert index[2] == {"t": 0.5, "game": "covered", "seen": False, "scores": GONE}
+    assert index[1]["file"] == "00000.jpg" and index[11]["file"] == "00001.jpg"
+    assert summary["first_seen"] == 0.0 and summary["last_seen"] == 2.5
+    assert summary["forms"] == {"countdown": {"first": 0.0, "last": 0.25, "frames": 2},
+                                "mini-game": {"first": 2.5, "last": 2.5, "frames": 1}}
+    assert summary["end"] == "gone" and summary["window"] == [64, 48]
 
 
 def test_a_frame_that_cant_be_written_doesnt_stop_the_recording_or_the_watchdog(tmp_path, monkeypatch):
