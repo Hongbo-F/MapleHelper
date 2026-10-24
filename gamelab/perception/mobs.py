@@ -240,10 +240,13 @@ class MobDetector:
     `threads`: how many matches run at once (1: all on the caller's thread). `frame_scale`: the frames' px per game px
     (screen.Geometry.frame_scale; by default the 1920x1080 window's at half size), which each folder's pictures are
     brought to from theirs (`picture_scale`): a folder drawn at the frames' own scale is used as it is.
-    `search_scale`: step 1's frame, px per game px (SEARCH_SCALE; a frame no finer than it is searched as it is)."""
+    `search_scale`: step 1's frame, px per game px (SEARCH_SCALE; a frame no finer than it is searched as it is).
+    `kinds`: only these kinds' templates (by default every kind with a colour test). Given (a map's own:
+    sprites.detector_for at the game's own size), there may be none, a map none of whose monsters has a colour test
+    yet, and the detector then finds nothing; without it, no templates at all is a mistake (a folder with none)."""
 
     def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None,
-                 frame_scale: float = STRETCHED.frame_scale, search_scale: float = SEARCH_SCALE):
+                 frame_scale: float = STRETCHED.frame_scale, search_scale: float = SEARCH_SCALE, kinds=None):
         self.templates: dict[str, list[MobTemplate]] = {}
         folders = folder if isinstance(folder, list) else [folder]
         meta = {**read_meta(folders), **(meta or {})}
@@ -255,7 +258,7 @@ class MobDetector:
         self.spx = self.px / self.search
         for path in sorted(p for f in folders for p in f.glob("*.png")):
             kind = path.stem.split("_")[0]
-            if kind not in KINDS_WITH_PALETTE:
+            if kind not in KINDS_WITH_PALETTE or kinds is not None and kind not in kinds:
                 continue
             rgba = np.asarray(Image.open(path).convert("RGBA"))
             rgb, mask, drawn = _picture(rgba, shrinks[path.parent])
@@ -277,7 +280,7 @@ class MobDetector:
                 self.templates.setdefault(kind, []).append(MobTemplate(
                     t, np.dstack([m] * 3), coarse, *_known(meta.get(path.name), t.shape[:2], flip), path.stem,
                     step1))
-        if not self.templates:
+        if not self.templates and kinds is None:
             raise RuntimeError(f"no monster templates in {folder}")
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)

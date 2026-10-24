@@ -187,12 +187,18 @@ def cutout_origins(kinds: set[str], folder: Path = SPRITES, cutouts: Path = ASSE
 def detector_for(model, geo: Geometry = STRETCHED) -> MobDetector:
     """A MobDetector for a map, for look frames of geometry `geo`: the game's sprites of every monster that spawns
     there (every pose, any monster with a colour gate), drawn as that window shows them, and where the window
-    stretches the game the screenshot cut-outs too (good at monsters half hidden in plants on the 1920x1080 window).
+    stretches the game the screenshot cut-outs too (good at monsters half hidden in plants on the 1920x1080 window;
+    they and the sprites folder hold every kind built for any map, and all of them are looked for, as always).
     At the game's own 1366x768 the sprites are the game's own pictures, and alone: the cut-outs are of the stretched
-    window, and shrunk back they're neither (README, Screen size)."""
+    window, and shrunk back they're neither (README, Screen size). There the detector holds the map's own kinds only,
+    whatever else the folder holds from other maps, so what it looks for doesn't hang on what was built before: a
+    map none of whose monsters has a colour gate yet (West Rocky Mountain II) gets one that finds nothing, where it
+    had none at all on a checkout that hadn't built the first map's (`no monster templates`)."""
     names_by_id = {s.mob_id: s.name for s in model.spawns if s.name and kind_of(s.name) in KINDS_WITH_PALETTE}
     folders = [ensure(names_by_id, stretch=geo.stretch)]
-    return MobDetector(folders if geo.stretch == 1 else [ASSETS] + folders, frame_scale=geo.frame_scale)
+    if geo.stretch == 1:
+        return MobDetector(folders, frame_scale=geo.frame_scale, kinds={kind_of(n) for n in names_by_id.values()})
+    return MobDetector([ASSETS] + folders, frame_scale=geo.frame_scale)
 
 
 def _read(path: Path) -> dict:

@@ -180,6 +180,27 @@ def test_at_the_games_own_size_the_detector_has_the_games_sprites_alone(tmp_path
     assert {"pig_0", "pig_move0"} <= {t.name for t in stretched.templates["pig"]}
 
 
+def test_at_the_games_own_size_the_detector_holds_the_maps_own_kinds_alone(tmp_path, monkeypatch):
+    # West Rocky Mountain II's monsters have no colour gate yet: on a checkout that never built the first map's
+    # sprites the folder is empty, and where it did, it holds them. Either way nothing is looked for there, and the
+    # first map's pig is still looked for on its own map.
+    stumps = SimpleNamespace(spawns=[SimpleNamespace(mob_id=130100, name="Stump")])
+    pigs = SimpleNamespace(spawns=[SimpleNamespace(mob_id=8, name="Pig")])
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    built = game_folder(tmp_path, {"pig_move0": pig()})
+    scene = frame()
+    pasted.paste(scene, pig(), 500, 300)
+    for folder in (empty, built):
+        monkeypatch.setattr(sprites, "ensure", lambda names, stretch: folder)
+        detector = sprites.detector_for(stumps, NATIVE)
+        assert detector.templates == {} and detector.detect_wide(scene, (0, int(768 * HUD_TOP))) == []
+        assert detector.detect(scene, (250, 420)) == [] and detector.refind(scene, (500, 300, 600, 360), "pig") is None
+    assert set(sprites.detector_for(pigs, NATIVE).templates) == {"pig"}
+    with pytest.raises(RuntimeError, match="no monster templates"):  # a folder with none, asked for any kind
+        MobDetector(empty, frame_scale=NATIVE.frame_scale)
+
+
 # --- the game's own pictures (needs the game data copy) ----------------------------------------------------------
 
 def needs_game_data():
