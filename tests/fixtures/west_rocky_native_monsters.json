@@ -1,0 +1,183 @@
+{
+ "about": "Every monster on the 31 frames of West Rocky Mountain II (map 10004021) at the game's own 1366x768 of 2026-10-23 (n28_000-029: she stands on stair 28 while another player, Magaodha, fights the bridge's stumps; native_first.png; the frames are in D:/MapleHelper-scratch/newmap/native and D:/MapleHelper-scratch/newmap/native_first.png, not in git): each one's kind by eye (an Axe Stump's axe on its head, seen on 2x-3x crops), its feet (x, y, the frame's px) and facing (1 right, -1 left) from the best fit of the map's sprites around it, with no colour gate (fit: its score; frame: the frame fitted, where it scored 0.9 or more). Flags: hit (a hit's spark on it, its flinch, its axe flying), faded (see-through, spawning or dying), fog, vines (behind them), hidden (mostly behind another monster or a player), kind? (the kind not sure; on n28_000 at x 786 an axe on the head of a body facing right with its handle up and right, as the Axe Stump's pictures facing left have it: no frame of either kind fits it all, a Stump in front of an Axe Stump or not). Monsters in plain view: those with no flag.",
+ "frames": {
+  "n28_000.png": [
+   {"kind": "stump", "x": 1295.0, "y": 218.0, "facing": -1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 786.0, "y": 210.0, "facing": 1, "frame": "stand/0", "fit": 0.985, "flags": ["kind?"]},
+   {"kind": "axe-stump", "x": 302.0, "y": 212.0, "facing": 1, "frame": "", "fit": 0.457, "flags": ["hit", "faded"]},
+   {"kind": "axe-stump", "x": 1030.0, "y": 217.0, "facing": 1, "frame": "", "fit": 0.845, "flags": ["faded"]},
+   {"kind": "axe-stump", "x": 1139.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.646, "flags": ["faded", "vines"]}
+  ],
+  "n28_001.png": [
+   {"kind": "axe-stump", "x": 1278.0, "y": 218.0, "facing": 1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 647.0, "y": 208.0, "facing": -1, "frame": "move/3", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 771.0, "y": 210.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1216.0, "y": 218.0, "facing": -1, "frame": "move/1", "fit": 0.998, "flags": []},
+   {"kind": "axe-stump", "x": 1089.0, "y": 218.0, "facing": -1, "frame": "move/3", "fit": 0.949, "flags": []},
+   {"kind": "axe-stump", "x": 304.0, "y": 212.0, "facing": 1, "frame": "", "fit": 0.564, "flags": ["hit"]}
+  ],
+  "n28_002.png": [
+   {"kind": "axe-stump", "x": 634.0, "y": 206.0, "facing": 1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 811.0, "y": 210.0, "facing": -1, "frame": "move/3", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 240.0, "y": 214.0, "facing": 1, "frame": "stand/0", "fit": 0.997, "flags": []},
+   {"kind": "stump", "x": 1132.0, "y": 218.0, "facing": -1, "frame": "move/1", "fit": 0.97, "flags": []},
+   {"kind": "axe-stump", "x": 1009.0, "y": 213.0, "facing": -1, "frame": "", "fit": 0.758, "flags": ["faded"]}
+  ],
+  "n28_003.png": [
+   {"kind": "axe-stump", "x": 764.0, "y": 210.0, "facing": 1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1009.0, "y": 213.0, "facing": -1, "frame": "", "fit": 0.772, "flags": ["fog"]},
+   {"kind": "stump", "x": 1055.0, "y": 218.0, "facing": -1, "frame": "", "fit": 0.713, "flags": ["faded"]}
+  ],
+  "n28_004.png": [
+   {"kind": "axe-stump", "x": 362.0, "y": 208.0, "facing": -1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 894.0, "y": 210.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1000.0, "y": 211.0, "facing": 1, "frame": "move/2", "fit": 1.0, "flags": ["kind?"]},
+   {"kind": "stump", "x": 790.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.773, "flags": ["fog"]}
+  ],
+  "n28_005.png": [
+   {"kind": "axe-stump", "x": 278.0, "y": 213.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1028.0, "y": 217.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1062.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.719, "flags": ["hidden"]},
+   {"kind": "axe-stump", "x": 844.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.63, "flags": ["fog"]}
+  ],
+  "n28_006.png": [
+   {"kind": "axe-stump", "x": 355.0, "y": 209.0, "facing": 1, "frame": "move/3", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1060.0, "y": 218.0, "facing": 1, "frame": "stand/0", "fit": 0.978, "flags": []},
+   {"kind": "axe-stump", "x": 714.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.655, "flags": ["faded"]},
+   {"kind": "axe-stump", "x": 945.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.535, "flags": ["fog"]}
+  ],
+  "n28_007.png": [
+   {"kind": "axe-stump", "x": 488.0, "y": 202.0, "facing": 1, "frame": "move/3", "fit": 0.998, "flags": []},
+   {"kind": "axe-stump", "x": 949.0, "y": 210.0, "facing": 1, "frame": "move/2", "fit": 0.983, "flags": []},
+   {"kind": "stump", "x": 891.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.591, "flags": ["fog"]},
+   {"kind": "stump", "x": 1086.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.504, "flags": ["fog"]}
+  ],
+  "n28_008.png": [
+   {"kind": "axe-stump", "x": 397.0, "y": 206.0, "facing": -1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1080.0, "y": 218.0, "facing": 1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 588.0, "y": 203.0, "facing": -1, "frame": "move/3", "fit": 1.0, "flags": []},
+   {"kind": "dark-stump", "x": 549.0, "y": 200.0, "facing": -1, "frame": "", "fit": 0.709, "flags": ["hidden"]},
+   {"kind": "stump", "x": 874.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.702, "flags": ["faded"]},
+   {"kind": "stump", "x": 1169.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.535, "flags": ["fog"]}
+  ],
+  "n28_009.png": [
+   {"kind": "axe-stump", "x": 392.0, "y": 206.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 567.0, "y": 202.0, "facing": 1, "frame": "hit1/0", "fit": 0.942, "flags": ["hit"]},
+   {"kind": "stump", "x": 1168.0, "y": 218.0, "facing": -1, "frame": "move/2", "fit": 0.922, "flags": ["hidden"]},
+   {"kind": "axe-stump", "x": 1212.0, "y": 218.0, "facing": 1, "frame": "move/1", "fit": 0.919, "flags": ["vines"]},
+   {"kind": "stump", "x": 796.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.516, "flags": ["fog"]}
+  ],
+  "n28_010.png": [
+   {"kind": "axe-stump", "x": 1269.0, "y": 218.0, "facing": -1, "frame": "move/3", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 392.0, "y": 206.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 714.0, "y": 210.0, "facing": -1, "frame": "move/2", "fit": 0.976, "flags": []},
+   {"kind": "dark-stump", "x": 575.0, "y": 203.0, "facing": 1, "frame": "", "fit": 0.781, "flags": ["hit"]},
+   {"kind": "stump", "x": 1097.0, "y": 218.0, "facing": -1, "frame": "", "fit": 0.498, "flags": ["faded"]}
+  ],
+  "n28_011.png": [
+   {"kind": "axe-stump", "x": 392.0, "y": 206.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1207.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.65, "flags": ["fog"]},
+   {"kind": "dark-stump", "x": 666.0, "y": 209.0, "facing": 1, "frame": "", "fit": 0.649, "flags": ["hit", "kind?"]},
+   {"kind": "stump", "x": 1097.0, "y": 218.0, "facing": -1, "frame": "", "fit": 0.616, "flags": ["faded"]}
+  ],
+  "n28_012.png": [
+   {"kind": "axe-stump", "x": 416.0, "y": 205.0, "facing": 1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "dark-stump", "x": 693.0, "y": 210.0, "facing": 1, "frame": "", "fit": 0.816, "flags": ["hit"]},
+   {"kind": "axe-stump", "x": 1196.0, "y": 218.0, "facing": -1, "frame": "", "fit": 0.658, "flags": ["faded"]},
+   {"kind": "stump", "x": 1015.0, "y": 214.0, "facing": -1, "frame": "", "fit": 0.525, "flags": ["fog"]}
+  ],
+  "n28_013.png": [
+   {"kind": "axe-stump", "x": 552.0, "y": 200.0, "facing": 1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 937.0, "y": 210.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1066.0, "y": 218.0, "facing": -1, "frame": "move/2", "fit": 0.924, "flags": []},
+   {"kind": "axe-stump", "x": 1208.0, "y": 218.0, "facing": -1, "frame": "", "fit": 0.609, "flags": ["faded"]}
+  ],
+  "n28_014.png": [
+   {"kind": "axe-stump", "x": 1023.0, "y": 215.0, "facing": 1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 567.0, "y": 201.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 956.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.637, "flags": ["hit"]},
+   {"kind": "axe-stump", "x": 1228.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.522, "flags": ["faded"]}
+  ],
+  "n28_015.png": [
+   {"kind": "axe-stump", "x": 1143.0, "y": 218.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 670.0, "y": 210.0, "facing": 1, "frame": "move/1", "fit": 0.995, "flags": []},
+   {"kind": "stump", "x": 1283.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.499, "flags": ["faded"]}
+  ],
+  "n28_016.png": [
+   {"kind": "axe-stump", "x": 802.0, "y": 210.0, "facing": 1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1283.0, "y": 218.0, "facing": 1, "frame": "stand/0", "fit": 0.99, "flags": []},
+   {"kind": "axe-stump", "x": 1179.0, "y": 218.0, "facing": -1, "frame": "", "fit": 0.81, "flags": ["hit"]}
+  ],
+  "n28_017.png": [
+   {"kind": "stump", "x": 1283.0, "y": 218.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": ["kind?"]},
+   {"kind": "axe-stump", "x": 933.0, "y": 210.0, "facing": 1, "frame": "move/1", "fit": 0.946, "flags": ["hidden"]},
+   {"kind": "axe-stump", "x": 1188.0, "y": 218.0, "facing": -1, "frame": "", "fit": 0.755, "flags": ["hit"]}
+  ],
+  "n28_018.png": [
+   {"kind": "axe-stump", "x": 993.0, "y": 210.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1115.0, "y": 218.0, "facing": -1, "frame": "stand/0", "fit": 0.996, "flags": []}
+  ],
+  "n28_019.png": [
+   {"kind": "axe-stump", "x": 1097.0, "y": 218.0, "facing": -1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 979.0, "y": 210.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []}
+  ],
+  "n28_020.png": [
+   {"kind": "stump", "x": 1291.0, "y": 218.0, "facing": -1, "frame": "move/3", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 1002.0, "y": 211.0, "facing": -1, "frame": "", "fit": 0.868, "flags": ["hit"]},
+   {"kind": "axe-stump", "x": 962.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.747, "flags": ["hit"]},
+   {"kind": "stump", "x": 266.0, "y": 213.0, "facing": -1, "frame": "", "fit": 0.584, "flags": ["faded"]}
+  ],
+  "n28_021.png": [
+   {"kind": "axe-stump", "x": 1048.0, "y": 218.0, "facing": -1, "frame": "move/3", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 870.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.552, "flags": ["hidden"]}
+  ],
+  "n28_022.png": [
+   {"kind": "axe-stump", "x": 1015.0, "y": 214.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 853.0, "y": 210.0, "facing": -1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1302.0, "y": 218.0, "facing": -1, "frame": "move/2", "fit": 1.0, "flags": []}
+  ],
+  "n28_023.png": [
+   {"kind": "axe-stump", "x": 1015.0, "y": 214.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1222.0, "y": 218.0, "facing": -1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 813.0, "y": 210.0, "facing": -1, "frame": "", "fit": 0.61, "flags": ["hit"]}
+  ],
+  "n28_024.png": [
+   {"kind": "axe-stump", "x": 1005.0, "y": 212.0, "facing": -1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 647.0, "y": 208.0, "facing": -1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1141.0, "y": 218.0, "facing": -1, "frame": "move/2", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 386.0, "y": 206.0, "facing": -1, "frame": "", "fit": 0.855, "flags": ["faded"]}
+  ],
+  "n28_025.png": [
+   {"kind": "axe-stump", "x": 1051.0, "y": 218.0, "facing": -1, "frame": "hit1/0", "fit": 0.908, "flags": ["hit"]},
+   {"kind": "axe-stump", "x": 337.0, "y": 211.0, "facing": -1, "frame": "", "fit": 0.691, "flags": ["faded"]},
+   {"kind": "stump", "x": 568.0, "y": 202.0, "facing": -1, "frame": "", "fit": 0.674, "flags": ["faded"]}
+  ],
+  "n28_026.png": [
+   {"kind": "axe-stump", "x": 289.0, "y": 212.0, "facing": -1, "frame": "stand/0", "fit": 0.942, "flags": []},
+   {"kind": "stump", "x": 230.0, "y": 214.0, "facing": 1, "frame": "", "fit": 0.852, "flags": ["vines"]},
+   {"kind": "stump", "x": 564.0, "y": 201.0, "facing": 1, "frame": "", "fit": 0.604, "flags": ["faded"]}
+  ],
+  "n28_027.png": [
+   {"kind": "stump", "x": 552.0, "y": 200.0, "facing": -1, "frame": "", "fit": 0.674, "flags": ["faded"]},
+   {"kind": "axe-stump", "x": 1040.0, "y": 218.0, "facing": 1, "frame": "", "fit": 0.558, "flags": ["fog"]}
+  ],
+  "n28_028.png": [
+   {"kind": "axe-stump", "x": 1067.0, "y": 218.0, "facing": -1, "frame": "move/1", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 783.0, "y": 210.0, "facing": 1, "frame": "move/2", "fit": 0.937, "flags": []},
+   {"kind": "stump", "x": 468.0, "y": 203.0, "facing": -1, "frame": "", "fit": 0.817, "flags": ["faded"]},
+   {"kind": "stump", "x": 266.0, "y": 213.0, "facing": 1, "frame": "", "fit": 0.631, "flags": ["faded"]},
+   {"kind": "stump", "x": 231.0, "y": 214.0, "facing": -1, "frame": "", "fit": 0.519, "flags": ["faded"]}
+  ],
+  "n28_029.png": [
+   {"kind": "axe-stump", "x": 1026.0, "y": 216.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "axe-stump", "x": 304.0, "y": 212.0, "facing": 1, "frame": "", "fit": 0.687, "flags": ["faded"]},
+   {"kind": "stump", "x": 452.0, "y": 203.0, "facing": -1, "frame": "", "fit": 0.597, "flags": ["fog"]},
+   {"kind": "stump", "x": 268.0, "y": 213.0, "facing": 1, "frame": "", "fit": 0.521, "flags": ["faded", "kind?"]}
+  ],
+  "native_first.png": [
+   {"kind": "axe-stump", "x": 874.0, "y": 210.0, "facing": -1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 1051.0, "y": 218.0, "facing": 1, "frame": "stand/0", "fit": 1.0, "flags": []},
+   {"kind": "stump", "x": 545.0, "y": 200.0, "facing": -1, "frame": "move/3", "fit": 0.933, "flags": []}
+  ]
+ }
+}

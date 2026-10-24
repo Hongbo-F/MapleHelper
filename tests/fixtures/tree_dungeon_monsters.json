@@ -1,0 +1,353 @@
+{
+ "about": "Every monster, player and pet on 20 frames of Tree Dungeon, Forest Up North II (map 10002073) at the game's own 1366x768, 2026-10-24 (the frames are in D:/MapleHelper-scratch/map3/native, not in git), labelled by eye on gridded zooms and checked by four means (footholds, each kind's sprites fitted around each label, a whole-frame sprite search, the background's difference): a compact copy of D:/MapleHelper-scratch/map3/study/labels.json. A monster's x, y are its feet (its sprite's origin, +-2 px), facing 1 right, -1 left, 0 not told; state normal, hit (its flinch), spawning (fading in) or dying; hidden, by another monster, a player or a tag; visible_rows, its share above the chat bar (row 700); frame and fit, the frame of its kind's sprites that fitted it best and the fit's score ('' where none was fitted or the fit couldn't tell the facing); certain, false where its kind wasn't sure. Her feet; the players' and pets' feet and tags (null where hidden): all pets are orange snails named Snail, hers and other players'. None of them is a monster.",
+ "frames": {
+  "first_000.png": {
+   "her": [970, 545],
+   "players": [
+    {"name": "siwooda", "feet": [680, 186], "tag": [678, 197]},
+    {"name": "BaileyBlake", "feet": [915, 545], "tag": null},
+    {"name": "TopAce", "feet": [765, 742], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [880, 545], "tag": null},
+    {"name": "Snail", "feet": [915, 545], "tag": [910, 556]},
+    {"name": "Snail", "feet": [826, 691], "tag": null}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 450, "y": 147, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 683, "y": 299, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 807, "y": 538, "facing": 0, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/3", "fit": 0.863, "certain": true}
+   ]
+  },
+  "here_000.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [768, -1], "tag": [768, 10]},
+    {"name": "TopAce", "feet": [757, 124], "tag": [754, 134]},
+    {"name": "Fuiyoohhhh", "feet": [865, 527], "tag": null},
+    {"name": "Grasje", "feet": [852, 742], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": null, "tag": [819, 2]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 449, "y": 716, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.69, "frame": "stand/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_001.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [724, 7], "tag": [729, 18]},
+    {"name": "TopAce", "feet": [757, 124], "tag": [754, 134]},
+    {"name": "Fuiyoohhhh", "feet": [867, 527], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [758, 3], "tag": [758, 12]},
+    {"name": "Snail", "feet": null, "tag": [819, 2]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 522, "y": 71, "facing": 1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.87, "certain": true},
+    {"kind": "green-mushroom", "x": 509, "y": 532, "facing": -1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "move/1", "fit": 0.854, "certain": true},
+    {"kind": "green-mushroom", "x": 716, "y": 572, "facing": -1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "move/1", "fit": 0.939, "certain": true},
+    {"kind": "horny-mushroom", "x": 449, "y": 716, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.69, "frame": "stand/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_002.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [725, 8], "tag": [729, 19]},
+    {"name": "TopAce", "feet": [722, 123], "tag": [722, 134]},
+    {"name": "Fuiyoohhhh", "feet": [867, 527], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [668, 6], "tag": [666, 19]},
+    {"name": "Snail", "feet": null, "tag": [795, 3]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 512, "y": 71, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 0.718, "certain": true},
+    {"kind": "green-mushroom", "x": 585, "y": 528, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 662, "y": 575, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 630, "y": 700, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_003.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [725, 8], "tag": [729, 19]},
+    {"name": "TopAce", "feet": [605, 132], "tag": [604, 143]},
+    {"name": "Fuiyoohhhh", "feet": [805, 524], "tag": [819, 535]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [618, 55], "tag": [618, 70]},
+    {"name": "Snail", "feet": [665, 4], "tag": [665, 19]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 598, "y": 530, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 630, "y": 700, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_004.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "TopAce", "feet": [756, 124], "tag": [756, 135]},
+    {"name": "Fuiyoohhhh", "feet": [682, 576], "tag": [682, 587]},
+    {"name": "Grasje", "feet": [667, 690], "tag": [674, 699]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [715, 123], "tag": [716, 135]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 530, "y": 709, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.83, "frame": "move/2", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_026.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [729, 8], "tag": [734, 19]},
+    {"name": "Fuiyoohhhh", "feet": [655, 516], "tag": [655, 527]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 619, "y": 65, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 748, "y": 125, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 922, "y": 158, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 506, "y": 714, "facing": 1, "state": "spawning", "hidden": true, "visible_rows": 0.73, "frame": "stand/1", "fit": 0.952, "certain": true},
+    {"kind": "slime", "x": 751, "y": 751, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.28, "frame": "move/3", "fit": 0.995, "certain": true}
+   ]
+  },
+  "here_027.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [763, -1], "tag": [763, 10]},
+    {"name": "Fuiyoohhhh", "feet": [872, 527], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": null, "tag": [726, 18]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 493, "y": 68, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 680, "y": 127, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 956, "y": 156, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 442, "y": 716, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.69, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "slime", "x": 762, "y": 745, "facing": 0, "state": "hit?", "hidden": true, "visible_rows": 0.08, "frame": "hit1/0", "fit": 0.788, "certain": false}
+   ]
+  },
+  "here_028.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "Fuiyoohhhh", "feet": [872, 527], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [718, 6], "tag": [717, 19]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 614, "y": 134, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 923, "y": 156, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 632, "y": 701, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.98, "frame": "move/1", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_029.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "Fuiyoohhhh", "feet": [872, 527], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [619, 68], "tag": [619, 77]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 669, "y": 129, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 927, "y": 157, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 534, "y": 711, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.79, "frame": "move/3", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_030.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "Fuiyoohhhh", "feet": [872, 527], "tag": null},
+    {"name": "Grasje", "feet": [718, 745], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [542, 73], "tag": [541, 81]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 661, "y": 56, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 503, "y": 137, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 927, "y": 157, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 730, "y": 573, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 522, "y": 712, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.77, "frame": "stand/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_031.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "Fuiyoohhhh", "feet": [870, 527], "tag": null},
+    {"name": "Grasje", "feet": [744, 748], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [520, 73], "tag": [519, 81]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 466, "y": 68, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 615, "y": 134, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 855, "y": 146, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 748, "y": 566, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 489, "y": 713, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.75, "frame": "move/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_032.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "Fuiyoohhhh", "feet": [783, 524], "tag": [787, 534]},
+    {"name": "Grasje", "feet": [755, 748], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": [565, 70], "tag": [566, 78]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 649, "y": 61, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 615, "y": 134, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 893, "y": 153, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 574, "y": 708, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.85, "frame": "move/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_033.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [660, 9], "tag": [660, 20]},
+    {"name": "siwooda", "feet": [705, 54], "tag": [708, 65]},
+    {"name": "Fuiyoohhhh", "feet": [872, 527], "tag": null}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": null, "tag": [650, 10]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 472, "y": 67, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 615, "y": 134, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 914, "y": 155, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 520, "y": 532, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.999, "certain": true},
+    {"kind": "horny-mushroom", "x": 501, "y": 714, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.73, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 802, "y": 737, "facing": 0, "state": "hit", "hidden": true, "visible_rows": 0.29, "frame": "", "fit": 0.588, "certain": true}
+   ]
+  },
+  "here_034.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "siwooda", "feet": [699, 125], "tag": [700, 136]},
+    {"name": "BaileyBlake", "feet": [814, -10], "tag": [814, 1]},
+    {"name": "Fuiyoohhhh", "feet": [803, 523], "tag": [807, 534]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]},
+    {"name": "Snail", "feet": null, "tag": [757, 13]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 654, "y": 59, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 534, "y": 136, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 874, "y": 148, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 515, "y": 535, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 0.963, "certain": true},
+    {"kind": "horny-mushroom", "x": 558, "y": 709, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.83, "frame": "stand/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 790, "y": 738, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.27, "frame": "stand/1", "fit": 0.979, "certain": true}
+   ]
+  },
+  "here_035.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "siwooda", "feet": [700, 92], "tag": [701, 104]},
+    {"name": "Fuiyoohhhh", "feet": [627, 526], "tag": [628, 537]},
+    {"name": "Grasje", "feet": [810, 666], "tag": [810, 677]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 679, "y": 129, "facing": 1, "state": "hit", "hidden": true, "visible_rows": 1.0, "frame": "hit1/0", "fit": 0.792, "certain": true},
+    {"kind": "green-mushroom", "x": 880, "y": 149, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 606, "y": 531, "facing": 0, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/2", "fit": 0.506, "certain": true},
+    {"kind": "horny-mushroom", "x": 497, "y": 714, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.73, "frame": "move/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_036.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "BaileyBlake", "feet": [614, 65], "tag": [614, 76]},
+    {"name": "siwooda", "feet": [640, 64], "tag": null},
+    {"name": "Fuiyoohhhh", "feet": [618, 464], "tag": [618, 475]},
+    {"name": "Grasje", "feet": [805, 660], "tag": [805, 671]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 709, "y": 124, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 855, "y": 146, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 634, "y": 701, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.98, "frame": "stand/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_037.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "Fuiyoohhhh", "feet": [838, 522], "tag": null},
+    {"name": "Grasje", "feet": [803, 660], "tag": [803, 671]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 724, "y": 124, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 784, "y": 120, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 916, "y": 156, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 520, "y": 532, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 575, "y": 708, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.85, "frame": "move/1", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_038.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "siwooda", "feet": [678, -10], "tag": [678, 1]},
+    {"name": "Fuiyoohhhh", "feet": [812, 524], "tag": [815, 534]},
+    {"name": "Grasje", "feet": [804, 659], "tag": [804, 670]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 686, "y": 128, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 811, "y": 112, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 934, "y": 158, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 528, "y": 533, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 487, "y": 712, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.77, "frame": "move/0", "fit": 1.0, "certain": true}
+   ]
+  },
+  "here_039.png": {
+   "her": [923, 529],
+   "players": [
+    {"name": "siwooda", "feet": [678, 6], "tag": [678, 17]},
+    {"name": "Fuiyoohhhh", "feet": [643, 521], "tag": [643, 531]},
+    {"name": "Grasje", "feet": [804, 659], "tag": [804, 670]}
+   ],
+   "pets": [
+    {"name": "Snail", "feet": [855, 520], "tag": [856, 534]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 563, "y": 136, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 632, "y": 134, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true},
+    {"kind": "green-mushroom", "x": 925, "y": 157, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true},
+    {"kind": "horny-mushroom", "x": 585, "y": 710, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.81, "frame": "stand/1", "fit": 1.0, "certain": true}
+   ]
+  }
+ }
+}
