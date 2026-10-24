@@ -16,6 +16,7 @@ STOP = LAB / "STOP"              # create this file to stop the player
 ALARM = LAB / "ALARM.json"       # the Lie Detector was seen; nothing runs until it's cleared
 PLAYER_LOG = LAB / "player.log"
 RECORDINGS = LAB / "recordings"  # saved frames + key events, by name
+LIE_RECORDINGS = LAB / "lie_detector"  # each Lie Detector's whole cycle as the player saw it (control.lie_recorder)
 CALIBRATION = LAB / "calibration.json"
 TAG_TEMPLATE = LAB / "tag_template.npy"
 TAG_FULL = LAB / "tag_template_full.npy"  # her name tag at full resolution (made on first look)
