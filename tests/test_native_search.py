@@ -93,6 +93,16 @@ def test_a_monster_drawn_at_the_games_own_size_is_found_where_it_stands(tmp_path
             assert [(m.foot_x, m.feet_y) for m in band] == [(feet_x, top + PIG_ORIGIN[1])]
 
 
+def test_a_band_with_no_rows_finds_nothing_at_either_size(tmp_path):
+    # Her band off the screen's bottom (Eyes.band_rows: its top under the bottom bar): at 1920x1080 half size no colour
+    # passed in it; shrunk for step 1 at 1366x768, OpenCV refused the empty picture.
+    native = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), threads=1, frame_scale=NATIVE.frame_scale)
+    stretched = MobDetector(threads=1)
+    for detector, scene in ((native, frame()), (stretched, np.zeros((540, 960, 3), np.uint8))):
+        for rows in ((675, 675), (700, 675)):
+            assert detector.detect(scene, rows) == [] and detector.detect_wide(scene, rows) == []
+
+
 def test_nothing_is_found_on_frames_of_the_game_at_its_own_size_with_no_monster_of_its_kind(tmp_path):
     detector = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), frame_scale=NATIVE.frame_scale)
     for name in FRAMES:

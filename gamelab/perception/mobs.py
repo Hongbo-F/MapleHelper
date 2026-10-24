@@ -345,6 +345,8 @@ class MobDetector:
         if rows:
             y_off = max(0, rows[0])
             frame = frame[y_off:rows[1]]
+        if not frame.shape[0] or not frame.shape[1]:  # a band with no rows (her band off screen: Eyes.band_rows),
+            return []  # as at 1920x1080 half size, where no colour then passed; shrunk for step 1, OpenCV raised
         small = frame  # step 1's frame: SEARCH_SCALE, unless the look frame is no finer
         if self.search != 1:
             h, w = frame.shape[:2]
