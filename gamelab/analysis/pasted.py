@@ -11,8 +11,14 @@ of its sprites both ways, and every drop (loot.ITEMS and the coins' frames).
 
 What it says, by size and kind: how many were found by the whole screen's search and by a fight's band around each
 (its feet as hers), where (their feet against where they were drawn, map units), how well they scored, whether as the
-frame and facing drawn, what was found that wasn't drawn (on the frames as they are, and in the scenes), and how long
-each search took. Drops likewise, each searched in a strip just above where it lies, as Senses searches a platform.
+frame and facing drawn (of those the game's sprites matched: a screenshot cut-out, at 1920x1080, says no frame), what
+was found that wasn't drawn (on the frames as they are, and in the scenes), and how long each search took. Drops
+likewise, each searched in a strip just above where it lies, as Senses searches a platform.
+
+Where a look frame's px are in the game's own picture: a px's middle, as the stretch and the shrink put it (`_game`).
+At half size of the 1920x1080 window that's (x + 0.5) * 1.42 - 0.5, not x * 1.42: by the px's edge, the feet of the
+first map's sprites found at 1920x1080 came out 0.27 units left and 0.19 up of where they were drawn on average (160
+of them), by its middle 0.06 left and 0.02 down. At the game's own size it's the px itself.
 """
 
 import math
@@ -30,6 +36,7 @@ from ..perception.loot import ABOVE, BELOW, LootDetector, _coin, _kind
 from ..perception.minimap import minimap_box
 from ..perception.mobs import INDEX, MobDetector, read_meta
 from ..screen import HUD_TOP, NATIVE, STRETCHED, Geometry
+from .bodies import is_cutout
 
 PER_SCENE = 6        # monsters (or drops) drawn on one frame, apart from each other
 GAP = 12             # game px kept between two drawn
@@ -61,6 +68,7 @@ class Tally:
     found: int = 0
     found_band: int = 0
     as_drawn: int = 0                  # found as the frame and facing drawn (monsters), the coin drawn (mesos)
+    by_cutout: int = 0                 # monsters found by a screenshot cut-out (1920x1080), which says no frame
     errors: list = field(default_factory=list)   # (dx, dy) map units, of each found
     scores: list = field(default_factory=list)
     missed: list = field(default_factory=list)   # names of those not found by the whole screen's search
@@ -137,6 +145,12 @@ def scenes(backgrounds: list[np.ndarray], todo: list[tuple], rng: np.random.Gene
     return out
 
 
+def _game(v: float, upp: float) -> float:
+    """A place in a look frame (its px, a px's middle at its index) in the game's own picture (game px), the frame's
+    px `upp` game px each: where the stretch and the shrink put that px's middle (screen.Geometry.to_game)."""
+    return (v + 0.5) * upp - 0.5
+
+
 def _timed(fn: Callable, times: list) -> object:
     t0 = time.perf_counter()
     out = fn()
@@ -184,8 +198,9 @@ def monsters(backgrounds: list[np.ndarray], detectors: dict[str, tuple[MobDetect
                     continue
                 used.add(id(m))
                 t.found += 1
+                t.by_cutout += is_cutout(m)
                 t.as_drawn += m.template == d.name and m.facing == d.facing
-                t.errors.append((m.foot_x * upp - d.feet[0], m.feet_y * upp - d.feet[1]))
+                t.errors.append((_game(m.foot_x, upp) - d.feet[0], _game(m.feet_y, upp) - d.feet[1]))
                 t.scores.append(m.score)
             for m in found:
                 if id(m) not in used:
@@ -195,9 +210,10 @@ def monsters(backgrounds: list[np.ndarray], detectors: dict[str, tuple[MobDetect
 
 def _nearest(found: list, d: Drawn, upp: float, used: set):
     """The monster found nearest where `d` was drawn, of its kind, within FEET_TOL, not already taken; or None."""
-    near = [(math.hypot(m.foot_x * upp - d.feet[0], m.feet_y * upp - d.feet[1]), i, m) for i, m in enumerate(found)
-            if m.kind == d.kind and id(m) not in used and abs(m.foot_x * upp - d.feet[0]) <= FEET_TOL
-            and abs(m.feet_y * upp - d.feet[1]) <= FEET_TOL]
+    near = [(math.hypot(_game(m.foot_x, upp) - d.feet[0], _game(m.feet_y, upp) - d.feet[1]), i, m)
+            for i, m in enumerate(found) if m.kind == d.kind and id(m) not in used
+            and abs(_game(m.foot_x, upp) - d.feet[0]) <= FEET_TOL
+            and abs(_game(m.feet_y, upp) - d.feet[1]) <= FEET_TOL]
     return min(near)[2] if near else None
 
 
@@ -236,7 +252,7 @@ def drops(backgrounds: list[np.ndarray], detectors: dict[str, tuple[LootDetector
                     it = max(near, key=lambda it: it.score)
                     t.found += 1
                     t.as_drawn += it.coin == d.coin
-                    t.errors.append((it.x * upp - (d.left + d.w / 2), it.y * upp - (d.top + d.h / 2)))
+                    t.errors.append((_game(it.x, upp) - _middle(d)[0], _game(it.y, upp) - _middle(d)[1]))
                     t.scores.append(it.score)
                 for it in items:  # (a strip may hold another drop drawn beside it)
                     if not any(_at(it, other, upp) for other in drawn):
@@ -244,10 +260,16 @@ def drops(backgrounds: list[np.ndarray], detectors: dict[str, tuple[LootDetector
     return out
 
 
+def _middle(d: Drawn) -> tuple[float, float]:
+    """A drop picture's middle as drawn, game px (a px's middle at its index)."""
+    return d.left + (d.w - 1) / 2, d.top + (d.h - 1) / 2
+
+
 def _at(item, d: Drawn, upp: float) -> bool:
     """Whether a drop found is `d`: its kind, its centre within ITEM_TOL of the picture's."""
-    return item.kind == d.kind and abs(item.x * upp - (d.left + d.w / 2)) <= ITEM_TOL and \
-        abs(item.y * upp - (d.top + d.h / 2)) <= ITEM_TOL
+    x, y = _middle(d)
+    return (item.kind == d.kind and abs(_game(item.x, upp) - x) <= ITEM_TOL
+            and abs(_game(item.y, upp) - y) <= ITEM_TOL)
 
 
 def lines(result: dict, what: str = "monsters") -> list[str]:
@@ -270,7 +292,10 @@ def lines(result: dict, what: str = "monsters") -> list[str]:
             sc = f"scored {min(t.scores):.2f}-{max(t.scores):.2f} (median {statistics.median(t.scores):.2f})" \
                 if t.scores else ""
             band = f", {t.found_band} in a band around each" if what == "monsters" else ""
-            same = "as the frame and facing drawn" if what == "monsters" else "as the coin drawn"
+            same = "as the coin drawn"
+            if what == "monsters":
+                same = (f"as the frame and facing drawn (of {t.found - t.by_cutout} found by the game's sprites"
+                        + (f"; {t.by_cutout} by a cut-out, which says no frame)" if t.by_cutout else ")"))
             out.append(f"   {kind:22s} {t.found} of {t.drawn} found{band}; {t.as_drawn} {same}; {err}; {sc}; "
                        f"{t.extra} found that weren't drawn"
                        + (f"; missed {', '.join(t.missed[:8])}{' ...' if len(t.missed) > 8 else ''}" if t.missed

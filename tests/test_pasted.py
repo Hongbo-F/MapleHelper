@@ -84,6 +84,29 @@ def test_monsters_drawn_are_found_where_they_stand_at_the_games_own_size_and_str
     s = result["tally"]["stretched"]["pig"]
     assert s.drawn == 6 and s.found >= 5 and max(abs(e) for err in s.errors for e in err) <= 3
     assert pasted.lines(result)[1].split()[:5] == ["pig", "5", "of", "6", "found,"]
+    assert "5 as the frame and facing drawn (of 5 found by the game's sprites)" in pasted.lines(result)[1]
+
+
+def test_a_look_frames_px_are_put_in_the_game_by_their_middles():
+    # At 1920x1080 half size a frame px is 1.42 game px: its middle, at x + 0.5, is (x + 0.5) * 1.42 game px from the
+    # picture's left edge, so px x's middle is game px (x + 0.5) * 1.42 - 0.5. At the game's own size, the px itself.
+    upp = STRETCHED.units_per_px
+    assert pasted._game(0, upp) == pytest.approx(0.5 * upp - 0.5) and pasted._game(10, 1.0) == 10
+    assert pasted._game(10, upp) == pytest.approx(STRETCHED.to_game(10 * 2 + 0.5))
+
+
+def test_a_monster_found_by_a_cut_out_isnt_counted_against_its_frame(tmp_path):
+    # A screenshot cut-out (named <kind>_<number>, as pig_0: at 1920x1080) says no frame: counted apart, not as found
+    # as another frame than the one drawn. Here the "cut-out" is the very picture drawn.
+    (tmp_path / "drawn").mkdir()
+    (tmp_path / "cutouts").mkdir()
+    drawn = game_folder(tmp_path / "drawn", {"pig_move0": pig()})
+    detector = MobDetector(game_folder(tmp_path / "cutouts", {"pig_7": pig()}), frame_scale=NATIVE.frame_scale)
+    result = pasted.monsters([frame()], {"native": (detector, NATIVE)}, drawn, (140, 75), each=2, seed=2)
+    t = result["tally"]["native"]["pig"]
+    assert t.found == t.by_cutout >= 3 and t.as_drawn == 0
+    said = f"0 as the frame and facing drawn (of 0 found by the game's sprites; {t.found} by a cut-out, which says no"
+    assert said + " frame)" in pasted.lines(result)[1]
 
 
 def test_drops_drawn_are_found_in_the_strip_above_where_they_lie(tmp_path):
