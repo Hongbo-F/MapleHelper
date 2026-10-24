@@ -1864,9 +1864,10 @@ def nav_rocky_fight_bridge(sim):
     Stump takes 4 stars, a Dark Stump 7 and an Axe Stump 10. (Seed 1: of seeds 1-12 she arrived with ten kills or more
     on 1 and 11, and on most of the others fell out of the map past 22's left end (-1640), where nothing is under
     her: a touch knocked her off it, fighting or picking up drops there, or off the rope at -1463 near its top, and
-    the knock carried her past it. The world's
-    side is the map's footholds' (-1662, 14's left end), 19 units left of the pit's bottom stair (32, from -1643);
-    what the game does there isn't known: README.)"""
+    the knock carried her past it. The world's side is the map's platforms' outer end (-1662, 14's left end), 19 units
+    left of the pit's bottom stair (32, from -1643); with HeavenClient's sides, 25 in from its footholds
+    (world.Realism.sides 'client', -1637), she can't get past 22's end; what the game does there isn't known:
+    README.)"""
     return _nav(14, fight=True)(sim)
 
 
