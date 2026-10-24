@@ -11,7 +11,8 @@ with `px` and `fpx`, and are exactly what they were at 1920x1080.
 
 STRETCHED is the 1920x1080 window. The simulator draws its world at that size, and the saved screenshots in
 gamelab/lab are of it; GAME_SIZE, SCREEN_SCALE, SCALE and UNITS_PER_HALF_PX are its numbers, for those alone
-(tests/test_architecture.py checks that nothing that reads the game uses them).
+(tests/test_geometry.py checks that nothing that reads the game uses them, leaves a `geo` at STRETCHED by default,
+makes numbers of its own from STRETCHED's, or uses a *_PX constant unconverted, but where it says why).
 """
 
 from dataclasses import dataclass

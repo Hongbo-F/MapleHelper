@@ -142,6 +142,200 @@ def test_nothing_but_the_simulator_assumes_the_1920x1080_window():
     assert _alias_users() == []
 
 
+# That alone let three things slip (the review of 2026-10-24): `map` placing her dot with Localizer(model), its
+# geometry left at 1920x1080's by default; bodies making its own UNITS_PER_HALF_PX from STRETCHED; and looting comparing
+# her ground with MIN_GROUND_PX as it is. So three more checks, over gamelab outside the simulator, each with the
+# places that mean 1920x1080 on purpose and why: calls that leave a `geo=STRETCHED` default (resolved through each
+# file's imports; a method called on an object isn't), module-level names made from STRETCHED's numbers, and *_PX
+# constants (px of the 1920x1080 window) used other than through a geometry's conversion.
+DEFAULT_ON_PURPOSE = {
+    ("__main__.py", "load"): "_calibration: at 1920x1080, the calibration's files as they always were",
+    ("localization/worldstate.py", "WorldState"): "a frame not visible: nothing was read off it",
+    ("perception/exp_number.py", "read_box"): "READ_BOX: 1920x1080's box, named so",
+}
+STRETCHED_ON_PURPOSE = {
+    ("analysis/pasted.py", "STRETCH_TO"): "the scene stretched as the 1920x1080 window showed the game",
+    ("analysis/respawn.py", "VIEW"): "scene records of before 2026-10-21's evening, all of the 1920x1080 window",
+    ("analysis/respawn.py", "MINIMAP"): "the same",
+    ("localization/pose.py", "VIEW"): "map units on screen: the game's view, the same at any size",
+    ("perception/exp_number.py", "SX"): "1920x1080's stretch, for BAR's rows measured there (bar_rows)",
+    ("perception/exp_number.py", "SY"): "the same",
+    ("perception/minimap.py", "OTHER_SHIFT"): "1920x1080's (minimap.sizes(geo).other_shift at any size)",
+    ("perception/mobs.py", "SEARCH_SCALE"): "step 1's scale at any size, where its numbers were measured",
+}
+PX_ON_PURPOSE = {
+    ("localization/senses.py", "ROPE_MATCH_PX"): "ROPE_PAD, a sum of px converted where it's used",
+    ("localization/tracking.py", "EDGE_PX"): "View.edge's default, 1920x1080's; worldstate sets it per look",
+}
+
+
+def _modules():
+    """gamelab's modules outside the simulator: (dotted name, whether it's a package, path from gamelab, tree)."""
+    for path in sorted(PKG.rglob("*.py")):
+        rel = path.relative_to(PKG)
+        if rel.parts[0] == "sim":
+            continue
+        parts = ("gamelab",) + rel.with_suffix("").parts
+        pkg = parts[-1] == "__init__"
+        yield ".".join(parts[:-1] if pkg else parts), pkg, rel.as_posix(), ast.parse(path.read_text(encoding="utf-8"))
+
+
+def _imports(module: str, pkg: bool, tree: ast.Module, names: set[str]) -> dict:
+    """A file's local names from its imports (anywhere in it): ("module", dotted) or ("symbol", (module, name))."""
+    out = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            src = node.module or ""
+            if node.level:
+                base = module.split(".") if pkg else module.split(".")[:-1]
+                src = ".".join(base[:len(base) - node.level + 1] + ([node.module] if node.module else []))
+            for a in node.names:
+                full = f"{src}.{a.name}"
+                out[a.asname or a.name] = ("module", full) if full in names else ("symbol", (src, a.name))
+        elif isinstance(node, ast.Import):
+            out.update({a.asname: ("module", a.name) for a in node.names if a.asname})
+    return out
+
+
+def _stretched_default(value) -> bool:
+    """Whether a default is STRETCHED (or a dataclass field(default=STRETCHED))."""
+    if isinstance(value, ast.Call) and getattr(value.func, "id", "") == "field":
+        value = next((k.value for k in value.keywords if k.arg == "default"), None)
+    return isinstance(value, ast.Name) and value.id == "STRETCHED"
+
+
+def _geo_param(fn: ast.FunctionDef, method: bool):
+    """A function's `geo` defaulting to STRETCHED: its index among the positional parameters (None: keyword only),
+    or False if it hasn't one."""
+    a = fn.args
+    pos = [p.arg for p in a.posonlyargs + a.args][1 if method else 0:]
+    if "geo" in pos:
+        i = pos.index("geo")
+        k = i - (len(pos) - len(a.defaults))
+        return i if k >= 0 and _stretched_default(a.defaults[k]) else False
+    kw = [p.arg for p in a.kwonlyargs]
+    return None if "geo" in kw and _stretched_default(a.kw_defaults[kw.index("geo")]) else False
+
+
+def _geo_takers(mods) -> dict:
+    """(module, name) of every top-level function and class taking a geo that defaults to STRETCHED -> geo's
+    positional index (None: by keyword only), dataclasses' fields and their bases' included."""
+    out = {}
+    for module, _, _, tree in mods:
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and (i := _geo_param(node, False)) is not False:
+                out[(module, node.name)] = i
+            elif isinstance(node, ast.ClassDef):
+                init = next((n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == "__init__"), None)
+                if init is not None:
+                    if (i := _geo_param(init, True)) is not False:
+                        out[(module, node.name)] = i
+                    continue
+                fields = [n for n in node.body if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)]
+                kw_only = any(isinstance(d, ast.Call) and any(k.arg == "kw_only" for k in d.keywords)
+                              for d in node.decorator_list)
+                for i, f in enumerate(fields):
+                    if f.target.id == "geo" and _stretched_default(f.value):
+                        out[(module, node.name)] = None if kw_only else i
+    names = {m for m, _, _, _ in mods}
+    for module, pkg, _, tree in mods:  # (a dataclass whose geo is its base's: Scene, Observation's)
+        imports = _imports(module, pkg, tree, names)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and (module, node.name) not in out:
+                bases = [(module, b.id) if (module, b.id) in out else imports.get(b.id, (None, None))[1]
+                         for b in node.bases if isinstance(b, ast.Name)]
+                if any(b in out for b in bases if isinstance(b, tuple)):
+                    out[(module, node.name)] = None
+    return out
+
+
+def _calls_leaving_geo() -> set[tuple[str, str]]:
+    mods = list(_modules())
+    takers, names, out = _geo_takers(mods), {m for m, _, _, _ in mods}, set()
+    for module, pkg, rel, tree in mods:
+        imports = _imports(module, pkg, tree, names)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            f, target = node.func, None
+            if isinstance(f, ast.Name):
+                kind, what = imports.get(f.id, (None, None))
+                target = what if kind == "symbol" else (module, f.id)
+            elif isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+                kind, what = imports.get(f.value.id, (None, None))
+                target = (what, f.attr) if kind == "module" else None
+            if target not in takers or any(k.arg in ("geo", None) for k in node.keywords) \
+                    or any(isinstance(a, ast.Starred) for a in node.args):
+                continue
+            if takers[target] is None or len(node.args) <= takers[target]:
+                out.add((rel, target[1]))
+    return out
+
+
+def _stretched_numbers() -> set[tuple[str, str]]:
+    numbers = {"stretch", "stretch_x", "units_per_px", "frame_scale", "client", "look_scale", "frame_size"}
+    out = set()
+    for _, _, rel, tree in _modules():
+        if rel == "screen.py":  # (where they're made, for the simulator)
+            continue
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets = [node.target]
+            else:
+                continue
+            if any(isinstance(n, ast.Attribute) and getattr(n.value, "id", "") == "STRETCHED" and n.attr in numbers
+                   for n in ast.walk(node.value)):
+                out |= {(rel, n.id) for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}
+    return out
+
+
+def _px_unconverted() -> set[tuple[str, str]]:
+    def converted(node, parents) -> bool:  # inside geo.px(...) and the like, in the same function or class
+        while node in parents and not isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Lambda)):
+            node = parents[node]
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("px", "fpx", "ipx", "ifpx", "box"):
+                return True
+        return False
+    out = set()
+    for _, _, rel, tree in _modules():
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        out |= {(rel, n.id) for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id.endswith("_PX")
+                and isinstance(n.ctx, ast.Load) and not converted(n, parents)}
+    return out
+
+
+def test_nothing_but_the_simulator_leaves_a_geometry_at_1920x1080s_by_default():
+    assert _calls_leaving_geo() == set(DEFAULT_ON_PURPOSE)
+
+
+def test_nothing_but_the_simulator_makes_its_own_numbers_from_the_1920x1080_window():
+    assert _stretched_numbers() == set(STRETCHED_ON_PURPOSE)
+
+
+def test_px_of_the_1920x1080_window_are_converted_where_theyre_used():
+    assert _px_unconverted() == set(PX_ON_PURPOSE)
+
+
+def test_the_checks_find_what_they_look_for(tmp_path, monkeypatch):
+    # The three slips the review found, written into a module of their own: each check names its own.
+    pkg = tmp_path / "gamelab"
+    (pkg / "localization").mkdir(parents=True)
+    (pkg / "localization" / "__init__.py").write_text("")
+    (pkg / "localization" / "pose.py").write_text(
+        "from ..screen import STRETCHED\n\n\nclass Localizer:\n"
+        "    def __init__(self, model, origin=0, geo=STRETCHED):\n        pass\n")
+    (pkg / "slips.py").write_text(
+        "from .localization.pose import Localizer\nfrom .screen import STRETCHED\n\nUNITS = STRETCHED.units_per_px\n"
+        "MIN_GROUND_PX = 6\n\n\ndef f(model, s):\n    return Localizer(model), s.ground >= MIN_GROUND_PX, "
+        "s.geo.fpx(MIN_GROUND_PX)\n")
+    monkeypatch.setitem(globals(), "PKG", pkg)
+    assert _calls_leaving_geo() == {("slips.py", "Localizer")}
+    assert _stretched_numbers() == {("slips.py", "UNITS")}
+    assert _px_unconverted() == {("slips.py", "MIN_GROUND_PX")}
+
+
 def test_the_trackers_screen_edge_and_the_players_reach_go_by_the_look():
     from gamelab.localization import mapdata
     from gamelab.localization.players import MATCH_PX, Players
