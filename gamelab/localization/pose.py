@@ -117,10 +117,18 @@ class Camera:
         self.offset = offset
 
     def corner(self, x: float, y: float) -> tuple[float, float]:
-        """Map point at the screen's top-left corner while her feet are at (x, y)."""
+        """Map point at the screen's top-left corner while her feet are at (x, y). Across (or up and down) a map no
+        wider (taller) than the view, the camera doesn't move: the map is centred on screen (Tree Dungeon, Forest Up
+        North II, 770 wide: its leaves' ends on screen put the corner at -658, the middle of -360..410 less half the
+        view's 1366; stopped at the right edge, as before, it would have been -955)."""
         left, top, right, bottom = self.bounds
-        return (min(max(x - self.offset[0], left), right - VIEW[0]),
-                min(max(y - self.offset[1], top), bottom - VIEW[1]))
+        return (_axis(x - self.offset[0], left, right, VIEW[0]), _axis(y - self.offset[1], top, bottom, VIEW[1]))
+
+    def fixed(self) -> tuple[bool, bool]:
+        """Whether the camera can't move at all across, and up and down: the map is no wider (taller) than the view.
+        Then her name tag on screen places her on the map exactly (camera_x)."""
+        left, top, right, bottom = self.bounds
+        return right - left <= VIEW[0], bottom - top <= VIEW[1]
 
     def clamped(self, x: float, y: float) -> tuple[bool, bool]:
         """Whether the camera is stopped at an edge, across and up/down, while her feet are at (x, y)."""
@@ -144,6 +152,25 @@ class Camera:
         if not cy:
             oy += rate * (screen[1] / geo.stretch - oy)
         self.offset = (ox, oy)
+
+
+def _axis(follow: float, lo: float, hi: float, view: float) -> float:
+    """The camera's corner along one axis: following her (`follow`) between the map's edges, or the map centred if
+    it's no bigger than the view."""
+    if hi - lo <= view:
+        return (lo + hi) / 2 - view / 2
+    return min(max(follow, lo), hi - view)
+
+
+def camera_x(where: Where, s: "Scene", camera: "Camera | None") -> float | None:
+    """Her x from her name tag on screen, where the camera can't move across (Camera.fixed): the map's x at her tag's
+    middle. Exact to a px (1 map unit at 1366x768), where the platform's visible end drifts with what's drawn over it:
+    standing still in the exit portal's light on Tree Dungeon, Forest Up North II (2026-10-24), the end read her x
+    anywhere from 265 to 293 about every second, her tag 264.3 on all 20 saved frames (her dot: 262)."""
+    if camera is None or s.tag is None or not camera.fixed()[0]:
+        return None
+    geo = s.geo
+    return camera.corner(where.x, where.y)[0] + geo.to_game(geo.look_scale * s.tag[0])
 
 
 def rope_x(where: Where, s: "Scene", model: MapModel) -> float | None:
@@ -183,14 +210,15 @@ def edge_x(where: Where, s: "Scene") -> float | None:
     return sum(good) / len(good) if good else None
 
 
-def refine(where: Where, s: "Scene", model: MapModel) -> tuple[Where, str]:
-    """Her x along her platform, best source first: a rope in view (ropes are drawn exactly at their
-    map x), the visible end of her platform, else the minimap dot (only good to ~11 map units).
-    Both screen sources need her name tag."""
+def refine(where: Where, s: "Scene", model: MapModel, camera: "Camera | None" = None) -> tuple[Where, str]:
+    """Her x along her platform, best source first: her name tag where the camera can't move across (camera_x), a
+    rope in view (ropes are drawn exactly at their map x), the visible end of her platform, else the minimap dot (only
+    good to ~11 map units). The screen sources need her name tag."""
     p = where.platform
     if p is None or s.tag is None:
         return where, "dot"
-    for how, x in (("rope", rope_x(where, s, model)), ("edge", edge_x(where, s))):
+    for how, x in (("camera", camera_x(where, s, camera)), ("rope", rope_x(where, s, model)),
+                   ("edge", edge_x(where, s))):
         if x is not None and abs(x - where.x) <= DOT_AGREE:
             x = p.clamp(x)
             return Where(x, p.y_at(x), p, where.dot), how

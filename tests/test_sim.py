@@ -1193,7 +1193,9 @@ def test_a_look_places_her_the_monsters_and_the_drops_where_the_world_has_them(m
     (d,) = s.loot
     assert d.mesos and d.x == pytest.approx(300, abs=1.5) and d.platform == b.id
     assert clock.elapsed > 0  # looking takes time
-    assert s.how == "rope"  # her x from the rope in view
+    # her x from her name tag: this test map is narrower than the view, so the camera can't move across (pose.camera_x;
+    # on a wider map, the rope in view)
+    assert s.how == "camera" and h.senses.camera.fixed()[0]
     eyes.want_ropes = False
     s = h.look()
     assert s.how == "edge" and s.where.x == pytest.approx(240, abs=1)  # ... or from her platform's end

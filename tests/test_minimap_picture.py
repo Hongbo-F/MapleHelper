@@ -74,3 +74,24 @@ def test_her_dot_falls_on_the_platform_she_stands_on_where_the_minimap_scrolls()
         assert where.platform is not None and where.platform.id == platform, (name, where)
         checked += 1
     assert checked
+
+
+def test_on_a_map_narrower_than_the_view_the_camera_is_centred_and_her_tag_places_her():
+    from types import SimpleNamespace
+    from gamelab.localization.pose import VIEW, Camera, Where, camera_x, refine
+    bounds = (-360, -2070, 410, 460)  # Tree Dungeon, Forest Up North II: 770 wide
+    camera = Camera(bounds)
+    assert camera.fixed() == (True, False)
+    assert camera.corner(0, -1000)[0] == camera.corner(300, -50)[0] == pytest.approx(25 - VIEW[0] / 2)
+    assert camera.corner(0, -1000)[1] != camera.corner(0, -50)[1]  # up and down it follows her
+    assert not Camera((-479, -1387, 1469, 765)).fixed()[0]  # the first map: wider than the view
+    model = mapdata.load(10002073) if mapdata.minimap_picture(10002073) is not None else None
+    if model is None:
+        pytest.skip("needs the game data copy")
+    p = next(pl for pl in model.platforms if pl.id == 28)
+    s = SimpleNamespace(tag=(461, 270), ground=(443, 475), geo=NATIVE, frame=np.zeros((768, 1366, 3), np.uint8),
+                        ropes=[])
+    where = Where(262.0, p.y_at(262.0), p, (93.5, 202.5))
+    assert camera_x(where, s, camera) == pytest.approx(25 - VIEW[0] / 2 + NATIVE.to_game(922))
+    refined, how = refine(where, s, model, camera)
+    assert how == "camera" and refined.x == pytest.approx(264.3, abs=0.5)

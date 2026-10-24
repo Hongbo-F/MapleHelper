@@ -153,7 +153,7 @@ class Senses:
             self.localizer.use(s.geo)
             s.where = self.localizer.where_dot(s.dot)
             if s.tag is not None:
-                s.where, s.how = refine(s.where, s, self.model)
+                s.where, s.how = refine(s.where, s, self.model, self.camera)
         if s.where is None:
             return
         if s.tag is not None:
