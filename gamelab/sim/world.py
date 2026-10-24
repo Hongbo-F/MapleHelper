@@ -113,6 +113,7 @@ from maplehelper.game import COMBAT
 
 from .. import directions
 from ..attack import reach
+from ..attack.danger import touch_taken
 from ..behavior import pet as pet_care
 from ..control.actions import STAR_DELAY_MS
 from ..localization import monsters as monster_data
@@ -660,9 +661,7 @@ def touch_damage(info: MobInfo | None, u: float, her: Her = LEVEL_19) -> float:
         return TOUCH_DAMAGE
     if her.defence is None:
         return info.pad * TOUCH_SHARE * (1 + TOUCH_SPREAD * (2 * u - 1)) / her.max_hp
-    d, raw = her.defence, info.pad * (1.2 + 0.2 * u)
-    taken = raw * (1 - d / (d + 300 + 2 * raw)) - (d / 25 + her.level / 10)
-    return max(1, math.trunc(taken)) / her.max_hp
+    return touch_taken(info.pad, her.defence, her.level, u) / her.max_hp  # (the stack's own: attack.danger)
 
 
 @functools.lru_cache(maxsize=None)

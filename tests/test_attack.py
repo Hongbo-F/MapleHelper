@@ -418,6 +418,39 @@ def test_monster_speeds_come_with_the_map(tmp_path, monkeypatch):
     assert [p.name for p in tmp_path.iterdir()] == ["1.json"]
 
 
+def test_touch_damage_hops_and_spawn_points_come_with_the_map(tmp_path, monkeypatch):
+    """A monster's touch damage (PADamage) and whether it hops (a jump action in its Mob data), by name, and each spawn
+    point with its platform. A map cached before those were kept gets them as it's read (here from a stand-in for the
+    game data), and the cache stays as it was."""
+    import json
+    tree = {"info": {}, "foothold": {"1": {"1": {"1": {"x1": 0, "y1": 500, "x2": 900, "y2": 500, "prev": 0, "next": 0}}}},
+            "life": {"0": {"type": "m", "id": "2", "x": 600, "y": 500, "cy": 500},
+                     "1": {"type": "m", "id": "7", "x": 300, "y": 500, "cy": 500},
+                     "2": {"type": "m", "id": "7", "x": 300, "y": 900, "cy": 900}},  # on no platform
+            "miniMap": {}}
+    model = mapdata.parse(1, tree, "Test", {}, {"2": "Snail", "7": "Slime"}, mob_damage={"2": 3, "7": 13},
+                          mob_hops={"2": False, "7": True})
+    assert model.mob_damage == {"Snail": 3.0, "Slime": 13.0} and model.mob_hops == {"Snail": False, "Slime": True}
+    assert [(pid, s.x, s.name) for pid, s in model.spawn_points] == [(0, 600, "Snail"), (0, 300, "Slime")]
+    assert model.monsters_by_platform == {0: ["Snail", "Slime"]}
+    raw = {"id": 1, "name": "Test", "tree": tree, "physics": {}, "mob_names": {"2": "Snail", "7": "Slime"},
+           "mob_exp": {"2": 2, "7": 12}, "mob_bodies": {}, "mob_die_s": {}, "mob_speeds": {"2": -65, "7": -20}}
+    monkeypatch.setattr(mapdata, "CACHE", tmp_path)
+    (tmp_path / "1.json").write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(mapdata, "_mob_touch", lambda ids: {"mob_damage": {i: 9.0 for i in ids},
+                                                            "mob_hops": {i: i == "7" for i in ids}})
+    loaded = mapdata.load(1)
+    assert loaded.mob_damage == {"Snail": 9.0, "Slime": 9.0} and loaded.mob_hops == {"Snail": False, "Slime": True}
+    assert json.loads((tmp_path / "1.json").read_text(encoding="utf-8")) == raw  # not written back
+    from gamedata.paths import COPY
+    if not (COPY / "Packs" / "Mob_00000.ms").is_file():
+        pytest.skip("needs the game data copy (gamedata/data/copy)")
+    monkeypatch.undo()
+    data = mapdata._mob_touch({"2", "7", "8", "9", "13", "19"})  # the first map's, Green and Horny Mushrooms
+    assert data["mob_damage"] == {"2": 3.0, "7": 13.0, "8": 15.0, "9": 17.0, "13": 54.0, "19": 110.0}
+    assert data["mob_hops"] == {"2": False, "7": True, "8": True, "9": True, "13": False, "19": False}
+
+
 # --- where to shoot from -------------------------------------------------------------------------------
 
 def test_coverage_and_spots_prefer_safe_platforms():
