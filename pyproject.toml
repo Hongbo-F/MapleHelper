@@ -7,3 +7,7 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# pytest-xdist: as many workers as tests/conftest.py's pytest_xdist_auto_num_workers says (8 for the suite, none for
+# files or tests named), the long tests handed round as workers come free. -n 8 or -n 0 says it outright.
+addopts = "-n auto --dist worksteal"
+markers = ["slow: long simulations and sweeps, left out unless --slow is given (README: Tests)"]

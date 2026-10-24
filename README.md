@@ -70,6 +70,14 @@ python -m gamelab combo jump_back_shot --runs 4 --chain 8
 python -m pytest
 ```
 
+That's about a minute on 8 workers (pytest-xdist), without the tests marked slow: the long feed runs, the tours end to end, the sweeps over many seeds and the probe tool's own tests. Before a commit, run them all (about 3 minutes):
+
+```bash
+python -m pytest --slow
+```
+
+A file or a test named runs in one process, as starting the workers takes longer than most files; `-n 8` spreads it anyway.
+
 ## Adding a combo
 
 Write a function in [maplehelper/combos.py](maplehelper/combos.py), add it to `COMBOS`, and give it a button in `[hotkeys]`. A combo is a list of steps:

@@ -1,5 +1,6 @@
 import copy
 import os
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,28 @@ BASE_CONFIG = {
     "control": {"abort": "esc", "slow_mode": "f12"},
     "timing": {"throw_gap": 650},
 }
+
+
+def pytest_addoption(parser):
+    parser.addoption("--slow", action="store_true",
+                     help="also run the tests marked slow: minutes more of simulation, for before a commit")
+
+
+def pytest_xdist_auto_num_workers(config):
+    """-n auto (pyproject.toml's addopts): 8 workers for the suite or a folder of it, which take 10 minutes on one;
+    one process when the run names its files or tests, as a worker takes about 4 s to start. 8, not one a core: each
+    commits about half a GB."""
+    return 0 if all(Path(arg.split("::")[0]).is_file() for arg in config.args) else 8
+
+
+def pytest_collection_modifyitems(config, items):
+    """Without --slow the tests marked slow aren't run: the long simulations and sweeps (README: Tests)."""
+    if config.getoption("--slow"):
+        return
+    slow = [item for item in items if item.get_closest_marker("slow")]
+    if slow:
+        config.hook.pytest_deselected(items=slow)
+        items[:] = [item for item in items if not item.get_closest_marker("slow")]
 
 
 @pytest.fixture

@@ -25,6 +25,10 @@ from test_attack import PLAT, step_map, target
 
 REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
 
+# Only with --slow (tests/conftest.py): the probes' answers are in the code since 2026-10-21, so these matter after a
+# change to behavior/probe.py, before probing again. The probe_* scenarios (test_sim) still run every time.
+pytestmark = pytest.mark.slow
+
 # From x 500 on PLAT (test_attack's: y 500, 0 to 1000), throwing right at pigs on platform 1, 110-200 off.
 TOY = Probe("toy", "a test", 0, 500.0, RIGHT, (1,), ("pig",), (110, 200))
 

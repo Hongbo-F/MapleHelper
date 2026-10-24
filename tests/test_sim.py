@@ -1262,10 +1262,14 @@ def test_map_data_that_is_there_but_fails_to_load_fails_instead_of_skipping(monk
 
 
 REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
+# Run only with --slow (tests/conftest.py): the long feed runs (their feedless twins and the short feed_* stay in) and
+# the tours end to end (their grounds' tour_* and loop_* stay in).
+SLOW_SCENARIOS = {"feed_tour_hunt_basin", "feed_loop_basin", "feed_loop_rival", "tour_run", "loop_run"}
 
 
 @REAL
-@pytest.mark.parametrize("name", list(scenarios.SCENARIOS))
+@pytest.mark.parametrize("name", [pytest.param(n, marks=pytest.mark.slow) if n in SLOW_SCENARIOS else n
+                                  for n in scenarios.SCENARIOS])
 def test_real_map_scenarios_show_what_they_are_there_for(name):
     trace = scenarios.run(name)
     assert not scenarios.unmet(trace), (scenarios.unmet(trace), trace["result"])
@@ -1479,6 +1483,7 @@ def _climb_then_jump(seed: int, x: float) -> dict:
 
 
 @REAL
+@pytest.mark.slow
 def test_a_climb_a_step_back_and_two_jumps_land_on_every_seed():
     """nav_climb_then_jump on seeds 1-32 from x 300, 470 and 760 (under the rope from either side), the lags
     spread: every trip climbs 36 -> 32 and jumps on to 29 and 28 without a miss (28 of 144 trips missed one at
@@ -1491,6 +1496,7 @@ def test_a_climb_a_step_back_and_two_jumps_land_on_every_seed():
 
 
 @REAL
+@pytest.mark.slow
 def test_a_climb_from_under_its_rope_then_a_run_to_a_jump_lands_on_every_seed():
     """From standing under a rope, the climb and a run off its top to a jump taking off 15 units from the end
     (route.TAKEOFF_EDGE), the lags spread as in nav_climb_then_jump, seeds 1-16: every trip arrives without a
@@ -1563,7 +1569,12 @@ def _stepped_go(self, dst, x=None, seconds=180, max_misses=6, until=None, *, mod
     return trip
 
 
-@pytest.mark.parametrize("name", [n for n in scenarios.SCENARIOS if n.startswith("nav_")])
+# Without --slow, one trip of each kind: shooting on the way, waiting for monsters, a transit's follow-ons, off a rope.
+STEPPED = {"nav_fight_short", "nav_monsters_long_way", "nav_transit_follows_on", "nav_off_rope_jump"}
+
+
+@pytest.mark.parametrize("name", [n if n in STEPPED else pytest.param(n, marks=pytest.mark.slow)
+                                  for n in scenarios.SCENARIOS if n.startswith("nav_")])
 def test_a_trip_stepped_one_pass_at_a_time_is_the_same_trip(name, monkeypatch):
     if scenarios.real_map() is None:
         pytest.skip("needs the real map's data")

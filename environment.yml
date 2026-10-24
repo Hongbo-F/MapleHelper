@@ -4,6 +4,7 @@ channels:
 dependencies:
   - python=3.14  # 3.15 had too many packages without builds (2026-10-24)
   - pytest
+  - pytest-xdist  # the tests on 8 workers (pyproject.toml)
   # OCR benchmark (ocr_bench.py). The combo helper itself needs only the standard library.
   # onnxruntime comes from conda-forge for its CUDA build. The CUDA 13.4 build
   # runs on the GPU (needs an NVIDIA driver with CUDA 13.4+) and also on the CPU.

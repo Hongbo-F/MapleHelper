@@ -239,6 +239,7 @@ def test_on_the_simulator_it_measures_the_simulator_s_respawn():
 
 
 @REAL
+@pytest.mark.slow
 def test_a_hunt_with_the_feed_records_the_deaths_of_others_kills():
     """With the continuous feed a hunt publishes the deaths the feed saw that weren't hers ('died', as `watch` does),
     which the report reads as others' kills; hers stay the 'kill' events alone (not counted twice). feed_loop_rival

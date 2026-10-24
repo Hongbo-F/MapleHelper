@@ -80,24 +80,28 @@ def enlarging(n: int, k: int) -> np.ndarray:
 
 def unenlarged(img: np.ndarray, k: int) -> np.ndarray:
     """The screen's pixels a crop enlarged k times was made from: the enlargement undone by least squares (OpenCV's
-    solver: numpy's linear algebra doesn't load here), down then across, to about a level."""
+    pseudo-inverses, one each way for all three channels), down then across, to about a level."""
     if k == 1:
         return img.astype(np.float32)
-    down, across = enlarging(img.shape[0] // k, k), enlarging(img.shape[1] // k, k)
-    out = np.zeros((img.shape[0] // k, img.shape[1] // k, 3), np.float32)
-    for ch in range(3):
-        _, rows = cv2.solve(down, img[..., ch].astype(np.float32), flags=cv2.DECOMP_SVD)
-        _, cols = cv2.solve(across, np.ascontiguousarray(rows.T), flags=cv2.DECOMP_SVD)
-        out[..., ch] = cols.T
+    down = cv2.invert(enlarging(img.shape[0] // k, k), flags=cv2.DECOMP_SVD)[1]
+    across = cv2.invert(enlarging(img.shape[1] // k, k), flags=cv2.DECOMP_SVD)[1]
+    out = np.stack([down @ img[..., ch].astype(np.float32) @ across.T for ch in range(3)], axis=-1)
     return np.clip(out, 0, 255)
+
+
+# Screen px kept round the read box when a crop is undone: bicubic reaches 2 px, and the box's pixels come out within
+# 0.003 of a level of the whole crop's. (hud_exp.png undone whole took 10 s.)
+UNDO_MARGIN = 8
 
 
 @pytest.mark.parametrize("name", sorted(CROPS))
 def test_every_saved_crop_of_the_bar_reads_as_checked_by_eye(name):
     (x, y, k), want = CROPS[name]
-    screen = unenlarged(_saved(name), k)
     x0, y0, x1, y1 = READ_BOX
-    box = screen[y0 - y:y1 - y, x0 - x:x1 - x]
+    left, top = max(0, x0 - x - UNDO_MARGIN), max(0, y0 - y - UNDO_MARGIN)
+    near = _saved(name)[top * k:(y1 - y + UNDO_MARGIN) * k, left * k:(x1 - x + UNDO_MARGIN) * k]
+    screen = unenlarged(near, k)
+    box = screen[y0 - y - top:y1 - y - top, x0 - x - left:x1 - x - left]
     if box.shape[1] < x1 - x0:  # rest_hud.png ends a column short, on the plain bar: that column again
         box = np.concatenate([box, box[:, -1:]], axis=1)
     r = read(box)

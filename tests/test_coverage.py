@@ -192,6 +192,7 @@ REACH_MINUTES = 10
 
 
 @REAL
+@pytest.mark.slow
 def test_the_hunt_policies_reach_every_platform_monsters_spawn_on_within_five_seeds():
     """The tour and the hunt loop, each on seeds 1-5 for 10 minutes in the harness's world with 15% of the spawns
     filled (preset game-sparse): between them a move gets her onto every platform monsters spawn on (16 on this
