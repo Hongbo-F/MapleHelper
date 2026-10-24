@@ -101,3 +101,45 @@ def test_a_rope_90_up_is_grabbed_at_the_planners_reach_and_not_at_the_clients():
     assert w.plat is floor and w.mode == "ground"
     assert not any("grabs the rope" in line for line in w.log)
     assert body.OWN_GROUP_WALLS  # (the world's default, as fitted on the first map's flights)
+
+
+# --- the planner on Tree Dungeon, Forest Up North II ---------------------------------------------------------------
+
+def test_the_planner_gets_onto_7_from_8_and_up_from_the_bottom_by_29():
+    from gamelab.motion.route import GRAB_CHANCE, MISS_S, Planner
+    m = tree_map()
+    planner = Planner(m)
+    by = {(mv.kind, mv.src, mv.dst): mv for mv in planner.moves}
+    # 7 (two Horny Mushrooms) by a running jump off 8's left end (route.END_LOOK, from West Rocky Mountain II's 17 onto
+    # 16): the study's brute force lands it from takeoffs 24-48 on 8
+    jump = by["jump", 8, 7]
+    assert 24 <= jump.takeoff <= 48 and m.platform(7).covers(jump.land_x) and jump.chance == 1.0
+    assert ("jump", 25, 29) in by
+    # The rope at -8 from 30 ends 94.3 above it: beyond a sure grab (82), within ROPE_REACH (95)
+    climb = by["climb", 30, 27]
+    assert climb.chance == GRAB_CHANCE and climb.seconds == pytest.approx(by["climb", 29, 27].seconds + 0.49
+                                                                          + (1 / GRAB_CHANCE - 1) * MISS_S, abs=0.01)
+    assert [f"{mv.kind} {mv.src}->{mv.dst}" for mv in planner.plan(30, 60.0, 27)] == ["jump 30->29", "climb 29->27"]
+    up = planner.plan(33, 100.0, 6)
+    assert "climb 30->27" not in [f"{mv.kind} {mv.src}->{mv.dst}" for mv in up] and up[-1].dst == 6
+    assert [mv for mv in planner.moves if mv.kind == "climb" and mv.chance < 1] == [climb]
+
+
+def test_on_the_other_maps_every_climb_is_a_sure_grab():
+    from gamelab.motion.route import Planner
+    for map_id in (scenarios.MAP_ID, scenarios.ROCKY):
+        m = scenarios.real_map(map_id)
+        if m is None:
+            continue
+        assert all(mv.chance == 1.0 for mv in Planner(m).moves if mv.kind == "climb")
+
+
+def test_jumping_for_the_rope_from_30_at_the_clients_reach_she_misses_and_lands_on_29():
+    m = tree_map()
+    p29, p27 = m.platform(29), m.platform(27)
+    for realism, lands in ((None, p27), (Realism(rope_reach=ROPE_REACH_CLIENT), p29)):
+        w = world(m, 30, -8.0, realism=realism)
+        w.key(0.0, "up", True)
+        tap(w, 0.05, "alt", 0.04)
+        w.advance(4.0)
+        assert w.plat is lands and w.mode == "ground", (realism, w.plat)

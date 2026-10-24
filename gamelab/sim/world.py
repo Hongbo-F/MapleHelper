@@ -114,7 +114,8 @@ from ..control.actions import STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import MapModel, Platform, Rope
 from ..motion import body, flow
-from ..motion.physics import CLIMB_SPEED, DROP_LAG, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE, WALK_SPEED
+from ..motion.physics import (CLIMB_SPEED, DROP_LAG, GRAB_SURE, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE,
+                               WALK_SPEED)
 from ..perception.kinds import kind_of
 
 TICK_MS = 5              # the world's tick, which is also the engine's own step in the air (body.TICK)
@@ -300,12 +301,12 @@ PORTAL_REACH = (25.0, 40.0)
 # - How far above her feet a rope's bottom can be for a jump to grab it: physics.ROPE_REACH, 95 (her jump's 77 and
 #   18 of arms: a guess from the start, never measured; the highest grab tried in game was a rope 69 up, on the first
 #   map); HeavenClient grabs a rope when a point 5 above her feet is on it (Gameplay/MapleMap/MapInfo.cpp,
-#   Ladder::inrange, read 2026-10-24), 82 up at the top of her jump (ROPE_REACH_CLIENT). Only one climb on the three
+#   Ladder::inrange, read 2026-10-24), 82 up at the top of her jump (physics.GRAB_SURE). Only one climb on the three
 #   maps is between the two: from 30 up the rope at -8 on Tree Dungeon, Forest Up North II (94.3 up), on every way up
 #   from the bottom of the tower; jumping for it and missing, she passes up through 29 (58 above 30 there) and lands
 #   on it.
 SIDE_INSET = 25.0
-ROPE_REACH_CLIENT = JUMP_HEIGHT + 5
+ROPE_REACH_CLIENT = GRAB_SURE
 MESSAGE_FOR = 5.0        # s a pickup message stays in the log on screen
 FULL_MESSAGE = "You can't get anymore items."
 ITEM_OF = {"pig": "leather"}

@@ -42,7 +42,12 @@ JUMP_SPEED = SHOE.vjump  # physics: jumpSpeed x JUMP/100 (555)
 GRAVITY = SHOE.gravity   # physics: gravityAcc (2000)
 FALL_SPEED = SHOE.fall   # physics: fallSpeed (670, terminal)
 JUMP_HEIGHT = JUMP_SPEED ** 2 / (2 * GRAVITY)   # 77 map units
-ROPE_REACH = 95          # she can grab a rope that ends this far above her feet (jump + arms)
+ROPE_REACH = 95          # she can grab a rope that ends this far above her feet (jump + arms: a guess, never measured;
+                         # the highest grab tried in game was a rope 69 up)
+# ... and surely this far: HeavenClient (the open-source v83 client) grabs a rope when a point 5 above her feet is on it
+# (Gameplay/MapleMap/MapInfo.cpp, Ladder::inrange, read 2026-10-24), 82 up at the top of her jump. Between the two,
+# which the game does isn't known (route.GRAB_CHANCE).
+GRAB_SURE = JUMP_HEIGHT + 5
 LAND_MARGIN = 18         # land at least this far onto a platform
 # Her walk and jump in the planner's terms, from the engine with the median lags (body.Lags: the jump sweeps
 # at 30 fps and the 60 fps recordings, the wait for the game's 30 ms step included). From standing the game

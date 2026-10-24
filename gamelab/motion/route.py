@@ -25,8 +25,8 @@ from .. import directions
 from ..localization.mapdata import MapModel, Platform, Rope
 from . import body
 from .body import slide, walls_for
-from .physics import (CLIMB_SPEED, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH, SHOE,
-                      SLOW_TAKEOFF, WALK_SPEED, fall_time, flight, fly, sure_landing)
+from .physics import (CLIMB_SPEED, FALL_SPEED, GRAB_SURE, GRAVITY, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH,
+                      SHOE, SLOW_TAKEOFF, WALK_SPEED, fall_time, flight, fly, sure_landing)
 
 
 JUMP_MARGIN = 12         # don't plan jumps that need the last few units of height
@@ -80,6 +80,13 @@ NEEDLESS_DROP = 10       # a running jump down more than this, where walking off
 ROPE_TOP_DX = 4
 ROPE_TOP_DY = 20
 ROPE_PAST = 5
+# A rope whose bottom is above a sure grab (physics.GRAB_SURE: 82, HeavenClient's) but within ROPE_REACH (95, a guess)
+# may or may not be grabbed: nothing measured says which. Its climb is kept as landing GRAB_CHANCE of the time, each
+# miss costing MISS_S (as a way out of a trap's). One such climb on the three maps: on Tree Dungeon, Forest Up North II
+# from 30 up the rope at -8 (94.3 up), which was on every way up from the bottom of the tower (2.4 s); now 5.4 s, and
+# the ways up go by 29, the same rope 36.8 above it (30 -> 29 jumping, 29 -> 27, 2.7 s). Missed, the jump for it lands
+# her on 29 (58 above 30 there) in any case. None on the first map or West Rocky Mountain II (69 up at most).
+GRAB_CHANCE = 0.5
 # Ropes in mid-air. With up held she grabs a rope she passes within GRAB_X of while her feet are between its top and
 # ROPE_ARMS below its bottom (the simulator's world.GRAB_X and ARMS: ROPE_REACH less a jump's height; the two climbs
 # from the basin up the rope ending 69 above it, on 2026-10-20 and 21, caught it at the top of her jump), but not
@@ -206,7 +213,8 @@ class Move:
     takeoff: float | None = None  # running jumps from along a platform: where she leaves the ground
     hang: float | None = None     # rope_jump: the height (her feet's map y) she jumps off the rope from ...
     onto: Rope | None = None      # ... and the rope she jumps onto (None: a platform, dst)
-    chance: float = 1.0           # how likely it lands on dst: below 1 only for a way out of a trap (_ways_out)
+    chance: float = 1.0           # how likely it lands on dst: below 1 only for a way out of a trap (_ways_out) and
+                                  # a climb up a rope beyond a sure grab (GRAB_CHANCE)
 
 
 @dataclass(frozen=True)
@@ -258,9 +266,11 @@ def _rope_moves(model: MapModel) -> list[Move]:
             if p.covers(rope.x):
                 gap = p.y_at(rope.x) - rope.bottom  # how far the rope ends above her feet
                 if -ROPE_PAST <= gap <= ROPE_REACH:
+                    chance = 1.0 if gap <= GRAB_SURE else GRAB_CHANCE
                     out.append(Move("climb", p.id, top.id, rope.x, rope.x,
-                                    seconds=CLIMB_EXTRA_S + (p.y_at(rope.x) - rope.top) / CLIMB_SPEED,
-                                    rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom))
+                                    seconds=CLIMB_EXTRA_S + (p.y_at(rope.x) - rope.top) / CLIMB_SPEED
+                                    + (1 / chance - 1) * MISS_S,
+                                    rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom, chance=chance))
             elif (past := _past_end(model, p, rope)) is not None:
                 takeoff, sign, _ = past
                 out.append(Move("climb", p.id, top.id, takeoff, rope.x, directions.toward(sign),
