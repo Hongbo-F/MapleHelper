@@ -40,6 +40,7 @@ from ..control.timeline import SIM_KEYS, SIM_KEYS_PET
 from ..behavior.tour import Tour
 from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
                     Trace, detector_kinds, patched)
+from . import harness
 from .world import LEVEL_19, LEVEL_23, Her, Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
@@ -1737,3 +1738,184 @@ def feed_loop_rival(sim):
     by it (tracking.OTHERS_BY_PLAYER), and 13 with the searches off the feed's frame loop too, each of them
     meeting all of this.)"""
     return _loop(2)(sim)
+
+
+# West Rocky Mountain II (ROCKY: map 10004021, from 2026-10-23), with her as she plays there (HER: level 23, HP 730,
+# her keys from 2026-10-23, her pet drinking her potions): trips between its hunting grounds, out of the pit of
+# stairs, up its ropes and stairs, and the hunt loop and the tour on it (README: In game, on West Rocky Mountain II).
+
+def rocky(start: tuple[int, float], **kw):
+    """A scenario on West Rocky Mountain II."""
+    return scenario(start, map_id=ROCKY, **kw)
+
+
+def _made(tr: dict, move: str) -> bool:
+    """The trip made a move (its kind and platforms: `jump 27->25`) that landed where it was going."""
+    to = move.split("->")[1]
+    return any(m == move or m == f"{move}: landed on {to}" for m in _result(tr, "moves"))
+
+
+GAME_ERRORS = harness._GAME_NOISE  # the game's errors, as the harness's preset `game` has them
+
+
+@rocky((30, -1009.0), expects=(ends("arrived"), moves("jump", "jump_up"),
+                               check("out by the way out of the pit, 27 onto 25", lambda tr: _made(tr, "jump 27->25")),
+                               check("no move missed", lambda tr: _result(tr, "misses") == 0)))
+def nav_rocky_out_of_pit(sim):
+    """From stair 30 in the pit up to the bridge (22): up the stairs (each 60 up), the one way out, 27 onto the
+    floating step 25 (a way out of a trap, route._ways_out: 0.90 by her takeoff's spread), then 25, 24, 23 and up
+    onto 22. In game the planner had no route out ("no route from platform 30 to 19"), and from 27 she twice fell
+    back to 28."""
+    return _nav(22)(sim)
+
+
+@rocky((30, -1009.0), noise=GAME_ERRORS, realism=Realism(lock_arrows=True),
+       expects=(ends("arrived"), check("out by 27 onto 25", lambda tr: _made(tr, "jump 27->25"))))
+def nav_rocky_noisy_pit(sim):
+    """nav_rocky_out_of_pit with the game's errors (the harness's preset `game`: the lags spread, walks off by a few
+    units, her dot read to whole pixels, short taps lost): she still gets out by 27 onto 25 (on seeds 1-10 every
+    trip arrived)."""
+    return _nav(22)(sim)
+
+
+@rocky((32, -1500.0), expects=(ends("arrived"), check("five jumps up the stairs, none missed",
+                                                      lambda tr: _result(tr, "moves")[0].startswith("jump 32->31")
+                                                      and len(_result(tr, "moves")) == 5
+                                                      and _result(tr, "misses") == 0)))
+def nav_rocky_stairs_up(sim):
+    """From the pit's bottom stair (32) up to 27: five running jumps, each 60 up with 17 to spare, over the riser
+    under each stair's end (a wall of her own group, cleared from 15-35 units back)."""
+    return _nav(27)(sim)
+
+
+@rocky((24, -946.0), expects=(ends("arrived"), moves("jump_up", "jump")))
+def nav_rocky_floating_steps(sim):
+    """From the floating step 24 under the bridge up onto 22: straight up onto 23, then up onto the bridge's slope
+    (2.3-8.0 units to spare). In game her dot read 80 units left there, and the jumps went 80 units right of where
+    they were planned."""
+    return _nav(22)(sim)
+
+
+@rocky((22, -1300.0), expects=(ends("arrived"), moves("climb"),
+                               check("on 14: 11 lies on it", lambda tr: tr["world"]["platform"] == 14)))
+def nav_rocky_twins(sim):
+    """From the bridge under 11 to 11 (it lies on 14's footholds: one place, MapModel.twins): up the rope at -1463
+    onto 14 is arriving. In game the trips between the twins were planned as jumps, and landing on the other one
+    counted as landing elsewhere."""
+    return _nav(11)(sim)
+
+
+@rocky((14, -930.0), expects=(ends("arrived"), moves("climb"),
+                              check("no move missed", lambda tr: _result(tr, "misses") == 0)))
+def nav_rocky_rope_to_7(sim):
+    """From the high bridge (14) up the rope at -414 to 7 (its bottom 64 above 14, 8 units from 14's end): in game
+    the run to it was keyed for where her dot (80 units off) put her, she ran off 14's end, and ended on 17."""
+    return _nav(7)(sim)
+
+
+@rocky((17, -277.5), expects=(ends("arrived"), check("17 onto 16 and 16 onto 13", lambda tr: _made(tr, "jump 17->16")
+                                                     and _made(tr, "jump 16->13"))))
+def nav_rocky_right_side_up(sim):
+    """From 17 up the steps on the right to 10: 17 onto 16 (a jump off the end from 15 units back: Motion
+    planning), 16 onto 13 (2.6 units to spare), up onto 10, in 3.5 s; by the planner's times 22.2 before the jumps
+    nearer the end, round by the bridge and the rope to 14."""
+    return _nav(10)(sim)
+
+
+@rocky((0, -600.0), expects=(ends("arrived"), moves("walk_off", "drop")))
+def nav_rocky_down_from_the_top(sim):
+    """From the top (0) down to the bridge: walk-offs onto 9 and 14, a drop through 14 onto 22."""
+    return _nav(22)(sim)
+
+
+@rocky((19, -700.0), expects=(ends("arrived"), moves("jump", "jump_up", "climb"),
+                              check("ten moves or more", lambda tr: len(_result(tr, "moves")) >= 10)))
+def nav_rocky_to_the_top(sim):
+    """From 19 (the way out to West Rocky Mountain I) up to the top (0): the steps on the right, the rope at -414
+    from 10 to 7, and the ledges' jumps (6 onto 3 with 0.4 units to spare, or by 4)."""
+    return _nav(0)(sim)
+
+
+@rocky((22, 0.0), seed=3, expects=(ends("arrived"), moves("climb", "jump", "jump_up"),
+                                   check("no move missed", lambda tr: _result(tr, "misses") == 0)))
+def nav_rocky_bridge_to_ledges(sim):
+    """From the bridge's right part up to the ledge 6, the longest way up (13.4 s): the rope at -303 to 18, the
+    steps on the right, the rope at -414 to 7, up onto 6. (Seed 3: on seeds 1, 2 and 6 of 1-6 the jump up from 13
+    (from x -10.3, running left) went down through 10's surface without landing and on to 16: body._lands_at weighs
+    her height at the start of each 5 ms step against the surface at its end, and 10 rises 0.15 a unit to the left
+    there: a step (0.75 units across) that starts less than 0.11 above the surface goes through it. She replanned
+    from 16 and arrived, in 16.5-23.5 s. README: Found offline.)"""
+    return _nav(6)(sim)
+
+
+@rocky((22, -1000.0), monsters="all", expects=(ends("arrived"), moves("climb")))
+def nav_rocky_monsters_bridge(sim):
+    """Across the bridge among its monsters (14 spawn points, Stumps and Axe Stumps) and up the rope at -536 to 19,
+    keeping clear of them: the climb starts among them (on seeds 1-6 she arrived every time, touched 3-25 times on
+    the way)."""
+    return _nav(19)(sim)
+
+
+@rocky((22, -1300.0), monsters="all", seed=1, limit=300,
+       expects=(ends("arrived"), logs("shooting it on the way"),
+                check("ten kills or more on the way", lambda tr: sum(tr["world"]["kills"].values()) >= 10)))
+def nav_rocky_fight_bridge(sim):
+    """From the bridge up the rope at -1463 to 14, shooting the monsters in reach on the way (the tour's escort): a
+    Stump takes 4 stars, a Dark Stump 7 and an Axe Stump 10. (Seed 1: of seeds 1-12 she arrived with ten kills or more
+    on 1 and 11, and on most of the others fell out of the map past 22's left end (-1640), where nothing is under
+    her: a touch knocked her off it, fighting or picking up drops there, or off the rope at -1463 near its top, and
+    the knock carried her past it. The world's
+    side is the map's footholds' (-1662, 14's left end), 19 units left of the pit's bottom stair (32, from -1643);
+    what the game does there isn't known: README.)"""
+    return _nav(14, fight=True)(sim)
+
+
+def _fed_her_pet(tr: dict) -> bool:
+    return any("feeds her pet" in line for line in tr["world_log"])
+
+
+@rocky((22, -700.0), monsters="all", limit=400,
+       expects=(_rule("shoot"), check("ten kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 10),
+                check("every kill counted", _every_kill),
+                check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 5),
+                check("she fed her pet", _fed_her_pet), happens("her pet drinks a potion for her"),
+                check("no potion key pressed: her pet drinks them", lambda tr: not any(p[1] == "potion"
+                                                                                       for p in tr["plans"])),
+                ends("standing by on a safe platform", key="stop")))
+def loop_rocky_bridge(sim):
+    """The hunt loop on West Rocky Mountain II from the bridge (22: 14 spawn points, 7 Stumps, 3 Dark Stumps and 4
+    Axe Stumps), 3 minutes: she feeds her pet at the start, it drinks a potion when a touch leaves her under its 45%
+    warning, she never presses a potion key, and she stands by on a safe platform at the end (under the bridge)."""
+    return _loop(3)(sim)
+
+
+@rocky((14, -930.0), monsters="all", limit=800,
+       expects=(check("fifty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 50),
+                ends("time up", key="hunt_stop"), ends("standing by on a safe platform", key="stop"),
+                check("every kill counted", _every_kill),
+                check("on a safe platform", lambda tr: tr["world"]["platform"] in tr["result"]["safe"])))
+def loop_rocky_run(sim):
+    """`python -m gamelab tour --loop --minutes 8 --map 10004021`, end to end from the high bridge (14), then standing
+    by on a safe platform: a floating step under the bridge or a stair of the pit (23, 24, 25, 27, 30, 32: every
+    safe platform 120 units wide is there)."""
+    return _loop(8)(sim)
+
+
+@rocky((22, -700.0), monsters="all", limit=1500,
+       expects=(check("three stops or more", lambda tr: len(tr["result"]["visited"]) >= 3),
+                ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
+                check("she fed her pet", _fed_her_pet)))
+def tour_rocky_run(sim):
+    """`python -m gamelab tour --map 10004021`: the whole sweep, end to end, from the bridge."""
+    return sim.tour_stack().run()
+
+
+@rocky((22, -700.0), monsters="all", hp=0.25, limit=400,
+       expects=(logs("resting on platform"), no_log("couldn't reach a safe platform"),
+                check("rests on a step under the bridge", lambda tr: tr["world"]["platform"] in (23, 24, 25)),
+                check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
+def tour_rocky_rest(sim):
+    """Low on HP on the bridge (25%, under the tour's 30%): down to a floating step under it to rest (every safe
+    platform 120 wide is under the bridge: the steps 23-25 and the pit's stairs, whose way out is 27 onto 25 at
+    0.90), and on the chair until HP is back."""
+    return _rest(sim)
