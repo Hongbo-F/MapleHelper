@@ -659,9 +659,14 @@ def fake_lab(tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0):
     monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
     monkeypatch.setattr(player_mod.window, "client_rect",
                         lambda hwnd: {"left": 0, "top": 0, "width": 64, "height": 48})
-    monkeypatch.setattr(player_mod, "Watchdog", functools.partial(
-        Watchdog, spotter=Spotter(), grab=screen, interval=0.02, end_s=end_s, cap_s=cap_s,
-        folder=tmp_path / "lie_detector"))
+    def watchdog(*args, **kwargs):
+        # serve() enables the real YOLO shadow in production; this fake lab must not load a GPU model (its first
+        # inference takes seconds, and parallel tests would all contend for the GPU).
+        kwargs["shadow"] = None
+        return Watchdog(*args, spotter=Spotter(), grab=screen, interval=0.02, end_s=end_s, cap_s=cap_s,
+                        folder=tmp_path / "lie_detector", **kwargs)
+
+    monkeypatch.setattr(player_mod, "Watchdog", watchdog)
 
 
 class Served:
