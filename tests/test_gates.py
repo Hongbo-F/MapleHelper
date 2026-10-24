@@ -1,6 +1,7 @@
 """Colour gates learned for the monster kinds without a hand-made one (perception.gates; mobs.MobDetector's
-`background`), kinds that share a body searched as one and told apart by their pictures (mobs._pick_kind), and a map's
-background colours learned from saved frames (sprites.learn_background, `learn-colours`). Made-up kinds are drawn onto
+`background`), kinds that share a body searched as one and told apart by their pictures (mobs._pick_kind) and re-found
+as their own kind only (MobDetector.refind), and a map's background colours learned from saved frames
+(sprites.learn_background, `learn-colours`). Made-up kinds are drawn onto
 tests/fixtures/native (West Rocky Mountain II at 1366x768); the new maps' labelled frames stay in D:/MapleHelper-scratch
 (the tests on them skip without them)."""
 
@@ -78,7 +79,8 @@ def drawn(rgba, left, top, flip=False, name="n28_000.png"):
 
 def test_a_kinds_gate_holds_the_colours_its_pictures_have_far_more_often_than_the_background():
     back = np.zeros(1 << (3 * gates.BITS), np.int64)
-    common, rare, never = (gates.bins(np.array([c], np.uint8))[0] for c in ((100, 80, 60), (10, 200, 30), (250, 0, 250)))
+    colours = ((100, 80, 60), (10, 200, 30), (250, 0, 250))
+    common, rare, never = (gates.bins(np.array([c], np.uint8))[0] for c in colours)
     back[common], back[rare] = 1_000_000, 10
     kind = [gates.histogram(np.array([(100, 80, 60)] * 50 + [(10, 200, 30)] * 50 + [(250, 0, 250)] * 5, np.uint8))]
     lut = gates.learn(kind, back)
@@ -178,6 +180,55 @@ def test_a_kind_with_parts_of_its_own_is_the_monsters_only_where_they_show(tmp_p
     assert picked.kind == "stub"
 
 
+def refound(det, scene, kind, left, top, fallback=True):
+    """A track of `kind` (its picture facing left, last seen with its top-left at left, top) re-found in `scene`, as
+    WorldStep re-finds (above the chat box): (its feet) or None."""
+    t = next(t for t in det.templates[kind] if t.facing == -1)
+    th, tw = t.rgb.shape[:2]
+    m = det.refind(scene, (left, top, left + tw, top + th), kind, t.name, t.facing, (0, 0, 1366, 700), fallback)
+    return None if m is None else (m.kind, m.foot_x, m.feet_y)
+
+
+def test_a_track_is_re_found_on_a_monster_of_its_own_kind_alone(tmp_path):
+    caps = {"violet-cap": (170, 60, 190), "pink-cap": (200, 60, 150)}
+    det = detector(tmp_path, {f"{k}_move0": body(cap=c) for k, c in caps.items()})
+    scene = drawn(body(cap=caps["pink-cap"]), 640, 300)
+    for fallback in (True, False):
+        assert refound(det, scene, "pink-cap", 640, 300, fallback) == ("pink-cap", 662, 340)
+        assert refound(det, scene, "violet-cap", 640, 300, fallback) is None
+    twins, det.twins = det.twins, {}
+    assert refound(det, scene, "violet-cap", 640, 300) == ("violet-cap", 662, 340)  # its picture fits the other
+    det.twins = twins
+    pictures = {"stub_move0": body(cap=(120, 80, 40)), "stub-axe_move0": body(cap=(120, 80, 40), axe=True)}
+    det = detector(tmp_path, pictures)
+    with_axe, without = drawn(pictures["stub-axe_move0"], 400, 200), drawn(pictures["stub_move0"], 400, 216)
+    assert refound(det, with_axe, "stub-axe", 400, 200) == ("stub-axe", 422, 256)
+    assert refound(det, with_axe, "stub", 400, 216) is None  # the stub that is all of it but the axe: not a stub
+    assert refound(det, without, "stub", 400, 216) == ("stub", 422, 256)
+    assert refound(det, without, "stub-axe", 400, 200) is None
+
+
+def test_a_twins_picture_is_checked_where_it_lies_on_the_monsters():
+    pic = np.zeros((20, 20, 3), np.uint8)
+    pic[5:15, 4:12] = 1
+    shifted = np.roll(pic, 1, axis=1)  # the same body a px across, on the same feet
+    one, other = (SimpleNamespace(mask3=p, origin=(10.0, 20.0)) for p in (pic, shifted))  # (what _cover reads)
+    assert mobs._aligned(one, other) == (-1, 0) and mobs._aligned(other, one) == (1, 0)
+    assert mobs._aligned(one, one) == (0, 0)
+
+
+def test_one_places_score_is_the_masked_matchs():
+    rng = np.random.default_rng(3)
+    tpl, patch = (rng.integers(0, 256, (40, 44, 3), np.uint8) for _ in range(2))
+    mask = rng.random((40, 44)) > 0.4
+    patch[mask] = np.clip(0.6 * tpl[mask] + 0.4 * patch[mask], 0, 255).astype(np.uint8)
+    cv = float(mobs.masked_match(patch, tpl, np.dstack([mask.astype(np.uint8)] * 3))[0, 0])
+    assert abs(mobs._score(patch, tpl, mask) - cv) < 1e-6 and cv > 0.5
+    flat = np.full_like(patch, 90)
+    assert mobs._score(flat, tpl, mask) == -1.0 == float(mobs.masked_match(flat, tpl, np.dstack([mask] * 3)
+                                                                             .astype(np.uint8))[0, 0])
+
+
 # --- the background, learned from saved frames --------------------------------------------------------------------
 
 def test_a_maps_background_is_learned_with_its_monsters_cut_out(tmp_path):
@@ -229,7 +280,8 @@ def needs(path: Path, model_id: int):
 def _match(found, labels, tol):
     """Each label's nearest monster found within `tol` px of its feet, one each: {label index: monster}."""
     pairs = sorted((abs(m.foot_x - lab["x"]) + abs(m.feet_y - lab["y"]), i, j) for i, m in enumerate(found)
-                   for j, lab in enumerate(labels) if abs(m.foot_x - lab["x"]) <= tol and abs(m.feet_y - lab["y"]) <= tol)
+                   for j, lab in enumerate(labels)
+                   if abs(m.foot_x - lab["x"]) <= tol and abs(m.feet_y - lab["y"]) <= tol)
     used, out = set(), {}
     for _, i, j in pairs:
         if i not in used and j not in out:
@@ -285,6 +337,40 @@ def test_horny_and_green_mushrooms_are_told_apart_wherever_the_sprite_fit_saw_on
                 told.append(mobs._pick_kind(scene, hit, det.twins[start], det.templates, mobs.FINE_SLACK).kind
                             == m["kind"])
     assert len(told) == 2 * 55 and all(told)  # spawning, flinching and covered ones too
+
+
+def test_a_mushrooms_or_a_stumps_track_re_finds_it_only_if_of_its_kind():
+    # Each mushroom and stump whose frame the labels give, re-found where it stands as WorldStep re-finds (above the
+    # chat box, the fallback on) by a track of its own kind and by one of each kind that shares its body, each with
+    # the picture that matched it last (its frame, facing its way). Without the kind check, the other kinds' tracks
+    # re-found 52 of the 55 mushrooms and 115 of the stumps' 116.
+    twins = {"horny-mushroom": ("green-mushroom",), "green-mushroom": ("horny-mushroom",),
+             "stump": ("dark-stump", "axe-stump"), "axe-stump": ("stump", "dark-stump")}
+    out = {}
+    for model_id, root, fixture in ((10002073, TREE_DUNGEON, "tree_dungeon_monsters.json"),
+                                    (10004021, WEST_ROCKY_NATIVE, "west_rocky_native_monsters.json")):
+        det = sprites.detector_for(needs(root, model_id), NATIVE)
+        tally = {"own": [0, 0], "other": [0, 0]}  # (asked, re-found within 3 px)
+        for name, e in json.loads((LABELS / fixture).read_text(encoding="utf-8"))["frames"].items():
+            path = root / name if (root / name).is_file() else root.parent / name
+            scene = np.asarray(Image.open(path).convert("RGB"))
+            for m in e["monsters"] if isinstance(e, dict) else [m for m in e if not m["flags"]]:
+                if m["kind"] not in twins or m["y"] > 700 or not m["frame"].startswith(("stand", "move", "hit1")):
+                    continue
+                for role, kinds in (("own", (m["kind"],)), ("other", twins[m["kind"]])):
+                    for kind in kinds:
+                        t = next(t for t in det.templates[kind] if t.frame == m["frame"] and t.facing == m["facing"])
+                        x0, y0 = round(m["x"] - t.origin[0]), round(m["y"] - t.origin[1])
+                        box = (x0, y0, x0 + t.rgb.shape[1], y0 + t.rgb.shape[0])
+                        r = det.refind(scene, box, kind, t.name, t.facing, (0, 0, 1366, 700))
+                        tally[role][0] += 1
+                        tally[role][1] += r is not None and abs(r.foot_x - m["x"]) <= 3 and abs(r.feet_y - m["y"]) <= 3
+        out[model_id] = tally
+        if model_id == 10004021:  # an Axe Stump's move/1 and move/3 lie a px across from a Stump's on their feet
+            assert {(a, b) for (a, _, b), d in det.aligned.items() if d != (0, 0)} >= {
+                ("axe-stump_move1", "stump_move1"), ("stump_move3", "axe-stump_move3")}
+            assert all(abs(d[0]) == 1 and d[1] == 0 for d in det.aligned.values() if d != (0, 0))
+    assert out == {10002073: {"own": [55, 53], "other": [55, 0]}, 10004021: {"own": [58, 58], "other": [116, 0]}}
 
 
 def test_west_rocky_mountains_stumps_and_snails_are_found_at_the_games_own_size():

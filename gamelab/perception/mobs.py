@@ -29,9 +29,10 @@ learned from the map's background colours (perception.gates, `background`), and 
 kinds only, so the first map's searches are as they were: whole-screen bands overlap by the tallest such picture; a
 place's gate tries its first GATE_TRIES templates, not only its first; at 1920x1080 half size step 2 checks up to
 PER_PLACE of a place's templates, as at the game's own size; kinds whose pictures are the same shape (Horny and Green
-Mushroom, Stump and Dark Stump) are searched as one (`units`), each kind's picture checked side by side at a place; and
-a monster found as a kind that shares its body with one searched apart (`twins`: a Stump, a Dark Stump and an Axe
-Stump) is given the kind whose picture it is (`_pick_kind`).
+Mushroom, Stump and Dark Stump) are searched as one (`units`), each kind's picture checked side by side at a place; a
+monster found as a kind that shares its body with one searched apart (`twins`: a Stump, a Dark Stump and an Axe Stump)
+is given the kind whose picture it is (`_pick_kind`); and at the game's own size a monster re-found as a kind that
+shares its body with others isn't re-found where another's picture is the monster's (`refind`).
 """
 
 import json
@@ -136,6 +137,12 @@ TWIN_COVER = 0.8
 # is all of it but the axe as well).
 OWN_PARTS = 0.1
 OWN_MATCH = 0.6
+# A re-found monster's kind is checked with its twins' pictures set on its feet where they lie on its own picture's
+# (no search around: `MobDetector.aligned`): the shift, this many px at most, at which their masks have the most in
+# common. The game's own frames of two kinds can be a px apart: an Axe Stump's move/1 and move/3 lie 1 px across from
+# a Stump's (set on their origins), and checked there, 27 of the 40 Axe Stumps in plain view on West Rocky Mountain
+# II's 1366x768 frames failed their axe's test (a Stump's track there went on on them).
+ALIGN = 2
 # Pictures of a frame (same name, facing and size) of two such kinds are the same shape where they have this share of
 # the larger's pixels in common: Horny and Green Mushroom (0.95), Stump and Dark Stump (1.00); not a Stump and an Axe
 # Stump (0.85). Step 1 matches one silhouette for them (`_shapes`).
@@ -385,6 +392,10 @@ class MobDetector:
             members = [(k, t) for k in kinds for t in self.templates[k]]
             self.units.append((kinds, members, _shapes(members)))
         unit = {k: kinds for kinds, _, _ in self.units for k in kinds}
+        # (a picture's name and facing, a twin's picture's name) -> where the twin's lies on it (ALIGN, `refind`)
+        self.aligned = {(a.name, a.facing, b.name): _aligned(a, b) for k, others in self.twins.items()
+                        for a in self.templates[k] for o in others for b in self.templates[o]
+                        if a.frame and a.frame == b.frame and a.facing == b.facing and a.origin and b.origin}
         self.apart = {k: others for k, v in self.twins.items() if (others := tuple(t for t in v if t not in unit[k]))}
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
@@ -413,8 +424,12 @@ class MobDetector:
         cut-out that doesn't know its facing, both ways), one masked match over the window; on a frame finer than
         step 1's, where that scores under REFIND_GOOD, the frames its animation most likely went to, in turn
         (`_next_frames`); if none reaches THRESHOLD (and `fallback`), every template of its kind there, as `detect`
-        does. The one found nearest the box's centre, or None. On the caller's thread: a window is small, and the
-        pool's hand-offs cost more."""
+        does. On a frame finer than step 1's, a learned kind that shares its body with others (`twins`: Horny and
+        Green Mushroom; a Stump, a Dark Stump and an Axe Stump) is re-found only where its picture is the monster's,
+        told apart from theirs side by side at its feet as a search tells them (`_its_kind`): the other kind's picture
+        of a frame scores 0.79-0.92 on a mushroom and up to 1.00 on a stump, so a track would otherwise go on on
+        another kind's monster walking past or standing where it died. The one found nearest the box's centre, or
+        None. On the caller's thread: a window is small, and the pool's hand-offs cost more."""
         h, w = frame.shape[:2]
         bx0, by0, bx1, by1 = bounds or (0, 0, w, h)
         pad = round(REFIND_PAD * self.px)
@@ -445,11 +460,26 @@ class MobDetector:
                     best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
                     if score >= REFIND_GOOD:
                         break
+        if best is not None and not self._its_kind(frame[:by1, :bx1], best):
+            best = None  # another kind's monster: not this one
         if best is not None or not fallback:
             return best
         self.fallbacks += 1
         found = [_moved(m, x0, y0) for m in self._detect(window, None, _serial, (kind,))]
+        found = [m for m in found if m.kind == kind and self._its_kind(frame[:by1, :bx1], m)]
         return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
+
+    def _its_kind(self, frame: np.ndarray, m: Mob) -> bool:
+        """Whether monster `m`, re-found as its kind (a learned one that shares its body with others: `twins`), is
+        that kind: its picture, just matched where it is, checked side by side with theirs set on its feet there, each
+        where it lies on its picture (`_pick_kind` with no slack, `aligned`; matched 4 px around, as a search does, a
+        twin's picture took 1.2-1.5 ms, against 0.1). Only on a look frame finer than step 1's (the game's own
+        pixels): at 1920x1080 half size, where the game's pictures are resampled, an Axe Stump's axe failed its test
+        on 3 of the 81 drawn on West Rocky Mountain II's frames and re-found as their next frame (`bench-paste`),
+        which were then lost, and the game isn't run at that size any more. Any other kind is its kind."""
+        if m.kind not in self.twins or self.search == 1:
+            return True
+        return _pick_kind(frame, m, self.twins[m.kind], self.templates, 0, self.aligned).kind == m.kind
 
     def _silhouette(self, kinds: tuple[str, ...], picture: np.ndarray, mask3: np.ndarray) -> np.ndarray:
         """A learned kind's template's silhouette at 1/COARSE of step 1's scale (MobTemplate.silhouette), by the gates
@@ -607,10 +637,12 @@ def _together(kind: str, twins: dict[str, tuple[str, ...]]) -> set[str]:
     return out
 
 
-def _cover(a: MobTemplate, b: MobTemplate) -> float:
-    """How much two pictures set on their feet have in common (step 2's masks), the larger's share."""
+def _cover(a: MobTemplate, b: MobTemplate, shift: tuple[int, int] = (0, 0)) -> float:
+    """How much two pictures set on their feet have in common (step 2's masks), the larger's share; with `shift`, b
+    moved that many px across and down from there."""
     ma, mb = a.mask3[..., 0] > 0, b.mask3[..., 0] > 0
-    dx, dy = int(round(a.origin[0] - b.origin[0])), int(round(a.origin[1] - b.origin[1]))  # b's top-left in a's px
+    dx = int(round(a.origin[0] - b.origin[0])) + shift[0]  # b's top-left in a's px
+    dy = int(round(a.origin[1] - b.origin[1])) + shift[1]
     h, w = ma.shape
     ys, xs = np.nonzero(mb)
     ys, xs = ys + dy, xs + dx
@@ -619,12 +651,20 @@ def _cover(a: MobTemplate, b: MobTemplate) -> float:
     return both / max(1, int(ma.sum()), int(mb.sum()))
 
 
+def _aligned(a: MobTemplate, b: MobTemplate) -> tuple[int, int]:
+    """Where picture b lies on picture a (of one frame, facing one way): the shift from where their feet set it, ALIGN
+    px at most, at which their masks have the most in common (`_cover`), the smallest of equals."""
+    shifts = [(dx, dy) for dy in range(-ALIGN, ALIGN + 1) for dx in range(-ALIGN, ALIGN + 1)]
+    return max(shifts, key=lambda d: (_cover(a, b, d), -abs(d[0]) - abs(d[1])))
+
+
 def _pick_kind(frame: np.ndarray, m: Mob, twins: tuple[str, ...], templates: dict[str, list[MobTemplate]],
-               slack: int) -> Mob:
+               slack: int, aligned: dict | None = None) -> Mob:
     """Monster `m` as the kind, of its own and `twins`, whose picture of its frame (facing its way, set on its feet,
-    matched `slack` px around) it is. A picture with parts of its own (OWN_PARTS: an Axe Stump's axe) is the
-    monster's only where those parts match too (OWN_MATCH), and then it is, over the pictures it holds (a Stump's);
-    otherwise the one that scores best (Horny or Green Mushroom, Stump or Dark Stump: their colours)."""
+    matched `slack` px around; with no slack, there alone, shifted to where it lies on `m`'s picture by `aligned`:
+    MobDetector.aligned) it is. A picture with parts of its own (OWN_PARTS: an Axe Stump's axe) is the monster's
+    only where those parts match too (OWN_MATCH), and then it is, over the pictures it holds (a Stump's); otherwise
+    the one that scores best (Horny or Green Mushroom, Stump or Dark Stump: their colours)."""
     if not m.frame or m.ox is None:
         return m
     own = next((t for t in templates.get(m.kind, ()) if t.name == m.template and t.facing == m.facing), None)
@@ -637,8 +677,12 @@ def _pick_kind(frame: np.ndarray, m: Mob, twins: tuple[str, ...], templates: dic
             if t.frame != m.frame or t.facing != m.facing or t.origin is None:
                 continue
             th, tw = t.rgb.shape[:2]
-            found = _match_at(frame, t.rgb, t.mask3, int(round(m.ox - t.origin[0])) + tw // 2,
-                              int(round(m.feet - t.origin[1])) + th // 2, slack)
+            cx, cy = int(round(m.ox - t.origin[0])) + tw // 2, int(round(m.feet - t.origin[1])) + th // 2
+            if slack:
+                found = _match_at(frame, t.rgb, t.mask3, cx, cy, slack)
+            else:
+                dx, dy = (aligned or {}).get((own.name, own.facing, t.name), (0, 0))
+                found = _match_here(frame, t.rgb, t.mask3[..., 0] > 0, cx + dx, cy + dy)
             if found is not None:
                 score, x, y, w, h = found
                 cands.append((_seen(kind, t, x, y, w, h, round(score, 3)), t, x - w // 2, y - h // 2))
@@ -656,11 +700,31 @@ def _pick_kind(frame: np.ndarray, m: Mob, twins: tuple[str, ...], templates: dic
             kept.append(seen)
             continue
         patch = frame[y0:y0 + mask.shape[0], x0:x0 + mask.shape[1]]
-        if patch.shape[:2] == mask.shape and float(np.nan_to_num(cv2.matchTemplate(
-                patch, t.rgb, cv2.TM_CCOEFF_NORMED, mask=np.dstack([parts.astype(np.uint8)] * 3))[0, 0],
-                nan=-1.0)) >= OWN_MATCH:
+        if patch.shape[:2] == mask.shape and _score(patch, t.rgb, parts) >= OWN_MATCH:
             bigger.append(seen)
     return max(bigger or kept or [m], key=lambda c: c.score)
+
+
+def _match_here(frame: np.ndarray, tpl: np.ndarray, mask: np.ndarray, cx: int, cy: int):
+    """`_match_at` with no slack: a picture's match centred at (cx, cy) alone (`_score`; `mask`: where it's drawn,
+    one channel), or None where it isn't wholly in the frame."""
+    th, tw = tpl.shape[:2]
+    x0, y0 = cx - tw // 2, cy - th // 2
+    if x0 < 0 or y0 < 0 or y0 + th > frame.shape[0] or x0 + tw > frame.shape[1]:
+        return None
+    return _score(frame[y0:y0 + th, x0:x0 + tw], tpl, mask), cx, cy, tw, th
+
+
+def _score(patch: np.ndarray, tpl: np.ndarray, mask: np.ndarray) -> float:
+    """The masked, normalised match of a picture on a patch of its size, at that one place: masked_match's score
+    (OpenCV's TM_CCOEFF_NORMED with a mask: each channel's mean over the mask taken off, the sums over every
+    channel), worked out in numpy: the same to 1e-9, in a seventh of the time OpenCV takes for one place (0.1 ms
+    against 0.73, a 58x56 picture). -1 where it's undefined (a flat patch), as there."""
+    i, t = patch[mask].astype(np.float64), tpl[mask].astype(np.float64)
+    i -= i.mean(0)
+    t -= t.mean(0)
+    den = float(np.sqrt(float((t * t).sum()) * float((i * i).sum())))
+    return float((t * i).sum()) / den if den > 0 else -1.0
 
 
 def _stamp(canvas: np.ndarray, mask: np.ndarray, dx: int, dy: int) -> None:

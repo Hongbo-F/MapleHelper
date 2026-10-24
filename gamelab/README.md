@@ -397,6 +397,34 @@ were, and the 86 golden traces are byte-identical.
   holds; otherwise the best score. On the 1920x1080 frames (shrunk, and at half size) an Axe Stump's axe matched
   0.83-0.97 on 39 of the 40 in plain view (one at 0.25), its place on a Stump or a Dark Stump -0.6 to 0.70 (one at 0.70,
   the next 0.52).
+- **A track is re-found as its own kind only** (`MobDetector.refind`, `_its_kind`; at the game's own size). A monster
+  followed is re-found with the picture that matched it last, and a kind's picture fits a monster of a kind that shares
+  its body nearly as well. At each labelled mushroom and stump of the 1366x768 frames whose frame the labels give, the
+  other kinds' pictures of it, re-found there, scored over `THRESHOLD` on all but 4: a Horny Mushroom's 0.79-0.90 on the
+  Greens (median 0.895), a Green's 0.72-0.92 on the Hornies (0.912), a Dark Stump's 0.84-0.98 on the Stumps and Axe
+  Stumps (0.979), a Stump's 0.86-1.00 on the Axe Stumps (1.00: its picture is all of theirs but the axe) and an Axe
+  Stump's 0.66-0.89 on the Stumps (0.807). So the other kind's track re-found 52 of the 55 mushrooms and 115 of the 116
+  re-finds asked of the stumps: a Horny's track would have gone on on a Green walking past or standing where it died.
+  Now a monster re-found as such a kind is checked side by side with the other kinds' pictures of its frame, set on its
+  feet, as a search tells them (`_pick_kind`), and isn't re-found where another kind's is the monster's: 0 of the 55
+  and 0 of the 116, its own kind's track re-finding 53 of the 55 and 58 of the 58 as before (the two not re-found, a
+  Horny standing on the chat box's border, its feet on row 700). The other kinds' pictures are matched where they lie
+  on the monster's, not searched around, in numpy (`mobs._score`: OpenCV's masked score to 1e-9, 0.1 ms a picture,
+  where OpenCV takes 0.73 for one place and 1.1-1.5 for 4 px around): the check takes 0.40 ms a mushroom and 0.85 a
+  stump (medians on one thread, with other work sharing the CPU), where matched as a search does they took 1.36 and
+  4.49. Where one kind's picture lies on another's is worked out once (`MobDetector.aligned`: the shift, 2 px at most,
+  at which their masks overlap most, `mobs.ALIGN`): an Axe Stump's move/1 and move/3 lie a px across from a Stump's set
+  on their origins, and checked there, 27 of the 40 Axe Stumps failed their axe's test. A track turned away goes on to
+  its kind's whole set in the window, as one not found does (18-23 ms here), until it's taken for hidden (0.3 s,
+  `tracking.MISSING_S`). From one labelled frame of a run to the next, each monster of these kinds the whole screen's
+  search found re-found where it was: on Tree Dungeon 15 on their kind with the check and without; on West Rocky
+  Mountain II 14 on their kind either way, and without the check an Axe Stump's track on a Stump and a Stump's on an
+  Axe Stump too. `bench-look`'s feed step (her place and the monsters re-found), with the check and without it in
+  turn, twice, with other work loading the CPU (its medians a third over the table's below): Tree Dungeon 33.9 and 34.2
+  ms against 32.1 and 32.7, West Rocky Mountain II 36.9 and 37.8 against 33.4 and 30.3. At 1920x1080 half size
+  re-finds go as they did: there the axe's test failed on 3 of the 81 Axe Stumps drawn and re-found as their next frame
+  (`bench-paste`). The axe's test is worked out by `_score` in the search too: the same on every labelled frame, in the
+  table below.
 
 **The HUD's top** (`screen.Geometry.hud_top`). Monsters and drops are looked for above the HUD, and `HUD_TOP` (0.88 of
 the height) put it at row 675 at 1366x768, where the chat box starts at row 700 (its dark border, from x 283 to 1080,
@@ -483,11 +511,10 @@ of whose places ever passes the gate, for 24 of the map's 1,003 spawn EXP.
 - Frames saved there in game (`snap --scale 1`, copied off `lab/shots/snap.png`), more Horny Mushrooms among them (the
   labelled ones are mostly the same one or two on 23), can go to `learn-colours` with the 20 of 2026-10-24.
 
-Not done: a monster followed is re-found as its own kind only, so a Horny walking past a Green, or a Stump past an Axe
-Stump, isn't checked for its kind again until a band or whole-screen search finds it; monsters half under the chat box
-aren't looked for (the HUD covers x 283-1080 only, and the map's sides below row 700 aren't searched either); a kind
-is looked for all over the screen, where its spawns can't show too (Tree Dungeon's slime, above); and a map's background
-is only as good as its frames (Tree Dungeon's 20 are one from platform 19 and two short runs from 28: the top of the
+Not done: monsters half under the chat box aren't looked for (the HUD covers x 283-1080 only, and the map's sides
+below row 700 aren't searched either); a kind is looked for all over the screen, where its spawns can't show too (Tree
+Dungeon's slime, above); a re-found monster's kind is checked at the game's own size only; and a map's background is
+only as good as its frames (Tree Dungeon's 20 are one from platform 19 and two short runs from 28: the top of the
 tower, 6-15, isn't in them).
 
 **What a look costs** (`bench-look` on the 17 saved frames, medians in ms; each pair of columns from runs back to back on 2026-10-20, the first 5 looks at each frame, the second 3 rounds of 3 alternating; offline, so the grab itself comes on top: 16.7 ms with mss, which waits for the compositor's next frame; with DXGI the wait for the screen's next frame, 8 ms on average at 60 frames a second, and copying it off the graphics card takes about 1 ms more than converting a saved frame):
