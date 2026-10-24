@@ -9,18 +9,23 @@ empty canvases with a `_hash`, and the pixels are at the same path ("stand/0") i
 in Mob/_Canvas/_Canvas_000.wz. Frames that repeat another one say so with `_inlink` ("move/2").
 Items are the same: Item/Etc/Etc_000.wz 0400.img holds 1x1 placeholders, and the pictures are at the
 same path in Item/Etc/_Canvas/_Canvas_000.wz. Mesos on the ground are Item/Special 0900.img.
+UI placeholders say where their picture is with `_outlink`, a path from the copy's root
+("UI/_Canvas/Basic.img/BtOK2/normal/0"), sometimes into another image.
 """
 
+import json
+import re
 import struct
 import zlib
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from .ms import MsPack
 from .paths import COPY
-from .wz import Canvas, Package
+from .wz import Canvas, Package, jsonable
 
 
 def pixels(canvas: Canvas) -> np.ndarray:
@@ -156,3 +161,82 @@ def minimap_markers(copy: Path = COPY) -> dict[str, tuple[np.ndarray, tuple[int,
             origin = entry.props.get("origin") if isinstance(entry, Canvas) else None
             out[name] = (pixels(picture), _point(origin))
     return out
+
+
+@lru_cache(maxsize=None)
+def _image(package: str, image: str) -> dict:
+    return Package(package).image(image)
+
+
+def outlinked(link: str, copy: Path = COPY) -> tuple[Canvas, dict]:
+    """What an `_outlink` names, and the image tree it's in. The image is in the package of the deepest folder
+    before it that has one: "UI/_Canvas/Basic.img/BtOK2/normal/0" is BtOK2/normal/0 in Basic.img of
+    UI/_Canvas/_Canvas_000.wz."""
+    parts = link.split("/")
+    at = next(i for i, part in enumerate(parts) if part.endswith(".img"))
+    for i in range(at, 0, -1):
+        package = copy.joinpath(*parts[:i]) / f"{parts[i - 1]}_000.wz"
+        if package.is_file():
+            tree = _image(str(package), "/".join(parts[i:at + 1]))
+            return _at(tree, parts[at + 1:]), tree
+    raise KeyError(f"no package in {copy} holds {link}")
+
+
+def _at(tree: dict, path: list[str]):
+    for key in path:
+        tree = tree[key]
+    return tree
+
+
+def source(canvas: Canvas, tree: dict, copy: Path = COPY) -> Canvas:
+    """The canvas holding a picture's pixels: the picture itself, or where its `_outlink` (from the copy's root)
+    or `_inlink` (in its own image, `tree`) points."""
+    for _ in range(8):
+        if "_outlink" in canvas.props:
+            canvas, tree = outlinked(canvas.props["_outlink"], copy)
+        elif "_inlink" in canvas.props:
+            canvas = _at(tree, canvas.props["_inlink"].split("/"))
+        else:
+            return canvas
+    raise ValueError("links go round in circles")
+
+
+def _file_name(key: str) -> str:
+    """A property name as a Windows file name: "button:ok" -> "button_ok", "emphasis " -> "emphasis"."""
+    return re.sub(r'[<>:"/\|?*]', "_", key).rstrip(" .") or "_"
+
+
+def export_pictures(tree: dict, dest: Path, copy: Path = COPY) -> tuple[int, list[str]]:
+    """Writes every picture of an image tree as PNG under `dest`, at its path in the tree ("lieDetector/back.png"),
+    with the pixels from wherever its links point, and the tree itself as `tree.json`, each picture there naming
+    its file (`_png`) beside its origin, delay and the rest. Returns (pictures written, paths that couldn't be)."""
+    written, failed = 0, []
+
+    def walk(node: dict, path: list[str]) -> dict:
+        nonlocal written
+        out = {}
+        for key, value in node.items():
+            here = path + [_file_name(key)]
+            if isinstance(value, dict):
+                out[key] = walk(value, here)
+            elif isinstance(value, Canvas):
+                out[key] = jsonable(value)
+                try:
+                    picture = source(value, tree, copy)
+                    rgba = pixels(picture)
+                except (KeyError, ValueError):
+                    failed.append("/".join(path + [key]))
+                    continue
+                png = Path(*here).with_suffix(".png")
+                (dest / png).parent.mkdir(parents=True, exist_ok=True)
+                Image.fromarray(rgba, "RGBA").save(dest / png)
+                out[key].update(_png=png.as_posix(), _size=[picture.width, picture.height])
+                written += 1
+            else:
+                out[key] = jsonable(value)
+        return out
+
+    index = walk(tree, [])
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "tree.json").write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
+    return written, failed

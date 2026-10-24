@@ -1,12 +1,15 @@
 """gamedata's readers, on small packages built here in the game's formats (no game files needed)."""
 
+import json
 import struct
+import zlib
 from dataclasses import dataclass
 
 import numpy as np
 import pytest
+from PIL import Image
 
-from gamedata import ms, tables
+from gamedata import canvas, ms, tables
 from gamedata.__main__ import copy_data
 from gamedata.wz import OFFSET_KEY, Canvas, Package, Reader, Uol, Vector, jsonable
 
@@ -75,7 +78,7 @@ def extended(v) -> bytes:
         return b"\x73" + wz_string("UOL") + b"\x00\x00" + wz_string(v.path)
     if isinstance(v, Canvas):
         head = b"\x73" + wz_string("Canvas") + b"\x00" + (b"\x01\x00\x00" + props(v.props) if v.props else b"\x00")
-        pixels = b"\x78\x9c\x03\x00\x00\x00\x00\x01"
+        pixels = zlib.compress(v.raw) if isinstance(v.raw, bytes) else b"\x78\x9c\x03\x00\x00\x00\x00\x01"
         return (head + cint(v.width) + cint(v.height) + cint(v.fmt) + b"\x00" + bytes(4)
                 + struct.pack("<i", len(pixels) + 1) + b"\x00" + pixels)
     raise TypeError(v)
@@ -185,6 +188,31 @@ def test_not_a_package(tmp_path):
     path.write_bytes(b"nope" + bytes(100))
     with pytest.raises(ValueError):
         Package(path)
+
+
+def test_pictures_are_exported_from_where_their_links_point(tmp_path):
+    # UI placeholders point (_outlink) into UI/_Canvas, sometimes into another image, and pictures there may
+    # repeat one another (_inlink).
+    red, blue = bytes([0, 0, 255, 255]), bytes([255, 0, 0, 255])  # BGRA
+    (tmp_path / "UI" / "_Canvas").mkdir(parents=True)
+    (tmp_path / "UI" / "UI_000.wz").write_bytes(package({"Win.img": image({"win": {
+        "back": Canvas(1, 1, 2, {"_outlink": "UI/_Canvas/Win.img/win/back", "origin": Vector(3, 4)}),
+        "button:ok": {"normal": {"0": Canvas(1, 1, 2, {"_outlink": "UI/_Canvas/Basic.img/BtOK/0"})}},
+        "gone": Canvas(1, 1, 2, {"_outlink": "UI/_Canvas/Nope.img/x"}),
+        "count": 5}})}))
+    (tmp_path / "UI" / "_Canvas" / "_Canvas_000.wz").write_bytes(package({
+        "Win.img": image({"win": {"back": Canvas(2, 1, 2, {"_inlink": "win/first"}),
+                                  "first": Canvas(2, 1, 2, raw=red + blue)}}),
+        "Basic.img": image({"BtOK": {"0": Canvas(1, 1, 2, raw=blue)}})}))
+    tree = Package(tmp_path / "UI" / "UI_000.wz").image("Win.img")
+    out = tmp_path / "out"
+    assert canvas.export_pictures(tree, out, copy=tmp_path) == (2, ["win/gone"])
+    assert np.asarray(Image.open(out / "win" / "back.png")).tolist() == [[[255, 0, 0, 255], [0, 0, 255, 255]]]
+    assert np.asarray(Image.open(out / "win" / "button_ok" / "normal" / "0.png")).tolist() == [[[0, 0, 255, 255]]]
+    index = json.loads((out / "tree.json").read_text(encoding="utf-8"))
+    assert index["win"]["back"]["_png"] == "win/back.png" and index["win"]["back"]["_size"] == [2, 1]
+    assert index["win"]["back"]["origin"] == {"_vec": [3, 4]} and index["win"]["count"] == 5
+    assert "_png" not in index["win"]["gone"]
 
 
 def test_jsonable():

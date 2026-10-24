@@ -5,6 +5,7 @@
   python -m gamedata list String/String_000.wz        # the images in one
   python -m gamedata dump Packs/Skill_00000.ms Skill/400.img
   python -m gamedata export String/String_000.wz      # images as JSON, into gamedata/data/out
+  python -m gamedata pictures UI/UI_000.wz LieDetector.img   # an image's pictures as PNG, into gamedata/data/out/pictures
   python -m gamedata tables                           # items, mobs, maps, skills, physics, animations
 """
 
@@ -14,7 +15,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import tables
+from . import canvas, tables
 from .ms import MsPack
 from .paths import COPY, OUT, TABLES
 from .wz import Canvas, Package, jsonable
@@ -119,6 +120,17 @@ def cmd_export(args) -> int:
     return 0
 
 
+def cmd_pictures(args) -> int:
+    pack = open_pack(args.package)
+    for image in args.images:
+        dest = (Path(args.out) if args.out else OUT / "pictures" / Path(args.package).parent) / image
+        written, failed = canvas.export_pictures(pack.image(image), dest)
+        print(f"{image}: {written} pictures -> {dest}")
+        for path in failed:
+            print(f"  not written: {path}")
+    return 0
+
+
 def cmd_tables(args) -> int:
     built = tables.build(COPY)
     TABLES.mkdir(parents=True, exist_ok=True)
@@ -151,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("export", help="write every image of the given packages as JSON")
     c.add_argument("packages", nargs="+")
     c.set_defaults(run=cmd_export)
+    c = sub.add_parser("pictures", help="write images' pictures as PNG, with their tree as JSON")
+    c.add_argument("package")
+    c.add_argument("images", nargs="+")
+    c.add_argument("--out", help="the folder to write each image's folder into (default gamedata/data/out/pictures/<package folder>)")
+    c.set_defaults(run=cmd_pictures)
     c = sub.add_parser("tables", help="build the summary tables")
     c.set_defaults(run=cmd_tables)
     args = p.parse_args(argv)
