@@ -52,6 +52,9 @@ POTION_EVERY = 3    # s at least between two potions
 # (at a moment no monster is within PET_CLEAR of her: the read takes a few s) and followed in time from there. Until
 # 2026-10-24 it was fed blind every 10 minutes, and only while hunting: found at fullness 9.
 PET_CLEAR = 250  # map units
+HP_ZERO = 0.02        # an HP read this low ...
+HP_DOUBT_AFTER = 0.3  # ... right after one this high isn't believed at once (_doubt_hp)
+HP_ZERO_SHOTS = 5     # frames of such looks saved, to find out why
 # s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
 # (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
 # from a look in that time comes while she's in the air (and is lost) or still sliding, from where she no longer is.
@@ -82,6 +85,8 @@ class Hunter:
         self.meter = ExpMeter(model.mob_exp)  # her EXP as read off its number, and what each gain was
         self._exp: np.ndarray | None = None  # the last look's EXP number (text pixels)
         self._last_hp: float | None = None
+        self._hp_doubted = False  # the last look's HP read 0 and wasn't believed (_doubt_hp)
+        self._hp_zero_shots = 0
         self._last_where: Where | None = None
         self.hit_at: float | None = None  # the time of the last look that saw her HP drop (a touch)
         self.knock_waited: float | None = None  # ... the hit_at a jump or step last waited out (fight.knocked_move)
@@ -130,6 +135,28 @@ class Hunter:
         self.drink_if_low(s)
         return None
 
+    def _doubt_hp(self, s: Scene) -> None:
+        """An HP of HP_ZERO or less a look after HP_DOUBT_AFTER or more isn't believed until the next look reads it too:
+        on Tree Dungeon on 2026-10-24 her HP read 0% three times in two minutes right after 82-87%, the bar's row with
+        no red at all, while the game showed 592/752; each sent her off to rest. The look keeps the HP before it, and its
+        frame is saved (lab/shots/hp0_<time>.png, the first HP_ZERO_SHOTS) to find out why."""
+        if s.hp > HP_ZERO:
+            self._hp_doubted = False
+            return
+        if self._last_hp is None or self._last_hp < HP_DOUBT_AFTER or self._hp_doubted:
+            return
+        self._hp_doubted = True
+        self.log(f"HP read {s.hp:.0%} right after {self._last_hp:.0%}: not believed until the next look reads it too")
+        if self._hp_zero_shots < HP_ZERO_SHOTS and s.frame is not None:
+            self._hp_zero_shots += 1
+            try:
+                from PIL import Image
+                (paths.LAB / "shots").mkdir(parents=True, exist_ok=True)
+                Image.fromarray(s.frame).save(paths.LAB / "shots" / f"hp0_{time.strftime('%H%M%S')}.png")
+            except Exception:
+                pass
+        s.hp = self._last_hp
+
     def drink_if_low(self, s: Scene) -> None:
         """Drink an HP potion below `potion_hp` (one every POTION_EVERY s at most), and feed her pet when it's due
         (feed_pet_if_due). The health check on the way to rest: low HP is why she's going, not a reason to stop. With
@@ -175,6 +202,7 @@ class Hunter:
         read; none if no kill explains it: logged). Her HP dropped: a hit (logged with how far it pushed her when no
         key was pressed). With a feed, from what it saw frame by frame (s.events, with the number as read then): two
         gains between two looks are two gains, and the HP lost is every drop's, a potion drunk between them or not."""
+        self._doubt_hp(s)
         if s.events is None:
             reads = []
             changed = exp_changed(self._exp, s.exp)
