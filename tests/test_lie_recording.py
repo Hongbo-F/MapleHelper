@@ -2,6 +2,8 @@
 until it has been gone a while, with an index and a summary, under a disk cap. All in temp folders, with made-up
 frames and scores; nothing touches the game."""
 
+import contextlib
+import functools
 import json
 import os
 import threading
@@ -416,3 +418,212 @@ def test_the_watchdog_thread_records_at_4_a_second_and_finishes_its_recording_wh
     assert summary["end"] == "stopped" and summary["outcome"].startswith("unknown")
     gaps = np.diff([r["t"] for r in index])
     assert 8 <= len(index) <= 14 and np.median(gaps) == pytest.approx(0.05, abs=0.02)  # from each look's start
+
+
+# --- the player stays up, locked, until the alarm is cleared and the screen clear (control.player) ---
+
+from types import SimpleNamespace  # noqa: E402
+
+from gamelab.control import alarm, client  # noqa: E402
+from gamelab.control import player as player_mod  # noqa: E402
+from gamelab.control.player import LIE_DETECTOR_ERROR, Player  # noqa: E402
+
+
+@pytest.fixture
+def pages(monkeypatch):
+    """Paging counted instead of done: the titles."""
+    out = []
+    monkeypatch.setattr(alarm, "page", lambda title, text: out.append(title))
+    return out
+
+
+@pytest.fixture
+def alarm_file(tmp_path, monkeypatch, pages):
+    """The alarm file in tmp_path for everyone who reads it (and paging counted)."""
+    path = tmp_path / "ALARM.json"
+    for mod in (alarm, client, player_mod):
+        monkeypatch.setattr(mod, "ALARM", path)
+    return path
+
+
+def refused(flag):
+    """Whether the player refuses a plan now (it does before looking for the game or pressing anything)."""
+    try:
+        return Player({}, "no such window", flag).run({"events": [[0, "f", "down"]]}) == {"error": LIE_DETECTOR_ERROR}
+    except ValueError:  # it went on to check the plan (its key isn't allowed here): not refused
+        return False
+
+
+def test_plans_are_refused_until_the_alarm_is_cleared_and_the_lie_detector_gone_in_either_order(
+        tmp_path, alarm_file, pages):
+    screen = Screen()
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=alarm.raise_alarm)
+    t = play(dog, screen, [0, 0])
+    assert not refused(flag)
+    t = play(dog, screen, [1, 1, 2], t)
+    assert refused(flag) and alarm_file.exists() and pages == ["MapleStory Lie Detector on screen"]
+    # Gone well past the end stretch, the alarm not cleared: still refused.
+    t = play(dog, screen, [0] * 12, t)
+    assert dog.cycle_t0 is None and refused(flag)
+    assert any(m.endswith("its cycle is over (waiting for `clear-alarm`)") for m in said)
+    alarm.clear_alarm()  # a person: gone already, so the next look takes plans again
+    t = play(dog, screen, [0], t)
+    assert not refused(flag) and said[-1].endswith("taking plans again")
+    # And the other way round: cleared while it's still on screen, plans wait for the end stretch.
+    t = play(dog, screen, [1, 1], t)
+    assert refused(flag) and len(pages) == 2  # a new one: paged again
+    alarm.clear_alarm()
+    t = play(dog, screen, [1, 0, 0, 0, 0], t)  # 0.75 s gone
+    assert refused(flag)
+    play(dog, screen, [0], t)  # 1 s
+    assert not refused(flag)
+    assert len(written(dog)) == 2  # a recording each
+
+
+def test_a_second_lie_detector_after_resuming_raises_the_alarm_again_with_a_new_recording(tmp_path, alarm_file, pages):
+    screen = Screen()
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=alarm.raise_alarm)
+    t = play(dog, screen, [1, 1] + [0] * 5)
+    alarm.clear_alarm()
+    t = play(dog, screen, [0, 0], t)
+    assert not flag.is_set()
+    t = play(dog, screen, [3, 3] + [0] * 5, t)
+    assert flag.is_set() and alarm_file.exists() and len(pages) == 2
+    first, second = written(dog)
+    assert first[0] != second[0] and second[1]["outcome"] == "sent to the Truth Booth"
+    assert first[1]["outcome"] == "answered"
+
+
+def test_an_alarm_file_that_couldnt_be_written_keeps_the_player_locked(tmp_path, alarm_file):
+    # No alarm file means no person can be said to have cleared it: locked until the player is restarted.
+    screen = Screen()
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=lambda frame: None)
+    play(dog, screen, [1] + [0] * 20)
+    assert flag.is_set() and dog.cycle_t0 is None and not alarm_file.exists()
+    assert any("couldn't be written: locked until the player is restarted" in m for m in said)
+
+
+class Served:
+    """serve() on a thread of its own, everything outside faked: the lab in tmp_path (the inbox and outbox the
+    client's, as tests/conftest.py points them), the game a fake screen, the config made up. A plan with no keys
+    runs through Player.run as any would."""
+
+    def __init__(self, tmp_path, monkeypatch, screen, end_s=0.4):
+        self.screen, self.end_s, self.lab = screen, end_s, tmp_path
+        for name, path in (("LAB", tmp_path), ("INBOX", client.INBOX), ("OUTBOX", client.OUTBOX),
+                           ("STOP", tmp_path / "STOP"), ("PLAYER_LOG", tmp_path / "player.log")):
+            monkeypatch.setattr(player_mod, name, path)
+        monkeypatch.setattr(player_mod.config, "load",
+                            lambda path, combos: SimpleNamespace(keys=None, game_window_title="MapleStory"))
+        monkeypatch.setattr(player_mod.win32, "precise_timers", contextlib.nullcontext)
+        monkeypatch.setattr(player_mod.win32, "enable_dpi_awareness", lambda: None)
+        monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "MapleStory")
+        monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+        monkeypatch.setattr(player_mod.window, "client_rect",
+                            lambda hwnd: {"left": 0, "top": 0, "width": 64, "height": 48})
+        monkeypatch.setattr(player_mod, "Watchdog", functools.partial(
+            Watchdog, spotter=Spotter(), grab=screen, interval=0.02, end_s=end_s, folder=tmp_path / "lie_detector"))
+        self.thread = threading.Thread(target=player_mod.serve, name="served-player")
+        self.thread.start()
+        self.wait_for(lambda: "player started" in self.log())
+
+    def log(self):
+        try:
+            return (self.lab / "player.log").read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ""
+
+    def wait_for(self, cond, timeout=10.0):
+        end = time.monotonic() + timeout
+        while not cond():
+            assert time.monotonic() < end, f"timed out; the player's log:\n{self.log()}"
+            time.sleep(0.01)
+
+    def plan(self, name):
+        """A plan put in the inbox as the client does (but past its check of the alarm), and the player's answer."""
+        client.INBOX.mkdir(parents=True, exist_ok=True)
+        tmp = client.INBOX / f"{name}.tmp"
+        tmp.write_text(json.dumps({"events": [], "capture": {"lead_ms": 0}, "focus": False}), encoding="utf-8")
+        tmp.replace(client.INBOX / f"{name}.json")
+        out = client.OUTBOX / f"{name}.json"
+        self.wait_for(out.exists)
+        result = client._read_result(out)
+        out.unlink()
+        return result
+
+    def stop(self):
+        (self.lab / "STOP").touch()
+        self.thread.join(timeout=30)
+        assert not self.thread.is_alive()
+        assert self.log().rstrip().endswith("player stopped")  # (what `python -m gamelab stop` waits for)
+
+
+def test_the_player_stays_up_after_the_lie_detector_and_takes_plans_again_after_clear_alarm_and_the_screen_clear(
+        tmp_path, monkeypatch, alarm_file, pages):
+    screen = Screen()
+    served = Served(tmp_path, monkeypatch, screen)
+    try:
+        assert "error" not in served.plan("before")
+        screen.kind = 1
+        served.wait_for(alarm_file.exists)
+        assert served.plan("during")["error"] == LIE_DETECTOR_ERROR
+        with pytest.raises(client.LieDetectorAlarm):  # the stack's side, as before
+            client.submit([], focus=False, timeout=5)
+        screen.kind = 0
+        time.sleep(3 * served.end_s)  # gone long enough, not cleared: still locked, still up
+        assert served.thread.is_alive() and served.plan("gone")["error"] == LIE_DETECTOR_ERROR
+        # Cleared while a second one is up (a new cycle: paged again), it waits for the screen to be clear.
+        screen.kind = 2
+        served.wait_for(lambda: len(pages) == 2)
+        alarm.clear_alarm()
+        assert served.plan("cleared_still_up")["error"] == LIE_DETECTOR_ERROR
+        screen.kind = 0
+        went = time.monotonic()
+        served.wait_for(lambda: "taking plans again" in served.log())
+        assert time.monotonic() - went >= served.end_s
+        assert "error" not in served.plan("after")
+        assert "error" not in client.submit([], focus=False, timeout=5)
+    finally:
+        served.stop()
+    folders = sorted((tmp_path / "lie_detector").iterdir())
+    assert len(folders) == 2 and all((f / SUMMARY).exists() for f in folders)
+    log = served.log()
+    assert log.count("LIE DETECTOR seen") == 2 and log.count("recording the Lie Detector") == 2
+    assert log.count("Lie Detector recording ended (gone)") == 2
+
+
+def test_the_player_started_with_an_uncleared_alarm_starts_locked_watching_and_recording(tmp_path, monkeypatch,
+                                                                                         alarm_file):
+    alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 10:15:00"}), encoding="utf-8")
+    screen = Screen(2)  # and the Lie Detector still on screen
+    served = Served(tmp_path, monkeypatch, screen)
+    try:
+        assert "a Lie Detector alarm hasn't been cleared" in served.log()
+        assert served.plan("first")["error"] == LIE_DETECTOR_ERROR
+        served.wait_for(lambda: "recording the Lie Detector" in served.log())
+        screen.kind = 0
+        served.wait_for(lambda: "its cycle is over (waiting for `clear-alarm`)" in served.log())
+        assert served.plan("not_cleared")["error"] == LIE_DETECTOR_ERROR
+        alarm.clear_alarm()
+        served.wait_for(lambda: "taking plans again" in served.log())
+        assert "error" not in served.plan("cleared")
+    finally:
+        served.stop()
+    [folder] = (tmp_path / "lie_detector").iterdir()
+    assert json.loads((folder / SUMMARY).read_text(encoding="utf-8"))["forms"].keys() == {"mini-game"}
+
+
+def test_the_player_started_with_an_uncleared_alarm_and_nothing_on_screen_waits_for_clear_alarm(tmp_path,
+                                                                                                 monkeypatch,
+                                                                                                 alarm_file):
+    alarm_file.write_text("{}", encoding="utf-8")
+    served = Served(tmp_path, monkeypatch, Screen(0))
+    try:
+        time.sleep(3 * served.end_s)
+        assert served.plan("first")["error"] == LIE_DETECTOR_ERROR
+        alarm.clear_alarm()
+        served.wait_for(lambda: "taking plans again" in served.log())
+        assert "error" not in served.plan("cleared")
+    finally:
+        served.stop()
+    assert not (tmp_path / "lie_detector").exists()  # nothing was on screen: nothing recorded

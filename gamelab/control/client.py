@@ -90,7 +90,7 @@ def wait(plan_id: str, timeout: float = 120) -> dict:
     frames_path = OUTBOX / f"{plan_id}.npz"
     end = time.monotonic() + timeout
     while not result_path.exists():
-        if plan_path.exists() and ALARM.exists():  # the player shut down before taking it
+        if plan_path.exists() and ALARM.exists():  # not taken yet, and it would only be refused (or no player)
             plan_path.unlink(missing_ok=True)
             check_alarm()
         if time.monotonic() > end:

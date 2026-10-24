@@ -39,8 +39,9 @@ WATCH_STATUS_S = 10.0
 WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for it (the player checks 4 a second)
 WATCH_EVENTS = ("died", "exp_gain")  # tracker events published as telemetry 'event' records (and hits, new ones)
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
-# subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
-GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
+# subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing). Not `player`
+# since 2026-10-24: started with the alarm up, the player starts locked (control.player.serve).
+GAME_COMMANDS = {"calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
 LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command
 
 SW_SHOWMINNOACTIVE = 7  # ShellExecute: start the player minimized, not activated
@@ -84,7 +85,11 @@ def _game_geometry(title: str, restore: bool = False):
 # --- the player and the Lie Detector ---------------------------------------------------------------------
 
 def cmd_player(args) -> int:
-    client.check_alarm()
+    from .control.alarm import alarm_info
+    from .control.lie_recorder import END_S
+    if info := alarm_info():
+        print(f"the Lie Detector alarm from {info.get('time', '?')} is up: the player starts locked, refusing every "
+              f"plan until `clear-alarm` and none on screen for {END_S:g} s (it watches and records meanwhile)")
     if not args.elevate:
         from .control.player import serve
         serve()
@@ -1613,7 +1618,7 @@ def main(argv=None) -> int:
             client.check_alarm()
         return args.func(args)
     except client.LieDetectorAlarm as e:
-        print(f"LIE DETECTOR: {e}. gamelab stopped all input and the player shut down.\n"
+        print(f"LIE DETECTOR: {e}. gamelab stopped all input (a running player stays up, locked, and records it).\n"
               "Answer it in the game yourself. Afterwards, run `python -m gamelab clear-alarm`.")
         return LIE_DETECTOR_EXIT
     except (client.PlayerError, RuntimeError) as e:

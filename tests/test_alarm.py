@@ -36,9 +36,10 @@ def scene_with_window():
 
 @pytest.fixture
 def alarm_file(tmp_path, monkeypatch):
+    from gamelab.control import player
     path = tmp_path / "ALARM.json"
-    monkeypatch.setattr(alarm, "ALARM", path)
-    monkeypatch.setattr(client, "ALARM", path)
+    for mod in (alarm, client, player):
+        monkeypatch.setattr(mod, "ALARM", path)
     return path
 
 
@@ -185,7 +186,7 @@ def test_waits_end_early_when_the_alarm_goes_off():
     assert _sleep_until(time.perf_counter() + 0.01) is True
 
 
-def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch):
+def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch, capsys):
     pages = []
     monkeypatch.setattr(alarm, "page", lambda title, text: pages.append(title))
     info = alarm.raise_alarm(scene_with_window())
@@ -198,7 +199,13 @@ def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch):
         client.submit([], name="x")
     assert main(["act", "100"]) == LIE_DETECTOR_EXIT  # refused before touching the game
     assert main(["map"]) == LIE_DETECTOR_EXIT         # its look would bring the game to the front
-    assert main(["player", "--elevate"]) == LIE_DETECTOR_EXIT
+    # The player may start (since 2026-10-24): it starts locked, refusing every plan (tests/test_lie_recording.py).
+    from gamelab.control import player as player_mod
+    started = []
+    monkeypatch.setattr(player_mod, "serve", lambda: started.append(True))
+    capsys.readouterr()
+    assert main(["player"]) == 0 and started == [True]
+    assert "the player starts locked" in capsys.readouterr().out
 
     assert main(["clear-alarm"]) == 0
     assert not alarm_file.exists()
