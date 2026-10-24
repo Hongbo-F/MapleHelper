@@ -55,7 +55,7 @@ What keeps the player safe:
 - **Any key, and clicks inside the game** (since 2026-10-23, at the user's request: the key bindings window, `\`, needs a click on Confirm to save a change): it presses any key `config.toml` can name (`player.ALL_KEYS`) and both mouse buttons (`lbutton`, `rbutton` events; `act`'s `click@X,Y` and `rclick@X,Y`), and moves the pointer only inside the game window. Until then it pressed only her bound keys, `\` and Esc, never Enter, and never clicked.
 - **Game in front only:** it stops pressing keys if the game leaves the foreground.
 - **Fixed at start:** it loads its code and key list once, when it starts, and loads as little of gamelab as it can (a test checks).
-- **Stops itself:** it exits when `lab/STOP` appears or after 3 idle hours.
+- **Stops itself:** it exits when `lab/STOP` appears or after 24 idle hours (3 until 2026-10-23: the user asked that it not be exited proactively, since starting it again needs their UAC click).
 - **Plans can be cut short:** when `lab/inbox/<plan id>.cancel` appears, it stops pressing and lets go of every key it holds. A plan it hasn't started yet can be withdrawn: it renames each plan as it takes it, so the client can tell. The navigator uses this when she's hit or off course mid-plan.
 - **Plans can be queued:** a plan can say how long it lasts (`end_ms`), so the next one starts the moment it ends. Keys are still all released between plans.
 - **Stops on the Lie Detector:** the player checks the game screen 4 times a second, idle or not. It recognizes the countdown window (yellow "LIE DETECTOR" title), the mouse mini-game ("The Lie Detector Mini-game: use the mouse to follow the fading figure") and the Truth Booth that a failed test sends her to. When one appears, it:

@@ -16,7 +16,7 @@ runs normally and talks to it through files. To keep that safe it only ever:
 - writes results to gamelab/lab/outbox.
 
 Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears or after
-3 idle hours. Start it with `python -m gamelab player --elevate`; stop it with `python -m gamelab stop`.
+24 idle hours. Start it with `python -m gamelab player --elevate`; stop it with `python -m gamelab stop`.
 
 Of gamelab, this module itself imports only paths and window (and control.alarm and
 perception.lie_detector when a Watchdog is created). Plans come from control.client.
@@ -41,7 +41,9 @@ from maplehelper.keys import parse as parse_key
 from .. import window
 from ..paths import ALARM, CONFIG, INBOX, LAB, OUTBOX, PLAYER_LOG, STOP
 
-IDLE_LIMIT_S = 3 * 60 * 60
+# It used to stop after 3 idle hours; on 2026-10-23 the user asked that it not be exited proactively (starting it
+# again needs their UAC click), and it had stopped by itself overnight: a day, so it outlasts a night without plans.
+IDLE_LIMIT_S = 24 * 60 * 60
 MAX_EVENTS = 400
 MAX_PLAN_MS = 20_000
 MAX_FRAMES = 900
@@ -292,7 +294,7 @@ def _answer(path, result: dict) -> str:
 
 def serve() -> None:
     """The player: take plans from the inbox in name order and answer each, until STOP, the Lie
-    Detector or 3 idle hours."""
+    Detector or 24 idle hours."""
     for d in (LAB, INBOX, OUTBOX):
         d.mkdir(parents=True, exist_ok=True)
     _rotate_log()
