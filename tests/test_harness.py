@@ -312,3 +312,25 @@ def test_her_trips_are_counted_from_the_stacks_log(model):
            f"  8.0     ended on air/rope instead of platform {c.id}; replanning",                # a fall
            f"  9.0     hit on the way (80% -> 70%): on {platform_text(c)}; replanning"]
     assert harness.navigation(log, model) == {"cut_hit": 1, "cut_off_path": 1, "replans": 5, "misses": 3, "falls": 2}
+
+
+def test_a_world_drops_what_its_maps_monsters_drop(model):
+    """The harness's `game-drops` (Realism.drops MAP_DROPS): on the first map what was seen there in game (GAME_DROPS);
+    on another its monsters' drops (perception.drops), at OSMLib's reference rates, and mesos."""
+    from types import SimpleNamespace
+    from gamelab.perception.drops import FIRST_MAP
+    from gamelab.sim.world import GAME_DROPS, MAP_DROPS, MESOS_SHARE, NO_RATE, game_drops
+
+    def a_map(map_id, *names):
+        return SimpleNamespace(id=map_id, spawns=[SimpleNamespace(name=n) for n in names])
+
+    assert game_drops(a_map(FIRST_MAP, "Pig", "Slime")) == GAME_DROPS
+    tree = game_drops(a_map(10002073, "Horny Mushroom", "Slime", "Horny Mushroom"))
+    assert tree[:3] == (("horny-mushroom", "mesos", MESOS_SHARE), ("horny-mushroom", "horny-mushroom-cap", 0.40),
+                        ("horny-mushroom", "orange-potion", 0.01))
+    assert ("horny-mushroom", "magic-potion", NO_RATE) in tree and ("slime", "slime-bubble", 0.03) in tree
+    assert len(tree) == 2 + 7 + 5
+    # A world on this made-up map, of snails (a kind the table doesn't know): mesos alone.
+    w = world(model, plat(model, 360, 300).id, 240.0, realism=Realism(drops=MAP_DROPS))
+    assert w._drop_table == (("snail", "mesos", MESOS_SHARE),)
+    assert harness.PRESETS["game-drops"][1].drops == MAP_DROPS

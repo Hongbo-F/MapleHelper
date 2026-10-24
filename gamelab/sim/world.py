@@ -119,6 +119,7 @@ from ..localization.mapdata import PORTAL_BOX, PORTAL_EXIT, MapModel, Platform, 
 from ..motion import body, flow
 from ..motion.physics import (CLIMB_SPEED, DROP_LAG, GRAB_SURE, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE,
                                WALK_SPEED)
+from ..perception import drops as drop_data
 from ..perception.kinds import kind_of
 
 TICK_MS = 5              # the world's tick, which is also the engine's own step in the air (body.TICK)
@@ -322,10 +323,10 @@ SIDE_INSET = 25.0
 ROPE_REACH_CLIENT = GRAB_SURE
 MESSAGE_FOR = 5.0        # s a pickup message stays in the log on screen
 FULL_MESSAGE = "You can't get anymore items."
-ITEM_OF = {"pig": "leather"}
+ITEM_OF = {"pig": "leather"}  # (the first map's pigs; a kind not in it drops mesos alone)
 # What a kill drops in a world closer to the game's (Realism.drops; the harness's preset `game-drops`): for each
-# monster kind, each drop and the chance a kill drops it, as seen where her kills died in the hunts of 2026-10-21
-# (of the kills whose place a look saw drops at 2-12 s after, within 60 units: 52 slimes, 45 pigs, 23 Orange
+# monster kind, each drop and the chance a kill drops it, as seen where her kills died on the first map in the hunts of
+# 2026-10-21 (of the kills whose place a look saw drops at 2-12 s after, within 60 units: 52 slimes, 45 pigs, 23 Orange
 # Mushrooms, 19 snails; an item there of another kind's, a slime's Squishy Liquid by a pig in the basin, is left
 # out). The default world drops mesos, and leather from a pig (ITEM_OF), every time.
 GAME_DROPS = (
@@ -335,6 +336,31 @@ GAME_DROPS = (
     ("orange-mushroom", "mesos", 0.70), ("orange-mushroom", "orange-mushroom-cap", 0.70),
     ("snail", "mesos", 0.63), ("snail", "snail-shell", 0.47), ("snail", "red-potion", 0.11),
 )
+# Realism.drops of a world that drops what its own map's monsters drop (`game_drops`): the harness's `game-drops`.
+MAP_DROPS = "map"
+# On a map whose drops weren't seen in game (`game_drops`): a kill drops mesos this often (the first map's four kinds'
+# 63-80% of their piles with coins, on average) and an item of its monster's (perception.drops) at OSMLib's reference
+# rate, or at NO_RATE where it gives none (the Magic Potion, a Fragment of Magic, ...). Neither is the game's: OSMLib's
+# "may not represent MapleStory Classic World rates", and the first map's slimes dropped Squishy Liquid at 65% where it
+# gives 40%, a Slime Bubble at 10% for its 3%.
+MESOS_SHARE = 0.72
+NO_RATE = 0.01
+
+
+def game_drops(model) -> tuple:
+    """What a kill drops on map `model` in a world closer to the game's: (monster kind, drop kind, chance), as
+    GAME_DROPS. The first map's are GAME_DROPS, as seen in game; another's are its monsters' (perception.drops: mesos
+    MESOS_SHARE of kills, each item at its reference rate), a monster the table doesn't know dropping mesos alone."""
+    if getattr(model, "id", None) == drop_data.FIRST_MAP:
+        return GAME_DROPS
+    out = []
+    for name in drop_data.monsters_of(model):
+        kind, known = kind_of(name), drop_data.MONSTERS.get(name)
+        out.append((kind, "mesos", MESOS_SHARE))
+        if known is not None:
+            out += [(kind, kind_of(item), known.rates.get(item, NO_RATE)) for item in known.items]
+    return tuple(out)
+
 # Another player (Realism.rival_every) hunts one place at a time: it kills a monster within RIVAL_REACH across and
 # RIVAL_DY up or down of where it stands, every Realism.rival_every s on average, and walks to another (by a live
 # monster, RIVAL_NEAR from it at most: a platform as likely as it has monsters alive) after Realism.rival_stay s
@@ -437,8 +463,9 @@ class Realism:
     rival_takes: float = 20.0    # s after landing that a rival picks up its own drops
     rival_stay: float = 90.0     # s a rival hunts one place before it walks to another, on average (RIVAL_REACH)
     potions: int | None = None   # potions she has (None: endless)
-    drops: tuple = ()            # what a kill drops: (monster kind, drop kind, chance) (GAME_DROPS), drawn per
-                                 # kill from a generator of their own; (): mesos, and a pig's leather (ITEM_OF)
+    drops: tuple | str = ()      # what a kill drops: (monster kind, drop kind, chance) (GAME_DROPS), drawn per
+                                 # kill from a generator of their own, or MAP_DROPS: the world's map's (game_drops);
+                                 # (): mesos, and a pig's leather (ITEM_OF)
     camps: tuple = ()            # other players camping (Camp, CAMP_KILL): each kills the monsters of its kinds on
                                  # its platforms soon after they show
     shared_exp: bool = False     # another player's kill of a monster she hurt gives her its EXP times the share of its
@@ -833,6 +860,8 @@ class World:
         self._rival_rng = random.Random(f"rival:{seed}")
         self._drop_rng = random.Random(f"drops:{seed}")  # Realism.drops' draws (the others' unchanged by them)
         self._camp_rng = random.Random(f"camps:{seed}")  # Realism.camps' draws
+        # What a kill drops (Realism.drops; with MAP_DROPS, the map's)
+        self._drop_table = game_drops(model) if self.realism.drops == MAP_DROPS else tuple(self.realism.drops)
         self.potions_left = self.realism.potions
         self.potions_used = 0           # potions drunk, by her key or by her pet
         self.pet_potions = 0            # ... of them her pet's (Her.pet)
@@ -1640,7 +1669,7 @@ class World:
         self.note(f"{what} kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
         p = m.platform
         drops = []
-        rng = self._drop_rng if self.realism.drops else self.rng
+        rng = self._drop_rng if self._drop_table else self.rng
         for kind in self._drop_kinds(m.kind, rng):
             x = min(max(mx + rng.uniform(-10, 10), p.left + 3), p.right - 3)
             drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY))
@@ -1650,9 +1679,9 @@ class World:
     def _drop_kinds(self, kind: str, rng: random.Random) -> list[str]:
         """What a kill of a monster of this kind drops: by Realism.drops' chances (drawn from `rng`), else mesos
         and its item (ITEM_OF)."""
-        if not self.realism.drops:
+        if not self._drop_table:
             return ["mesos"] + ([ITEM_OF[kind]] if kind in ITEM_OF else [])
-        return [drop for mob, drop, chance in self.realism.drops if mob == kind and rng.random() < chance]
+        return [drop for mob, drop, chance in self._drop_table if mob == kind and rng.random() < chance]
 
     def _rival_due(self) -> int:
         """The tick of another player's next kill: every Realism.rival_every s on average."""

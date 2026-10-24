@@ -26,8 +26,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    (world.SimLeftMap)
   touches, hurt    monsters touching her, and those of the touches she didn't evade
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
-                   the share she picked up; value_share, the same weighed by what each is worth (behavior.
-                   looting.worth: the game data's prices), and value_per_min, the mesos' worth she picked up a minute
+                   the share she picked up; value_share, the same weighed by what each is worth on the world's
+                   map (behavior.looting.worth_for: the game data's prices, mesos by what its monsters drop), and
+                   value_per_min, the mesos' worth she picked up a minute
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
   rest_hp_lost     HP lost to touches on the trips to rest (from 'rest_trip' to 'rest' events), and
@@ -54,9 +55,9 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 
 from ..analysis import coverage
-from ..behavior.looting import worth
+from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
-from .world import DROP_LIFE, GAME_DROPS, ROPE_REACH_CLIENT, Camp, Noise, Realism
+from .world import DROP_LIFE, MAP_DROPS, ROPE_REACH_CLIENT, Camp, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -83,9 +84,10 @@ PRESETS = {
     "plain": (Noise(), Realism()),
     "game": (_GAME_NOISE, Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True)),
     # "game" with the drops seen in game (world.GAME_DROPS: a slime's Slime Bubble one kill in 10, and its other
-    # monsters' items) instead of mesos and a pig's leather every time: the hunt loop's valuable piles (hunt.VALUABLE)
+    # monsters' items; on another map its monsters', world.game_drops) instead of mesos and a pig's leather every time:
+    # the hunt loop's valuable piles (hunt.VALUABLE)
     "game-drops": (_GAME_NOISE, Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True,
-                                        drops=GAME_DROPS)),
+                                        drops=MAP_DROPS)),
     # "game" with jump throws missing a snail close by as often as in game (world.Noise.air_snail): what
     # stance.JUMP_THROW_SNAILS saves, which "game"'s jump throws, taking every snail their area picks, can't show
     "game-air": (dataclasses.replace(_GAME_NOISE, air_snail=(46.0, 0.35)),
@@ -274,6 +276,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     drops = [d for d in world.drops if d.owner == "her" and d.since <= horizon]
     known = [d for d in drops if d.taken_by == "her" or d.since + DROP_LIFE <= horizon]
     picked = [d for d in known if d.taken_by == "her"]
+    worth = worth_for(world.model)  # what drops are worth on the world's map (looting.Worth)
     worth_known, worth_picked = sum(worth(d.kind) for d in known), sum(worth(d.kind) for d in picked)
     times = sorted([0.0] + [k[0] for k in mine] + [d.taken_at for d in world.drops if d.taken_by == "her"] + [end])
     gaps = [b - a for a, b in zip(times, times[1:])]
