@@ -6,7 +6,10 @@ silhouette against the frame's body-colour mask (one fast single-channel pass ov
 checks only the best few spots with the full masked colour template, which rejects scenery that merely
 shares the colour (leaves, clouds). Frames are look frames (the game window shrunk as screen.Geometry says: half
 size at 1920x1080, full size at the game's own 1366x768), and the templates are brought to their scale; the px below
-were measured in half-size frames of the 1920x1080 window and go by it too.
+were measured in half-size frames of the 1920x1080 window and go by it too. A template drawn at the frames' own scale
+(the game's own pictures at the game's own 1366x768, sprites.py) is used as it is, and step 2 matches only the pixels
+the game draws as they are (opaque ones: a slime is see-through, and its half-opaque pixels on screen are partly
+what's behind it).
 
 The matches run on a few threads (OpenCV lets go of Python's lock while it matches). Which spots step 2
 checks doesn't depend on what the checks find, so they're all picked first, and the answers are the same
@@ -40,6 +43,7 @@ MIN_COVER = 0.25             # step 1: a spot's window needs this share of the t
 MIN_BODY_PIXELS = 20         # a monster type is looked for only where this many pixels have its colour
 COARSE = 2                   # step 1 works at 1/COARSE of the frame's size
 CHECK_SLACK = 6              # step 2 looks this far (px) around a spot, so spots closer than this are one
+OPAQUE = 128                 # a game picture's pixel is drawn from this alpha up (sprites.build's threshold)
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
 THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the whole screen 250 -> 117 (8 are no faster)
 # A monster seen in the last frame is looked for again this far (px) around where it should be (`refind`):
@@ -109,7 +113,7 @@ class MobTemplate(NamedTuple):
     """One monster picture (one pose, facing one way), at frame size, and what its folder says of it (INDEX,
     CUTOUTS)."""
     rgb: np.ndarray         # its colours
-    mask3: np.ndarray       # where the picture is (uint8, one copy per colour channel)
+    mask3: np.ndarray       # where the picture is (uint8, one copy per colour channel): step 2 matches these pixels
     silhouette: np.ndarray  # its body colour, at 1/COARSE size (step 1)
     origin: tuple[float, float] | None = None  # where the monster's feet are, from its top-left (frame px)
     facing: int = 0         # which way the monster faces in it: 1 right, -1 left, 0 not known
@@ -170,6 +174,24 @@ def read_meta(folders: list[Path]) -> dict[str, dict]:
     return out
 
 
+def _picture(rgba: np.ndarray, shrink: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A template's picture (RGBA) in frames `shrink` times smaller than it is drawn: its colours, the pixels step 2
+    matches and where it's drawn (step 1's silhouette), both uint8. At its own size (the game's pictures at the game's
+    own 1366x768) it's as it is, and step 2 matches only its opaque pixels: those the game draws as they are (a
+    slime is see-through: 11,464 of its 17,927 pixels drawn are half opaque, alpha 128-254, and on screen partly
+    what's behind it; drawn as the game draws it on frames of the game at 1366x768, 396 times, its frames scored
+    0.96 or more with them, median 0.98, and 1.000 without; on the same frames without it, the best anywhere near
+    0.46 with them and 0.40 without). Shrunk (area averaged), both are where it's drawn, as before."""
+    alpha = rgba[..., 3]
+    if abs(shrink - 1) < 1e-9:
+        return np.ascontiguousarray(rgba[..., :3]), (alpha == 255).astype(np.uint8), (alpha >= OPAQUE).astype(np.uint8)
+    h, w = rgba.shape[:2]
+    size = frame_size(w, h, shrink)
+    rgb = cv2.resize(np.ascontiguousarray(rgba[..., :3]), size, interpolation=cv2.INTER_AREA)
+    mask = cv2.resize((alpha >= OPAQUE).astype(np.uint8), size, interpolation=cv2.INTER_NEAREST)
+    return rgb, mask, mask
+
+
 def _known(entry: dict | None, size: tuple[int, int], flip: bool) -> tuple:
     """What a template's entry (INDEX, CUTOUTS) says of it at frame size `size` (height, width), as drawn or
     flipped: MobTemplate's origin, facing, frame, pose and box. Without an origin, nothing is known."""
@@ -192,7 +214,7 @@ class MobDetector:
     What the folders say about their templates (INDEX, CUTOUTS) comes along, and `meta` (by file name) on top.
     `threads`: how many matches run at once (1: all on the caller's thread). `frame_scale`: the frames' px per game px
     (screen.Geometry.frame_scale; by default the 1920x1080 window's at half size), which each folder's pictures are
-    brought to from theirs (`picture_scale`)."""
+    brought to from theirs (`picture_scale`): a folder drawn at the frames' own scale is used as it is."""
 
     def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None,
                  frame_scale: float = STRETCHED.frame_scale):
@@ -206,14 +228,11 @@ class MobDetector:
             if kind not in KINDS_WITH_PALETTE:
                 continue
             rgba = np.asarray(Image.open(path).convert("RGBA"))
-            h, w = rgba.shape[:2]
-            size = frame_size(w, h, shrinks[path.parent])
-            rgb = cv2.resize(np.ascontiguousarray(rgba[..., :3]), size, interpolation=cv2.INTER_AREA)
-            mask = cv2.resize((rgba[..., 3] > 0).astype(np.uint8), size, interpolation=cv2.INTER_NEAREST)
+            rgb, mask, drawn = _picture(rgba, shrinks[path.parent])
             for flip in (False, True):  # monsters face either way
-                t, m = (rgb[:, ::-1], mask[:, ::-1]) if flip else (rgb, mask)
+                t, m, d = (rgb[:, ::-1], mask[:, ::-1], drawn[:, ::-1]) if flip else (rgb, mask, drawn)
                 t = np.ascontiguousarray(t)
-                silhouette = (palette(kind, t) & (m > 0)).astype(np.float32)
+                silhouette = (palette(kind, t) & (d > 0)).astype(np.float32)
                 coarse = cv2.resize(silhouette, (max(1, t.shape[1] // COARSE), max(1, t.shape[0] // COARSE)),
                                     interpolation=cv2.INTER_AREA)
                 self.templates.setdefault(kind, []).append(MobTemplate(
