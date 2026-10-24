@@ -6,6 +6,14 @@ players are (their minimap dots, followed from look to look: localization.player
 Every look anyone takes goes through `Senses.look`, and the listeners run after each one, in order:
 the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there.
 
+With the sweep on (`sweep`), a look at the band around her also searches one slice of the rest of the screen, the next
+in turn from the top down (SWEEP_SLICE map units tall, overlapping by the tallest body): the whole view every few slices
+(4 at the game's own 1366x768, standing on a platform), for a slice's search more. What a slice finds goes into
+`Scene.swept`, not `Scene.monsters`: the fights go by the band's monsters as before. `sweep_hold`, asked after the
+band's search, holds the slice back where it would cost her (behavior.hunter.Hunter.hold_sweep: a monster in her band
+and nothing to wait for), so the look comes back sooner. The memory of monsters (localization.memory) takes every
+look's band and slice (`Scene.rows` says where a look searched).
+
 With a continuous feed (localization.feed: the game looked at every frame in a process of its own), a look
 is the feed's state of the first frame shown after it was asked for, with what it needs fresh (see
 feed.fresh), and the events since the last look come with it (Scene.events); glances come from the feed's
@@ -21,17 +29,18 @@ look asks the window alone: Eyes.window_wait). What failed, and when it's right 
 events.
 """
 
+import math
 import time
 from collections.abc import Callable
 
 from .. import telemetry
 from ..perception.drops import items_for
-from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, tag_below_feet
+from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, band_rows, tag_below_feet
 from ..perception.framecheck import BadLook, LookLost, Problem
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import STRETCHED
 from .mapdata import MapModel
-from .monsters import Monster
+from .monsters import Monster, bodies
 from .placecheck import off_map
 from .players import LOCAL_IDS, Players
 from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
@@ -60,14 +69,28 @@ FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
 RETRY_GAP_S = 0.2
 LOST_S = 3.0
 PAUSE_POLL_S = 0.5
+# The sweep (Senses.sweep): each slice of the screen it searches is this many map units tall (193 rows at the game's own
+# 1366x768, as tall as each of a whole-screen search's bands there: perception.mobs.detect_wide), and slices overlap by
+# the tallest monster body of the map and SWEEP_BODY_SLACK, so a body cut by one slice's edge is whole in the next (and
+# one cut by the band's edge, in the slice beside it). On the 20 saved 1366x768 frames of Tree Dungeon, Forest Up North
+# II, one such slice took 16.7 ms (median; 25.4 at p90), against 21.9 for her band and 72.9 for the whole screen
+# (bench-look), and the slices together found the 53 monsters the whole-screen search did, at the same places.
+SWEEP_SLICE = 193.0
+SWEEP_BODY_SLACK = 8.0
 
 
 class Senses:
-    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None):
+    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None, sweep: bool = False):
         """`band`: how far above and below her feet (map units) a look searches for monsters. `feed`: a
-        continuous feed to take looks and glances from (localization.feed.Feed), or None."""
+        continuous feed to take looks and glances from (localization.feed.Feed), or None. `sweep`: a look at the band
+        also searches a slice of the rest of the screen (see the top; never with a feed, which searches the whole
+        screen every second)."""
         self.eyes, self.model, self.band = eyes, model, band
         self.feed = feed
+        self.sweep = sweep
+        self.sweep_hold: Callable[[Scene], bool] | None = None  # asked after the band's search: hold the slice back
+        self._sweep_row = 0.0  # map units below the view's top where the next slice starts
+        self._tallest = max((b.top for b in bodies(model).values()), default=60.0)  # the map's tallest monster
         self.localizer = Localizer(model, geo=getattr(eyes, "geo", STRETCHED))  # (the simulator's: 1920x1080)
         self.camera = Camera(model.bounds)
         # Other players, from the looks placed here, and from the feed's (Players.adopt): ids apart from the feed's
@@ -82,6 +105,7 @@ class Senses:
         self.failed = {"looks": 0, "lost": 0}  # looks that failed their checks, and times that made LookLost
         self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
         self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
+        self.sweep_counts = {"slices": 0, "held": 0}  # slices the sweep searched, and held back (sweep_hold)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False) -> Scene:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
@@ -97,6 +121,11 @@ class Senses:
             if mobs and s.tag is not None and s.where is not None:
                 s.monsters = self.search(s, wide)
                 s.searched, s.wide = True, wide
+                if not wide and self.sweep and self.feed is None:
+                    if self.sweep_hold is not None and self.sweep_hold(s):
+                        self.sweep_counts["held"] += 1
+                    else:
+                        self._sweep_slice(s)
             if loot:
                 s.loot = find_loot(s, self.model, self.eyes, wide, mesos_only)
             if self.feed is not None:
@@ -105,6 +134,8 @@ class Senses:
             self.counts["from the feed"] += 1
             self._learn(s)  # the feed placed her with its own camera; this one learns too, for looks taken here
             self.players.adopt(s.t, s.players)  # ... and the other players it follows, for them too
+            if s.searched and not s.rows and s.tag is not None and s.where is not None:  # where it searched
+                s.rows = [self._play_rows(s) if s.wide else self._map_rows(s, band_rows(s, *self.band))]
         if self.feed is not None:
             # What the feed saw up to the frame this look shows (all of it for a look taken here, now): an EXP
             # gain of a later frame goes with the next look, whose monsters no longer show the one it killed.
@@ -197,9 +228,60 @@ class Senses:
 
     def search(self, s: Scene, wide: bool = False) -> list[Monster]:
         """The monsters in a placed look's band around her (or, if `wide`, on the whole screen), placed on the
-        map with their HP bars (her screen position must be known)."""
+        map with their HP bars (her screen position must be known). Where it searched goes into `s.rows`."""
         seen = self.eyes.monsters_wide(s) if wide else self.eyes.monsters(s, *self.band)
+        s.rows.append(self._play_rows(s) if wide else self._map_rows(s, band_rows(s, *self.band)))
         return [s.place(m, self.model, self.eyes.bar(s, m)) for m in seen]
+
+    # --- the sweep ------------------------------------------------------------------------------------
+
+    def _sweep_slice(self, s: Scene) -> None:
+        """One slice of the screen outside the band (the next in turn, from the top down), searched for monsters into
+        `s.swept` (those the band found too left out) and `s.rows`."""
+        rows = self._next_slice(s)
+        if rows is None:
+            return
+        self.sweep_counts["slices"] += 1
+        found = [s.place(m, self.model, self.eyes.bar(s, m)) for m in self.eyes.monsters_rows(s, rows)]
+        s.swept = [m for m in found if not any(o.kind == m.kind and abs(o.x - m.x) < 25 and abs(o.y - m.y) < 25
+                                               for o in s.monsters)]
+        s.rows.append(self._map_rows(s, rows))
+
+    def _next_slice(self, s: Scene) -> tuple[int, int] | None:
+        """The rows of the frame the sweep searches next: SWEEP_SLICE tall, from where the last one ended (less the
+        overlap), within what the band leaves out: above its top (and a body's height into it, for one cut by its
+        edge) and below its bottom (likewise). Past the bottom it starts again at the top."""
+        geo = s.geo
+        bottom = int(s.frame.shape[0] * geo.hud_top)
+        b0, b1 = band_rows(s, *self.band)
+        body = int(math.ceil((self._tallest + SWEEP_BODY_SLACK) / geo.units_per_px))
+        size = max(body + 1, int(round(SWEEP_SLICE / geo.units_per_px)))
+        regions = [(0, min(bottom, b0 + body)), (max(0, b1 - body), bottom)]
+        if regions[0][1] >= regions[1][0]:  # the band is no taller than two bodies: the whole screen
+            regions = [(0, bottom)]
+        regions = [(a, b) for a, b in regions if b - a > body]
+        if not regions:
+            return None
+        start = int(round(self._sweep_row / geo.units_per_px))
+        region = next(((a, b) for a, b in regions if b - max(a, start) > body), None)
+        if region is None:  # past the last: from the top again
+            region, start = regions[0], regions[0][0]
+        top = max(region[0], start)
+        end = min(region[1], top + size)
+        if region[1] - end <= body:  # not worth a slice of its own: this one goes to the region's end
+            end = region[1]
+        last = region is regions[-1] and end >= region[1]
+        self._sweep_row = 0.0 if last else (end - body) * geo.units_per_px
+        return top, end
+
+    @staticmethod
+    def _map_rows(s: Scene, rows: tuple[int, int]) -> tuple[float, float]:
+        """Rows of a look's frame as map y (from, to)."""
+        return s.map_y(rows[0]), s.map_y(rows[1])
+
+    def _play_rows(self, s: Scene) -> tuple[float, float]:
+        """The whole screen above the bottom bar, as map y (from, to)."""
+        return self._map_rows(s, (0, int(s.frame.shape[0] * s.geo.hud_top)))
 
     def _learn(self, s: Scene) -> None:
         """With her name tag seen and her placed, the camera learns where it keeps her."""

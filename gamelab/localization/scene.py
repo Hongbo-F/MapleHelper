@@ -48,6 +48,10 @@ class Scene(Observation):
     monsters: list[Monster] = field(default_factory=list)  # monsters seen, placed on the map
     searched: bool = False        # monsters were looked for (an empty `monsters` then means none was seen)
     wide: bool = False            # ... on the whole screen (else only in the band around her level)
+    swept: list[Monster] = field(default_factory=list)  # monsters a slice of the sweep found, out of the band
+                                                         # (Senses.sweep; not `monsters`: the fights go by the band's)
+    rows: list[tuple[float, float]] = field(default_factory=list)  # where monsters were looked for: map y from, to
+                                                                    # (the band, a slice of the sweep, the screen)
     loot: list[Loot] = field(default_factory=list)         # drops seen on the ground (find_loot)
     looked: list[tuple[int, float, float]] = field(default_factory=list)  # where loot was looked for:
                                                                           # (platform, map x from, to)
@@ -115,7 +119,9 @@ class Scene(Observation):
         `looked` (where drops were looked for: platform, map x from, to) and `view` (the map the screen showed above
         the bottom bar: x from, y from, x to, y to, whole units); and the other players (`players`, left out when there
         are none); and where the map's minimap picture was found and how well it matched (`minimap`: its corner x, y in
-        full-size px, the score; left out without one), which a dot read with the wrong origin is told by."""
+        full-size px, the score; left out without one), which a dot read with the wrong origin is told by; from
+        2026-10-24's evening, where it searched for monsters (`rows`: map y from, to) and the monsters a slice of the
+        sweep found (`swept`, left out when it found none)."""
         her = None if self.where is None else {
             "x": round(self.where.x, 1), "y": round(self.where.y, 1),
             "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen,
@@ -126,10 +132,9 @@ class Scene(Observation):
             view = [round(self.map_x(0)), round(self.map_y(0)), round(self.map_x(w)),
                     round(self.map_y(h * self.geo.hud_top))]
         return {"her": her, "hp": round(self.hp, 3), "mp": round(self.mp, 3),
-                "monsters": [{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1), "platform": m.platform,
-                              "bar": None if m.bar is None else round(m.bar, 2),
-                              **({"facing": m.facing} if m.facing else {})}  # left out when not known
-                             for m in self.monsters],
+                "monsters": [_monster_record(m) for m in self.monsters],
+                **({"swept": [_monster_record(m) for m in self.swept]} if self.swept else {}),
+                "rows": [[round(lo), round(hi)] for lo, hi in self.rows],
                 "loot": [{"kind": d.item.kind, "x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform}
                          for d in self.loot],
                 "searched": self.searched, "wide": self.wide,
@@ -143,6 +148,12 @@ class Scene(Observation):
         if p is None:
             return 0.0
         return max(0.0, (p.right - margin - self.where.x) if direction == RIGHT else (self.where.x - p.left - margin))
+
+
+def _monster_record(m: Monster) -> dict:
+    return {"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1), "platform": m.platform,
+            "bar": None if m.bar is None else round(m.bar, 2),
+            **({"facing": m.facing} if m.facing else {})}  # left out when not known
 
 
 def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_only: bool = False) -> list[Loot]:

@@ -364,6 +364,10 @@ class Eyes:
         """Every monster on screen (above the bottom bar)."""
         return self.detector.detect_wide(obs.frame, (0, int(obs.frame.shape[0] * obs.geo.hud_top)))
 
+    def monsters_rows(self, obs: Observation, rows: tuple[int, int]) -> list[Mob]:
+        """Monsters wholly within rows `rows` (top, bottom) of the look's frame (one slice of a sweep: Senses.sweep)."""
+        return self.detector.detect(obs.frame, rows=rows)
+
     def refind(self, obs: Observation, mob: Mob, box: tuple[int, int, int, int], fallback: bool = True) -> Mob | None:
         """Monster `mob`, seen in an earlier frame, looked for again where its picture should be now (`box`:
         x0, y0, x1, y1), above the bottom bar (MobDetector.refind; without `fallback`, only with the template
