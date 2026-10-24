@@ -12,6 +12,13 @@ brightness and tint, and the sea and island backdrop matched the Blue Potion's s
 buttons the White Potion's, but never their colours. Drops lie on the ground, so only strips just above
 platforms are searched (localization.scene.find_loot, with ABOVE and BELOW): a whole-screen search took 1.3 s.
 
+At the game's own 1366x768 the pictures are the game's own, drawn on screen pixel for pixel, so a drop's colours
+are its picture's to the pixel: there the shape is matched on brightness alone (one channel instead of three:
+`gray`), and the colours are checked as above (PIXEL_SLACK). On the 17 bench frames shrunk to that size it found the
+11 drops found in colour (scoring 0.81-0.95, in colour 0.83-0.95), and every platform in view took 78 ms against 112
+in colour (73 at 1920x1080 half size); drawn as the game draws them on frames of the game at that size, all 32 were
+found, scoring 1.00, and on the frames as they are nothing. At 1920x1080, all of it is as it was.
+
 The pickup log's full-inventory message (`says_full`) is here too.
 """
 
@@ -182,16 +189,19 @@ class LootTemplate(NamedTuple):
     mask3: np.ndarray  # where the picture is (uint8, one copy per colour channel)
     solid: np.ndarray  # where its colours are checked (bool)
     coin: str | None = None  # mesos: the coin it's a frame of
+    gray: tuple[np.ndarray, np.ndarray] | None = None  # its brightness and mask (one channel), when matched on that
 
 
 class LootDetector:
     """Templates come from `folder` (built from the game data if not given): PNGs named
     <kind>_<anything>.png, RGBA at full screen size (mobs.picture_scale's), brought to look frames of geometry
-    `geo` (by default the 1920x1080 window's, at half size)."""
+    `geo` (by default the 1920x1080 window's, at half size). `gray`: match the shapes on brightness alone (by
+    default where the pictures are drawn at the frames' own scale, the game's own pixels)."""
 
-    def __init__(self, folder: Path | None = None, geo: Geometry = STRETCHED):
+    def __init__(self, folder: Path | None = None, geo: Geometry = STRETCHED, gray: bool | None = None):
         folder = ensure(stretch=geo.stretch) if folder is None else folder
         shrink = picture_scale(folder) / geo.frame_scale
+        self.gray = abs(shrink - 1) < 1e-9 if gray is None else gray
         self.templates: list[LootTemplate] = []
         for path in sorted(folder.glob("*.png")):
             rgba = np.asarray(Image.open(path).convert("RGBA"))
@@ -204,8 +214,9 @@ class LootDetector:
             # Slime Bubble's string) is half line, half background at half size, and was 41 off.
             solid = cover >= SOLID_COVER
             solid = solid if solid.sum() >= MIN_SOLID else mask > 0
+            gray = (cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2GRAY), mask) if self.gray else None
             self.templates.append(LootTemplate(_kind(path), np.ascontiguousarray(rgb), np.dstack([mask] * 3), solid,
-                                               _coin(path)))
+                                               _coin(path), gray))
         if not self.templates:
             raise RuntimeError(f"no loot templates in {folder}")
         self.height = max(t.rgb.shape[0] for t in self.templates)
@@ -224,25 +235,28 @@ class LootDetector:
         areas = []
         for x0, y0, x1, y1 in boxes:
             x0, y0 = max(0, int(x0)), max(0, int(y0))
-            areas.append((np.ascontiguousarray(frame[y0:int(y1), x0:int(x1)]), (x0, y0)))
+            area = np.ascontiguousarray(frame[y0:int(y1), x0:int(x1)])
+            areas.append((area, (x0, y0), cv2.cvtColor(area, cv2.COLOR_RGB2GRAY) if self.gray and area.size else None))
 
         def wanted(t: LootTemplate, area: np.ndarray) -> bool:
             fits = t.rgb.shape[0] <= area.shape[0] and t.rgb.shape[1] <= area.shape[1]
             return (t.kind == MESOS or not mesos_only) and fits
 
-        jobs = [(k, t) for k, (area, _) in enumerate(areas) for t in self.templates if wanted(t, area)]
+        jobs = [(k, t) for k, (area, _, _) in enumerate(areas) for t in self.templates if wanted(t, area)]
         found = self._pool.map(lambda job: self._match(*areas[job[0]], job[1]), jobs)
         each: list[list[Item]] = [[] for _ in boxes]
         for (k, _), hits in zip(jobs, found):
             each[k] += hits
         return [suppress_overlaps(items) for items in each]
 
-    def _match(self, area: np.ndarray, origin: tuple[int, int], template: LootTemplate) -> list[Item]:
-        """Where one template is in `area`, whose top left is at `origin` in the frame."""
-        kind, rgb, mask3, solid, coin = template
+    def _match(self, area: np.ndarray, origin: tuple[int, int], gray: np.ndarray | None,
+               template: LootTemplate) -> list[Item]:
+        """Where one template is in `area`, whose top left is at `origin` in the frame (`gray`: the area's
+        brightness, where shapes are matched on that)."""
+        kind, rgb, mask3, solid, coin = template[:5]
         own = rgb[solid].astype(np.float32)
         th, tw = rgb.shape[:2]
-        res = masked_match(area, rgb, mask3)
+        res = masked_match(area, rgb, mask3) if gray is None else masked_match(gray, *template.gray)
         peaks = (res >= THRESHOLD) & (res == cv2.dilate(res, np.ones((5, 5), np.uint8)))
         hits = []
         for y, x in zip(*np.nonzero(peaks)):

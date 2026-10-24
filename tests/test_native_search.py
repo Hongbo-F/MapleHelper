@@ -1,7 +1,8 @@
-"""Monsters at the game's own 1366x768: the game's own pictures as they are (opaque pixels matched, no cut-outs), and
-the search coarse to fine (step 1 at the 1920x1080 window's half size, step 2 at full size in small windows, a gate
-first and several templates a place). The frames are tests/fixtures/native (West Rocky Mountain II, none of whose
-monsters has a colour gate yet), with pictures drawn on them as the game draws them (analysis.pasted)."""
+"""Monsters and drops at the game's own 1366x768: the game's own pictures as they are (a monster's opaque pixels
+matched, no cut-outs; a drop's shape on brightness, its colours checked), and the monster search coarse to fine (step
+1 at the 1920x1080 window's half size, step 2 at full size in small windows, a gate first and several templates a
+place). The frames are tests/fixtures/native (West Rocky Mountain II, none of whose monsters has a colour gate yet),
+with pictures drawn on them as the game draws them (analysis.pasted)."""
 
 import json
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from PIL import Image
 
 from gamelab.analysis import pasted
 from gamelab.perception import mobs, sprites
+from gamelab.perception.loot import LootDetector
 from gamelab.perception.mobs import INDEX, SCALE_FILE, MobDetector
 from gamelab.screen import HUD_TOP, NATIVE, STRETCHED
 
@@ -131,6 +133,24 @@ def test_a_monster_seen_at_the_games_own_size_is_refound(tmp_path):
     again = detector.refind(moved, box, "pig", seen.template, seen.facing)
     assert (again.foot_x - seen.foot_x, again.feet_y - seen.feet_y) == (12, 3)
     assert detector.fallbacks == 0
+
+
+# --- drops ------------------------------------------------------------------------------------------------------
+
+def test_drops_at_the_games_own_size_are_matched_on_brightness_and_their_colours_checked(tmp_path):
+    from test_loot import coin, leather
+    folder = game_folder(tmp_path, {"mesos_bronze0": coin(), "leather_0": leather()}, origin=None)
+    native = LootDetector(folder, NATIVE)
+    assert native.gray and all(t.gray[0].ndim == 2 and t.gray[0].shape == t.rgb.shape[:2] for t in native.templates)
+    assert not LootDetector(folder, STRETCHED).gray  # the 1920x1080 window's: in colour, as before
+    scene = frame()
+    pasted.paste(scene, coin(), 500, 400)
+    pasted.paste(scene, leather((60, 120, 50)), 700, 395)  # a hide's shape in green: its brightness, not its colours
+    box = (450, 380, 800, 440)
+    found = native.detect(scene, box)
+    assert [(i.kind, i.x, i.y, i.score) for i in found] == [("mesos", 516, 416, 1.0)]
+    assert LootDetector(folder, NATIVE, gray=False).detect(scene, box) == found  # the same in colour
+    assert native.detect(frame(), box) == []
 
 
 # --- which pictures, at which size --------------------------------------------------------------------------------
