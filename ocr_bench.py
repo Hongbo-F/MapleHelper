@@ -4,7 +4,7 @@ Read-only by design: it captures the screen with mss, like any screenshot tool. 
 the game's process, reads its memory or sends it input.
 
 Setup: the project's `maplehelper` env (environment.yml) has everything, including the CUDA build of
-onnxruntime from conda-forge (PyPI has none for Python 3.15). To bring an existing env up to date:
+onnxruntime from conda-forge. To bring an existing env up to date:
   conda env update -n maplehelper -f environment.yml
 
 Examples (python = C:\\Users\\Admin\\.conda\\envs\\maplehelper\\python.exe):
