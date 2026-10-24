@@ -219,6 +219,19 @@ def test_a_drop_drawn_partly_see_through_is_matched_on_the_px_drawn_as_they_are(
         assert [(i.kind, i.x, i.y, i.score) for i in found] == [("fragment-of-magic", 135, 115, 1.0)], back
 
 
+def test_of_two_recoloured_pictures_found_at_one_place_the_nearer_colours_win():
+    # An Iron Ore's picture is a Silver Ore's recoloured: on brightness both score alike where either lies, and their
+    # colours are 12 apart, under PIXEL_SLACK. Where a monster hides part of a Silver Ore, Iron's could score higher.
+    from gamelab.perception.loot import SAME_SHAPE, _recoloured
+    silver, iron = Item("silver-ore", 100, 50, 25, 21, 0.951), Item("iron-ore", 100, 51, 25, 21, 0.953)
+    assert _recoloured([(silver, 6.0), (iron, 15.0)]) == [silver]
+    assert _recoloured([(silver, 16.0), (iron, 4.0)]) == [iron]
+    # Not one picture recoloured (another size), apart (2 px), or shapes clearly apart: the scores decide, as before.
+    for other in (Item("iron-ore", 100, 50, 22, 22, 0.953), Item("iron-ore", 102, 50, 25, 21, 0.953),
+                  Item("iron-ore", 100, 50, 25, 21, 0.951 + SAME_SHAPE + 0.001)):
+        assert _recoloured([(silver, 6.0), (other, 15.0)]) == [silver, other]
+
+
 def test_full_inventory_messages():
     assert says_full("You can't get anymore items.")  # what the game said when her Etc tab was full
     assert says_full("Your inventory is full.")
@@ -565,3 +578,18 @@ def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_els
     assert result["clean"]["native"] == []
     for full in backgrounds:
         assert det.detect(full, (0, 0, full.shape[1], int(full.shape[0] * HUD_TOP))) == []
+
+
+@pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
+def test_a_silver_ore_partly_hidden_is_not_taken_for_an_iron_ore():
+    """The game's Silver Ore drawn on West Rocky Mountain II, its left 5 columns hidden (a pale patch: a monster in front
+    of it): Iron Ore's picture, the same picture recoloured, scored higher on brightness there, and its colours passed."""
+    from gamelab.analysis import pasted
+    from gamelab.perception import loot
+    from gamelab.screen import NATIVE
+    det = loot.LootDetector(geo=NATIVE, items=("Silver Ore", "Iron Ore"))
+    ore = {n: rgba for n, rgba, _ in pasted.pictures(loot.folder_for(1), {"silver-ore"})}["silver-ore_0"]
+    frame = np.array(Image.open(WEST_ROCKY / "n28_000.png").convert("RGB"))
+    pasted.paste(frame, ore, 200, 300)
+    frame[300:321, 200:205] = 220
+    assert [i.kind for i in det.detect(frame, (160, 280, 265, 327))] == ["silver-ore"]

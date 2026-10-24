@@ -71,6 +71,13 @@ HALF_COVER = 0.5     # a template's mask: where the picture covers at least this
 SOLID_COVER = 0.99   # its colours are checked where the picture covers this much (see LootDetector)
 MIN_MASK = 20        # fewer pixels in its mask than this, and a template isn't used
 MIN_SOLID = 10       # fewer solid pixels than this, and its colours are checked over the whole mask
+# Two kinds whose pictures are one picture recoloured (the same size; the ores, the gems), both found at one place (a px
+# apart at most) with shape scores this close: the one whose colours are nearer its own is the drop (`_recoloured`). On
+# brightness alone an Iron Ore's picture scores 0.998 where a Silver Ore lies, and its colours are 12.1 off there, under
+# PIXEL_SLACK. Drawn 1:1 on West Rocky Mountain II's frames with a fifth of it behind a piece of a monster's sprite, 9
+# of 43 Silver Ores were taken for Iron Ore (a third: 14), and none now; the shape scores of the two came within 0.005
+# of each other (README: Perception, drops of the new maps).
+SAME_SHAPE = 0.02
 # The game's message when pick-up fails for want of room: "You can't get anymore items." (seen when her
 # Etc tab filled up). It's in the client, not the game data, so this matches it and the usual other wordings.
 FULL_MESSAGE = re.compile(r"inventory\W*(?:is\W*)?full|full\W*inventory|(?:can\W?not|can\W?t|unable\W*to)\W*"
@@ -288,15 +295,15 @@ class LootDetector:
 
         jobs = [(k, t) for k, (area, _, _) in enumerate(areas) for t in self.templates if wanted(t, area)]
         found = self._pool.map(lambda job: self._match(*areas[job[0]], job[1]), jobs)
-        each: list[list[Item]] = [[] for _ in boxes]
+        each: list[list[tuple[Item, float]]] = [[] for _ in boxes]
         for (k, _), hits in zip(jobs, found):
             each[k] += hits
-        return [suppress_overlaps(items) for items in each]
+        return [suppress_overlaps(_recoloured(hits)) for hits in each]
 
     def _match(self, area: np.ndarray, origin: tuple[int, int], gray: np.ndarray | None,
-               template: LootTemplate) -> list[Item]:
+               template: LootTemplate) -> list[tuple[Item, float]]:
         """Where one template is in `area`, whose top left is at `origin` in the frame (`gray`: the area's
-        brightness, where shapes are matched on that)."""
+        brightness, where shapes are matched on that): each with how far its colours are from the template's."""
         kind, rgb, mask3, solid, coin = template[:5]
         own = rgb[solid].astype(np.float32)
         th, tw = rgb.shape[:2]
@@ -305,8 +312,17 @@ class LootDetector:
         hits = []
         for y, x in zip(*np.nonzero(peaks)):
             seen = area[y:y + th, x:x + tw][solid].astype(np.float32)
-            if float(np.abs(seen - own).mean()) <= PIXEL_SLACK:
-                hits.append(Item(kind, origin[0] + int(x) + tw // 2, origin[1] + int(y) + th // 2, tw, th,
-                                 round(float(res[y, x]), 3), coin))
+            if (off := float(np.abs(seen - own).mean())) <= PIXEL_SLACK:
+                hits.append((Item(kind, origin[0] + int(x) + tw // 2, origin[1] + int(y) + th // 2, tw, th,
+                                  round(float(res[y, x]), 3), coin), off))
         return hits
 
+
+def _recoloured(hits: list[tuple[Item, float]]) -> list[Item]:
+    """The drops found (each with how far its colours are from its template's), but where two kinds' pictures of one
+    size are found at one place with shape scores within SAME_SHAPE: only the one whose colours are nearer."""
+    return [item for item, off in hits
+            if not any(other.kind != item.kind and (other.w, other.h) == (item.w, item.h)
+                       and abs(other.x - item.x) <= 1 and abs(other.y - item.y) <= 1
+                       and abs(other.score - item.score) <= SAME_SHAPE and other_off < off
+                       for other, other_off in hits)]
