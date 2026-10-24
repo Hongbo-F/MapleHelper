@@ -1,5 +1,6 @@
 """Colour gates learned for the monster kinds without a hand-made one (perception.gates; mobs.MobDetector's
-`background`). Made-up kinds are drawn onto tests/fixtures/native (West Rocky Mountain II at 1366x768)."""
+`background`), and kinds that share a body searched as one and told apart by their pictures (mobs._pick_kind). Made-up
+kinds are drawn onto tests/fixtures/native (West Rocky Mountain II at 1366x768)."""
 
 import json
 from pathlib import Path
@@ -107,7 +108,7 @@ def test_a_backgrounds_counts_leave_out_the_boxes_cut_and_are_kept_by_map(tmp_pa
 
 def test_a_kind_without_a_hand_made_test_is_looked_for_with_its_learned_gate(tmp_path):
     det = detector(tmp_path, {"blob_move0": body()})
-    assert det.learned == {"blob"}
+    assert det.learned == {"blob"} and det.units == [(("blob",), det.units[0][1], [[0], [1]])]
     for left, top, flip in ((300, 250, False), (900, 120, True)):
         found = det.detect_wide(drawn(body(), left, top, flip), (0, 700))
         assert [(m.kind, m.foot_x, m.feet_y, m.facing, m.score) for m in found] == [
@@ -119,7 +120,8 @@ def test_a_kind_without_a_hand_made_test_is_looked_for_with_its_learned_gate(tmp
 
 def test_the_first_maps_kinds_are_looked_for_as_they_were_whatever_background():
     det = MobDetector(threads=1, background=np.ones(1 << (3 * gates.BITS), np.int64))  # (no kind to learn)
-    assert det.learned == frozenset() and det.gates is None and det.overlap == 0
+    assert det.learned == frozenset() and det.gates is None and det.overlap == 0 and det.twins == {}
+    assert all(len(kinds) == 1 and shapes == [[i] for i in range(len(members))] for kinds, members, shapes in det.units)
 
 
 def test_whole_screen_bands_overlap_by_the_tallest_learned_picture(tmp_path):
@@ -131,3 +133,36 @@ def test_whole_screen_bands_overlap_by_the_tallest_learned_picture(tmp_path):
     assert [(m.kind, m.feet_y) for m in found] == [("pole", 188 + 120)]
     det.overlap = 0
     assert det.detect_wide(drawn(tall, 600, 188), (0, 700)) == []
+
+
+# --- kinds that share a body ---------------------------------------------------------------------------------------
+
+def test_kinds_of_one_shape_are_searched_as_one_and_told_apart_by_their_colours(tmp_path):
+    # (caps about as far apart as a Horny Mushroom's and a Green's, to the masked match: a place is gated with the
+    # first kind's picture)
+    pictures = {"violet-cap_move0": body(cap=(170, 60, 190)), "pink-cap_move0": body(cap=(200, 60, 150))}
+    det = detector(tmp_path, pictures)
+    assert det.twins == {"pink-cap": ("violet-cap",), "violet-cap": ("pink-cap",)}
+    (kinds, members, shapes), = det.units
+    assert kinds == ("pink-cap", "violet-cap") and len(members) == 4 and len(shapes) == 2  # one silhouette a frame
+    for kind, cap in (("violet-cap", (170, 60, 190)), ("pink-cap", (200, 60, 150))):
+        for flip in (False, True):
+            found = det.detect_wide(drawn(body(cap=cap), 640, 300, flip), (0, 700))
+            assert [(m.kind, m.foot_x, m.feet_y) for m in found] == [(kind, 662, 340)], (kind, flip)
+            band = det.detect(drawn(body(cap=cap), 640, 300, flip), (200, 420))
+            assert [m.kind for m in band] == [kind]
+
+
+def test_a_kind_with_parts_of_its_own_is_the_monsters_only_where_they_show(tmp_path):
+    pictures = {"stub_move0": body(cap=(120, 80, 40)), "stub-axe_move0": body(cap=(120, 80, 40), axe=True)}
+    det = detector(tmp_path, pictures)
+    assert det.twins == {"stub": ("stub-axe",), "stub-axe": ("stub",)}
+    assert sorted(kinds for kinds, _, _ in det.units) == [("stub",), ("stub-axe",)]  # not the same shape: apart
+    found = det.detect_wide(drawn(body(cap=(120, 80, 40), axe=True), 400, 200), (0, 700))
+    assert [(m.kind, m.feet_y) for m in found] == [("stub-axe", 256)]
+    found = det.detect_wide(drawn(body(cap=(120, 80, 40)), 400, 216), (0, 700))
+    assert [(m.kind, m.feet_y) for m in found] == [("stub", 256)]  # the stub matches the axe's own picture well too
+    plain = mobs.Mob("stub-axe", 422, 228, 44, 56, 0.9, 422.0, 256.0, -1, "move", "move/0", "stub-axe_move0")
+    picked = mobs._pick_kind(drawn(body(cap=(120, 80, 40)), 400, 216)[:700], plain, det.twins["stub-axe"],
+                             det.templates, mobs.FINE_SLACK)
+    assert picked.kind == "stub"

@@ -27,8 +27,11 @@ template faces right), and its frame and pose.
 The first map's four kinds have colour tests written by hand (PALETTES). Any other kind is looked for with a gate
 learned from the map's background colours (perception.gates, `background`), and a few things go otherwise for those
 kinds only, so the first map's searches are as they were: whole-screen bands overlap by the tallest such picture; a
-place's gate tries its first GATE_TRIES templates, not only its first; and at 1920x1080 half size step 2 checks up to
-PER_PLACE of a place's templates, as at the game's own size.
+place's gate tries its first GATE_TRIES templates, not only its first; at 1920x1080 half size step 2 checks up to
+PER_PLACE of a place's templates, as at the game's own size; kinds whose pictures are the same shape (Horny and Green
+Mushroom, Stump and Dark Stump) are searched as one (`units`), each kind's picture checked side by side at a place; and
+a monster found as a kind that shares its body with one searched apart (`twins`: a Stump, a Dark Stump and an Axe
+Stump) is given the kind whose picture it is (`_pick_kind`).
 """
 
 import json
@@ -77,9 +80,9 @@ FINE_SLACK = 4
 # turn, until one scores FINE_GATE. A stump's frames' silhouettes match a blob of its colour about alike, its flinch
 # frame's (the largest) most often best: on West Rocky Mountain II's 31 labelled frames at 1366x768 (2026-10-24) the
 # places of Stumps and Axe Stumps in plain view were gated with it at 0.29-0.46, where their own frame, the place's
-# second or third, scored 0.67-0.77 and then 0.94-1.00 at full size. Gated with the first alone 54 of the 58 in plain
-# view were found (on its 42 labelled 1920x1080 frames shrunk to 1366x768, 156 of 203); with the first 2, 57 (170), a
-# whole screen taking 110 ms against 98; with all 6, 57, in 143.
+# second or third, scored 0.67-0.77 and then 0.94-1.00 at full size. Gated with the first alone 53 of the 58 in plain
+# view were found (on its 42 labelled 1920x1080 frames shrunk to 1366x768, 143 of 203), a whole screen taking 91 ms;
+# with the first 2, 56 (167), in 106.
 GATE_TRIES = 2
 OPAQUE = 128                 # a game picture's pixel is drawn from this alpha up (sprites.build's threshold)
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
@@ -118,6 +121,25 @@ SCALE_FILE = "scale.json"
 # matched about alike where the gate takes only its shell, and the one checked was often the wrong frame (a stand frame
 # at 0.92, its flinch checked at 0.55): checking the best 3 found 171 of 203 monsters in plain view instead of 152.
 PER_PLACE = 3
+# Two learned kinds share a body where their pictures of a frame (same name, same facing, set on their feet) have this
+# share at least of the larger's pixels (step 2's) in common, on the frames they both have (median): Horny and Green
+# Mushroom are one sprite with two caps (0.95 at either size), Stump and Dark Stump one in two colours (1.00), an Axe
+# Stump a Stump with an axe (0.85; 0.81 at the least); a Red Snail fits inside a Stump (0.32-0.38). A monster found as
+# one is checked as those searched apart from it (`units`), at its feet (`_pick_kind`).
+TWIN_COVER = 0.8
+# Of two such pictures, one has parts of its own where this share of its pixels lies outside the other's (by a px): an
+# Axe Stump's axe, 15% of its picture (a Horny or Green Mushroom's own edge pixels are 5%). Then it's the monster's
+# only where those parts alone match this well (masked, normalised). On the 42 labelled 1920x1080 frames of West Rocky
+# Mountain II (shrunk to 1366x768, and at 1920x1080 half size) an Axe Stump's axe matched 0.83-0.97 on 39 of the 40 in
+# plain view (one at 0.25), where on a Stump or Dark Stump the axe's place scored -0.6 to 0.70 (one at 0.70, the next
+# 0.52); by the score alone, 10 of the 40 Axe Stumps were taken for Stumps (the Stump's picture matches the stump that
+# is all of it but the axe as well).
+OWN_PARTS = 0.1
+OWN_MATCH = 0.6
+# Pictures of a frame (same name, facing and size) of two such kinds are the same shape where they have this share of
+# the larger's pixels in common: Horny and Green Mushroom (0.95), Stump and Dark Stump (1.00); not a Stump and an Axe
+# Stump (0.85). Step 1 matches one silhouette for them (`_shapes`).
+SAME_SHAPE = 0.9
 
 
 def picture_scale(folder: Path) -> float:
@@ -343,13 +365,34 @@ class MobDetector:
         # own size); without learned kinds, as they were.
         tallest = max((t.rgb.shape[0] for k in self.learned for t in self.templates.get(k, ())), default=0)
         self.overlap = tallest + round(CHECK_SLACK * self.px) if tallest else 0
+        self.twins = _twins({k: self.templates[k] for k in self.learned if k in self.templates})
+        same = _twins({k: self.templates[k] for k in self.learned if k in self.templates}, SAME_SHAPE)
+        # What step 1 searches as one (`units`): each kind alone, as always, but learned kinds whose pictures are the
+        # same shape (Horny and Green Mushroom, Stump and Dark Stump: SAME_SHAPE), searched together: by their gates
+        # together (their silhouettes made by them too), one silhouette a frame for them (`_shapes`), one set of
+        # places, and at each place step 2 checks each kind's picture, side by side, the better kept. Apart, each made
+        # a place at the same monster, gated and checked there. Kinds that share a body with kinds searched apart
+        # (`apart`: an Axe Stump with a Stump and a Dark Stump) are told apart where they're found (`_picked`).
+        self.units: list[tuple[tuple[str, ...], list[tuple[str, MobTemplate]], list[list[int]]]] = []
+        for kind in self.templates:
+            if any(kind in kinds for kinds, _, _ in self.units):
+                continue
+            kinds = (kind,) if kind not in same else tuple(sorted(_together(kind, same)))
+            if len(kinds) > 1:
+                for k in kinds:
+                    self.templates[k] = [t._replace(silhouette=self._silhouette(kinds, *t.step1) if t.step1 else
+                                                    self._silhouette(kinds, t.rgb, t.mask3)) for t in self.templates[k]]
+            members = [(k, t) for k in kinds for t in self.templates[k]]
+            self.units.append((kinds, members, _shapes(members)))
+        unit = {k: kinds for kinds, _, _ in self.units for k in kinds}
+        self.apart = {k: others for k, v in self.twins.items() if (others := tuple(t for t in v if t not in unit[k]))}
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         """Monsters in `frame` (RGB, a look frame at `frame_scale`). `rows` limits the search to a band."""
-        return self._detect(frame, rows, self._map)
+        return self._picked(frame, rows, self._detect(frame, rows, self._map))
 
     def detect_wide(self, frame: np.ndarray, rows: tuple[int, int]) -> list[Mob]:
         """Monsters over a tall stretch of the frame, band by band. Over the whole screen, green
@@ -360,7 +403,7 @@ class MobDetector:
         band = step + max(band - step, self.overlap)
         starts = range(rows[0], max(rows[0] + 1, rows[1] - band + step), step)
         bands = self._map(lambda y0: self._detect(frame, (y0, min(rows[1], y0 + band)), _serial), starts)
-        return suppress_overlaps([hit for band in bands for hit in band])
+        return self._picked(frame, rows, suppress_overlaps([hit for band in bands for hit in band]))
 
     def refind(self, frame: np.ndarray, box: tuple[int, int, int, int], kind: str, template: str = "",
                facing: int = 0, bounds: tuple[int, int, int, int] | None = None, fallback: bool = True) -> Mob | None:
@@ -408,6 +451,26 @@ class MobDetector:
         found = [_moved(m, x0, y0) for m in self._detect(window, None, _serial, (kind,))]
         return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
 
+    def _silhouette(self, kinds: tuple[str, ...], picture: np.ndarray, mask3: np.ndarray) -> np.ndarray:
+        """A learned kind's template's silhouette at 1/COARSE of step 1's scale (MobTemplate.silhouette), by the gates
+        of `kinds` together, from its picture at step 1's scale and where it's drawn there (`mask3`)."""
+        silhouette = (self.gates.test(kinds, *split_channels(picture)) & (mask3[..., 0] > 0)).astype(np.float32)
+        return cv2.resize(silhouette, (max(1, picture.shape[1] // COARSE), max(1, picture.shape[0] // COARSE)),
+                          interpolation=cv2.INTER_AREA)
+
+    def _picked(self, frame: np.ndarray, rows: tuple[int, int] | None, hits: list[Mob]) -> list[Mob]:
+        """`hits`, each of a learned kind that shares its body with kinds searched apart from it (`twins` outside its
+        unit: an Axe Stump's with a Stump's) given the kind whose picture it is (`_pick_kind`, searched step 2's slack
+        around), within the rows searched. Those searched with it were checked at its place already, side by side."""
+        if not self.apart or not any(m.kind in self.apart for m in hits):
+            return hits
+        if rows:
+            frame = frame[:max(0, rows[1])]
+        slack = FINE_SLACK if self.search != 1 else round(CHECK_SLACK * self.spx)
+        out = [_pick_kind(frame, m, self.apart[m.kind], self.templates, slack) if m.kind in self.apart else m
+               for m in hits]
+        return suppress_overlaps(out) if any(a is not b for a, b in zip(out, hits)) else out
+
     def _map(self, fn, items) -> list:
         """fn of each item, in order: on the pool, or here with one thread."""
         return list(self._pool.map(fn, items)) if self._pool else [fn(item) for item in items]
@@ -432,38 +495,46 @@ class MobDetector:
         channels = split_channels(small)
         coarse_size = (small.shape[1] // COARSE, small.shape[0] // COARSE)
         looked = None  # every pixel's learned kinds (gates.Gates.lookup), worked out once for them all
-        kinds = []  # (kind, its templates, its body colour at 1/COARSE size, that colour's cover)
-        for kind, templates in self.templates.items():
-            if only is not None and kind not in only:
-                continue
-            if kind in self.learned:
+        units = []  # (its kinds, their templates as (kind, template), shapes, their colour at 1/COARSE size, its cover)
+        for kinds, members, shapes in self.units:
+            if only is not None and any(k not in only for k in kinds):
+                members = [(k, t) for k, t in members if k in only]
+                shapes = [[i] for i in range(len(members))]
+                if not members:
+                    continue
+            if kinds[0] in self.learned:
                 looked = self.gates.lookup(*channels) if looked is None else looked
-                colour = self.gates.of(kind, looked)
+                colour = self.gates.of(kinds, looked)
             else:
-                colour = palette(kind, small, channels)
+                colour = palette(kinds[0], small, channels)
             if colour.sum() < MIN_BODY_PIXELS * self.spx * self.spx:
                 continue
             coarse = cv2.resize(colour.astype(np.float32), coarse_size, interpolation=cv2.INTER_AREA)
-            kinds.append((kind, templates, coarse, Cover(coarse)))
-        # Step 1, every template of every kind; then the spots each kind checks; then step 2, all at once.
-        jobs = [(coarse, cover, t, i) for _, templates, coarse, cover in kinds for i, t in enumerate(templates)]
+            units.append((kinds, members, shapes, coarse, Cover(coarse)))
+        # Step 1, every template of every kind (one a shape: `units`); then the spots each kind checks (kinds that
+        # share a body, together); then step 2, all at once, every template of each shape picked.
+        jobs = [(coarse, cover, members[shape[0]][1], i) for _, members, shapes, coarse, cover in units
+                for i, shape in enumerate(shapes)]
         found = run(lambda job: _spots(*job), jobs)
         checks, places, start, slack = [], [], 0, round(CHECK_SLACK * self.spx)
-        for kind, templates, _, _ in kinds:
-            spots = sorted((s for f in found[start:start + len(templates)] for s in f), reverse=True)
-            start += len(templates)
+        for kinds, members, shapes, _, _ in units:
+            spots = sorted((s for f in found[start:start + len(shapes)] for s in f), reverse=True)
+            start += len(shapes)
+            learned = kinds[0] in self.learned
             if self.search == 1:
-                picked = (_to_check(spots, slack) if kind not in self.learned
+                picked = (_to_check(spots, slack) if not learned
                           else [spot for place in _places(spots, slack, PER_PLACE) for spot in place])
-                checks += [(kind, templates[i], cx, cy) for cx, cy, i in picked]
+                checks += [(*members[j], cx, cy) for cx, cy, i in picked for j in shapes[i]]
             else:
-                places += [(kind, [(templates[i], cx, cy) for cx, cy, i in place]) for place in _places(spots, slack)]
+                places += [(learned, [(*members[shapes[i][0]], cx, cy) for cx, cy, i in place],
+                            [(*members[j], cx, cy) for cx, cy, i in place for j in shapes[i]])
+                           for place in _places(spots, slack)]
         if self.search == 1:
             results = run(lambda c: _check(frame, c[1], c[2], c[3], slack), checks)
         else:  # the gate at step 1's scale, then each place's templates at the look frame's, around their own spots
-            gate = run(lambda p: _gate(small, p[1], slack, GATE_TRIES if p[0] in self.learned else 1), places)
-            checks = [(kind, t, *_finer(t, cx, cy, sx, sy)) for (kind, place), g in zip(places, gate)
-                      if g is not None and g[0] >= FINE_GATE for t, cx, cy in place[:FINE_TEMPLATES]]
+            gate = run(lambda p: _gate(small, p[1], slack, GATE_TRIES if p[0] else 1), places)
+            checks = [(kind, t, *_finer(t, cx, cy, sx, sy)) for (_, _, every), g in zip(places, gate)
+                      if g is not None and g[0] >= FINE_GATE for kind, t, cx, cy in every]
             results = run(lambda c: _check(frame, c[1], c[2], c[3], FINE_SLACK), checks)
         hits = []
         for (kind, template, *_), result in zip(checks, results):
@@ -488,6 +559,117 @@ def _seen(kind: str, t: MobTemplate, x: int, y: int, w: int, h: int, score: floa
     if t.origin is not None:  # the window's top-left (the centre is that plus half the size, rounded down)
         ox, feet = round(x - w // 2 + t.origin[0], 2), round(y - h // 2 + t.origin[1], 2)
     return Mob(kind, x, y, w, h, score, ox, feet, t.facing, t.pose, t.frame, t.name)
+
+
+def _twins(templates: dict[str, list[MobTemplate]], least: float = TWIN_COVER) -> dict[str, tuple[str, ...]]:
+    """The kinds each of these shares its body with (TWIN_COVER), by kind: those whose pictures of the frames both
+    have (same frame, same facing, set on their feet) have that much in common, the larger's share (median over those
+    frames)."""
+    out: dict[str, list[str]] = {}
+    kinds = sorted(templates)
+    for i, a in enumerate(kinds):
+        for b in kinds[i + 1:]:
+            covers = [_cover(ta, tb) for ta in templates[a] for tb in templates[b]
+                      if ta.frame and ta.frame == tb.frame and ta.facing == tb.facing and ta.origin and tb.origin]
+            if covers and float(np.median(covers)) >= least:
+                out.setdefault(a, []).append(b)
+                out.setdefault(b, []).append(a)
+    return {k: tuple(v) for k, v in out.items()}
+
+
+def _shapes(members: list[tuple[str, MobTemplate]]) -> list[list[int]]:
+    """Which of a unit's templates (kind, template) step 1 matches as one (indices, the first's silhouette for them
+    all): those of other kinds with the same frame, facing and size whose pictures, set on their feet, have SAME_SHAPE
+    of the larger's pixels in common; every other template alone."""
+    shapes: list[list[int]] = []
+    for i, (kind, t) in enumerate(members):
+        for shape in shapes:
+            t0 = members[shape[0]][1]
+            if (kind not in {members[j][0] for j in shape} and t.frame and t.frame == t0.frame
+                    and t.facing == t0.facing and t.rgb.shape == t0.rgb.shape
+                    and t.silhouette.shape == t0.silhouette.shape and t.origin and t0.origin
+                    and _cover(t, t0) >= SAME_SHAPE):
+                shape.append(i)
+                break
+        else:
+            shapes.append([i])
+    return shapes
+
+
+def _together(kind: str, twins: dict[str, tuple[str, ...]]) -> set[str]:
+    """`kind` and every kind it shares a body with, through others too (`twins`)."""
+    out, todo = {kind}, [kind]
+    while todo:
+        for k in twins.get(todo.pop(), ()):
+            if k not in out:
+                out.add(k)
+                todo.append(k)
+    return out
+
+
+def _cover(a: MobTemplate, b: MobTemplate) -> float:
+    """How much two pictures set on their feet have in common (step 2's masks), the larger's share."""
+    ma, mb = a.mask3[..., 0] > 0, b.mask3[..., 0] > 0
+    dx, dy = int(round(a.origin[0] - b.origin[0])), int(round(a.origin[1] - b.origin[1]))  # b's top-left in a's px
+    h, w = ma.shape
+    ys, xs = np.nonzero(mb)
+    ys, xs = ys + dy, xs + dx
+    inside = (ys >= 0) & (ys < h) & (xs >= 0) & (xs < w)
+    both = int(ma[ys[inside], xs[inside]].sum())
+    return both / max(1, int(ma.sum()), int(mb.sum()))
+
+
+def _pick_kind(frame: np.ndarray, m: Mob, twins: tuple[str, ...], templates: dict[str, list[MobTemplate]],
+               slack: int) -> Mob:
+    """Monster `m` as the kind, of its own and `twins`, whose picture of its frame (facing its way, set on its feet,
+    matched `slack` px around) it is. A picture with parts of its own (OWN_PARTS: an Axe Stump's axe) is the
+    monster's only where those parts match too (OWN_MATCH), and then it is, over the pictures it holds (a Stump's);
+    otherwise the one that scores best (Horny or Green Mushroom, Stump or Dark Stump: their colours)."""
+    if not m.frame or m.ox is None:
+        return m
+    own = next((t for t in templates.get(m.kind, ()) if t.name == m.template and t.facing == m.facing), None)
+    if own is None:
+        return m
+    th, tw = own.rgb.shape[:2]
+    cands = [(m, own, int(m.x) - tw // 2, int(m.y) - th // 2)]  # (as that kind, its picture, its top-left)
+    for kind in twins:
+        for t in templates.get(kind, ()):
+            if t.frame != m.frame or t.facing != m.facing or t.origin is None:
+                continue
+            th, tw = t.rgb.shape[:2]
+            found = _match_at(frame, t.rgb, t.mask3, int(round(m.ox - t.origin[0])) + tw // 2,
+                              int(round(m.feet - t.origin[1])) + th // 2, slack)
+            if found is not None:
+                score, x, y, w, h = found
+                cands.append((_seen(kind, t, x, y, w, h, round(score, 3)), t, x - w // 2, y - h // 2))
+    if len(cands) == 1:
+        return m
+    kept, bigger = [], []
+    for i, (seen, t, x0, y0) in enumerate(cands):
+        mask = t.mask3[..., 0] > 0
+        others = np.zeros(mask.shape, np.uint8)
+        for j, (_, o, ox0, oy0) in enumerate(cands):
+            if j != i:
+                _stamp(others, o.mask3[..., 0] > 0, ox0 - x0, oy0 - y0)
+        parts = mask & (cv2.dilate(others, np.ones((3, 3), np.uint8)) == 0)
+        if parts.sum() < OWN_PARTS * mask.sum():
+            kept.append(seen)
+            continue
+        patch = frame[y0:y0 + mask.shape[0], x0:x0 + mask.shape[1]]
+        if patch.shape[:2] == mask.shape and float(np.nan_to_num(cv2.matchTemplate(
+                patch, t.rgb, cv2.TM_CCOEFF_NORMED, mask=np.dstack([parts.astype(np.uint8)] * 3))[0, 0],
+                nan=-1.0)) >= OWN_MATCH:
+            bigger.append(seen)
+    return max(bigger or kept or [m], key=lambda c: c.score)
+
+
+def _stamp(canvas: np.ndarray, mask: np.ndarray, dx: int, dy: int) -> None:
+    """Set `canvas` (uint8) to 1 where `mask` is, its top-left at (dx, dy) of the canvas."""
+    h, w = canvas.shape
+    mh, mw = mask.shape
+    y0, x0, y1, x1 = max(0, dy), max(0, dx), min(h, dy + mh), min(w, dx + mw)
+    if y1 > y0 and x1 > x0:
+        canvas[y0:y1, x0:x1] |= mask[y0 - dy:y1 - dy, x0 - dx:x1 - dx]
 
 
 def _moved(m: Mob, dx: int, dy: int) -> Mob:
@@ -610,12 +792,12 @@ def _places(spots: list[tuple[float, int, int, int]], slack: int,
     return places
 
 
-def _gate(small: np.ndarray, place: list[tuple[MobTemplate, int, int]], slack: int, tries: int = 1):
+def _gate(small: np.ndarray, place: list[tuple[str, MobTemplate, int, int]], slack: int, tries: int = 1):
     """The fine gate's match at a place (`_match_at` at step 1's scale, `slack` around): its first template's; with
     `tries` (a learned kind's GATE_TRIES), the first of its first `tries` templates that scores FINE_GATE, else the
     last one's."""
     found = None
-    for t, cx, cy in place[:tries]:
+    for _, t, cx, cy in place[:tries]:
         found = _match_at(small, *t.step1, cx, cy, slack)
         if found is not None and found[0] >= FINE_GATE:
             break
