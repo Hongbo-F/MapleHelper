@@ -307,8 +307,10 @@ PORTAL_REACH = (25.0, 40.0)
 #   floor's; its floating platforms are other groups, with no walls). By the client's movement as reconstructed
 #   (body.OWN_GROUP_WALLS), only her own group's walls stop her; RustMS's port has group 0's stop every group's stars
 #   (README, Attack). Whether they stop her body is unknown: walked or knocked off the outer end of a floating platform
-#   there (11's left end, 13 from the tower's wall, 23's 23, 25's right end 34), she falls past the wall and out of the
-#   map, or slides down it onto the shelf below.
+#   there (11's left end, 13 from the tower's wall, 23's 23, 25's right end 34), or off a rope near the wall (the one
+#   at -192, 28 from it: off a rope no wall stops her, body.ROPE_GROUP), she falls past the wall and out of the map, or
+#   slides down it onto the shelf below. (HeavenClient has neither: there a wall stops her if it's chained to the
+#   foothold below her, its prev or the one before, FootholdTree::get_wall, whatever its group.)
 # - How far above her feet a rope's bottom can be for a jump to grab it: physics.ROPE_REACH, 95 (her jump's 77 and
 #   18 of arms: a guess from the start, never measured; the highest grab tried in game was a rope 69 up, on the first
 #   map); HeavenClient grabs a rope when a point 5 above her feet is on it (Gameplay/MapleMap/MapInfo.cpp,
@@ -1828,10 +1830,10 @@ def _sides(model: MapModel, how: str = "platforms") -> tuple[float, float]:
 
 def _walls_for(model: MapModel, group, zero: bool = False) -> list:
     """The walls that stop her with foothold group `group` (body.walls_for), and with `zero` (Realism.zero_walls) those
-    of group 0 of her group's layer too."""
+    of every layer's group 0 too, whatever her group: off a rope too (body.ROPE_GROUP, where none stops her)."""
     walls = body.walls_for(model, group)
-    if zero and isinstance(group, tuple) and group[1] != 0 and body.OWN_GROUP_WALLS:
-        walls = walls + model.walls_of((group[0], 0))
+    if zero and group != body.EVERY_WALL and body.OWN_GROUP_WALLS:
+        walls = walls + [w for w in model.walls if w.group is not None and w.group[1] == 0 and w.group != group]
     return walls
 
 

@@ -41,7 +41,7 @@ from ..behavior.tour import Tour
 from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
                     Trace, detector_kinds, patched)
 from . import harness
-from .world import LEVEL_19, LEVEL_23, LEVEL_24, Her, Noise, Realism, SimDied, World
+from .world import LEVEL_19, LEVEL_23, LEVEL_24, ROPE_REACH_CLIENT, Her, Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -1924,4 +1924,145 @@ def tour_rocky_rest(sim):
     """Low on HP on the bridge (25%, under the tour's 30%): down to a floating step under it to rest (every safe
     platform 120 wide is under the bridge: the steps 23-25 and the pit's stairs, whose way out is 27 onto 25 at
     0.90), and on the chair until HP is back."""
+    return _rest(sim)
+
+
+# Tree Dungeon, Forest Up North II (TREE: map 10002073, from 2026-10-24), with her at level 24 (HP 752, the keys and pet
+# of West Rocky Mountain II): a tower 530 wide between walls of foothold group 0, the camera fixed across, its minimap
+# window scrolling; trips up and down it and its ropes, the top cluster (6-10), and the hunt loop and the tour, with the
+# other players camping as the crowding study saw them (harness.TREE_CAMPS) and with group 0's walls stopping her
+# (world.Realism.zero_walls) (README: Tree Dungeon, Forest Up North II).
+
+def tree(start: tuple[int, float], **kw):
+    """A scenario on Tree Dungeon, Forest Up North II."""
+    return scenario(start, map_id=TREE, **kw)
+
+
+def _kinds_of(tr: dict) -> list[str]:
+    """The trip's moves as kind and platforms (`jump 30->29`), however each ended."""
+    return [" ".join(m.split(":")[0].split()[:2]) for m in _result(tr, "moves")]
+
+
+@tree((33, 100.0), limit=200,
+      expects=(ends("arrived"), check("up by 29, not the grab from 30", lambda tr: "jump 30->29" in _kinds_of(tr)
+                                      and "climb 30->27" not in _kinds_of(tr)),
+               check("the tower's four choke ropes", lambda tr: {"climb 32->30", "climb 29->27", "climb 19->18",
+                                                                 "climb 11->10"} <= set(_kinds_of(tr)))))
+def nav_tree_bottom_to_top(sim):
+    """From the floor (33) to the top (6), the whole tower: 22 moves, up the ropes at 146 (32 to 30), -8 from 29 (not
+    from 30: 94.3 up, beyond a sure grab, route.GRAB_CHANCE), 111 (19 to 18) and -80 (11 to 10), the floating
+    platforms' jumps between, 9 onto 8 and up onto 6."""
+    return _nav(6)(sim)
+
+
+@tree((30, 60.0), expects=(ends("arrived"), check("30 onto 29, then up the rope from 29",
+                                                  lambda tr: _kinds_of(tr) == ["jump 30->29", "climb 29->27"])))
+def nav_tree_up_by_29(sim):
+    """From 30 up to 27: the rope at -8 hangs 94.3 above 30, 0.7 inside physics.ROPE_REACH and 12.3 beyond HeavenClient's
+    grab (physics.GRAB_SURE): the planner takes the jump onto 29 and the same rope from there (36.8 up)."""
+    return _nav(27)(sim)
+
+
+@tree((30, -8.0), realism=Realism(rope_reach=ROPE_REACH_CLIENT),
+      expects=(ends("arrived"), check("the grab from 30 missed, landing on 29",
+                                      lambda tr: _result(tr, "moves")[0] == "climb 30->27: landed on 29"),
+               check("then up the rope from 29", lambda tr: _kinds_of(tr)[-1] == "climb 29->27"),
+               happens("grabs the rope at x -8")))
+def nav_tree_rope_miss(sim):
+    """The grab from 30 (94.3 up) in a world where she grabs a rope as HeavenClient does (a point 5 above her feet on
+    it: 82 up at the top of her jump; world.Realism.rope_reach), jumps made 20 times dearer (`nav 27 --avoid jump`) so
+    the trip takes it: she misses, passes up through 29 and lands on it, and the trip goes on up the rope from there."""
+    h = sim.hunter()
+    nav = sim.navigator(h)
+    weight = nav.weight
+    nav.weight = lambda m: weight(m) * (20.0 if m.kind == "jump" else 1.0)
+    return nav.go(27, seconds=60)
+
+
+@tree((10, -100.0), expects=(ends("arrived"), check("8 onto 7", lambda tr: _made(tr, "jump 8->7"))))
+def nav_tree_top_cluster(sim):
+    """In the top cluster (6-10: 7 Horny Mushrooms and a Green), from 10 to 7: onto 9, 8, and the running jump off 8's
+    left end onto 7 (route.END_LOOK: taking off 37 in from the end), which the planner didn't have."""
+    return _nav(7)(sim)
+
+
+@tree((12, 160.0), expects=(ends("arrived"), moves("walk_off", "jump", "climb")))
+def nav_tree_mid_portal_to_top(sim):
+    """From the mid portal's shelf (12, 121 left of its exit at 281) to the top stand on 8 (x 137): off 12 onto 14,
+    13, up onto 11, the rope at -80 to 10, then 9 and 8."""
+    return _nav(8, x=137.0)(sim)
+
+
+@tree((31, -150.0), expects=(ends("arrived"), check("up the two ropes on the left",
+                                                    lambda tr: _kinds_of(tr) == ["climb 31->29", "climb 29->27"])))
+def nav_tree_left_ropes(sim):
+    """From 31 up to 27 by the ropes on the tower's left: -192 (28 from the wall) to 29, then -8 to 27."""
+    return _nav(27)(sim)
+
+
+@tree((6, 250.0), expects=(ends("arrived"), moves("walk_off", "drop")))
+def nav_tree_down(sim):
+    """From the top (6) down to the floor: walk-offs and drops (16 onto 20 at full speed, the study's item 4: at 0.75
+    of it she'd land on 18)."""
+    return _nav(33)(sim)
+
+
+@tree((28, 247.0), monsters="all", seed=4, limit=600,
+      expects=(_rule("close quarters"), _rule("in passing"),
+               check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
+               check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
+               ends("standing by on a safe platform", key="stop"),
+               check("up the tower: a ground of the top cluster", lambda tr: bool({7, 10} & set(tr["result"]["grounds"])))))
+def loop_tree_run(sim):
+    """`python -m gamelab tour --loop --minutes 5 --map 10002073` from her spot by the portal on 28, with every spawn
+    filled and nobody else: up the tower to 23, 19, 7 and 15, then standing by on a safe platform (25-27). Every ground
+    is hunted standing on it, among its monsters (the rules 'close quarters' and 'in passing'; 'shoot' on 2 of seeds
+    1-10: no platform the spot picker counts as safe reaches a ground here; the study's per-x safety would). (Seed 4:
+    in this world her own group's walls alone stop her, and of seeds 1-10, 4 were knocked out past the tower's walls
+    within 5 minutes, off 25's right end or the rope at -192; with group 0's walls stopping her none:
+    loop_tree_walls.)"""
+    return _loop(5)(sim)
+
+
+@tree((28, 247.0), monsters="all", seed=10, limit=600, realism=Realism(zero_walls=True),
+      expects=(check("thirty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 30),
+               ends("time up", key="hunt_stop"), check("still in the tower", lambda tr: tr["world"].get("fell_out_at")
+                                                       is None)))
+def loop_tree_walls(sim):
+    """loop_tree_run's twin in a world where the walls of foothold group 0 (the tower's) stop her whatever her group,
+    off a rope too (world.Realism.zero_walls). Seed 10: with her own group's walls alone she was knocked off the rope
+    at -192 (28 from the wall) and out of the map at 328 s; here she stays in the tower all 5 minutes."""
+    return _loop(5)(sim)
+
+
+@tree((28, 247.0), monsters="all", seed=3, limit=400, may_die=True,
+      realism=Realism(camps=harness.TREE_CAMPS, respawn=8.8, zero_walls=True),
+      expects=(happens("another player kills green-mushroom"), check("only her kills in the ledger", _every_kill),
+               check("nobody else kills a Horny Mushroom", lambda tr: not any(
+                   "another player kills horny-mushroom" in line for line in tr["world_log"]))))
+def loop_tree_crowd(sim):
+    """The hunt loop for 3 minutes among the other players the crowding study saw (harness.TREE_CAMPS: five camping by
+    28, 21, 23, 19 and 33, each killing the Greens it hunts 2-6 s after they show, leaving the Horny Mushrooms),
+    respawns at 8.8 s (MeowDB's mean), group 0's walls stopping her."""
+    return _loop(3)(sim)
+
+
+@tree((28, 247.0), monsters="all", seed=2, limit=1200,
+      expects=(logs("tour: sweep"), check("two stops hunted or more", lambda tr: len(tr["result"]["visited"]) >= 2),
+               check("she fed her pet", _fed_her_pet)))
+def tour_tree_run(sim):
+    """`python -m gamelab tour --stops 3 --map 10002073` from 28: the sweep's three nearest grounds from the bottom,
+    the escort's fights on the way. The floor's and 32's respawns keep her fighting on the way: each stop takes
+    minutes, and the third is often not reached in its time (README: Tree Dungeon, Forest Up North II)."""
+    return sim.tour_stack().run(stops=3)
+
+
+@tree((23, 0.0), monsters="all", hp=0.25, limit=400,
+      expects=(logs("resting on platform"), no_log("couldn't reach a safe platform"),
+               check("rests on a floating platform below", lambda tr: tr["world"]["platform"] in (25, 26, 27)),
+               check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
+def tour_tree_rest(sim):
+    """Low on HP among the Horny Mushrooms on 23 (25%, under the tour's 30%): down to the nearest safe platform (25,
+    26 and 27, the only ones with no monster in reach; the caps 0-5 above the VR are safe too, but narrower than a
+    rest wants, tour.MIN_REST_WIDTH) and on the chair until HP is back."""
     return _rest(sim)

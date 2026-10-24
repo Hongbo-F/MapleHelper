@@ -50,7 +50,7 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth
 from ..paths import LAB, REPO
-from .world import DROP_LIFE, GAME_DROPS, Noise, Realism
+from .world import DROP_LIFE, GAME_DROPS, Camp, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -85,6 +85,14 @@ PRESETS = {
     # (tests/test_coverage.py: every platform monsters spawn on reached).
     "game-sparse": (_GAME_NOISE, Realism(spawn_share=0.15, rival_every=25.0, potions=60, lock_arrows=True)),
 }
+# The other players on Tree Dungeon, Forest Up North II as the crowding study saw them from 28 (world.Camp; D:/
+# MapleHelper-scratch/map3/study/crowding.md, 2026-10-24): Fuiyoohhhh by the portal on 28 killing 29's and 30's Greens
+# (one every 7.1 s), BaileyBlake on 21 and siwooda by 22 killing 21's and 22's, TopAce on 23 (whose Hornies lived on), a
+# player on 19 and Grasje on 32/33 (Greens and, unseen, Slimes). Five at once (3-6 were in view, mean 3.9); the upper
+# tower (6-15), out of the minimap's view from 28, has nobody: unknown.
+GREEN, SLIME = "green-mushroom", "slime"
+TREE_CAMPS = (Camp(28, 250.0, (29, 30), (GREEN,)), Camp(21, 90.0, (21, 22), (GREEN,)), Camp(23, 0.0, (22,), (GREEN,)),
+              Camp(19, 200.0, (19,), (GREEN,)), Camp(33, 120.0, (32, 33), (GREEN, SLIME)))
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture

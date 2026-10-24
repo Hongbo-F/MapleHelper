@@ -310,3 +310,23 @@ def test_knocked_right_off_30_she_lands_on_tree_dungeons_floor_not_through_it():
     w._launch(180.0, -220.0, w.ms)
     w.advance(2.0)
     assert w.plat is floor and w.fell_out_at is None and 250 < w.x < 300
+
+
+def test_knocked_off_the_rope_by_the_towers_left_wall_she_falls_out_unless_group_0s_walls_stop_her():
+    # The rope at -192 (29 down to 31) hangs 28 from the tower's wall at -220. Off a rope no wall stops her (body.
+    # ROPE_GROUP): knocked left off it she went out of the tower (loop_tree_run's seed 10, 328 s); with group 0's walls
+    # stopping her (Realism.zero_walls) she comes down by the wall onto 31.
+    m = tree_map()
+    for realism, out in ((None, True), (Realism(zero_walls=True), False)):
+        w = world(m, 31, -192.0, hanging=0.0, realism=realism)
+        assert w.mode == "rope" and w.group is None
+        w._leave_rope()
+        w.knocked = True
+        w._launch(-180.0, -220.0, w.ms)
+        try:
+            w.advance(4.0)
+        except SimFellOut:
+            pass
+        assert (w.fell_out_at is not None) == out
+        if not out:
+            assert w.plat is m.platform(31) and w.x == pytest.approx(-220, abs=1)
