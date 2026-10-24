@@ -13,7 +13,7 @@ from gamelab.behavior.hunter import Hunter
 from gamelab.control.timeline import SIM_KEYS, SIM_KEYS_PET
 from gamelab.localization import mapdata
 from gamelab.perception import exp_number
-from gamelab.sim import fakes, golden, scenarios
+from gamelab.sim import fakes, golden, harness, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.world import LEVEL_19, LEVEL_23, Her, MobInfo, Realism, World
 from maplehelper.keys import parse as K
@@ -217,3 +217,39 @@ def test_in_the_simulator_her_pet_care_reads_the_worlds_pet_and_feeds_it_once_at
     assert [p[1] for p in trace["plans"]] == ["pet_food"]  # no click, no Esc: the panel read off the world
     assert any("pet: fullness 60, fed 1 -> 90" in line for line in trace["log"])
     assert trace["world_log"] and "feeds her pet" in trace["world_log"][0]
+
+
+# --- the harness on either map ------------------------------------------------------------------------------------
+
+def _run(k: int, exp: float, **kw) -> dict:
+    return dict(seed=k, exp_per_min=exp, drops_share=0.5, hp_lost=0.5, died_at=None, fell_out_at=None, **kw)
+
+
+def test_the_harness_runs_on_either_map_and_compares_runs_of_one_map_only():
+    sc = harness.scenario("loop", 3, map_id=ROCKY)
+    assert (sc.map_id, sc.start, sc.name) == (ROCKY, harness.ROCKY_START_AT[3], "loop:game:3:10004021")
+    first = harness.scenario("loop", 3)
+    assert (first.map_id, first.start, first.name) == (scenarios.MAP_ID, harness.START_AT[3], "loop:game:3")
+    assert harness.STARTS == {scenarios.MAP_ID: harness.START_AT, ROCKY: harness.ROCKY_START_AT}
+    base, better = [_run(k, 50.0) for k in range(1, 11)], [_run(k, 60.0) for k in range(1, 11)]
+    assert harness.compare(base, better)[0]  # runs saved before the map was kept are the first map's
+    there = [dict(r, map=ROCKY) for r in better]
+    ok, lines = harness.compare(base, there)
+    assert not ok and lines[0] == "the runs are on different maps ([10000012] and [10004021])"
+    assert not harness.compare_rest(base, there)[0]
+    assert harness.compare([dict(r, map=ROCKY) for r in base], there)[0]
+
+
+def test_a_short_harness_run_on_west_rocky_mountain_ii():
+    rocky()
+    out = harness.run_one("loop", 1, "game", minutes=0.5, map_id=ROCKY)
+    assert out["map"] == ROCKY and "SimTimeout" in out["result"] and out["coverage"]["platforms"]
+    assert harness.run_one("loop", 1, "game", minutes=0.5)["map"] == scenarios.MAP_ID
+
+
+def test_the_coverage_report_asks_the_first_maps_questions_on_the_first_map_only():
+    from gamelab.analysis import coverage
+    graph = coverage.graph_for(rocky())
+    lines = coverage.report(graph, [("none", coverage.merge([], graph))])
+    assert not any(line.startswith("== Platform") or line.startswith("== 23 -> 17") for line in lines)
+    assert coverage.FOCUS == {scenarios.MAP_ID: (12,)}

@@ -1292,6 +1292,9 @@ def cmd_coverage(args) -> int:
         except FileNotFoundError:
             print(f"{name}: no such saved run in {harness.FOLDER}: left out")
             continue
+        if (other := {r.get("map", harness.FIRST_MAP) for r in runs} - {args.map}):
+            print(f"{name}: its runs are on map {', '.join(map(str, sorted(other)))}, not {args.map}: left out")
+            continue
         tallies = [r["coverage"] for r in runs if "coverage" in r]
         if not tallies:
             print(f"{name}: its runs keep no coverage (saved before the harness kept it): left out")

@@ -1,13 +1,15 @@
 """Results of simulated hunts, and A/B comparisons of hunting policies on the same seeds.
 
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
-                                             [--feed] [--costs coded|measured] [--ways N]
+                                             [--feed] [--costs coded|measured] [--ways N] [--map 10004021]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
     python -m gamelab.sim.harness rests [--trips 40]            trips to rest at low HP, transit vs --rest-avoid
 
-A run hunts for a fixed time (the horizon) from one of START_AT, on a world seed, with the policy's own
-random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ.
+A run hunts for a fixed time (the horizon) from one of its map's START_AT, on a world seed, with the policy's own
+random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ. On the first
+map by default; `--map 10004021` on West Rocky Mountain II, with her as she plays there (sim.scenarios.HER: level 23,
+her pet drinking her potions), saved as POLICY-PRESET-10004021; the presets are the same worlds on either map.
 What a run gave is read from the simulated world, not from the bot's own reports (those miss kills):
 
   exp_per_min      EXP she got, per minute of the horizon (a death stops the count)
@@ -52,8 +54,14 @@ from .world import DROP_LIFE, GAME_DROPS, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
+FIRST_MAP = 10000012  # (sim.scenarios.MAP_ID)
 START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12, -300.0), (21, -300.0),
             (24, 120.0), (4, 450.0), (1, 1200.0)]  # where seed k starts: START_AT[k % len]
+# ... on West Rocky Mountain II: its hunting grounds (the bridge 22, the high bridge 14, 17, 19, 10, the ledges 7, 6
+# and 9), the floating step 24 under the bridge and stair 30 in the pit.
+ROCKY_START_AT = [(22, -700.0), (14, -930.0), (17, -277.5), (19, -700.0), (10, -200.0), (7, -500.0), (30, -1009.0),
+                  (24, -946.0), (6, -300.0), (9, -800.0)]
+STARTS = {FIRST_MAP: START_AT, 10004021: ROCKY_START_AT}
 # Worlds to compare in. "plain" is the simulator's own (every spawn filled, 8 s respawns, nobody else,
 # perfect eyes). "game" adds the game's errors and a less crowded, contested map; its values are guesses
 # (nothing about respawns, other players or potions is measured), chosen to be harder than "plain"; and arrows
@@ -123,22 +131,23 @@ POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid}
 # --- one run -------------------------------------------------------------------------------------------
 
 def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-             feed: bool = False):
-    """The Scenario for one run: the policy hunting from START_AT[seed] in world `seed` until the horizon.
-    `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a little);
-    `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed)."""
+             feed: bool = False, map_id: int = FIRST_MAP):
+    """The Scenario for one run: the policy hunting on map `map_id` from its START_AT[seed] (STARTS) in world `seed`
+    until the horizon. `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a
+    little); `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed)."""
     from . import scenarios
     noise, realism = PRESETS[preset]
     fn = POLICIES[policy]
-    return scenarios.Scenario(f"{policy}:{preset}:{seed}", fn, START_AT[seed % len(START_AT)], monsters="all",
-                              seed=seed, limit=minutes * 60, noise=noise, realism=realism, may_die=True,
-                              think=think, feed=feed)
+    starts = STARTS[map_id]
+    return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else ""), fn,
+                              starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
+                              realism=realism, may_die=True, think=think, feed=feed, map_id=map_id)
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-            feed: bool = False, costs: str = "coded", ways: int | None = None) -> dict:
+            feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP) -> dict:
     """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS); `ways`:
-    the ways her trips choose among (route.ROUTES; None: as it is)."""
+    the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS)."""
     from .. import telemetry
     from ..motion import route
     from . import fakes, scenarios
@@ -150,14 +159,14 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         if ways is not None:
             route.ROUTES = ways
         with telemetry.captured() as records:
-            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed))
+            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id))
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
         route.ROUTES = routes
     out = outcomes(sim.world, records, minutes * 60)
     out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=feed, costs=costs,
-               ways=routes if ways is None else ways, result=str(trace["result"])[:120])
+               ways=routes if ways is None else ways, map=map_id, result=str(trace["result"])[:120])
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     if feed:
         f = trace["feed"]
@@ -262,8 +271,8 @@ def _rest_trips(records: list[dict]) -> list[tuple[float, float]]:
 # --- many runs -----------------------------------------------------------------------------------------
 
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
-             feed: bool = False, costs: str = "coded", ways: int | None = None) -> list[dict]:
-    args = [(policy, k, preset, minutes, think, feed, costs, ways) for k in range(1, seeds + 1)]
+             feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP) -> list[dict]:
+    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id) for k in range(1, seeds + 1)]
     if jobs <= 1:
         return [run_one(*a) for a in args]
     from gamelab.sim import harness  # by its module name, so worker processes can find it (not __main__)
@@ -319,6 +328,8 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     least), and why: better EXP a minute on at least 8 of 10 seeds and no seed more than 10% worse; at
     least the drops share on average; no more HP lost on average; no death, and no fall out of the map."""
     every = cand  # deaths count on every seed, compared or not: "no death" isn't a comparison
+    if (maps := _maps(base, cand)) is not None:
+        return False, [maps, "does NOT pass the bar"]
     base, cand = _paired(base, cand)
     if len(cand) < MIN_PAIRS:
         return False, [f"{len(cand)} seed(s) in both runs: the bar needs {MIN_PAIRS}", "does NOT pass the bar"]
@@ -353,11 +364,20 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
 NAV = ("cut_hit", "cut_off_path", "replans", "misses", "falls", "glances")  # navigation()'s counts, and the glances
 
 
+def _maps(base: list[dict], cand: list[dict]) -> str | None:
+    """Why two saved runs can't be compared: they're on different maps (runs saved before the map was kept are the
+    first map's), or None."""
+    a, b = ({r.get("map", FIRST_MAP) for r in runs} for runs in (base, cand))
+    return None if a == b and len(a) == 1 else f"the runs are on different maps ({sorted(a)} and {sorted(b)})"
+
+
 def compare_rest(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     """Step 7's bar (`--rest-avoid`) on 20-minute runs: no more HP lost on the trips to rest on average
     (over the seeds both have, and with trips to rest on both sides), and no death. EXP a minute and the
     drops share are shown, not judged. (`rests` measures the trips themselves, with far more of them.)"""
     every = cand
+    if (maps := _maps(base, cand)) is not None:
+        return False, [maps, "does NOT pass the rest bar"]
     base, cand = _paired(base, cand)
     if len(cand) < MIN_PAIRS:
         return False, [f"{len(cand)} seed(s) in both runs: the bar needs {MIN_PAIRS}", "does NOT pass the rest bar"]
@@ -493,6 +513,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--ways", type=int, help="the ways her trips choose among (route.ROUTES; default: route's own)")
     r.add_argument("--costs", choices=sorted(COSTS), default="coded",
                    help="what the simulator's looks take: coded (the fakes' own), measured (today's)")
+    r.add_argument("--map", type=int, choices=sorted(STARTS), default=FIRST_MAP,
+                   help="the map (default: the first, Thicket Around the Beach II; 10004021: West Rocky Mountain II)")
     c = sub.add_parser("compare")
     c.add_argument("baseline")
     c.add_argument("candidate")
@@ -504,8 +526,9 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--jobs", type=int, default=1)
     args = p.parse_args(argv)
     from . import scenarios
-    if not scenarios.available():
-        print(f"map {scenarios.MAP_ID} isn't available on this computer (gamedata/data): nothing to run")
+    map_id = getattr(args, "map", FIRST_MAP)
+    if not scenarios.available(map_id):
+        print(f"map {map_id} isn't available on this computer (gamedata/data): nothing to run")
         return 2
     if args.cmd == "check":
         return check()
@@ -518,11 +541,12 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(lines))
         return 0 if ok else 1
     results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs,
-                       args.ways)
+                       args.ways, args.map)
     print(table(results))
     name = args.save or (f"{args.policy}-{args.preset}" + ("-feed" if args.feed else "")
                          + (f"-{args.costs}" if args.costs != "coded" else "")
-                         + (f"-ways{args.ways}" if args.ways is not None else ""))
+                         + (f"-ways{args.ways}" if args.ways is not None else "")
+                         + (f"-{args.map}" if args.map != FIRST_MAP else ""))
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
     return 0

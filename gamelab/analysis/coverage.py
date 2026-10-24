@@ -41,6 +41,10 @@ from ..motion.flow import Body, Flow, Keys
 from ..motion.physics import WALK_SPEED
 from ..motion.route import NOISE, RISK, Move, Planner
 
+FIRST_MAP = 10000012  # Thicket Around the Beach II, where the report's own questions were asked:
+FOCUS = {FIRST_MAP: (12,)}  # the platforms the report looks at on each map: on the first, 12, which no trip went
+                            # through (and 23 -> 17 by the two rope hops: _hop_lines)
+
 GAP_S = 5.0        # s: a look's time counts toward its platform up to this long (a longer gap is a pause)
 STAND_DX = 6       # units: a look or a glance this near a platform's span ...
 STAND_DY = 6       # ... and its surface reads as on it (her dot is good to a minimap pixel: the play track's
@@ -588,9 +592,11 @@ def why(m: Move, counts: list[int], gaps: dict, wide: tuple | None, older: bool 
 
 # --- the report ----------------------------------------------------------------------------------------------
 
-def report(graph: Graph, sets: list[tuple[str, dict]], focus: tuple = (12,)) -> list[str]:
+def report(graph: Graph, sets: list[tuple[str, dict]], focus: tuple | None = None) -> list[str]:
     """The report, as lines: for each set of runs (name, merged tallies) what it did with the map's moves and
-    platforms, the moves it never took and why; then the platforms in `focus` and 23 -> 17 by the two rope hops."""
+    platforms, the moves it never took and why; then the platforms in `focus` (by default the map's: FOCUS) and, on
+    the first map, 23 -> 17 by the two rope hops."""
+    focus = FOCUS.get(graph.model.id, ()) if focus is None else focus
     wide = map_wide(graph)
     chains = {key_of(m): graph.chains(m) for m in graph.moves}
     stuck = [k for k, v in chains.items() if v is False]
@@ -613,7 +619,8 @@ def report(graph: Graph, sets: list[tuple[str, dict]], focus: tuple = (12,)) -> 
         lines += [f"Never taken in any of the {len(sets)} sets ({len(never)}): " + ", ".join(sorted(never)), ""]
     for pid in focus:
         lines += _platform_lines(graph, pid, sets)
-    lines += _hop_lines(graph, sets)
+    if graph.model.id == FIRST_MAP:
+        lines += _hop_lines(graph, sets)
     return lines
 
 
