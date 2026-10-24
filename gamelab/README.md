@@ -667,10 +667,104 @@ First look, explore only (no attacks):
   offline: her dot's 80 units (above). The chain ran her right along 14 from where her dot put her, and the jump at
   the rope, keyed for 41 units before it (-455), came when she was 80 units further on, past 14's end (-406): she ran
   off it and the key came in the air (both times, her dot corrected: -402 then down onto 17 at -354). The rope itself
-  is grabbed as planned (its bottom 64 above 14 there, platform 10 between them, 20 under it; missing it from -455 lands on
-  10, not off 14), and in the simulator the climb arrives on 16 seeds of the game's errors.
+  is grabbed as planned (its bottom 64 above 14 there, platform 10 between them, 20 under it; missing it from -455
+  lands on 10, not off 14), and in the simulator the climb arrives on 16 seeds of the game's errors.
 - Full-size frames from 24, the bridge (22), the high bridge (11), 17 and the stairs (30) are in
   `D:/MapleHelper-scratch/newmap/frames` (`<platform>_<n>.png`).
+
+**The map, from its game data** (offline: `mapdata.load(10004021)`, the planner, `attack.reach`; worked out on
+2026-10-24 with the fixes above). 33 platforms, 31 places (11 and 21 are twins), 4 ropes, 2 portals, 49 spawn points
+(20 Stumps, 12 Red Snails, 10 Dark Stumps, 7 Axe Stumps; a twin's go with the platform it lies on):
+
+| Platform | x | y | Group | Spawn points | |
+|---|---|---|---|---|---|
+| 0 | -837..-354 | 1333-1363 | (4, 12) | Axe Stump | the top; portal `in00` to West Rocky Mountain III (10004022) at -705 |
+| 1 | -386..-271 | 1379-1387 | (4, 12) | Dark Stump | |
+| 2 | -426..-341 | 1405-1414 | (4, 12) | | |
+| 3 | -475..-349 | 1441-1443 | (4, 12) | Stump | |
+| 4 | -516..-376 | 1477-1481 | (4, 12) | Red Snail | |
+| 5 | -768..-541 | 1521-1543 | (4, 12) | Dark Stump | |
+| 6 | -441..-166 | 1508-1553 | (4, 12) | 2 Dark Stumps | |
+| 7 | -713..-368 | 1571-1591 | (4, 12) | 2 Axe Stumps | the rope at -414 comes up onto it |
+| 8 | -736..-461 | 1682-1727 | (4, 12) | 2 Stumps | |
+| 9 | -1008..-663 | 1745-1765 | (4, 12) | Stump, Dark Stump | |
+| 10 | -460..23 | 1794-1824 | (5, 0) | 2 Stumps, 2 Red Snails | over 14's right end and 17 |
+| 11 | -1426..-1171 | 1822-1830 | (5, 0) | (14's) | twin of 14 |
+| 12 | -9..106 | 1840-1848 | (5, 0) | Red Snail | the steps on the right: 16, 15, 13, 12 |
+| 13 | -49..36 | 1866-1875 | (5, 0) | | |
+| 14 | -1662..-406 | 1811-1886 | (5, 0) | 4 Stumps, 2 Dark Stumps, 4 Red Snails | the high bridge (11 on it); the rope at -1463 comes up onto it |
+| 15 | -98..28 | 1902-1904 | (5, 0) | | |
+| 16 | -139..1 | 1938-1942 | (5, 0) | Stump | |
+| 17 | -391..-164 | 1982-2004 | (5, 0) | Stump, Red Snail | |
+| 18 | -548..-273 | 2039-2084 | (5, 0) | Stump, Red Snail | the rope at -303 comes up onto it |
+| 19 | -820..-475 | 2102-2122 | (5, 0) | 2 Red Snails | portal `out00` to West Rocky Mountain I (10004020) at -764; the rope at -536 comes up onto it |
+| 20 | -473..-442 | 2385 | (5, 0) | | 0-6.4 under 22's slope: never reached |
+| 21 | -1404..-1149 | 2378-2386 | (5, 0) | (22's) | twin of 22 |
+| 22 | -1640..113 | 2367-2442 | (5, 0) | 7 Stumps, 3 Dark Stumps, 4 Axe Stumps | the bridge (21 on it), the bottom of every rope but -414's |
+| 23 | -1103..-967 | 2445 | (5, 5) | | floating steps under the bridge, 15-unit lips |
+| 24 | -1013..-877 | 2505 | (5, 4) | | |
+| 25 | -923..-787 | 2565 | (5, 3) | | |
+| 26-32 | -563..-473 down to -1643..-1373 | 2565 down to 2925, 60 a stair | (5, 0) | | the pit of stairs, a riser wall under each stair's end |
+
+- **Ropes:** -414 (1584-1787) from 10 (20 under its bottom) or 14 (64 under it) up to 7; -1463 (1833-2331) from 22
+  up to 14; -536 (2114-2348) from 22 up to 19; -303 (2041-2362) from 22 up to 18. Every way from the bridge (22) up
+  goes by a rope: the climb to 14 is 5.3 s.
+- **Walls, by foothold group** (what stops a star: only walls of the group of the platform she stands on, Attack):
+  the ledges 0-9 (group (4, 12)) have none; 10-22 and the pit's stairs 26-32 are one group, (5, 0), whose walls are
+  the stairs' risers, the pit's right side under 20 (-473, 2385-2565), the map's right cliff (113, from 2385 down)
+  and the pit's left side under 32 (-1643, from 2925); each floating step (23, 24, 25) is a group of its own, its
+  lips 15 down from its ends. So no wall stops a star at a monster on a spawn platform from anywhere: of the lines
+  from every 10 units of each place to every 10 of each spawn platform in reach (`reach.can_shoot`, the v83 line),
+  none ends at a wall. Floors do: a star doesn't go down through the platform she stands on (the v83 line).
+- **The pit's moves** (takeoffs every half unit, flown by the engine; she jumps 77 up):
+
+  | Move | Up | To spare | Lands from (full speed) | ... at 0.85 of it | |
+  |---|---|---|---|---|---|
+  | each stair up (32 -> 31 ... 28 -> 27, 27 -> 26) | 60 | 17 | the last 59.5 units of the stair | the last 50.5 | sure |
+  | 27 -> 25, off 27's left end | 60 | 17 | -743..-726 (17 units) | -743..-735.5 (7.5) | the way out, 0.90 (`route._ways_out`) |
+  | 25 -> 24, 24 -> 23 (left; 24 -> 23 also straight up) | 60 | 17 | 107 units | 97.5 | sure |
+  | 23 -> 22 | 71-76 (22 slopes) | 2.3-8.0 by the takeoff | all of 23, to the left | all of 23 | sure; one landed in game with about 3 to spare |
+
+  Out of the pit to the bridge: from 30 in 5.4 s (7 moves), from 32 in 7.0, from 26 (walking off onto 27) in 3.7. In
+  only by falling: off 20's left end, a drop through 22, off the floating steps.
+- **Trips between the hunting grounds** (the planner's seconds, from the middle of each; the ones with 2 spawn points
+  or more):
+
+  | from \ to | 6 | 7 | 8 | 9 | 10 | 14 | 17 | 18 | 19 | 22 |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | 6 | | 1.6 | 3.3 | 4.1 | 1.2 | 2.9 | 2.5 | 3.8 | 5.2 | 4.5 |
+  | 7 | 1.5 | | 1.3 | 2.1 | 2.0 | 2.4 | 3.2 | 4.1 | 4.0 | 5.2 |
+  | 8 | 4.9 | 4.2 | | 1.6 | 1.7 | 1.0 | 2.0 | 2.8 | 2.6 | 3.8 |
+  | 9 | 6.8 | 6.2 | 1.5 | | 3.7 | 0.9 | 4.0 | 4.0 | 3.3 | 3.7 |
+  | 10 | 4.5 | 3.8 | 3.9 | 4.2 | | 2.2 | 1.5 | 2.7 | 4.4 | 3.5 |
+  | 14 | 7.7 | 7.0 | 3.3 | 1.0 | 4.6 | | 5.0 | 4.9 | 3.8 | 1.7 |
+  | 17 | 9.3 | 8.6 | 8.7 | 9.0 | 3.4 | 7.0 | | 1.2 | 2.9 | 2.0 |
+  | 18 | 10.6 | 9.9 | 10.0 | 10.3 | 4.8 | 8.3 | 1.1 | | 1.6 | 1.3 |
+  | 19 | 12.7 | 12.0 | 12.1 | 12.4 | 6.8 | 10.4 | 3.0 | 1.5 | | 1.2 |
+  | 22 | 16.3 | 15.6 | 15.7 | 13.8 | 10.5 | 10.0 | 6.6 | 5.1 | 4.4 | |
+
+  Down is quick everywhere; up from the bridge it's a rope (to 14 and on, or to 18 or 19 and up the steps on the
+  right). Before the jumps off an end nearer than 33 back (Motion planning), from 17, 18 and 19 to the ledges took
+  11.3-25.3 s, round by 22 and the rope to 14.
+- **Jumps with little height to spare** (her 77 less the rise, at the planned takeoff and landing): 6 -> 3 0.4 and
+  1.7, 23 -> 22 2.3 (to the right) and 3.6, 4 -> 2 2.6, 16 -> 13 2.6 (the way up the right side). The engine follows
+  her jumps to 1.7 units in y (Motion planning), so these may come down short in game; straight-up jumps keep 12 to
+  spare (`route.JUMP_MARGIN`), running jumps nothing yet: on the first map none has under 17. To watch in game.
+- **Reachability:** every place gets to every other but 20 (32 pairs; no spawn on it, and if she's ever on it she
+  walks off onto 22 or into the pit). Before the twins and the way out of the pit, 207 pairs had no route: the pit's
+  7 to the 26 others, and every one to 20. On the first map, every platform gets to every other, before and after.
+
+**To check in game** (explore only first: `nav` without `--fight` keeps clear of monsters; the player running):
+- Her place: `python -m gamelab map --map 10004021` where a rope is in view (on stair 28 her dot says -800, the
+  ropes -792): within a minimap pixel of the game's (16 units) of where the ropes put her.
+- Out of the pit: standing on stair 30, `python -m gamelab nav 22 --map 10004021`: up the stairs, 27 onto 25 (0.90
+  by the model: a miss comes down on 28, and she tries again), 25, 24, 23 and up onto 22.
+- Up the right side: from 17, `python -m gamelab nav 10 --map 10004021`: 17 onto 16 (taking off 15 back of 17's
+  end), 16 onto 13 (2.6 units to spare), up onto 10.
+- The rope at -414: from 14, `python -m gamelab nav 7 --map 10004021`; the twins: from 22 under 11,
+  `python -m gamelab nav 11 --map 10004021` (14 under it is arriving too).
+- The jumps with little to spare: from 6, `python -m gamelab nav 3 --map 10004021` (0.4-1.7); from 23,
+  `python -m gamelab nav 22 --map 10004021` (2.3-8.0).
 
 ## Screen size: the game at its own 1366x768 (from 2026-10-23)
 
