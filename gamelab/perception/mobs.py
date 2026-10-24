@@ -23,6 +23,12 @@ first), so they're all picked first, and the answers are the same as one thread'
 A monster found says which template matched it, and so what that template's folder knows of it (INDEX,
 CUTOUTS): where its feet are in the picture, which way it faces (the game's sprites face left; a flipped
 template faces right), and its frame and pose.
+
+The first map's four kinds have colour tests written by hand (PALETTES). Any other kind is looked for with a gate
+learned from the map's background colours (perception.gates, `background`), and a few things go otherwise for those
+kinds only, so the first map's searches are as they were: whole-screen bands overlap by the tallest such picture; a
+place's gate tries its first GATE_TRIES templates, not only its first; and at 1920x1080 half size step 2 checks up to
+PER_PLACE of a place's templates, as at the game's own size.
 """
 
 import json
@@ -37,6 +43,7 @@ from PIL import Image
 
 from .. import native, paths
 from ..screen import STRETCHED
+from .gates import FOG_ALPHAS, Gates, kind_histograms, learn
 from .match import masked_match, suppress_overlaps
 
 
@@ -66,6 +73,14 @@ CHECK_SLACK = 6              # step 2 looks this far (px) around a spot, so spot
 FINE_TEMPLATES = 6
 FINE_GATE = 0.55
 FINE_SLACK = 4
+# A learned kind's place (only theirs: the first map's go as they were) is gated with its first GATE_TRIES templates in
+# turn, until one scores FINE_GATE. A stump's frames' silhouettes match a blob of its colour about alike, its flinch
+# frame's (the largest) most often best: on West Rocky Mountain II's 31 labelled frames at 1366x768 (2026-10-24) the
+# places of Stumps and Axe Stumps in plain view were gated with it at 0.29-0.46, where their own frame, the place's
+# second or third, scored 0.67-0.77 and then 0.94-1.00 at full size. Gated with the first alone 54 of the 58 in plain
+# view were found (on its 42 labelled 1920x1080 frames shrunk to 1366x768, 156 of 203); with the first 2, 57 (170), a
+# whole screen taking 110 ms against 98; with all 6, 57, in 143.
+GATE_TRIES = 2
 OPAQUE = 128                 # a game picture's pixel is drawn from this alpha up (sprites.build's threshold)
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
 THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the whole screen 250 -> 117 (8 are no faster)
@@ -97,6 +112,12 @@ CUTOUTS = "cutouts.json"  # the screenshot cut-outs, matched against the sprites
 # A folder's pictures are drawn this many px per game px ({"px_per_game_px": 1.0}: sprites.build at the game's own
 # size); without the file, as the 1920x1080 window shows them (1.40625: the cut-outs, and the sprites made for it).
 SCALE_FILE = "scale.json"
+# For kinds with a learned gate (perception.gates) only. At 1920x1080 half size, where step 1's frame is the look
+# frame, each place's best PER_PLACE templates are checked, each at its own spot, as FINE_TEMPLATES are at a finer
+# frame: on 42 labelled 1920x1080 frames of West Rocky Mountain II (2026-10-23) a red snail's five frames' silhouettes
+# matched about alike where the gate takes only its shell, and the one checked was often the wrong frame (a stand frame
+# at 0.92, its flinch checked at 0.55): checking the best 3 found 171 of 203 monsters in plain view instead of 152.
+PER_PLACE = 3
 
 
 def picture_scale(folder: Path) -> float:
@@ -195,13 +216,16 @@ PALETTES = {"pig": _pig, "slime": _slime, "snail": _snail, "orange-mushroom": _o
 KINDS_WITH_PALETTE = tuple(PALETTES)
 
 
-def palette(kind: str, rgb: np.ndarray, channels=None) -> np.ndarray:
+def palette(kind: str, rgb: np.ndarray, channels=None, gates: Gates | None = None) -> np.ndarray:
     """Pixels that have the colour of this monster's body. `channels` = `split_channels(rgb)`, if already
-    split (saves time when testing several kinds on one frame)."""
+    split (saves time when testing several kinds on one frame). A kind without a hand-made test (PALETTES) is tested
+    with its learned gate, from `gates`."""
     r, g, b = channels or split_channels(rgb)
-    if kind not in PALETTES:
+    if kind in PALETTES:
+        return PALETTES[kind](r, g, b)
+    if gates is None or kind not in gates:
         raise ValueError(f"unknown monster kind {kind!r}")
-    return PALETTES[kind](r, g, b)
+    return gates.test(kind, r, g, b)
 
 
 def read_meta(folders: list[Path]) -> dict[str, dict]:
@@ -258,10 +282,14 @@ class MobDetector:
     `search_scale`: step 1's frame, px per game px (SEARCH_SCALE; a frame no finer than it is searched as it is).
     `kinds`: only these kinds' templates (by default every kind with a colour test). Given (a map's own:
     sprites.detector_for at the game's own size), there may be none, a map none of whose monsters has a colour test
-    yet, and the detector then finds nothing; without it, no templates at all is a mistake (a folder with none)."""
+    yet, and the detector then finds nothing; without it, no templates at all is a mistake (a folder with none).
+    `background`: a map's background colours (gates.load_background), against which the kinds in `learned` (by
+    default those in `kinds`) that have no hand-made colour test get a gate learned (gates.learn) from their own
+    pictures as step 1 sees them, blended toward a fog's white by `fog_alphas`; without it, they aren't looked for."""
 
     def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None,
-                 frame_scale: float = STRETCHED.frame_scale, search_scale: float = SEARCH_SCALE, kinds=None):
+                 frame_scale: float = STRETCHED.frame_scale, search_scale: float = SEARCH_SCALE, kinds=None,
+                 background: np.ndarray | None = None, learned=None, fog_alphas=FOG_ALPHAS):
         self.templates: dict[str, list[MobTemplate]] = {}
         folders = folder if isinstance(folder, list) else [folder]
         meta = {**read_meta(folders), **(meta or {})}
@@ -271,14 +299,27 @@ class MobDetector:
         # 1920x1080 frame's (1 at either size; 0.71 for a half-size look at 1366x768, searched as it is).
         self.search = max(1.0, frame_scale / search_scale)
         self.spx = self.px / self.search
+        to_learn = set() if background is None else set((kinds if learned is None else learned) or ()) - set(PALETTES)
+        pictures = []  # (path, kind, its colours, step 2's mask, where it's drawn, and those two at step 1's scale)
         for path in sorted(p for f in folders for p in f.glob("*.png")):
             kind = path.stem.split("_")[0]
-            if kind not in KINDS_WITH_PALETTE or kinds is not None and kind not in kinds:
+            if kind not in PALETTES and kind not in to_learn or kinds is not None and kind not in kinds:
                 continue
             rgba = np.asarray(Image.open(path).convert("RGBA"))
             rgb, mask, drawn = _picture(rgba, shrinks[path.parent])
+            small, small_drawn = rgb, drawn
             if self.search != 1:  # step 1's picture, from the picture as it is
                 small, _, small_drawn = _picture(rgba, shrinks[path.parent] * self.search)
+            pictures.append((path, kind, rgb, mask, drawn, small, small_drawn))
+        # Each learned kind's gate, from its pictures' pixels as step 1 sees them, against the map's background.
+        luts = {}
+        for k in sorted(to_learn):
+            px = [s[d > 0] for _, kind, _, _, _, s, d in pictures if kind == k]
+            if px:
+                luts[k] = learn(kind_histograms(np.concatenate(px), fog_alphas), background)
+        self.gates = Gates(luts) if luts else None
+        self.learned = frozenset(luts)  # the kinds looked for with a learned gate
+        for path, kind, rgb, mask, drawn, small, small_drawn in pictures:
             for flip in (False, True):  # monsters face either way
                 t, m = (rgb[:, ::-1], mask[:, ::-1]) if flip else (rgb, mask)
                 t = np.ascontiguousarray(t)
@@ -289,7 +330,7 @@ class MobDetector:
                     s, d = (small[:, ::-1], small_drawn[:, ::-1]) if flip else (small, small_drawn)
                     s = np.ascontiguousarray(s)
                     step1 = (s, np.dstack([d] * 3))
-                silhouette = (palette(kind, s) & (d > 0)).astype(np.float32)
+                silhouette = (palette(kind, s, gates=self.gates) & (d > 0)).astype(np.float32)
                 coarse = cv2.resize(silhouette, (max(1, s.shape[1] // COARSE), max(1, s.shape[0] // COARSE)),
                                     interpolation=cv2.INTER_AREA)
                 self.templates.setdefault(kind, []).append(MobTemplate(
@@ -297,6 +338,11 @@ class MobDetector:
                     step1))
         if not self.templates and kinds is None:
             raise RuntimeError(f"no monster templates in {folder}")
+        # Whole-screen bands overlap by the tallest learned kind's picture and step 2's slack, so one standing across a
+        # band's edge is whole in the next (an Axe Stump's flinch is 93 game px tall, a band's overlap 43 at the game's
+        # own size); without learned kinds, as they were.
+        tallest = max((t.rgb.shape[0] for k in self.learned for t in self.templates.get(k, ())), default=0)
+        self.overlap = tallest + round(CHECK_SLACK * self.px) if tallest else 0
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
@@ -311,6 +357,7 @@ class MobDetector:
         each band gets its own best spots. The bands are searched at once, each on one thread."""
         # A band starts every WIDE_STEP rows until one reaches rows[1] (it's cut short there); always one.
         band, step = round(WIDE_BAND * self.px), round(WIDE_STEP * self.px)
+        band = step + max(band - step, self.overlap)
         starts = range(rows[0], max(rows[0] + 1, rows[1] - band + step), step)
         bands = self._map(lambda y0: self._detect(frame, (y0, min(rows[1], y0 + band)), _serial), starts)
         return suppress_overlaps([hit for band in bands for hit in band])
@@ -374,12 +421,9 @@ class MobDetector:
             frame = frame[y_off:rows[1]]
         if not frame.shape[0] or not frame.shape[1]:  # a band with no rows (her band off screen: Eyes.band_rows),
             return []  # as at 1920x1080 half size, where no colour then passed; shrunk for step 1, OpenCV raised
-        small = frame  # step 1's frame: SEARCH_SCALE, unless the look frame is no finer
-        if self.search != 1:
-            h, w = frame.shape[:2]
-            small = cv2.resize(frame, (max(1, round(w / self.search)), max(1, round(h / self.search))),
-                               interpolation=cv2.INTER_AREA)
-            sx, sy = w / small.shape[1], h / small.shape[0]  # the look frame's px per step 1's
+        small = step1_frame(frame, self.search)  # step 1's frame: SEARCH_SCALE, unless the look frame is no finer
+        if self.search != 1:  # the look frame's px per step 1's
+            sx, sy = frame.shape[1] / small.shape[1], frame.shape[0] / small.shape[0]
         # A size that's a multiple of COARSE, so step 1's mask is an exact shrink. An odd one (the fight's
         # band was 151 rows) smeared faint colour into blank windows, which then scored a perfect 1.0.
         small = small[:small.shape[0] // COARSE * COARSE, :small.shape[1] // COARSE * COARSE]
@@ -387,11 +431,16 @@ class MobDetector:
             frame = small
         channels = split_channels(small)
         coarse_size = (small.shape[1] // COARSE, small.shape[0] // COARSE)
+        looked = None  # every pixel's learned kinds (gates.Gates.lookup), worked out once for them all
         kinds = []  # (kind, its templates, its body colour at 1/COARSE size, that colour's cover)
         for kind, templates in self.templates.items():
             if only is not None and kind not in only:
                 continue
-            colour = palette(kind, small, channels)
+            if kind in self.learned:
+                looked = self.gates.lookup(*channels) if looked is None else looked
+                colour = self.gates.of(kind, looked)
+            else:
+                colour = palette(kind, small, channels)
             if colour.sum() < MIN_BODY_PIXELS * self.spx * self.spx:
                 continue
             coarse = cv2.resize(colour.astype(np.float32), coarse_size, interpolation=cv2.INTER_AREA)
@@ -404,13 +453,15 @@ class MobDetector:
             spots = sorted((s for f in found[start:start + len(templates)] for s in f), reverse=True)
             start += len(templates)
             if self.search == 1:
-                checks += [(kind, templates[i], cx, cy) for cx, cy, i in _to_check(spots, slack)]
+                picked = (_to_check(spots, slack) if kind not in self.learned
+                          else [spot for place in _places(spots, slack, PER_PLACE) for spot in place])
+                checks += [(kind, templates[i], cx, cy) for cx, cy, i in picked]
             else:
                 places += [(kind, [(templates[i], cx, cy) for cx, cy, i in place]) for place in _places(spots, slack)]
         if self.search == 1:
             results = run(lambda c: _check(frame, c[1], c[2], c[3], slack), checks)
         else:  # the gate at step 1's scale, then each place's templates at the look frame's, around their own spots
-            gate = run(lambda p: _match_at(small, *p[1][0][0].step1, p[1][0][1], p[1][0][2], slack), places)
+            gate = run(lambda p: _gate(small, p[1], slack, GATE_TRIES if p[0] in self.learned else 1), places)
             checks = [(kind, t, *_finer(t, cx, cy, sx, sy)) for (kind, place), g in zip(places, gate)
                       if g is not None and g[0] >= FINE_GATE for t, cx, cy in place[:FINE_TEMPLATES]]
             results = run(lambda c: _check(frame, c[1], c[2], c[3], FINE_SLACK), checks)
@@ -420,6 +471,15 @@ class MobDetector:
                 score, x, y, w, h = result
                 hits.append(_seen(kind, template, x, y_off + y, w, h, round(score, 3)))
         return suppress_overlaps(hits)
+
+
+def step1_frame(frame: np.ndarray, search: float) -> np.ndarray:
+    """A look frame (or a band of it) as step 1 sees it, `search` times smaller (MobDetector.search): shrunk to
+    SEARCH_SCALE (area averaged), unless it's no finer (as it is)."""
+    if search == 1:
+        return frame
+    h, w = frame.shape[:2]
+    return cv2.resize(frame, (max(1, round(w / search)), max(1, round(h / search))), interpolation=cv2.INTER_AREA)
 
 
 def _seen(kind: str, t: MobTemplate, x: int, y: int, w: int, h: int, score: float) -> Mob:
@@ -548,6 +608,18 @@ def _places(spots: list[tuple[float, int, int, int]], slack: int,
             if all(i != j for _, _, j in place):
                 place.append((cx, cy, i))
     return places
+
+
+def _gate(small: np.ndarray, place: list[tuple[MobTemplate, int, int]], slack: int, tries: int = 1):
+    """The fine gate's match at a place (`_match_at` at step 1's scale, `slack` around): its first template's; with
+    `tries` (a learned kind's GATE_TRIES), the first of its first `tries` templates that scores FINE_GATE, else the
+    last one's."""
+    found = None
+    for t, cx, cy in place[:tries]:
+        found = _match_at(small, *t.step1, cx, cy, slack)
+        if found is not None and found[0] >= FINE_GATE:
+            break
+    return found
 
 
 def _finer(template: MobTemplate, cx: int, cy: int, sx: float, sy: float) -> tuple[int, int]:
