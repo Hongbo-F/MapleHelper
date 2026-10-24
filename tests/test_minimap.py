@@ -28,7 +28,8 @@ def crop(name: str) -> np.ndarray:
     """A saved minimap (the screen's MINIMAP_BOX, RGB): `stranger`, another player on this map (hover_D.png of
     2026-10-18); `party`, a leader of her party on the safe platform 32, her dot over a portal's (calibrate.png);
     `crowd`, nine strangers and an NPC in Kerning City Construction Site, whose minimap reaches further right
-    (lie_detector_025439.png, 330 px wide)."""
+    (lie_detector_025439.png, 330 px wide); `rocky` and `rocky_stairs`, West Rocky Mountain II with her on the floating
+    step 24 and on stair 29 (D:/MapleHelper-scratch/newmap/frames/p24_000.png and stuck_000.png of 2026-10-23)."""
     return np.asarray(Image.open(FIXTURES / f"minimap_{name}.png").convert("RGB")).copy()
 
 
@@ -64,6 +65,31 @@ def _full_size(path: Path) -> bool:
         return Image.open(path).size == (1920, 1080)
     except OSError:  # one of them is cut short (written as the player shut down)
         return False
+
+
+@pytest.mark.skipif(mapdata.minimap_picture(10004021) is None, reason="needs the game data copy (gamedata/data/copy)")
+def test_the_maps_picture_is_found_in_the_minimap_window_wherever_its_name_puts_it():
+    # The window is as wide as the map's name needs and centres the picture (its miniMap canvas) under it: on Thicket
+    # Around the Beach II (121 x 134 game px) its top-left corner is at game px (47, 72), where DOT_ORIGIN was fitted,
+    # on West Rocky Mountain II (109 x 133; `rocky`, from the floating step 24, and `rocky_stairs`, from stair 29, of
+    # 2026-10-23) at (42, 72), 5 game px left: 7.03 px of the 1920x1080 window, 80 map units at mag 4. The game draws
+    # it at whole game px (the motion track's edge fit put its corner at 46.95-46.96 on all 30 saved frames of the
+    # first map, 41.96-41.98 on all 133 of the second at 1920x1080 and 42.03-42.04 on all 31 at 1366x768), so the
+    # shift is by whole game px (MinimapPicture.shift).
+    from gamelab.perception.minimap import MinimapPicture
+    first, second = mapdata.minimap_picture(10000012), mapdata.minimap_picture(10004021)
+    for name in ("stranger", "party"):
+        finder = MinimapPicture(first)
+        assert finder.find(crop(name)) == (66, 101) and finder.shift() == (0.0, 0.0)
+        assert MinimapPicture(second).find(crop(name)) is None
+    for name in ("rocky", "rocky_stairs"):
+        finder = MinimapPicture(second)
+        assert finder.find(crop(name)) == (59, 101) and finder.shift() == (-5 * 1.40625, 0.0)
+        assert MinimapPicture(first).find(crop(name)) is None
+    # Nor on a map whose minimap fills a wider window (Kerning City Construction Site's), nor on nothing at all.
+    for picture in (first, second):
+        assert MinimapPicture(picture).find(crop("crowd")) is None
+        assert MinimapPicture(picture).find(np.zeros((205, 300, 3), np.uint8)) is None
 
 
 def test_saved_frames_of_this_map_show_no_other_player_but_the_two_seen():
