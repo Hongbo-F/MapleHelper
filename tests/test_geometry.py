@@ -160,3 +160,61 @@ def test_the_trackers_screen_edge_and_the_players_reach_go_by_the_look():
         (p,) = players.update(0.0, [Marker("stranger", 100.0, 150.0)])
         (q,) = players.update(0.0, [Marker("stranger", 100.0 + step, 150.0)])  # the same player, or still the old
         assert q.id == p.id and (q.dot[0] == 100.0 + step) == same, (geo, step)  # one, missed (a new dot waits)
+
+
+# --- the commands take the game window's size as it is: a minimized one once it's back ----------------------------
+
+def _game_window(monkeypatch, game: dict):
+    """window.* for a game window that's minimized while game["iconic"] (its client area then 432x54, as GetClientRect
+    gave on 2026-10-24), else 1366x768."""
+    from gamelab import __main__ as cli
+    monkeypatch.setattr(cli.window, "find_game", lambda title: 7)
+    monkeypatch.setattr(cli.window, "minimized", lambda hwnd: game["iconic"])
+    monkeypatch.setattr(cli.window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 432, "height": 54}
+                        if game["iconic"] else {"left": 0, "top": 0, "width": 1366, "height": 768})
+    return cli
+
+
+def test_a_command_that_brings_the_game_forward_restores_it_before_reading_its_size(monkeypatch):
+    game = {"iconic": True, "brought": 0}
+    cli = _game_window(monkeypatch, game)
+
+    def bring(title, wait=0.0):
+        game["brought"] += 1
+        game["iconic"] = False
+        return True
+    monkeypatch.setattr(cli.window, "bring_to_front", bring)
+    assert cli._game_geometry("MapleStory", restore=True) == NATIVE and game["brought"] == 1
+    assert cli._game_geometry("MapleStory", restore=True) == NATIVE and game["brought"] == 1  # shown: as it is
+    game["iconic"] = True
+    monkeypatch.setattr(cli.window, "bring_to_front", lambda title, wait=0.0: False)  # Windows wouldn't
+    with pytest.raises(RuntimeError, match="minimized and didn't come back"):
+        cli._game_geometry("MapleStory", restore=True)
+
+
+def test_the_hunting_commands_eyes_are_made_for_the_restored_window(monkeypatch):
+    from types import SimpleNamespace
+
+    from gamelab.perception import eyes, sprites
+    game = {"iconic": True}
+    cli = _game_window(monkeypatch, game)
+    monkeypatch.setattr(cli.window, "bring_to_front", lambda title, wait=0.0: game.update(iconic=False) or True)
+    monkeypatch.setattr(cli, "_calibration", lambda geo: SimpleNamespace(template=np.zeros((15, 55), np.uint8)))
+    monkeypatch.setattr(sprites, "detector_for", lambda model, geo: ("detector", geo))
+    monkeypatch.setattr(eyes, "Eyes", lambda title, template, detector, geo: SimpleNamespace(detector=detector, geo=geo))
+    made = cli._eyes(SimpleNamespace(id=10004021), "MapleStory")
+    assert made.geo == NATIVE and made.detector == ("detector", NATIVE)
+
+
+def test_watch_waits_for_a_minimized_game_and_never_restores_it(monkeypatch, capsys):
+    game = {"iconic": True}
+    cli = _game_window(monkeypatch, game)
+    monkeypatch.setattr(cli.window, "bring_to_front", lambda *a, **k: pytest.fail("brought the game forward"))
+    waits = []
+
+    def sleep(s):
+        waits.append(s)
+        game["iconic"] = len(waits) < 3  # restored by whoever is at the PC after three looks
+    monkeypatch.setattr(cli.time, "sleep", sleep)
+    assert cli._game_geometry("MapleStory") == NATIVE and waits == [cli.MINIMIZED_POLL_S] * 3
+    assert "the game is minimized: waiting" in capsys.readouterr().out

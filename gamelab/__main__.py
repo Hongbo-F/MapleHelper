@@ -28,6 +28,7 @@ from .screen import STRETCHED, geometry
 
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
 FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the front before it gives up (_to_game)
+MINIMIZED_POLL_S = 0.5  # s between looks at whether the minimized game was restored (`watch` waits: _game_geometry)
 # `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes 10
 # times a second and tracks twice a second: on the saved frames a scene is 393 bytes (with what each look searched,
 # for analysis.respawn, and the other players; 279 before those) and the tracks 848, so about 20 MB an hour, 490 MB
@@ -60,9 +61,23 @@ def _game_title() -> str:
     return her_setup()[0].game_window_title
 
 
-def _game_geometry(title: str):
-    """The game window's geometry as it is now (screen.Geometry, from its client size; reads the window only)."""
-    area = window.client_rect(window.find_game(title))
+def _game_geometry(title: str, restore: bool = False):
+    """The game window's geometry (screen.Geometry, from its client size). Minimized, its client area isn't the
+    game's (GetClientRect gave 432x54 on 2026-10-24), so it's read once the window is back: with `restore` (the
+    commands that bring the game to the front anyway: their first look did, before its size was read here) the
+    window is restored and brought forward first (window.bring_to_front); without (`watch`, which never brings it
+    forward), this waits until whoever is at the PC restores it. Otherwise it reads the window only."""
+    hwnd = window.find_game(title)
+    if window.minimized(hwnd):
+        if restore:
+            window.bring_to_front(title, wait=FRONT_WAIT_S)
+            if window.minimized(hwnd):
+                raise RuntimeError("the game is minimized and didn't come back: restore it, then run this again")
+        else:
+            print("the game is minimized: waiting for it to be restored (nothing is read; Ctrl+C stops)", flush=True)
+            while window.minimized(hwnd):
+                time.sleep(MINIMIZED_POLL_S)
+    area = window.client_rect(hwnd)
     return geometry(area["width"], area["height"])
 
 
@@ -313,7 +328,7 @@ def _eyes(model, title: str):
     the size it is now (its calibration at that size)."""
     from .perception.eyes import Eyes
     from .perception.sprites import detector_for
-    geo = _game_geometry(title)
+    geo = _game_geometry(title, restore=True)  # (a minimized game is brought back, as the first look would)
     return Eyes(title, _calibration(geo).template, detector_for(model, geo), geo=geo)
 
 
@@ -1062,7 +1077,7 @@ def _watch_runner(args):
     from .attack import reach
     from .localization import feed, worldstate
     title = _game_title()
-    geo = _game_geometry(title)
+    geo = _game_geometry(title)  # (minimized, it waits for the game to be restored: it never restores it)
     return feed.screen_world(args.map, title, _calibration(geo).template, (reach.LOOK_UP, reach.LOOK_DOWN),
                              throws=False, schedule=worldstate.WATCH, geo=geo)
 
