@@ -145,6 +145,44 @@ def test_a_monster_seen_at_the_games_own_size_is_refound(tmp_path):
     assert detector.fallbacks == 0
 
 
+def test_the_frames_a_monster_most_likely_went_to_come_first():
+    t = [SimpleNamespace(name=f"slime_{p}{i}", frame=f"{p}/{i}", facing=f) for p, n in (("move", 7), ("stand", 3),
+                                                                                      ("hit1", 1))
+         for i in range(n) for f in (1, -1)]
+    last = next(x for x in t if x.name == "slime_move6" and x.facing == -1)
+    names = [x.name for x in mobs._next_frames(t, last, most=20)]
+    assert names[:4] == ["slime_move0", "slime_move1", "slime_hit10", "slime_stand0"]  # (an animation loops)
+    assert names[4:] == [f"slime_move{i}" for i in range(2, 6)] and len(names) == 8
+    assert all(x.facing == -1 for x in mobs._next_frames(t, last, most=20))
+    assert [x.name for x in mobs._next_frames(t, last)] == names[:mobs.REFIND_NEXT]
+    assert mobs._next_frames(t, SimpleNamespace(name="slime_1", frame="", facing=0)) == []  # a cut-out: no frame
+
+
+def test_a_monster_whose_animation_stepped_on_is_refound_as_its_new_frame(tmp_path):
+    # At the game's own size a monster's frames differ crisply: here its next frame is its colours 4 px across inside
+    # the same outline. The frame it was found as still passes there, 4 px off where it stands (0.80); its next frame,
+    # tried as that's under REFIND_GOOD, finds it where it stands. With step 1 at full size (as at 1920x1080 half size,
+    # where frames were alike) the frame it was found as is all there is.
+    right = pig().copy()
+    nxt = right.copy()
+    nxt[..., :3] = np.roll(right[..., :3], 4, axis=1)
+    folder = game_folder(tmp_path, {"pig_move0": right, "pig_move1": nxt})
+    index = json.loads((folder / INDEX).read_text(encoding="utf-8"))
+    index["pig_move1.png"]["frame"] = "move/1"
+    (folder / INDEX).write_text(json.dumps(index), encoding="utf-8")
+    scene, later = frame(), frame()
+    pasted.paste(scene, right, 500, 300)
+    pasted.paste(later, nxt, 500, 300)
+    for search_scale, refound in ((mobs.SEARCH_SCALE, ("pig_move1", 1.0, 560)), (1.0, ("pig_move0", 0.796, 564))):
+        detector = MobDetector(folder, threads=1, frame_scale=NATIVE.frame_scale, search_scale=search_scale)
+        seen = detector.detect(scene, (250, 420))[0]
+        box = (seen.x - seen.w // 2, seen.y - seen.h // 2, seen.x + seen.w // 2, seen.y + seen.h // 2)
+        assert (seen.template, seen.foot_x) == ("pig_move0", 500 + PIG_ORIGIN[0])
+        for fallback in (True, False):
+            m = detector.refind(later, box, "pig", seen.template, seen.facing, fallback=fallback)
+            assert (m.template, m.score, m.foot_x) == refound and detector.fallbacks == 0
+
+
 # --- drops ------------------------------------------------------------------------------------------------------
 
 def test_drops_at_the_games_own_size_are_matched_on_brightness_and_their_colours_checked(tmp_path):

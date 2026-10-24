@@ -140,3 +140,21 @@ def test_bench_paste_says_when_none_of_a_maps_monsters_has_a_colour_gate(rocky, 
     out = capsys.readouterr().out
     assert "monsters: none of map 10004021's has a colour gate yet" in out
     assert "drops:" in out and "1366x768, full size" in out
+
+
+def test_refinds_follow_a_monster_into_its_next_frame(tmp_path):
+    right = pig().copy()
+    nxt = right.copy()
+    nxt[..., :3] = np.roll(right[..., :3], 4, axis=1)  # its next frame: its colours 4 px across in the same outline
+    folder = game_folder(tmp_path, {"pig_move0": right, "pig_move1": nxt})
+    index = json.loads((folder / INDEX).read_text(encoding="utf-8"))
+    index["pig_move1.png"]["frame"] = "move/1"
+    (folder / INDEX).write_text(json.dumps(index), encoding="utf-8")
+    detector = MobDetector(folder, frame_scale=NATIVE.frame_scale)
+    result = pasted.refinds([frame(n) for n in FRAMES], {"native": (detector, NATIVE)}, folder, (140, 75), seed=3)
+    for step in ("unchanged", "its pose's next frame"):  # (each of the two frames, both ways)
+        r = result["native"][step]
+        assert (r.n, r.found, r.feet, r.as_drawn, r.hidden, r.fallbacks) == (4, 4, 4, 4, 4, 0), step
+    assert result["native"]["a flinch"].n == 0  # (it has none)
+    lines = pasted.refind_lines(result)
+    assert lines[0] == "native:" and lines[1].split()[:6] == ["unchanged", "4", "of", "4", "found", "again"]

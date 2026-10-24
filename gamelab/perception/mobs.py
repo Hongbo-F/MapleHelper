@@ -74,6 +74,21 @@ THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the wh
 # (which places the monsters on the map) can step by a minimap pixel, 11.4 units or 8 px, as she walks.
 # The research's prototype re-found 84 of 84 monsters in saved frames with 16 px, 78 with 8.
 REFIND_PAD = 16
+# On a look frame finer than step 1's (the game's own 1366x768 at full size), a monster's frames differ crisply, and
+# the one that matched it last seldom finds it once its animation steps on. Drawn as the game draws them
+# (analysis.pasted.refinds: the first map's standing and walking sprites, both ways, found on West Rocky Mountain II's
+# 31 frames, then drawn where they stood as a frame they may show next), it alone found its pose's next frame 23 times
+# in 50, a step from standing to walking or back 13 in 52 and a flinch 9 in 52 (at 1920x1080 half size 39, 31 and
+# 27): a live track's re-find went on to the kind's whole set the rest of the time (5.1-8.8 ms a re-find, at 90% 20),
+# a hidden one's stayed lost. So there, where it scores under REFIND_GOOD, the frames it most likely went to
+# (`_next_frames`, REFIND_NEXT of them) are matched in the same window in turn until one scores REFIND_GOOD, the
+# best kept: every one found, none going on to the whole set, 46-52 of each with the feet within a unit, in 3.2 ms
+# (its pose's next frame), 7.8 (standing to walking or back) and 6.3 (a flinch); unchanged, one match as before
+# (1.7). Each frame followed by the next on two frames (MobDetector.refind as here, 200 times): within a unit 182 at
+# 0.9, 200 at 0.95, 168 at 0.8; at 0.95 a monster with her or another over part of it would take REFIND_NEXT matches
+# every frame.
+REFIND_GOOD = 0.9
+REFIND_NEXT = 4
 # What a folder of templates may say about them, by file name: where the monster's feet are in each picture
 # ("origin", in the picture's own px, of its size "w" x "h"), which way it faces ("faces_right"; the game's
 # sprites face left), its frame in the game data ("frame": "move/2") and that frame's body box ("lt", "rb").
@@ -305,10 +320,11 @@ class MobDetector:
         """A monster seen before, looked for again around where it should be: `box` (x0, y0, x1, y1, frame
         px) is where its picture should be, searched REFIND_PAD px around (within `bounds`, by default the
         frame). First the picture that matched it last (`template`, `facing`: Mob.template and Mob.facing; a
-        cut-out that doesn't know its facing, both ways), one masked match over the window; if that doesn't
-        reach THRESHOLD (and `fallback`), every template of its kind there, as `detect` does. The one found
-        nearest the box's centre, or None. On the caller's thread: a window is small, and the pool's
-        hand-offs cost more."""
+        cut-out that doesn't know its facing, both ways), one masked match over the window; on a frame finer than
+        step 1's, where that scores under REFIND_GOOD, the frames its animation most likely went to, in turn
+        (`_next_frames`); if none reaches THRESHOLD (and `fallback`), every template of its kind there, as `detect`
+        does. The one found nearest the box's centre, or None. On the caller's thread: a window is small, and the
+        pool's hand-offs cost more."""
         h, w = frame.shape[:2]
         bx0, by0, bx1, by1 = bounds or (0, 0, w, h)
         pad = round(REFIND_PAD * self.px)
@@ -318,16 +334,27 @@ class MobDetector:
             return None
         window = frame[y0:y1, x0:x1]
         cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
-        best = None
+        best, last = None, None
         for t in self.templates[kind]:
             if not template or t.name != template or (facing and t.facing and t.facing != facing):
                 continue
+            last = last or t
             th, tw = t.rgb.shape[:2]
             if window.shape[0] < th or window.shape[1] < tw:
                 continue
             _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, t.rgb, t.mask3))
             if score >= THRESHOLD and (best is None or score > best.score):
                 best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
+        if self.search != 1 and last is not None and (best is None or best.score < REFIND_GOOD):
+            for t in _next_frames(self.templates[kind], last):  # (finer than step 1's: its frames differ)
+                th, tw = t.rgb.shape[:2]
+                if window.shape[0] < th or window.shape[1] < tw:
+                    continue
+                _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, t.rgb, t.mask3))
+                if score >= THRESHOLD and (best is None or score > best.score):
+                    best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
+                    if score >= REFIND_GOOD:
+                        break
         if best is not None or not fallback:
             return best
         self.fallbacks += 1
@@ -407,6 +434,31 @@ def _moved(m: Mob, dx: int, dy: int) -> Mob:
     """A monster found in a window of the frame, in the frame's px (the window's top-left at dx, dy)."""
     return replace(m, x=m.x + dx, y=m.y + dy, ox=None if m.ox is None else round(m.ox + dx, 2),
                    feet=None if m.feet is None else round(m.feet + dy, 2))
+
+
+def _next_frames(templates: list[MobTemplate], last: MobTemplate, most: int | None = None) -> list[MobTemplate]:
+    """The frames a monster that `last` matched most likely shows now, facing the same way, at most `most` (by default
+    REFIND_NEXT): the next frame of its pose and the one after (an animation loops), the other poses' first frames
+    (standing to walking and back, a flinch: hit1), then the rest of its pose. None for a template that doesn't know
+    its frame (a cut-out)."""
+    most = REFIND_NEXT if most is None else most
+    pose, _, i = last.frame.partition("/")
+    if not pose or not i.isdigit():
+        return []
+    poses: dict[str, dict[int, MobTemplate]] = {}
+    for t in templates:
+        p, _, j = t.frame.partition("/")
+        if p and j.isdigit() and t.facing == last.facing:
+            poses.setdefault(p, {})[int(j)] = t
+    own, i = poses.get(pose, {}), int(i)
+    n = max(own, default=i) + 1
+    order = [own.get((i + 1) % n), own.get((i + 2) % n)] + [poses[p].get(0) for p in sorted(poses) if p != pose]
+    order += [own.get((i + k) % n) for k in range(3, n)]
+    out: list[MobTemplate] = []
+    for t in order:
+        if t is not None and t.name != last.name and all(t.name != o.name for o in out):
+            out.append(t)
+    return out[:most]
 
 
 def _one_opencv_thread() -> None:

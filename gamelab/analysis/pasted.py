@@ -13,7 +13,9 @@ What it says, by size and kind: how many were found by the whole screen's search
 (its feet as hers), where (their feet against where they were drawn, map units), how well they scored, whether as the
 frame and facing drawn (of those the game's sprites matched: a screenshot cut-out, at 1920x1080, says no frame), what
 was found that wasn't drawn (on the frames as they are, and in the scenes), and how long each search took. Drops
-likewise, each searched in a strip just above where it lies, as Senses searches a platform.
+likewise, each searched in a strip just above where it lies, as Senses searches a platform. And re-finds
+(`refinds`): each sprite found, then drawn where it stood as the frame it may show next, and looked for again there as
+the feed does each frame (MobDetector.refind).
 
 Where a look frame's px are in the game's own picture: a px's middle, as the stretch and the shrink put it (`_game`).
 At half size of the 1920x1080 window that's (x + 0.5) * 1.42 - 0.5, not x * 1.42: by the px's edge, the feet of the
@@ -22,6 +24,7 @@ of them), by its middle 0.06 left and 0.02 down. At the game's own size it's the
 """
 
 import math
+import re
 import statistics
 import time
 from collections.abc import Callable
@@ -43,6 +46,10 @@ GAP = 12             # game px kept between two drawn
 TOP = 40             # game px from the top a picture may start (the window's title strip, the party HP box)
 FEET_TOL = 10        # map units across and down a monster found may be from where it was drawn and count
 ITEM_TOL = 6         # ... a drop found
+FEET_NEAR = 1        # map units across and down a re-found monster's feet may be from where it was drawn, to count as
+                     # placed right (a fight aims by them)
+# What a monster may show in the next frame of a look, after the frame it was found as (`refinds`)
+STEPS = ("unchanged", "its pose's next frame", "standing to walking or back", "a flinch")
 STRIP_PAD = 40       # map units either side of a drop its strip reaches
 STRETCH_TO = STRETCHED.client
 
@@ -270,6 +277,106 @@ def _at(item, d: Drawn, upp: float) -> bool:
     x, y = _middle(d)
     return (item.kind == d.kind and abs(_game(item.x, upp) - x) <= ITEM_TOL
             and abs(_game(item.y, upp) - y) <= ITEM_TOL)
+
+
+@dataclass
+class Refound:
+    """What re-finding made of monsters drawn again as a frame they may show next (`refinds`), for one size and step."""
+    n: int = 0             # found first, then re-found
+    found: int = 0         # found again (with the fallback to the kind's whole set, as a live track is)
+    feet: int = 0          # ... with its feet within FEET_NEAR of where it was drawn
+    as_drawn: int = 0      # ... as the frame and facing drawn
+    fallbacks: int = 0     # re-finds that went on to the kind's whole set
+    hidden: int = 0        # found again without the fallback, as a hidden track is
+    times: list = field(default_factory=list)  # s, each re-find with the fallback
+
+
+def _frames_by_pose(names: list[str]) -> dict[tuple[str, str], list[str]]:
+    """The game's sprites' names ("<kind>_<action><index>", sprites.build) by kind and action, in their order."""
+    out: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    for name in names:
+        m = re.fullmatch(r"(.+)_(stand|move|hit1)(\d+)", name)
+        if m:
+            out.setdefault((m.group(1), m.group(2)), []).append((int(m.group(3)), name))
+    return {k: [n for _, n in sorted(v)] for k, v in out.items()}
+
+
+def refinds(backgrounds: list[np.ndarray], detectors: dict[str, tuple[MobDetector, Geometry]], folder: Path,
+            band: tuple[float, float], seed: int = 3, kinds: set[str] | None = None) -> dict:
+    """Each standing and walking sprite in `folder` (a native sprite folder) of the kinds the detectors know (of
+    `kinds` only, if given), both ways, drawn at a random place on one of the backgrounds in turn and found there (a
+    fight's band around it), then drawn instead, its feet where they were, as each frame it may show next (STEPS:
+    itself, its pose's next, the first of standing or walking, whichever it wasn't, its flinch) and looked for again
+    around where it was (MobDetector.refind, within the play area, as the feed does each frame), with the fallback to
+    the kind's whole set and without: by detector and step, a Refound."""
+    pics = {name: (rgba, origin) for name, rgba, origin in pictures(folder) if origin is not None}
+    kinds = set.intersection(*(set(d.templates) for d, _ in detectors.values()), *([kinds] if kinds else []))
+    poses = _frames_by_pose(list(pics))
+    todo = []  # (kind, the frame found, the frame drawn next, step)
+    for (kind, action), names in sorted(poses.items()):
+        if kind not in kinds or action == "hit1":
+            continue
+        other = poses.get((kind, "move" if action == "stand" else "stand"), [])
+        flinch = poses.get((kind, "hit1"), [])
+        for i, a in enumerate(names):
+            nexts = (a, names[(i + 1) % len(names)] if len(names) > 1 else None, other[0] if other else None,
+                     flinch[0] if flinch else None)
+            todo += [(kind, a, b, step) for step, b in zip(STEPS, nexts) if b is not None]
+    rng = np.random.default_rng(seed)
+    h, w = backgrounds[0].shape[:2]
+    out = {name: {step: Refound() for step in STEPS} for name in detectors}
+    for k, (kind, a, b, step) in enumerate(todo):
+        for flip in (False, True):
+            # (its feet 300 game px from the left: clear of the minimap; room for its body above and the bar below)
+            fx, fy = int(rng.integers(300, w - 80)), int(rng.integers(TOP + 110, int(h * HUD_TOP) - 10))
+            scenes, drawn = [], []
+            for name in (a, b):
+                rgba, origin = pics[name]
+                pic = rgba[:, ::-1] if flip else rgba
+                ox = pic.shape[1] - origin[0] if flip else origin[0]
+                scene = backgrounds[k % len(backgrounds)].copy()
+                paste(scene, pic, int(fx - ox), int(fy - origin[1]))
+                scenes.append(scene)
+                drawn.append(Drawn(kind, name, 1 if flip else -1, int(fx - ox), int(fy - origin[1]), pic.shape[1],
+                                   pic.shape[0], (fx, fy)))
+            for label, (det, geo) in detectors.items():
+                upp = geo.units_per_px
+                before, after = (look_frame(s if geo.native else stretched(s, geo.client), geo) for s in scenes)
+                bottom = int(before.shape[0] * HUD_TOP)
+                rows = (max(0, int((fy - band[0]) / upp)), min(bottom, int((fy + band[1]) / upp)))
+                m = _nearest(det.detect(before, rows), drawn[0], upp, set())
+                if m is None:
+                    continue
+                r = out[label][step]
+                r.n += 1
+                box = (m.x - m.w // 2, m.y - m.h // 2, m.x + m.w // 2, m.y + m.h // 2)
+                bounds = (0, 0, after.shape[1], bottom)
+                fallbacks = det.fallbacks
+                again = _timed(lambda: det.refind(after, box, kind, m.template, m.facing, bounds), r.times)
+                r.fallbacks += det.fallbacks - fallbacks
+                if again is not None:
+                    r.found += 1
+                    r.feet += (abs(_game(again.foot_x, upp) - fx) <= FEET_NEAR
+                               and abs(_game(again.feet_y, upp) - fy) <= FEET_NEAR)
+                    r.as_drawn += again.template == b and again.facing == drawn[1].facing
+                r.hidden += det.refind(after, box, kind, m.template, m.facing, bounds, fallback=False) is not None
+    return out
+
+
+def refind_lines(result: dict) -> list[str]:
+    """A report of `refinds`, one block a detector."""
+    out = []
+    for name, steps in result.items():
+        out.append(f"{name}:")
+        for step, r in steps.items():
+            if not r.n:
+                continue
+            ts = sorted(r.times)
+            out.append(f"   {step:28s} {r.found} of {r.n} found again ({r.feet} with their feet within {FEET_NEAR} "
+                       f"unit, {r.as_drawn} as the frame drawn), {r.fallbacks} going on to the kind's whole set; "
+                       f"{1000 * statistics.median(ts):.1f} ms a re-find (median; at 90% "
+                       f"{1000 * ts[int(0.9 * (len(ts) - 1))]:.1f}); without the fallback {r.hidden} found again")
+    return out
 
 
 def lines(result: dict, what: str = "monsters") -> list[str]:

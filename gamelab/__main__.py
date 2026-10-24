@@ -994,6 +994,11 @@ def cmd_bench_paste(args) -> int:
         result = pasted.monsters(backgrounds, detectors, sprites.folder_for(NATIVE.stretch),
                                  (reach.LOOK_UP, reach.LOOK_DOWN), args.each, args.seed, kinds)
         print("\n".join("   " + line for line in pasted.lines(result)))
+        print("re-finds (each found, then drawn where it stood as a frame it may show next, and looked for again "
+              "there as the feed does):")
+        result = pasted.refinds(backgrounds, detectors, sprites.folder_for(NATIVE.stretch),
+                                (reach.LOOK_UP, reach.LOOK_DOWN), args.seed + 2, kinds)
+        print("\n".join("   " + line for line in pasted.refind_lines(result)))
     found = {"1366x768, full size": (loot.LootDetector(geo=NATIVE), NATIVE),
              "1920x1080 (the scene stretched), half size": (loot.LootDetector(geo=STRETCHED), STRETCHED)}
     print("drops:")
