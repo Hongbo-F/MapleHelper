@@ -7,7 +7,8 @@ After each look, the first rule that applies decides (the design's numbering; at
 in the order listed, 6 before 3):
 
    1  close quarters   a target on her platform the claw would swipe (stance.close_to, by its size: a pig
-                       within 111, a snail within 96): stance's answer (jump back, jump-throw, step back)
+                       within 111, a snail within 96), or nearer than its danger warrants (attack.danger: a
+                       Horny Mushroom within 162): stance's answer (jump back, jump-throw, step back)
   6a  valuable pile    a pile with a drop worth VALUABLE mesos or more on its own (looting.Worth: the game
                        data's prices; on the first map a Slime Bubble, a White Potion, a gold coin; on another
                        twice its bronze coin, `valuable`) within VALUABLE_TRAVEL: at once, ahead of shooting,
@@ -104,14 +105,14 @@ SPOT_CHANGES = 4       # ... and at most this many times per visit to a ground
 # hunt loops' time (rule 8, 6.2%; rule 9, 5.3%) and 20 of their 43 departures from a ground.
 RESPAWN = 8.0
 PATIENCE = {"ground": 1.0, "spot": 2.0, "none": 0.4}  # rule 9: today's patience values
-# A ground's EXP a second (the rate rule, the next ground) counts 1 - GROUND_DANGER x the danger where she stands to hunt
-# it (its spot's: attack.spots, the spawn points' monsters at their points), never under 0: on Tree Dungeon 23 shot from
-# 24 (danger 0.07) keeps 86%, 10 hunted standing among its two Horny Mushrooms (0.18) 64%. In the simulator's crowd
-# (harness: the whole map, 20 seeds of 20 minutes, Lucky Seven), with the spots by danger and without this she lost
-# 1.39 bars of HP a minute alive, as she did before them, and 14 of the 20 died; with it 1.09 and 6, with 41% more
-# kills: she hunted 23 from 24, 15 from 16 and the floor more, 10 among its Hornies less (README: Positioning). At 1.0
-# 1.12 a minute and 8 died, at 3.0 1.00 and 3 (a run each, before the spots kept GROUND_MARGIN). Where nothing counts
-# as a danger (the first map), every ground counts all of its EXP, as before.
+# A ground's EXP a second (the rate rule, the next ground) counts 1 - GROUND_DANGER x the danger where she'd stand to
+# hunt it (its spot's: attack.spots, the spawn points' monsters at their points), never under 0: on Tree Dungeon 23
+# shot from 24 (danger 0.07) keeps 86%, 10 hunted standing among its two Horny Mushrooms (0.18) 64%. In the simulator's
+# crowd (harness: the whole map, 20 seeds of 20 minutes, Lucky Seven), with the spots by the danger but every ground's
+# EXP counted whole she lost 1.39 bars of HP a minute alive, as before them, and 13 of the 20 died (14 before); with
+# this 1.03 and 6, and she hunted 23 from 24, 15 from 16 and the floor more, 10 among its Hornies less (README:
+# Positioning). At 1.0 she lost 1.12 a minute and 8 died, at 3.0 1.00 and 3 (a run each, before the spots kept
+# GROUND_MARGIN). Where nothing counts as a danger (the first map), every ground counts all of its EXP, as before.
 GROUND_DANGER = 2.0
 PRIOR_S = 20.0         # the rate rule: a ground's expected rate counts as this many s of hunting there
 MIN_STAY, MIN_THROWS = 15.0, 6  # ... judged only after this long there, or this many throws
@@ -606,8 +607,11 @@ class Hunt:
 
     def _close_quarters(self, s: Scene, monsters) -> bool:
         """Rule 1: one of `monsters` on her platform is as close as stance's own threshold (close_to: the
-        claw would swipe it, by its size)."""
-        return any(m.platform == s.platform.id and close_to(m, s.where.x, self._halves) for m in monsters)
+        claw would swipe it, by its size; or nearer than its danger warrants: Danger.keep_off)."""
+        x, d = s.where.x, self.danger
+        return any(m.platform == s.platform.id and (close_to(m, x, self._halves)
+                                                     or (d is not None and abs(m.x - x) < d.keep_off(m.kind)))
+                   for m in monsters)
 
     def _owed(self, s: Scene, around: list[Monster]) -> list[Monster] | None:
         """Rule 4b: with an objective on another platform (she's set off, or about to: every rule that takes her
@@ -643,7 +647,7 @@ class Hunt:
         here = s.platform
         return stance(s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
                       can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops,
-                      halves=self._halves, around=visible + hidden)
+                      halves=self._halves, around=visible + hidden, danger=self.danger)
 
     def _shoot(self, s: Scene, targets, visible, hidden, now: float, rule: str, approach: bool) -> None:
         """One step of stance's answer: a throw (fight's bookkeeping kept), or a walk."""
@@ -689,7 +693,7 @@ class Hunt:
         here = s.platform
         act = stance(s.where.x, s.where.y, here, above, False, self.h.actions.facing,
                      can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
-                     around=s.monsters)
+                     around=s.monsters, danger=self.danger)
         return act if act[0] == "back" and act[2] <= PASS_STEP else None
 
     def _passing_shot(self, s: Scene, targets, others, visible, hidden, now: float) -> None:

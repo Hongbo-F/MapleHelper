@@ -22,6 +22,13 @@ search picks a small or a short one from farther off).
 A snail too close for a star from the ground is never jump-thrown at (JUMP_THROW_SNAILS): she steps back to
 where a throw from the ground is a star if her platform has the room, else stabs it (not to a short platform's
 far end: SNAIL_FAR_END).
+With the map's danger (attack.danger), the group policy lets a monster of a kind that hits hard come only as near
+as its danger warrants (Danger.keep_off: a Horny Mushroom 162 units on Tree Dungeon; no kind on the first map, and
+on West Rocky Mountain II an Axe Stump's 80 is inside the claw's reach), and then does whichever of a jump back, a
+step away and a throw from where she is leaves her the least danger (_escape: the monsters around her and the spawn
+points they don't account for; a jump back toward another one, or onto a spawn point, isn't an escape). From where
+she is it's a throw from the ground, a jump throw only where that would be a claw swipe: a jump in place by one
+walks it into her as she lands.
 """
 
 from collections.abc import Callable
@@ -34,16 +41,11 @@ from ..localization.monsters import DEFAULT_SPEED, MONSTER_SPEED, MONSTER_TOP, M
 from ..motion import physics
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from . import reach
+from .danger import Danger
 
 
 # Distances in map units.
 TOO_CLOSE = 110    # a monster on her platform nearer than this is about to touch her: step away first
-# Kinds that hit hard enough to keep further off on her platform than the claw's reach (the group policy, `stance`,
-# reacts to others only once a throw from the ground would be a swipe, about 95 units): a Horny Mushroom touches for
-# 110 of her 752 HP (twice a Green Mushroom's 54) and walks 100 units/s, 75 in a throw's lock. Live on Tree Dungeon
-# on 2026-10-24 she fought them close and the user saw her "take a lot of hit damage from the horny mushrooms".
-# Within KEEP_OFF of one she jumps back and throws, or steps away; with no room for either, throws from where she is.
-KEEP_OFF = {"horny-mushroom": 170}
 STEP_AWAY = 120    # how far she steps away from a monster too close
 STEP_ROOM = 40     # the least room worth stepping away into (with less she fights from where she is)
 KNOCKBACK_ROOM = 25  # extra room kept from her platform's ends while monsters share it: standing ~100
@@ -146,7 +148,7 @@ def open_above(model: MapModel, platform: Platform, x0: float, x1: float) -> boo
 def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approach: bool = True,
            facing: str | None = None, can_jump: Callable[[float, float], bool] | None = None,
            tops: dict[str, float] | None = None, halves: dict[str, float] | None = None,
-           around: list[Monster] | None = None) -> tuple:
+           around: list[Monster] | None = None, danger: Danger | None = None) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units) to step away,
@@ -158,18 +160,19 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     (close_to). `tops`: how tall each kind is at least, `halves`: half its width (the map's game data,
     localization.monsters.bodies; MONSTER_TOP and MONSTER_HALF by default). `around`: every monster around
     her, of any kind (`wanted` by default): one the attack takes first whose star is stopped shields those
-    behind it (reach.shielded)."""
+    behind it (reach.shielded). `danger`: the map's (attack.danger), for how near a monster that hits hard may come
+    (Danger.keep_off) and where she goes from it (_escape)."""
     can_jump = can_jump or (lambda a, b: True)
     around = wanted if around is None else around
     mine = [t for t in wanted if t.platform == platform.id]
     lo, hi = _stand_limits(platform, crowded=bool(mine))
-    close = [t for t in mine if close_to(t, x, halves)  # a throw from the ground would be a claw swipe
-             or abs(t.x - x) < KEEP_OFF.get(t.kind, 0)]   # ... or it hits too hard to let it come closer
+    close = [t for t in mine if close_to(t, x, halves)  # a throw from the ground would be a claw swipe ...
+             or (danger is not None and abs(t.x - x) < danger.keep_off(t.kind))]  # ... or it hits too hard
     in_reach = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around)]
     if close:
         return _close_quarters(x, close, mine, facing, lo, hi, can_jump, tops or MONSTER_TOP, halves,
                                (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
-                               else None)
+                               else None, danger, platform, around)
     if in_reach:
         return ("throw", _throw_side(x, in_reach, facing))
     act = _step_from_under(x, y, platform, wanted, lo, hi, around)
@@ -202,7 +205,9 @@ def close_to(t: Monster, x: float, halves: dict[str, float] | None = None) -> bo
 
 def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing: str | None, lo: float,
                     hi: float, can_jump: Callable[[float, float], bool], tops: dict[str, float],
-                    halves: dict[str, float] | None = None, ends: tuple[float, float] | None = None) -> tuple:
+                    halves: dict[str, float] | None = None, ends: tuple[float, float] | None = None,
+                    danger: Danger | None = None, platform: Platform | None = None,
+                    around: list[Monster] | None = None) -> tuple:
     """A monster on her platform too close for a throw from the ground (`close`; `mine`: all on her
     platform), the nearest one deciding (on the side she faces, if any is): jump away from it and throw
     back from the air, if there's room behind her and no monster there; cornered, straight up. Each only
@@ -213,7 +218,9 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     `halves`), else from where she is (the claw swipes it: weak, but every swipe hits). So is a snail
     (too short for a jump back's attack) unless JUMP_THROW_SNAILS: she steps back as far as it walks at her
     meanwhile past star_sure, within `lo` and `hi` (or `ends`, with SNAIL_FAR_END: on a short platform, its far
-    end), else stabs it. `lo`, `hi`: where she keeps to with monsters about."""
+    end), else stabs it. `lo`, `hi`: where she keeps to with monsters about. With `danger` (on `platform`, the
+    monsters `around` her), one of a kind she keeps further off than the claw's reach (Danger.keep_off) is escaped
+    as _escape has it."""
     on_facing = [t for t in close if _side_of(t, x) == facing]
     nearest = _nearest(on_facing or close, x)
     side = _side_of(nearest, x)
@@ -223,6 +230,10 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     behind = [t for t in mine if 0 < (t.x - x) * back < JUMP_BACK_CLEAR]
     top = tops.get(nearest.kind, MONSTER_TOP["pig"])  # a kind of unknown size: a pig's
     small = not reach.air_hits(top, physics.JUMP_BACK_ATTACK_MS)  # a snail
+    if (danger is not None and platform is not None and not small
+            and danger.keep_off(nearest.kind) > reach.claw_edge(half_of(nearest.kind, halves))):
+        return _escape(x, side, room, can_jump, danger, platform, mine if around is None else around,
+                       close_to(nearest, x, halves))
     if not small and room >= JUMP_BACK_ROOM and not behind and can_jump(x, x + back * JUMP_BACK_SPAN):
         return ("jump_back", side)
     if small and not JUMP_THROW_SNAILS:
@@ -238,8 +249,6 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
         if room >= step and not behind:
             return ("back", away, step)
         return ("throw", side)
-    if nearest.kind in KEEP_OFF and room >= STEP_ROOM and not behind:  # never a jump in place by one of them
-        return ("back", away, min(STEP_AWAY, room))
     if can_jump(x, x):
         return ("jump_throw", side)
     # A platform just overhead: a jump lands her on it (on 20, five jump-throws at a snail put
@@ -247,6 +256,29 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     if room >= STEP_ROOM and not behind:
         return ("back", away, min(STEP_AWAY, room))
     return ("throw", side)
+
+
+def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float], bool], danger: Danger,
+            platform: Platform, around: list[Monster], swipe: bool) -> tuple:
+    """From a monster on her platform that hits hard, on `side` of her, too near (Danger.keep_off): of a jump back
+    (JUMP_BACK_SPAN away, throwing back; with JUMP_BACK_ROOM of `room` behind her), a step away (STEP_AWAY, or the
+    room there is, STEP_ROOM at least) and a throw from where she is, the one leaving her the least danger (Danger.at,
+    with the monsters `around` her and the spawn points they don't account for), the first of those of equal danger.
+    From where she is it's a throw from the ground, or a jump throw where that would be a claw swipe (`swipe`) and a
+    jump doesn't land her on a platform overhead. A monster behind her makes the way back worse by its own danger,
+    not a rule of its own: with a Horny Mushroom on each side of her on Tree Dungeon's 23 the jump back (no monster
+    within JUMP_BACK_CLEAR behind) almost never could."""
+    away = directions.opposite(side)
+    back = directions.sign(away)
+    options = []  # (danger there, order, act)
+    if room >= JUMP_BACK_ROOM and can_jump(x, x + back * JUMP_BACK_SPAN):
+        options.append((danger.at(platform.id, x + back * JUMP_BACK_SPAN, around), 0, ("jump_back", side)))
+    if room >= STEP_ROOM:
+        step = min(STEP_AWAY, room)
+        options.append((danger.at(platform.id, x + back * step, around), 1, ("back", away, step)))
+    options.append((danger.at(platform.id, x, around), 2,
+                    ("jump_throw", side) if swipe and can_jump(x, x) else ("throw", side)))
+    return min(options, key=lambda o: (round(o[0], 6), o[1]))[2]
 
 
 def _throw_side(x: float, in_reach: list[Monster], facing: str | None) -> str:

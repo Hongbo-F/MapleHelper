@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-from gamelab.attack import danger, spots
+from gamelab.attack import danger, spots, stance
 from gamelab.attack.danger import HER_TALL, HOP_CHANCE, THREAT_S, Danger, Her, soon, touch_taken
 from gamelab.localization import mapdata
 from gamelab.localization.monsters import Monster
@@ -172,6 +172,24 @@ def test_where_no_kind_counts_spots_are_as_they_were():
     assert spots.spot(model, g, here, lambda a, x, b: 1.0, None, danger=d) == spots.spot(model, g, here,
                                                                                          lambda a, x, b: 1.0, None)
     assert spots.spots(model, g, d) == spots.spots(model, g) and spots.spot_at(model, g, None, d) == (g, 200.0)
+
+
+def test_a_monster_that_hits_hard_is_kept_off_and_escaped_to_the_least_danger():
+    model = build([(0, 500, 1000, 500)], [("19", 650, 500), ("19", 330, 500)])
+    d, p = Danger(model, HER), model.platform(0)
+    front = seen("horny-mushroom", 650, 500, p.id)
+    # 150 off: past the claw's reach, inside its keep-off (162): without the danger a throw, with it a jump back.
+    assert stance.stance(500, 500, p, [front]) == ("throw", "right")
+    assert stance.stance(500, 500, p, [front], danger=d) == ("jump_back", "right")
+    # Another 170 behind her: the jump back would land her 75 from it, a step 50: she throws from where she is.
+    behind = seen("horny-mushroom", 330, 500, p.id)
+    assert stance.stance(500, 500, p, [front, behind], danger=d) == ("throw", "right")
+    # Inside the claw's reach a throw from the ground would be a swipe: from where she is, a jump throw.
+    near = seen("horny-mushroom", 590, 500, p.id)
+    assert stance.stance(500, 500, p, [near, behind], danger=d) == ("jump_throw", "right")
+    # A Green Mushroom (7.2%) is let come to the claw's reach, as before.
+    green = seen("green-mushroom", 650, 500, p.id)
+    assert stance.stance(500, 500, p, [green], danger=d) == stance.stance(500, 500, p, [green]) == ("throw", "right")
 
 
 def test_a_ground_counts_less_of_its_exp_the_more_dangerous_its_stand():

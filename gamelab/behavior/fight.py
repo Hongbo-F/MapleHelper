@@ -329,7 +329,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     tops, halves = body_sizes(h.model)
     act = stance(s.where.x, s.where.y, here, fight, approach, h.actions.facing,
                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
-                 around=visible + hidden)
+                 around=visible + hidden, danger=h.danger)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
@@ -460,7 +460,8 @@ def _plain_stance(h: "Hunter", s: Scene, targets: list[Monster], around: list[Mo
     here = s.platform
     tops, halves = body_sizes(h.model)
     return stance(s.where.x, s.where.y, here, targets, approach, h.actions.facing,
-                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves, around=around)
+                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves, around=around,
+                  danger=h.danger)
 
 
 def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], gains: int,

@@ -60,7 +60,8 @@ HOP_CHANCE = 0.25
 # A fight lets a monster on her platform come as near as where its danger reaches this (keep_off): then she jumps back
 # or steps away (attack.stance). Half a Horny Mushroom's touch (8% of her HP): it walks at her 100 units/s, and this
 # keeps it 162 units off, where a fix in game on 2026-10-24 had 170 for that kind alone (stance.KEEP_OFF); a Green
-# Mushroom (7.2%) or an Axe Stump (10.8% at 62.5 units/s: 80 units) is let as near as the claw would swipe it, as before.
+# Mushroom (7.2%) or an Axe Stump (10.8% at 62.5 units/s: 80 units) is let as near as the claw would swipe it, as
+# before.
 KEEP_DANGER = 0.08
 
 
