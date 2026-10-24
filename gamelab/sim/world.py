@@ -80,8 +80,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   HP potion key gives 30% HP, the chair key sits her down (+3% HP/s) until an arrow stands her up; her pet
   (Her.pet), if she has one, drinks a potion for her right after a touch leaves her under its warning.
 
-Her HP, her level and EXP when a run starts, her evasion and her pet are `Her`'s: LEVEL_19 on the first map,
-LEVEL_23 on West Rocky Mountain II, LEVEL_24 on Tree Dungeon, Forest Up North II. A monster of a kind the first map
+Her HP, her level and EXP when a run starts, her evasion, her pet and what her attack does (her regular attack's star,
+or Lucky Seven as thrown live: LUCKY_SEVEN) are `Her`'s: LEVEL_19 on the first map, LEVEL_23 on West Rocky Mountain II,
+LEVEL_24 on Tree Dungeon, Forest Up North II. A monster of a kind the first map
 hasn't takes as many stars as its HP and defence in the game data say (hits_of), and its body is as tall and wide as
 its frames there (_body_of).
 
@@ -243,6 +244,16 @@ KNOCK_MOB = 18.0
 KNOCK_MOB_S = 0.25
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
 CLAW_DAMAGE = (9, 11)
+# What one of her attacks does, in stars (Her.stars): 1, her regular attack's star as above (and a swipe its CLAW of
+# one); LUCKY_SEVEN, Lucky Seven as she threw it live on Tree Dungeon, Forest Up North II (tour --loop --skill,
+# 2026-10-24, 26.9 minutes): 3.85 throws a Horny Mushroom's kill and 2.95 a Green's, by the kills her EXP gains named,
+# where the regular attack's 9 and 5 stars (HITS' fit, stars_to_kill) take 12.4 and 6.9 with preset game's misses. At
+# 3 stars a cast they take 4.1 and 2.8 there. Lucky Seven has no stab of its own up close (the stab is the regular
+# attack's: README, Attack), so with it a swipe's pick takes a cast's damage too; its MP isn't kept.
+LUCKY_SEVEN = 3.0
+# A touch by a monster within this many s of its respawn came from its spawn point, onto her or beside her (World.
+# fresh_log): what a waiting place by a spawn point costs.
+FRESH_S = 1.5
 # ... but a hit pushes it (and it flinches) only if its damage, after the monster's defence (x 100 / (PDDamage + 100),
 # as STAR_DAMAGE's), reaches its `pushed` in the game data: 1 for every kind of the first map (any damage, as above),
 # 40 for a Horny Mushroom and 25 for a Green Mushroom on Tree Dungeon, Forest Up North II, 30 for an Axe Stump and 25
@@ -521,6 +532,8 @@ class Her:
     evade: float = 0.0           # her evasion against a touch, as EVADE_ACC (her chance is this over the monster's
                                  # accuracy); 0: EVADE_ACC, as fitted
     potion: float | None = None  # HP a potion of hers heals (her key's and her pet's); None: POTION_HP of her HP
+    stars: float = 1.0           # what one of her attacks does, in stars: 1 the regular attack (a swipe CLAW of one);
+                                 # LUCKY_SEVEN, Lucky Seven as thrown live (a swipe's pick as much)
 
 
 LEVEL_19 = Her()
@@ -729,6 +742,7 @@ class SimMonster:
     anim0: float = 0.0         # ... and when it began to stand or walk (its animation's start)
     pushed: tuple[float, float] | None = None  # a hit's (when, from x): pushed from there to x0 (knock)
     life: int = 0              # how often it has come back (a camp's kill is for the life it was drawn in)
+    born: float | None = None  # when it last came back (None: there from the start)
 
     @property
     def lo(self) -> float:
@@ -885,6 +899,8 @@ class World:
         self.hp_low = hp                # her lowest HP so far
         self.kill_log: list[tuple[float, str, int, str]] = []  # (t, kind, platform, "her" or "rival")
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
+        self.fresh_log: list[tuple[float, float]] = []  # ... of those, the touches by a monster within FRESH_S of its
+                                                        # respawn (from its spawn point)
         self.actions = _actions(keys)
         self.held: dict[str, float] = {}  # action -> the clock time it went down (as sent)
         self._events: list[tuple[int, int, Event]] = []
@@ -1124,6 +1140,7 @@ class World:
             m = e.data
             m.alive, m.hp, m.died_at, m.hit_at, m.flinch_at = True, m.hp_max, None, None, None
             m.life += 1
+            m.born = self.t
             m.start(self.t, m.home)
             self._camps_watch(m)
         elif e.kind == "rival":
@@ -1479,6 +1496,8 @@ class World:
         evaded = self.chance("evade") < evade_chance(m.info, self.character)
         damage = 0.0 if evaded else touch_damage(m.info, self.chance("damage"), self.character)
         self.touch_log.append((self.t, damage))
+        if m.born is not None and self.t - m.born < FRESH_S:
+            self.fresh_log.append((self.t, damage))
         if evaded:
             self.evaded += 1
             self.note(f"touched by {m.kind} #{m.idx} at x {mx:.0f}: MISS")
@@ -1653,7 +1672,8 @@ class World:
         if not swipe and self.noise.miss and self.chance("miss") < self.noise.miss:
             self.note(f"star misses {m.kind} #{m.idx} at {dx:+.0f}")
             return
-        m.hp = round(m.hp - (CLAW if swipe else 1.0), 6)
+        stars = self.character.stars
+        m.hp = round(m.hp - (stars if stars != 1.0 else CLAW if swipe else 1.0), 6)
         if m.hp > 1e-9:
             m.hit_at = self.t
             if self._pushes(m, swipe):

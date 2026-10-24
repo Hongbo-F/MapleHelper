@@ -33,6 +33,11 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    in such stretches
   rest_hp_lost     HP lost to touches on the trips to rest (from 'rest_trip' to 'rest' events), and
                    rest_trips: how many (the bar for `--rest-avoid`: compare --bar rest)
+  alive_s          the seconds of the horizon she was hunting (to her death, fall or portal): rates a minute alive
+  fresh_hurt       touches that hurt her by a monster within world.FRESH_S of its respawn (from its spawn point),
+                   and fresh_hp_lost, the HP they took
+  wait_s           seconds the hunt loop spent waiting for respawns (its rules 'wait' and 'lull loot', from its 'hunt'
+                   records), and wait_hp_lost, the HP touches took then
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances
@@ -57,7 +62,7 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
-from .world import DROP_LIFE, MAP_DROPS, ROPE_REACH_CLIENT, Camp, Noise, Realism
+from .world import DROP_LIFE, LUCKY_SEVEN, MAP_DROPS, ROPE_REACH_CLIENT, Camp, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -118,11 +123,13 @@ PRESET_MAPS = {"crowd": (TREE,), "crowd-slow": (TREE,)}
 # group 0's walls stopping her whatever her group, the map's sides as HeavenClient has them, a rope grabbed as it does
 # (82 up at most), a touch's HP as a share of PADamage (as fitted on the first map) rather than meowdb's formula, and
 # no evasion at all (the study: at EVA 42 she'd evade no Horny Mushroom), and her potions Red Potions (100 HP: which
-# she carries isn't known; world.POTION_HP's 30% otherwise, 226 HP on Tree Dungeon).
+# she carries isn't known; world.POTION_HP's 30% otherwise, 226 HP on Tree Dungeon). And how she plays: `lucky-seven`,
+# her attacks as Lucky Seven's live (`tour --loop --skill`: world.LUCKY_SEVEN, a Horny Mushroom's kill in about 4
+# throws, not 12), the stack unchanged (the simulator acts on its key as on the attack's).
 WORLDS = {"zero-walls": {"zero_walls": True}, "client-sides": {"sides": "client"},
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
-          "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}}
-HER_FIELDS = ("defence", "evade", "potion")
+          "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN}}
+HER_FIELDS = ("defence", "evade", "potion", "stars")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
@@ -281,7 +288,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     times = sorted([0.0] + [k[0] for k in mine] + [d.taken_at for d in world.drops if d.taken_by == "her"] + [end])
     gaps = [b - a for a, b in zip(times, times[1:])]
     events = [r for r in records if r.get("topic") == "event"]
-    trips = _rest_trips(records)
+    trips, waits = _rest_trips(records), _waits(records)
     return {
         "exp": world.exp,
         "exp_per_min": round(world.exp / (horizon / 60), 2),
@@ -305,6 +312,12 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "rest_trips": len(trips),
         "rest_hp_lost": round(sum(hp for t, hp in world.touch_log
                                   if t <= end and any(a <= t <= b for a, b in trips)), 3),
+        "alive_s": round(end, 1),
+        "fresh_hurt": sum(1 for t, hp in world.fresh_log if hp > 0 and t <= end),
+        "fresh_hp_lost": round(sum(hp for t, hp in world.fresh_log if t <= end), 3),
+        "wait_s": round(sum(max(0.0, min(b, end) - a) for a, b in waits), 1),
+        "wait_hp_lost": round(sum(hp for t, hp in world.touch_log if t <= end and any(a <= t <= b for a, b in waits)),
+                              3),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
 
@@ -322,6 +335,30 @@ def _rest_trips(records: list[dict]) -> list[tuple[float, float]]:
         if r.get("kind") == "rest_trip":
             began = r["t"] - start
         elif r.get("kind") == "rest" and began is not None:
+            out.append((began, r["t"] - start))
+            began = None
+    if began is not None:
+        out.append((began, float("inf")))
+    return out
+
+
+WAITING = ("wait", "lull loot")  # the hunt loop's rules for waiting out respawns (behavior.hunt: 9 and 8)
+
+
+def _waits(records: list[dict]) -> list[tuple[float, float]]:
+    """(start, end) of each stretch the hunt loop's rule was one of WAITING, in world time (s from the run's start):
+    from the 'hunt' record that names one to the next that names another rule (or the end)."""
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    if start is None:
+        return []
+    out, began = [], None
+    for r in records:
+        if r.get("topic") != "hunt":
+            continue
+        waiting = r.get("rule") in WAITING
+        if waiting and began is None:
+            began = r["t"] - start
+        elif not waiting and began is not None:
             out.append((began, r["t"] - start))
             began = None
     if began is not None:
@@ -348,7 +385,8 @@ def _run_one_args(a: tuple) -> dict:
 
 COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "died_at", "fell_out_at",
            "left_map_at",
-           "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost")
+           "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost",
+           "alive_s", "hurt", "fresh_hurt", "wait_s", "wait_hp_lost")
 
 
 def table(results: list[dict]) -> str:

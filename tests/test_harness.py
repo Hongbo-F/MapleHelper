@@ -206,6 +206,48 @@ def test_outcomes_are_read_from_the_world(model):
     assert harness.outcomes(w, [], DROP_LIFE + 1)["drops_share"] == 0.0
 
 
+def test_lucky_seven_does_three_stars_a_cast(model):
+    """`--world lucky-seven` (world.Her.stars): a pig, 3 of the regular attack's stars (HITS), dies to one cast."""
+    c = plat(model, 500, 400)
+    for stars, alive in ((1.0, True), (world_mod.LUCKY_SEVEN, False)):
+        w = still(world(model, c.id, 100.0, monsters=[("Pig", c.id, 400.0)], facing="right",
+                        character=world_mod.Her(stars=stars)))
+        tap(w, 0.0, "f", 0.04)
+        w.advance(1.5)
+        assert w.monsters[0].alive is alive
+    assert harness.WORLDS["lucky-seven"] == {"stars": world_mod.LUCKY_SEVEN} and "stars" in harness.HER_FIELDS
+
+
+def test_a_touch_by_a_monster_just_back_at_its_spawn_point_is_a_fresh_one(model):
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 300.0)], facing="right"))
+    tap(w, 0.0, "f", 0.04)  # one star kills a snail
+    w.advance(2.0)
+    assert not w.monsters[0].alive and not w.touch_log
+    w.x = 300.0  # waiting on its spawn point: it comes back on her
+    w.advance(2.0 + world_mod.RESPAWN)
+    born = w.monsters[0].born
+    assert born is not None and w.fresh_log and w.fresh_log == w.touch_log  # every touch then (a second apart)
+    assert all(t - born < world_mod.FRESH_S for t, _ in w.fresh_log)
+
+
+def test_waiting_and_the_touches_then_are_counted_from_the_hunt_loop_s_rules(model):
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0))
+    w.touch_log = [(5.0, 0.1), (12.0, 0.05), (13.0, 0.0), (30.0, 0.02)]
+    w.fresh_log = [(12.0, 0.05), (13.0, 0.0)]  # (an evaded one doesn't hurt)
+    t0 = 1000.0
+    records = [{"topic": "session", "t": t0}, {"topic": "hunt", "rule": "shoot", "t": t0 + 1.0},
+               {"topic": "hunt", "rule": "wait", "t": t0 + 10.0}, {"topic": "hunt", "rule": "wait", "t": t0 + 11.0},
+               {"topic": "hunt", "rule": "shoot", "t": t0 + 15.0}, {"topic": "hunt", "rule": "lull loot", "t": t0 + 25.0}]
+    out = harness.outcomes(w, records, 60.0)
+    assert out["wait_s"] == pytest.approx(5.0 + 35.0) and out["wait_hp_lost"] == pytest.approx(0.07)
+    assert out["fresh_hurt"] == 1 and out["fresh_hp_lost"] == pytest.approx(0.05) and out["alive_s"] == 60.0
+    w.died_at = 20.0  # cut at her death
+    out = harness.outcomes(w, records, 60.0)
+    assert out["alive_s"] == 20.0 and out["wait_s"] == pytest.approx(5.0) and out["wait_hp_lost"] == pytest.approx(0.05)
+
+
 def test_hp_lost_on_the_trips_to_rest_is_counted_between_their_events(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0))
