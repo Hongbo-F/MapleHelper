@@ -103,6 +103,7 @@ class Recording:
         self.missing: Counter = Counter()  # grabs with no frame, by why
         self.forms: dict[str, dict] = {}   # form: first, last, frames
         self.first_seen = self.last_seen = None
+        self.shadow_checks = self.shadow_suggestions = 0
         self.last_t = 0.0
         self.window = None
         self.end = None
@@ -115,11 +116,12 @@ class Recording:
         threading.Thread(target=self._prune, args=(keep_bytes,), name="lie-detector-prune", daemon=True).start()
 
     def add(self, t: float, frame: np.ndarray | None, scores: dict[str, float] | None = None,
-            why: str | None = None) -> None:
+            why: str | None = None, suggestions: list[dict] | None = None) -> None:
         """One grab, `t` s after the first sight: a frame (RGB) with the spotter's scores of it, or None and why
         there is none (the game window gone or minimized; or covered by another window, with the scores of what was
-        on top, which aren't saved as a picture). Never blocks: with the queue full the frame is dropped (counted,
-        and the next line in the index says how many went before it)."""
+        on top, which aren't saved as a picture). YOLO's optional shadow suggestions are recorded, never acted on.
+        Never blocks: with the queue full the frame is dropped (counted, and the next line in the index says how
+        many went before it)."""
         record: dict = {"t": round(t, 3)}
         if frame is None:
             record["game"] = why or "no window"
@@ -141,6 +143,10 @@ class Recording:
             if seen:
                 self.first_seen = record["t"] if self.first_seen is None else self.first_seen
                 self.last_seen = record["t"]
+        if suggestions is not None:
+            record["suggestions"] = suggestions
+            self.shadow_checks += 1
+            self.shadow_suggestions += len(suggestions)
         self.grabs += 1
         self.last_t = t
         if self._dropped_since:
@@ -178,6 +184,7 @@ class Recording:
                 "frames": self.frames, "frame_bytes": self.bytes, "grabs": self.grabs,
                 "not_showing": dict(self.missing), "dropped": self.dropped, "write_errors": self.errors,
                 "forms": self.forms, "truth_booth": booth, "outcome": outcome, "end": self.end,
+                "shadow": {"checks": self.shadow_checks, "suggestions": self.shadow_suggestions},
                 "end_stretch_s": self.end_s, "cap_s": self.cap_s, "alarm_screenshot": self.screenshot,
                 "window": self.window, "jpeg_quality": JPEG_QUALITY}
 

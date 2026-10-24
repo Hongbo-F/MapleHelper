@@ -165,14 +165,17 @@ class Watchdog(threading.Thread):
     the log stops the watching: it's logged and the next look comes."""
 
     def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
-                 interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None):
+                 interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None,
+                 shadow=False):
         super().__init__(name="lie-detector-watch", daemon=True)
         from ..perception.lie_detector import LieDetectorSpotter
+        from ..perception.lie_detector_yolo import YoloPatternShadow
         from . import lie_recorder
         from .alarm import raise_alarm
         self.title = game_title
         self.alarm = alarm
         self.spotter = spotter or LieDetectorSpotter()
+        self.shadow = YoloPatternShadow() if shadow is True else shadow
         self.grab = grab
         self.interval = interval
         self.on_alarm = on_alarm or raise_alarm
@@ -216,13 +219,24 @@ class Watchdog(threading.Thread):
     def tick(self, now: float, sct=None) -> None:
         """One look at the game (`now`: monotonic s), and what follows from it."""
         frame, why = self._look(sct)
-        scores = None
+        scores = suggestions = None
         if frame is not None:
             try:
                 scores = self.spotter.scores(frame)
             except Exception as e:  # (a frame it can't take, such as one smaller than its templates)
                 self._trouble("the Lie Detector check failed", e)
                 frame, why = None, "check failed"
+            else:
+                # Shadow YOLO runs only within a cycle started by the existing spotter. It can keep that cycle
+                # alive during pattern play, but can neither start an alarm nor send any input.
+                template_seen = bool(scores) and max(scores.values()) >= 1
+                if self.shadow is not None and (template_seen or self.cycle_t0 is not None):
+                    try:
+                        from ..perception.lie_detector_yolo import FORM
+                        shadow_score, suggestions = self.shadow.check(frame)
+                        scores = {**scores, FORM: shadow_score}
+                    except Exception as e:  # the template alarm and frame recording still work without YOLO
+                        self._trouble("the YOLO shadow check failed", e)
         seen = scores is not None and max(scores.values()) >= 1
         shown = frame is not None and why is None  # the game itself, nothing over it: only then is the frame saved
         if seen or not shown:
@@ -248,7 +262,7 @@ class Watchdog(threading.Thread):
             self._say("the Lie Detector alarm was cleared while the Lie Detector is still on screen: raised again "
                       f"(clear it once it has been off the screen for {self.end_s:g} s)")
         if self.recording is not None:
-            self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why)
+            self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why, suggestions=suggestions)
             if now - self.cycle_t0 >= self.cap_s:
                 self._end_recording("cap")
         if self.cycle_t0 is not None and self.gone_for(now):
@@ -501,7 +515,7 @@ def serve() -> None:
     alarm = threading.Event()
     player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm)
     win32.enable_dpi_awareness()
-    watchdog = Watchdog(cfg.game_window_title, alarm)
+    watchdog = Watchdog(cfg.game_window_title, alarm, shadow=True)
     watchdog.start()
     _log(f"player started; {len(player.allowed)} keys and the mouse buttons allowed; watching for the Lie Detector")
     idle_since = time.monotonic()
