@@ -879,8 +879,8 @@ def test_the_game_data_gives_each_kind_its_touch_damage_and_accuracy():
     infos = {kind_of(s.name): world_mod.mob_info(s.mob_id) for s in m.spawns}
     if any(i is None for i in infos.values()):
         pytest.skip("the monsters' game data isn't on this computer")
-    assert {k: (i.pad, i.acc) for k, i in infos.items()} == {
-        "snail": (3, 33), "slime": (13, 53), "pig": (15, 54), "orange-mushroom": (17, 62)}
+    assert {k: (i.pad, i.acc, i.hp, i.pdd) for k, i in infos.items()} == {
+        "snail": (3, 33, 45, 0), "slime": (13, 53, 115, 10), "pig": (15, 54, 128, 0), "orange-mushroom": (17, 62, 142, 0)}
     w = World(m, KEYS, (36, 300.0), monsters="all")
     assert {mo.kind: mo.info for mo in w.monsters} == infos
     assert infos["slime"] == SLIME and infos["orange-mushroom"] == MUSHROOM  # the frames the tests above use
@@ -893,10 +893,10 @@ SLIME = world_mod.MobInfo(13.0, 53.0, stand=(F(200, -27, 24, 0, 43), F(300, -28,
                           move=(F(200, -29, 26, 0, 41), F(50, -31, 26, 0, 40), F(150, -27, 19, 16, 66),
                                 F(150, -27, 19, 17, 66), F(100, -27, 21, 10, 58), F(100, -28, 25, 0, 42),
                                 F(300, -27, 24, 0, 43)),
-                          hit=F(600, -23, 26, 0, 46))
+                          hit=F(600, -23, 26, 0, 46), hp=115.0, pdd=10.0)
 MUSHROOM = world_mod.MobInfo(17.0, 62.0, stand=(F(180, -27, 36, 0, 58), F(180, -27, 36, 0, 55)),
                              move=(F(180, -32, 32, 0, 55), F(120, -31, 31, 3, 67), F(180, -31, 32, 0, 55)),
-                             hit=F(600, -28, 34, 0, 65))
+                             hit=F(600, -28, 34, 0, 65), hp=142.0)
 
 
 def _put(w, mode, x, y):
@@ -1248,15 +1248,15 @@ def test_a_scenario_gives_the_same_trace_every_time(model):
 def test_map_data_that_is_there_but_fails_to_load_fails_instead_of_skipping(monkeypatch):
     def broken(map_id):
         raise TypeError("a refactor broke mapdata")
-    monkeypatch.setattr(scenarios, "available", lambda: True)
-    monkeypatch.setattr(scenarios, "_MODEL", [])
+    monkeypatch.setattr(scenarios, "available", lambda map_id=scenarios.MAP_ID: True)
+    monkeypatch.setattr(scenarios, "_MODEL", {})
     monkeypatch.setattr(mapdata, "load", broken)
     with pytest.raises(TypeError):
         scenarios.real_map()
     monkeypatch.setenv("PYTHONHASHSEED", "0")  # golden.main runs here, not in a fresh process
     with pytest.raises(TypeError):
         golden.main(["check", "hunt_kill"])
-    monkeypatch.setattr(scenarios, "available", lambda: False)
+    monkeypatch.setattr(scenarios, "available", lambda map_id=scenarios.MAP_ID: False)
     assert scenarios.real_map() is None
     assert golden.main(["check"]) == 2  # nothing could be compared: never a pass
 
@@ -1267,9 +1267,10 @@ REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's gam
 SLOW_SCENARIOS = {"feed_tour_hunt_basin", "feed_loop_basin", "feed_loop_rival", "tour_run", "loop_run"}
 
 
-@REAL
-@pytest.mark.parametrize("name", [pytest.param(n, marks=pytest.mark.slow) if n in SLOW_SCENARIOS else n
-                                  for n in scenarios.SCENARIOS])
+@pytest.mark.parametrize("name", [pytest.param(name, marks=[pytest.mark.skipif(
+    not scenarios.available(sc.map_id), reason=f"needs map {sc.map_id}'s game data (gamedata/data)")]
+    + ([pytest.mark.slow] if name in SLOW_SCENARIOS else []))
+    for name, sc in scenarios.SCENARIOS.items()])
 def test_real_map_scenarios_show_what_they_are_there_for(name):
     trace = scenarios.run(name)
     assert not scenarios.unmet(trace), (scenarios.unmet(trace), trace["result"])

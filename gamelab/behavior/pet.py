@@ -198,7 +198,7 @@ class PetCare:
             self._feed()
             feeds += 1
             time.sleep(SETTLE_S)
-            seen = read_fullness(self.eyes._capture(), self.ocr)
+            seen = self._read()
             fullness = seen if seen is not None else min(100, fullness + 30)
         self._close()
         if feeds:
@@ -212,6 +212,10 @@ class PetCare:
 
     def _feed(self) -> None:
         self.actions.feed_pet()
+
+    def _read(self) -> int | None:
+        """The pet's fullness on the Character Info window open now (a capture read), or None."""
+        return read_fullness(self.eyes._capture(), self.ocr)
 
     def _open(self) -> int | None:
         """Double-click her body (above her name tag in a look) and read the panel: its fullness if the window is hers

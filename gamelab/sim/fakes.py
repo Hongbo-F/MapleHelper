@@ -7,7 +7,8 @@
   tag, the grass under her, the ropes in view, her minimap dot and the other player's), glance() and messages(). Monsters and
   drops are drawn into the frame as data its fake detectors read (Eyes.monsters, monsters_wide, items),
   and hurt monsters' HP bars as pixels (Eyes.bar reads those); her EXP number as the bar shows it
-  (perception.exp_number draws it with the game's glyphs: EXP_START and what she has gained), read as in game.
+  (perception.exp_number draws it with the game's glyphs: her level and EXP at the start, World.character, and what she
+  has gained), read as in game.
   world.Noise can round the dot to whole pixels and hide her tag, her dot or her EXP number for a while.
 - `FakePlayer`: what gamelab.control.client offers (submit, send, done, wait, cancel), running each plan's keys
   on the world: plans run one after another, `end_ms` makes one last longer, every key still held is let
@@ -33,6 +34,7 @@ import numpy as np
 from maplehelper.config import GameKeys
 from maplehelper.ocr.exp_table import EXP_TO_NEXT
 
+from ..behavior.pet import PetCare
 from ..control import client
 from ..localization.mapdata import MapModel
 from ..localization.monsters import FLINCH_S
@@ -49,14 +51,16 @@ from ..perception.terrain import ScreenRope
 from ..screen import SCALE
 from ..screen import UNITS_PER_HALF_PX
 from ..screen import SCREEN_SCALE
-from .world import POSE_SPELL_S, Noise, World, exp_pixels
+from ..perception.kinds import kind_of
+from .world import LEVEL_19, POSE_SPELL_S, Noise, World, exp_pixels
 
 START = 10_000.0          # the fake clock's start (monotonic() is never near 0 in real runs)
 EPOCH = 1_800_000_000.0   # what time.time() reads at the start (a fixed date, for strftime)
 FRAME = (540, 960)        # half-size game frame
 SKY = (60, 140, 230)      # the frame's colour: nothing in it reads as an HP bar, a rope or ground
 PLAY_BOTTOM = int(FRAME[0] * 0.88)  # the bottom bar starts below (screen.HUD_TOP)
-KINDS = ("pig", "slime", "snail", "orange-mushroom")  # what the real detector has templates for
+KINDS = ("pig", "slime", "snail", "orange-mushroom")  # what the real detector has templates for (on the first map;
+                                                      # on another, the map's kinds too: detector_kinds)
 ITEM_SIZE = {"mesos": (13, 13), "leather": (20, 18)}  # half-size px (w, h)
 ITEM_HEIGHT = 22          # the loot detector's tallest template
 # Seconds each fake takes (the real ones' cost as gamelab documents it; and a look must cost something,
@@ -67,9 +71,29 @@ DETECT_WIDE_S = 0.25            # ... on the whole screen: a wide look takes ~0.
 LOOT_S = 0.02             # per strip searched
 GLANCE_S = 0.035          # with Navigator.follow's 30 ms sleep, ~15 glances a second (as Navigator.follow says)
 MESSAGES_S = 0.4
-EXP_START = (19, 421)     # her level and EXP when a run starts (as on the saved frames of 2026-10-18)
+EXP_START = (LEVEL_19.level, LEVEL_19.exp)  # her level and EXP when a run starts on the first map (World.character's)
 START_LATENCY = 0.01      # a plan starts this long after it's handed over (the player polls its inbox)
 RESULT_LATENCY = 0.01     # ... and its result is seen this long after it ends
+
+
+class FakePetCare(PetCare):
+    """behavior.pet.PetCare on the simulated world: her Character Info's pet panel read off the world's pet
+    (World.pet_fullness, to the whole point, as the panel shows it), no window opened or closed and no click sent; the
+    Pet Food itself goes out as in game (Actions.feed_pet), and the fake clock is its clock."""
+
+    def __init__(self, world, actions, eyes, clock: "Clock", log=print):
+        super().__init__(actions, eyes, ocr=object(), log=log, clock=clock.time)
+        self.world, self.fake_clock = world, clock
+
+    def _open(self) -> int | None:
+        self.world.advance(self.fake_clock.now)
+        return int(self.world.pet_fullness())
+
+    def _read(self) -> int | None:
+        return self._open()
+
+    def _close(self) -> None:
+        pass
 
 
 class SimViolation(RuntimeError):
@@ -230,6 +254,12 @@ class FakeLoot:
         return [self.detect(frame, box, mesos_only) for box in boxes]  # each charged as a strip of its own
 
 
+def detector_kinds(model: MapModel) -> tuple[str, ...]:
+    """The kinds the fake detector finds on map `model`: KINDS, and the map's own (the stack's colour gates for West
+    Rocky Mountain II's are another track's: here they're taken as found)."""
+    return KINDS + tuple(sorted({kind_of(s.name) for s in model.spawns if s.name} - set(KINDS)))
+
+
 def shown_exp(start: tuple[int, int], gained: int) -> tuple[int, int]:
     """Her level and EXP into it, from `start` (level, EXP) with `gained` EXP more: each level's requirement
     (the EXP table) carried into the next."""
@@ -246,7 +276,7 @@ class FakeEyes(Eyes):
         self.world, self.clock, self.model = world, clock, model
         self.camera = Camera(model.bounds)  # the game's camera (the default offset)
         self.loc = Localizer(model)
-        self.detector = FakeDetector(clock=clock)
+        self.detector = FakeDetector(detector_kinds(model), clock=clock)
         self._loot = FakeLoot(clock)
         self.want_ropes = False
         self.guard = guard
@@ -295,12 +325,12 @@ class FakeEyes(Eyes):
         return [Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT)]
 
     def _exp_box(self) -> np.ndarray:
-        """Her EXP number as the bar shows it, from EXP_START and what she has gained (exp_number.draw: the game's
-        glyphs as the game draws them; read only when it changes); with a block of white over it while something
-        covers it (Noise.exp_hidden): then it can't be read."""
+        """Her EXP number as the bar shows it, from her level and EXP at the start (World.character) and what she has gained
+        (exp_number.draw: the game's glyphs as the game draws them; read only when it changes); with a block of white
+        over it while something covers it (Noise.exp_hidden): then it can't be read."""
         gained = self.world.exp
         if self._exp_drawn is None or self._exp_drawn[0] != gained:
-            level, exp = shown_exp(EXP_START, gained)
+            level, exp = shown_exp((self.world.character.level, self.world.character.exp), gained)
             box = exp_number.draw(exp_number.shown(exp, level))
             box.flags.writeable = False
             self._exp_drawn = (gained, box)

@@ -129,8 +129,13 @@ class Hunter:
 
     def drink_if_low(self, s: Scene) -> None:
         """Drink an HP potion below `potion_hp` (one every POTION_EVERY s at most), and feed her pet when it's due
-        (feed_pet_if_due). The health check on the way to rest: low HP is why she's going, not a reason to stop."""
+        (feed_pet_if_due). The health check on the way to rest: low HP is why she's going, not a reason to stop. With
+        no potion key (her pet drinks them since 2026-10-23), nothing: it logged "drinking a potion" at every look
+        under `potion_hp` and drank none (in the simulator on West Rocky Mountain II, the hunt loop from 40% HP with
+        her pet out of potions: 83 times in 3 minutes)."""
         self.feed_pet_if_due(s)
+        if self.actions.keys.hp_potion is None:
+            return
         if s.hp < self.potion_hp and time.monotonic() - self._last_potion > POTION_EVERY:
             self.log(f"HP {s.hp:.0%}: drinking a potion")
             if self.actions.drink():

@@ -6,7 +6,8 @@ exactly the same after a change (same key plans, same log, same results).
     python -m gamelab.sim.golden list             the scenarios, and which have a recorded trace
 
 `check` exits 0 only when every scenario asked for ran and matched: 1 when one differs (or has no
-recorded trace), 2 when nothing could be run (no game data for the map on this computer).
+recorded trace), 2 when nothing could be run (no game data for the map on this computer). Scenarios on a map
+whose data isn't here (West Rocky Mountain II's, say) are named and left out.
 
 The traces hold map-derived data, so they stay in gamelab/lab (git-ignored), like all game data.
 Runs are made with PYTHONHASHSEED=0 (the command restarts itself with it), so nothing depends on the
@@ -139,6 +140,12 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         print(f"unknown scenario(s): {', '.join(unknown)}; see `list`")
         return 2
+    away = [n for n in names if not scenarios.available(scenarios.SCENARIOS[n].map_id)]
+    if away and argv[0] != "list":
+        print(f"left out, their map's game data isn't on this computer: {', '.join(away)}")
+        names = [n for n in names if n not in away]
+    for map_id in {scenarios.SCENARIOS[n].map_id for n in names}:
+        scenarios.real_map(map_id)  # (each map's: one that fails to load raises here)
     if argv[0] == "list":
         for name, sc in scenarios.SCENARIOS.items():
             print(f"{'*' if path_of(name).exists() else ' '} {name:28s} {sc.doc.splitlines()[0] if sc.doc else ''}")

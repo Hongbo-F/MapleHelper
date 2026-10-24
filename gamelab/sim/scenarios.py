@@ -1,5 +1,7 @@
-"""Scenarios: gamelab's entry points run against the simulated game on the real map (10000012), each
-built the way gamelab/__main__.py builds them (_hunter, Navigator, Tour), with the fakes in place.
+"""Scenarios: gamelab's entry points run against the simulated game on a real map, each built the way
+gamelab/__main__.py builds them (_hunter, Navigator, Tour), with the fakes in place. Most are on the first map
+(MAP_ID, 10000012); those named `*_rocky_*` on West Rocky Mountain II (ROCKY, 10004021), with her as she plays
+there (HER: level 23, her new keys, her pet drinking her potions).
 
 Each scenario returns a trace: every key plan sent ([t, name, events, end_ms], in order), every cancel,
 every log line, the entry point's result, what the world saw happen, how often she looked (and didn't
@@ -9,7 +11,7 @@ the same trace, so traces recorded now (golden.py) pin what gamelab does today. 
 a change in the sim or in gamelab can't quietly drop a behaviour a scenario was meant to cover.
 
 Game data stays on this computer: the map is read from gamedata's local extract, and scenarios are
-skipped when it isn't there (`available()`). Data that is there but fails to load is an error, not a skip.
+skipped when it isn't there (`available(map_id)`). Data that is there but fails to load is an error, not a skip.
 
 The stack only runs with the fakes in place: `with Sim(model, scenario) as sim: sim.hunter()...`.
 """
@@ -34,30 +36,41 @@ from ..behavior.hunter import Hunter
 from ..behavior.looting import DropSpot
 from ..localization.mapdata import MapModel
 from ..control.navigator import Navigator
-from ..control.timeline import SIM_KEYS
+from ..control.timeline import SIM_KEYS, SIM_KEYS_PET
 from ..behavior.tour import Tour
-from .fakes import Clock, FakeDetector, FakeEyes, FakeLoot, FakePlayer, SimTimeout, SimViolation, Trace, patched
-from .world import Noise, Realism, SimDied, World
+from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
+                    Trace, detector_kinds, patched)
+from .world import LEVEL_19, LEVEL_23, Her, Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
-_MODEL: list = []
+ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
+# Her keys and her (world.Her) on each map: on the first map as the golden traces were recorded with (level 19, her
+# potions on a key); on West Rocky Mountain II as she plays there (level 23, HP 730, her pet drinking her potions, her
+# bindings from 2026-10-23). Any other map (the tests' synthetic ones): the first map's.
+HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23)}
+_MODEL: dict[int, MapModel] = {}
 
 
-def available() -> bool:
+def available(map_id: int = MAP_ID) -> bool:
     """Whether the map's game data is on this computer: its parsed extract, or the game data copy that
     mapdata.load makes one from. Says nothing about whether it loads: real_map() raises if it doesn't."""
     from gamedata.paths import COPY
-    return (mapdata.CACHE / f"{MAP_ID}.json").is_file() or (COPY / "Map" / "Map").is_dir()
+    return (mapdata.CACHE / f"{map_id}.json").is_file() or (COPY / "Map" / "Map").is_dir()
 
 
-def real_map() -> MapModel | None:
+def real_map(map_id: int = MAP_ID) -> MapModel | None:
     """The real map's model (loaded once), or None when its game data isn't on this computer. A map
     that is there but fails to load raises: a refactor that breaks mapdata must fail, not skip."""
-    if not available():
+    if not available(map_id):
         return None
-    if not _MODEL:
-        _MODEL.append(mapdata.load(MAP_ID))
-    return _MODEL[0]
+    if map_id not in _MODEL:
+        _MODEL[map_id] = mapdata.load(map_id)
+    return _MODEL[map_id]
+
+
+def her_on(map_id: int) -> tuple:
+    """Her keys and her (world.Her) on map `map_id` (HER; the first map's on any other)."""
+    return HER.get(map_id, HER[MAP_ID])
 
 
 @dataclass
@@ -79,6 +92,8 @@ class Scenario:
     feed: bool = False           # her looks and glances from a continuous feed (localization.feed.SyncFeed)
     expects: tuple = ()          # (what, trace -> bool): what the scenario is there for (tests check them)
     may_die: bool = False        # unless set, every scenario also expects her alive at the end
+    map_id: int = MAP_ID         # the map it's on (real_map)
+    her: Her | None = None       # her HP, level and pet (world.Her); None: as she is on the map (HER)
     doc: str = ""
 
 
@@ -101,11 +116,12 @@ class Sim:
     def __init__(self, model: MapModel, sc: Scenario, pace: float | None = None):
         """`pace`: also let simulated time pass in real time, this many times faster (to watch it)."""
         self.model, self.scenario = model, sc
-        self.keys = SIM_KEYS  # fixed, not config.toml's (control.timeline)
+        self.keys, her = her_on(model.id)  # fixed, not config.toml's (control.timeline)
         self.clock = Clock(limit=sc.limit, pace=pace, think=sc.think)
         self.world = World(model, self.keys, sc.start, seed=sc.seed, monsters=sc.monsters, hp=sc.hp,
                            inventory_full=sc.inventory_full, facing=sc.facing, origin=self.clock.now,
-                           drops=list(sc.drops), hanging=sc.hanging, noise=sc.noise, realism=sc.realism)
+                           drops=list(sc.drops), hanging=sc.hanging, noise=sc.noise, realism=sc.realism,
+                           character=sc.her or her)
         self.eyes = FakeEyes(self.world, self.clock, model, guard=self.guard)
         self.trace = Trace(self.clock.now)
         self.player = FakePlayer(self.world, self.clock, self.trace, self.keys)
@@ -122,7 +138,7 @@ class Sim:
         from ..localization.senses import Senses
         from ..localization.worldstate import WorldStep
         self.frames = FakeEyes(self.world, self.clock, self.model, guard=self.guard)
-        self.frames.detector, self.frames._loot = FakeDetector(), FakeLoot()
+        self.frames.detector, self.frames._loot = FakeDetector(detector_kinds(self.model)), FakeLoot()
         feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN))), self.frames.observe)
         self.clock.frames = (1.0 / GAME_HZ, feed.tick)
         return feed
@@ -183,6 +199,7 @@ class Sim:
     def hunter(self, **kw) -> Hunter:
         self.guard()
         h = Hunter(self.eyes, self.keys, self.model, log=self.log, feed=self.feed, **kw)
+        h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
         self.senses.append(h.senses)
         play = h.actions.play  # every plan Actions plays (fights, single moves, tours): checked each time;
         # the navigator's chains go through client.send, which guard() checks through the fake player
@@ -230,16 +247,16 @@ def run(name: str) -> dict:
 
 
 def run_scenario(sc: Scenario, model: MapModel | None = None, pace: float | None = None) -> dict:
-    """Run a scenario on the real map (or on `model`); returns its trace. A run that ends early (she
+    """Run a scenario on its real map (or on `model`); returns its trace. A run that ends early (she
     died, the time limit, the player refusing a plan, gamelab giving up) has that as its result."""
     return run_sim(sc, model, pace)[0]
 
 
 def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = None) -> tuple[dict, "Sim"]:
     """run_scenario, also returning the Sim it ran in (its world, clock and eyes, for sim.harness)."""
-    model = model or real_map()
+    model = model or real_map(sc.map_id)
     if model is None:
-        raise FileNotFoundError(f"map {MAP_ID} isn't available (gamedata/data); scenarios need it")
+        raise FileNotFoundError(f"map {sc.map_id} isn't available (gamedata/data); scenarios need it")
     with Sim(model, sc, pace) as sim:
         try:
             outcome = plain(sc.fn(sim))

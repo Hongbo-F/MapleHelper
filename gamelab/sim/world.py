@@ -39,7 +39,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   A touch leaves her a second's invulnerability. She evades it (a thief's "MISS": nothing else happens)
   with a chance inversely proportional to the monster's accuracy (game data: half a pig's touches, four
   in five of a snail's); the others take a share of her HP by the monster's touch damage (game data:
-  about 1.6% for a pig, 0.3% for a snail, give or take 70%) and knock her back ~58 units (the median
+  about 1.6% for a pig, 0.3% for a snail, give or take 70%; or, her DEF known, by meowdb's formula: Her) and
+  knock her back ~58 units (the median
   logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS). At 0% HP she dies, and the
   run ends (SimDied);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
@@ -72,7 +73,12 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   died as long as its death animation runs (MobBody.die_s: a pig 0.66 s, a snail 1.26), and respawns 8 s
   later where it spawned;
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
-  HP potion key gives 30% HP, the chair key sits her down (+3% HP/s) until an arrow stands her up.
+  HP potion key gives 30% HP, the chair key sits her down (+3% HP/s) until an arrow stands her up; her pet
+  (Her.pet), if she has one, drinks a potion for her right after a touch leaves her under its warning.
+
+Her HP, her level and EXP when a run starts, and her pet are `Her`'s: LEVEL_19 on the first map, LEVEL_23 on
+West Rocky Mountain II. A monster of a kind the first map hasn't takes as many stars as its HP and defence in
+the game data say (hits_of), and its body is as tall and wide as its frames there (_body_of).
 
 `Noise` (off by default) adds the errors of the real game, each one seeded and tied to the moment it
 happens, not to how often anything was looked at: stars that miss, walks that stop a few units early or
@@ -101,6 +107,7 @@ from maplehelper.game import COMBAT
 
 from .. import directions
 from ..attack import reach
+from ..behavior import pet as pet_care
 from ..control.actions import STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import MapModel, Platform, Rope
@@ -177,6 +184,14 @@ MAX_HP = 642.0
 TOUCH_SHARE = 0.68
 TOUCH_SPREAD = 0.7
 TOUCH_DAMAGE = 0.014     # a touch by a monster without game data: the logged hits' median (2 px, 1.4%)
+# ... or (Her.defence) as meowdb's page on this game's formulas has it (meowdb.com/msclassic/formulas/damage-taken,
+# read 2026-10-24): raw = PADamage x (1.2 + 0.2 u), taken = raw x (1 - DEF / (DEF + 300 + 2 raw)) - (DEF / 25 + her
+# level / 10), cut to whole HP, at least 1. Her DEF isn't known: DEFENCE is what makes that formula give the logged
+# hits' 9.56 HP on average at level 19 (pigs and slimes half each: 9.48; 70 gives 9.88, 80 9.09), taken as hers at 23
+# too. Against a share it's the shape that differs: little for a weak monster, more for a strong one (at level 23,
+# a Red Snail 3.6 HP, a Stump 5.8, a Dark Stump 31.3, an Axe Stump 78.9, where 0.68 of their PADamage is 6.1, 7.5,
+# 23.1 and 51.0), and its spread is the roll's ±8%, not ±70%.
+DEFENCE = 75.0
 # A thief's evasion: a touch shows "MISS" and takes nothing, without a knockback, with a chance of
 # EVADE_ACC over the monster's accuracy (acc in the game data: snail 33, slime 53, pig 54, Orange Mushroom
 # 62). Inversely proportional is the form MapleStory's dodge rule is usually given in (not measured here).
@@ -197,6 +212,15 @@ INVULNERABLE = 1.0
 KNOCK_STEERS = False
 KNOCK_VX, KNOCK_VY = 180.0, 220.0
 HITS = {"pig": 3, "orange-mushroom": 3, "slime": 2, "snail": 1}  # HP in stars
+# A kind HITS doesn't have takes as many stars as hers need on average to kill it (stars_to_kill, rounded): a star of
+# hers did 30-70 damage on the first map (a claw swipe 9-11: README, Attack; at level 23 not measured yet), less the
+# monster's defence as meowdb's page on this game's formulas has it (meowdb.com/msclassic/formulas/damage, read
+# 2026-10-24: damage x 100 / (DEF + 100), DEF its PDDamage in the game data, 30 for every stump: their stars do
+# 23-54), and no level penalty (none of them is above her level). So a Red Snail (68 HP) takes 2 stars, a Stump
+# (133 HP) 4, a Dark Stump (236) 7, an Axe Stump (371) 10. HITS' own kinds stay as they were fitted (by this a slime,
+# 115 HP and DEF 10, would take 3).
+STAR_DAMAGE = (30, 70)
+HITS_UNKNOWN = 2         # ... and a kind without game data
 # A hit that doesn't kill (a star or a swipe) pushes the monster KNOCK_MOB units away from her over
 # KNOCK_MOB_S, and it stands in its hit1 frame until monster_data.FLINCH_S after the hit (0.6 s, that
 # frame's delay); then it walks or stands as its own draws say. In the game data `pushed` is 1 for all four
@@ -238,6 +262,18 @@ DROP_LIFE = 180.0        # s drops lie before they vanish (a guess: in game they
                          # followed, and the hunts' telemetry can't say more; analysis.respawn)
 PICK_REACH = 15.0
 POTION_HP = 0.30
+# Her pet's potions (Her.pet), as meowdb's page on this game's pets has them (meowdb.com/msclassic/formulas/pets,
+# read 2026-10-24): it drinks when "HP after the hit x 100 / MaxHP < Warning", the warning a multiple of 5% (System
+# Options), one potion she picked, from her stock; potions "at least 0.2 seconds apart (unconfirmed)". So the pet
+# drinks right after a touch that leaves her under the warning (when after it isn't known: at once), one potion a
+# touch, never sooner than PET_GAP after the last; with none left it drinks nothing, nor too hungry (below).
+PET_GAP = 0.2
+# Her pet's fullness (with a pet: Her.pet), as behavior.pet follows it: HUNGRY lost every TICK_S (the game data's 1
+# for her Snail pets; 70-74 s a point live on 2026-10-24), FOOD (30) for a Pet Food, sent home at PACKED_AT or under
+# (then it drinks nothing). At a run's start PET_FULLNESS, not known: under pet.FEED_BELOW (70), so the pet care's
+# first read feeds it once (60 -> 90), as she fed it at the start before it was read. The pet care reads it off the
+# world (sim.fakes.FakePetCare: no window, no OCR, no clicks).
+PET_FULLNESS = 60.0
 CHAIR_HP_PER_S = 0.03
 STAND_UP = 0.2           # s the arrow press that stands her up from the chair takes
 PORTAL_REACH = (25.0, 40.0)
@@ -344,6 +380,27 @@ class Realism:
                                  # the noisy scenarios have it; the default world lets her walk at once
 
 
+@dataclass(frozen=True)
+class Her:
+    """Her as the simulator plays her: her HP (what a touch takes is a share of it), her level and EXP when a run
+    starts (her EXP number: sim.fakes), how a touch's damage is worked out, and her pet. LEVEL_19 is her on the first
+    map, where the golden traces and the harness's runs were fitted; LEVEL_23 on West Rocky Mountain II (from
+    2026-10-23: level 23, HP 730 and MP 584 by her bars there, her pet drinking her potions). Her MP isn't kept: the
+    regular attack the stack throws with costs none."""
+    max_hp: float = MAX_HP
+    level: int = 19
+    exp: int = 421               # EXP into her level (as on the saved frames of 2026-10-18)
+    defence: float | None = None  # her DEF in meowdb's touch formula (DEFENCE); None: a share of PADamage, as fitted
+    pet: float | None = None     # her pet's HP warning: it drinks a potion of hers when a touch leaves her under this
+                                 # share of her HP (PET_GAP); None: no pet
+
+
+LEVEL_19 = Her()
+# Her pet's warning isn't known (a multiple of 5% in System Options): 45% is where the tour and the hunt loop have her
+# drink herself (Hunter's potion_hp in Sim.tour_stack and sim.harness), so the pet does what her own potions did.
+LEVEL_23 = Her(max_hp=730.0, level=23, exp=31_736, defence=DEFENCE, pet=0.45)
+
+
 # --- monsters ----------------------------------------------------------------------------------------
 
 MOBS = OUT / "mobs"      # what the simulator reads of each monster from the game data, cached as JSON (as
@@ -369,12 +426,15 @@ class MobInfo:
     accuracy (acc), which her evasion goes against, and its frames standing, walking and flinching after a
     hit (hit1). A walk cycle can lift it: a slime is off the ground for 400 of its 1,050 ms (its box 10-17
     above its feet, up to 66 tall where it stands 42-44), a pig 4 units for 300 of 500, an Orange Mushroom
-    3 for 120 of 480 (67 tall where it stands 55-58)."""
+    3 for 120 of 480 (67 tall where it stands 55-58). Its HP (maxHP) and defence (PDDamage) say how many stars
+    kill it (stars_to_kill); 0 where not known."""
     pad: float
     acc: float
     stand: tuple[Frame, ...] = ()
     move: tuple[Frame, ...] = ()
     hit: Frame | None = None
+    hp: float = 0.0
+    pdd: float = 0.0
 
     @staticmethod
     def frame_at(frames: tuple[Frame, ...], ms: float) -> Frame:
@@ -392,16 +452,19 @@ def mob_info(mob_id: int) -> MobInfo | None:
     """Monster `mob_id`'s MobInfo, from the game data (cached in MOBS), or None where there's none."""
     cache = MOBS / f"{mob_id:07d}.json"
     raw = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else None
-    if raw is None or "move" not in raw:  # not cached yet, or cached before its frames were kept
-        raw = _read_mob(mob_id)
-        if raw is None:
+    if raw is None or "move" not in raw or "hp" not in raw:  # not cached yet, or before its frames or HP were kept
+        fresh = _read_mob(mob_id)
+        if fresh is None and (raw is None or "move" not in raw):
             return None
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        part = cache.with_suffix(f".{os.getpid()}.part")  # whole, or not there: harness workers read it too
-        part.write_text(json.dumps(raw), encoding="utf-8")
-        os.replace(part, cache)
+        if fresh is not None:  # (without the game data copy, a cache from before its HP was kept does as it is)
+            raw = fresh
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            part = cache.with_suffix(f".{os.getpid()}.part")  # whole, or not there: harness workers read it too
+            part.write_text(json.dumps(raw), encoding="utf-8")
+            os.replace(part, cache)
     stand, move = (tuple(Frame(*f) for f in raw[k]) for k in ("stand", "move"))
-    return MobInfo(raw["pad"], raw["acc"], stand or move, move or stand, raw["hit"] and Frame(*raw["hit"]))
+    return MobInfo(raw["pad"], raw["acc"], stand or move, move or stand, raw["hit"] and Frame(*raw["hit"]),
+                   raw.get("hp", 0.0), raw.get("pdd", 0.0))
 
 
 def _read_mob(mob_id: int) -> dict | None:
@@ -431,15 +494,49 @@ def _read_mob(mob_id: int) -> dict | None:
 
     hit = frames("hit1")
     return {"pad": float(info.get("PADamage") or 0), "acc": float(info.get("acc") or 0),
-            "stand": frames("stand"), "move": frames("move"), "hit": hit[0] if hit else None}
+            "stand": frames("stand"), "move": frames("move"), "hit": hit[0] if hit else None,
+            "hp": float(info.get("maxHP") or 0), "pdd": float(info.get("PDDamage") or 0)}
 
 
-def touch_damage(info: MobInfo | None, u: float) -> float:
+def touch_damage(info: MobInfo | None, u: float, her: Her = LEVEL_19) -> float:
     """The share of her HP a touch by a monster with `info` takes, `u` in [0, 1) placing it within the
-    spread (TOUCH_SHARE of its touch damage, give or take TOUCH_SPREAD)."""
+    spread: TOUCH_SHARE of its touch damage, give or take TOUCH_SPREAD; or, with her DEF known (Her.defence),
+    as meowdb's formula has it (DEFENCE)."""
     if info is None or info.pad <= 0:
         return TOUCH_DAMAGE
-    return info.pad * TOUCH_SHARE * (1 + TOUCH_SPREAD * (2 * u - 1)) / MAX_HP
+    if her.defence is None:
+        return info.pad * TOUCH_SHARE * (1 + TOUCH_SPREAD * (2 * u - 1)) / her.max_hp
+    d, raw = her.defence, info.pad * (1.2 + 0.2 * u)
+    taken = raw * (1 - d / (d + 300 + 2 * raw)) - (d / 25 + her.level / 10)
+    return max(1, math.trunc(taken)) / her.max_hp
+
+
+@functools.lru_cache(maxsize=None)
+def stars_to_kill(hp: float, pdd: float = 0.0) -> float:
+    """How many of her stars kill a monster of `hp` HP and defence `pdd` on average: each star a whole number of
+    damage from STAR_DAMAGE's least to its most, as likely each, less the defence (x 100 / (pdd + 100))."""
+    lo, hi = STAR_DAMAGE
+    need = hp * (pdd + 100) / 100      # in damage before the defence
+    sums, stars = {0: 1.0}, 0.0       # the chance of each total of the stars so far, among those short of `need`
+    while sums:
+        stars += sum(sums.values())   # the chance one more star is needed
+        nxt: dict[int, float] = {}
+        for total, chance in sums.items():
+            for k in range(lo, hi + 1):
+                if total + k < need:
+                    nxt[total + k] = nxt.get(total + k, 0.0) + chance / (hi - lo + 1)
+        sums = nxt
+    return stars
+
+
+def hits_of(kind: str, info: MobInfo | None) -> int:
+    """A monster's HP in stars: HITS' for its kind, else by its HP and defence in the game data (stars_to_kill,
+    rounded), else HITS_UNKNOWN."""
+    if kind in HITS:
+        return HITS[kind]
+    if info is None or info.hp <= 0:
+        return HITS_UNKNOWN
+    return max(1, round(stars_to_kill(info.hp, info.pdd)))
 
 
 def evade_chance(info: MobInfo | None) -> float:
@@ -601,13 +698,16 @@ class World:
     def __init__(self, model: MapModel, keys: GameKeys, start: tuple[int, float], seed: int = 1,
                  monsters="all", hp: float = 1.0, inventory_full: bool = False, facing: str = RIGHT,
                  origin: float = 0.0, drops: list[tuple[str, int, float]] = (), hanging: float | None = None,
-                 noise: Noise | None = None, realism: Realism | None = None, step_phase: int | None = None):
+                 noise: Noise | None = None, realism: Realism | None = None, step_phase: int | None = None,
+                 character: Her = LEVEL_19):
         """Her standing on platform start[0] at x start[1] (or, with `hanging`, on the rope nearest that x,
         her feet at y `hanging`). `monsters`: None, "all" (the map's spawns), a set of platform ids (the
         spawns on those), or [(name, platform, x)]. `drops`: [(kind, platform, x)] lying there already.
         `step_phase`: the ms (a whole tick, below STEP_MS) of the game's first step; by default drawn from
-        the seed (from an rng of its own: the world's other draws don't move)."""
+        the seed (from an rng of its own: the world's other draws don't move). `character`: her HP, level and pet
+        (Her)."""
         self.model = model
+        self.character = character
         self.origin = origin       # clock time of ms 0
         self.ms = 0
         self.seed = seed
@@ -621,7 +721,12 @@ class World:
         self._rival_rng = random.Random(f"rival:{seed}")
         self._drop_rng = random.Random(f"drops:{seed}")  # Realism.drops' draws (the others' unchanged by them)
         self.potions_left = self.realism.potions
-        self.potions_used = 0
+        self.potions_used = 0           # potions drunk, by her key or by her pet
+        self.pet_potions = 0            # ... of them her pet's (Her.pet)
+        self.pet_drank_ms = -10_000     # when her pet last drank one
+        self.pet_fed = 0                # times she fed her pet (the pet food key)
+        self.pet_full = PET_FULLNESS     # her pet's fullness (Her.pet) as of pet_since (pet_fullness)
+        self.pet_since = 0.0
         self.hp_low = hp                # her lowest HP so far
         self.kill_log: list[tuple[float, str, int, str]] = []  # (t, kind, platform, "her" or "rival")
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
@@ -713,14 +818,16 @@ class World:
         ids.update({s.name: s.mob_id for s in self.model.spawns if s.name})      # ... and by name
         for i, (name, pid, x) in enumerate(wanted):
             kind = kind_of(name)
+            mob_id = ids.get(name, ids.get(kind))
+            info = None if mob_id is None else mob_info(int(mob_id))
+            half, height = _body_of(kind, bodies.get(kind), info)
+            hits = float(hits_of(kind, info))
             m = SimMonster(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
-                    speeds.get(kind, monster_data.DEFAULT_SPEED), monster_data.MONSTER_HALF.get(kind, 34.0),
-                    monster_data.MONSTER_HEIGHT.get(kind, 46.0), float(HITS.get(kind, 2)), float(HITS.get(kind, 2)))
+                           speeds.get(kind, monster_data.DEFAULT_SPEED), half, height, hits, hits)
             if kind in bodies:
                 m.flinch_top = bodies[kind].flinch_top
                 m.fade = bodies[kind].die_s or FADE
-            mob_id = ids.get(name, ids.get(kind))
-            m.info = None if mob_id is None else mob_info(int(mob_id))
+            m.info = info
             m.start(0.0, float(x))
             self.monsters.append(m)
             self.by_platform.setdefault(pid, []).append(m)
@@ -956,6 +1063,10 @@ class World:
             self.potions_used += 1
             self.hp = min(1.0, self.hp + POTION_HP)
             self.note("drinks a potion")
+        elif action == "pet_food":
+            self.pet_fed += 1
+            self.pet_full, self.pet_since = min(100.0, self.pet_fullness() + pet_care.FOOD), self.t
+            self.note("feeds her pet")
         elif action == "chair":
             if ground and abs(self.vx) < 1:
                 self.sitting = not self.sitting
@@ -1177,7 +1288,7 @@ class World:
         self.touches += 1
         self.invulnerable_ms = self.ms + int(INVULNERABLE * 1000)
         evaded = self.chance("evade") < evade_chance(m.info)
-        damage = 0.0 if evaded else touch_damage(m.info, self.chance("damage"))
+        damage = 0.0 if evaded else touch_damage(m.info, self.chance("damage"), self.character)
         self.touch_log.append((self.t, damage))
         if evaded:
             self.evaded += 1
@@ -1193,10 +1304,36 @@ class World:
             self.seen.clear()
             self.note("HP 0: she died")
             return
+        self._pet_drinks()
         if self.mode == "rope":
             self._leave_rope()
         self.knocked = True
         self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
+
+    def _pet_drinks(self) -> None:
+        """Her pet's auto potion, right after a touch took HP (Her.pet; PET_GAP): below its warning, a potion from
+        her stock (Realism.potions), POTION_HP as her own."""
+        pet = self.character.pet
+        if pet is None or self.hp >= pet - 1e-9 or self.ms - self.pet_drank_ms < PET_GAP * 1000:
+            return
+        if self.pet_fullness() <= pet_care.PACKED_AT:
+            self.note("her pet is too hungry to drink a potion: sent home")
+            return
+        if self.potions_left is not None:
+            if self.potions_left <= 0:
+                self.note("her pet has no potion left to drink")
+                return
+            self.potions_left -= 1
+        self.potions_used += 1
+        self.pet_potions += 1
+        self.pet_drank_ms = self.ms
+        self.hp = min(1.0, self.hp + POTION_HP)
+        self.note(f"her pet drinks a potion for her: HP {self.hp:.1%}")
+
+    def pet_fullness(self) -> float:
+        """Her pet's fullness now: pet.HUNGRY lost at every pet.TICK_S since it was last fed (or the start)."""
+        ticks = int((self.t - self.pet_since) // pet_care.TICK_S)
+        return max(0.0, self.pet_full - ticks * pet_care.HUNGRY)
 
     def flinching(self, m: SimMonster) -> bool:
         """Whether monster `m` flinches now: for FLINCH_S after a star or a swipe hit it."""
@@ -1484,8 +1621,20 @@ class World:
                 "platform": None if self.plat is None else self.plat.id, "hp": round(self.hp, 3),
                 "exp": self.exp, "kills": dict(sorted(self.kills.items())), "touches": self.touches,
                 "evaded": self.evaded, **({"fell_out_at": round(self.fell_out_at, 3)} if self.fell_out_at else {}),
+                **({"pet_potions": self.pet_potions} if self.pet_potions else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
+
+
+def _body_of(kind: str, b, info: MobInfo | None) -> tuple[float, float]:
+    """A monster's half width and height (how tall it walks), as an attack picks it (World.top): the tables'
+    (monster_data.MONSTER_HALF, MONSTER_HEIGHT) for their kinds, else from the game data as those were made (half its
+    widest stand or move frame, MobBody.half from the map; the top of its first move frame), else a pig-sized 34 by
+    46. On West Rocky Mountain II: a Stump, Dark Stump and Axe Stump 33 by 51, a Red Snail 20.5 by 34."""
+    if kind in monster_data.MONSTER_HALF:
+        return monster_data.MONSTER_HALF[kind], monster_data.MONSTER_HEIGHT.get(kind, 46.0)
+    half = b.half if b is not None else 34.0
+    return half, info.move[0].top if info is not None and info.move else 46.0
 
 
 def _actions(keys: GameKeys) -> dict[str, str]:
@@ -1493,7 +1642,8 @@ def _actions(keys: GameKeys) -> dict[str, str]:
     out = {}
     for field_name, action in (("left", "left"), ("right", "right"), ("up", "up"), ("down", "down"),
                                ("jump", "jump"), ("attack", "attack"), ("lucky_seven", "attack"),
-                               ("pick_up", "pick"), ("chair", "chair"), ("hp_potion", "potion")):
+                               ("pick_up", "pick"), ("chair", "chair"), ("hp_potion", "potion"),
+                               ("pet_food", "pet_food")):
         k = getattr(keys, field_name, None)
         if k is not None:
             out[k.name] = action

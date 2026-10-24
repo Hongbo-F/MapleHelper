@@ -20,6 +20,10 @@ from ..paths import CONFIG
 SIM_KEYS = GameKeys(left=parse_key("left"), right=parse_key("right"), jump=parse_key("alt"), attack=parse_key("f"),
                     lucky_seven=parse_key("g"), up=parse_key("up"), down=parse_key("down"), pick_up=parse_key("z"),
                     chair=parse_key("d"), sit=parse_key("x"), hp_potion=parse_key("r"), mp_potion=parse_key("t"))
+# ... and her bindings from 2026-10-23, on West Rocky Mountain II (config.toml then): attack ctrl, Lucky Seven shift,
+# no potion keys (her pet drinks them), pet food u. The simulator plays her with these there (sim.scenarios.HER).
+SIM_KEYS_PET = dataclasses.replace(SIM_KEYS, attack=parse_key("ctrl"), lucky_seven=parse_key("shift"), hp_potion=None,
+                                   mp_potion=None, pet_food=parse_key("u"))
 
 
 def sim_setup() -> tuple[GameKeys, Timing]:
