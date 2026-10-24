@@ -38,10 +38,10 @@ import numpy as np
 
 from ..paths import LIE_RECORDINGS
 
-# The recording ends once the game has shown no Lie Detector for this long (frames the game window was gone or
-# minimized don't count: it may have been up behind it), and the player takes plans again only after as long
-# (control.player.Watchdog). The spotter sees the mouse mini-game's notice only: once it closes, the game's "5 ...
-# START" count and the figure tracking itself (moving the pointer over a fading shape) show nothing it knows, and
+# The recording ends once the game has shown no Lie Detector for this long (frames the game window was gone,
+# minimized or covered don't count: it may have been up behind), and the player, its alarm cleared, stops only after
+# as long (control.player.Watchdog). The spotter sees the mouse mini-game's notice only: once it closes, the game's
+# "5 ... START" count and the figure tracking itself (moving the pointer over a fading shape) show nothing it knows, and
 # they are what the person answering does. So it has to outlast them, as well as the moment between the countdown
 # window ("N sec until the Lie Detector mini-game starts") and the Violettas' window (both have the yellow title) and
 # a frame or two missed in a flicker (a window redrawn, the pointer over the title). How long the tracking lasts
@@ -52,7 +52,8 @@ END_S = 60.0
 # it has been seen, is a test left unanswered (its windows run a minute or two) and the Truth Booth it sends her to
 # (4:44 left on its timer in the screenshot taken as she arrived, 2026-10-18), then END_S: about 8 minutes. Ten
 # leave two to spare; a cycle that runs on (a window the spotter takes for the Lie Detector, the game minimized
-# for good) stops recording there, at 2,400 frames (about 700 MB), and the player stays locked as before.
+# for good) stops recording there, at 2,400 frames (about 700 MB at 1366x768, 1.0 GB at 1920x1080), and the player
+# stays up, locked, as before.
 CAP_S = 10 * 60.0
 # JPEG at quality 75 with full-resolution colour (4:4:4). Measured on the three real 1366x768 frames in
 # tests/fixtures/native and the six Lie Detector screens in tests/fixtures/lie_detector shrunk to 1366x768
@@ -61,7 +62,10 @@ CAP_S = 10 * 60.0
 # spotter scored it 0.36-0.41 of its threshold on the decoded frame at every quality from 60 to 90; at 4:4:4 it
 # keeps 1.11 (1.22 on the PNG); every other form scored as on the PNG. The mini-game notice's small text read as
 # well as on the PNG, the HUD's 1366x768 text too (30.5 dB PSNR in the notice's box). Quality 85 is 434 KB a frame
-# for 2.4 dB more; 65 was as legible at 238 KB, but its ringing showed round the letters. A PNG is 1,307 KB.
+# for 2.4 dB more; 65 was as legible at 238 KB, but its ringing showed round the letters. A PNG is 1,307 KB. At
+# 1920x1080, the other size the player may set (window.CLIENT_SIZES: the game's 1366x768 view stretched to it), a
+# frame is half as big again: 447 KB a game frame (the three stretched, bilinear) and 335 KB a Lie Detector screen
+# (126-431, the six as saved; D:/MapleHelper-scratch/ld/finish/scripts/jpeg_sizes.py). The sizes below are 1366x768's.
 JPEG_QUALITY = 75
 JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY,
                cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444]
@@ -71,9 +75,10 @@ JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY,
 # about 175 MB at 290 KB a frame, so 10 GB holds about 58 of those; 18 that went to the Truth Booth (8 minutes,
 # 560 MB), 14 at the cap. The Lie Detector came about an hour apart at the most often (00:47, 01:58 and 02:54 on
 # 2026-10-19: tests/fixtures/lie_detector), so 58 cycles are two days of play without a break, weeks of evenings.
-# D: had 98 GB free on 2026-10-24.
+# D: had 98 GB free on 2026-10-24. At 1920x1080, about 260 MB a cycle answered and 39 of them in the 10 GB.
 KEEP_BYTES = 10 * 1024 ** 3
-QUEUE_ITEMS = 16  # grabs waiting to be written (4 s of them, 3 MB a 1366x768 frame); past it a frame is dropped
+QUEUE_ITEMS = 16  # grabs waiting to be written (4 s of them, 3 MB a 1366x768 frame, 6 at 1920x1080); past it one is
+                  # dropped
 LIVE_S = 5.0      # a recording whose index was written this recently, and not summed up, is still being written
 STAMP = "%Y%m%d-%H%M%S"
 INDEX, SUMMARY = "index.jsonl", "summary.json"
