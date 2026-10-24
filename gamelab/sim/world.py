@@ -343,6 +343,16 @@ RIVAL_REACH = 400.0
 RIVAL_DY = 60.0
 RIVAL_NEAR = 150.0
 RIVAL_SPEED = 125.0
+# Other players camping (Realism.camps), as the crowding study saw them on Tree Dungeon, Forest Up North II from her spot
+# on 28 (D:/MapleHelper-scratch/map3/study/crowding.md, 2026-10-24: 19 frames 2 s apart, 35.4 s): 3-6 others in the
+# minimap's view at once, each staying by 1-3 neighbouring platforms for 80 s or more, killing the Green Mushrooms there
+# (8 kills seen, all Greens; of the 7 whose appearing was seen, 5 died 2.1-6.3 s later) and leaving the Horny Mushrooms
+# (none of 3-4 died; one took 192 and lived), their drops gone within one 2 s step. A camp (Camp) stands at a place,
+# its dot on the minimap there, and kills each monster of its kinds on the platforms it hunts CAMP_KILL s after it shows
+# (at the start, or respawned), drawn per monster from a generator of its own; its drops are taken CAMP_TAKES s after
+# they land. It doesn't move, and kills nothing it doesn't hunt.
+CAMP_KILL = (2.0, 6.0)
+CAMP_TAKES = 1.0
 
 
 class SimDied(Exception):
@@ -396,6 +406,9 @@ class Noise:
                                  # that matched said so for 18% of the sightings of monsters walking and 22% of
                                  # those standing (3 recordings with the camera still), mostly a frame at a time
                                  # but for up to 1.4 s on end, most of the time wrong in such long stretches
+    dot_under: float = 0.0       # units: another player's minimap dot this near hers isn't seen (hers is drawn over
+                                 # it: on Tree Dungeon's frames theirs vanished within about 3.5 minimap px, 56 units,
+                                 # her yellow core whole in all 20); 0 off
     air_snail: tuple = ()        # (near, take): an attack from a jump whose area picks a snail (AIR_PICK 'area')
                                  # under `near` units ahead takes it only with chance `take`, else hits nothing.
                                  # In the live hunts of 2026-10-21 such jump throws hurt or killed the snail 6
@@ -422,6 +435,10 @@ class Realism:
     potions: int | None = None   # potions she has (None: endless)
     drops: tuple = ()            # what a kill drops: (monster kind, drop kind, chance) (GAME_DROPS), drawn per
                                  # kill from a generator of their own; (): mesos, and a pig's leather (ITEM_OF)
+    camps: tuple = ()            # other players camping (Camp, CAMP_KILL): each kills the monsters of its kinds on
+                                 # its platforms soon after they show
+    shared_exp: bool = False     # another player's kill of a monster she hurt gives her its EXP times the share of its
+                                 # HP she took (whether the game does isn't known: the study's session 2 asks)
     lock_arrows: bool = False    # an arrow pressed within ARROW_LOCK of an attack's key moves her only from
                                  # ARROW_HELD after it, if still held (as measured in game on 2026-10-21;
                                  # control.actions holds a plan's first arrow back for it). Preset game and
@@ -432,6 +449,16 @@ class Realism:
     zero_walls: bool = False     # the walls of foothold group 0 stop her whatever her group
     rope_reach: float = ROPE_REACH  # how far above her feet a rope's bottom can be for her to grab it
                                     # (ROPE_REACH_CLIENT: HeavenClient's)
+
+
+@dataclass(frozen=True)
+class Camp:
+    """Another player camping (Realism.camps, CAMP_KILL): where it stands (its minimap dot), the platforms whose
+    monsters it kills, and of which kinds."""
+    stand: int
+    x: float
+    hunts: tuple[int, ...]
+    kinds: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -653,6 +680,7 @@ class SimMonster:
     facing: int = -1           # the way it faced when it last stopped walking (-1: left, as it's drawn) ...
     anim0: float = 0.0         # ... and when it began to stand or walk (its animation's start)
     pushed: tuple[float, float] | None = None  # a hit's (when, from x): pushed from there to x0 (knock)
+    life: int = 0              # how often it has come back (a camp's kill is for the life it was drawn in)
 
     @property
     def lo(self) -> float:
@@ -796,6 +824,7 @@ class World:
         # The knobs draw from rngs of their own, so with them off the world is the same as without them.
         self._rival_rng = random.Random(f"rival:{seed}")
         self._drop_rng = random.Random(f"drops:{seed}")  # Realism.drops' draws (the others' unchanged by them)
+        self._camp_rng = random.Random(f"camps:{seed}")  # Realism.camps' draws
         self.potions_left = self.realism.potions
         self.potions_used = 0           # potions drunk, by her key or by her pet
         self.pet_potions = 0            # ... of them her pet's (Her.pet)
@@ -874,6 +903,8 @@ class World:
             self.rival = self._rival_start()
             self._push(self._rival_due(), "rival")
             self._push(self._rival_stays(), "rival_moves")
+        for m in self.monsters:
+            self._camps_watch(m)
 
     # --- set-up -------------------------------------------------------------------------------------
 
@@ -1025,7 +1056,9 @@ class World:
         elif e.kind == "respawn":
             m = e.data
             m.alive, m.hp, m.died_at, m.hit_at, m.flinch_at = True, m.hp_max, None, None, None
+            m.life += 1
             m.start(self.t, m.home)
+            self._camps_watch(m)
         elif e.kind == "rival":
             self._push(self._rival_kill(), "rival")
         elif e.kind == "rival_moves":
@@ -1038,6 +1071,10 @@ class World:
                 r.platform, r.x, r.y = r.goal
                 r.goal = None
                 self.note(f"another player gets to platform {r.platform} at x {r.x:.0f}")
+        elif e.kind == "camp_kill":
+            m, life = e.data
+            if m.alive and m.life == life:
+                self._others_kill(m, self._camp_rng, CAMP_TAKES)
         elif e.kind == "rival_takes":
             for d in e.data:
                 if not d.gone:
@@ -1658,19 +1695,44 @@ class World:
         live = [m for m in self.monsters if m.alive and self._rival_reaches(m)]
         if not live:
             return self._rival_due()
-        m = live[self._rival_rng.randrange(len(live))]
+        self._others_kill(live[self._rival_rng.randrange(len(live))], self._rival_rng, self.realism.rival_takes)
+        return self._rival_due()
+
+    def _others_kill(self, m: "SimMonster", rng: random.Random, takes: float) -> None:
+        """Another player kills monster `m` (a rival or a camp): no EXP for her (but her share of it, with
+        Realism.shared_exp), drops drawn from `rng` that she can't pick up for Realism.rival_owns s and that it takes
+        `takes` s after they land, and the monster's respawn."""
         t, mx = self.t, m.at(self.t)
         m.alive, m.died_at, m.died_x = False, t, mx
         self.kill_log.append((t, m.kind, m.platform.id, "rival"))
         self.note(f"another player kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
+        if self.realism.shared_exp and m.hp < m.hp_max:
+            share = round(self.model.mob_exp.get(m.name, 1) * (m.hp_max - m.hp) / m.hp_max)
+            self.exp += share
+            self.note(f"her share of its EXP: {share}")
         p, drops = m.platform, []
-        for kind in self._drop_kinds(m.kind, self._rival_rng):
-            x = min(max(mx + self._rival_rng.uniform(-10, 10), p.left + 3), p.right - 3)
+        for kind in self._drop_kinds(m.kind, rng):
+            x = min(max(mx + rng.uniform(-10, 10), p.left + 3), p.right - 3)
             drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY, owner="rival"))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
-        self._push(self.ms + int((DROP_DELAY + self.realism.rival_takes) * 1000), "rival_takes", drops)
+        self._push(self.ms + int((DROP_DELAY + takes) * 1000), "rival_takes", drops)
         self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
-        return self._rival_due()
+
+    def _camps_watch(self, m: "SimMonster") -> None:
+        """Monster `m` shows (at the start, or respawned): each camp hunting its platform and kind kills it CAMP_KILL
+        s from now (if it's still that life of it then)."""
+        for c in self.realism.camps:
+            if m.platform.id in c.hunts and m.kind in c.kinds:
+                self._push(self.ms + int(self._camp_rng.uniform(*CAMP_KILL) * 1000), "camp_kill", (m, m.life))
+
+    def others_at(self) -> list[tuple[float, float]]:
+        """Where the other players are now (map units, as their minimap dots place them): the rival (rival_at) and
+        the camps (Realism.camps)."""
+        out = [] if (r := self.rival_at()) is None else [r]
+        for c in self.realism.camps:
+            p = self.model.platform(c.stand)
+            out.append((c.x, p.y_at(c.x)))
+        return out
 
     def _pick(self) -> None:
         t = self.t

@@ -222,3 +222,59 @@ def test_up_on_the_ground_at_a_portal_takes_her_out_of_the_map_and_the_stack_nev
             assert not m.portal_near(m.platform(mv.src), mv.rope_x), mv
     for pid in (28, 12):
         assert m.portal_near(m.platform(pid), 240.0) and not m.portal_near(m.platform(pid), 110.0)
+
+
+# --- other players ---------------------------------------------------------------------------------------------------
+
+def _camp_world(m, **kw):
+    from gamelab.sim.world import Camp
+    camps = (Camp(28, 250.0, (29, 30), ("green-mushroom",)),)
+    return world(m, 23, 0.0, monsters={29, 30, 23}, realism=Realism(camps=camps, respawn=8.8, **kw))
+
+
+def test_a_camp_kills_the_greens_it_hunts_2_to_6_s_after_they_show_and_leaves_the_rest():
+    m = tree_map()
+    w = _camp_world(m)
+    w.invulnerable_ms = 10**9  # (the Horny Mushrooms on 23, by her: they don't count here)
+    w.advance(30.0)
+    kills = [k for k in w.kill_log if k[3] == "rival"]
+    first = sorted(t for t, _, _, _ in kills)[:2]
+    assert {k[1] for k in kills} == {"green-mushroom"} and {k[2] for k in kills} == {29, 30}
+    assert all(2.0 <= t <= 6.0 for t in first)  # the two there from the start
+    assert len(kills) >= 4  # and again once they're back (8.8 s), 2-6 s after
+    assert all(m_.alive for m_ in w.monsters if m_.kind == "horny-mushroom")
+    taken = [d for d in w.drops if d.owner == "rival" and d.gone]
+    assert taken and all(d.taken_by == "rival" and d.taken_at - d.since <= 1.0 + 1e-6 for d in taken)
+    assert w.others_at() == [(250.0, m.platform(28).y_at(250.0))]
+
+
+def test_with_shared_exp_a_monster_she_hurt_and_another_player_killed_gives_her_her_share():
+    m = tree_map()
+    for shared, exp in ((False, 0), (True, round(26 * 2 / 5))):
+        w = _camp_world(m, shared_exp=shared)
+        g = next(x for x in w.monsters if x.kind == "green-mushroom")
+        g.hp -= 2  # two of her five stars
+        w.invulnerable_ms = 10**9
+        w.advance(6.5)
+        assert not g.alive and w.exp == exp
+
+
+def test_other_players_dots_show_in_the_minimap_windows_view_and_not_under_hers():
+    import dataclasses
+    from gamelab.sim import fakes
+    from gamelab.sim.world import Camp, Noise
+    m = tree_map()
+    camps = (Camp(29, -100.0, (29,), ()), Camp(28, 240.0, (28,), ()), Camp(13, -100.0, (13,), ()))
+    clock = fakes.Clock()
+    w = World(m, KEYS, (28, 262.0), monsters=None, origin=clock.now, realism=Realism(camps=camps))
+    eyes = fakes.FakeEyes(w, clock, m)
+    assert eyes.in_window(m.platform(29).top) and eyes.in_window(-1100) and not eyes.in_window(-1120)
+    assert len(eyes._others()) == 2  # 13 (y -1190) is out of the window's view from 28
+    w.noise = dataclasses.replace(w.noise, dot_under=56.0)
+    assert len(eyes._others()) == 1  # the one 22 units from her is under her dot
+    w.y = m.platform(13).top  # up on 13 the window has scrolled: 13 in view, 28 and 29 not
+    assert eyes.in_window(-1190) and not eyes.in_window(-49)
+    assert [eyes.in_window(y) for y in (-1200, -50)] == [True, False]
+    if (rocky := scenarios.real_map(scenarios.ROCKY)) is not None:  # its whole picture shows
+        eyes = fakes.FakeEyes(World(rocky, KEYS, (22, -700.0), monsters=None, origin=clock.now), clock, rocky)
+        assert eyes.in_window(-5000) and eyes.in_window(5000)

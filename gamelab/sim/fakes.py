@@ -20,6 +20,7 @@
 
 import builtins
 import io
+import math
 import os
 import sys
 import time
@@ -59,6 +60,15 @@ EPOCH = 1_800_000_000.0   # what time.time() reads at the start (a fixed date, f
 FRAME = (540, 960)        # half-size game frame
 SKY = (60, 140, 230)      # the frame's colour: nothing in it reads as an HP bar, a rope or ground
 PLAY_BOTTOM = int(FRAME[0] * 0.88)  # the bottom bar starts below (screen.HUD_TOP)
+# The minimap window's rows (game px) on a map whose picture is taller than it shows: on Tree Dungeon, Forest Up North
+# II 112 of the picture's 183 (the window from y 72 to 184 at 1366x768; the study's frames). It scrolls the picture to
+# keep her dot WINDOW_DOT_ROW rows from its top, stopping at the picture's ends: on its frames of 2026-10-24 her dot
+# was 49.5 rows down on 19 (first_000: the picture's corner at y 28, her dot at picture row 93.5), and on 28 the window
+# had stopped at the picture's bottom (the corner at y 1, her dot at row 130.5): from 28 the window shows y -1113 and
+# below (platforms 15 to 33), and nobody higher up is seen. The first map's and West Rocky Mountain II's whole pictures
+# show (their corners at y 72 on all their saved frames).
+WINDOW_ROWS = {10002073: 112}
+WINDOW_DOT_ROW = 49.5
 KINDS = ("pig", "slime", "snail", "orange-mushroom")  # what the real detector has templates for (on the first map;
                                                       # on another, the map's kinds too: detector_kinds)
 ITEM_SIZE = {"mesos": (13, 13), "leather": (20, 18)}  # half-size px (w, h)
@@ -313,16 +323,36 @@ class FakeEyes(Eyes):
         return (float(round(dot[0])), float(round(dot[1]))) if self.noise.dot_px else dot
 
     def _others(self) -> list[Marker]:
-        """Other players' minimap dots as minimap.other_dots reads them: the other player's (World.rival_at), drawn
-        OTHER_SHIFT right of and below where her dot would be there, read to whole pixels as hers is
-        (Noise.dot_px); none while something covers the minimap (Noise.dot_hidden)."""
-        at = self.world.rival_at()
-        if at is None or Noise.during(self.noise.dot_hidden, self.world.t):
+        """Other players' minimap dots as minimap.other_dots reads them: the other players' (World.others_at), each
+        drawn OTHER_SHIFT right of and below where her dot would be there, read to whole pixels as hers is
+        (Noise.dot_px); none while something covers the minimap (Noise.dot_hidden), none within Noise.dot_under of hers
+        (hers is drawn over them), and none outside the minimap window's view (in_window)."""
+        if Noise.during(self.noise.dot_hidden, self.world.t):
             return []
-        x, y = self.loc.to_dot(*at)
-        if self.noise.dot_px:
-            x, y = float(round(x)), float(round(y))
-        return [Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT)]
+        out, hx, hy = [], *self.world.her()
+        for at in self.world.others_at():
+            if self.noise.dot_under and math.hypot(at[0] - hx, at[1] - hy) < self.noise.dot_under:
+                continue
+            if not self.in_window(at[1]):
+                continue
+            x, y = self.loc.to_dot(*at)
+            if self.noise.dot_px:
+                x, y = float(round(x)), float(round(y))
+            out.append(Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT))
+        return out
+
+    def in_window(self, y: float) -> bool:
+        """Whether map y is in the minimap window's view: everywhere, but on a map whose picture is taller than the
+        window shows (WINDOW_ROWS), the rows the window scrolls to with her dot WINDOW_DOT_ROW from its top (stopping at
+        the picture's ends)."""
+        rows = WINDOW_ROWS.get(self.model.id)
+        if rows is None:
+            return True
+        mm = self.model.minimap
+        mag, tall = 2 ** mm["mag"], mm["height"] // 2 ** mm["mag"]
+        her = (self.world.y + mm["centerY"]) / mag
+        top = min(max(0.0, her - WINDOW_DOT_ROW), tall - rows)
+        return top <= (y + mm["centerY"]) / mag < top + rows
 
     def _exp_box(self) -> np.ndarray:
         """Her EXP number as the bar shows it, from her level and EXP at the start (World.character) and what she has gained
