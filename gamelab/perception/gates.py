@@ -6,10 +6,10 @@ map's four kinds have tests written by hand; any other kind gets a gate learned,
 and a few saved frames of it. A kind's colours are its templates' pixels as step 1 sees them (the game's own sprites
 shrunk to step 1's scale, as MobDetector makes them, at either window size), as drawn and blended toward a fog's white
 (FOG_ALPHAS); the background's are the play area (above the HUD) of saved frames of the map at step 1's scale, with the
-monsters on them cut out (`background`). A colour, binned BITS bits a channel, is the kind's where its share of any one
-blend's pixels is RATIO times its share of the background's or more. The background's counts are kept per map in
-assets/backgrounds/<map id>.npz (in git; the frames stay out of it), and MobDetector learns its kinds' gates from them
-as it's made (its `background`).
+monsters found on them cut out (sprites.learn_background; `python -m gamelab learn-colours`). A colour, binned BITS bits
+a channel, is the kind's where its share of any one blend's pixels is RATIO times its share of the background's or
+more. The background's counts are kept per map in assets/backgrounds/<map id>.npz (in git; the frames stay out of it),
+and MobDetector learns its kinds' gates from them as it's made (sprites.detector_for).
 
 All of a detector's learned gates are one lookup a frame: each colour bin's byte holds a bit a kind (`Gates`), so step 1
 works out each pixel's bin once and looks it up once, whatever the number of kinds.

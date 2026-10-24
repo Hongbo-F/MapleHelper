@@ -1,7 +1,7 @@
 """`bench-paste` (analysis/pasted.py): the game's own pictures drawn onto frames of the game at its own 1366x768 as the
 game draws them, at known places, and what the monster and drop searches make of them there and on the same scenes
-stretched to 1920x1080. The frames are tests/fixtures/native (West Rocky Mountain II, none of whose monsters has a
-colour gate yet)."""
+stretched to 1920x1080. The frames are tests/fixtures/native (West Rocky Mountain II, with none of the first map's
+monsters on them)."""
 
 import json
 from pathlib import Path
@@ -135,10 +135,12 @@ def rocky():
         pytest.skip("needs West Rocky Mountain II's game data")
 
 
-def test_bench_paste_says_when_none_of_a_maps_monsters_has_a_colour_gate(rocky, capsys):
+def test_bench_paste_says_when_none_of_a_maps_monsters_has_a_colour_gate(rocky, capsys, monkeypatch):
+    from gamelab.perception import gates
+    monkeypatch.setattr(gates, "load_background", lambda map_id: None)  # (as before one was learned for it)
     assert main(["bench-paste", "--map", "10004021", "--each", "1"]) == 0
     out = capsys.readouterr().out
-    assert "monsters: none of map 10004021's has a colour gate yet" in out
+    assert "monsters: none of map 10004021's has a colour gate" in out
     assert "drops:" in out and "1366x768, full size" in out
 
 

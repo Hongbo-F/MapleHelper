@@ -12,9 +12,14 @@ what that says of them (CUTOUTS, in their own px) goes for any window that stret
 size they aren't used (`detector_for`).
 
 A monster's kind is its name in lower case with dashes ("orange-mushroom"; perception.kinds).
+
+A map's kinds without a hand-made colour test (mobs.PALETTES) are looked for with gates learned against the map's
+background colours (perception.gates), which `learn_background` measures on saved frames of the map (`python -m gamelab
+learn-colours`): a detector for the map learns them from its own pictures as it's made (`detector_for`).
 """
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import cv2
@@ -23,10 +28,11 @@ from PIL import Image
 
 from gamedata.paths import OUT
 
-from ..screen import STRETCHED, Geometry
+from ..screen import STRETCHED, Geometry, of_frame
+from . import gates
 from .kinds import kind_of
 from .match import masked_match
-from .mobs import ASSETS, CUTOUTS, INDEX, KINDS_WITH_PALETTE, OPAQUE, SCALE_FILE, MobDetector
+from .mobs import ASSETS, CUTOUTS, INDEX, OPAQUE, PALETTES, SCALE_FILE, SEARCH_SCALE, MobDetector, step1_frame
 
 
 SPRITES = OUT / "sprites"
@@ -39,6 +45,11 @@ GAME_ALPHA = {"alpha": "game"}
 CUTOUT_SCORE = 0.85
 CUTOUT_PAD = 30  # full-size px around a cut-out a sprite may reach out to: the pig cut-outs are cut off above
                  # the feet (58 px tall, their frame 60)
+# learn_background: a monster found on a frame is cut out of the background this many game px around its picture; the
+# monsters are found this many times, the first with gates learned against the frames as they are, monsters and all,
+# then against the background without those found the time before.
+CUT_PAD = 6
+CUT_ROUNDS = 2
 
 
 def screen_size(picture: np.ndarray, stretch: float = STRETCHED.stretch) -> tuple[int, int]:
@@ -184,21 +195,62 @@ def cutout_origins(kinds: set[str], folder: Path = SPRITES, cutouts: Path = ASSE
     return out
 
 
-def detector_for(model, geo: Geometry = STRETCHED) -> MobDetector:
+def detector_for(model, geo: Geometry = STRETCHED, background: np.ndarray | None = None) -> MobDetector:
     """A MobDetector for a map, for look frames of geometry `geo`: the game's sprites of every monster that spawns
     there (every pose, any monster with a colour gate), drawn as that window shows them, and where the window
     stretches the game the screenshot cut-outs too (good at monsters half hidden in plants on the 1920x1080 window;
-    they and the sprites folder hold every kind built for any map, and all of them are looked for, as always).
-    At the game's own 1366x768 the sprites are the game's own pictures, and alone: the cut-outs are of the stretched
-    window, and shrunk back they're neither (README, Screen size). There the detector holds the map's own kinds only,
-    whatever else the folder holds from other maps, so what it looks for doesn't hang on what was built before: a
-    map none of whose monsters has a colour gate yet (West Rocky Mountain II) gets one that finds nothing, where it
-    had none at all on a checkout that hadn't built the first map's (`no monster templates`)."""
-    names_by_id = {s.mob_id: s.name for s in model.spawns if s.name and kind_of(s.name) in KINDS_WITH_PALETTE}
+    they and the sprites folder hold every kind built for any map, and all of them with a hand-made colour test are
+    looked for, as always). At the game's own 1366x768 the sprites are the game's own pictures, and alone: the
+    cut-outs are of the stretched window, and shrunk back they're neither (README, Screen size). There the detector
+    holds the map's own kinds only, whatever else the folder holds from other maps, so what it looks for doesn't hang
+    on what was built before. The map's kinds without a hand-made colour test get gates learned against its background
+    colours (`background`, by default those kept for it: gates.load_background, `learn-colours`); a map with none kept
+    gets a detector that doesn't look for them (it finds nothing on a map none of whose monsters has a hand-made test,
+    where it had none at all on a checkout that hadn't built the first map's: `no monster templates`)."""
+    background = gates.load_background(getattr(model, "id", None)) if background is None else background
+    kinds = {kind_of(s.name) for s in model.spawns if s.name}
+    learned = {k for k in kinds if k not in PALETTES} if background is not None else set()
+    names_by_id = {s.mob_id: s.name for s in model.spawns
+                   if s.name and (kind_of(s.name) in PALETTES or kind_of(s.name) in learned)}
     folders = [ensure(names_by_id, stretch=geo.stretch)]
     if geo.stretch == 1:
-        return MobDetector(folders, frame_scale=geo.frame_scale, kinds={kind_of(n) for n in names_by_id.values()})
-    return MobDetector([ASSETS] + folders, frame_scale=geo.frame_scale)
+        return MobDetector(folders, frame_scale=geo.frame_scale, kinds={kind_of(n) for n in names_by_id.values()},
+                           background=background, learned=learned)
+    return MobDetector([ASSETS] + folders, frame_scale=geo.frame_scale, background=background, learned=learned)
+
+
+def learn_background(frames: list[np.ndarray], detector: Callable[[Geometry, np.ndarray], MobDetector],
+                     rounds: int = CUT_ROUNDS,
+                     log: Callable[[str], None] = lambda line: None) -> tuple[np.ndarray, int]:
+    """A map's background colours (gates.background), from saved frames of it (full size, RGB, of any window size):
+    the play area of each (above the HUD) at step 1's scale, with the monsters found on it cut out. They're found with
+    the map's detector for the frame's geometry, its gates learned against the background as learned so far
+    (`detector(geo, background)`, as detector_for makes it): first against the frames as they are, monsters and all,
+    then `rounds` - 1 times against the background without the monsters found the round before, each found monster's
+    picture cut out CUT_PAD game px around. Returns the counts and how many monsters the last round cut out."""
+    looks = []  # (geometry, look frame, its play area at step 1's scale)
+    for full in frames:
+        geo = of_frame(full)
+        k = geo.look_scale
+        frame = full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
+                                               interpolation=cv2.INTER_AREA)
+        search = max(1.0, geo.frame_scale / SEARCH_SCALE)
+        looks.append((geo, frame, step1_frame(frame[:int(frame.shape[0] * geo.hud_top)], search), search))
+    cut: list[list[tuple[int, int, int, int]]] = [[] for _ in looks]
+    found = 0
+    for r in range(rounds):
+        counts = gates.background([picture for _, _, picture, _ in looks], cut)
+        detectors = {geo: detector(geo, counts) for geo in {geo for geo, *_ in looks}}
+        found, cut = 0, []
+        for geo, frame, _, search in looks:
+            hits = detectors[geo].detect_wide(frame, (0, int(frame.shape[0] * geo.hud_top)))
+            found += len(hits)
+            pad = CUT_PAD * geo.frame_scale  # look-frame px; step 1's are `search` of them
+            cut.append([(int((m.x - m.w / 2 - pad) / search), int((m.y - m.h / 2 - pad) / search),
+                         int(np.ceil((m.x + m.w / 2 + pad) / search)), int(np.ceil((m.y + m.h / 2 + pad) / search)))
+                        for m in hits])
+        log(f"round {r + 1}: {found} monsters found on {len(looks)} frames, cut out")
+    return gates.background([picture for _, _, picture, _ in looks], cut), found
 
 
 def _read(path: Path) -> dict:

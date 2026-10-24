@@ -1,12 +1,12 @@
 """Monsters and drops drawn onto saved frames as the game draws them, then looked for (`python -m gamelab
 bench-paste`): offline, no game, no keys.
 
-There are no frames of the game at its own 1366x768 with the first map's monsters on them, and on West Rocky Mountain
-II's frames none of its monsters has a colour gate yet. So the game's own pictures are drawn onto frames of the game
+There are no frames of the game at its own 1366x768 with the first map's monsters on them, and the new maps' saved
+frames show theirs in a few places and poses only. So the game's own pictures are drawn onto frames of the game
 at that size, pixel for pixel and alpha blended as the game draws them (`paste`), at known places, and the search is
 asked to find them: at 1366x768 as a look sees it (full size), and the same scene stretched to 1920x1080 as the game's
 window stretched it until 2026-10-23 (bilinear, `stretched`), looked at half size as that window was. Every kind of a
-map that has a colour gate (what its detector holds: mobs.PALETTES, and any gate added later) is drawn, every frame
+map that has a colour gate (what its detector holds: mobs.PALETTES, and the gates learned for it) is drawn, every frame
 of its sprites both ways, and every drop (loot.ITEMS and the coins' frames).
 
 What it says, by size and kind: how many were found by the whole screen's search and by a fight's band around each

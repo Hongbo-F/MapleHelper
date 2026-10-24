@@ -1036,7 +1036,8 @@ def cmd_bench_paste(args) -> int:
     except RuntimeError:  # (no picture of any kind with a colour gate there at all)
         kinds = set()
     if not kinds:
-        print(f"monsters: none of map {args.map}'s has a colour gate yet (mobs.PALETTES)")
+        print(f"monsters: none of map {args.map}'s has a colour gate (mobs.PALETTES), nor its background colours for a "
+              f"learned one (learn-colours)")
     else:
         print(f"monsters ({', '.join(sorted(kinds))}):")
         result = pasted.monsters(backgrounds, detectors, sprites.folder_for(NATIVE.stretch),
@@ -1052,6 +1053,40 @@ def cmd_bench_paste(args) -> int:
     print("drops:")
     result = pasted.drops(backgrounds, found, loot.folder_for(NATIVE.stretch), args.each, args.seed + 1)
     print("\n".join("   " + line for line in pasted.lines(result, "drops")))
+    return 0
+
+
+def cmd_learn_colours(args) -> int:
+    """A map's background colours, from saved frames of it, for the gates of its monsters without a hand-made colour
+    test (perception.gates, sprites.learn_background): kept in assets/backgrounds/<map id>.npz (or --out), where the
+    map's detector finds them. Offline: no game, no keys."""
+    from .localization import mapdata
+    from .perception import gates, sprites
+    from .perception.kinds import kind_of
+    from .perception.mobs import PALETTES
+    from .screen import of_frame
+    model = mapdata.load(args.map)
+    kinds = sorted({kind_of(s.name) for s in model.spawns if s.name} - set(PALETTES))
+    if not kinds:
+        print(f"map {args.map}'s monsters all have a hand-made colour test: nothing to learn")
+        return 0
+    files = sorted(f for name in map(Path, args.files) for f in ([name] if name.is_file() else name.glob("*.png")))
+    frames = [np.asarray(Image.open(f).convert("RGB")) for f in files]
+    if not frames:
+        print("name saved frames of the map (full-size screenshots of the game window, or folders of them)")
+        return 1
+    sizes = sorted({f"{f.shape[1]}x{f.shape[0]}" for f in frames})
+    print(f"map {args.map} ({', '.join(kinds)}): {len(frames)} frames ({', '.join(sizes)})")
+    counts, cut = sprites.learn_background(frames, lambda geo, back: sprites.detector_for(model, geo, back),
+                                           args.rounds, log=lambda line: print("   " + line))
+    path = gates.save_background(args.map, counts, len(frames), cut, Path(args.out) if args.out else gates.BACKGROUNDS)
+    print(f"kept {path} ({int(counts.sum()):,} pixels at step 1's scale)")
+    for geo in sorted({of_frame(f) for f in frames}, key=lambda g: g.client):
+        det = sprites.detector_for(model, geo, counts)
+        print(f"   {geo.client[0]}x{geo.client[1]}: " + "; ".join(
+            f"{k}'s gate takes {100 * det.gates.share(k, counts):.2f}% of the background" for k in sorted(det.learned))
+              + "".join(f"; {', '.join(kinds)} together {100 * det.gates.share(kinds, counts):.2f}%"
+                        for kinds, _, _ in det.units if len(kinds) > 1))
     return 0
 
 
@@ -1619,6 +1654,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--seed", type=int, default=0, help="where they're drawn")
     s.add_argument("--full-step-1", action="store_true", help="also search with step 1 at full size at 1366x768")
     s.set_defaults(func=cmd_bench_paste)
+    s = sub.add_parser("learn-colours", help="a map's background colours from saved frames of it, for the colour "
+                                             "gates of its monsters without a hand-made one (offline; no game, no "
+                                             "keys)")
+    s.add_argument("files", nargs="+", help="saved frames of the map (full-size screenshots of the game window, any "
+                                            "size), or folders of them")
+    s.add_argument("--map", type=int, required=True, help="the map's id")
+    s.add_argument("--rounds", type=int, default=2, help="times the monsters are found and cut out "
+                                                         "(sprites.CUT_ROUNDS)")
+    s.add_argument("--out", help="the folder to keep it in (default: gamelab/assets/backgrounds)")
+    s.set_defaults(func=cmd_learn_colours)
     s = sub.add_parser("bodies", help="where the monster detector puts monsters' feet on saved screenshots, and "
                                       "their x from frame to frame on recordings (offline; no game, no keys)")
     s.add_argument("files", nargs="*", help="saved screenshots, 1920x1080 or 1366x768, all of one size (default: "

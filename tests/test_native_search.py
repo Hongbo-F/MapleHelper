@@ -1,7 +1,7 @@
 """Monsters and drops at the game's own 1366x768: the game's own pictures as they are (a monster's opaque pixels
 matched, no cut-outs; a drop's shape on brightness, its colours checked), and the monster search coarse to fine (step
 1 at the 1920x1080 window's half size, step 2 at full size in small windows, a gate first and several templates a
-place). The frames are tests/fixtures/native (West Rocky Mountain II, none of whose monsters has a colour gate yet),
+place). The frames are tests/fixtures/native (West Rocky Mountain II, with none of the first map's monsters on them),
 with pictures drawn on them as the game draws them (analysis.pasted)."""
 
 import json
@@ -244,9 +244,9 @@ def test_at_the_games_own_size_the_detector_has_the_games_sprites_alone(tmp_path
 
 
 def test_at_the_games_own_size_the_detector_holds_the_maps_own_kinds_alone(tmp_path, monkeypatch):
-    # West Rocky Mountain II's monsters have no colour gate yet: on a checkout that never built the first map's
-    # sprites the folder is empty, and where it did, it holds them. Either way nothing is looked for there, and the
-    # first map's pig is still looked for on its own map.
+    # A map none of whose monsters has a colour gate (here, with no background colours learned for it: the model has
+    # no id): on a checkout that never built the first map's sprites the folder is empty, and where it did, it holds
+    # them. Either way nothing is looked for there, and the first map's pig is still looked for on its own map.
     stumps = SimpleNamespace(spawns=[SimpleNamespace(mob_id=130100, name="Stump")])
     pigs = SimpleNamespace(spawns=[SimpleNamespace(mob_id=8, name="Pig")])
     empty = tmp_path / "empty"

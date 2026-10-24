@@ -1,16 +1,19 @@
 """Colour gates learned for the monster kinds without a hand-made one (perception.gates; mobs.MobDetector's
-`background`), and kinds that share a body searched as one and told apart by their pictures (mobs._pick_kind). Made-up
-kinds are drawn onto tests/fixtures/native (West Rocky Mountain II at 1366x768)."""
+`background`), kinds that share a body searched as one and told apart by their pictures (mobs._pick_kind), and a map's
+background colours learned from saved frames (sprites.learn_background, `learn-colours`). Made-up kinds are drawn onto
+tests/fixtures/native (West Rocky Mountain II at 1366x768)."""
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 from PIL import Image
 
+from gamelab.__main__ import main
 from gamelab.analysis import pasted
-from gamelab.perception import gates, mobs
+from gamelab.perception import gates, mobs, sprites
 from gamelab.perception.mobs import INDEX, SCALE_FILE, MobDetector
 from gamelab.screen import NATIVE, STRETCHED
 
@@ -166,3 +169,41 @@ def test_a_kind_with_parts_of_its_own_is_the_monsters_only_where_they_show(tmp_p
     picked = mobs._pick_kind(drawn(body(cap=(120, 80, 40)), 400, 216)[:700], plain, det.twins["stub-axe"],
                              det.templates, mobs.FINE_SLACK)
     assert picked.kind == "stub"
+
+
+# --- the background, learned from saved frames --------------------------------------------------------------------
+
+def test_a_maps_background_is_learned_with_its_monsters_cut_out(tmp_path):
+    (tmp_path / "pics").mkdir()
+    pics = folder(tmp_path / "pics", {"blob_move0": body()})
+    frames = [drawn(body(), 300 + 100 * i, 250, name=n) for i, n in enumerate(FRAMES)]
+    made = []
+
+    def make(geo, back):
+        made.append(back.copy())
+        return MobDetector(pics, threads=1, frame_scale=geo.frame_scale, kinds={"blob"}, background=back)
+    counts, cut = sprites.learn_background(frames, make)
+    magenta = gates.bins(np.array([(200, 40, 200)], np.uint8))[0]
+    assert cut == 3 and made[0][magenta] > 500  # first against the frames as they are, the blobs in them
+    assert counts[magenta] == 0 and counts.sum() < made[0].sum()  # then without them
+
+
+def test_learn_colours_keeps_a_maps_background_where_its_detector_finds_it(tmp_path, monkeypatch, capsys):
+    from gamelab.localization import mapdata
+    pics = folder(tmp_path, {"blob_move0": body()})
+    model = SimpleNamespace(id=4242, spawns=[SimpleNamespace(mob_id=1, name="Blob")])
+    monkeypatch.setattr(mapdata, "load", lambda map_id: model)
+    monkeypatch.setattr(sprites, "ensure", lambda names, stretch: pics)
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    for i, n in enumerate(FRAMES):
+        Image.fromarray(drawn(body(), 300 + 100 * i, 250, name=n)).save(shots / n)
+    out = tmp_path / "backgrounds"
+    assert main(["learn-colours", "--map", "4242", str(shots), "--out", str(out)]) == 0
+    printed = capsys.readouterr().out
+    assert "3 frames (1366x768)" in printed and "3 monsters found" in printed and "blob's gate takes" in printed
+    counts = gates.load_background(4242, out)
+    det = sprites.detector_for(model, NATIVE, counts)
+    assert det.learned == {"blob"}
+    assert [m.kind for m in det.detect_wide(drawn(body(), 800, 300), (0, 700))] == ["blob"]
+    assert sprites.detector_for(model, NATIVE).learned == frozenset()  # none kept for it in assets/backgrounds
