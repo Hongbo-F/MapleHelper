@@ -18,9 +18,15 @@ later. Opened by a double-click on her, her window shows its pet panel collapsed
 have passed since the last feed, so a pet is never left to starve for a reading.
 
 Read once, then followed (PetCare.tend): the game data gives each pet how much fullness it loses at a time (Item.wz
-Pet/<id>.img info/hungry: 1 for both Snail pets, 5000054 and 5000033; 1-5 across the game's pets), and the server
-takes that every TICK_S while the pet is out. Measured live on 2026-10-24: 99 at 10:04:47, 85 at 10:21:14 and 82 at
-10:25:46 (70-74 s a point); the v83 server emulators take it every 60 s and send the pet home at PACKED_AT ("packed").
+Pet/<id>.img info/hungry: 1 for both Snail pets, 5000054 and 5000033; 1-5 across the game's pets). How often isn't
+in the client, and no Classic source says (MeowDB: "We do not know how often the hunger tick runs in Classic World
+yet"; mapleclassic.wiki and planet-helper likewise). Two independent v95 server emulators, one ported from the
+official routine (Rebirth95 CPet.cs:75-109, "CPet::Update"; Kinoko Pet.java:100-115), take 1 a time after 60 s plus a
+random 0 to 36 - 6 x hungry s: for hungry 1, 60-90 s, 75 on average. That fits the three readings of 2026-10-24
+(99 at 10:04:47, 85 at 10:21:14, 82 at 10:25:46: a fixed period fits only between 70.0 and 75.9 s, best 74.1; 60 s,
+the OdinMS v55 timer remembered at first, and the v83 emulators' 180 s are ruled out). Where it goes home is
+disputed: at 0 back at 5 with a closeness lost (the ported code, Nexon support), or at 5 or less back at 15 (the
+OdinMS family, MeowDB "Unconfirmed"); PACKED_AT takes the higher. Notes and sources: D:/MapleHelper-scratch/pet.
 No key opens the Character Info (the key bindings' unbound functions are MUTE and KEYS1-3; the equipment window shows
 the pet's equipment, not its fullness), so the double-click is used once, to start from, or when asked (`pet --read`).
 The fullness followed, when it was, and the last feed are kept in paths.PET. Time counts only while the game window is
@@ -39,11 +45,11 @@ import numpy as np
 from .. import paths, telemetry
 
 HUNGRY = 1             # fullness the pet loses a tick (the game data's info/hungry of the Snail pets)
-TICK_S = 70            # s between the server's ticks, as measured (70-74 s a point; the emulators' 60 s)
+TICK_S = 75            # s a point on average: 60 + random 0..30 for hungry 1 (above); the readings' best fixed fit 74.1
 FOOD = 30              # fullness a Pet Food gives (9 -> 39 -> 69 -> 99)
-PACKED_AT = 5          # at or under it the server sends the pet home (v83 emulators)
-FOLLOW_FEED_BELOW = 60  # followed fullness under which she gives it a food: 30 above PACKED_AT and then some, for
-                        # a followed rate a few s a tick off over an hour (an hour at 60 s a tick instead is 10 lower)
+PACKED_AT = 5          # at or under it the pet may be sent home (5 by the OdinMS family and MeowDB; 0 by the ported code)
+FOLLOW_FEED_BELOW = 60  # followed fullness under which she gives it a food: well above PACKED_AT, for a random tick
+                        # (an hour is 48 points, give or take 1) and a period a few s off (74 s for 75: 1 an hour)
 FEED_BELOW = 70        # read fullness under which she feeds it ...
 FEED_TO = 80           # ... and fed until at least this (a food gives 30: 50 -> 80, 40 -> 70 -> 100)
 MAX_FEEDS = 3          # Pet Food at most in one check (9 -> 99 took three)
