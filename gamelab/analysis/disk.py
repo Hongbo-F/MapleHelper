@@ -1,7 +1,8 @@
 """What gamelab keeps under gamelab/lab, by kind, and how much (`python -m gamelab lab-usage`). It only
 reads. Recordings and screenshots are measurement evidence and are never deleted for you; telemetry is
 pruned when a run starts or goes on in a new part (telemetry.prune: the newest 2 GB are kept, and none is
-deleted for its age), and `lab-usage --prune-telemetry` applies the same now.
+deleted for its age), and `lab-usage --prune-telemetry` applies the same now; the Lie Detector's recordings
+when one starts (control.lie_recorder.prune: the newest 10 GB besides the one being written).
 """
 
 import os
@@ -10,14 +11,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import telemetry
+from ..control import lie_recorder
 from ..paths import LAB
 
 # The folders of lab/ and what they hold (anything else is "other": the player's log, learned stats such
 # as shots.jsonl and grounds.json, templates, notes); the *.png at the top are screenshots.
-FOLDERS = {"recordings": "recordings", "telemetry": "telemetry", "harness": "harness runs",
-           "golden": "golden traces", "inbox": "player inbox, outbox", "outbox": "player inbox, outbox"}
-KINDS = ("recordings", "screenshots", "telemetry", "harness runs", "golden traces", "player inbox, outbox",
-         "other")
+FOLDERS = {"recordings": "recordings", "lie_detector": "Lie Detector recordings", "telemetry": "telemetry",
+           "harness": "harness runs", "golden": "golden traces", "inbox": "player inbox, outbox",
+           "outbox": "player inbox, outbox"}
+KINDS = ("recordings", "Lie Detector recordings", "screenshots", "telemetry", "harness runs", "golden traces",
+         "player inbox, outbox", "other")
 
 
 @dataclass
@@ -62,12 +65,18 @@ def report(lab: Path = LAB, now: float | None = None) -> list[str]:
     lines = [f"{lab}: {size(total)} in {sum(u.files for u in kinds)} files"]
     for u in kinds:
         span = "" if u.oldest is None else f"  {_day(u.oldest)} to {_day(u.newest)}"
-        lines.append(f"  {u.kind:22s} {size(u.bytes):>9s} {u.files:6d} files{span}")
+        lines.append(f"  {u.kind:23s} {size(u.bytes):>9s} {u.files:6d} files{span}")
     due = telemetry.prune(lab / "telemetry", now=now, dry_run=True)
     lines.append(f"telemetry: {telemetry.kept()} are kept, in parts of {size(telemetry.MAX_BYTES)}; due to go "
                  f"now: {len(due)} files ({size(sum(b for _, b in due))}), deleted when the next run starts or with "
                  f"--prune-telemetry")
-    lines.append("recordings and screenshots are never deleted for you")
+    folder = lab / "lie_detector"
+    cycles, going = lie_recorder.recordings(folder), lie_recorder.going(folder)
+    due = lie_recorder.prune(folder, spare=going, dry_run=True)
+    lines.append(f"Lie Detector recordings: {len(cycles)} cycles{' (one being written)' if going else ''}; the newest "
+                 f"{size(lie_recorder.KEEP_BYTES)} are kept besides the one being written; due to go when the next "
+                 f"starts: {len(due)} ({size(sum(b for _, b in due))})")
+    lines.append("the other recordings and screenshots are never deleted for you")
     return lines
 
 

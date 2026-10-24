@@ -256,9 +256,11 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     from gamelab.__main__ import main
     from gamelab.analysis import disk
     now = time.time()
-    for folder in ("recordings", "telemetry", "harness", "golden", "inbox"):
-        (tmp_path / folder).mkdir()
+    for folder in ("recordings", "telemetry", "harness", "golden", "inbox", "lie_detector/20261024-101500"):
+        (tmp_path / folder).mkdir(parents=True)
     _make(tmp_path / "recordings", "chain.npz", 1, 5000, now)
+    _make(tmp_path / "lie_detector" / "20261024-101500", "00000.jpg", 1, 700, now)
+    _make(tmp_path / "lie_detector" / "20261024-101500", "summary.json", 1, 20, now)
     _make(tmp_path, "snap.png", 1, 3000, now)
     old = _make(tmp_path / "telemetry", "20260901-120000-tour.jsonl", 20, 100, now)
     new = _make(tmp_path / "telemetry", "20261019-120000-tour.jsonl", 1, 200, now)
@@ -266,13 +268,15 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     _make(tmp_path / "inbox", "120000_plan_ab12.cancel", 1, 0, now)
     _make(tmp_path, "player.log", 1, 40, now)
     got = {u.kind: (u.files, u.bytes) for u in disk.usage(tmp_path)}
-    assert got == {"recordings": (1, 5000), "screenshots": (1, 3000), "telemetry": (2, 300), "harness runs": (0, 0),
-                   "golden traces": (1, 50), "player inbox, outbox": (1, 0), "other": (1, 40)}
+    assert got == {"recordings": (1, 5000), "Lie Detector recordings": (2, 720), "screenshots": (1, 3000),
+                   "telemetry": (2, 300), "harness runs": (0, 0), "golden traces": (1, 50),
+                   "player inbox, outbox": (1, 0), "other": (1, 40)}
     monkeypatch.setattr(paths, "LAB", tmp_path)
     monkeypatch.setattr(telemetry, "KEEP_BYTES", 250)  # the old one is past the cap (none goes for its age)
     assert main(["lab-usage"]) == 0
     out = capsys.readouterr().out
     assert "due to go now: 1 files (100 B)" in out and old.exists()  # told, not deleted
+    assert "Lie Detector recordings: 1 cycles; the newest 10.0 GB are kept" in out and "due to go when the next starts: 0" in out
     assert main(["lab-usage", "--prune-telemetry"]) == 0
     assert "deleted 1 telemetry files (100 B)" in capsys.readouterr().out
     assert not old.exists() and new.exists() and (tmp_path / "recordings" / "chain.npz").exists()

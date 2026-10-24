@@ -55,7 +55,7 @@ END_S = 60.0
 CAP_S = 10 * 60.0
 # JPEG at quality 75 with full-resolution colour (4:4:4). Measured on the three real 1366x768 frames in
 # tests/fixtures/native and the six Lie Detector screens in tests/fixtures/lie_detector shrunk to 1366x768
-# (D:/MapleHelper-scratch/ld/jpeg_measure2.py): 297 KB a game frame (199 KB a Lie Detector screen), 4.9 ms to
+# (D:/MapleHelper-scratch/ld/jpeg_measure2.py): 297 KB a game frame (197 KB a Lie Detector screen), 4.9 ms to
 # encode. With the usual half-resolution colour (4:2:0) the countdown's thin yellow title lost its colour: the
 # spotter scored it 0.37 of its threshold on the decoded frame at every quality from 60 to 90, where at 4:4:4 it
 # keeps 1.11 (1.22 on the PNG); every other form scored as on the PNG. The mini-game notice's small text read as
@@ -84,9 +84,9 @@ class Recording:
     the frames and the index as they come and the summary at the end. Making one makes its folder (OSError if it
     can't) and deletes the oldest recordings past `keep_bytes`."""
 
-    def __init__(self, root: Path = LIE_RECORDINGS, alarm_info: dict | None = None, log=print,
+    def __init__(self, root: Path | None = None, alarm_info: dict | None = None, log=print,
                  keep_bytes: int = KEEP_BYTES, end_s: float = END_S, cap_s: float = CAP_S):
-        self.root = Path(root)
+        self.root = _root(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.folder = _new_folder(self.root)
         self.started = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -254,10 +254,15 @@ def _new_folder(root: Path) -> Path:
     raise OSError(f"no free folder name for {stamp} in {root}")
 
 
-def recordings(root: Path = LIE_RECORDINGS) -> list[Path]:
-    """The recordings in `root`, oldest first (by name: the time each was first seen)."""
+def _root(root: Path | None) -> Path:
+    """`root`, or by default LIE_RECORDINGS (looked up when called)."""
+    return LIE_RECORDINGS if root is None else Path(root)
+
+
+def recordings(root: Path | None = None) -> list[Path]:
+    """The recordings in `root` (LIE_RECORDINGS), oldest first (by name: the time each was first seen)."""
     try:
-        return sorted(p for p in Path(root).iterdir() if p.is_dir())
+        return sorted(p for p in _root(root).iterdir() if p.is_dir())
     except OSError:  # no folder yet
         return []
 
@@ -277,9 +282,9 @@ def size_of(folder: Path) -> int:
     return total
 
 
-def prune(root: Path = LIE_RECORDINGS, keep_bytes: int = KEEP_BYTES, spare: Path | None = None,
+def prune(root: Path | None = None, keep_bytes: int = KEEP_BYTES, spare: Path | None = None,
           dry_run: bool = False) -> list[tuple[Path, int]]:
-    """Delete the oldest recordings in `root` until the rest (`spare`, the one being written, left out of the sum)
+    """Delete the oldest recordings in `root` (LIE_RECORDINGS) until the rest (`spare`, the one being written, left out of the sum)
     take at most `keep_bytes`; never `spare`. Returns those deleted (folder, bytes), oldest first; with `dry_run`,
     those it would delete. One that can't be deleted wholly is left (the rest of it goes next time)."""
     spare = None if spare is None else Path(spare).resolve()
@@ -305,8 +310,8 @@ def summary_of(folder: Path) -> dict | None:
         return None
 
 
-def going(root: Path = LIE_RECORDINGS, now: float | None = None) -> Path | None:
-    """The recording still being written, if any: the newest, with no summary yet and its index written in the
+def going(root: Path | None = None, now: float | None = None) -> Path | None:
+    """The recording still being written in `root` (LIE_RECORDINGS), if any: the newest, with no summary yet and its index written in the
     last LIVE_S (the watchdog adds a line every grab, 4 a second, even with the game minimized). One the player
     stopped in the middle of has no summary either, but its index is old."""
     folders = recordings(root)
@@ -315,5 +320,8 @@ def going(root: Path = LIE_RECORDINGS, now: float | None = None) -> Path | None:
     try:
         written = os.stat(folders[-1] / INDEX).st_mtime
     except OSError:
-        written = os.stat(folders[-1]).st_mtime  # just made: no line yet
+        try:
+            written = os.stat(folders[-1]).st_mtime  # just made: no line yet
+        except OSError:  # gone meanwhile
+            return None
     return folders[-1] if (time.time() if now is None else now) - written <= LIVE_S else None

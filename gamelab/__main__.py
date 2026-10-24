@@ -119,13 +119,27 @@ def cmd_stop(args) -> int:
 
 
 def cmd_clear_alarm(args) -> int:
+    from .control import lie_recorder
     from .control.alarm import clear_alarm
     info = clear_alarm()
     if info is None:
         print("no Lie Detector alarm is set")
-        return 0
-    print(f"cleared the Lie Detector alarm from {info.get('time', '?')} (screenshot: {info.get('screenshot', 'none')})")
-    print("gamelab can be started again. The game flagged automated play once; keep sessions short and supervised.")
+    else:
+        print(f"cleared the Lie Detector alarm from {info.get('time', '?')} "
+              f"(screenshot: {info.get('screenshot', 'none')})")
+    folder = lie_recorder.going()
+    if folder is not None:
+        print(f"the Lie Detector recording is still going: {folder} (until it has been off the screen for "
+              f"{lie_recorder.END_S:g} s)")
+    elif folders := lie_recorder.recordings():
+        summary = lie_recorder.summary_of(folders[-1])
+        print(f"the last recording: {folders[-1]} " + (
+            f"({summary['outcome']}: {summary['frames']} frames over {summary['duration_s']:.0f} s, ended: "
+            f"{summary['end']})" if summary else "(unfinished: the player stopped while it was written)"))
+    if info is not None:
+        print(f"gamelab's commands can run again; the player takes plans once the Lie Detector has been off the "
+              f"screen for {lie_recorder.END_S:g} s. The game flagged automated play once; keep sessions short and "
+              "supervised.")
     return 0
 
 
@@ -1328,8 +1342,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--elevate", action="store_true", help="start it as administrator via a UAC prompt")
     s.set_defaults(func=cmd_player)
     sub.add_parser("stop", help="stop the player").set_defaults(func=cmd_stop)
-    sub.add_parser("clear-alarm", help="after you've answered a Lie Detector: let gamelab run again"
-                   ).set_defaults(func=cmd_clear_alarm)
+    sub.add_parser("clear-alarm", help="after you've answered a Lie Detector: let gamelab run again (and say "
+                                       "whether its recording is still going)").set_defaults(func=cmd_clear_alarm)
     s = sub.add_parser("spot", help="check the game (or an image) for the Lie Detector; sends no keys")
     s.add_argument("--image", help="check this screenshot instead of the game")
     s.set_defaults(func=cmd_spot)
@@ -1577,11 +1591,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_bodies)
 
-    s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, screenshots, "
-                                         "telemetry, harness runs, golden traces), by kind; deletes nothing")
+    s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, the Lie Detector's "
+                                         "recordings, screenshots, telemetry, harness runs, golden traces), by kind; "
+                                         "deletes nothing")
     s.add_argument("--prune-telemetry", action="store_true",
                    help="delete the telemetry a run starting now would (the oldest past 2 GB in all; none for "
-                        "its age); recordings and screenshots are never deleted")
+                        "its age); recordings and screenshots are never deleted (the Lie Detector's past their "
+                        "10 GB, when one starts)")
     s.set_defaults(func=cmd_lab_usage)
     s = sub.add_parser("coverage", help="how often each route move was planned, taken and missed, the moves never "
                                         "taken and why, from harness runs and live telemetry; a picture of the map "

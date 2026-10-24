@@ -627,3 +627,29 @@ def test_the_player_started_with_an_uncleared_alarm_and_nothing_on_screen_waits_
     finally:
         served.stop()
     assert not (tmp_path / "lie_detector").exists()  # nothing was on screen: nothing recorded
+
+
+# --- clear-alarm says whether the recording is still going ---
+
+def test_clear_alarm_says_whether_the_lie_detector_s_recording_is_still_going(tmp_path, monkeypatch, alarm_file,
+                                                                             capsys):
+    from gamelab.__main__ import main
+    monkeypatch.setattr(lie_recorder, "LIE_RECORDINGS", tmp_path / "lie_detector")
+    alarm.raise_alarm(frame())
+    rec = Recording(tmp_path / "lie_detector", log=lambda m: None)
+    rec.add(0.0, frame(), COUNTDOWN)
+    for _ in range(250):
+        if (rec.folder / INDEX).exists():
+            break
+        time.sleep(0.02)
+    assert main(["clear-alarm"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("cleared the Lie Detector alarm from ") and not alarm_file.exists()
+    assert f"the Lie Detector recording is still going: {rec.folder} (until it has been off the screen for 60 s)" in out
+    assert "the player takes plans once the Lie Detector has been off the screen for 60 s" in out
+    rec.add(0.25, frame(), GONE)
+    finished(rec)
+    assert main(["clear-alarm"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("no Lie Detector alarm is set")
+    assert f"the last recording: {rec.folder} (answered: 2 frames over 0 s, ended: gone)" in out
