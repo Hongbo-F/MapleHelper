@@ -295,10 +295,9 @@ def test_an_old_sweep_track_replays_as_her_positions(tmp_path):
     assert s.map == 1 and s.her()["x"] == 110 and len(s.trail) == 2
 
 
-def test_the_web_page_serves_the_map_and_the_text_with_its_key_only():
+def test_the_web_page_serves_the_map_and_the_text():
     import json
     import threading
-    import urllib.error
     import urllib.request
 
     from gamelab.ui.sources import ReplaySource
@@ -315,27 +314,22 @@ def test_the_web_page_serves_the_map_and_the_text_with_its_key_only():
     feed = Feed(lambda map_id: MapView(m, width=300), ReplaySource(records, clock=lambda: now[0]), live=False)
     now[0] = 1.0
     feed.step()
-    server = WebServer(feed, host="127.0.0.1", port=0, key="secret")
+    server = WebServer(feed, host="127.0.0.1", port=0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.port}"
     try:
-        try:
-            urllib.request.urlopen(base + "/state.json")
-            raise AssertionError("served without its key")
-        except urllib.error.HTTPError as e:
-            assert e.code == 403
-        page = urllib.request.urlopen(base + "/?k=secret")
-        assert b"gamelab mini-map" in page.read() and "gk=secret" in page.headers["Set-Cookie"]
-        s = json.load(urllib.request.urlopen(base + "/state.json?k=secret"))
+        page = urllib.request.urlopen(base + "/")
+        assert b"gamelab mini-map" in page.read()
+        s = json.load(urllib.request.urlopen(base + "/state.json"))
         assert s["hp"] == 0.8 and s["hunt"]["rule"] == "shoot" and s["logs"] == ["pig down"]
         assert s["her"]["platform"] == c.id and s["monsters"] == 1 and s["replay"]["length"] == 30.0
-        jpeg = urllib.request.urlopen(base + "/frame.jpg?k=secret").read()
+        jpeg = urllib.request.urlopen(base + "/frame.jpg").read()
         assert jpeg[:2] == bytes([0xFF, 0xD8])  # a JPEG
-        req = urllib.request.Request(base + "/control?k=secret&action=on", method="POST")
+        req = urllib.request.Request(base + "/control?action=on", method="POST")
         assert urllib.request.urlopen(req).status == 200  # 10 s on: still before "much later"
-        req = urllib.request.Request(base + "/control?k=secret&action=pause", method="POST")
+        req = urllib.request.Request(base + "/control?action=pause", method="POST")
         urllib.request.urlopen(req)
-        s2 = json.load(urllib.request.urlopen(base + "/state.json?k=secret"))
+        s2 = json.load(urllib.request.urlopen(base + "/state.json"))
         assert s2["replay"]["paused"] and s2["replay"]["pos"] == 11.0 and s2["version"] > s["version"]
     finally:
         server.shutdown()
@@ -394,10 +388,10 @@ def test_the_web_page_can_be_served_in_the_background_and_stopped():
     m = model()
     feed = Feed(lambda map_id: MapView(m, width=300), ReplaySource([]), live=False)
     lines = []
-    server = start(feed, host="127.0.0.1", port=0, key="k", announce=lines.append)
+    server = start(feed, host="127.0.0.1", port=0, announce=lines.append)
     try:
-        assert urllib.request.urlopen(f"http://127.0.0.1:{server.port}/state.json?k=k").status == 200
-        assert lines[1] == f"  http://127.0.0.1:{server.port}/?k=k" and len(lines) == 2  # this computer only
+        assert urllib.request.urlopen(f"http://127.0.0.1:{server.port}/state.json").status == 200
+        assert lines[1] == f"  http://127.0.0.1:{server.port}/" and len(lines) == 2  # this computer only
     finally:
         stop(server)
 
@@ -427,10 +421,10 @@ def replay_feed(m, now: list[float]):
 class Served:
     """A feed's page served on 127.0.0.1 (any free port) while in a `with`."""
 
-    def __init__(self, feed, key: str = "secret"):
+    def __init__(self, feed):
         import threading
         from gamelab.ui.web import WebServer
-        self.server = WebServer(feed, host="127.0.0.1", port=0, key=key)
+        self.server = WebServer(feed, host="127.0.0.1", port=0)
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
 
     def __enter__(self):
@@ -441,7 +435,7 @@ class Served:
         stop(self.server)
 
 
-def open_stream(server, path: str = "/events?k=secret", headers: dict | None = None):
+def open_stream(server, path: str = "/events", headers: dict | None = None):
     import http.client
     conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
     conn.request("GET", path, headers=headers or {})
@@ -494,19 +488,6 @@ def test_the_page_streams_a_snapshot_then_the_new_records():
         conn.close()
 
 
-def test_the_stream_and_the_map_need_the_key():
-    m = model()
-    feed = replay_feed(m, [0.0])
-    with Served(feed) as server:
-        for path in ("/events", "/map.json", "/clock.json"):
-            conn, resp = open_stream(server, path)
-            assert resp.status == 403
-            conn.close()
-            conn, resp = open_stream(server, path, {"Cookie": "gk=secret"})
-            assert resp.status == 200
-            conn.close()
-
-
 def test_a_seek_or_a_new_run_restarts_the_stream_with_a_snapshot(tmp_path):
     import urllib.request
     from gamelab.ui.sources import LiveSource
@@ -517,7 +498,7 @@ def test_a_seek_or_a_new_run_restarts_the_stream_with_a_snapshot(tmp_path):
         conn, resp = open_stream(server)
         assert read_event(resp)[0] == "snapshot"
         urllib.request.urlopen(urllib.request.Request(
-            f"http://127.0.0.1:{server.port}/control?k=secret&action=on", method="POST"))
+            f"http://127.0.0.1:{server.port}/control?action=on", method="POST"))
         kind, snap, _ = read_event(resp)
         assert kind == "snapshot" and snap["logs"] == ["pig down", "later"]  # 11 s in
         conn.close()
@@ -617,7 +598,7 @@ def test_stopping_the_server_ends_its_streams():
     m = model()
     feed = Feed(lambda map_id: MapView(m, width=300), ReplaySource(run_records(m)), live=False)
     before = set(threading.enumerate())
-    server = start(feed, host="127.0.0.1", port=0, key="secret", announce=lambda line: None)
+    server = start(feed, host="127.0.0.1", port=0, announce=lambda line: None)
     conn, resp = open_stream(server)
     assert read_event(resp)[0] == "snapshot"
     began = time.monotonic()
@@ -668,7 +649,7 @@ def test_a_connection_dropped_between_requests_prints_nothing(capsys):
     with Served(feed) as server:
         before = set(threading.enumerate())
         s = socket.create_connection(("127.0.0.1", server.port), timeout=5)
-        s.sendall(b"GET /clock.json?k=secret HTTP/1.1\r\nHost: here\r\n\r\n")
+        s.sendall(b"GET /clock.json HTTP/1.1\r\nHost: here\r\n\r\n")
         assert s.recv(65536).startswith(b"HTTP/1.1 200")
         # A reset while the server waits for the next request on the connection (a phone gone)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
@@ -694,9 +675,9 @@ def test_the_page_s_map_matches_the_window_s():
     feed = replay_feed(m, [0.0])
     with Served(feed) as server:
         conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
-        conn.request("GET", "/map.json?k=secret")
+        conn.request("GET", "/map.json")
         payload = json.loads(conn.getresponse().read())
-        conn.request("GET", "/state.json?k=secret")  # the same connection (HTTP/1.1 keep-alive)
+        conn.request("GET", "/state.json")  # the same connection (HTTP/1.1 keep-alive)
         assert json.loads(conn.getresponse().read())["hp"] == 0.8
         conn.close()
     assert (payload["id"], payload["x0"], payload["x1"], payload["y0"], payload["y1"], payload["margin"]) == \
@@ -717,9 +698,9 @@ def test_the_page_is_given_the_state_s_topics_and_lengths():
     from gamelab.ui.web import LOG_KEEP
     m = model()
     with Served(replay_feed(m, [0.0])) as server:
-        page = urllib.request.urlopen(f"http://127.0.0.1:{server.port}/?k=secret").read().decode("utf-8")
+        page = urllib.request.urlopen(f"http://127.0.0.1:{server.port}/").read().decode("utf-8")
     assert f"const LATEST = {json.dumps(list(state.LATEST))}, TRAIL = {state.TRAIL}, LOG_KEEP = {LOG_KEEP}" in page
-    assert 'const KEY = "secret"' in page and not re.search(r"__[A-Z_]+__", page)  # every blank filled in
+    assert 'const URLS = ["http://127.0.0.1:' in page and not re.search(r"__[A-Z_]+__", page)  # every blank filled in
 
 
 def test_the_page_s_clock_follows_the_run(tmp_path):

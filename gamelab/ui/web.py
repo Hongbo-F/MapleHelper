@@ -24,19 +24,17 @@ the canvas both work in iOS Safari. A stream that has gone quiet (Safari can lea
 locked screen) is opened again, and every stream starts with a snapshot, so nothing needs resuming.
 (WebRTC would need packages the standard library doesn't have, for nothing a LAN needs.)
 
-It only reads telemetry: it sends no keys and never touches the game. Every request needs the key printed
-at the start (?k=..., then a cookie), so nobody else on the network can watch.
+It only reads telemetry: it sends no keys and never touches the game. It asks for no key or password:
+whoever reaches its address (the network, or a tunnel's hostname) can watch, and steer a replay.
 """
 
 import json
-import secrets
 import socket
 import sys
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import islice
 from urllib.parse import parse_qs, urlparse
@@ -374,13 +372,12 @@ def _event(kind: str, data: dict) -> bytes:
 
 
 class WebServer(ThreadingHTTPServer):
-    """The HTTP server: `feed`'s page, stream, map and text, for requests with `key`."""
+    """The HTTP server: `feed`'s page, stream, map and text."""
 
     daemon_threads = True
 
-    def __init__(self, feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None):
+    def __init__(self, feed: Feed, host: str = "0.0.0.0", port: int = 8765):
         self.feed = feed
-        self.key = key or secrets.token_urlsafe(8)
         self.stopping = threading.Event()
         self.streams: list[Cursor] = []  # the open streams, oldest first (changed under feed.lock)
         super().__init__((host, port), _Handler)
@@ -391,11 +388,11 @@ class WebServer(ThreadingHTTPServer):
 
     def urls(self) -> list[str]:
         """Where to open the page: on this computer, and (when serving the network) from a phone."""
-        local = f"http://127.0.0.1:{self.port}/?k={self.key}"
+        local = f"http://127.0.0.1:{self.port}/"
         host = self.server_address[0]
         if host in ("127.0.0.1", "localhost"):
             return [local]
-        return [local] + [f"http://{ip}:{self.port}/?k={self.key}" for ip in lan_addresses()]
+        return [local] + [f"http://{ip}:{self.port}/" for ip in lan_addresses()]
 
     def open_stream(self) -> Cursor:
         """A new stream's cursor. Past MAX_STREAMS the oldest ends: a phone gone from the Wi-Fi leaves
@@ -463,13 +460,6 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args) -> None:  # quiet: the console shows the run's URLs only
         pass
 
-    def _allowed(self, query: dict) -> bool:
-        given = query.get("k", [""])[0]
-        if not given:
-            cookie = SimpleCookie(self.headers.get("Cookie", ""))
-            given = cookie["gk"].value if "gk" in cookie else ""
-        return secrets.compare_digest(given, self.server.key)
-
     def _send(self, code: int, body: bytes, kind: str, extra: dict | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", kind)
@@ -483,15 +473,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        if not self._allowed(query):
-            self._send(403, b"This page needs its key: open the address `python -m gamelab web` printed.",
-                       "text/plain; charset=utf-8")
-            return
         feed = self.server.feed
         if url.path == "/":
-            cookie = f"gk={self.server.key}; Path=/; SameSite=Strict; Max-Age=2592000"
-            self._send(200, page(self.server.key, self.server.urls()), "text/html; charset=utf-8",
-                       {"Set-Cookie": cookie})
+            self._send(200, page(self.server.urls()), "text/html; charset=utf-8")
         elif url.path == "/events":
             self._stream()
         elif url.path == "/map.json":
@@ -518,9 +502,6 @@ class _Handler(BaseHTTPRequestHandler):
             self.close_connection = True
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        if not self._allowed(query):
-            self._send(403, b"forbidden", "text/plain")
-            return
         if url.path != "/control":
             self._send(404, b"not found", "text/plain")
             return
@@ -555,11 +536,11 @@ class _Handler(BaseHTTPRequestHandler):
             server.close_stream(cursor)
 
 
-def start(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None,
+def start(feed: Feed, host: str = "0.0.0.0", port: int = 8765,
           announce: Callable[[str], None] = print, ends: str = "Ctrl+C stops it") -> WebServer:
     """Serve the page in the background (threads of this process); returns the server, for stop().
     Raises OSError if the port can't be had (another one already serving it)."""
-    server = WebServer(feed, host, port, key)
+    server = WebServer(feed, host, port)
     feed.start()
     threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.25}, name="web", daemon=True).start()
     announce(f"the mini-map, in a browser ({ends}):")
@@ -578,10 +559,10 @@ def stop(server: WebServer) -> None:
     server.server_close()
 
 
-def serve(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None = None,
+def serve(feed: Feed, host: str = "0.0.0.0", port: int = 8765,
           announce: Callable[[str], None] = print) -> None:
     """Serve the page until Ctrl+C."""
-    server = start(feed, host, port, key, announce)
+    server = start(feed, host, port, announce)
     try:
         while True:
             time.sleep(0.5)
@@ -591,11 +572,11 @@ def serve(feed: Feed, host: str = "0.0.0.0", port: int = 8765, key: str | None =
         stop(server)
 
 
-def page(key: str, urls: list[str]) -> bytes:
-    """The page, with what it needs from here written in: the key and the addresses, and the state's
-    topics and lengths, so its copy of State.apply keeps what this one keeps."""
+def page(urls: list[str]) -> bytes:
+    """The page, with what it needs from here written in: the addresses, and the state's topics and
+    lengths, so its copy of State.apply keeps what this one keeps."""
     out = PAGE
-    for name, value in (("__KEY__", key), ("__URLS__", urls), ("__LATEST__", list(LATEST)), ("__TRAIL__", TRAIL),
+    for name, value in (("__URLS__", urls), ("__LATEST__", list(LATEST)), ("__TRAIL__", TRAIL),
                         ("__LOG_KEEP__", LOG_KEEP), ("__HEARTBEAT_S__", HEARTBEAT_S)):
         out = out.replace(name, json.dumps(value).replace("<", "\\u003c"))
     return out.encode("utf-8")
@@ -713,7 +694,7 @@ PAGE = r"""<!doctype html>
 </main>
 <script>
 "use strict";
-const KEY = __KEY__, URLS = __URLS__;
+const URLS = __URLS__;
 // From gamelab/ui/state.py and web.py, so this copy of State.apply keeps what the server's keeps.
 const LATEST = __LATEST__, TRAIL = __TRAIL__, LOG_KEEP = __LOG_KEEP__, HEARTBEAT_S = __HEARTBEAT_S__;
 const params = new URLSearchParams(location.search);
@@ -723,7 +704,6 @@ const DEBUG = params.get("debug") === "1";
 const DELAY = params.has("delay") ? Math.max(0, Number(params.get("delay")) || 0) : 0.1;
 const GAP = 0.6;  // her positions further apart than this (s) aren't glided between: she's held, then moved
 const $ = id => document.getElementById(id);
-const withKey = path => path + (path.includes("?") ? "&" : "?") + "k=" + encodeURIComponent(KEY);
 
 // --- the state: the records folded as the server folds them -----------------------------------------
 
@@ -823,7 +803,7 @@ function connect(byPage) {
   if (byPage) net.restarts++;
   crowded = 0;
   lastMsg = Date.now();
-  es = new EventSource(withKey("events"));
+  es = new EventSource("events");
   es.onopen = () => { net.opens++; textChanged = true; };
   es.onerror = () => { textChanged = true; };   // the browser tries again by itself (retry: 1000)
   es.addEventListener("snapshot", e => { heard(e); snapshot(JSON.parse(e.data)); });
@@ -846,7 +826,7 @@ function wantMap() {   // the map once, and again when the run moves to another
   if (mapLoading || (M && (S.map == null || S.map === M.id)) || performance.now() - mapAsked < 2000) return;
   mapLoading = true;
   mapAsked = performance.now();
-  fetch(withKey("map.json"), {cache: "no-store"})
+  fetch("map.json", {cache: "no-store"})
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(m => { M = m; C = m.style; rev++; })
     .catch(() => {})
@@ -1140,7 +1120,7 @@ function debug() {
     +(window.devicePixelRatio || 1).toFixed(2) + "x";
   was = {t: now, frames: perf.frames, drawn: perf.drawn, msgs: net.msgs, bytes: net.bytes};
   const sent = performance.now();
-  fetch(withKey("clock.json"), {cache: "no-store"}).then(r => r.arrayBuffer()).then(() => { net.rtt = performance.now() - sent; }).catch(() => {});
+  fetch("clock.json", {cache: "no-store"}).then(r => r.arrayBuffer()).then(() => { net.rtt = performance.now() - sent; }).catch(() => {});
 }
 
 function setView(v) {
@@ -1153,7 +1133,7 @@ function setView(v) {
 for (const b of document.querySelectorAll(".views button")) b.addEventListener("click", () => setView(b.dataset.v));
 setView(view);
 for (const b of document.querySelectorAll("#controls button")) {
-  b.addEventListener("click", () => fetch(withKey("control?action=" + b.dataset.a), {method: "POST"}));
+  b.addEventListener("click", () => fetch("control?action=" + b.dataset.a, {method: "POST"}));
 }
 
 // On a computer, show how to open it on a phone: the network address, and a QR code to scan.
