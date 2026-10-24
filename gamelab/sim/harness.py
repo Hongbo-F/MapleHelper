@@ -145,10 +145,10 @@ def _tour(sim) -> None:
         tour.run()
 
 
-def _loop(sim, rest_avoid: bool = False) -> None:
+def _loop(sim, rest_avoid: bool = False, low_hp: float = 0.3) -> None:
     """The hunt loop (`python -m gamelab tour --loop`), on the same hunter, navigator and map knowledge."""
     from ..behavior.hunt import Hunt
-    h = sim.hunter(low_hp=0.3, potion_hp=0.45)
+    h = sim.hunter(low_hp=low_hp, potion_hp=0.45)
     tour = sim.tour(h, sim.navigator(h, fight=True, seed=POLICY_SEED), seed=POLICY_SEED)
     tour.rest_avoid = rest_avoid
     while True:
@@ -160,7 +160,13 @@ def _loop_avoid(sim) -> None:
     _loop(sim, rest_avoid=True)
 
 
-POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid}
+def _loop_hp50(sim) -> None:
+    """The hunt loop with `--low-hp 0.5`: it stops to rest under half her HP, not 30% (the Tree Dungeon study's advice:
+    at 30% two Horny Mushroom touches by meowdb's formula kill her)."""
+    _loop(sim, low_hp=0.5)
+
+
+POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid, "loop-hp50": _loop_hp50}
 
 
 # --- one run -------------------------------------------------------------------------------------------

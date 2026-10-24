@@ -355,3 +355,21 @@ def test_a_short_harness_run_on_tree_dungeon():
     from gamelab.sim import harness
     out = harness.run_one("loop", 1, "crowd", minutes=0.5, map_id=TREE, world=("zero-walls",))
     assert out["map"] == TREE and out["world"] == ["zero-walls"] and "left_map_at" in out and out["coverage"]
+
+
+def test_the_harness_has_the_hunt_loop_with_low_hp_at_half_to_compare_against():
+    from types import SimpleNamespace
+    from gamelab.sim import harness
+    made = []
+
+    class Stop(Exception):
+        pass
+
+    def hunter(low_hp, potion_hp):
+        made.append((low_hp, potion_hp))
+        raise Stop
+    sim = SimpleNamespace(hunter=hunter)
+    for policy, low in (("loop", 0.3), ("loop-hp50", 0.5)):
+        with pytest.raises(Stop):
+            harness.POLICIES[policy](sim)
+        assert made[-1] == (low, 0.45)
