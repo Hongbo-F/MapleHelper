@@ -58,6 +58,20 @@ def test_spots_the_mouse_mini_game_and_the_truth_booth():
     assert spotter.scores(img("truth_booth_timer.png"))["truth booth"] >= 1
 
 
+SEEN_IN_GAME = sorted((FIXTURES / "lie_detector").glob("*.png"))  # <date>_<time>_<form>.png, see its README
+FORMS = {"countdown": "countdown", "mini_game": "mini-game", "truth_booth": "truth booth"}
+
+
+@pytest.mark.parametrize("png", SEEN_IN_GAME, ids=lambda p: p.stem)
+def test_spots_every_lie_detector_seen_in_game(png):
+    form = FORMS[png.stem.split("_", 2)[2]]
+    assert LieDetectorSpotter().scores(img(png))[form] >= 1
+
+
+def test_the_lie_detectors_seen_in_game_are_all_there():
+    assert len(SEEN_IN_GAME) >= 6
+
+
 @pytest.mark.parametrize("frame", [SCENE, NEAR_MISS, np.zeros((540, 960, 3), np.uint8)])
 def test_ignores_yellow_scenery_and_other_windows(frame):
     assert not LieDetectorSpotter().seen(frame)
