@@ -4,12 +4,13 @@
   against the surface of the platform it was put on: by its template's bottom (as before the templates
   knew where the feet are in them) and by the template's origin. Looks where she isn't standing on the
   ground are left out, as her own height then shifts every monster seen.
-- **x from frame to frame, on recordings** (half-size frames, the camera still: she stands): each monster
-  followed from frame to frame, how far its x strays from a straight line through its neighbours' (within
-  ±0.3 s), by the template's centre and by its origin; how often the way it faces is the way it moves; how
-  often its pose (the template's frame: move, stand) is what it does, walking (faster than WALKING_V) or
-  standing (slower than STILL_V), by cut-outs and sprites; and how fast each kind walks (the game data says
-  125 units/s for a pig, 43.75 for a snail).
+- **x from frame to frame, on recordings** (their frames as recorded: half size at 1920x1080, full size at the
+  game's own 1366x768, each recording's geometry its own, `recordings.file_geometry`; the camera still: she
+  stands): each monster followed from frame to frame, how far its x strays from a straight line through its
+  neighbours' (within ±0.3 s), by the template's centre and by its origin; how often the way it faces is the
+  way it moves; how often its pose (the template's frame: move, stand) is what it does, walking (faster than
+  WALKING_V) or standing (slower than STILL_V), by cut-outs and sprites; and how fast each kind walks (the game
+  data says 125 units/s for a pig, 43.75 for a snail).
 - **The feed's tracks, from `watch`'s telemetry** (`tracks` records, twice a second): each track's velocity
   against how far its x went by the next record, for the monsters standing and those walking.
 
@@ -26,16 +27,15 @@ from pathlib import Path
 import numpy as np
 
 from ..perception.mobs import Mob, MobDetector
-from ..screen import STRETCHED
-
-# The recordings read here are all of the 1920x1080 window at half size (made before 2026-10-23): their px in map units
-UNITS_PER_HALF_PX = STRETCHED.units_per_px
+from ..screen import STRETCHED, Geometry
+from .recordings import file_geometry
 
 # Saved screenshots where she's off the ground though the look can't tell (the basin's dirt walls behind her
 # read as ground): in closeup.png her name tag is 9 px above where she stands, and every monster reads 5-15
 # units low.
 AIRBORNE = ("closeup.png",)
-LINK_PX = (12, 10)    # a monster in the next frame is the same one within this far across and down (half px) ...
+LINK_PX = (12, 10)    # a monster in the next frame is the same one within this far across and down (half-size px of
+                      # the 1920x1080 window: a recording's geometry converts them) ...
 LINK_GAP = 3          # ... and this many frames later at most
 FIT_S = 0.3           # s either side of a detection whose others its straight line goes through ...
 FIT_MIN = 7           # ... and how many it needs
@@ -94,9 +94,10 @@ def _stats(xs: list[float]) -> str:
     return f"{statistics.mean(xs):+12.1f} {sd:5.2f} {min(xs):+6.1f} {max(xs):+6.1f}"
 
 
-def link(frames: list[list[Mob]]) -> list[list[tuple[int, Mob]]]:
-    """Detections followed from frame to frame: each the nearest of its kind within LINK_PX of the last
-    one, at most LINK_GAP frames later. Each track is [(frame index, Mob)]."""
+def link(frames: list[list[Mob]], geo: Geometry = STRETCHED) -> list[list[tuple[int, Mob]]]:
+    """Detections followed from frame to frame (of geometry `geo`): each the nearest of its kind within LINK_PX of
+    the last one, at most LINK_GAP frames later. Each track is [(frame index, Mob)]."""
+    reach_x, reach_y = geo.fpx(LINK_PX[0]), geo.fpx(LINK_PX[1])
     done, live = [], []
     for i, found in enumerate(frames):
         used, kept = set(), []
@@ -106,8 +107,8 @@ def link(frames: list[list[Mob]]) -> list[list[tuple[int, Mob]]]:
                 done.append(track)
                 continue
             near = [(abs(m.x - last.x) + abs(m.y - last.y), k) for k, m in enumerate(found)
-                    if k not in used and m.kind == last.kind and abs(m.x - last.x) <= LINK_PX[0]
-                    and abs(m.y - last.y) <= LINK_PX[1]]
+                    if k not in used and m.kind == last.kind and abs(m.x - last.x) <= reach_x
+                    and abs(m.y - last.y) <= reach_y]
             if near:
                 k = min(near)[1]
                 used.add(k)
@@ -135,15 +136,16 @@ def residuals(ts: np.ndarray, xs: np.ndarray) -> list[float]:
     return out
 
 
-def recording(frames: np.ndarray, times: np.ndarray, detector: MobDetector) -> dict:
-    """On one recording (half-size frames, times in ms): x's stray (map units) by the template's centre and by
-    where the feet are, facing against motion, and how fast each kind walked (units/s, where it walked), over
-    the monsters seen in MIN_TRACK frames or more."""
+def recording(frames: np.ndarray, times: np.ndarray, detector: MobDetector, geo: Geometry = STRETCHED) -> dict:
+    """On one recording (frames of geometry `geo`, a detector for them; times in ms): x's stray (map units) by the
+    template's centre and by where the feet are, facing against motion, and how fast each kind walked (units/s,
+    where it walked), over the monsters seen in MIN_TRACK frames or more."""
+    per_px = geo.units_per_px
     found = [detector.detect(np.ascontiguousarray(f)) for f in frames]
     ts_all = np.asarray(times, float) / 1000
     centre, feet, agree, moving, n, speeds = [], [], 0, 0, 0, {}
     poses: Counter = Counter()  # (cut-out or sprite, walking or standing, its pose right)
-    for track in link(found):
+    for track in link(found, geo):
         if len(track) < MIN_TRACK:
             continue
         n += len(track)
@@ -155,7 +157,7 @@ def recording(frames: np.ndarray, times: np.ndarray, detector: MobDetector) -> d
             near = (ts >= ts[k] - FIT_S) & (ts <= ts[k] + FIT_S)
             if near.sum() < FIT_MIN:
                 continue
-            v = _slope(ts[near], xs[near]) * UNITS_PER_HALF_PX
+            v = _slope(ts[near], xs[near]) * per_px
             doing = "walking" if abs(v) > WALKING_V else "standing" if abs(v) < STILL_V else None
             if doing and m.pose in ("move", "stand"):
                 poses[("cut-outs" if is_cutout(m) else "sprites", doing, (m.pose == "move") == (doing == "walking"))] += 1
@@ -165,24 +167,26 @@ def recording(frames: np.ndarray, times: np.ndarray, detector: MobDetector) -> d
             if m.facing:
                 moving += 1
                 agree += (v > 0) == (m.facing > 0)
-    return {"detections": sum(len(f) for f in found), "followed": n, "centre": _spread(centre),
-            "origin": _spread(feet), "moving": moving, "facing_agrees": agree, "poses": dict(poses),
+    return {"detections": sum(len(f) for f in found), "followed": n, "centre": _spread(centre, per_px),
+            "origin": _spread(feet, per_px), "moving": moving, "facing_agrees": agree, "poses": dict(poses),
             "speeds": {k: (len(v), round(float(np.median(v)), 1), round(float(np.percentile(v, 75)), 1))
                        for k, v in sorted(speeds.items())}}
 
 
-def _spread(res: list[float]) -> dict:
-    """rms, 95th percentile and largest of residuals in half px, as map units."""
+def _spread(res: list[float], per_px: float) -> dict:
+    """rms, 95th percentile and largest of residuals in frame px (`per_px` map units each), as map units."""
     if not res:
         return {"n": 0}
-    e = np.abs(np.array(res)) * UNITS_PER_HALF_PX
+    e = np.abs(np.array(res)) * per_px
     return {"n": len(res), "rms": round(math.sqrt(float((e ** 2).mean())), 2),
             "p95": round(float(np.percentile(e, 95)), 1), "max": round(float(e.max()), 1)}
 
 
-def run(scenes: list[tuple[str, Callable]], model, recordings: list[Path], detector: MobDetector) -> list[str]:
+def run(scenes: list[tuple[str, Callable]], model, recordings: list[Path],
+        detector_for: Callable[[Geometry], MobDetector]) -> list[str]:
     """The report: feet on each of `scenes` (name, a look giving a placed Scene) where she stands, then x and
-    facing on each of `recordings` (.npz)."""
+    facing on each of `recordings` (.npz), each with `detector_for` its frames' geometry (file_geometry: the
+    recordings of before 2026-10-23 are the 1920x1080 window's at half size, whatever size the screenshots are)."""
     rows, skipped = [], []
     for name, look in scenes:
         s = look()
@@ -198,8 +202,9 @@ def run(scenes: list[tuple[str, Callable]], model, recordings: list[Path], detec
     if poses:
         lines.append("pose and facing: " + ", ".join(f"{k} {v}" for k, v in sorted(poses.items())))
     for path in recordings:
+        geo = file_geometry(path)
         with np.load(path) as d:
-            r = recording(d["frames"], d["times"], detector)
+            r = recording(d["frames"], d["times"], detector_for(geo), geo)
         c, o = r["centre"], r["origin"]
         lines.append(f"{path.stem}: {r['detections']} detections, {r['followed']} followed; x off a straight "
                      f"line, by the template's centre: rms {c.get('rms', '-')}, p95 {c.get('p95', '-')}, max "

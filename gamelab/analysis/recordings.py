@@ -7,6 +7,7 @@ its px are read at that size; one saved before 2026-10-23 says neither, and was 
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -67,6 +68,14 @@ def load(name: str) -> Recording:
     ev = json.loads(events_path.read_text()) if events_path.exists() else {"planned": [], "sent": []}
     return Recording(name, frames, times, ev["planned"], ev["sent"], tuple(ev.get("client", STRETCHED_CLIENT)),
                      ev.get("scale", 2))
+
+
+def file_geometry(path: Path) -> Geometry:
+    """The geometry of a saved recording's frames (its .npz anywhere), from its key events beside it (`save`): one
+    saved before 2026-10-23, or without them, was of the 1920x1080 window at half size."""
+    events = path.with_name(f"{path.stem}.events.json")
+    ev = json.loads(events.read_text()) if events.exists() else {}
+    return geometry(*ev.get("client", STRETCHED_CLIENT), ev.get("scale", 2))
 
 
 def contact_sheet(frames, times, path, *, cols=8, every=3, zoom=1) -> None:

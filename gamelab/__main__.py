@@ -1063,7 +1063,13 @@ def cmd_bodies(args) -> int:
     scenes = [(name, look_at(bgra)) for name, bgra in frames]
     names = BODY_RECORDINGS if args.recordings is None else args.recordings
     found = [Path(r) if Path(r).suffix else RECORDINGS / f"{r}.npz" for r in names]
-    print("\n".join(bodies.run(scenes, model, [p for p in found if p.exists()], detector)))
+    detectors = {geo: detector}  # the recordings', by their own geometry (the default ones: 1920x1080 half size)
+
+    def for_recording(g):
+        if g not in detectors:
+            detectors[g] = detector_for(model, g)
+        return detectors[g]
+    print("\n".join(bodies.run(scenes, model, [p for p in found if p.exists()], for_recording)))
     if missing := [str(p) for p in found if not p.exists()]:
         print(f"recordings not found: {', '.join(missing)}")
     return 0

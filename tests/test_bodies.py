@@ -71,6 +71,32 @@ def test_a_recording_tells_how_often_the_pose_was_what_the_monster_did():
 
 
 
+def test_at_the_games_own_size_a_recording_is_read_in_its_own_px(tmp_path):
+    """A recording keeps its geometry (recordings.file_geometry): one at 1366x768 full size is searched with a
+    detector for that size and read in its px (1 map unit each), one saved before it (no client in its key events)
+    as the 1920x1080 window's at half size, whatever size the screenshots were."""
+    from gamelab.screen import NATIVE, STRETCHED
+    times = np.arange(60) * 1000 / 30
+    xs = [100 + min(t, 1000) / 1000 * 125 for t in times]  # 125 units/s, then standing: 4.2 px a frame here
+    frames = [[Mob("pig", round(x), 50, 64, 46, 1.0, ox=x, feet=60.0, facing=1, pose="move")] for x in xs]
+    pictures = np.zeros((60, 2, 2, 3), np.uint8)
+    pictures[:, 0, 0, 0] = np.arange(60)
+    np.savez_compressed(tmp_path / "native.npz", frames=pictures, times=times)
+    (tmp_path / "native.events.json").write_text('{"planned": [], "sent": [], "client": [1366, 768], "scale": 1}')
+    np.savez_compressed(tmp_path / "old.npz", frames=pictures, times=times)
+    asked = []
+
+    def detector_for(geo):
+        asked.append(geo)
+        return SimpleNamespace(detect=lambda f: frames[int(f[0, 0, 0])] if geo == NATIVE else [])
+    lines = bodies.run([], None, [tmp_path / "native.npz", tmp_path / "old.npz"], detector_for)
+    assert asked == [NATIVE, STRETCHED]
+    assert "   pig walking: 125.0 units/s" in "\n".join(lines)
+    # a monster's step from frame to frame: 15 px is within LINK_PX at full size (17 px), not at half size (12)
+    steps = [[Mob("pig", 100 + 15 * i, 50, 30, 20, 0.9)] for i in range(5)]
+    assert [len(t) for t in bodies.link(steps, NATIVE)] == [5] and len(bodies.link(steps)) == 5
+
+
 def test_watch_tracks_velocities_against_how_their_x_moved(tmp_path, capsys):
     from gamelab import telemetry
     from gamelab.__main__ import main
