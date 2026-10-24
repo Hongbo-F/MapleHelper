@@ -63,6 +63,14 @@ TAKEOFF_SPREAD = 10.0
 TAKEOFF_SLOP = 12.0
 TAKEOFF_ROOM_WANTED = 20  # landing room enough (no better takeoff is sought)
 TAKEOFF_SEARCH = 30       # how far from where a jump was found its takeoff may be moved
+# Where a jump off an end is looked for: JUMP_FROM back, else (none surely landing from there) every unit nearer, to
+# TAKEOFF_EDGE. A jump landing only from nearer the end than JUMP_FROM was never found: on West Rocky Mountain II
+# five (17 onto 16, 64 up and 25 across, surely landing from 15-20 units back of 17's end and from nowhere further;
+# 15 onto 17, 5 onto 4, 3 onto 5, and off 7's left end onto 5, which three jumps from along 7 reached already), and
+# with 17 -> 16 the way up the steps on the right (17, 16, 13, 12 to 10): from 17 to 10 took 22.2 s round by 22 and
+# the rope to 14, and takes 3.4 now (17 -> 16 -> 13, up to 10). None on the first map, whose 204 moves stay as they
+# were.
+END_LOOK = tuple(range(JUMP_FROM, TAKEOFF_EDGE - 1, -1))
 RUN_UP = 20               # a running jump starts this far before its takeoff (mover.MIN_RUN 15 and some)
 LANDING_ROOM = LAND_MARGIN * 0.5  # a running jump must land at least this far in from the landing platform's ends,
                                   # and a walk-off this far more than her slide from its far end
@@ -289,13 +297,16 @@ def _end_moves(model: MapModel, a: Platform) -> list[Move]:
     out: list[Move] = []
     for direction, sign in SIDES:
         edge = a.right if sign > 0 else a.left
-        # Running jump off this end: looked for from JUMP_FROM back, taking off where it lands with room (_placed).
+        # Running jump off this end: looked for from JUMP_FROM back, and if none surely lands from there, a unit
+        # nearer at a time down to TAKEOFF_EDGE (END_LOOK), taking off where it lands with room (_placed).
         if a.covers(edge - sign * RUN_START):
-            jump = _sure_running_jump(model, a, edge - sign * JUMP_FROM, sign)
-            if jump is not None:
-                placed = _placed(model, a, edge - sign * JUMP_FROM, sign, jump[0])
-                if placed is not None:
-                    out.append(placed)
+            for back in END_LOOK:
+                jump = _sure_running_jump(model, a, edge - sign * back, sign)
+                if jump is not None:
+                    placed = _placed(model, a, edge - sign * back, sign, jump[0])
+                    if placed is not None:
+                        out.append(placed)
+                    break
         # Walking off this end: from just inside it when a wall of her group rises there (it stops her),
         # else from just past it. A cliff dropping from the end (34 down to 36) isn't in her way, but
         # starting inside it read as bumping into the cliff's top.

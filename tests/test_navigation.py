@@ -176,6 +176,39 @@ def test_a_pit_whose_only_way_out_is_a_jump_from_its_very_end_gets_that_jump_by_
     assert chances == {50: [0.72], 54: [0.53], 60: []}
 
 
+def step_tree(gap: float = 25, rise: float = 64):
+    """A (0..300, y 600) and B, `rise` up and `gap` past A's right end (300 + gap..500), over a floor C (-500..1000, y
+    800) with a rope up to each: West Rocky Mountain II's 17 and 16 (25 across, 64 up)."""
+    return {
+        "info": {"VRLeft": -500, "VRTop": 0, "VRRight": 1000, "VRBottom": 900},
+        "foothold": {"1": {
+            "1": dict([seg(1, 1, 1, 0, 600, 300, 600)]),
+            "2": dict([seg(1, 2, 2, 300 + gap, 600 - rise, 500, 600 - rise)]),
+            "3": dict([seg(1, 3, 3, -500, 800, 1000, 800)]),
+        }},
+        "ladderRope": {"0": {"l": 0, "uf": 1, "x": 100, "y1": 600, "y2": 760},
+                       "1": {"l": 0, "uf": 1, "x": 450, "y1": 600 - rise, "y2": 760}},
+        "miniMap": {"width": 1500, "height": 900, "centerX": 500, "centerY": 0, "mag": 4},
+    }
+
+
+def test_a_jump_off_an_end_that_lands_only_from_nearer_than_jump_from_is_found():
+    # From 33 back (route.JUMP_FROM) the jump up onto B comes down short of it or with no room to spare; from 15-21
+    # back it surely lands. Looked for at JUMP_FROM alone it was never found, and A got to B by nothing.
+    from gamelab.motion import route
+    m = mapdata.parse(1, step_tree(), "Step", {})
+    a, b = by_y(m, 600, 100), by_y(m, 536, 400)
+    assert route._sure_running_jump(m, a, a.right - route.JUMP_FROM, 1) is None
+    [up] = [mv for mv in Planner(m).moves if mv.src == a.id and mv.dst == b.id]
+    assert up.kind == "jump" and up.direction == "right" and up.chance == 1
+    assert route.TAKEOFF_EDGE <= a.right - up.takeoff < route.JUMP_FROM and up.x == up.takeoff - route.RUN_UP
+    assert b.left + route.LANDING_ROOM <= up.land_x
+    # Nearer than TAKEOFF_EDGE alone (36 across): still none.
+    m = mapdata.parse(1, step_tree(36), "Step", {})
+    a, b = by_y(m, 600, 100), by_y(m, 536, 400)
+    assert not any(mv.src == a.id and mv.dst == b.id for mv in Planner(m).moves)
+
+
 def test_physics_helpers():
     assert JUMP_HEIGHT == pytest.approx(77, abs=1)
     assert air_time(0) == pytest.approx(0.555, abs=0.01)

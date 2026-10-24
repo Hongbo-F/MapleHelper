@@ -153,6 +153,29 @@ def test_every_place_gets_to_every_other_but_20_under_22s_slope():
     assert not any(m.chance < 1 for m in fp.moves)
 
 
+def test_the_jumps_that_land_only_from_near_an_end_are_found_and_the_steps_on_the_right_are_a_way_up(monkeypatch):
+    # 17 (-391..-164) onto 16 (-139..1, 64 up, 25 across) surely lands from the last 20 units of 17 alone; looked for at
+    # route.JUMP_FROM (33 back) only, it and four more weren't found (three more pairs of platforms, and a fourth
+    # takeoff off 7's left end onto 5), and from 17 to 10 went round by 22 and the rope to 14.
+    from gamelab.motion import route
+    model = load()
+    planner = route.Planner(model)
+    jumps = {(m.src, m.dst, m.direction) for m in planner.moves if m.kind == "jump"}
+    new = {(17, 16, "right"), (15, 17, "left"), (5, 4, "right"), (3, 5, "left")}
+    assert new <= jumps and len(planner.moves) == 181
+    [up] = [m for m in planner.moves if (m.kind, m.src, m.dst) == ("jump", 17, 16)]
+    assert up.takeoff == -164 - route.TAKEOFF_EDGE and model.platform(16).left + route.LANDING_ROOM <= up.land_x
+    assert route._sure_running_jump(model, model.platform(17), -164 - route.JUMP_FROM, 1) is None
+    trip = planner.plan(17, -277.5, 10)
+    assert [(m.src, m.dst) for m in trip] == [(17, 16), (16, 13), (13, 10)]
+    assert planner.travel(17, -277.5, 10) == pytest.approx(3.4, abs=0.1)
+    monkeypatch.setattr(route, "END_LOOK", (route.JUMP_FROM,))  # looked for at JUMP_FROM alone, as before
+    before = route.Planner(load())
+    assert not new & {(m.src, m.dst, m.direction) for m in before.moves if m.kind == "jump"}
+    assert len(before.moves) == 176
+    assert before.travel(17, -277.5, 10) == pytest.approx(22.2, abs=0.1)
+
+
 def test_in_the_simulator_she_gets_out_of_the_pit_up_the_rope_from_14_and_onto_11_from_22():
     # The trips the live runs of 2026-10-23 missed, with her dot placed right: up the rope from 14 to 7 (it ran past
     # 14's right end, 80 units further on than planned, and fell to 17 twice), from the pit to 19 (no route), and from
