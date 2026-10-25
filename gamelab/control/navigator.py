@@ -271,12 +271,15 @@ class TripState:
 
     def paused(self, seconds: float) -> None:
         """She stood still `seconds` (LookLost: Senses.regain): the trip's clocks move on by as much, its deadline and
-        how long its chains have stopped short of a monster (MEET_S), and a look taken before isn't used. Where the
-        monsters were (`avoid`, `sighted`) ages as the game's own clocks do."""
+        how long its chains have stopped short of a monster (MEET_S), and a look taken before isn't used, nor the
+        monsters seen before: the next pass looks for them afresh even if a cut-short chain had it take a quick look
+        (`quick`, which plans from the tracker's last monsters: those from before the pause, none that came during it,
+        and with an escort no fight for that chain; review, 2026-10-24). Where moves were in a monster's way (`avoid`)
+        ages as the game's own clocks do."""
         self.deadline += seconds
         if self.blocked is not None:
             self.blocked += seconds
-        self.fresh = None
+        self.fresh, self.quick, self.sighted = None, False, []
 
 
 class Navigator:

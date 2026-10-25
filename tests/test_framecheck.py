@@ -673,6 +673,38 @@ def test_a_trip_stands_still_while_its_looks_fail_and_arrives_after():
     assert trace["result"] == "arrived" or trace["result"].get("result") == "arrived", trace["result"]
 
 
+def test_a_trip_paused_on_its_quick_look_looks_for_monsters_again():
+    """A chain cut short has the next pass take a quick look, planning from the monsters seen before (TripState.quick).
+    When that quick look is the one that fails, the pass after the pause looks for monsters afresh, as Navigator.go's
+    LookLost handler leaves it: not from those seen before the pause, nor with none that came during it (review,
+    2026-10-24: `paused` cleared the look taken before, but not `quick`)."""
+    from gamelab.control.navigator import TripState
+    from gamelab.sim import scenarios
+
+    def fn(sim):
+        nav = sim.navigator(sim.hunter())
+        real, asked = nav.mover.locate, []
+
+        def locate(*args, mobs=False, **kw):
+            asked.append(mobs)
+            if len(asked) == 1:
+                raise LookLost(Problem("picture", "the minimap doesn't show this map's picture"))
+            return real(*args, mobs=mobs, **kw)
+
+        nav.mover.locate = locate
+        st = TripState(17, deadline=100.0, quick=True)
+        st.sighted = [("a track", "a sighting")]
+        with pytest.raises(LookLost):
+            nav._look(st)
+        st.paused(30.0)
+        s, _ = nav._look(st)
+        return {"asked": asked, "quick": st.quick, "sighted": st.sighted, "deadline": st.deadline,
+                "placed": s.where is not None}
+
+    got = scenarios.run_scenario(scenarios.Scenario("paused quick", fn, (23, 900.0)))["result"]
+    assert got == {"asked": [False, True], "quick": False, "sighted": [], "deadline": 130.0, "placed": True}
+
+
 # --- the name tag, the minimap picture and the capture -----------------------------------------------------------------
 
 def test_a_name_tag_template_that_no_longer_matches_is_cut_again(tmp_path):
