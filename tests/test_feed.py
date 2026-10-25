@@ -445,7 +445,7 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     f.alive = False  # the feed's gone: the look is taken here, as without one
     s = senses.look()
     assert eyes.looks == 1 and s.events is None and senses.counts == {
-        "from the feed": 2, "taken here": 1, "glances from the feed": 2}
+        "from the feed": 2, "taken here": 1, "glances from the feed": 2, "feed rested": 0}
     senses.glance()
     assert eyes.glances == 1
 
@@ -485,6 +485,36 @@ def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band_and_sweeps_o
     f.alive = False  # the feed's gone: her looks are taken here, and sweep the screen again
     s = senses.look()
     assert eyes.looks == 1 and senses.sweep_counts["slices"] == 1 and len(s.rows) == 2
+
+
+def test_a_slow_feed_is_rested_and_her_looks_and_glances_are_taken_here_meanwhile(sync, monkeypatch):
+    # Starved of the CPU (its child runs at below-normal priority), the feed's looks come slowly: after FEED_SLOW_LOOKS
+    # of them in a row waiting FEED_SLOW_S or more, it rests FEED_REST_S; then one look tries it again.
+    from gamelab.localization import senses as senses_mod
+    f, clock, eyes = sync
+    monkeypatch.setattr(senses_mod, "time", clock)
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    clock.sleep(0.5)
+    quick = f.look
+
+    def slow(*args):
+        clock.sleep(senses_mod.FEED_SLOW_S)  # (each look waits that long for it)
+        return quick(*args)
+    monkeypatch.setattr(f, "look", slow)
+    for _ in range(senses_mod.FEED_SLOW_LOOKS):
+        senses.look()
+    assert senses.counts["from the feed"] == senses_mod.FEED_SLOW_LOOKS and senses.counts["feed rested"] == 1
+    senses.look()
+    senses.glance()
+    assert getattr(eyes, "looks", 0) == 1 and getattr(eyes, "glances", 0) == 1  # taken here while it rests
+    clock.sleep(senses_mod.FEED_REST_S)
+    senses.look()  # tried again, still slow: rested again at once
+    assert senses.counts["from the feed"] == senses_mod.FEED_SLOW_LOOKS + 1 and senses.counts["feed rested"] == 2
+    monkeypatch.setattr(f, "look", quick)
+    clock.sleep(senses_mod.FEED_REST_S)
+    senses.look()
+    senses.look()
+    assert senses.counts["from the feed"] == senses_mod.FEED_SLOW_LOOKS + 3 and senses.counts["feed rested"] == 2
 
 
 def test_glances_from_the_feed_come_as_often_as_its_frames_or_63_ms_apart(sync, monkeypatch):

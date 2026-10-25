@@ -19,8 +19,9 @@ is the feed's state of the first frame shown after it was asked for, with what i
 feed.fresh), and the events since the last look come with it (Scene.events); a look at her band has the monsters the
 feed follows off it too (`Scene.swept`, for her memory: Feed.look), so there's no sweep while the feed serves her
 looks. Glances come from the feed's newest frames. When the feed can't give one (the game not in front, the feed gone
-or too slow), the look or glance is taken here as without it, and once the feed is gone her looks sweep again.
-Without a feed nothing changes.
+or too slow), the look or glance is taken here as without it, and once the feed is gone her looks sweep again; a feed
+whose looks keep coming slowly (starved of the CPU) is rested a while, her looks and glances taken here meanwhile
+(FEED_SLOW_S, FEED_REST_S). Without a feed nothing changes.
 
 A look taken here is never handed on unless it passed its checks: the eyes' (perception.framecheck: the game window,
 the frame lined up with it, the minimap's picture found) and her place on the map (localization.placecheck). One that
@@ -33,6 +34,7 @@ events.
 
 import math
 import time
+from collections import deque
 from collections.abc import Callable
 
 from .. import telemetry
@@ -79,6 +81,19 @@ PAUSE_POLL_S = 0.5
 # (bench-look), and the slices together found the 53 monsters the whole-screen search did, at the same places.
 SWEEP_SLICE = 193.0
 SWEEP_BODY_SLACK = 8.0
+# A feed whose looks come slowly (its child starved of the CPU: it runs at below-normal priority) is rested: once
+# FEED_SLOW_LOOKS looks in a row at her band or her place (not the whole screen, whose search takes 0.1-0.25 s however it's
+# taken) have waited FEED_SLOW_S or more for it, or one wasn't given at all (it waited FEED_WAIT_S), her looks and glances
+# are taken here for FEED_REST_S; then the next look tries the feed again, and rests it again at once if that one is slow
+# too. On the 20 saved 1366x768 frames of Tree Dungeon with the machine 93% busy (2026-10-24; other work at normal and idle
+# priority), the child looked at 12 frames a second, a look at her band waited 149 ms for it (median; p90 655) against 61
+# taken here, and 30 of 226 looks waited out FEED_WAIT_S; resting it so (the machine 74-94% busy), the feed was rested 17
+# times in a minute, 217 of 329 looks were taken here, and a look at her band waited 62 ms (p90 214) against 61 (104).
+# FEED_SLOW_S is a guess: a look at her band taken here costs about 40 ms at the game's own size, and the feed's as much
+# with its frames coming (README, Continuous perception). In the simulator the feed is never rested.
+FEED_SLOW_S = 0.15
+FEED_SLOW_LOOKS = 3
+FEED_REST_S = 2.0
 
 
 class Senses:
@@ -104,7 +119,9 @@ class Senses:
         self._glanced = -1e18  # the frame time of the last glance from the feed
         self.glanced_at: float | None = None  # when the frame the last glance saw was shown (time.monotonic)
         self.glanced = None  # the feed's state (worldstate.WorldState) the last glance came from; None: taken here
-        self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0}
+        self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0, "feed rested": 0}
+        self._feed_waits: deque[float] = deque(maxlen=FEED_SLOW_LOOKS)  # the latest looks' waits for the feed
+        self._feed_rest = -1e18  # no looks or glances from the feed before this (FEED_REST_S)
         self.failed = {"looks": 0, "lost": 0}  # looks that failed their checks, and times that made LookLost
         self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
         self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
@@ -119,8 +136,11 @@ class Senses:
         will do (None: now, as it's asked for): one a glance from it saw her standing still in once the keys were
         let go of, say (Navigator.recover)."""
         s = None
-        if self.feed is not None and self.feed.alive:
+        if self._feed_up():
+            asked = time.monotonic()
             s = self.feed.look(self, mobs, wide, loot, mesos_only, after)
+            if not wide:
+                self._feed_paced(s is None, time.monotonic() - asked)
         served = s is not None
         if s is None:
             s = self._take()
@@ -149,6 +169,25 @@ class Senses:
         for listener in self.listeners:
             listener(s)
         return s
+
+    def _feed_up(self) -> bool:
+        """Whether looks and glances come from the feed now: there's one, it's alive, and it isn't resting
+        (FEED_REST_S)."""
+        return self.feed is not None and self.feed.alive and time.monotonic() >= self._feed_rest
+
+    def _feed_paced(self, refused: bool, waited: float) -> None:
+        """A look at her band or place asked of the feed waited `waited` s (`refused`: and wasn't given): the feed is
+        rested if it's slow (FEED_SLOW_S, FEED_SLOW_LOOKS), said in the log and as telemetry."""
+        self._feed_waits.append(math.inf if refused else waited)
+        if refused or (len(self._feed_waits) == FEED_SLOW_LOOKS and min(self._feed_waits) >= FEED_SLOW_S):
+            self._feed_rest = time.monotonic() + FEED_REST_S
+            self.counts["feed rested"] += 1
+            text = (f"the feed is slow (its last looks waited "
+                    f"{', '.join('out' if w == math.inf else f'{1000 * w:.0f} ms' for w in self._feed_waits)}): "
+                    f"looks taken here for {FEED_REST_S:.0f} s")
+            if self.counts["feed rested"] <= 3 or self.counts["feed rested"] % 50 == 0:  # (not every time)
+                self.log(f"  {text} ({self.counts['feed rested']} times)")
+            telemetry.emit("event", kind="feed", text=text)
 
     def _take(self) -> Scene:
         """A look taken here and placed that passed its checks (see the module's docstring), taken again until one
@@ -206,7 +245,7 @@ class Senses:
         """Her minimap dot and HP (Eyes.glance), and when its frame was shown (`glanced_at`): with a feed, from its
         newest frame, one shown FEED_GLANCE_EVERY_S after the last glance's at the soonest (and after it), its state
         kept (`glanced`: the monsters it follows, for a plan running to react to: control.navigator)."""
-        if self.feed is not None and self.feed.alive:
+        if self._feed_up():
             st = self.feed.glance(self._glanced + max(FEED_GLANCE_EVERY_S, 1e-3))
             if st is not None:
                 self._glanced = self.glanced_at = st.t
@@ -219,8 +258,8 @@ class Senses:
         return out
 
     def wait_frame(self, timeout: float) -> None:
-        """Until the feed's next frame comes, `timeout` s at most; without a feed, `timeout` s."""
-        if self.feed is not None and self.feed.alive:
+        """Until the feed's next frame comes, `timeout` s at most; without a feed (or while it rests), `timeout` s."""
+        if self._feed_up():
             self.feed.wait_frame(timeout)
         else:
             time.sleep(timeout)
