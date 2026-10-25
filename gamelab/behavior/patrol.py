@@ -43,10 +43,13 @@ of what it holds full when she gets there (an emptied stretch is skipped until i
 has seen (her memory, not the belief's guesses) pulls her off the loop when it holds PULL_MIN kills' worth and gives
 PULL_GAIN times the EXP a second (travel and its kills included) of the loop's next.
 
-The danger hook (`Patrol.danger(platform, x)`, a share of her HP a second spent fighting there): by default 0 where no
-monster can touch her (MapModel.safe), else HP_S_PER_SPAWN for each spawn point on that platform of a kind she keeps off
-(attack.stance.KEEP_OFF). The positioning model (attack.danger, branch work/positioning) can be plugged in there. What
-she loses there is learned as she goes (`hp_rate`: the hook as a prior, HP_PRIOR_S, and the HP she's seen go there).
+The danger hook (`Patrol.danger(platform, x)`): how badly she can be touched fighting at a place, in the positioning
+model's unit (attack.danger.Danger.at, branch work/positioning: the share of her HP touches would take there, each
+monster or spawn point weighed by how soon it gets to her), which plugs in as it is; she loses DANGER_HP_S of her HP a
+second for each unit of it. By default (default_danger), 0 where no monster can touch her (MapModel.safe), else the
+touch shares (touch_shares: the game data's touch damage over her HP) of the platform's spawn points of kinds whose touch
+takes DANGER_MIN of her HP or more: by no kind's name. What she loses there is learned as she goes (`hp_rate`: the hook
+as a prior, HP_PRIOR_S, and the HP she's seen go there).
 
 The numbers marked "guess" are starting values for the simulator's A/B runs; the rest say where they were measured.
 """
@@ -59,7 +62,6 @@ from functools import lru_cache
 
 from ..attack import spots
 from ..attack.reach import EDGE_MARGIN
-from ..attack.stance import KEEP_OFF
 from ..localization.mapdata import SPAWN_REACH, MapModel
 from ..localization.memory import MEMORY_S
 from ..localization.players import Player, near_rival
@@ -100,11 +102,20 @@ RIVAL_KEEP_S = 20.0    # guess
 TAKE_PRIOR = 0.5       # guess
 TAKE_N = 4.0           # guess
 TAKE_KEEP_S = 10.0     # guess (the crowding study's Green Mushrooms went within about 4 s)
-# The danger hook's default: a share of her HP a second fighting on a platform with a spawn point of a kind she keeps
-# off (stance.KEEP_OFF): live, hunting 23 (two Horny Mushroom points) on 2026-10-24 she lost 0.28-0.31 bars of HP a
-# minute, 0.0025 a second a point. What a bar costs her, in EXP (her pet's potions, and the risk): HP_PRICE, a guess.
-HP_S_PER_SPAWN = 0.0025
-HP_PRICE = 100.0
+# The danger hook (see the top): the share of her HP a second she loses fighting at a place, for each unit of its danger.
+# Live, hunting 23 (two Horny Mushroom points) on 2026-10-24 she lost 0.28-0.31 bars of HP a minute, 0.005 a second,
+# where the positioning model's Danger.at at 23's stop is 0.285: 0.0175. The default's danger there is 0.33 (two Horny
+# Mushroom points, 0.164 each): 0.0058 a second.
+DANGER_HP_S = 0.0175
+# The default (default_danger): a kind counts when a touch by it takes this share of her HP or more (the positioning
+# model's DANGER_MIN: her pet drinks a potion under 45%; on Tree Dungeon a Horny Mushroom takes 15-18% of her 752 HP, a
+# Green Mushroom about 7%, a Slime under 2%; on the first map no kind counts) ...
+DANGER_MIN = 0.05
+# ... a touch taking TOUCH_PER_PAD HP for each point of its kind's touch damage (PADamage, game data): live on Tree
+# Dungeon on 2026-10-24 a Horny Mushroom's 110 took 113-134 HP a touch (123.5 on average), the README's ...
+TOUCH_PER_PAD = 1.12
+HER_HP = 752.0         # ... of her HP: at level 24 (config.toml has none; the positioning model's attack.danger.Her)
+HP_PRICE = 100.0       # guess: what a bar of her HP costs her, in EXP (her pet's potions, and the risk)
 # ... and blended with the HP she has seen go on each platform (Patrol.learn_hp: the drops of her HP bar between looks
 # there), the hook counting as HP_PRIOR_S s there: in the simulator's crowd on Tree Dungeon she lost 1.3-1.4 bars a
 # minute alive whatever she did (20 bars a run, her 60 potions), live 0.28-0.33.
@@ -249,13 +260,34 @@ def refill_mean(n: int = 1, scale: float = 1.0) -> float:
     return (REFILL_D0 + max(1, n) * REFILL_TAU) * scale
 
 
-def default_danger(model: MapModel, points: list[Point]) -> Callable[[int, float], float]:
-    """The danger hook's default (see the top): HP_S_PER_SPAWN for each point of a KEEP_OFF kind on the platform, 0
-    where MapModel.safe."""
-    n = Counter(q.platform for q in points if q.kind in KEEP_OFF)
+def touch_shares(model: MapModel, hp: float = HER_HP) -> dict[str, float]:
+    """Kind -> the share of her HP (`hp`) a touch by it takes: TOUCH_PER_PAD x its touch damage (PADamage, read from
+    the game data as mapdata reads a monster's EXP). {} without the game data copy: no danger by default."""
+    ids = {s.mob_id: kind_of(s.name or str(s.mob_id)) for s in model.spawns}
+    try:
+        pads = _pads(tuple(sorted(ids)))
+    except (OSError, KeyError, ValueError, ImportError):
+        return {}
+    return {ids[i]: TOUCH_PER_PAD * pad / hp for i, pad in pads.items() if pad > 0}
+
+
+@lru_cache(maxsize=None)
+def _pads(ids: tuple[int, ...]) -> dict[int, float]:
+    from gamedata.canvas import _mob_pack
+    pack = _mob_pack()
+    return {i: float((pack.image(f"Mob/{i:07d}.img").get("info") or {}).get("PADamage") or 0) for i in ids}
+
+
+def default_danger(model: MapModel, points: list[Point], touch: dict[str, float]) -> Callable[[int, float], float]:
+    """The danger hook's default (see the top): on a platform, the touch shares (`touch`: kind -> share) of its spawn
+    points of kinds over DANGER_MIN; 0 where MapModel.safe."""
+    on = Counter()
+    for q in points:
+        if touch.get(q.kind, 0.0) >= DANGER_MIN:
+            on[q.platform] += touch[q.kind]
 
     def danger(pid: int, x: float) -> float:
-        return 0.0 if model.safe(pid) else HP_S_PER_SPAWN * n.get(pid, 0)
+        return 0.0 if model.safe(pid) else on.get(pid, 0.0)
     return danger
 
 
@@ -403,18 +435,19 @@ class Belief:
 
 class Patrol:
     """The map's points and stops, the belief, the loop she follows and the choice of her next stop (see the top).
-    `travel(platform, x, platform, x)`: s by the planner's routes (None: no way); `danger(platform, x)`: the hook, a
-    share of her HP a second spent fighting there (None: default_danger)."""
+    `travel(platform, x, platform, x)`: s by the planner's routes (None: no way); `danger(platform, x)`: the hook, the
+    danger of fighting there in the positioning model's unit (None: default_danger, with `touch`: kind -> the share of
+    her HP a touch takes, None: touch_shares)."""
 
     def __init__(self, model: MapModel, kinds: set[str] | None, exp: dict[str, float],
                  travel: Callable[[int, float, int, float], float | None],
-                 danger: Callable[[int, float], float] | None = None):
+                 danger: Callable[[int, float], float] | None = None, touch: dict[str, float] | None = None):
         self.model = model
         self.points = points_of(model, kinds, exp)
         self.stops = stops_of(model, self.points)
         self.belief = Belief(model, self.points)
         self.travel = travel
-        self.danger = danger or default_danger(model, self.points)
+        self.danger = danger or default_danger(model, self.points, touch_shares(model) if touch is None else touch)
         avg = [q.exp for q in self.points]
         self.avg_exp = sum(avg) / len(avg) if avg else 10.0
         self.kill_s = KILL_S_PER_EXP   # s of shooting a point of EXP (learn_kills)
@@ -450,9 +483,9 @@ class Patrol:
         self.hp_time[pid] += dt
 
     def hp_rate(self, pid: int, x: float) -> float:
-        """The share of her HP a second she loses fighting on platform `pid` at x: the danger hook, as HP_PRIOR_S s
-        there, blended with what she has seen go there."""
-        return (self.danger(pid, x) * HP_PRIOR_S + self.hp_seen[pid]) / (HP_PRIOR_S + self.hp_time[pid])
+        """The share of her HP a second she loses fighting on platform `pid` at x: the danger hook's (DANGER_HP_S a
+        unit of it), as HP_PRIOR_S s there, blended with what she has seen go there."""
+        return (DANGER_HP_S * self.danger(pid, x) * HP_PRIOR_S + self.hp_seen[pid]) / (HP_PRIOR_S + self.hp_time[pid])
 
     def learn_kills(self, throws: int, exp: float) -> None:
         """Her kill time a point of EXP from the throws she made and the EXP her kills gave (KILL_PRIOR_EXP)."""

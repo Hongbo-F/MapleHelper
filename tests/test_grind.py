@@ -17,6 +17,7 @@ from gamelab.localization.memory import Cover, Memory
 from gamelab.localization.monsters import Monster
 from gamelab.localization.players import Player
 from gamelab.perception.mobs import Mob
+from gamelab.sim import scenarios
 
 HORNY, GREEN = "horny-mushroom", "green-mushroom"
 
@@ -38,11 +39,14 @@ def _pid(model, x, y):
     return model.platform_under(x, y).id
 
 
+TOUCH = {HORNY: 0.164, GREEN: 0.08}  # the share of her HP a touch takes (Tree Dungeon's, patrol.touch_shares)
+
+
 def _patrol(model, seconds):
     """A Patrol on `model` whose route time between two platforms is `seconds(a, b)` (platform ids) plus a walk."""
     def travel(a, x, b, bx):
         return seconds(a, b) if a != b else abs(bx - x) / 149.0
-    return patrol.Patrol(model, {HORNY, GREEN}, {HORNY: 41.0, GREEN: 26.0}, travel)
+    return patrol.Patrol(model, {HORNY, GREEN}, {HORNY: 41.0, GREEN: 26.0}, travel, touch=TOUCH)
 
 
 def _sight(model, kind, x, y):
@@ -227,8 +231,16 @@ def test_the_belief_of_a_point_her_kill_emptied_refills_and_learns_how_fast():
 
 def test_the_danger_hook_is_a_cost_and_learns_from_her_hp():
     model, a, b, p = _two_areas()
-    # By default a platform with Horny Mushroom points (stance.KEEP_OFF) costs HP_S_PER_SPAWN a point a second.
-    assert p.danger(a[0], 150.0) == pytest.approx(2 * patrol.HP_S_PER_SPAWN)
+    # By default a platform's danger is the touch shares of its points of kinds over DANGER_MIN: two Horny Mushrooms,
+    # DANGER_HP_S of her HP a second for each unit of it.
+    assert p.danger(a[0], 150.0) == pytest.approx(2 * TOUCH[HORNY])
+    assert p.hp_rate(a[0], 150.0) == pytest.approx(patrol.DANGER_HP_S * 2 * TOUCH[HORNY])
+    weak = patrol.Patrol(model, {HORNY}, {HORNY: 41.0}, p.travel, touch={HORNY: patrol.DANGER_MIN / 2})
+    assert weak.danger(a[0], 150.0) == 0.0  # a kind whose touch takes little: no danger
+    # Tree Dungeon's from the game data (its touch damage), where it's on this computer.
+    if scenarios.available(10002073):
+        shares = patrol.touch_shares(mapdata.load(10002073))
+        assert shares["horny-mushroom"] == pytest.approx(0.164, abs=0.01) and shares["slime"] < patrol.DANGER_MIN
     before = p.rate([p.stop_on(i) for i in a], 0.0)
     # She has seen a bar of HP go a minute on the first (as in the simulator): that area's rounds are worth less, a
     # cost, not a ban.
