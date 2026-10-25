@@ -395,22 +395,26 @@ To check in game (none of this has been played):
 1366x768 (game px; the saved frames and the rolling recorder's clips of 2026-10-24 and 25): a white frame 50 x 8 between
 two black ones, and inside the fill, 46 x 4: three rows green (0, 255, 0) for the HP left over a red one (170, 0, 0),
 then the latest damage, red fading to dark red, and the HP lost black; its frame's top-left 25 left of the monster's
-centre and 29 above its picture's top, on all 574 bars over the mushrooms' poses (at 1920x1080 the pigs' 25-30 game px
-above, the slimes', whose pictures change height as they bounce, 0-30). A party member's bar over a player is the same
-filled red, and a monster's as it dies all red and black.
+centre and 29 above its picture's top on 567 of the 575 bars paired with a mushroom the detector found within 6 px (25
+above on 6 Horny Mushrooms, 33 once, 26 left once; 3 more bars of the clips sat 10-13 px right of the nearest Horny
+Mushroom found, perhaps over one it missed, and read only for the search's 14 px either side; at 1920x1080 the pigs'
+25-30 game px above, the slimes', whose pictures change height as they bounce, 0-30). A party member's bar over a player
+is the same filled red, and a monster's as it dies all red and black.
 - **Why every bar read empty:** the reader took the longest run of pure green, black and dark red in a row above the
   monster for the fill. At 1366x768 the black frame outside the white one is 52 px of pure black, longer than the
   fill's 48: of 567 labelled bars 488 read 0 and 64 none (the run read was the black frame on 375 of the 503 read, the
   black rows inside on 53, the red row under the green on 49), and the scenery's 1-px black outlines read as empty bars
   over 267 of 2207 monsters with none. At half size of 1920x1080 the black rows blend into the white or not by where the
-  bar falls in a look's px: 111 of 161 bars of the first map's recordings read 0 (and live on 2026-10-21 a third of the
+  bar falls in a look's px: 111 of 162 bars of the first map's recordings read 0 (and live on 2026-10-21 a third of the
   bars read 0). The simulator drew a bar of its own, grey around green and black, which read right.
 - **Now** the bar is found by its frame: the frame's least colour (white high; the black frames and the fill, green, red
-  or black, all low) matched against the bar's (`TM_CCOEFF_NORMED`, 0.75: 0.78-1.0 on the bars, 0.73 at most where
-  there's none), drawn at the look's scale for each place a game px can fall in a px (quarters across, halves down:
-  `_bar_frames`), around where it's expected from the monster (14 game px either side, 12 above, 31 below). Of the
-  places matching about as well as the best (0.1), the nearest is read (the frame slid along its own long rows
-  matches less well: a slime's slid 7 half-size px matched 0.81 against 0.99, nearer, and read 0.97 for 0.74). The HP
+  or black, all low) matched against the bar's (`TM_CCOEFF_NORMED`, 0.75: at 1366x768 0.75-1.0 on the 805 bars found
+  in the frames, 3 of them under 0.78, and 0.73 at most around a monster with none, a margin of only 0.02; at half size
+  of 1920x1080 0.86 and up on the bars, 0.62 at most around none), drawn at the look's scale for each place a game px
+  can fall in a px (quarters across, halves down: `_bar_frames`), around where it's expected from the monster (14 game
+  px either side, 12 above, 31 below). Of the places matching about as well as the best (0.1), the nearest is read (the
+  frame slid along its own long rows matches less well: a slime's slid 7 half-size px matched 0.81 against 0.99,
+  nearer, and read 0.97 for 0.74). The HP
   left is green from the left to the last green column (green over red and blue by 60, blue under half of it: a vine's
   mint green over a bar isn't, a glow's yellow tint is), whatever covers the rest of its rows (a damage number over the
   frame's top, sparkles, the red of the latest damage), its blended edge at half size counted by how green it is. If
@@ -418,10 +422,13 @@ filled red, and a monster's as it dies all red and black.
   it's read halfway along that to the first red or black after it (on the clips 0.45, 0.73 and 0.47, where the next
   frame without the cover read 0.46, 0.72 and 0.50). No green: None.
 - **Measured** on the labelled bars (`tests/fixtures/hp_bars`, a bar over each monster the detector found, its fill
-  counted by pixel): at 1366x768 563 of 564 with the end in view within half a px (0.001 off on average; before 0.539,
-  486 read 0, 63 none), the 408 monsters without one of their own none (before 47 read empty); at half size of
-  1920x1080 160 of 161 within a px (0.003; before 0.518), 16 of 16 with the end covered within the range it's in. 0.5 ms
-  a monster at 1366x768, 0.8 ms at half size (0.2 before).
+  counted by pixel): at 1366x768 564 of 565 with the end in view within half a px (0.001 off on average; before 0.540,
+  487 read 0, 63 none), 1 of 1 with the end covered within the range it's in, the 408 monsters without one of their own
+  none (before 47 read empty); at half size of 1920x1080 161 of 162 within a px (0.003; before 0.518, 111 read 0, 15
+  none), 16 of 16 with the end covered, none of the 131 monsters without one (before 3). Two labels were put right on
+  review: a full bar whose end a vine covers (its mint green counted as green) is 38 of 46 px green, the HP lost's black
+  after it, as in the frames either side; a pig's bar under a damage number's purple halo, labelled with no green, is
+  0.675 green. 0.5 ms a monster at 1366x768, 0.8 ms at half size (0.2 before).
 - **In the simulator** the bars are drawn as the game draws them (`hud.draw_hp_bar`, at the half-size look's blend), and
   `--world bars-empty` (`Realism.bars_empty`) reads every bar up as empty, as live did before.
 
@@ -1522,7 +1529,7 @@ Per run, its means (HP lost in bars of her HP; "in taps": what the taps added to
     | HP potions a minute | 3.06 | 2.23 | 2.24 |
     | deaths | 0 | 0 | 0 |
 
-    With the bars read empty, her throws alone rarely make a monster sure enough to be low: the choice threw the regular attack 1.3 times a run, seeds 1-3, 7 and 8 the same runs as Lucky Seven only, the others parting from them by the world's chaos (EXP -2.0%, standard error 3.4%; its MP a minute is lower for its fewer kills, not its regular throws). With the bars read (`ATTACK_REALISM` off) it threw the regular attack 13 times a run to finish, for 314.7 MP a minute against 329.6 (-4.5%) and 1.34 MP potions a minute against 1.43, EXP a minute 200.7 against 196.7 (+2.0%, standard error 3.1%, better on 5 of 8). (Before EXP before loot, the same three made 77.7, 215.3 and 215.3.) The regular attack alone makes 39% of Lucky Seven's EXP, with more HP lost (the monsters live three times as long). Measured again after review's fixes (2026-10-25: a trip stopping for a pile only where it goes first, a bar up taken as her damage showing), Lucky Seven only and the choice ran the same runs seed for seed; the regular attack alone parted on seeds 2, 4 and 5 (74.0 EXP a minute before), where the old check had stopped a trip for a pile the pass then let wait 7, 20 and 43 times a run. Rebased onto master (2026-10-25: her heading off the frame taking a throw's tap away where it's strong, the Lie Detector retreat), the choice made 194.2 EXP a minute against 192.7 (+4.6% seed by seed, standard error 10.5%, better on 4 of 8), 56.9 kills a run against 58.5, 322.0 MP a minute against 314.7, 1.38 MP potions a minute against 1.34, HP lost 9.4 bars a run against 8.1 (hurt 95 times against 82, 34 of them on trips against 24: her trips 104 s a run against 86), no death, no Lucky Seven pressed short (`gamelab/lab/harness/rb-loop-attack-choice-8x10.json`). Both ran without the feed, so with the hunt loop's sweep on both sides: the Lie Detector's no-feed sweep (above) has nothing to do with the difference. Paired by seed, her hurts are within the noise (+12.8 a run, standard error 9.1; seed 1's went 38 -> 107 as its kills went 32 -> 50, and without it +4.7), those on trips less so (+9.9, standard error 3.8, up on 7 of 8 seeds), with her trips 18 s a run longer (11 s standard error) and 33 hurts every 100 s of them against 28: not explained, one to watch in the supervised run. What saves MP is reading the monsters' bars at 1366x768 (`perception.hud.hp_bar`, not done) and her MP potions' price against the EXP; nothing here spends MP on nothing (a cast with nothing seen in its way is the regular attack).
+    With the bars read empty, her throws alone rarely make a monster sure enough to be low: the choice threw the regular attack 1.3 times a run, seeds 1-3, 7 and 8 the same runs as Lucky Seven only, the others parting from them by the world's chaos (EXP -2.0%, standard error 3.4%; its MP a minute is lower for its fewer kills, not its regular throws). With the bars read (the simulator's own grey bar then, which the old reader read right: `--attack` without its bars read empty, now `--world bars-empty`) it threw the regular attack 13 times a run to finish, for 314.7 MP a minute against 329.6 (-4.5%) and 1.34 MP potions a minute against 1.43, EXP a minute 200.7 against 196.7 (+2.0%, standard error 3.1%, better on 5 of 8). (Before EXP before loot, the same three made 77.7, 215.3 and 215.3.) The regular attack alone makes 39% of Lucky Seven's EXP, with more HP lost (the monsters live three times as long). Measured again after review's fixes (2026-10-25: a trip stopping for a pile only where it goes first, a bar up taken as her damage showing), Lucky Seven only and the choice ran the same runs seed for seed; the regular attack alone parted on seeds 2, 4 and 5 (74.0 EXP a minute before), where the old check had stopped a trip for a pile the pass then let wait 7, 20 and 43 times a run. Rebased onto master (2026-10-25: her heading off the frame taking a throw's tap away where it's strong, the Lie Detector retreat), the choice made 194.2 EXP a minute against 192.7 (+4.6% seed by seed, standard error 10.5%, better on 4 of 8), 56.9 kills a run against 58.5, 322.0 MP a minute against 314.7, 1.38 MP potions a minute against 1.34, HP lost 9.4 bars a run against 8.1 (hurt 95 times against 82, 34 of them on trips against 24: her trips 104 s a run against 86), no death, no Lucky Seven pressed short (`gamelab/lab/harness/rb-loop-attack-choice-8x10.json`). Both ran without the feed, so with the hunt loop's sweep on both sides: the Lie Detector's no-feed sweep (above) has nothing to do with the difference. Paired by seed, her hurts are within the noise (+12.8 a run, standard error 9.1; seed 1's went 38 -> 107 as its kills went 32 -> 50, and without it +4.7), those on trips less so (+9.9, standard error 3.8, up on 7 of 8 seeds), with her trips 18 s a run longer (11 s standard error) and 33 hurts every 100 s of them against 28: not explained, one to watch in the supervised run. What saves MP is reading the monsters' bars at 1366x768 (`perception.hud.hp_bar`: done since, below) and her MP potions' price against the EXP; nothing here spends MP on nothing (a cast with nothing seen in its way is the regular attack).
     **With the bars read** (2026-10-25: `perception.hud.hp_bar` reads them at 1366x768, Perception: Monster HP bars; the simulator draws them as the game does, `hud.draw_hp_bar`, and `--world bars-empty` reads them empty as before; same world, the hunt loop, 8 seeds of 10 minutes, `gamelab/lab/harness/hpbars-*.json`):
 
     | | the choice, bars read empty (as before) | the choice, bars read | Lucky Seven only |

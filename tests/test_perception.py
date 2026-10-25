@@ -316,13 +316,14 @@ def _labelled_frame(name: str, size: str) -> np.ndarray | None:
 def test_the_labelled_bars_in_the_saved_frames(size):
     # Every labelled bar over its monster as the detector found it (574 at 1366x768 on the rolling recorder's clips of
     # 2026-10-24 and 25, 178 at 1920x1080 on the first map's recordings and screenshots), and monsters with no bar of
-    # their own; on the frames in gamelab/lab, where there are any (they're the machine's own). Measured 2026-10-25: at
-    # 1366x768 563 of the 564 with their end in view read within half a px of the fill (0.001 off on average; the old
-    # reader 0.539 off, 486 of them 0.0 and 63 none), and none of 408 monsters with no bar (the old reader 47); at
-    # 1920x1080 160 of 161 within a px (0.003 off; the old reader 0.518, 111 of them 0.0), 1 of 132 with none.
+    # their own; on the frames in gamelab/lab, where there are any (they're the machine's own). Measured 2026-10-25 (two
+    # labels put right on review: tests/fixtures/hp_bars/README.md): at 1366x768 564 of the 565 with their end in view
+    # read within half a px of the fill (0.001 off on average; the old reader 0.540 off, 487 of them 0.0 and 63 none),
+    # 1 of 1 with it covered within its range, and none of 408 monsters with no bar (the old reader 47); at 1920x1080
+    # 161 of 162 within a px (0.003 off; the old reader 0.518, 111 of them 0.0), 16 of 16 covered, 0 of 131 with none.
     labelled = json.loads((BARS / "labelled.json").read_text(encoding="utf-8"))[size]
     geo = NATIVE if size == "1366x768" else STRETCHED
-    seen = good = hidden = none_ok = none_n = 0
+    seen = good = hidden = hidden_n = none_ok = none_n = 0
     for name, rows in labelled.items():
         frame = _labelled_frame(name, size)
         if frame is None:
@@ -336,10 +337,13 @@ def test_the_labelled_bars_in_the_saved_frames(size):
                 seen += 1
                 good += got is not None and abs(got - share) <= (0.5 if geo is NATIVE else 1) / 46 + 1e-9
             else:
+                hidden_n += 1
                 hidden += got is not None and share - 0.03 <= got <= hi + 0.03
     if seen == 0:
         pytest.skip("needs the labelled frames (gamelab/lab: recent/, recordings/)")
-    assert good / seen >= 0.98 and none_ok / none_n >= 0.98
+    assert good / seen >= 0.98
+    assert hidden_n == 0 or hidden / hidden_n >= 0.9
+    assert none_n == 0 or none_ok / none_n >= 0.98
 
 
 def test_touches_show_as_purple_text_above_her():

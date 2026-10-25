@@ -101,13 +101,18 @@ def touch_popup(frame: np.ndarray, tag: tuple[int, int], geo: Geometry = STRETCH
 BAR_FRAME = (50, 8)  # the light frame's width and height
 BAR_FILL = (2, 46)   # the fill's left in it, and its width
 BAR_GREEN = (2, 5)   # the fill's rows from the frame's top that are green for the HP left (the next is red under it)
-BAR_AT = (-25, -29)  # the light frame's top-left from a monster's centre and top (its picture's): -25, -29 on every
-                     # one of the 574 bars over the mushrooms' poses at 1366x768 (the 1920x1080 window's pigs 17.8-20.8
-                     # half-size px above, its slimes, whose pictures change height as they bounce, 0-21)
-BAR_SLACK = (14, 12, 31)  # game px it's looked for either side of there, above, and below
-BAR_MATCH = 0.75     # the frame's least colour against the bar's (TM_CCOEFF_NORMED) that makes one: 0.75-1.0 on the
-                     # labelled bars (under 0.84 on 1% of them: behind sparkles, a crescent of light), at most 0.73
-                     # around a monster with none
+BAR_AT = (-25, -29)  # the light frame's top-left from a monster's centre and top (its picture's): at 1366x768, of the
+                     # 575 bars paired with a mushroom the detector found within 6 px, -25, -29 on 567, -25, -25 on 6
+                     # Horny Mushrooms, -25, -33 and -26, -29 once each (the 1920x1080 window's pigs 17.8-20.8 half-size
+                     # px above, its slimes, whose pictures change height as they bounce, 0-21)
+BAR_SLACK = (14, 12, 31)  # game px it's looked for either side of there, above, and below: at 1366x768 too, 3 bars
+                          # of the clips sat 10-13 px right of the nearest Horny Mushroom found (perhaps over one the
+                          # detector missed) and read only for the 14 either side (0.72, 0.52, 0.52, as counted); at
+                          # 1920x1080 the pigs' and slimes' height
+BAR_MATCH = 0.75     # the frame's least colour against the bar's (TM_CCOEFF_NORMED) that makes one: at 1366x768
+                     # 0.75-1.0 on the 805 bars found in the frames (3 under 0.78, 11 under 0.84: behind sparkles, a
+                     # crescent of light), at most 0.73 around a monster with none, a margin of only 0.02; at half size
+                     # of 1920x1080 0.86 and up on the bars, 0.62 at most around a monster with none
 BAR_TIE = 0.1        # ... and how much less than the best match another place may match to be a bar of its own
 BAR_GREENISH = 60    # a fill px's green over its red and blue that makes it the HP left (255 for (0, 255, 0); the JPEG
                      # clips' 160 and up, their lost px' 40 at most)
