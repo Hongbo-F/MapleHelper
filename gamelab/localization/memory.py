@@ -86,6 +86,8 @@ KILL_DX = 150.0     # a kill of hers marks the nearest monster remembered on its
 ENDED_KEEP_S = 2.0  # s a killed or forgotten monster is kept, ended, for the mini-map
 RECORD_EVERY_S = 0.5  # s between two 'memory' records at the least
 EVENTS = 400        # the latest new, killed and gone monsters kept (Memory.events), for whoever learns from them
+COVERS = 256        # the latest looks' covers kept (Memory.covers), for whoever judges places by them: a trip's looks
+                    # come 5-10 a second, and its passes, which read them, can be 20 s apart
 SURE = 0.5          # p at which a remembered monster counts as there (Memory.there): about 2 s of covered misses
 
 
@@ -175,7 +177,8 @@ class Memory:
         self.kills = kills
         self.entries: list[Remembered] = []
         self.events: deque[tuple[str, float, Remembered]] = deque(maxlen=EVENTS)  # (what, when, the monster)
-        self.covered: dict[int, float] = {}  # platform -> the latest look that covered it whole
+        self.covered: dict[int, float] = {}  # platform -> the latest look that covered all of it
+        self.covers: deque[Cover] = deque(maxlen=COVERS)  # the latest looks' covers (behavior.patrol's points)
         self.counts = {"looks": 0, "covered": 0, "new": 0, "killed": 0, "gone": 0, "aged": 0}
         self._bodies = bodies(model)
         self._speeds = speeds(model)
@@ -201,8 +204,15 @@ class Memory:
                 and (kinds is None or e.kind in kinds) and e.p(t) >= min_p]
 
     def covered_at(self, platform: int) -> float | None:
-        """When a look last covered all of `platform` (any monster that spawns on it wholly searched), if one has."""
+        """When a look last covered all of `platform` (any monster that spawns on it wholly searched at every one of
+        COVER_POINTS places along it), if one has."""
         return self.covered.get(platform)
+
+    def holds_body(self, cover: Cover, platform: int, x: float, kind: str) -> bool:
+        """Whether `cover` wholly searched a monster of `kind` standing on `platform` at x (a spawn point's monster,
+        for one)."""
+        p = self.model.platform(platform)
+        return cover.holds(x, p.y_at(x), self._half(kind), self._top(kind))
 
     # --- keeping it up ---------------------------------------------------------------------------------
 
@@ -273,6 +283,7 @@ class Memory:
                 self._killed(min(near, key=lambda q: (q.id in matched, abs(q.x - self._her[0]))), t, None)
         if cover is not None:
             self.counts["covered"] += 1
+            self.covers.append(cover)
             for e in live:
                 if e.id not in matched and self._holds(cover, e, t):
                     e.covered = t
@@ -347,8 +358,10 @@ class Memory:
         return _share(cover, p, p.clamp(e.x - walk), p.clamp(e.x + walk), self._half(e.kind), self._top(e.kind))
 
     def _covers_platform(self, cover: Cover, pid: int) -> bool:
+        """Whether `cover` searched all of platform `pid` (every one of COVER_POINTS places along it) for its tallest
+        body: a platform half of it searched isn't seen empty."""
         p = self.model.platform(pid)
-        return _share(cover, p, p.left, p.right, 0.0, self._tallest[pid])
+        return _share(cover, p, p.left, p.right, 0.0, self._tallest[pid], need=1.0)
 
     def _fading(self, f: Remembered, m: Monster) -> bool:
         """Whether sighting `m` can be killed monster `f` fading out where it died (see the top)."""
@@ -370,16 +383,16 @@ class Memory:
 
     def record(self, t: float) -> dict:
         """The memory as telemetry data ('memory'): every monster kept (Remembered.record: its age and p, ended ones
-        too, for a moment), and how long ago each platform was last covered whole ('covered': platform, s)."""
+        too, for a moment), and how long ago each platform was last covered all of it ('covered': platform, s)."""
         return {"list": [e.record(t) for e in self.entries],
                 "covered": [[pid, round(t - at, 1)] for pid, at in sorted(self.covered.items())]}
 
 
-def _share(cover: Cover, p, lo: float, hi: float, half: float, top: float) -> bool:
-    """Whether `cover` searched COVER_SHARE at least of platform `p` from x `lo` to `hi` (COVER_POINTS along it) for a
-    body `half` wide either side and `top` tall."""
+def _share(cover: Cover, p, lo: float, hi: float, half: float, top: float, need: float = COVER_SHARE) -> bool:
+    """Whether `cover` searched `need` (COVER_SHARE) at least of platform `p` from x `lo` to `hi` (COVER_POINTS along
+    it) for a body `half` wide either side and `top` tall."""
     xs = [lo + (hi - lo) * i / (COVER_POINTS - 1) for i in range(COVER_POINTS)] if hi > lo else [lo]
-    return sum(cover.holds(x, p.y_at(x), half, top) for x in xs) >= COVER_SHARE * len(xs)
+    return sum(cover.holds(x, p.y_at(x), half, top) for x in xs) >= need * len(xs)
 
 
 def _kinds_by_platform(model: MapModel) -> dict[int, set[str]]:

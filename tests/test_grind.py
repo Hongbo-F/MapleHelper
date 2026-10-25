@@ -2,6 +2,7 @@
 along it and what pulls her off it, other players' areas, no flip-flopping between loops, the belief of each spawn
 point, and kills in passing on another platform. No game data, no simulator: route times are stand-ins."""
 
+import math
 import time
 from types import SimpleNamespace
 
@@ -12,7 +13,7 @@ from gamelab.behavior.fight import FightState
 from gamelab.behavior.grind import Grind
 from gamelab.behavior.hunt import Objective
 from gamelab.localization import mapdata
-from gamelab.localization.memory import Memory
+from gamelab.localization.memory import Cover, Memory
 from gamelab.localization.monsters import Monster
 from gamelab.localization.players import Player
 from gamelab.perception.mobs import Mob
@@ -158,11 +159,12 @@ def test_an_area_with_another_player_is_avoided():
     assert [p.belief.share(q.id, 0.0) for q in below] == [1.0, 1.0]  # 200 units under them: not by them
     loop = p.best(0.0)
     assert {p.platform_of(i) for i in loop.stops} == set(b)
-    # Learned: another player by them took 6 Horny Mushrooms she saw, and left her none: they take that kind.
+    # Learned: another player by them took 6 Horny Mushrooms she saw (looks forgot them), and left her none: they take
+    # that kind.
     for k in range(6):
         e = Monster(Mob(HORNY, 0, 0, 0, 0, 1.0), 100.0, 0.0, a[0])
         m.update(1.0 + k, [e], None, [Player(1, "stranger", 100.0, 0.0, a[0], (0.0, 0.0), 1.0, 1.0)])
-        m.entries[-1].state, m.entries[-1].ended = "gone", 1.0 + k
+        m.entries[-1].state, m.entries[-1].ended, m.entries[-1].missed = "gone", 1.5 + k, 1.5 + k
         m.events.append(("gone", 1.0 + k, m.entries[-1]))
         m.counts["gone"] += 1
     p.belief.update(8.0, m, [other])
@@ -216,7 +218,7 @@ def test_the_belief_of_a_point_her_kill_emptied_refills_and_learns_how_fast():
     m.update(8.0, [_sight(model, HORNY, 140, 0)], None)
     b.update(8.0, m)
     assert q.id not in b.empty_since and len(b.refills) == 1
-    assert b.refills[0] == pytest.approx((7.75 - 1.0) / patrol.refill_median(1))
+    assert b.refills[0] == pytest.approx((7.75 - 1.0) / patrol.refill_mean(1))
     assert b.scale < 1.0
     # A point never seen: Q_UNKNOWN.
     other = next(q for q in p.points if q.platform == ids[1])
@@ -270,3 +272,97 @@ def test_she_shoots_in_passing_what_a_star_reaches_on_another_platform():
     s.monsters = [there]
     targets, _, _ = g._targets(s, time.monotonic())
     assert there in targets and not g._can_pass_shoot(s, targets)
+
+
+def test_a_world_refilling_as_the_model_says_is_learned_as_the_model():
+    # Watched refills drawn from the model itself: their scale comes out at 1 (against the model's median it came out at
+    # 1.25, the mean being 1.28 times the median).
+    import math
+    import random
+    model, ids, far, p = _column()
+    rng, n = random.Random(1), 1
+    tau = n * patrol.REFILL_TAU
+    p.belief.refills = [(patrol.REFILL_D0 - tau * math.log(1 - rng.random())) / patrol.refill_mean(n)
+                        for _ in range(2000)]
+    assert p.belief.scale == pytest.approx(1.0, abs=0.05)
+
+
+def test_a_point_looks_saw_empty_is_believed_empty_however_long_since_it_was_emptied():
+    model, ids, far, p = _column()
+    b, m = p.belief, Memory(model)
+    q = next(q for q in p.points if q.platform == ids[0])
+    look = Cover(0.0, ((-300.0, 100.0),), -200.0, 600.0)  # all of the bottom platform searched
+    m.update(10.0, [], Cover(10.0, look.rows, look.x0, look.x1))
+    b.update(10.0, m)
+    assert b.empty_since[q.id] == 10.0 and b.stock(q.id, 10.0) == 0.0
+    # Seen empty again 50 s later: not back now, whatever the clock from the first look says (0.97 back by it) ...
+    m.update(60.0, [], Cover(60.0, look.rows, look.x0, look.x1))
+    b.update(60.0, m)
+    assert b.empty_since[q.id] == 10.0 and b.stock(q.id, 60.0) == 0.0
+    # ... and from then on as a point just watched empty: the clock past REFILL_D0 has no memory.
+    tau = patrol.REFILL_TAU
+    assert b.stock(q.id, 60.0 + tau) == pytest.approx(1 - math.exp(-1), abs=1e-6)
+    assert b.due(q.id, 60.0) == pytest.approx(tau * math.log(2))
+    # Never watched since its kill, a point is due at the model's median after it, and is overdue after that.
+    b.empty_seen.pop(q.id)
+    assert b.due(q.id, 60.0) == pytest.approx(10.0 + patrol.refill_median(1) - 60.0)
+
+
+def test_a_point_seen_full_again_takes_a_fresh_clock_when_it_is_next_emptied():
+    model, ids, far, p = _column()
+    b, m = p.belief, Memory(model)
+    q = next(q for q in p.points if q.platform == ids[0])
+    look = ((-300.0, 100.0),)
+    m.update(0.0, [_sight(model, HORNY, 150, 0)], Cover(0.0, look, -200.0, 600.0))
+    b.update(0.0, m)
+    # Missed by looks for 2.2 s (under SURE): seen empty ...
+    for t in (1.0, 2.2):
+        m.update(t, [], Cover(t, look, -200.0, 600.0))
+        b.update(t, m)
+    assert q.id in b.empty_since
+    # ... then seen again (the same monster), until 60 s: the point is full, its clock gone.
+    for t in (3.0, 30.0, 60.0):
+        m.update(t, [_sight(model, HORNY, 150, 0)], Cover(t, look, -200.0, 600.0))
+        b.update(t, m)
+    assert q.id not in b.empty_since
+    # Taken by someone else: empty from the look that saw it gone, not full by a clock from 2.2 s.
+    for t in (61.0, 63.0, 66.0):
+        m.update(t, [], Cover(t, look, -200.0, 600.0))
+        b.update(t, m)
+    assert b.empty_since[q.id] >= 61.0 and b.stock(q.id, 66.0) == 0.0
+    assert p.expect(p.stop_on(ids[0]), 66.0)[0] == 0.0
+
+
+def test_a_look_empties_only_the_points_whose_monsters_it_searched():
+    # One platform from x 0 to 1200 with a Horny Mushroom point at 300 and one at 1100; a look whose screen ends at
+    # x 700: the point at 1100 wasn't seen, so it isn't seen empty (half the platform searched isn't all of it).
+    model = _map([(0, 1200, 0)], [(300, 0, "h"), (1100, 0, "h")])
+    p = _patrol(model, lambda a, b: 1.0)
+    b, m = p.belief, Memory(model)
+    m.update(5.0, [], Cover(5.0, ((-300.0, 100.0),), -400.0, 700.0))
+    b.update(5.0, m)
+    near, far_point = sorted(p.points, key=lambda q: q.x)
+    assert near.id in b.empty_since and far_point.id not in b.empty_since
+    assert b.stock(far_point.id, 5.0) == patrol.Q_UNKNOWN
+    assert m.covered_at(near.platform) is None
+
+
+def test_others_take_is_learned_from_monsters_looked_at_again_only():
+    model, a, b, p = _two_areas()
+    m = Memory(model)
+    by = [Player(1, "stranger", 100.0, 0.0, a[0], (0.0, 0.0), 0.0, 0.0)]
+    # A Horny Mushroom by another player, seen once and never looked at again: neither left to her nor taken ...
+    m.update(0.0, [Monster(Mob(HORNY, 0, 0, 0, 0, 1.0), 100.0, 0.0, a[0])], None, by)
+    for t in (5.0, 12.0):
+        m.update(t, [], None, by)
+        p.belief.update(t, m, by)
+    assert p.belief.kept_by[HORNY] == 0 and p.belief.take(HORNY) == patrol.TAKE_PRIOR
+    # ... nor once forgotten by age (MEMORY_S: no look covered its place).
+    m.update(61.0, [], None, by)
+    p.belief.update(61.0, m, by)
+    assert m.counts["aged"] == 1 and p.belief.gone_by[HORNY] == 0
+    # Seen there again 10 s after it was first seen: left to her.
+    m.update(70.0, [Monster(Mob(HORNY, 0, 0, 0, 0, 1.0), 100.0, 0.0, a[0])], None, by)
+    m.update(80.0, [Monster(Mob(HORNY, 0, 0, 0, 0, 1.0), 110.0, 0.0, a[0])], None, by)
+    p.belief.update(80.0, m, by)
+    assert p.belief.kept_by[HORNY] == 1 and p.belief.take(HORNY) < patrol.TAKE_PRIOR

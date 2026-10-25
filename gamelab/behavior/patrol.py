@@ -14,11 +14,14 @@ The map, once (Patrol):
 
 What she believes (Belief, from her memory of the monsters, localization.memory, at every look): how many monsters
 each spawn point has now and at any time ahead (`stock`): the monsters remembered there (each the nearest point of its
-kind on its platform), else, for a point a look has seen empty or her kill emptied, its refill clock (`not_back`:
-nothing for REFILL_D0, then back at REFILL_TAU per point on its platform), else, never seen, Q_UNKNOWN. And what of it is hers
-(`share`): by a point with another player by it (their minimap dot, RIVAL_X across and RIVAL_DY up or down), as much as
-others leave of its kind, learned from her memory (`take`): of the monsters she saw by another player, those gone
-without her kill against those she killed or saw stay TAKE_KEEP_S.
+kind on its platform), else, for a point a look has seen empty (one that searched a body of its kind standing at the
+point: Memory.holds_body) or her kill emptied, its refill clock (`not_back`: nothing for REFILL_D0, then back at
+REFILL_TAU per point on its platform), given that it wasn't back at the latest look that saw it empty; else, never seen,
+Q_UNKNOWN. A point is emptied once (her kill, or the first look to see it empty after a monster was seen there) and
+full again once a monster is seen there after that. And what of it is hers (`share`): by a point with another player
+by it (their minimap dot, RIVAL_X across and RIVAL_DY up or down), as much as others leave of its kind, learned from
+her memory (`take`): of the monsters she saw by another player, those looks forgot (not those forgotten by age: she
+never looked again) without her kill, against those she killed or saw there TAKE_KEEP_S after she first saw them.
 
 The loop (Patrol.best): a closed round of stops (LOOP_MIN to LOOP_MAX), chosen by its EXP a minute in the long run: each
 spawn point it reaches gives its EXP (times her share) each time she comes round and finds it back (`caught`: a round
@@ -58,6 +61,7 @@ from ..attack import spots
 from ..attack.reach import EDGE_MARGIN
 from ..attack.stance import KEEP_OFF
 from ..localization.mapdata import SPAWN_REACH, MapModel
+from ..localization.memory import MEMORY_S
 from ..localization.players import Player, near_rival
 from ..motion.physics import WALK_SPEED
 from ..perception.kinds import kind_of
@@ -75,12 +79,14 @@ STOP_S = 1.0           # guess: s a stop costs beyond its kills (the looks that 
 # platforms her kills emptied): none back within 5 s in 91%, a median of 13.9 s for a platform's first monster back
 # (95% 11.3-16.2), 0.74 not back at 8 s, 0.55 at 12.56 s; nothing for REFILL_D0, then exp(-(dt - D0) / tau) fits it
 # with tau REFILL_TAU (0.79 at 8 s, 0.55 at 12.56 s). A platform's first monster back is the soonest of its points, so a
-# point on a platform with n of them comes back at n x REFILL_TAU. Scaled by what she sees (Belief.scale): of the points
-# her kills emptied and looks watched until a monster came back, the time it took against the model's median.
+# point on a platform with n of them comes back at n x REFILL_TAU (an assumption: as if each point refilled on its own
+# clock; the game may respawn map-wide). Scaled by what she sees (Belief.scale): of the points her kills emptied and
+# looks watched until a monster came back, the time it took against the model's mean (REFILL_D0 + n REFILL_TAU; against
+# its median, 1.28 times shorter, a world refilling just as the model says had come out at 1.25).
 REFILL_D0 = 5.0
 REFILL_TAU = 12.8
-REFILL_PRIOR_N = 5     # ... the model counting as this many such refills
-WATCH_GAP_S = 2.0      # ... watched: a look saw it empty at most this long before the one that saw it back
+REFILL_PRIOR_N = 5     # guess: ... the model counting as this many such refills
+WATCH_GAP_S = 2.0      # guess: ... watched: a look saw it empty at most this long before the one that saw it back
 Q_UNKNOWN = 0.35       # a point never seen: this full (live: the uncamped 19-21 had a monster 31-39% of the time, 28%
                        # of all points; the simulator's crowd fills every point)
 # Another player by a point (their minimap dot within RIVAL_X across and RIVAL_DY up or down: hunt.PLAYER_NEAR and
@@ -92,8 +98,8 @@ RIVAL_X = 200.0
 RIVAL_DY = 100.0
 RIVAL_KEEP_S = 20.0    # guess
 TAKE_PRIOR = 0.5       # guess
-TAKE_N = 4.0
-TAKE_KEEP_S = 10.0
+TAKE_N = 4.0           # guess
+TAKE_KEEP_S = 10.0     # guess (the crowding study's Green Mushrooms went within about 4 s)
 # The danger hook's default: a share of her HP a second fighting on a platform with a spawn point of a kind she keeps
 # off (stance.KEEP_OFF): live, hunting 23 (two Horny Mushroom points) on 2026-10-24 she lost 0.28-0.31 bars of HP a
 # minute, 0.0025 a second a point. What a bar costs her, in EXP (her pet's potions, and the risk): HP_PRICE, a guess.
@@ -238,6 +244,11 @@ def refill_median(n: int = 1, scale: float = 1.0) -> float:
     return (REFILL_D0 + max(1, n) * REFILL_TAU * math.log(2)) * scale
 
 
+def refill_mean(n: int = 1, scale: float = 1.0) -> float:
+    """s a point emptied takes to be back on average (not_back's mean)."""
+    return (REFILL_D0 + max(1, n) * REFILL_TAU) * scale
+
+
 def default_danger(model: MapModel, points: list[Point]) -> Callable[[int, float], float]:
     """The danger hook's default (see the top): HP_S_PER_SPAWN for each point of a KEEP_OFF kind on the platform, 0
     where MapModel.safe."""
@@ -264,11 +275,11 @@ class Belief:
         self.rival_at: dict[int, float] = {}     # point id -> the latest look with another player by it
         self.gone_by: Counter = Counter()        # kind -> monsters by another player gone without her kill
         self.kept_by: Counter = Counter()        # kind -> ... killed by her, or seen there TAKE_KEEP_S on
-        self.refills: list[float] = []           # refills watched, against the model's median
+        self.refills: list[float] = []           # refills watched, against the model's mean
         self.t = 0.0
         self._events = 0
         self._kept_ids: set[int] = set()
-        self._covered_t = -1e18
+        self._covered_t = -1e18                  # the latest look's cover taken (Memory.covers)
 
     # --- what it holds ---------------------------------------------------------------------------------
 
@@ -278,13 +289,16 @@ class Belief:
         return (REFILL_PRIOR_N + sum(self.refills)) / (REFILL_PRIOR_N + len(self.refills))
 
     def stock(self, i: int, t: float) -> float:
-        """How many monsters point `i` is expected to have at time `t` (now or ahead)."""
+        """How many monsters point `i` is expected to have at time `t` (now or ahead): for one empty, the chance it's
+        back by then, given it wasn't at the latest look that saw it empty."""
         es = self.at.get(i)
         if es:
             return sum(e.p(t) for e in es)
         since = self.empty_since.get(i)
         if since is not None:
-            return 1.0 - not_back(t - since, self.n_on[self.points[i].platform], self.scale)
+            n, scale = self.n_on[self.points[i].platform], self.scale
+            known = max(since, self.empty_seen.get(i, since))
+            return 1.0 - not_back(max(t, known) - since, n, scale) / not_back(known - since, n, scale)
         return Q_UNKNOWN
 
     def seen(self, i: int, t: float) -> float:
@@ -301,17 +315,22 @@ class Belief:
         return 1.0 - self.take(self.points[i].kind) if t - self.rival_at.get(i, -1e18) <= RIVAL_KEEP_S else 1.0
 
     def due(self, i: int, t: float) -> float | None:
-        """s from `t` until point `i`, empty, is back with even odds (None: not known to be empty)."""
+        """s from `t` until point `i`, empty, is back with even odds, given it wasn't at the latest look that saw it
+        empty (None: not known to be empty). Past REFILL_D0 the clock has no memory: a point watched empty is due its
+        platform's n REFILL_TAU ln 2 after the latest look (8.9 s for one point), however long it has been empty."""
         since = self.empty_since.get(i)
         if since is None or self.at.get(i):
             return None
-        return since + refill_median(self.n_on[self.points[i].platform], self.scale) - t
+        n, scale = self.n_on[self.points[i].platform], self.scale
+        known = max(since, self.empty_seen.get(i, since))
+        return max(since + REFILL_D0 * scale, known) + n * REFILL_TAU * scale * math.log(2) - t
 
     # --- keeping it up ---------------------------------------------------------------------------------
 
     def update(self, t: float, memory, players: list[Player] | None = None) -> None:
         """At a look at time `t`: the monsters her memory has (localization.memory.Memory) put at their points, her
-        kills and the looks that covered a platform (since the last update) emptying points, other players by them."""
+        kills and the looks that searched a point's monster (since the last update: Memory.covers) emptying points,
+        other players by them."""
         self.t = t
         self._take_events(t, memory)
         at: dict[int, list] = {}
@@ -331,32 +350,31 @@ class Belief:
                 if e.id not in used_e:
                     at.setdefault(min(qs, key=lambda q: abs(q.x - e.x)).id, []).append(e)
         self.at = at
-        for i, es in at.items():
+        for i, es in at.items():  # a monster seen there since it was emptied: full again
             since = self.empty_since.get(i)
-            back = [e for e in es if since is not None and e.first > since]
-            if since is not None and back:
-                first = min(e.first for e in back)
-                if i in self.killed and first - self.empty_seen.get(i, -1e18) <= WATCH_GAP_S:
-                    watched = (self.empty_seen[i] + first) / 2 - self.killed[i]
-                    n = self.n_on[self.points[i].platform]
-                    self.refills.append(max(0.0, watched) / refill_median(n))
-                self.empty_since.pop(i, None)
-                self.killed.pop(i, None)
-        for q in self.points:  # a look covering its platform since the last update, nothing sure there: empty
-            covered = memory.covered.get(q.platform)
-            if covered is None or covered <= self._covered_t:
+            if since is None or not any(e.seen > since for e in es):
                 continue
-            if not any(e.p(covered) >= 0.5 for e in at.get(q.id, ())):
-                self.empty_since.setdefault(q.id, covered)
-                self.empty_seen[q.id] = covered
-        self._covered_t = max([self._covered_t, *memory.covered.values()])
+            back = [e.first for e in es if e.first > since]  # a new one: a refill, watched if a look saw it empty
+            if back and i in self.killed and min(back) - self.empty_seen.get(i, -1e18) <= WATCH_GAP_S:
+                watched = (self.empty_seen[i] + min(back)) / 2 - self.killed[i]
+                self.refills.append(max(0.0, watched) / refill_mean(self.n_on[self.points[i].platform]))
+            self.empty_since.pop(i, None)
+            self.killed.pop(i, None)
+        for cover in [c for c in memory.covers if c.t > self._covered_t]:  # a look that searched a point's monster
+            for q in self.points:  # ... and nothing sure there: empty
+                if any(e.p(cover.t) >= 0.5 for e in at.get(q.id, ())) \
+                        or not memory.holds_body(cover, q.platform, q.x, q.kind):
+                    continue
+                self.empty_since.setdefault(q.id, cover.t)
+                self.empty_seen[q.id] = max(cover.t, self.empty_seen.get(q.id, -1e18))
+            self._covered_t = cover.t
         if players is not None:
             for q in self.points:
                 y = self.model.platform(q.platform).y_at(q.x)
                 if near_rival(players, q.x, y, RIVAL_X, RIVAL_DY) is not None:
                     self.rival_at[q.id] = t
-        for e in memory.entries:  # by another player, and still there TAKE_KEEP_S on: left to her
-            if e.live and e.rival and e.id not in self._kept_ids and t - e.first >= TAKE_KEEP_S:
+        for e in memory.entries:  # by another player, and seen there TAKE_KEEP_S after she first saw it: left to her
+            if e.live and e.rival and e.id not in self._kept_ids and e.seen - e.first >= TAKE_KEEP_S:
                 self._kept_ids.add(e.id)
                 self.kept_by[e.kind] += 1
 
@@ -377,7 +395,8 @@ class Belief:
                 if e.rival and e.id not in self._kept_ids:
                     self._kept_ids.add(e.id)
                     self.kept_by[e.kind] += 1
-            elif what == "gone" and e.rival and e.id not in self._kept_ids:
+            elif what == "gone" and e.rival and e.id not in self._kept_ids and e.missed is not None \
+                    and e.ended - e.seen <= MEMORY_S:  # forgotten by looks; by age, she never looked again
                 self._kept_ids.add(e.id)
                 self.gone_by[e.kind] += 1
 
