@@ -74,6 +74,11 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(capture, "_SHARED", None)  # no grabber outlives its test
     monkeypatch.setattr(client, "INBOX", tmp_path / "inbox")  # plans go nowhere a player looks
     monkeypatch.setattr(client, "OUTBOX", tmp_path / "outbox")
+    # Nor is the lab's own Lie Detector alarm read: a worktree whose lab was copied while the alarm was up had every
+    # plan a test sent refused (and serve() refused to start).
+    from gamelab.control import player
+    for mod in (paths, alarm, client, player):
+        monkeypatch.setattr(mod, "ALARM", tmp_path / "ALARM.json")
     monkeypatch.setattr(alarm, "page", refuse("gamelab.control.alarm.page"))
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
