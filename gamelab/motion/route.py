@@ -214,7 +214,7 @@ class Move:
     hang: float | None = None     # rope_jump: the height (her feet's map y) she jumps off the rope from ...
     onto: Rope | None = None      # ... and the rope she jumps onto (None: a platform, dst)
     chance: float = 1.0           # how likely it lands on dst: below 1 only for a way out of a trap (_ways_out) and
-                                  # a climb up a rope beyond a sure grab (GRAB_CHANCE)
+                                  # a climb up a rope beyond a sure grab, or a rope jump from below one (GRAB_CHANCE)
 
 
 @dataclass(frozen=True)
@@ -533,7 +533,8 @@ def _rope_jumps(model: MapModel, others: list[Move]) -> list[Move]:
     started, nor to the platform the rope hangs from (that's a climb), nor, off onto a platform, where one of the
     `others` (the map's other moves) goes quicker: down to where a drop or a walk-off gets her (of 24 on this map
     before that, 19). A hop onto another rope is kept even so: 23 -> 959 -> 1040 -> 17 is 0.8 s slower than jumping
-    at 1040 off 23's end, and the way round when a monster stands there."""
+    at 1040 off 23's end, and the way round when a monster stands there. Onto a rope beyond a sure grab from below
+    (GRAB_CHANCE, as its climb), the move lands GRAB_CHANCE of the time, each miss MISS_S."""
     if not (ROPE_JUMPS or ROPE_HOPS):
         return []
     quickest: dict[tuple[int, int], float] = {}
@@ -543,30 +544,34 @@ def _rope_jumps(model: MapModel, others: list[Move]) -> list[Move]:
     out: list[Move] = []
     for rope in model.ropes:
         top = hung_from(model, rope)
-        ways = []  # (platform, where she starts, seconds before she's on the rope, her feet's y then)
+        # (platform, where she starts, seconds before she's on the rope, her feet's y then, the grab's chance)
+        ways = []
         for p in model.places:
             if p is top:
                 continue
             if p.covers(rope.x):
-                if -ROPE_PAST <= p.y_at(rope.x) - rope.bottom <= ROPE_REACH:
-                    ways.append((p, rope.x, 0.0, grab_height(p.y_at(rope.x), rope)))
+                if -ROPE_PAST <= (gap := p.y_at(rope.x) - rope.bottom) <= ROPE_REACH:
+                    ways.append((p, rope.x, 0.0, grab_height(p.y_at(rope.x), rope),
+                                 1.0 if gap <= GRAB_SURE else GRAB_CHANCE))
             elif (past := _past_end(model, p, rope)) is not None:
-                ways.append((p, past[0], GRAB_LEAD / WALK_SPEED, past[2]))
+                ways.append((p, past[0], GRAB_LEAD / WALK_SPEED, past[2], 1.0))
         if top is not None:
-            ways.append((top, rope.x, LINE_UP_S, rope.top))
+            ways.append((top, rope.x, LINE_UP_S, rope.top, 1.0))
         if not ways:
             continue
         for sign in (1, -1):
             for dst, hang, land_x, t, onto, onto_y in _side_jumps(model, rope, sign):
                 up_it = 0.0 if onto is None else CLIMB_EXTRA_S + (onto_y - onto.top) / CLIMB_SPEED
-                for p, x, on, y_on in ways:
+                for p, x, on, y_on, chance in ways:
                     if dst is p or dst is top:
                         continue
-                    seconds = on + JUMP_EXTRA_S + abs(y_on - hang) / CLIMB_SPEED + ROPE_LOOK_S + t + up_it
+                    seconds = (on + JUMP_EXTRA_S + abs(y_on - hang) / CLIMB_SPEED + ROPE_LOOK_S + t + up_it
+                               + (1 / chance - 1) * MISS_S)
                     if onto is None and seconds + RISK["rope_jump"] >= quickest.get((p.id, dst.id), math.inf):
                         continue
                     out.append(Move("rope_jump", p.id, dst.id, x, land_x, directions.toward(sign), seconds=seconds,
-                                    rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom, hang=hang, onto=onto))
+                                    rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom, hang=hang, onto=onto,
+                                    chance=chance))
     return out
 
 

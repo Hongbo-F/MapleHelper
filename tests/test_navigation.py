@@ -635,6 +635,24 @@ def test_a_rope_just_past_a_platforms_end_is_jumped_at_from_it():
             assert m.x == pytest.approx(m.rope_x - route.GRAB_LEAD)
 
 
+def test_a_rope_jump_from_under_a_rope_beyond_a_sure_grab_lands_by_the_grabs_chance():
+    """A platform F (540..640, y 400) under the arc of a jump to the left off the rope at 700, reached from the floor by
+    that rope jump alone: with the rope's bottom 50 above the floor its grab is sure; 90 above, beyond physics.GRAB_SURE
+    (82) but within ROPE_REACH (95), the move lands route.GRAB_CHANCE of the time and costs its misses (MISS_S each),
+    as the climb up that rope does (her grab 18 lower on the rope then: at its bottom, 410, not 428)."""
+    from gamelab.motion import route
+    jumps = {}
+    for bottom in (450, 410):
+        t = tree()
+        t["ladderRope"]["0"]["y2"] = bottom
+        t["foothold"]["1"]["5"] = dict([seg(1, 5, 8, 540, 400, 640, 400)])
+        model = mapdata.parse(1, t, "Test Map", {})
+        floor, f = by_y(model, 500, 300), by_y(model, 400, 600)
+        jumps[bottom], = [m for m in route.moves(model) if (m.kind, m.src, m.dst) == ("rope_jump", floor.id, f.id)]
+    assert (jumps[450].chance, jumps[410].chance) == (1.0, route.GRAB_CHANCE)
+    assert jumps[410].seconds - jumps[450].seconds == pytest.approx(route.MISS_S - 18 / route.CLIMB_SPEED, abs=0.01)
+
+
 @pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
                     reason="needs the map's game data (gamedata/data)")
 def test_from_23_to_17_by_the_rope_past_its_end_or_two_rope_hops(monkeypatch):
