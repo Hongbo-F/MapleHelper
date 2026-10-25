@@ -27,8 +27,8 @@ where she stands (the escort's `clear_for`), else the move costs extra so a way 
 it (one in the way of a run along her platform), else waits for it to move off, then goes anyway; on a trip to
 rest (`detour`) a way around comes before a shot. The monsters for that are searched where the chain's legs go
 (`trip_monsters`: her fights look at the band around her), and with her memory of the monsters (`memory`: a hunter's)
-the ones it has there that the look didn't find are kept clear of too (`remembered`). Without an escort the mode is
-`avoid`, as described above.
+the ones it has there that the look couldn't have found, last seen off its view, are kept clear of too (`remembered`).
+Without an escort the mode is `avoid`, as described above.
 """
 
 import random
@@ -641,7 +641,7 @@ class Navigator:
             seen = self.trip_monsters(s, _platforms(path)) if self.fight else s.monsters
             tracks = self.tracker.update(s.t, seen, seen_at=s.t - time.monotonic())
             st.sighted = list(zip(tracks, [m for m in seen if m.platform is not None]))  # (as the tracker keeps them)
-            if self.fight:  # and those her memory has there that the look didn't find (not into the tracker's)
+            if self.fight:  # and those her memory has there off the look's view (not into the tracker's)
                 tracks = tracks + self.remembered(s, _platforms(path), seen, s.t - time.monotonic())
             if telemetry.recording():
                 telemetry.emit("monsters", **tracks_record(tracks, self.model))
@@ -670,7 +670,7 @@ class Navigator:
         again over all of that (Eyes.monsters: a band as tall, in game about a band's time more, 23 ms at the game's own
         1366x768), with the look's own kept too (a feed's frame may be gone by then: Feed.frame_of gives a blank one). A
         fight looks at the band around her (her stars reach 60 up and down), so most of a trip's looks are band looks
-        (`_look`). What her memory has there that the look didn't find comes on top (`remembered`)."""
+        (`_look`). What her memory has there off the look's view comes on top (`remembered`)."""
         if s.wide or not s.searched or s.where is None or s.tag is None:
             return list(s.monsters)
         ps = [self.model.platform(p) for p in platforms]
@@ -1233,7 +1233,7 @@ class Navigator:
         ahead = {p.id} | _platforms(_after(running, st.path))
         seen = self.trip_monsters(s, ahead) if threats else s.monsters
         tracks = tuple(self.tracker.update(s.t, seen, seen_at=s.t - running.ends))  # as of the next start
-        if threats:  # and those her memory has there that the look didn't find
+        if threats:  # and those her memory has there off the look's view
             tracks += tuple(self.remembered(s, ahead, seen, s.t - running.ends))
         if not self.fight:  # avoiding them: the next chain keeps clear of them
             return _Ahead(there, tracks)
