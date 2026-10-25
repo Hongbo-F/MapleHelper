@@ -60,11 +60,16 @@ class Character:
     at 125 units/s x SPEED/100 and jumps her at 555 units/s x JUMP/100 (its Physics.img), counting
     SPEED from 80 to 140 and JUMP from 80 to 123. Gear and Haste raise them. gamelab plans her moves
     with them (gamelab.motion.physics). And her HP and level, which what a monster's touch takes is
-    measured against (gamelab.attack.danger: where she stands and how near she lets monsters come)."""
+    measured against (gamelab.attack.danger: where she stands and how near she lets monsters come), and her MP
+    and her Lucky Seven's skill level, which what a cast costs and how many she has left come from
+    (gamelab.attack.choice: Lucky Seven or the regular attack)."""
     speed: float = 119.2    # measured: she walks 148-151 units/s (149 = 125 x 1.192)
     jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
     hp: float = 752.0       # her HP when full (her HP bar, level 24, 2026-10-24)
     level: float = 24.0
+    mp: float = 601.0       # her MP when full (her MP bar's number, level 24, 2026-10-24)
+    lucky_seven: float = 10.0  # her Lucky Seven's skill level: 11 MP a cast in the game data (at 10 and 11); her MP
+                               # bar fell a median 11.4 MP a cast over 99 casts live on 2026-10-24
 
 
 @dataclass(frozen=True)

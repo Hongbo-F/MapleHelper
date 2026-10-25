@@ -506,7 +506,7 @@ def cmd_hunt(args) -> int:
         return 0
     if args.mode == "look":  # what her own looks make of the game (no keys): no feed, whose child takes seconds to start
         args.feed = False
-    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
+    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, attack=_attack(args))
     if args.mode == "look":
         return _hunt_looks(hunter, args.every, args.seconds) if args.every else _hunt_look(hunter)
     kinds = set(args.kinds.split(",")) if args.kinds else None
@@ -745,7 +745,7 @@ def cmd_nav(args) -> int:
 def cmd_tour(args) -> int:
     from .behavior.tour import Tour
     _ways(args)
-    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
+    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, attack=_attack(args))
     nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
     _record("tour", hunter.model.id)
     if not _to_game():
@@ -1733,6 +1733,19 @@ def feed_arg(s) -> None:
                         "each look taken when it's asked for, as before 2026-10-24)")
 
 
+def attack_arg(s) -> None:
+    s.add_argument("--attack", choices=["choice", "skill", "regular"], default="choice",
+                   help="which attack a throw is (behavior.attacks): choice (the default), Lucky Seven but the regular "
+                        "attack to finish a monster and while her MP is under a cast; skill, Lucky Seven while she has "
+                        "the MP for a cast; regular, the regular attack always")
+    s.add_argument("--skill", action="store_true", help="the same as --attack skill")
+
+
+def _attack(args) -> str:
+    """The attack mode `--attack` (or `--skill`) asks for."""
+    return "skill" if getattr(args, "skill", False) else getattr(args, "attack", "regular")
+
+
 def sweep_arg(s, default: str) -> None:
     s.add_argument("--sweep", action=argparse.BooleanOptionalAction, default=None,
                    help="each look at the band around her also searches a slice of the rest of the screen in turn, so "
@@ -1798,7 +1811,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--seconds", type=float, default=120, help="stop after this long")
     s.add_argument("--every", type=float, help="look: a look every this many seconds for --seconds, her place in a "
                                                "line each (what looks make of the window moved or resized meanwhile)")
-    s.add_argument("--skill", action="store_true", help="throw Lucky Seven instead of the regular attack (MP)")
+    attack_arg(s)
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
     s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
@@ -1860,7 +1873,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("tour", help="hunt the map: sweep the platforms worth hunting (nearest next, varied a "
                                       "little), clear each, collect the drops, rest when low")
-    s.add_argument("--skill", action="store_true", help="throw Lucky Seven instead of the regular attack (MP)")
+    attack_arg(s)
     s.add_argument("--stops", type=int, default=None,
                    help="how many hunting platforms to visit (default: every one worth it)")
     s.add_argument("--kills", type=int, default=5, help="kills per stop")

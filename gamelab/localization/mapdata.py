@@ -231,6 +231,9 @@ class MapModel:
     mob_tall: dict[str, float] = field(default_factory=dict)      # monster name -> the highest its body reaches
                                                                   # above its feet, a hop's frames too (a slime 66,
                                                                   # 42 standing): what a rope above it must clear
+    mob_hp: dict[str, float] = field(default_factory=dict)        # monster name -> its HP (maxHP) ...
+    mob_pdd: dict[str, float] = field(default_factory=dict)       # ... and its defence against her stars (PDDamage):
+                                                                  # what her throws must take (attack.choice)
 
     # --- one place: twins -----------------------------------------------------------------------
 
@@ -415,12 +418,13 @@ def _mob_id(life: dict) -> str:
 def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None,
           mob_exp: dict | None = None, mob_bodies: dict | None = None, mob_die_s: dict | None = None,
           mob_speeds: dict | None = None, mob_damage: dict | None = None, mob_hops: dict | None = None,
-          mob_flies: dict | None = None, mob_tall: dict | None = None) -> MapModel:
+          mob_flies: dict | None = None, mob_tall: dict | None = None, mob_hp: dict | None = None,
+          mob_pdd: dict | None = None) -> MapModel:
     """A map's model from its image in the game data (`tree`, as JSON). `mob_names`, `mob_exp`,
     `mob_bodies` (as _mob_bodies gives them), `mob_die_s` (_mob_die_s), `mob_speeds` (speed stats, as
     _mob_speeds gives them), `mob_damage` (touch damage), `mob_hops` (whether it hops), `mob_flies` (whether it
-    flies) and `mob_tall` (how high its body reaches: _mob_touch gives these four) are keyed by monster id (_mob_id);
-    the model keys them by name."""
+    flies) and `mob_tall` (how high its body reaches: _mob_touch gives these four), `mob_hp` and `mob_pdd` (its HP and
+    defence: _mob_hp) are keyed by monster id (_mob_id); the model keys them by name."""
     info = tree.get("info", {})
     platforms, walls = _platforms(_footholds(tree))
     ropes = [Rope(r["x"], r["y1"], r["y2"], bool(r.get("l")), bool(r.get("uf")))
@@ -445,7 +449,9 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         mob_damage={mob_names.get(i, i): float(v) for i, v in (mob_damage or {}).items()},
         mob_hops={mob_names.get(i, i): bool(v) for i, v in (mob_hops or {}).items()},
         mob_flies={mob_names.get(i, i): bool(v) for i, v in (mob_flies or {}).items()},
-        mob_tall={mob_names.get(i, i): float(v) for i, v in (mob_tall or {}).items()})
+        mob_tall={mob_names.get(i, i): float(v) for i, v in (mob_tall or {}).items()},
+        mob_hp={mob_names.get(i, i): float(v) for i, v in (mob_hp or {}).items()},
+        mob_pdd={mob_names.get(i, i): float(v) for i, v in (mob_pdd or {}).items()})
     floors, peers = tuple(s for p in model.platforms for s in p.segments), tuple(model.platforms)
     for p in model.platforms:
         p.walls, p.floors, p.peers = tuple(model.walls_of(p.group)), floors, peers
@@ -512,7 +518,7 @@ def load(map_id: int) -> MapModel:
         names = _mob_names(ids)
         raw = {"id": map_id, "name": _map_name(map_id), "tree": tree, "physics": physics, "mob_names": names,
                "mob_exp": _mob_exp(ids), "mob_bodies": _mob_bodies(ids), "mob_die_s": _mob_die_s(ids),
-               "mob_speeds": _mob_speeds(ids), **_mob_touch(ids)}
+               "mob_speeds": _mob_speeds(ids), **_mob_touch(ids), **_mob_hp(ids)}
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(raw), encoding="utf-8")
     elif "mob_speeds" not in raw:  # cached before speeds were kept: added to it
@@ -529,9 +535,16 @@ def load(map_id: int) -> MapModel:
             if lives:  # every kind then counts as no danger (attack.danger): the positioning is off, said so
                 print(f"map {map_id}: no touch damage for its monsters ({type(e).__name__}: {e}): every place counts "
                       f"as safe (attack.danger)", file=sys.stderr)
+    hp = {k: raw[k] for k in HP_KEYS if k in raw}
+    if len(hp) < len(HP_KEYS):  # cached before the monsters' HP and defence were kept: read as the touch keys are
+        try:
+            hp = _mob_hp({_mob_id(s) for s in _monster_lives(raw["tree"])})
+        except (OSError, KeyError, ValueError):  # no copy of the game data: attack.choice goes by her throws alone
+            hp = {}
     return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"],
                  raw["mob_bodies"], raw["mob_die_s"], raw.get("mob_speeds"), touch.get("mob_damage"),
-                 touch.get("mob_hops"), touch.get("mob_flies"), touch.get("mob_tall"))
+                 touch.get("mob_hops"), touch.get("mob_flies"), touch.get("mob_tall"), hp.get("mob_hp"),
+                 hp.get("mob_pdd"))
 
 
 def _add_speeds(cache: Path, raw: dict) -> None:
@@ -548,6 +561,21 @@ def _add_speeds(cache: Path, raw: dict) -> None:
         os.replace(part, cache)
     except OSError:  # another process has it open: it's written next time
         part.unlink(missing_ok=True)
+
+
+def _mob_hp(ids: set[str]) -> dict[str, dict]:
+    """Monster id -> its HP (info/maxHP) as "mob_hp" and its defence against her stars (info/PDDamage) as "mob_pdd",
+    from the game data (its own info, or the one it links to where it has none): a Horny Mushroom 403 and 10, a
+    Green Mushroom 233 and 0."""
+    from gamedata.canvas import _mob_pack
+    pack = _mob_pack()
+    hp, pdd = {}, {}
+    for i in ids:
+        info = pack.image(f"Mob/{int(i):07d}.img").get("info") or {}
+        if not info.get("maxHP") and info.get("link"):
+            info = pack.image(f"Mob/{int(info['link']):07d}.img").get("info") or {}
+        hp[i], pdd[i] = float(info.get("maxHP") or 0), float(info.get("PDDamage") or 0)
+    return {"mob_hp": hp, "mob_pdd": pdd}
 
 
 def _mob_names(ids: set[str]) -> dict[str, str]:
@@ -603,6 +631,7 @@ DIE_ACTION = "die1"               # ... and while it dies (no boxes: only their 
 JUMP_ACTION = "jump"              # a monster with frames for this hops (_mob_touch) ...
 FLY_ACTION = "fly"                # ... and one with frames for this flies
 TOUCH_KEYS = ("mob_damage", "mob_hops", "mob_flies", "mob_tall")  # what _mob_touch gives, kept with a map's cache
+HP_KEYS = ("mob_hp", "mob_pdd")   # ... and what _mob_hp gives
 FRAME_DELAY = 100                 # ms a frame lasts when the data gives it no delay (the client's default)
 
 

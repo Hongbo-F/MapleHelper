@@ -627,6 +627,8 @@ class Hunt:
         swept = f"; the sweep: {sc['slices']} slices, held {sc['held']} times" if sc["slices"] or sc["held"] else ""
         self.log(f"  memory: {c['new']} monsters seen, {c['killed']} killed by her, {c['gone']} forgotten by looks, "
                  f"{c['aged']} by age{swept}")
+        if said := self.h.attacks.summary():  # her throws by attack (behavior.attacks)
+            self.log(f"  attacks: {said}")
 
     def _remembered(self, s: Scene, platform: int | None) -> list[Monster]:
         """The wanted monsters her memory has on `platform` (None: anywhere) as of look `s`, sure enough to count

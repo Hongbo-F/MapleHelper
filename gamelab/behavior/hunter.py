@@ -2,11 +2,11 @@
 reach, and the tours built on them).
 
 The decider (a person, or Claude) picks objectives; the hunter makes the small decisions in a loop:
-look at the game, keep the target at the far end of a star's reach, face it, throw a regular attack
-(Lucky Seven costs MP and isn't needed on these monsters), step away from monsters that get close, loot
-each kill straight away when it fell on her platform (drops elsewhere are remembered for the tour to
-collect), drink a potion when HP gets low, and hand control back when HP is too low, the target is gone,
-nothing is left in reach, or the time is up. Every key goes through the gamelab player, so the Lie
+look at the game, keep the target at the far end of a star's reach, face it, throw (the regular attack, or with
+`attack` 'choice' Lucky Seven but to finish a monster and while her MP is under a cast: behavior.attacks), step away
+from monsters that get close, loot each kill straight away when it fell on her platform (drops elsewhere are
+remembered for the tour to collect), drink a potion when HP gets low, and hand control back when HP is too low, the
+target is gone, nothing is left in reach, or the time is up. Every key goes through the gamelab player, so the Lie
 Detector watchdog stops everything the moment the game's anti-bot check appears.
 
 It's made of the layers below: Senses (perception and localization: every look), Actions (control:
@@ -50,6 +50,7 @@ from ..perception.eyes import Eyes
 from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from . import fight
+from .attacks import Attacks
 from .fight import Report
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
@@ -91,11 +92,14 @@ class Hunter:
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
                  low_hp: float = 0.35, potion_hp: float = 0.5, skill: bool = False, feed=None,
-                 her: danger.Her | None = None, sweep: bool = False):
+                 her: danger.Her | None = None, sweep: bool = False, attack: str | None = None):
         """`feed`: a continuous feed for her looks and glances (localization.feed), told of her throws. `her`: her HP and
         level, what a touch is measured against (attack.danger; config.toml [character] by default). `sweep`: her looks
         at the band around her also search a slice of the rest of the screen in turn (Senses.sweep), where it costs her
-        nothing (`hold_sweep`)."""
+        nothing (`hold_sweep`). `attack`: which attack each throw is (behavior.attacks.MODES: 'choice', Lucky Seven but
+        to finish a monster and while her MP is under a cast; 'skill', Lucky Seven while she has the MP; 'regular';
+        None: 'skill' with `skill`, else 'regular'), with her MP and Lucky Seven's level from config.toml
+        [character]."""
         self.model, self.log = model, log
         c = physics.CHARACTER
         self.danger = danger.of_map(model, her or danger.Her(c.hp, c.level))  # where touches would cost her
@@ -104,7 +108,8 @@ class Hunter:
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
         self.senses.sweep_hold = self.hold_sweep
         self._halves = fight.body_sizes(model)[1]  # each kind's half width (game data), for `pressed`
-        self.actions = Actions(keys, skill)
+        mode = attack or ("skill" if skill else "regular")
+        self.actions = Actions(keys, skill=mode != "regular")
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
         if note := drops.unknown_note(model):  # its monsters whose drops aren't known, said once
             log(note)
@@ -134,6 +139,11 @@ class Hunter:
         # The monsters she has seen anywhere, kept across looks (localization.memory), her kills (the ledger's) marking
         # the ones they were: after the ledger, so a look's kills are in it.
         self.memory = Memory(model, kills=lambda: self.ledger.kills)
+        # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'.
+        self.attacks = Attacks(model, keys, mode, max_mp=c.mp, level=c.lucky_seven, log=log,
+                               kills=lambda: self.ledger.kills)
+        if mode != "regular":
+            self.actions.choose = self.attacks.key
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
         self.facing_seen = Reading(None, why="no look")  # which way the last look's frame showed her facing
         # Her facing off the frames: looks, told or not (and why), what her keys made of each (Actions.saw), and those
@@ -141,7 +151,7 @@ class Hunter:
         self.heading_counts: Counter[str] = Counter()
         self._shots = len(list(paths.HEADING_SHOTS.glob("*.png"))) if paths.HEADING_SHOTS.exists() else 0
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
-                                  self.drops.on_look, self.wounds.on_look, self.memory.on_look]
+                                  self.drops.on_look, self.wounds.on_look, self.memory.on_look, self.attacks.on_look]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw]
         if feed is not None:  # whose kills are whose (localization.tracking)
             self.actions.throw_listeners.append(feed.throw)

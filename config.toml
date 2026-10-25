@@ -51,12 +51,15 @@ recap = 3000
 # and how high it jumps her (JUMP 100: 77 units). gamelab plans every move with them, so change them
 # when gear or Haste does. 119.2 is measured (she walks 149 units/s); her stat window would say exactly.
 # And her HP when full and her level: what a monster's touch takes is measured against them (where she
-# stands, how near she lets monsters come), so change them when she levels up.
+# stands, how near she lets monsters come), so change them when she levels up. Her MP when full and her
+# Lucky Seven's level too: a throw is Lucky Seven only while she has MP for a cast (gamelab.attack.choice).
 [character]
 speed = 119.2
 jump = 100
 hp = 752
 level = 24
+mp = 601            # her MP when full: what her MP bar's share is of (Lucky Seven only with MP for a cast)
+lucky_seven = 10    # her Lucky Seven's skill level: its MP a cast in the game data (11 at 10 and 11)
 
 # How gamelab captures the game: "dxgi" (desktop duplication: each frame as the screen shows it, about 2 ms
 # for the game's window) or "mss" (a GDI copy that waits for the screen's next frame: 17 ms and more).

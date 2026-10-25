@@ -19,6 +19,7 @@ made 12% less EXP a minute and the tour 3% (README, Her heading).
 
 import dataclasses
 import time
+from collections.abc import Callable
 
 from maplehelper.config import GameKeys
 from maplehelper.engine import LEFT, RIGHT
@@ -108,7 +109,11 @@ class Actions:
 
     def __init__(self, keys: GameKeys, skill: bool = False, kind: str | None = None):
         self.keys = keys
-        self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP)
+        self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP) ...
+        # ... or, with `skill`, the attack key each throw is asked of this (the way it's thrown -> a key name): the
+        # hunter's choice of attack a throw (behavior.attacks: Lucky Seven, or the regular attack to finish a monster
+        # and while her MP is under a cast)
+        self.choose: Callable[[str], str] | None = None
         self.kind = kind    # what its plans are to the player with the Lie Detector alarm up (alarm.RETREAT: her
                             # retreat's moves); None: refused then
         # Which way she faces (None: unknown). `facing`: by her keys, the way her last plan turned her or threw
@@ -271,13 +276,14 @@ class Actions:
     # --- attacks ------------------------------------------------------------------------------
 
     def throw(self, direction: str) -> None:
-        """Face `direction` (if she isn't already), then throw (regular attack; Lucky Seven if `skill`).
+        """Face `direction` (the arrow tapped first unless she surely faces it already: `faces`, by her keys or a strong
+        frame), then throw (regular attack; with `skill`, Lucky Seven or as `choose` says, a throw at a time).
         Turning taps the arrow, which also walks her a few units: tapping before every throw walked
         her off the end of a platform after nine throws the same way."""
         self.wait_lock()
         events, t = self._turn(direction)
         self._thrown(t, direction)
-        self.play(events + tap(t, self._attack_key()), "throw")
+        self.play(events + tap(t, self._attack_key(direction)), "throw")
         self._turned(events, direction, t)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
@@ -293,7 +299,7 @@ class Actions:
         turn, t = self._turn(direction)
         if turn:  # turned: the jump waits until the tap's walk has stopped (JUMP_THROW_TURN_MS)
             t = max(t, JUMP_THROW_TURN_MS)
-        key, jump = self._attack_key(), self.keys.jump.name
+        key, jump = self._attack_key(direction), self.keys.jump.name
         events = turn + tap(t, jump) + tap(t + JUMP_ATTACK_MS, key)
         self._thrown(t + JUMP_ATTACK_MS, direction)
         self.play(events, "jump_throw")
@@ -309,7 +315,7 @@ class Actions:
         key goes in right after lift-off: pressed later, the star left after she had landed. The caller
         makes sure there's room behind her."""
         self.wait_lock()
-        key = self._attack_key()
+        key = self._attack_key(direction)
         away = self.arrow(directions.opposite(direction))
         toward, jump = self.arrow(direction), self.keys.jump.name
         events = [[0, away, "down"], *tap(JB_RUN_MS, jump),
@@ -329,8 +335,12 @@ class Actions:
         for listener in self.throw_listeners:
             listener(when, direction)
 
-    def _attack_key(self) -> str:
-        return (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
+    def _attack_key(self, direction: str) -> str:
+        """The attack key of a throw that way: the regular attack's; with `skill` (and a Lucky Seven key), Lucky Seven's,
+        or whichever `choose` picks."""
+        if self.skill and self.keys.lucky_seven:
+            return self.choose(direction) if self.choose is not None else self.keys.lucky_seven.name
+        return self.keys.attack.name
 
     def faces(self, direction: str) -> bool:
         """Whether she faces `direction` surely enough for a throw that way to go without the tap that turns her: her
