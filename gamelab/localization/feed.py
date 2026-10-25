@@ -73,10 +73,11 @@ BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS
 # measured) asking for everything made the hunt loop 7.1% +- 1.8% better and the tour 9.0% +- 2.7%; asking only for
 # what's stale, the feed's own loop on the saved frames had searched her band 4.9 times a second instead of 7.0 and
 # looked at 21.7 frames a second instead of 18.3. With the searches on a thread of their own and the feed the default
-# (2026-10-24; Tree Dungeon's crowd, zero-walls, the regular attack, 8 seeds x 10 min, --costs measured), reading made
-# the hunt loop's EXP a minute 72.4 against asking's 68.4 and 73.1 without a feed (+7.5% seed by seed against that,
-# standard error 16.5%; asking +1.9%, 18.0%): level within the spread, and a look waits for its frame, not for a search
-# of its own (README, Continuous perception).
+# (2026-10-24; Tree Dungeon's crowd, zero-walls, the regular attack, 8 seeds x 10 min, --costs measured, her band looks
+# with what the feed follows: TRACKED), reading made the hunt loop's EXP a minute 67.3 against asking's 68.4 and 73.1
+# without a feed (-3.3% seed by seed against that, standard error 9.0%; asking +1.9%, 18.0%): level within the spread,
+# and a look waits for its frame, not for a search of its own: 43 ms (median) against 73 for the hunt loop's look in the
+# simulator (README, Continuous perception: The feed by default).
 ASK_ONLY_STALE = True
 # Whether a look at her band from the feed also has the monsters it follows off the band (Feed.look: Scene.swept, for
 # her memory), as the sweep's slices had them without a feed; False: the band's alone, as before 2026-10-24.

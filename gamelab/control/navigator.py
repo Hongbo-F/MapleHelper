@@ -29,6 +29,10 @@ rest (`detour`) a way around comes before a shot. The monsters for that are sear
 (`trip_monsters`: her fights look at the band around her), and with her memory of the monsters (`memory`: a hunter's)
 the ones it has there that the look couldn't have found, last seen off its view, are kept clear of too (`remembered`).
 Without an escort the mode is `avoid`, as described above.
+
+With a continuous feed (the hunting commands' default) her glances while a chain runs carry the monsters it follows: one
+the chain's legs ahead of her now meet, that the look it was planned from hadn't, stops the chain as a hit does while she
+runs along a platform with room to stop (REACT), and the next pass meets it.
 """
 
 import random
