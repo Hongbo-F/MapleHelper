@@ -584,7 +584,8 @@ class Navigator:
         look's, moved on by the time since; else this look's, tracked from look to look (which way they walk). Without
         an escort, every one of them both ways. With an escort, those of the kinds whose touch counts (Escort.threat),
         searched for where the chain's legs go (trip_monsters), and every one of them for the tail; on a map where no
-        kind counts (the first map), none, as before: the chain is planned blind (it fights them instead)."""
+        kind counts (the first map), none, as before: the chain is planned blind (it fights them instead); its tail and
+        whether the next chain follows on (_queue_next) are judged against every one, by her box (motion.bodies)."""
         if self.fight and not self._threats():
             return [], None
         if st.quick:  # the last look's monsters, moved on by the time since

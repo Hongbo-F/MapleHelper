@@ -57,8 +57,9 @@ GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she tr
 # share work/positioning's danger counts from (attack.danger.DANGER_MIN, 5%): on Tree Dungeon, Forest Up North II a
 # Horny Mushroom (110: 16%) and a Green Mushroom (54: 7.3%), not a Slime (13); on West Rocky Mountain II an Axe Stump
 # (75: 10.8% at level 23), not a Dark Stump (34: 4.2%); on the first map nothing (an Orange Mushroom's 17 is 2.0% of
-# 642 HP at level 19), so her trips there are planned as before. Live on Tree Dungeon on 2026-10-24, 74 of 186 touches
-# came on trips (33% of the HP lost), 28 of 48 travel hits a Green Mushroom's, 14 a Horny's.
+# 642 HP at level 19), so her chains there are planned blind as before (though whether the next follows on, and the
+# run on past a chain's end, are judged by her box now: motion.bodies). Live on Tree Dungeon on 2026-10-24, 74 of 186
+# touches came on trips (33% of the HP lost), 28 of 48 travel hits a Green Mushroom's, 14 a Horny's.
 TRIP_PAD = 40.0
 # A monster she has hurt (Hunter.wounds) is finished before she moves on, from where she is or from a walk this
 # long along her platform at most (a second's walk at 149 units/s): in the live hunt loops of 2026-10-21 she set
