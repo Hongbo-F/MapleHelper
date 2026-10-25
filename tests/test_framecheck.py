@@ -578,8 +578,10 @@ def test_a_refused_frame_keeps_the_last_good_hp_and_the_feeds_step_reads_nothing
 # --- a hunt in the simulator, its looks failing for a while ------------------------------------------------------------
 
 def _lost_hunt(window: tuple[float, float], minutes: float, problem: Problem) -> dict:
-    """The hunt loop on Tree Dungeon (loop_tree_run's start, `minutes`), every look failing its checks with `problem`
-    from window[0] to window[1] s of it: its trace."""
+    """The hunt loop on Tree Dungeon (loop_tree_walls's start, `minutes`: loop_tree_run's, the walls of foothold group 0
+    stopping her, so a touch doesn't knock her out of the map past the tower's wall, a simulator effect: on
+    loop_tree_run's seed it did at 146 s, on the trip to stand by, with her memory of the monsters and the sweep
+    merged), every look failing its checks with `problem` from window[0] to window[1] s of it: its trace."""
     import dataclasses
 
     from gamelab.sim import scenarios
@@ -599,7 +601,7 @@ def _lost_hunt(window: tuple[float, float], minutes: float, problem: Problem) ->
         sim.eyes.look = look
         return _loop(minutes)(sim)
 
-    sc = dataclasses.replace(scenarios.SCENARIOS["loop_tree_run"], name="loop_tree_lost", fn=run, expects=())
+    sc = dataclasses.replace(scenarios.SCENARIOS["loop_tree_walls"], name="loop_tree_lost", fn=run, expects=())
     return scenarios.run_scenario(sc)
 
 

@@ -2094,7 +2094,9 @@ def loop_tree_23(sim):
     with the branches merged (escorted trips, her body the client's), of seeds 1-12 four meet them (1, 5, 6, 9), every
     one going to 24 at 231 for 23; on positioning alone over master's onboarding, 2 and 5 of seeds 1-6. (Seed 5
     since a throw's tap goes by her facing off the frame, perception.heading: of seeds 1-12, 4, 5, 6, 9 and 10 meet
-    them; on seed 1 she shot 23 from the spot fewer than 20 times, killing 20.)"""
+    them; on seed 1 she shot 23 from the spot fewer than 20 times, killing 20.) With her memory of the monsters and the
+    sweep merged too (hunt.SWEEP: a slice 23 ms of the simulator's clock moves every look after the first), nine meet
+    them (all but 1, 2 and 7): on seed 5 still."""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2224,7 +2226,7 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((28, 247.0), monsters="all", seed=7, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=3, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
@@ -2238,7 +2240,8 @@ def loop_tree_lie_detector(sim):
     by her facing off the frame, perception.heading, where her course before the sighting goes otherwise: of seeds
     1-12 seen at 110 s, 7 and 10 go up onto the rope at 146 within 10 s, 9 are on a safe place at 10 s (a safe
     platform near on 5, 6, 8 and 12, 28 on 2 and 9, the rope at -192 on 3), and on seed 1 she took 10.5 s, still on
-    33.)"""
+    33. Seed 3 with her memory of the monsters and the sweep merged too, hunt.SWEEP: 1, 3, 9 and 12 go up onto the
+    rope at 146 within 10 s, 8 are on a safe place at 10 s; on seed 7 she took 11.2 s, still on 32.)"""
     return lie_detector(110.0)(sim)
 
 

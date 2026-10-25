@@ -19,13 +19,24 @@ from gamelab.localization import mapdata
 from test_sim import KEYS, tree
 
 
+class Remembers:
+    """Hunter.memory's stand-in: the monsters it has (`seen`), as `there` gives them."""
+
+    def __init__(self, seen=()):
+        self.seen = list(seen)
+
+    def there(self, t, platform=None, kinds=None, min_p=0.5):
+        return [m for m in self.seen if (platform is None or m.platform == platform)
+                and (kinds is None or m.kind in kinds)]
+
+
 def _hunt(piles, kills=(), travel=5.0):
     """A Hunt with only what the pile rules read: the drop store, the looter, route times, the visit (and no
-    monster she has hurt)."""
+    monster she has hurt, none remembered)."""
     h = object.__new__(Hunt)
     h.h = SimpleNamespace(drops=SimpleNamespace(known=list(piles)), looter=SimpleNamespace(inventory_full=False),
                           wounds=SimpleNamespace(seen_within=lambda now, seconds, hurt_by=None: []),
-                          danger=None)  # (the map's danger: none here)
+                          danger=None, memory=Remembers())  # (the map's danger: none here)
     h.fs = FightState()
     h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel,
                                                     arrive=lambda src, x, dst, dst_x=None, keep_off=(): travel))
@@ -178,7 +189,7 @@ def test_the_ground_is_judged_empty_only_from_looks_that_cover_it_for_a_while():
 
     def look(pid, strips):
         return SimpleNamespace(platform=SimpleNamespace(id=pid), looked=strips, monsters=[],
-                               where=SimpleNamespace(x=0.0, y=0.0))
+                               where=SimpleNamespace(x=0.0, y=0.0), t=time.monotonic())
     assert h._leaving(look(36, [(36, 129, 951)])) is None  # down on 36, 17 out of view: no verdict
     assert h._leaving(look(20, [(17, 855, 886)])) is None and h.visit.empty_since is None  # a sliver of it
     on_spot = look(16, [(16, 501, 669), (17, 861, 1300)])  # 83% of 17
@@ -201,14 +212,14 @@ def test_she_doesnt_leave_a_ground_for_itself_she_waits_there():
     grounds = [23]
     h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: list(grounds))
     empty = SimpleNamespace(platform=SimpleNamespace(id=24), looked=[(23, -197, 186)], monsters=[], players=[],
-                            where=SimpleNamespace(x=231.0, y=-430.0))
+                            where=SimpleNamespace(x=231.0, y=-430.0), t=time.monotonic())
     assert h._leaving(empty) is None and h.visit.empty_since is not None  # empty: to be confirmed
     h.visit.empty_since -= hunt.EMPTY_CONFIRM_S
     assert h._leaving(empty) is None and 23 not in h._skip and h._progress > 0  # stays, not skipped
     assert h._leaving(empty) is None and len(lines) == 1 and "staying at platform 23" in lines[0]  # said once
     # Out of view of the ground (not covered), her patience run out: the same.
     away = SimpleNamespace(platform=SimpleNamespace(id=24), looked=[], monsters=[], players=[],
-                           where=SimpleNamespace(x=231.0, y=-430.0))
+                           where=SimpleNamespace(x=231.0, y=-430.0), t=time.monotonic())
     h._idle_since = time.monotonic() - 10
     assert h._leaving(away) is None
     h.visit.throws += 1  # a throw since: said again
@@ -218,6 +229,22 @@ def test_she_doesnt_leave_a_ground_for_itself_she_waits_there():
     h._skip, grounds[:] = {}, [23, 20]  # another ground to go to
     assert h._leaving(away) == "nothing came into reach"
     assert h._leaving(empty) == "nothing left here, and nothing due back" and 23 in h._skip
+
+
+def test_a_monster_her_memory_has_on_the_ground_keeps_it_from_being_judged_empty():
+    # The look covering 17 sees nothing on it, but her memory has a pig there (hidden under damage numbers a moment,
+    # or seen by the last slice of the sweep): not empty. Once the memory lets it go, the clock starts.
+    h = _hunt([])
+    h.visit = Visit(17, Spot(16, 636.0, 0.35, True), arrived=time.monotonic() - 30)
+    h.kinds, h._skip, h._idle_since = None, {}, None
+    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=17, left=861.0, right=1389.0))
+    h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: [])
+    on_spot = SimpleNamespace(platform=SimpleNamespace(id=16), looked=[(16, 501, 669), (17, 861, 1300)], monsters=[],
+                              where=SimpleNamespace(x=0.0, y=0.0), t=time.monotonic())
+    h.h.memory.seen = [SimpleNamespace(platform=17, x=1000.0, kind="pig")]
+    assert h._leaving(on_spot) is None and h.visit.empty_since is None
+    h.h.memory.seen = []
+    assert h._leaving(on_spot) is None and h.visit.empty_since is not None
 
 
 def test_she_finishes_what_she_hurt_before_she_sets_off_for_another_platform(monkeypatch):
@@ -342,7 +369,8 @@ def _detour_hunt(piles, times):
 
 
 def _at(pid, x=0.0, monsters=()):
-    return SimpleNamespace(platform=SimpleNamespace(id=pid), where=SimpleNamespace(x=x), monsters=list(monsters))
+    return SimpleNamespace(platform=SimpleNamespace(id=pid), where=SimpleNamespace(x=x), monsters=list(monsters),
+                           t=time.monotonic())
 
 
 def test_a_pile_a_little_off_her_way_is_picked_up_on_the_way():
@@ -352,7 +380,9 @@ def test_a_pile_a_little_off_her_way_is_picked_up_on_the_way():
     h = _detour_hunt([far, near], times)
     h.obj = Objective("spot", 16, 636.0)
     assert h._detour(_at(13)) == (2.0 + hunt.PICK_S + 4.4 - 5.7, near)
-    assert h._detour(_at(13, monsters=[SimpleNamespace(platform=19, x=120.0)])) is None  # guarded
+    h.h.memory.seen = [SimpleNamespace(platform=19, x=120.0, kind="pig")]  # remembered by it (off her band):
+    assert h._detour(_at(13)) is None                                      # guarded
+    h.h.memory.seen = []
     # Coins on 12, 3 s away, 1.1 s more: past DETOUR_REACH, they'd make the trip their own.
     times.update({(12, 16): 3.2, (13, 19): 3.0})
     assert hunt.DETOUR_REACH < 3.0 and h._detour(_at(13)) is None

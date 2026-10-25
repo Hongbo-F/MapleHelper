@@ -162,7 +162,8 @@ NOISE_FIELDS = ("heading_wrong",)  # WORLDS' fields that are world.Noise's
 # own costs are localization.feed.COSTS.
 COSTS = {
     "coded": {},
-    "measured": {"LOOK_S": 0.020, "LOOK_LAG": 0.006, "DETECT_S": 0.024, "DETECT_WIDE_S": 0.084, "LOOT_S": 0.008},
+    "measured": {"LOOK_S": 0.020, "LOOK_LAG": 0.006, "DETECT_S": 0.024, "DETECT_WIDE_S": 0.084, "LOOT_S": 0.008,
+                 "DETECT_SLICE_S": 0.018},  # a slice of the sweep: DETECT_S x 16.7 / 21.9 (bench-look, 1366x768)
 }
 
 
@@ -176,14 +177,15 @@ def _tour(sim) -> None:
         tour.run()
 
 
-def _loop(sim, rest_avoid: bool = False, low_hp: float = 0.3) -> None:
-    """The hunt loop (`python -m gamelab tour --loop`), on the same hunter, navigator and map knowledge."""
+def _loop(sim, rest_avoid: bool = False, low_hp: float = 0.3, sweep: bool | None = None) -> None:
+    """The hunt loop (`python -m gamelab tour --loop`), on the same hunter, navigator and map knowledge. `sweep`: her
+    looks sweep the screen (None: hunt.SWEEP)."""
     from ..behavior.hunt import Hunt
     h = sim.hunter(low_hp=low_hp, potion_hp=0.45)
     tour = sim.tour(h, sim.navigator(h, fight=True, seed=POLICY_SEED), seed=POLICY_SEED)
     tour.rest_avoid = rest_avoid
     while True:
-        Hunt(tour, log=tour.log).run(minutes=600)
+        Hunt(tour, log=tour.log, sweep=sweep).run(minutes=600)
 
 
 def _loop_avoid(sim) -> None:
@@ -197,7 +199,14 @@ def _loop_hp50(sim) -> None:
     _loop(sim, low_hp=0.5)
 
 
-POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid, "loop-hp50": _loop_hp50}
+def _loop_nosweep(sim) -> None:
+    """The hunt loop with `--no-sweep`: her looks at the band around her search only it (her memory of the monsters is
+    kept up by the band and the whole-screen looks alone)."""
+    _loop(sim, sweep=False)
+
+
+POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid, "loop-hp50": _loop_hp50,
+            "loop-nosweep": _loop_nosweep}
 
 
 def _only(policy, grounds: tuple[int, ...]):

@@ -48,6 +48,12 @@ pick again at once (the only one: `--grounds 23`, or a value map with one): then
 are suspended, not ended, when a higher rule fires: they keep their route weights and their clock
 (OBJECTIVE_S, suspensions included).
 
+What she knows of the monsters off her band is her memory of them (Hunter.memory, localization.memory: every look's,
+kept across looks, forgotten by looks that cover their place without them or by age), and her looks sweep the screen
+a slice at a time (SWEEP: Senses.sweep), so the memory is kept up while she shoots: the ground's monsters out of reach
+(rule 7), whether anything is left on it (the fast exit), and what guards a pile elsewhere (rule 5b) go by it. Her
+own platform's, which the fights react to, are the look's as before.
+
 The numbers marked "guess" are starting values for the simulator's A/B runs (gamelab.sim.harness); none
 is measured in game. Respawns and how long drops last were measured on the live telemetry (analysis.respawn), and
 didn't settle RESPAWN and DROP_LIFE: their comments say what they did show.
@@ -224,6 +230,15 @@ PLAYER_DY = 100.0
 # after its kill, before OTHERS_AFTER makes them worth a trip anyway, so only piles taken for no kill of hers are
 # left; whether a real player's are worth leaving is for the game to say.
 PLAYER_PILES = False
+# Whether the hunt loop's looks at the band around her also search a slice of the rest of the screen each
+# (Senses.sweep), where it costs her nothing (Hunter.hold_sweep: during her attack's lock, or with nothing in her
+# band): the whole view every 4 slices, 16.7 ms each at the game's own 1366x768 (bench-look). In the live hunts of
+# 2026-10-24 on Tree Dungeon, Forest Up North II her whole-screen looks came a median 4.9 s apart (up to 22.8 s) while
+# she shot, and nothing she saw elsewhere was kept: the memory has nothing to go by between them. With it, in the
+# simulator, her memory held 0.62-0.66 of the monsters on screen off her band, 0.19-0.42 without (Tree Dungeon's crowd,
+# the first map's game preset), and her EXP a minute was as before (hunter.SWEEP_LOCK_S). Never with a continuous feed
+# (it searches the whole screen every second).
+SWEEP = True
 
 
 def _keep_off(o: "Objective") -> tuple[int, ...]:
@@ -304,10 +319,12 @@ class Hunt:
     spots and rest) and its hunter and navigator."""
     valuable: float = VALUABLE  # rule 6a's: what a drop must be worth on its own, on her map (looting.Worth.valuable)
 
-    def __init__(self, tour, log=print, rng: random.Random | None = None):
+    def __init__(self, tour, log=print, rng: random.Random | None = None, sweep: bool | None = None):
+        """`sweep`: her looks sweep the screen a slice at a time (None: SWEEP)."""
         self.tour, self.h, self.nav, self.model = tour, tour.h, tour.nav, tour.nav.model
         self.valuable = self.h.worth.valuable
         self.log = log
+        self.sweep = SWEEP if sweep is None else sweep
         self.rng = rng or tour.rng
         self.kinds = tour.worth
         self.report = HuntReport()
@@ -358,21 +375,27 @@ class Hunt:
         self._gone = self.h.drops.gone_tried
         self._progress = start
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
+        senses = self.h.senses
+        sweep, senses.sweep = senses.sweep, self.sweep and senses.feed is None
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
-        self._next_ground(self.nav.mover.settle())
-        while time.monotonic() < end:
-            try:
-                if self._pass() == "stop":
-                    break
-            except LookLost as lost:  # the game doesn't look as expected: stand still until it does (senses)
-                paused = time.monotonic()
-                back = self.h.senses.regain(lost, end)
-                self._paused(time.monotonic() - paused)
-                if back is None:
-                    break
-        self._leave_ground()
+        try:
+            self._next_ground(self.nav.mover.settle())
+            while time.monotonic() < end:
+                try:
+                    if self._pass() == "stop":
+                        break
+                except LookLost as lost:  # the game doesn't look as expected: stand still until it does (senses)
+                    paused = time.monotonic()
+                    back = self.h.senses.regain(lost, end)
+                    self._paused(time.monotonic() - paused)
+                    if back is None:
+                        break
+            self._leave_ground()
+        finally:
+            senses.sweep = sweep  # as it was, whatever ended the hunt
         self.report.seconds = time.monotonic() - start
+        self._log_memory()
         if meter.since is not None:
             self.report.exp_read = meter.total - (read or 0)
         self.report.stop = self.report.stop or "time up"
@@ -596,6 +619,18 @@ class Hunt:
         key = (s.platform.id, id(self.obj))
         if key != self._fs_key:  # a new place or objective: what she was throwing at there is forgotten
             self.fs, self._fs_key = FightState(exp_counted=self.h.report.exp_kills), key
+
+    def _log_memory(self) -> None:
+        """What her memory of the monsters did over the hunt, and the sweep's slices (the end of the run's log)."""
+        c, sc = self.h.memory.counts, self.h.senses.sweep_counts
+        swept = f"; the sweep: {sc['slices']} slices, held {sc['held']} times" if sc["slices"] or sc["held"] else ""
+        self.log(f"  memory: {c['new']} monsters seen, {c['killed']} killed by her, {c['gone']} forgotten by looks, "
+                 f"{c['aged']} by age{swept}")
+
+    def _remembered(self, s: Scene, platform: int | None) -> list[Monster]:
+        """The wanted monsters her memory has on `platform` (None: anywhere) as of look `s`, sure enough to count
+        (memory.SURE): this look's among them."""
+        return self.h.memory.there(s.t, platform, self.kinds)
 
     def _avg_exp(self) -> float:
         worth = [self.tour.exp[k] for k in (self.kinds or ())]
@@ -935,8 +970,9 @@ class Hunt:
         return None if best is None else best[1:]
 
     def _guarded(self, s: Scene, p: Pile) -> bool:
-        """Whether look `s` shows a monster by pile `p` (PILE_GUARD), or any on its platform where she can't stand."""
-        there = [m for m in s.monsters if m.platform == p.platform]
+        """Whether a monster is by pile `p` (PILE_GUARD), or any on its platform where she can't stand: as her memory
+        has them as of look `s` (of any kind: a guard needn't be worth hunting)."""
+        there = self.h.memory.there(s.t, p.platform)
         return bool(there) and (not self._standable(p.platform) or any(abs(m.x - p.x) < PILE_GUARD for m in there))
 
     def _go_for(self, pile: Pile, rule: str, s: Scene) -> None:
@@ -966,11 +1002,12 @@ class Hunt:
         self.obj = Objective("spot", spot.platform, spot.x, ground=self.visit.ground, spot=spot)
 
     def _better_spot(self, s: Scene) -> Spot | None:
-        """Rule 7: wanted monsters on the ground seen out of reach, and a spot reaching clearly more of them."""
+        """Rule 7: wanted monsters on the ground out of reach (as her memory has them), and a spot reaching clearly more
+        of them."""
         v = self.visit
         if v.changes >= SPOT_CHANGES or time.monotonic() - v.spot_since < SPOT_REST:
             return None
-        left = [m for m in s.monsters if m.platform == v.ground and (self.kinds is None or m.kind in self.kinds)]
+        left = self._remembered(s, v.ground)
         if not left:
             return None
         now_n = sum(self._hits(s, m) for m in left)
@@ -992,8 +1029,9 @@ class Hunt:
         return lambda a, x, b: self.nav.planner.travel(a, x, b, keep_off=(ground,))
 
     def _nothing_here(self, s: Scene) -> bool:
-        return not any(m.platform == self.visit.ground and (self.kinds is None or m.kind in self.kinds)
-                       for m in s.monsters)
+        """Whether her memory has no wanted monster on the ground as of look `s` (a look missing one hidden under its
+        damage numbers doesn't empty it)."""
+        return not self._remembered(s, self.visit.ground)
 
     def _due_back(self) -> float | None:
         """When the next of her kills on this ground is due back (s from now), if one is."""

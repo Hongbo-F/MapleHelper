@@ -759,7 +759,7 @@ def cmd_tour(args) -> int:
         if args.ground_tie is not None:  # grounds about as good: the one she left longest ago (README: Route diversity)
             hunt.GROUND_TIE = args.ground_tie
         with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
-            report = hunt.Hunt(tour, log=_log).run(minutes=args.minutes)
+            report = hunt.Hunt(tour, log=_log, sweep=args.sweep).run(minutes=args.minutes)
         print(f"hunt done: {report}")
         return 0
     with on_alarm(hunter):
@@ -1810,7 +1810,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --loop: of the grounds within this share of the best's score, the one she left longest "
                         "ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
     feed_arg(s)
-    sweep_arg(s, "off")
+    sweep_arg(s, "on with --loop (hunt.SWEEP), else off")
     s.set_defaults(func=cmd_tour)
 
     s = sub.add_parser("pet", help="keep her pet fed: its fullness followed in time (read once off her Character Info) "
