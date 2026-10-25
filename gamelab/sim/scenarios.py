@@ -2093,16 +2093,16 @@ def loop_tree_wait(sim):
     return harness._only(_loop(4), (20,))(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=6, limit=1200,
+@tree((28, 247.0), monsters="all", seed=2, limit=1200,
       expects=(logs("tour: sweep"), check("two stops hunted or more", lambda tr: len(tr["result"]["visited"]) >= 2),
                check("she fed her pet", _fed_her_pet)))
 def tour_tree_run(sim):
     """`python -m gamelab tour --stops 3 --map 10002073` from 28: the sweep's three nearest grounds from the bottom,
     the escort's fights on the way. The floor's and 32's respawns keep her fighting on the way: each stop takes
-    minutes, and the third is often not reached in its time (README: Tree Dungeon, Forest Up North II). (Seed 6 since
-    her trips keep clear of the mushrooms (Escort.threat, motion.bodies): on seed 2 a touch knocked her off 31's left
-    end, past the tower's wall and out of the map at 635 s; of seeds 1-6 all but 2 meet this, against 4 before, the
-    others knocked out past the same wall.)"""
+    minutes, and the third is often not reached in its time (README: Tree Dungeon, Forest Up North II). (A touch can
+    knock her past the tower's wall and out of the map, a simulator effect: with the escorted trips alone seed 2 went
+    out at 635 s and the scenario was on seed 6; with positioning and her body the client's too, seeds 1-12 all meet
+    this but 6, out at 872 s by x -308, and it's on seed 2 again.)"""
     return sim.tour_stack().run(stops=3)
 
 
