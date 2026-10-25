@@ -5,6 +5,7 @@ decided by it: where she shoots a ground from (attack.spots), what she does abou
 she waits for respawns and how much of a ground's EXP counts (behavior.hunt)."""
 
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -190,6 +191,46 @@ def test_a_monster_that_hits_hard_is_kept_off_and_escaped_to_the_least_danger():
     # A Green Mushroom (7.2%) is let come to the claw's reach, as before.
     green = seen("green-mushroom", 650, 500, p.id)
     assert stance.stance(500, 500, p, [green], danger=d) == stance.stance(500, 500, p, [green]) == ("throw", "right")
+
+
+def _waiting(model, kinds):
+    from gamelab.behavior.hunt import Hunt, Visit
+    g = on(model, 400, 500)
+    h = object.__new__(Hunt)
+    h.model, h.kinds = model, kinds
+    h.h = SimpleNamespace(danger=Danger(model, HER), knocked=lambda s: False)
+    h.visit = Visit(g, spots.Spot(g, 400.0, 1.0, False))
+    return h, SimpleNamespace(platform=model.platform(g), where=SimpleNamespace(x=400.0, y=500.0), monsters=[])
+
+
+def test_waiting_she_steps_off_between_two_spawn_points_of_a_kind_that_hits_hard():
+    from gamelab.behavior.hunt import WAIT_GAIN
+    model = build([(0, 500, 800, 500)], [("19", 300, 500), ("19", 500, 500)])
+    h, s = _waiting(model, {"horny-mushroom"})
+    side, units, goal, there = h._wait_place(s)
+    assert (side, units) == (("left", 400 - goal) if goal < 400 else ("right", goal - 400))
+    assert min(abs(goal - 300), abs(goal - 500)) >= 150  # off both, out of a fresh one's reach
+    assert h._spawns_in_reach(s, goal) == h._spawns_in_reach(s, 400.0) == 2  # both still in reach
+    assert h.danger.at(s.platform.id, 400.0, []) - there >= WAIT_GAIN
+    s.where.x = goal  # there already: she waits where she is
+    assert h._wait_place(s) is None
+    weak = build([(0, 500, 800, 500)], [("7", 300, 500), ("7", 500, 500)])  # slimes: nothing counts, as before
+    h, s = _waiting(weak, {"slime"})
+    assert h._wait_place(s) is None
+
+
+def test_waiting_she_never_walks_past_a_monster_that_hits_hard_and_looks_again_after_a_step():
+    from gamelab.behavior.hunt import WAIT_STEP
+    model = build([(0, 500, 800, 500)], [("19", 300, 500), ("19", 500, 500)])
+    h, s = _waiting(model, {"horny-mushroom"})
+    side, units, goal, _ = h._wait_place(s)  # by an end (the left: as safe as the right, and first)
+    assert goal < 200 and side == "left" and units > WAIT_STEP  # a walk of several steps, a look after each
+    # One of them back at 300, between her and there: she stays on her side of it, or goes the other way.
+    s.monsters = [seen("horny-mushroom", 300.0, 500.0, s.platform.id)]
+    step = h._wait_place(s)
+    assert step is None or step[2] > 400
+    assert h._in_the_way(s, 400.0, 100.0) and not h._in_the_way(s, 400.0, 700.0)
+    assert not h._in_the_way(s, 400.0, 360.0) and h._in_the_way(s, 400.0, 340.0)  # its body and hers meet at 343
 
 
 def test_a_ground_counts_less_of_its_exp_the_more_dangerous_its_stand():

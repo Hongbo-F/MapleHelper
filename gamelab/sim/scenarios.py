@@ -42,7 +42,7 @@ from ..behavior.tour import Tour
 from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
                     Trace, detector_kinds, patched)
 from . import harness
-from .world import LEVEL_19, LEVEL_23, LEVEL_24, ROPE_REACH_CLIENT, Her, Noise, Realism, SimDied, World
+from .world import LEVEL_19, LEVEL_23, LEVEL_24, LUCKY_SEVEN, ROPE_REACH_CLIENT, Her, Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -2053,6 +2053,35 @@ def loop_tree_crowd(sim):
     28, 21, 23, 19 and 33, each killing the Greens it hunts 2-6 s after they show, leaving the Horny Mushrooms),
     respawns at 8.8 s (MeowDB's mean), group 0's walls stopping her."""
     return _loop(3)(sim)
+
+
+_CROWD, _SLOW = harness.PRESETS["crowd"], harness.PRESETS["crowd-slow"]
+_LUCKY = dataclasses.replace(LEVEL_24, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
+
+
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+      realism=dataclasses.replace(_CROWD[1], zero_walls=True),
+      expects=(logs("next: platform 23, from platform 24 at x 231"), logs("at platform 23's spot (platform 24)"),
+               _rule("shoot", 20), check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
+               check("every kill counted", _every_kill), check("alive", lambda tr: not tr["world"]["dead"])))
+def loop_tree_23(sim):
+    """The hunt loop as live on 2026-10-24: Tree Dungeon's 23 its only ground (harness `--grounds 23`), Lucky Seven
+    (world.LUCKY_SEVEN: 3 of the simulator's stars a cast), among the crowd the study saw (preset crowd), group 0's
+    walls stopping her. She shoots 23 from 24 at 231 (attack.spots by the danger: 95% of 23 in reach, where its Horny
+    Mushrooms, which never leave it, can't touch her), not standing among them on 23 as live, and not from its middle
+    between their two spawn points when it's empty."""
+    return harness._only(_loop(4), (23,))(sim)
+
+
+@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=3, limit=500, may_die=True, noise=_SLOW[0], her=_LUCKY,
+      realism=dataclasses.replace(_SLOW[1], zero_walls=True),
+      expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
+def loop_tree_wait(sim):
+    """20 its only ground, hunted standing on it (no spot off it is better: attack.spots), its one Horny Mushroom's
+    spawn point at x -171, respawns 30 s after a kill (preset crowd-slow), Lucky Seven: with 20 empty she waits for it
+    at the safest place along 20 that keeps the spawn point in reach (hunt._wait_place), not where her last kill left
+    her."""
+    return harness._only(_loop(4), (20,))(sim)
 
 
 @tree((28, 247.0), monsters="all", seed=2, limit=1200,

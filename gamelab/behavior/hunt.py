@@ -35,7 +35,9 @@ in the order listed, 6 before 3):
                        they were about to vanish
    7  better spot      wanted monsters seen out of reach, and a spot that reaches clearly more of them
    8  lull loot        nothing wanted on this ground and a kill of hers due back: piles she can pick up first
-   9  wait             monsters about or due back: stand still, for the patience at most
+   9  wait             monsters about or due back: stand still, for the patience at most, where she is or at the
+                       safest place along her platform that still has the ground's spawn points in reach
+                       (_wait_place: not between two Horny Mushrooms' spawn points)
   10  loot elsewhere   leaving: the piles left when she decided, the most worth per second of travel first
   11  advance          leaving: one trip to the next ground's spot
 
@@ -54,15 +56,20 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 
+from maplehelper.engine import LEFT, RIGHT
+
 from .. import telemetry
 from ..attack import reach, spots
-from ..attack.spots import Spot
-from ..attack.stance import act_text, close_to, open_above, stance
+from ..attack.spots import GROUND_MARGIN, Spot
+from ..attack.stance import MIN_MOVE, act_text, close_to, open_above, stance
 from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.players import near_rival
 from ..localization.scene import Scene
+from ..motion.flow import HER_HALF
 from ..motion.physics import WALK_SPEED
+from ..perception.kinds import kind_of
+from ..perception.mobs import Mob
 from . import fight
 from .fight import THROWS, FightState, Report, kills_text
 from .ledger import DROP_LANDS, Pile
@@ -105,6 +112,14 @@ SPOT_CHANGES = 4       # ... and at most this many times per visit to a ground
 # hunt loops' time (rule 8, 6.2%; rule 9, 5.3%) and 20 of their 43 departures from a ground.
 RESPAWN = 8.0
 PATIENCE = {"ground": 1.0, "spot": 2.0, "none": 0.4}  # rule 9: today's patience values
+# Rule 9: waiting, she walks to a safer place along her platform (_wait_place) only for this much less danger there
+# (attack.danger: the share of her HP touches would take; the spawn points this look's monsters don't account for may
+# fill at any moment). On Tree Dungeon's 23 at x -10, on a Horny Mushroom's spawn point with the other 105 off, it's
+# 0.27; at -147, 132 and 242 from them, 0.14. Live on 2026-10-24 she waited at x -10 +- 5 for 49 s, 37% of her waits
+# within 20 units of a spawn point, and respawns landed on her there twice (11% and 19% of her HP).
+WAIT_GAIN = 0.03
+WAIT_STEP = 100.0      # ... in steps of this many units at most (0.7 s at her 149 units/s), a look after each: the walk
+                       # is blind (actions.walk), and a respawn or a monster walking in changes where's safest
 # A ground's EXP a second (the rate rule, the next ground) counts 1 - GROUND_DANGER x the danger where she'd stand to
 # hunt it (its spot's: attack.spots, the spawn points' monsters at their points), never under 0: on Tree Dungeon 23
 # shot from 24 (danger 0.07) keeps 86%, 10 hunted standing among its two Horny Mushrooms (0.18) 64%. In the simulator's
@@ -1155,11 +1170,71 @@ class Hunt:
     # --- waiting ------------------------------------------------------------------------------------
 
     def _wait(self, s: Scene, targets) -> None:
+        """Rule 9: wait a moment, where she is or (a walk along her platform) at a safer place (_wait_place)."""
         self._note("wait")
         if self._idle_since is None:
             self._idle_since = time.monotonic()
+        if (step := self._wait_place(s)) is not None:
+            side, units, goal, there = step
+            self.log(f"  waiting at x {goal:.0f} instead (danger {there:.2f} there)")
+            self.h.actions.walk(side, min(units, WAIT_STEP))
+            return None
         time.sleep(0.1)
         return None
+
+    def _wait_place(self, s: Scene) -> tuple[str, float, float, float] | None:
+        """Rule 9: where along her platform to wait, as a walk (the way, how far, to where, the danger there), or None
+        to wait where she is: of the places GROUND_MARGIN from its ends (spots.X_STEP apart) from which a star reaches
+        as many of the ground's spawn points as from where she is (_spawns_in_reach), the safest (Danger.at with this
+        look's monsters), if it's WAIT_GAIN safer than here and stance.MIN_MOVE away, and the way there doesn't pass
+        a monster that counts (_in_the_way). Never on a map where no kind counts as a danger (the first map: she waits
+        where she is, as she did), nor from a look a touch's knock may still be moving her in (fight.knocked_move's)."""
+        d, here, x = self.danger, s.platform, s.where.x
+        if d is None or not d.any or self.h.knocked(s):
+            return None
+        xs = spots._stand_xs(here.left + GROUND_MARGIN, here.right - GROUND_MARGIN)
+        if not xs:
+            return None
+        need = self._spawns_in_reach(s, x)
+        now = d.at(here.id, x, s.monsters)
+        best = None  # (danger, distance, x)
+        for g in xs:
+            if self._spawns_in_reach(s, g) < need or self._in_the_way(s, x, g):
+                continue
+            there = d.at(here.id, g, s.monsters)
+            if best is None or (round(there, 6), abs(g - x)) < (round(best[0], 6), best[1]):
+                best = (there, abs(g - x), g)
+        if best is None or now - best[0] < WAIT_GAIN or best[1] < MIN_MOVE:
+            return None
+        there, units, goal = best
+        return (RIGHT if goal > x else LEFT), units, goal, there
+
+    def _in_the_way(self, s: Scene, x: float, g: float) -> bool:
+        """Whether a walk along her platform from map x to `g` would touch a monster that counts as a danger: one of
+        this look's on her platform ahead of her, up to where its body (its half width and hers) meets her at `g`."""
+        d, here = self.danger, s.platform.id
+        for m in s.monsters:
+            t = d.threats.get(m.kind)
+            if m.platform != here or t is None or t.share <= 0:
+                continue
+            if (x < m.x <= g + t.half + HER_HALF) if g > x else (g - t.half - HER_HALF <= m.x < x):
+                return True
+        return False
+
+    def _spawns_in_reach(self, s: Scene, x: float) -> int:
+        """How many of the visit's ground's spawn points (of the kinds she hunts) a star from map x on her platform
+        reaches (reach.can_hit, a monster of its kind standing there; terrain stopping it counts)."""
+        here, ground = s.platform, self.visit.ground
+        y = here.y_at(x)
+        n = 0
+        for pid, sp in self.model.spawn_points:
+            kind = kind_of(sp.name or str(sp.mob_id))
+            if pid != ground or (self.kinds is not None and kind not in self.kinds):
+                continue
+            q = self.model.platform(pid)
+            m = Monster(Mob(kind, 0, 0, 0, 0, 1.0), sp.x, q.y_at(sp.x), pid)
+            n += reach.can_hit(here, x, y, m)
+        return n
 
     def _note(self, rule: str) -> None:
         self.report.rules[rule] += 1
