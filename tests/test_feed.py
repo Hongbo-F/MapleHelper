@@ -61,6 +61,12 @@ def test_a_look_is_never_handed_a_frame_from_before_it_asked(monkeypatch):
     assert not fresh(state(9, 10.1, loot=[]), Asks(after=10.0, loot_wide=True))
     assert not fresh(state(10, 10.1, loot=[], mesos_only=True), loot)  # it looked for mesos only
     assert fresh(state(11, 10.1, tag=None), band)  # she isn't placed: as good as a look would be
+    # A frame that failed its checks is never fresh, placed or not (it was served as an unplaced look, and the mover
+    # tried 40 times, nudging the mouse, then stopped the command).
+    from gamelab.perception.framecheck import Problem
+    for kind in ("offset", "minimap", "hud", "picture", "tag", "place"):
+        assert not fresh(state(12, 10.1, band_at=10.1, bad=Problem(kind, kind)), band)
+        assert not fresh(state(12, 10.1, tag=None, where=None, bad=Problem(kind, kind)), Asks(after=10.0))
 
 
 class Clock:
@@ -401,32 +407,59 @@ def test_a_child_that_cant_start_says_why():
 def test_screen_frames_never_bring_the_game_forward_and_say_when_it_isnt_showing(monkeypatch):
     from gamelab import window
     from gamelab.analysis import bench
+    from gamelab.perception import frames as frames_module
     from gamelab.perception.frames import ScreenFrames
-    game = {"front": "MapleStory", "shows": True, "size": (1920, 1080), "running": True}
+    game = {"front": "MapleStory", "shows": True, "size": (1920, 1080), "running": True, "iconic": False,
+            "on": True, "at": (0, 0), "drag": None}
 
     def find_game(title):
         if not game["running"]:
             raise RuntimeError("no window")
         return 7
+
+    def client_rect(hwnd):
+        rect = {"left": game["at"][0], "top": game["at"][1], "width": game["size"][0], "height": game["size"][1]}
+        if game["drag"] is not None:  # read again after the shot: moved meanwhile
+            game["at"], game["drag"] = game["drag"], None
+        return rect
     monkeypatch.setattr(window, "find_game", find_game)
-    monkeypatch.setattr(window, "minimized", lambda hwnd: False)
-    monkeypatch.setattr(window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": game["size"][0],
-                                                             "height": game["size"][1]})
+    monkeypatch.setattr(window, "minimized", lambda hwnd: game["iconic"])
+    monkeypatch.setattr(window, "client_rect", client_rect)
+    monkeypatch.setattr(window, "on_screen", lambda area: game["on"])
     monkeypatch.setattr(window, "foreground_title", lambda: game["front"])
-    monkeypatch.setattr(window, "shows", lambda hwnd, area: game["shows"])
+    monkeypatch.setattr(window, "shows", lambda hwnd, area, grid=None: game["shows"])
     # window.bring_to_front raises here (tests/conftest.py): a frame source that called it would fail
     screen = bench.SavedScreen()
-    screen.bgra = np.zeros((1080, 1920, 4), np.uint8)
-    frames = ScreenFrames("MapleStory", grabber=screen)
+    screen.bgra = np.zeros((1200, 2000, 4), np.uint8)  # (the desktop: the window moves on it)
+    said = []
+    frames = ScreenFrames("MapleStory", grabber=screen, log=said.append)
     f = frames.next(time.monotonic())
-    assert f.visible and f.full.shape == (1080, 1920, 3)
-    for change, why in ((("front", "Notepad"), "in front"), (("shows", False), "in front"),
-                        (("size", (1280, 720)), "1280x720"), (("running", False), "isn't running")):
+    assert f.visible and f.full.shape == (1080, 1920, 3) and f.problem is None
+    for change, why, kind in ((("front", "Notepad"), "in front", "window"), (("shows", False), "another window", "window"),
+                              (("size", (1280, 720)), "1280x720", "size"), (("running", False), "isn't running", "gone"),
+                              (("iconic", True), "minimized", "minimized"), (("on", False), "off the screen",
+                                                                            "offscreen")):
         before = game[change[0]]
         game[change[0]] = change[1]
         f = frames.next(time.monotonic())
-        assert not f.visible and f.full is None and why in f.why
+        assert not f.visible and f.full is None and why in f.why and f.problem.kind == kind, (change, f)
         game[change[0]] = before
+    # The window dragged while it was captured: not read (its picture isn't where the window is); the next frame is,
+    # and the move is said once.
+    game["drag"] = (26, 26)
+    f = frames.next(time.monotonic())
+    assert not f.visible and f.problem.kind == "moved" and "(0, 0) -> (26, 26)" in f.why
+    assert frames.next(time.monotonic()).visible and said == ["  the game window moved: (0, 0) -> (26, 26)"]
+    # A frame the capture held for STALE_S or more: the duplication stopped handing over frames.
+    old, real_shot = time.monotonic() - frames_module.framecheck.STALE_S - 1.0, screen.shot
+    monkeypatch.setattr(screen, "shot", lambda area, after=None, at=None: _aged(real_shot(area), old))
+    f = frames.next(time.monotonic())
+    assert not f.visible and f.problem.kind == "stale"
+
+
+def _aged(shot, t):
+    shot.t = t
+    return shot
 
 
 def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):

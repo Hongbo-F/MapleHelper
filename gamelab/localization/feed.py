@@ -44,6 +44,7 @@ from multiprocessing.shared_memory import SharedMemory
 import numpy as np
 
 from ..perception.eyes import Eyes, Observation, band_rows
+from ..perception.framecheck import Problem
 from ..perception.frames import Frame
 from ..screen import STRETCHED, Geometry
 from .senses import Senses
@@ -62,6 +63,9 @@ FEED_WAIT_S = 0.6    # s a look waits for the feed before it takes the look itse
                      # drop in view takes ~0.25 s)
 GLANCE_WAIT_S = 0.25  # s a glance waits for a frame from the feed before it takes one itself
 NOT_VISIBLE_S = 0.25  # s between checks while the game isn't wholly on screen
+RECOVER_EVERY_S = 0.2  # s at least between two of the eyes' recoveries while frames fail their checks (Eyes.recover:
+                       # the minimap's picture and her name tag searched afresh, the capture duplicated afresh or mss),
+                       # as a look taken again (senses.RETRY_GAP_S)
 KEEP = 8             # states the stack's side keeps
 EVENTS_KEPT = 10_000  # events kept for the next drain at most (the oldest go: a stack that never drains)
 BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS
@@ -151,9 +155,18 @@ class Runner:
     eyes: Eyes
     step: WorldStep
     title: str = ""
+    recovered: float = -1e18       # when the eyes last recovered (`recover`)
 
     def look(self, frame: Frame) -> Callable[[bool], Observation]:
         return lambda ropes: self.eyes.look_at(frame.full, frame.t, ropes)
+
+    def recover(self, problem: Problem) -> None:
+        """A frame that failed its checks (or the game not wholly on screen): the eyes do what they can before the next
+        (Eyes.recover), RECOVER_EVERY_S apart at most."""
+        now = time.monotonic()
+        if now - self.recovered >= RECOVER_EVERY_S and hasattr(self.eyes, "recover"):
+            self.recovered = now
+            self.eyes.recover(problem)
 
 
 def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[float, float], throws: bool = True,
@@ -226,7 +239,9 @@ def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bo
         if frame is None:
             return
         if not frame.visible:
-            emit(runner.step.step(None, frame.t, False, why=frame.why), frame)
+            st = runner.step.step(None, frame.t, False, why=frame.why, bad=frame.problem)
+            emit(st, frame)
+            runner.recover(st.bad)
             due, pending = time.monotonic() + NOT_VISIBLE_S, None  # whoever asked takes the look itself
             continue
         use = pending if asked and frame.t >= pending.after else None
@@ -242,6 +257,8 @@ def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bo
             for done in late:
                 if done.seq == st.seq:
                     emit(done, None)
+            if st.bad is not None:
+                runner.recover(st.bad)
         if use is not None:
             pending = None
         if time.monotonic() >= due:
@@ -364,8 +381,9 @@ def fresh(st: WorldState, want: Asks) -> bool:
     the look needs (see the top): the monsters it wants searched within MOBS_FRESH_S (WIDE_FRESH_S) of the state's
     frame (with ASK_ONLY_STALE, the default, any search that recent will do: it asked only for what was stale;
     without, the search it asked for, on a frame shown at `want.after` or later, as a blocking look searches its own
-    frame). One where she isn't placed is as good as a look would be."""
-    if not st.visible or st.t < want.after:
+    frame). One where she isn't placed is as good as a look would be; one that failed its checks (`bad`) is never
+    fresh."""
+    if not st.usable or st.t < want.after:
         return False
     if not st.placed:
         return True
@@ -540,9 +558,9 @@ class FeedClient(Feed):
                     return st
                 newest = newest_frame(self.states)
                 left = deadline - time.monotonic()
-                if (newest is not None and newest.t >= want.after and not newest.visible) or left <= 0:
-                    self.refused += 1  # the game isn't on screen (the look brings it forward itself), or too slow
-                    return None
+                if (newest is not None and newest.t >= want.after and not newest.usable) or left <= 0:
+                    self.refused += 1  # the game isn't on screen or as expected (the look's own checks say why; it
+                    return None        # brings the game forward itself), or the feed too slow
                 seq = newest.seq if newest is not None else 0
                 # Nothing fresh as of the newest state: asked of the next frame, once (it's searched on it, or as
                 # soon as the search out is back); with ASK_ONLY_STALE, at each new frame again for a search gone

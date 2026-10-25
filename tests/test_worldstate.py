@@ -338,3 +338,27 @@ def test_a_hidden_track_waits_to_be_judged_for_a_search_for_monsters_out_and_not
         searches.back()
         one(step, k + 1)  # it wasn't there: judged as soon as that search is merged
         assert step.tracker.tracks[tr.id].state == "dead"
+
+
+def test_a_frame_that_fails_its_checks_says_why_in_its_state_and_is_neither_placed_nor_usable(step):
+    # The frame's own checks (perception.framecheck) and her place off the map (localization.placecheck) as the step
+    # meets them: the state carries the Problem, nothing is read from the frame, and no look may be given it.
+    from gamelab.perception.framecheck import Problem
+    good = frames(step, 1)[0]
+    assert good.bad is None and good.placed and good.usable
+    for kind in ("offset", "minimap", "hud", "picture", "tag"):
+        problem = Problem(kind, f"the {kind} check failed")
+
+        def refused(ropes, t=good.t + 0.1, problem=problem):
+            return Observation(t=t, frame=step.eyes.frame(t, ropes).frame, tag=None, hp=1.0, mp=1.0, bad=problem)
+        st = step.step(refused, good.t + 0.1)
+        assert st.bad == problem and not st.placed and not st.usable and st.events == [] and st.monsters == []
+    off = step.eyes.frame(good.t + 0.2, False)
+    off.dot = (off.dot[0] + 400.0, off.dot[1])  # her dot far right of the map's end
+    st = step.step(lambda ropes: off, good.t + 0.2)
+    assert st.bad is not None and st.bad.kind == "place" and not st.usable
+    # The game not wholly on screen: its window's problem, or (none given) why in words.
+    hidden = step.step(None, good.t + 0.3, False, why="the game isn't in front",
+                       bad=Problem("window", "the game isn't in front"))
+    assert not hidden.visible and hidden.bad.kind == "window" and not hidden.usable
+    assert step.step(None, good.t + 0.4, False, why="gone").bad == Problem("window", "gone")

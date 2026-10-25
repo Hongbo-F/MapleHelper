@@ -34,6 +34,7 @@ import numpy as np
 from ..perception import exp_number
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
+from ..perception.framecheck import Problem
 from ..perception.hud import exp_changed
 from ..perception.minimap import minimap_box
 from ..screen import STRETCHED, Geometry
@@ -99,6 +100,11 @@ class WorldState:
     t: float                       # when the screen showed it (time.monotonic's clock)
     visible: bool                  # False: the game wasn't wholly on screen; nothing was read (see `why`)
     why: str = ""
+    # Why nothing may be acted on from this frame (perception.framecheck): the game not wholly on screen (with `visible`
+    # False: its window's problem), or a frame that failed its checks (the minimap window or the HUD not where they
+    # should be, the capture offset, the map's minimap picture or her name tag not found), or her place off the map
+    # (localization.placecheck). Nothing but the bars is read from it; None: it's of the game as expected.
+    bad: Problem | None = None
     tag: tuple[int, int] | None = None   # Observation's and Scene's fields
     tag_seen: bool = True
     hp: float = 0.0
@@ -129,9 +135,16 @@ class WorldState:
                                    # slot are the frame's; given after the states of frames since)
     geo: Geometry = STRETCHED      # the frame's geometry (Observation.geo)
 
+    epoch: int = 0                 # the perception service's run it's of (localization.service): its ring's frames
+
     @property
     def placed(self) -> bool:
-        return self.visible and self.tag is not None and self.where is not None
+        return self.visible and self.bad is None and self.tag is not None and self.where is not None
+
+    @property
+    def usable(self) -> bool:
+        """Whether the stack may act on it: of the game as expected (placed or not: her dot may be hidden)."""
+        return self.visible and self.bad is None
 
     def exp_pixels(self) -> np.ndarray | None:
         if not self.exp_shape:
@@ -341,9 +354,10 @@ class WorldStep:
         self.tracker.throw(t, side)
 
     def step(self, look: Callable[[bool], Observation], t: float, visible: bool = True, asks: Asks | None = None,
-             why: str = "", by: float | None = None) -> WorldState:
+             why: str = "", by: float | None = None, bad: Problem | None = None) -> WorldState:
         """The frame shown at t. `look(ropes)` reads it (Eyes.look_at, or the simulator's FakeEyes.observe),
-        searching for ropes or not; with `visible` False nothing is read. `asks`: what was asked of it (searched
+        searching for ropes or not; with `visible` False nothing is read (`why`, and `bad`, the window's problem, say
+        why). A frame that fails its checks has its Problem in the state (`bad`). `asks`: what was asked of it (searched
         on it, or as soon as the search out is back). Once she's placed, what the searches found since the last
         frame is merged (`by`: what's in by then, on the simulator's clock), the searches due are handed over on
         this frame, and then the monsters followed are re-found; the late states the merge makes, and those of
@@ -354,7 +368,7 @@ class WorldStep:
         if not visible:
             self.counts["not visible"] += 1
             self.owed = None  # whoever asked takes the look itself
-            return WorldState(self.seq, t, False, why=why)
+            return WorldState(self.seq, t, False, why=why, bad=bad or Problem("window", why or "not visible"))
         if asks is not None and (asks.band or asks.wide or asks.loot or asks.loot_wide):
             self.owed = asks if self.owed is None else self.owed.merge(asks)
         sch = self.schedule
@@ -406,7 +420,8 @@ class WorldStep:
             exp=np.packbits(exp).tobytes() if s.exp is not None else b"",
             exp_shape=exp.shape if s.exp is not None else (), where=where, how=s.how, monsters=seen,
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
-            tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame, geo=s.geo)
+            tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame, geo=s.geo,
+            bad=s.bad)
         if job is not None:  # (its answer is merged only after this) the re-finds the tracker took, as inline
             job.known.update({tid: m for tid, m in refound.items() if tid in self.tracker.refound_seen})
             job.state = st

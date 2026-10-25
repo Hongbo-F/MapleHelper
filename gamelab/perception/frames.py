@@ -3,10 +3,11 @@ as the screen shows it, captured without ever bringing it to the front (`ScreenF
 played back (`ListFrames`).
 
 A capture sees whatever is on top. So a frame the game isn't wholly showing (another window in front of it or
-over part of it, the game minimized or not the client size the feed's eyes are for, not running) is marked not
-visible, and nothing is read
-from it: the feed waits for the game to come back rather than bring it forward (Eyes._capture does that for a
-command that sends keys; nothing here ever does).
+over part of it, the game minimized or not the client size the feed's eyes are for, partly off the screen, not
+running) is marked not visible, and nothing is read from it: the feed waits for the game to come back rather than
+bring it forward (nothing here ever does). Nor is a frame the window moved under while it was captured, or one the
+capture held for STALE_S or more: their pictures aren't where the window is (Eyes' own checks once, now the frames':
+perception.framecheck). Each says why in words and as a framecheck.Problem (`problem`), which the feed's state carries.
 """
 
 import time
@@ -14,9 +15,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .. import capture, window
+from .. import capture, telemetry, window
 from ..screen import STRETCHED, Geometry
+from . import framecheck
 from .eyes import rgb_of
+from .framecheck import Problem
 
 
 @dataclass
@@ -26,38 +29,57 @@ class Frame:
     t: float                 # when the screen showed it (time.monotonic's clock), at the latest known
     visible: bool            # the game wholly on screen, in front, at the size the templates were made for
     new: bool = True         # False: the same picture as the frame before (nothing on screen changed)
-    why: str = ""            # why it isn't visible
+    why: str = ""            # why it isn't visible ...
+    problem: Problem | None = None  # ... as a framecheck.Problem (its kind decides what's done about it)
+
+    @staticmethod
+    def unfit(t: float, problem: Problem) -> "Frame":
+        """A frame not to be read, for `problem`."""
+        return Frame(None, t, False, why=problem.why, problem=problem)
 
 
 class ScreenFrames:
     """The game window as the screen shows it, through the process's grabber (DXGI desktop duplication or
     mss, capture.shared). Reads the screen only: no keys, and the game is never brought to the front. `geo`: the
-    client size the eyes reading the frames are for (screen.Geometry); at any other, not visible."""
+    client size the eyes reading the frames are for (screen.Geometry); at any other, not visible. `log`: where a move
+    of the window is said."""
 
-    def __init__(self, title: str, grabber: capture.Grabber | None = None, geo: Geometry = STRETCHED):
+    def __init__(self, title: str, grabber: capture.Grabber | None = None, geo: Geometry = STRETCHED, log=print):
         self.title = title
         self.geo = geo
         self.grabber = grabber or capture.shared()
+        self.log = log
+        self.area: dict[str, int] | None = None  # where the client area was at the last frame read
         self._last: float | None = None  # the last frame's present time
 
     def next(self, after: float) -> Frame:
         """The game as the screen shows it: a frame shown at `after` or later if one comes (the grabber waits
-        for it as long as a look would), else the one held, the screen not having changed since."""
+        for it as long as a look would), else the one held, the screen not having changed since. Not visible, saying
+        why, while the window isn't fit to read (framecheck.window_problem: gone, minimized, another size, partly off
+        the screen, not in front, covered), and for a frame the window moved under or the capture held too long
+        (framecheck.moved_problem, stale_problem)."""
         now = time.monotonic()
         try:
             hwnd = window.find_game(self.title)
-        except RuntimeError:
-            return Frame(None, now, False, why="the game isn't running")
-        if window.minimized(hwnd):
-            return Frame(None, now, False, why="the game is minimized")
-        area = window.client_rect(hwnd)
-        if (area["width"], area["height"]) != self.geo.client:
-            return Frame(None, now, False, why=f"the game window is {area['width']}x{area['height']}, "
-                                               f"not {self.geo.client[0]}x{self.geo.client[1]}")
-        if window.foreground_title() != self.title or not window.shows(hwnd, area):
-            return Frame(None, now, False, why="the game isn't in front")
+            area = window.client_rect(hwnd)
+            wrong = framecheck.window_problem(hwnd, area, self.title, self.geo)
+        except RuntimeError as e:
+            return Frame.unfit(now, Problem("gone", f"the game isn't running ({e})"))
+        if wrong is not None:
+            return Frame.unfit(now, wrong)
         shot = self.grabber.shot(area, after=after)
         full = shot.crop(0, 0, area["width"], area["height"], rgb_of)
+        try:
+            moved = framecheck.moved_problem(area, window.client_rect(hwnd))  # (a window dragged moves between the two)
+        except RuntimeError as e:
+            return Frame.unfit(time.monotonic(), Problem("gone", f"the game isn't running ({e})"))
+        if bad := moved or framecheck.stale_problem(shot.t, time.monotonic()):
+            return Frame.unfit(time.monotonic(), bad)
+        if self.area is not None and area != self.area:
+            text = f"the game window moved: ({self.area['left']}, {self.area['top']}) -> ({area['left']}, {area['top']})"
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="window", text=text)
+        self.area = area
         shown = shot.t if shot.t is not None else time.monotonic()
         new = shown != self._last
         self._last = shown
