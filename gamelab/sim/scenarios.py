@@ -2146,10 +2146,10 @@ def _grind(minutes: float):
 def loop_tree_grind(sim):
     """`python -m gamelab tour --loop --grind --minutes 3 --map 10002073` from 23 among the crowding study's other
     players (harness.TREE_CAMPS) with respawns at 30 s (preset crowd-slow's): the loop over the map's spawn points chosen
-    by its EXP a minute (behavior.patrol: the upper tower's 14, 10, 8, 12), its stops taken in turn, what she meets on
-    the way shot in passing, kills credited to the platforms they died on. In this world she's touched about five times
-    as often as live (README: Grinding): on seed 1 her trips up the tower end in rests twice, and in 3 minutes she gets
-    to no stop to stay at; she kills on 18-23 on the way."""
+    by its EXP a minute (behavior.patrol: the top cluster's 10, 7), and what she sees pulling her off it to the stops
+    around her (23, 24, 19, 20 on seed 1), what she meets on the way shot in passing, kills credited to the platforms
+    they died on (19, 20, 21, 23, 24). In this world she's touched about five times as often as live (README:
+    Grinding): knocked off 23 down to 25-29 and back, then a rest at the end."""
     return _grind(3)(sim)
 
 

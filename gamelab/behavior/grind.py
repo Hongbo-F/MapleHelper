@@ -57,8 +57,9 @@ REACH_STEP = 200.0     # guess: units she walks along her platform at once at mo
 HP_GAP_S = 2.0         # guess: s between two looks at most for the HP gone between them to be charged to a platform
 RECHOOSE_S = 1.0       # guess: s between two looks at where she'd go instead (Patrol.choose takes about 1 ms on Tree
                        # Dungeon, its routes kept by the planner)
-HP_LOG_S = 10.0        # s on a platform at least for the log to say what HP she lost there
-STATE_EVERY_S = 60.0   # s between two 'grind' records 'state' (what it did so far: a run cut short has them)
+HP_LOG_S = 10.0        # s on a platform at least for the log to say what HP she lost there (the log's choice)
+STATE_EVERY_S = 60.0   # s between two 'grind' records 'state' (what it did so far: a run cut short has them; the
+                       # log's choice)
 
 
 class Grind(Hunt):

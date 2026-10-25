@@ -33,10 +33,11 @@ stop that raises the rate most (at its cheapest place in the round), the best ro
 replaces the one she follows only when it's LOOP_GAIN better by the same belief, and not within LOOP_MIN_S of the last
 change (no flip-flopping).
 
-On Tree Dungeon, Forest Up North II, before she has seen anything (Lucky Seven's kill time): the loop 14, 10, 8, 12, 466
-EXP a minute (a round of 50 s: 12 of travel, 33 of shooting; 14 spawn points), where the user grinding made 484 on
-2026-10-24; 19-24 round the platforms by the safe ones, 337; camping at 23 229, where her hunt loop camping there made
-283 live (her kills from 23 and 24 on 22, 23 and 24).
+On Tree Dungeon, Forest Up North II, before she has seen anything (Lucky Seven's kill time): the loop 10, 7, 463 EXP a
+minute (a round of 22 s: 5 of travel, 15 of shooting; 8 spawn points), where the user grinding made 484 on 2026-10-24;
+14, 10, 8, 12 461 (a round of 50 s); 19-24 round the platforms by the safe ones, 347; camping at 23 228, where her hunt
+loop camping there made 283 live (her kills from 23 and 24 on 22, 23 and 24). Rounds this close are a coin toss: what
+she sees decides (the next stop, below).
 
 The next stop (Patrol.choose): along the loop from the last loop stop she was at, the first expected to hold SKIP_FULL
 of what it holds full when she gets there (an emptied stretch is skipped until it's due), or on a trip the stop she's
@@ -55,7 +56,8 @@ touch shares (touch_shares: the game data's touch damage over her HP) of the pla
 takes DANGER_MIN of her HP or more: by no kind's name. What she loses there is learned as she goes (`hp_rate`: the hook
 as a prior, HP_PRIOR_S, and the HP she's seen go there).
 
-The numbers marked "guess" are starting values for the simulator's A/B runs; the rest say where they were measured.
+The numbers marked "guess" are starting values for the simulator's A/B runs; the rest say where they were measured, or
+are a search's resolution.
 """
 
 import math
@@ -80,7 +82,7 @@ from ..perception.kinds import kind_of
 # misses) it's about three times as long.
 KILL_S_PER_EXP = 0.085
 THROW_S = 0.84         # s between her throws (her attack's lock and its margin: 0.79-0.85 s live)
-KILL_PRIOR_EXP = 300.0
+KILL_PRIOR_EXP = 300.0  # guess
 STOP_S = 1.0           # guess: s a stop costs beyond its kills (the looks that judge it, settling where she lands)
 # The refill of a spawn point she emptied (not_back): the live respawn report on Tree Dungeon (2026-10-24, six runs, 133
 # platforms her kills emptied): none back within 5 s in 91%, a median of 13.9 s for a platform's first monster back
@@ -98,9 +100,11 @@ Q_UNKNOWN = 0.35       # a point never seen: this full (live: the uncamped 19-21
                        # of all points; the simulator's crowd fills every point)
 # Another player by a point (their minimap dot within RIVAL_X across and RIVAL_DY up or down: hunt.PLAYER_NEAR and
 # PLAYER_DY) in a look within RIVAL_KEEP_S takes its monsters: of its kind, she gets 1 - take(kind), learned from her
-# memory (the monsters she saw by another player: gone without a kill of hers, against killed by her or seen there
-# TAKE_KEEP_S on), TAKE_PRIOR counting as TAKE_N monsters. The crowding study of 2026-10-24: other players killed Green
-# Mushrooms within about 4 s and left Horny Mushrooms alone; the simulator's camps do the same.
+# memory (the monsters she saw by another player: forgotten by looks without a kill of hers, against killed by her or
+# seen there TAKE_KEEP_S after she first saw them), TAKE_PRIOR counting as TAKE_N monsters. The crowding study of
+# 2026-10-24: other players killed Green Mushrooms within about 4 s and left Horny Mushrooms alone; the simulator's
+# camps do the same. Replayed on the user's play (lab/telemetry/20261024-170558-watch.jsonl) it learns 0.50 and 0.33,
+# on the 14:01 hunt 0.51 and 0.50.
 RIVAL_X = 200.0
 RIVAL_DY = 100.0
 RIVAL_KEEP_S = 20.0    # guess
@@ -124,16 +128,17 @@ HP_PRICE = 100.0       # guess: what a bar of her HP costs her, in EXP (her pet'
 # ... and blended with the HP she has seen go on each platform (Patrol.learn_hp: the drops of her HP bar between looks
 # there), the hook counting as HP_PRIOR_S s there: in the simulator's crowd on Tree Dungeon she lost 1.3-1.4 bars a
 # minute alive whatever she did (20 bars a run, her 60 potions), live 0.28-0.33.
-HP_PRIOR_S = 60.0
+HP_PRIOR_S = 60.0      # guess
 # The loop.
-LOOP_MAX = 12          # stops in a round at most ...
+LOOP_MAX = 12          # guess: stops in a round at most ...
 LOOP_MIN = 2           # ... and at least: one is camping (Patrol.camping), which grinding doesn't do
-SEEDS = 8              # rounds grown, from the stops worth the most on their own
-STAND_STEP = 20.0      # units between the places along a platform tried as a stop
-CAUGHT_TERMS = 400     # rounds summed at most for what she catches at a point (caught)
+SEEDS = 8              # guess: rounds grown, from the stops worth the most on their own (best() about 0.1 s on Tree
+                       # Dungeon)
+STAND_STEP = 20.0      # units between the places along a platform tried as a stop (a resolution)
+CAUGHT_TERMS = 400     # rounds summed at most for what she catches at a point (caught; a resolution)
 LOOP_GAIN = 0.15       # guess: a new round replaces hers only this much better by the same belief ...
-LOOP_MIN_S = 60.0      # ... and not within this long of the last change
-REPLAN_S = 20.0        # s between two looks for a better round
+LOOP_MIN_S = 60.0      # guess: ... and not within this long of the last change
+REPLAN_S = 20.0        # guess: s between two looks for a better round
 # The next stop.
 # A stop of the loop is skipped when it's expected to hold under this share of what it holds full when she gets there
 # (an emptied stretch, until it's due): under Q_UNKNOWN, so a stop never seen is never skipped.
@@ -145,7 +150,8 @@ SKIP_FULL = 0.25       # guess
 # lost to 10, 15 s up the tower and never seen (2.2 EXP/s).
 PULL_MIN = SURE
 PULL_GAIN = 1.5        # guess
-REACH_ROUND = 5.0      # units: a remembered monster's x to this for whether a stop gets at it (Patrol.gets, kept)
+REACH_ROUND = 5.0      # units: a remembered monster's x to this for whether a stop gets at it (Patrol.gets, kept; a
+                       # resolution)
 DUE_S = 2.0            # guess: s of a wait at a stop for the respawns in reach (Patrol.wait_gain)
 
 
