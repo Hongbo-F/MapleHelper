@@ -616,12 +616,12 @@ WEST_ROCKY = ROOT / "tests" / "fixtures" / "native"         # 10004021 at 1366x7
 def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_else_is(map_id, frames):
     """Each of the map's drops (perception.drops) and the coins' frames, the game's own pictures drawn 1:1 onto frames
     of the map at the game's own 1366x768, is found in the strip above where it lies, as its kind and where drawn; and
-    on the frames as they are no drop is found anywhere above the bottom bar."""
+    on the frames as they are no drop is found anywhere above the chat bar (row 700, where the search goes down to)."""
     from gamelab.analysis import pasted
     from gamelab.localization import mapdata
     from gamelab.perception import loot
     from gamelab.perception.drops import items_for
-    from gamelab.screen import HUD_TOP, NATIVE
+    from gamelab.screen import NATIVE
     files = sorted(frames.glob("*.png")) if frames.is_dir() else []
     if not files:
         pytest.skip(f"needs frames of map {map_id} in {frames}")
@@ -638,7 +638,7 @@ def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_els
         assert max(max(abs(dx), abs(dy)) for dx, dy in t.errors) <= 0.5, kind
     assert result["clean"]["native"] == []
     for full in backgrounds:
-        assert det.detect(full, (0, 0, full.shape[1], int(full.shape[0] * HUD_TOP))) == []
+        assert det.detect(full, (0, 0, full.shape[1], int(full.shape[0] * NATIVE.hud_top))) == []
 
 
 TREE_DUNGEON_DROPS = Path("D:/MapleHelper-scratch/perception/tree_dungeon_drops")  # 10002073 in game, with drops
