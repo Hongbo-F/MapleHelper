@@ -226,6 +226,11 @@ class MapModel:
                                                                   # her defence: attack.danger)
     mob_hops: dict[str, bool] = field(default_factory=dict)       # monster name -> whether it hops (a jump action in
                                                                   # its Mob data): it can leave its platform
+    mob_flies: dict[str, bool] = field(default_factory=dict)      # monster name -> whether it flies (a fly action):
+                                                                  # no floor holds it (none on her three maps)
+    mob_tall: dict[str, float] = field(default_factory=dict)      # monster name -> the highest its body reaches
+                                                                  # above its feet, a hop's frames too (a slime 66,
+                                                                  # 42 standing): what a rope above it must clear
 
     # --- one place: twins -----------------------------------------------------------------------
 
@@ -409,11 +414,13 @@ def _mob_id(life: dict) -> str:
 
 def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | None = None,
           mob_exp: dict | None = None, mob_bodies: dict | None = None, mob_die_s: dict | None = None,
-          mob_speeds: dict | None = None, mob_damage: dict | None = None, mob_hops: dict | None = None) -> MapModel:
+          mob_speeds: dict | None = None, mob_damage: dict | None = None, mob_hops: dict | None = None,
+          mob_flies: dict | None = None, mob_tall: dict | None = None) -> MapModel:
     """A map's model from its image in the game data (`tree`, as JSON). `mob_names`, `mob_exp`,
     `mob_bodies` (as _mob_bodies gives them), `mob_die_s` (_mob_die_s), `mob_speeds` (speed stats, as
-    _mob_speeds gives them), `mob_damage` (touch damage) and `mob_hops` (whether it hops: _mob_touch gives
-    both) are keyed by monster id (_mob_id); the model keys them by name."""
+    _mob_speeds gives them), `mob_damage` (touch damage), `mob_hops` (whether it hops), `mob_flies` (whether it
+    flies) and `mob_tall` (how high its body reaches: _mob_touch gives these four) are keyed by monster id (_mob_id);
+    the model keys them by name."""
     info = tree.get("info", {})
     platforms, walls = _platforms(_footholds(tree))
     ropes = [Rope(r["x"], r["y1"], r["y2"], bool(r.get("l")), bool(r.get("uf")))
@@ -436,7 +443,9 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
                     for i, b in (mob_bodies or {}).items()},
         mob_speeds={mob_names.get(i, i): mob_walk_speed(v, physics) for i, v in (mob_speeds or {}).items()},
         mob_damage={mob_names.get(i, i): float(v) for i, v in (mob_damage or {}).items()},
-        mob_hops={mob_names.get(i, i): bool(v) for i, v in (mob_hops or {}).items()})
+        mob_hops={mob_names.get(i, i): bool(v) for i, v in (mob_hops or {}).items()},
+        mob_flies={mob_names.get(i, i): bool(v) for i, v in (mob_flies or {}).items()},
+        mob_tall={mob_names.get(i, i): float(v) for i, v in (mob_tall or {}).items()})
     floors, peers = tuple(s for p in model.platforms for s in p.segments), tuple(model.platforms)
     for p in model.platforms:
         p.walls, p.floors, p.peers = tuple(model.walls_of(p.group)), floors, peers
@@ -496,10 +505,10 @@ def load(map_id: int) -> MapModel:
         cache.write_text(json.dumps(raw), encoding="utf-8")
     elif "mob_speeds" not in raw:  # cached before speeds were kept: added to it
         _add_speeds(cache, raw)
-    touch = {k: raw[k] for k in ("mob_damage", "mob_hops") if k in raw}
-    if len(touch) < 2:
-        # Cached before touch damage and hops were kept: read with the model from the game data copy (none without
-        # it), and not written to the cache: one cache can serve several checkouts of the code at once.
+    touch = {k: raw[k] for k in TOUCH_KEYS if k in raw}
+    if len(touch) < len(TOUCH_KEYS):
+        # Cached before touch damage, hops, flight and height were kept: read with the model from the game data copy
+        # (none without it), and not written to the cache: one cache can serve several checkouts of the code at once.
         lives = {_mob_id(s) for s in _monster_lives(raw["tree"])}
         try:
             touch = _mob_touch(lives)
@@ -510,7 +519,7 @@ def load(map_id: int) -> MapModel:
                       f"as safe (attack.danger)", file=sys.stderr)
     return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"],
                  raw["mob_bodies"], raw["mob_die_s"], raw.get("mob_speeds"), touch.get("mob_damage"),
-                 touch.get("mob_hops"))
+                 touch.get("mob_hops"), touch.get("mob_flies"), touch.get("mob_tall"))
 
 
 def _add_speeds(cache: Path, raw: dict) -> None:
@@ -550,13 +559,17 @@ def _mob_speeds(ids: set[str]) -> dict[str, float]:
 
 
 def _mob_touch(ids: set[str]) -> dict[str, dict]:
-    """Monster id -> its touch damage (info/PADamage) as "mob_damage", and whether it hops (a "jump" action in its
+    """Monster id -> its touch damage (info/PADamage) as "mob_damage"; whether it hops (a "jump" action in its
     Mob data, its own or the one it links to: on the first map pigs, slimes and Orange Mushrooms do, on Tree Dungeon
-    the slimes and not the mushrooms) as "mob_hops", from the game data. A monster that hops can leave the platform
-    it walks (pigs were seen on platforms where none spawn: localization.monsters); one that doesn't never does."""
+    the slimes and not the mushrooms) as "mob_hops"; whether it flies (a "fly" action: no monster of her three maps
+    has one) as "mob_flies"; and as "mob_tall" the highest its body reaches above its feet, by the boxes of its
+    stand, move and jump frames (lt: a slime's hop 66, standing 42-44; the mushrooms 52), from the game data. A
+    monster that hops can leave the platform it walks (pigs were seen on platforms where none spawn:
+    localization.monsters); one that doesn't never does."""
     from gamedata.canvas import _mob_pack
+    from gamedata.wz import Canvas
     pack = _mob_pack()
-    damage, hops = {}, {}
+    damage, hops, flies, tall = {}, {}, {}, {}
     for i in ids:
         tree = pack.image(f"Mob/{int(i):07d}.img")
         info = tree.get("info") or {}
@@ -564,13 +577,20 @@ def _mob_touch(ids: set[str]) -> dict[str, dict]:
         if info.get("link") and not tree.get("stand"):  # its frames are another monster's
             tree = pack.image(f"Mob/{int(info['link']):07d}.img")
         hops[i] = bool(tree.get(JUMP_ACTION))
-    return {"mob_damage": damage, "mob_hops": hops}
+        flies[i] = bool(tree.get(FLY_ACTION))
+        tops = [-f.props["lt"].y for a in (*BODY_ACTIONS, JUMP_ACTION, FLY_ACTION) for f in (tree.get(a) or {}).values()
+                if isinstance(f, Canvas) and f.props.get("lt") is not None]
+        if tops:
+            tall[i] = float(max(tops))
+    return {"mob_damage": damage, "mob_hops": hops, "mob_flies": flies, "mob_tall": tall}
 
 
 BODY_ACTIONS = ("stand", "move")  # a monster's frames while it stands or walks ...
 FLINCH_ACTION = "hit1"            # ... while it flinches after a hit ...
 DIE_ACTION = "die1"               # ... and while it dies (no boxes: only their delays are read)
-JUMP_ACTION = "jump"              # a monster with frames for this hops (_mob_touch)
+JUMP_ACTION = "jump"              # a monster with frames for this hops (_mob_touch) ...
+FLY_ACTION = "fly"                # ... and one with frames for this flies
+TOUCH_KEYS = ("mob_damage", "mob_hops", "mob_flies", "mob_tall")  # what _mob_touch gives, kept with a map's cache
 FRAME_DELAY = 100                 # ms a frame lasts when the data gives it no delay (the client's default)
 
 

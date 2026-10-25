@@ -21,13 +21,18 @@ on 23 came 1.7-57 s after her last kill there, a median of about 17 s: not on be
 
 The danger at a place is the sum over them: the share of her HP each one's touch takes times how likely it comes
 soon. Places are compared by it, never a kind or a map by name.
+
+A rope or ladder is a place too (`on_rope`: her feet at a height on it): a monster that walks its floor touches her
+there only where its body, up to the highest its frames reach (MapModel.mob_tall: a slime's hop), meets hers; a
+flier (MapModel.mob_flies: none on her three maps) anywhere, straight at her. Where on a rope she hangs and what it
+takes to get on and off is attack.ropes'.
 """
 
 import math
 from collections import Counter
 from dataclasses import dataclass
 
-from ..localization.mapdata import MapModel, Platform
+from ..localization.mapdata import MapModel, Platform, Rope
 from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, speeds
 from ..motion.flow import HER_HALF
 from ..perception.kinds import kind_of
@@ -87,13 +92,16 @@ def touch_taken(pad: float, defence: float, level: float, u: float = 0.5) -> int
 @dataclass(frozen=True)
 class Threat:
     """A kind as a danger to her: the share of her HP a touch by it takes (0: under DANGER_MIN), how fast it walks,
-    half its width, how tall it is, and whether it hops off its platform."""
+    half its width, how tall it is walking, whether it hops off its platform, whether it flies, and the highest its
+    body reaches (a hop's frames too: MapModel.mob_tall)."""
     kind: str
     share: float
     speed: float
     half: float
     top: float
     hops: bool
+    flies: bool = False
+    tall: float = 0.0
 
 
 def soon(t: float) -> float:
@@ -112,8 +120,10 @@ class Danger:
             kind = kind_of(name)
             share = touch_taken(pad, self.her.defence, self.her.level) / self.her.hp if pad > 0 else 0.0
             b = body.get(kind)
+            top = b.top if b else 46.0
             self.threats[kind] = Threat(kind, share if share >= DANGER_MIN else 0.0, speed.get(kind, DEFAULT_SPEED),
-                                        b.half if b else 34.0, b.top if b else 46.0, model.mob_hops.get(name, False))
+                                        b.half if b else 34.0, top, model.mob_hops.get(name, False),
+                                        model.mob_flies.get(name, False), max(top, model.mob_tall.get(name, top)))
         # The spawn points of kinds that count, and how many of each kind each platform has.
         self.points = [(pid, s.x, kind) for pid, s in model.spawn_points
                        if self.share(kind := kind_of(s.name or str(s.mob_id))) > 0]
@@ -142,6 +152,8 @@ class Danger:
         `p` (0: it does already), and how likely it goes there (1 along its platform, HOP_CHANCE off it); None if it
         can't touch her there. Its middle keeps half its width inside its platform."""
         reach = t.half + HER_HALF
+        if t.flies:  # no floor holds it: straight at her
+            return _flight(t, mx, q.y_at(q.clamp(mx)), x, p.y_at(x)), 1.0
         lo, hi = q.left + t.half, q.right - t.half
         if hi < lo:
             lo = hi = (q.left + q.right) / 2
@@ -181,21 +193,66 @@ class Danger:
     def at(self, pid: int, x: float, seen: list[Monster] | None = None) -> float:
         """The danger to her standing at map x on platform `pid`: from the monsters `seen` (a look's) and the spawn
         points they don't account for; with no look (None), from every spawn point's monster at its point."""
-        p, model = self.model.platform(pid), self.model
-        total, fill = 0.0, None
+        p = self.model.platform(pid)
+        return sum(w * self.of(kind, q, mx, p, x) for kind, q, mx, w in self._sources(seen))
+
+    def on_rope(self, rope: Rope, y: float, seen: list[Monster] | None = None) -> float:
+        """The danger to her hanging on `rope` with her feet at map y, from the same monsters and spawn points as `at`:
+        a monster that walks its floor touches her there only if its body reaches hers (walk_rope)."""
+        total = 0.0
+        for kind, q, mx, w in self._sources(seen):
+            t = self.threats.get(kind)
+            if t is None or t.share <= 0:
+                continue
+            way = self.walk_rope(t, q, mx, rope, y)
+            if way is not None:
+                total += w * t.share * way[1] * soon(way[0] / max(t.speed, 1.0))
+        return total
+
+    def walk_rope(self, t: Threat, q: Platform, mx: float, rope: Rope, y: float) -> tuple[float, float] | None:
+        """How far a monster of threat `t` at map x `mx` on platform `q` walks before it touches her hanging on `rope`
+        with her feet at y, and how likely (1); None if it can't. Her body is HER_HALF either side of the rope and
+        HER_TALL up from her feet; its, half its width either side of its middle (kept on its platform) and from its
+        feet up to the highest its frames reach (Threat.tall: a slime's hop, 66, where it stands 42-44). A flier goes
+        straight at her."""
+        reach = t.half + HER_HALF
+        if t.flies:
+            return _flight(t, mx, q.y_at(q.clamp(mx)), rope.x, y), 1.0
+        lo, hi = q.left + t.half, q.right - t.half
+        if hi < lo:
+            lo = hi = (q.left + q.right) / 2
+        a, b = max(lo, rope.x - reach), min(hi, rope.x + reach)
+        if a > b:
+            return None
+        floor = q.y_at(q.clamp(rope.x))
+        if not (floor - t.tall < y and floor > y - HER_TALL):  # its top under her feet, or its feet over her head
+            return None
+        return (0.0 if a <= mx <= b else min(abs(mx - a), abs(mx - b))), 1.0
+
+    def _sources(self, seen: list[Monster] | None):
+        """The monsters a place's danger comes from, as (kind, platform, x, weight): the ones `seen` (a look's, of
+        kinds that count, each 1) and the spawn points they don't account for (of each kind's on a platform, as many as
+        the look's monsters of that kind there don't account for, each as likely); with no look (None), every spawn
+        point's monster at its point."""
+        model, fill = self.model, None
         if seen is not None:
             here = Counter()
             for m in seen:
                 if m.platform is None or self.share(m.kind) <= 0:
                     continue
                 here[(m.platform, m.kind)] += 1
-                total += self.of(m.kind, model.platform(m.platform), m.x, p, x)
+                yield m.kind, model.platform(m.platform), m.x, 1.0
             fill = {key: max(0, n - here[key]) / n for key, n in self.counts.items()}
         for q, sx, kind in self.points:
             share = 1.0 if fill is None else fill[(q, kind)]
             if share > 0:
-                total += share * self.of(kind, model.platform(q), sx, p, x)
-        return total
+                yield kind, model.platform(q), sx, share
+
+
+def _flight(t: Threat, mx: float, floor: float, x: float, feet: float) -> float:
+    """How far a flier of threat `t` at map x `mx` over a floor at y `floor` goes straight at her (her feet at (x,
+    feet)) before their bodies meet: middle to middle, less half its width and hers."""
+    return max(0.0, math.hypot(mx - x, (floor - t.tall / 2) - (feet - HER_TALL / 2)) - t.half - HER_HALF)
 
 
 # Danger by id(model) and her, with the model (kept, so its id can't go to another one while it's here).
