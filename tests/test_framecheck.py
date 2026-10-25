@@ -375,17 +375,15 @@ def test_regain_stands_still_until_a_look_passes(monkeypatch):
 
 # --- a hunt in the simulator, its looks failing for a while ------------------------------------------------------------
 
-def test_a_hunt_sends_nothing_while_its_looks_fail_and_hunts_on_after(monkeypatch):
-    """The hunt loop on Tree Dungeon (loop_tree_run's start, 90 s): from 20 s to 35 s of it every look fails its
-    checks (the capture offset). It stands still, says why, sends no plan from LOST_S after the first failure until
-    the looks pass again, and then hunts on."""
+def _lost_hunt(window: tuple[float, float], minutes: float, problem: Problem) -> dict:
+    """The hunt loop on Tree Dungeon (loop_tree_run's start, `minutes`), every look failing its checks with `problem`
+    from window[0] to window[1] s of it: its trace."""
     import dataclasses
 
     from gamelab.sim import scenarios
     from gamelab.sim.scenarios import _loop
     if scenarios.real_map(TREE) is None:
         pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
-    window = (20.0, 35.0)
 
     def run(sim):
         real = sim.eyes.look
@@ -393,23 +391,45 @@ def test_a_hunt_sends_nothing_while_its_looks_fail_and_hunts_on_after(monkeypatc
         def look():
             if window[0] <= sim.clock.elapsed < window[1]:
                 sim.clock.sleep(0.03)  # a capture's time
-                raise BadLook(Problem("offset", "the capture is offset by (+26, +26) px from the game's client area"))
+                raise BadLook(problem)
             return real()
 
         sim.eyes.look = look
-        return _loop(1.5)(sim)
+        return _loop(minutes)(sim)
 
     sc = dataclasses.replace(scenarios.SCENARIOS["loop_tree_run"], name="loop_tree_lost", fn=run, expects=())
-    trace = scenarios.run_scenario(sc)
+    return scenarios.run_scenario(sc)
+
+
+def test_a_hunt_sends_nothing_while_its_looks_fail_and_hunts_on_after():
+    """From 20 s to 35 s of a 90 s hunt every look fails its checks (the capture offset). It stands still, says why,
+    sends no plan from LOST_S after the first failure until the looks pass again, and then hunts on."""
+    window = (20.0, 35.0)
+    trace = _lost_hunt(window, 1.5, Problem("offset", "the capture is offset by (+26, +26) px from the game's client "
+                                                      "area"))
     log = trace["log"]
     assert any("standing still: the capture is offset by (+26, +26)" in line for line in log), log
     assert any("the game looks as expected again" in line for line in log)
-    first_fail = next(i for i, line in enumerate(log) if "a look failed its checks" in line)
-    assert first_fail is not None
-    quiet = [p for p in trace["plans"] if window[0] + senses_module.LOST_S + 2.0 <= p[0] < window[1]]
-    assert quiet == [], quiet  # (a plan sent just before the looks failed may still play out)
+    # (a plan sent as the looks began to fail may still play out: the last before the window was at 20.49 s)
+    quiet = [p for p in trace["plans"] if window[0] + 0.5 <= p[0] < window[1]]
+    assert quiet == [], quiet
     assert any(p[0] >= window[1] for p in trace["plans"])  # hunting on after
     assert trace["result"]["hunt_stop"] == "time up"
+
+
+def test_a_pause_longer_than_stuck_s_is_no_time_without_progress():
+    """Looks failing for 125 s (the client resized, the user taking a while), longer than hunt.STUCK_S: when they pass
+    again the hunt goes on, the pause not counted as time without progress or on its objective (before, the first
+    look after it ended the hunt as stuck, or dropped the objective at once)."""
+    from gamelab.behavior import hunt
+    window = (25.0, 150.0)
+    trace = _lost_hunt(window, 3.0, framecheck.size_problem((1396, 1952), NATIVE))
+    assert window[1] - window[0] > hunt.STUCK_S
+    after = [line for line in trace["log"] if float(line.split()[0]) >= window[1]]
+    assert after and after[0].split(None, 1)[1].startswith("the game looks as expected again")
+    assert not any("no kill" in line or "suspensions included: dropped" in line for line in after[:20]), after[:20]
+    assert trace["result"]["hunt_stop"] == "time up"
+    assert sum(p[0] >= window[1] for p in trace["plans"]) > 20
 
 
 # --- the name tag, the minimap picture and the capture -----------------------------------------------------------------

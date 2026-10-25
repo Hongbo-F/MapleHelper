@@ -364,7 +364,10 @@ class Hunt:
                 if self._pass() == "stop":
                     break
             except LookLost as lost:  # the game doesn't look as expected: stand still until it does (senses)
-                if self.h.senses.regain(lost, end) is None:
+                paused = time.monotonic()
+                back = self.h.senses.regain(lost, end)
+                self._paused(time.monotonic() - paused)
+                if back is None:
                     break
         self._leave_ground()
         self.report.seconds = time.monotonic() - start
@@ -373,6 +376,27 @@ class Hunt:
         self.report.stop = self.report.stop or "time up"
         self.tour.rest_and_stand_by(mode=TRANSIT)
         return self.report
+
+    def _paused(self, seconds: float) -> None:
+        """She stood still `seconds` (LookLost: Senses.regain): her clocks move on by as much, so the pause isn't time
+        without progress (STUCK_S: a pause of 125 s ended the hunt as stuck on the first look after it, in the
+        simulator's loop_tree_run), on an objective (OBJECTIVE_S, its trip's deadline), at a ground (its EXP a second
+        on disk, MIN_STAY, GROUND_S), on her spot (SPOT_REST) or idle (her patience). The game's own clocks (respawns,
+        drops' lives) ran on meanwhile and aren't moved."""
+        self._progress += seconds
+        for o in [self.obj, *self.stack]:
+            if o is not None:
+                o.started += seconds
+                if o.trip is not None:
+                    o.trip.deadline += seconds
+        if (v := self.visit) is not None:
+            v.spot_since += seconds
+            if v.arrived is not None:
+                v.arrived += seconds
+            if v.empty_since is not None:
+                v.empty_since += seconds
+        if self._idle_since is not None:
+            self._idle_since += seconds
 
     def _pass(self) -> str | None:
         """One look and one step."""
