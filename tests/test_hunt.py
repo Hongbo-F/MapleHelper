@@ -1,9 +1,14 @@
-"""The hunt loop's pile rules (behavior.hunt), on stand-ins: no map, no simulator. The loop itself runs
-end to end in the simulator's loop_* scenarios."""
+"""The hunt loop's pile rules (behavior.hunt), on stand-ins: no map, no simulator (but where a hunter and its
+Hunt take their map's worth, on Tree Dungeon's from the game data). The loop itself runs end to end in the
+simulator's loop_* scenarios."""
 
+import random
 import time
 from types import SimpleNamespace
 
+import pytest
+
+from gamedata.paths import COPY
 from gamelab.attack.spots import Spot
 from gamelab.behavior import hunt
 from gamelab.behavior.fight import FightState
@@ -267,6 +272,20 @@ def test_on_another_map_a_drop_is_valuable_at_twice_its_bronze_coin():
     assert h._valuable_pile(_scene()) is None
     h.h.drops.known.append(topaz)
     assert h._valuable_pile(_scene()) is topaz
+
+
+@pytest.mark.skipif(not (mapdata.CACHE / "10002073.json").exists() and not (COPY / "Map").is_dir(),
+                    reason="needs Tree Dungeon's map data")
+def test_a_hunter_on_tree_dungeon_and_its_hunt_go_by_the_maps_worth():
+    # The hunter takes its map's worth (looting.worth_for), and its Hunt rule 6a's line from it: 66.8 on Tree Dungeon,
+    # twice its bronze coin's 33.4 (on the first map 30). Its monsters' drops are all known: nothing said of them.
+    from gamelab.behavior.hunter import Hunter
+    model, said = mapdata.load(10002073), []
+    h = Hunter(SimpleNamespace(), KEYS, model, log=said.append)
+    assert h.worth.coins["bronze"] == pytest.approx(33.4, abs=0.05) and h.drops.value is h.worth
+    hunting = Hunt(SimpleNamespace(h=h, nav=SimpleNamespace(model=model), rng=random.Random(1), worth=None),
+                   log=said.append)
+    assert hunting.valuable == h.worth.valuable == pytest.approx(66.8, abs=0.1) and said == []
 
 
 def test_a_hunter_on_a_map_whose_monsters_drops_are_not_known_says_so_once():
