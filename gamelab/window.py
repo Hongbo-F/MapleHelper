@@ -50,6 +50,16 @@ user32.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
 user32.AdjustWindowRectEx.argtypes = (ctypes.POINTER(wintypes.RECT), wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
 user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                 wintypes.UINT)
+user32.GetWindow.argtypes = (wintypes.HWND, wintypes.UINT)
+user32.GetWindow.restype = wintypes.HWND
+GW_HWNDPREV = 3  # GetWindow: the window just above in the z-order
+user32.IsWindowVisible.argtypes = (wintypes.HWND,)
+user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+dwmapi = ctypes.WinDLL("dwmapi")
+dwmapi.DwmGetWindowAttribute.argtypes = (wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD)
+dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long  # an HRESULT: 0 is S_OK
+DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_CLOAKED = 9, 14  # a window's box as drawn; whether it's hidden by the compositor
+OVER_MAX = 2000  # `over`: windows above the game looked at at most (the walk can go round if windows change meanwhile)
 # The game's client sizes the player may set (resize_client): the game lays out a 1366x768 view and stretches it to
 # its window (screen.Geometry.stretch), so a 1366x768 client shows it pixel for pixel; 1920x1080 is how it was set until
 # 2026-10-23. A normal program can't resize the game's window (it runs as administrator: "access denied", tried
@@ -112,6 +122,59 @@ def shows(hwnd: int, area: dict, inset: int = 8, grid: tuple[int, int] | None = 
         points = [(x0 + (x1 - x0) * i // grid[0], y0 + (y1 - y0) * j // grid[1])
                   for i in range(grid[0] + 1) for j in range(grid[1] + 1)]
     return all(user32.GetAncestor(user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) == hwnd for x, y in points)
+
+
+def over(hwnd: int, area: dict) -> int | None:
+    """A window of another program over any of window `hwnd`'s client area `area` (screen px), or None: the windows
+    above it in the z-order, one by one to the top, that are shown (visible, not minimized, not hidden by the
+    compositor: DWMWA_CLOAKED, as a window on another virtual desktop or a closed Start menu is) and whose box as drawn
+    (DWMWA_EXTENDED_FRAME_BOUNDS: without the invisible borders Windows 10 puts round a window to grab, else
+    GetWindowRect) meets the area. `shows` looks at points only: a window between them (a notification, a small box
+    of 200x150 at COVER_GRID's points 225x188 px apart, the client's left 8 px) or one clicks pass through (a layered
+    overlay: WindowFromPoint skips it) passes it. The game's own windows are left out (its picture). 39 windows above
+    the game, none shown over it: 0.1 ms (median of 50; 0.66 ms in the review's run), 2026-10-24."""
+    x0, y0 = area["left"], area["top"]
+    x1, y1 = x0 + area["width"], y0 + area["height"]
+    game = _process(hwnd)
+    above = user32.GetWindow(hwnd, GW_HWNDPREV)
+    for _ in range(OVER_MAX):
+        if not above:
+            return None
+        if user32.IsWindowVisible(above) and not user32.IsIconic(above) and not _cloaked(above) \
+                and _process(above) != game:
+            left, top, right, bottom = _drawn(above)
+            if left < x1 and right > x0 and top < y1 and bottom > y0 and right > left and bottom > top:
+                return above
+        above = user32.GetWindow(above, GW_HWNDPREV)
+    return None
+
+
+def describe(hwnd: int) -> str:
+    """A window as a log names it: its class and box (not its title, which can say what's in it)."""
+    name = ctypes.create_unicode_buffer(256)
+    user32.GetClassNameW(hwnd, name, len(name))
+    left, top, right, bottom = _drawn(hwnd)
+    return f"a window of class {name.value!r} at {left},{top} {right - left}x{bottom - top}"
+
+
+def _process(hwnd: int) -> int:
+    pid = wintypes.DWORD(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def _cloaked(hwnd: int) -> bool:
+    cloaked = wintypes.DWORD(0)
+    return dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked)) == 0 \
+        and bool(cloaked.value)
+
+
+def _drawn(hwnd: int) -> tuple[int, int, int, int]:
+    """A window's box as drawn (left, top, right, bottom; screen px)."""
+    r = wintypes.RECT()
+    if dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(r), ctypes.sizeof(r)) != 0:
+        user32.GetWindowRect(hwnd, ctypes.byref(r))
+    return r.left, r.top, r.right, r.bottom
 
 
 def on_screen(area: dict) -> bool:

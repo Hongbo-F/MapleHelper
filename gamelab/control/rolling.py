@@ -7,7 +7,8 @@ the mouse mini-game and the Truth Booth, and records only once it has seen one).
 babysitter, hunts or not. What it keeps is saved:
   - on a Lie Detector alarm (control.alarm's ALARM.json, written by the player's watchdog): the 5 minutes before it,
     and on until the player's own recording of it has begun, go into that recording's folder as `before/`
-    (control.lie_recorder), so the whole cycle is kept with what led up to it;
+    (control.lie_recorder), so the whole cycle is kept with what led up to it; as one is written, the Lie Detector's
+    recordings are pruned to their 10 GB counting those parts (`_prune_lie`), whatever the player's age;
   - on demand (`python -m gamelab save-recent`, `ask` here): the last N s, to paths.RECENT/<YYYYmmdd-HHMMSS>[-name],
     asked through a file inbox (paths.RECORDER: inbox/<id>.json, taken as <id>.taken, answered in outbox/<id>.json).
 
@@ -22,9 +23,11 @@ A saved part (`write_part`), one folder:
                  `fps`, `jpeg_quality` and the `window`'s size (the last frame's).
 
 A frame is kept only when the screen shows the game: its window there and not minimized, wholly on the monitors, in
-front, and no other window over it (window.shows at perception.framecheck's COVER_GRID), asked before the grab and again
-after it, the window where it was. Otherwise the moment is a gap: nothing of another window is ever kept. It reads the
-screen only: no keys, no clicks, and it never brings the game forward.
+front, and no other program's window over any of it (window.shows at perception.framecheck's COVER_GRID, then
+window.over: every window above it in the z-order, as a window between the grid's points or one clicks pass through
+isn't seen at them), asked before the grab and again after it, the window where it was. Otherwise the moment is a gap:
+nothing of another window is ever kept. It reads the screen only: no keys, no clicks, and it never brings the game
+forward.
 
 Captured with mss, not DXGI desktop duplication: duplications of a monitor are limited (on 2026-10-24, with `watch` and
 `pet` running, two more opened and a third failed: DuplicateOutput 0x887A0022, DXGI_ERROR_NOT_CURRENTLY_AVAILABLE). One
@@ -32,7 +35,8 @@ held all the time would leave a hunt's looks and its feed one fewer, and one tha
 capture.RETRY_S (17 ms looks). mss takes none; its grab costs 2-3 ms more CPU (README: The rolling recording).
 
 Imports: numpy, OpenCV, the shared modules, perception.framecheck (COVER_GRID), and control.alarm and
-control.lie_recorder (the JPEG settings, the Lie Detector's folders, and pruning a folder of recordings).
+control.lie_recorder (the JPEG settings, the Lie Detector's folders, and pruning a folder of recordings: `recent/`, and
+the Lie Detector's when a part goes into one, `_prune_lie`).
 """
 
 import ctypes
@@ -160,10 +164,11 @@ class Ring:
 
 class GameWindow:
     """The game window as the recorder asks after it (`check`): its client area (screen px, an mss box) when the screen
-    shows all of it, else None and why not, in a few words."""
+    shows all of it, else None and why not, in a few words. `detail` names the window over it, when one was."""
 
     def __init__(self, title: str):
         self.title = title
+        self.covering: int | None = None  # the other program's window over the game at the last check (window.over)
 
     def check(self) -> tuple[dict | None, str]:
         try:
@@ -179,9 +184,22 @@ class GameWindow:
             return None, "off the screen"
         if window.foreground_title() != self.title:
             return None, "not in front"
+        self.covering = None
         if not window.shows(hwnd, area, grid=framecheck.COVER_GRID):
             return None, "covered"
+        self.covering = window.over(hwnd, area)
+        if self.covering is not None:
+            return None, "covered"
         return area, ""
+
+    def detail(self) -> str:
+        """The window over the game at the last check, as the log names it ("" if none was found by window.over)."""
+        if self.covering is None:
+            return ""
+        try:
+            return "by " + window.describe(self.covering)
+        except Exception:  # (gone meanwhile)
+            return ""
 
 
 class ScreenGrab:
@@ -219,14 +237,14 @@ class Recorder:
                  box: Path | None = None, lie_root: Path | None = None, recent: Path | None = None,
                  clock: Callable[[], float] = time.time, encode_frame: Callable[[np.ndarray], bytes] = encode,
                  fps: float = FPS, log: Callable[[str], None] = print, folder_wait: float = FOLDER_WAIT_S,
-                 recent_keep: int = RECENT_KEEP_BYTES):
+                 recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES):
         self.game, self.grab, self.ring = game, grab, ring or Ring()
         box = Path(box or paths.RECORDER)
         self.inbox, self.outbox, self.status_path = box / "inbox", box / "outbox", box / "status.json"
         self.lie_root = Path(lie_root or paths.LIE_RECORDINGS)
         self.recent = Path(recent or paths.RECENT)
         self.clock, self.encode, self.fps, self.log = clock, encode_frame, fps, log
-        self.folder_wait, self.recent_keep = folder_wait, recent_keep
+        self.folder_wait, self.recent_keep, self.lie_keep = folder_wait, recent_keep, lie_keep
         self.started = self.clock()
         self.state: str | None = None  # the last moment's gap reason ("": a frame), as the log last said it
         self.counts: Counter = Counter()  # moments by what: "frame", or a gap's why
@@ -287,7 +305,9 @@ class Recorder:
         if why in ("moved", "capture failed", "not encoded") or why == self.state:
             return
         self.state = why
-        self._say("recorder: the game is on screen: recording" if not why else f"recorder: not recording: {why}")
+        detail = self.game.detail() if why == "covered" and hasattr(self.game, "detail") else ""
+        self._say("recorder: the game is on screen: recording" if not why else
+                  f"recorder: not recording: {why}" + (f" ({detail})" if detail else ""))
 
     # --- between moments ---
 
@@ -415,6 +435,7 @@ class Recorder:
         items = snapshot + (self.ring.after(snapshot[-1].t) if snapshot else self.ring.last(self.ring.seconds))
         if folder is not None:
             dest = folder / BEFORE
+            self._prune_lie(folder)
         else:
             lie_recorder.prune(self.recent, self.recent_keep)
             dest = new_folder(self.recent, "lie-detector")
@@ -426,6 +447,23 @@ class Recorder:
         if folder is None:
             self._say(f"recorder: no recording of the player's began within {self.folder_wait:g} s of the alarm "
                       f"(the player not running?): the part before it is in {dest}")
+
+    def _prune_lie(self, spare: Path) -> None:
+        """The Lie Detector's recordings kept to `lie_keep` (lie_recorder.KEEP_BYTES), their parts before counted, the
+        one under way (`spare`) left out, before a part goes into it. The player prunes them too, but only as a
+        recording starts, and a player from before 2026-10-24 counts no part before (its size_of counts a folder's
+        files, not before/): the 10 GB would then hold some 58 cycles of 0.8 GB, 37 GB (32 GB were free on D: that
+        evening). The player runs elevated and is restarted only with the user's click, so it can run old code for days;
+        pruned here, the 10 GB hold whichever player wrote the cycles."""
+        try:
+            gone = lie_recorder.prune(self.lie_root, self.lie_keep, spare=spare)
+        except Exception as e:
+            self._say(f"recorder: pruning the Lie Detector's recordings failed ({type(e).__name__}: {e})")
+            return
+        if gone:
+            self._say(f"recorder: deleted the {len(gone)} oldest Lie Detector recordings "
+                      f"({sum(b for _, b in gone) / 1024 ** 2:.0f} MB) to keep the rest under "
+                      f"{self.lie_keep / 1024 ** 3:g} GB")
 
     def lie_folder(self, seen: float) -> Path | None:
         """The player's recording of the Lie Detector seen at `seen` (time.time's clock): the newest folder in

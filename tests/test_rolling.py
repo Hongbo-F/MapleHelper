@@ -20,6 +20,7 @@ from gamelab.control.rolling import BEFORE, INDEX, SUMMARY, Item, Recorder, Ring
 from gamelab.perception import framecheck
 
 AREA = {"left": 100, "top": 50, "width": 64, "height": 48}
+REAL_OVER, REAL_SHOWS, REAL_DESCRIBE = window.over, window.shows, window.describe  # (before conftest refuses them)
 
 
 class Clock:
@@ -179,17 +180,133 @@ def test_the_game_window_is_asked_as_the_eyes_ask_it_wholly_shown_in_front_with_
     monkeypatch.setattr(window, "on_screen", lambda area: state["on_screen"])
     monkeypatch.setattr(window, "foreground_title", lambda: state["front"])
     monkeypatch.setattr(window, "shows", lambda hwnd, area, grid=None: grids.append(grid) or state["shows"])
+    monkeypatch.setattr(window, "over", lambda hwnd, area: state["over"])
+    monkeypatch.setattr(window, "describe", lambda hwnd: f"a window of class 'Toast' ({hwnd})")
+    state["over"] = None
     game = rolling.GameWindow("MapleStory")
-    assert game.check() == (AREA, "") and grids == [framecheck.COVER_GRID]
+    assert game.check() == (AREA, "") and grids == [framecheck.COVER_GRID] and game.detail() == ""
+    state["over"] = 9  # between the grid's points: window.over sees it
+    assert game.check() == (None, "covered") and game.detail() == "by a window of class 'Toast' (9)"
+    state["over"] = None
     for key, value, why in (("shows", False, "covered"), ("front", "Claude", "not in front"),
                             ("on_screen", False, "off the screen"), ("minimized", True, "minimized")):
         state[key] = value
-        assert game.check() == (None, why)
+        assert game.check() == (None, why) and game.detail() == ""
 
     def gone(title):
         raise RuntimeError("no window titled 'MapleStory'")
     monkeypatch.setattr(window, "find_game", gone)
     assert game.check() == (None, "no window")
+
+
+class Desktop:
+    """Windows' answers about the top windows (user32's and dwmapi's, as window.over and window.shows ask them):
+    `windows` topmost first, each a dict: `hwnd`, `box` (as drawn: left, top, right, bottom), and as wanted `rect`
+    (GetWindowRect's, with the invisible borders; else the box), `pid` (the game's is 1), `visible`, `iconic`,
+    `cloaked`, `through` (clicks pass through it: WindowFromPoint skips it), `cls`, `no_dwm` (no drawn box)."""
+
+    def __init__(self, windows):
+        self.order = [w["hwnd"] for w in windows]
+        self.w = {w["hwnd"]: w for w in windows}
+
+    def GetWindow(self, hwnd, cmd):  # noqa: N802 (Windows' names)
+        assert cmd == window.GW_HWNDPREV
+        i = self.order.index(hwnd)
+        return self.order[i - 1] if i else None
+
+    def IsWindowVisible(self, hwnd):  # noqa: N802
+        return self.w[hwnd].get("visible", True)
+
+    def IsIconic(self, hwnd):  # noqa: N802
+        return self.w[hwnd].get("iconic", False)
+
+    def GetWindowThreadProcessId(self, hwnd, pid):  # noqa: N802
+        pid._obj.value = self.w[hwnd].get("pid", 2)
+        return 1
+
+    def GetWindowRect(self, hwnd, rect):  # noqa: N802
+        w, r = self.w[hwnd], rect._obj
+        r.left, r.top, r.right, r.bottom = w.get("rect", w["box"])
+        return 1
+
+    def GetClassNameW(self, hwnd, buf, n):  # noqa: N802
+        buf.value = self.w[hwnd].get("cls", "Fake")
+        return len(buf.value)
+
+    def DwmGetWindowAttribute(self, hwnd, attr, out, size):  # noqa: N802
+        w = self.w[hwnd]
+        if attr == window.DWMWA_CLOAKED:
+            out._obj.value = int(w.get("cloaked", False))
+            return 0
+        assert attr == window.DWMWA_EXTENDED_FRAME_BOUNDS
+        if w.get("no_dwm"):
+            return -2147024809  # E_INVALIDARG
+        r = out._obj
+        r.left, r.top, r.right, r.bottom = w["box"]
+        return 0
+
+    def WindowFromPoint(self, point):  # noqa: N802
+        for hwnd in self.order:
+            w = self.w[hwnd]
+            x0, y0, x1, y1 = w["box"]
+            shown = w.get("visible", True) and not w.get("iconic") and not w.get("cloaked")
+            if shown and not w.get("through") and x0 <= point.x < x1 and y0 <= point.y < y1:
+                return hwnd
+        return None
+
+    def GetAncestor(self, hwnd, flags):  # noqa: N802
+        return hwnd
+
+
+def test_a_window_between_the_cover_grid_s_points_is_seen_in_the_z_order_above_the_game(tmp_path, monkeypatch):
+    """The reviewer's three boxes over the real client area (2448,206 1366x768) pass window.shows at COVER_GRID's
+    points: a window over the client's left 8 px, a 200x150 box between the points, a 300x100 notification; so does an
+    overlay clicks pass through. window.over sees each, and the recorder keeps no frame and names the window. Windows
+    not shown over the game (hidden, minimized, cloaked, only their invisible borders over it, the game's own, below
+    it) are left out."""
+    area = {"left": 2448, "top": 206, "width": 1366, "height": 768}
+    l, t = area["left"], area["top"]
+    game_box = (l, t, l + 1366, t + 768)
+    the_game = {"hwnd": 1, "pid": 1, "box": game_box}
+    covers = {"left 8 px": (l - 500, t + 100, l + 8, t + 400),
+              "200x150 between the points": (l + 18, t + 18, l + 218, t + 168),
+              "300x100 notification": (l + 1000, t + 654, l + 1300, t + 754),
+              "overlay": game_box}
+
+    def desktop(*windows):
+        desk = Desktop(list(windows))
+        monkeypatch.setattr(window, "user32", desk)
+        monkeypatch.setattr(window, "dwmapi", desk)
+        return desk
+
+    for what, box in covers.items():
+        desktop({"hwnd": 50, "box": box, "through": what == "overlay"}, the_game)
+        assert REAL_SHOWS(1, area, grid=framecheck.COVER_GRID), what  # the grid's points miss it
+        assert REAL_OVER(1, area) == 50, what
+    # Not over it: hidden, minimized, cloaked (another virtual desktop), only its invisible borders over the client
+    # (the box as drawn ends at its left edge), the game's own, an empty box, a window below the game.
+    beside = (l - 400, t, l, t + 300)
+    desk = desktop({"hwnd": 60, "box": game_box, "visible": False}, {"hwnd": 61, "box": game_box, "iconic": True},
+                   {"hwnd": 62, "box": game_box, "cloaked": True},
+                   {"hwnd": 63, "box": beside, "rect": (beside[0] - 7, t, beside[2] + 7, t + 307)},
+                   {"hwnd": 64, "box": game_box, "pid": 1}, {"hwnd": 65, "box": (l + 10, t + 10, l + 10, t + 50)},
+                   the_game, {"hwnd": 70, "box": game_box})
+    assert REAL_OVER(1, area) is None
+    desk.w[63]["no_dwm"] = True  # no box as drawn: GetWindowRect's, its borders over the client
+    assert REAL_OVER(1, area) == 63
+    # The recorder's look at the game, and its log naming the window over it.
+    desktop({"hwnd": 50, "box": covers["300x100 notification"], "cls": "Windows.UI.Core.CoreWindow"}, the_game)
+    for name, fn in (("over", REAL_OVER), ("shows", REAL_SHOWS), ("describe", REAL_DESCRIBE),
+                     ("find_game", lambda title: 1), ("minimized", lambda hwnd: False),
+                     ("client_rect", lambda hwnd: dict(area)), ("on_screen", lambda area: True),
+                     ("foreground_title", lambda: "MapleStory")):
+        monkeypatch.setattr(window, name, fn)
+    grab = Grab()
+    rec = recorder(tmp_path, game=rolling.GameWindow("MapleStory"), grab=grab)
+    assert rec.tick().why == "covered" and grab.n == 0
+    assert rec.said[-1].endswith("recorder: not recording: covered (by a window of class "
+                                 f"'Windows.UI.Core.CoreWindow' at {l + 1000},{t + 654} 300x100)")
+    rec.close()
 
 
 def test_save_recent_asks_the_running_recorder_through_its_inbox_and_gets_the_folder(tmp_path):
@@ -256,7 +373,7 @@ def test_a_lie_detector_alarm_saves_the_5_minutes_before_it_into_the_player_s_re
     run_ticks(rec, 15)  # the player pages, then starts its recording
     player = tmp_path / "lie_detector" / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
     player.mkdir(parents=True)
-    assert rec.flush(10)
+    assert rec.flush(60)  # (3,000 frames written: 3 s, 10 and more with the PC busy)
     before = player / BEFORE
     s = summary(before)
     assert s["kind"] == "before the Lie Detector" and s["alarm"]["time"] == "2026-10-24 21:50:00"
@@ -269,6 +386,31 @@ def test_a_lie_detector_alarm_saves_the_5_minutes_before_it_into_the_player_s_re
     # The same alarm isn't saved again; the player's own folder is left as it was, but for the part.
     run_ticks(rec, 20, poll=True)
     assert rec.flush(10) and sorted(p.name for p in player.iterdir()) == [BEFORE]
+    rec.close()
+
+
+def test_an_alarm_save_keeps_the_lie_detector_s_recordings_to_their_budget_whatever_the_player_counts(tmp_path,
+                                                                                                     alarm_file):
+    """A player from before the part before (its size_of counted a folder's files only) never counts the `before/`
+    parts: the recorder prunes the Lie Detector's recordings itself when it writes one, the parts counted, the
+    player's recording under way spared however big."""
+    root = tmp_path / "lie_detector"
+    for stamp, size in (("20261020-100000", 4000), ("20261021-100000", 3000), ("20261022-100000", 2000)):
+        rolling.write_part(root / stamp / BEFORE, [Item(1.0, b"b" * size, size=(4, 4))], {"kind": "x"})
+        (root / stamp / "00000.jpg").write_bytes(b"j" * 100)  # all an old player counts of it
+    rec = recorder(tmp_path, lie_keep=7500)  # the two newer, about 6.3 KB with their index and summary, fit
+    run_ticks(rec, 50, poll=True)
+    seen = rec.clock()
+    alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 22:30:00"}), encoding="utf-8")
+    os.utime(alarm_file, (seen, seen))
+    player = root / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
+    player.mkdir()
+    (player / "00000.jpg").write_bytes(b"p" * 50_000)  # the recording under way: spared, and not in the sum
+    run_ticks(rec, 5, poll=True)
+    assert rec.flush(10)
+    assert sorted(p.name for p in root.iterdir()) == ["20261021-100000", "20261022-100000", player.name]
+    assert (player / BEFORE / SUMMARY).exists() and (player / "00000.jpg").exists()
+    assert any("deleted the 1 oldest Lie Detector recordings" in m for m in rec.said)
     rec.close()
 
 
