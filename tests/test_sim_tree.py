@@ -111,7 +111,7 @@ def test_the_planner_gets_onto_7_from_8_and_up_from_the_bottom_by_29():
     planner = Planner(m)
     by = {(mv.kind, mv.src, mv.dst): mv for mv in planner.moves}
     # 7 (two Horny Mushrooms) by a running jump off 8's left end (route.END_LOOK, from West Rocky Mountain II's 17 onto
-    # 16): the study's brute force lands it from takeoffs 24-48 on 8
+    # 16): the study's brute force lands it from takeoffs at x 24-48 on 8 (2-26 units in from its end at 22)
     jump = by["jump", 8, 7]
     assert 24 <= jump.takeoff <= 48 and m.platform(7).covers(jump.land_x) and jump.chance == 1.0
     assert ("jump", 25, 29) in by

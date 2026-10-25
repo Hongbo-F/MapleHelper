@@ -1986,7 +1986,7 @@ def nav_tree_rope_miss(sim):
 @tree((10, -100.0), expects=(ends("arrived"), check("8 onto 7", lambda tr: _made(tr, "jump 8->7"))))
 def nav_tree_top_cluster(sim):
     """In the top cluster (6-10: 7 Horny Mushrooms and a Green), from 10 to 7: onto 9, 8, and the running jump off 8's
-    left end onto 7 (route.END_LOOK: taking off 37 in from the end), which the planner didn't have."""
+    left end onto 7 (route.END_LOOK: taking off at x 37, 15 in from the end), which the planner didn't have."""
     return _nav(7)(sim)
 
 

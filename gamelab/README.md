@@ -813,10 +813,11 @@ native frames hand-labelled), and nothing of it but the motion and the simulator
 
 **The motion** (offline, from the game data and the planner: 175 moves, 74 jumps, 39 drops, 36 walk-offs, 13
 jump-ups, 7 climbs, 6 climb-downs; every place gets to every other but the caps):
-- **7 (two Horny Mushrooms) is reached:** the running jump off 8's left end, 45 up and 28 across, lands only from
-  takeoffs 24-48 units in (the study's brute force); the jumps off an end looked for nearer the end
-  (`route.END_LOOK`, West Rocky Mountain II's 17 onto 16) take off at 37 and land at -32. 25 -> 29 is found the same
-  way. In the simulator 10 -> 7 by 9 and 8 arrives in 4 s (`nav_tree_top_cluster`).
+- **7 (two Horny Mushrooms) is reached:** the running jump off 8's left end (x 22), 45 up and 28 across, lands only
+  from takeoffs at x 24-48, 2-26 units in from the end (the study's brute force); the jumps off an end looked for
+  nearer the end (`route.END_LOOK`, West Rocky Mountain II's 17 onto 16) run from x 57, take off at x 37 (15 in) and
+  land at -32. 25 -> 29 is found the same way. In the simulator 10 -> 7 by 9 and 8 arrives in 4 s
+  (`nav_tree_top_cluster`).
 - **The rope at -8 from 30** hangs 94.3 above 30's floor: 0.7 inside `physics.ROPE_REACH` (95, a guess from the start;
   the highest grab tried in game was 69 up) and 12.3 beyond HeavenClient's (`Ladder::inrange`: a point 5 above her feet
   on the rope, 82 at the top of her jump, `physics.GRAB_SURE`). It was on every way up from the bottom. A climb up a
@@ -897,95 +898,106 @@ Horny), `tour_tree_run` (`--stops 3`: 33, 32 and 31 in 704 s), `tour_tree_rest` 
 care runs as in game but for its read: `sim.fakes.FakePetCare` reads her pet's fullness off the world (60 at a run's
 start: fed once, 60 -> 90) where `behavior.pet.PetCare` opens her Character Info and reads it.
 
-**Harness baselines** (10 seeds of 20 minutes each; EXP a minute over the horizon, a death or a fall stopping the
-count; HP lost in bars of her HP; trips missed: landings elsewhere than planned, those more than 10 units lower in
+**Harness baselines** (10 seeds of 20 minutes each, run again on 2026-10-24 once the fake eyes' camera kept her 529
+down, `fakes.CAMERA_DOWN`; EXP a minute over the horizon, a death or a fall stopping the count; HP lost in bars of her
+HP, up to her death in most runs; trips missed: landings elsewhere than planned, those more than 10 units lower in
 brackets; `python -m gamelab.sim.harness run POLICY --map 10002073 [--preset P] [--world W]`):
 
 | Run | EXP a minute (median) | Kills | Drops | HP lost | Deaths | Out of the map | Trips missed |
 |---|---|---|---|---|---|---|---|
-| loop | 16.2 (4.7) | 10.1 | 55% | 7.0 | 1 | 9 | 47 (35) |
-| tour | 39.2 (43.1) | 27.2 | 86% | 12.8 | 5 | 5 | 80 (72) |
-| loop, `--world zero-walls` | 52.8 (54.3) | 38.7 | 84% | 21.3 | 8 | 0 | 217 (185) |
-| tour, `--world zero-walls` | 62.6 (60.8) | 48.8 | 89% | 18.2 | 8 | 0 | 129 (119) |
-| loop, `--preset crowd --world zero-walls` | 34.0 (30.6) | 19.6 | 76% | 21.4 | 9 | 0 | 165 (150) |
-| tour, `--preset crowd --world zero-walls` | 42.8 (40.3) | 24.9 | 87% | 20.1 | 10 | 0 | 156 (133) |
-| loop, `--preset crowd-slow --world zero-walls` | 31.5 (33.0) | 18.2 | 83% | 21.3 | 8 | 0 | 205 (189) |
-| tour, `--preset crowd-slow --world zero-walls` | 46.1 (47.8) | 26.5 | 93% | 19.8 | 10 | 0 | 166 (128) |
-| loop, `--world zero-walls --world touch-share` | 62.4 (61.2) | 40.0 | 87% | 19.5 | 2 | 0 | 211 (172) |
-| loop, `--world zero-walls --world client-reach` | 49.5 (54.3) | 34.9 | 81% | 21.0 | 8 | 0 | 211 (179) |
-| loop, `--world zero-walls --world no-evade` | 30.6 (27.6) | 28.0 | 79% | 20.6 | 9 | 0 | 342 (323) |
-| loop-hp50, `--world zero-walls` | 23.8 (25.1) | 18.0 | 83% | 21.9 | 1 | 0 | 241 (168) |
-| loop-hp50, `--preset crowd-slow --world zero-walls` | 21.8 (22.0) | 12.3 | 87% | 25.0 | 4 | 0 | 219 (154) |
+| loop | 13.0 (5.1) | 8.0 | 49% | 5.7 | 1 | 9 | 47 (38) |
+| tour | 58.4 (56.6) | 46.2 | 93% | 15.9 | 5 | 4 | 103 (88) |
+| loop, `--world zero-walls` | 46.1 (51.8) | 29.4 | 77% | 21.3 | 9 | 0 | 214 (182) |
+| tour, `--world zero-walls` | 70.8 (67.2) | 54.6 | 91% | 19.7 | 8 | 0 | 129 (110) |
+| loop, `--preset crowd --world zero-walls` | 30.6 (25.9) | 18.0 | 77% | 21.3 | 8 | 0 | 186 (178) |
+| tour, `--preset crowd --world zero-walls` | 45.6 (44.5) | 26.5 | 84% | 20.3 | 10 | 0 | 116 (103) |
+| loop, `--preset crowd-slow --world zero-walls` | 30.9 (27.8) | 18.1 | 77% | 20.5 | 8 | 0 | 183 (165) |
+| tour, `--preset crowd-slow --world zero-walls` | 46.1 (46.5) | 26.4 | 92% | 20.1 | 10 | 0 | 146 (129) |
+| loop, `--world zero-walls --world touch-share` | 58.9 (56.6) | 35.7 | 77% | 19.9 | 5 | 0 | 216 (184) |
+| loop, `--world zero-walls --world client-reach` | 47.0 (51.8) | 30.3 | 76% | 21.5 | 9 | 0 | 212 (182) |
+| loop, `--world zero-walls --world no-evade` | 32.3 (30.0) | 33.5 | 85% | 19.3 | 5 | 1 (a portal) | 282 (268) |
+| loop, `--world zero-walls --world red-potion` | 16.1 (13.9) | 11.8 | 68% | 13.1 | 10 | 0 | 147 (122) |
+| loop-hp50, `--world zero-walls` | 20.9 (22.0) | 14.3 | 88% | 22.3 | 3 | 0 | 230 (161) |
+| loop-hp50, `--preset crowd-slow --world zero-walls` | 20.1 (20.2) | 11.3 | 79% | 23.6 | 3 | 0 | 220 (163) |
 
-- **Out of the map:** with her own group's walls alone 9 of 10 hunt loops and 5 of 10 tours were knocked out of the
-  tower (off floating platforms' outer ends and off the rope at -192, from 10 s in): the loop's 16.2 is its falls'
+Against the table before the camera moved (the first map's 489, with which a look from 28 saw 31's Horny Mushrooms
+over the HUD), the loop with group 0's walls makes 46.1 a minute where it made 52.8 (9 dead where 8) and the tour
+70.8 where 62.6; the rest moved as much either way.
+- **Out of the map:** with her own group's walls alone 9 of 10 hunt loops and 4 of 10 tours were knocked out of the
+  tower (off floating platforms' outer ends and off the rope at -192, from 10 s in): the loop's 13.0 is its falls'
   more than its hunting's. With group 0's walls stopping her (`--world zero-walls`) none fell, and the runs below are
   in that world: which the game has is the first thing to settle (the check below).
-- **Her HP is what ends them then:** 8 of 10 loops and tours died (9 and 10 among the crowd, 9 with no evasion), HP
-  lost 18-25 of her bars in 20 minutes, the preset's 60 potions nearly all drunk by her pet. With a touch a share of
-  PADamage (`touch-share`: a Horny's 75 give or take 70%, not 111-131) 2 of 10 died and the loop made 62.4 a minute.
-  With `--low-hp 0.5` (`loop-hp50`, a policy of the harness's for this: the loop rests under half her HP, not 30%) 1 of
-  10 died where 8 had, at 23.8 a minute where 52.8 (much of it resting); among the slow crowd 4 where 8, 21.8 where
-  31.5.
-- **The crowd** (`crowd`: every spawn filled, respawns at 8.8 s, the camps killing 534 monsters a run, 27 a minute;
-  `crowd-slow`: 30 s, 218, 11 a minute, nearer the study's 13.6 a minute on her screen): the loop 34.0 and 31.5 a
-  minute where the same world empty made 52.8; the tour 42.8 and 46.1 where 62.6.
-- **The grab's reach** (`client-reach`, HeavenClient's 82): 49.5 against 52.8 (the same median), the planner taking
-  the grab from 30 in neither (`climb 30->27` was taken in no run).
-- **A portal taken:** in one run of 130 on an earlier build of this branch (2026-10-24, `loop-hp50`, a seed's 95 s;
-  none in the 130 above) a chain went on after a Horny's knock the stack didn't see (her pet's potion came with the
-  touch, so her HP went up between two looks, and no hit cut the plan): its later moves, keyed from where she'd been
-  on 23, jumped her off 23's right end, over 24 and down onto 28 by the wall, and the chain's climb pressed up on the
-  ground at x 306, 24 units from `out00`: she'd have left the map. The rule holds where she is where the chain has
-  her; off it, nothing guards up. For the next phase (below).
+- **Her HP is what ends them then:** 9 of 10 loops and 8 of 10 tours died (8 and 10 among the crowd), most 12-16
+  minutes in; HP lost 19-24 of her bars a run before that, the preset's 60 potions nearly all drunk by her pet (each
+  heals 30% of her HP, 226: `world.POTION_HP`). With Red Potions (`red-potion`, 100 HP each) all 10 died, 10.5 minutes
+  in on average, at 16.1 a minute. With a touch a share of PADamage (`touch-share`: a Horny's 75 give or take 70%, not
+  111-131) 5 of 10 died and the loop made 58.9 a minute. With `--low-hp 0.5` (`loop-hp50`, a policy of the harness's
+  for this: the loop rests under half her HP, not 30%) 3 of 10 died where 9 had, at 20.9 a minute where 46.1 (much of
+  it resting); among the slow crowd 3 where 8, 20.1 where 30.9.
+- **The crowd** (`crowd`: every spawn filled, respawns at 8.8 s, the camps killing 538 monsters a run, 42.5 a minute of
+  the runs, which her death ended 12.6 minutes in on average; `crowd-slow`: 30 s, 192 a run, 16.2 a minute, more than
+  the 13.6 a minute the study saw on her screen alone, where these are the whole map's): the loop 30.6 and 30.9 a
+  minute where the same world empty made 46.1; the tour 45.6 and 46.1 where 70.8.
+- **The grab's reach** (`client-reach`, HeavenClient's 82): 47.0 against 46.1 (the same median, 51.8), the planner
+  taking the grab from 30 in neither (`climb 30->27` was taken in no run).
+- **A portal taken:** in one of these 140 runs (`no-evade`, seed 5, 321 s), and in one of 130 on an earlier build of
+  this branch (`loop-hp50`, a seed's 95 s), a chain went on after a knock the stack didn't see (her pet's potion came
+  with the touch, so her HP went up between two looks, and no hit cut the plan), and its climb pressed up on the ground
+  by `out00`. Seed 5: knocked off 26 onto 28 by the wall, the chain planned from there (walk off 28 onto 30, jump onto
+  29, climb to 27) played on while a Green Mushroom's touches at x 137 pushed her back along 28 (her pet drank between
+  them), and the climb's up went down at x 257, 25 units from the exit: out of the map (by the earlier rule too, up
+  on the ground within 25). The earlier one: from 23, over 24 and down onto 28, up at x 306, 24 units from it. The
+  rule holds where she is where the chain has her; off it, nothing guards up. For the next phase (below).
 - Against West Rocky Mountain II's (63.7 and 53.2 a minute, 90.2 and 69.3 with the client's sides: In game, on West
-  Rocky Mountain II) and the first map's (the loop about 130, the tour about 90, preset `game`), this map pays least
-  in the simulator as things stand: the harness's 20 minutes are a tower climb from wherever a seed starts, Horny
-  fights at close quarters among their touches, and rests.
+  Rocky Mountain II, not run again) and the first map's (the loop about 130, the tour about 90, preset `game`), the
+  hunt loop pays least here in the simulator as things stand, and the tour about as much as there: the harness's 20
+  minutes are a tower climb from wherever a seed starts, Horny fights at close quarters among their touches, and rests.
 
 **The coverage report** (`python -m gamelab coverage loop-game-10002073-zero-walls tour-game-10002073-zero-walls --map
-10002073`; picture `lab/shots/coverage_10002073.png`): the loop planned 118 of the 175 moves and took 114 (2,241 moves,
-217 missed, 581 a hit's), the tour 104 and 101 (1,116, 129, 285); 53 were taken in neither: the caps' 12, 4 of the 6
-climb-downs, `climb 30->27`, drops off 6 and 10 onto the shelves by the right wall, and drops, walk-offs and jumps
-between neighbours that the quickest ways didn't need (onto 26-28 from above, 30 up onto 28). The hunt loop's grounds:
-23 (17 times in 10 runs), 7 and 10 (14), 15 (10), 19 (5), 33 (3), 8 (2); she spends 18% of her time on 25, where she
-rests. The tour's stops by ground: 19 10, 24 9, 20 9, 15 8, the rest under 8; 37 of its 300 trips timed out. The moves
-that miss most (planned, taken, missed, the platforms she ended on): `jump 24->23 @229` 407/215/21 in the loop (on 25
-17 times) and 147/90/14 in the tour, `climb 32->30 @146` 83/65/15 (on 28 7 times, 33 6), `climb 11->10 @-80` 356/50/13
-(on 13 8 times), `jump_up 25->24 @226` 265/144/13, `climb 19->18 @111` 288/65/12, `jump 21->20 @29` (the tour's 13 of
-50, on 22 8), `jump_up 21->19 @142` 234/102/10, `jump 14->13 @23` 331/65/10, and `jump 8->7 @57`, the way onto 7: 7 of
-22 in the loop and 10 of 26 in the tour came down back on 8 or 9.
+10002073`; picture `lab/shots/coverage_10002073.png`; the runs above): the loop planned 116 of the 175 moves and took
+115 (2,212 moves, 214 missed, 586 a hit's), the tour 104 and 97 (1,142, 129, 324); 49 were taken in neither: the caps'
+12, all 6 climb-downs, `climb 30->27`, drops and jumps off 6 and 10 onto the shelves by the right wall, and drops,
+walk-offs and jumps between neighbours that the quickest ways didn't need (onto 26-28 from above, 30 up onto 28). The
+hunt loop's grounds: 23 (16 times in 10 runs), 7 (15), 10 (14), 15 (11), 19 (8), 8 (2), 33 (1); she spends 18% of her
+time on 25, where she rests. The tour's stops by ground: 23 16, 21 13, 24 12, 30, 31 and 32 9 each, the rest under 9;
+39 of its 362 trips timed out. The moves that miss most (planned, taken, missed, the platforms she ended on): in the
+loop `jump_up 21->19 @142` 261/120/16 (on 21 14 times), `climb 19->18 @111` 269/89/14, `jump 24->23 @229` 369/201/13
+(on 25 9), `jump 16->15 @39` 396/84/13 (on 16 10), `climb 11->10 @-80` 341/65/13 (on 11 and 13 6 each), `jump 27->26
+@69` 50/30/12 (all on 27); in the tour `climb 32->30 @146` 78/43/17 (on 28 9 times, 33 6), `jump 24->23` 151/92/10; and
+`jump 8->7 @57`, the way onto 7: 9 of 29 in the loop and 10 of 26 in the tour came down back on 8 or 9.
 
 **What looks wrong there, for the next phase** (the defaults are unchanged):
 - **Where she stands:** every ground is hunted standing on it, among its monsters: the hunt loop's rules are 'close
-  quarters' and 'in passing', hardly ever 'shoot' (`loop_tree_run`: 174 and 137 of 351; 'shoot' on 2 of seeds 1-10),
+  quarters' and 'in passing', hardly ever 'shoot' (`loop_tree_run`: 174 and 137 of 351; 'shoot' on 2 of seeds 1-10
+  before the camera moved),
   since no platform `MapModel.safe` counts as safe reaches a ground at ±60 (only 25, 26 and 27 are safe, and they reach
   none). The study's best stands,
-  7 at -100 and 8 at 137 (185-190 spawn EXP in reach), are not where she goes: she took up 7 14 times in 10 runs and 8
+  7 at -100 and 8 at 137 (185-190 spawn EXP in reach), are not where she goes: she took up 7 15 times in 10 runs and 8
   twice, standing on the ground she shoots. Safety per x would give 28 at 212-255 (reaching 29 and 30, safe, but the
   arrival band and a rival's spot) and 25 at 219-224 (23 by the search alone).
-- **Her HP:** with the formula's Horny touches she dies in most runs: 8 of 10 hunt loops and tours with group 0's walls
-  stopping her, 9 and 10 among the crowd; HP lost 18-25 of her bars in 20 minutes, the 60 potions of the preset nearly
-  all drunk by her pet. With `--low-hp 0.5` (the harness's `loop-hp50`) 1 of 10 loops died where 8 had, at 23.8 EXP a
-  minute where 52.8; the share's touches leave 2 of 10 dead. A default `--low-hp` here, shooting Hornies from a
-  platform they can't walk onto, and her potions' count are the next phase's; the touch model wants one Horny touch
-  read in game.
+- **Her HP:** with the formula's Horny touches she dies in most runs: 9 of 10 hunt loops and 8 of 10 tours with group
+  0's walls stopping her, 8 and 10 among the crowd; HP lost 19-24 of her bars a run before that, the 60 potions of the
+  preset nearly all drunk by her pet; with Red Potions all 10 loops died. With `--low-hp 0.5` (the harness's
+  `loop-hp50`) 3 of 10 loops died where 9 had, at 20.9 EXP a minute where 46.1; the share's touches leave 5 of 10
+  dead. A default `--low-hp` here, shooting Hornies from a platform they can't walk onto, and her potions' kind and
+  count are the next phase's; the touch model wants one Horny touch read in game.
 - **A chain played on after a knock it didn't see** (the portal taken above): the navigator cuts a plan on a hit by
   her HP dropping between two looks, and her pet's potion, drunk the instant a touch leaves her under 45%, can hide
   the drop; the chain's later moves then play from where the knock put her. A knock wants telling by her dot as well,
   and up wants guarding by where she is (not only by where the plan has her) near the exits.
 - **Ground choice with crowding:** `hunt.PLAYER_DISCOUNT` is off (1.0), so the loop goes where the camps take the Greens
-  as readily as anywhere: among the crowd she made 34.0 EXP a minute (median 30.6) where the same world empty made 52.8,
+  as readily as anywhere: among the crowd she made 30.6 EXP a minute (median 25.9) where the same world empty made 46.1,
   and in `loop_tree_crowd` 4 of her 10 kills were Greens the camps hadn't reached yet. The study's per-kind discount
   (a Green spawn with a rival on its ground 0.3, a Horny 0.85) and its narrower contest test are to be weighed here.
 - **Lucky Seven against the regular attack:** the hunt loop throws the regular attack only, and the simulator throws
   Lucky Seven as a star (its damage and MP aren't modelled): a Horny's 9 stars are about 11 s of throwing, while it
   walks at her through a third of them. Lucky Seven on Hornies (the study: 5.5 casts at level 1) needs its lock
   measured (`lock lucky_seven`) and her MP modelled first.
-- **The moves that miss:** the jump off 8's left end onto 7 (7 of 22 in the loop, 10 of 26 in the tour, back on 8:
-  it lands only from takeoffs 24-48 units in, and the game's errors spread her takeoff), the climb from 11 up the rope
-  at -80 (13 of 50) and from 32 up the one at 146 (15 of 65), the jump from 24 onto 23 (21 of 215, back on 25), the
-  jumps onto the floating platforms from 21, 19 and 14. Each is a chain onto a sloped floating platform or a short
+- **The moves that miss:** the jump off 8's left end onto 7 (9 of 29 in the loop, 10 of 26 in the tour, back on 8:
+  it lands only from takeoffs at x 24-48, 2-26 units in from the end, and the game's errors spread her takeoff), the
+  climbs from 11 up the rope at -80 (13 of 65), from 19 up the one at 111 (14 of 89) and from 32 up the one at 146 (17
+  of 43 in the tour), the jump from 24 onto 23 (13 of 201, back on 25), the jumps up from 21 onto 19, from 16 onto 15
+  and from 27 onto 26. Each is a chain onto a sloped floating platform or a short
   stretch of takeoffs; why they miss (the takeoff's spread on a short run, or the grab's timing after a landing) is to
   be looked at before the tower's long trips are trusted.
 - **The tour** spends its stops on the bottom grounds (33, 32, 31: their respawns keep the escort fighting on the way;
