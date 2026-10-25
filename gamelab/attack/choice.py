@@ -133,6 +133,16 @@ class Left:
         folded[top] += dealt[top + 1:].sum()  # all of its HP or more: dead
         return Left((1 - miss) * folded[::-1] + miss * self.p, self.pdd)
 
+    def hit(self) -> "Left | None":
+        """As it is, known hit by at least one of the throws reckoned in it (its HP bar up: the game shows a monster's
+        bar to whoever damages it): the chance they all missed gone, the rest in proportion; None if nothing else is
+        left. That chance is all on its first amount (`p[-1]`), the one it was reckoned from (Left.of): a throw that
+        lands takes at least its least damage off (a regular star's 30), so nothing else stays there."""
+        p = self.p.copy()
+        p[-1] = 0.0
+        total = p.sum()
+        return None if total < 1e-12 else Left(p / total, self.pdd)
+
     def alive(self) -> "Left | None":
         """As it is, seen alive: none of it dead, the rest in proportion; None if her throws as reckoned can't have
         left it alive (they did less than reckoned)."""

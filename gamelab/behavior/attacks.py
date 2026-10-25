@@ -12,10 +12,16 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
   less her throws at it. Her throws at a monster are kept with it (`Mark`, followed look to look: monsters.seen_again),
   each taking off its attack's damage as drawn, or nothing (choice.MISS); a look that sees it alive LANDS_S or more
   after a throw rules out what that throw would have killed it with (Left.alive), and one that reads its HP bar
-  between empty and full sets it from the bar (the throws that can't have landed by then still taken off). A throw is
-  chosen by what the monster has left if it's still alive when the throw lands. A monster she hasn't thrown at, whose
-  bar no look reads, has its whole HP: others' damage to it isn't known (on Tree Dungeon at 1366x768 the bars read
-  empty: attack.choice.STAR).
+  between empty and full sets it from the bar (the throws that can't have landed by then still taken off). A bar up
+  but read empty (on Tree Dungeon at 1366x768 that's what a hurt monster's bar reads: attack.choice.STAR) still says
+  her damage shows: not all her throws at it missed (Left.hit), once none is out that could have shown since the
+  last look and not landed by LANDS_S (SHOWS_S). Before (review, 2026-10-25) such a bar counted for nothing, and in
+  the simulator with the bars drawn empty she reckoned a target's HP 86-98 off (median), throwing no regular attack
+  to finish one in 518 throws. A throw is chosen by what the monster has left if it's still alive when the throw
+  lands. A monster she hasn't thrown at, whose bar no look reads, has its whole HP. Others' damage to it isn't
+  known: a monster's bar shows its damage to whoever dealt it, and the bars on monsters she hadn't thrown at in the
+  live hunts of 2026-10-24 didn't go with other players by them (7.2% of sightings with a player on its platform,
+  9.7% without: her stars that hit another in their path than the one she aimed at, and misreads).
 - Her MP: the latest look's bar share (Scene.mp) of her MP when full (config.toml [character] mp).
 
 Each choice is logged with its numbers, and sent as a telemetry 'attack' record; `counts` keeps them for the run's
@@ -41,6 +47,8 @@ from .ledger import in_path
 HIDDEN_FOR = 1.8   # s a monster she threw at is still taken to be in a throw's way unseen (fight.HIDDEN_FOR)
 LANDS_S = 0.85     # s after a throw's attack key that its damage can show on its target's bar: the star leaves 0.52 s
                    # after it (actions.STAR_DELAY_MS), and flies up to 0.6 s (434 units at 690 a second)
+SHOWS_S = 0.47     # s after a throw's attack key that its damage may first show: a bar's change is the throw's from
+                   # then on in the shot log (README: hunt shots), about when the star leaves
 LOST_S = 3.0       # s unseen before a monster she threw at is forgotten (ledger.WOUND_LOST_S) ...
 FORGET_S = 15.0    # ... and s since her last throw at it (ledger.WOUND_S)
 MODES = ("choice", "skill", "regular")  # attack.choice.pick's modes: `tour --attack` (choice by default)
@@ -56,6 +64,7 @@ class Mark:
     left: Left
     pending: list[tuple[float, Attack]] = field(default_factory=list)
     last: float | None = None  # her last throw at it
+    whole: bool = True  # `left` is reckoned from its HP before any throw of hers (False: from a bar read since)
 
     @property
     def thrown(self) -> float:
@@ -104,12 +113,15 @@ class Attacks:
             landed = [a for t, a in mk.pending if t <= s.t - LANDS_S]
             mk.pending = [(t, a) for t, a in mk.pending if t > s.t - LANDS_S]
             if _believable(again.bar) and (stats := self.stats.get(again.kind)) is not None:
-                mk.left = Left.of(again.bar * stats[0], stats[1])
-            elif landed:  # alive after them: what would have killed it ruled out
+                mk.left, mk.whole = Left.of(again.bar * stats[0], stats[1]), False
+                continue
+            if landed:  # alive after them: what would have killed it ruled out
                 left = mk.left
                 for a in landed:
                     left = left.after(a, choice.MISS)
                 mk.left = left.alive() or mk.left  # (none alive: her throws did less than reckoned, taken as nothing)
+            if again.bar is not None and mk.whole and not any(t <= s.t - SHOWS_S for t, _ in mk.pending):
+                mk.left = mk.left.hit() or mk.left  # her damage shows: not all of her throws reckoned in it missed
         self.marks = [mk for mk in self.marks if s.t - mk.seen < LOST_S and s.t - mk.thrown < FORGET_S]
 
     # --- at every throw --------------------------------------------------------------------------
@@ -126,7 +138,7 @@ class Attacks:
         if target is not None and target.kind in self.stats:
             mk = self._mark_of(target)
             if mk is None:
-                mk = Mark(target, now, left)
+                mk = Mark(target, now, left, whole=not _believable(target.bar))
                 self.marks.append(mk)
             mk.pending.append((now, attack))
             mk.last = now
