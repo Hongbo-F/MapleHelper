@@ -722,12 +722,12 @@ class Flow:
             return None
         lo_x, hi_x = min(x for _, x, _ in path), max(x for _, x, _ in path)
         lo_y, hi_y = min(y for _, _, y in path), max(y for _, _, y in path)
-        near = []  # only those whose box can get near where she goes, over the leg
+        near = []  # only those whose box can get near where she goes, over the leg (a walker turning back included)
         for mo in monsters:
             q = self.model.platform(mo.platform)
-            (a0, b0), (a1, b1) = mo.reach(path[0][0], q), mo.reach(path[-1][0], q)
+            a, b = mo.reach_over(path[0][0], path[-1][0], q)
             reach_x = mo.half + bodies.HER_HALF
-            if min(a0, a1) - reach_x < hi_x and max(b0, b1) + reach_x > lo_x \
+            if a - reach_x < hi_x and b + reach_x > lo_x \
                     and hi_y > q.top - mo.tall and lo_y - bodies.HER_TALL < bodies.low_end(q):
                 near.append((mo, q))
         for t, x, y in path:

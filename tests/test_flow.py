@@ -349,6 +349,37 @@ def test_a_monster_walking_to_its_platforms_end_turns_back_there(model):
     assert walking.at(2.0, b) == pytest.approx(300)  # to 380, back 140 to 240, and on 60
     assert MonsterTrack(b.id, 300, half=20.0, vx=0.0).at(5.0, b) == 300
     assert MonsterTrack(b.id, 300, half=20.0, vx=-100.0).at(1.0, b) == pytest.approx(280)  # 60 to 240, 40 back
+    # Where it can be over a while (reach_over) takes in the end it turns at: from 330 it turns at 380 0.5 s on and is
+    # back at 310 by 1.2 s, its reach at either moment short of 360 (as reach: 25 + 20 units/s either way).
+    from_330 = MonsterTrack(b.id, 330, half=20.0, vx=100.0)
+    assert from_330.reach(0.0, b) == (305, 355) and from_330.reach(1.2, b) == pytest.approx((261, 359))
+    assert from_330.reach_over(0.0, 1.2, b) == pytest.approx((261, 400))
+    assert from_330.reach_over(0.0, 0.2, b) == pytest.approx((305, 379))  # no turn yet
+
+
+def test_a_monster_turning_back_where_she_goes_is_found_however_it_walks(model):
+    # flow.danger's quick check keeps only the monsters that can get near her over the leg: one walking to its
+    # platform's end and back between the leg's first and last moments is kept too (reach_over), so the check finds
+    # just what checking every monster at every moment finds. Bounded by where it could be at those two moments only,
+    # the check let through 17 of 2625 random legs on Tree Dungeon that touched (review, 2026-10-24).
+    from gamelab.motion import bodies
+    a, b = by_y(model, 300, 100), by_y(model, 360, 300)
+    flow = Flow(model, KEYS)
+    [move] = Planner(model).plan(a.id, 100, b.id)
+    leg = flow.leg(move, Body(0.0, 100, a), Keys(KEYS), "run")
+    path = flow.path(leg, 1.0)
+    turned = 0
+    for x in range(230, 400, 10):
+        for vx in (-100.0, -60.0, 60.0, 100.0):
+            mo = MonsterTrack(b.id, float(x), half=28.0, vx=vx, height=56.0, kind="horny-mushroom", top=56.0)
+            every = any(bodies.touches(px, py, *mo.reach(t, b), mo.half, b.y_at(min(max(px, mo.reach(t, b)[0]),
+                                                                                    mo.reach(t, b)[1])), mo.tall)
+                        for t, px, py in path)
+            assert (flow.danger(leg, [mo], 1.0) is not None) == every, (x, vx)
+            (a0, b0), (a1, b1) = mo.reach(path[0][0], b), mo.reach(path[-1][0], b)
+            far = min(a0, a1) - 50 >= max(px for _, px, _ in path) or max(b0, b1) + 50 <= min(px for _, px, _ in path)
+            turned += every and far
+    assert turned  # (some of them touch only as they come back from the end)
 
 
 # --- on the real map ------------------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 (MonsterTrack, for planning moves around it).
 """
 
+import math
 from collections import deque
 from dataclasses import dataclass
 
@@ -232,6 +233,27 @@ class MonsterTrack:
         lo = self.x - (go if self.heading <= 0 else min(go, TURN_SLACK))
         hi = self.x + (go if self.heading >= 0 else min(go, TURN_SLACK))
         return max(p.left, lo), min(p.right, hi)
+
+    def reach_over(self, t0: float, t1: float, p: Platform) -> tuple[float, float]:
+        """Where its centre can be at any plan time from t0 to t1 (a bound for a quick check: motion.flow's danger).
+        `reach` at both, and, seen walking, the end of its platform it turns back at in between (`at`), from where it
+        comes back: one seen at 86 on Tree Dungeon's 21 walking right at 60 turned at 152 and was back at 148 a second
+        on, outside its reach at either moment, and a drop from 17 onto 19 with it under her landing was let through
+        (review of the branch, 2026-10-24: 17 of 2625 random legs that touched)."""
+        (a0, b0), (a1, b1) = self.reach(t0, p), self.reach(t1, p)
+        lo, hi = min(a0, a1), max(b0, b1)
+        left, right = p.left + self.half, p.right - self.half
+        if self.vx and right > left:
+            def leg_of(t: float) -> int:  # which of its walks between the ends: even ones go right
+                return math.floor((min(max(self.x, left), right) + self.vx * max(0.0, t - self.seen_at) - left)
+                                  / (right - left))
+            n0, n1 = sorted((leg_of(t0), leg_of(t1)))
+            spread = TURN_SLACK + 20.0 * max(0.0, t1 - self.seen_at)  # (as reach's, by t1 at most)
+            for end, turns in ((left, any(k % 2 == 0 for k in range(n0 + 1, n1 + 1))),
+                               (right, any(k % 2 == 1 for k in range(n0 + 1, n1 + 1)))):
+                if turns:
+                    lo, hi = min(lo, max(p.left, end - spread)), max(hi, min(p.right, end + spread))
+        return lo, hi
 
 
 class Tracker:
