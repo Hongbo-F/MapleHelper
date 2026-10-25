@@ -2173,8 +2173,8 @@ def loop_tree_ore_waits(sim):
     is in reach, the ore isn't at risk (90 s of life, nobody by it): she shoots first and picks it up once nothing is in
     reach, 4 ores of 4. With the valuable pile rule ahead of shooting as before (hunt.EXP_FIRST off) she went down to
     22 for it at once, among its Green Mushrooms, and was hurt 15 times (1.72 bars of HP) against once (0.16), for the
-    same 596 EXP and 3 ores; on seeds 1-4, 2384 EXP against 2261, 12 ores of 15 against 14 of 16, 3.45 bars of HP lost
-    against 5.28."""
+    same 596 EXP and 3 ores; on seeds 1-8, 4645 EXP against 4306 (better on 5, worse on 1), 25 ores of 31 against 25
+    of 30, hurt 76 times against 98."""
     return harness._only(_loop(4), (23,))(sim)
 
 

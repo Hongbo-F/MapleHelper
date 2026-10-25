@@ -44,7 +44,7 @@ LANDS_S = 0.85     # s after a throw's attack key that its damage can show on it
 LOST_S = 3.0       # s unseen before a monster she threw at is forgotten (ledger.WOUND_LOST_S) ...
 FORGET_S = 15.0    # ... and s since her last throw at it (ledger.WOUND_S)
 MODES = ("choice", "skill", "regular")  # attack.choice.pick's modes: `tour --attack` (choice by default)
-DEAD_LIKELY = 0.5  # a monster in a throw's way this likely dead by her throws (Left.dead) isn't what it takes: the next is
+DEAD_LIKELY = 0.5  # a monster in a throw's way this likely dead by her throws (Left.dead) isn't its target: the next is
 
 
 @dataclass
