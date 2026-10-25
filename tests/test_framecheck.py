@@ -673,6 +673,42 @@ def test_a_trip_stands_still_while_its_looks_fail_and_arrives_after():
     assert trace["result"] == "arrived" or trace["result"].get("result") == "arrived", trace["result"]
 
 
+def test_a_trip_stands_still_no_later_than_its_caller_says():
+    """Navigator.go's `stand_until` bounds a pause sooner than the trip's deadline (the hunt's end, for its trip to rest:
+    Tour.rest): with every look failing from 4 s to 16 s of the same climb and `stand_until` 8 s in, the trip raises
+    LookLost at 8 s, as a pass of the hunt would at its end (Hunt.run), not standing on to its deadline (review,
+    2026-10-24: a hunt could stand past its end by up to the trip's 180 s)."""
+    import dataclasses
+    import time
+
+    from gamelab.sim import scenarios
+    if scenarios.real_map(TREE) is None:
+        pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
+
+    def run(sim):
+        real = sim.eyes.look
+
+        def look():
+            if 4.0 <= sim.clock.elapsed < 16.0:
+                sim.clock.sleep(0.03)
+                raise BadLook(Problem("picture", "the minimap doesn't show this map's picture"))
+            return real()
+
+        sim.eyes.look = look
+        nav = sim.navigator(sim.hunter())
+        until = time.monotonic() + 8.0  # (the simulator's clock)
+        try:
+            nav.go(6, stand_until=until)
+        except LookLost:
+            return {"lost at": sim.clock.elapsed}
+        return {"lost at": None}
+
+    sc = dataclasses.replace(scenarios.SCENARIOS["nav_tree_bottom_to_top"], name="nav_tree_lost_bound", fn=run,
+                             expects=(), limit=300)
+    got = scenarios.run_scenario(sc)["result"]
+    assert got["lost at"] is not None and 8.0 <= got["lost at"] < 10.0, got  # (its last look's retries: 8.96 s)
+
+
 def test_a_trip_paused_on_its_quick_look_looks_for_monsters_again():
     """A chain cut short has the next pass take a quick look, planning from the monsters seen before (TripState.quick).
     When that quick look is the one that fails, the pass after the pause looks for monsters afresh, as Navigator.go's

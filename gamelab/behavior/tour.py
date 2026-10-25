@@ -193,9 +193,10 @@ class Tour:
             raise RuntimeError("no safe platform reachable")
         return best[1]
 
-    def rest(self, max_seconds: float = REST_SECONDS) -> None:
+    def rest(self, max_seconds: float = REST_SECONDS, stand_until: float | None = None) -> None:
         """Go to the nearest safe platform, sit on the chair until HP is back (or for `max_seconds` at
-        most), and stand up."""
+        most), and stand up. `stand_until`: the latest the trip there stands still to while its looks fail (the
+        hunt's end: Navigator.go)."""
         pid = self.nearest_safe()
         self.log(f"resting on platform {pid}")
         # Low on HP: straight there, shooting only what's in the way. Low HP is why she's going, so it's no
@@ -203,7 +204,7 @@ class Tour:
         # and she sat down among the monsters. A monster whose touch counts that could touch her on the way: a way
         # around it first, a shot at it only if there's none (navigator.TripState.detour).
         telemetry.emit("event", kind="rest_trip", text=f"to platform {pid} to rest")
-        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT), vary=False, detour=True)
+        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT), vary=False, detour=True, stand_until=stand_until)
         self.report.on_the_way += trip.kills
         if trip.result != "arrived":
             self.log(f"  couldn't reach a safe platform ({trip.result}); resting here")

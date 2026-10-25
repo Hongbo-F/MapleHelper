@@ -343,13 +343,14 @@ class Hunt:
         self._s: Scene | None = None         # the last look, for the 'hunt' record
         self._seen: Scene | None = None      # the latest look of all (a trip starts from it if it's still fresh)
         self._published = None
+        self._end = float("inf")  # when the running hunt ends (run)
 
     # --- the loop ------------------------------------------------------------------------------------
 
     def run(self, minutes: float) -> HuntReport:
         """Hunt for `minutes`, then go to a safe platform and stand by (as a tour ends)."""
         start = time.monotonic()
-        end = start + minutes * 60
+        end = self._end = start + minutes * 60
         self.h.report = Report()  # one report for the whole hunt
         if self.nav.escort is not None:
             self.nav.escort.kinds = self.kinds
@@ -660,7 +661,8 @@ class Hunt:
         self.stack.clear()
         self.obj = None
         self._leave_ground()  # the visit so far goes into the value map: a rest isn't hunting time
-        self.tour.rest()
+        # (its trip stands still while its looks fail only up to the hunt's end, as a pass does: Navigator.go)
+        self.tour.rest(stand_until=self._end)
         self._progress = time.monotonic()
         self._exit_piles = self._exit_reason = None  # the new visit starts undecided
         self._potion_misses = 0

@@ -325,7 +325,8 @@ class Navigator:
 
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-           scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False) -> Trip:
+           scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False,
+           stand_until: float | None = None) -> Trip:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
         with a look that includes monsters (late in the chain before, when it follows on from that one):
         True ends the trip early ('in position'). `mode` (AVOID, HUNT or TRANSIT; the navigator's own by
@@ -333,7 +334,9 @@ class Navigator:
         pass instead of a new one if it's fresh (no keys sent since). `keep_off`: platforms its routes go onto
         only at a cost (TripState.keep_off). `vary`: it chooses among the planner's ways (route.ROUTES; TripState.
         vary). `detour`: with an escort, a way around a monster that could touch her before a shot at it (a trip to
-        rest: TripState.detour)."""
+        rest: TripState.detour). While its looks fail (LookLost) it stands still up to its deadline, or `stand_until`
+        (time.monotonic) if that's sooner: the hunt's end, for its trip to rest (Tour.rest), which then stops it as a
+        pass would (Hunt.run)."""
         st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary,
                         detour=detour)
         while not st.over:
@@ -341,7 +344,8 @@ class Navigator:
                 self.step(st)
             except LookLost as lost:  # the game doesn't look as expected: stand still until it does, up to the trip's
                 stood = time.monotonic()  # deadline (then the command stops, saying why), as the hunt loop does
-                if self.senses.regain(lost, st.deadline) is None:
+                until = st.deadline if stand_until is None else min(st.deadline, stand_until)
+                if self.senses.regain(lost, until) is None:
                     raise
                 st.paused(time.monotonic() - stood)
         return st.trip
