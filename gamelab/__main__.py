@@ -1016,7 +1016,13 @@ def cmd_bench_look(args) -> int:
         frames = bench.load(files, tuple(int(v) for v in args.shrink.lower().split("x")) if args.shrink else None)
         geo = bench.geometry_of(frames, args.look_scale)
         eyes = bench.SavedEyes(_calibration(geo).template, detector_for(model, geo), geo,
-                               mapdata.minimap_picture(model.id))
+                               minimap_picture=mapdata.minimap_picture(model.id), check_frames=not args.shrink)
+        if args.shrink:
+            print("--shrink: the frames' own checks are left out (perception.framecheck: the shrink blurs their 1-px "
+                  "anchors)")
+        if bad := bench.refused(eyes, Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)), frames):
+            print(f"frames whose looks fail their checks (--map {model.id}?):" + "".join(f"\n  {b}" for b in bad))
+            return 1
     from .localization.worldstate import Asks, Schedule, WorldStep
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
     # The continuous feed's step on the same frames (localization.worldstate): her place and every monster it
@@ -1194,7 +1200,10 @@ def cmd_bodies(args) -> int:
     frames = bench.load(files)
     geo = bench.geometry_of(frames)
     detector = detector_for(model, geo)
-    eyes = bench.SavedEyes(_calibration(geo).template, detector, geo, mapdata.minimap_picture(model.id))
+    eyes = bench.SavedEyes(_calibration(geo).template, detector, geo, minimap_picture=mapdata.minimap_picture(model.id))
+    if bad := bench.refused(eyes, Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)), frames):
+        print(f"frames whose looks fail their checks (--map {model.id}?):" + "".join(f"\n  {b}" for b in bad))
+        return 1
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
 
     def look_at(bgra):

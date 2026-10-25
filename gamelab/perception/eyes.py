@@ -106,6 +106,9 @@ class Eyes:
     # The drops the loot detector looks for, by name (perception.drops.items_for: Senses tells it its map's); None: the
     # first map's (loot.ITEMS)
     drop_names: tuple[str, ...] | None = None
+    check_frames = True           # whether frames are checked (framecheck.frame_problem): not frames resampled from
+                                  # another size (bench-look --shrink), whose 1-px anchors are blurred
+    _hp, _mp = 1.0, 1.0           # the HP and MP the last frame that passed its checks read (a refused one's)
 
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
                  loot: LootDetector | None = None, screen=None, geo: Geometry = STRETCHED,
@@ -120,7 +123,6 @@ class Eyes:
         self._loot = loot
         self.screen = screen or capture.shared()
         self._glanced = -GLANCE_EVERY_S    # when the last glance began
-        self._hp = 1.0                     # the HP the last look or glance that passed its checks read
         self.area: dict[str, int] | None = None  # where the client area was at the last look that passed
         self.log: Callable[[str], None] = print  # what the eyes say (the window moved; the capture reopened)
         self.glances_failed = 0            # glances that failed their checks (no dot from them)
@@ -138,7 +140,6 @@ class Eyes:
         obs = self.look_at(self._capture())
         if obs.bad is not None:
             raise BadLook(obs.bad)
-        self._hp = obs.hp
         return obs
 
     def look_at(self, full: np.ndarray, t: float | None = None, ropes: bool | None = None) -> Observation:
@@ -155,22 +156,22 @@ class Eyes:
         k = geo.look_scale
         frame = full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
                                                interpolation=cv2.INTER_AREA)
-        if (bad := framecheck.frame_problem(full, geo)) is not None:  # before her name tag, whose template is cut
-            return self._refused(t, frame, hp, mp, bad)                # from the first look
+        if self.check_frames and (bad := framecheck.frame_problem(full, geo)) is not None:  # before her name tag,
+            return self._refused(t, frame, bad)                         # whose template is cut from the first look
         picture = None
         if self.minimap is not None:
             mx0, my0, mx1, my1 = minimap_box(geo)
             self.minimap.find(full[my0:my1, mx0:mx1])
             if self.minimap.corner is None:  # never found: her dot can't be read (its origin isn't known)
                 score = "no search" if self.minimap.score is None else f"best match {self.minimap.score:.2f}"
-                return self._refused(t, frame, hp, mp, Problem(
+                return self._refused(t, frame, Problem(
                     "picture", f"the minimap doesn't show this map's picture ({score}, {PICTURE_MATCH} needed): "
                                f"another map, or the minimap covered"))
             picture = (*self.minimap.corner, -1.0 if self.minimap.score is None else round(self.minimap.score, 3))
         try:
             tag = self.name_tag.find(full)
         except RuntimeError as e:  # her name tag's full-size template can't be cut: she isn't on screen
-            return self._refused(t, frame, hp, mp, Problem("tag", str(e)))
+            return self._refused(t, frame, Problem("tag", str(e)))
         ground = ground_extent(frame, tag[0], tag[1] - tag_below_feet(geo), geo) if tag else None
         dot = her_dot(full, geo)
         others = other_dots(full, geo)  # 0.4-0.6 ms (the 31 saved frames of this map)
@@ -182,15 +183,17 @@ class Eyes:
             found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None, geo)
         x0, y0, x1, y1 = exp_number_box(geo)
         bx0, by0, bx1, by1 = read_box(geo)
+        self._hp, self._mp = hp, mp
         return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=tag, hp=hp, mp=mp,
                            ground=ground, dot=dot, others=others, ropes=found,
                            exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy(),
                            geo=geo, picture=picture)
 
-    def _refused(self, t: float | None, frame: np.ndarray, hp: float, mp: float, bad: Problem) -> Observation:
-        """A look that failed its checks: nothing read from it but the bars."""
-        return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=None, hp=hp, mp=mp, geo=self.geo,
-                           bad=bad)
+    def _refused(self, t: float | None, frame: np.ndarray, bad: Problem) -> Observation:
+        """A look that failed its checks: nothing read from it, its HP and MP the last good frame's (the bars of a frame
+        off the client area are read off something else: 0% on the 16:48:45 frame, a hit to the feed's world step)."""
+        return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=None, hp=self._hp, mp=self._mp,
+                           geo=self.geo, bad=bad)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from the newest frame (with DXGI 0.2 ms, with mss two grabs of 16.7

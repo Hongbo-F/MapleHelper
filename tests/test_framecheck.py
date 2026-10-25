@@ -373,6 +373,18 @@ def test_regain_stands_still_until_a_look_passes(monkeypatch):
     assert said[-1].startswith("  still lost when the time was up: the game's client is 1396x1952")
 
 
+def test_a_refused_frame_keeps_the_last_good_hp_and_the_feeds_step_reads_nothing_off_it():
+    """The reviewer's feedhp.py: the 16:48:45 offset frame read 0% HP, and the feed's world step made a hit of it."""
+    from gamelab.localization.worldstate import Schedule, WorldStep
+    eyes = GameWindow(Desktop(GOOD), tree_picture())
+    step = WorldStep(senses_module.Senses(eyes, tree_model(), band=(100, 100)),
+                     schedule=Schedule(band_s=None, wide_s=None))
+    good = step.step(lambda ropes: eyes.look_at(GOOD, 1.0, ropes), 1.0, True)
+    assert good.where is not None and good.hp > 0.5
+    bad = step.step(lambda ropes: eyes.look_at(OFFSET, 1.1, ropes), 1.1, True)
+    assert bad.where is None and bad.hp == good.hp and bad.events == []
+
+
 # --- a hunt in the simulator, its looks failing for a while ------------------------------------------------------------
 
 def _lost_hunt(window: tuple[float, float], minutes: float, problem: Problem) -> dict:
@@ -480,6 +492,25 @@ def test_a_command_stops_saying_why_if_the_maps_picture_wont_load(monkeypatch, c
     monkeypatch.setattr(mapdata, "load_minimap_picture", lambda map_id: np.zeros((183, 67, 3), np.uint8))
     assert cli._minimap_picture(SimpleNamespace(id=TREE, minimap={"width": 548})).shape == (183, 67, 3)
     assert "the minimap picture of map 10002073: 67x183 game px" in capsys.readouterr().out
+
+
+def test_bench_look_reads_tree_dungeons_frames_and_says_at_once_of_one_that_fails(monkeypatch, tmp_path, capsys):
+    """bench-look (offline) on Tree Dungeon's frames: its eyes had no minimap picture, so every look was off the map, and
+    after senses.LOST_S of retrying it stopped. A frame that fails its checks is said at once, with why."""
+    import time
+    from types import SimpleNamespace
+
+    from gamelab import __main__ as cli
+    from gamelab import paths
+    tree_model(), tree_picture()
+    monkeypatch.setattr(cli, "_calibration", lambda geo: SimpleNamespace(template=np.load(TAG)))
+    monkeypatch.setattr(paths, "TAG_FULL", tmp_path / "tag.npy")
+    good, offset = (str(FIXTURES / "capture" / n) for n in ("tree_135315.png", "tree_164845_offset.png"))
+    assert cli.main(["bench-look", "--map", str(TREE), "--reps", "1", good]) == 0
+    begun = time.monotonic()
+    assert cli.main(["bench-look", "--map", str(TREE), "--reps", "1", good, offset]) == 1
+    assert time.monotonic() - begun < senses_module.LOST_S
+    assert "tree_164845_offset.png: the capture is offset by (+26, +26)" in capsys.readouterr().out
 
 
 def test_the_scene_record_says_where_the_minimap_picture_was():

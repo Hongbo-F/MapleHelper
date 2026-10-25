@@ -158,8 +158,13 @@ def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[floa
     from . import mapdata
     model = mapdata.load(map_id)
     frames = ScreenFrames(title, geo=geo)
-    eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo,
-                minimap_picture=mapdata.minimap_picture(model.id))
+    try:  # as the commands that act load it (__main__._minimap_picture): the feed stops if it won't load
+        picture = mapdata.load_minimap_picture(model.id)
+    except (KeyError, OSError, ValueError) as e:
+        if model.minimap.get("width"):  # the map has one: without it her dot is read with the first map's origin
+            raise RuntimeError(f"map {model.id}'s minimap picture didn't load ({e!r})") from None
+        picture = None
+    eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo, minimap_picture=picture)
     senses = Senses(eyes, model, band)
     return Runner(frames, eyes, WorldStep(senses, throws, schedule, SearchThread(senses)), title)
 

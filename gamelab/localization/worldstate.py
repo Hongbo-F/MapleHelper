@@ -360,7 +360,8 @@ class WorldStep:
         sch = self.schedule
         obs = look(self.seq % sch.ropes_every == 0)
         s = self.senses.place(obs)
-        events = self._vitals(s, t)
+        events = self._vitals(s, t) if s.bad is None else []  # (a frame that failed its checks: its EXP and HP aren't
+                                                               # the game's, and the next good frame's are compared)
         placed = s.tag is not None and s.where is not None
         view = self._view(s) if placed else None
         if placed:

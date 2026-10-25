@@ -30,6 +30,7 @@ from ..paths import LAB
 from ..perception import exp_number
 from ..perception.eyes import EXP_TEXT, Eyes, rgb_of, tag_below_feet
 from ..perception.exp_number import read_box
+from ..perception.framecheck import BadLook
 from ..perception.hud import BAR_ROW, HP_BAR, bars, exp_number_box
 from ..perception.lie_detector import LieDetectorSpotter
 from ..perception.minimap import her_dot, minimap_box, other_dots
@@ -102,12 +103,16 @@ class SavedShot(capture.Shot):
 
 class SavedEyes(Eyes):
     """Eyes whose captures come from saved frames (`show`) of a client of geometry `geo`, never from the screen: no
-    window is touched. `minimap_picture`: the map's own (mapdata.minimap_picture), as the game's Eyes have it."""
+    window is touched. `minimap_picture`: the map's (mapdata.minimap_picture), as the game's eyes have it: without it
+    her dot is read with the first map's origin, which on Tree Dungeon's frames is off the map, and Senses refuses every
+    look (localization.placecheck). `check_frames` False: frames resampled from another size (`load`'s `shrink`) aren't
+    checked (perception.framecheck: the shrink blurs its 1-px anchors, and every frame would fail)."""
 
     def __init__(self, tag_template: np.ndarray, detector=None, geo: Geometry = STRETCHED,
-                 minimap_picture: np.ndarray | None = None):
+                 minimap_picture: np.ndarray | None = None, check_frames: bool = True):
         super().__init__("saved frames", tag_template, detector, screen=SavedScreen(), geo=geo,
                          minimap_picture=minimap_picture)
+        self.check_frames = check_frames
 
     def show(self, bgra: np.ndarray) -> None:
         self.screen.bgra = bgra
@@ -201,6 +206,22 @@ def stages(eyes: Eyes, timer: Timer, band: tuple[float, float], spotter: LieDete
     timer.time("monsters: whole screen", lambda: eyes.monsters_wide(obs))
     for mob in mobs:
         timer.time("monster HP bar (each)", lambda: eyes.bar(obs, mob))
+
+
+def refused(eyes: SavedEyes, senses, frames: list[tuple[str, np.ndarray]]) -> list[str]:
+    """The saved frames (name, BGRA) whose looks fail their checks (perception.framecheck, localization.placecheck:
+    `senses`, a localization.senses.Senses of its own, places them), each with why. Asked first: a look at one through
+    Senses would be taken again for senses.LOST_S, and then stop the command (LookLost)."""
+    out = []
+    for name, bgra in frames:
+        eyes.show(bgra)
+        try:
+            problem = senses.place(eyes.look()).bad
+        except BadLook as e:
+            problem = e.problem
+        if problem is not None:
+            out.append(f"{name}: {problem.why}")
+    return out
 
 
 def run(eyes: Eyes, band: tuple[float, float], looks: dict[str, Callable], frames: list | None = None,
