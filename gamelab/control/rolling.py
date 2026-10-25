@@ -73,6 +73,7 @@ RECENT_KEEP_BYTES = 5 * 1024 ** 3  # save-recent's saves: the oldest go, when on
 ALARM_POLL_S = 0.5    # how often it looks for a new Lie Detector alarm
 STATUS_S = 5.0        # how often it writes its status file (what `recorder --status` and `save-recent` read)
 STATUS_STALE_S = 30.0  # a status file older than this: no recorder is running
+STATUS_TRIES, STATUS_RETRY_S = 5, 0.02  # a status file held open by a reader: tried again this often, this far apart
 LOG_EVERY_S = 600.0   # a line in its log this often: what it keeps, its rate and its cost
 # On an alarm, how long it waits for the player's recording of it to begin (its folder in paths.LIE_RECORDINGS): the
 # player writes the alarm, pages (about 1.2 s of beeps) and then starts it. Without one by then (the player not
@@ -449,7 +450,7 @@ class Recorder:
         self.last_save = str(folder)
         gaps = ", ".join(f"{why} {s:g} s" for why, s in summary["gaps"].items())
         self._say(f"recorder: saved {summary['seconds']:g} s ({summary['kind']}): {summary['frames']} frames "
-                  f"({summary['bytes'] / 1024 ** 2:.0f} MB)" + (f", gaps: {gaps}" if gaps else "") + f": {folder}")
+                  f"({summary['bytes'] / 1024 ** 2:.1f} MB)" + (f", gaps: {gaps}" if gaps else "") + f": {folder}")
 
     def _answer(self, rid: str, taken: Path, answer: dict) -> None:
         try:
@@ -504,10 +505,20 @@ class Recorder:
                 "max_bytes": self.ring.max_bytes, "seconds": self.ring.seconds, "fps_asked": self.fps}
 
     def write_status(self, stopped: bool = False) -> None:
+        """The status file, put in place whole. Windows refuses to replace a file another program has open, as
+        `recorder --status` has it for a moment (seen on 2026-10-24: the status saying it stopped was lost so): tried
+        again STATUS_TRIES times STATUS_RETRY_S apart."""
+        tmp = self.status_path.with_suffix(".tmp")
         try:
-            tmp = self.status_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self.status(stopped), indent=1), encoding="utf-8")
-            os.replace(tmp, self.status_path)
+            for n in range(STATUS_TRIES):
+                try:
+                    os.replace(tmp, self.status_path)
+                    return
+                except PermissionError:
+                    if n == STATUS_TRIES - 1:
+                        raise
+                    time.sleep(STATUS_RETRY_S)
         except OSError as e:  # (the disk full: the recording goes on)
             self._say(f"recorder: couldn't write its status ({e})")
 
@@ -629,8 +640,8 @@ def ask(seconds: float = SECONDS, name: str | None = None, box: Path | None = No
     box = Path(box or paths.RECORDER)
     if running(box) is None:
         raise NotRunning(f"no recorder is running (its status file, {box / 'status.json'}, is missing, says it stopped "
-                         f"or is older than {STATUS_STALE_S:g} s): start it with `python -m gamelab recorder`, in the "
-                         "folder the player runs from (the babysitter keeps it running)")
+                         f"or is older than {STATUS_STALE_S:g} s): start it with `python -m gamelab recorder` from a "
+                         "checkout whose gamelab/lab is the player's (the babysitter keeps it running)")
     inbox, outbox = box / "inbox", box / "outbox"
     inbox.mkdir(parents=True, exist_ok=True)
     rid = f"{time.strftime('%H%M%S')}_{uuid.uuid4().hex[:6]}"

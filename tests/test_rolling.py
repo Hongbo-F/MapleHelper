@@ -354,6 +354,23 @@ def test_run_ticks_10_times_a_second_and_leaves_a_status_saying_it_stopped(tmp_p
     assert "frames a second" in text and "of a core" in text
 
 
+def test_the_status_is_written_though_a_reader_has_it_open_for_a_moment(tmp_path, monkeypatch):
+    rec = recorder(tmp_path)
+    rec.write_status()
+    path = tmp_path / "recorder" / "status.json"
+    monkeypatch.setattr(rolling, "STATUS_TRIES", 2)
+    with open(path, encoding="utf-8"):  # `recorder --status` reading it: Windows won't replace it meanwhile
+        rec.write_status(stopped=True)
+    assert rolling.read_status(tmp_path / "recorder")["stopped"] is False
+    assert "couldn't write its status" in rec.said[-1]
+    monkeypatch.setattr(rolling, "STATUS_TRIES", 200)
+    held = open(path, encoding="utf-8")
+    threading.Timer(0.05, held.close).start()
+    rec.write_status(stopped=True)  # tried again until the reader let go
+    assert rolling.read_status(tmp_path / "recorder")["stopped"] is True
+    rec.close()
+
+
 def test_a_saved_part_makes_a_sheet_and_a_video_and_so_does_a_lie_detector_recording(tmp_path):
     items = [Item(1000.0 + k / 10, rolling.encode(bgra(k)), size=(64, 48)) for k in range(30)]
     items[10:15] = [Item(it.t, None, "covered") for it in items[10:15]]
