@@ -308,6 +308,11 @@ def test_the_touches_on_her_trips_are_counted_from_a_chains_or_moves_start_to_it
                {"topic": "moved", "t": t0 + 7.0}, {"topic": "move", "t": t0 + 13.0}, {"topic": "moved", "t": t0 + 15.0}]
     out = harness.outcomes(w, records, 60.0)
     assert out["trip_s"] == pytest.approx(4.0) and out["trip_hurt"] == 2 and out["trip_hp_lost"] == pytest.approx(0.06)
+    # A move the mover can't do from where she stands ends at its 'cannot' event: standing there isn't travel.
+    records[4:5] = [{"topic": "move", "t": t0 + 8.0}, {"topic": "event", "kind": "cannot", "t": t0 + 8.1},
+                    {"topic": "move", "t": t0 + 13.0}]
+    out = harness.outcomes(w, records, 60.0)
+    assert out["trip_s"] == pytest.approx(4.1) and out["trip_hurt"] == 2
 
 
 def test_her_box_can_be_the_clients_in_the_simulated_world(model):

@@ -261,6 +261,7 @@ class TripState:
     sighted: list[tuple[MonsterTrack, Monster]] = field(default_factory=list)  # the last pass's tracks of the
                                                                               # monsters it saw, each with the sighting
     cannot: set = field(default_factory=set)  # moves the mover couldn't do from where she stood (CANNOT_S)
+    thought_to: float = 0.0  # up to when thinking is counted (Trip.time: _chain, called again for a pass's replans)
 
     def end(self, result: str) -> Trip:
         """The trip, over: `result` says how it ended."""
@@ -650,13 +651,16 @@ class Navigator:
     def _chain(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float,
                hops: bool | None = None) -> tuple:
         """As many of the route's moves as can be predicted, chained from where she stands (flow.chain:
-        the legs, their keys, and why the chain ended). The time since the look (`looked`) counts as
-        thinking. `hops`: over a monster in the way of a run (by default only without an escort)."""
+        the legs, their keys, and why the chain ended). The time since the look (`looked`), or since the last chain
+        planned from it (a pass's replans: _meet), counts as thinking. `hops`: over a monster in the way of a run (by
+        default only without an escort)."""
         # Right after a plan she may still be sliding or landing: the first jump/drop waits. A chain cut off
         # for length doesn't stop her at its end: the next one may follow on (follow).
         legs, keys, why = self.flow.chain(path, self._start(st, s), monsters, keep_going=True,
                                           hops=not self.fight if hops is None else hops)
-        st.trip.time["think"] += time.monotonic() - looked
+        now = time.monotonic()
+        st.trip.time["think"] += now - max(looked, st.thought_to)
+        st.thought_to = now
         return legs, keys, why
 
     def _meet(self, st: TripState, s: Scene, path: list[Move], monsters: list, legs: list[Leg], why: str,
@@ -846,6 +850,8 @@ class Navigator:
         except ValueError as e:  # one it can't do from here (CANNOT_S): another way, from the next look
             self.log(f"    can't: {e}; another way")
             st.cannot.add(_key(move))
+            if telemetry.recording():  # (nothing made: no 'moved' record ends the 'move' one)
+                telemetry.emit("event", kind="cannot", text=f"{move.kind} -> {move.dst}: {e}")
             return [], s.where.platform, s
         st.trip.time["move"] += time.monotonic() - t2
         st.moved_at = time.monotonic()

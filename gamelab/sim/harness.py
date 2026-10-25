@@ -355,8 +355,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
 
 def _travelling(world, records: list[dict], end: float) -> dict:
     """trip_s, trip_hurt and trip_hp_lost (see the top): her moves, from each 'chain' or 'move' record (a chain sent, a
-    move made alone) to the next 'moved' record (chains that follow on are in their first one's), in world time, up to
-    `end`; and the touches that hurt her then."""
+    move made alone) to the next 'moved' record (chains that follow on are in their first one's), or a move the mover
+    couldn't do (a 'cannot' event: nothing made), in world time, up to `end`; and the touches that hurt her then."""
     start = next((r["t"] for r in records if r.get("topic") == "session"), None)
     if start is None:
         return {"trip_s": 0.0, "trip_hurt": 0, "trip_hp_lost": 0.0}
@@ -364,7 +364,8 @@ def _travelling(world, records: list[dict], end: float) -> dict:
     for r in records:
         if r.get("topic") in ("chain", "move") and began is None:
             began = r["t"] - start
-        elif r.get("topic") == "moved" and began is not None:
+        elif (r.get("topic") == "moved" or r.get("topic") == "event" and r.get("kind") == "cannot") \
+                and began is not None:
             spans.append((began, min(r["t"] - start, end)))
             began = None
     if began is not None:

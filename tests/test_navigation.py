@@ -1514,6 +1514,23 @@ def test_a_fighting_trip_reads_which_kinds_count_before_its_first_look(model):
     assert nav._threat_kinds is not None
 
 
+def test_thinking_is_counted_once_however_many_chains_a_pass_plans(model, monkeypatch):
+    """Navigator._chain: the time since the look counts as thinking, and a replan from the same look (_meet's hop and
+    regardless) counts only the time since the chain before."""
+    import gamelab.control.navigator as nv
+    c = by_y(model, 500, 400)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, _escort(), (c.id, 100.0))
+    clock = {"now": 10.0}
+    monkeypatch.setattr(nv.time, "monotonic", lambda: clock["now"])
+    nav._chain(st, s, path, monsters, 9.5)
+    clock["now"] = 10.25
+    nav._chain(st, s, path, monsters, 9.5)
+    assert st.trip.time["think"] == pytest.approx(0.75)
+    clock["now"] = 12.0
+    nav._chain(st, s, path, monsters, 11.5)  # a new look's: from it
+    assert st.trip.time["think"] == pytest.approx(1.25)
+
+
 def test_a_trip_with_an_escort_shoots_first_a_monster_that_could_touch_her_on_the_way(model, monkeypatch):
     """Navigator._meet: the run along C to the rope passes a Horny Mushroom standing at 450 (the chain stops before
     the move: flow.in_the_way). A star reaches it from where she stands (the escort's clear_for): she shoots it, and
