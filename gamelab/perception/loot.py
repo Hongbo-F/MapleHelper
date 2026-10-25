@@ -27,6 +27,9 @@ behind them. Drawn so on the new maps' frames (200 times), it scored 0.95-0.98 w
 drawn (alpha 128 and up, as the 1920x1080 pictures are cut) and its colours were 10.4 off (15.5 at most); now 1.00
 and 0.
 
+Of kinds whose pictures are one picture recoloured (the ores, the potions), the nearer in colour is the drop: of two a
+detector holds (SAME_SHAPE), and of one it holds and its twins it doesn't (TWINS), which it weighs where one is found.
+
 The pickup log's full-inventory message (`says_full`) is here too.
 """
 
@@ -79,6 +82,18 @@ MIN_SOLID = 10       # fewer solid pixels than this, and its colours are checked
 # of 43 Silver Ores were taken for Iron Ore (a third: 14), and none now; the shape scores of the two came within 0.005
 # of each other (README: Perception, drops of each map).
 SAME_SHAPE = 0.02
+# A drop's twins: the items whose picture is its picture recoloured (`twins_of`), which a map's detector doesn't look
+# for. Nothing else is found where one lies, so a twin whose colours pass a held kind's check would be named as it: on
+# a Tree Dungeon frame the game's Iron Ore was found as a Silver Ore (0.998, its colours 12.1 apart), Aquamarine as
+# Emerald (11.1), Diamond and Opal as Sapphire (9.2 and 23.7), a Warrior Potion as a Magic Potion (19.6), all of
+# them valuable there. So each held kind is weighed against its twins where it's found (`_match`): it's kept
+# only if its colours are nearer than every twin's. Its twins are looked for among the items whose pictures the game
+# data keeps beside its own (the ores, the jewels' ores, the potions each in an image of their own; Tree Dungeon's
+# others have no picture of their size and shape there), drawn on the same px, with colours within TWIN_SLACK of its
+# own: twice the check's, as a drop's colours were up to 19 off its own picture in the 1920x1080 window's saved frames.
+# The first map's drops have none: its potions are all held, and the snail shells' pictures differ in shape.
+TWINS = "twins"            # the subfolder of a pictures folder that holds its drops' twins (`ensure`)
+TWIN_SLACK = 2 * PIXEL_SLACK
 # The game's message when pick-up fails for want of room: "You can't get anymore items." (seen when her
 # Etc tab filled up). It's in the client, not the game data, so this matches it and the usual other wordings.
 FULL_MESSAGE = re.compile(r"inventory\W*(?:is\W*)?full|full\W*inventory|(?:can\W?not|can\W?t|unable\W*to)\W*"
@@ -177,10 +192,7 @@ def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch, items: tuple[
     ids, written = item_ids(COPY), []
 
     def save(rgba: np.ndarray, name: str) -> None:
-        path = folder / f"{name}.png"
-        picture = rgba if stretch == 1 else resample_rgba(rgba, screen_size(rgba, stretch))
-        _put(path, lambda part: Image.fromarray(np.ascontiguousarray(picture), "RGBA").save(part, format="PNG"))
-        written.append(path)
+        written.append(_save(folder / f"{name}.png", rgba, stretch))
 
     for name in items:
         for item_id in ids.get(name, []):  # the first id with a picture ("Red Potion" has two, one blank)
@@ -194,6 +206,56 @@ def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch, items: tuple[
             if rgba.shape[1] >= rgba.shape[0] // 2:  # not edge-on
                 save(rgba, f"{MESOS}_{MESO_KINDS[kind]}{i}")
     return written
+
+
+def _save(path: Path, rgba: np.ndarray, stretch: float) -> Path:
+    """Write a picture drawn `stretch` times larger (at 1, as it is) to `path` (`_put`)."""
+    picture = rgba if stretch == 1 else resample_rgba(rgba, screen_size(rgba, stretch))
+    _put(path, lambda part: Image.fromarray(np.ascontiguousarray(picture), "RGBA").save(part, format="PNG"))
+    return path
+
+
+def twins_of(items: tuple[str, ...], copy: Path = COPY) -> dict[str, list[tuple[str, np.ndarray]]]:
+    """For each of `items` (by name), its twins: the other items whose pictures (`iconRaw`) the game data keeps beside
+    its own (gamedata.canvas.item_ids_beside), of its size and drawn on the same px (the alpha the same), with colours
+    within TWIN_SLACK of its own (the mean difference per channel over the px it draws whole); each by name, with its
+    picture (RGBA). An item without a picture has none; a twin whose kind can't be a file's name (drops.safe) is left
+    out."""
+    from gamedata.canvas import item_icon, item_ids_beside
+    ids, pictures = item_ids(copy), {}
+    name_of: dict[int, str] = {}
+    for name, numbers in ids.items():
+        for number in numbers:
+            name_of.setdefault(number, name)
+
+    def picture(number: int) -> np.ndarray | None:
+        if number not in pictures:
+            try:
+                pictures[number] = item_icon(number, copy)
+            except (KeyError, ValueError):
+                pictures[number] = None
+        return pictures[number]
+
+    out: dict[str, list[tuple[str, np.ndarray]]] = {}
+    for name in items:
+        out[name] = []
+        own = next(((n, p) for n in ids.get(name, []) if (p := picture(n)) is not None), None)
+        if own is None:
+            continue
+        number, rgba = own
+        whole = rgba[..., 3] == 255
+        seen = {name}
+        for other_number in item_ids_beside(number, copy):
+            other = name_of.get(other_number)
+            if other in seen or other is None or (q := picture(other_number)) is None:
+                continue
+            seen.add(other)  # (a name's first id with a picture, as `build` takes it)
+            if q.shape != rgba.shape or not np.array_equal(q[..., 3], rgba[..., 3]) or not whole.any():
+                continue
+            apart = float(np.abs(q[..., :3][whole].astype(np.float32) - rgba[..., :3][whole]).mean())
+            if apart <= TWIN_SLACK and drops.safe(other):
+                out[name].append((other, q))
+    return out
 
 
 def _put(path: Path, write) -> None:
@@ -221,14 +283,32 @@ def _coin(path: Path) -> str | None:
 
 def ensure(folder: Path | None = None, stretch: float = STRETCHED.stretch, items: tuple[str, ...] = ITEMS) -> Path:
     """Build the templates of those of `items` and the coins (drawn `stretch` times larger, in `folder`: by default
-    `folder_for(stretch)`) that are missing; returns the folder. Those there are left as they are: another map's
-    detector may be reading them."""
+    `folder_for(stretch)`) that are missing, and their twins (`_ensure_twins`); returns the folder. Those there are left
+    as they are: another map's detector may be reading them."""
     folder = folder_for(stretch) if folder is None else folder
     have = {_kind(p) for p in folder.glob("*.png")}
     missing = tuple(n for n in items if kind_of(n) not in have)
     if missing or MESOS not in have:
         build(folder, stretch, missing, coins=MESOS not in have)
+    _ensure_twins(folder, stretch, items)
     return folder
+
+
+def _ensure_twins(folder: Path, stretch: float, items: tuple[str, ...]) -> None:
+    """Write the twins (`twins_of`) of those of `items` whose twins aren't in `folder`'s TWINS subfolder yet: each twin's
+    picture (`<kind>_0.png`, drawn `stretch` times larger as `build` draws them), then, last, `<item's kind>.txt`
+    naming them (a kind a line; empty: none), which a detector reads. Without the game data, none: a detector then
+    weighs its kinds against no twins."""
+    twins = folder / TWINS
+    todo = tuple(n for n in items if not (twins / f"{kind_of(n)}.txt").exists())
+    if not todo or not (COPY / "Item").is_dir():
+        return
+    twins.mkdir(parents=True, exist_ok=True)
+    for name, found in twins_of(todo).items():
+        for other, rgba in found:
+            _save(twins / f"{kind_of(other)}_0.png", rgba, stretch)
+        listed = "".join(f"{kind_of(other)}\n" for other, _ in found)
+        _put(twins / f"{kind_of(name)}.txt", lambda part, text=listed: part.write_text(text, encoding="utf-8"))
 
 
 def kinds_of(items: tuple[str, ...]) -> set[str]:
@@ -250,6 +330,7 @@ class LootTemplate(NamedTuple):
     solid: np.ndarray  # where its colours are checked (bool)
     coin: str | None = None  # mesos: the coin it's a frame of
     gray: tuple[np.ndarray, np.ndarray] | None = None  # its brightness and mask (one channel), when matched on that
+    twins: tuple[np.ndarray, ...] = ()  # its twins' colours where its own are checked (`solid`; TWIN_SLACK)
 
 
 class LootDetector:
@@ -273,21 +354,15 @@ class LootDetector:
         for path in sorted(folder.glob("*.png")):
             if kinds is not None and _kind(path) not in kinds:
                 continue
-            rgba = np.asarray(Image.open(path).convert("RGBA"))
-            h, w = rgba.shape[:2]
-            rgb, cover = _at_size(rgba, frame_size(w, h, shrink))
-            mask = (cover >= HALF_COVER).astype(np.uint8)
-            if mask.sum() < MIN_MASK:
+            if (prepared := _prepared(path, shrink)) is None:
                 continue
-            # Colours are checked where the picture covers the whole pixel: on screen a thin line (the
-            # Slime Bubble's string) is half line, half background at half size, and was 41 off.
-            solid = cover >= SOLID_COVER
-            solid = solid if solid.sum() >= MIN_SOLID else mask > 0
-            gray = (cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2GRAY), mask) if self.gray else None
-            self.templates.append(LootTemplate(_kind(path), np.ascontiguousarray(rgb), np.dstack([mask] * 3), solid,
-                                               _coin(path), gray))
+            rgb, mask, solid = prepared
+            gray = (cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), mask) if self.gray else None
+            self.templates.append(LootTemplate(_kind(path), rgb, np.dstack([mask] * 3), solid, _coin(path), gray))
         if not self.templates:
             raise RuntimeError(f"no loot templates in {folder}")
+        held = {t.kind for t in self.templates}
+        self.templates = [t._replace(twins=_twins(folder, t, held, shrink)) for t in self.templates]
         self.height = max(t.rgb.shape[0] for t in self.templates)
         self._pool = ThreadPoolExecutor(THREADS)  # OpenCV lets go of the GIL while matching
 
@@ -330,10 +405,44 @@ class LootDetector:
         hits = []
         for y, x in zip(*np.nonzero(peaks)):
             seen = area[y:y + th, x:x + tw][solid].astype(np.float32)
-            if (off := float(np.abs(seen - own).mean())) <= PIXEL_SLACK:
+            if (off := float(np.abs(seen - own).mean())) <= PIXEL_SLACK and \
+                    not any(float(np.abs(seen - twin).mean()) < off for twin in template.twins):  # (a twin lies there)
                 hits.append((Item(kind, origin[0] + int(x) + tw // 2, origin[1] + int(y) + th // 2, tw, th,
                                   round(float(res[y, x]), 3), coin), off))
         return hits
+
+
+def _prepared(path: Path, shrink: float) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """A template's picture at frame size (`_at_size`): its colours, its mask (uint8) and where its colours are checked
+    (bool); None if its mask is too small (MIN_MASK)."""
+    rgba = np.asarray(Image.open(path).convert("RGBA"))
+    h, w = rgba.shape[:2]
+    rgb, cover = _at_size(rgba, frame_size(w, h, shrink))
+    mask = (cover >= HALF_COVER).astype(np.uint8)
+    if mask.sum() < MIN_MASK:
+        return None
+    # Colours are checked where the picture covers the whole pixel: on screen a thin line (the Slime Bubble's string)
+    # is half line, half background at half size, and was 41 off.
+    solid = cover >= SOLID_COVER
+    return np.ascontiguousarray(rgb), mask, solid if solid.sum() >= MIN_SOLID else mask > 0
+
+
+def _twins(folder: Path, template: LootTemplate, held: set[str], shrink: float) -> tuple[np.ndarray, ...]:
+    """The colours where `template`'s are checked of its twins in `folder` (TWINS: `_ensure_twins`) that aren't among
+    the `held` kinds (those are templates of their own: `_recoloured`), drawn on the px it is at frame size."""
+    listed = folder / TWINS / f"{template.kind}.txt"
+    if template.kind == MESOS or not listed.exists():
+        return ()
+    out = []
+    for kind in listed.read_text(encoding="utf-8").split():
+        path = folder / TWINS / f"{kind}_0.png"
+        if kind in held or not path.exists() or (prepared := _prepared(path, shrink)) is None:
+            continue
+        rgb, mask, solid = prepared
+        if rgb.shape == template.rgb.shape and np.array_equal(mask, template.mask3[..., 0]) \
+                and np.array_equal(solid, template.solid):
+            out.append(rgb[template.solid].astype(np.float32))
+    return tuple(out)
 
 
 def _recoloured(hits: list[tuple[Item, float]]) -> list[Item]:

@@ -692,3 +692,43 @@ def test_a_silver_ore_partly_hidden_is_not_taken_for_an_iron_ore():
     pasted.paste(frame, ore, 200, 300)
     frame[300:321, 200:205] = 220
     assert [i.kind for i in det.detect(frame, (160, 280, 265, 327))] == ["silver-ore"]
+
+
+@pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
+def test_a_drops_twins_are_the_items_whose_picture_is_its_picture_recoloured():
+    """loot.twins_of: the ores beside a Silver Ore in the game data whose colours are within TWIN_SLACK of its own (an
+    Iron Ore 12.1 off, a Bronze 24.0, a Mithril 30.7, an Orihalcon 37.2; Adamantium and Gold are 50.7 and 54.3), a
+    Magic Potion's the Warrior Potion (19.6), and the first map's drops none: its potions are one another's (all held),
+    the snail shells differ in shape, and the caps, the leather and the slimes' drops have no picture of their size."""
+    from gamelab.perception import loot
+    twins = loot.twins_of(("Silver Ore", "Magic Potion") + loot.ITEMS)
+    assert [name for name, _ in twins["Silver Ore"]] == ["Bronze Ore", "Iron Ore", "Mithril Ore", "Orihalcon Ore"]
+    assert [name for name, _ in twins["Magic Potion"]][0] == "Warrior Potion"
+    held = set(loot.ITEMS)
+    assert all(name in held for item in loot.ITEMS for name, _ in twins[item])
+
+
+@pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
+def test_a_twin_of_a_tree_dungeon_drop_is_not_taken_for_it():
+    """Each twin of Tree Dungeon's drops that the map's detector doesn't look for (an Iron Ore, an Aquamarine, a Diamond,
+    an Opal, a Warrior Potion, ...), the game's picture drawn 1:1 onto a frame of the map: nothing found. Its colours had
+    passed the held kind's check, and an Iron Ore was found as a Silver Ore (0.998), an Aquamarine as an Emerald (0.953),
+    a Diamond and an Opal as a Sapphire (0.993, 0.929), a Warrior Potion as a Magic Potion (0.996). The held kinds drawn
+    the same way are still found as themselves."""
+    from gamelab.analysis import pasted
+    from gamelab.perception import loot
+    from gamelab.screen import NATIVE
+    files = sorted(TREE_DUNGEON.glob("*.png")) if TREE_DUNGEON.is_dir() else []
+    if not files:
+        pytest.skip(f"needs frames of Tree Dungeon in {TREE_DUNGEON}")
+    det = loot.detector_for(mapdata.load(10002073), NATIVE)
+    folder, held = loot.folder_for(NATIVE.stretch), {t.kind for t in det.templates}
+    listed = {k for t in held - {loot.MESOS} for k in (folder / loot.TWINS / f"{t}.txt").read_text().split()}
+    assert {"iron-ore", "aquamarine-ore", "diamond-ore", "opal-ore", "warrior-potion"} <= listed - held
+    background = np.asarray(Image.open(files[0]).convert("RGB"))
+    for kind in sorted(listed - held) + sorted(held & {"silver-ore", "emerald-ore", "sapphire-ore", "magic-potion"}):
+        frame = background.copy()
+        rgba = np.asarray(Image.open(folder / (loot.TWINS if kind not in held else ".") / f"{kind}_0.png"))
+        pasted.paste(frame, rgba, 400, 300)
+        found = det.detect(frame, (370, 270, 430 + rgba.shape[1], 330 + rgba.shape[0]))
+        assert [i.kind for i in found] == ([kind] if kind in held else []), kind

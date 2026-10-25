@@ -559,8 +559,25 @@ hunt loop priced those alone. Now each map's detector looks for what its own mon
   of one size are found a px apart at most with scores within 0.02 (`loot.SAME_SHAPE`), the one whose colours are
   nearer is kept. Drawn on West Rocky Mountain II's frames with a fifth of each drop behind a piece of one of its
   monsters' sprites, 9 of the 43 Silver Ores had been taken for Iron Ore (a third behind it, 14), and none now; with 4-7
-  of its columns painted over on a saved frame, 168 of 1,296, and none now. The other close pairs: Opal and Sapphire Ore
-  (23.7 apart in colour) drop on different maps, and the Red and Orange Potions (23.8) score 0.89 on each other.
+  of its columns painted over on a saved frame, 168 of 1,296, and none now. The Red and Orange Potions (23.8 apart in
+  colour) score 0.89 on each other.
+- **A drop's twins the map doesn't look for** (`loot.twins_of`, `TWIN_SLACK`) had nothing to be weighed against, and
+  were named as the drop whose picture they share: drawn on a Tree Dungeon frame, the game's Iron Ore was found as a
+  Silver Ore (0.998), an Aquamarine as an Emerald (0.953), a Diamond and an Opal as a Sapphire (0.993, 0.929) and a
+  Warrior Potion as a Magic Potion (0.996), all of them valuable there (and on a saved frame of her inventory, its Iron
+  Ore's icon as a Silver Ore, 0.998). None of those drops from the map's monsters, but players drop things. A map's
+  detector now holds each of its kinds' twins too, the items whose pictures the game data keeps beside its own (the
+  ores, the jewels' ores, the potions each in an image of their own) of its size, drawn on the same px, with colours
+  within twice the check's 24 (a drop's own were up to 19 off in the 1920x1080 window's saved frames), and keeps a find
+  only where its colours are nearer than every twin's. Tree Dungeon's ores and Magic Potion have 2-5 each, 13 kinds in
+  all (Iron, Adamantium, Gold, Mithril, Garnet, Amethyst, Aquamarine, Opal, Diamond and Black Crystal Ore, the Warrior,
+  Sniper and Speed Potions); the first map's drops none (its potions are one another's, all held; the snail shells
+  differ in shape), so its detector is as it was. Drawn on Tree Dungeon's 20 frames (seeds 1 and 2), the 13 were named
+  as one of its drops 107 times of 300 (one column behind a piece of one of its monsters' sprites) and 222 of 1,000 (a
+  fifth behind it), and none now; its own drops were found as often as without (all 1,000 with a tenth behind, 982 with
+  a fifth, 744 with three tenths; the in-game frames' 39 of 39). They are built once into the pictures folder's `twins`
+  (1.3 s: every picture beside each drop's is read); a detector is made in 20 ms with them as without, and weighs them
+  only where a kind is found.
 
 On each map's own frames at 1366x768 (`bench-paste FRAMES --map ID`, each drop drawn 10 times as the game draws it, on
 three seeds): Tree Dungeon's 220 a run (16 items and 60 coins) and West Rocky Mountain II's 230 were all found as their

@@ -119,6 +119,15 @@ def item_icon(item_id: int, copy: Path = COPY) -> np.ndarray:
     return pixels(picture)
 
 
+def item_ids_beside(item_id: int, copy: Path = COPY) -> list[int]:
+    """The ids of the items whose pictures are kept in the same image as item `item_id`'s, lowest first (Etc 0401.img:
+    the ores; 0402.img: the jewels' ores; Consume 0200.img: the potions)."""
+    folder = ITEM_FOLDERS.get(item_id // 1_000_000)
+    if folder is None:
+        raise ValueError(f"no item pictures read for item {item_id} yet")
+    return sorted(int(k) for k in _item_canvases(folder, copy).image(f"{item_id // 10_000:04d}.img") if k.isdigit())
+
+
 def meso_frames(copy: Path = COPY, kinds=range(4)) -> dict[int, list[np.ndarray]]:
     """Mesos on the ground, by kind (0 bronze coin, 1 gold coin, 2 bundle of bills, 3 sack; the amount picks
     the kind), each a list of its spinning animation's frames (RGBA)."""
