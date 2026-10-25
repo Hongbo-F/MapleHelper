@@ -200,9 +200,10 @@ class Tour:
         self.log(f"resting on platform {pid}")
         # Low on HP: straight there, shooting only what's in the way. Low HP is why she's going, so it's no
         # reason to stop on the way (potions are still drunk): it used to end the trip at its first look,
-        # and she sat down among the monsters.
+        # and she sat down among the monsters. A monster whose touch counts that could touch her on the way: a way
+        # around it first, a shot at it only if there's none (navigator.TripState.detour).
         telemetry.emit("event", kind="rest_trip", text=f"to platform {pid} to rest")
-        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT), vary=False)
+        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT), vary=False, detour=True)
         self.report.on_the_way += trip.kills
         if trip.result != "arrived":
             self.log(f"  couldn't reach a safe platform ({trip.result}); resting here")

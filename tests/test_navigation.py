@@ -1467,3 +1467,162 @@ def test_a_monsters_box_for_touches_is_its_widest_and_tallest_frame(model):
     assert (track.kind, track.half, track.tall, track.height) == ("horny-mushroom", 28.0, 56.0, 56.0)
     [pig] = Tracker().update(0.0, [walker(300, platform=b.id)])  # the first map's: as before for a hop (46)
     assert (pig.half, pig.height, pig.tall) == (34.0, 46.0, 54.0)
+
+
+# --- trips with an escort keep clear of the monsters whose touch counts (Navigator._meet) ---------------------
+
+def _meeting(model, monkeypatch, escort, monster_at, mode="transit", detour=False):
+    """A trip with an escort from C at x 200 to D (up the rope at 700), and the look it plans from: one Horny Mushroom
+    standing at `monster_at` (platform, x), tracked as the pass tracks it. Returns the navigator, the trip, the look,
+    the route, and the chain's monsters."""
+    import numpy as np
+
+    import gamelab.control.navigator as nv
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    c, d = by_y(model, 500, 400), by_y(model, 300, 700)
+    nav = _navigator(model, escort=escort)
+    monkeypatch.setattr(nv.time, "sleep", lambda s: None)
+    st = nav.begin(d.id, mode=mode, detour=detour)
+    st.moved_at = -1e9  # not just after a plan: nothing to settle
+    seen = walker(monster_at[1], kind="horny-mushroom", pose="stand", platform=monster_at[0])
+    s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0,
+              where=Where(200, 500, c, (0, 0)), searched=True, wide=True, monsters=[seen])
+    path = Planner(model).plan(c.id, 200, d.id)
+    monsters, _ = nav._chain_monsters(st, s, path)
+    return nav, st, s, path, monsters
+
+
+def _escort(shots=None):
+    """An escort for which every kind counts (Escort.threat), shooting with `shots` (its kills; None: no star reaches)."""
+    from types import SimpleNamespace
+    asked = []
+    return SimpleNamespace(threat=lambda kind: True, asked=asked,
+                           clear_for=lambda s, m, finish=True: asked.append((m, finish)) or shots)
+
+
+def test_a_trip_with_an_escort_shoots_first_a_monster_that_could_touch_her_on_the_way(model, monkeypatch):
+    """Navigator._meet: the run along C to the rope passes a Horny Mushroom standing at 450 (the chain stops before
+    the move: flow.in_the_way). A star reaches it from where she stands (the escort's clear_for): she shoots it, and
+    looks again; in transit the fight doesn't finish what she has hurt. MAX_FIGHTS shots in a row at most."""
+    from gamelab.control.navigator import MAX_FIGHTS
+    c = by_y(model, 500, 400)
+    escort = _escort(shots=1)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450))
+    legs, keys, why = nav._chain(st, s, path, monsters, 0.0)
+    assert legs == [] and why == "monster" and len(monsters) == 1 and monsters[0].kind == "horny-mushroom"
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True
+    assert st.shots == 1 and st.trip.kills == 1 and escort.asked == [(s.monsters[0], False)]
+    st.shots = MAX_FIGHTS  # as many in a row as it may: a way around instead
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and len(escort.asked) == 1 and st.avoid
+    nav._made(st, [path[0]])  # a move made: the shots start again from none
+    assert st.shots == 0
+
+
+def test_out_of_reach_a_monster_on_the_way_is_gone_around_hopped_or_waited_for(model, monkeypatch):
+    """Navigator._meet with no star reaching it: the move costs extra so a way around is taken (st.avoid: here there's
+    none, so the next pass plans the same move); then, one in the way of a run along her platform, she hops it
+    (flow's hop: the chain hops over it, then climbs); one she can't hop (at the rope's top), she waits for it to
+    move off (WAIT_LOOKS looks), then goes on regardless (a backstop: the chain planned as if it weren't there). One
+    seen walking up and down D (its walking known: two looks) she doesn't wait for: wherever it heads, it can be at
+    the rope's top as she gets there, so waiting can't clear the way."""
+    from dataclasses import replace
+
+    from gamelab.control.navigator import WAIT_LOOKS, _key
+    c, d = by_y(model, 500, 400), by_y(model, 300, 700)
+    escort = _escort(shots=None)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450))
+    legs, keys, why = nav._chain(st, s, path, monsters, 0.0)
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True
+    assert _key(path[0]) in st.avoid and escort.asked  # asked first: no star reaches it
+    hopped = nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0)
+    assert isinstance(hopped, tuple) and [leg.move.kind for leg in hopped[0]] == ["hop", "climb"]
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, _escort(shots=None), (d.id, 700))
+    legs, keys, why = nav._chain(st, s, path, monsters, 0.0)
+    assert legs == [] and why == "monster" and monsters[0].vx is None  # (one look: which way it walks isn't known)
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.avoid  # around first ...
+    for i in range(WAIT_LOOKS):  # ... then waits, where nothing can reach her meanwhile
+        assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.waited == i + 1
+    regardless = nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0)  # then on regardless
+    assert [leg.move.kind for leg in regardless[0]] == ["climb"] and st.waited == 0
+    walking = [replace(monsters[0], vx=100.0)]  # seen walking on D: no waiting
+    assert [leg.move.kind for leg in nav._meet(st, s, path, walking, legs, why, 0.0, 0.0)[0]] == ["climb"]
+    assert st.waited == 0
+    standing = [replace(monsters[0], vx=0.0)]  # seen standing: it walks off sooner or later, so she waits
+    assert nav._meet(st, s, path, standing, legs, why, 0.0, 0.0) is True and st.waited == 1
+
+
+def test_past_meet_s_without_a_move_that_arrives_she_goes_on_regardless(model, monkeypatch):
+    """Navigator._meet's MEET_S: her chains stop short of a monster whose touch counts for that long at most, counted
+    from the first stop and not started again by a move cut short (a touch knocked her back: _made's `arrived`); then
+    she goes on regardless, the chain planned blind as before they kept clear of anything (a backstop), and a move
+    that gets her where it was going starts the count again. (Started again by every move, a trip to rest from Tree
+    Dungeon's floor ran out its 180 s there: simulator, loop_tree_walls.)"""
+    from gamelab.control.navigator import MEET_S
+    c = by_y(model, 500, 400)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, _escort(shots=1), (c.id, 450))
+    legs, keys, why = nav._chain(st, s, path, monsters, 0.0)
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.blocked is not None  # a shot first
+    nav._made(st, [path[0]], arrived=False)  # set off, knocked back
+    assert st.blocked is not None and st.shots == 0
+    st.blocked -= MEET_S
+    regardless = nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0)
+    blind = nav._chain(st, s, path, [], 0.0)
+    assert regardless[0] and [leg.move for leg in regardless[0]] == [leg.move for leg in blind[0]]
+    nav._made(st, [path[0]])
+    assert st.blocked is None
+
+
+def test_on_a_trip_to_rest_a_monster_on_the_way_is_gone_around_before_it_is_shot(model, monkeypatch):
+    """TripState.detour (Tour.rest's trips): low on HP, a way around a monster that could touch her on the way is
+    looked for first (getting there is what counts); with none, it's shot if a star reaches it, else she hops it."""
+    c = by_y(model, 500, 400)
+    escort = _escort(shots=1)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450), detour=True)
+    legs, keys, why = nav._chain(st, s, path, monsters, 0.0)
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.avoid and not escort.asked
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and len(escort.asked) == 1  # no way around
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, _escort(shots=None), (c.id, 450), detour=True)
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.avoid
+    hopped = nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0)  # no star reaches it: hopped
+    assert [leg.move.kind for leg in hopped[0]] == ["hop", "climb"]
+
+
+def test_where_no_kind_counts_an_escorts_chains_are_planned_as_before(model, monkeypatch):
+    """With an escort on a map where no kind's touch counts (the first map: Escort.threat), the chain keeps clear of
+    no monster (it fights them instead), and its tail's are tracked as before (None: by the caller)."""
+    from types import SimpleNamespace
+    c = by_y(model, 500, 400)
+    escort = SimpleNamespace(threat=lambda kind: False)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450))
+    assert monsters == [] and nav._chain_monsters(st, s, path) == ([], None)
+    assert nav._chain(st, s, path, monsters, 0.0)[2] != "monster"
+
+
+def test_a_fighting_trip_searches_for_monsters_where_its_chain_goes(model):
+    """Navigator.trip_monsters: a band look (fights look at the band around her) is searched again, over the rows from
+    as high as she gets over the chain's highest platform (a jump, her body, the map's tallest monster) to as low as
+    its lowest, when its band doesn't take all of them in; a whole-screen look as it is."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    from gamelab.motion import bodies
+    from gamelab.motion.physics import JUMP_HEIGHT
+    c, d = by_y(model, 500, 400), by_y(model, 300, 700)
+    nav = _navigator(model)
+    asked = []
+    nav.senses = SimpleNamespace(band=(300.0, 75.0),  # (taller than a fight's: reach.LOOK_UP is 140)
+                                 eyes=SimpleNamespace(monsters=lambda s, up, down: asked.append((up, down)) or [],
+                                                      bar=lambda s, m: None))
+    s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0, where=Where(200, 500, c, (0, 0)),
+              searched=True, monsters=[walker(300, platform=c.id)])
+    # Her own platform: the band takes in a jump's height over it (77), her body (65) and a snail's (33, as it flinches).
+    assert nav.trip_monsters(s, {c.id}) == s.monsters and not asked
+    assert nav.trip_monsters(s, {c.id, d.id}) == [] and len(asked) == 1  # D, 200 above: searched again
+    up, down = asked[0]
+    assert up == pytest.approx(200 + JUMP_HEIGHT + bodies.HER_TALL + nav._tallest()) and down == 75.0
+    s.wide = True
+    assert nav.trip_monsters(s, {c.id, d.id}) == s.monsters and len(asked) == 1

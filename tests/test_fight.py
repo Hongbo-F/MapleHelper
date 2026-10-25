@@ -242,6 +242,38 @@ def test_the_escorts_fight_in_her_way_finishes_wounds_only_when_asked():
     assert escort.clear_way(s, -400.0) is None and not asked  # nothing in her way that way
 
 
+def test_the_escort_keeps_her_trips_clear_of_the_kinds_whose_touch_counts(monkeypatch):
+    # FightOnTheWay.threat: a touch damage (PADamage, the map's game data) of TRIP_PAD or more: on Tree Dungeon the
+    # two mushrooms, not its slimes; on the first map nothing (an Orange Mushroom's 17 is its highest).
+    pads = {"Horny Mushroom": 110.0, "Green Mushroom": 54.0, "Slime": 13.0}
+    monkeypatch.setattr(fight_mod, "touch_damage", lambda model: pads)
+    escort = fight_mod.FightOnTheWay(SimpleNamespace(model=object()))
+    assert escort.threat("horny-mushroom") and escort.threat("green-mushroom")
+    assert not escort.threat("slime") and not escort.threat("pig")
+    first = mapdata.load(10000012) if (mapdata.CACHE / "10000012.json").exists() else None
+    if first is not None and mapdata.touch_damage(first):
+        assert max(mapdata.touch_damage(first).values()) < fight_mod.TRIP_PAD
+
+
+def test_the_escort_shoots_a_monster_on_the_way_only_where_a_star_reaches_it(monkeypatch):
+    # FightOnTheWay.clear_for: one that could touch her on the chain ahead (the navigator's), shot from where she
+    # stands if a star reaches it (reach.can_hit): a fight at its kind on its platform, one kill, never walking after
+    # it, finishing what she has hurt only when asked (not in transit). None where no star reaches it.
+    asked = {}
+    h = SimpleNamespace(log=lambda *a: None, clear=lambda kinds=None, **kw: asked.update(kw, kinds=kinds),
+                        report=SimpleNamespace(exp_kills=0))
+    escort = fight_mod.FightOnTheWay(h)
+    m = target(200, -60.0, platform=5, kind="horny-mushroom")
+    s = SimpleNamespace(where=SimpleNamespace(x=50.0, y=0.0), platform=PLAT, monsters=[m])
+    monkeypatch.setattr(fight_mod.reach, "can_hit", lambda *a, **kw: True)
+    assert escort.clear_for(s, m, finish=False) == 0
+    assert asked["kinds"] == {"horny-mushroom"} and asked["ground"] == {5} and asked["far"] is True
+    assert asked["max_kills"] == 1 and asked["approach"] is False and asked["finish_wounds"] is False
+    asked.clear()
+    monkeypatch.setattr(fight_mod.reach, "can_hit", lambda *a, **kw: False)
+    assert escort.clear_for(s, m) is None and not asked
+
+
 def test_a_kill_seen_while_she_sweeps_up_still_counts(monkeypatch):
     # Her EXP goes up again during the sweep after a kill (a star in flight killed the other pig), seen by a
     # look of the sweep's: the fight ends at its kill count there, and that kill is still told apart (the
