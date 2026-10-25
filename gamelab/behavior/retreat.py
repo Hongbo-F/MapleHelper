@@ -15,7 +15,8 @@ SAFE_DANGER of her HP at most, with every spawn point's monster at its point and
 where a kind counts at all, Danger.any: on the first map none does, and anywhere would be "safe"), if it's near
 (NEAR_S); else the quickest to get to of those and the ropes as safe (positioning's rope model, attack.ropes: from any
 platform she gets to, at its safest height; she regains no HP there, so only when no safe platform is near). None in
-time: the safest place she gets to in that time, by the same danger, or where she is if that's it.
+time: the safest place she gets to in that time, by the same danger, or where she is if that's it. Hanging on a rope
+as safe already (the hunt waits on ropes: its rule 9), she stays on it (`safe_rope`).
 
 How: her moves alone, as the navigator plans them keeping clear of monsters (navigator.AVOID: never a fight; the
 quickest way; a monster in the way of a move waited out where she can stand, or gone round, as on any trip), its plans of
@@ -27,11 +28,12 @@ food on the way: her pet's care stops with the hunt (the pet babysitter, `pet --
 telemetry ('retreat' events) say where, why and how long it took.
 
 In the simulator (Tree Dungeon, the hunt loop, the Lie Detector at 40, 75, 110 or 150 s): shooting 23 from 24, as live,
-47 of 48 runs (seeds 1-12) are on a safe place 10 s after the sighting (onto 25, 2.4 s at the median); hunting the
-whole map, mostly its floor (33) among its Green Mushrooms, 38 of 47 (81%), the rest knocked back on the way up to the
-rope at 146 or to 28 (tests/test_retreat.py).
+47 of 48 runs (seeds 1-12) are on a safe place 10 s after the sighting (onto 25, 2.3 s at the median); hunting the
+whole map, mostly its floor (33) among its Green Mushrooms, 39 of 47 (83%), the rest knocked back on the way up to the
+rope at 146 or to 28 (tests/test_retreat.py; D:/MapleHelper-scratch/ldpet/sweep.py).
 """
 
+import math
 import random
 import time
 from collections.abc import Callable
@@ -43,7 +45,9 @@ from ..attack import ropes
 from ..attack.ropes import Refuge
 from ..control import client
 from ..control.alarm import RETREAT_S, RETREAT_WINDOW_S
+from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import AVOID, Navigator
+from ..localization.mapdata import Rope
 from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
@@ -60,13 +64,17 @@ PLACE_IN = 15.0     # ... kept this far in from its ends (her half width: she st
 LOCATE_TRIES = 8    # looks at most for her dot before she sets off (a look every 0.25 s: 2 s)
 TRIES = 3           # goes at a safe place at most: from wherever a go left her (knocked back, the rope missed) ...
 GO_SLACK_S = 1.5    # ... a go given this long past its trip's time (trip_s), then the next from where she is
+ROPE_STILL_LOOKS = 3  # looks in a row with her dot put (on no platform) that have her hanging on a rope, not in the
+                      # air: a jump's top keeps it put over one look's gap at most (0.08 s) ...
+ROPE_STILL_S = 1.0    # ... looked for this long at most
 
 
 @dataclass(frozen=True)
 class Place:
     """Where a retreat goes: platform `platform`, at map x `x` (None: anywhere on it, a safe platform), or on `rope`
-    (got onto from `platform`); why there, the planner's seconds to get there, and its danger."""
-    platform: int
+    (got onto from `platform`), or (platform None) the rope at x she hangs on already; why there, the planner's seconds
+    to get there, and its danger."""
+    platform: int | None
     x: float | None
     why: str
     seconds: float
@@ -76,6 +84,8 @@ class Place:
     def text(self) -> str:
         if self.rope is not None:
             return f"the rope at x {self.rope.x:.0f} from platform {self.platform}, feet at y {self.rope.y:.0f}"
+        if self.platform is None:
+            return f"the rope at x {self.x:.0f}"
         return f"platform {self.platform}" + ("" if self.x is None else f" at x {self.x:.0f}")
 
 
@@ -138,7 +148,20 @@ def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | No
     try:
         for go in range(TRIES):
             s = nav.mover.locate(tries=LOCATE_TRIES, mobs=True, wide=True)
-            if s.where.platform is None:  # on a rope or in the air: down, or off it, first
+            # On a rope or in the air: a rope as safe as a safe place is one, where she stays; off any other at once
+            # (_onto_platform's look until she's still is over), and down from the air.
+            if s.where.platform is None and (hung := hanging(nav, s)) is not None:
+                still, rope = hung
+                if (p := safe_rope(h, rope, still.where.y, s.monsters)) is not None:
+                    out.place, out.result = (p, "stayed") if go == 0 else (out.place, "on a safe rope")
+                    if go == 0:
+                        log(f"LIE DETECTOR: retreat: she stays on {p.text()} ({p.why}; danger {p.danger:.3f}), "
+                            f"{time.monotonic() - seen:.1f} s after it was seen")
+                    return _end(out, seen, log, nav, still)
+                log(f"  on the rope at x {rope.x:.0f} (danger {rope_risk(h, rope, still.where.y, s.monsters):.3f} "
+                    "there): getting off")
+                s = nav.mover.off_rope(still)
+            if s.where.platform is None:
                 s = nav._onto_platform(s)
             if s.where.platform is None:
                 out.result = "lost: not on any platform"
@@ -182,6 +205,50 @@ def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | No
 
 def platform_text(s: Scene) -> str:
     return "nothing" if s.where is None or s.where.platform is None else f"platform {s.where.platform.id}"
+
+
+def hanging(nav: Navigator, s: Scene) -> tuple[Scene, Rope] | None:
+    """Look `s` has her on no platform: a look of her hanging on a rope, and the rope; None if she's in the air
+    (landed meanwhile, or still moving after ROPE_STILL_S). Hanging: her dot still over ROPE_STILL_LOOKS looks on no
+    platform, by the nearest rope reaching her height (Mover.off_rope's), between its ends."""
+    model = nav.model
+    if not model.ropes:
+        return None
+    last, still, end = s, 1, time.monotonic() + ROPE_STILL_S
+    while still < ROPE_STILL_LOOKS:
+        if time.monotonic() > end:
+            return None
+        time.sleep(0.08)
+        now = nav.mover.locate()
+        if now.where is None or now.where.platform is not None:  # (landed)
+            return None
+        still = still + 1 if math.dist(now.where.dot, last.where.dot) < 0.6 else 1
+        last = now
+    x, y = last.where.x, last.where.y
+    rope = min(model.ropes, key=lambda r: abs(r.x - x) + (0 if r.top - 10 <= y <= r.bottom + 10 else 1000))
+    if abs(x - rope.x) > ON_ROPE_X or not rope.top - HANG_TOLERANCE <= y <= rope.bottom + HANG_TOLERANCE:
+        return None
+    return last, rope
+
+
+def rope_risk(h, rope: Rope, y: float, seen) -> float:
+    """The danger to her hanging on `rope` with her feet at map y, as choose has a rope's: the worst within HANG_SLACK
+    of y, with every spawn point's monster at its point or with the monsters `seen` (a look's)."""
+    d = h.danger
+    return max(d.on_rope(rope, y + dy, look) for dy in (-ropes.HANG_SLACK, 0.0, ropes.HANG_SLACK)
+               for look in (None, seen))
+
+
+def safe_rope(h, rope: Rope, y: float, seen) -> Place | None:
+    """Hanging on `rope`, her feet at map y (`hanging`): staying there (a Place of 0 s, platform None) if it's as safe as
+    a safe place (`rope_risk` SAFE_DANGER at most), else None; None too on a map where no kind counts (Danger.any), as
+    choose has it: only a safe platform is a safe place there. Got off first, a rope she waited on safely (the hunt's
+    rule 9) had sent her over 9 s across the map (review, 2026-10-24: the simulator, from the rope at -8, its danger
+    0)."""
+    if not h.danger.any:
+        return None
+    risk = rope_risk(h, rope, y, seen)
+    return Place(None, rope.x, "here: a safe rope", 0.0, risk) if risk <= SAFE_DANGER else None
 
 
 def choose(h, nav: Navigator, s: Scene, left: float) -> Place:

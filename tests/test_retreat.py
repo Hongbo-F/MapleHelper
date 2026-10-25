@@ -208,6 +208,52 @@ def test_in_the_simulator_the_player_stops_the_plan_running_at_the_sighting_then
     assert all(e[2] == "right" for e in out["played"] if e[0] < 0)  # the throw's arrow went down; its attack never
 
 
+def _hanging_at(y: float) -> dict:
+    """Her retreat (retreat.retreat) as she hangs on Tree Dungeon's rope at 146 (between 30 above and 32 below), her feet
+    at map y, the Lie Detector seen as it starts: how it went, what played from the sighting on, where she is 10 s after
+    it (`then`), and the log."""
+    def run(sim):
+        tour = sim.tour_stack()
+        seen = sim.player.alarm_at = sim.clock.now
+        then = {}
+        sim.world.call_at(seen + RETREAT_S, lambda w: then.update(mode=w.mode, x=round(w.x), y=round(w.y),
+                                                                  safe=scenarios.safe_there(sim)))
+        out = retreat.retreat(tour.h, log=sim.log)
+        sim.clock.sleep(max(0.0, seen + RETREAT_S + 0.1 - sim.clock.now))
+        sim.world.advance(sim.clock.now)
+        played = sorted(e for kind, events in sim.player.played.values() for e in events)
+        return {"retreat": out.record(), "played": played, "then": then}
+    tr = scenarios.run_scenario(scenarios.Scenario("ld_rope", run, (32, 146.0), hanging=y, map_id=TREE))
+    return dict(tr["result"], log="\n".join(tr["log"]))
+
+
+def test_hanging_on_a_rope_as_safe_as_a_safe_place_she_stays_on_it():
+    """Review, 2026-10-24: the retreat always got her off a rope first, the one the hunt waits on too (its rule 9); in the
+    simulator, off the rope at -8 (its danger 0) and across the map, 9.2 s after the sighting. At y 62 on the rope at
+    146 no monster reaches her (attack.danger, every spawn point's monster at its point): she stays, nothing pressed."""
+    tree_map()
+    out = _hanging_at(62.0)
+    assert out["retreat"]["why"] == "here: a safe rope" and out["retreat"]["result"] == "stayed", out["log"]
+    assert out["retreat"]["to"] == "the rope at x 146" and out["retreat"]["took"] < 1.5
+    assert out["played"] == [] and "getting off" not in out["log"]
+    assert out["then"]["mode"] == "rope" and out["then"]["safe"]
+
+
+def test_hanging_on_a_rope_within_a_monsters_reach_she_gets_off_it_for_a_safe_place():
+    """At y 22 on the same rope the Horny Mushrooms of 30, just above, reach her (danger 0.059): not a safe place. Off it
+    at once, once her dot has shown her hanging (the navigator's look until she stands still, 2 s on a rope, skipped),
+    onto 28 by 10 s."""
+    m = tree_map()
+    d = danger.of_map(m, danger.Her(752, 24))
+    assert d.on_rope(next(r for r in m.ropes if r.x == 146), 22.0, None) > retreat.SAFE_DANGER
+    out = _hanging_at(22.0)
+    assert out["retreat"]["why"] != "here: a safe rope", out["log"]
+    assert "on the rope at x 146 (danger 0.059 there): getting off" in out["log"]
+    getting_off = next(line for line in out["log"].splitlines() if "getting off" in line)
+    assert float(getting_off.split()[0]) < 1.0
+    assert out["played"] and out["then"]["safe"], out["log"]
+
+
 # (loop_tree_lie_detector, _28 and _23 are checked with every scenario: test_sim's
 # test_real_map_scenarios_show_what_they_are_there_for.)
 
@@ -231,8 +277,8 @@ def _sweep(name: str, seeds, times, only=None) -> list[dict]:
                                              ("loop_tree_lie_detector_23", (23,), 0.9)])
 def test_on_most_seeds_she_is_on_a_safe_place_10_s_after_the_sighting(name, only, share):
     """The hunt loop on Tree Dungeon, the Lie Detector seen at 40, 75, 110 or 150 s, seeds 1-8: from the floor's crowd
-    (the whole map hunted) 26 of 32 on a safe place 10 s after the sighting (2026-10-24: 70% asked, for room), the rest
-    knocked back by the Green Mushrooms on 32 and 30 on the way; shooting 23 from 24, as live, 32 of 32 (47 of 48 over
+    (the whole map hunted) 27 of 32 on a safe place 10 s after the sighting (2026-10-24: 70% asked, for room), the rest
+    knocked back by the Green Mushrooms on 32 and 30 on the way; shooting 23 from 24, as live, 31 of 32 (47 of 48 over
     seeds 1-12). On every run nothing but her moves after it (no attack, pick-up, pet food or mouse), and her retreat's
     moves refused past the player's 12 s."""
     tree_map()

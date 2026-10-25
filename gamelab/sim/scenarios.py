@@ -2217,8 +2217,8 @@ def loop_tree_lie_detector(sim):
     floor (33): the hunt stops at once (the plan running cut, nothing of hers after it); no safe platform is near (28,
     the nearest place no monster reaches, is 4.3 s by route, past retreat.NEAR_S with the crowd's stops), so up onto
     the rope at 146 from 32, at its safest height (attack.ropes), avoiding the monsters, her moves alone; a retreat plan
-    past the player's 12 s is refused. (From the floor's crowd, of seeds 1-12 seen at 40, 75, 110 and 150 s, 81% are on
-    a safe place at 10 s; from 24, shooting 23, all: loop_tree_lie_detector_23.)"""
+    past the player's 12 s is refused. (From the floor's crowd, of seeds 1-12 seen at 40, 75, 110 and 150 s, 83% are on
+    a safe place at 10 s; from 24, shooting 23, 47 of 48: loop_tree_lie_detector_23.)"""
     return lie_detector(110.0)(sim)
 
 
