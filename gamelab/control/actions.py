@@ -3,9 +3,11 @@ back), walking, picking up, potions and the chair. Actions keeps which way she f
 attack lock ends; it never decides anything (attack and behavior do).
 
 Every plan goes through `send`, blocking until the player has run it, except the navigator's chains
-(control.navigator), which are queued with client.send.
+(control.navigator), which are queued with client.send. With the Lie Detector alarm up the player takes only two kinds
+of plan (control.alarm): her pet's food (feed_pet's), and her retreat's moves (`moves_only`'s, behavior.retreat).
 """
 
+import dataclasses
 import time
 
 from maplehelper.config import GameKeys
@@ -16,6 +18,7 @@ from .. import directions
 from ..motion.physics import BLIND_ENDS_MS, JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS, KICK_JUMPS, hold_ms
 from ..screen import STRETCHED_CLIENT
 from . import client
+from .alarm import PET_FOOD, RETREAT
 
 TAP_MS = 40          # a key tap: released this long after it's pressed
 TURN_SETTLE_MS = 30  # after the arrow tap that turns her, before the next key
@@ -87,9 +90,11 @@ def tap(t: int, key: str) -> list[list]:
 class Actions:
     """Her actions as key plans, run one at a time (send blocks until the player is done)."""
 
-    def __init__(self, keys: GameKeys, skill: bool = False):
+    def __init__(self, keys: GameKeys, skill: bool = False, kind: str | None = None):
         self.keys = keys
         self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP)
+        self.kind = kind    # what its plans are to the player with the Lie Detector alarm up (alarm.RETREAT: her
+                            # retreat's moves); None: refused then
         self.facing: str | None = None  # which way she faces (None: unknown), so throws only turn when needed
         self.pressed = False  # keys sent since the last look (then a move isn't a knockback)
         self.sent_at = 0.0     # when the last key plan was sent (a look older than that may be out of date)
@@ -100,12 +105,13 @@ class Actions:
         # (behavior.ledger) matches EXP gains to the stars that could have made them.
         self.throw_listeners: list = []
 
-    def play(self, events: list, name: str) -> None:
+    def play(self, events: list, name: str, kind: str | None = None) -> None:
         """Run a key plan (events in time order) and wait until the player has. Held back first if a jump
-        or attack in it would come inside her attack lock (hold_back)."""
+        or attack in it would come inside her attack lock (hold_back). `kind`: what it is to the player with the
+        Lie Detector alarm up (client.send's; these actions' own by default)."""
         self.hold_back(events)
         self.sent_at = time.monotonic()
-        client.submit(events, lead_ms=0, focus=True, name=name)
+        client.submit(events, lead_ms=0, focus=True, name=name, kind=kind or self.kind)
         self.pressed = True
 
     def hold_back(self, events: list) -> None:
@@ -245,11 +251,12 @@ class Actions:
         return True
 
     def feed_pet(self) -> bool:
-        """Feed her pet (it drinks her potions for her); False if no pet food key is bound."""
+        """Feed her pet (it drinks her potions for her); False if no pet food key is bound. A plan of kind
+        alarm.PET_FOOD: the player takes it with the Lie Detector alarm up too (a few a minute)."""
         if self.keys.pet_food is None:
             return False
         self.wait_lock()
-        self.play(tap(0, self.keys.pet_food.name), "pet_food")
+        self.play(tap(0, self.keys.pet_food.name), "pet_food", kind=PET_FOOD)
         return True
 
     def sit(self) -> None:
@@ -266,7 +273,21 @@ class Actions:
     def nudge_mouse(self, client: tuple[int, int] = STRETCHED_CLIENT) -> None:
         """Move the mouse inside the game (moves only, never clicks), in a client area that size (client px): a
         tooltip from another program once sat over the minimap until the mouse moved. Just below the middle: at
-        1920x1080 (1000, 620) then (960, 600)."""
+        1920x1080 (1000, 620) then (960, 600). Not in a retreat from the Lie Detector (`kind`): whoever is at the PC
+        may be answering it with the mouse."""
+        if self.kind is not None:
+            return
         w, h = client
         self.play([[0, "mouse", round(1000 * w / 1920), round(620 * h / 1080)],
                    [120, "mouse", round(960 * w / 1920), round(600 * h / 1080)]], "mouse")
+
+    def moves_only(self) -> "Actions":
+        """These actions for her retreat from the Lie Detector (behavior.retreat): her moves' keys alone (arrows, jump,
+        up and down; no pick-up, chair, potion, pet food or Lucky Seven), every plan of kind alarm.RETREAT, no mouse
+        (nudge_mouse), and her attack's locks as they are here (an arrow pressed inside one doesn't move her)."""
+        keys = dataclasses.replace(self.keys, lucky_seven=None, pick_up=None, chair=None, sit=None, hp_potion=None,
+                                   mp_potion=None, pet_food=None)
+        out = Actions(keys, kind=RETREAT)
+        out.facing, out.lock_until, out.arrow_until = self.facing, self.lock_until, self.arrow_until
+        out._attack_at, out.sent_at = self._attack_at, self.sent_at
+        return out

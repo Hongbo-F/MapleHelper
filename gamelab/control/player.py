@@ -12,9 +12,12 @@ runs normally and talks to it through files. To keep that safe it only ever:
 - watches the game for the Lie Detector (the game's anti-bot check) the whole time it runs; if it
   appears, input stops at once (all that goes out after is letting go of the keys and buttons a plan
   held), the player pages whoever is at the PC, records the Lie Detector's whole cycle
-  (control.lie_recorder) while refusing every plan, and stops once a person has run `python -m gamelab
-  clear-alarm` and the Lie Detector has been off the screen for a minute; it won't start again until
-  the alarm is cleared (it never tries to answer it),
+  (control.lie_recorder) while refusing every plan but two kinds (alarm_refusal: a tap of her pet food key,
+  a few a minute; her retreat's moves, arrows, jump, up and down, for alarm.RETREAT_WINDOW_S after the
+  sighting; neither with the mouse), and stops once a person has run `python -m gamelab clear-alarm` and the
+  Lie Detector has been off the screen for a minute; it won't start again until the alarm is cleared (it never
+  tries to answer it, and never moves her by itself: her retreat is the running hunt's, behavior.retreat, which
+  knows the map and where she is; with no hunt running, nothing moves her),
 - records the game's client area while a plan runs,
 - writes results to gamelab/lab/outbox.
 
@@ -23,8 +26,8 @@ hours (not while it records a Lie Detector) or after a Lie Detector, as above: p
 only by a player started again, which takes the user's UAC click. Start it with `python -m gamelab
 player --elevate`; stop it with `python -m gamelab stop`.
 
-Of gamelab, this module itself imports only paths and window (and control.alarm, control.lie_recorder and
-perception.lie_detector when a Watchdog is created). Plans come from control.client.
+Of gamelab, this module itself imports only paths, window and control.alarm (its constants: what goes with the alarm
+up), and control.lie_recorder and perception.lie_detector when a Watchdog is created. Plans come from control.client.
 """
 
 import json
@@ -46,6 +49,7 @@ from maplehelper.keys import parse as parse_key
 
 from .. import window
 from ..paths import ALARM, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_LOG, STOP
+from .alarm import LIE_DETECTOR_ERROR, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS, RETREAT, RETREAT_WINDOW_S
 
 # It used to stop after 3 idle hours; on 2026-10-23 the user asked that it not be exited proactively (starting it
 # again needs their UAC click), and it had stopped by itself overnight: a day, so it outlasts a night without plans.
@@ -53,7 +57,8 @@ IDLE_LIMIT_S = 24 * 60 * 60
 MAX_EVENTS = 400
 MAX_PLAN_MS = 20_000
 MAX_FRAMES = 900
-LIE_DETECTOR_ERROR = "Lie Detector on screen: all input stopped"
+TAP_MAX_MS = 200   # with the alarm up, a pet food plan's key is let go within this of going down (a tap: 40 ms)
+RETREAT_OVER = "the retreat's time after the Lie Detector is over: stopped pressing"
 # Past this, the player's log becomes player.log.1 (the one before goes) when the player starts. It writes
 # about 40 bytes a plan, some 150 KB an hour of hunting, and was never cut: 5 MB is about 30 hours.
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -115,6 +120,48 @@ def validate(plan: dict, allowed: dict[str, Key]) -> None:
         raise ValueError("crop must be [x, y, width, height] in client pixels")
 
 
+def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: list[float], now: float) -> str | None:
+    """Why the player won't run `plan` with the Lie Detector alarm up (None: it will), `since` s after the sighting
+    (None: when isn't known), the pet food plans it ran with the alarm up having started at `fed` (time.monotonic(), as
+    `now`). Two kinds go (alarm.PLAN_KINDS), and only as their kind says:
+    - `pet_food`: one tap of her pet food key (config.toml [keys] pet_food), down and up within TAP_MAX_MS, nothing
+      else; PET_FOOD_PER_MIN in any minute at most;
+    - `retreat`: her moves alone (her arrows, jump, up and down: walking, jumping, climbing, dropping), every key it
+      presses let go by its end, until RETREAT_WINDOW_S after the sighting.
+    Neither moves the mouse, clicks, resizes the window or records; every other plan is refused, as before. `plan` is
+    well-formed already (`validate`)."""
+    kind = plan.get("kind")
+    if kind not in PLAN_KINDS:
+        return "only her pet's food and her retreat go with the alarm up"
+    events = plan.get("events", [])
+    if plan.get("window_client") is not None or plan.get("capture", {}).get("fps", 0):
+        return "no window resize or recording with the alarm up"
+    if any(len(e) != 3 or e[1] in MOUSE_BUTTONS for e in events):
+        return "no mouse with the alarm up"
+    if kind == PET_FOOD:
+        key = keys.pet_food.name if keys is not None and keys.pet_food is not None else None
+        if key is None:
+            return "no pet food key is bound"
+        if [e[1:] for e in events] != [[key, "down"], [key, "up"]] or events[1][0] - events[0][0] > TAP_MAX_MS:
+            return f"a pet food plan is one tap of {key!r} and nothing else"
+        if sum(1 for t in fed if now - t < 60) >= PET_FOOD_PER_MIN:
+            return f"{PET_FOOD_PER_MIN} pet foods a minute at most with the alarm up"
+        return None
+    if since is None:
+        return "when the Lie Detector was seen isn't known"
+    if since > RETREAT_WINDOW_S:
+        return f"her retreat's {RETREAT_WINDOW_S:g} s after the Lie Detector are over"
+    moves = {k.name for k in (keys.left, keys.right, keys.jump, keys.up, keys.down) if k} if keys is not None else set()
+    held = set()
+    for _, name, how in events:
+        if name not in moves:
+            return f"{name!r} isn't one of her moves' keys (her arrows, jump, up, down)"
+        (held.add if how == "down" else held.discard)(name)
+    if held:
+        return f"a retreat lets go of every key it presses ({', '.join(sorted(held))} held at its end)"
+    return None
+
+
 def _sleep_until(t: float, stop: threading.Event | None = None) -> bool:
     """Sleep until perf_counter() reaches t. Returns False early if `stop` gets set."""
     while (left := t - time.perf_counter()) > 0:
@@ -136,6 +183,20 @@ def alarm_up() -> bool:
     except OSError:
         return True
     return True
+
+
+class Alarm(threading.Event):
+    """The Lie Detector seen: set by the Watchdog, never cleared; `at`, when it was first set (time.monotonic()), from
+    which the player takes her retreat's moves for alarm.RETREAT_WINDOW_S (alarm_refusal)."""
+
+    def __init__(self):
+        super().__init__()
+        self.at: float | None = None
+
+    def set(self) -> None:
+        if self.at is None:
+            self.at = time.monotonic()
+        super().set()
 
 
 class Watchdog(threading.Thread):
@@ -248,7 +309,8 @@ class Watchdog(threading.Thread):
             info = self._raise(frame)  # the alarm, its screenshot, paging: before anything of the recording
             self.cycle_t0 = now
             self.alarm_written = alarm_up()
-            self._say("LIE DETECTOR seen: input stopped; the player stays up refusing every plan, records it, and "
+            self._say("LIE DETECTOR seen: input stopped; the player stays up refusing every plan (but a tap of her pet "
+                      f"food, and her retreat's moves for {RETREAT_WINDOW_S:g} s), records it, and "
                       f"stops once `clear-alarm` has been run and none has been on screen for {self.end_s:g} s "
                       "(it takes plans again only once it's started again)"
                       + ("" if self.alarm_written else " (the alarm file couldn't be written: locked until it's "
@@ -360,29 +422,44 @@ class Watchdog(threading.Thread):
 
 class Player:
     """Plays one plan at a time: presses its keys on time (on a thread of their own) while recording
-    the game's client area, and stops at once when the alarm goes off or the plan is cancelled."""
+    the game's client area, and stops at once when the alarm goes off or the plan is cancelled. With the alarm up it
+    plays only what alarm_refusal lets through, by `keys` (her bindings), and says so in its log."""
 
-    def __init__(self, allowed: dict[str, Key], game_title: str, alarm: threading.Event | None = None):
+    def __init__(self, allowed: dict[str, Key], game_title: str, alarm: threading.Event | None = None,
+                 keys: GameKeys | None = None, log=None):
         self.allowed = allowed
         self.title = game_title
-        self.alarm = alarm or threading.Event()
+        self.alarm = alarm if alarm is not None else Alarm()
+        self.keys = keys
+        self.log = log or _log
+        self.fed: list[float] = []  # when the pet food plans it ran with the alarm up started (time.monotonic())
 
     def run(self, plan: dict) -> dict:
         """Play a plan (checked by `validate` first) and return its result: the keys sent and when,
-        any problems, and the frames (saved beside the result) if it records."""
-        if self.alarm.is_set():
+        any problems, and the frames (saved beside the result) if it records. With the alarm up already, only a
+        plan alarm_refusal lets through: never brought to the front, and played to its end (a retreat's to its
+        window's), not stopped by the alarm it came in."""
+        during = self.alarm.is_set()
+        if during and plan.get("kind") not in PLAN_KINDS:
             return {"error": LIE_DETECTOR_ERROR}
         validate(plan, self.allowed)
+        cutoff = None  # (perf_counter) when a retreat's window ends: its keys stop there
+        if during:
+            if (refused := self._with_alarm(plan)) is not None:
+                return refused
+            if plan["kind"] == RETREAT:
+                cutoff = time.perf_counter() + (self.alarm.at + RETREAT_WINDOW_S - time.monotonic())
         hwnd = window.find_game(self.title)
         if plan.get("window_client"):  # before anything else: the capture's area is the new client area
             window.resize_client(hwnd, *plan["window_client"])
             time.sleep(0.5)  # let the game lay itself out again
         # The alarm looked at again after each wait: a Lie Detector seen in one had the game brought to the front all
-        # the same (the keys' own waits stop at it, but bringing it forward isn't one of them).
-        if plan.get("focus") and win32.foreground_title() != self.title and not self.alarm.is_set():
+        # the same (the keys' own waits stop at it, but bringing it forward isn't one of them). With it up already,
+        # never: whoever is at the PC is answering it.
+        if plan.get("focus") and not during and win32.foreground_title() != self.title and not self.alarm.is_set():
             window.bring_to_front(self.title)
             time.sleep(0.5)  # let the window come to the front
-        if self.alarm.is_set():
+        if self.alarm.is_set() and not during:
             return {"error": LIE_DETECTOR_ERROR}
         if win32.foreground_title() != self.title:
             return {"error": f"game not in front (foreground: {win32.foreground_title()!r})"}
@@ -398,14 +475,19 @@ class Player:
         sent, held, problems = [], set(), []
 
         cancel = INBOX / f"{plan['id']}.cancel"  # the client cut the plan short: stop pressing
+        halt = threading.Event() if during else self.alarm  # (let through with the alarm up: it plays on)
 
         def wait(due: float) -> bool:
-            """Until `due`, unless the plan is cancelled or the alarm goes off."""
+            """Until `due`, unless the plan is cancelled, the alarm goes off, or a retreat's window ends."""
             while True:
                 if cancel.exists():
                     problems.append("cancelled")
                     return False
-                if not _sleep_until(min(due, time.perf_counter() + 0.015), self.alarm):  # 15 ms steps
+                if cutoff is not None and time.perf_counter() >= cutoff:
+                    problems.append(RETREAT_OVER)
+                    return False
+                step = min(due, time.perf_counter() + 0.015, cutoff if cutoff is not None else due)  # 15 ms steps
+                if not _sleep_until(step, halt):
                     problems.append(LIE_DETECTOR_ERROR)
                     return False
                 if time.perf_counter() >= due:
@@ -451,12 +533,31 @@ class Player:
                 _press(self.allowed, name, False)
             cancel.unlink(missing_ok=True)
         result = {"sent": sent, "problems": problems, "region": region, "scale": scale, "client": client_area}
-        if self.alarm.is_set():
+        if self.alarm.is_set() and not during:
             result["error"] = LIE_DETECTOR_ERROR
         if frames:
             np.savez_compressed(OUTBOX / f"{plan['id']}.npz", frames=np.stack(frames), times=np.array(times))
             result["frames"] = len(frames)
         return result
+
+    def _with_alarm(self, plan: dict) -> dict | None:
+        """A plan of a kind that goes with the alarm up: its refusal (the Lie Detector error, and why), or None, logged
+        either way (a pet food counted)."""
+        now = time.monotonic()
+        self.fed = [t for t in self.fed if now - t < 60]
+        at = getattr(self.alarm, "at", None)  # (a plain Event: when isn't known, and no retreat goes)
+        since = None if at is None else now - at
+        kind, name = plan["kind"], plan.get("id", "?")
+        if why := alarm_refusal(plan, self.keys, since, self.fed, now):
+            self.log(f"Lie Detector alarm up: refused {name} ({kind}): {why}")
+            return {"error": f"{LIE_DETECTOR_ERROR}: {why}"}
+        if kind == PET_FOOD:
+            self.fed.append(now)
+            self.log(f"Lie Detector alarm up: her pet's food ({name}), {len(self.fed)} in the last minute")
+        else:
+            self.log(f"Lie Detector alarm up: her retreat's plan {name}, {since:.1f} s after the sighting "
+                     f"({sum(1 for e in plan['events'] if e[2] == 'down')} keys; it's cut at {RETREAT_WINDOW_S:g} s)")
+        return None
 
 
 def _press(allowed: dict[str, Key], name: str, down: bool) -> None:
@@ -498,7 +599,8 @@ def _answer(path, result: dict) -> str:
 def serve() -> None:
     """The player: take plans from the inbox in name order and answer each, until STOP, 24 idle hours (not counting
     a Lie Detector's recording, at most lie_recorder.CAP_S) or a Lie Detector dealt with. From a Lie Detector's
-    sight it refuses every plan (Player.run: the alarm Event) while the watchdog records it, and it stops once a
+    sight it refuses every plan (Player.run: the alarm Event) but the two kinds alarm_refusal lets through (her pet's
+    food; her retreat's moves, for alarm.RETREAT_WINDOW_S) while the watchdog records it, and it stops once a
     person has cleared the alarm and the screen has been clear since (Watchdog.cleared): plans are taken again only
     by a player started again, which takes the user's UAC click, as when it shut down at the alarm. It won't start
     with the alarm up, takes no plan before the watchdog's first look at the game, and stops if the watchdog does."""
@@ -512,12 +614,15 @@ def serve() -> None:
     for stale in [*INBOX.glob("*.json"), *INBOX.glob("*.cancel"), *INBOX.glob("*.running")]:  # left over
         stale.unlink()
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
-    alarm = threading.Event()
-    player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm)
+    alarm = Alarm()
+    player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm, keys=cfg.keys)
     win32.enable_dpi_awareness()
     watchdog = Watchdog(cfg.game_window_title, alarm, shadow=True)
     watchdog.start()
-    _log(f"player started; {len(player.allowed)} keys and the mouse buttons allowed; watching for the Lie Detector")
+    pet = cfg.keys.pet_food.name if cfg.keys is not None and cfg.keys.pet_food is not None else None
+    _log(f"player started; {len(player.allowed)} keys and the mouse buttons allowed; watching for the Lie Detector "
+         f"(with it seen: {f'a tap of {pet!r} for her pet, {PET_FOOD_PER_MIN} a minute, and ' if pet else ''}her "
+         f"retreat's moves for {RETREAT_WINDOW_S:g} s; nothing else)")
     idle_since = time.monotonic()
     with win32.precise_timers():
         while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:

@@ -210,9 +210,9 @@ class Sim:
         play = h.actions.play  # every plan Actions plays (fights, single moves, tours): checked each time;
         # the navigator's chains go through client.send, which guard() checks through the fake player
 
-        def guarded(events, name):
+        def guarded(events, name, **kw):
             self.guard()
-            play(events, name)
+            play(events, name, **kw)
         h.actions.play = guarded
         return h
 

@@ -249,3 +249,175 @@ def test_a_plan_can_last_past_its_last_key(tmp_path, monkeypatch):
     assert 0.28 <= time.perf_counter() - started < 0.6
     with pytest.raises(ValueError):
         player_mod.validate({"events": [[0, "f", "down"], [500, "f", "up"]], "end_ms": 100}, {"f": parse("f")})
+
+
+# --- what still goes with the alarm up: her pet's food and her retreat (control.alarm.PLAN_KINDS) -------------------
+
+def _keys(pet="u"):
+    from maplehelper.config import GameKeys
+    from maplehelper.keys import parse
+    return GameKeys(left=parse("left"), right=parse("right"), jump=parse("alt"), attack=parse("ctrl"),
+                    lucky_seven=parse("shift"), up=parse("up"), down=parse("down"), pick_up=parse("z"),
+                    pet_food=parse(pet) if pet else None)
+
+
+def _tap(key, t=0):
+    return [[t, key, "down"], [t + 40, key, "up"]]
+
+
+def test_with_the_alarm_up_a_pet_food_plan_is_one_tap_of_its_key_and_nothing_else():
+    from gamelab.control.player import alarm_refusal
+    keys = _keys()
+
+    def food(events, **kw):
+        return {"kind": "pet_food", "events": events, **kw}
+    assert alarm_refusal(food(_tap("u")), keys, 30.0, [], 100.0) is None
+    for events in (_tap("u") + _tap("u", 100), _tap("u") + _tap("left", 100), _tap("ctrl"), [[0, "u", "down"]],
+                   [[0, "u", "down"], [500, "u", "up"]], [[0, "mouse", 5, 5]] + _tap("u"), _tap("lbutton"), []):
+        assert alarm_refusal(food(events), keys, 30.0, [], 100.0) is not None, events
+    assert "no mouse" in alarm_refusal(food([[0, "mouse", 5, 5]] + _tap("u")), keys, 30.0, [], 100.0)
+    assert alarm_refusal(food(_tap("u"), capture={"fps": 30}), keys, 30.0, [], 100.0) is not None
+    assert alarm_refusal(food(_tap("u"), window_client=[1366, 768]), keys, 30.0, [], 100.0) is not None
+    assert alarm_refusal(food(_tap("u")), _keys(pet=None), 30.0, [], 100.0) == "no pet food key is bound"
+    # A few a minute: the fourth within 60 s is refused, the next once the first is a minute old.
+    assert "a minute at most" in alarm_refusal(food(_tap("u")), keys, 30.0, [50.0, 70.0, 90.0], 100.0)
+    assert alarm_refusal(food(_tap("u")), keys, 30.0, [40.0, 70.0, 90.0], 100.0) is None
+    # Any plan without a kind, or of another, is refused as before.
+    assert alarm_refusal({"events": _tap("u")}, keys, 1.0, [], 100.0) is not None
+    assert alarm_refusal({"kind": "throw", "events": _tap("u")}, keys, 1.0, [], 100.0) is not None
+
+
+def test_with_the_alarm_up_a_retreat_is_her_moves_alone_for_its_window_with_every_key_let_go():
+    from gamelab.control import alarm as alarm_mod
+    from gamelab.control.player import alarm_refusal
+    keys = _keys()
+    run = [[0, "left", "down"], [100, "alt", "down"], [140, "alt", "up"], [600, "left", "up"],
+           [700, "up", "down"], [1500, "up", "up"], [1600, "down", "down"], [1700, "down", "up"]]
+
+    def retreat(events):
+        return {"kind": "retreat", "events": events}
+    assert alarm_refusal(retreat(run), keys, 0.5, [], 100.0) is None
+    assert alarm_refusal(retreat(run), keys, alarm_mod.RETREAT_WINDOW_S - 0.01, [], 100.0) is None
+    assert "are over" in alarm_refusal(retreat(run), keys, alarm_mod.RETREAT_WINDOW_S + 0.01, [], 100.0)
+    assert "isn't known" in alarm_refusal(retreat(run), keys, None, [], 100.0)
+    for other in ("ctrl", "shift", "z", "u", "lbutton"):  # no attack, Lucky Seven, pick-up, pet food or click
+        assert alarm_refusal(retreat(run + _tap(other, 1800)), keys, 1.0, [], 100.0) is not None, other
+    assert "held at its end" in alarm_refusal(retreat(run[:-1]), keys, 1.0, [], 100.0)
+    assert "no mouse" in alarm_refusal(retreat([[0, "mouse", 10, 10]] + run), keys, 1.0, [], 100.0)
+    assert alarm_mod.RETREAT_WINDOW_S > alarm_mod.RETREAT_S  # her 10 s retreat fits
+
+
+def test_the_alarm_keeps_when_the_lie_detector_was_first_seen():
+    from gamelab.control.player import Alarm
+    flag = Alarm()
+    assert flag.at is None and not flag.is_set()
+    before = time.monotonic()
+    flag.set()
+    first = flag.at
+    assert flag.is_set() and before <= first <= time.monotonic()
+    flag.set()  # seen again: the sighting it counts from stays the first
+    assert flag.at == first
+
+
+class _Game:
+    """The player's way to the game faked: the window there and in front, the keys it sends kept."""
+
+    def __init__(self, monkeypatch, tmp_path):
+        from gamelab.control import player as player_mod
+        self.sent, self.fronted = [], []
+        monkeypatch.setattr(player_mod, "INBOX", tmp_path)
+        monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+        monkeypatch.setattr(player_mod.window, "client_rect",
+                            lambda hwnd: {"left": 0, "top": 0, "width": 1366, "height": 768})
+        monkeypatch.setattr(player_mod.window, "bring_to_front", lambda title: self.fronted.append(title))
+        monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "Game")
+        monkeypatch.setattr(player_mod.win32, "send_key", lambda key, down: self.sent.append((key.name, down)))
+        monkeypatch.setattr(player_mod.win32, "send_mouse_button", lambda name, down: self.sent.append((name, down)))
+
+
+def _alarmed_player(seen_ago: float = 1.0):
+    from gamelab.control.player import Alarm, allowed_keys
+    flag, said = Alarm(), []
+    flag.set()
+    flag.at = time.monotonic() - seen_ago
+    keys = _keys()
+    return Player(allowed_keys(keys), "Game", flag, keys=keys, log=said.append), said
+
+
+def _plan(pid, events, kind="pet_food"):
+    return {"id": pid, "kind": kind, "events": events, "focus": True, "capture": {"lead_ms": 0}}
+
+
+def test_with_the_alarm_up_the_player_feeds_her_pet_and_refuses_the_rest(monkeypatch, tmp_path):
+    game = _Game(monkeypatch, tmp_path)
+    p, said = _alarmed_player()
+    result = p.run(_plan("food1", _tap("u")))
+    assert "error" not in result and game.sent == [("u", True), ("u", False)]
+    assert game.fronted == []  # never brought forward with the alarm up: whoever is at the PC is answering it
+    assert said == ["Lie Detector alarm up: her pet's food (food1), 1 in the last minute"]
+    # The pet food key with anything else, a hunt's plan, a click: refused before anything is pressed.
+    for pid, events, kind in (("food2", _tap("u") + _tap("ctrl", 100), "pet_food"), ("throw", _tap("ctrl"), None),
+                              ("click", _tap("lbutton"), "pet_food")):
+        assert p.run(_plan(pid, events, kind))["error"].startswith(LIE_DETECTOR_ERROR), pid
+    assert p.run({"id": "throw", "events": _tap("ctrl")}) == {"error": LIE_DETECTOR_ERROR}  # as before
+    assert game.sent == [("u", True), ("u", False)]
+    assert [line.split(": ")[1] for line in said[1:]] == ["refused food2 (pet_food)", "refused click (pet_food)"]
+    # A few a minute.
+    for i in range(2, 4):
+        assert "error" not in p.run(_plan(f"food{i + 1}", _tap("u")))
+    assert "a minute at most" in p.run(_plan("food5", _tap("u")))["error"]
+
+
+def test_with_the_alarm_up_her_retreat_is_played_until_its_window_ends_and_refused_after(monkeypatch, tmp_path):
+    from gamelab.control import alarm as alarm_mod
+    from gamelab.control.player import RETREAT_OVER
+    game = _Game(monkeypatch, tmp_path)
+    p, said = _alarmed_player(seen_ago=alarm_mod.RETREAT_WINDOW_S - 0.2)  # 0.2 s of it left
+    started = time.perf_counter()
+    result = p.run(_plan("flow1", [[0, "left", "down"], [1500, "left", "up"]], "retreat"))
+    assert 0.1 < time.perf_counter() - started < 0.6  # cut at the window's end, not played its 1.5 s
+    assert "error" not in result and result["problems"] == [RETREAT_OVER]
+    assert game.sent == [("left", True), ("left", False)]  # let go of when cut
+    assert game.fronted == [] and "her retreat's plan flow1" in said[0]
+    late = p.run(_plan("flow2", _tap("left"), "retreat"))
+    assert late["error"].startswith(LIE_DETECTOR_ERROR) and "are over" in late["error"]
+    assert game.sent == [("left", True), ("left", False)]
+
+
+def test_a_plan_running_when_the_alarm_goes_off_is_stopped_whatever_its_kind(monkeypatch, tmp_path):
+    from gamelab.control.player import Alarm, allowed_keys
+    game = _Game(monkeypatch, tmp_path)
+    flag, keys = Alarm(), _keys()
+    p = Player(allowed_keys(keys), "Game", flag, keys=keys, log=lambda m: None)
+    threading.Timer(0.1, flag.set).start()
+    started = time.perf_counter()
+    result = p.run(_plan("flow", [[0, "left", "down"], [3000, "left", "up"]], "retreat"))
+    assert time.perf_counter() - started < 1.0 and result["error"] == LIE_DETECTOR_ERROR
+    assert game.sent == [("left", True), ("left", False)]
+
+
+def test_the_client_sends_her_pet_food_and_her_retreat_with_the_alarm_up_and_nothing_else(alarm_file):
+    alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 21:02:00",
+                                      "at": time.time() - 2.0}), encoding="utf-8")
+    with pytest.raises(client.LieDetectorAlarm):
+        client.send(_tap("ctrl"), name="throw")
+    with pytest.raises(ValueError):
+        client.send(_tap("u"), name="x", kind="throw")
+    pid = client.send(_tap("u"), name="pet_food", kind="pet_food")
+    plan = json.loads((client.INBOX / f"{pid}.json").read_text(encoding="utf-8"))
+    assert plan["kind"] == "pet_food" and plan["events"] == _tap("u")
+    assert client.alarm_up() and 1.9 < client.alarm_age() < 5.0
+    # Waited for, it isn't withdrawn as a plan without a kind is (the player decides): no player, no answer.
+    with pytest.raises(client.PlayerError, match="no result"):
+        client.wait(pid, timeout=0.05)
+    alarm_file.unlink()
+    assert not client.alarm_up() and client.alarm_age() is None
+
+
+def test_a_plan_refused_for_the_lie_detector_raises_its_alarm_even_before_its_file_is_written(alarm_file):
+    for error in (LIE_DETECTOR_ERROR, f"{LIE_DETECTOR_ERROR}: 3 pet foods a minute at most with the alarm up"):
+        pid = client.send([], name="x")
+        client.OUTBOX.mkdir(parents=True, exist_ok=True)
+        (client.OUTBOX / f"{pid}.json").write_text(json.dumps({"error": error}), encoding="utf-8")
+        with pytest.raises(client.LieDetectorAlarm, match="Lie Detector on screen"):
+            client.wait(pid, timeout=1)

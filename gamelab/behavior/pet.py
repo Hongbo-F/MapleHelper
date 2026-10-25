@@ -32,6 +32,12 @@ the pet's equipment, not its fullness), so the double-click is used once, to sta
 The fullness followed, when it was, and the last feed are kept in paths.PET. Time counts only while the game window is
 there (the pet is out only with her in the game): `pet --every` looks for it every minute.
 
+With the Lie Detector alarm up (since 2026-10-24: the user, after one kept the pet from being fed, "don't block pet
+feeding"), the food goes on by the fullness followed: its plan (Actions.feed_pet: kind alarm.PET_FOOD, a tap of the
+key) is the one the player takes then, a few a minute. Nothing is read until the alarm is cleared: the read
+double-clicks her, and whoever is at the PC may be answering the Lie Detector with the mouse. Never read yet, she gets
+a food once FALLBACK_S have passed since the last, as when the panel can't be read.
+
 Keys: pet food (config.toml [keys] pet_food), Esc, two left clicks on her and one on her window's SHOW PET INFO.
 Nothing else.
 """
@@ -43,6 +49,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .. import paths, telemetry
+from ..control import client
 from ..perception.framecheck import BadLook
 
 HUNGRY = 1             # fullness the pet loses a tick (the game data's info/hungry of the Snail pets)
@@ -154,13 +161,24 @@ class PetCare:
     def tend(self, present: bool = True, read_ok: bool = True) -> float | None:
         """Follow the pet's fullness in time (TICK_S, HUNGRY) and give it a food when that's under FOLLOW_FEED_BELOW.
         `present`: the game window is there (time away from the game doesn't count). Never read yet, it's read first
-        (`check`, if `read_ok`). Returns the fullness followed (None if not known yet)."""
+        (`check`, if `read_ok`), but not with the Lie Detector alarm up: then a food if FALLBACK_S have passed since the
+        last. Returns the fullness followed (None if not known yet). A food the player refuses raises (client's
+        PlayerError; the alarm's limits: LieDetectorAlarm), the fullness followed left as it was."""
         if self.actions.keys.pet_food is None:
             return None
         now = self.clock()
         state = _state()
         follow(state, now, present)
         if "level" not in state:
+            if present and client.alarm_up():
+                if now - state.get("fed", 0.0) >= FALLBACK_S:
+                    self._feed()
+                    state["fed"] = now
+                    self.log(f"pet: its fullness isn't known, and isn't read with the Lie Detector alarm up; fed it "
+                             f"anyway ({FALLBACK_S // 3600} h since a feed)")
+                    telemetry.emit("event", kind="pet", text="fed her pet without reading its fullness (the alarm up)")
+                _save(state)
+                return None
             _save(state)
             return self.check() if present and read_ok else None
         if present and state["level"] < FOLLOW_FEED_BELOW:
@@ -174,8 +192,13 @@ class PetCare:
 
     def check(self) -> int | None:
         """Open her Character Info, read the pet's fullness, feed it while low, close the window. Returns the
-        fullness it was left at (None if it couldn't be read: then fed once if FALLBACK_S passed since a feed)."""
+        fullness it was left at (None if it couldn't be read: then fed once if FALLBACK_S passed since a feed). Not with
+        the Lie Detector alarm up (None): the read double-clicks her."""
         if self.actions.keys.pet_food is None:
+            return None
+        if client.alarm_up():
+            self.log("pet: its fullness isn't read with the Lie Detector alarm up (the read double-clicks her): fed by "
+                     "the fullness followed until it's cleared")
             return None
         state = _state()
         if self.clock() < state.get("retry_at", 0.0):

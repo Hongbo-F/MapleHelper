@@ -226,3 +226,72 @@ def test_a_hunt_reads_it_only_with_no_monster_near_her(state):
     game = _Game(90)
     care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: 0.0)
     assert care.tend(read_ok=False) is None and game.plans == []
+
+
+# --- with the Lie Detector alarm up: fed by the fullness followed, nothing read (the user, 2026-10-24) --------------
+
+@pytest.fixture
+def alarm_up():
+    client.ALARM.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 21:02:00"}), encoding="utf-8")
+    yield client.ALARM
+    client.ALARM.unlink(missing_ok=True)
+
+
+def test_with_the_alarm_up_she_is_fed_by_the_fullness_followed_and_nothing_is_read(state, alarm_up):
+    game = _Game(85)
+    now = [10_000.0]
+    said = []
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=said.append, clock=lambda: now[0])
+    state.write_text(json.dumps({"level": 85.0, "at": now[0], "read_at": now[0]}))
+    now[0] += 30 * pet.TICK_S  # 55: under the line, one food, by time alone
+    assert care.tend() == pytest.approx(55 + pet.FOOD)
+    assert game.plans == ["pet_food"]  # no double-click, no Esc
+    assert care.check() is None and game.plans == ["pet_food"]  # a read asked for: none until the alarm is cleared
+    assert "isn't read with the Lie Detector alarm up" in said[-1]
+    alarm_up.unlink()  # cleared: read again when asked (the food given made it 100)
+    assert care.check() == 100 and game.plans == ["pet_food", "pet_info", "pet_close"]
+
+
+def test_never_read_with_the_alarm_up_she_gets_a_food_only_after_a_long_while(state, alarm_up):
+    game = _Game(50)
+    now = [10_000.0]
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: now[0])
+    state.write_text(json.dumps({"fed": now[0] - 60}))
+    assert care.tend() is None and game.plans == []  # not read, and fed a minute ago
+    now[0] += pet.FALLBACK_S
+    assert care.tend() is None and game.plans == ["pet_food"]  # as a check that can't read the panel
+    assert care.tend() is None and game.plans == ["pet_food"]
+    assert json.loads(state.read_text())["fed"] == now[0]
+
+
+def test_her_pet_food_goes_out_as_the_kind_the_player_takes_with_the_alarm_up(monkeypatch):
+    from gamelab.control.actions import Actions
+    sent = []
+    monkeypatch.setattr(client, "submit", lambda events, **kw: sent.append((events, kw.get("kind"), kw["name"])))
+    a = Actions(SimpleNamespace(pet_food=keys.parse("u"), jump=keys.parse("alt"), attack=keys.parse("ctrl"),
+                                lucky_seven=None, left=keys.parse("left"), right=keys.parse("right")))
+    assert a.feed_pet()
+    assert sent == [([[0, "u", "down"], [40, "u", "up"]], "pet_food", "pet_food")]
+
+
+def test_the_pet_command_goes_on_when_a_food_is_refused_or_not_answered(monkeypatch, capsys):
+    """`pet --every N` follows on: a food the player refuses (the alarm's limits) or doesn't answer (it has stopped)
+    is said, and tried again at the next follow, where it used to end the command."""
+    import gamelab.__main__ as m
+    from gamelab import window
+    errors = [client.LieDetectorAlarm("Lie Detector on screen: all input stopped: 3 pet foods a minute at most"),
+              client.PlayerError("no result after 120s; is the player running?")]
+
+    class Care:
+        def tend(self, present=True):
+            raise errors.pop(0)
+
+    monkeypatch.setattr(m, "_hunter", lambda args: SimpleNamespace(pet=Care()))
+    monkeypatch.setattr(m, "_record", lambda command, map_id: None)
+    monkeypatch.setattr(m, "_game_title", lambda: "MapleStory")
+    monkeypatch.setattr(m.telemetry, "emit", lambda *a, **k: None)
+    monkeypatch.setattr(window, "find_game", lambda title: 1)
+    monkeypatch.setattr(window, "minimized", lambda hwnd: False)
+    assert m.main(["pet"]) == 0 and m.main(["pet"]) == 0
+    out = capsys.readouterr().out
+    assert "pet: no food given (LieDetectorAlarm" in out and "pet: no food given (PlayerError" in out

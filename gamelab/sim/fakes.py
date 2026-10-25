@@ -565,7 +565,7 @@ class FakePlayer:
         self.free_from = clock.now  # after a cancel: the player takes a moment to notice it and stop
 
     def send(self, events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan",
-             end_ms: int | None = None) -> str:
+             end_ms: int | None = None, kind: str | None = None) -> str:
         from ..control.player import validate
         self.clock.charge()
         events = [list(e) for e in events]
@@ -588,9 +588,9 @@ class FakePlayer:
         return p.id
 
     def submit(self, events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100,
-               name="plan", timeout=120) -> dict:
+               name="plan", timeout=120, kind: str | None = None) -> dict:
         return self.wait(self.send(events, fps=fps, duration_ms=duration_ms, crop=crop, scale=scale, focus=focus,
-                                   lead_ms=lead_ms, name=name), timeout)
+                                   lead_ms=lead_ms, name=name, kind=kind), timeout)
 
     def done(self, plan_id: str) -> bool:
         p = self.plans[plan_id]

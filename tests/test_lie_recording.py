@@ -645,14 +645,14 @@ def test_an_alarm_file_that_couldnt_be_written_keeps_the_player_locked(tmp_path,
     assert any("couldn't be written: locked until it's stopped" in m for m in said)
 
 
-def fake_lab(tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0):
+def fake_lab(tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0, keys=None):
     """serve() with everything outside faked: the lab in tmp_path (the inbox and outbox the client's, as
-    tests/conftest.py points them), the game a fake screen, the config made up."""
+    tests/conftest.py points them), the game a fake screen, the config made up (her keys `keys`)."""
     for name, path in (("LAB", tmp_path), ("INBOX", client.INBOX), ("OUTBOX", client.OUTBOX),
                        ("STOP", tmp_path / "STOP"), ("PLAYER_LOG", tmp_path / "player.log")):
         monkeypatch.setattr(player_mod, name, path)
     monkeypatch.setattr(player_mod.config, "load",
-                        lambda path, combos: SimpleNamespace(keys=None, game_window_title="MapleStory"))
+                        lambda path, combos: SimpleNamespace(keys=keys, game_window_title="MapleStory"))
     monkeypatch.setattr(player_mod.win32, "precise_timers", contextlib.nullcontext)
     monkeypatch.setattr(player_mod.win32, "enable_dpi_awareness", lambda: None)
     monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "MapleStory")
@@ -672,9 +672,9 @@ def fake_lab(tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0):
 class Served:
     """serve() on a thread of its own, in fake_lab. A plan with no keys runs through Player.run as any would."""
 
-    def __init__(self, tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0):
+    def __init__(self, tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0, keys=None):
         self.screen, self.end_s, self.lab = screen, end_s, tmp_path
-        fake_lab(tmp_path, monkeypatch, screen, end_s, cap_s)
+        fake_lab(tmp_path, monkeypatch, screen, end_s, cap_s, keys)
         self.thread = threading.Thread(target=player_mod.serve, name="served-player")
         self.thread.start()
         self.wait_for(lambda: "player started" in self.log())
@@ -746,6 +746,32 @@ def test_the_player_stays_up_through_the_lie_detector_recording_it_and_stops_onc
     assert json.loads((folder / SUMMARY).read_text(encoding="utf-8"))["end"] == "gone"
     assert log.count("LIE DETECTOR seen") == 1 and log.count("recording the Lie Detector") == 1
     assert log.count("Lie Detector recording ended (gone)") == 1
+
+
+def test_with_the_alarm_up_the_served_player_takes_her_pet_food_and_nothing_else(tmp_path, monkeypatch, alarm_file,
+                                                                                pages):
+    """The user, 2026-10-24: "don't block pet feeding". From the sighting a tap of her pet food key goes (a plan of
+    kind pet_food, from the client), and nothing else: not the pet food key with another, not a hunt's plan."""
+    from test_alarm import _keys, _tap
+    sent = []
+    monkeypatch.setattr(player_mod.win32, "send_key", lambda key, down: sent.append((key.name, down)))
+    screen = Screen()
+    served = Served(tmp_path, monkeypatch, screen, keys=_keys())
+    try:
+        assert "with it seen: a tap of 'u' for her pet, 3 a minute, and her retreat's moves for 12 s" in served.log()
+        screen.kind = 1
+        served.wait_for(alarm_file.exists)
+        assert "error" not in client.submit(_tap("u"), name="pet_food", kind="pet_food", focus=False, timeout=5)
+        with pytest.raises(client.LieDetectorAlarm, match="one tap of 'u' and nothing else"):
+            client.submit(_tap("u") + _tap("ctrl", 100), name="pet_food", kind="pet_food", focus=False, timeout=5)
+        with pytest.raises(client.LieDetectorAlarm):  # a hunt's plan: refused here already, as before
+            client.submit(_tap("ctrl"), name="throw", focus=False, timeout=5)
+        assert served.plan("raw")["error"] == LIE_DETECTOR_ERROR  # and by the player, past the client's check
+        assert sent == [("u", True), ("u", False)]
+        assert "Lie Detector alarm up: her pet's food" in served.log()
+        assert "Lie Detector alarm up: refused" in served.log()
+    finally:
+        served.stop()
 
 
 def test_the_player_wont_start_with_the_alarm_up(tmp_path, monkeypatch, alarm_file):

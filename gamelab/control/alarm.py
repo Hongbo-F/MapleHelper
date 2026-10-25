@@ -1,6 +1,6 @@
 """The Lie Detector alarm: once the player has seen it, gamelab refuses to run until a person has
 answered it and cleared the alarm (the alarm file, paths.ALARM). Paging whoever is at the PC.
-(Spotting it on screen: perception.lie_detector.)
+(Spotting it on screen: perception.lie_detector.) And the two kinds of plan that still go while it's up.
 
 The elevated key player loads this module: it imports nothing else of gamelab but paths.
 """
@@ -16,13 +16,26 @@ from ..paths import ALARM
 
 BEEPS = 3         # alert sounds when paging ...
 BEEP_GAP_S = 0.4  # ... this far apart
+LIE_DETECTOR_ERROR = "Lie Detector on screen: all input stopped"  # the player's answer to a plan it refuses for it
+
+# What still goes with the alarm up, named by a plan's `kind` (control.client.send), each only as its kind says
+# (control.player.alarm_refusal); every other plan is refused, as before. The user, 2026-10-24, after a Lie Detector
+# failed over Chrome Remote Desktop's lag while the alarm kept the pet from being fed: "just stop any in-progress hunt
+# when this happens, don't block pet feeding", and a minute later "On a lie detector you should move to a safe place,
+# within 10s".
+PET_FOOD = "pet_food"  # one tap of her pet food key and nothing else, PET_FOOD_PER_MIN a minute at most
+RETREAT = "retreat"    # her moves to a safe place (behavior.retreat), up to RETREAT_WINDOW_S after the sighting
+PLAN_KINDS = (PET_FOOD, RETREAT)
+PET_FOOD_PER_MIN = 3   # a food is given at most every 75 s or so (behavior.pet: a point of fullness a TICK_S)
+RETREAT_S = 10.0       # s from the sighting by which she's on a safe place (behavior.retreat plans for it) ...
+RETREAT_WINDOW_S = 12.0  # ... and the player takes her retreat's moves this long after it, then none
 
 
 def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector") -> dict:
     """Record the alarm (gamelab refuses to run until it's cleared) and page whoever is at the PC. An alarm that
     can't be written (the disk full) is still paged, and its error raised after that: it had raised before the
-    paging, so then nobody was told."""
-    info = {"reason": reason, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
+    paging, so then nobody was told. `at` is when (time.time(): her retreat counts its 10 s from it)."""
+    info = {"reason": reason, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "at": round(time.time(), 3)}
     try:
         ALARM.parent.mkdir(parents=True, exist_ok=True)
         _write(info)  # first: everything else may fail

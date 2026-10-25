@@ -404,23 +404,31 @@ def _hunter(args, **kw):
 def cmd_pet(args) -> int:
     """Her pet kept fed (behavior.pet): its fullness followed in time and a food given when it's low, read once off her
     Character Info to start from (or now, with --read); with --every, followed every that many minutes until stopped,
-    counting only time the game window is there. Keys: pet food; for a read Esc and a double-click on her."""
+    counting only time the game window is there. Keys: pet food; for a read Esc and a double-click on her. With the Lie
+    Detector alarm up it goes on: the food by the fullness followed (the player takes it then), no read until the alarm
+    is cleared; a food the player refuses or doesn't answer (it isn't running) is tried again at the next follow."""
     hunter = _hunter(args)
     _record("pet", args.map)
     title = _game_title()
-    if args.read:
+    if args.read and client.alarm_up():
+        print("pet fullness: not read with the Lie Detector alarm up (the read double-clicks her)")
+    elif args.read:
         window.bring_to_front(title)
         print(f"pet fullness: {hunter.pet.check()}")
-        if not args.every:
-            return 0
+    if args.read and not args.every:
+        return 0
     while True:
         try:
             present = not window.minimized(window.find_game(title))
         except RuntimeError:  # no game window: the pet isn't out
             present = False
-        level = hunter.pet.tend(present=present)
-        print(f"pet fullness: {'not known' if level is None else f'about {level:.0f}'}"
-              + ("" if present else " (the game isn't there: time not counted)"))
+        try:
+            level = hunter.pet.tend(present=present)
+        except client.PlayerError as e:  # the alarm's limits, the player stopped: the food goes again next time
+            _log(f"pet: no food given ({type(e).__name__}: {e}); tried again at the next follow")
+        else:
+            print(f"pet fullness: {'not known' if level is None else f'about {level:.0f}'}"
+                  + ("" if present else " (the game isn't there: time not counted)"))
         if not args.every:
             return 0
         time.sleep(args.every * 60)
