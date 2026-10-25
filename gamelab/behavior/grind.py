@@ -67,8 +67,8 @@ class Grind(Hunt):
     the tour's kinds worth hunting and their EXP, the navigator's route times, and for the danger hook the hunter's
     map danger, the positioning model's: Hunter.danger, attack.danger; patrol's default for a hunter without one)."""
 
-    def __init__(self, tour, log=print, rng=None, sweep: bool | None = None, patrol: Patrol | None = None):
-        super().__init__(tour, log=log, rng=rng, sweep=sweep)
+    def __init__(self, tour, log=print, rng=None, patrol: Patrol | None = None):
+        super().__init__(tour, log=log, rng=rng)
         danger = getattr(self.h, "danger", None)  # the positioning model's Danger (its `at` is in the hook's unit)
         self.patrol = patrol or Patrol(self.model, self.kinds, tour.exp,
                                        travel=lambda a, x, b, bx: self.nav.planner.arrive(a, x, b, bx),

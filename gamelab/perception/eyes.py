@@ -17,6 +17,11 @@ and the map's minimap picture found. One that fails raises BadLook, saying why; 
 (localization.senses takes it again, and gives up after a while). While the window is unfit in a way only the user sets
 right (framecheck.WAIT_KINDS: another size, partly off the screen, gone), a look asks the window alone: the game isn't
 brought to the front or captured. A glance that fails has no dot and keeps the last HP read.
+
+A command's eyes take no shots of their own (`NoScreen`: one raises): the game is looked at all the time by the
+perception service (localization.service), whose states every look reads, and what a command's eyes read off a whole
+frame (the pet's panels, the pick-up log, her EXP number for `hunt look`) is its frame at full size (`full_frames`). The
+service's own eyes, and the offline tools' on saved frames, have a screen to shoot.
 """
 
 import time
@@ -55,6 +60,16 @@ GLANCE_EVERY_S = 0.063
 # capture.RETRY_S, 10 s, a time). Before, only the first two failures of a run of any kind did anything, so a capture
 # still lagging after a drag that had first failed as "moved" was never tried again (the reviewer's repro_attempts.py).
 CAPTURE_AGAIN_S = 5.0
+
+
+class NoScreen:
+    """A command's screen: none. Every shot raises, so nothing in a command captures the game behind the perception
+    service's back (its one DXGI duplication: a third failed with 0x887A0022 when watch, the pet's babysitter and a hunt
+    each held their own)."""
+
+    def shot(self, area, after: float | None = None, at: float | None = None):
+        raise RuntimeError("a command's eyes take no shots: its frames are the perception service's "
+                           "(localization.service; Eyes.full_frames)")
 
 
 def tag_below_feet(geo: Geometry = STRETCHED) -> int:
@@ -122,15 +137,19 @@ class Eyes:
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
                  loot: LootDetector | None = None, screen=None, geo: Geometry = STRETCHED,
                  minimap_picture: np.ndarray | None = None):
-        """`screen`: what takes shots of the screen (by default the process's capture.Grabber: DXGI or mss,
-        as config.toml says; analysis.bench passes saved frames). `minimap_picture`: the map's own minimap picture
+        """`screen`: what takes shots of the screen (the perception service's capture.Grabber, DXGI or mss as
+        config.toml says; analysis.bench's saved frames; by default none, NoScreen: a command's, whose frames come from
+        the service, `full_frames`). `minimap_picture`: the map's own minimap picture
         (mapdata.minimap_picture): with it, dots are read as if the picture were where it was on the first map
         (minimap.MinimapPicture), wherever the window puts or scrolls it."""
         self.title = title
         self.geo = geo
         self.detector = detector or MobDetector(frame_scale=geo.frame_scale)
         self._loot = loot
-        self.screen = screen or capture.shared()
+        self.screen = screen if screen is not None else NoScreen()
+        # A command's whole frames: the game window at full size (RGB) shown at a time or later (the perception
+        # service's client's full_frame), raising BadLook if there's none; None: shot here (`screen`).
+        self.full_frames: Callable[[float], np.ndarray] | None = None
         self._glanced = -GLANCE_EVERY_S    # when the last glance began
         self.area: dict[str, int] | None = None  # where the client area was at the last look that passed
         self._waited: Problem | None = None  # what the last look waited out without touching the window (WAIT_KINDS)
@@ -256,9 +275,14 @@ class Eyes:
         except ImportError:
             return ""
         begun = time.monotonic()
-        area = self._client_area()
-        x, y, w, h = LOOT.region.box((0, 0, area["width"], area["height"]))
-        shot = self.screen.shot(area, after=begun).crop(x, y, w, h)
+        if getattr(self, "full_frames", None) is not None:  # (a command's: the perception service's frame)
+            full = self.full_frames(begun)
+            x, y, w, h = LOOT.region.box((0, 0, full.shape[1], full.shape[0]))
+            shot = full[y:y + h, x:x + w, ::-1]  # RGB -> BGR
+        else:
+            area = self._client_area()
+            x, y, w, h = LOOT.region.box((0, 0, area["width"], area["height"]))
+            shot = self.screen.shot(area, after=begun).crop(x, y, w, h)
         rows = shared().read(np.ascontiguousarray(shot[:, :, :3]), min_height=LOOT.min_height) or []  # BGR
         return "\n".join(r.text for r in rows)
 
@@ -296,7 +320,10 @@ class Eyes:
         sets right (window_wait), the game isn't brought to the front: a hunt standing still on a resized window
         looked twice a second, and would have pulled the game over whatever the user was doing every time (the
         reviewer's focus.py: 136 times in 63 s). A minimized game is restored, as it always was, unless the last look
-        was waiting for the user already."""
+        was waiting for the user already. A command's (`full_frames`): the perception service's frame shown after now,
+        its checks the service's (BadLook if it had none)."""
+        if getattr(self, "full_frames", None) is not None:
+            return self.full_frames(time.monotonic())
         wait = self.window_wait()
         if wait is not None and (wait.kind != "minimized" or getattr(self, "_waited", None) is not None):
             self._waited = wait
@@ -363,10 +390,6 @@ class Eyes:
     def monsters_wide(self, obs: Observation) -> list[Mob]:
         """Every monster on screen (above the bottom bar)."""
         return self.detector.detect_wide(obs.frame, (0, int(obs.frame.shape[0] * obs.geo.hud_top)))
-
-    def monsters_rows(self, obs: Observation, rows: tuple[int, int]) -> list[Mob]:
-        """Monsters wholly within rows `rows` (top, bottom) of the look's frame (one slice of a sweep: Senses.sweep)."""
-        return self.detector.detect(obs.frame, rows=rows)
 
     def refind(self, obs: Observation, mob: Mob, box: tuple[int, int, int, int], fallback: bool = True) -> Mob | None:
         """Monster `mob`, seen in an earlier frame, looked for again where its picture should be now (`box`:

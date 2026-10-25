@@ -1,7 +1,7 @@
 """Results of simulated hunts, and A/B comparisons of hunting policies on the same seeds.
 
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
-                                             [--feed] [--costs coded|measured] [--ways N] [--map 10004021]
+                                             [--costs coded|measured] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
                                              [--attack choice|skill|regular]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
@@ -18,7 +18,8 @@ there (WORLDS: group 0's walls, the client's sides, the client's rope reach, a t
 evasion, the monsters' HP bars read empty), each saved as a suffix of the name. `--attack` has the stack choose her
 attack a throw as live (behavior.attacks: Lucky Seven but the regular attack to finish a monster and while her MP is
 under a cast; Lucky Seven whenever she has the MP; the regular attack always) in a world where her Lucky Seven key
-casts it at its MP (ATTACK_HER).
+casts it at its MP (ATTACK_HER). Her looks and glances are the feed's (SyncFeed), as live takes them from the
+perception service; its costs are localization.feed.COSTS.
 What a run gave is read from the simulated world, not from the bot's own reports (those miss kills):
 
   exp_per_min      EXP she got, per minute of the horizon (a death stops the count)
@@ -176,12 +177,12 @@ ATTACK_HER = {"skill": LUCKY_SEVEN, "spread": True}
 # computing plus the wait for a frame (5.6 ms median with the screen changing) and its copy off the card and
 # conversion (2.0), her band 23.8 ms more, the whole screen 83.8, a strip of drops about 8 (her platform's
 # 15.6 ms in 1.9 strips). Before the profiling pass (as step 5 measured them): 0.024, 0.006, 0.032, 0.122 and
-# 0.008. Glances keep their pace (Eyes.GLANCE_EVERY_S). With `--feed`, her looks come from the feed, whose
-# own costs are localization.feed.COSTS.
+# 0.008. Glances keep their pace (Eyes.GLANCE_EVERY_S). Her looks and glances come from the feed (SyncFeed), whose
+# own costs are localization.feed.COSTS: these are what a look taken by the fakes costs (Hunter's on FakeEyes
+# without a feed, the tests'), and the pick-up log's OCR (fakes.MESSAGES_S).
 COSTS = {
     "coded": {},
-    "measured": {"LOOK_S": 0.020, "LOOK_LAG": 0.006, "DETECT_S": 0.024, "DETECT_WIDE_S": 0.084, "LOOT_S": 0.008,
-                 "DETECT_SLICE_S": 0.018},  # a slice of the sweep: DETECT_S x 16.7 / 21.9 (bench-look, 1366x768)
+    "measured": {"LOOK_S": 0.020, "LOOK_LAG": 0.006, "DETECT_S": 0.024, "DETECT_WIDE_S": 0.084, "LOOT_S": 0.008},
 }
 
 
@@ -195,15 +196,14 @@ def _tour(sim) -> None:
         tour.run()
 
 
-def _loop(sim, rest_avoid: bool = False, low_hp: float = 0.3, sweep: bool | None = None) -> None:
-    """The hunt loop (`python -m gamelab tour --loop`), on the same hunter, navigator and map knowledge. `sweep`: her
-    looks sweep the screen (None: hunt.SWEEP)."""
+def _loop(sim, rest_avoid: bool = False, low_hp: float = 0.3) -> None:
+    """The hunt loop (`python -m gamelab tour --loop`), on the same hunter, navigator and map knowledge."""
     from ..behavior.hunt import Hunt
     h = sim.hunter(low_hp=low_hp, potion_hp=0.45)
     tour = sim.tour(h, sim.navigator(h, fight=True, seed=POLICY_SEED), seed=POLICY_SEED)
     tour.rest_avoid = rest_avoid
     while True:
-        Hunt(tour, log=tour.log, sweep=sweep).run(minutes=600)
+        Hunt(tour, log=tour.log).run(minutes=600)
 
 
 def _loop_avoid(sim) -> None:
@@ -217,12 +217,6 @@ def _loop_hp50(sim) -> None:
     _loop(sim, low_hp=0.5)
 
 
-def _loop_nosweep(sim) -> None:
-    """The hunt loop with `--no-sweep`: her looks at the band around her search only it (her memory of the monsters is
-    kept up by the band and the whole-screen looks alone)."""
-    _loop(sim, sweep=False)
-
-
 def _loop_grind(sim) -> None:
     """The hunt loop grinding round the map (`tour --loop --grind`: behavior.grind), on the same hunter, navigator and
     map knowledge as `loop`."""
@@ -234,7 +228,7 @@ def _loop_grind(sim) -> None:
 
 
 POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid, "loop-hp50": _loop_hp50,
-            "loop-nosweep": _loop_nosweep, "loop-grind": _loop_grind}
+            "loop-grind": _loop_grind}
 
 
 def _only(policy, grounds: tuple[int, ...]):
@@ -257,12 +251,10 @@ def _only(policy, grounds: tuple[int, ...]):
 # --- one run -------------------------------------------------------------------------------------------
 
 def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-             feed: bool = False, map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (),
-             attack: str | None = None):
+             map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (), attack: str | None = None):
     """The Scenario for one run: the policy hunting on map `map_id` from its START_AT[seed] (STARTS) in world `seed`
     until the horizon. `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a
-    little); `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed); `world`: the
-    switches of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default);
+    little); `world`: the switches of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default);
     `attack`: the stack's attack a throw (behavior.attacks.MODES), with her as ATTACK_HER (None: the regular attack,
     her as the map has her)."""
     from . import scenarios
@@ -285,12 +277,12 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
                               + (f":attack-{attack}" if attack else ""),
                               fn,
                               starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
-                              realism=realism, may_die=True, think=think, feed=feed, map_id=map_id,
+                              realism=realism, may_die=True, think=think, map_id=map_id,
                               her=her if world or attack else None, attack=attack)
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-            feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
+            costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
             world: tuple = (), grounds: tuple = (), attack: str | None = None) -> dict:
     """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS); `ways`:
     the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on;
@@ -306,14 +298,14 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         if ways is not None:
             route.ROUTES = ways
         with telemetry.captured() as records:
-            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id, world, grounds,
+            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, map_id, world, grounds,
                                                     attack))
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
         route.ROUTES = routes
     out = outcomes(sim.world, records, minutes * 60)
-    out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=feed, costs=costs,
+    out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=True, costs=costs,
                ways=routes if ways is None else ways, map=map_id, result=str(trace["result"])[:120])
     if world:
         out["world"] = list(world)
@@ -322,17 +314,15 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     if attack:
         out["attack"] = attack
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
-    if feed:
-        f = trace["feed"]
-        out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
-                              "searches": f.get("searches"), "searching_s": f.get("searching_s"),
-                              "senses": f["senses"], "tracker": f["tracker"]}
-    out["looks"] = sim.eyes.counts["looks"]
+    f = trace["feed"]
+    out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
+                          "searches": f.get("searches"), "searching_s": f.get("searching_s"),
+                          "senses": f["senses"], "tracker": f["tracker"]}
+    out["looks"] = f["senses"].get("looks", 0)
     out["turning"] = turning(trace["plans"], records, sim.world)
     out["attack_kinds"] = attack_kinds(sim.world, records)
     out["nav"] = navigation(trace["log"], sim.model)
-    out["nav"]["glances"] = sim.eyes.counts["glances"] + (
-        trace["feed"]["senses"].get("glances from the feed", 0) if feed else 0)
+    out["nav"]["glances"] = f["senses"].get("glances", 0)
     return out
 
 
@@ -557,15 +547,22 @@ def _waits(records: list[dict]) -> list[tuple[float, float]]:
 # --- many runs -----------------------------------------------------------------------------------------
 
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
-             feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
+             costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
              world: tuple = (), grounds: tuple = (), attack: str | None = None) -> list[dict]:
-    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id, tuple(world), tuple(grounds), attack)
+    args = [(policy, k, preset, minutes, think, costs, ways, map_id, tuple(world), tuple(grounds), attack)
             for k in range(1, seeds + 1)]
     if jobs <= 1:
         return [run_one(*a) for a in args]
     from gamelab.sim import harness  # by its module name, so worker processes can find it (not __main__)
-    with ProcessPoolExecutor(max_workers=jobs) as pool:
+    with ProcessPoolExecutor(max_workers=jobs, initializer=harness._worker) as pool:
         return list(pool.map(harness._run_one_args, args))
+
+
+def _worker() -> None:
+    """A worker process at below-normal priority (feed.quiet): the perception service, at normal, keeps its pace on a
+    machine the runs keep busy (it looked at 20.8 frames a second beside 22 busy workers so, 14 at their priority)."""
+    from ..localization.feed import quiet
+    quiet()
 
 
 def _run_one_args(a: tuple) -> dict:
@@ -803,8 +800,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--think", type=float, default=0.0,
                    help="charge the stack's computing to the fake clock, times this (1: this computer's speed)")
     r.add_argument("--save",
-                   help="name to save the results under (default: POLICY-PRESET, then -feed, -COSTS and -waysN)")
-    r.add_argument("--feed", action="store_true", help="her looks and glances from a continuous feed (SyncFeed)")
+                   help="name to save the results under (default: POLICY-PRESET, then -COSTS and -waysN)")
     r.add_argument("--ways", type=int, help="the ways her trips choose among (route.ROUTES; default: route's own)")
     r.add_argument("--costs", choices=sorted(COSTS), default="coded",
                    help="what the simulator's looks take: coded (the fakes' own), measured (today's)")
@@ -848,10 +844,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.map not in PRESET_MAPS.get(args.preset, (args.map,)):
         print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
         return 2
-    results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs,
+    results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.costs,
                        args.ways, args.map, tuple(args.world), args.grounds, args.attack)
     print(table(results))
-    name = args.save or (f"{args.policy}-{args.preset}" + ("-feed" if args.feed else "")
+    name = args.save or (f"{args.policy}-{args.preset}"
                          + (f"-{args.costs}" if args.costs != "coded" else "")
                          + (f"-ways{args.ways}" if args.ways is not None else "")
                          + (f"-{args.map}" if args.map != FIRST_MAP else "")

@@ -12,7 +12,7 @@ from PIL import Image
 
 from gamedata.paths import COPY
 from gamelab.localization import mapdata
-from gamelab.localization.players import CONFIRM, LOCAL_IDS, MISS_S, MISSES, Players
+from gamelab.localization.players import CONFIRM, MISS_S, MISSES, Players
 from gamelab.localization.pose import Localizer
 from gamelab.perception import minimap
 from gamelab.perception.minimap import MARKER_COLOURS, MINIMAP_BOX, OTHER_SHIFT, Marker, dot_in_box, markers_in_box
@@ -397,33 +397,25 @@ def test_with_the_feeds_30_looks_a_second_her_marker_passing_over_theirs_doesnt_
     assert ids[90] == []  # gone 1.0 s after it was last seen (1.97 s)
 
 
-def test_a_look_taken_here_goes_on_from_the_players_the_feeds_looks_brought(model):
-    """Senses.look with a feed: a look the feed serves brings its players (its own ids); a look taken here after it
-    (the feed too slow, say) goes on from them, the same ids, so the hunter doesn't log them coming and going. A new
-    one seen here has an id the feed's can't have (LOCAL_IDS)."""
+def test_a_look_has_the_players_its_feed_follows(model):
+    """Senses.look: a look the feed serves brings its players (its own ids, as its frames followed them), kept as hers
+    (Players.adopt), so the hunter doesn't log them coming and going between looks."""
     from types import SimpleNamespace
     from gamelab.localization.players import Player
     from gamelab.localization.senses import Senses
     from gamelab.localization.worldstate import WorldState, to_scene
-    from gamelab.perception.eyes import Observation
     frame = np.zeros((540, 960, 3), np.uint8)
     loc = Localizer(model)
     her, theirs = loc.to_dot(100.0, 500.0), dot_of(loc, 300.0, 360.0)
-    feed = SimpleNamespace(alive=True, scene=None, drain_events=lambda t: [])
+    feed = SimpleNamespace(alive=True, scene=None, drain_events=lambda t: [], problem=lambda: None,
+                           bring_forward=lambda problem: None)
     feed.look = lambda senses, mobs, wide, loot, mesos_only, after=None: feed.scene
-    obs = []
-    eyes = SimpleNamespace(look=lambda: obs[-1])
-    senses = Senses(eyes, model, band=(100.0, 100.0), feed=feed)
+    senses = Senses(SimpleNamespace(), model, band=(100.0, 100.0), feed=feed)
     p = Player(3, "stranger", 300.0, 360.0, None, (theirs.x, theirs.y), 0.0, 1.0, seen=9)
     feed.scene = to_scene(WorldState(1, 1.0, True, dot=her, others=[theirs], players=[p], frame=frame), model,
                           (100.0, 100.0), mobs=False)
     assert [q.id for q in senses.look(mobs=False).players] == [3]
-    feed.scene = None  # the feed can't serve the next: it's taken here
-    other = dot_of(loc, 600.0, 360.0)
-    for t in (1.1, 1.2):
-        obs.append(Observation(t=t, frame=frame, tag=None, hp=1.0, mp=1.0, dot=her, others=[theirs, other]))
-        s = senses.look(mobs=False)
-    assert sorted(q.id for q in s.players) == [3, LOCAL_IDS]
+    assert [q.id for q in senses.players.current] == [3] and senses.players.current[0].seen >= p.seen
 
 
 def test_a_player_walking_is_followed_and_one_far_off_is_another(model):

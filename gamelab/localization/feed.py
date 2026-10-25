@@ -1,40 +1,37 @@
-"""The continuous feed: the game looked at every frame, in a process of its own, and the latest of what it saw
-handed to the stack as it asks (Senses(feed=...)).
+"""The continuous feed: the game looked at every frame and the latest of what it saw handed to the stack as it
+asks (Senses: every look and glance). Live, it runs in the perception service, a process of its own that runs at all
+times (localization.service: `run` there, its states down a pipe to each command, its frames in a `Ring` in shared
+memory); in the simulator `SyncFeed`, in-process on the fake clock; on saved frames and in tests `InlineFeed`, the step
+run on the eyes' own frame when a look asks.
 
 Why a process: the stack's planning holds Python's lock, and a perception thread in the same process got
 16 of its 60 looks in 2 s while the planner worked (the research's gil.py; Python 3.15 here has the lock on).
-So the feed is a child process (`serve`, started with spawn, at below-normal priority so the game, mostly
-on one core, keeps its frame pacing). Each frame it runs the world step (localization.worldstate): her
-place, the monsters tracked, her EXP gains and hits; the searches (her band, the whole screen, the drops) run
-on a thread of the child's own beside that frame loop (worldstate.SearchThread), and each frame's state
-searched is given again once they're back (`late`). The look frames (half size at 1920x1080, full size at the game's
-own 1366x768: screen.Geometry) go into a ring of RING_SLOTS in shared memory (`Ring`: the oldest overwritten, never
-more), and each frame's state (plain data, a few KB) down a pipe; the stack's requests (what it wants searched on the
-next frame, her throws) go up another.
+Each frame it runs the world step (localization.worldstate): her place, the monsters tracked, her EXP gains and hits;
+the searches (her band, the whole screen, the drops) run on a thread beside that frame loop
+(worldstate.SearchThread), and each frame's state searched is given again once they're back (`late`). The look frames
+(half size at 1920x1080, full size at the game's own 1366x768: screen.Geometry) go into a ring in shared memory
+(`Ring`: the oldest overwritten, never more).
 
-The stack's side (`FeedClient`) keeps the last few states, read off the pipe by a thread of its own:
-- `latest(after, want)`: the newest state of a frame shown at `after` or later (a look sees what came of
-  the keys sent before it) that has what's wanted fresh: her place and the monsters followed are that frame's
-  (re-found every frame), monsters new in her band of a search within MOBS_FRESH_S of it, the whole screen within
-  WIDE_FRESH_S, drops searched on that very frame (a pile just picked up must not be seen again). If none has, it
-  asks the next frame for what the newest state wouldn't have fresh by then (to_ask: so a look reads the feed's
-  world state and waits for a frame, not for a search, ASK_ONLY_STALE), and waits, FEED_WAIT_S at most; then (or
-  once the game isn't in front, or the child has died) None, and Senses takes the look itself as before.
+What the stack asks of a feed (`Feed`):
+- `latest(want)`: the newest state of a frame shown at `want.after` or later that has what's wanted fresh (`fresh`):
+  her place and the monsters followed are that frame's (re-found every frame), monsters new in her band of a search
+  within MOBS_FRESH_S of it, the whole screen within WIDE_FRESH_S, drops searched on that very frame (a pile just
+  picked up must not be seen again), and nothing that failed its checks (WorldState.bad). If none has, it asks the next
+  frame for what the newest state wouldn't have fresh by then (to_ask: so a look reads the feed's world state and waits
+  for a frame, not for a search, ASK_ONLY_STALE), and waits, FEED_WAIT_S at most; then (or at once while the newest
+  state isn't of the game as expected) None, and Senses asks again, says why (`problem`) and stands still after a while.
 - `wait_frame(timeout)`: until a new frame's state comes; `drain_events(upto)`: every event since the last
-  drain of a frame up to the one a look shows, each once.
+  drain of a frame up to the one a look shows, each once; `throw`: her throw, for the tracker.
 
 `SyncFeed` is the same thing in-process for the simulator: its clock calls `tick` at every frame the game
 shows, the world step runs on the fake eyes there, and each state is ready its measured cost (COSTS) after
 its frame; a search handed over at the end of a frame's step comes back its own cost later (`TimedSearches`),
-merged by the first frame placing her after that, or as it comes if the frame loop is idle, as in the child.
+merged by the first frame placing her after that, or as it comes if the frame loop is idle, as in the service.
 Nothing it does is charged to the stack's time.
 """
 
 import ctypes
-import multiprocessing
-import multiprocessing.connection
 import sys
-import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -44,7 +41,7 @@ from multiprocessing.shared_memory import SharedMemory
 import numpy as np
 
 from ..perception.eyes import Eyes, Observation, band_rows
-from ..perception.framecheck import Problem
+from ..perception.framecheck import BadLook, Problem
 from ..perception.frames import Frame
 from ..screen import STRETCHED, Geometry
 from .senses import Senses
@@ -52,23 +49,23 @@ from .tracking import Event
 from .worldstate import Asks, Found, Job, Schedule, SearchThread, Searches, WorldState, WorldStep, search, to_scene
 
 HZ = 30.0            # frames a second the feed looks at (the game shows 60; a frame's step takes 15-20 ms)
-RING_SLOTS = 4       # look frames kept in shared memory: at 30 Hz the newest 133 ms
+RING_SLOTS = 4       # look frames a Ring keeps by default (the service's: service.RING_SLOTS)
 FRAME_SHAPE = (540, 960, 3)  # ... each of this shape at 1920x1080 (frame_shape)
 MOBS_FRESH_S = 0.3   # a look's monsters: her band searched at most this long before its frame. It's searched every
                      # 0.2 s (worldstate.BAND_EVERY_S), and the frame after that and the search itself take about 0.1 s
                      # more: with 0.25, on the saved frames a third of the frames searched it, every look asking.
                      # (Without ASK_ONLY_STALE a look asks for it on a frame of its own.)
 WIDE_FRESH_S = 0.5   # ... the whole screen (it's searched every second; tracked monsters are re-found every frame)
-FEED_WAIT_S = 0.6    # s a look waits for the feed before it takes the look itself (the whole screen with every
-                     # drop in view takes ~0.25 s)
-GLANCE_WAIT_S = 0.25  # s a glance waits for a frame from the feed before it takes one itself
+FEED_WAIT_S = 0.6    # s a look waits for the feed's state before it asks again (the whole screen with every drop in
+                     # view takes ~0.25 s; Senses.look stands still after senses.LOST_S of none)
+GLANCE_WAIT_S = 0.25  # s a glance waits for a frame from the feed (none: no dot, Senses.glance)
 NOT_VISIBLE_S = 0.25  # s between checks while the game isn't wholly on screen
 RECOVER_EVERY_S = 0.2  # s at least between two of the eyes' recoveries while frames fail their checks (Eyes.recover:
                        # the minimap's picture and her name tag searched afresh, the capture duplicated afresh or mss),
                        # as a look taken again (senses.RETRY_GAP_S)
 KEEP = 8             # states the stack's side keeps
 EVENTS_KEPT = 10_000  # events kept for the next drain at most (the oldest go: a stack that never drains)
-BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS
+BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS (quiet: the harness's and soak's workers)
 # True: a look reads the feed's world state, and asks the next frame only for what the newest state wouldn't have fresh
 # by then (to_ask): her place and the monsters it follows are of the look's own frame (re-found in every frame), the
 # monsters new in her band of a search within MOBS_FRESH_S, the whole screen within WIDE_FRESH_S; the drops it asks for
@@ -83,9 +80,6 @@ BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS
 # and a look waits for its frame, not for a search of its own: 43 ms (median) against 73 for the hunt loop's look in the
 # simulator (README, Continuous perception: The feed by default).
 ASK_ONLY_STALE = True
-# Whether a look at her band from the feed also has the monsters it follows off the band (Feed.look: Scene.swept, for
-# her memory), as the sweep's slices had them without a feed; False: the band's alone, as before 2026-10-24.
-TRACKED = True
 
 
 # --- frames in shared memory --------------------------------------------------------------------------
@@ -97,9 +91,9 @@ def frame_shape(geo: Geometry = STRETCHED) -> tuple[int, int, int]:
 
 
 class Ring:
-    """Look frames in shared memory, `slots` of them, each with its frame number and time: the child
-    writes them in turn (the oldest overwritten), the stack copies one out by its number. Made by the stack's
-    side (`name` None) and opened by name in the child."""
+    """Look frames in shared memory, `slots` of them, each with its frame number and time: the perception service
+    writes them in turn (the oldest overwritten), a command copies one out by its number. Made by the service (`name`
+    None) and opened by name in each command."""
 
     def __init__(self, name: str | None = None, slots: int = RING_SLOTS, shape: tuple = FRAME_SHAPE):
         self.slots, self.shape = slots, shape
@@ -169,30 +163,11 @@ class Runner:
             self.eyes.recover(problem)
 
 
-def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[float, float], throws: bool = True,
-                 schedule: Schedule = Schedule(), geo: Geometry = STRETCHED) -> Runner:
-    """The game on screen (perception.frames.ScreenFrames: never brought to the front), with monster
-    templates for map `map_id` and her name tag (`template`, calibration's), for a game window of geometry `geo`."""
-    from ..perception.frames import ScreenFrames
-    from ..perception.sprites import detector_for
-    from . import mapdata
-    model = mapdata.load(map_id)
-    frames = ScreenFrames(title, geo=geo)
-    try:  # as the commands that act load it (__main__._minimap_picture): the feed stops if it won't load
-        picture = mapdata.load_minimap_picture(model.id)
-    except (KeyError, OSError, ValueError) as e:
-        if model.minimap.get("width"):  # the map has one: without it her dot is read with the first map's origin
-            raise RuntimeError(f"map {model.id}'s minimap picture didn't load ({e!r})") from None
-        picture = None
-    eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo, minimap_picture=picture)
-    senses = Senses(eyes, model, band)
-    return Runner(frames, eyes, WorldStep(senses, throws, schedule, SearchThread(senses)), title)
-
-
 def saved_world(files: list[str], map_id: int, template: np.ndarray, band: tuple[float, float], hold: int = 30,
                 schedule: Schedule = Schedule()) -> Runner:
     """Saved screenshots (full-size game frames, all of one size: its geometry's) for a screen, each `hold` frames in
-    a row, round and round: the feed run offline (`python -m gamelab.sim.soak feed`)."""
+    a row, round and round: the perception service run offline (`python -m gamelab perceive --frames`,
+    `python -m gamelab.sim.soak feed`)."""
     from PIL import Image
 
     from ..perception.frames import ListFrames
@@ -266,73 +241,10 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
             due = max(due + period, time.monotonic())
 
 
-def serve(requests, states, ring_name: str, make: Callable[[], Runner], hz: float = HZ,
-          shape: tuple = FRAME_SHAPE) -> None:
-    """The child process: builds its runner with `make()`, then runs it, frames into the ring (of frames of `shape`)
-    and states down `states`, asks and throws read from `requests`, until asked to stop or the stack's end of a pipe
-    closes. The searches' thread wakes the frame loop through a pipe of the child's own when an answer is in."""
-    quiet()
-    try:
-        runner = make()
-        ring = Ring(ring_name, shape=shape)
-    except Exception as e:
-        states.send(("error", f"the feed couldn't start: {type(e).__name__}: {e}"))
-        return
-    states.send(("hello", {"priority": _priority(), "pid": multiprocessing.current_process().pid}))
-    back, wake = multiprocessing.Pipe(duplex=False)
-    runner.step.searches.wake = lambda: wake.send_bytes(b"1")
-
-    def poll(wait: float) -> tuple[Asks | None, bool]:
-        asks = None
-        deadline = time.monotonic() + wait
-        while True:
-            left = deadline - time.monotonic()
-            ready = multiprocessing.connection.wait([requests, back], max(0.0, left) if asks is None else 0)
-            if back in ready:
-                while back.poll():
-                    back.recv_bytes()
-            if requests not in ready:  # the time's up, or the searches are back (merged before the next wait)
-                return asks, False
-            msg = requests.recv()
-            if msg[0] == "stop":
-                return asks, True
-            if msg[0] == "ask":
-                asks = msg[1] if asks is None else asks.merge(msg[1])  # the older first: the newer's mesos_only
-            elif msg[0] == "throw":
-                runner.step.throw(*msg[1:])
-
-    def emit(st: WorldState, frame: Frame | None) -> None:
-        if st.frame is not None and not st.late:
-            st.slot = ring.put(st.seq, st.t, st.frame)
-        elif st.frame is not None and st.slot is None:
-            # A late state's frame went in when it was new, but a search back before its frame's state went out
-            # (in `run`, the frame's own, quick enough) was copied from that state before it had its slot: 14 of 42
-            # late states had none, and a look given one got a black frame.
-            st.slot = ring.slot_of(st.seq)
-        states.send(("state", replace(st, frame=None)))
-
-    try:
-        run(runner, hz, poll, emit)
-        states.send(("bye", runner.step.counts))
-    except (EOFError, BrokenPipeError, OSError):
-        pass  # the stack is gone
-    except Exception as e:  # a bug: the stack is told why before it looks for itself
-        try:
-            states.send(("error", f"the feed stopped: {type(e).__name__}: {e}"))
-        except OSError:
-            pass
-        raise
-    finally:
-        runner.step.close()
-        ring.close()
-        back.close()
-        wake.close()
-
-
 def quiet() -> None:
-    """This process at below-normal priority (the game keeps its frame pacing), and OpenCV on one thread: the
-    monster search's own threads do the work, and OpenCV's 24 on top only cost (a 1920x1080 conversion took
-    25 ms of CPU across them)."""
+    """This process at below-normal priority (the game and the perception service keep their pace: the harness's,
+    soak's and the offline measurements' workers), and OpenCV on one thread: the monster search's own threads do the
+    work, and OpenCV's 24 on top only cost (a 1920x1080 conversion took 25 ms of CPU across them)."""
     if sys.platform == "win32":
         k = ctypes.windll.kernel32
         k.GetCurrentProcess.restype = ctypes.c_void_p
@@ -340,15 +252,6 @@ def quiet() -> None:
         k.SetPriorityClass(k.GetCurrentProcess(), BELOW_NORMAL)
     import cv2
     cv2.setNumThreads(1)
-
-
-def _priority() -> int | None:
-    if sys.platform != "win32":
-        return None
-    k = ctypes.windll.kernel32
-    k.GetCurrentProcess.restype = ctypes.c_void_p
-    k.GetPriorityClass.argtypes = (ctypes.c_void_p,)
-    return k.GetPriorityClass(k.GetCurrentProcess())
 
 
 # --- the stack's side ------------------------------------------------------------------------------------
@@ -418,12 +321,30 @@ def newest_frame(states) -> WorldState | None:
 
 
 class Feed:
-    """What the stack asks of a feed (FeedClient, SyncFeed)."""
+    """What the stack asks of a feed (service.ServiceClient, SyncFeed, InlineFeed)."""
     alive = True
     why = ""  # why it's down, if it is
 
     def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
         raise NotImplementedError
+
+    def problem(self) -> Problem | None:
+        """Why there's no state to act on now (the newest one's, or perception down); None: the newest is usable."""
+        newest = newest_frame(list(self._states()))
+        if newest is None:
+            return Problem("perception", self.why or "no state from perception yet")
+        return newest.bad
+
+    def _states(self):
+        return ()
+
+    def bring_forward(self, problem: Problem | None) -> None:
+        """What a command that sends keys does while there's no state to act on for `problem` (the service's client
+        brings the game to the front when it isn't); by default nothing."""
+
+    def full_frame(self, after: float) -> np.ndarray:
+        """The game window at full size (RGB), shown at `after` or later; raises BadLook if there's none."""
+        raise BadLook(Problem("perception", "this feed has no full frames"))
 
     def frame_of(self, st: WorldState) -> np.ndarray:
         """The state's half-size frame."""
@@ -445,16 +366,16 @@ class Feed:
         pass
 
     def look(self, senses: Senses, mobs: bool, wide: bool, loot: bool, mesos_only: bool, after: float | None = None):
-        """The Scene of a look with these arguments from the feed, or None (Senses then looks itself). A look at her
-        band also has the monsters the feed follows off it, re-found in that frame (`Scene.swept`, as the sweep's: the
-        fights go by the band's, her memory takes them all), and says where it searched (`Scene.rows`): her band, and
+        """The Scene of a look with these arguments from the feed, or None (Senses then asks again). A look at her
+        band also has the monsters the feed follows off it, re-found in that frame (`Scene.swept`: the fights go by the
+        band's, her memory takes them all), and says where it searched (`Scene.rows`): her band, and
         the whole screen while the feed's last search of it is within WIDE_FRESH_S of the frame (everything on screen
         then was found, and followed since). `after`: of a frame shown then or later (None: now)."""
         st = self.latest(wanted(time.monotonic() if after is None else after, mobs, wide, loot, mesos_only))
         if st is None:
             return None
         s = to_scene(st, senses.model, senses.band, mobs, wide, loot, mesos_only, self.frame_of(st))
-        if TRACKED and s.searched and not s.wide:
+        if s.searched and not s.wide:
             s.swept = [m for m in st.monsters if not any(m is k for k in s.monsters)]
             s.rows = [senses._map_rows(s, band_rows(s, *senses.band))]
             if st.wide_at is not None and st.t - st.wide_at <= WIDE_FRESH_S:
@@ -464,157 +385,6 @@ class Feed:
     def glance(self, after: float, timeout: float = GLANCE_WAIT_S) -> WorldState | None:
         """The newest visible state of a frame shown at `after` or later (waited for), or None."""
         return self.latest(Asks(after), timeout)
-
-
-class FeedClient(Feed):
-    """The feed's child process, from the stack's side. `make`: a picklable callable building the child's
-    Runner (screen_world, with its arguments, for the game); `shape`: its look frames' (frame_shape of its geometry)."""
-
-    def __init__(self, make: Callable[[], Runner], hz: float = HZ, start: bool = True, shape: tuple = FRAME_SHAPE):
-        self.make, self.hz, self.shape = make, hz, tuple(shape)
-        self.states: deque[WorldState] = deque(maxlen=KEEP)
-        self.events: deque[Event] = deque(maxlen=EVENTS_KEPT)
-        self.dropped = 0          # events lost because nothing drained them
-        self.served = self.refused = 0  # states handed out by latest(), and times it had none to give
-        self.on_state: Callable[[WorldState], None] | None = None  # sees every state as it comes (soak feed)
-        self.hello: dict | None = None
-        self.bye: dict | None = None  # the world step's counts, which the child sends once asked to stop
-        self.alive, self.why = False, "not started"
-        self._closing = False  # asked to stop (close): its process ending then is no news
-        self._cond = threading.Condition()
-        self._send_lock = threading.Lock()
-        self._seen_seq = 0
-        self.proc = None
-        if start:
-            self.start()
-
-    def start(self, timeout: float = 30.0) -> bool:
-        """Start the child and wait (`timeout` s at most) for it to be ready; False (with `why`) if it isn't."""
-        ctx = multiprocessing.get_context("spawn")
-        self.ring = Ring(shape=self.shape)
-        child_requests, self._requests = ctx.Pipe(duplex=False)  # each (receiving end, sending end)
-        self._states, child_states = ctx.Pipe(duplex=False)
-        self.proc = ctx.Process(target=serve, args=(child_requests, child_states, self.ring.name, self.make, self.hz,
-                                                    self.shape), name="gamelab-feed", daemon=True)
-        self.proc.start()
-        child_requests.close()
-        child_states.close()
-        self.alive, self.why = True, ""
-        self._reader = threading.Thread(target=self._read, name="feed-reader", daemon=True)
-        self._reader.start()
-        with self._cond:
-            self._cond.wait_for(lambda: self.hello is not None or not self.alive, timeout)
-        if self.hello is None and self.alive:
-            self.why = f"the feed didn't start within {timeout:.0f} s"
-            self.close()
-        return self.alive
-
-    def _read(self) -> None:
-        """The pipe from the child, read as it comes (a thread of its own, so the child never waits on it)."""
-        try:
-            while True:
-                msg = self._states.recv()
-                with self._cond:
-                    if msg[0] == "state":
-                        st = msg[1]
-                        self.states.append(st)
-                        if self.on_state is not None:
-                            self.on_state(st)
-                        room = EVENTS_KEPT - len(self.events)
-                        self.dropped += max(0, len(st.events) - room)
-                        self.events.extend(st.events)
-                    elif msg[0] == "hello":
-                        self.hello = msg[1]
-                    elif msg[0] == "error":
-                        self.why, self.alive = msg[1], False
-                    elif msg[0] == "bye":
-                        self.bye = msg[1]
-                    self._cond.notify_all()
-        except (EOFError, OSError):
-            pass
-        with self._cond:
-            if self.alive:
-                self.alive, self.why = False, self.why or ("closed" if self._closing else "the feed's process ended")
-            self._cond.notify_all()
-
-    def _send(self, *msg) -> None:
-        try:
-            with self._send_lock:
-                self._requests.send(msg)
-        except (OSError, ValueError):
-            with self._cond:
-                self.alive, self.why = False, self.why or "the feed's process ended"
-
-    def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
-        deadline, asked, seen = time.monotonic() + timeout, None, None
-        with self._cond:
-            while True:
-                if not self.alive:
-                    self.refused += 1
-                    return None
-                st = newest_fresh(self.states, want)
-                if st is not None:
-                    self._seen_seq = max(self._seen_seq, st.seq)
-                    self.served += 1
-                    return st
-                newest = newest_frame(self.states)
-                left = deadline - time.monotonic()
-                if (newest is not None and newest.t >= want.after and not newest.usable) or left <= 0:
-                    self.refused += 1  # the game isn't on screen or as expected (the look's own checks say why; it
-                    return None        # brings the game forward itself), or the feed too slow
-                seq = newest.seq if newest is not None else 0
-                # Nothing fresh as of the newest state: asked of the next frame, once (it's searched on it, or as
-                # soon as the search out is back); with ASK_ONLY_STALE, at each new frame again for a search gone
-                # stale since that wasn't asked for yet (adds).
-                ask = to_ask(want, newest) if asked is None or (ASK_ONLY_STALE and seq != seen) else None
-                if ask is not None and (asked is None or adds(ask, asked)):
-                    self._send("ask", ask)
-                    asked = ask if asked is None else asked.merge(ask)
-                seen = seq
-                self._cond.wait(left)
-
-    def frame_of(self, st: WorldState) -> np.ndarray:
-        frame = None if st.slot is None else self.ring.get(st.slot, st.seq)
-        return frame if frame is not None else np.zeros(self.shape, np.uint8)
-
-    def wait_frame(self, timeout: float) -> bool:
-        with self._cond:
-            newest = lambda: max((st.seq for st in self.states), default=0)  # (a late state may come after it)
-            seen = newest()
-            return self._cond.wait_for(lambda: not self.alive or newest() > seen, timeout) and self.alive
-
-    def drain_events(self, upto: float | None = None) -> list[Event]:
-        with self._cond:
-            return _drain(self.events, upto)
-
-    def throw(self, t: float, side: str) -> None:
-        if self.alive:
-            self._send("throw", t, side)
-
-    def close(self, timeout: float = 2.0) -> None:
-        """Stop the child (asked, then made to) and free the ring. Asked, the child sends what it did (`bye`)
-        as it ends, and that's waited for (`timeout` s at most) before the pipes close: closed at once, the
-        reader thread could lose it to the closed pipe."""
-        if self.proc is not None:
-            with self._cond:
-                self._closing = True
-            self._send("stop")
-            with self._cond:
-                self._cond.wait_for(lambda: self.bye is not None or not self.alive, timeout)
-            self.proc.join(timeout)
-            if self.proc.is_alive():
-                self.proc.terminate()
-                self.proc.join(2.0)
-        with self._cond:
-            self.alive = False
-            self.why = self.why or "closed"
-            self._cond.notify_all()
-        for end in (getattr(self, "_requests", None), getattr(self, "_states", None)):
-            if end is not None:
-                end.close()
-        if getattr(self, "ring", None) is not None:
-            self.ring.close(unlink=True)
-            self.ring = None
 
 
 def _drain(events: deque[Event], upto: float | None) -> list[Event]:
@@ -716,8 +486,10 @@ class SyncFeed(Feed):
     on, or at once if it's idle; each such frame's late state is ready then. Waiting goes through time.sleep,
     the simulator's own."""
 
-    def __init__(self, step: WorldStep, look: Callable[[bool], Observation], costs: Costs = COSTS, hz: float = HZ):
-        self.step, self._look, self.costs, self.hz = step, look, costs, hz
+    def __init__(self, step: WorldStep, look: Callable[[bool], Observation], costs: Costs = COSTS, hz: float = HZ,
+                 guard: Callable[[], None] | None = None):
+        """`guard`: called at every ask; it raises when the fakes aren't in place (sim.scenarios.Sim.guard)."""
+        self.step, self._look, self.costs, self.hz, self.guard = step, look, costs, hz, guard
         self.searches = step.searches = TimedSearches(step.senses, costs)
         self.states: deque[tuple[float, WorldState]] = deque(maxlen=KEEP)  # (ready at, state)
         self.events: deque[Event] = deque()
@@ -770,14 +542,20 @@ class SyncFeed(Feed):
                 self.counts["searching"] += self.costs.of(st)
 
     def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
+        if self.guard is not None:
+            self.guard()
         deadline, asked = time.monotonic() + timeout, None
         while True:
             now = time.monotonic()
             self._settle(now)
-            st = newest_fresh([st for ready, st in self.states if ready <= now + 1e-9], want)
+            ready = [st for at, st in self.states if at <= now + 1e-9]
+            st = newest_fresh(ready, want)
             if st is not None:
                 self._seen_seq = max(self._seen_seq, st.seq)
                 return st
+            newest = newest_frame(ready)
+            if newest is not None and newest.t >= want.after and not newest.usable:
+                return None  # (the game not on screen or not as expected: Senses says why, and asks again)
             if (asked is None or ASK_ONLY_STALE) and not any(fresh(st, want) for _, st in self.states):
                 ask = to_ask(want, newest_frame([st for _, st in self.states]), 1.0 / self.hz)
                 if asked is None or adds(ask, asked):  # (as FeedClient.latest: once, and a search gone stale since)
@@ -792,6 +570,10 @@ class SyncFeed(Feed):
 
     def frame_of(self, st: WorldState) -> np.ndarray:
         return st.frame
+
+    def _states(self):
+        now = time.monotonic()
+        return [st for ready, st in self.states if ready <= now + 1e-9]
 
     def wait_frame(self, timeout: float) -> bool:
         self._settle(time.monotonic())
@@ -812,4 +594,56 @@ class SyncFeed(Feed):
 
     def throw(self, t: float, side: str) -> None:
         self._settle(time.monotonic())
+        self.step.throw(t, side)
+
+
+# --- on saved frames and in tests -------------------------------------------------------------------------
+
+class InlineFeed(Feed):
+    """The world step run when a look or glance asks, on the eyes' own frame then (Eyes.look on their capture: saved
+    frames, bench-look's and bodies'; the tests' made-up frames; the simulator's FakeEyes charging a look's time): a
+    command's looks come from the perception service instead (localization.service), whose frames it looks at all the
+    time, and the simulator's from SyncFeed. What's asked is searched on that frame at once (InlineSearches): each look
+    is a frame of its own, taken when it asks (its `after` aside: the eyes' clock may be another's, a test's)."""
+
+    def __init__(self, eyes: Eyes, model, band: tuple[float, float]):
+        self.eyes = eyes
+        self.step = WorldStep(Senses(eyes, model, band), schedule=Schedule(band_s=None, wide_s=None))
+        self.events: deque[Event] = deque(maxlen=EVENTS_KEPT)
+        self.newest: WorldState | None = None
+
+    def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
+        st = self._frame(want)
+        return st if st.usable else None
+
+    def _frame(self, asks: Asks | None) -> WorldState:
+        """A frame stepped now (its late state, with its searches, if it was searched)."""
+        t = time.monotonic()
+        try:
+            obs = self.eyes.look()
+        except BadLook as e:  # (eyes that check their own frames: the game window, offline)
+            st = self.step.step(None, t, False, why=e.why, bad=e.problem)
+        else:  # (what's asked, of this very frame: the eyes' clock may not be the asker's)
+            st = self.step.step(lambda ropes: obs, obs.t, True, None if asks is None else replace(asks, after=-1e18))
+        if st.bad is not None and hasattr(self.eyes, "recover"):  # before the next look, as the service's frame loop
+            self.eyes.recover(st.bad)
+        late = self.step.came_back()
+        for done in [st] + late:
+            self.events.extend(done.events)
+        self.newest = late[-1] if late else st
+        return self.newest
+
+    def _states(self):
+        return () if self.newest is None else (self.newest,)
+
+    def frame_of(self, st: WorldState) -> np.ndarray:
+        return st.frame
+
+    def wait_frame(self, timeout: float) -> bool:
+        return True  # (each look takes a frame of its own)
+
+    def drain_events(self, upto: float | None = None) -> list[Event]:
+        return _drain(self.events, upto)
+
+    def throw(self, t: float, side: str) -> None:
         self.step.throw(t, side)

@@ -96,8 +96,6 @@ ITEM_HEIGHT = 22          # the loot detector's tallest template
 LOOK_S, LOOK_LAG = 0.10, 0.04   # a look, and when in it the frame is taken (Observation.t)
 DETECT_S = 0.03                 # monsters around her level
 DETECT_WIDE_S = 0.25            # ... on the whole screen: a wide look takes ~0.35 s in all (navigator.LOOK_AHEAD)
-DETECT_SLICE_S = 0.023          # ... in one slice of the sweep (Senses.sweep): DETECT_S x 16.7 / 21.9, a slice's search
-                                # against her band's on the saved 1366x768 frames (bench-look)
 LOOT_S = 0.02             # per strip searched
 GLANCE_S = 0.035          # with Navigator.follow's 30 ms sleep, ~15 glances a second (as Navigator.follow says)
 MESSAGES_S = 0.4
@@ -420,11 +418,6 @@ class FakeEyes(Eyes):
             self._bars[key] = super().bar(obs, mob)
         left = self._bars[key]
         return 0.0 if left is not None and self.world.realism.bars_empty else left
-
-    def monsters_rows(self, obs: Observation, rows: tuple[int, int]) -> list[Mob]:
-        """The monsters drawn wholly within those rows, as a slice's search finds them, charged DETECT_SLICE_S."""
-        self.clock.sleep(DETECT_SLICE_S)
-        return self.detector._find(obs.frame, rows)
 
     def look(self) -> Observation:
         self._now()

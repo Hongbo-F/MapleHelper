@@ -44,7 +44,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -194,6 +194,21 @@ def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[floa
     eyes.log = log
     senses = Senses(eyes, model, band)
     return Runner(frames, eyes, WorldStep(senses, False, schedule, SearchThread(senses)), title)
+
+
+def serve_saved(files: list[str], map_id: int, template: np.ndarray, band: tuple[float, float], address: str,
+                info: str, seconds: float | None = None, hold: int = 30, quiet: bool = True) -> None:
+    """A service on saved frames (feed.saved_world, each `hold` frames in a row, round and round) at a pipe of its own
+    (`address`, `info`), for `seconds` (None: until killed): a process's target, offline (sim.soak's, the measurements').
+    `quiet`: nothing said."""
+    from PIL import Image
+
+    from ..screen import of_frame
+    settle()
+    geo = of_frame(np.asarray(Image.open(files[0]).convert("RGB")))
+    svc = Service(lambda m, g: feed.saved_world(files, m, template, band, hold=hold, schedule=IDLE), map_id,
+                  lambda: (geo, None), address=address, info=Path(info), log=(lambda m: None) if quiet else print)
+    svc.serve(None if seconds is None else time.monotonic() + seconds)
 
 
 def window_geometry(title: str) -> tuple[Geometry | None, Problem | None]:
@@ -967,7 +982,19 @@ class ServiceClient(Feed):
 
     def full_frame(self, after: float, timeout: float = FULL_WAIT_S) -> np.ndarray:
         """The game window at full size (RGB) as shown at `after` or later: the pet's panels, the pick-up log. Raises
-        BadLook if the service had none to give (the game not on screen, the service not reached)."""
+        BadLook if the service had none to give (the game not on screen, the service not reached). A command that sends
+        keys has the game brought to the front first if it wasn't, and asks again once (as its own capture did)."""
+        try:
+            return self._full(after, timeout)
+        except BadLook as e:
+            if not self.hello.acts or e.kind != "window":
+                raise
+            self._fronted = -1e18
+            self.bring_forward(e.problem)
+            time.sleep(0.3)
+            return self._full(time.monotonic(), timeout)
+
+    def _full(self, after: float, timeout: float) -> np.ndarray:
         with self._cond:
             self._rid += 1
             rid = self._rid

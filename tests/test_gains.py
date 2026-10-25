@@ -266,8 +266,9 @@ def test_in_the_simulator_a_number_covered_for_a_while_counts_its_kills_and_not_
 
 @needs_map
 def test_hunt_look_reads_her_number_on_a_look_the_feed_served():
-    """`hunt look --feed`: the feed's looks have no box for the number (its frames are half size), so `hunt look`
-    reads it off a look of its own; it had printed "EXP number not read: no box"."""
+    """`hunt look`: a look of perception's state has no box for the number (it's read off a full-size frame), so `hunt
+    look` reads it off the eyes' own look at the whole frame (the service's, live); it had printed "EXP number not
+    read: no box"."""
     from gamelab import __main__ as cli
     got = {}
 
@@ -276,8 +277,7 @@ def test_hunt_look_reads_her_number_on_a_look_the_feed_served():
         s = h.look()
         got[sim.scenario.name] = (s.exp_box is None, s.events is not None, cli._exp_reading(h, s))
         return {}
-    for name in ("feed_hunt_kill", "hunt_kill"):
-        scenarios.run_sim(dataclasses.replace(scenarios.SCENARIOS[name], fn=fn, expects=()))
-    assert got["feed_hunt_kill"][:2] == (True, True) and got["hunt_kill"][:2] == (False, False)
+    scenarios.run_sim(dataclasses.replace(scenarios.SCENARIOS["hunt_kill"], fn=fn, expects=()))
+    assert got["hunt_kill"][:2] == (True, True)
     for name, (*_, reading) in got.items():
         assert reading is not None and reading.exp == fakes.EXP_START[1] and fakes.EXP_START[0] in reading.levels, name

@@ -590,15 +590,7 @@ def _lost_hunt(window: tuple[float, float], minutes: float, problem: Problem) ->
         pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
 
     def run(sim):
-        real = sim.eyes.look
-
-        def look():
-            if window[0] <= sim.clock.elapsed < window[1]:
-                sim.clock.sleep(0.03)  # a capture's time
-                raise BadLook(problem)
-            return real()
-
-        sim.eyes.look = look
+        sim.fail_frames(window[0], window[1], problem)  # (perception's frames: every look's)
         return _loop(minutes)(sim)
 
     sc = dataclasses.replace(scenarios.SCENARIOS["loop_tree_walls"], name="loop_tree_lost", fn=run, expects=())
@@ -653,15 +645,7 @@ def test_a_trip_stands_still_while_its_looks_fail_and_arrives_after():
     window = (4.0, 16.0)
 
     def run(sim):
-        real = sim.eyes.look
-
-        def look():
-            if window[0] <= sim.clock.elapsed < window[1]:
-                sim.clock.sleep(0.03)  # a capture's time
-                raise BadLook(Problem("picture", "the minimap doesn't show this map's picture"))
-            return real()
-
-        sim.eyes.look = look
+        sim.fail_frames(window[0], window[1], Problem("picture", "the minimap doesn't show this map's picture"))
         return _nav(6)(sim)
 
     sc = dataclasses.replace(scenarios.SCENARIOS["nav_tree_bottom_to_top"], name="nav_tree_lost", fn=run, expects=(),
@@ -688,15 +672,7 @@ def test_a_trip_stands_still_no_later_than_its_caller_says():
         pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
 
     def run(sim):
-        real = sim.eyes.look
-
-        def look():
-            if 4.0 <= sim.clock.elapsed < 16.0:
-                sim.clock.sleep(0.03)
-                raise BadLook(Problem("picture", "the minimap doesn't show this map's picture"))
-            return real()
-
-        sim.eyes.look = look
+        sim.fail_frames(4.0, 16.0, Problem("picture", "the minimap doesn't show this map's picture"))
         nav = sim.navigator(sim.hunter())
         until = time.monotonic() + 8.0  # (the simulator's clock)
         try:

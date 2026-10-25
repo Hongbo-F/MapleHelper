@@ -414,10 +414,16 @@ def test_a_look_asks_for_a_frame_shown_after_it_began(monkeypatch):
     assert eyes.seen_at is not None
 
 
-def test_eyes_share_the_processs_grabber():
+def test_a_commands_eyes_take_no_shots_and_the_services_frames_share_the_processs_grabber():
+    # A command's eyes (Eyes by default) have no screen: their frames are the perception service's, whose frames are
+    # the process's one grabber's (perception.frames.ScreenFrames: capture.shared).
+    from gamelab.perception.eyes import NoScreen
+    from gamelab.perception.frames import ScreenFrames
     a = Eyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object())
-    b = Eyes("MapleStory", np.zeros((10, 36), np.uint8), detector=object())
-    assert a.screen is b.screen is capture.shared()
+    assert isinstance(a.screen, NoScreen)
+    with pytest.raises(RuntimeError, match="no shots"):
+        a.screen.shot(AREA)
+    assert ScreenFrames("MapleStory").grabber is ScreenFrames("MapleStory").grabber is capture.shared()
 
 
 def test_bench_capture_times_both_ways_and_compares_their_pixels():

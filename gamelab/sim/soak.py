@@ -7,9 +7,9 @@ growing. Not part of pytest (they run for minutes):
                                                        tracker, telemetry
     python -m gamelab.sim.soak sim [--minutes 10]      the hunt loop in the simulator (preset game, seed 0),
                                                        for as many simulated hours as the minutes allow
-    python -m gamelab.sim.soak feed [--minutes 10]     the continuous feed's child process on the saved frames,
-                                                       the stack's side asking of it as a fight does; the
-                                                       child's memory is followed too, and its frames a
+    python -m gamelab.sim.soak feed [--minutes 10]     the perception service in a process of its own on the
+                                                       saved frames, a client asking of it as a fight does;
+                                                       the service's memory is followed too, and its frames a
                                                        second, its frame loop's step, its searches and its
                                                        CPU
 
@@ -239,31 +239,37 @@ def soak_frames(meter: Meter) -> dict:
 
 
 def soak_feed(meter: Meter) -> dict:
-    """The continuous feed's child process (localization.feed) on the saved frames for the meter's time, each
-    frame HOLD frames in a row as the screen, 30 a second. The stack's side asks of it as a fight does: a
-    look with her band every 0.1 s (with the drops on her platform every 5th, the whole screen every 30th),
-    a glance between, its events drained, a throw every 10th look. The child's private bytes are sampled
-    with the meter's (the report's last lines); after the warm-up, its frames a second, its frame loop's
-    step (each state's work["s"]), its searches (each late state's) and its CPU (cores: CPU seconds a
-    second, all its threads)."""
-    import functools
+    """The perception service (localization.service) in a process of its own on the saved frames for the meter's time,
+    each frame HOLD frames in a row as the screen, at its pace for a command that hunts (30 a second). A client asks of
+    it as a fight does: a look with her band every 0.1 s (with the drops on her platform every 5th, the whole screen
+    every 30th), a glance between, its events drained, a throw every 10th look. The service's private bytes are sampled
+    with the meter's (the report's last lines); after the warm-up, its frames a second, its frame loop's step (each
+    state's work["s"]), its searches (each late state's) and its CPU (cores: CPU seconds a second, all its threads)."""
+    import multiprocessing
 
     from maplehelper.engine import RIGHT
 
     from ..analysis import bench, calibration
     from ..attack import reach
-    from ..localization import feed
+    from ..localization import feed, service
     from . import scenarios
     model, files = scenarios.real_map(), [str(p) for p in bench.saved_frames()]
     if model is None or not files:
         raise SystemExit("needs the map's game data and the saved frames in gamelab/lab")
-    client = feed.FeedClient(functools.partial(feed.saved_world, files, model.id, calibration.load().template,
-                                               (reach.LOOK_UP, reach.LOOK_DOWN), HOLD))
-    if not client.alive:
-        raise SystemExit(f"the feed didn't start: {client.why}")
+    folder = tempfile.mkdtemp(prefix="gamelab-soak-perceive-")
+    address, info = rf"\\.\pipe\gamelab-perceive-soak-{os.getpid()}", os.path.join(folder, "perceive.json")
+    proc = multiprocessing.get_context("spawn").Process(
+        target=service.serve_saved, args=(files, model.id, calibration.load().template, (reach.LOOK_UP, reach.LOOK_DOWN),
+                                          address, info, None, HOLD), daemon=True)
+    proc.start()
+    client = service.ServiceClient("soak", acts=True, throws=True, address=address, info=Path(info), ensure=None,
+                                   log=lambda m: None)
+    if not client.ready(60.0):
+        proc.terminate()
+        raise SystemExit(f"the perception service didn't start: {client.why}")
     child, n, missed, events, glanced, waits = [], 0, 0, 0, 0, {"band": [], "loot": [], "wide": []}
     took: dict[str, list[float]] = {"step": [], "band": [], "wide": [], "drops": []}
-    warm: list = []  # (time, the child's CPU seconds, its newest frame) once warmed up
+    warm: list = []  # (time, the service's CPU seconds, its newest frame) once warmed up
 
     def seen(st) -> None:  # (the client's reader thread)
         if not warm or not st.visible:
@@ -272,8 +278,9 @@ def soak_feed(meter: Meter) -> dict:
         kind = ("wide" if w.get("wide") else "band" if w.get("band") else "drops") if st.late else "step"
         took[kind].append(w.get("s", 0.0))
     client.on_state = seen
+    frames = None
     try:
-        while not meter.due() and client.alive:
+        while not meter.due() and proc.is_alive():
             now = time.monotonic()
             st = client.latest(feed.wanted(now, True, n % 30 == 0, n % 5 == 0, False))
             waits["wide" if n % 30 == 0 else "loot" if n % 5 == 0 else "band"].append(time.monotonic() - now)
@@ -288,13 +295,16 @@ def soak_feed(meter: Meter) -> dict:
             before = len(meter.samples)
             meter.sample()
             if len(meter.samples) > before:
-                child.append((meter.samples[-1][0], private_bytes(client.proc.pid)))
+                child.append((meter.samples[-1][0], private_bytes(proc.pid)))
             if not warm and meter.warm is not None:
-                warm.append((time.perf_counter(), cpu_seconds(client.proc.pid), newest_seq(client)))
+                warm.append((time.perf_counter(), cpu_seconds(proc.pid), newest_seq(client)))
             time.sleep(max(0.0, now + 0.1 - time.monotonic()))
-        end = (time.perf_counter(), cpu_seconds(client.proc.pid), newest_seq(client))
+        end = (time.perf_counter(), cpu_seconds(proc.pid), newest_seq(client))
+        frames = (client.status() or {}).get("frames")
     finally:
         client.close()
+        proc.terminate()
+        proc.join(5.0)
     since = meter.warm[0] if meter.warm else 0.0
     points = [(t, b) for t, b in child if t >= since and b is not None]
     rate = cpu = "not read"
@@ -304,10 +314,10 @@ def soak_feed(meter: Meter) -> dict:
         cpu = f"{(c1 - c0) / (t1 - t0):.2f}" if c0 is not None and c1 is not None else "not read"
     return {"looks asked": n, "the wait for one (median, p90 ms)": _ms(waits),
             "not given in time": missed, "glances": glanced, "events drained": events,
-            "dropped events": client.dropped, "child's frames": (client.bye or {}).get("frames"),
-            "child's frames a second after the warm-up": rate, "child's CPU (cores)": cpu,
-            "child's frame step and searches (median, p90 ms; how many)": _ms(took, counts=True),
-            "child's private bytes": _trend(points) if len(points) >= 2 else "not read"}
+            "dropped events": client.dropped, "the service's frames": frames,
+            "its frames a second after the warm-up": rate, "its CPU (cores)": cpu,
+            "its frame step and searches (median, p90 ms; how many)": _ms(took, counts=True),
+            "its private bytes": _trend(points) if len(points) >= 2 else "not read"}
 
 
 def newest_seq(client) -> int:

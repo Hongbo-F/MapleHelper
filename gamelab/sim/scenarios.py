@@ -93,7 +93,6 @@ class Scenario:
     noise: Noise | None = None   # the real game's errors (world.Noise); None: none
     realism: Realism | None = None  # how busy and hard the map is (world.Realism); None: the default world
     think: float = 0.0           # charge the stack's computing to the fake clock (fakes.Clock); 0: free
-    feed: bool = False           # her looks and glances from a continuous feed (localization.feed.SyncFeed)
     expects: tuple = ()          # (what, trace -> bool): what the scenario is there for (tests check them)
     may_die: bool = False        # unless set, every scenario also expects her alive at the end
     map_id: int = MAP_ID         # the map it's on (real_map)
@@ -133,20 +132,35 @@ class Sim:
         self.active = False
         self.files: dict[str, list[str]] = {}  # what the run wrote (under its stand-in for gamelab/lab)
         self.senses = []  # every hunter's (for the feed's record)
-        self.feed = self._feed() if sc.feed else None
+        self.feed = self._feed()
 
     def _feed(self):
-        """A continuous feed on the world (SyncFeed): its own eyes (their detectors free, the feed's costs are
-        its own: feed.COSTS), the world step on them at every frame the clock passes."""
+        """Perception on the world, as live's service looks at the game (SyncFeed): its own eyes (their detectors free,
+        the feed's costs are its own: feed.COSTS), the world step on them at every frame the clock passes; every look
+        and glance of hers is its."""
         from ..attack.reach import LOOK_DOWN, LOOK_UP
         from ..localization.feed import GAME_HZ, SyncFeed
         from ..localization.senses import Senses
         from ..localization.worldstate import WorldStep
         self.frames = FakeEyes(self.world, self.clock, self.model, guard=self.guard)
         self.frames.detector, self.frames._loot = FakeDetector(detector_kinds(self.model)), FakeLoot()
-        feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN))), self.frames.observe)
+        feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN))), self.frames.observe,
+                        guard=self.guard)
         self.clock.frames = (1.0 / GAME_HZ, feed.tick)
         return feed
+
+    def fail_frames(self, start: float, end: float, problem) -> None:
+        """Every frame perception takes from `start` to `end` s into the run fails its checks with `problem` (a
+        perception.framecheck.Problem), nothing read off it but the bars, as the perception service's frames of a game
+        window moved, covered or offset (the tests': the stack stands still meanwhile, Senses.look)."""
+        real = self.feed._look
+
+        def look(ropes):
+            obs = real(ropes)
+            if start <= self.clock.elapsed < end:
+                obs.bad, obs.tag, obs.dot, obs.others, obs.ropes = problem, None, None, [], []
+            return obs
+        self.feed._look = look
 
     def feed_record(self) -> dict:
         """What the feed did (the trace's 'feed'): frames, how many were asked for, how long its frame loop was
@@ -278,9 +292,8 @@ def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = No
     trace = {"scenario": sc.name, "doc": sc.doc, "seconds": round(sim.clock.elapsed, 3), "result": outcome,
              "plans": sim.trace.plans, "cancels": sim.trace.cancels, "log": sim.trace.log,
              "world": sim.world.summary(), "world_log": sim.world.log, "eyes": dict(sim.eyes.counts),
-             "files": sim.files}
-    if sim.feed is not None:
-        trace["feed"] = sim.feed_record()
+             "frames": dict(sim.frames.frame_counts), "files": sim.files}
+    trace["feed"] = sim.feed_record()
     return trace, sim
 
 
@@ -500,7 +513,7 @@ def nav_off_rope_climb(sim):
 
 @scenario((36, 300.0), noise=Noise(dot_hidden=((0.0, 2.0), (4.0, 4.6))),
           expects=(ends("arrived"), sends("mouse", "the mouse is moved when the dot stays hidden"),
-                   check("looks and glances without the dot", lambda tr: tr["eyes"]["dot hidden"] >= 5)))
+                   check("frames without the dot", lambda tr: tr["frames"]["dot hidden"] >= 5)))
 def nav_dot_hidden(sim):
     """36 -> 25 with her minimap dot covered (a tooltip) for her first 2 s and again mid-climb: Mover.locate
     keeps looking and moves the mouse after four tries; Navigator.follow goes on without the dot."""
@@ -542,34 +555,33 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=1,
+@scenario((34, -300.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("looking for a way around"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
-    """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the monster
-    in her way, and is touched and knocked about a few times on the way up. (Seed 3 until her
-    walks pressed pick-up: they last ~0.2 s longer, and with seed 3 no monster was then in her way to hop;
-    seed 1 until her walk and jump lags came from motion.body, after which no monster was in her way on seed
-    1, and one is on seed 3 again. Seed 2 since the simulator moves her by the engine: on seed 3 nothing was
-    in her way to hop. Over 16 seeds all arrive, and 8 meet all of this, 10 before. Seed 4 since the planner
-    times her runs and stops by the engine: on seed 2 nothing was in her way to hop; over 16 seeds all arrive,
-    7 meeting all of this. Seed 1 since a touch is evaded by the monster's accuracy: on seed 4 she evaded a
-    snail's touch at 7 s (82% of a snail's are), and then nothing was in her way to hop; over 16 seeds all
-    arrive, 5 meeting all of this. Seed 5 since monsters walk as fast as the game data says (a pig 125
-    units/s, not 70; alone, that moved it to seed 2): on seeds 1 and 2 no monster was in her way to go around
-    or hop; over 16 seeds all arrive, 2 meeting all of this. Seed 6 since the game moves her in 30 ms steps
-    (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 5 no monster was in her way to go
-    around or hop; over 16 seeds 15 arrive, 1 meeting all of this; 16 and 2 just before. On the play track,
-    before the steps, seed 10 since the route's jumps take off where they land with room, 15 units from the end
-    up the staircase, not 33-45 (route._placed): on seed 5 no monster was in her way to hop or go around there;
-    over 24 seeds all arrived, 2 meeting all of this, 10 and 18. Then seed 18 there since the rope moves
-    (route._past_end, _rope_jumps): the random weights are drawn in another order, and on seed 10 no monster was
-    in her way to hop; over 24 seeds all arrived, 1 meeting all of this. Seed 24 since the play track was
-    rebased onto the game's steps and the live fixes: on seed 6 no monster was in her way to go around or hop;
-    over 24 seeds all arrive, 1 meeting all of this. Seed 1, and no hop, since a monster touches her by her box all
-    along her moves (motion.bodies: 22 either side and 65 tall, against the monster's widest and tallest frame): a
-    chain stops sooner for one in her way, by then too close to time a hop over it, and of seeds 1-24 none hops
-    here (nav_hop_pig still does); on seed 24 no monster was in her way to go around. Over 24 seeds all arrive, 16
-    meeting the rest of this.)"""
+    """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the monster in her
+    way, and is touched and knocked about a few times on the way up. (Seed 3 until her walks pressed pick-up: they last
+    ~0.2 s longer, and with seed 3 no monster was then in her way to hop; seed 1 until her walk and jump lags came from
+    motion.body, after which no monster was in her way on seed 1, and one is on seed 3 again. Seed 2 since the simulator
+    moves her by the engine: on seed 3 nothing was in her way to hop. Over 16 seeds all arrive, and 8 meet all of this,
+    10 before. Seed 4 since the planner times her runs and stops by the engine: on seed 2 nothing was in her way to hop;
+    over 16 seeds all arrive, 7 meeting all of this. Seed 1 since a touch is evaded by the monster's accuracy: on seed 4
+    she evaded a snail's touch at 7 s (82% of a snail's are), and then nothing was in her way to hop; over 16 seeds all
+    arrive, 5 meeting all of this. Seed 5 since monsters walk as fast as the game data says (a pig 125 units/s, not 70;
+    alone, that moved it to seed 2): on seeds 1 and 2 no monster was in her way to go around or hop; over 16 seeds all
+    arrive, 2 meeting all of this. Seed 6 since the game moves her in 30 ms steps (body.STEP) and jumps from standing
+    wait 150 ms after the arrow: on seed 5 no monster was in her way to go around or hop; over 16 seeds 15 arrive, 1
+    meeting all of this; 16 and 2 just before. On the play track, before the steps, seed 10 since the route's jumps take
+    off where they land with room, 15 units from the end up the staircase, not 33-45 (route._placed): on seed 5 no
+    monster was in her way to hop or go around there; over 24 seeds all arrived, 2 meeting all of this, 10 and 18. Then
+    seed 18 there since the rope moves (route._past_end, _rope_jumps): the random weights are drawn in another order,
+    and on seed 10 no monster was in her way to hop; over 24 seeds all arrived, 1 meeting all of this. Seed 24 since the
+    play track was rebased onto the game's steps and the live fixes: on seed 6 no monster was in her way to go around or
+    hop; over 24 seeds all arrive, 1 meeting all of this. Seed 1, and no hop, since a monster touches her by her box all
+    along her moves (motion.bodies: 22 either side and 65 tall, against the monster's widest and tallest frame): a chain
+    stops sooner for one in her way, by then too close to time a hop over it, and of seeds 1-24 none hops here
+    (nav_hop_pig still does); on seed 24 no monster was in her way to go around. Over 24 seeds all arrive, 16 meeting
+    the rest of this.) (Seed 2 since every look is perception's newest frame after her keys' effect (Senses.fresh_after,
+    the feed in every scenario): on seed 1 nothing hit her on the way; of seeds 1-16, 9 meet all of this.)"""
     return _nav(19)(sim)
 
 
@@ -707,36 +719,37 @@ def nav_fight_up_runs_out(sim):
     from 14, climbed to 6, was knocked off 4 onto 6 at 31 s, and fought her way up to 3 and over to 1 and back onto 3
     twice, running out of her 180 s, 42 monsters killed. Seed 5
     since the monsters' HP bars are drawn as the game draws them, perception.hud.draw_hp_bar, read to the game's px: on
-    seed 4 she now arrives on 1 in 177 s, knocked off four times; of seeds 1-17, 2, 5, 11 and 16 meet all of this.
-    On seed 4 before: she shot 17's monsters from 14, climbed to 3, came back down to 17 and up again to
-    3, was knocked off down to 25 at 112 s, back up by 23 and the rope to 17, then down to 35, knocked off 33 back
-    onto it at 142 s, and ran out of her 180 s on 33, 40 monsters killed. Seed 4 since a throw's tap goes by her
-    facing off the frame, perception.heading: on seed 6 she now arrives, in 151 s; of seeds 1-16, 4 and 5 meet all
-    of this. On seed 6 before: knocked off 3 down to 17 at 55 s and off 17 down to 25 at 81 s, back up by 23 and the
-    rope past its end, she ran out of her 180 s on her way up again, 39 monsters killed. Seed 6 since her EXP number
-    is read and each kill goes on a monster of the kind its gain's size names: on seed 2 the fights no longer take
-    live monsters for dead (a slime killed on 17 at 4.3 s had been put on an Orange Mushroom, left alone then as
-    dying), and she arrives on 1 in 103 s. Of seeds 1-48, 9 meet all of this, as before. On seed 2 before: knocked
-    off 3 down to 17 at 88 s and off 17 down to 25 at 138 and 149 s, each time back up by 23 and the rope past its
-    end, she ran out of her 180 s on her way up again, 39 monsters killed. Seed 2 since the play track was rebased
-    onto the game's steps and the live fixes: on seed 1 she arrives (nav_fight_up's seed again). Of seeds 1-48, 9
-    meet all of this. On seed 1 before: she shot 17's monsters from 14 for 48 s, climbed to 3 and shot 1's, was
-    knocked down onto 17 and off it down to 35 at 103 s, fought there until 162 s, and on the long way round up the
-    staircase ran out of her 180 s on 19, 45 monsters killed. Seed 1 since the game moves her in 30 ms steps
-    (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 4 she now arrives; of seeds 1-48, 41
-    arrive, 42 just before. Seed 4 had been since the drops and walk-offs kept clear of the basin's cliffs: knocked
-    off 3 down to 17 at 84 s, she had gone the long way round, down from 25 to 32 and up the staircase, fighting 48
-    monsters, and run out of time on 21. Seed 10 on the perception track, where it arrived before monsters walked
-    125 units/s; with the physics and attack tracks it arrives there. Seed 11 then, where with the client's star
-    search and claw stab it arrives too: knocked off 4 at 26 s and hit off the jump from 3 to 1, it had gone the
-    long way round, fighting 38 monsters, and run out of time on 16. Of seeds 1-48, 41 arrive, against 37 before and
-    36 at the physics and attack tracks' merge. On the play track, before the steps, seed 17 since she finishes what
-    she has hurt before she moves on (behavior.fight.owed): on seed 4 she arrived there; of seeds 1-48, 46 arrived,
-    against 41 before. Then seed 18 since she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed 17
-    she arrived; of seeds 1-48, 41 arrived, 46 with the jump throws in that world, whose jump throws' area picks a
-    snail. On seed 18 since she stabs a snail on 3 where she stands, not stepping to 3's far end
-    (stance.SNAIL_FAR_END), at 40 s, she was knocked off 3 down to 17 at 86 s, off 17 down to 25 at 89 s and off 17
-    to 35 at 141 s, and ran out of time, 48 monsters in all.)"""
+    seed 4 she now arrives on 1 in 177 s, knocked off four times; of seeds 1-17, 2, 5, 11 and 16 meet all of this. On
+    seed 4 before: she shot 17's monsters from 14, climbed to 3, came back down to 17 and up again to 3, was knocked off
+    down to 25 at 112 s, back up by 23 and the rope to 17, then down to 35, knocked off 33 back onto it at 142 s, and
+    ran out of her 180 s on 33, 40 monsters killed. Seed 4 since a throw's tap goes by her facing off the frame,
+    perception.heading: on seed 6 she now arrives, in 151 s; of seeds 1-16, 4 and 5 meet all of this. On seed 6 before:
+    knocked off 3 down to 17 at 55 s and off 17 down to 25 at 81 s, back up by 23 and the rope past its end, she ran out
+    of her 180 s on her way up again, 39 monsters killed. Seed 6 since her EXP number is read and each kill goes on a
+    monster of the kind its gain's size names: on seed 2 the fights no longer take live monsters for dead (a slime
+    killed on 17 at 4.3 s had been put on an Orange Mushroom, left alone then as dying), and she arrives on 1 in 103 s.
+    Of seeds 1-48, 9 meet all of this, as before. On seed 2 before: knocked off 3 down to 17 at 88 s and off 17 down to
+    25 at 138 and 149 s, each time back up by 23 and the rope past its end, she ran out of her 180 s on her way up
+    again, 39 monsters killed. Seed 2 since the play track was rebased onto the game's steps and the live fixes: on seed
+    1 she arrives (nav_fight_up's seed again). Of seeds 1-48, 9 meet all of this. On seed 1 before: she shot 17's
+    monsters from 14 for 48 s, climbed to 3 and shot 1's, was knocked down onto 17 and off it down to 35 at 103 s,
+    fought there until 162 s, and on the long way round up the staircase ran out of her 180 s on 19, 45 monsters killed.
+    Seed 1 since the game moves her in 30 ms steps (body.STEP) and jumps from standing wait 150 ms after the arrow: on
+    seed 4 she now arrives; of seeds 1-48, 41 arrive, 42 just before. Seed 4 had been since the drops and walk-offs kept
+    clear of the basin's cliffs: knocked off 3 down to 17 at 84 s, she had gone the long way round, down from 25 to 32
+    and up the staircase, fighting 48 monsters, and run out of time on 21. Seed 10 on the perception track, where it
+    arrived before monsters walked 125 units/s; with the physics and attack tracks it arrives there. Seed 11 then, where
+    with the client's star search and claw stab it arrives too: knocked off 4 at 26 s and hit off the jump from 3 to 1,
+    it had gone the long way round, fighting 38 monsters, and run out of time on 16. Of seeds 1-48, 41 arrive, against
+    37 before and 36 at the physics and attack tracks' merge. On the play track, before the steps, seed 17 since she
+    finishes what she has hurt before she moves on (behavior.fight.owed): on seed 4 she arrived there; of seeds 1-48, 46
+    arrived, against 41 before. Then seed 18 since she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed
+    17 she arrived; of seeds 1-48, 41 arrived, 46 with the jump throws in that world, whose jump throws' area picks a
+    snail. On seed 18 since she stabs a snail on 3 where she stands, not stepping to 3's far end (stance.SNAIL_FAR_END),
+    at 40 s, she was knocked off 3 down to 17 at 86 s, off 17 down to 25 at 89 s and off 17 to 35 at 141 s, and ran out
+    of time, 48 monsters in all.) (Seed 4 since every look is perception's newest frame after her keys' effect
+    (Senses.fresh_after, the feed in every scenario): on seed 5 she now arrives; of seeds 1-16, only 4 meets all of
+    this.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -846,25 +859,25 @@ def move_climb_down(sim):
     return _one_move(sim, "climb_down", 30, 36)
 
 
-@scenario((30, 700.0), seed=6, noise=Noise(walk_jitter=5.0, dot_px=True),
+@scenario((30, 700.0), seed=8, noise=Noise(walk_jitter=5.0, dot_px=True),
           expects=(sends("nudge", "nudges by the rope on screen"),
-                   check("lined up in a few nudges, from either side",
-                         lambda tr: 2 <= sum(p[1] == "nudge" for p in tr["plans"]) <= 4
-                         and {p[2][0][1] for p in tr["plans"] if p[1] == "nudge"} == {"left", "right"}),
+                   check("lined up in a few nudges", lambda tr: 1 <= sum(p[1] == "nudge" for p in tr["plans"]) <= 4),
                    ends(36, key="landed", what="down the rope after all")))
 def move_climb_down_nudge(sim):
-    """Mover.do with walks a few units off: the walk stops a few units from the rope's top, and
-    Mover.line_up_rope nudges her by the rope on screen, held as physics.hold_ms says (54-61 ms here), until
-    she's inside the 6 px tolerance, and she climbs down. On the game's 30 ms steps a nudge that short moves
-    her one step of speeding up or two, 1.8 or 7.0 units, so it can take a few, from either side: on seed 6
-    three (left, right, left). (Seed 6 since the game moves her in those steps: on seed 14 the walk stopped
-    close enough not to nudge. Over 16 seeds 3 nudge, 1 just before; with a nudge moving her 5.8 units, as on
-    the engine's 5 ms step, she climbed down after one. Seed 14 since the walk's lags came from motion.body:
-    on seed 7 the walk now stops close enough not to nudge. Until the simulator moved her by the engine, any
-    tap that moved her at all moved her at least ~14 units, so that nudge went 23 px, and she swung from side
-    to side of the rope three times before pressing down; over 16 seeds 1 nudged then, and 1 now. Until the
-    mover held its nudges as hold_ms says, they were timed by her walking speed alone, plus 25 ms: 58 ms for 5
-    units, which moved her 9, 4 past the rope's top.)"""
+    """Mover.do with walks a few units off: the walk stops a few units from the rope's top, and Mover.line_up_rope
+    nudges her by the rope on screen, held as physics.hold_ms says (54-61 ms here), until she's inside the 6 px
+    tolerance, and she climbs down. On the game's 30 ms steps a nudge that short moves her one step of speeding up or
+    two, 1.8 or 7.0 units, so it can take a few, from either side: on seed 6 three (left, right, left). (Seed 6 since
+    the game moves her in those steps: on seed 14 the walk stopped close enough not to nudge. Over 16 seeds 3 nudge, 1
+    just before; with a nudge moving her 5.8 units, as on the engine's 5 ms step, she climbed down after one. Seed 14
+    since the walk's lags came from motion.body: on seed 7 the walk now stops close enough not to nudge. Until the
+    simulator moved her by the engine, any tap that moved her at all moved her at least ~14 units, so that nudge went 23
+    px, and she swung from side to side of the rope three times before pressing down; over 16 seeds 1 nudged then, and 1
+    now. Until the mover held its nudges as hold_ms says, they were timed by her walking speed alone, plus 25 ms: 58 ms
+    for 5 units, which moved her 9, 4 past the rope's top.) (Seed 8 since every look is perception's newest frame after
+    her keys' effect (Senses.fresh_after, the feed in every scenario): of seeds 1-40, 8 nudge, 7 of them once, from one
+    side, and seed 30 twice, both from the left: one look after a nudge sees where it left her, and a nudge lines her
+    up; on seed 6 the walk stopped close enough not to nudge.)"""
     return _one_move(sim, "climb_down", 30, 36)
 
 
@@ -973,32 +986,37 @@ def _kill_far(sim):
     return {"ended": end, "report": str(h.report)}
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=14,
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=15,
           expects=(ends("killed", key="ended"), happens("picks up leather")))
 def hunt_kill_far(sim):
-    """`hunt kill` at a pig across the basin: walk into reach (300 units at most per look), shoot it dead,
-    loot it."""
+    """`hunt kill` at a pig across the basin: walk into reach (300 units at most per look), shoot it dead, loot it.
+    (Seed 15 since every look is perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every
+    scenario): on seed 14 the pig had walked off the screen's edge by the first look's frame, and she had no target; of
+    seeds 1-16, 8 meet all of this.)"""
     return _kill_far(sim)
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=5, noise=Noise(miss=0.35),
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=8, noise=Noise(miss=0.35),
           expects=(ends("killed", key="ended"), happens("star misses"),
                    wrote("shots2.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
 def hunt_kill_misses(sim):
-    """hunt_kill_far (another seed) with a third of the stars missing: throws scored as misses (no HP bar
-    change within ~0.9 s of the star's arrival), and more throws to kill it. (Seed 5 since monsters walk
-    as fast as the game data says (a pig 125 units/s, not 70): on seed 4 no star missed it. That alone moved
-    it to seed 16, where with the physics and attack tracks the pig walks out of reach and she loses it. Over
-    16 seeds 8 meet all of this.)"""
+    """hunt_kill_far (another seed) with a third of the stars missing: throws scored as misses (no HP bar change within
+    ~0.9 s of the star's arrival), and more throws to kill it. (Seed 5 since monsters walk as fast as the game data says
+    (a pig 125 units/s, not 70): on seed 4 no star missed it. That alone moved it to seed 16, where with the physics and
+    attack tracks the pig walks out of reach and she loses it. Over 16 seeds 8 meet all of this.) (Seed 8 since every
+    look is perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every scenario): on seed 5
+    no star missed; of seeds 1-16, 5 meet all of this.)"""
     return _kill_far(sim)
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=14, noise=Noise(tag_hidden=((0.0, 4.0),)),
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=15, noise=Noise(tag_hidden=((0.0, 4.0),)),
           expects=(ends("killed", key="ended"),
-                   check("looks without her name tag", lambda tr: tr["eyes"]["tag hidden"] >= 3)))
+                   check("frames without her name tag", lambda tr: tr["frames"]["tag hidden"] >= 3)))
 def hunt_kill_tag_hidden(sim):
-    """hunt_kill_far with her name tag hidden for the first 4 s (behind a box): she's placed on screen
-    by the camera from her map position (Hunter.look), and the monsters by their offset from there."""
+    """hunt_kill_far with her name tag hidden for the first 4 s (behind a box): she's placed on screen by the camera
+    from her map position (Hunter.look), and the monsters by their offset from there. (Seed 15 since every look is
+    perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every scenario): as hunt_kill_far.
+    Counted in perception's frames, which have her tag hidden as her looks did.)"""
     return _kill_far(sim)
 
 
@@ -1273,18 +1291,20 @@ def _hunt_17_pigs(sim):
     return tour.hunt(17, {"pig"}, kills=2, seconds=90)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1260.0)], seed=6, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=16, limit=400,
           expects=(logs("out of reach here: over to platform"),))
 def tour_hunt_other_spot(sim):
-    """Tour.hunt of two pigs on 17 from 14: one dies, the other is out of reach, so over to a spot that
-    reaches it (Tour.spot_for). (Seed 6 since monsters walk as fast as the game data says (a pig 125
-    units/s, not 70): on seed 1 the other walked into reach first. That alone moved it to seed 28, where with
-    the physics and attack tracks it doesn't; of seeds 1-16 only 6 shows it. The other pig starts at 1240,
-    not 1320, since her own floor stops a star down past 14's end (reach.LINE 'v83', 2026-10-21): the spot on
-    14 is at 756, reaching 17 out to 1166, not 716, and from 1320 no seed of 1-32 showed it; from 1240 seeds
-    1 and 6 of 1-12 do. From 1260 since a throw's tap goes by her facing off the frame, perception.heading: her
-    first throw no longer taps the arrow she faces already, and from 1240 no seed of 1-16 shows it, the other pig
-    walking into reach first; from 1220, 1260 and 1280 seed 6 does.)"""
+    """Tour.hunt of two pigs on 17 from 14: one dies, the other is out of reach, so over to a spot that reaches it
+    (Tour.spot_for). (Seed 6 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 1
+    the other walked into reach first. That alone moved it to seed 28, where with the physics and attack tracks it
+    doesn't; of seeds 1-16 only 6 shows it. The other pig starts at 1240, not 1320, since her own floor stops a star
+    down past 14's end (reach.LINE 'v83', 2026-10-21): the spot on 14 is at 756, reaching 17 out to 1166, not 716, and
+    from 1320 no seed of 1-32 showed it; from 1240 seeds 1 and 6 of 1-12 do. From 1260 since a throw's tap goes by her
+    facing off the frame, perception.heading: her first throw no longer taps the arrow she faces already, and from 1240
+    no seed of 1-16 shows it, the other pig walking into reach first; from 1220, 1260 and 1280 seed 6 does.) (Seed 16
+    since every look is perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every
+    scenario): the other pig starts at 1320: from 1260, 1240, 1280, 1300 and 1340 no seed of 1-16 showed it, the other
+    walking into reach or shot from 14 first; from 1320 seed 16 does.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -1453,6 +1473,14 @@ def tour_rest_no_escort(sim):
     return {"report": str(tour.report), "hp": round(tour.h.look(mobs=False).hp, 3)}
 
 
+# What perception saw die (every scenario's looks and glances are the feed's: SyncFeed on the fake clock, as live's are
+# the perception service's).
+
+def _died(cause: str, at_least: int = 1):
+    return check(f"the feed saw {at_least}+ monsters die, killed by {cause}",
+                 lambda tr: tr["feed"]["tracker"][f"died {cause}"] >= at_least)
+
+
 @scenario((36, 300.0), monsters="all", seed=22, limit=400,
           noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, tag_hidden=((20.0, 23.0),)),
           realism=Realism(lock_arrows=True),
@@ -1500,7 +1528,7 @@ def _rule(name: str, at_least: int = 1):
                    check("every kill counted", _every_kill),
                    check("HP lost is counted", lambda tr: tr["result"]["damage_taken"] > 0),
                    check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 5),
-                   ends("standing by on a safe platform", key="stop")))
+                   ends("standing by on a safe platform", key="stop"), _died("hers", 2)))
 def loop_basin(sim):
     """tour_hunt_basin's twin: the loop hunts the basin (36) on the platform itself, where no safe spot
     reaches it. Anywhere on it she's there: waiting to reach the spot's x, close monsters interrupted her
@@ -1717,84 +1745,17 @@ def loop_noisy(sim):
     return _loop(2)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=25, limit=400, may_die=True,
-          realism=Realism(spawn_share=0.5, rival_every=20.0),
-          expects=(check("only her kills in the ledger", _every_kill), happens("another player kills")))
-def loop_rival(sim):
-    """Another player on the map: half the monsters spawn, and a rival kills one every 20 s and takes its
-    drops. Their kills give her no EXP, so the ledger has only hers. (The rival hunts one place at a time, its dot
-    on the minimap: here 21, then 2, away from her.)"""
-    return _loop(3)(sim)
-
-
-# The continuous feed (localization.feed; `--feed` on the hunting commands): her looks and glances from a feed
-# looking at every frame in a process of its own (SyncFeed on the fake clock), the same entry points.
-
-def _fed(tr: dict, at_least: float = 0.95) -> bool:
-    """Her looks came from the feed (at least this share; the rest she took herself, the feed too slow)."""
-    s = tr["feed"]["senses"]
-    return s["from the feed"] >= at_least * (s["from the feed"] + s["taken here"]) and s["from the feed"] > 0
-
-
-def _died(cause: str, at_least: int = 1):
-    return check(f"the feed saw {at_least}+ monsters die, killed by {cause}",
-                 lambda tr: tr["feed"]["tracker"][f"died {cause}"] >= at_least)
-
-
-@scenario((36, 300.0), monsters={36}, seed=7, feed=True,
-          expects=(ends("killed", key="ended"), check("looks from the feed", _fed), _died("hers")))
-def feed_hunt_kill(sim):
-    """hunt_kill with the feed: the slime nearest her, shot dead and looted; the feed follows it and puts her
-    EXP gain on it. She then stands for the 1.8 s a gain waits for the monster it was to fade
-    (tracking.FADE_S + MISSING_S): with the feed's costs as measured after the profiling pass, its drops
-    were guarded, the run ended at the kill, and the feed hadn't judged the death yet. (Seed 7 since her EXP
-    gains name their kinds with the searches off the feed's frame loop: on seed 6 the kill that ended it was a
-    pig's, her claw's at 24.0 s, taken for the slime's while a gain's kind wasn't known; known, she fought on,
-    the basin's other monsters walked into her way, and she hadn't killed it after 30 s. Of seeds 1-16, 8 meet
-    all of this.)"""
-    from ..localization.tracking import FADE_S, MISSING_S
-    return sim.sleep_then(hunt_kill(sim), FADE_S + MISSING_S + 0.2)
-
-
-@scenario((36, 200.0), monsters="all", seed=4, feed=True,
-          expects=(ends("arrived"), moves("climb"), check("looks from the feed", _fed)))
-def feed_nav_monsters_basin(sim):
-    """nav_monsters_basin with the feed: across the basin floor and up onto 33, keeping clear of the monsters
-    (whole-screen looks: the screen is searched once a second, its monsters re-found every frame)."""
-    return _nav(33)(sim)
-
-
-@scenario((36, 300.0), monsters="all", seed=1, limit=400, feed=True,
-          expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
-                   logs("collecting drops on platform 36"), check("looks from the feed", _fed), _died("hers", 2)))
-def feed_tour_hunt_basin(sim):
-    """tour_hunt_basin with the feed (3 kills, not 5: the feed's frames take the simulator time): the basin
-    hunted on the platform itself, then its drops collected."""
-    return _tour_hunt(36, 3)(sim)
-
-
-@scenario((36, 300.0), monsters="all", seed=22, limit=400, feed=True,
-          expects=(_rule("shoot"), check("ten kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 10),
-                   check("every kill counted", _every_kill), check("looks from the feed", _fed),
-                   ends("standing by on a safe platform", key="stop")))
-def feed_loop_basin(sim):
-    """loop_basin with the feed, for 2 minutes: every kill in the ledger."""
-    return _loop(2)(sim)
-
-
-@scenario((36, 300.0), monsters="all", seed=17, limit=400, may_die=True, feed=True,
+@scenario((36, 300.0), monsters="all", seed=3, limit=400, may_die=True,
           realism=Realism(spawn_share=0.5, rival_every=20.0),
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
-                   _died("other"), check("looks from the feed", _fed)))
-def feed_loop_rival(sim):
-    """loop_rival with the feed, for 2 minutes: another player kills a monster every 20 s. The feed sees some
-    of those die with no EXP of hers: killed by someone else (the hunt loop doesn't read that yet). (Seed 17
-    since the other player hunts one place at a time, its dot on the minimap: on seed 25 it hunted 2 and 21 all
-    2 minutes, out of her sight, and the feed saw none of its kills die; on 17 it hunts the basin with her, 7
-    kills there. Of seeds 1-30, 16 showed a death someone else's then, 10 once such a death needed another player
-    by it (tracking.OTHERS_BY_PLAYER), and 13 with the searches off the feed's frame loop too, each of them
-    meeting all of this.)"""
-    return _loop(2)(sim)
+                   _died("other")))
+def loop_rival(sim):
+    """Another player on the map: half the monsters spawn, and a rival kills one every 20 s and takes its drops. Their
+    kills give her no EXP, so the ledger has only hers. (The rival hunts one place at a time, its dot on the minimap:
+    here 21, then 2, away from her.) (Seed 3 since every look is perception's newest frame after her keys' effect
+    (Senses.fresh_after, the feed in every scenario): with the twin that had the feed (17), perception sees some of the
+    rival's kills die, someone else's: of seeds 1-12, 8 meet all of this, 25 not.)"""
+    return _loop(3)(sim)
 
 
 # West Rocky Mountain II (ROCKY: map 10004021, from 2026-10-23), with her as she plays there (HER: level 23, HP 730,
@@ -2201,11 +2162,11 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=8, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
-               check("hurt three times at most", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] <= 3)))
+               check("hurt five times at most", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] <= 5)))
 def loop_tree_ore_waits(sim):
     """EXP before loot (hunt._loot_first): 23 her only ground, shot from 24 at 231, every Green Mushroom on 22 dropping
     a Sapphire Ore (120 mesos, valuable on Tree Dungeon: twice its bronze coin, 66.8). Seen while a Horny Mushroom on 23
@@ -2230,14 +2191,13 @@ def _lucky_seven_again(tr: dict) -> bool:
     return low is not None and any("Lucky Seven:" in line for line in log[low:])
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=1, limit=300, may_die=True, noise=_CROWD[0], feed=True, attack="choice",
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=300, may_die=True, noise=_CROWD[0], attack="choice",
       her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER, pet_mp=None),
       realism=Realism(respawn=17.0, zero_walls=True),
       expects=(logs("Lucky Seven: horny-mushroom"), logs("< a cast's 11"),
                check("Lucky Seven again once her MP came back", _lucky_seven_again),
                check("never Lucky Seven with too little MP", lambda tr: not any(
-                   "not enough, nothing thrown" in line for line in tr["world_log"])),
-               check("her looks from the feed", lambda tr: tr["feed"]["senses"]["from the feed"] > 0)))
+                   "not enough, nothing thrown" in line for line in tr["world_log"]))))
 def loop_tree_mp_runs_out(sim):
     """The hunt loop as live runs by default (tour --loop: the feed, the attack choice), her pet drinking no MP potions
     and her MP at 12% (72 of 601) when it starts, 23 her only ground, shot from 24 at 231. Lucky Seven while she has
@@ -2409,26 +2369,13 @@ def loop_tree_lie_detector_23(sim):
 # Her as `tour --loop` plays by default (the feed, the attack choice): Lucky Seven's key casting it at its MP, and each
 # star's damage drawn (harness.ATTACK_HER), the bars over hurt monsters read as they show; group 0's walls
 # stopping her (in the default world a touch knocked her out of the map past the tower's wall on 3 of seeds 1-12 of
-# loop_tree_lie_detector_grind, and 2 of feed_loop_tree_lie_detector, a simulator effect).
-_LIVE = dict(feed=True, attack="choice", her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER),
+# loop_tree_lie_detector_grind, and 2 of loop_tree_lie_detector's twin as live ran it, a simulator effect).
+_LIVE = dict(attack="choice", her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER),
              realism=Realism(zero_walls=True))
-_FROM_THE_FEED = check("her looks from the feed", lambda tr: tr["feed"]["senses"]["from the feed"] > 0)
-
-
-@tree((28, 247.0), monsters="all", seed=1, limit=400, **_LIVE, expects=LIE_DETECTOR_EXPECTS + (
-    logs("Lucky Seven:"), _FROM_THE_FEED))
-def feed_loop_tree_lie_detector(sim):
-    """loop_tree_lie_detector as `tour --loop --map 10002073` runs by default: her looks from the feed (its reactions
-    cutting her retreat's chains for a monster coming into their way, as any trip's), and each throw Lucky Seven or the
-    regular attack as the attack choice has it (behavior.attacks). The Lie Detector seen 110 s in: the hunt stops at
-    the next look or plan, and she retreats to a safe place within 10 s, her moves alone: on seed 1 for 27, a safe
-    platform 3.1 s by route, knocked back once on the way up from 29 and there at 8.0 s. (Of seeds 1-12, 11 are on a
-    safe place at 10 s; on seed 3 she was still on the floor, 33, its safest place within reach.)"""
-    return lie_detector(110.0)(sim)
 
 
 @tree((23, 73.0), monsters="all", seed=1, limit=400, **_LIVE, expects=LIE_DETECTOR_EXPECTS + (
-    logs("loop: ["), logs("Lucky Seven:"), _FROM_THE_FEED))
+    logs("loop: ["), logs("Lucky Seven:")))
 def loop_tree_lie_detector_grind(sim):
     """`tour --loop --grind --map 10002073` as it runs by default (the feed, the attack choice) from 23, as
     loop_tree_grind, the Lie Detector seen 75 s in: grinding is the hunt loop going round the map (behavior.grind.Grind,

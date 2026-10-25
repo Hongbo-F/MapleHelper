@@ -23,7 +23,8 @@ import time
 from ..paths import REPO
 
 _clock = time.perf_counter  # the real clock: the simulator puts its own in `time` while it runs
-WHAT = {"_now": "a look or glance", "send": "a key plan", "wait": "waiting for a plan", "sleep": "a sleep or a search"}
+WHAT = {"_now": "a look of the fakes'", "send": "a key plan", "wait": "waiting for a plan",
+        "sleep": "a sleep, a look or a glance"}  # (her looks and glances wait for the feed's frames: sleeps)
 
 
 class Stretches:

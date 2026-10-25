@@ -6,50 +6,43 @@ players are (their minimap dots, followed from look to look: localization.player
 Every look anyone takes goes through `Senses.look`, and the listeners run after each one, in order:
 the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there.
 
-With the sweep on (`sweep`), a look at the band around her taken here (no feed serving it) also searches one slice of the
-rest of the screen, the next in turn from the top down (SWEEP_SLICE map units tall, overlapping by the tallest body): the whole view every few slices
-(4 at the game's own 1366x768, standing on a platform), for a slice's search more. What a slice finds goes into
-`Scene.swept`, not `Scene.monsters`: the fights go by the band's monsters as before. `sweep_hold`, asked after the
-band's search, holds the slice back where it would cost her (behavior.hunter.Hunter.hold_sweep: a monster in her band
-and nothing to wait for), so the look comes back sooner. The memory of monsters (localization.memory) takes every
-look's band and slice (`Scene.rows` says where a look searched).
+Every look and glance is the latest of what perception, looking at the game all the time, has seen (a
+localization.feed.Feed: for a command the perception service, localization.service, whose world step runs on every
+frame; in the simulator SyncFeed; on saved frames and the tests' made-up ones InlineFeed, the step run on the eyes' frame
+when asked). A look is the newest state of a frame newer than the last look's, shown KEY_EFFECT_S after her last key
+and MAX_AGE_S before the look at the most (`fresh_after`), with what it needs fresh (feed.fresh: her band searched within
+0.3 s, the whole screen within 0.5 s, the drops on that very frame), the events since the last look with it
+(Scene.events); a look at her band has the monsters the feed follows off it too (`Scene.swept`, for her memory:
+Feed.look). Glances are the newest frames, GLANCE_EVERY_S apart at the soonest. (Until 2026-10-25 a command could look
+for itself, `--no-feed`, and such looks swept the screen a slice at a time for her memory; the user: "We should just
+remove the --no-feed mode, perception should just always run and the other modules just work based on latest
+perception result".)
 
-With a continuous feed (localization.feed: the game looked at every frame in a process of its own), a look
-is the feed's state of the first frame shown after it was asked for, with what it needs fresh (see
-feed.fresh), and the events since the last look come with it (Scene.events); a look at her band has the monsters the
-feed follows off it too (`Scene.swept`, for her memory: Feed.look), so a look the feed serves has no sweep. Glances
-come from the feed's newest frames. When the feed can't give one (the game not in front, the feed gone or too slow),
-the look or glance is taken here as without it, the sweep's slice and all; a feed whose looks keep coming slowly
-(starved of the CPU) is rested a while, her looks and glances taken here meanwhile (FEED_SLOW_S, FEED_REST_S), and
-those looks sweep too: on the saved frames with the machine busy, 217 of 329 looks were taken here so, and without
-their slices her memory had only her band from them. Without a feed nothing changes.
-
-A look taken here is never handed on unless it passed its checks: the eyes' (perception.framecheck: the game window,
-the frame lined up with it, the minimap's picture found) and her place on the map (localization.placecheck). One that
-fails is taken again, RETRY_GAP_S later, after the eyes have done what they can (Eyes.recover); after LOST_S of
-failing, `look` raises LookLost, and nothing acts on the game until a look passes again (a hunt stands still and
-looks every PAUSE_POLL_S: `regain`; while the window is unfit in a way only the user sets right, another size, say, a
-look asks the window alone: Eyes.window_wait). What failed, and when it's right again, is logged and sent as telemetry
-events.
+No look is handed on that isn't of the game as expected: one whose state failed its checks (WorldState.bad: the eyes'
+own, perception.framecheck: the game window, the frame lined up with it, the minimap's picture found; her place on the
+map, localization.placecheck), or the game not wholly on screen, or no state at all (perception down), is asked again,
+RETRY_GAP_S later; after LOST_S of that `look` raises LookLost, and nothing acts on the game until a look passes again
+(a hunt stands still and looks every PAUSE_POLL_S: `regain`). A command that sends keys has the game brought to the
+front meanwhile when it isn't (Feed.bring_forward). A glance with no state to give has no dot and the last HP; after
+GLANCE_LOST_S of none, it raises LookLost too (a chain running is cut: control.navigator). What failed, and when it's
+right again, is logged and sent as telemetry events.
 """
 
-import math
 import time
-from collections import deque
 from collections.abc import Callable
 
 from .. import telemetry
 from ..perception.drops import items_for
 from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, band_rows, tag_below_feet
-from ..perception.framecheck import BadLook, LookLost, Problem
+from ..perception.framecheck import LookLost, Problem
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import STRETCHED
 from .mapdata import MapModel
-from .monsters import Monster, bodies
+from .monsters import Monster
 from .placecheck import off_map
 from .players import LOCAL_IDS, Players
 from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
-from .scene import Scene, find_loot
+from .scene import Scene
 
 # Full-size px (1920x1080; the look's geometry converts them) either side of where her minimap dot puts each of the
 # map's ropes on screen that a look searches for ropes: all `pose.rope_x` can use (a rope within ROPE_MATCH_PX of
@@ -75,11 +68,12 @@ FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
 #   key 66-68 ms after it's sent (README, Motion planning), so the look sees what came of the keys before it,
 # - and shown MAX_AGE_S before the look at the most;
 # with its searches as fresh as a look needs (feed.fresh). Before, a look was the first frame shown after it was asked
-# for, whatever came before. In the simulator (D:/MapleHelper-scratch/perceive/latcov2.py: the hunt loop on Tree Dungeon,
-# crowd, zero-walls, the attack choice, the costs measured, 4 seeds of 5 minutes), against a frame after the ask: a plan's
-# end to the next decision 122 ms (median; p90 265) against 66 (250), touches that hurt her a run 44.0 against 49.0, HP
-# lost 4.51 against 5.10 bars; the Lie Detector's retreat on a safe place 10 s after the sighting 28 of 28 runs against
-# 24 of 29 (test_retreat's sweep); the newest new frame without waiting for the keys' effect, 67 ms, 49.2, 4.75, 27 of 28.
+# for, whatever came before. In the simulator (D:/MapleHelper-scratch/perceive/latcov2.py: the hunt loop on Tree
+# Dungeon, crowd, zero-walls, the attack choice, the costs measured, 4 seeds of 5 minutes), against a frame after the ask:
+# a plan's end to the next decision 122 ms (median; p90 265) against 66 (250), touches that hurt her a run 44.0 against
+# 49.0, HP lost 4.51 against 5.10 bars; the Lie Detector's retreat on a safe place 10 s after the sighting 28 of 28 runs
+# against 24 of 29 (test_retreat's sweep); the newest new frame without waiting for the keys' effect, 67 ms, 49.2, 4.75,
+# 27 of 28.
 KEY_EFFECT_S = 0.068
 MAX_AGE_S = 0.1
 # Looks that fail their checks are taken again this long apart (each a capture: 5-30 ms), for up to LOST_S; then
@@ -88,103 +82,77 @@ MAX_AGE_S = 0.1
 RETRY_GAP_S = 0.2
 LOST_S = 3.0
 PAUSE_POLL_S = 0.5
-# The sweep (Senses.sweep): each slice of the screen it searches is this many map units tall (193 rows at the game's own
-# 1366x768, as tall as each of a whole-screen search's bands there: perception.mobs.detect_wide), and slices overlap by
-# the tallest monster body of the map and SWEEP_BODY_SLACK, so a body cut by one slice's edge is whole in the next (and
-# one cut by the band's edge, in the slice beside it). On the 20 saved 1366x768 frames of Tree Dungeon, Forest Up North
-# II, one such slice took 16.7 ms (median; 25.4 at p90), against 21.9 for her band and 72.9 for the whole screen
-# (bench-look), and the slices together found the 53 monsters the whole-screen search did, at the same places.
-SWEEP_SLICE = 193.0
-SWEEP_BODY_SLACK = 8.0
-# A feed whose looks come slowly (its child starved of the CPU: it runs at below-normal priority) is rested: once
-# FEED_SLOW_LOOKS looks in a row at her band or her place (not the whole screen, whose search takes 0.1-0.25 s however it's
-# taken) have waited FEED_SLOW_S or more for it, or one wasn't given at all (it waited FEED_WAIT_S), her looks and glances
-# are taken here for FEED_REST_S; then the next look tries the feed again, and rests it again at once if that one is slow
-# too. On the 20 saved 1366x768 frames of Tree Dungeon with the machine 93% busy (2026-10-24; other work at normal and idle
-# priority), the child looked at 12 frames a second, a look at her band waited 149 ms for it (median; p90 655) against 61
-# taken here, and 30 of 226 looks waited out FEED_WAIT_S; resting it so (the machine 74-94% busy), the feed was rested 17
-# times in a minute, 217 of 329 looks were taken here, and a look at her band waited 62 ms (p90 214) against 61 (104).
-# FEED_SLOW_S is a guess: a look at her band taken here costs about 40 ms at the game's own size, and the feed's as much
-# with its frames coming (README, Continuous perception). In the simulator the feed is never rested.
-FEED_SLOW_S = 0.15
-FEED_SLOW_LOOKS = 3
-FEED_REST_S = 2.0
+# A glance gets no state to act on this long (perception down, the game not on screen or not as expected): it raises
+# LookLost, and a chain of keys running is cut, every key let go (control.navigator). A glance waits feed.GLANCE_WAIT_S
+# (0.25 s) for a frame, so the second glance without one cuts it.
+GLANCE_LOST_S = 0.3
 
 
 class Senses:
-    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None, sweep: bool = False):
-        """`band`: how far above and below her feet (map units) a look searches for monsters. `feed`: a
-        continuous feed to take looks and glances from (localization.feed.Feed), or None. `sweep`: a look at the band
-        also searches a slice of the rest of the screen (see the top; only in a look taken here: the feed searches the
-        whole screen every second, and follows what it found)."""
+    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None):
+        """`band`: how far above and below her feet (map units) a look searches for monsters. `feed`: what its looks
+        and glances come from (localization.feed.Feed: a command's the perception service's, localization.service;
+        the simulator's SyncFeed); None: the world step run on the eyes' own frame when a look asks (feed.InlineFeed:
+        saved frames and tests; made on the first look, so a world step's own Senses, which only places and searches,
+        makes none)."""
         self.eyes, self.model, self.band = eyes, model, band
-        self.feed = feed
-        self.sweep = sweep
-        self.sweep_hold: Callable[[Scene], bool] | None = None  # asked after the band's search: hold the slice back
-        self._sweep_row = 0.0  # map units below the view's top where the next slice starts
-        self._tallest = max((b.top for b in bodies(model).values()), default=60.0)  # the map's tallest monster
+        self._feed = feed
         self.localizer = Localizer(model, geo=getattr(eyes, "geo", STRETCHED))  # (the simulator's: 1920x1080)
         self.camera = Camera(model.bounds)
-        # Other players, from the looks placed here, and from the feed's (Players.adopt): ids apart from the feed's
+        # Other players, from the looks placed here (a world step's), and from the feed's (Players.adopt): ids apart from
+        # the feed's
         self.players = Players(self.localizer, 1 if feed is None else LOCAL_IDS)
         self.listeners: list[Callable[[Scene], None]] = []
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
         eyes.drop_names = items_for(model)  # the drops looked for: the map's monsters' (perception.drops)
-        self._glanced = -1e18  # the frame time of the last glance from the feed
+        self._glanced = -1e18  # the frame time of the last glance
         self.glanced_at: float | None = None  # when the frame the last glance saw was shown (time.monotonic)
-        self.glanced = None  # the feed's state (worldstate.WorldState) the last glance came from; None: taken here
-        self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0, "feed rested": 0}
-        self._feed_waits: deque[float] = deque(maxlen=FEED_SLOW_LOOKS)  # the latest looks' waits for the feed
-        self._feed_rest = -1e18  # no looks or glances from the feed before this (FEED_REST_S)
+        self.glanced = None  # the state (worldstate.WorldState) the last glance came from; None: it had none
+        self.counts = {"looks": 0, "glances": 0, "glances without a state": 0}
         self.failed = {"looks": 0, "lost": 0}  # looks that failed their checks, and times that made LookLost
         self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
         self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
-        self.sweep_counts = {"slices": 0, "held": 0}  # slices the sweep searched, and held back (sweep_hold)
         self.keyed: Callable[[], float] = lambda: -1e18  # when her last key went (the hunter's: Actions.last_key)
-        self._looked = -1e18  # the frame time of the last look from the feed
+        self._looked = -1e18  # the frame time of the last look
+        self._usable = -1e18  # when the last state to act on came (a look's or a glance's: GLANCE_LOST_S)
+        self._hp = 1.0        # the last HP a state read (a glance without one keeps it)
+
+    @property
+    def feed(self):
+        """What its looks and glances come from (see __init__)."""
+        if self._feed is None:
+            from .feed import InlineFeed
+            self._feed = InlineFeed(self.eyes, self.model, self.band)
+        return self._feed
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False,
              after: float | None = None) -> Scene:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
         dot and the camera when the tag is hidden; (if `mobs`) the monsters she could shoot, or (if
         `wide`) every monster on screen; and (if `loot`) the drops on her platform, or (if `wide`) on
-        every platform in view (only mesos if `mesos_only`). `after`: from a feed, a frame shown then or later
-        will do (None: now, as it's asked for): one a glance from it saw her standing still in once the keys were
-        let go of, say (Navigator.recover)."""
-        s = None
-        if self._feed_up():
-            asked = time.monotonic()
+        every platform in view (only mesos if `mesos_only`): the newest state of a frame as fresh as `fresh_after`
+        says, or with `after`, of a frame shown then or later (one a glance saw her standing still in once the keys were
+        let go of, say: Navigator.recover). Raises LookLost once there has been none to act on for LOST_S (at once
+        while there still is none, after that)."""
+        while True:
             s = self.feed.look(self, mobs, wide, loot, mesos_only, self.fresh_after() if after is None else after)
-            if not wide:
-                self._feed_paced(s is None, time.monotonic() - asked)
             if s is not None:
-                self._looked = max(self._looked, s.t)
-        served = s is not None
-        if s is None:
-            s = self._take()
-            if mobs and s.tag is not None and s.where is not None:
-                s.monsters = self.search(s, wide)
-                s.searched, s.wide = True, wide
-                if not wide and self.sweep:  # (not served by the feed: resting, refused or gone)
-                    if self.sweep_hold is not None and self.sweep_hold(s):
-                        self.sweep_counts["held"] += 1
-                    else:
-                        self._sweep_slice(s)
-            if loot:
-                s.loot = find_loot(s, self.model, self.eyes, wide, mesos_only)
-            if self.feed is not None:
-                self.counts["taken here"] += 1
-        else:
-            self.counts["from the feed"] += 1
-            self._learn(s)  # the feed placed her with its own camera; this one learns too, for looks taken here
-            self.players.adopt(s.t, s.players)  # ... and the other players it follows, for them too
-            if s.searched and not s.rows and s.tag is not None and s.where is not None:  # where it searched
-                s.rows = [self._play_rows(s) if s.wide else self._map_rows(s, band_rows(s, *self.band))]
-        if self.feed is not None:
-            # What the feed saw up to the frame this look shows (all of it for a look taken here, now): an EXP
-            # gain of a later frame goes with the next look, whose monsters no longer show the one it killed.
-            s.events = self.feed.drain_events(s.t if served else None) if self.feed.alive else None
+                break
+            problem = self.feed.problem() or Problem("perception", "no state from perception in time")
+            self._failed(problem)  # (raises LookLost after LOST_S)
+            self.feed.bring_forward(problem)
+            time.sleep(RETRY_GAP_S)
+        self._passed()
+        self.counts["looks"] += 1
+        self._looked, self._usable, self._hp = max(self._looked, s.t), time.monotonic(), s.hp
+        self._learn(s)  # the feed placed her with its own camera; this one learns too (her name tag hidden)
+        self.players.adopt(s.t, s.players)  # ... and the other players it follows
+        if s.searched and not s.rows and s.tag is not None and s.where is not None:  # where it searched
+            s.rows = [self._play_rows(s) if s.wide else self._map_rows(s, band_rows(s, *self.band))]
+        # What the feed saw up to the frame this look shows: an EXP gain of a later frame goes with the next look, whose
+        # monsters no longer show the one it killed.
+        s.events = self.feed.drain_events(s.t)
         for listener in self.listeners:
             listener(s)
         return s
@@ -194,51 +162,21 @@ class Senses:
         look's frame, KEY_EFFECT_S after her last key, and MAX_AGE_S before now."""
         return max(time.monotonic() - MAX_AGE_S, self._looked + 1e-6, self.keyed() + KEY_EFFECT_S)
 
-    def _feed_up(self) -> bool:
-        """Whether looks and glances come from the feed now: there's one, it's alive, and it isn't resting
-        (FEED_REST_S)."""
-        return self.feed is not None and self.feed.alive and time.monotonic() >= self._feed_rest
-
-    def _feed_paced(self, refused: bool, waited: float) -> None:
-        """A look at her band or place asked of the feed waited `waited` s (`refused`: and wasn't given): the feed is
-        rested if it's slow (FEED_SLOW_S, FEED_SLOW_LOOKS), said in the log and as telemetry."""
-        self._feed_waits.append(math.inf if refused else waited)
-        if refused or (len(self._feed_waits) == FEED_SLOW_LOOKS and min(self._feed_waits) >= FEED_SLOW_S):
-            self._feed_rest = time.monotonic() + FEED_REST_S
-            self.counts["feed rested"] += 1
-            text = (f"the feed is slow (its last looks waited "
-                    f"{', '.join('out' if w == math.inf else f'{1000 * w:.0f} ms' for w in self._feed_waits)}): "
-                    f"looks taken here for {FEED_REST_S:.0f} s")
-            if self.counts["feed rested"] <= 3 or self.counts["feed rested"] % 50 == 0:  # (not every time)
-                self.log(f"  {text} ({self.counts['feed rested']} times)")
-            telemetry.emit("event", kind="feed", text=text)
-
-    def _take(self) -> Scene:
-        """A look taken here and placed that passed its checks (see the module's docstring), taken again until one
-        does; raises LookLost once looks have failed for LOST_S (at once while they still are, after that)."""
-        while True:
-            try:
-                s = self.place(self.eyes.look())
-                problem = s.bad
-            except BadLook as e:
-                problem = e.problem
-            if problem is None:
-                self._passed()
-                return s
-            now = time.monotonic()
-            self.failed["looks"] += 1
-            if self._failing is None or self._failing[1] != problem.why:
-                if self._failing is None:
-                    self.log(f"  a look failed its checks: {problem.why}")
-                else:
-                    self.log(f"  ... then: {problem.why}")
-                telemetry.emit("event", kind="look", text=problem.why)
-                self._failing = (now if self._failing is None else self._failing[0], problem.why)
-            self.eyes.recover(problem)  # (before the next look, which may be a while: `regain`)
-            if now - self._failing[0] >= LOST_S:
-                self.failed["lost"] += 1
-                raise LookLost(problem)
-            time.sleep(RETRY_GAP_S)
+    def _failed(self, problem: Problem) -> None:
+        """A look found nothing to act on (`problem`): said once (and when the why changes); LookLost once that has
+        gone on for LOST_S."""
+        now = time.monotonic()
+        self.failed["looks"] += 1
+        if self._failing is None or self._failing[1] != problem.why:
+            if self._failing is None:
+                self.log(f"  a look failed its checks: {problem.why}")
+            else:
+                self.log(f"  ... then: {problem.why}")
+            telemetry.emit("event", kind="look", text=problem.why)
+            self._failing = (now if self._failing is None else self._failing[0], problem.why)
+        if now - self._failing[0] >= LOST_S:
+            self.failed["lost"] += 1
+            raise LookLost(problem)
 
     def _passed(self) -> None:
         """A look passed its checks: if looks had failed before it, that's over (said so)."""
@@ -266,27 +204,25 @@ class Senses:
         return None
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
-        """Her minimap dot and HP (Eyes.glance), and when its frame was shown (`glanced_at`): with a feed, from its
-        newest frame, one shown FEED_GLANCE_EVERY_S after the last glance's at the soonest (and after it), its state
-        kept (`glanced`: the monsters it follows, for a plan running to react to: control.navigator)."""
-        if self._feed_up():
-            st = self.feed.glance(self._glanced + max(FEED_GLANCE_EVERY_S, 1e-3))
-            if st is not None:
-                self._glanced = self.glanced_at = st.t
-                self.glanced = st
-                self.counts["glances from the feed"] += 1
-                return st.dot, st.hp
-        self.glanced = None
-        out = self.eyes.glance()
-        self.glanced_at = self.eyes.seen_at if self.eyes.seen_at is not None else time.monotonic()
-        return out
+        """Her minimap dot and HP from the feed's newest frame, one shown FEED_GLANCE_EVERY_S after the last glance's at
+        the soonest (and after it), when its frame was shown (`glanced_at`), and its state (`glanced`: the monsters it
+        follows, for a plan running to react to: control.navigator). With no state to act on: no dot and the last HP,
+        and LookLost once there has been none for GLANCE_LOST_S."""
+        st = self.feed.glance(self._glanced + max(FEED_GLANCE_EVERY_S, 1e-3))
+        if st is not None:
+            self._glanced = self.glanced_at = st.t
+            self.glanced, self._usable, self._hp = st, time.monotonic(), st.hp
+            self.counts["glances"] += 1
+            return st.dot, st.hp
+        self.glanced, self.glanced_at = None, time.monotonic()
+        self.counts["glances without a state"] += 1
+        if time.monotonic() - self._usable >= GLANCE_LOST_S:
+            raise LookLost(self.feed.problem() or Problem("perception", "no state from perception in time"))
+        return None, self._hp
 
     def wait_frame(self, timeout: float) -> None:
-        """Until the feed's next frame comes, `timeout` s at most; without a feed (or while it rests), `timeout` s."""
-        if self._feed_up():
-            self.feed.wait_frame(timeout)
-        else:
-            time.sleep(timeout)
+        """Until the feed's next frame comes, `timeout` s at most."""
+        self.feed.wait_frame(timeout)
 
     def place(self, obs: Observation) -> Scene:
         """A look placed on the map: where she is (see _place_her), and the other players (Players: a look that
@@ -304,47 +240,6 @@ class Senses:
         seen = self.eyes.monsters_wide(s) if wide else self.eyes.monsters(s, *self.band)
         s.rows.append(self._play_rows(s) if wide else self._map_rows(s, band_rows(s, *self.band)))
         return [s.place(m, self.model, self.eyes.bar(s, m)) for m in seen]
-
-    # --- the sweep ------------------------------------------------------------------------------------
-
-    def _sweep_slice(self, s: Scene) -> None:
-        """One slice of the screen outside the band (the next in turn, from the top down), searched for monsters into
-        `s.swept` (those the band found too left out) and `s.rows`."""
-        rows = self._next_slice(s)
-        if rows is None:
-            return
-        self.sweep_counts["slices"] += 1
-        found = [s.place(m, self.model, self.eyes.bar(s, m)) for m in self.eyes.monsters_rows(s, rows)]
-        s.swept = [m for m in found if not any(o.kind == m.kind and abs(o.x - m.x) < 25 and abs(o.y - m.y) < 25
-                                               for o in s.monsters)]
-        s.rows.append(self._map_rows(s, rows))
-
-    def _next_slice(self, s: Scene) -> tuple[int, int] | None:
-        """The rows of the frame the sweep searches next: SWEEP_SLICE tall, from where the last one ended (less the
-        overlap), within what the band leaves out: above its top (and a body's height into it, for one cut by its
-        edge) and below its bottom (likewise). Past the bottom it starts again at the top."""
-        geo = s.geo
-        bottom = int(s.frame.shape[0] * geo.hud_top)
-        b0, b1 = band_rows(s, *self.band)
-        body = int(math.ceil((self._tallest + SWEEP_BODY_SLACK) / geo.units_per_px))
-        size = max(body + 1, int(round(SWEEP_SLICE / geo.units_per_px)))
-        regions = [(0, min(bottom, b0 + body)), (max(0, b1 - body), bottom)]
-        if regions[0][1] >= regions[1][0]:  # the band is no taller than two bodies: the whole screen
-            regions = [(0, bottom)]
-        regions = [(a, b) for a, b in regions if b - a > body]
-        if not regions:
-            return None
-        start = int(round(self._sweep_row / geo.units_per_px))
-        region = next(((a, b) for a, b in regions if b - max(a, start) > body), None)
-        if region is None:  # past the last: from the top again
-            region, start = regions[0], regions[0][0]
-        top = max(region[0], start)
-        end = min(region[1], top + size)
-        if region[1] - end <= body:  # not worth a slice of its own: this one goes to the region's end
-            end = region[1]
-        last = region is regions[-1] and end >= region[1]
-        self._sweep_row = 0.0 if last else (end - body) * geo.units_per_px
-        return top, end
 
     @staticmethod
     def _map_rows(s: Scene, rows: tuple[int, int]) -> tuple[float, float]:

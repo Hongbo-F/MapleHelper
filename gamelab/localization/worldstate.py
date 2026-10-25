@@ -394,7 +394,7 @@ class WorldStep:
             job = self._last = Job(self.seq, t, s, view)
             self._hand_over()
         work = {"re-finds": 0, "fallbacks": 0}
-        fallbacks = getattr(self.eyes.detector, "fallbacks", 0)
+        fallbacks = getattr(getattr(self.eyes, "detector", None), "fallbacks", 0)
         refound: dict[int, Monster] = {}
         unread: set[int] = set()  # the tracks re-found whose bars weren't read (_bar_due)
         if placed:
@@ -412,7 +412,7 @@ class WorldStep:
                     refound[tr.id] = s.place(m, self.model, self.eyes.bar(s, m) if read else None)
                     if not read:
                         unread.add(tr.id)
-            work["fallbacks"] = getattr(self.eyes.detector, "fallbacks", 0) - fallbacks
+            work["fallbacks"] = getattr(getattr(self.eyes, "detector", None), "fallbacks", 0) - fallbacks
             self.counts["re-finds"] += work["re-finds"]
             self.counts["re-found"] += len(refound)
             self.counts["fallbacks"] += work["fallbacks"]

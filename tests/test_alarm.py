@@ -265,7 +265,6 @@ def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch, tmp_
     with pytest.raises(client.LieDetectorAlarm):
         client.submit([], name="x")
     assert main(["act", "100"]) == LIE_DETECTOR_EXIT  # refused before touching the game
-    assert main(["map"]) == LIE_DETECTOR_EXIT         # its look would bring the game to the front
     assert main(["player", "--elevate"]) == LIE_DETECTOR_EXIT  # nor is the player started again
 
     assert main(["clear-alarm"]) == 0

@@ -7,7 +7,6 @@ leaving the frame loop at its rate, the service killed and started again under a
 import multiprocessing
 import os
 import pickle
-import subprocess
 import sys
 import threading
 import time
@@ -50,8 +49,8 @@ def test_asks_from_every_client_are_merged_and_mesos_only_if_each_asked_only_for
     merged = svc._take(a, ("ask", Asks(10.2, band=True, loot=True, mesos_only=True)), None)
     merged = svc._take(b, ("ask", Asks(10.1, loot=True)), merged)
     assert (merged.after, merged.band, merged.loot, merged.mesos_only) == (10.1, True, True, False)
-    both = svc._take(b, ("ask", Asks(10.3, loot=True, mesos_only=True)), svc._take(a, ("ask", Asks(10.2, loot=True,
-                                                                                                     mesos_only=True)), None))
+    first = svc._take(a, ("ask", Asks(10.2, loot=True, mesos_only=True)), None)
+    both = svc._take(b, ("ask", Asks(10.3, loot=True, mesos_only=True)), first)
     assert both.mesos_only  # (to_scene filters what each wants of a frame searched for all)
     # A full ask is a frame asked for at its time, its searches what the others asked
     asked = svc._take(a, ("full", 7, 10.5), merged)
@@ -136,9 +135,10 @@ def full_runner():
     return feed.Runner(ListFrames(frames), _Look(eyes), step)
 
 
-def serve(address: str, info: str, seconds: float, idle_hz: float, active_hz: float, full: bool = False) -> None:
-    """A service in a process of its own, on the drawn frames."""
-    make = (lambda map_id, geo: full_runner()) if full else (lambda map_id, geo: drawn_runner())
+def serve(address: str, info: str, seconds: float, idle_hz: float, active_hz: float, full: bool = False,
+          slow: float = 0.0) -> None:
+    """A service in a process of its own, on the drawn frames (their searches `slow` s each)."""
+    make = (lambda map_id, geo: full_runner()) if full else (lambda map_id, geo: drawn_runner(0, slow))
     service.settle()
     svc = Service(make, 1, lambda: (STRETCHED, None), address=address, info=Path(info), log=lambda m: None,
                   idle_hz=idle_hz, active_hz=active_hz)
@@ -149,13 +149,13 @@ class Running:
     """A service process on a pipe of the test's own."""
 
     def __init__(self, tmp_path: Path, name: str, seconds: float = 30.0, idle_hz: float = 10.0,
-                 active_hz: float = 30.0, full: bool = False, at: "Running | None" = None):
+                 active_hz: float = 30.0, full: bool = False, at: "Running | None" = None, slow: float = 0.0):
         """`at`: where another one ran (started again there, as the babysitter starts it at the same address)."""
         pipe = rf"\\.\pipe\gamelab-perceive-test-{os.getpid()}-{name}-{time.monotonic_ns()}"
         self.address, self.info = (at.address, at.info) if at else (pipe, tmp_path / f"{name}.json")
         ctx = multiprocessing.get_context("spawn")
-        self.proc = ctx.Process(target=serve, args=(self.address, str(self.info), seconds, idle_hz, active_hz, full),
-                                daemon=True)
+        self.proc = ctx.Process(target=serve, args=(self.address, str(self.info), seconds, idle_hz, active_hz, full,
+                                                    slow), daemon=True)
         self.proc.start()
 
     def client(self, name: str, **kw) -> ServiceClient:
@@ -290,3 +290,135 @@ def test_a_full_frame_is_the_screens_next_frame_at_full_size(tmp_path):
     finally:
         pet.close()
         svc.stop()
+
+
+def test_the_frames_keep_their_rate_while_a_slow_search_is_out(tmp_path, monkeypatch):
+    # Each search takes 0.15 s: the frame loop goes on beside it (its searches on a thread of their own), a look that
+    # asks for a search of its own waits for it.
+    svc = Running(tmp_path, "slow", slow=0.15)
+    hunt = svc.client("tour", acts=True, throws=True)
+    monkeypatch.setattr(service.feed, "ASK_ONLY_STALE", False)  # (the look asks for her band on a frame of its own)
+    try:
+        assert hunt.ready(30.0), hunt.why
+        assert hunt.latest(Asks(time.monotonic(), band=True), timeout=5.0) is not None
+        t0 = time.monotonic()
+        asked = hunt.latest(Asks(t0, band=True), timeout=2.0)
+        waited = time.monotonic() - t0
+        assert asked is not None and asked.band_at >= t0 and 0.15 <= waited < 0.6
+        assert _rate(hunt, 1.0) > 15  # (30 a second asked for; with the searches in the frame loop under 7)
+    finally:
+        hunt.close()
+        svc.stop()
+
+
+def test_the_commands_side_asks_and_waits_and_gives_up(monkeypatch):
+    from gamelab.localization.worldstate import WorldState
+    from gamelab.perception.framecheck import Problem
+    client = ServiceClient("tour", acts=True, start=False, ensure=None)
+    client.alive = True
+    sent = []
+    monkeypatch.setattr(client, "_send", lambda *msg: sent.append(msg) or True)
+    now = time.monotonic()
+    client.states.append(_state(1, now - 1.0))
+    assert client.latest(Asks(now, band=True), timeout=0.05) is None
+    assert sent and sent[0][0] == "ask" and sent[0][1].band
+    client.states.append(_state(2, now + 0.01, band_at=now))
+    assert client.latest(Asks(now, band=True), timeout=0.05).seq == 2
+    client.states.append(WorldState(3, now + 0.02, False, why="the game isn't in front",
+                                    bad=Problem("window", "the game isn't in front")))
+    t0 = time.monotonic()
+    assert client.latest(Asks(now + 0.015), timeout=1.0) is None and time.monotonic() - t0 < 0.5  # at once
+    assert client.problem().kind == "window"
+    client.alive = False
+    assert client.latest(Asks(0.0), timeout=0.1) is None and client.problem().kind == "perception"
+
+
+def _state(seq, t, **kw):
+    from gamelab.localization.worldstate import WorldState
+    kw.setdefault("tag", (480, 308))
+    kw.setdefault("where", (1000.0, 500.0, 0, (0.0, 0.0)))
+    return WorldState(seq, t, True, **kw)
+
+
+def test_the_service_publishes_what_it_sees_as_watch_did(tmp_path, monkeypatch):
+    # watch's records, now the service's (Publisher): a session, a scene 10 times a second (every monster, the drops
+    # last searched and where), the tracks twice a second, her EXP gains; it sends no key and brings nothing forward.
+    from maplehelper import win32
+
+    from gamelab import telemetry, window
+    from gamelab.control import client as player_client
+    from gamelab.localization import worldstate
+    from gamelab.perception.exp_number import ExpReading
+    from test_feed import feed
+    touched = []
+    for obj, name in ((win32, "send_key"), (window, "bring_to_front"), (window, "move_cursor"),
+                      (player_client, "send"), (player_client, "submit"), (player_client, "cancel")):
+        monkeypatch.setattr(obj, name, lambda *a, _n=name, **k: touched.append(_n))
+    model = small_map()
+    model.mob_exp["Pig"] = 13  # (as on Thicket Around the Beach II: a pig's kill)
+    eyes = Drawn(model)
+
+    class Gaining(_Look):  # the number drawn as data: 421 EXP, then a pig's 13 more 0.5 s in
+        def look_at(self, full, t, ropes):
+            obs = super().look_at(full, t, ropes)
+            eyes.exp = 10 if t - self.t0 >= 0.5 else 0
+            obs.exp, obs.exp_box = eyes.frame(t, ropes).exp, np.full((1, 1), eyes.exp, np.uint8)
+            return obs
+    monkeypatch.setattr(worldstate.exp_number, "read",
+                        lambda box: ExpReading(421 + (13 if box[0, 0] else 0), 2.5, (19,)))
+
+    def make(map_id, geo):
+        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=IDLE)
+        return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), Gaining(eyes), step)
+    telemetry.record_to("perceive", tmp_path)
+    address = rf"\\.\pipe\gamelab-perceive-test-pub-{os.getpid()}-{time.monotonic_ns()}"
+    svc = Service(make, 1, lambda: (STRETCHED, None), address=address, log=lambda m: None,
+                  publish=service.Publisher((100, 100), log=lambda m: None), idle_hz=30.0)
+    svc.serve(until=time.monotonic() + 1.8)
+    assert touched == []
+    (path,) = tmp_path.glob("*-perceive.jsonl")
+    records = telemetry.read(path)
+    topics = {r["topic"] for r in records}
+    assert {"session", "scene", "tracks", "exp"} <= topics and records[0]["command"] == "perceive"
+    scenes = [r for r in records if r["topic"] == "scene"]
+    assert 8 <= len(scenes) <= 25 and scenes[-1]["monsters"][0]["kind"] == "pig"  # 10 a second for ~1.8 s
+    # Where the last search for drops looked (a late state's: the drops come back with it), her platform among them.
+    assert scenes[-1]["her"]["platform"] in {lk[0] for lk in scenes[-1]["looked"]}
+    assert [t["kind"] for t in [r for r in records if r["topic"] == "tracks"][-1]["list"]] == ["pig"]
+    exp = [r for r in records if r["topic"] == "exp"]
+    assert [(r["exp"], r["level"], r["gain"], r["kinds"], r["total"]) for r in exp] == [(434, 19, 13, ["pig"], 13)]
+
+
+def test_the_commands_attach_as_what_they_are_and_none_has_a_feed_or_sweep_flag(monkeypatch):
+    # The hunting commands send keys and tell her throws (the hunt's pace); `pet` sends keys but doesn't hunt; `hunt
+    # look` is a viewer. No command looks for itself any more: --feed/--no-feed and --sweep are gone.
+    from gamelab import __main__ as cli
+    from gamelab.behavior import hunter as hunter_mod
+    from gamelab.localization import mapdata
+    for cmd in (["hunt", "clear", "--no-feed"], ["tour", "--loop", "--sweep"], ["nav", "35", "--feed"]):
+        with pytest.raises(SystemExit):
+            cli.build_parser().parse_args(cmd)
+    made = []
+
+    class Client:
+        def __init__(self, name, **kw):
+            made.append((name, kw))
+            self.welcome, self.why = {"pid": 1, "epoch": 1, "map": kw["map_id"]}, ""
+
+        def ready(self, timeout):
+            return True
+
+        def full_frame(self, after):
+            raise AssertionError("no frame wanted here")
+    monkeypatch.setattr(service, "ServiceClient", Client)
+    monkeypatch.setattr(cli, "_eyes", lambda model, title, perception, restore: SimpleNamespace(log=print))
+    monkeypatch.setattr(mapdata, "load", lambda map_id: small_map())
+    monkeypatch.setattr(hunter_mod, "Hunter", lambda eyes, keys, model, log, feed, **kw: SimpleNamespace(feed=feed))
+    for argv, viewer, throws, want in ((["tour", "--loop"], False, True, (True, True)),
+                                       (["pet"], False, False, (True, False)),
+                                       (["hunt", "look"], True, True, (False, False))):
+        args = cli.build_parser().parse_args(argv)
+        cli._hunter(args, viewer=viewer, throws=throws)
+        name, kw = made[-1]
+        assert (kw["acts"], kw["throws"]) == want, argv
+    cli._PERCEPTION.clear()

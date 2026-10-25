@@ -24,6 +24,7 @@ from .analysis import analyze, calibration, recordings
 from .analysis.track import airborne, track
 from .control import client
 from .control.timeline import action_events, chain, her_setup
+from .perception.framecheck import BadLook
 from .paths import LAB, PLAYER_LOG, RECORDINGS, REPO, SHOTS, STOP
 from .screen import STRETCHED, geometry
 
@@ -32,15 +33,10 @@ FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the fron
 MINIMIZED_POLL_S = 0.5  # s between looks at whether the minimized game was restored (`watch` waits: _game_geometry)
 MINIMAP_TRIES = 3       # times the map's minimap picture is tried before a command that acts stops (_minimap_picture),
 MINIMAP_RETRY_S = 0.5   # ... this long apart (in case what kept it from loading passes)
-# `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes 10
-# times a second and tracks twice a second: on the saved frames a scene is 393 bytes (with what each look searched,
-# for analysis.respawn, and the other players; 279 before those) and the tracks 848, so about 20 MB an hour, 490 MB
-# a day: the 2 GB telemetry keeps (telemetry.KEEP_BYTES) hold 4 days of it (5 before).
-WATCH_SCENE_S = 0.1
-WATCH_TRACKS_S = 0.5
+# `watch`: how often it says on the console how what the perception service sees is going (the service publishes the
+# telemetry itself: localization.service.SCENE_S, TRACKS_S).
 WATCH_STATUS_S = 10.0
 WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for it (the player checks 4 a second)
-WATCH_EVENTS = ("died", "exp_gain")  # tracker events published as telemetry 'event' records (and hits, new ones)
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
 # subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
 GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
@@ -347,19 +343,24 @@ def _annotate(scene, path) -> None:
     img.save(path)
 
 
-def _eyes(model, title: str):
-    """Eyes on the game, with monster templates for that map (screenshots + the game's sprites), for its window at
-    the size it is now (its calibration at that size), and the map's minimap picture (_minimap_picture). Says where
-    the window is, at what DPI awareness, and what minimap picture was loaded: what a run that went wrong is told
-    by (2026-10-24 16:46:50)."""
+def _eyes(model, title: str, perception=None, restore: bool = True):
+    """A command's eyes on the game, with monster templates for that map (screenshots + the game's sprites), for its
+    window at the size it is now (its calibration at that size), and the map's minimap picture (_minimap_picture): what
+    it reads off the frames the perception service hands it (`perception`, its client: the whole frames too,
+    Eyes.full_frames). They take no shots of their own (perception.eyes.NoScreen). `restore`: a minimized game is
+    brought back (the commands that act); else it's waited for. Says where the window is, at what DPI awareness, and
+    what minimap picture was loaded: what a run that went wrong is told by (2026-10-24 16:46:50)."""
     from .perception.eyes import Eyes
     from .perception.sprites import detector_for
-    geo = _game_geometry(title, restore=True)  # (a minimized game is brought back, as the first look would)
+    geo = _game_geometry(title, restore=restore)
     area = window.client_rect(window.find_game(title))
     print(f"the game's client: {area['width']}x{area['height']} at ({area['left']}, {area['top']}) (desktop px); "
           f"DPI awareness {window.dpi_awareness()}", flush=True)
-    return Eyes(title, _calibration(geo).template, detector_for(model, geo), geo=geo,
+    eyes = Eyes(title, _calibration(geo).template, detector_for(model, geo), geo=geo,
                 minimap_picture=_minimap_picture(model))
+    if perception is not None:
+        eyes.full_frames = perception.full_frame
+    return eyes
 
 
 def _minimap_picture(model):
@@ -386,20 +387,42 @@ def _minimap_picture(model):
     return None
 
 
-_FEEDS: list = []  # continuous feeds started by this command (--feed, the default), closed when it ends
+_PERCEPTION: list = []  # this command's clients of the perception service, closed when it ends
+PERCEPTION_WAIT_S = 20.0  # s a command waits at its start for the perception service (started by it if none runs: its
+                          # first state comes about 2 s after it starts) before it goes on without (its looks stand
+                          # still until it comes)
 
 
-def _hunter(args, **kw):
-    """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way); with
-    `--feed` (on by default for `hunt`, `nav` and `tour`; --no-feed), her looks and glances from a continuous feed
-    (localization.feed: the game looked at every frame in a process of its own)."""
+def _perception(model, title: str, name: str, acts: bool, throws: bool = False):
+    """This command's client of the perception service (localization.service: the game looked at all the time, by one
+    process; started detached if none runs), named `name`, deciding on map `model`: `acts` (it sends keys: the game is
+    brought forward for it, and its map is the one looked at), `throws` (it tells her throws: hunting). Closed when the
+    command ends."""
+    from .localization import service
+    perception = service.ServiceClient(name, acts=acts, throws=throws, map_id=model.id, title=title, log=_log)
+    _PERCEPTION.append(perception)
+    started = time.monotonic()
+    if perception.ready(PERCEPTION_WAIT_S):  # (raises RuntimeError if another command holds it on another map)
+        w = perception.welcome
+        _log(f"perception: the service (pid {w['pid']}, run {w['epoch']}, map {w['map']}) in "
+             f"{time.monotonic() - started:.1f} s")
+    else:
+        _log(f"perception: {perception.why}; it's started if none runs, and this command stands still until it comes")
+    return perception
+
+
+def _hunter(args, viewer: bool = False, throws: bool = True, **kw):
+    """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way): her looks
+    and glances from the perception service (_perception), as a command that sends keys and tells her throws, or with
+    `viewer` one that does neither (`hunt look`); `throws` False: it sends keys but doesn't hunt (`pet`)."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
     cfg, keys, _ = her_setup()
     model = mapdata.load(args.map)
-    eyes = _eyes(model, cfg.game_window_title)
-    feed = _feed(model, cfg.game_window_title, eyes.geo) if getattr(args, "feed", False) else None
-    return Hunter(eyes, keys, model, log=_log, feed=feed, sweep=bool(getattr(args, "sweep", None)), **kw)
+    perception = _perception(model, cfg.game_window_title, args.cmd + ("-" + args.mode if hasattr(args, "mode") else ""),
+                             acts=not viewer, throws=throws and not viewer)
+    eyes = _eyes(model, cfg.game_window_title, perception, restore=not viewer)
+    return Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
 
 
 def cmd_pet(args) -> int:
@@ -407,8 +430,10 @@ def cmd_pet(args) -> int:
     Character Info to start from (or now, with --read); with --every, followed every that many minutes until stopped,
     counting only time the game window is there. Keys: pet food; for a read Esc and a double-click on her. With the Lie
     Detector alarm up it goes on: the food by the fullness followed (the player takes it then), no read until the alarm
-    is cleared; a food the player refuses or doesn't answer (it isn't running) is tried again at the next follow."""
-    hunter = _hunter(args)
+    is cleared; a food the player refuses or doesn't answer (it isn't running) is tried again at the next follow. Its
+    looks and panels are the perception service's frames (it sends keys, but doesn't hunt: the service keeps its idle
+    pace for it)."""
+    hunter = _hunter(args, throws=False)
     _record("pet", args.map)
     title = _game_title()
     if args.read and client.alarm_up():
@@ -435,42 +460,15 @@ def cmd_pet(args) -> int:
         time.sleep(args.every * 60)
 
 
-def _feed(model, title: str, geo=STRETCHED):
-    """A continuous feed of the game for this command (its child process; closed when the command ends), for its
-    window at geometry `geo` (the command's eyes'), or None if it can't start (the command then looks for itself)."""
-    import functools
-
-    from .attack import reach
-    from .localization import feed
-    try:
-        ring = {} if geo == STRETCHED else {"shape": feed.frame_shape(geo)}  # (FeedClient's own default otherwise)
-        client = feed.FeedClient(functools.partial(feed.screen_world, model.id, title, _calibration(geo).template,
-                                                   (reach.LOOK_UP, reach.LOOK_DOWN), geo=geo), **ring)
-    except Exception as e:  # it couldn't even be started: the command goes on without
-        _log(f"feed: couldn't start it ({type(e).__name__}: {e}); looking without it")
-        return None
-    if not client.alive:
-        _log(f"feed: {client.why}; looking without it")
-        client.close()
-        return None
-    _FEEDS.append(client)
-    _log(f"feed: the game looked at {client.hz:.0f} times a second in process {client.hello['pid']} "
-         f"(below normal priority: {client.hello['priority'] == feed.BELOW_NORMAL})")
-    return client
-
-
-def _close_feeds() -> None:
-    """Stop the command's feeds, and say what each did. Its child sends its counts (`bye`) only once asked to
-    stop, so they're read after close: read before it, on 2026-10-21 (`tour --feed`), every count was '?'."""
-    while _FEEDS:
-        client = _FEEDS.pop()
-        down = "" if client.alive else client.why  # it went down before the command ended
-        client.close()
-        bye = client.bye or {}
-        print(f"feed: {bye.get('frames', '?')} frames, {bye.get('placed', '?')} placing her, "
-              f"{bye.get('band', '?')} band and {bye.get('wide', '?')} whole-screen searches; "
-              f"{client.served} looks and glances from it, {client.refused} taken without it"
-              + (f"; {down}" if down else ""))
+def _close_perception() -> None:
+    """Detach the command from the perception service (which goes on), and say what it had of it."""
+    while _PERCEPTION:
+        perception = _PERCEPTION.pop()
+        down = "" if perception.alive else perception.why  # it went down before the command ended
+        perception.close()
+        print(f"perception: {perception.served} states handed out, {perception.refused} times none in time, "
+              f"{perception.connects} connections, {perception.gaps} states dropped for reading too slowly"
+              + (f"; {down}" if down and down != "closed" else ""))
 
 
 def _to_game() -> bool:
@@ -504,9 +502,8 @@ def cmd_hunt(args) -> int:
         for path in (paths.OLD_SHOT_LOG, paths.SHOT_LOG):
             _shot_summary(path)
         return 0
-    if args.mode == "look":  # what her own looks make of the game (no keys): no feed, whose child takes seconds to start
-        args.feed = False
-    hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, attack=_attack(args))
+    hunter = _hunter(args, viewer=args.mode == "look", low_hp=args.low_hp, potion_hp=args.potion_hp,
+                     attack=_attack(args))  # (`look`: what her looks make of the game; no keys)
     if args.mode == "look":
         return _hunt_looks(hunter, args.every, args.seconds) if args.every else _hunt_look(hunter)
     kinds = set(args.kinds.split(",")) if args.kinds else None
@@ -537,10 +534,10 @@ def cmd_hunt(args) -> int:
 
 
 def _hunt_looks(hunter, every: float, seconds: float) -> int:
-    """`hunt look --every S`: a look every S seconds for `seconds`, her place in a line each (no keys; a look brings the
-    game to the front, as any look does): what looks make of the game window moved, covered, minimized or resized while
-    it runs. One that fails its checks says why, and after senses.LOST_S of failing it stands still until one passes
-    (Senses.regain), as a hunt does (README: Capture checks)."""
+    """`hunt look --every S`: a look every S seconds for `seconds`, her place in a line each (no keys, and the game never
+    brought forward): what looks make of the game window moved, covered, minimized or resized while it runs. One that
+    fails its checks says why, and after senses.LOST_S of failing it stands still until one passes (Senses.regain), as a
+    hunt does (README: Capture checks)."""
     from .perception.framecheck import LookLost
     end = time.monotonic() + seconds
     while time.monotonic() < end:
@@ -603,12 +600,12 @@ def _hunt_look(hunter) -> int:
 
 
 def _exp_reading(hunter, s):
-    """Her EXP number as `hunt look` reads it (perception.exp_number), off the look's box; a look the feed served has
-    none (the feed's frames are half size, the box full size: worldstate.to_scene), so then off a look of its own (a
-    capture, no keys). None: no box."""
+    """Her EXP number as `hunt look` reads it (perception.exp_number), off the look's box; a look of the perception
+    service's state has none (the box is read off a full-size frame: worldstate.to_scene), so then off its full frame
+    (Eyes.look on it, no keys). None: no box."""
     from .perception import exp_number
     box = s.exp_box
-    if box is None and s.events is not None:  # (a look from the feed: it comes with the feed's events)
+    if box is None:
         box = hunter.senses.eyes.look().exp_box
     return exp_number.read(box) if box is not None else None
 
@@ -695,13 +692,17 @@ def cmd_map(args) -> int:
     from .localization.pose import Localizer
     model = mapdata.load(args.map)
     marks = []
-    if not args.offline:
-        client.check_alarm()  # a look brings the game to the front: not while the Lie Detector alarm is up
-        eyes = _eyes(model, _game_title())
-        s = eyes.look()
-        if s.dot:
-            w = Localizer(model, geo=s.geo).where_dot(s.dot)  # (the dot's px are the look's window's)
-            print(f"she's at map ({w.x:.0f}, {w.y:.0f}) on {platform_text(w.platform)} (dot {s.dot[0]:.1f},{s.dot[1]:.1f})")
+    if not args.offline:  # the perception service's newest state (no keys, the game never brought forward)
+        from .localization.worldstate import Asks
+        perception = _perception(model, _game_title(), "map", acts=False)
+        st = perception.latest(Asks(time.monotonic()), timeout=PERCEPTION_WAIT_S)
+        if st is None:
+            problem = perception.problem()
+            print(f"her place isn't known: {problem.why if problem else 'no state from the perception service'}")
+        elif st.dot:
+            w = Localizer(model, geo=st.geo).where_dot(st.dot)  # (the dot's px are the frame's window's)
+            print(f"she's at map ({w.x:.0f}, {w.y:.0f}) on {platform_text(w.platform)} "
+                  f"(dot {st.dot[0]:.1f},{st.dot[1]:.1f})")
             marks.append((w.x, w.y, "her"))
     print(f"{model.name}: {len(model.platforms)} platforms, {len(model.ropes)} ropes; monster spawns by platform:",
           dict(sorted(model.spawn_platforms.items())))
@@ -763,9 +764,9 @@ def cmd_tour(args) -> int:
         with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
             if args.grind:  # going round the map as a player grinds (behavior.grind; README: Grinding)
                 from .behavior.grind import Grind
-                report = Grind(tour, log=_log, sweep=args.sweep).run(minutes=args.minutes)
+                report = Grind(tour, log=_log).run(minutes=args.minutes)
             else:
-                report = hunt.Hunt(tour, log=_log, sweep=args.sweep).run(minutes=args.minutes)
+                report = hunt.Hunt(tour, log=_log).run(minutes=args.minutes)
         print(f"hunt done: {report}")
         return 0
     with on_alarm(hunter):
@@ -1083,13 +1084,11 @@ def cmd_bench_look(args) -> int:
         st = step.step(lambda ropes: eyes.look_at(full, None, ropes), time.monotonic(), True, asks)
         step.came_back()
         return st
-    # A look with the sweep on (Senses.sweep, as the hunt loop's are): her band and a slice of the rest of the screen
-    # in turn, the slices going round from look to look, and the frames with them.
-    swept = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN), sweep=True)
+    # Senses.look on frames of its own: the step run inline on each when asked (feed.InlineFeed), what's asked searched
+    # on it; then the step alone, as the perception service runs it on every frame.
     looks = {"Senses.look: no monsters": lambda: senses.look(mobs=False),
              "Senses.look: her band": lambda: senses.look(),
              "Senses.look: band + loot on her platform": lambda: senses.look(loot=True),
-             "Senses.look: ... and a slice of the sweep": lambda: swept.look(loot=True),
              "Senses.look: whole screen + all loot": lambda: senses.look(wide=True, loot=True),
              "feed step: her place, monsters re-found": frame_step,
              "feed step: ... and her band searched": lambda: frame_step(Asks(band=True)),
@@ -1330,151 +1329,98 @@ def cmd_bodies(args) -> int:
 
 # --- watching the game, no command running -------------------------------------------------------------
 
-def _watch_runner(args):
-    """What `watch` looks with: the game on screen (never brought to the front), her throws unknown (played
-    by hand), drops searched on a schedule of their own."""
-    from .attack import reach
-    from .localization import feed, worldstate
-    title = _game_title()
-    geo = _game_geometry(title)  # (minimized, it waits for the game to be restored: it never restores it)
-    return feed.screen_world(args.map, title, _calibration(geo).template, (reach.LOOK_UP, reach.LOOK_DOWN),
-                             throws=False, schedule=worldstate.WATCH, geo=geo)
-
-
 def cmd_watch(args) -> int:
-    """The game looked at every frame with no command running, as `--feed` does for one: her place, the
-    monsters tracked (ids, facing, HP bars, deaths and who killed them), her EXP gains and hits, published as
-    telemetry for the mini-map. It never sends a key and never brings the game to the front: a frame the
-    game isn't wholly showing isn't read. With --lie-detector it also checks the screen for the Lie Detector
-    and pages whoever is at the PC (the player keeps its own watchdog regardless): on a thread of its own, the
-    frame handed over as soon as it's taken, before its step (it had waited for the step, in the frame loop). With
-    --heading it reads which way she faces off every frame (perception.heading, her pictures in lab or the seed),
-    says each change, and publishes it with the scenes (her `facing_seen`): turn her with the arrows and watch."""
-    from .localization import feed, worldstate
+    """What the perception service sees (localization.service: the game looked at every frame at all times, by one
+    process, whose telemetry the mini-map follows), said on the console every WATCH_STATUS_S: its frames a second, the
+    monsters followed, the deaths it saw and whose, her EXP a minute, who's attached. A viewer of it: it never sends a
+    key and never brings the game to the front, starts the service if none runs (service.ensure), and waits for it and
+    for the game. With --lie-detector it also checks the screen for the Lie Detector, the service's frame at full size
+    every WATCH_LIE_DETECTOR_S, and pages whoever is at the PC (the player keeps its own watchdog regardless); with
+    --heading it reads which way she faces off every frame (perception.heading, her pictures in lab or the seed) and
+    says each change: turn her with the arrows and watch. (--hz: the service's rate is its own now: 30 a second while a
+    command hunts, 10 otherwise.)"""
+    from .localization import mapdata
     from .perception.drops import unknown_note
     from .perception.lie_detector import LieDetectorSpotter
-    feed.quiet()  # below normal priority, as the feed's child runs
-    runner = _watch_runner(args)
-    model, band = runner.step.model, runner.step.senses.band
-    path = telemetry.record_to("watch", telemetry.FOLDER)
-    telemetry.emit("session", map=model.id, command="watch", mode="watch")
-    print(f"watching the game {args.hz:.0f} times a second; telemetry: {path} (the mini-map follows it); Ctrl+C stops")
+    title = _game_title()
+    model = mapdata.load(args.map)
     if note := unknown_note(model):  # its monsters whose drops aren't known
         print(note)
+    perception = _perception(model, title, "watch", acts=False)
     spotter = LieDetectorSpotter() if args.lie_detector else None
-    started = time.monotonic()
-    until = started + args.minutes * 60 if args.minutes else None
-    w = {"scene": -1e9, "tracks": -1e9, "status": started, "lie": -1e9, "visible": None, "loot": [], "looked": [],
-         "frames": 0, "seen": 0, "alarm": False, "facing": "", "told": 0, "read": 0}
-    if args.heading:
-        bank = runner.eyes.heading_bank()
+    eyes = None
+    if args.heading:  # her pictures, read off the service's frames (no shots of its own)
+        eyes = _heading_eyes(title)
+        bank = eyes.heading_bank()
         print(f"her facing off every frame: {len(bank.refs)} pictures of her from {len(bank.pool)} boxes"
               + ("" if bank.ready else " (none: nothing can be told; `heading --learn` makes some from saved frames)"))
-
-    def facing(st: worldstate.WorldState):
-        """Which way the frame shows her facing (--heading), each change said."""
-        r = runner.eyes.heading(SimpleNamespace(frame=st.frame, tag=st.tag, tag_seen=st.tag_seen, geo=st.geo, t=st.t))
-        w["read"] += 1
-        w["told"] += r.side is not None
-        said = r.side or f"can't tell ({r.why})"
-        if said != w["facing"]:
-            w["facing"] = said
-            _log(f"  her frame: faces {r.side} (matched {r.score:.2f}, {r.margin:.2f} ahead)" if r.side else
-                 f"  her frame: {said}")
-        return r
-
-    def check(full) -> None:  # the Lie Detector, on its thread
-        if spotter.seen(full) and not w["alarm"]:
-            w["alarm"] = True
-            _lie_detector_seen(full)
-    lie = worldstate.Worker(check, "lie-detector") if spotter is not None else None
-
-    def shown(frame) -> None:
-        now = time.monotonic()
-        if lie is None or frame.full is None or now - w["lie"] < WATCH_LIE_DETECTOR_S:
-            return
-        lie.take()  # (a check that failed raises here)
-        if lie.free():
-            w["lie"] = now
-            lie.submit(frame.full)
-
-    def emit(st: worldstate.WorldState, frame) -> None:
-        now = time.monotonic()
-        if st.late:  # a frame searched, given again with what its searches found: its drops, its events
-            if st.loot is not None:  # (and where it looked for them, for the scene records: Scene.record's `looked`)
-                w["loot"], w["looked"] = st.loot, st.looked
-            for e in st.events:
-                if e.kind in WATCH_EVENTS:
-                    telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)
-            return
-        w["frames"] += 1
-        if st.visible != w["visible"]:
-            w["visible"] = st.visible
-            _log("the game is on screen: watching" if st.visible else f"not watching: {st.why} (nothing is read)")
-        if st.visible:
-            w["seen"] += 1
-            for e in st.events:
-                if e.kind in WATCH_EVENTS or (e.kind == "hp_drop" and e.data.get("new")):
-                    telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)
-                if e.kind == "died":
-                    by = e.data.get("by")  # the other player by it (localization.players)
-                    _log(f"  {e.data['kind']} #{e.track} died on platform {e.data['platform']}: "
-                         + ("hers" if e.data["cause"] == "hers" else "someone else's"
-                            + (f" (another player's, #{by})" if by is not None else "")))
-            if st.loot is not None:
-                w["loot"], w["looked"] = st.loot, st.looked
-            seen = facing(st) if args.heading else None
-            if now - w["scene"] >= WATCH_SCENE_S:
-                w["scene"] = now
-                s = worldstate.to_scene(st, model, band, mobs=True, wide=True)
-                s.loot, s.looked = w["loot"], w["looked"]  # as of the last frame searched for drops (LOOT_EVERY_S)
-                record = s.record()
-                if seen is not None and record["her"] is not None:
-                    record["her"].update(facing_seen=seen.side, facing_strong=seen.strong)
-                telemetry.emit("scene", **record)
-            if now - w["tracks"] >= WATCH_TRACKS_S:
-                w["tracks"] = now
-                telemetry.emit("tracks", list=[tr.record() for tr in st.tracks], frames=st.seq)
-        meter = runner.step.meter  # her EXP as read off its number (localization.gains)
-        while runner.step.gains:  # each gain as the hunter records it (Hunter._gained), for the mini-map's EXP line
-            g = runner.step.gains.popleft()
-            if meter.at is not None:
-                rate = meter.per_minute(now)
-                telemetry.emit("exp", exp=meter.at[1], level=meter.at[0], gain=g.exp, kinds=list(g.kinds),
-                               total=meter.total, per_minute=None if rate is None else round(rate, 1))
-        if now - w["status"] >= WATCH_STATUS_S:
-            c, rate = runner.step.tracker.counts, w["frames"] / max(1e-9, now - w["status"])
-            live = [tr for tr in st.tracks if tr.state != "dead"]
-            for note in meter.notes:  # (its sizes going off, or on again)
-                _log(f"  {note}")
-            meter.notes.clear()
-            per_minute = meter.per_minute(now)
-            exp = "" if meter.at is None else f"; EXP {meter.at[1]:,}" + (
-                "" if per_minute is None else f", {per_minute:.0f} a minute")
-            told = f"; her facing told on {w['told']} of {w['read']} frames" if args.heading else ""
-            print(f"{time.strftime('%H:%M:%S')} {rate:.1f} frames a second ({w['seen']} with the game on screen); "
-                  f"{len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'{exp}"
-                  f"{told}", flush=True)
-            w["status"], w["frames"], w["seen"], w["told"], w["read"] = now, 0, 0, 0, 0
-
-    # Nobody waits for watch's searches (each is merged at the next frame), so its wait for the next frame needn't
-    # end when one is back: time.sleep's, on Windows' fine timer, not an Event's, which ends on its 15.6 ms ticks.
-    def poll(wait: float):
-        time.sleep(wait)
-        return None, False
-
+    print("watching what the perception service sees; Ctrl+C stops", flush=True)
+    started = time.monotonic()
+    until = started + args.minutes * 60 if args.minutes else None
+    w = {"status": started, "lie": -1e9, "visible": None, "frames": 0, "seen": 0, "alarm": False, "facing": "",
+         "told": 0, "read": 0, "hers": 0, "others": 0, "seq": 0, "exp": None}
     try:
-        feed.run(runner, args.hz, poll, emit, until, shown)
+        while until is None or time.monotonic() < until:
+            perception.wait_frame(0.5)
+            now = time.monotonic()
+            states = [st for st in list(perception.states) if st.seq > w["seq"] and not st.late]
+            for st in states:
+                w["seq"], w["frames"] = max(w["seq"], st.seq), w["frames"] + 1
+                usable = st.visible and st.bad is None
+                if usable != w["visible"]:
+                    w["visible"] = usable
+                    _log("the game is on screen: watching" if usable else f"not watching: {st.why or st.bad}")
+                if not usable:
+                    continue
+                w["seen"] += 1
+                for e in st.events:
+                    if e.kind == "died":
+                        w["hers" if e.data.get("cause") == "hers" else "others"] += 1
+                    elif e.kind in ("exp_gain", "exp_read") and e.data.get("exp") is not None:
+                        w["exp"] = e.data["exp"]
+                if eyes is not None:
+                    frame = perception.frame_of(st)
+                    r = eyes.heading(SimpleNamespace(frame=frame, tag=st.tag, tag_seen=st.tag_seen, geo=st.geo, t=st.t))
+                    w["read"] += 1
+                    w["told"] += r.side is not None
+                    said = r.side or f"can't tell ({r.why})"
+                    if said != w["facing"]:
+                        w["facing"] = said
+                        _log(f"  her frame: faces {r.side} (matched {r.score:.2f}, {r.margin:.2f} ahead)" if r.side else
+                             f"  her frame: {said}")
+            if spotter is not None and not w["alarm"] and now - w["lie"] >= WATCH_LIE_DETECTOR_S:
+                w["lie"] = now
+                try:
+                    full = perception.full_frame(now)
+                except BadLook:
+                    full = None
+                if full is not None and spotter.seen(full):
+                    w["alarm"] = True
+                    _lie_detector_seen(full)
+            if now - w["status"] >= WATCH_STATUS_S:
+                rate = w["frames"] / max(1e-9, now - w["status"])
+                newest = perception.states[-1] if perception.states else None
+                live = [tr for tr in (newest.tracks if newest is not None else []) if tr.state != "dead"]
+                status = perception.status() or {}
+                names = ", ".join(c["name"] + ("*" if c["acts"] else "") for c in status.get("clients", []))
+                told = f"; her facing told on {w['told']} of {w['read']} frames" if args.heading else ""
+                exp = "" if w["exp"] is None else f"; EXP {w['exp']:,}"
+                print(f"{time.strftime('%H:%M:%S')} {rate:.1f} frames a second ({w['seen']} with the game on screen); "
+                      f"{len(live)} monsters followed; deaths seen: {w['hers']} hers, {w['others']} others'{exp}"
+                      f"{told}; attached: {names or '?'}", flush=True)
+                w["status"], w["frames"], w["seen"], w["told"], w["read"] = now, 0, 0, 0, 0
     except KeyboardInterrupt:
         pass
-    finally:
-        runner.step.close()
-        if lie is not None:
-            lie.close()
-        telemetry.stop()
-    print(f"watched {time.monotonic() - started:.0f} s: {runner.step.counts['frames']} frames "
-          f"({runner.step.counts['not visible']} not showing the game); deaths {runner.step.tracker.counts}")
+    print(f"watched {time.monotonic() - started:.0f} s")
     return 0
+
+
+def _heading_eyes(title: str):
+    """Eyes that read which way she faces off the perception service's frames (`watch --heading`: her pictures for the
+    window's size; no shots of their own)."""
+    from .perception.eyes import Eyes
+    geo = _game_geometry(title)
+    return Eyes(title, _calibration(geo).template, geo=geo)
 
 
 def _lie_detector_seen(frame) -> None:
@@ -1776,13 +1722,6 @@ def cmd_patrol(args) -> int:
 
 # --- the command line ------------------------------------------------------------------------------------
 
-def feed_arg(s) -> None:
-    s.add_argument("--feed", action=argparse.BooleanOptionalAction, default=True,
-                   help="looks and glances from a continuous feed: the game looked at every frame in a process of its "
-                        "own, at below-normal priority, her looks reading what it follows (default: on; --no-feed, "
-                        "each look taken when it's asked for, as before 2026-10-24)")
-
-
 def attack_arg(s) -> None:
     s.add_argument("--attack", choices=["choice", "skill", "regular"], default="choice",
                    help="which attack a throw is (behavior.attacks): choice (the default), Lucky Seven but the regular "
@@ -1794,12 +1733,6 @@ def attack_arg(s) -> None:
 def _attack(args) -> str:
     """The attack mode `--attack` (or `--skill`) asks for."""
     return "skill" if getattr(args, "skill", False) else getattr(args, "attack", "regular")
-
-
-def sweep_arg(s, default: str) -> None:
-    s.add_argument("--sweep", action=argparse.BooleanOptionalAction, default=None,
-                   help="each look at the band around her also searches a slice of the rest of the screen in turn, so "
-                        f"her memory of the monsters is kept up (localization.senses; default: {default})")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1865,8 +1798,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
     s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
-    feed_arg(s)
-    sweep_arg(s, "off")
     s.set_defaults(func=cmd_hunt)
 
     s = sub.add_parser("probe", help="in-game probes of what a star hits: list them, run one, score their log")
@@ -1917,8 +1848,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ways", type=int, metavar="N",
                    help="each trip chooses among the N best distinct ways by their times (route.ROUTES; default 1: "
                         "the quickest, varied by the moves' random weights; README: Route diversity)")
-    feed_arg(s)
-    sweep_arg(s, "off")
     s.set_defaults(func=cmd_nav)
 
     s = sub.add_parser("tour", help="hunt the map: sweep the platforms worth hunting (nearest next, varied a "
@@ -1950,8 +1879,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ground-tie", type=float, metavar="F",
                    help="with --loop: of the grounds within this share of the best's score, the one she left longest "
                         "ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
-    feed_arg(s)
-    sweep_arg(s, "on with --loop (hunt.SWEEP), else off")
     s.set_defaults(func=cmd_tour)
 
     s = sub.add_parser("pet", help="keep her pet fed: its fullness followed in time (read once off her Character Info) "
@@ -1975,7 +1902,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "
                                      "followed, deaths and who killed them), for the mini-map; never sends keys or "
                                      "brings the game forward")
-    s.add_argument("--hz", type=float, default=30.0, help="frames a second looked at")
+    s.add_argument("--hz", type=float, default=30.0, help="(none now: the perception service's rate is its own)")
     s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
     s.add_argument("--lie-detector", action="store_true",
                    help="also check the screen for the Lie Detector and page whoever is at the PC")
@@ -2196,7 +2123,7 @@ def main(argv=None) -> int:
         print(f"error: {e}")
         return 1
     finally:
-        _close_feeds()
+        _close_perception()
 
 
 if __name__ == "__main__":

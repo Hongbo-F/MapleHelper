@@ -61,10 +61,10 @@ are suspended, not ended, when a higher rule fires: they keep their route weight
 (OBJECTIVE_S, suspensions included).
 
 What she knows of the monsters off her band is her memory of them (Hunter.memory, localization.memory: every look's,
-kept across looks, forgotten by looks that cover their place without them or by age), and her looks sweep the screen
-a slice at a time (SWEEP: Senses.sweep), so the memory is kept up while she shoots: the ground's monsters out of reach
-(rule 7), whether anything is left on it (the fast exit), and what guards a pile elsewhere (rule 5b) go by it. Her
-own platform's, which the fights react to, are the look's as before.
+kept across looks, forgotten by looks that cover their place without them or by age), and every look of hers has the
+monsters perception follows on the whole screen (Scene.swept: localization.feed.Feed.look), so the memory is kept up
+while she shoots: the ground's monsters out of reach (rule 7), whether anything is left on it (the fast exit), and what
+guards a pile elsewhere (rule 5b) go by it. Her own platform's, which the fights react to, are the look's as before.
 
 The numbers marked "guess" are starting values for the simulator's A/B runs (gamelab.sim.harness); none
 is measured in game. Respawns and how long drops last were measured on the live telemetry (analysis.respawn), and
@@ -252,16 +252,6 @@ PLAYER_DY = 100.0
 # after its kill, before OTHERS_AFTER makes them worth a trip anyway, so only piles taken for no kill of hers are
 # left; whether a real player's are worth leaving is for the game to say.
 PLAYER_PILES = False
-# Whether the hunt loop's looks at the band around her also search a slice of the rest of the screen each
-# (Senses.sweep), where it costs her nothing (Hunter.hold_sweep: during her attack's lock, or with nothing in her
-# band): the whole view every 4 slices, 16.7 ms each at the game's own 1366x768 (bench-look). In the live hunts of
-# 2026-10-24 on Tree Dungeon, Forest Up North II her whole-screen looks came a median 4.9 s apart (up to 22.8 s) while
-# she shot, and nothing she saw elsewhere was kept: the memory has nothing to go by between them. With it, in the
-# simulator, her memory held 0.62-0.66 of the monsters on screen off her band, 0.19-0.42 without (Tree Dungeon's crowd,
-# the first map's game preset), and her EXP a minute was as before (hunter.SWEEP_LOCK_S). Never in a look a continuous
-# feed serves (it searches the whole screen every second, and her band looks have what it follows: feed.TRACKED); her
-# looks taken without it sweep, while the feed rests or once it's gone (Senses.look).
-SWEEP = True
 
 
 def _keep_off(o: "Objective") -> tuple[int, ...]:
@@ -342,12 +332,10 @@ class Hunt:
     spots and rest) and its hunter and navigator."""
     valuable: float = VALUABLE  # rule 6a's: what a drop must be worth on its own, on her map (looting.Worth.valuable)
 
-    def __init__(self, tour, log=print, rng: random.Random | None = None, sweep: bool | None = None):
-        """`sweep`: her looks sweep the screen a slice at a time (None: SWEEP)."""
+    def __init__(self, tour, log=print, rng: random.Random | None = None):
         self.tour, self.h, self.nav, self.model = tour, tour.h, tour.nav, tour.nav.model
         self.valuable = self.h.worth.valuable
         self.log = log
-        self.sweep = SWEEP if sweep is None else sweep
         self.rng = rng or tour.rng
         self.kinds = tour.worth
         self.report = HuntReport()
@@ -400,8 +388,6 @@ class Hunt:
         self._gone = self.h.drops.gone_tried
         self._progress = start
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
-        senses = self.h.senses
-        sweep, senses.sweep = senses.sweep, self.sweep  # (only while no feed serves her looks: Senses.look)
         looter = self.h.looter
         yield_to = looter.yield_to
         if EXP_FIRST:
@@ -422,7 +408,6 @@ class Hunt:
                         break
             self._leave_ground()
         finally:
-            senses.sweep = sweep  # as it was, whatever ended the hunt
             looter.yield_to = yield_to
         self.report.seconds = time.monotonic() - start
         self._log_memory()
@@ -655,11 +640,10 @@ class Hunt:
             self.fs, self._fs_key = FightState(exp_counted=self.h.report.exp_kills), key
 
     def _log_memory(self) -> None:
-        """What her memory of the monsters did over the hunt, and the sweep's slices (the end of the run's log)."""
-        c, sc = self.h.memory.counts, self.h.senses.sweep_counts
-        swept = f"; the sweep: {sc['slices']} slices, held {sc['held']} times" if sc["slices"] or sc["held"] else ""
+        """What her memory of the monsters did over the hunt (the end of the run's log)."""
+        c = self.h.memory.counts
         self.log(f"  memory: {c['new']} monsters seen, {c['killed']} killed by her, {c['gone']} forgotten by looks, "
-                 f"{c['aged']} by age{swept}")
+                 f"{c['aged']} by age")
         if said := self.h.attacks.summary():  # her throws by attack (behavior.attacks)
             self.log(f"  attacks: {said}")
 

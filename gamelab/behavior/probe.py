@@ -91,6 +91,11 @@ from ..localization.scene import Scene
 from ..motion import body, physics
 from .fight import GUARD_PATIENCE, GUARD_SECONDS, IN_HER_WAY, UNPLACED_LOOKS
 
+# s of looks that can't place her before a probe gives up on her: a fight's UNPLACED_LOOKS, 0.2 s apart. By time, not
+# looks: while a jump throw flies she's looked at as often as perception has a frame (30 a second), on no platform for
+# the 0.6 s she's in the air, and ten looks in a row did that (counted, the probe stopped after its first jump throw).
+UNPLACED_S = UNPLACED_LOOKS * 0.2
+
 if TYPE_CHECKING:
     from ..control.navigator import Navigator
     from .hunter import Hunter
@@ -430,7 +435,7 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
     report = ProbeReport(probe.name)
     deadline = time.monotonic() + seconds
     flying: _Flying | None = None
-    unplaced = 0
+    unplaced: float | None = None  # since when (the frame time) her looks haven't placed her
     guard = _Guard(clears_first(h.model, probe), probe.x)
     out = JUMP_BACK_OUT if probe.style == "jump_back" else 0.0
     ranges = ", ".join(f"{k} {lo:.0f}-{hi - out:.0f}" for k in probe.kinds for lo, hi in (probe.range_of(k),))
@@ -446,14 +451,14 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
         if flying is not None and s.where is not None:
             flying.see(s, h.exp_gains)  # in mid-jump too (a jump back's pick, and while she's in the air)
         if s.where is None or s.platform is None:
-            unplaced += 1
-            if unplaced >= UNPLACED_LOOKS:
+            unplaced = s.t if unplaced is None else unplaced
+            if s.t - unplaced >= UNPLACED_S:
                 report.stop = "lost track of her"
                 break
             if flying is None:
                 time.sleep(0.2)
             continue
-        unplaced = 0
+        unplaced = None
         if stop := h.health_check(s):
             report.stop = stop
             break

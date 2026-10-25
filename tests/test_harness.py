@@ -385,17 +385,16 @@ def test_a_short_harness_run_on_the_real_map():
     assert ways["ways"] == 3 and route.ROUTES == out["ways"]
 
 
-def test_a_harness_run_with_the_feed_and_todays_look_costs():
+def test_a_harness_run_takes_her_looks_from_the_feed_with_todays_look_costs():
     if not scenarios.available():
         pytest.skip("needs the real map's data")
     from gamelab.sim import fakes
     coded = fakes.LOOK_S
-    out = harness.run_one("loop", 1, "game", minutes=0.5, feed=True, costs="measured")
+    out = harness.run_one("loop", 1, "game", minutes=0.5, costs="measured")
     assert out["feed"] and out["costs"] == "measured" and fakes.LOOK_S == coded  # put back after the run
     rec = out["feed_record"]
-    assert rec["frames"] > 0 and rec["senses"]["from the feed"] > 0 and out["looks"] == rec["senses"]["taken here"]
-    blocking = harness.run_one("loop", 1, "game", minutes=0.5, costs="measured")
-    assert "feed_record" not in blocking and blocking["looks"] > 0
+    assert rec["frames"] > 0 and rec["senses"]["looks"] > 0 and out["looks"] == rec["senses"]["looks"]
+    assert out["nav"]["glances"] == rec["senses"]["glances"] > 0
 
 
 def test_the_stacks_computing_is_timed_between_its_calls_and_the_run_is_as_it_was():
@@ -406,7 +405,7 @@ def test_the_stacks_computing_is_timed_between_its_calls_and_the_run_is_as_it_wa
         pytest.skip("needs the real map's data")
     found, (timed,) = latency.measure("loop", [1], 0.5)
     assert timed == harness.run_one("loop", 1, "game", minutes=0.5)
-    assert found.times["send"] and found.times["_now"] and min(min(xs) for xs in found.times.values()) >= 0
+    assert found.times["send"] and found.times["sleep"] and min(min(xs) for xs in found.times.values()) >= 0
     assert fakes.Clock.charge is Clock.charge and Clock.charge.__module__ == "gamelab.sim.fakes"  # put back
     lines = found.table()
     assert lines[0].startswith("before") and lines[-1].startswith("any call")

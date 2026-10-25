@@ -1,11 +1,9 @@
 """The continuous feed (localization.feed): the ring of frames in shared memory never holds more than its
-slots, a look is never handed a frame from before it was asked for, every event is drained once, what's
-asked is done on the next frame (its searches off the frame loop, back their cost later), and the child
-process itself, started and stopped, with a list of frames for a screen, its frames coming at their rate
-while a slow search is out. When the child dies, the stack's side says so and hands out nothing more."""
+slots, a look is never handed a frame from before it was asked for nor one that failed its checks, every event is
+drained once, what's asked is done on the next frame (its searches off the frame loop, back their cost later), and
+Senses on it: every look and glance from it, standing still (LookLost) while it has nothing to act on, and going on
+after. The perception service that runs it live is test_service's."""
 
-import functools
-import sys
 import time
 
 import numpy as np
@@ -13,7 +11,7 @@ import pytest
 
 from gamelab.localization import feed
 from gamelab.localization import senses as senses_mod
-from gamelab.localization.feed import Asks, FeedClient, Ring, SyncFeed, fresh, run
+from gamelab.localization.feed import Asks, Ring, SyncFeed, fresh, run
 from gamelab.localization.senses import Senses
 from gamelab.localization.worldstate import Schedule, SearchThread, WorldState, WorldStep
 from gamelab.perception.frames import Frame, ListFrames
@@ -68,6 +66,29 @@ def test_a_look_is_never_handed_a_frame_from_before_it_asked(monkeypatch):
     for kind in ("offset", "minimap", "hud", "picture", "tag", "place"):
         assert not fresh(state(12, 10.1, band_at=10.1, bad=Problem(kind, kind)), band)
         assert not fresh(state(12, 10.1, tag=None, where=None, bad=Problem(kind, kind)), Asks(after=10.0))
+
+
+def test_a_bad_newest_state_gives_no_look_at_once_and_says_why(sync):
+    # SyncFeed (and the service's client) as the frames fail their checks: no look given, at once (not after
+    # FEED_WAIT_S), and `problem` says why; a glance has none either.
+    from gamelab.perception.framecheck import Problem
+    f, clock, eyes = sync
+    clock.sleep(0.5)
+    real = f._look
+    problem = Problem("offset", "the capture is offset by (+26, +26) px")
+
+    def look(ropes):
+        obs = real(ropes)
+        obs.bad, obs.tag, obs.dot = problem, None, None
+        return obs
+    f._look = look
+    clock.sleep(0.1)
+    asked = clock.now
+    assert f.latest(Asks(asked - 0.05)) is None and clock.now - asked < 0.1 and f.problem() == problem
+    assert f.glance(asked - 0.05, timeout=0.0) is None
+    f._look = real
+    clock.sleep(0.1)
+    assert f.latest(Asks(clock.now - 0.05)) is not None and f.problem() is None
 
 
 class Clock:
@@ -239,28 +260,8 @@ def test_frames_the_game_isnt_showing_say_so_and_are_not_read():
     assert [(s.visible, s.why) for s in out] == [(False, "the game isn't in front")] * 3
 
 
-def test_the_stacks_side_asks_and_waits_and_gives_up(monkeypatch):
-    client = FeedClient(lambda: None, start=False)
-    client.alive = True
-    sent = []
-    monkeypatch.setattr(client, "_send", lambda *msg: sent.append(msg))
-    now = time.monotonic()
-    client.states.append(state(1, now - 1.0))
-    assert client.latest(Asks(now, band=True), timeout=0.05) is None
-    assert sent and sent[0][0] == "ask" and sent[0][1].band
-    client.states.append(state(2, now + 0.01, band_at=now))
-    assert client.latest(Asks(now, band=True), timeout=0.05).seq == 2
-    client.states.append(WorldState(3, now + 0.02, False, why="the game isn't in front"))
-    t0 = time.monotonic()
-    assert client.latest(Asks(now + 0.015), timeout=1.0) is None and time.monotonic() - t0 < 0.5
-    client.alive = False
-    assert client.latest(Asks(0.0), timeout=1.0) is None
-
-
-# --- the child process itself ----------------------------------------------------------------------
-
 class _Look:
-    """The drawn frames' eyes, as the child's Runner needs them (look_at a frame), with a pig walking."""
+    """The drawn frames' eyes, as the service's Runner needs them (look_at a frame), with a pig walking."""
 
     def __init__(self, eyes):
         self.eyes, self.t0 = eyes, None
@@ -288,9 +289,9 @@ class Slow(FakeDetector):
 
 
 def drawn_runner(n: int = 0, slow: float = 0.0) -> feed.Runner:
-    """The child's runner for the smoke test: a list of blank frames (a stand-in for the screen), read by eyes
-    that draw a pig walking (built in the child, from this module); its searches on their thread, as the
-    feed's, each taking `slow` s."""
+    """A service's runner for its tests (test_service): a list of blank frames (a stand-in for the screen), read by eyes
+    that draw a pig walking (built in the service's process, from this module); its searches on their thread, as the
+    service's, each taking `slow` s."""
     model = small_map()
     eyes = Drawn(model)
     if slow:
@@ -298,112 +299,6 @@ def drawn_runner(n: int = 0, slow: float = 0.0) -> feed.Runner:
     senses = Senses(eyes, model, band=(100, 100))
     step = WorldStep(senses, searches=SearchThread(senses))
     return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)] * 3), _Look(eyes), step)
-
-
-def test_the_child_runs_below_normal_and_hands_out_states_frames_and_events():
-    client = FeedClient(functools.partial(drawn_runner, 0), hz=60.0)
-    try:
-        assert client.alive, client.why
-        if sys.platform == "win32":
-            assert client.hello["priority"] == feed.BELOW_NORMAL
-        after = time.monotonic()
-        st = client.latest(Asks(after, band=True), timeout=5.0)
-        assert st is not None and st.t >= after and st.placed
-        assert [m.kind for m in st.monsters] == ["pig"]
-        assert client.frame_of(st).shape == feed.FRAME_SHAPE
-        assert client.wait_frame(1.0)
-        time.sleep(0.3)
-        first = client.drain_events()
-        assert [e.kind for e in first].count("appeared") == 1
-        assert "appeared" not in [e.kind for e in client.drain_events()]
-        assert len(client.ring.held()) <= feed.RING_SLOTS
-    finally:
-        client.close()
-    assert client.proc.exitcode is not None and not client.alive
-    assert client.bye is not None and client.bye["frames"] > 10
-
-
-def test_a_late_state_has_its_frames_slot_in_the_ring_even_when_its_search_was_back_before_the_frame_went_out(
-        monkeypatch):
-    # The drawn frames' searches are back at once, often before their own frame's state has gone out: a late state
-    # copied from it then had no slot (14 of 42 here), and a look given it got a black frame. (Each look asks for her
-    # band searched on a frame of its own, so there are as many late states.)
-    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)
-    client = FeedClient(functools.partial(drawn_runner, 0), hz=30.0)
-    came = []
-    client.on_state = lambda st: came.append((st.seq, st.late, st.slot, client.ring.slot_of(st.seq)))
-    try:
-        assert client.alive, client.why
-        for k in range(20):
-            assert client.latest(Asks(time.monotonic(), band=True, loot=k % 2 == 0), timeout=2.0) is not None
-    finally:
-        client.close()
-    late = [c for c in came if c[1]]
-    assert len(late) >= 20
-    assert all(slot is not None for seq, _, slot, held in late if held is not None)  # its frame still in the ring
-    assert all(slot == seq % feed.RING_SLOTS for seq, _, slot, _ in came if slot is not None)
-
-
-def test_the_childs_frames_keep_their_rate_while_a_slow_search_is_out(monkeypatch):
-    # Each search takes 0.15 s; in the frame loop (as they were) the feed made fewer than 7 frames a second. (The look
-    # asks for her band searched on a frame of its own, and waits for it.)
-    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)
-    client = FeedClient(functools.partial(drawn_runner, 0, 0.15), hz=30.0)
-    try:
-        assert client.alive, client.why
-        assert client.latest(Asks(time.monotonic(), band=True), timeout=5.0) is not None
-        first = client.states[-1].seq
-        t0 = time.monotonic()
-        asked = client.latest(Asks(t0, band=True), timeout=2.0)  # a look waits for its own search ...
-        waited = time.monotonic() - t0
-        time.sleep(1.0)
-        rate = (client.states[-1].seq - first) / (time.monotonic() - t0)
-        assert asked is not None and asked.band_at >= t0 and 0.15 <= waited < 0.6
-        assert rate > 15  # ... while the frames go on (30 a second asked for, Windows' timer ticks and a busy CPU
-        # losing some; with the searches in the frame loop it would be under 7)
-    finally:
-        client.close()
-    assert client.bye["band"] + client.bye["wide"] >= 5
-
-
-def test_a_command_s_feed_says_what_it_did_when_it_ends(capsys):
-    # The real child, as `--feed` starts it for a command: closed at the command's end, it sends the world step's
-    # counts, and the summary has them (each was '?' on 2026-10-21, read before the child was asked to stop).
-    from gamelab import __main__ as cli
-    client = FeedClient(functools.partial(drawn_runner, 0), hz=60.0)
-    assert client.alive, client.why
-    assert client.latest(Asks(time.monotonic(), band=True), timeout=5.0) is not None
-    cli._FEEDS.append(client)
-    capsys.readouterr()
-    cli._close_feeds()
-    out = capsys.readouterr().out
-    assert cli._FEEDS == [] and "?" not in out and client.bye["frames"] > 0 and client.why == "closed"
-    assert out.startswith(f"feed: {client.bye['frames']} frames, {client.bye['placed']} placing her, ")
-    assert out.rstrip().endswith("taken without it")  # closed, not gone down: no reason given
-
-
-def test_when_the_child_dies_the_stack_is_told_and_gets_nothing_more():
-    client = FeedClient(functools.partial(drawn_runner, 0), hz=60.0)
-    try:
-        assert client.latest(Asks(time.monotonic()), timeout=5.0) is not None
-        client.proc.terminate()
-        client.proc.join(5.0)
-        deadline = time.monotonic() + 5.0
-        while client.alive and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert not client.alive and client.why
-        assert client.latest(Asks(time.monotonic()), timeout=0.5) is None
-        assert not client.wait_frame(0.1)
-    finally:
-        client.close()
-
-
-def test_a_child_that_cant_start_says_why():
-    client = FeedClient(functools.partial(int, "not a number"), hz=60.0)
-    try:
-        assert not client.alive and "couldn't start" in client.why
-    finally:
-        client.close()
 
 
 def test_screen_frames_never_bring_the_game_forward_and_say_when_it_isnt_showing(monkeypatch):
@@ -464,10 +359,16 @@ def _aged(shot, t):
     return shot
 
 
-def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
+def test_senses_look_and_glance_through_the_feed_and_stand_still_while_it_has_nothing(sync, monkeypatch):
+    # Every look and glance is the feed's (no eyes' look of their own); while it has nothing to act on (here: down),
+    # a look is asked again RETRY_GAP_S apart and raises LookLost after LOST_S, a glance has no dot and the last HP,
+    # and raises LookLost after GLANCE_LOST_S; once it's back, the look passes, said so.
     from gamelab.perception.eyes import GLANCE_EVERY_S
+    from gamelab.perception.framecheck import LookLost
     f, clock, eyes = sync
     senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    said = []
+    senses.log = said.append
     eyes.mobs = [pig(1100)]
     clock.sleep(0.5)
     asked = clock.now
@@ -476,13 +377,22 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     assert [e.kind for e in s.events] == ["appeared"]  # what the feed saw since: once
     assert senses.look(mobs=False).events == [] and getattr(eyes, "looks", 0) == 0
     a, b = senses.glance(), senses.glance()
-    assert senses.counts["glances from the feed"] == 2 and senses._glanced - asked >= GLANCE_EVERY_S - 1e-9
-    f.alive = False  # the feed's gone: the look is taken here, as without one
-    s = senses.look()
-    assert eyes.looks == 1 and s.events is None and senses.counts == {
-        "from the feed": 2, "taken here": 1, "glances from the feed": 2, "feed rested": 0}
-    senses.glance()
-    assert eyes.glances == 1
+    assert senses.counts["glances"] == 2 and senses._glanced - asked >= GLANCE_EVERY_S - 1e-9
+    real = f.latest
+    monkeypatch.setattr(f, "latest", lambda want, timeout=feed.FEED_WAIT_S: (clock.sleep(timeout), None)[1])
+    hp = a[1]
+    assert senses.glance() == (None, hp)  # (0.25 s waited: no dot, the last HP)
+    with pytest.raises(LookLost):
+        senses.glance()  # none for GLANCE_LOST_S: a chain running is cut (control.navigator)
+    lost = clock.now
+    with pytest.raises(LookLost):
+        senses.look()
+    assert clock.now - lost >= senses_mod.LOST_S and getattr(eyes, "looks", 0) == 0
+    assert said[0].startswith("  a look failed its checks: ")
+    monkeypatch.setattr(f, "latest", real)
+    back = senses.regain(LookLost(f.problem() or senses_mod.Problem("perception", "down")), clock.now + 5.0)
+    assert back is not None and said[-1].startswith("  the game looks as expected again")
+    assert senses.failed["lost"] == 1
 
 
 def test_a_look_is_the_newest_frame_newer_than_the_last_looks_and_after_her_keys_effect(sync, monkeypatch):
@@ -548,12 +458,12 @@ def test_a_look_after_a_glance_saw_her_still_takes_that_frame_and_waits_for_none
     assert s.t > seen and clock.now > asked
 
 
-def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band_and_sweeps_only_once_it_is_down(sync):
-    # Her memory takes what the feed follows off her band (Scene.swept, as the sweep's slices had it), with the whole
-    # screen as searched while the feed's last search of it is fresh; the sweep's slices only once the feed is gone.
+def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band(sync):
+    # Her memory takes what the feed follows off her band (Scene.swept), with the whole screen as searched while the
+    # feed's last search of it is fresh.
     from gamelab.localization.memory import Memory
     f, clock, eyes = sync
-    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f, sweep=True)
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
     memory = Memory(f.step.model)
     senses.listeners.append(memory.on_look)
     eyes.mobs = [pig(1100), pig(1200, 300)]  # one in her band, one on the platform 200 above (off it)
@@ -563,61 +473,9 @@ def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band_and_sweeps_o
     assert [m.x for m in s.monsters] == [pytest.approx(1100, abs=3)]
     assert [(m.x, m.platform) for m in s.swept] == [(pytest.approx(1200, abs=3), above)]
     assert len(s.rows) == 2 and s.rows[1][0] < s.rows[0][0] and s.rows[1][1] >= s.rows[0][1]  # her band, the screen
-    assert len(memory.alive(s.t)) == 2 and senses.sweep_counts["slices"] == 0
+    assert len(memory.alive(s.t)) == 2
     clock.sleep(0.4)  # the whole screen's search over 0.6 s old now: her band's rows alone
     assert len(senses.look().rows) == 1
-    f.alive = False  # the feed's gone: her looks are taken here, and sweep the screen again
-    s = senses.look()
-    assert eyes.looks == 1 and senses.sweep_counts["slices"] == 1 and len(s.rows) == 2
-
-
-def test_a_look_taken_here_while_the_feed_is_up_sweeps_resting_or_refused(sync, monkeypatch):
-    # A feed resting (FEED_REST_S) or giving no look is still alive: the looks taken here meanwhile sweep as without it
-    # (review, 2026-10-25: they swept nothing, and her memory had only her band from them).
-    from gamelab.localization import senses as senses_mod
-    f, clock, eyes = sync
-    monkeypatch.setattr(senses_mod, "time", clock)
-    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f, sweep=True)
-    eyes.mobs = [pig(1100), pig(1200, 300)]
-    clock.sleep(1.25)
-    senses._feed_rest = clock.now + senses_mod.FEED_REST_S  # resting, as _feed_paced rests it
-    s = senses.look()
-    assert eyes.looks == 1 and senses.sweep_counts["slices"] == 1 and len(s.rows) == 2
-    senses._feed_rest = -1e18
-    monkeypatch.setattr(f, "look", lambda *args: None)  # up, but gives none
-    s = senses.look()
-    assert eyes.looks == 2 and senses.sweep_counts["slices"] == 2 and len(s.rows) == 2
-    assert f.alive and senses.counts["taken here"] == 2
-
-
-def test_a_slow_feed_is_rested_and_her_looks_and_glances_are_taken_here_meanwhile(sync, monkeypatch):
-    # Starved of the CPU (its child runs at below-normal priority), the feed's looks come slowly: after FEED_SLOW_LOOKS
-    # of them in a row waiting FEED_SLOW_S or more, it rests FEED_REST_S; then one look tries it again.
-    from gamelab.localization import senses as senses_mod
-    f, clock, eyes = sync
-    monkeypatch.setattr(senses_mod, "time", clock)
-    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
-    clock.sleep(0.5)
-    quick = f.look
-
-    def slow(*args):
-        clock.sleep(senses_mod.FEED_SLOW_S)  # (each look waits that long for it)
-        return quick(*args)
-    monkeypatch.setattr(f, "look", slow)
-    for _ in range(senses_mod.FEED_SLOW_LOOKS):
-        senses.look()
-    assert senses.counts["from the feed"] == senses_mod.FEED_SLOW_LOOKS and senses.counts["feed rested"] == 1
-    senses.look()
-    senses.glance()
-    assert getattr(eyes, "looks", 0) == 1 and getattr(eyes, "glances", 0) == 1  # taken here while it rests
-    clock.sleep(senses_mod.FEED_REST_S)
-    senses.look()  # tried again, still slow: rested again at once
-    assert senses.counts["from the feed"] == senses_mod.FEED_SLOW_LOOKS + 1 and senses.counts["feed rested"] == 2
-    monkeypatch.setattr(f, "look", quick)
-    clock.sleep(senses_mod.FEED_REST_S)
-    senses.look()
-    senses.look()
-    assert senses.counts["from the feed"] == senses_mod.FEED_SLOW_LOOKS + 3 and senses.counts["feed rested"] == 2
 
 
 def test_glances_from_the_feed_come_as_often_as_its_frames_or_63_ms_apart(sync, monkeypatch):
@@ -640,20 +498,20 @@ def test_glances_from_the_feed_come_as_often_as_its_frames_or_63_ms_apart(sync, 
             times.append(senses.glanced_at)
         assert [round(b - a, 4) for a, b in zip(times, times[1:])] == [round(apart, 4)] * 7
         assert f.counts["asked"] - asked == (0 if every == 0.0 else 8)
-    assert senses.counts["glances from the feed"] == 18
+    assert senses.counts["glances"] == 18
 
 
-def test_looks_from_the_feed_teach_the_stacks_camera_for_the_looks_it_takes_itself(sync):
-    # Placed by the feed's child, a look skips Senses' own placing; without this, a look taken here with her
-    # name tag hidden (the feed slow or gone) placed her by the default camera.
+def test_looks_from_the_feed_teach_the_stacks_camera(sync):
+    # Placed by the feed's own step, a look skips Senses' placing; its camera learns from it all the same (where it
+    # keeps her: Senses.place on the same look would have learned the same).
     f, clock, eyes = sync
     senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
     alone = Senses(eyes, f.step.model, band=(100, 100))
     clock.sleep(0.5)
     before = senses.camera.offset
     s = senses.look(mobs=False)
-    assert s.tag_seen and senses.counts["from the feed"] == 1 and senses.camera.offset != before
-    alone.place(eyes.look())  # the same look taken without the feed: the camera learns the same
+    assert s.tag_seen and senses.counts["looks"] == 1 and senses.camera.offset != before
+    alone.place(eyes.look())  # the same look placed here: the camera learns the same
     assert alone.camera.offset == pytest.approx(senses.camera.offset)
 
 
@@ -673,136 +531,3 @@ def test_a_look_takes_the_feeds_events_up_to_its_frame_and_the_later_ones_go_wit
     monkeypatch.setattr(f, "look", lambda *a: next(served))
     assert [(e.kind, e.t) for e in senses.look().events] == [("exp_gain", t + 0.4), ("hp_drop", t + 0.5)]
     assert [(e.kind, e.t) for e in senses.look().events] == [("exp_gain", t + 0.6)]
-    # A look the feed couldn't give is taken here, now: everything the feed saw goes with it.
-    f.events.append(Event("exp_gain", t + 2.0))
-    monkeypatch.setattr(f, "look", lambda *a: None)
-    assert [e.t for e in senses.look(mobs=False).events] == [t + 2.0]
-
-
-def test_watch_publishes_what_it_sees_and_can_neither_send_keys_nor_bring_the_game_forward(monkeypatch, tmp_path):
-    from maplehelper import win32
-
-    from gamelab import __main__ as cli, telemetry, window
-    from gamelab.control import client as player_client
-    from gamelab.localization import worldstate
-    touched = []
-    for obj, name in ((win32, "send_key"), (window, "bring_to_front"), (window, "move_cursor"),
-                      (player_client, "send"), (player_client, "submit"), (player_client, "cancel")):
-        monkeypatch.setattr(obj, name, lambda *a, _n=name, **k: touched.append(_n))
-    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
-    monkeypatch.setattr(feed, "quiet", lambda: None)  # not the test process's priority
-    model = small_map()
-    eyes = Drawn(model)
-
-    def runner(args):
-        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
-        frames = ListFrames([np.zeros((4, 4, 3), np.uint8)])
-        return feed.Runner(frames, _Look(eyes), step)
-    monkeypatch.setattr(cli, "_watch_runner", runner)
-    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30"]) == 0
-    assert touched == []
-    (path,) = tmp_path.glob("*-watch.jsonl")
-    records = telemetry.read(path)
-    topics = {r["topic"] for r in records}
-    assert {"session", "scene", "tracks", "log"} <= topics
-    assert records[0]["mode"] == "watch"
-    scenes = [r for r in records if r["topic"] == "scene"]
-    assert 5 <= len(scenes) <= 25 and scenes[-1]["monsters"][0]["kind"] == "pig"  # 10 a second for ~1.8 s
-    # Where the last search for drops looked (a late state's: the drops come back with it), her platform among them.
-    assert scenes[-1]["her"]["platform"] in {lk[0] for lk in scenes[-1]["looked"]}
-    assert [t["kind"] for t in [r for r in records if r["topic"] == "tracks"][-1]["list"]] == ["pig"]
-
-
-def test_watch_records_her_exp_gains_as_the_hunter_does(monkeypatch, tmp_path):
-    # Its 'exp' records (her EXP and level as read, the gain and its kinds, the total, EXP a minute) are what the
-    # mini-map's EXP line folds, and what the in-game check of the mouse over the number reads; watch had none.
-    from gamelab import __main__ as cli, telemetry
-    from gamelab.localization import worldstate
-    from gamelab.perception.exp_number import ExpReading
-    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
-    monkeypatch.setattr(feed, "quiet", lambda: None)
-    model = small_map()
-    model.mob_exp["Pig"] = 13  # (as on Thicket Around the Beach II: a pig's kill)
-    eyes = Drawn(model)
-
-    class Gaining(_Look):  # the number drawn as data: 421 EXP, then a pig's 13 more 0.5 s in
-        def look_at(self, full, t, ropes):
-            obs = super().look_at(full, t, ropes)
-            eyes.exp = 10 if t - self.t0 >= 0.5 else 0
-            obs.exp, obs.exp_box = eyes.frame(t, ropes).exp, np.full((1, 1), eyes.exp, np.uint8)
-            return obs
-    monkeypatch.setattr(worldstate.exp_number, "read",
-                        lambda box: ExpReading(421 + (13 if box[0, 0] else 0), 2.5, (19,)))
-
-    def runner(args):
-        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
-        return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), Gaining(eyes), step)
-    monkeypatch.setattr(cli, "_watch_runner", runner)
-    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30"]) == 0
-    (path,) = tmp_path.glob("*-watch.jsonl")
-    exp = [r for r in telemetry.read(path) if r["topic"] == "exp"]
-    assert [(r["exp"], r["level"], r["gain"], r["kinds"], r["total"]) for r in exp] == [(434, 19, 13, ["pig"], 13)]
-
-
-def test_watch_checks_for_the_lie_detector_on_a_thread_of_its_own_twice_a_second(monkeypatch, tmp_path):
-    # It was checked in the frame loop, after each frame's step; now each frame is handed to the check's thread
-    # as soon as it's taken, before the step, every 0.5 s as before.
-    import threading
-
-    from gamelab import __main__ as cli, telemetry
-    from gamelab.localization import worldstate
-    from gamelab.perception import lie_detector
-    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
-    monkeypatch.setattr(feed, "quiet", lambda: None)
-    checked, raised = [], []
-
-    class Spotter:
-        def seen(self, full):
-            checked.append(threading.current_thread().name)
-            return len(checked) == 2
-    monkeypatch.setattr(lie_detector, "LieDetectorSpotter", Spotter)
-    monkeypatch.setattr(cli, "_lie_detector_seen", lambda frame: raised.append(threading.current_thread().name))
-    model = small_map()
-    eyes = Drawn(model)
-
-    def runner(args):
-        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
-        return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), _Look(eyes), step)
-    monkeypatch.setattr(cli, "_watch_runner", runner)
-    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30", "--lie-detector"]) == 0
-    assert 3 <= len(checked) <= 5 and set(checked) == {"lie-detector"}  # ~1.8 s
-    assert raised == ["lie-detector"]  # the alarm once, from the check's own thread
-
-
-def test_hunting_commands_take_a_feed_by_default_and_go_without_it_when_it_cant_start(monkeypatch, capsys):
-    from gamelab import __main__ as cli
-    from gamelab.analysis import calibration
-    for cmd in (["hunt", "clear"], ["nav", "35"], ["tour"], ["tour", "--loop"], ["tour", "--loop", "--grind"]):
-        assert cli.build_parser().parse_args(cmd).feed  # the default since 2026-10-24
-        assert not cli.build_parser().parse_args(cmd + ["--no-feed"]).feed
-    assert not hasattr(cli.build_parser().parse_args(["pet"]), "feed")  # (no feed for a pet's food)
-    started = []
-
-    class Client:
-        def __init__(self, make, alive):
-            self.make, self.alive, self.why, self.hz, self.bye = make, alive, "" if alive else "no game", 30.0, None
-            self.served, self.refused = 12, 1
-            self.hello = {"pid": 1, "priority": feed.BELOW_NORMAL}
-            started.append(self)
-
-        def close(self):  # the child sends its counts once asked to stop, as the real one does
-            self.alive, self.why = False, "closed"
-            self.bye = {"frames": 900, "placed": 880, "band": 150, "wide": 30}
-    monkeypatch.setattr(calibration, "load", lambda: type("Cal", (), {"template": np.zeros((10, 36), np.uint8)}))
-    monkeypatch.setattr(feed, "FeedClient", lambda make: Client(make, True))
-    model = small_map()
-    client = cli._feed(model, "MapleStory")
-    assert client is started[0] and cli._FEEDS == [client] and client.make.func is feed.screen_world
-    capsys.readouterr()
-    cli._close_feeds()
-    assert cli._FEEDS == [] and not client.alive
-    # Its counts, read once it's closed (on 2026-10-21 `tour --feed` read them before and printed '?' for each).
-    assert capsys.readouterr().out.strip() == ("feed: 900 frames, 880 placing her, 150 band and 30 whole-screen "
-                                               "searches; 12 looks and glances from it, 1 taken without it")
-    monkeypatch.setattr(feed, "FeedClient", lambda make: Client(make, False))
-    assert cli._feed(model, "MapleStory") is None and cli._FEEDS == []

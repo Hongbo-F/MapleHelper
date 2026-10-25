@@ -564,15 +564,8 @@ def test_a_grind_stands_still_while_its_looks_fail_and_grinds_on_after():
     window = (20.0, 35.0)
 
     def run(sim):
-        real = sim.eyes.look
-
-        def look():
-            if window[0] <= sim.clock.elapsed < window[1]:
-                sim.clock.sleep(0.03)  # a capture's time
-                raise BadLook(Problem("offset", "the capture is offset by (+26, +26) px from the game's client area"))
-            return real()
-
-        sim.eyes.look = look
+        sim.fail_frames(window[0], window[1],  # (perception's frames: every look's)
+                        Problem("offset", "the capture is offset by (+26, +26) px from the game's client area"))
         return grinding(1.5)(sim)
 
     sc = dataclasses.replace(scenarios.SCENARIOS["loop_tree_grind"], name="loop_tree_grind_lost", fn=run, expects=())

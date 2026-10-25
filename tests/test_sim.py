@@ -1197,8 +1197,9 @@ def test_a_look_places_her_the_monsters_and_the_drops_where_the_world_has_them(m
     # on a wider map, the rope in view)
     assert s.how == "camera" and h.senses.camera.fixed()[0]
     eyes.want_ropes = False
-    left, top, right, bottom = h.senses.camera.bounds
-    h.senses.camera.bounds = (left - 2000, top, right + 2000, bottom)  # as if the map were wider than the view
+    placing = h.senses.feed.step.senses  # (what places her: the step of her looks' feed, here run on the eyes' frames)
+    left, top, right, bottom = placing.camera.bounds
+    placing.camera.bounds = (left - 2000, top, right + 2000, bottom)  # as if the map were wider than the view
     s = h.look()
     assert s.how == "edge" and s.where.x == pytest.approx(240, abs=1)  # ... or from her platform's end
 
@@ -1262,11 +1263,15 @@ def test_map_data_that_is_there_but_fails_to_load_fails_instead_of_skipping(monk
 
 
 REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
-# Run only with --slow (tests/conftest.py): the long feed runs (their feedless twins and the short feed_* stay in) and
-# the tours end to end (their grounds' tour_* and loop_* stay in), on each map: on West Rocky Mountain II 19 and 17 s,
-# on Tree Dungeon, Forest Up North II 9 and 9 s (2026-10-24, 8 workers).
-SLOW_SCENARIOS = {"feed_tour_hunt_basin", "feed_loop_basin", "feed_loop_rival", "tour_run", "loop_run",
-                  "tour_rocky_run", "loop_rocky_run", "tour_tree_run", "loop_tree_run"}
+# Run only with --slow (tests/conftest.py): the tours end to end (their grounds' tour_* and loop_* stay in), on each map:
+# on West Rocky Mountain II 19 and 17 s, on Tree Dungeon, Forest Up North II 9 and 9 s (2026-10-24, 8 workers); and since
+# every scenario's looks are perception's (the feed: SyncFeed, 30 frames a second of the world step), those over 15 s
+# (2026-10-25, 8 workers; the shorter of each kind stay in: hunt_clear_basin, loop_tree_lie_detector, nav_fight_up).
+SLOW_SCENARIOS = {"tour_run", "loop_run", "tour_rocky_run", "loop_rocky_run", "tour_tree_run", "loop_tree_run",
+                  "tour_hunt_from_safe_spot", "loop_rocky_bridge", "loop_basin", "loop_tree_walls", "tour_hunt_basin",
+                  "tour_hunt_platform_12", "loop_tree_crowd", "nav_rocky_fight_bridge", "loop_tree_23", "nav_fight_basin",
+                  "loop_tree_grind", "loop_noisy", "nav_fight_across_runs_out", "loop_tree_wait", "loop_spot_off_ground",
+                  "nav_fight_up_runs_out", "loop_rest_hp_low"}
 # Not met since her escorted trips keep clear of the monsters whose touch counts (Escort.threat), tuned on Tree
 # Dungeon only until the work is taken to other maps: on West Rocky Mountain II the Axe Stump (75) counts, and
 # loop_rocky_run fell out of the map at 536 s (work/safe-travel, 2026-10-24).
@@ -1465,15 +1470,16 @@ def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_ba
     """nav_jump_after_kill at the route's takeoffs of that night (old_route_takeoffs: 16 -> 14 off 16's right end
     from 33-45 units back), with the chain's first arrow held back only to 0.6 s after her last throw's key (as
     played in game from 00:49 on 2026-10-21): she sets off about 0.12 s late, the jump goes at its planned time
-    from short of where it was meant to, and she falls to 25 on 6 of seeds 1-8 (all of which kill the pig), as 8
-    of 10 such chains did in game. (With the swallowed arrow seen at 0.835 s, as fitted to her dot's first move
+    from short of where it was meant to, and she falls to 25 on every one of seeds 1-8 (all of which kill the pig;
+    6 of them before her looks were perception's newest frames, Senses.fresh_after), as 8 of 10 such chains did in
+    game. (With the swallowed arrow seen at 0.835 s, as fitted to her dot's first move
     before, 3 of the 7 that killed it then fell to 25 and 4 were cut short on 16, standing still where the run
     starts while the plan had her on: navigator.OFF_SPAN. Before her facing was read off the frame,
     perception.heading, 7 seeds killed it and all 7 fell: her first throw no longer taps the arrow she faces
     already, and the pig dies elsewhere.) Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
     landed = _after_kill_landings(monkeypatch)
     assert landed[800] == ["6"] * 8
-    assert landed[600] == ["6", "25", "25", "6", "25", "25", "25", "25"]
+    assert landed[600] == ["25"] * 8
 
 
 @REAL

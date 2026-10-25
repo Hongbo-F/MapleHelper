@@ -286,7 +286,7 @@ def test_the_pet_command_goes_on_when_a_food_is_refused_or_not_answered(monkeypa
         def tend(self, present=True):
             raise errors.pop(0)
 
-    monkeypatch.setattr(m, "_hunter", lambda args: SimpleNamespace(pet=Care()))
+    monkeypatch.setattr(m, "_hunter", lambda args, **kw: SimpleNamespace(pet=Care()))
     monkeypatch.setattr(m, "_record", lambda command, map_id: None)
     monkeypatch.setattr(m, "_game_title", lambda: "MapleStory")
     monkeypatch.setattr(m.telemetry, "emit", lambda *a, **k: None)

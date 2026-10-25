@@ -144,13 +144,16 @@ def test_her_place_at_this_size(rocky, monkeypatch):
 @pytest.mark.parametrize("picture", [True, False])
 def test_the_map_command_places_her_dot_at_this_size(rocky, monkeypatch, capsys, tmp_path, picture):
     """`map` (not --offline) places her dot as Senses does, through the minimap's picture: with 1920x1080's Localizer
-    it put her at (-1319, 1897), and at this size without the picture at (-880, 2697), on no platform."""
+    it put her at (-1319, 1897), and at this size without the picture at (-880, 2697), on no platform. (Its state is
+    the perception service's newest: here the step on the eyes' frame, feed.InlineFeed.)"""
     from types import SimpleNamespace
 
     from gamelab import __main__ as cli
     from gamelab.localization import mapdata
+    from gamelab.localization.feed import InlineFeed
     eyes = _picture_eyes(rocky, monkeypatch, picture)
-    monkeypatch.setattr(cli, "_eyes", lambda model, title: eyes)
+    monkeypatch.setattr(cli, "_perception", lambda model, title, name, acts, throws=False: InlineFeed(
+        eyes, model, (100, 100)))
     monkeypatch.setattr(cli, "_game_title", lambda: "MapleStory")
     monkeypatch.setattr(cli.client, "check_alarm", lambda: None)
     monkeypatch.setattr(cli, "LAB", tmp_path)

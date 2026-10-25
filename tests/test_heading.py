@@ -5,7 +5,6 @@ read back safely; her keys going by it (control.actions.Actions.see, faces); and
 world's facing (or the wrong way: sim.world.Noise.heading_wrong) and whose world can turn her without a key
 (Noise.turned, Realism.knock_turns)."""
 
-import dataclasses
 import json
 import threading
 from pathlib import Path
@@ -470,22 +469,24 @@ KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True), start=0.0, mu
 def test_in_a_world_where_a_knock_turns_her_the_frame_keeps_her_stars_going_the_right_way():
     """Realism.knock_turns (not the game's, by HeavenClient): shooting the mushroom on her right, the one on her left
     walks into her and the knock turns her to face it. The frame tells (logged, against her last arrow), and of her
-    stars only one decided before a knock goes the wrong way; with eyes that can't read her picture, 4 do (seed 3)."""
-    out, _ = _kill_on_23(seed=3, **KNOCKED)
+    stars only one decided before a knock goes the wrong way; with eyes that can't read her picture, 2 do (seed 24,
+    two knocks; on seed 3 4 did before her looks were perception's latest frames, Senses.fresh_after)."""
+    out, _ = _kill_on_23(seed=24, **KNOCKED)
     assert out["knocks"] >= 1 and out["wrong way"] <= 1 and out["counts"]["against"] >= 1, out
-    blind, _ = _kill_on_23(seed=3, read=False, **KNOCKED)
-    assert blind["wrong way"] >= 4, blind
+    blind, _ = _kill_on_23(seed=24, read=False, **KNOCKED)
+    assert blind["wrong way"] >= 2, blind
 
 
 @needs_tree
 def test_over_eight_seeds_of_knocks_that_turn_her_her_stars_go_the_wrong_way_only_when_decided_before_one():
-    """As above on seeds 1-8: with the frame, at most one wrong-way star a knock (4 for 10 knocks, as measured), where
-    eyes that can't read her picture send 16 the wrong way (19 knocks). (Knocks that turned her; the stars by the
-    world's count, World.wrong_way.)"""
+    """As above on seeds 1-8: with the frame, at most one wrong-way star a knock (3 for 12 knocks, as measured), where
+    eyes that can't read her picture send 6 the wrong way (13 knocks). (Knocks that turned her; the stars by the
+    world's count, World.wrong_way. Before her looks were perception's latest frames, Senses.fresh_after: 4 for 10
+    knocks, and 16 for 19.)"""
     seen = [_kill_on_23(seed=k, **KNOCKED)[0] for k in range(1, 9)]
     blind = [_kill_on_23(seed=k, read=False, **KNOCKED)[0] for k in range(1, 9)]
     wrong = sum(o["wrong way"] for o in seen)
-    assert wrong <= sum(o["knocks"] for o in seen) and sum(o["wrong way"] for o in blind) >= 3 * wrong
+    assert wrong <= sum(o["knocks"] for o in seen) and sum(o["wrong way"] for o in blind) >= 2 * wrong
 
 
 @needs_tree
@@ -560,40 +561,46 @@ def test_the_fake_eyes_see_the_worlds_facing_but_not_on_a_rope_nor_on_frames_tha
 
 # --- the live check's command (watch --heading) ---------------------------------------------------------------------
 
-def test_watch_says_each_change_of_her_facing_and_publishes_it_with_the_scenes(monkeypatch, tmp_path):
-    """`watch --heading` reads her facing off every frame (the runner's eyes, Eyes.heading), says each change (not
-    every frame), counts how many frames told it, and puts it on the scenes (her `facing_seen`, and whether strongly:
-    `facing_strong`); it presses nothing."""
+def test_watch_says_each_change_of_her_facing(monkeypatch):
+    """`watch --heading` reads her facing off every frame the perception service shows it (Eyes.heading on the ring's
+    frame), says each change (not every frame) and counts how many frames told it; it presses nothing, a viewer."""
+    import time
+    from collections import deque
+
     from gamelab import __main__ as cli
-    from gamelab.localization import feed, worldstate
-    from gamelab.localization.senses import Senses
-    from gamelab.localization.worldstate import WorldStep
-    from gamelab.perception.frames import ListFrames
-    from test_feed import _Look
-    from test_worldstate import Drawn, small_map
-    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
-    monkeypatch.setattr(feed, "quiet", lambda: None)
+    from gamelab.localization.worldstate import WorldState
     logged = []
     monkeypatch.setattr(cli, "_log", logged.append)
-    model = small_map()
-    eyes = Drawn(model)
 
-    class Turning(_Look):  # she faces right for the first 0.6 s, then left (the arrow pressed by hand)
+    class Perception:  # the service's client: a new state at each wait, 30 a second
+        def __init__(self):
+            self.states, self.seq = deque(maxlen=8), 0
+
+        def wait_frame(self, timeout):
+            time.sleep(1 / 30)
+            self.seq += 1
+            self.states.append(WorldState(self.seq, time.monotonic(), True, tag=(480, 308), tag_seen=True,
+                                          where=(1000.0, 500.0, 0, (0.0, 0.0))))
+            return True
+
+        def frame_of(self, st):
+            return np.zeros((540, 960, 3), np.uint8)
+
+        def status(self):
+            return {"clients": [{"name": "watch", "acts": False}]}
+
+    class Turning:  # she faces right for the first 0.3 s of frames, then left (the arrow pressed by hand)
+        first = None
+
         def heading_bank(self):
             return SimpleNamespace(refs=[1], pool=[1, 2], ready=True)
 
         def heading(self, obs):
-            return Reading(RIGHT if obs.t - self.t0 < 0.6 else LEFT, 0.6, 0.4)
-
-    def runner(args):
-        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
-        return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), Turning(eyes), step)
-    monkeypatch.setattr(cli, "_watch_runner", runner)
-    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30", "--heading"]) == 0
+            self.first = obs.t if self.first is None else self.first
+            return Reading(RIGHT if obs.t - self.first < 0.3 else LEFT, 0.6, 0.4)
+    monkeypatch.setattr(cli, "_perception", lambda model, title, name, acts: Perception())
+    monkeypatch.setattr(cli, "_heading_eyes", lambda title: Turning())
+    assert cli.main(["watch", "--minutes", "0.012", "--heading", "--map", "10000012"]) == 0
     said = [line.strip() for line in logged if "her frame" in line]
     assert said == ["her frame: faces right (matched 0.60, 0.40 ahead)",
                     "her frame: faces left (matched 0.60, 0.40 ahead)"]
-    (path,) = tmp_path.glob("*-watch.jsonl")
-    hers = [r["her"] for r in telemetry.read(path) if r["topic"] == "scene" and r["her"]]
-    assert hers[0]["facing_seen"] == RIGHT and hers[-1]["facing_seen"] == LEFT
-    assert all(h["facing_strong"] for h in hers)  # (0.6, 0.4 ahead: strong, Reading.strong)

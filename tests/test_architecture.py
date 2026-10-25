@@ -78,3 +78,29 @@ def test_the_elevated_player_loads_only_what_it_needs():
              "gamelab.sim", "gamedata", "tkinter")
     assert not [m for m in loaded if m.startswith(stack)], sorted(loaded)
     assert "gamelab.native" not in loaded  # it loads a DLL built from the tree: never into the elevated player
+
+
+def test_only_the_perception_service_captures_the_game():
+    """The game is looked at by one process, the perception service (localization.service: its ScreenFrames on the
+    process's one DXGI duplication, capture.shared). No command makes a capture of its own: their eyes have no screen
+    (perception.eyes.NoScreen), their frames are the service's. (A third duplication failed with 0x887A0022 when
+    watch, the pet's babysitter and a hunt each held one: control.rolling's README notes.) The offline tools that time
+    or read captures (bench-capture, bench-look --live) make their own capture.Grabber, as before."""
+    made = {}
+    for path in sorted(PKG.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for what in ("ScreenFrames(", "capture.shared()"):
+            if what in text:
+                made.setdefault(what, set()).add(path.relative_to(PKG).as_posix())
+    assert made.get("ScreenFrames(", set()) == {"localization/service.py"}, made
+    assert made.get("capture.shared()", set()) == {"perception/frames.py"}, made  # (ScreenFrames' default grabber)
+
+
+def test_no_command_looks_for_itself():
+    """--feed/--no-feed and --sweep are gone (2026-10-25): every command's looks are the perception service's."""
+    from gamelab.__main__ import build_parser
+    parser = build_parser()
+    choices = parser._subparsers._group_actions[0].choices
+    for name, sub in choices.items():
+        flags = {f for action in sub._actions for f in action.option_strings}
+        assert not flags & {"--feed", "--no-feed", "--sweep", "--no-sweep"}, name

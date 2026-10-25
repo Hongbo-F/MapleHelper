@@ -12,7 +12,6 @@ from gamelab.localization.memory import Cover, Memory, P_FORGET, cover_of, repla
 from gamelab.localization.monsters import Monster
 from gamelab.localization.players import Player
 from gamelab.localization.senses import Senses
-from gamelab.perception.eyes import band_rows
 from gamelab.perception.mobs import Mob
 from gamelab.screen import UNITS_PER_HALF_PX as U
 
@@ -162,52 +161,14 @@ def test_a_platform_is_covered_when_a_look_searched_all_of_it():
     assert m.covered_at(A) == 2.0 and m.covered_at(B) == 2.0 and m.covered_at(C) is None  # C's monsters: cut
 
 
-def _senses(model, sweep: bool = False):
+def _senses(model):
     eyes = Drawn(model)
-    s = Senses(eyes, model, band=(100, 100), sweep=sweep)
-    asked = []
-    find = eyes.monsters_rows
-    eyes.monsters_rows = lambda obs, rows: (asked.append(rows), find(obs, rows))[1]
-    return eyes, s, asked
-
-
-def test_the_sweep_searches_the_screen_outside_her_band_a_slice_a_look_from_the_top_down():
-    model = three_floors()
-    eyes, senses, asked = _senses(model, sweep=True)
-    eyes.mobs = [pig(1000, 300), pig(1000)]  # one on B (out of her band), one by her
-    looks = [senses.look() for _ in range(5)]
-    bottom = int(540 * looks[0].geo.hud_top)
-    b0, b1 = band_rows(looks[0], 100, 100)  # her band's rows
-    body = math.ceil((max(b.top for b in memory.bodies(model).values()) + 8) / U)
-    cycle = asked[:4]
-    assert cycle[0][0] == 0 and cycle[-1][1] == bottom and asked[4] == asked[0]  # 4 looks, then from the top again
-    for (_, end), (start, _) in zip(cycle, cycle[1:]):
-        assert end - start >= body or start >= b1 - body  # each overlaps the last by a body (or starts under the band)
-    assert cycle[2][1] <= b0 + body and cycle[3][0] >= b1 - body  # nothing searched twice in the band's middle
-    assert all(len(s.monsters) == 1 and s.monsters[0].platform == A for s in looks)  # the fights' monsters: the band's
-    assert [len(s.swept) for s in looks] == [0, 1, 0, 0, 0] and looks[1].swept[0].platform == B
-    assert looks[1].rows == [(500 + (b0 - 300) * U, 500 + (b1 - 300) * U),
-                             (500 + (cycle[1][0] - 300) * U, 500 + (cycle[1][1] - 300) * U)]
-    assert senses.sweep_counts == {"slices": 5, "held": 0}
-
-
-def test_the_sweep_holds_back_while_she_is_pressed_and_whole_screen_looks_have_none():
-    model = three_floors()
-    eyes, senses, asked = _senses(model, sweep=True)
-    senses.sweep_hold = lambda s: True
-    s = senses.look()
-    assert asked == [] and senses.sweep_counts["held"] == 1 and len(s.rows) == 1
-    senses.sweep_hold = None
-    s = senses.look(wide=True)
-    assert asked == [] and s.rows == [(500 - 300 * U, 500 + (int(540 * s.geo.hud_top) - 300) * U)]
-    eyes2, off, asked2 = _senses(model)
-    off.look()
-    assert asked2 == []  # off by default
+    return eyes, Senses(eyes, model, band=(100, 100))
 
 
 def test_the_memory_takes_every_look_and_replays_from_the_records_as_it_ran():
     model = three_floors()
-    eyes, senses, _ = _senses(model, sweep=True)
+    eyes, senses = _senses(model)
     live = Memory(model)
     senses.listeners.append(live.on_look)
     records = []
@@ -226,20 +187,3 @@ def test_the_memory_takes_every_look_and_replays_from_the_records_as_it_ran():
     assert [e["state"] for e in last["list"]] == ["seen", "seen"] and last["list"][0]["misses"] > 0  # B's: missed
 
 
-def test_the_hunter_lets_the_sweep_search_only_where_it_costs_her_nothing(monkeypatch):
-    from gamelab.behavior import hunter
-    from gamelab.behavior.hunter import Hunter
-    clock = [100.0]
-    monkeypatch.setattr(hunter.time, "monotonic", lambda: clock[0])
-    h = object.__new__(Hunter)
-    h.low_hp, h._halves = 0.3, {"pig": 34.0}
-    h.actions = SimpleNamespace(lock_until=0.0)
-    here = SimpleNamespace(id=A)
-    look = lambda monsters, hp=1.0: SimpleNamespace(hp=hp, where=SimpleNamespace(x=1000.0, y=500.0), platform=here,
-                                                    monsters=monsters)
-    assert not h.hold_sweep(look([]))                      # nothing in her band: nothing to react to
-    assert h.hold_sweep(look([mon(1300, A)]))              # one in her band, and her next attack due now
-    h.actions.lock_until = clock[0] + 0.3                  # ... while she waits for her attack's lock: free
-    assert not h.hold_sweep(look([mon(1300, A)]))
-    assert h.hold_sweep(look([mon(1080, A)]))              # close quarters: never
-    assert h.hold_sweep(look([], hp=0.35))                 # nor with her HP near --low-hp
