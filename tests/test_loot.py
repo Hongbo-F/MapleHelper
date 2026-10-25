@@ -188,6 +188,21 @@ def test_a_detector_holds_its_maps_drops_only(tmp_path):
     assert {t.kind for t in held.templates} == {"mesos", "leather"} and held.items == ("Leather",)
 
 
+def test_a_maps_detector_builds_only_the_pictures_missing(tmp_path, monkeypatch):
+    # The folder is every map's, and a test run's workers make their maps' detectors at once: one map's build must not
+    # write over the pictures another's detector is reading (the coins and potions are every map's).
+    from gamelab.perception import loot
+    calls = []
+    monkeypatch.setattr(loot, "build", lambda folder, stretch, items, coins=True: calls.append((items, coins)))
+    for name in ("squishy-liquid_0", "mesos_bronze0"):
+        (tmp_path / f"{name}.png").write_bytes(b"")
+    assert loot.ensure(tmp_path, 1.0, ("Squishy Liquid",)) == tmp_path and calls == []
+    loot.ensure(tmp_path, 1.0, ("Squishy Liquid", "Leather"))
+    (tmp_path / "mesos_bronze0.png").unlink()
+    loot.ensure(tmp_path, 1.0, ("Squishy Liquid",))
+    assert calls == [(("Leather",), False), ((), True)]
+
+
 def _native_folder(tmp_path, pictures: dict) -> Path:
     """A folder of made-up drop pictures at the game's own size (scale.json 1.0, as loot.build makes at stretch 1)."""
     import json
@@ -529,6 +544,20 @@ def test_every_maps_drops_have_a_price():
     names = {n for m in drops.MONSTERS.values() for n in m.items} | set(drops.POTIONS)
     names |= {n for items in drops.PINNED.values() for n in items}
     assert {kind_of(n) for n in names} == set(PRICES)
+
+
+@pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
+def test_a_drops_picture_is_written_whole_as_the_games(tmp_path):
+    """loot.build at the game's own size: the game's picture as it is (the Fragment of Magic's glow partly see-through),
+    written under another name and renamed (nothing of it left behind), and the coins only when asked for."""
+    from gamelab.perception import loot
+    loot.build(tmp_path, 1.0, ("Fragment of Magic",), coins=False)
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["fragment-of-magic_0.png", "scale.json"]
+    alpha = np.asarray(Image.open(tmp_path / "fragment-of-magic_0.png").convert("RGBA"))[..., 3]
+    assert ((alpha > 0) & (alpha < 255)).sum() > 100
+    loot.build(tmp_path, 1.0, ())
+    assert {loot._kind(f) for f in tmp_path.glob("*.png")} == {"fragment-of-magic", "mesos"}
+    assert not list(tmp_path.glob("*.part"))
 
 
 @pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")

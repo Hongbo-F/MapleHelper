@@ -109,8 +109,8 @@ def ensure(names_by_id: dict[int, str], folder: Path | None = None, cutouts: Pat
     it was kept, or at stretch 1 before the game's alpha was); then match the cut-outs of their kinds that the
     folder's CUTOUTS doesn't have yet. The cut-outs are of the 1920x1080 window, so they're matched against its
     sprites (in `stretched`), and another stretch's folder takes what that says of them; at stretch 1 they aren't
-    used (`detector_for`), so nothing is matched. Returns the folder. (loot.ensure, unlike this, rebuilds every
-    template when any is missing.)"""
+    used (`detector_for`), so nothing is matched. Returns the folder. (loot.ensure, too, builds only the drops
+    missing.)"""
     folder = folder_for(stretch) if folder is None else folder
     _sprites_at(names_by_id, folder, stretch)
     if stretch == 1:

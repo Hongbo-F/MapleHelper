@@ -31,6 +31,7 @@ The pickup log's full-inventory message (`says_full`) is here too.
 """
 
 import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -158,24 +159,27 @@ def folder_for(stretch: float) -> Path:
     return LOOT if stretch == STRETCHED.stretch else OUT / f"loot_x{stretch:g}"
 
 
-def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch, items: tuple[str, ...] = ITEMS) -> list[Path]:
+def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch, items: tuple[str, ...] = ITEMS,
+          coins: bool = True) -> list[Path]:
     """Write `<kind>_<n>.png` (RGBA, drawn `stretch` times larger: by default screen size at 1920x1080) for each of
-    `items` (by default the first map's), and `mesos_<coin><frame>.png` for the coins' spinning frames (the edge-on
-    one, 5 px wide, is left out). At stretch 1 (the game's own 1366x768) each is the game's picture as it is, alpha and
-    all. Another stretch than 1920x1080's is written in the folder's mobs.SCALE_FILE. An item whose kind can't be a
-    file's name (drops.safe) is refused."""
+    `items` (by default the first map's), and with `coins` `mesos_<coin><frame>.png` for the coins' spinning frames
+    (the edge-on one, 5 px wide, is left out). At stretch 1 (the game's own 1366x768) each is the game's picture as it
+    is, alpha and all. Another stretch than 1920x1080's is written in the folder's mobs.SCALE_FILE. An item whose kind
+    can't be a file's name (drops.safe) is refused. Each file is written whole under another name, then renamed (`_put`):
+    the folder is every map's, and the test run's workers build it at once (each new map's drops, the first time)."""
     from gamedata.canvas import item_icon, meso_frames
     if unsafe := [n for n in items if not drops.safe(n)]:
         raise ValueError(f"drops whose kinds can't be file names: {unsafe}")
     folder.mkdir(parents=True, exist_ok=True)
     if stretch != STRETCHED.stretch:
-        (folder / SCALE_FILE).write_text(json.dumps({"px_per_game_px": stretch}), encoding="utf-8")
+        _put(folder / SCALE_FILE, lambda part: part.write_text(json.dumps({"px_per_game_px": stretch}),
+                                                               encoding="utf-8"))
     ids, written = item_ids(COPY), []
 
     def save(rgba: np.ndarray, name: str) -> None:
         path = folder / f"{name}.png"
         picture = rgba if stretch == 1 else resample_rgba(rgba, screen_size(rgba, stretch))
-        Image.fromarray(np.ascontiguousarray(picture), "RGBA").save(path)
+        _put(path, lambda part: Image.fromarray(np.ascontiguousarray(picture), "RGBA").save(part, format="PNG"))
         written.append(path)
 
     for name in items:
@@ -185,11 +189,23 @@ def build(folder: Path = LOOT, stretch: float = STRETCHED.stretch, items: tuple[
                 break
             except (KeyError, ValueError):
                 continue
-    for kind, frames in meso_frames(COPY, MESO_KINDS).items():
+    for kind, frames in (meso_frames(COPY, MESO_KINDS) if coins else {}).items():
         for i, rgba in enumerate(frames):
             if rgba.shape[1] >= rgba.shape[0] // 2:  # not edge-on
                 save(rgba, f"{MESOS}_{MESO_KINDS[kind]}{i}")
     return written
+
+
+def _put(path: Path, write) -> None:
+    """`write(part)` a file whole under another name in its folder, then rename it `path`: another process never reads
+    it half written. Where `path` can't be replaced (Windows: another process has it open, reading what another build
+    wrote, the same picture), the new one goes."""
+    part = path.with_name(f"{path.name}.{os.getpid()}.part")
+    write(part)
+    try:
+        os.replace(part, path)
+    except PermissionError:
+        part.unlink(missing_ok=True)
 
 
 def _kind(path: Path) -> str:
@@ -204,12 +220,14 @@ def _coin(path: Path) -> str | None:
 
 
 def ensure(folder: Path | None = None, stretch: float = STRETCHED.stretch, items: tuple[str, ...] = ITEMS) -> Path:
-    """Build the templates of `items` and the coins (drawn `stretch` times larger, in `folder`: by default
-    `folder_for(stretch)`) if any of them are missing; returns the folder."""
+    """Build the templates of those of `items` and the coins (drawn `stretch` times larger, in `folder`: by default
+    `folder_for(stretch)`) that are missing; returns the folder. Those there are left as they are: another map's
+    detector may be reading them."""
     folder = folder_for(stretch) if folder is None else folder
     have = {_kind(p) for p in folder.glob("*.png")}
-    if not kinds_of(items) <= have:
-        build(folder, stretch, items)
+    missing = tuple(n for n in items if kind_of(n) not in have)
+    if missing or MESOS not in have:
+        build(folder, stretch, missing, coins=MESOS not in have)
     return folder
 
 
