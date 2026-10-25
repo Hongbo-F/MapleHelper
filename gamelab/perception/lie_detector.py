@@ -3,11 +3,18 @@
 It comes in more than one form, and each is recognized:
 - a countdown window titled "LIE DETECTOR" in yellow letters; its title bar is see-through, so the
   yellow letter shapes are matched rather than raw pixels;
-- "The Lie Detector Mini-game" ("Use the mouse to follow the fading figure"): a window with the
-  Maple Administrator's portrait and a blue header, matched at half size. On 2026-10-18 this one
+- the mouse mini-game's notice, 10 s before it: a box at the bottom right with the Maple
+  Administrator's portrait, "The Lie Detector Mini-game", "The mini-game will start soon. Go to a
+  safe place before the game begins.";
+- "The Lie Detector Mini-game" ("Use the mouse to follow the fading figure"): the board itself, a
+  window with the same portrait and a blue header, matched at half size. On 2026-10-18 this one
   wasn't recognized yet, went unanswered, and she was sent to the Truth Booth;
+- the image quiz's warning, 30 s before it: a see-through blue box, "Question in N seconds",
+  "Answer within 10 seconds";
+- the image quiz: "Click all matching images", three pictures and a Confirm button, 10 s to answer;
 - the Truth Booth itself (where a failed test sends her), by its "Time Left" timer.
-Never try to answer it automatically: a person has to.
+The notice and the quiz's warning are matched so that the hunt stops, and she retreats, before the
+test begins. Never try to answer it automatically: a person has to.
 
 The key player, which runs as administrator, loads this module: it imports only gamelab.paths.
 """
@@ -30,8 +37,19 @@ TEMPLATE_FRAME = (1920, 1080)
 NATIVE_FRAME = (1366, 768)  # (only a whole frame of that size: crops are matched as they are)
 # Half-size grey templates and their thresholds. The real screens score 1.0; across ~190 saved game
 # screenshots and recordings nothing else scored above 0.53 (mini-game) or 0.69 (timer).
+# The notice's and the quiz's were cut on 2026-10-25 from the rolling recorder's frames of that night (their fixtures
+# in tests/fixtures/lie_detector), as `scores` sees a 1366x768 frame: stretched, halved, grey. The notice's is its
+# portrait, title and first lines (00:55:01); the quiz's two are the line that stays the same, "Answer within 10
+# seconds", and the quiz's title, each the median of its frames (the box is see-through: the scene behind averages
+# out). On the 12,552 saved frames of 2026-10-19 to 25 (D:/MapleHelper-scratch/report-1025): the notice scored 0.998
+# or more on every notice, the 1920x1080 ones of 2026-10-19 and 21 too, 0.80 on the board (the same portrait and
+# title) and at most 0.34 on anything else; the warning 0.82 or more on its 296 frames and at most 0.50 elsewhere; the
+# quiz 0.89 or more on its 78 frames, SUCCESS over it included, and at most 0.52 elsewhere.
 HALF_SIZE = {
+    "mini-game notice": (ASSETS / "lie_detector_notice.png", 0.9),
     "mini-game": (ASSETS / "lie_detector_minigame.png", 0.8),
+    "quiz warning": (ASSETS / "lie_detector_quiz_warning.png", 0.7),
+    "quiz": (ASSETS / "lie_detector_quiz.png", 0.7),
     "truth booth": (ASSETS / "truth_booth_timer.png", 0.85),
 }
 

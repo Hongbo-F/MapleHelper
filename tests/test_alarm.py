@@ -59,8 +59,11 @@ def test_spots_the_mouse_mini_game_and_the_truth_booth():
     assert spotter.scores(img("truth_booth_timer.png"))["truth booth"] >= 1
 
 
-SEEN_IN_GAME = sorted((FIXTURES / "lie_detector").glob("*.png"))  # <date>_<time>_<form>.png, see its README
-FORMS = {"countdown": "countdown", "mini_game": "mini-game", "truth_booth": "truth booth"}
+# <date>_<time>_<form>.png (.jpg: the rolling recorder's frames, as recorded), see its README
+SEEN_IN_GAME = sorted((FIXTURES / "lie_detector").glob("*.png")) + sorted((FIXTURES / "lie_detector").glob("*.jpg"))
+WITHOUT = sorted((FIXTURES / "lie_detector" / "without").glob("*.jpg"))  # the same scenes just before or after
+FORMS = {"countdown": "countdown", "mini_game_notice": "mini-game notice", "mini_game": "mini-game",
+         "quiz_warning": "quiz warning", "quiz": "quiz", "truth_booth": "truth booth"}
 
 
 @pytest.mark.parametrize("png", SEEN_IN_GAME, ids=lambda p: p.stem)
@@ -78,12 +81,27 @@ def test_spots_every_lie_detector_seen_in_game_at_the_game_s_own_size_too(png):
 
 
 def test_the_lie_detectors_seen_in_game_are_all_there():
-    assert len(SEEN_IN_GAME) >= 6
+    assert len(SEEN_IN_GAME) >= 15 and len(WITHOUT) >= 4
+    assert {FORMS[png.stem.split("_", 2)[2]] for png in SEEN_IN_GAME} == set(FORMS.values())
+
+
+@pytest.mark.parametrize("png", SEEN_IN_GAME, ids=lambda p: p.stem)
+def test_each_lie_detector_seen_in_game_is_seen_as_its_own_form(png):
+    """The notice and the board share the portrait and the title (the notice's template scores the board 0.80 of
+    its 0.9): each is told for what it is, as are the quiz's warning and the quiz."""
+    scores = LieDetectorSpotter().scores(img(png))
+    assert max(scores, key=scores.get) == FORMS[png.stem.split("_", 2)[2]]
 
 
 @pytest.mark.parametrize("frame", [SCENE, NEAR_MISS, np.zeros((540, 960, 3), np.uint8)])
 def test_ignores_yellow_scenery_and_other_windows(frame):
     assert not LieDetectorSpotter().seen(frame)
+
+
+@pytest.mark.parametrize("jpg", WITHOUT, ids=lambda p: p.stem)
+def test_sees_nothing_in_the_same_scenes_just_before_the_notice_or_the_quiz_s_warning_or_after_the_quiz(jpg):
+    scores = LieDetectorSpotter().scores(img(jpg))
+    assert max(scores.values()) < 0.8, scores
 
 
 def numpy_yellow(rgb):
@@ -165,6 +183,45 @@ def test_watchdog_sets_the_alarm_first_then_reports_once(tmp_path):
     assert dog.recording is not None and dog.recording.grabs == 3  # and the watchdog goes on, recording it
     dog.recording.finish("stopped")
     assert dog.recording.join(timeout=10)
+
+
+@pytest.mark.parametrize("before, seen, form, title", [
+    ("2026-10-25_005500_before_the_notice", "2026-10-25_005501_mini_game_notice.jpg", "mini-game notice",
+     "MapleStory Lie Detector mini-game in 10 s"),
+    ("2026-10-25_002757_before_the_quiz_warning", "2026-10-25_002758_quiz_warning.jpg", "quiz warning",
+     "MapleStory image quiz in 30 s"),
+    ("2026-10-25_002757_before_the_quiz_warning", "2026-10-25_002828_quiz.jpg", "quiz",
+     "MapleStory image quiz on screen")])
+def test_the_notice_and_the_quiz_raise_the_alarm_named_for_what_was_seen(alarm_file, monkeypatch, tmp_path, before,
+                                                                         seen, form, title):
+    """On 2026-10-24 and 25 the alarm went off at the mini-game's board, 10 s after its notice, and not at all for the
+    image quiz (30 s of warning, then 10 s to answer): the hunt went on through both. Now the first of them seen is
+    the alarm, as the board is: input stopped, paged by name, the cycle recorded."""
+    pages, said = [], []
+    monkeypatch.setattr(alarm, "page", lambda title, text: pages.append(title))
+    frames = iter([img(f"lie_detector/without/{before}.jpg"), img(f"lie_detector/{seen}"), img(f"lie_detector/{seen}")])
+    flag = threading.Event()
+    dog = Watchdog("MapleStory", flag, grab=lambda: next(frames), folder=tmp_path / "lie_detector", log=said.append)
+    dog.tick(0.0)
+    assert not flag.is_set() and not alarm_file.exists()
+    dog.tick(0.25)
+    info = json.loads(alarm_file.read_text())
+    assert flag.is_set() and info["reason"] == "lie_detector" and info["form"] == form and pages == [title]
+    assert any(m.startswith(f"LIE DETECTOR seen ({form}): input stopped") for m in said)
+    dog.tick(0.5)
+    dog.recording.finish("stopped")
+    assert dog.recording.join(timeout=10) and dog.recording.forms[form]["frames"] == 2
+    Path(info["screenshot"]).unlink()
+
+
+def test_the_alarm_without_a_form_is_paged_as_before(alarm_file, monkeypatch):
+    pages = []
+    monkeypatch.setattr(alarm, "page", lambda title, text: pages.append((title, text)))
+    for form in (None, "countdown", "truth booth"):
+        info = alarm.raise_alarm(None, form=form)
+        assert info.get("form") == form
+    assert pages == [("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer it in the game "
+                                                            "yourself.")] * 3
 
 
 def test_watchdog_keeps_watching_while_all_is_well(tmp_path):

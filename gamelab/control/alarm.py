@@ -17,6 +17,21 @@ from ..paths import ALARM
 BEEPS = 3         # alert sounds when paging ...
 BEEP_GAP_S = 0.4  # ... this far apart
 LIE_DETECTOR_ERROR = "Lie Detector on screen: all input stopped"  # the player's answer to a plan it refuses for it
+# What's paged for each form the spotter knows (perception.lie_detector, by its names): the notice and the quiz's
+# warning come before their test, so the page says how long there is.
+PAGED = {
+    "mini-game notice": ("MapleStory Lie Detector mini-game in 10 s",
+                         "gamelab stopped the hunt (a hunt moves her to a safe place). Follow the figure with the "
+                         "mouse yourself."),
+    "mini-game": ("MapleStory Lie Detector mini-game on screen",
+                  "gamelab stopped all input. Follow the figure with the mouse yourself."),
+    "quiz warning": ("MapleStory image quiz in 30 s",
+                     "gamelab stopped the hunt (a hunt moves her to a safe place). Click the matching images and "
+                     "Confirm yourself."),
+    "quiz": ("MapleStory image quiz on screen",
+             "gamelab stopped all input. Click the matching images and Confirm yourself."),
+}
+PAGE = ("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer it in the game yourself.")
 
 # What still goes with the alarm up, named by a plan's `kind` (control.client.send), each only as its kind says
 # (control.player.alarm_refusal); every other plan is refused, as before. The user, 2026-10-24, after a Lie Detector
@@ -31,11 +46,14 @@ RETREAT_S = 10.0       # s from the sighting by which she's on a safe place (beh
 RETREAT_WINDOW_S = 12.0  # ... and the player takes her retreat's moves this long after it, then none
 
 
-def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector") -> dict:
+def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector", form: str | None = None) -> dict:
     """Record the alarm (gamelab refuses to run until it's cleared) and page whoever is at the PC. An alarm that
     can't be written (the disk full) is still paged, and its error raised after that: it had raised before the
-    paging, so then nobody was told. `at` is when (time.time(): her retreat counts its 10 s from it)."""
+    paging, so then nobody was told. `at` is when (time.time(): her retreat counts its 10 s from it); `form` the form
+    seen (perception.lie_detector's name), recorded and paged by name (PAGED)."""
     info = {"reason": reason, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "at": round(time.time(), 3)}
+    if form is not None:
+        info["form"] = form
     try:
         ALARM.parent.mkdir(parents=True, exist_ok=True)
         _write(info)  # first: everything else may fail
@@ -48,7 +66,7 @@ def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector") -> dict:
             except OSError:
                 pass
     finally:
-        page("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer it in the game yourself.")
+        page(*PAGED.get(form, PAGE))
     return info
 
 

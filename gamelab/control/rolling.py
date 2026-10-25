@@ -1,12 +1,14 @@
 """The rolling recording: the game's client area 10 times a second, the last 5 minutes kept in memory as JPEG, so what
 led up to a moment can be saved after it. The user asked for it on 2026-10-24 (21:50): something had popped up in the
-game wanting an answer within 10 s, and nothing recorded it (the player's Lie Detector check knows only the countdown,
-the mouse mini-game and the Truth Booth, and records only once it has seen one).
+game wanting an answer within 10 s, and nothing recorded it (the player's Lie Detector check knew only the countdown,
+the mouse mini-game and the Truth Booth, and records only once it has seen one). It was the image quiz: since
+2026-10-25 the player knows it and its warning, and the mini-game's notice, so their alarms are saved as any.
 
 `python -m gamelab recorder` runs it (README: The rolling recording), at below-normal priority, kept running by the
 babysitter, hunts or not. What it keeps is saved:
-  - on a Lie Detector alarm (control.alarm's ALARM.json, written by the player's watchdog): the 5 minutes before it,
-    and on until the player's own recording of it has begun, go into that recording's folder as `before/`
+  - on a Lie Detector alarm (control.alarm's ALARM.json, written by the player's watchdog, whatever form it was seen
+    as: its `form`): the 5 minutes before it, and on until the player's own recording of it has begun, go into that
+    recording's folder as `before/`
     (control.lie_recorder), so the whole cycle is kept with what led up to it; as one is written, the Lie Detector's
     recordings are pruned to their 10 GB counting those parts (`_prune_lie`), whatever the player's age;
   - on demand (`python -m gamelab save-recent`, `ask` here): the last N s, to paths.RECENT/<YYYYmmdd-HHMMSS>[-name],
@@ -368,7 +370,8 @@ class Recorder:
         except OSError:
             seen = self.clock()
         snapshot = self.ring.last(self.ring.seconds)
-        self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}, {key}): saving the "
+        seen_as = f", {info['form']}" if info.get("form") else ""
+        self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}): saving the "
                   f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it")
         self.jobs.put(lambda: self._save_before(info, seen, snapshot))
 
@@ -438,7 +441,7 @@ class Recorder:
             self._prune_lie(folder)
         else:
             lie_recorder.prune(self.recent, self.recent_keep)
-            dest = new_folder(self.recent, "lie-detector")
+            dest = new_folder(self.recent, safe_name(f"lie-detector {info.get('form') or ''}".strip()))
         summary = write_part(dest, items, {
             "kind": "before the Lie Detector", "alarm": info, "alarm_at": day_time(seen),
             "alarm_t": None if not items else round(seen - items[0].t, 3),

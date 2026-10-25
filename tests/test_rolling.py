@@ -428,6 +428,22 @@ def test_an_alarm_with_no_recording_of_the_player_s_goes_to_the_recent_folder(tm
     rec.close()
 
 
+def test_an_alarm_for_the_image_quiz_or_the_mini_game_s_notice_is_saved_by_itself(tmp_path, alarm_file, monkeypatch):
+    """On 2026-10-25 the image quiz raised no alarm, and was kept only because the user asked for `save-recent`. The
+    player's alarm for it (control.alarm.raise_alarm, its `form`) is saved as any, named for the form."""
+    monkeypatch.setattr(alarm, "page", lambda title, text: None)
+    rec = recorder(tmp_path, folder_wait=0.3)
+    run_ticks(rec, 50, poll=True)
+    alarm.raise_alarm(None, form="quiz warning")
+    run_ticks(rec, 5, poll=True)
+    assert rec.flush(10)
+    (folder,) = (tmp_path / "recent").iterdir()
+    assert folder.name.endswith("-lie-detector-quiz-warning")
+    assert summary(folder)["alarm"]["form"] == "quiz warning" and summary(folder)["frames"] >= 50
+    assert any("Lie Detector alarm (lie_detector, quiz warning, " in m for m in rec.said)
+    rec.close()
+
+
 def test_an_alarm_up_as_it_starts_is_not_saved_but_the_next_one_is(tmp_path, alarm_file):
     alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 20:00:00"}), encoding="utf-8")
     rec = recorder(tmp_path, folder_wait=0.2)

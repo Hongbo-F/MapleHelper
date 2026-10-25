@@ -327,8 +327,10 @@ class Watchdog(threading.Thread):
     """Looks at the game every `interval` seconds, whether or not a plan is running, and records each Lie Detector's
     whole cycle.
 
-    A cycle starts when the Lie Detector is first seen: `alarm` is set first (any keys stop within ~10 ms, mid-plan
-    too), then on_alarm writes the alarm and its screenshot and pages (control.alarm.raise_alarm), as before; only
+    A cycle starts when the Lie Detector is first seen, in any of its forms (`form`: the one it was seen as, the best
+    match; since 2026-10-25 also the mini-game's notice and the image quiz's warning, ahead of their tests): `alarm` is
+    set first (any keys stop within ~10 ms, mid-plan too), then on_alarm writes the alarm, named for that form, and its
+    screenshot and pages (control.alarm.raise_alarm), as before; only
     then does the recording start (control.lie_recorder), with that first frame. From there every grab goes into it
     until the game has shown no Lie Detector for `end_s` (lie_recorder.END_S): the cycle's end; or, at the latest,
     `cap_s` after the first sight, when the recording stops and the cycle goes on unrecorded. A grab with the game
@@ -371,7 +373,8 @@ class Watchdog(threading.Thread):
         self.shadow_form = FORM
         self.grab = grab
         self.interval = interval
-        self.on_alarm = on_alarm or raise_alarm
+        self.form: str | None = None  # the form the cycle in progress was first seen as (the spotter's name)
+        self.on_alarm = on_alarm or (lambda frame: raise_alarm(frame, form=self.form))
         self.folder = folder or LIE_RECORDINGS
         self.log = log or _log
         self.end_s = lie_recorder.END_S if end_s is None else end_s
@@ -437,11 +440,12 @@ class Watchdog(threading.Thread):
             self.gone_since = now
         if seen and self.cycle_t0 is None:
             self.alarm.set()  # first: keys stop within ~10 ms
+            self.form = max(scores, key=scores.get)
             info = self._raise(frame)  # the alarm, its screenshot, paging: before anything of the recording
             self.cycle_t0 = now
             self.alarm_written = alarm_up()
-            self._say("LIE DETECTOR seen: input stopped; the player stays up refusing every plan (but a tap of her pet "
-                      f"food, and her retreat's moves for {RETREAT_WINDOW_S:g} s), records it, and "
+            self._say(f"LIE DETECTOR seen ({self.form}): input stopped; the player stays up refusing every plan (but a "
+                      f"tap of her pet food, and her retreat's moves for {RETREAT_WINDOW_S:g} s), records it, and "
                       f"stops once `clear-alarm` has been run and none has been on screen for {self.end_s:g} s "
                       "(it takes plans again only once it's started again)"
                       + ("" if self.alarm_written else " (the alarm file couldn't be written: locked until it's "

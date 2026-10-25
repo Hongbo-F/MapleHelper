@@ -359,7 +359,7 @@ def test_a_cycle_seen_for_a_while_then_gone_is_recorded_from_its_first_sight_to_
     assert flag.is_set()  # still locked: the alarm is lifted elsewhere (the player's rule)
     assert any(m.startswith("recording the Lie Detector") and str(folder) in m for m in said)
     assert any(m.startswith("Lie Detector recording ended (gone): 15 frames") for m in said)
-    first = [i for i, m in enumerate(said) if m.startswith("LIE DETECTOR seen: input stopped")]
+    first = [i for i, m in enumerate(said) if m.startswith("LIE DETECTOR seen (countdown): input stopped")]
     assert first and first[0] < [i for i, m in enumerate(said) if m.startswith("recording the")][0]
 
 
