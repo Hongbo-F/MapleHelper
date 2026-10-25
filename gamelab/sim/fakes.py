@@ -46,7 +46,7 @@ from ..perception import exp_number
 from ..perception.eyes import Eyes, Observation
 from ..perception.loot import Item
 from ..perception.match import suppress_overlaps
-from ..perception.minimap import OTHER_SHIFT, Marker
+from ..perception.minimap import OTHER_SHIFT, PICTURE_BASE, Marker
 from ..perception.mobs import REFIND_PAD, Mob
 from ..perception.terrain import ScreenRope
 from ..screen import SCALE
@@ -62,11 +62,14 @@ SKY = (60, 140, 230)      # the frame's colour: nothing in it reads as an HP bar
 PLAY_BOTTOM = int(FRAME[0] * 0.88)  # the bottom bar starts below (screen.HUD_TOP)
 # The minimap window's rows (game px) on a map whose picture is taller than it shows: on Tree Dungeon, Forest Up North
 # II 112 of the picture's 183 (the window from y 72 to 184 at 1366x768; the study's frames). It scrolls the picture to
-# keep her dot WINDOW_DOT_ROW rows from its top, stopping at the picture's ends: on its frames of 2026-10-24 her dot
-# was 49.5 rows down on 19 (first_000: the picture's corner at y 28, her dot at picture row 93.5), and on 28 the window
-# had stopped at the picture's bottom (the corner at y 1, her dot at row 130.5): from 28 the window shows y -1113 and
-# below (platforms 15 to 33), and nobody higher up is seen. The first map's and West Rocky Mountain II's whole pictures
-# show (their corners at y 72 on all their saved frames).
+# keep her dot WINDOW_DOT_ROW rows from its top, stopping at the picture's ends. Rows are the picture's as the game draws
+# the dots in it (_picture_row: 7.2 rows above the map's own row there, (y + centerY) / 16, as the dot's origin has
+# it). On its frames of 2026-10-24 her dot was 49.5 rows down on 19 (first_000: the picture's corner at y 28, her dot
+# at picture row 93.5; one frame: the study took the window to keep her dot in its middle, 56), and on 28 the window
+# had stopped at the picture's bottom (the corner at y 1, her dot at row 130.5): from 28 the window shows y -998 and
+# below (platforms 17 to 33), and nobody higher up is seen (the hour of live telemetry from 28, 2026-10-24: none of
+# 137,645 other players' dots read above -1015, 1,902 within that px of -998; the study: -1001 and down). The first
+# map's and West Rocky Mountain II's whole pictures show (their corners at y 72 on all their saved frames).
 WINDOW_ROWS = {10002073: 112}
 WINDOW_DOT_ROW = 49.5
 # Where the game's camera keeps her up and down (map units from the screen's top), on a map where it was seen apart
@@ -358,10 +361,16 @@ class FakeEyes(Eyes):
         if rows is None:
             return True
         mm = self.model.minimap
-        mag, tall = 2 ** mm["mag"], mm["height"] // 2 ** mm["mag"]
-        her = (self.world.y + mm["centerY"]) / mag
-        top = min(max(0.0, her - WINDOW_DOT_ROW), tall - rows)
-        return top <= (y + mm["centerY"]) / mag < top + rows
+        tall = mm["height"] // 2 ** mm["mag"]
+        top = min(max(0.0, self._picture_row(self.world.y) - WINDOW_DOT_ROW), tall - rows)
+        return top <= self._picture_row(y) < top + rows
+
+    def _picture_row(self, y: float) -> float:
+        """The row of the minimap picture (game px from its top) the game draws a dot in for map y: the dot as it's read
+        (Localizer.to_dot, whose origin was fitted with the picture's corner at PICTURE_BASE), 7.2 rows above the map's
+        own row in the picture ((y + centerY) / 16): her dot on 28 at 130.2 (130.5 on the study's frames), on 19 93.4
+        (93.5)."""
+        return self.loc.geo.to_game(self.loc.to_dot(0.0, y)[1]) - PICTURE_BASE[1]
 
     def _exp_box(self) -> np.ndarray:
         """Her EXP number as the bar shows it, from her level and EXP at the start (World.character) and what she has gained

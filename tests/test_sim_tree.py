@@ -268,7 +268,9 @@ def test_other_players_dots_show_in_the_minimap_windows_view_and_not_under_hers(
     clock = fakes.Clock()
     w = World(m, KEYS, (28, 262.0), monsters=None, origin=clock.now, realism=Realism(camps=camps))
     eyes = fakes.FakeEyes(w, clock, m)
-    assert eyes.in_window(m.platform(29).top) and eyes.in_window(-1100) and not eyes.in_window(-1120)
+    # From 28 the window has stopped at the picture's bottom: y -998 and below (the dots' rows, 7.2 above the map's own
+    # rows in the picture: fakes.FakeEyes._picture_row), not -1113 as the map's rows put it.
+    assert eyes.in_window(m.platform(29).top) and eyes.in_window(-990) and not eyes.in_window(-1005)
     assert len(eyes._others()) == 2  # 13 (y -1190) is out of the window's view from 28
     w.noise = dataclasses.replace(w.noise, dot_under=56.0)
     assert len(eyes._others()) == 1  # the one 22 units from her is under her dot

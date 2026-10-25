@@ -871,7 +871,8 @@ across in the fake eyes as on screen and keeps her 529 units below the screen's 
 from 19, not understood), so from 28 the Horny Mushrooms on 31 are behind the chat bar, as in game (with 489 a look
 found them at row 673, over the HUD); rows below the HUD's top aren't searched (the chat bar's strip), and other
 players' dots show only in the minimap window's rows (`fakes.WINDOW_ROWS`, her dot 49.5 rows from its top as on the
-study's frame from 19: from 28 nobody above y -1113 is seen) and not within 56 units of hers (`Noise.dot_under`, in
+study's one frame from 19, the rows the picture's as the dots are drawn in it, 7.2 above the map's own: from 28 nobody
+above y -998 is seen, platforms 17-33, as in the hour of telemetry there; from 7 nobody below -342) and not within 56 units of hers (`Noise.dot_under`, in
 the crowd presets). The other players (presets `crowd`, `crowd-slow`, this map's alone): five camps where the study
 saw them (`harness.TREE_CAMPS`: by 28 killing 29's and 30's Greens, by 21 and 23 killing 21's and 22's, by 19, and by
 33 killing 32's and 33's Greens and Slimes), each 2-6 s after a monster shows (`world.CAMP_KILL`), their drops gone 1 s
