@@ -475,14 +475,26 @@ def _map_name(map_id: int) -> str:
     return str(map_id)
 
 
-@lru_cache(maxsize=4)
-def minimap_picture(map_id: int) -> np.ndarray | None:
+_PICTURES: dict[int, np.ndarray] = {}  # minimap pictures loaded (only those: one that failed is tried again)
+
+
+def load_minimap_picture(map_id: int) -> np.ndarray:
     """The map's own minimap picture (its miniMap canvas: the map at 1/2^mag, RGB, game px), from the game data
-    copy; None if the copy or the picture isn't there (perception.minimap.MinimapPicture finds it in the window)."""
-    from gamedata.canvas import outlinked, pixels
-    try:
+    copy (perception.minimap.MinimapPicture finds it in the window). Raises KeyError, OSError or ValueError if the
+    copy or the picture isn't there."""
+    if map_id not in _PICTURES:
+        from gamedata.canvas import outlinked, pixels
         canvas, _ = outlinked(f"Map/Map/Map{map_id // 100000000}/_Canvas/{map_id:09d}.img/miniMap/canvas")
-        return np.ascontiguousarray(pixels(canvas)[..., :3])
+        _PICTURES[map_id] = np.ascontiguousarray(pixels(canvas)[..., :3])
+    return _PICTURES[map_id]
+
+
+def minimap_picture(map_id: int) -> np.ndarray | None:
+    """load_minimap_picture, or None if it isn't there. Without it her dot is read with the first map's origin, which
+    on Tree Dungeon put her 640 units off (2026-10-24 16:46:50, a process that had none): the commands that act load
+    it with load_minimap_picture, and stop saying why if the map has one and it won't load (__main__._eyes)."""
+    try:
+        return load_minimap_picture(map_id)
     except (KeyError, OSError, ValueError):
         return None
 

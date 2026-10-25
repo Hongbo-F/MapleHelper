@@ -85,6 +85,18 @@ def minimized(hwnd: int) -> bool:
     return bool(user32.IsIconic(hwnd))
 
 
+def dpi_awareness() -> int | None:
+    """This thread's DPI awareness: 0 unaware, 1 system aware, 2 per monitor (window places and captures in the
+    monitor's real pixels); None if Windows can't say. On 2026-10-24 python.exe was per monitor (2) before any call
+    (its compatibility flag HIGHDPIAWARE), at 300% scaling."""
+    try:
+        context = user32.GetThreadDpiAwarenessContext()
+        user32.GetAwarenessFromDpiAwarenessContext.argtypes = (ctypes.c_void_p,)
+        return int(user32.GetAwarenessFromDpiAwarenessContext(context))
+    except (AttributeError, OSError):
+        return None
+
+
 def shows(hwnd: int, area: dict, inset: int = 8) -> bool:
     """Whether the screen shows window `hwnd` at its client area's middle and near each corner (`inset` px
     in): no other window is over those points. Screen captures see whatever is on top."""

@@ -29,6 +29,8 @@ from .screen import STRETCHED, geometry
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
 FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the front before it gives up (_to_game)
 MINIMIZED_POLL_S = 0.5  # s between looks at whether the minimized game was restored (`watch` waits: _game_geometry)
+MINIMAP_TRIES = 3       # times the map's minimap picture is tried before a command that acts stops (_minimap_picture),
+MINIMAP_RETRY_S = 0.5   # ... this long apart (in case what kept it from loading passes)
 # `watch`: how often it publishes what it sees (telemetry), and says how it's going on the console. Scenes 10
 # times a second and tracks twice a second: on the saved frames a scene is 393 bytes (with what each look searched,
 # for analysis.respawn, and the other players; 279 before those) and the tracks 848, so about 20 MB an hour, 490 MB
@@ -346,13 +348,41 @@ def _annotate(scene, path) -> None:
 
 def _eyes(model, title: str):
     """Eyes on the game, with monster templates for that map (screenshots + the game's sprites), for its window at
-    the size it is now (its calibration at that size)."""
-    from .localization import mapdata
+    the size it is now (its calibration at that size), and the map's minimap picture (_minimap_picture). Says where
+    the window is, at what DPI awareness, and what minimap picture was loaded: what a run that went wrong is told
+    by (2026-10-24 16:46:50)."""
     from .perception.eyes import Eyes
     from .perception.sprites import detector_for
     geo = _game_geometry(title, restore=True)  # (a minimized game is brought back, as the first look would)
+    area = window.client_rect(window.find_game(title))
+    print(f"the game's client: {area['width']}x{area['height']} at ({area['left']}, {area['top']}) (desktop px); "
+          f"DPI awareness {window.dpi_awareness()}", flush=True)
     return Eyes(title, _calibration(geo).template, detector_for(model, geo), geo=geo,
-                minimap_picture=mapdata.minimap_picture(model.id))
+                minimap_picture=_minimap_picture(model))
+
+
+def _minimap_picture(model):
+    """The map's minimap picture (mapdata.load_minimap_picture), tried MINIMAP_TRIES times, MINIMAP_RETRY_S apart; None
+    for a map without one. Raises RuntimeError, saying why, if the map has one and it won't load: without it her dot
+    is read with the first map's origin, which on Tree Dungeon put her 640 units off the map for a whole hunt (a
+    process in which it was None, 2026-10-24 16:46:50; why isn't known: mapdata.minimap_picture said nothing)."""
+    from .localization import mapdata
+    why = None
+    for attempt in range(MINIMAP_TRIES):
+        try:
+            picture = mapdata.load_minimap_picture(model.id)
+        except (KeyError, OSError, ValueError) as e:
+            why = e
+            if attempt + 1 < MINIMAP_TRIES:
+                time.sleep(MINIMAP_RETRY_S)
+            continue
+        print(f"the minimap picture of map {model.id}: {picture.shape[1]}x{picture.shape[0]} game px", flush=True)
+        return picture
+    if (getattr(model, "minimap", None) or {}).get("width"):
+        raise RuntimeError(f"map {model.id}'s minimap picture didn't load ({why!r}): without it her minimap dot is read "
+                           f"with the first map's origin (on Tree Dungeon 640 units off the map)")
+    print(f"map {model.id} has no minimap picture: her dot is read with the first map's origin", flush=True)
+    return None
 
 
 _FEEDS: list = []  # continuous feeds started by this command (--feed), closed when it ends
@@ -467,7 +497,7 @@ def cmd_hunt(args) -> int:
         return 0
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
     if args.mode == "look":
-        return _hunt_look(hunter)
+        return _hunt_looks(hunter, args.every, args.seconds) if args.every else _hunt_look(hunter)
     kinds = set(args.kinds.split(",")) if args.kinds else None
     _record(f"hunt-{args.mode}", hunter.model.id)
     if not _to_game():
@@ -490,6 +520,27 @@ def cmd_hunt(args) -> int:
     left = ", ".join(f"{d.item.kind} at {d.x - final.where.x:+.0f}" for d in final.loot) or "none"
     print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}; drops left on her platform: {left}"
           + ("; her inventory is full" if hunter.looter.inventory_full else ""))
+    return 0
+
+
+def _hunt_looks(hunter, every: float, seconds: float) -> int:
+    """`hunt look --every S`: a look every S seconds for `seconds`, her place in a line each (no keys; a look brings the
+    game to the front, as any look does): what looks make of the game window moved, covered, minimized or resized while
+    it runs. One that fails its checks says why, and after senses.LOST_S of failing it stands still until one passes
+    (Senses.regain), as a hunt does (README: Capture checks)."""
+    from .perception.framecheck import LookLost
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            s = hunter.look(mobs=False)
+        except LookLost as lost:
+            if hunter.senses.regain(lost, end) is None:
+                return 1
+            continue
+        p = s.platform
+        _log(f"her: map ({s.where.x:.0f}, {s.where.y:.0f}) on platform {p.id if p else None} ({s.how})"
+             if s.where is not None else "her minimap dot isn't seen")
+        time.sleep(every)
     return 0
 
 
@@ -1463,6 +1514,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ground", help="clear: only monsters on these platforms (and any on hers), e.g. 17,18")
     s.add_argument("--kills", type=int, default=6, help="clear: stop after this many kills")
     s.add_argument("--seconds", type=float, default=120, help="stop after this long")
+    s.add_argument("--every", type=float, help="look: a look every this many seconds for --seconds, her place in a "
+                                               "line each (what looks make of the window moved or resized meanwhile)")
     s.add_argument("--skill", action="store_true", help="throw Lucky Seven instead of the regular attack (MP)")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")

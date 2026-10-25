@@ -426,8 +426,74 @@ def test_a_name_tag_template_that_no_longer_matches_is_cut_again(tmp_path):
     assert tag.find(full) == (685, 528)
 
 
+def test_a_minimap_picture_that_failed_to_load_is_tried_again(monkeypatch):
+    import gamedata.canvas
+    calls = []
+    real = gamedata.canvas.outlinked
+
+    def outlinked(path):
+        calls.append(path)
+        if len(calls) == 1:
+            raise OSError("a passing failure")
+        return real(path)
+
+    monkeypatch.setattr(gamedata.canvas, "outlinked", outlinked)
+    monkeypatch.setattr(mapdata, "_PICTURES", {})
+    assert mapdata.minimap_picture(TREE) is None
+    tree_picture()  # (skips without the game data)
+    assert len(calls) == 2
+
+
+def test_a_command_stops_saying_why_if_the_maps_picture_wont_load(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from gamelab import __main__ as cli
+
+    def fail(map_id):
+        raise KeyError("miniMap")
+
+    monkeypatch.setattr(mapdata, "load_minimap_picture", fail)
+    monkeypatch.setattr(cli, "MINIMAP_RETRY_S", 0.0)
+    with pytest.raises(RuntimeError, match="minimap picture didn't load"):
+        cli._minimap_picture(SimpleNamespace(id=TREE, minimap={"width": 548}))
+    assert cli._minimap_picture(SimpleNamespace(id=1, minimap={"width": None})) is None
+    monkeypatch.setattr(mapdata, "load_minimap_picture", lambda map_id: np.zeros((183, 67, 3), np.uint8))
+    assert cli._minimap_picture(SimpleNamespace(id=TREE, minimap={"width": 548})).shape == (183, 67, 3)
+    assert "the minimap picture of map 10002073: 67x183 game px" in capsys.readouterr().out
+
+
 def test_the_scene_record_says_where_the_minimap_picture_was():
     from gamelab.localization.scene import Scene
     s = Scene(t=0.0, frame=GOOD, tag=None, hp=1.0, mp=1.0, geo=NATIVE, picture=(87, 17, 0.645))
     assert s.record()["minimap"] == [87, 17, 0.645]
     assert "minimap" not in Scene(t=0.0, frame=GOOD, tag=None, hp=1.0, mp=1.0, geo=NATIVE).record()
+
+
+def test_hunt_look_every_says_each_look_and_stands_still_through_a_lost_one(monkeypatch, capsys):
+    """`hunt look --every S` (no keys): a line a look, and a LookLost waited out as a hunt does (Senses.regain)."""
+    from types import SimpleNamespace
+
+    from gamelab import __main__ as cli
+    clock = FakeTime()
+    monkeypatch.setattr(cli, "time", clock)
+    here = SimpleNamespace(where=Where(31.3, -451.3, SimpleNamespace(id=23), (0.0, 0.0)), how="camera")
+    here.platform = here.where.platform
+    looks = iter([here, LookLost(Problem("size", "the game's client is 1396x1952, not 1366x768")), here])
+    regained = []
+
+    def look(mobs=True):
+        out = next(looks)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    def regain(lost, until):
+        regained.append(lost.why)
+        clock.now += 5.0
+        return here
+
+    hunter = SimpleNamespace(look=look, senses=SimpleNamespace(regain=regain))
+    assert cli._hunt_looks(hunter, every=1.0, seconds=2.5) == 0
+    out = capsys.readouterr().out
+    assert out.count("her: map (31, -451) on platform 23 (camera)") == 1 and regained == [
+        "the game's client is 1396x1952, not 1366x768"]
