@@ -386,13 +386,13 @@ def _minimap_picture(model):
     return None
 
 
-_FEEDS: list = []  # continuous feeds started by this command (--feed), closed when it ends
+_FEEDS: list = []  # continuous feeds started by this command (--feed, the default), closed when it ends
 
 
 def _hunter(args, **kw):
     """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way); with
-    `--feed`, her looks and glances from a continuous feed (localization.feed: the game looked at every frame
-    in a process of its own)."""
+    `--feed` (on by default for `hunt`, `nav` and `tour`; --no-feed), her looks and glances from a continuous feed
+    (localization.feed: the game looked at every frame in a process of its own)."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
     cfg, keys, _ = her_setup()
@@ -504,6 +504,8 @@ def cmd_hunt(args) -> int:
         for path in (paths.OLD_SHOT_LOG, paths.SHOT_LOG):
             _shot_summary(path)
         return 0
+    if args.mode == "look":  # what her own looks make of the game (no keys): no feed, whose child takes seconds to start
+        args.feed = False
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, skill=args.skill)
     if args.mode == "look":
         return _hunt_looks(hunter, args.every, args.seconds) if args.every else _hunt_look(hunter)
@@ -1725,9 +1727,10 @@ def cmd_patrol(args) -> int:
 # --- the command line ------------------------------------------------------------------------------------
 
 def feed_arg(s) -> None:
-    s.add_argument("--feed", action="store_true",
+    s.add_argument("--feed", action=argparse.BooleanOptionalAction, default=True,
                    help="looks and glances from a continuous feed: the game looked at every frame in a process of its "
-                        "own (not tried in game yet)")
+                        "own, at below-normal priority, her looks reading what it follows (default: on; --no-feed, "
+                        "each look taken when it's asked for, as before 2026-10-24)")
 
 
 def sweep_arg(s, default: str) -> None:

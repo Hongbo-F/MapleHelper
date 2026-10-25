@@ -627,12 +627,13 @@ def test_watch_checks_for_the_lie_detector_on_a_thread_of_its_own_twice_a_second
     assert raised == ["lie-detector"]  # the alarm once, from the check's own thread
 
 
-def test_hunting_commands_take_a_feed_with_feed_and_go_without_it_when_it_cant_start(monkeypatch, capsys):
+def test_hunting_commands_take_a_feed_by_default_and_go_without_it_when_it_cant_start(monkeypatch, capsys):
     from gamelab import __main__ as cli
     from gamelab.analysis import calibration
-    for cmd in (["hunt", "clear", "--feed"], ["nav", "35", "--feed"], ["tour", "--loop", "--feed"]):
-        assert cli.build_parser().parse_args(cmd).feed
-    assert not cli.build_parser().parse_args(["tour"]).feed
+    for cmd in (["hunt", "clear"], ["nav", "35"], ["tour"], ["tour", "--loop"], ["tour", "--loop", "--grind"]):
+        assert cli.build_parser().parse_args(cmd).feed  # the default since 2026-10-24
+        assert not cli.build_parser().parse_args(cmd + ["--no-feed"]).feed
+    assert not hasattr(cli.build_parser().parse_args(["pet"]), "feed")  # (no feed for a pet's food)
     started = []
 
     class Client:
