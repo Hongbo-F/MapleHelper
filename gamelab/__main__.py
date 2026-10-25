@@ -1710,7 +1710,7 @@ def cmd_patrol(args) -> int:
         last = t
         if (changed := p.replan(t)) is not None:
             print(f"{t - start:7.1f}  loop: {p.plan.text(p.platform_of)} ({changed})")
-        j, info = p.choose(t, her["platform"], her["x"], current=p.stop_on(her["platform"]))
+        j, info = p.choose(t, her["platform"], her["x"], current=p.stop_on(her["platform"]), peek=True)
         if j is not None:
             why[info["why"]] += 1
             print(f"{t - start:7.1f}  on {her['platform']} at x {her['x']:.0f}: next {patrol.choice_text(info)}")

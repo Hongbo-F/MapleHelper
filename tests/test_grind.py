@@ -131,7 +131,7 @@ def test_a_pile_seen_off_the_loop_pulls_the_route():
     nxt, info = p.choose(1.0, left[0], 150.0, current=here)
     assert p.platform_of(nxt) == right and info["why"] == "pulled" and info["seen"] > 90
     assert info["instead_of"]["stop"] in left
-    # One alone isn't a pile: the loop goes on.
+    # One Green Mushroom alone, 6 s off, isn't worth leaving the loop for: the loop goes on.
     m2 = Memory(model)
     m2.update(1.0, [_sight(model, GREEN, 1200, -200)], None)
     p.belief = patrol.Belief(model, p.points)
@@ -378,3 +378,78 @@ def test_others_take_is_learned_from_monsters_looked_at_again_only():
     m.update(80.0, [Monster(Mob(HORNY, 0, 0, 0, 0, 1.0), 110.0, 0.0, a[0])], None, by)
     p.belief.update(80.0, m, by)
     assert p.belief.kept_by[HORNY] == 1 and p.belief.take(HORNY) < patrol.TAKE_PRIOR
+
+
+def test_one_monster_seen_close_by_pulls_her_from_a_loop_stop_far_off():
+    # On the column's bottom platform, the loop's next stop 30 s off and never seen; one Horny Mushroom seen on the
+    # platform above, 2 s off: a pile of one is worth the trip (two kills' worth had been asked).
+    model, ids, far, p = _column()
+    m = Memory(model)
+    p._take(p.rate([p.stop_on(ids[0]), p.stop_on(far)], 0.0), 0.0, "test")
+    m.update(1.0, [_sight(model, HORNY, 150, -200)], None)
+    p.belief.update(1.0, m)
+    nxt, info = p.choose(1.0, ids[0], 150.0, current=p.stop_on(ids[0]))
+    assert p.platform_of(nxt) == ids[1] and info["why"] == "pulled" and info["instead_of"]["stop"] == far
+    # On her way to the far stop, the same: the stop she's heading to stands in for the loop's next ...
+    p.at_loop = 0
+    nxt, info = p.choose(1.0, ids[0], 150.0, heading=p.stop_on(far), peek=True)
+    assert p.platform_of(nxt) == ids[1] and info["why"] == "pulled"
+    assert p.at_loop == 0  # (a peek moves nothing)
+    # ... and with nothing seen she goes on to it.
+    p.belief = patrol.Belief(model, p.points)
+    p.belief.update(1.0, Memory(model))
+    nxt, info = p.choose(1.0, ids[0], 150.0, heading=p.stop_on(far), peek=True)
+    assert nxt == p.stop_on(far) and info["why"] == "on her way"
+
+
+def test_a_stop_counts_only_the_monsters_she_gets_at_from_it():
+    # A (x 0-400, y 500) and B 50 units up (x 300-1300). From A a star reaches B's left end, not its right one.
+    model = _map([(0, 400, 500), (300, 1300, 450)], [(200, 500, "h"), (500, 450, "h"), (1200, 450, "h")])
+    A, B = _pid(model, 200, 500), _pid(model, 1200, 450)
+    p = _patrol(model, lambda a, b: 2.0)
+    a, b = p.stop_on(A), p.stop_on(B)
+    assert any(p.points[q].platform == B for q, c in p.stops[a].cover)  # A's stop gets at some of B
+    m = Memory(model)
+    # Three seen at B's right end: A's stop gets at none of them (the share of B it reaches had counted them) ...
+    m.update(1.0, [_sight(model, HORNY, 1150, 450), _sight(model, HORNY, 1200, 450), _sight(model, HORNY, 1250, 450)],
+             None)
+    p.belief.update(1.0, m)
+    assert p.expect(a, 1.0)[1] == 0.0 and p.expect(b, 1.0)[1] == pytest.approx(3 * 41)
+    p._take(p.rate([a, b], 1.0), 1.0, "test")
+    nxt, info = p.choose(1.0, A, 200.0)
+    assert nxt == b  # pulled to the stop that gets at them, not bounced to A's
+    # ... one at B's left end, A's does.
+    m.update(2.0, [_sight(model, HORNY, 480, 450)], None)
+    p.belief.update(2.0, m)
+    assert p.expect(a, 2.0)[1] == pytest.approx(41)
+    # Left with nothing in reach there, a stop doesn't count again what she'd been there to see; a monster seen
+    # since, it does.
+    p.left_at[a] = 2.5
+    assert p.expect(a, 3.0)[1] == 0.0
+    m.update(3.0, [_sight(model, HORNY, 490, 450)], None)
+    p.belief.update(3.0, m)
+    assert p.expect(a, 3.0)[1] == pytest.approx(41)
+
+
+def test_a_better_loop_is_taken_up_only_when_it_is_loop_gain_better(monkeypatch):
+    model, a, b, p = _two_areas()
+    m = Memory(model)
+    p.belief.update(0.0, m)
+    A, B = [p.stop_on(i) for i in a], [p.stop_on(i) for i in b]
+    p._take(p.rate(B, 0.0), 0.0, "test")
+    t = patrol.LOOP_MIN_S + 1
+    # Another player by B's points, taking a little of them (7%: learned from 25 monsters left to her): A's round is
+    # the best, but not LOOP_GAIN better than hers: kept ...
+    p.belief.kept_by[HORNY] = 25
+    p.belief.rival_at = {q.id: t for q in p.points if q.platform in b}
+    ratio = p.rate(A, t).rate / p.rate(B, t).rate
+    assert 1.0 < ratio < 1 + patrol.LOOP_GAIN and set(p.best(t).stops) == set(A)
+    assert p.replan(t) is None and set(p.plan.stops) == set(B)
+    with monkeypatch.context() as mp:  # (with no margin it would have changed)
+        mp.setattr(patrol, "LOOP_GAIN", 0.0)
+        assert p.replan(t, force=True) is not None and set(p.plan.stops) == set(A)
+    p._take(p.rate(B, t), 0.0, "test")
+    # ... taking half of them (the prior, nothing learned): more than LOOP_GAIN better, taken up.
+    p.belief.kept_by[HORNY] = 0
+    assert p.rate(A, t).rate / p.rate(B, t).rate > 1 + patrol.LOOP_GAIN
+    assert p.replan(t + patrol.REPLAN_S) is not None and set(p.plan.stops) == set(A)

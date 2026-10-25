@@ -39,9 +39,13 @@ EXP a minute (a round of 50 s: 12 of travel, 33 of shooting; 14 spawn points), w
 283 live (her kills from 23 and 24 on 22, 23 and 24).
 
 The next stop (Patrol.choose): along the loop from the last loop stop she was at, the first expected to hold SKIP_FULL
-of what it holds full when she gets there (an emptied stretch is skipped until it's due); and a stop whose monsters she
-has seen (her memory, not the belief's guesses) pulls her off the loop when it holds PULL_MIN kills' worth and gives
-PULL_GAIN times the EXP a second (travel and its kills included) of the loop's next.
+of what it holds full when she gets there (an emptied stretch is skipped until it's due), or on a trip the stop she's
+on her way to; and a stop whose monsters she has seen (her memory, not the belief's guesses) pulls her off it when they
+give PULL_GAIN times its EXP a second (travel and kills included), any pile of one monster or more (PULL_MIN). What a
+stop is expected to give (Patrol.expect) counts a monster her memory has only where she gets at it from there (on the
+stop's platform, or in a star's reach from somewhere along it: `gets`), and not one she left the stop with nothing in
+reach since (`left_at`: she'd been there to see it); a point her memory has none at, by the share of it a star reaches
+from the stop.
 
 The danger hook (`Patrol.danger(platform, x)`): how badly she can be touched fighting at a place, in the positioning
 model's unit (attack.danger.Danger.at, branch work/positioning: the share of her HP touches would take there, each
@@ -60,10 +64,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 
-from ..attack import spots
-from ..attack.reach import EDGE_MARGIN
+from ..attack import reach, spots
+from ..attack.reach import EDGE_MARGIN, SHOT_DOWN, SHOT_UP
 from ..localization.mapdata import SPAWN_REACH, MapModel
-from ..localization.memory import MEMORY_S
+from ..localization.memory import MEMORY_S, SURE
+from ..localization.monsters import Monster
 from ..localization.players import Player, near_rival
 from ..motion.physics import WALK_SPEED
 from ..perception.kinds import kind_of
@@ -132,10 +137,15 @@ REPLAN_S = 20.0        # s between two looks for a better round
 # The next stop.
 # A stop of the loop is skipped when it's expected to hold under this share of what it holds full when she gets there
 # (an emptied stretch, until it's due): under Q_UNKNOWN, so a stop never seen is never skipped.
-SKIP_FULL = 0.25
-PULL_MIN = 2.0         # guess: a stop pulls her off the loop holding this many kills' worth she has seen (her kinds'
-                       # average EXP) ...
-PULL_GAIN = 1.5        # guess: ... giving this many times the loop's next stop's EXP a second
+SKIP_FULL = 0.25       # guess
+# A stop pulls her off the loop (or a trip) when the monsters she has seen there are worth PULL_MIN of a monster of the
+# cheapest kind (memory.SURE: one at even odds), and give PULL_GAIN times the EXP a second of the stop she'd go to
+# otherwise. With two kills' worth at least (a guess), 18 of 45 moments of the 14:01 hunt with two monsters or more on
+# another platform went elsewhere, 22 of 34 on the user's play: on 22 at 197 s, two seen on 19 2.6 s away (7.1 EXP/s)
+# lost to 10, 15 s up the tower and never seen (2.2 EXP/s).
+PULL_MIN = SURE
+PULL_GAIN = 1.5        # guess
+REACH_ROUND = 5.0      # units: a remembered monster's x to this for whether a stop gets at it (Patrol.gets, kept)
 DUE_S = 2.0            # guess: at a stop, a respawn in reach due within this many s is waited for
 
 
@@ -221,6 +231,21 @@ def stops_of(model: MapModel, points: list[Point]) -> list[Stop]:
         if best is not None:
             out.append(Stop(p.id, round(best[2], 1), best[3]))
     return out
+
+
+def reaching(here, monsters: list[Monster]):
+    """The places along platform `here` (every STAND_STEP, EDGE_MARGIN from its ends) from which a star reaches one of
+    `monsters` at least (reach.can_hit), as (x, how many)."""
+    near = [m for m in monsters if -SHOT_UP - 30 <= m.y - here.y_at(min(max(m.x, here.left), here.right))
+            <= SHOT_DOWN + 30]
+    if not near:
+        return
+    lo, hi = here.left + EDGE_MARGIN, here.right - EDGE_MARGIN
+    xs = [(lo + hi) / 2] if hi < lo else [lo + i * STAND_STEP for i in range(int((hi - lo) // STAND_STEP) + 1)]
+    for x in xs:
+        n = sum(reach.can_hit(here, x, here.y_at(x), m) for m in near)
+        if n:
+            yield x, n
 
 
 def not_back(dt: float, n: int = 1, scale: float = 1.0) -> float:
@@ -332,10 +357,6 @@ class Belief:
             known = max(since, self.empty_seen.get(i, since))
             return 1.0 - not_back(max(t, known) - since, n, scale) / not_back(known - since, n, scale)
         return Q_UNKNOWN
-
-    def seen(self, i: int, t: float) -> float:
-        """Of stock, the monsters she has seen (her memory's), not the model's guesses."""
-        return sum(e.p(t) for e in self.at.get(i, ()))
 
     def take(self, kind: str) -> float:
         """The share of its kind's monsters another player by a point takes (see the top)."""
@@ -450,6 +471,9 @@ class Patrol:
         self.danger = danger or default_danger(model, self.points, touch_shares(model) if touch is None else touch)
         avg = [q.exp for q in self.points]
         self.avg_exp = sum(avg) / len(avg) if avg else 10.0
+        self.min_exp = min(avg, default=10.0)  # the cheapest kind's EXP (PULL_MIN)
+        self.left_at: dict[int, float] = {}    # stop -> when she last left it with nothing in reach there
+        self._gets: dict[tuple, bool] = {}
         self.kill_s = KILL_S_PER_EXP   # s of shooting a point of EXP (learn_kills)
         self.plan: Plan | None = None  # the loop she follows
         self.changed = -1e18           # when it last changed
@@ -476,6 +500,17 @@ class Patrol:
             a, b = self.stops[i], self.stops[j]
             self._legs[key] = self.travel(a.platform, a.x, b.platform, b.x)
         return self._legs[key]
+
+    def gets(self, i: int, e) -> bool:
+        """Whether at stop i she gets at remembered monster `e` (localization.memory.Remembered): on the stop's
+        platform (she walks up to it), or in a star's reach from somewhere along it (grind walks there: `reaching`)."""
+        st = self.stops[i]
+        if e.platform == st.platform:
+            return True
+        key = (st.platform, e.platform, e.kind, round(e.x / REACH_ROUND))
+        if key not in self._gets:
+            self._gets[key] = any(True for _ in reaching(self.model.platform(st.platform), [e.monster]))
+        return self._gets[key]
 
     def learn_hp(self, pid: int, lost: float, dt: float) -> None:
         """`dt` s on platform `pid`, with `lost` of her HP gone meanwhile (hp_rate)."""
@@ -601,14 +636,21 @@ class Patrol:
 
     def expect(self, i: int, t: float) -> tuple[float, float, float, float]:
         """At stop i at time `t`: the EXP expected in reach (hers: share), of it the EXP of monsters she has seen, the s
-        of shooting it takes, and the EXP it holds full (a monster at each point)."""
-        b = self.belief
+        of shooting it takes, and the EXP it holds full (a monster at each point). A point's monsters her memory has
+        count each as sure as it is, where she gets at it from the stop (`gets`) and it was seen since she last left
+        the stop with nothing in reach (`left_at`); a point it has none at, by its stock and the share of it in reach."""
+        b, left = self.belief, self.left_at.get(i, -1e18)
         exp = seen = full = 0.0
         for q, c in self.stops[i].cover:
-            g = c * b.share(q, t) * self.points[q].exp
-            exp += g * b.stock(q, t)
-            seen += g * b.seen(q, t)
-            full += g
+            g = b.share(q, t) * self.points[q].exp
+            es = b.at.get(q)
+            if es:
+                got = g * sum(e.p(t) for e in es if e.seen > left and self.gets(i, e))
+                exp += got
+                seen += got
+            else:
+                exp += g * c * b.stock(q, t)
+            full += g * c
         return exp, seen, exp * self.kill_s, full
 
     def due(self, i: int, t: float) -> float | None:
@@ -617,9 +659,11 @@ class Patrol:
         return min(due) if due else None
 
     def choose(self, t: float, here: int | None, x: float | None, current: int | None = None,
-               skip: Iterable[int] = ()) -> tuple[int | None, dict]:
+               skip: Iterable[int] = (), heading: int | None = None, peek: bool = False) -> tuple[int | None, dict]:
         """The next stop from (platform `here`, map x `x`), having been at stop `current`, never one on a platform in
-        `skip` (see the top): (its index, what decided it, for the log and the telemetry)."""
+        `skip` (see the top): (its index, what decided it, for the log and the telemetry). `heading`: the stop she's
+        on her way to, which stands in for the loop's next (only a pull takes her elsewhere); `peek`: what she'd do,
+        her place in the loop left as it is (a check on the way, a replay)."""
         skip = set(skip)
         if self.plan is None:
             self.replan(t, force=True)
@@ -648,21 +692,24 @@ class Patrol:
         if not order:
             return None, {"why": "no stop to get to"}
         nxt, skipped = None, []
-        for j in order:
-            if options[j][1] >= SKIP_FULL * options[j][4] and options[j][4] > 0:
-                nxt = j
-                break
-            skipped.append(j)
-        why = "the loop"
-        if nxt is None:
-            nxt, skipped, why = order[0], [], "the loop, nothing due ahead"
-        best = max((j for j in options if j != nxt and options[j][2] >= PULL_MIN * self.avg_exp),
+        if heading in options:
+            nxt, why = heading, "on her way"
+        else:
+            for j in order:
+                if options[j][1] >= SKIP_FULL * options[j][4] and options[j][4] > 0:
+                    nxt = j
+                    break
+                skipped.append(j)
+            why = "the loop"
+            if nxt is None:
+                nxt, skipped, why = order[0], [], "the loop, nothing due ahead"
+        best = max((j for j in options if j != nxt and options[j][2] >= PULL_MIN * self.min_exp),
                    key=lambda j: options[j][3], default=None)
         if best is not None and options[best][3] >= PULL_GAIN * options[nxt][3]:
             pulled_from, nxt, why = nxt, best, "pulled"
         else:
             pulled_from = None
-        if nxt in loop:
+        if nxt in loop and not peek:
             self.at_loop = loop.index(nxt)
         far, exp, seen, gain, _ = options[nxt]
         info = {"why": why, "stop": self.stops[nxt].platform, "x": self.stops[nxt].x, "travel": round(far, 1),

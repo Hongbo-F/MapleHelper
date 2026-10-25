@@ -32,15 +32,13 @@ from statistics import median
 from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
-from ..attack import reach
-from ..attack.reach import EDGE_MARGIN, SHOT_DOWN, SHOT_UP
 from ..attack.spots import Spot
 from ..localization.memory import SURE
 from ..localization.monsters import Monster
 from ..localization.scene import Scene
 from . import fight
 from .hunt import Hunt, Objective, Visit
-from .patrol import DUE_S, STAND_STEP, Patrol, choice_text
+from .patrol import DUE_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # backstop: s at one stop, however many respawns keep coming (there's a round to go)
 # s with nothing left in reach before she leaves a stop: one look's miss isn't enough (a hit monster hides under its
@@ -152,23 +150,9 @@ class Grind(Hunt):
         for e in self.h.memory.alive(s.t, SURE):
             if (self.kinds is not None and e.kind not in self.kinds) or s.t - e.seen > HOLD_S:
                 continue
-            if e.platform == here.id or any(True for _ in self._reaching(here, [e.monster])):
+            if e.platform == here.id or any(True for _ in reaching(here, [e.monster])):
                 out.append(e.monster)
         return out
-
-    def _reaching(self, here, monsters: list[Monster]):
-        """The places along platform `here` (every STAND_STEP, EDGE_MARGIN from its ends) from which a star reaches one
-        of `monsters` at least, as (x, how many)."""
-        near = [m for m in monsters if -SHOT_UP - 30 <= m.y - here.y_at(min(max(m.x, here.left), here.right))
-                <= SHOT_DOWN + 30]
-        if not near:
-            return
-        lo, hi = here.left + EDGE_MARGIN, here.right - EDGE_MARGIN
-        xs = [(lo + hi) / 2] if hi < lo else [lo + i * STAND_STEP for i in range(int((hi - lo) // STAND_STEP) + 1)]
-        for x in xs:
-            n = sum(reach.can_hit(here, x, here.y_at(x), m) for m in near)
-            if n:
-                yield x, n
 
     def _reach_step(self, s: Scene, held: list[Monster]) -> tuple[str, float] | None:
         """A walk along her platform (which way, how far: REACH_STEP at most) to where a star reaches more of the `held`
@@ -177,7 +161,7 @@ class Grind(Hunt):
         off = [m for m in held if m.platform != here.id]
         now = sum(self._hits(s, m) for m in off)
         best = None
-        for g, n in self._reaching(here, off):
+        for g, n in reaching(here, off):
             if n > now and (best is None or (n, -abs(g - x)) > (best[0], -abs(best[1] - x))):
                 best = (n, g)
         if best is None or abs(best[1] - x) < 10:
