@@ -163,9 +163,11 @@ TRIP_MEMORY_S = 2.0
 # the look the chain was planned from hadn't (walked in, spawned, or off that look's view: Navigator._known): one it had
 # was planned against, or past on purpose (after waiting for it, or regardless: _meet). Only while she runs along a
 # platform with room to stop on it (_room_to_stop): not in the air, on a rope or at a jump's lift-off, where letting go
-# of the keys changes nothing she can use or drops her; once per monster (the feed's track) in REACT_AGAIN_S.
+# of the keys changes nothing she can use or drops her; once per monster (the feed's track) in REACT_AGAIN_S. The glances
+# keep their pace and chains follow on as before (the hunt loop with the feed on Tree Dungeon, 4 seeds of 5 minutes: 2
+# chains followed on either way; 51 stops, 122 chains against 89).
 REACT = True
-REACT_LEAD_S = 0.25  # s: a stop from a run slides her about this long (AFTER_STILL_S), so a touch sooner comes anyway
+REACT_LEAD_S = 0.25  # s: a stop from a run slides her about 0.26 s (AFTER_STILL_S), so a touch sooner comes anyway
 REACT_AGAIN_S = 3.0  # s
 STILL_VX = 15.0      # units/s: a followed monster slower than this stands (tracking's velocities, filtered frame to frame)
 REACT_ROOM = 50.0    # units of platform ahead of her run she needs to stop on (her 149 units/s for AFTER_STILL_S's
