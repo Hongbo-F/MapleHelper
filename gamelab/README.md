@@ -579,6 +579,20 @@ maps' own frames, 24 OpenCV threads, with other work loading the CPU): her platf
 map's pictures on Tree Dungeon, 7.7 against 5.9 on West Rocky Mountain II; every platform in view 118 against 91, and
 114 against 85.
 
+**Seen in game** (`tests/test_loot.py`; the frames in `D:/MapleHelper-scratch/perception/tree_dungeon_drops`, the
+labels in `tests/fixtures/tree_dungeon_drops.json`). The hunts on Tree Dungeon on 2026-10-24 saved a few frames of the
+game as it was (where her HP read 0: `lab/shots/hp0_*.png`), five of them at 13:53 by piles her kills had left: Horny
+Mushroom Caps, a Bronze Ore, bronze coins and a gold one, a Green Mushroom Cap, an Orange Potion, with other players,
+their pets and the mushrooms about them. Searched over the whole screen above the chat bar, the map's detector found
+all 39 drops in plain view as their kinds, within 2 px (three caps lying overlapped scored 0.83-1.00, a coin half
+behind the ore 0.73), and nothing else; on three more frames with no drop in view (two with the window off the screen's
+corner, one with the hunt look's boxes drawn on it), nothing. Not found: the coins it doesn't look for, 4 edge-on, and
+2 half behind another coin. The first map's detector, the one she hunted with, found 12 of the 39, the coins and the
+potion. (A whole screen took 360-420 ms with the map's pictures, 260-340 with the first map's, with other work loading
+the CPU; a look searches the strips above the platforms.) In those hunts (13 runs, 8,795 scenes) the first map's
+detector found mesos 1,091 times, potions 122 (Orange 50, Red 46, Blue 26) and Squishy Liquid 6: none of the first
+map's own items where they don't drop, and none of the caps and ores, which it didn't look for.
+
 **What they're worth** (`looting.PRICES`, `Worth`, `coins_for`). Every map's items are priced from the game data
 (`info/price`, by item id; a test checks each): of the new maps', an Opal Ore 160, a Sapphire 120, an Orihalcon 100, a
 Silver, Emerald or Topaz 80, an Adamantium 60, a Garnet 40, a Bronze or Iron 20, a Horny Mushroom Cap 22, Firewood 17,
@@ -611,11 +625,15 @@ the game to the front) with drops lying in view: each named as its kind on `lab/
 colour), and nothing named where none lies, the portal's light, the other players and their pets and name tags
 included; then `python -m gamelab watch --minutes 3 --map 10002073` (it searches her platform for drops twice a second
 and every platform in view every 2 s, and its telemetry's scenes list what it found, `loot`). The same on West Rocky
-Mountain II (`--map 10004021`). Frames saved with drops on them (`snap --scale 1`) would be the first
-of the new maps' drops seen in game: the checks above are on the game's pictures drawn as the game draws them.
+Mountain II (`--map 10004021`). Frames saved with drops on them (`snap --scale 1`) would check the drops on none yet:
+Tree Dungeon's ores but Bronze, its Fragment of Magic, Magic Potion, Slime Bubble and Squishy Liquid and the potions but
+the Orange, and all of West Rocky Mountain II's.
 
 Not done: the drops' rates and the mesos on these maps aren't seen in game (the simulator's are OSMLib's and a guess); a
-Red Snail's mesos aren't reported; equipment and scrolls still aren't looked for.
+Red Snail's mesos aren't reported; equipment and scrolls still aren't looked for; of Tree Dungeon's drops only the Horny
+and Green Mushroom Caps, the Bronze Ore, the coins and the Orange Potion are on frames saved in game (the first map's
+detector named Red and Blue Potions and Squishy Liquid there, in telemetry without frames), and none of West Rocky
+Mountain II's.
 
 **What a look costs** (`bench-look` on the 17 saved frames, medians in ms; each pair of columns from runs back to back on 2026-10-20, the first 5 looks at each frame, the second 3 rounds of 3 alternating; offline, so the grab itself comes on top: 16.7 ms with mss, which waits for the compositor's next frame; with DXGI the wait for the screen's next frame, 8 ms on average at 60 frames a second, and copying it off the graphics card takes about 1 ms more than converting a saved frame):
 

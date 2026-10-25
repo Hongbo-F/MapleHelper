@@ -641,6 +641,39 @@ def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_els
         assert det.detect(full, (0, 0, full.shape[1], int(full.shape[0] * HUD_TOP))) == []
 
 
+TREE_DUNGEON_DROPS = Path("D:/MapleHelper-scratch/perception/tree_dungeon_drops")  # 10002073 in game, with drops
+
+
+@pytest.mark.skipif(not (COPY / "Item").is_dir() or not TREE_DUNGEON_DROPS.is_dir(),
+                    reason="needs the game data copy and the frames")
+def test_tree_dungeons_drops_seen_in_game_are_found_as_their_kinds_and_nothing_else_is():
+    """The drops lying on frames saved in game on Tree Dungeon (tests/fixtures/tree_dungeon_drops.json: Horny Mushroom
+    Caps, a Bronze Ore, Green Mushroom Caps, an Orange Potion, bronze and gold coins; players, pets and the portal's light
+    about them), searched for over the whole screen above the chat bar by the map's detector: every one in plain view is
+    found as its kind, within 2 px, and nothing where none lies. The first map's detector found the coins and the potion
+    alone, 12 of the 39."""
+    import json
+    from gamelab.localization import mapdata
+    from gamelab.perception import loot
+    from gamelab.screen import NATIVE
+    labels = json.loads((ROOT / "tests" / "fixtures" / "tree_dungeon_drops.json").read_text(encoding="utf-8"))["frames"]
+    det = loot.detector_for(mapdata.load(10002073), NATIVE)
+    shown, found_shown = 0, 0
+    for name, drops in labels.items():
+        frame = np.asarray(Image.open(TREE_DUNGEON_DROPS / name).convert("RGB"))
+        found = det.detect(frame, (0, 0, frame.shape[1], 700))
+
+        def near(d, i, px):
+            return (i.kind, i.coin) == (d["kind"], d.get("coin")) and abs(i.x - d["x"]) <= px and abs(i.y - d["y"]) <= px
+
+        for d in drops:
+            if "optional" not in d:
+                shown += 1
+                found_shown += any(near(d, i, 2) for i in found)
+        assert all(any(near(d, i, 4) for d in drops) for i in found), (name, found)  # nothing that isn't there
+    assert (found_shown, shown) == (39, 39)
+
+
 @pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
 def test_a_silver_ore_partly_hidden_is_not_taken_for_an_iron_ore():
     """The game's Silver Ore drawn on West Rocky Mountain II, its left 5 columns hidden (a pale patch: a monster in front

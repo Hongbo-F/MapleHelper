@@ -1,0 +1,63 @@
+{
+ "about": "The drops lying on 8 frames of Tree Dungeon, Forest Up North II (map 10002073) at the game's own 1366x768, saved in game on 2026-10-24 while she hunted there with the first map's loot detector (lab/shots: hp0_*.png at 13:53 and 16:48, hunt_look at 13:46; the frames are in D:/MapleHelper-scratch/perception/tree_dungeon_drops, not in git). Each drop's kind read by eye on 6x zooms; x, y its picture's centre (+-2 px; they bob as they lie). Coins say which coin they're drawn as. optional: a coin edge-on (its 5 px wide frame isn't looked for, loot.build) or half behind another coin: it may be found or not. Drops wholly behind a monster, a player or her aren't listed. hp0_164845 has the game window 25 px right of the frame's corner and 25 px down, hp0_164847 7 px down, and no drop in view; hunt_look_1346 has the hunt look's boxes drawn on it and no drop in view. Players, their pets (orange snails named Snail), the portal's light and the damage numbers are on most of them.",
+ "frames": {
+  "hp0_135315.png": [
+   {"kind": "horny-mushroom-cap", "x": 508, "y": 424},
+   {"kind": "horny-mushroom-cap", "x": 528, "y": 426},
+   {"kind": "mesos", "coin": "bronze", "x": 548, "y": 427},
+   {"kind": "bronze-ore", "x": 568, "y": 426},
+   {"kind": "horny-mushroom-cap", "x": 608, "y": 423},
+   {"kind": "horny-mushroom-cap", "x": 816, "y": 288},
+   {"kind": "mesos", "coin": "bronze", "x": 836, "y": 286},
+   {"kind": "mesos", "coin": "bronze", "x": 898, "y": 512}
+  ],
+  "hp0_135320.png": [
+   {"kind": "horny-mushroom-cap", "x": 508, "y": 433},
+   {"kind": "horny-mushroom-cap", "x": 528, "y": 435},
+   {"kind": "mesos", "coin": "bronze", "x": 548, "y": 436, "optional": "edge-on"},
+   {"kind": "bronze-ore", "x": 568, "y": 435},
+   {"kind": "horny-mushroom-cap", "x": 608, "y": 428},
+   {"kind": "horny-mushroom-cap", "x": 816, "y": 291},
+   {"kind": "mesos", "coin": "bronze", "x": 836, "y": 289},
+   {"kind": "mesos", "coin": "bronze", "x": 898, "y": 512}
+  ],
+  "hp0_135323.png": [
+   {"kind": "horny-mushroom-cap", "x": 508, "y": 462},
+   {"kind": "horny-mushroom-cap", "x": 528, "y": 464},
+   {"kind": "mesos", "coin": "bronze", "x": 548, "y": 465, "optional": "edge-on"},
+   {"kind": "bronze-ore", "x": 568, "y": 464},
+   {"kind": "horny-mushroom-cap", "x": 608, "y": 462},
+   {"kind": "horny-mushroom-cap", "x": 816, "y": 327},
+   {"kind": "mesos", "coin": "bronze", "x": 836, "y": 325},
+   {"kind": "mesos", "coin": "gold", "x": 732, "y": 518},
+   {"kind": "mesos", "coin": "bronze", "x": 898, "y": 541, "optional": "edge-on, behind a Green Mushroom"}
+  ],
+  "hp0_135329.png": [
+   {"kind": "horny-mushroom-cap", "x": 508, "y": 465},
+   {"kind": "horny-mushroom-cap", "x": 528, "y": 467},
+   {"kind": "mesos", "coin": "bronze", "x": 548, "y": 468, "optional": "edge-on"},
+   {"kind": "bronze-ore", "x": 568, "y": 467},
+   {"kind": "horny-mushroom-cap", "x": 608, "y": 460},
+   {"kind": "horny-mushroom-cap", "x": 816, "y": 324},
+   {"kind": "mesos", "coin": "bronze", "x": 836, "y": 322},
+   {"kind": "orange-potion", "x": 781, "y": 518},
+   {"kind": "horny-mushroom-cap", "x": 801, "y": 512},
+   {"kind": "green-mushroom-cap", "x": 871, "y": 541},
+   {"kind": "mesos", "coin": "bronze", "x": 891, "y": 547},
+   {"kind": "mesos", "coin": "bronze", "x": 902, "y": 547, "optional": "half behind the other coin"}
+  ],
+  "hp0_135339.png": [
+   {"kind": "horny-mushroom-cap", "x": 508, "y": 481},
+   {"kind": "horny-mushroom-cap", "x": 528, "y": 483},
+   {"kind": "mesos", "coin": "bronze", "x": 548, "y": 484},
+   {"kind": "bronze-ore", "x": 568, "y": 483},
+   {"kind": "horny-mushroom-cap", "x": 608, "y": 476},
+   {"kind": "green-mushroom-cap", "x": 871, "y": 558},
+   {"kind": "mesos", "coin": "bronze", "x": 891, "y": 563},
+   {"kind": "mesos", "coin": "bronze", "x": 902, "y": 563, "optional": "half behind the other coin"}
+  ],
+  "hp0_164845.png": [],
+  "hp0_164847.png": [],
+  "hunt_look_1346.png": []
+ }
+}
