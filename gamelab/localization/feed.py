@@ -424,13 +424,13 @@ class Feed:
     def close(self) -> None:
         pass
 
-    def look(self, senses: Senses, mobs: bool, wide: bool, loot: bool, mesos_only: bool):
+    def look(self, senses: Senses, mobs: bool, wide: bool, loot: bool, mesos_only: bool, after: float | None = None):
         """The Scene of a look with these arguments from the feed, or None (Senses then looks itself). A look at her
         band also has the monsters the feed follows off it, re-found in that frame (`Scene.swept`, as the sweep's: the
         fights go by the band's, her memory takes them all), and says where it searched (`Scene.rows`): her band, and
         the whole screen while the feed's last search of it is within WIDE_FRESH_S of the frame (everything on screen
-        then was found, and followed since)."""
-        st = self.latest(wanted(time.monotonic(), mobs, wide, loot, mesos_only))
+        then was found, and followed since). `after`: of a frame shown then or later (None: now)."""
+        st = self.latest(wanted(time.monotonic() if after is None else after, mobs, wide, loot, mesos_only))
         if st is None:
             return None
         s = to_scene(st, senses.model, senses.band, mobs, wide, loot, mesos_only, self.frame_of(st))

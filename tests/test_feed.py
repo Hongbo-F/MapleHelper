@@ -450,6 +450,20 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     assert eyes.glances == 1
 
 
+def test_a_look_after_a_glance_saw_her_still_takes_that_frame_and_waits_for_none(sync):
+    # Navigator.recover: once a glance from the feed has seen her standing still, the look placing her may be of that
+    # very frame (Senses.look's `after`); taken anew, it waits for the feed's next frame.
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    clock.sleep(0.5)
+    senses.glance()
+    seen, asked = senses.glanced_at, clock.now
+    s = senses.look(mobs=False, after=seen)
+    assert s.t == seen and clock.now == asked and getattr(eyes, "looks", 0) == 0
+    s = senses.look(mobs=False)
+    assert s.t >= asked and clock.now > asked
+
+
 def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band_and_sweeps_only_once_it_is_down(sync):
     # Her memory takes what the feed follows off her band (Scene.swept, as the sweep's slices had it), with the whole
     # screen as searched while the feed's last search of it is fresh; the sweep's slices only once the feed is gone.

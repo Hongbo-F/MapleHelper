@@ -110,14 +110,17 @@ class Senses:
         self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
         self.sweep_counts = {"slices": 0, "held": 0}  # slices the sweep searched, and held back (sweep_hold)
 
-    def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False) -> Scene:
+    def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False,
+             after: float | None = None) -> Scene:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
         dot and the camera when the tag is hidden; (if `mobs`) the monsters she could shoot, or (if
         `wide`) every monster on screen; and (if `loot`) the drops on her platform, or (if `wide`) on
-        every platform in view (only mesos if `mesos_only`)."""
+        every platform in view (only mesos if `mesos_only`). `after`: from a feed, a frame shown then or later
+        will do (None: now, as it's asked for): one a glance from it saw her standing still in once the keys were
+        let go of, say (Navigator.recover)."""
         s = None
         if self.feed is not None and self.feed.alive:
-            s = self.feed.look(self, mobs, wide, loot, mesos_only)
+            s = self.feed.look(self, mobs, wide, loot, mesos_only, after)
         served = s is not None
         if s is None:
             s = self._take()

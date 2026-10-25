@@ -410,7 +410,7 @@ def test_a_look_taken_here_goes_on_from_the_players_the_feeds_looks_brought(mode
     loc = Localizer(model)
     her, theirs = loc.to_dot(100.0, 500.0), dot_of(loc, 300.0, 360.0)
     feed = SimpleNamespace(alive=True, scene=None, drain_events=lambda t: [])
-    feed.look = lambda senses, mobs, wide, loot, mesos_only: feed.scene
+    feed.look = lambda senses, mobs, wide, loot, mesos_only, after=None: feed.scene
     obs = []
     eyes = SimpleNamespace(look=lambda: obs[-1])
     senses = Senses(eyes, model, band=(100.0, 100.0), feed=feed)

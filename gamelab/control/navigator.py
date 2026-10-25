@@ -1271,17 +1271,20 @@ class Navigator:
     def recover(self, longest: float = 0.8, mobs: bool = False, wide: bool = False) -> Scene:
         """Right after a plan: wait until she's stopped moving (a hit knocks her back and she can't be
         steered for a moment; a stop slides her on), glancing at her dot, then one look to place her (with
-        the monsters, if `mobs`; on the whole screen, if `wide`)."""
-        end, stood = time.monotonic() + longest, None
+        the monsters, if `mobs`; on the whole screen, if `wide`). With a feed, that look is of the frame the last
+        glance saw her standing still in, or a later one (Senses.look's `after`): taken anew, it waited for the feed's
+        next frame, 41 ms (median; 20 for a look taken here at today's costs) in the simulator's hunt loop."""
+        end, stood, still = time.monotonic() + longest, None, None
         while time.monotonic() < end:
             dot, _ = self.senses.glance()
             stood = _stood(stood, self.senses.glanced_at, dot)
             if stood is not None and self.senses.glanced_at - stood[0] >= RECOVER_STILL_S:
                 w = self.senses.localizer.where_dot(dot)
                 if w.platform is not None:
+                    still = self.senses.glanced_at if getattr(self.senses, "glanced", None) is not None else None
                     break
             self.senses.wait_frame(GLANCE_S)
-        return self.mover.locate(mobs=mobs, wide=wide)
+        return self.mover.locate(mobs=mobs, wide=wide, after=still)
 
     # --- chains that follow on (follow) ------------------------------------------------------------
 

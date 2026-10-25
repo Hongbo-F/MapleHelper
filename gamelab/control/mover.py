@@ -77,11 +77,11 @@ class Mover:
 
     # --- looking ----------------------------------------------------------------------------
 
-    def locate(self, tries: int = 40, mobs: bool = False, wide: bool = False) -> Scene:
+    def locate(self, tries: int = 40, mobs: bool = False, wide: bool = False, after: float | None = None) -> Scene:
         """A look that places her (its `where` is set). Waits up to ~10 s for her minimap dot (a window
-        or notification popping up over the minimap hides it)."""
+        or notification popping up over the minimap hides it). `after`: the first look's (Senses.look)."""
         for i in range(tries):
-            s = self.senses.look(mobs=mobs, wide=wide)
+            s = self.senses.look(mobs=mobs, wide=wide, after=after if i == 0 else None)
             if s.where is not None:
                 return s
             if i == 3:
