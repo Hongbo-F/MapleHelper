@@ -1263,8 +1263,10 @@ def test_map_data_that_is_there_but_fails_to_load_fails_instead_of_skipping(monk
 
 REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
 # Run only with --slow (tests/conftest.py): the long feed runs (their feedless twins and the short feed_* stay in) and
-# the tours end to end (their grounds' tour_* and loop_* stay in).
-SLOW_SCENARIOS = {"feed_tour_hunt_basin", "feed_loop_basin", "feed_loop_rival", "tour_run", "loop_run"}
+# the tours end to end (their grounds' tour_* and loop_* stay in), on each map: on West Rocky Mountain II 19 and 17 s,
+# on Tree Dungeon, Forest Up North II 9 and 9 s (2026-10-24, 8 workers).
+SLOW_SCENARIOS = {"feed_tour_hunt_basin", "feed_loop_basin", "feed_loop_rival", "tour_run", "loop_run",
+                  "tour_rocky_run", "loop_rocky_run", "tour_tree_run", "loop_tree_run"}
 
 
 @pytest.mark.parametrize("name", [pytest.param(name, marks=[pytest.mark.skipif(
