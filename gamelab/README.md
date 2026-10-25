@@ -27,7 +27,7 @@ The code is organized like a self-driving car's stack. Each layer is a package, 
 | Package | Does | Main pieces | May import |
 |---|---|---|---|
 | `perception` | Pixels to what's on screen, in half-size screen px | `Eyes` (the only door to pixels): `look` gives an `Observation` (her name tag, HP/MP, the ground under her, her minimap dot and other players', ropes, her EXP number and the box it's read from); `monsters`, `items`, `bar`, `refind` and `heading` (which way she faces, off her picture: `Heading`) answer questions about a look's frame. `MobDetector`, `LootDetector`, `NameTag`, `LieDetectorSpotter`; `exp_number` (her EXP number read, glyph by glyph); `frames` (the game as the screen shows it, for the continuous feed, never brought to the front) | shared |
-| `localization` | Where things are on the map, in map units | `mapdata` (the map from the game's own data), `pose` (her position from the minimap dot, refined by ropes or her platform's end; the `Camera`), `Scene` (a look placed on the map), `Monster`/`MonsterTrack`/`Tracker` (monsters seen, told apart from look to look, and where they can be next), `Players` (other players, by their minimap dots), `Senses` (every look goes through it), `gains` (what each EXP gain was: the kills its size names, by kind; her EXP a minute off the number); the continuous feed: `tracking` (monsters followed frame by frame: ids, deaths and who killed them), `worldstate` (the feed's step, a frame at a time), `feed` (its child process, the stack's side of it, and `SyncFeed` for the simulator) | perception |
+| `localization` | Where things are on the map, in map units | `mapdata` (the map from the game's own data), `pose` (her position from the minimap dot, refined by ropes or her platform's end; the `Camera`), `Scene` (a look placed on the map), `Monster`/`MonsterTrack`/`Tracker` (monsters seen, told apart from look to look, and where they can be next), `Players` (other players, by their minimap dots), `Senses` (every look goes through it; its sweep searches the screen a slice a look), `Memory` (the monsters she has seen anywhere, kept across looks: Her memory of the monsters), `gains` (what each EXP gain was: the kills its size names, by kind; her EXP a minute off the number); the continuous feed: `tracking` (monsters followed frame by frame: ids, deaths and who killed them), `worldstate` (the feed's step, a frame at a time), `feed` (its child process, the stack's side of it, and `SyncFeed` for the simulator) | perception |
 | `motion` | Getting from A to B | `body` (how the game moves her: the client's movement step by step, from its own Physics.img), `physics` (jumps, falls and walking, measured), `route` (every move between platforms; Dijkstra; the ways a trip may choose among: Route diversity), `flow` (several moves chained into one key timeline, hopping monsters) | localization |
 | `attack` | Which monster, from where, how | `reach` (where a star hits, and what an attack from a jump can pick), `stance` (throw, jump-throw, jump back, step away, close in), `spots` (where to stand to shoot a platform), `danger` (how badly she can be touched at a place: the monsters seen and the spawn points, by game data) | perception (monster names), localization, motion |
 | `control` | Keys out | `Actions` (her key plans: throws, walking, pick-up, potions, the chair), `Mover` (one move, closed loop), `Navigator` (a route: chains, glances, cut-offs, replans), `client` (plans to the key player), `player` (the key player itself), `alarm`, `lie_recorder` (the Lie Detector's cycle recorded), `rolling` (the game's last 5 minutes kept: The rolling recording) | perception, localization, motion |
@@ -164,6 +164,8 @@ Other commands (`python -m gamelab -h` lists them all):
 | `tour --loop --ground-tie 0.1` | Of the grounds within 10% of the best's score, the one she left longest ago goes next (`hunt.GROUND_TIE`; off by default: nothing in the simulator measures it; see Route diversity; not tried in game) |
 | `tour --stops 3 --kills 5` | A hunting sweep of the map, then rest and stand by |
 | `tour --loop --minutes 20` | The hunt loop instead of the sweep's stops (`docs/hunt-modes.md`; simulator-tested only): one decision after every look, for 20 minutes, then rest and stand by |
+| `tour --loop --no-sweep` | Her looks search the band around her alone, not a slice of the rest of the screen as well (`hunt.SWEEP`; on by default with `--loop`, off elsewhere: `--sweep` on `tour`, `nav` and `hunt` turns it on; see Her memory of the monsters) |
+| `memory FILE --out OUT` | Her memory of the monsters run again on a recorded run (its looks' monsters and what each searched, her kills from its 'kill' events): what it held, and a copy of the run with its 'memory' records for `minimap --replay OUT`; no game, no keys |
 | `tour --rest-avoid` | On the trips to rest and to stand by, keep clear of monsters instead of shooting the ones in the way (simulator-tested only) |
 | `minimap` | The live mini-map, following the run in progress: a window beside the game, and the same as a web page for a phone on the same Wi-Fi; see below |
 | `minimap --window-only`, `minimap --web-only` | Just one of the two (`web` is short for `minimap --web-only`) |
@@ -202,7 +204,7 @@ Other commands (`python -m gamelab -h` lists them all):
 `python -m gamelab minimap` opens a window that draws the map from the game data, and on it what the stack sees and plans, as it happens (it also serves the same as a web page for a phone: see "On a phone" below):
 
 - **Localization:** her position (yellow; a magenta ring when placed from the minimap dot because her name tag is hidden) with the way she faces and her trail, HP and MP, and how her position was worked out (rope, edge or dot).
-- **Perception:** the monsters in the last look, coloured by kind, with their HP bars once hit; the drops seen on the ground (yellow), and those remembered for later (hollow squares); other players where their minimap dots put them (dots ringed dark, in their markers' colours: anyone red, her party orange, a guild lavender, a buddy cyan), and how many there are under the map.
+- **Perception:** the monsters in the last look (its band and its slice of the sweep), coloured by kind, with their HP bars once hit; the monsters she remembers (rings of their kind's colour where each was seen last, fading over 20 s, broken once looks covering their place have missed them; a red cross where one was killed, a dim one where one was forgotten: Her memory of the monsters); the drops seen on the ground (yellow), and those remembered for later (hollow squares); other players where their minimap dots put them (dots ringed dark, in their markers' colours: anyone red, her party orange, a guild lavender, a buddy cyan), and how many there are under the map.
 - **Prediction:** where each monster can be in the next second, as the move planner sees it (red bars).
 - **Motion planning:** the planned route (cyan: arcs for jumps, arrows for climbs and drops) and the chain of moves in the running key plan (magenta: where she runs, and where each move lands).
 - **Attack:** where a star reaches from her (the band either side, brighter on the side she faces, cut short at a wall of her foothold group whose outer face looks at her), the monsters the last throw aimed at (red rings), and the fight's last decision.
@@ -874,6 +876,173 @@ All of it together, against the branch's starting commit (harness, preset `game`
 **In the simulator** the other player (`Realism.rival_every`: preset `game`, `loop_rival`, `feed_loop_rival`) hunts one place at a time: it kills a monster within 400 units across and 60 up or down of where it stands (`world.RIVAL_REACH`, `RIVAL_DY`) every 25 s on average (20 in the scenarios), and walks at 125 units/s straight across the map (as its dot goes) to another place, by a monster alive (a platform as likely as it has monsters alive), after 90 s there on average (`Realism.rival_stay`) or as soon as nothing is left in its reach; it kills nothing on the way, and its next kill comes once it's there. Before, it killed a monster anywhere on the map and had no place. Its dot is on the minimap (`FakeEyes`: where hers would be there, 0.70 px right and down, read to whole px with `Noise.dot_px`, hidden with hers by `Noise.dot_hidden`), so the whole chain runs: placed, followed, drawn, logged. What the change did to the world (harness, preset `game`, 10 seeds of 20 minutes, the stack as it was): the rival's kills 47.4 -> 43.2 a run (it walks between places), the hunt loop 128.7 -> 127.9 EXP a minute (better on 5 of 10 seeds, the worst 12% down), drops picked up 80.5% -> 82.2%, HP lost 2.71 -> 2.67 bars; the tour 90.9 -> 92.2 (better on 6 of 10, the worst 18% down), drops 96.4% -> 94.7%, HP lost 3.08 -> 3.14. `feed_loop_rival` moved to seed 17: on 25 the rival hunted 2 and 21 the whole 2 minutes, out of her sight, and the feed saw none of its kills (on 17 it hunts the basin with her: 7 kills there; of seeds 1-30, 16 showed the feed a death someone else's as this was written, 10 once such a death needed another player by it, and 13 on the three tracks together, each of them meeting all it expects). `feed_hunt_kill` moved to seed 7 on the three tracks together (2026-10-22): on 6 the kill that ended the run was a pig's (her claw's, at 24.0 s), which the feed track, where a gain's kind wasn't known, had put on the slime she was after; with the kinds known she fought on, the basin's other monsters walked into her way, and the slime was still alive when the 30 s ran out. Seed 7 is the first after 6 that meets all of it; 8 of seeds 1-16 do. `loop_rival` keeps seed 25: the rival hunts 21, then 2, and its kills are still none of hers in the ledger.
 
 **To check in game:** with another player on the map, `hunt look` (no keys: it lists each other player's dot, its kind and where it puts them) and `snap`, whether their dots look as the game data draws them here and are found; with a party member, a buddy or a guild member in view, their colours (`MARKER_COLOURS` has them from the data, unchecked, and the party leader's crown); whose marker the game draws on top when another player stands where she does (a `snap` with them side by side: if theirs, her dot can be lost under it within 4 game px); and the position of a party, guild or buddy dot against where that player stands (their markers have no origin in the data: the party leader on 32 sat 2 units from its surface placed by its core, as hers). With another player hunting near her: `watch --minutes 3` (no keys), whether the deaths it judges someone else's name them and none comes with nobody by it; how many monsters a minute they kill on their ground (`watch`'s deaths someone else's), which says whether `hunt.PLAYER_DISCOUNT` should come on and how far (the simulator's other player kills one every 25 s); and in a supervised `tour --loop` (`hunt.PLAYER_PILES` off), her trips to piles her kills don't explain with another player by them, and what was left of those piles when she got there (taken by them: then `hunt.PLAYER_PILES` should come on), and whether the kills the log places ever sit by another player's ("... down at x ..." against `watch`'s deaths someone else's, run beside it: that's what `ledger.PLAYER_KILLS`, on, is for; never, and it can as well be off).
+
+## Her memory of the monsters
+
+What she knows of the monsters off her band is what her looks have seen, kept from look to look: her memory of them
+(`localization/memory.py`, `Hunter.memory`). Without it, one look's monsters were all she had, and a look's monsters
+are only what it searched: in the live hunts of 2026-10-24 on Tree Dungeon, Forest Up North II that was the band around
+her (140 units up, 75 down) on 90% of her looks. Of the 2161 looks of the 20-minute hunt of 14:01, 207 searched the whole
+screen, a median 4.9 s apart and up to 22.8 s (they came only once nothing else was to be done: the hunt loop's rules 7
+to 11), and what one saw was gone at the next look. "Right now during the hunt she has tunnelled vision", as the user
+put it, watching her.
+
+**The sweep** (`localization/senses.py`, `Senses.sweep`; on in the hunt loop, `hunt.SWEEP`, `tour --loop --no-sweep`
+for without; `--sweep` on `tour`, `nav` and `hunt` for the others). A look at her band also searches one slice of the
+rest of the screen, the next in turn from the top down (`Eyes.monsters_rows`): 193 map units tall (as tall as each band
+of a whole-screen search at the game's own size), within what the band leaves out, each overlapping the one before and
+the band by the map's tallest body and 8 units, so a body cut by one's edge is whole in the next. At 1366x768, with her
+standing, 4 slices go round the screen. What a slice finds goes into `Scene.swept`, not `Scene.monsters`: the fights go
+by the band's monsters as before. And `Scene.rows` says where a look searched (its 'scene' record too, with `rows` and
+`swept`). A slice is searched only where it costs her nothing (`Hunter.hold_sweep`): while her last attack's lock has
+50 ms to go at least (her next attack waits for it anyway), or with no monster in her band; never in close quarters (a
+monster on her platform within the claw's swipe) or with her HP within 0.1 of `--low-hp`. Searched on every look but
+those, it cost the simulator's hunt loop on Tree Dungeon 23% of its EXP a minute (preset `crowd`, `--world zero-walls`,
+20 seeds of 20 minutes, standard error 11%), and once every 0.4 s at most 11% (6.5%): the 23 ms of each slice on the
+simulator's clock (with them free it made 2% more, 6.7%, 16 seeds of 10 minutes). With `--feed` there's no sweep: the
+feed searches the whole screen every second. What it costs (`bench-look` on the 20 saved 1366x768 frames of Tree
+Dungeon, 3 looks a frame, medians in ms, with other work sharing the CPU):
+
+| | median | p90 |
+|---|---|---|
+| Monsters: her band | 26.0 | 31.2 |
+| ... the whole screen | 88.7 | 110.7 |
+| `Senses.look` with the monsters in her band and the drops on her platform (a hunt look) | 33.7 | 41.9 |
+| ... and a slice of the sweep | 49.8 | 65.5 |
+| ... the whole screen and every drop in view | 143.8 | 160.6 |
+
+So a slice adds 16 ms to her look, where a whole-screen look adds 110, and 4 of them see the whole view. With nothing
+else on the CPU (OpenCV on one thread, `D:/MapleHelper-scratch/exp-grounds/design/slices.py`), a slice took 16.7 ms
+(p90 25.4), her band 21.9 and the whole screen 72.9, and the 5 slices of a whole-screen search found together its 53
+monsters, at the same places. A slice is searched only with 50 ms of her attack's lock to go, so at p90 it's over before
+her next throw is due.
+
+**What's remembered** (`Memory`, a `Senses` listener after the ledger's). Each monster seen: its kind, platform and x,
+when it was seen last, how many looks have covered its place since without it, whether another player is by it, and
+whether it's still there ("seen"), killed by her or forgotten. A sighting is one remembered when it's the same kind on
+the same platform within 40 units of where it was and 1.3 times what it can have walked since (the nearest first);
+else it's a new one. A kill of hers the ledger places marks the nearest of its kind on its platform within 150 units
+killed; one no throw of hers explains, the likeliest of those she threw at (of the kind her EXP gain named), one the
+look didn't see first. A body seen fading out where it died within 1.5 s of its kill, where it can be from its last
+sighting or 30 units from where the kill was placed, is that one, not a new one (only within 30 units of the kill's
+place, a body knocked 77 units on was taken for a new one in `loop_shoots_21_from_22`, and it kept her off the drops
+there).
+
+A look covers a remembered monster's place when it searched its whole body (one stretch of its rows from the body's
+top, as tall as it walks and 4 units, to its feet; 30 units inside the screen's sides; not under the minimap) over half
+of where it can have walked on its platform since it was seen (9 places along it); looks while she's in the air don't
+count. So a body cut by the view's edge, the bottom bar or a band's edge is never missed by a look, only not found.
+Taller (as tall as it flinches, 62 units for a Horny Mushroom), platform 19 seen from 27 (60 units under the view's top)
+was never covered, and on the `watch` run below every respawn there added one more (5.0 remembered at a time, where the
+looks saw 0.93); all of the span, platform 30 (a third of it a unit behind the bottom bar) kept its one up to a minute
+after it went (0.84 against 0.22). Covered looks without it don't count while a throw of hers went its way in the last
+4.7 s and it was seen since (`tracking.HIDE_S` after `HIT_AFTER_S`): it may be under her damage numbers.
+
+How sure one is still there (`Remembered.p`) goes down two ways; it's forgotten under 0.15 (`P_FORGET`) or a minute after
+it was seen (`MEMORY_S`):
+- **By looks that covered its place without it:** exp(-d / 3 s), d from its last sighting to the latest such look
+  (`MISS_S`). On the `watch` run of 2026-10-24 at 14:44 (8,750 whole-screen looks at 10 a second, her on 27, a crowd
+  hunting 19-24 and 29-30), of the monsters missing that long with their place covered 0.84 were seen again after
+  0.3 s, 0.69 after 1 s, 0.51 after 2, 0.35 after 3, 0.27 after 4 and 0.20 after 5 (exp(-d / 3): 0.90, 0.72, 0.51, 0.37,
+  0.26, 0.19): a monster hit hides under its damage numbers for 1-3 s, and other players' hits too. On her hunts' own
+  looks of that day the same table, by covered looks and time, was the same shape, lower in the first second (0.6-0.7)
+  with her kills in it, which the memory takes from the ledger. So one look missing it says little, and about 5.3 s of
+  looks without it forget it.
+- **By age:** exp(-a / 45 s), a since it was seen (`STAY_S`): of the monsters seen at t, 0.75-0.86 were there again
+  10 s later in that day's telemetry (normalised by the same at 2-4 s): 35-66 s.
+
+**What reads it.** The hunt loop counts one as there at p 0.5 (`memory.SURE`, about 2 s of covered looks without it),
+where it went by one look's monsters off her platform: the ground's monsters out of reach that rule 7 (better spot)
+weighs, whether anything is left on the ground (the fast exit, and rule 8: a look missing one hidden under its damage
+numbers doesn't empty it), and the monsters by a pile elsewhere that keep rule 5b (on the way) off it. Of the piles
+the memory said were guarded where the base's look saw no guard (`loop_rest_hp_low`, `loop_spot_off_ground`,
+`loop_leaves_empty_ground`), the simulator had a monster by nearly all. Her own platform's monsters, which the fights
+react to, are the look's as before. For the choice of ground (the next step): `Memory.alive(t, min_p)` (each
+`Remembered`: kind, platform, x, y, when seen, `p(t)`, covered looks without it, whether another player is by it, its
+last sighting as a `Monster`), `there(t, platform, kinds, min_p)` (the sightings), `covered_at(platform)` (when a look
+last covered all of it) and `events` (each new, killed and forgotten monster, with when).
+
+Its telemetry is the topic 'memory' (`Memory.record`, every 0.5 s at most): each monster with its age, p, covered looks
+without it, state and whether another player is by it, and how long ago each platform was last covered whole. On the
+mini-map each monster remembered is a ring of its kind's colour where it was seen last, fading over 20 s to a quarter,
+broken once looks covering its place have missed it; a red cross where one was killed, a dim one where one was
+forgotten; the latest look's own monsters (its band and its slice) are the filled dots, as before (checked on the page,
+`minimap --replay` of the hunt of 14:23 run again, `--port 8799`). `python -m gamelab memory FILE --out OUT` runs it
+again on a recorded run (each look's monsters and what it searched, her kills from the 'kill' events; her throws aren't
+recorded), for `minimap --replay OUT`: on the hunt of 14:01, 334 monsters seen, 130 killed by her, 194 forgotten by
+looks covering their place, 2 by age, 3.2 held at a time at p 0.5 and 0.7 less sure.
+
+**Against the simulator's truth** (`D:/MapleHelper-scratch/exp-grounds/vision/eval_sim.py`; at every look she took
+standing, the monsters alive whose whole body was on screen, and those of them off her band; held: the same kind on the
+same platform within 80 units, one to one; a ghost: held at p 0.5 with no monster of its kind on its platform within
+205; 4 seeds of 10 minutes each):
+
+| | Tree Dungeon, `crowd`, zero-walls: sweep | no sweep | the first map, `game`: sweep | no sweep |
+|---|---|---|---|---|
+| monsters on screen a look (off her band) | 6.97 (3.88) | 7.21 (4.04) | 6.91 (3.51) | 6.64 (3.26) |
+| ... held by the memory at p 0.5 (any p) | 0.71 (0.75) | 0.60 (0.66) | 0.74 (0.75) | 0.51 (0.54) |
+| ... off her band | 0.62 (0.68) | 0.42 (0.51) | 0.66 (0.69) | 0.19 (0.25) |
+| ... in the look itself (off her band) | 0.34 (0.13) | 0.28 (0.03) | 0.38 (0.11) | 0.35 (0.01) |
+| ... in the last whole-screen look (off her band) | 0.28 (0.30) | 0.34 (0.39) | 0.27 (0.36) | 0.24 (0.31) |
+| held at p 0.5 a look, and right | 8.2, 0.89 | 6.9, 0.88 | 7.6, 0.88 | 4.9, 0.88 |
+| the last whole-screen look's, and right | 3.6, 0.87 | 4.7, 0.89 | 4.1, 0.72 | 3.6, 0.73 |
+
+**Run again on the live runs of 2026-10-24** (`eval_live.py`; no truth in game, so at each whole-screen look, the memory
+as it was before it, against what it saw: recall, of the monsters it saw off her band, those the memory held; ghosts,
+of those held at p 0.5 whose place it covered, those it didn't see):
+
+| run | whole-screen looks | off her band | held at p 0.5 | in the last whole-screen look | ghosts: memory | ghosts: last whole-screen look |
+|---|---|---|---|---|---|---|
+| hunt 13:53 | 21 | 56 | 0.48 | 0.45 | 0.50 | 0.60 |
+| hunt 13:56 | 41 | 73 | 0.38 | 0.38 | 0.59 | 0.67 |
+| hunt 14:01 (20 min) | 202 | 252 | 0.44 | 0.42 | 0.52 | 0.61 |
+| hunt 14:23 | 117 | 281 | 0.57 | 0.57 | 0.40 | 0.47 |
+| `watch` 14:40 (10 a second) | 200 | 641 | 0.97 | 0.94 | 0.28 | 0.05 |
+| `watch` 14:44 (10 a second) | 8,744 | 32,685 | 0.98 | 0.95 | 0.25 | 0.05 |
+
+The hunts of that day had no sweep, so between whole-screen looks the memory knew what the last of them had seen, a
+little more of it (what her band and the places covered hadn't contradicted), with fewer ghosts. On the `watch` runs
+how often a platform's count changed from one look to the next went down 2-6 times (19: 12.2% of looks to 4.1%; 23:
+8.8% to 2.5%; 24: 6.3% to 1.1%), and it had more there (19: 1.51 at a time against 0.93 a look) and a quarter of what
+it held at p 0.5 unseen in any one look: those missing under 2 s, half of whom come back.
+
+**What it changed** (harness, the hunt loop as `tour --loop --skill` runs it, against the code before (bc036b9); the
+simulator throws Lucky Seven as a regular star, so `--skill` changes nothing there; per seed in
+`D:/MapleHelper-scratch/exp-grounds/vision/ab`):
+
+| | EXP a minute | ... while alive | kills a minute alive | HP lost a minute alive (bars) | rests | deaths |
+|---|---|---|---|---|---|---|
+| first map, `game`, 60 seeds of 20 minutes | 130.2 -> 131.9 (+1.3%, standard error 1.8%) | 132.2 -> 131.9 | 10.76 -> 10.76 | 0.14 -> 0.15 | 1.93 -> 2.02 | 0 -> 0 |
+| ... `--costs measured` | 134.3 -> 133.3 (-0.7%, 1.0%) | 134.6 -> 133.3 | 10.92 -> 10.91 | 0.14 -> 0.14 | 2.07 -> 1.90 | 0 -> 0 |
+| Tree Dungeon, `crowd`, zero-walls, 20 seeds | 37.4 -> 37.4 (-0.1%, 9.1%) | 57.3 -> 52.2 (-8.8%, 6.4%) | 1.64 -> 1.49 | 1.76 -> 1.64 | 4.9 -> 6.5 | 18 -> 17 |
+| ... `crowd-slow` | 31.4 -> 33.6 (+6.9%, 6.9%) | 53.0 -> 50.1 (-5.5%, 8.1%) | 1.51 -> 1.44 | 1.86 -> 1.63 | 3.9 -> 5.1 | 19 -> 20 |
+
+(One base run of the first map fell out of the map, none since.) On Tree Dungeon she lived 1.2 minutes longer a run
+(standard error 1.0, both presets), was touched 6% less often a minute alive, and rested more: 0.34 -> 0.42 times a
+minute alive on `crowd`, 0.28 -> 0.36 on `crowd-slow` (standard error 0.06 each). The simulator is far from the game
+there (her kills take 15-23 stars to the game's 3-4, she's touched 5 times as often, and nearly every run dies), and
+seed to seed it swings by a third: the 20 seeds there don't tell a few percent either way.
+
+The golden traces of the 19 hunt-loop scenarios were recorded again (`loop_*` on the first map, West Rocky Mountain II
+and Tree Dungeon, and `feed_loop_*`); each still shows what it's there for, and the other 95 match. The slices' 23 ms
+each on the simulator's clock move every look after the first one (`loop_basin` first differs at 5.255 s -> 5.278 s),
+and the memory changes rule 7, the fast exit and the guards by piles; `feed_loop_basin` and `feed_loop_rival` (no
+sweep with the feed) differ only by the memory's line at the end of the log. One scenario is one seed: their EXP went
+down on 8, up on 5 and stayed on 4 (`loop_tree_crowd` 551 -> 350, `loop_lull_loot` 574 -> 464, `loop_leaves_empty_ground`
+479 -> 547, `loop_run` 1937 both), as the harness's runs above swing from seed to seed.
+
+**To check in game** (no keys, no attack): `watch --minutes 3 --map 10002073` with her standing on 23 or 27, then
+`memory` on its telemetry file and `minimap --replay` on what it writes: rings where the monsters are, none piling up
+on 19, 20 or 30, and the counts steadier than the looks'. Needs a hunt (later): the sweep's cost live (`bench-look
+--live` has its row; a hunt loop's looks a second, and the touches she takes in close quarters, against the hunts of
+2026-10-24), what the 'memory' records of a live hunt hold against its whole-screen looks (`eval_live.py` on it), and
+whether a slice comes as often as the simulator says (the end of the hunt's log: "the sweep: N slices, held M times").
+
+Not done: the memory doesn't learn its own numbers (how fast others take each kind, how full each platform is: the
+choice of ground's belief); monsters seen while she's in the air are placed by the spawn rule and never missed; with
+the feed it takes the feed's scenes as they are (a band look's band, its whole-screen searches); a kind read wrong for
+a look (a Horny taken for a Green) is a new monster, and the other one is forgotten by looks; the replay doesn't have
+her throws, so a monster she shot at is missed by looks as any other there.
 
 ## Her EXP number
 
