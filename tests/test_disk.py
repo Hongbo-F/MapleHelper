@@ -257,13 +257,14 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     from gamelab.analysis import disk
     now = time.time()
     for folder in ("recordings", "telemetry", "harness", "golden", "inbox", "lie_detector/20261024-101500/before",
-                   "recent/20261024-215000-pop-up"):
+                   "recent/20261024-215000-pop-up", "alarm_clips/20261025-002758-lie-detector-quiz-warning"):
         (tmp_path / folder).mkdir(parents=True)
     _make(tmp_path / "recordings", "chain.npz", 1, 5000, now)
     _make(tmp_path / "lie_detector" / "20261024-101500", "00000.jpg", 1, 700, now)
     _make(tmp_path / "lie_detector" / "20261024-101500", "summary.json", 1, 20, now)
     _make(tmp_path / "lie_detector" / "20261024-101500" / "before", "00000.jpg", 1, 300, now)  # the rolling recording's
     _make(tmp_path / "recent" / "20261024-215000-pop-up", "00000.jpg", 1, 400, now)
+    _make(tmp_path / "alarm_clips" / "20261025-002758-lie-detector-quiz-warning", "00000.jpg", 1, 600, now)
     _make(tmp_path, "snap.png", 1, 3000, now)
     old = _make(tmp_path / "telemetry", "20260901-120000-tour.jsonl", 20, 100, now)
     new = _make(tmp_path / "telemetry", "20261019-120000-tour.jsonl", 1, 200, now)
@@ -272,8 +273,8 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     _make(tmp_path, "player.log", 1, 40, now)
     got = {u.kind: (u.files, u.bytes) for u in disk.usage(tmp_path)}
     assert got == {"recordings": (1, 5000), "Lie Detector recordings": (3, 1020), "recent recordings": (1, 400),
-                   "screenshots": (1, 3000), "telemetry": (2, 300), "harness runs": (0, 0), "golden traces": (1, 50),
-                   "player inbox, outbox": (1, 0), "other": (1, 40)}
+                   "alarm clips": (1, 600), "screenshots": (1, 3000), "telemetry": (2, 300), "harness runs": (0, 0),
+                   "golden traces": (1, 50), "player inbox, outbox": (1, 0), "other": (1, 40)}
     monkeypatch.setattr(paths, "LAB", tmp_path)
     monkeypatch.setattr(telemetry, "KEEP_BYTES", 250)  # the old one is past the cap (none goes for its age)
     assert main(["lab-usage"]) == 0
@@ -282,6 +283,7 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     assert "Lie Detector recordings: 1 cycles; the newest 10.0 GB are kept" in out
     assert "due to go when the next starts: 0" in out
     assert "recent recordings (save-recent's): 1; the newest 5.0 GB are kept besides the next" in out
+    assert "alarm clips (the recorder's, 10 s before each alarm to 60 s after): 1; the newest 5.0 GB are kept" in out
     assert main(["lab-usage", "--prune-telemetry"]) == 0
     assert "deleted 1 telemetry files (100 B)" in capsys.readouterr().out
     assert not old.exists() and new.exists() and (tmp_path / "recordings" / "chain.npz").exists()

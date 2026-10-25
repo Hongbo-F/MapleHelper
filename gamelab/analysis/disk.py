@@ -3,7 +3,7 @@ reads. Recordings and screenshots are measurement evidence and are never deleted
 pruned when a run starts or goes on in a new part (telemetry.prune: the newest 2 GB are kept, and none is
 deleted for its age), and `lab-usage --prune-telemetry` applies the same now; the Lie Detector's recordings
 when one starts (control.lie_recorder.prune: the newest 10 GB besides the one being written), and the rolling
-recording's saves when one is made (control.rolling: the newest 5 GB besides it).
+recording's saves and its alarm clips when one is made (control.rolling: the newest 5 GB of each besides it).
 """
 
 import os
@@ -18,10 +18,10 @@ from ..paths import LAB
 # The folders of lab/ and what they hold (anything else is "other": the player's log, learned stats such
 # as shots.jsonl and grounds.json, templates, notes); the *.png at the top are screenshots.
 FOLDERS = {"recordings": "recordings", "lie_detector": "Lie Detector recordings", "recent": "recent recordings",
-           "telemetry": "telemetry", "harness": "harness runs", "golden": "golden traces",
+           "alarm_clips": "alarm clips", "telemetry": "telemetry", "harness": "harness runs", "golden": "golden traces",
            "inbox": "player inbox, outbox", "outbox": "player inbox, outbox"}
-KINDS = ("recordings", "Lie Detector recordings", "recent recordings", "screenshots", "telemetry", "harness runs",
-         "golden traces", "player inbox, outbox", "other")
+KINDS = ("recordings", "Lie Detector recordings", "recent recordings", "alarm clips", "screenshots", "telemetry",
+         "harness runs", "golden traces", "player inbox, outbox", "other")
 
 
 @dataclass
@@ -81,6 +81,11 @@ def report(lab: Path = LAB, now: float | None = None) -> list[str]:
     due = lie_recorder.prune(lab / "recent", rolling.RECENT_KEEP_BYTES, dry_run=True)
     lines.append(f"recent recordings (save-recent's): {len(saves)}; the newest {size(rolling.RECENT_KEEP_BYTES)} are "
                  f"kept besides the next; due to go when the next is saved: {len(due)} ({size(sum(b for _, b in due))})")
+    clips = lie_recorder.recordings(lab / "alarm_clips")
+    due = lie_recorder.prune(lab / "alarm_clips", rolling.CLIPS_KEEP_BYTES, dry_run=True)
+    lines.append(f"alarm clips (the recorder's, 10 s before each alarm to 60 s after): {len(clips)}; the newest "
+                 f"{size(rolling.CLIPS_KEEP_BYTES)} are kept besides the next; due to go when the next is saved: "
+                 f"{len(due)} ({size(sum(b for _, b in due))})")
     lines.append("the other recordings and screenshots are never deleted for you")
     return lines
 

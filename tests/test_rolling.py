@@ -89,7 +89,7 @@ def recorder(tmp_path, clock=None, game=None, grab=None, **kw) -> Recorder:
     said = []
     kw.setdefault("log", said.append)
     rec = Recorder(game or Game(), grab or Grab(), box=tmp_path / "recorder", lie_root=tmp_path / "lie_detector",
-                   recent=tmp_path / "recent", clock=clock or Clock(), **kw)
+                   recent=tmp_path / "recent", clips=tmp_path / "alarm_clips", clock=clock or Clock(), **kw)
     rec.said = said
     return rec
 
@@ -441,6 +441,79 @@ def test_an_alarm_for_the_image_quiz_or_the_mini_game_s_notice_is_saved_by_itsel
     assert folder.name.endswith("-lie-detector-quiz-warning")
     assert summary(folder)["alarm"]["form"] == "quiz warning" and summary(folder)["frames"] >= 50
     assert any("Lie Detector alarm (lie_detector, quiz warning, " in m for m in rec.said)
+    rec.close()
+
+
+def _alarm_at(rec, alarm_file, form="mini-game notice"):
+    seen = rec.clock()
+    alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-25 00:55:10", "form": form}),
+                          encoding="utf-8")
+    os.utime(alarm_file, (seen, seen))
+    return seen
+
+
+def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_60_s_after(tmp_path, alarm_file):
+    """The user, 2026-10-25: "For an alarmed lie detector save, save T-10s to T+1min automatically, regardless of
+    [the] lie detector's own save or not. I need this as a 2nd line of defense"."""
+    rec = recorder(tmp_path, folder_wait=0.3)
+    run_ticks(rec, 400, poll=True)
+    seen = _alarm_at(rec, alarm_file)
+    run_ticks(rec, 595, poll=True)  # 59.5 s on: not yet
+    assert rec.flush(10) and not (tmp_path / "alarm_clips").exists()
+    run_ticks(rec, 10, poll=True)
+    assert rec.flush(10)
+    (clip,) = (tmp_path / "alarm_clips").iterdir()
+    s = summary(clip)
+    assert clip.name.endswith("-lie-detector-mini-game-notice") and s["kind"] == "the alarm's clip"
+    assert s["alarm"]["form"] == "mini-game notice" and s["asked"] == [-10.0, 60.0] and s["cut_short"] is False
+    assert s["alarm_t"] == pytest.approx(10.0, abs=0.15) and 699 <= s["ticks"] <= 701 and s["frames"] == s["ticks"]
+    assert lines(clip)[-1]["t"] == pytest.approx(70.0, abs=0.15)
+    # ... besides the part before it, its own way (here no recording of the player's began: to recent/).
+    (before,) = (tmp_path / "recent").iterdir()
+    assert summary(before)["kind"] == "before the Lie Detector"
+    assert summary(before)["alarm_t"] == pytest.approx(40.0, abs=0.6)  # all the ring held: 40 s
+    assert any("its own clip from 10 s before it to 60 s after" in m for m in rec.said)
+    rec.close()
+    assert len(list((tmp_path / "alarm_clips").iterdir())) == 1  # written once
+    assert lines(clip)[0]["at"] == rolling.clock_time(seen - 9.9)  # its first moment, 10 s before the alarm's
+
+
+def test_an_alarm_s_clip_keeps_its_moments_however_little_the_ring_keeps(tmp_path, alarm_file):
+    rec = recorder(tmp_path, folder_wait=0.3, ring=Ring(seconds=20.0))  # the ring holds 20 s; the clip needs 70
+    run_ticks(rec, 300, poll=True)
+    _alarm_at(rec, alarm_file, form="quiz warning")
+    run_ticks(rec, 605, poll=True)
+    assert rec.flush(10)
+    (clip,) = (tmp_path / "alarm_clips").iterdir()
+    s = summary(clip)
+    assert clip.name.endswith("-lie-detector-quiz-warning")
+    assert 699 <= s["ticks"] <= 701 and s["alarm_t"] == pytest.approx(10.0, abs=0.15)
+    rec.close()
+
+
+def test_an_alarm_s_clip_is_written_cut_short_when_the_recorder_stops(tmp_path, alarm_file):
+    rec = recorder(tmp_path, folder_wait=0.3)
+    run_ticks(rec, 200, poll=True)
+    _alarm_at(rec, alarm_file)
+    run_ticks(rec, 50, poll=True)
+    rec.close()
+    (clip,) = (tmp_path / "alarm_clips").iterdir()
+    s = summary(clip)
+    assert s["cut_short"] is True and 149 <= s["ticks"] <= 151 and s["alarm_t"] == pytest.approx(10.0, abs=0.15)
+
+
+def test_an_alarm_s_clips_are_kept_to_their_budget(tmp_path, alarm_file):
+    root = tmp_path / "alarm_clips"
+    for stamp in ("20261020-100000-lie-detector", "20261021-100000-lie-detector"):
+        rolling.write_part(root / stamp, [Item(1.0, b"c" * 4000, size=(4, 4))], {"kind": "x"})
+    rec = recorder(tmp_path, folder_wait=0.3, clips_keep=6000)  # the newer old one fits beside the next, not both
+    run_ticks(rec, 50, poll=True)
+    _alarm_at(rec, alarm_file)
+    run_ticks(rec, 605, poll=True)
+    assert rec.flush(10)
+    names = sorted(p.name for p in root.iterdir())
+    assert names[0] == "20261021-100000-lie-detector" and len(names) == 2
+    assert any("deleted the 1 oldest alarm clips" in m for m in rec.said)
     rec.close()
 
 

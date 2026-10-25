@@ -10,7 +10,9 @@ babysitter, hunts or not. What it keeps is saved:
     as: its `form`): the 5 minutes before it, and on until the player's own recording of it has begun, go into that
     recording's folder as `before/`
     (control.lie_recorder), so the whole cycle is kept with what led up to it; as one is written, the Lie Detector's
-    recordings are pruned to their 10 GB counting those parts (`_prune_lie`), whatever the player's age;
+    recordings are pruned to their 10 GB counting those parts (`_prune_lie`), whatever the player's age; and, on its
+    own whatever becomes of those, the alarm's clip, from 10 s before it to 60 s after, to
+    paths.ALARM_CLIPS/<YYYYmmdd-HHMMSS>-lie-detector[-<form>] (CLIP_BEFORE_S, CLIP_AFTER_S);
   - on demand (`python -m gamelab save-recent`, `ask` here): the last N s, to paths.RECENT/<YYYYmmdd-HHMMSS>[-name],
     asked through a file inbox (paths.RECORDER: inbox/<id>.json, taken as <id>.taken, answered in outbox/<id>.json).
 
@@ -86,6 +88,14 @@ LOG_EVERY_S = 600.0   # a line in its log this often: what it keeps, its rate an
 # running, or `watch --lie-detector` raised it: it records nothing), the part goes to paths.RECENT, named for it.
 FOLDER_WAIT_S = 20.0
 FOLDER_SLACK_S = 2.0  # ... a recording counts as the alarm's if its folder is named for no more than this before it
+# Each alarm also gets a clip of its own, whatever becomes of the player's recording and the part before it (the user,
+# 2026-10-25: "a 2nd line of defense"): from CLIP_BEFORE_S before the alarm to CLIP_AFTER_S after, 10 a second, in
+# paths.ALARM_CLIPS, written once its last moment is past (or, cut short, when the recorder stops). Its moments are
+# held by the clip itself as they come, so a ring that loses them first (its 1 GB cap) loses none of the clip's. 70 s
+# at 1366x768 is about 120 MB (170 KB a frame on Tree Dungeon); the oldest go past CLIPS_KEEP_BYTES, about 40 of them.
+CLIP_BEFORE_S = 10.0
+CLIP_AFTER_S = 60.0
+CLIPS_KEEP_BYTES = 5 * 1024 ** 3
 SAVES_WAITING = 4     # saves waiting to be written at most; a request past it is answered "busy"
 ASK_TAKEN_S = 3.0     # save-recent: the recorder takes a request within this (it looks every tick), or isn't running
 ASK_WAIT_S = 180.0    # ... and answers within this (writing 5 minutes of frames takes seconds)
@@ -105,6 +115,15 @@ class Item:
     jpeg: bytes | None = None    # None: a gap
     why: str = ""                # a gap's reason
     size: tuple[int, int] | None = None  # a frame's width, height
+
+
+@dataclass(slots=True)
+class Clip:
+    """An alarm's clip being gathered: the alarm (ALARM.json's), when it was seen (time.time's clock) and its moments
+    held so far, from CLIP_BEFORE_S before it (Recorder.check_alarm, then each tick's)."""
+    info: dict
+    seen: float
+    items: list[Item]
 
 
 class Ring:
@@ -233,20 +252,26 @@ class Recorder:
     and the status between ticks, `run` does both FPS times a second. Saves are written on a thread of their own, one
     after the other (`flush` waits for them). `game` says whether the screen shows the game (GameWindow), `grab`
     grabs a box of the screen (ScreenGrab); tests pass fakes, and their own folders: `box` (the inbox, the outbox and
-    the status file: paths.RECORDER), `lie_root` (paths.LIE_RECORDINGS) and `recent` (paths.RECENT)."""
+    the status file: paths.RECORDER), `lie_root` (paths.LIE_RECORDINGS), `recent` (paths.RECENT) and `clips`
+    (paths.ALARM_CLIPS)."""
 
     def __init__(self, game, grab: Callable[[dict], np.ndarray], ring: Ring | None = None, *,
                  box: Path | None = None, lie_root: Path | None = None, recent: Path | None = None,
-                 clock: Callable[[], float] = time.time, encode_frame: Callable[[np.ndarray], bytes] = encode,
-                 fps: float = FPS, log: Callable[[str], None] = print, folder_wait: float = FOLDER_WAIT_S,
-                 recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES):
+                 clips: Path | None = None, clock: Callable[[], float] = time.time,
+                 encode_frame: Callable[[np.ndarray], bytes] = encode, fps: float = FPS,
+                 log: Callable[[str], None] = print, folder_wait: float = FOLDER_WAIT_S,
+                 recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES,
+                 clips_keep: int = CLIPS_KEEP_BYTES):
         self.game, self.grab, self.ring = game, grab, ring or Ring()
         box = Path(box or paths.RECORDER)
         self.inbox, self.outbox, self.status_path = box / "inbox", box / "outbox", box / "status.json"
         self.lie_root = Path(lie_root or paths.LIE_RECORDINGS)
         self.recent = Path(recent or paths.RECENT)
+        self.clips = Path(clips or paths.ALARM_CLIPS)
         self.clock, self.encode, self.fps, self.log = clock, encode_frame, fps, log
         self.folder_wait, self.recent_keep, self.lie_keep = folder_wait, recent_keep, lie_keep
+        self.clips_keep = clips_keep
+        self.pending_clips: list[Clip] = []  # alarms whose clip's last moment isn't past yet
         self.started = self.clock()
         self.state: str | None = None  # the last moment's gap reason ("": a frame), as the log last said it
         self.counts: Counter = Counter()  # moments by what: "frame", or a gap's why
@@ -297,6 +322,8 @@ class Recorder:
                 item = Item(t, None, "not encoded")
                 self._say(f"recorder: a frame wasn't encoded ({type(e).__name__}: {e})")
         self.ring.add(item)
+        for clip in self.pending_clips:  # (held there too: the ring may lose them, its cap, before the clip's end)
+            clip.items.append(item)
         self.counts[item.why or "frame"] += 1
         self._said(item.why)
         return item
@@ -314,13 +341,15 @@ class Recorder:
     # --- between moments ---
 
     def poll(self) -> None:
-        """Between ticks: a request in the inbox (every tick), a new Lie Detector alarm (every ALARM_POLL_S), the status
-        file (every STATUS_S) and the log's line (every LOG_EVERY_S)."""
+        """Between ticks: a request in the inbox (every tick), a new Lie Detector alarm (every ALARM_POLL_S), an alarm's
+        clip whose last moment is past (every tick), the status file (every STATUS_S) and the log's line (every
+        LOG_EVERY_S)."""
         self.read_inbox()
         now = self.clock()
         if now >= self._next_alarm:
             self._next_alarm = now + ALARM_POLL_S
             self.check_alarm()
+        self.check_clips(now)
         if now >= self._next_status:
             self._next_status = now + STATUS_S
             self.write_status()
@@ -372,8 +401,20 @@ class Recorder:
         snapshot = self.ring.last(self.ring.seconds)
         seen_as = f", {info['form']}" if info.get("form") else ""
         self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}): saving the "
-                  f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it")
+                  f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it, and its own clip "
+                  f"from {CLIP_BEFORE_S:g} s before it to {CLIP_AFTER_S:g} s after in {self.clips}")
         self.jobs.put(lambda: self._save_before(info, seen, snapshot))
+        # The clip's moments are held from now on (`tick` adds each to it), the ring's from CLIP_BEFORE_S before the
+        # alarm first: the ring may lose them, its cap, before the clip's end.
+        self.pending_clips.append(Clip(info, seen, [it for it in snapshot if it.t > seen - CLIP_BEFORE_S]))
+
+    def check_clips(self, now: float, cut_short: bool = False) -> None:
+        """Each alarm's clip whose last moment is past (`cut_short`: all, as the recorder stops): its moments up to
+        CLIP_AFTER_S after the alarm, queued to be written."""
+        for clip in [c for c in self.pending_clips if cut_short or now >= c.seen + CLIP_AFTER_S]:
+            self.pending_clips.remove(clip)
+            items = [it for it in clip.items if it.t <= clip.seen + CLIP_AFTER_S]
+            self.jobs.put(lambda clip=clip, items=items: self._save_clip(clip, items, cut_short))
 
     def read_inbox(self) -> None:
         """Take each request in the inbox (renamed <id>.taken) and queue its save: the last `seconds` as the ring holds
@@ -451,6 +492,18 @@ class Recorder:
             self._say(f"recorder: no recording of the player's began within {self.folder_wait:g} s of the alarm "
                       f"(the player not running?): the part before it is in {dest}")
 
+    def _save_clip(self, clip: Clip, items: list[Item], cut_short: bool) -> None:
+        gone = lie_recorder.prune(self.clips, self.clips_keep)
+        if gone:
+            self._say(f"recorder: deleted the {len(gone)} oldest alarm clips to keep the rest under "
+                      f"{self.clips_keep / 1024 ** 3:g} GB")
+        dest = new_folder(self.clips, safe_name(f"lie-detector {clip.info.get('form') or ''}".strip()))
+        summary = write_part(dest, items, {
+            "kind": "the alarm's clip", "alarm": clip.info, "alarm_at": day_time(clip.seen),
+            "alarm_t": None if not items else round(clip.seen - items[0].t, 3),
+            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, self.fps)
+        self._saved(dest, summary)
+
     def _prune_lie(self, spare: Path) -> None:
         """The Lie Detector's recordings kept to `lie_keep` (lie_recorder.KEEP_BYTES), their parts before counted, the
         one under way (`spare`) left out, before a part goes into it. The player prunes them too, but only as a
@@ -512,7 +565,9 @@ class Recorder:
         return True
 
     def close(self, timeout: float = 120.0) -> None:
-        """Write what's queued (a save under way finishes), say it stopped in the status file, let the grabber go."""
+        """Write what's queued (a save under way finishes) and the alarms' clips not over yet, cut short; say it
+        stopped in the status file, let the grabber go."""
+        self.check_clips(self.clock(), cut_short=True)
         self.flush(timeout)
         self._stop.set()
         self.jobs.put(None)
