@@ -76,6 +76,7 @@ class Hunter:
         self.danger = danger.of_map(model, her or danger.Her(c.hp, c.level))  # where touches would cost her
         self.low_hp, self.potion_hp = low_hp, potion_hp
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
+        self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
         self.actions = Actions(keys, skill)
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
         if note := drops.unknown_note(model):  # its monsters whose drops aren't known, said once

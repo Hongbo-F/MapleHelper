@@ -114,7 +114,8 @@ class Scene(Observation):
         of monsters is otherwise a look that saw none or one that didn't look): `searched` and `wide` (Scene's),
         `looked` (where drops were looked for: platform, map x from, to) and `view` (the map the screen showed above
         the bottom bar: x from, y from, x to, y to, whole units); and the other players (`players`, left out when there
-        are none)."""
+        are none); and where the map's minimap picture was found and how well it matched (`minimap`: its corner x, y in
+        full-size px, the score; left out without one), which a dot read with the wrong origin is told by."""
         her = None if self.where is None else {
             "x": round(self.where.x, 1), "y": round(self.where.y, 1),
             "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen,
@@ -133,7 +134,8 @@ class Scene(Observation):
                          for d in self.loot],
                 "searched": self.searched, "wide": self.wide,
                 "looked": [[pid, round(lo), round(hi)] for pid, lo, hi in self.looked], "view": view,
-                **({"players": [p.record() for p in self.players]} if self.players else {})}
+                **({"players": [p.record() for p in self.players]} if self.players else {}),
+                **({"minimap": [round(v, 3) for v in self.picture]} if self.picture is not None else {})}
 
     def room(self, direction: str, margin: float) -> float:
         """Map units she can walk that way before the end of her platform (less a margin)."""

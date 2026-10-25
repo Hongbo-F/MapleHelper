@@ -255,7 +255,13 @@ class MinimapPicture:
         self.picture = np.ascontiguousarray(picture[..., :3]).astype(np.float32)
         self.geo = geo
         self.corner: tuple[float, float] | None = None  # full-size px in the window, as last found
+        self.score: float | None = None  # the best match of the last search (None: none made, the box too small)
         self._retry_at = 0.0  # time.monotonic() before which no whole search is made again (PICTURE_RETRY_S)
+
+    def lose(self) -> None:
+        """Forget where the picture was, and search the whole box at the next look (after a look that failed its
+        checks: perception.framecheck; a corner found in a frame offset from the window would be off by as much)."""
+        self.corner, self._retry_at = None, 0.0
 
     def find(self, box: np.ndarray) -> tuple[float, float] | None:
         """The picture's top-left corner (full-size px in the game window) in a capture of `minimap_box` (RGB), or
@@ -266,6 +272,7 @@ class MinimapPicture:
         ph, pw = self.picture.shape[:2]
         bh = min(ph, max(8, int(box.shape[0] * PICTURE_BAND)))
         if box.shape[0] < bh or box.shape[1] < pw:
+            self.score = None
             return None
         best = None
         if self.corner is not None:  # first where it was: the band across the box's middle, around its last place
@@ -280,6 +287,7 @@ class MinimapPicture:
                 found = self._best(box, top, bh, 0, 0)
                 if best is None or found[0] > best[0]:
                     best = found
+        self.score = None if best is None else best[0]
         if best is None or best[0] < PICTURE_MATCH:
             self._retry_at = time.monotonic() + PICTURE_RETRY_S
             return None

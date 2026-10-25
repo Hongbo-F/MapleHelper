@@ -9,6 +9,11 @@ Eyes is perception's only door to pixels. `look` gives an Observation (her name 
 ground under her, her minimap dot and other players', ropes, her EXP number and the box it's read from);
 localization then asks about that look's frame through Eyes (`monsters`, `items`, `bar`) instead of reading pixels
 itself, so the simulator (gamelab.sim) can stand in for the game by answering the same questions.
+
+A look is checked before anything is read from it (perception.framecheck): the game window where it was read to be,
+in front, uncovered and the size the eyes are for, its frame fresh and lined up with the client area, and the map's
+minimap picture found. One that fails raises BadLook, saying why; `recover` then does what it can (localization.senses
+takes it again, and gives up after a while). A glance that fails has no dot and keeps the last HP read.
 """
 
 import time
@@ -18,12 +23,14 @@ from dataclasses import dataclass, field, replace
 import cv2
 import numpy as np
 
-from .. import capture, paths, window
+from .. import capture, paths, telemetry, window
 from ..screen import STRETCHED, Geometry
+from . import framecheck
 from .exp_number import read_box
+from .framecheck import BadLook, Problem
 from .hud import BAR_ROW, HP_BAR, bars, exp_number_box, hp_bar, hp_fill
 from .loot import Item, LootDetector
-from .minimap import Marker, MinimapPicture, dot_in_box, her_dot, minimap_box, other_dots
+from .minimap import PICTURE_MATCH, Marker, MinimapPicture, dot_in_box, her_dot, minimap_box, other_dots
 from .mobs import Mob, MobDetector
 from .nametag import NameTag
 from .terrain import ScreenRope, find_ropes, ground_extent
@@ -76,6 +83,11 @@ class Observation:
                                              # RGB): read (exp_number.read) only when `exp` changes
     geo: Geometry = STRETCHED                # the game window's client size and the look's scale (the simulator's
                                              # frames are the 1920x1080 window's)
+    bad: Problem | None = None               # why this look isn't of the game as expected (framecheck; Senses: her
+                                             # place off the map), nothing read from it then; None: it is (or
+                                             # wasn't checked)
+    picture: tuple[float, float, float] | None = None  # the map's minimap picture: its corner (full-size px) and how
+                                                       # well it matched this look (None: no picture, or no search)
 
     @property
     def floor_y(self) -> int | None:
@@ -108,6 +120,10 @@ class Eyes:
         self._loot = loot
         self.screen = screen or capture.shared()
         self._glanced = -GLANCE_EVERY_S    # when the last glance began
+        self._hp = 1.0                     # the HP the last look or glance that passed its checks read
+        self.area: dict[str, int] | None = None  # where the client area was at the last look that passed
+        self.log: Callable[[str], None] = print  # what the eyes say (the window moved; the capture reopened)
+        self.glances_failed = 0            # glances that failed their checks (no dot from them)
         self.name_tag = NameTag(tag_template, paths.calibrated(paths.TAG_FULL, geo.suffix), geo)
         self.want_ropes = False  # Senses turns this on
         self.minimap = MinimapPicture(minimap_picture, geo) if minimap_picture is not None else None
@@ -117,14 +133,20 @@ class Eyes:
                                     list[tuple[int, int]] | None] | None = None
 
     def look(self) -> Observation:
-        """HP/MP, her name tag, the ground under her, her minimap dot and other players'; no monsters (`monsters`)."""
-        return self.look_at(self._capture())
+        """HP/MP, her name tag, the ground under her, her minimap dot and other players'; no monsters (`monsters`).
+        Raises BadLook if it isn't of the game as expected (see the module's docstring)."""
+        obs = self.look_at(self._capture())
+        if obs.bad is not None:
+            raise BadLook(obs.bad)
+        self._hp = obs.hp
+        return obs
 
     def look_at(self, full: np.ndarray, t: float | None = None, ropes: bool | None = None) -> Observation:
         """What a capture of the game window shows (full size, RGB), as `look` reads it: `t` is when the
         screen showed it (by default now, the end of the look); `ropes` False leaves the rope search out
         (by default `want_ropes`). The continuous feed (localization.feed) looks at frames it captured
-        itself this way. The capture must be of the client size the eyes are for (`geo`)."""
+        itself this way. The capture must be of the client size the eyes are for (`geo`). A frame that fails its
+        checks (framecheck) gives an Observation with `bad` saying why, and nothing read from it but the bars."""
         geo = self.geo
         if (full.shape[1], full.shape[0]) != geo.client:
             raise ValueError(f"a frame of {full.shape[1]}x{full.shape[0]}; these eyes are for "
@@ -133,13 +155,26 @@ class Eyes:
         k = geo.look_scale
         frame = full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
                                                interpolation=cv2.INTER_AREA)
-        tag = self.name_tag.find(full)
+        if (bad := framecheck.frame_problem(full, geo)) is not None:  # before her name tag, whose template is cut
+            return self._refused(t, frame, hp, mp, bad)                # from the first look
+        picture = None
+        if self.minimap is not None:
+            mx0, my0, mx1, my1 = minimap_box(geo)
+            self.minimap.find(full[my0:my1, mx0:mx1])
+            if self.minimap.corner is None:  # never found: her dot can't be read (its origin isn't known)
+                score = "no search" if self.minimap.score is None else f"best match {self.minimap.score:.2f}"
+                return self._refused(t, frame, hp, mp, Problem(
+                    "picture", f"the minimap doesn't show this map's picture ({score}, {PICTURE_MATCH} needed): "
+                               f"another map, or the minimap covered"))
+            picture = (*self.minimap.corner, -1.0 if self.minimap.score is None else round(self.minimap.score, 3))
+        try:
+            tag = self.name_tag.find(full)
+        except RuntimeError as e:  # her name tag's full-size template can't be cut: she isn't on screen
+            return self._refused(t, frame, hp, mp, Problem("tag", str(e)))
         ground = ground_extent(frame, tag[0], tag[1] - tag_below_feet(geo), geo) if tag else None
         dot = her_dot(full, geo)
         others = other_dots(full, geo)  # 0.4-0.6 ms (the 31 saved frames of this map)
         if self.minimap is not None:
-            mx0, my0, mx1, my1 = minimap_box(geo)
-            self.minimap.find(full[my0:my1, mx0:mx1])
             sx, sy = self.minimap.shift()
             dot, others = self._shifted(dot), [replace(m, x=m.x - sx, y=m.y - sy) for m in others]
         found = []
@@ -150,23 +185,45 @@ class Eyes:
         return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=tag, hp=hp, mp=mp,
                            ground=ground, dot=dot, others=others, ropes=found,
                            exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy(),
-                           geo=geo)
+                           geo=geo, picture=picture)
+
+    def _refused(self, t: float | None, frame: np.ndarray, hp: float, mp: float, bad: Problem) -> Observation:
+        """A look that failed its checks: nothing read from it but the bars."""
+        return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=None, hp=hp, mp=mp, geo=self.geo,
+                           bad=bad)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from the newest frame (with DXGI 0.2 ms, with mss two grabs of 16.7
-        ms each), GLANCE_EVERY_S after the last glance began at the soonest: for watching a plan run."""
+        ms each), GLANCE_EVERY_S after the last glance began at the soonest: for watching a plan run. One that
+        fails its checks (the game window gone, minimized, another size, not in front or covered; the minimap
+        window's title strip not where it should be: framecheck) has no dot, and the last HP read."""
         begun = time.monotonic()
-        area = self._client_area()
+        try:
+            area = self._client_area()
+            wrong = self._window_problem(area)
+        except RuntimeError:  # the game window is gone
+            area, wrong = None, True
+        if wrong:
+            self._glanced = max(begun, self._glanced + GLANCE_EVERY_S)
+            self.glances_failed += 1
+            return None, self._hp
         x0, y0, x1, y1 = minimap_box(self.geo)
         w, h = area["width"], area["height"]
         a, b = int(HP_BAR[0] * w), int(HP_BAR[1] * w)
+        boxes = [(x0, y0, x1 - x0, y1 - y0), (a, int(BAR_ROW * h), b - a, 1)]
+        if framecheck.checked(self.geo):
+            boxes.append(framecheck.title_box())
         shot = self.screen.shot(area, at=self._glanced + GLANCE_EVERY_S)
         self._glanced = max(begun, self._glanced + GLANCE_EVERY_S)
-        box, row = shot.crops([(x0, y0, x1 - x0, y1 - y0), (a, int(BAR_ROW * h), b - a, 1)], rgb_of)
+        box, row, *title = shot.crops(boxes, rgb_of)
         self.seen_at = shot.t
+        if title and framecheck.title_diff(title[0]) > framecheck.TITLE_DIFF:
+            self.glances_failed += 1
+            return None, self._hp
         if self.minimap is not None:
             self.minimap.find(box)
-        return self._shifted(dot_in_box(box, self.geo)), hp_fill(row[0].astype(np.int16))
+        self._hp = hp_fill(row[0].astype(np.int16))
+        return self._shifted(dot_in_box(box, self.geo)), self._hp
 
     def _shifted(self, dot: tuple[float, float] | None) -> tuple[float, float] | None:
         """A dot as it would be with the minimap's picture where it was on the first map (minimap.MinimapPicture)."""
@@ -195,6 +252,10 @@ class Eyes:
         """The game window's client area on screen: left, top, width, height."""
         return window.client_rect(window.find_game(self.title))
 
+    def _window_problem(self, area: dict[str, int]) -> Problem | None:
+        """What's wrong with the game window for a capture of `area` (framecheck.window_problem), or None."""
+        return framecheck.window_problem(window.find_game(self.title), area, self.title, self.geo)
+
     def _to_front(self) -> None:
         """Bring the game to the front unless it's there already: a capture sees whatever window is on top."""
         if window.foreground_title() != self.title:
@@ -203,19 +264,54 @@ class Eyes:
 
     def _capture(self) -> np.ndarray:
         """The whole client area, full size, RGB, with the game in front, as the screen showed it after
-        this began (a look sees what came of the keys before it). It must be the size the templates were
-        made for (`geo`)."""
+        this began (a look sees what came of the keys before it). Raises BadLook if the game window isn't fit to
+        capture (gone, minimized, not the size the templates were made for, not in front, covered), moved while it
+        was captured, or the frame is stale (framecheck)."""
         self._to_front()
         begun = time.monotonic()
-        area = self._client_area()
-        if (area["width"], area["height"]) != self.geo.client:
-            raise RuntimeError(f"the game window is {area['width']}x{area['height']}; the monster templates and "
-                               f"her name tag here are for {self.geo.client[0]}x{self.geo.client[1]} (it was that "
-                               f"size when this began): run it again")
+        try:
+            area = self._client_area()
+            wrong = self._window_problem(area)
+        except RuntimeError as e:  # no game window
+            raise BadLook(Problem("window", str(e))) from None
+        if wrong is not None:
+            raise BadLook(wrong)
         shot = self.screen.shot(area, after=begun)
         full = shot.crop(0, 0, area["width"], area["height"], rgb_of)
         self.seen_at = shot.t
+        try:
+            after = self._client_area()  # read again: a window being dragged moves between the two (16:48:45)
+        except RuntimeError as e:
+            raise BadLook(Problem("window", str(e))) from None
+        if wrong := framecheck.moved_problem(area, after) or framecheck.stale_problem(shot.t, time.monotonic()):
+            raise BadLook(wrong)
+        if self.area is not None and area != self.area:
+            text = f"the game window moved: ({self.area['left']}, {self.area['top']}) -> ({area['left']}, {area['top']})"
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="window", text=text)
+        self.area = area
         return full
+
+    def recover(self, problem: Problem, attempt: int = 0) -> None:
+        """After a look that failed its checks (`problem`; `attempt`: the failures in a row before it), before the
+        next: the minimap's picture and her name tag are searched for afresh; if the capture itself may be at fault
+        (framecheck.CAPTURE_KINDS: the frame offset from the window, or old), the duplication is opened afresh on
+        the first failure, and on the second mss takes over for capture.RETRY_S (the window moving is waited out:
+        its next look reads where it is). The game window is never moved or resized here. (The simulator's eyes
+        have none of these, and nothing is done.)"""
+        if getattr(self, "minimap", None) is not None:
+            self.minimap.lose()
+        if getattr(self, "name_tag", None) is not None:
+            self.name_tag.lose()
+        screen, log = getattr(self, "screen", None), getattr(self, "log", print)
+        if problem.kind not in framecheck.CAPTURE_KINDS:
+            return
+        if attempt == 0 and hasattr(screen, "reopen"):
+            screen.reopen()
+            log("  the capture is duplicated afresh")
+        elif attempt == 1 and hasattr(screen, "fall_back"):
+            screen.fall_back(problem.why)
+            log(f"  the capture falls back to mss for {capture.RETRY_S:.0f} s")
 
     # --- questions about a look's frame -----------------------------------------------------------
 

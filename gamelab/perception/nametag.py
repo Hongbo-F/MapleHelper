@@ -32,6 +32,11 @@ SAME_NAME = (20, 60)   # full-size px around a match (rows, columns) where other
 # in there (a warp, a long walk by an edge, the tag hidden), the whole play area is searched.
 NEAR = (240, 120)
 FULL_EVERY = 30        # ... and every this many looks the whole play area anyway, so a wrong match can't stick
+# After this many looks in a row without her tag, the full-size template is cut again from calibration's half-size one
+# (`_cut`, about 35 ms), in case it no longer matches her (kept from another day); if the half-size one doesn't find her
+# either, nothing changes. In the tours on Tree Dungeon on 2026-10-24 (7,646 looks, 1.8 a second) her tag was hidden 14
+# looks in a row at the most.
+RECUT_AFTER = 50
 
 
 def _hide_minimap(res: np.ndarray, shape: tuple[int, ...], x0: int = 0, y0: int = 0) -> None:
@@ -52,6 +57,12 @@ class NameTag:
         self._last: tuple[int, int] | None = None
         self.looks = 0   # finds so far ...
         self.missed = 0  # ... and how many of them didn't find her near where she was (the whole play area searched)
+        self.unseen = 0  # finds in a row that found her nowhere
+        self.recuts = 0  # times the full-size template was cut again (RECUT_AFTER)
+
+    def lose(self) -> None:
+        """Forget where she was: the next find searches the whole play area (after a look that failed its checks)."""
+        self._last = None
 
     def find(self, full: np.ndarray) -> tuple[int, int] | None:
         """Centre of her name tag in a full-size frame, in look-frame pixels (None: not on screen).
@@ -68,9 +79,23 @@ class NameTag:
             self.missed += found is None
         if found is None:
             found = self.search(full)
+        self.unseen = 0 if found is not None else self.unseen + 1
+        if self.unseen >= RECUT_AFTER:
+            found = self._recut(full)
         if found is not None:
             self._last = found
         return found
+
+    def _recut(self, full: np.ndarray) -> tuple[int, int] | None:
+        """Cut the full-size template again from calibration's (RECUT_AFTER) and search with it; None if the half-size
+        one doesn't find her either (the template is kept then)."""
+        self.unseen = 0
+        try:
+            self.full = self._cut(full)
+        except RuntimeError:
+            return None
+        self.recuts += 1
+        return self.search(full)
 
     def _near(self, shape: tuple[int, ...]) -> tuple[int, int, int, int]:
         """The box of the play area (x0, y0, x1, y1; full-size px) a tag within NEAR of where she was

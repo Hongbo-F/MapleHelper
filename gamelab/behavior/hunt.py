@@ -72,6 +72,7 @@ from ..localization.players import near_rival
 from ..localization.scene import Scene
 from ..motion.flow import HER_HALF
 from ..motion.physics import WALK_SPEED
+from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from . import fight
@@ -359,8 +360,12 @@ class Hunt:
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         self._next_ground(self.nav.mover.settle())
         while time.monotonic() < end:
-            if self._pass() == "stop":
-                break
+            try:
+                if self._pass() == "stop":
+                    break
+            except LookLost as lost:  # the game doesn't look as expected: stand still until it does (senses)
+                if self.h.senses.regain(lost, end) is None:
+                    break
         self._leave_ground()
         self.report.seconds = time.monotonic() - start
         if meter.since is not None:

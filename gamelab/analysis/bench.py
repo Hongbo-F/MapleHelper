@@ -119,6 +119,9 @@ class SavedEyes(Eyes):
         h, w = self.screen.bgra.shape[:2]
         return {"left": 0, "top": 0, "width": w, "height": h}
 
+    def _window_problem(self, area: dict[str, int]):
+        return None  # no window: the frame's own checks (framecheck) still run
+
 
 class FrontEyes(Eyes):
     """Eyes on the game as it is: a capture refuses unless the game is in front already. It never brings

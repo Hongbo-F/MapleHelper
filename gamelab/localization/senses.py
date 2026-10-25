@@ -11,17 +11,26 @@ is the feed's state of the first frame shown after it was asked for, with what i
 feed.fresh), and the events since the last look come with it (Scene.events); glances come from the feed's
 newest frames. When the feed can't give one (the game not in front, the feed gone or too slow), the look or
 glance is taken here as without it. Without a feed (the default) nothing changes.
+
+A look taken here is never handed on unless it passed its checks: the eyes' (perception.framecheck: the game window,
+the frame lined up with it, the minimap's picture found) and her place on the map (localization.placecheck). One that
+fails is taken again, RETRY_GAP_S later, after the eyes have done what they can (Eyes.recover); after LOST_S of
+failing, `look` raises LookLost, and nothing acts on the game until a look passes again (a hunt stands still and
+looks every PAUSE_POLL_S: `regain`). What failed, and when it's right again, is logged and sent as telemetry events.
 """
 
 import time
 from collections.abc import Callable
 
+from .. import telemetry
 from ..perception.drops import items_for
 from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, tag_below_feet
+from ..perception.framecheck import BadLook, LookLost, Problem
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import STRETCHED
 from .mapdata import MapModel
 from .monsters import Monster
+from .placecheck import off_map
 from .players import LOCAL_IDS, Players
 from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
 from .scene import Scene, find_loot
@@ -43,6 +52,12 @@ ROPE_PAD: int | None = ROPE_MATCH_PX + MAX_ROPE_WIDTH
 # minimap pixels), and over 20 seeds of 20 minutes the tour made 5.0% less EXP a minute (standard error 2.6%), the
 # hunt loop 2.4% more (1.6%). Not tried in game.
 FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
+# Looks that fail their checks are taken again this long apart (each a capture: 5-30 ms), for up to LOST_S; then
+# LookLost. The window dragged at 16:48:44 on 2026-10-24 gave four bad looks in 4.1 s (16:48:44.0-48.1); a look that
+# fails for longer than LOST_S makes a hunt stand still (`regain`), looking again every PAUSE_POLL_S.
+RETRY_GAP_S = 0.2
+LOST_S = 3.0
+PAUSE_POLL_S = 0.5
 
 
 class Senses:
@@ -62,6 +77,10 @@ class Senses:
         self._glanced = -1e18  # the frame time of the last glance from the feed
         self.glanced_at: float | None = None  # when the frame the last glance saw was shown (time.monotonic)
         self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0}
+        self.failed = {"looks": 0, "lost": 0}  # looks that failed their checks, and times that made LookLost
+        self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
+        self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
+        self._attempts = 0  # looks failed in a row (Eyes.recover goes by it)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False) -> Scene:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
@@ -73,7 +92,7 @@ class Senses:
             s = self.feed.look(self, mobs, wide, loot, mesos_only)
         served = s is not None
         if s is None:
-            s = self.place(self.eyes.look())
+            s = self._take()
             if mobs and s.tag is not None and s.where is not None:
                 s.monsters = self.search(s, wide)
                 s.searched, s.wide = True, wide
@@ -92,6 +111,59 @@ class Senses:
         for listener in self.listeners:
             listener(s)
         return s
+
+    def _take(self) -> Scene:
+        """A look taken here and placed that passed its checks (see the module's docstring), taken again until one
+        does; raises LookLost once looks have failed for LOST_S (at once while they still are, after that)."""
+        while True:
+            try:
+                s = self.place(self.eyes.look())
+                problem = s.bad
+            except BadLook as e:
+                problem = e.problem
+            if problem is None:
+                self._passed()
+                return s
+            now = time.monotonic()
+            self.failed["looks"] += 1
+            if self._failing is None or self._failing[1] != problem.why:
+                if self._failing is None:
+                    self.log(f"  a look failed its checks: {problem.why}")
+                else:
+                    self.log(f"  ... then: {problem.why}")
+                telemetry.emit("event", kind="look", text=problem.why)
+                self._failing = (now if self._failing is None else self._failing[0], problem.why)
+            self.eyes.recover(problem, self._attempts)  # (before the next look, which may be a while: `regain`)
+            self._attempts += 1
+            if now - self._failing[0] >= LOST_S:
+                self.failed["lost"] += 1
+                raise LookLost(problem)
+            time.sleep(RETRY_GAP_S)
+
+    def _passed(self) -> None:
+        """A look passed its checks: if looks had failed before it, that's over (said so)."""
+        if self._failing is not None:
+            text = f"the game looks as expected again ({time.monotonic() - self._failing[0]:.1f} s after a look failed)"
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="look", text=text)
+        self._failing, self._attempts = None, 0
+
+    def regain(self, lost: LookLost, until: float) -> Scene | None:
+        """After LookLost: nothing is sent while a look is taken every PAUSE_POLL_S, until one passes its checks (it's
+        returned) or it's `until` (time.monotonic; None then). What's wrong is logged when it changes."""
+        self.log(f"  standing still: {lost.why} (nothing is sent until the game looks as expected again)")
+        telemetry.emit("event", kind="lost", text=lost.why)
+        why = lost.why
+        while time.monotonic() < until:
+            time.sleep(min(PAUSE_POLL_S, max(0.0, until - time.monotonic())))
+            try:
+                return self.look(mobs=False)
+            except LookLost as e:
+                if e.why != why:
+                    self.log(f"  still standing: {e.why}")
+                    why = e.why
+        self.log(f"  still lost when the time was up: {why}")
+        return None
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Her minimap dot and HP (Eyes.glance), and when its frame was shown (`glanced_at`): with a feed, from its
@@ -115,10 +187,12 @@ class Senses:
 
     def place(self, obs: Observation) -> Scene:
         """A look placed on the map: where she is (see _place_her), and the other players (Players: a look that
-        didn't see her own dot, the minimap covered, keeps the players as they were); no monsters or drops yet."""
+        didn't see her own dot, the minimap covered, keeps the players as they were); no monsters or drops yet. A look
+        that failed its checks (`bad`: the eyes', or her place off the map) isn't placed, and keeps the players."""
         s = Scene.of(obs)
-        self._place_her(s)
-        s.players = self.players.update(s.t, obs.others) if s.dot is not None else self.players.current
+        if s.bad is None:
+            self._place_her(s)
+        s.players = self.players.update(s.t, obs.others) if s.dot is not None and s.bad is None else self.players.current
         return s
 
     def search(self, s: Scene, wide: bool = False) -> list[Monster]:
@@ -154,6 +228,9 @@ class Senses:
         if s.dot is not None:
             self.localizer.use(s.geo)
             s.where = self.localizer.where_dot(s.dot)
+            if (off := off_map(self.model, s.where)) is not None:  # not placed, and the camera learns nothing from it
+                s.where, s.bad = None, Problem("place", off)
+                return
             if s.tag is not None:
                 s.where, s.how = refine(s.where, s, self.model, self.camera)
         if s.where is None:
