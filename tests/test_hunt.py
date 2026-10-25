@@ -392,6 +392,36 @@ def test_a_trip_for_a_pile_that_went_first_is_called_off_for_what_goes_first_now
     assert "sapphire-ore on platform 2 at x 100: later, shooting what's in reach first" in h.said[-1]
 
 
+def test_a_trip_stops_for_a_valuable_or_urgent_pile_only_where_it_goes_ahead_of_what_is_in_reach():
+    # Where `_pass` lets a pile wait (EXP before loot), the trip it sends her on doesn't stop for it at its first look:
+    # it did, "in position" with no move made, and the next pass sent her off again, neither shooting nor moving once
+    # her time in passing there was spent (review, 2026-10-25).
+    ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
+    h = _shooter([ore])
+    h.h.low_hp, h.model, h._tops, h._halves = 0.3, None, {}, {}
+    h._close_quarters = lambda s, monsters: False
+    h._owed = lambda s, monsters: None
+    h._standable = lambda pid: False
+    h._detour = lambda s, slack=0.0: None
+    h.obj = Objective("spot", 19, 36.0)
+    h.obj.passing[1] = hunt.PASSING_S  # her time in passing on this platform spent
+    horny = _horny()
+    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=1), where=SimpleNamespace(x=0.0, y=0.0), monsters=[horny],
+                        players=[])
+    assert h._valuable_pile(s) is ore and not h._loot_first(s, ore, [horny], say=False)
+    assert not h._interrupt(s)  # it waits: on her way
+    s.monsters = []
+    assert h._interrupt(s)  # nothing in reach: it goes at once
+    urgent = _pile(hunt.DROP_LIFE - hunt.URGENT_MARGIN - 2.0, worth=20.0)  # cheap, and about to go
+    h.h.drops.known = [urgent]
+    s.monsters = [horny]
+    h.h.attacks = SimpleNamespace(kill_s=lambda m: 3.3)  # Lucky Seven's: 12.1 EXP a second
+    assert h._urgent_pile(s) is urgent and not h._loot_first(s, urgent, [horny], say=False)
+    assert not h._interrupt(s)
+    s.monsters = []
+    assert h._interrupt(s)
+
+
 def test_picking_up_yields_to_what_is_in_reach_while_she_hunts():
     from gamelab.behavior.looting import DropSpot, Looter
     said = []

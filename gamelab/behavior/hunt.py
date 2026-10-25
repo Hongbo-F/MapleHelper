@@ -1339,7 +1339,12 @@ class Hunt:
 
     def _interrupt(self, s: Scene) -> bool:
         """Asked before every chain of a trip: whether a rule calls for her here (close quarters, a valuable pile,
-        one she has hurt to finish, a target in reach she may shoot, a pile on the way, an urgent pile, low HP)."""
+        one she has hurt to finish, a target in reach she may shoot, a pile on the way, an urgent pile, low HP). A
+        valuable or an urgent pile calls for her only where it goes ahead of what's in reach (`_loot_first`, as `_pass`
+        asks it): one that waits stopped the trip "in position" on its first look, no move made, and the next pass
+        sent her off on it again, again and again, neither shooting nor moving once her time in passing there was spent
+        (review, 2026-10-25: 1-4 such trips a run in loop_tree_ore_waits, one followed by 2.9 s without a throw in the
+        harness's crowd)."""
         if s.hp < self.h.low_hp:
             return True
         here = s.platform.id
@@ -1348,13 +1353,14 @@ class Hunt:
         o = self.obj
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):
             return True  # not worth it any more (`_pass` drops it)
+        wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
         if o is not None and o.why == "valuable pile":
             # At once: nothing else stops her, but something in reach that goes first now (`_loot_first`)
-            wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
             return not self._loot_first(s, o.pile, wanted, say=False)
-        if self._valuable_pile(s) is not None or self._owed(s, s.monsters) is not None:
+        if (pile := self._valuable_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False):
             return True
-        wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
+        if self._owed(s, s.monsters) is not None:
+            return True
         in_reach = [m for m in wanted if self._hits(s, m)]
         if (in_reach or self._pass_step(s, wanted) is not None) and o is not None \
                 and o.passing.get(here, 0.0) < PASSING_S:
@@ -1364,7 +1370,7 @@ class Hunt:
             return True
         if self._detour(s) is not None:
             return True
-        return o is not None and o.kind != "pile" and self._exit_piles is None and self._urgent_pile(s) is not None
+        return o is not None and o.kind != "pile" and self._exit_piles is None             and (pile := self._urgent_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False)
 
     def _arrived(self, o: Objective) -> None:
         if o.kind == "spot":
