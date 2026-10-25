@@ -109,26 +109,34 @@ def test_a_monster_100_up_and_close_is_hit_only_with_the_attack_near_the_top_of_
 def test_the_same_height_farther_off_is_hit_lower_in_the_jump_or_from_the_ground(monkeypatch):
     # "After the jump you can hit monsters that is far away horizontally, remember the widening vertical search as
     # horizontal scale out": the windows reach 5 higher every 20 ahead, so 100 up is in reach lower in the jump
-    # farther off: 290 off with the attack keyed at once. From the ground the search's windows reach it from 271 (a
-    # pig), but her decisions keep to SHOT_UP (60) above her until a probe settles the windows' top (UP_BY_SEARCH off:
-    # with the logs' lower top, 21, from 357).
+    # farther off: 290 off with the attack keyed at once, and from the ground there too, the search's windows reaching
+    # it from 271 (a pig: UP_BY_SEARCH, on by the user's choice, 2026-10-25). With the switch off, her decisions keep
+    # to SHOT_UP (60) above her from the ground, and 290 off is a jump's only.
     floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 600)
     keys = {}
     for dx in (80, 160, 220, 290):
         m = pig(400 + dx, 400, up.id)
         c = cover(LEDGE, floor, 400, [m])
-        assert not c.ground(m)
+        assert c.ground(m) == (dx == 290), dx
         keys[dx] = c.best(m, ("up",)).key_ms
     assert keys[80] > keys[160] > keys[220] >= keys[290] == reach.KEY_FIRST_MS, keys
-    far = pig(400 + 290, 400, up.id)
-    monkeypatch.setattr(reach, "UP_BY_SEARCH", True)
-    assert cover(LEDGE, floor, 400, [far]).ground(far)
     assert reach.can_shoot(290, -100) and not reach.can_shoot(250, -100)
+    far = pig(400 + 290, 400, up.id)
+    monkeypatch.setattr(reach, "UP_BY_SEARCH", False)
+    c = cover(LEDGE, floor, 400, [far])
+    assert not c.ground(far) and c.best(far, ("up",)).key_ms == reach.KEY_FIRST_MS
 
 
-def test_the_ground_is_capped_60_above_her_until_a_probe_settles_the_windows_top():
-    assert not reach.UP_BY_SEARCH
-    assert not reach.can_shoot(290, -100) and reach.can_shoot(200, -60)
+def test_the_ground_reaches_above_60_by_the_search_and_the_switch_caps_it(monkeypatch):
+    # The user, 2026-10-25, "Turn it on now": their own play killed Green Mushrooms 69-100 above her from the ground,
+    # where the client's top (44) has the search pick them. The search's windows alone, then: a pig 100 above her from
+    # 271 off, 120 from 351 (the last bands; 124 at most, at 385-400 ahead). Off (UP_BY_SEARCH False, should the
+    # top-60 probe find the logs' 21), SHOT_UP's cap: 60 above her at most.
+    assert reach.UP_BY_SEARCH
+    assert reach.can_shoot(290, -100) and not reach.can_shoot(260, -100) and reach.can_shoot(200, -60)
+    assert reach.can_shoot(360, -120) and not reach.can_shoot(340, -120)
+    monkeypatch.setattr(reach, "UP_BY_SEARCH", False)
+    assert not reach.can_shoot(290, -100) and not reach.can_shoot(360, -120) and reach.can_shoot(200, -60)
 
 
 def test_too_high_for_the_widest_window_and_the_jump_is_out_of_reach():

@@ -174,18 +174,20 @@ AREA_UP = SEARCH_TOP0
 AIR_SEARCH = True
 # Whether a throw from the ground reaches monsters more than SHOT_UP above her where the star's search picks them (its
 # windows widen 5 up for every 20 ahead: 100 above her from about 270 off, 124 at most, at 385-400 ahead), as the
-# simulator's world always had it. Off until the top-60 probe settles the first window's top (SEARCH_TOP0: 44, the
-# client's, or the logs' 21, from which a pig 100 above her is picked from 357 off, not 271): too high a top has her
-# throw from the ground at monsters above her that the star doesn't take, and the simulator, which picks by the same
-# windows, can't show it. In the same play, from the ground, Green Mushrooms 69 above her 185-214 off (from 15 at 14),
-# 74-76 above 223 off (21 at 19) and 100 above 291 off (24 at 22) were killed, where 44 has the search pick them and
-# 21 wouldn't; but that's suggestive, not decisive (review, 2026-10-25): the ±0.2 s window put back from the kill
-# misplaces where in a jump the attack came (6 of the 30 kills above her, all 61-133 above with looks on the ground
-# only, no model explains), the first was airborne 0.09 s on, the third's only look in the window was airborne (as
-# she lifted off), and the second has a single look. Its shot logs' fit (the bands' floor and the lean to 21) wasn't
-# run again. True: the search's windows alone, no cap above her (`python -m gamelab probe run top-60`, then `probe
-# score`, decides it with SEARCH_TOP0).
-UP_BY_SEARCH = False
+# simulator's world always had it. On by the user's choice, 2026-10-25 ("Turn it on now"), asked whether to wait for
+# the top-60 probe: their own play, from the ground, killed Green Mushrooms 69 above her 185-214 off (from 15 at 14),
+# 74-76 above 223 off (21 at 19) and 100 above 291 off (24 at 22), where the client's first window's top (SEARCH_TOP0,
+# 44) has the search pick them and the logs' 21 wouldn't, and in the simulator it gave the hunt loop +21.8% EXP (16
+# seeds) against the cap. The review of 2026-10-25 had it off as that's suggestive, not decisive: the ±0.2 s window put
+# back from the kill misplaces where in a jump the attack came (6 of the 30 kills above her, all 61-133 above with
+# looks on the ground only, no model explains), the first was airborne 0.09 s on, the third's only look in the window
+# was airborne (as she lifted off), and the second has a single look; its shot logs' fit (the bands' floor and the
+# lean to 21) wasn't run again. What the probe (`python -m gamelab probe run top-60`, then `probe score`) would still
+# settle is that top: at 21 a pig 100 above her is picked from 357 off, not 271, and she'd throw from the ground at
+# monsters above her that the star doesn't take, which the simulator, picking by the same windows, can't show (in a
+# world with 21, 34% of her throws from the ground hit nothing against 27% capped: README, Attacks from her jumps).
+# False: SHOT_UP's cap, 60 above her, as from the review until the user's choice.
+UP_BY_SEARCH = True
 AIR_MARGIN = 6       # how far into the area a body must reach for an attack from a jump to pick it surely:
                      # about one frame of her climb when a jump throw's attack starts
 # The claw up close (see above): a regular attack from the ground first looks for a monster right in front of
@@ -860,9 +862,8 @@ def air_hits(top: float, gap_ms: float) -> bool:
 # whose feet are 100 above where she stood only with the attack starting 155-400 ms after lift-off (her feet 62 up,
 # AIR_MARGIN into it: physics.lift_time), 110 above within 70 ms of the top (207-348 ms), 115 at most (77 + 44 -
 # AIR_MARGIN), at the very top; farther off the windows reach higher, so lower in the jump (and from the ground with
-# UP_BY_SEARCH, off until a probe settles the windows' top: a pig 100 above her from 271 off, 110 from 311; capped at
-# SHOT_UP, 60, without), up to 124 over her feet at the last band (385-400 ahead), from a jump 201 above where she
-# stood.
+# UP_BY_SEARCH, on by the user's choice: a pig 100 above her from 271 off, 110 from 311; capped at SHOT_UP, 60,
+# without), up to 124 over her feet at the last band (385-400 ahead), from a jump 201 above where she stood.
 KEY_FIRST_MS = physics.JUMP_ATTACK_MS  # the soonest an attack key goes after its jump key (40: in game, keyed so, a
                      # star from the jump killed a snail; keyed at the jump key the game may take the attack first,
                      # on the ground, which nothing has measured)

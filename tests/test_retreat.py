@@ -284,7 +284,9 @@ def _sweep(name: str, seeds, times, only=None, feed: bool = False) -> list[dict]
 # map; shooting 23 from 24, 32 of 32): no longer an expected failure, the hunt before the sighting gone otherwise. With
 # the review's fixes of 2026-10-25 (her body clear of a monster above over a jump in place, a jump forward's landing
 # however it goes, the ground's reach capped 60 above her again): 24 of 31 without the feed (one run out of the
-# map before the sighting), 28 of 29 with it (three out, on seeds 5-8), 32 of 32 shooting 23 from 24.
+# map before the sighting), 28 of 29 with it (three out, on seeds 5-8), 32 of 32 shooting 23 from 24. With the ground's
+# reach above 60 on again by the user's choice (reach.UP_BY_SEARCH): 25 of 32 without the feed, 28 of 29 with it (16 of
+# 16, 12 of 13), 30 of 32 shooting 23 from 24.
 
 
 @pytest.mark.slow
@@ -302,7 +304,7 @@ def test_on_most_seeds_she_is_on_a_safe_place_10_s_after_the_sighting(name, only
     sighting); shooting 23 from 24, as live, 31 of 32 (47 of 48 over seeds 1-12). Since her jumps' attacks are weighed
     (2026-10-25): with the feed 28 of 32 (14 of 16 on each half), without it 26 of 32, shooting 23 from 24 32 of 32;
     with the review's fixes, 28 of 29 with the feed (16 of 16, 12 of 13), 24 of 31 without, 32 of 32 shooting 23 from
-    24. On
+    24; with the ground's reach above 60 on again (reach.UP_BY_SEARCH), 28 of 29, 25 of 32 and 30 of 32. On
     every run nothing but her moves after it (no attack, pick-up, pet food or mouse), and her retreat's moves refused
     past the player's 12 s."""
     tree_map()
