@@ -581,13 +581,16 @@ map's pictures on Tree Dungeon, 7.7 against 5.9 on West Rocky Mountain II; every
 
 **Seen in game** (`tests/test_loot.py`; the frames in `D:/MapleHelper-scratch/perception/tree_dungeon_drops`, the
 labels in `tests/fixtures/tree_dungeon_drops.json`). The hunts on Tree Dungeon on 2026-10-24 saved a few frames of the
-game as it was (where her HP read 0: `lab/shots/hp0_*.png`), five of them at 13:53 by piles her kills had left: Horny
-Mushroom Caps, a Bronze Ore, bronze coins and a gold one, a Green Mushroom Cap, an Orange Potion, with other players,
-their pets and the mushrooms about them. Searched over the whole screen above the chat bar, the map's detector found
-all 39 drops in plain view as their kinds, within 2 px (three caps lying overlapped scored 0.83-1.00, a coin half
-behind the ore 0.73), and nothing else; on three more frames with no drop in view (two with the window off the screen's
-corner, one with the hunt look's boxes drawn on it), nothing. Not found: the coins it doesn't look for, 4 edge-on, and
-2 half behind another coin. The first map's detector, the one she hunted with, found 12 of the 39, the coins and the
+game as it was (where her HP read 0: `lab/shots/hp0_*.png`), five of them at 13:53 by piles her kills had left, 24 s
+at one spot with the camera moving up and down between them: 13 drops, 5 Horny Mushroom Caps, a Bronze Ore, a Green
+Mushroom Cap, an Orange Potion, 4 bronze coins and a gold one, with other players, their pets and the mushrooms about
+them, seen 39 times in plain view. Searched over the whole screen above the chat bar, the map's detector found all 39
+as their kinds (three caps lying overlapped scored 0.83-1.00, a coin half behind the ore 0.73), and nothing else; on
+three more frames with no drop in view (two with the window off the screen's corner, one with the hunt look's boxes
+drawn on it), nothing. The kinds were read by eye; the places are where the detector found them, checked by eye to sit
+on each drop (the test holds it within 2 px of there). So an ore found in game is one Bronze Ore, the potion, the Green
+cap and the gold coin one each. Not found: the coins it doesn't look for, 4 edge-on, and 2 half behind another coin.
+The first map's detector, the one she hunted with, found 12 of the 39 sightings, 6 of the 13 drops: the coins and the
 potion. (A whole screen took 360-420 ms with the map's pictures, 260-340 with the first map's, with other work loading
 the CPU; a look searches the strips above the platforms.) In those hunts (13 runs, 8,795 scenes) the first map's
 detector found mesos 1,091 times, potions 122 (Orange 50, Red 46, Blue 26) and Squishy Liquid 6: none of the first

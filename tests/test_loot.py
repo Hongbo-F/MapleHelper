@@ -647,11 +647,13 @@ TREE_DUNGEON_DROPS = Path("D:/MapleHelper-scratch/perception/tree_dungeon_drops"
 @pytest.mark.skipif(not (COPY / "Item").is_dir() or not TREE_DUNGEON_DROPS.is_dir(),
                     reason="needs the game data copy and the frames")
 def test_tree_dungeons_drops_seen_in_game_are_found_as_their_kinds_and_nothing_else_is():
-    """The drops lying on frames saved in game on Tree Dungeon (tests/fixtures/tree_dungeon_drops.json: Horny Mushroom
-    Caps, a Bronze Ore, Green Mushroom Caps, an Orange Potion, bronze and gold coins; players, pets and the portal's light
-    about them), searched for over the whole screen above the chat bar by the map's detector: every one in plain view is
-    found as its kind, within 2 px, and nothing where none lies. The first map's detector found the coins and the potion
-    alone, 12 of the 39."""
+    """The drops lying on frames saved in game on Tree Dungeon (tests/fixtures/tree_dungeon_drops.json: 13 drops, 5 Horny
+    Mushroom Caps, a Bronze Ore, a Green Mushroom Cap, an Orange Potion, 4 bronze coins and a gold one, seen 39 times in
+    plain view on five frames 24 s apart; players, pets and the portal's light about them), searched for over the whole
+    screen above the chat bar by the map's detector: every one in plain view is found as its kind, within 2 px of where
+    it was found when they were labelled (the labels' places are the detector's, checked by eye; their kinds were read by
+    eye), and nothing where none lies. The first map's detector found the coins and the potion alone, 12 of the 39
+    sightings, 6 of the 13 drops."""
     import json
     from gamelab.localization import mapdata
     from gamelab.perception import loot
@@ -672,6 +674,8 @@ def test_tree_dungeons_drops_seen_in_game_are_found_as_their_kinds_and_nothing_e
                 found_shown += any(near(d, i, 2) for i in found)
         assert all(any(near(d, i, 4) for d in drops) for i in found), (name, found)  # nothing that isn't there
     assert (found_shown, shown) == (39, 39)
+    # the same drops in every frame: the camera moved up and down, not across
+    assert len({(d["kind"], d.get("coin"), d["x"]) for ds in labels.values() for d in ds if "optional" not in d}) == 13
 
 
 @pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
