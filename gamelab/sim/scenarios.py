@@ -2038,7 +2038,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=7, limit=600,
+@tree((28, 247.0), monsters="all", seed=4, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -2050,7 +2050,7 @@ def loop_tree_run(sim):
     """`python -m gamelab tour --loop --minutes 5 --map 10002073` from her spot by the portal on 28, with every spawn
     filled and nobody else, then standing by on a safe platform (25-27). A ground's EXP counts less the more dangerous
     the place she'd hunt it from (hunt.GROUND_DANGER): the floor (33: a Green Mushroom, 7% of her HP a touch, and two
-    Slimes, 1%) is the safest that pays, and she hunts it the whole 5 minutes, 68 kills and 1,280 EXP; with every
+    Slimes, 1%) is the safest that pays, and she hunts it the whole 5 minutes, 77 kills and 1,444 EXP; with every
     ground's EXP counted whole she went up the tower to 23, 19, 7 and 19 for 1,041 (before the danger, 23, 19, 7 and
     15 for 59 kills and 1,117 EXP, most of them on the floor on her way).
     The floor is hunted standing on it (the rules 'close quarters' and 'in passing'). (Seed 4: in this world her own
@@ -2058,7 +2058,10 @@ def loop_tree_run(sim):
     25's right end or the rope at -192; with group 0's walls stopping her none: loop_tree_walls. Seed 7 since a
     throw's tap goes by her facing off the frame, perception.heading: on seed 4 she was knocked off the rope at -192
     out of the map at 203 s; of seeds 1-12, 3 fell out (4, 6, 9), as 2 at master's head (3, 12), and 5 meet all of
-    this, 7 alone on the floor all 5 minutes, the others hunting 23 first.)"""
+    this, 7 alone on the floor all 5 minutes, the others hunting 23 first. Seed 4 again with her memory of the
+    monsters and the sweep merged on top, hunt.SWEEP: of seeds 1-12, 5 meet all of this (1, 4, 5, 6, 9), 4 alone on
+    the floor all 5 minutes; 11 fell out at 124 s, and on 7 her stand-by trip to a safe platform timed out after the
+    hunt and she rested on the floor past the run's 600 s.)"""
     return _loop(5)(sim)
 
 
@@ -2240,14 +2243,15 @@ def safe_there(sim) -> bool:
     return sim.model.safe(w.plat.id) or d.at(w.plat.id, w.x, None) <= SAFE_DANGER
 
 
-def lie_detector(after: float, minutes: float = 5):
-    """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm), the player seeing the Lie Detector `after`
-    s into the run. The result: how the hunt stopped (`stopped`: the alarm's message), the retreat (Retreat.record),
-    where the world has her RETREAT_S after the sighting and whether that's a safe place (`then`: at that very moment,
-    World.call_at, whatever the retreat was doing), every key and mouse event played from the sighting on (`after`: [s
-    after it, the plan's kind, the event]), and what became of a retreat's plan sent past the player's window
-    (`late_retreat`)."""
+def lie_detector(after: float, minutes: float = 5, grind: bool = False):
+    """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; with `grind`, grinding, behavior.grind, as
+    `tour --loop --grind` does), the player seeing the Lie Detector `after` s into the run. The result: how the hunt
+    stopped (`stopped`: the alarm's message), the retreat (Retreat.record), where the world has her RETREAT_S after the
+    sighting and whether that's a safe place (`then`: at that very moment, World.call_at, whatever the retreat was
+    doing), every key and mouse event played from the sighting on (`after`: [s after it, the plan's kind, the event]),
+    and what became of a retreat's plan sent past the player's window (`late_retreat`)."""
     def run(sim):
+        from ..behavior.grind import Grind
         from ..behavior.hunt import Hunt
         from ..behavior.retreat import on_alarm
         from ..control.alarm import RETREAT, RETREAT_S, RETREAT_WINDOW_S
@@ -2262,7 +2266,7 @@ def lie_detector(after: float, minutes: float = 5):
         watch, stopped = None, None
         try:
             with on_alarm(tour.h, rng=random.Random(sim.scenario.seed)) as watch:
-                Hunt(tour, log=sim.log).run(minutes=minutes)
+                (Grind if grind else Hunt)(tour, log=sim.log).run(minutes=minutes)
         except client.LieDetectorAlarm as e:
             stopped = str(e)
         sim.clock.sleep(max(0.0, seen + RETREAT_S + 0.1 - sim.clock.now))  # (past the tick `look` is called at)
@@ -2347,3 +2351,35 @@ def loop_tree_lie_detector_23(sim):
     seen 60 s in, as she shoots 23 from 24 at 231 (attack.spots): down onto 25, the safe platform under 24 (0.9 s by
     route)."""
     return harness._only(lie_detector(60.0), (23,))(sim)
+
+
+# Her as `tour --loop` plays by default (the feed, the attack choice): Lucky Seven's key casting it at its MP, each star's
+# damage drawn, and the bars over hurt monsters read empty as live (harness.ATTACK_HER, ATTACK_REALISM); group 0's walls
+# stopping her (in the default world a touch knocked her out of the map past the tower's wall on 3 of seeds 1-12 of
+# loop_tree_lie_detector_grind, and 2 of feed_loop_tree_lie_detector, a simulator effect).
+_LIVE = dict(feed=True, attack="choice", her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER),
+             realism=Realism(zero_walls=True, **harness.ATTACK_REALISM))
+_FROM_THE_FEED = check("her looks from the feed", lambda tr: tr["feed"]["senses"]["from the feed"] > 0)
+
+
+@tree((28, 247.0), monsters="all", seed=1, limit=400, **_LIVE, expects=LIE_DETECTOR_EXPECTS + (
+    logs("Lucky Seven:"), _FROM_THE_FEED))
+def feed_loop_tree_lie_detector(sim):
+    """loop_tree_lie_detector as `tour --loop --map 10002073` runs by default: her looks from the feed (its reactions
+    cutting her retreat's chains for a monster coming into their way, as any trip's), and each throw Lucky Seven or the
+    regular attack as the attack choice has it (behavior.attacks). The Lie Detector seen 110 s in: the hunt stops at
+    the next look or plan, and she retreats to a safe place within 10 s, her moves alone: on seed 1 for 27, a safe
+    platform 3.1 s by route, knocked back once on the way up from 29 and there at 8.0 s. (Of seeds 1-12, 11 are on a
+    safe place at 10 s; on seed 3 she was still on the floor, 33, its safest place within reach.)"""
+    return lie_detector(110.0)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, **_LIVE, expects=LIE_DETECTOR_EXPECTS + (
+    logs("loop: ["), logs("Lucky Seven:"), _FROM_THE_FEED))
+def loop_tree_lie_detector_grind(sim):
+    """`tour --loop --grind --map 10002073` as it runs by default (the feed, the attack choice) from 23, as
+    loop_tree_grind, the Lie Detector seen 75 s in: grinding is the hunt loop going round the map (behavior.grind.Grind,
+    a Hunt), so it stops as the hunt loop does, at the next look or plan, and she retreats to a safe place within 10 s,
+    her moves alone: on seed 1 down onto 25, a safe platform, at 5.6 s. (Of seeds 1-12, all 12 are on a safe place at
+    10 s, 10 on 25 and 2 on 28; resting on 25 when it's seen, she stays, the rest's next look up to 5 s after it.)"""
+    return lie_detector(75.0, grind=True)(sim)

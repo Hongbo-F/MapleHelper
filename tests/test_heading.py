@@ -320,6 +320,42 @@ def test_a_frame_that_isnt_strong_adds_a_tap_but_never_takes_one_away(keys_at):
     assert taps(a)
 
 
+def test_every_throw_is_the_attack_choices_key_with_the_tap_her_heading_asks_for(keys_at):
+    """The attack choice (behavior.attacks, through Actions.choose) keys each throw's attack, and her heading (`faces`)
+    decides whether its arrow is tapped first: both on every throw, from the ground and jumping; a jump back presses
+    its arrows whatever she faces, its key the choice's too."""
+    a, now = keys_at
+    a.keys.lucky_seven, a.skill = SimpleNamespace(name="q"), True
+    chosen, asked = iter(["q", "f", "q", "f", "q"]), []
+    a.choose = lambda side: asked.append(side) or next(chosen)
+
+    def attack_key() -> str:
+        return next(e[1] for e in a.sent[-1][1] if e[1] in ("f", "q"))
+
+    def unlock(dt: float = 1.0) -> None:
+        a.lock_until = a.arrow_until = 0.0
+        now[0] += dt
+
+    a.facing = None  # after a move: her keys can't tell
+    a.see(LEFT, now[0] + 1.0, strong=True)
+    unlock(1.5)
+    a.throw(LEFT)  # a strong frame says left: no tap; Lucky Seven, as chosen
+    assert not taps(a) and attack_key() == "q"
+    unlock()
+    a.see(RIGHT, now[0] - 0.5)  # told right, not strongly: the throw left taps first; the regular attack
+    a.throw(LEFT)
+    assert taps(a) and attack_key() == "f"
+    unlock()
+    a.jump_throw(LEFT)  # her keys left her facing left: no tap
+    assert not taps(a) and attack_key() == "q"
+    unlock()
+    a.jump_throw(RIGHT)
+    assert taps(a) and attack_key() == "f"
+    unlock()
+    a.jump_back(LEFT)
+    assert attack_key() == "q" and asked == [LEFT, LEFT, LEFT, RIGHT, LEFT]
+
+
 def test_a_frame_telling_the_other_way_from_her_last_arrow_goes_over_it_and_is_said_once(keys_at):
     a, now = keys_at
     a.facing = None
