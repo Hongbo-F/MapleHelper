@@ -45,6 +45,7 @@ from ..motion import bodies as her_body
 from ..motion import route
 from ..motion.flow import END_LINGER, MAX_LEGS, Body, Flow, Leg, Span, chain_record, ms
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
+from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..motion.route import Move, Planner, keeping_off, route_record
 from . import client
@@ -268,6 +269,15 @@ class TripState:
         self.trip.result, self.over = result, True
         return self.trip
 
+    def paused(self, seconds: float) -> None:
+        """She stood still `seconds` (LookLost: Senses.regain): the trip's clocks move on by as much, its deadline and
+        how long its chains have stopped short of a monster (MEET_S), and a look taken before isn't used. Where the
+        monsters were (`avoid`, `sighted`) ages as the game's own clocks do."""
+        self.deadline += seconds
+        if self.blocked is not None:
+            self.blocked += seconds
+        self.fresh = None
+
 
 class Navigator:
     """Gets her onto a platform: plans the route, chains its moves, and replans from wherever she ends up."""
@@ -324,7 +334,13 @@ class Navigator:
         st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary,
                         detour=detour)
         while not st.over:
-            self.step(st)
+            try:
+                self.step(st)
+            except LookLost as lost:  # the game doesn't look as expected: stand still until it does, up to the trip's
+                stood = time.monotonic()  # deadline (then the command stops, saying why), as the hunt loop does
+                if self.senses.regain(lost, st.deadline) is None:
+                    raise
+                st.paused(time.monotonic() - stood)
         return st.trip
 
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,

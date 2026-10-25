@@ -637,6 +637,42 @@ def test_a_pause_longer_than_stuck_s_is_no_time_without_progress():
     assert sum(p[0] >= window[1] for p in trace["plans"]) > 20
 
 
+def test_a_trip_stands_still_while_its_looks_fail_and_arrives_after():
+    """Navigator.go (the nav command, a trip to rest, the tour's stops) pauses as the hunt loop does: from 4 s to 16 s of
+    the climb from Tree Dungeon's floor to its top every look fails its checks; it stands still, sends no plan from
+    0.5 s after the first look that fails until they pass, its deadline moved on by the pause (TripState.paused), and
+    then it gets there. Before, LookLost stopped the trip and the command."""
+    import dataclasses
+
+    from gamelab.sim import scenarios
+    from gamelab.sim.scenarios import _nav
+    if scenarios.real_map(TREE) is None:
+        pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
+    window = (4.0, 16.0)
+
+    def run(sim):
+        real = sim.eyes.look
+
+        def look():
+            if window[0] <= sim.clock.elapsed < window[1]:
+                sim.clock.sleep(0.03)  # a capture's time
+                raise BadLook(Problem("picture", "the minimap doesn't show this map's picture"))
+            return real()
+
+        sim.eyes.look = look
+        return _nav(6)(sim)
+
+    sc = dataclasses.replace(scenarios.SCENARIOS["nav_tree_bottom_to_top"], name="nav_tree_lost", fn=run, expects=(),
+                             limit=300)
+    trace = scenarios.run_scenario(sc)
+    log = trace["log"]
+    assert any("standing still: the minimap doesn't show" in line for line in log), log
+    failed = next(float(line.split()[0]) for line in log if "a look failed its checks" in line)
+    assert [p for p in trace["plans"] if failed + 0.5 <= p[0] < window[1]] == []
+    assert any(p[0] >= window[1] for p in trace["plans"])
+    assert trace["result"] == "arrived" or trace["result"].get("result") == "arrived", trace["result"]
+
+
 # --- the name tag, the minimap picture and the capture -----------------------------------------------------------------
 
 def test_a_name_tag_template_that_no_longer_matches_is_cut_again(tmp_path):

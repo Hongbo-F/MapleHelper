@@ -380,15 +380,15 @@ class Hunt:
     def _paused(self, seconds: float) -> None:
         """She stood still `seconds` (LookLost: Senses.regain): her clocks move on by as much, so the pause isn't time
         without progress (STUCK_S: a pause of 125 s ended the hunt as stuck on the first look after it, in the
-        simulator's loop_tree_run), on an objective (OBJECTIVE_S, its trip's deadline), at a ground (its EXP a second
-        on disk, MIN_STAY, GROUND_S), on her spot (SPOT_REST) or idle (her patience). The game's own clocks (respawns,
-        drops' lives) ran on meanwhile and aren't moved."""
+        simulator's loop_tree_run), on an objective (OBJECTIVE_S, its trip's: TripState.paused), at a ground (its EXP a
+        second on disk, MIN_STAY, GROUND_S), on her spot (SPOT_REST), idle (her patience) or on a rope (HANG_MAX_S,
+        ROPE_AGAIN_S). The game's own clocks (respawns, drops' lives) ran on meanwhile and aren't moved."""
         self._progress += seconds
         for o in [self.obj, *self.stack]:
             if o is not None:
                 o.started += seconds
                 if o.trip is not None:
-                    o.trip.deadline += seconds
+                    o.trip.paused(seconds)
         if (v := self.visit) is not None:
             v.spot_since += seconds
             if v.arrived is not None:
@@ -397,6 +397,10 @@ class Hunt:
                 v.empty_since += seconds
         if self._idle_since is not None:
             self._idle_since += seconds
+        if self._hanging is not None:
+            self._hung_at += seconds
+        if self._rope_rest:
+            self._rope_rest += seconds
 
     def _pass(self) -> str | None:
         """One look and one step."""
