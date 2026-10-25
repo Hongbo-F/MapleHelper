@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gamelab.behavior import patrol
+from gamelab.behavior import grind, patrol
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.grind import Grind
 from gamelab.behavior.hunt import Objective
@@ -453,3 +453,67 @@ def test_a_better_loop_is_taken_up_only_when_it_is_loop_gain_better(monkeypatch)
     p.belief.kept_by[HORNY] = 0
     assert p.rate(A, t).rate / p.rate(B, t).rate > 1 + patrol.LOOP_GAIN
     assert p.replan(t + patrol.REPLAN_S) is not None and set(p.plan.stops) == set(A)
+
+
+def _at_stop(model, p, pid, x, monsters, t):
+    """A Grind at the stop on platform `pid`, arrived, standing at x with `monsters` in her look at time t, her memory
+    and the belief updated with them."""
+    g = _grind(model, {HORNY, GREEN})
+    g.patrol, g.stop = p, p.stop_on(pid)
+    g.h.memory = Memory(model)
+    g.tour = SimpleNamespace(exp={HORNY: 41.0, GREEN: 26.0})
+    g._skip, g._alt, g._reroute = {}, None, False
+    g.visit = SimpleNamespace(ground=pid, arrived=time.monotonic(), empty_since=None)
+    plat = model.platform(pid)
+    s = SimpleNamespace(platform=plat, where=SimpleNamespace(x=x, y=plat.y_at(x)), monsters=monsters, t=t, dot=None,
+                        players=[])
+    g.h.memory.update(t, monsters, None)
+    p.belief.update(t, g.h.memory)
+    return g, s
+
+
+def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawns(monkeypatch):
+    from dataclasses import replace
+    model, ids, far, p = _column()
+    p.replan(0.0, force=True)
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    # A Horny Mushroom on her platform 100 units off, in reach: its 41 EXP over its kill (11.8 EXP/s) beats the loop's
+    # rate: she stays.
+    m = _sight(model, HORNY, 250, 0)
+    g, s = _at_stop(model, p, ids[0], 150.0, [m], 1.0)
+    assert g._held(s) and g._stay_gain(s, g._held(s)) > p.plan.rate
+    assert g._leaving(s, g._held(s)) is None
+    # The loop worth more than that (say 20 EXP/s): she goes on, its EXP left to her passing again.
+    p.plan = replace(p.plan, rate=20.0)
+    for dt in (0.0, grind.LEAVE_CONFIRM_S + 0.01):
+        clock[0] += dt
+        reason = g._leaving(s, g._held(s))
+    assert reason == "11.8 EXP/s here, going on gives 20.0"
+    # Her kill emptied the point a moment ago: nothing comes back within REFILL_D0, so she doesn't wait for it; and
+    # watched empty after that, its respawn's few EXP a second (Patrol.wait_gain) don't hold her either.
+    p.replan(0.0, force=True)
+    g, s = _at_stop(model, p, ids[0], 150.0, [], 2.0)
+    q = next(i for i, _ in p.stops[g.stop].cover)
+    p.belief.empty_since[q] = p.belief.killed[q] = p.belief.empty_seen[q] = 1.9
+    assert p.wait_gain(g.stop, 2.0) == 0.0
+    assert g._leaving(s, []) is None  # (LEAVE_CONFIRM_S first)
+    clock[0] += grind.LEAVE_CONFIRM_S + 0.01
+    assert g._leaving(s, []) == "nothing left in reach"
+    p.belief.empty_seen[q] = 30.0
+    assert 0 < p.wait_gain(g.stop, 30.0) < 0.5 * p.plan.rate
+
+
+def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch):
+    from gamelab.behavior.hunt import Hunt
+    model, ids, far, p = _column()
+    p._take(p.rate([p.stop_on(ids[0]), p.stop_on(far)], 0.0), 0.0, "test")
+    monkeypatch.setattr(Hunt, "_interrupt", lambda self, s: False)  # none of the hunt loop's reasons
+    g, s = _at_stop(model, p, ids[0], 150.0, [], 1.0)
+    g.stop, g.visit = p.stop_on(far), SimpleNamespace(ground=far, arrived=None, empty_since=None)
+    g.obj = Objective("spot", far, p.stops[p.stop_on(far)].x, ground=far)
+    assert g._interrupt(s) is False and not g._reroute  # nothing seen: on to the far stop
+    # One seen on the platform above (2 s off, the far stop 30): a stop on the way's worth more.
+    g.h.memory.update(1.5, [_sight(model, HORNY, 150, -200)], None)
+    s.t, g._alt = 1.5, None
+    assert g._interrupt(s) is True and g._reroute

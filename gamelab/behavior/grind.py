@@ -9,14 +9,21 @@ What changes from the hunt loop (the rules not named here are its own, unchanged
   its EXP a minute, the next stop along it the first worth going to, a pile she has seen elsewhere pulling her off it),
   not the grounds of the value map. Each stop is a visit of the hunt loop to that platform, at the place there that
   reaches the most of the spawn points around it.
-- At a stop (`_at_ground`): she shoots what's in reach on any platform, and what's on hers (stance closes in); she
-  walks along her platform to bring monsters she remembers into reach (`_reach_step`, the rule 'reach'); and she leaves
-  the moment nothing is left in reach (`_leaving`: no monster seen within HOLD_S that she can get at from her platform,
-  no respawn in reach due within patrol.DUE_S), LEAVE_CONFIRM_S after, STOP_MAX_S at the most. No better spot (rule 7),
-  no lull loot (rule 8), no waiting out respawns (rule 9 only for those confirmations), no rate rule.
+- At a stop (`_at_ground`), she stays while what's there gives as much EXP a second as going on would (the marginal
+  value theorem: a patch is left when its rate falls under the habitat's): going on gives the loop's long-run rate
+  (Plan.rate) or, if more, the next stop's (Patrol.choose, looked at every RECHOOSE_S). What's there: a monster in a
+  star's reach now is shot at once (her kill time, 0.085 s a point of EXP live, 11.8 EXP/s, beats any loop: the best on
+  Tree Dungeon is 7.7); the monsters her memory has, seen within HOLD_S, that she can get at from her platform (on it,
+  stance closing in; or in reach from somewhere along it, which she walks to: `_reach_step`, the rule 'reach'), by their
+  EXP over their kill time and the walk (`_stay_gain`); with none, the respawns expected in reach within patrol.DUE_S
+  (Patrol.wait_gain: 1-2 EXP/s at a point watched empty, so she doesn't wait for respawns). Under it, she leaves
+  LEAVE_CONFIRM_S after; STOP_MAX_S at the most with nothing in reach. No better spot (rule 7), no lull loot (rule 8),
+  no waiting out respawns (rule 9 only for those confirmations), no rate rule.
 - On the legs: the hunt loop's rule 4, shooting in passing (anything a star reaches, any platform), its finishing (4b)
   and the piles on the way (5b) and on her platform (5): kills and pick-ups between moves, without stopping to clear a
-  ground. No trip back for the piles of a stop she leaves (rule 10): those on the way are picked up.
+  ground. No trip back for the piles of a stop she leaves (rule 10): those on the way are picked up. Every RECHOOSE_S
+  of a trip to a stop, a pile seen elsewhere (Patrol.choose with the stop she's heading to as the default) takes her
+  there instead (`_interrupt`, `_while_travelling`).
 - What she knows: every look updates the belief of each spawn point (patrol.Belief) from her memory of the monsters.
 - What a kill is credited to: the platform it died on (`credit`), not the ground she hunted. The value map
   (lab/grounds.json) isn't written: its EXP a visit credits a ground with its neighbours' kills (live, 48% of 23's on
@@ -36,17 +43,20 @@ from ..attack.spots import Spot
 from ..localization.memory import SURE
 from ..localization.monsters import Monster
 from ..localization.scene import Scene
+from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import Hunt, Objective, Visit
-from .patrol import DUE_S, Patrol, choice_text, reaching
+from .patrol import Patrol, choice_text, reaching
 
-STOP_MAX_S = 40.0      # backstop: s at one stop, however many respawns keep coming (there's a round to go)
+STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
 # s with nothing left in reach before she leaves a stop: one look's miss isn't enough (a hit monster hides under its
 # damage numbers for 1-3 s: fight's hidden targets keep it a target meanwhile, and HOLD_S keeps it held)
-LEAVE_CONFIRM_S = 0.3
+LEAVE_CONFIRM_S = 0.3  # (a guess)
 HOLD_S = 3.5           # a monster her memory has, seen within this long (tracking.HIDE_S), holds her at a stop
-REACH_STEP = 200.0     # units she walks along her platform at once at most to bring held monsters into reach
-HP_GAP_S = 2.0         # s between two looks at most for the HP gone between them to be charged to a platform
+REACH_STEP = 200.0     # guess: units she walks along her platform at once at most to bring held monsters into reach
+HP_GAP_S = 2.0         # guess: s between two looks at most for the HP gone between them to be charged to a platform
+RECHOOSE_S = 1.0       # guess: s between two looks at where she'd go instead (Patrol.choose takes about 1 ms on Tree
+                       # Dungeon, its routes kept by the planner)
 HP_LOG_S = 10.0        # s on a platform at least for the log to say what HP she lost there
 STATE_EVERY_S = 60.0   # s between two 'grind' records 'state' (what it did so far: a run cut short has them)
 
@@ -66,6 +76,8 @@ class Grind(Hunt):
         self.credit: dict[int, list] = {}         # platform -> [kills, EXP] of her kills that died there
         self.stays: list[float] = []              # s at each stop she got to
         self.pulls = self.skips = 0
+        self._alt: tuple | None = None            # where she'd go instead: (when, heading, stop, choose's info)
+        self._reroute = False                     # a pile seen on a trip: to it at the next pass
         self._start = time.monotonic()
         self._hp: tuple[float, float, int] | None = None  # the last look's (time, HP, platform), for learn_hp
         self._stated = time.monotonic()
@@ -125,7 +137,7 @@ class Grind(Hunt):
         here = s.platform.id
         if (pile := self._urgent_pile(s)) is not None:
             return self._go_for(pile, "urgent pile", s)
-        if any(self._hits(s, m) or m.platform == here for m in targets):
+        if any(self._hits(s, m) for m in targets):  # in reach now: shot (beats going on: see the top)
             act = self._stance(s, targets, visible, hidden, approach=True, log=False)
             if act[0] != "wait":
                 return self._shoot(s, targets, visible, hidden, now, "shoot", approach=True)
@@ -133,15 +145,19 @@ class Grind(Hunt):
             return self._pick_here(s, pile)
         wide = self._wide(s)
         held = self._held(wide)
+        reason = self._leaving(wide, held)
+        if reason is not None:
+            return self._leave(wide, reason)
+        if any(m.platform == here for m in targets):  # on her platform: stance closes in
+            act = self._stance(s, targets, visible, hidden, approach=True, log=False)
+            if act[0] != "wait":
+                return self._shoot(s, targets, visible, hidden, now, "shoot", approach=True)
         if held and (step := self._reach_step(wide, held)) is not None:
             self._note("reach")
             self.h.actions.walk(*step)
             self._idle_since = None
             return None
-        reason = self._leaving(wide)
-        if reason is None:
-            return self._wait(wide, targets)
-        return self._leave(wide, reason)
+        return self._wait(wide, targets)
 
     def _held(self, s: Scene) -> list[Monster]:
         """The wanted monsters her memory has (memory.SURE), seen within HOLD_S, that she can get at from her platform:
@@ -168,37 +184,95 @@ class Grind(Hunt):
             return None
         return (RIGHT if best[1] > x else LEFT), min(abs(best[1] - x), REACH_STEP)
 
-    def _leaving(self, s: Scene) -> str | None:
+    def _stay_gain(self, s: Scene, held: list[Monster]) -> float:
+        """EXP a second of staying at the stop (see the top): the `held` monsters' EXP over their kill time and the
+        walk to where she gets at the nearest of them; with none, the respawns expected in reach (Patrol.wait_gain)."""
+        if not held:
+            return self.patrol.wait_gain(self.stop, s.t)
+        here, x, avg = s.platform, s.where.x, self._avg_exp()
+        exp = sum(self.tour.exp.get(m.kind, avg) for m in held)
+        walk = 0.0
+        if not any(self._hits(s, m) for m in held):
+            near = [abs(m.x - x) for m in held if m.platform == here.id]
+            near += [abs(g - x) for g, _ in reaching(here, [m for m in held if m.platform != here.id])]
+            walk = min(near, default=0.0) / WALK_SPEED
+        return exp / (exp * self.patrol.kill_s + walk)
+
+    def _instead(self, s: Scene, heading: int | None = None) -> tuple[int | None, dict]:
+        """Where she'd go instead as of look `s` (Patrol.choose, peeked: with the stop she's `heading` to as the
+        default on a trip, else from the stop she's at), looked at again every RECHOOSE_S."""
+        a = self._alt
+        if a is None or a[1] != heading or not 0 <= s.t - a[0] < RECHOOSE_S:
+            skip = [g for g, until in self._skip.items() if until > time.monotonic()]
+            j, info = self.patrol.choose(s.t, s.platform.id, s.where.x, current=self.stop if heading is None else None,
+                                         skip=skip, heading=heading, peek=True)
+            self._alt = a = (s.t, heading, j, info)
+        return a[2], a[3]
+
+    def _leaving(self, s: Scene, held: list[Monster]) -> str | None:
         """Why she leaves the stop now, or None to stay (see the top)."""
         v, now = self.visit, time.monotonic()
         if v.arrived is None:
             return "not at the stop"
         if s.platform.id != v.ground:
-            return None if self._held(s) else "off the stop, nothing in reach"
-        if now - v.arrived >= STOP_MAX_S:
+            return None if held else "off the stop, nothing in reach"
+        if now - v.arrived >= STOP_MAX_S and not held:
             telemetry.emit("event", kind="backstop", text=f"STOP_MAX_S: {STOP_MAX_S:.0f} s at stop {v.ground}")
             return f"{STOP_MAX_S:.0f} s here"
-        due = self.patrol.due(self.stop, now)
-        if self._held(s) or (due is not None and due <= DUE_S):
+        stay = self._stay_gain(s, held)
+        j, info = self._instead(s)
+        plan = self.patrol.plan
+        bar = max(0.0 if plan is None else plan.rate, 0.0 if j is None else info.get("gain", 0.0))
+        if stay > 0 and stay >= bar:
             v.empty_since = None
             return None
         if v.empty_since is None:
             v.empty_since = now
         if now - v.empty_since < LEAVE_CONFIRM_S:
             return None
-        return "nothing left in reach"
+        if not held:
+            return "nothing left in reach"
+        return f"{stay:.1f} EXP/s here, going on gives {bar:.1f}"
 
     def _leave(self, s: Scene, reason: str) -> None:
         v = self.visit
         there = 0.0 if v.arrived is None else time.monotonic() - v.arrived
         self.log(f"  leaving stop {v.ground}: {reason} ({there:.1f} s there, {v.exp:.0f} EXP)")
+        if reason == "nothing left in reach" and self.stop is not None:
+            self.patrol.left_at[self.stop] = time.monotonic()
         self._next_ground(s)
         return self._travel("advance")
 
+    # --- on the way ----------------------------------------------------------------------------------------------
+
+    def _interrupt(self, s: Scene) -> bool:
+        """The hunt loop's reasons to stop a trip, and on a trip to a stop, every RECHOOSE_S, a pile seen elsewhere
+        worth going to instead (Patrol.choose, the stop she's heading to as the default): taken at the next pass."""
+        if super()._interrupt(s):
+            return True
+        o, v = self.obj, self.visit
+        if s.where is None or s.platform is None or o is None or o.kind != "spot" or self.stop is None \
+                or v is None or v.arrived is not None or o.ground != v.ground:
+            return False
+        self.patrol.belief.update(s.t, self.h.memory, s.players if s.dot is not None else None)
+        j, info = self._instead(s, heading=self.stop)
+        self._reroute = j is not None and j != self.stop and info["why"] == "pulled"
+        return self._reroute
+
+    def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
+        """The hunt loop's, on its way to the pile `_interrupt` saw if it did."""
+        if self._reroute:
+            self._reroute = False
+            o, v = self.obj, self.visit
+            if o is not None and o.kind == "spot" and v is not None and v.arrived is None and self.stop is not None:
+                self._next_ground(s, heading=self.stop)
+        return super()._while_travelling(s, targets, visible, hidden, now)
+
     # --- the next stop -----------------------------------------------------------------------------------------
 
-    def _next_ground(self, s: Scene) -> None:
-        """The next stop (Patrol.choose), the loop looked at again first (Patrol.replan), and a trip to it."""
+    def _next_ground(self, s: Scene, heading: int | None = None) -> None:
+        """The next stop (Patrol.choose; on a trip, `heading`: the stop she's on her way to, which only a pile seen
+        elsewhere replaces), the loop looked at again first (Patrol.replan), and a trip to it."""
         self._leave_ground()
         self._exit_piles = self._exit_reason = None
         now, p = time.monotonic(), self.patrol
@@ -217,7 +291,8 @@ class Grind(Hunt):
         here = where.platform if where is not None else None
         skip = [g for g, until in self._skip.items() if until > now]
         j, info = p.choose(now, None if here is None else here.id, None if where is None else where.x,
-                           current=self.stop, skip=skip)
+                           current=self.stop if heading is None else None, skip=skip, heading=heading)
+        self._alt = None
         if j is None:
             if not p.stops:
                 raise RuntimeError("no stop on this map")

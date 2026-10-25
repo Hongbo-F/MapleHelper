@@ -146,7 +146,7 @@ SKIP_FULL = 0.25       # guess
 PULL_MIN = SURE
 PULL_GAIN = 1.5        # guess
 REACH_ROUND = 5.0      # units: a remembered monster's x to this for whether a stop gets at it (Patrol.gets, kept)
-DUE_S = 2.0            # guess: at a stop, a respawn in reach due within this many s is waited for
+DUE_S = 2.0            # guess: s of a wait at a stop for the respawns in reach (Patrol.wait_gain)
 
 
 @dataclass(frozen=True)
@@ -652,6 +652,17 @@ class Patrol:
                 exp += g * c * b.stock(q, t)
             full += g * c
         return exp, seen, exp * self.kill_s, full
+
+    def wait_gain(self, i: int, t: float, horizon: float = DUE_S) -> float:
+        """EXP a second of waiting `horizon` s at stop i for what's expected back in reach meanwhile (her share; the
+        points her memory has no monster at), its kills included. Past REFILL_D0 a point watched empty comes back at
+        a steady rate (not_back has no memory), so this hardly changes as she waits: 1 - exp(-2 / 12.8) = 14% of a
+        Horny Mushroom in 2 s at a point alone on its platform, 1.6 EXP/s."""
+        b, exp = self.belief, 0.0
+        for q, c in self.stops[i].cover:
+            if not b.at.get(q):
+                exp += c * b.share(q, t) * self.points[q].exp * max(0.0, b.stock(q, t + horizon) - b.stock(q, t))
+        return exp / (horizon + exp * self.kill_s)
 
     def due(self, i: int, t: float) -> float | None:
         """s until the soonest respawn due at stop i's points (in reach of it), if one is."""
