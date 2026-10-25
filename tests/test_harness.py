@@ -297,6 +297,40 @@ def test_hp_lost_on_the_trips_to_rest_is_counted_between_their_events(model):
     assert not harness.compare(base, died)[0] and not harness.compare_rest(base, died)[0]
 
 
+def test_the_touches_on_her_trips_are_counted_from_a_chains_or_moves_start_to_its_end(model):
+    # harness._travelling: from each 'chain' or 'move' record (a chain sent, a move made alone; a chain queued on the
+    # move is in the first one's) to the next 'moved' record, in world time; the touches that hurt her then.
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0))
+    w.touch_log = [(2.0, 0.1), (5.5, 0.05), (6.0, 0.0), (9.0, 0.2), (14.0, 0.01)]
+    t0 = 1000.0
+    records = [{"topic": "session", "t": t0}, {"topic": "chain", "t": t0 + 5.0}, {"topic": "chain", "t": t0 + 6.5},
+               {"topic": "moved", "t": t0 + 7.0}, {"topic": "move", "t": t0 + 13.0}, {"topic": "moved", "t": t0 + 15.0}]
+    out = harness.outcomes(w, records, 60.0)
+    assert out["trip_s"] == pytest.approx(4.0) and out["trip_hurt"] == 2 and out["trip_hp_lost"] == pytest.approx(0.06)
+
+
+def test_her_box_can_be_the_clients_in_the_simulated_world(model):
+    # Realism.her_box (`--world client-body`): 22 either side of her feet and 65 tall (motion.bodies), not the
+    # simulator's 15 and 55: a slime walking on B, 140 above C's floor, never reaches her there; one on a platform 60
+    # over her does with the client's box only (her head 65 up).
+    from gamelab.motion import bodies
+    assert world_mod.HER_BOX_CLIENT == (bodies.HER_HALF, bodies.HER_TALL) == (22.0, 65.0)
+    assert harness.WORLDS["client-body"] == {"her_box": world_mod.HER_BOX_CLIENT}
+    sc = harness.scenario("loop", 1, "game", 1.0, world=("client-body",))
+    assert sc.realism.her_box == (22.0, 65.0) and Realism().her_box is None
+    t = tree()
+    t["foothold"]["1"]["9"] = {"30": {"x1": 300, "y1": 440, "x2": 500, "y2": 440, "prev": 0, "next": 0}}
+    m = mapdata.parse(1, t, "Test Map", {}, {"7": "Slime"}, {"7": 3})
+    c, over = plat(m, 500, 400), plat(m, 440, 400)
+    for box, touched in ((None, 0), ((22.0, 65.0), 1)):
+        w = still(world(m, c.id, 400.0, monsters=[("Slime", over.id, 400.0)], realism=Realism(her_box=box)))
+        for mo in w.monsters:
+            mo.speed = 0.0
+        w.advance(0.5)
+        assert w.touches == touched, box
+
+
 def test_a_trip_to_rest_is_measured_both_ways():
     if not scenarios.available():
         pytest.skip("needs the real map's data")

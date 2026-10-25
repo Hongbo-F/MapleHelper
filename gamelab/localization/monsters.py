@@ -103,6 +103,18 @@ def bodies(model: MapModel | None = None) -> dict[str, MobBody]:
     return out
 
 
+def touch_box(kind: str, body: MobBody | None = None) -> tuple[float, float]:
+    """A monster of `kind`'s box for touches (motion.bodies): half its width and how tall it is, its tallest frame
+    walking or flinching after a hit (a touch can come with it either way). From the tables above where they have the
+    kind (half its width, MONSTER_HALF; walking, MONSTER_HEIGHT), so the first map's decisions stay as they were made,
+    and its body in the map's game data (`body`: MobBody.half, and its flinch's top, MobBody.flinch_top); a kind
+    neither knows is a pig walking. A Horny or Green Mushroom: 28 either side, 56 tall (52 walking); a pig 34 and 54. A
+    slime's hop (66 tall, 10-17 off the ground) isn't in it."""
+    half = MONSTER_HALF.get(kind, body.half if body is not None else 34.0)
+    tops = ([MONSTER_HEIGHT[kind]] if kind in MONSTER_HEIGHT else []) + ([body.top, body.flinch_top] if body else [])
+    return half, max(tops, default=46.0)
+
+
 def speeds(model: MapModel | None = None) -> dict[str, float]:
     """How fast each kind walks (units/s): from the game data with the map for the monsters it has
     (MapModel.mob_speeds), from MONSTER_SPEED for the rest."""
@@ -179,7 +191,7 @@ class MonsterTrack:
     """A monster as the move planner sees it: where it was (map x) at plan time `seen_at` (negative:
     before the plan starts), how fast it can walk, which way it was seen walking (+1/-1, or 0 if
     unknown), its measured velocity if two looks caught it, and its body's half width and height
-    (by default a pig's)."""
+    (by default a pig's: what a hop over it clears), and how tall its box for touches is (`top`; None: `height`)."""
     platform: int
     x: float
     speed: float = DEFAULT_SPEED
@@ -189,11 +201,26 @@ class MonsterTrack:
     seen_at: float = 0.0
     height: float = 46.0
     facing: int = 0       # which way it faced, seen walking (1 right, -1 left; 0: not known, or standing)
+    kind: str = ""        # its kind ("": not known)
+    top: float | None = None  # its box's top for touches (touch_box: walking or flinching), if not `height`
+
+    @property
+    def tall(self) -> float:
+        """How tall its box is for touches (motion.bodies)."""
+        return self.height if self.top is None else self.top
 
     def at(self, t: float, p: Platform) -> float:
-        """Where its centre most likely is at plan time t (walking on as it was, stopping at the ends)."""
-        x = self.x + (self.vx or 0.0) * max(0.0, t - self.seen_at)
-        return min(max(x, p.left + self.half), p.right - self.half)
+        """Where its centre most likely is at plan time t: walking on as it was, and turning back at its platform's
+        ends (a monster never walks off its platform: it turns there). Stopping at the end instead, a Horny Mushroom
+        seen walking left on 31 at its left end (vx -59 between two looks, turning as they were taken) was planned for
+        there 1.3 s on, and touched her at 137 units to the right as she jumped up from 33 under it (simulator,
+        loop_tree_run, 2026-10-24)."""
+        lo, hi = p.left + self.half, p.right - self.half
+        if hi <= lo:
+            return (p.left + p.right) / 2
+        x = min(max(self.x, lo), hi) + (self.vx or 0.0) * max(0.0, t - self.seen_at)
+        k = (x - lo) % (2 * (hi - lo))
+        return lo + (k if k <= hi - lo else 2 * (hi - lo) - k)
 
     def reach(self, t: float, p: Platform) -> tuple[float, float]:
         """Where its centre can be at plan time t (it never leaves its platform)."""
@@ -215,6 +242,7 @@ class Tracker:
     def __init__(self, model: MapModel | None = None):
         """`model`: the map, for how fast its monsters walk (speeds)."""
         self.walking = speeds(model)  # kind -> how fast it walks (units/s; the game data's)
+        self.body = bodies(model)  # kind -> its body (touch_box: the game data's, or the tables')
         self.last: tuple[float, list[MonsterTrack]] = (0.0, [])  # the last look's time, and its tracks
         # kind -> the latest walking speeds seen between looks (units/s), SPEED_SAMPLES at most
         self.speeds: dict[str, deque[float]] = {}
@@ -243,8 +271,9 @@ class Tracker:
             walking = m.facing if m.pose == "move" else 0
             if FACING_HEADING and not heading and vx is None:  # looks can't tell yet: the way it faces walking
                 heading = walking
-            out.append(MonsterTrack(m.platform, m.x, speed, heading, MONSTER_HALF.get(m.kind, 34.0), vx, seen_at,
-                                    MONSTER_HEIGHT.get(m.kind, 46.0), walking))
+            half, top = touch_box(m.kind, self.body.get(m.kind))
+            out.append(MonsterTrack(m.platform, m.x, speed, heading, half, vx, seen_at, MONSTER_HEIGHT.get(m.kind, top),
+                                    walking, m.kind, top))
         self.last = (t, out)
         return out
 

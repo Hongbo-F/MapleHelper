@@ -1446,3 +1446,24 @@ def test_a_walker_that_stopped_is_still_matched_to_itself():
     tracker.update(10.0, [a, b])
     a2, b2 = walker(405, 1, "stand"), walker(480, 0, "stand")  # a stopped just after the look
     assert [t.vx for t in tracker.update(10.7, [a2, b2])] == [0.0, 0.0]
+
+
+# --- a monster's box for touches (motion.bodies) ------------------------------------------------------------
+
+def test_a_monsters_box_for_touches_is_its_widest_and_tallest_frame(model):
+    """localization.monsters.touch_box, which each track keeps (MonsterTrack.half, .tall): the first map's tables for
+    their kinds (so its decisions are as they were), as tall as it flinches if the game data says so; a Horny
+    Mushroom from the map's game data, 28 either side and 56 tall as it flinches (52 walking); a kind nothing knows,
+    a pig walking."""
+    from gamelab.localization.mapdata import MobBody
+    from gamelab.localization.monsters import Tracker, touch_box
+    assert touch_box("horny-mushroom", MobBody(51.0, 56.0, 28.0)) == (28.0, 56.0)
+    assert touch_box("pig") == (34.0, 46.0) and touch_box("pig", MobBody(38.0, 54.0, 34.5)) == (34.0, 54.0)
+    assert touch_box("axe-stump") == (34.0, 46.0)
+    tree_like = mapdata.parse(1, tree(), "Test Map", {}, mob_names={"19": "Horny Mushroom"},
+                              mob_bodies={"19": {"top": 51.0, "flinch_top": 56.0, "half": 28.0}})
+    b = by_y(tree_like, 360, 300)
+    [track] = Tracker(tree_like).update(0.0, [walker(300, kind="horny-mushroom", platform=b.id)])
+    assert (track.kind, track.half, track.tall, track.height) == ("horny-mushroom", 28.0, 56.0, 56.0)
+    [pig] = Tracker().update(0.0, [walker(300, platform=b.id)])  # the first map's: as before for a hop (46)
+    assert (pig.half, pig.height, pig.tall) == (34.0, 46.0, 54.0)

@@ -118,6 +118,7 @@ from ..behavior import pet as pet_care
 from ..control.actions import STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import PORTAL_BOX, PORTAL_EXIT, MapModel, Platform, Rope
+from ..motion import bodies as her_body
 from ..motion import body, flow
 from ..motion.physics import (CLIMB_SPEED, DROP_LAG, GRAB_SURE, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE,
                                WALK_SPEED)
@@ -147,6 +148,7 @@ ROPE_JUMP_SHOE = True
 ROPE_JUMP = ((SHOE.rope_vx * SHOE.vmax, SHOE.rope_vy * SHOE.vjump) if ROPE_JUMP_SHOE else (WALK_SPEED, 220.0))
 HER_HALF = flow.HER_HALF
 HER_HEIGHT = 55.0
+HER_BOX_CLIENT = (her_body.HER_HALF, her_body.HER_TALL)  # ... or the client's (Realism.her_box): 22 either side, 65 tall
 # A jump key the game takes in the air does nothing. When it takes one isn't measured: the 18 jumps recorded
 # lifted off 45-95 ms after their key, and a key pressed while she was in the air (or held from before) never
 # jumped her again on landing. Taken when it acts on it (Lags.jump after the key, as the world's clock
@@ -505,6 +507,8 @@ class Realism:
     zero_walls: bool = False     # the walls of foothold group 0 stop her whatever her group
     rope_reach: float = ROPE_REACH  # how far above her feet a rope's bottom can be for her to grab it
                                     # (ROPE_REACH_CLIENT: HeavenClient's)
+    her_box: tuple[float, float] | None = None  # her body for touches, (half its width, its height): None, HER_HALF
+                                                # and HER_HEIGHT; HER_BOX_CLIENT, the client's (motion.bodies)
 
 
 @dataclass(frozen=True)
@@ -1472,6 +1476,7 @@ class World:
         if self.ms < self.invulnerable_ms or not self.monsters or self.dead:
             return
         t = self.t
+        half, tall = self.realism.her_box or (HER_HALF, HER_HEIGHT)
         if self.mode == "ground":
             pids = self._near[self.plat.id]
         else:
@@ -1482,10 +1487,10 @@ class World:
                     continue
                 mx = m.at(t)
                 lo, hi, bottom, top = self.body(m)
-                if self.x + HER_HALF <= mx + lo or self.x - HER_HALF >= mx + hi:
+                if self.x + half <= mx + lo or self.x - half >= mx + hi:
                     continue
                 my = m.y(mx)
-                if self.y > my - top and self.y - HER_HEIGHT < my - bottom:
+                if self.y > my - top and self.y - tall < my - bottom:
                     self._hit_by(m, mx)
                     return
 

@@ -537,11 +537,11 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=24,
-          expects=(ends("arrived"), logs("looking for a way around"), logs("hop@"), logs("hit on the way")))
+@scenario((34, -300.0), monsters="all", seed=1,
+          expects=(ends("arrived"), logs("looking for a way around"), logs("hit on the way")))
 def nav_monsters_staircase(sim):
     """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the monster
-    in her way, hops over one, and is touched and knocked about a few times on the way up. (Seed 3 until her
+    in her way, and is touched and knocked about a few times on the way up. (Seed 3 until her
     walks pressed pick-up: they last ~0.2 s longer, and with seed 3 no monster was then in her way to hop;
     seed 1 until her walk and jump lags came from motion.body, after which no monster was in her way on seed
     1, and one is on seed 3 again. Seed 2 since the simulator moves her by the engine: on seed 3 nothing was
@@ -560,7 +560,11 @@ def nav_monsters_staircase(sim):
     (route._past_end, _rope_jumps): the random weights are drawn in another order, and on seed 10 no monster was
     in her way to hop; over 24 seeds all arrived, 1 meeting all of this. Seed 24 since the play track was
     rebased onto the game's steps and the live fixes: on seed 6 no monster was in her way to go around or hop;
-    over 24 seeds all arrive, 1 meeting all of this.)"""
+    over 24 seeds all arrive, 1 meeting all of this. Seed 1, and no hop, since a monster touches her by her box all
+    along her moves (motion.bodies: 22 either side and 65 tall, against the monster's widest and tallest frame): a
+    chain stops sooner for one in her way, by then too close to time a hop over it, and of seeds 1-24 none hops
+    here (nav_hop_pig still does); on seed 24 no monster was in her way to go around. Over 24 seeds all arrive, 16
+    meeting the rest of this.)"""
     return _nav(19)(sim)
 
 

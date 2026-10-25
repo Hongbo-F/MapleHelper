@@ -25,6 +25,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    counts against the bar as a death does; left_map_at, the same for up held at a portal
                    (world.SimLeftMap)
   touches, hurt    monsters touching her, and those of the touches she didn't evade
+  trip_s           the seconds she was on the move (from a chain's or a lone move's start, 'chain' or 'move' records,
+                   to its 'moved' record), and trip_hurt, trip_hp_lost: the touches that hurt her then, and the HP
+                   they took (what her trips cost, against her hunting where she stands)
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
                    the share she picked up; value_share, the same weighed by what each is worth on the world's
                    map (behavior.looting.worth_for: the game data's prices, mesos by what its monsters drop), and
@@ -63,7 +66,7 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
-from .world import DROP_LIFE, LUCKY_SEVEN, MAP_DROPS, ROPE_REACH_CLIENT, Camp, Noise, Realism
+from .world import DROP_LIFE, HER_BOX_CLIENT, LUCKY_SEVEN, MAP_DROPS, ROPE_REACH_CLIENT, Camp, Noise, Realism
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -134,6 +137,9 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "client-sides": {"sides": "client"
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN}}
 HER_FIELDS = ("defence", "evade", "potion", "stars")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
+# ... and her body as the client has it (`client-body`: 22 either side of her feet and 65 tall, motion.bodies, which the
+# planner keeps her clear of monsters by), not the simulator's 15 and 55 (world.HER_HALF, HER_HEIGHT).
+WORLDS["client-body"] = {"her_box": HER_BOX_CLIENT}
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
 # measured them offline (17 saved frames x 5, medians, after the profiling pass): a look placing her 12.0 ms of
@@ -320,6 +326,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "hp_lost": round(sum(hp for _, hp in world.touch_log), 3),
         "touches": world.touches,
         "hurt": world.touches - world.evaded,
+        **_travelling(world, records, end),
         "hp_low": round(world.hp_low, 3),
         "potions": world.potions_used,
         "died_at": world.died_at,
@@ -344,6 +351,27 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "ropes": sum(1 for r in events if r.get("kind") == "rope"),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
+
+
+def _travelling(world, records: list[dict], end: float) -> dict:
+    """trip_s, trip_hurt and trip_hp_lost (see the top): her moves, from each 'chain' or 'move' record (a chain sent, a
+    move made alone) to the next 'moved' record (chains that follow on are in their first one's), in world time, up to
+    `end`; and the touches that hurt her then."""
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    if start is None:
+        return {"trip_s": 0.0, "trip_hurt": 0, "trip_hp_lost": 0.0}
+    spans, began = [], None
+    for r in records:
+        if r.get("topic") in ("chain", "move") and began is None:
+            began = r["t"] - start
+        elif r.get("topic") == "moved" and began is not None:
+            spans.append((began, min(r["t"] - start, end)))
+            began = None
+    if began is not None:
+        spans.append((began, end))
+    on = [hp for t, hp in world.touch_log if t <= end and any(a <= t <= b for a, b in spans)]
+    return {"trip_s": round(sum(max(0.0, b - a) for a, b in spans if a < end), 1),
+            "trip_hurt": sum(1 for hp in on if hp > 0), "trip_hp_lost": round(sum(on), 3)}
 
 
 def _rest_trips(records: list[dict]) -> list[tuple[float, float]]:

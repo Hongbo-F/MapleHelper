@@ -267,6 +267,90 @@ def test_a_stop_landing_slides_from_her_landing_speed(model):
     assert ran.end.x == 300.0 and ran.end.t == pytest.approx(1.0 + wait) and wait == pytest.approx(0.015)
 
 
+# --- touches: her body's box all along a move (motion.bodies) ---------------------------------------------
+
+def _mushroom(platform: int, x: float, half: float = 28.0, tall: float = 56.0) -> MonsterTrack:
+    """A Horny Mushroom standing still (as touch_box has its body: 28 either side, 56 tall)."""
+    return MonsterTrack(platform, x, speed=0.0, half=half, vx=0.0, height=tall, kind="horny-mushroom", top=tall)
+
+
+def test_a_monster_where_she_lands_could_touch_her_though_none_is_along_her_run(model):
+    # The walk-off from A down onto B: nothing on A, one standing where she comes down on B. Only her runs along her
+    # own platform were checked before (live on Tree Dungeon, 17 of 48 travel hits came as she came down).
+    a, b = by_y(model, 300, 100), by_y(model, 360, 300)
+    flow = Flow(model, KEYS)
+    [move] = Planner(model).plan(a.id, 100, b.id)
+    leg = flow.leg(move, Body(0.0, 100, a), Keys(KEYS), "run")
+    assert leg.end.platform is b and leg.air and leg.stands  # the flight and the landing are kept with the leg
+    hit = flow.danger(leg, [_mushroom(b.id, leg.end.x + 30)])
+    assert hit is not None and hit[1] > leg.spans[-1].t1  # off A: in the air or landing
+    assert flow.danger(leg, [_mushroom(b.id, b.right - 10)]) is None  # at B's far end it can't
+    assert flow.chain([move], Body(0.0, 100, a), [_mushroom(b.id, leg.end.x + 30)], hops=False)[2] == "monster"
+
+
+def test_a_monster_at_a_ropes_top_or_beside_the_rope_could_touch_her_on_the_way_up(model):
+    # Up the rope at 700 from C onto D: one standing at its top on D (the climbs 11 -> 10 and 19 -> 18 on Tree
+    # Dungeon, whose tops a band look from below doesn't see), or on a ledge beside the rope that she climbs past.
+    c, d = by_y(model, 500, 400), by_y(model, 300, 700)
+    flow = Flow(model, KEYS)
+    [climb] = Planner(model).plan(c.id, 400, d.id)
+    leg = flow.leg(climb, Body(0.0, 400, c), Keys(KEYS), "run")
+    assert leg.move.kind == "climb" and leg.rope and leg.air
+    hit = flow.danger(leg, [_mushroom(d.id, 700)])
+    assert hit is not None and hit[1] > leg.spans[-1].t1  # on the rope or climbing over, not on C
+    assert flow.danger(leg, [_mushroom(c.id, 250)]) is None  # behind her on C, standing: it can't
+    t = tree()
+    t["foothold"]["1"]["9"] = {"30": {"x1": 640, "y1": 400, "x2": 690, "y2": 400, "prev": 0, "next": 0}}
+    ledge_map = mapdata.parse(1, t, "Test Map", {})
+    e = by_y(ledge_map, 400, 660)
+    c2, d2 = by_y(ledge_map, 500, 400), by_y(ledge_map, 300, 700)
+    [climb] = [m for m in Planner(ledge_map).plan(c2.id, 400, d2.id) if m.kind == "climb"]
+    flow = Flow(ledge_map, KEYS)
+    leg = flow.leg(climb, Body(0.0, 400, c2), Keys(KEYS), "run")
+    hit = flow.danger(leg, [_mushroom(e.id, 668, half=20.0)])
+    assert hit is not None and hit[1] > leg.spans[-1].t1  # her box goes past it (it's 100 above C: none on C)
+
+
+def test_her_box_against_a_tall_and_a_short_monster():
+    # Her box is the client's: 22 either side of her feet, 65 tall (motion.bodies). Her feet 40 above a monster's
+    # feet, right over it: a Horny Mushroom (56 tall) reaches her, a snail (26) doesn't.
+    from gamelab.motion import bodies
+    assert (bodies.HER_HALF, bodies.HER_TALL) == (22.0, 65.0)
+    assert bodies.touches(0, 460, 0, 0, 28, 500, 56) and not bodies.touches(0, 460, 0, 0, 19, 500, 26)
+    # Under a monster's feet 60 above hers her head reaches it, whatever its height; 70 above, none.
+    assert bodies.touches(0, 500, 0, 0, 19, 440, 26) and not bodies.touches(0, 500, 0, 0, 28, 430, 56)
+    # Beside her on her level: touching while their boxes overlap (22 + 28 = 50 middle to middle, strictly).
+    assert bodies.touches(0, 500, 49, 49, 28, 500, 56) and not bodies.touches(0, 500, 50, 50, 28, 500, 56)
+    # Where a monster may be anywhere from 100 to 200 (MonsterTrack.reach), the nearest place counts.
+    assert bodies.touches(0, 500, 40, 200, 28, 500, 56) and not bodies.touches(-60, 500, 100, 200, 28, 500, 56)
+
+
+def test_a_flight_and_a_climb_put_her_feet_where_the_game_would(model):
+    # An arc from a jump: up at 555 units/s, gravity 2000: 77 up after 0.28 s, and never under where it lands on the
+    # way down; a fall from rest reaches the fall cap (670 units/s) 0.335 s in. A climb goes up steadily.
+    from gamelab.motion.bodies import Arc, Climb
+    from gamelab.motion.physics import FALL_SPEED, GRAVITY, JUMP_SPEED
+    jump = Arc(1.0, 1.6, 100.0, 500.0, 160.0, 480.0, -JUMP_SPEED)
+    x, y = jump.at(1.0 + JUMP_SPEED / GRAVITY, GRAVITY, FALL_SPEED)
+    assert x == pytest.approx(100 + 60 * 0.2775 / 0.6, abs=0.1) and y == pytest.approx(500 - 77.0, abs=0.1)
+    assert jump.at(1.6, GRAVITY, FALL_SPEED)[1] == 480.0 and jump.at(0.0, GRAVITY, FALL_SPEED) == (100.0, 500.0)
+    fall = Arc(0.0, 1.0, 0.0, 0.0, 0.0, 1000.0, 0.0)
+    cap = FALL_SPEED / GRAVITY
+    assert fall.at(cap + 0.1, GRAVITY, FALL_SPEED)[1] == pytest.approx(GRAVITY * cap ** 2 / 2 + FALL_SPEED * 0.1)
+    assert Climb(0.0, 2.0, 700.0, 450.0, 300.0).at(1.0) == (700.0, 375.0)
+
+
+def test_a_monster_walking_to_its_platforms_end_turns_back_there(model):
+    # MonsterTrack.at: a monster never walks off its platform, it turns back at the end (stopping there, the planner
+    # had a Horny Mushroom that had turned 137 units from where it touched her: simulator, loop_tree_run).
+    b = by_y(model, 360, 300)  # 220..400: its middle keeps 220 + 20 to 400 - 20
+    walking = MonsterTrack(b.id, 380, half=20.0, vx=100.0)
+    assert walking.at(0.0, b) == 380 and walking.at(0.5, b) == pytest.approx(330)
+    assert walking.at(2.0, b) == pytest.approx(300)  # to 380, back 140 to 240, and on 60
+    assert MonsterTrack(b.id, 300, half=20.0, vx=0.0).at(5.0, b) == 300
+    assert MonsterTrack(b.id, 300, half=20.0, vx=-100.0).at(1.0, b) == pytest.approx(280)  # 60 to 240, 40 back
+
+
 # --- on the real map ------------------------------------------------------------------------------------
 
 from gamelab.sim import scenarios  # noqa: E402
