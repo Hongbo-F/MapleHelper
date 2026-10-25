@@ -1188,6 +1188,7 @@ def cmd_watch(args) -> int:
     and pages whoever is at the PC (the player keeps its own watchdog regardless): on a thread of its own, the
     frame handed over as soon as it's taken, before its step (it had waited for the step, in the frame loop)."""
     from .localization import feed, worldstate
+    from .perception.drops import unknown_note
     from .perception.lie_detector import LieDetectorSpotter
     feed.quiet()  # below normal priority, as the feed's child runs
     runner = _watch_runner(args)
@@ -1195,6 +1196,8 @@ def cmd_watch(args) -> int:
     path = telemetry.record_to("watch", telemetry.FOLDER)
     telemetry.emit("session", map=model.id, command="watch", mode="watch")
     print(f"watching the game {args.hz:.0f} times a second; telemetry: {path} (the mini-map follows it); Ctrl+C stops")
+    if note := unknown_note(model):  # its monsters whose drops aren't known
+        print(note)
     spotter = LieDetectorSpotter() if args.lie_detector else None
     started = time.monotonic()
     until = started + args.minutes * 60 if args.minutes else None

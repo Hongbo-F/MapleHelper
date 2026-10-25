@@ -37,7 +37,7 @@ from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..localization.worldstate import reading_of
-from ..perception import exp_number
+from ..perception import drops, exp_number
 from ..perception.eyes import Eyes
 from ..perception.hud import exp_changed
 from . import fight
@@ -69,6 +69,8 @@ class Hunter:
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.actions = Actions(keys, skill)
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
+        if note := drops.unknown_note(model):  # its monsters whose drops aren't known, said once
+            log(note)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
         # Her kills her EXP told of: when, and the kind its gain's size named (None: not known). The last EXP_MEMORY s

@@ -23,7 +23,8 @@ Snail: the first map's, seen in game, for the Slime).
 Every map's drops are its monsters' and the potions (POTIONS, as on the first map: monsters at this level drop them),
 and mesos (perception.loot.MESOS, the coins). The first map's are pinned as they were (PINNED): what was seen where her
 kills died there, and the potions; meowdb's slimes drop Orihalcon and Sapphire Ore too, which aren't looked for there.
-A monster this table doesn't know adds nothing: its drops aren't looked for (`unknown` names it).
+A monster this table doesn't know adds nothing: its drops aren't looked for (`unknown` names it, and
+the hunter and `watch` say so as they start: `unknown_note`).
 
 Each item's picture (`iconRaw`) and price (`info/price`) are the game data's, by its name (perception.loot.item_ids,
 behavior.looting.PRICES); its kind is its name as a kind (perception.kinds), which is also its template's file name,
@@ -148,6 +149,15 @@ def items_for(model) -> tuple[str, ...]:
 def unknown(model) -> list[str]:
     """The monsters of map `model` MONSTERS doesn't know (their drops aren't looked for), but on a pinned map."""
     return [] if getattr(model, "id", None) in PINNED else [n for n in _names(model) if n not in MONSTERS]
+
+
+def unknown_note(model) -> str | None:
+    """What the hunter and `watch` say as they start on map `model` of its monsters whose drops aren't known
+    (`unknown`), or None: else the map's drops would be fewer without a word."""
+    if names := unknown(model):
+        return (f"drops not known for {', '.join(names)} (perception.drops.MONSTERS: add them from their meowdb "
+                f"pages): only potions and mesos are looked for from them, and a coin's worth leaves their mesos out")
+    return None
 
 
 def monsters_of(model) -> dict[str, int]:

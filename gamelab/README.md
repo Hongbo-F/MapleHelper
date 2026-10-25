@@ -541,8 +541,8 @@ hunt loop priced those alone. Now each map's detector looks for what its own mon
   Liquid, White Potion. West Rocky Mountain II 17: Iron Ore, Leaf, Garnet Ore, Tree Branch, Red Potion, Lemon, Bronze
   Ore, Emerald Ore, Adamantium Ore, Firewood, Orihalcon Ore, Blue Potion, Opal Ore, Red Snail Shell, Silver Ore, Orange
   Potion, White Potion. The first map's 11 are pinned as they were (meowdb's slimes drop Orihalcon and Sapphire Ore too;
-  none was seen there). A monster the table doesn't know adds nothing (`drops.unknown` names it): the next map's
-  monsters go into `drops.MONSTERS` from their pages.
+  none was seen there). A monster the table doesn't know adds nothing (`drops.unknown` names it, and `watch` and the commands
+  with a hunter, `hunt` among them, say so as they start): the next map's monsters go into `drops.MONSTERS` from their pages.
 - **The pictures** are the game data's (each item's `iconRaw`, by name), built for every map into one folder a window
   size, and a map's detector holds its own and the coins (`LootDetector(items=)`). Not all of them: with the three
   maps' pictures the first map's detector would have found 243 drops on the lab's 1920x1080 frames and the native

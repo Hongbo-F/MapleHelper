@@ -9,6 +9,9 @@ from gamelab.behavior import hunt
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.hunt import Hunt, Objective, Visit
 from gamelab.behavior.ledger import Pile
+from gamelab.localization import mapdata
+
+from test_sim import KEYS, tree
 
 
 def _hunt(piles, kills=(), travel=5.0):
@@ -264,6 +267,15 @@ def test_on_another_map_a_drop_is_valuable_at_twice_its_bronze_coin():
     assert h._valuable_pile(_scene()) is None
     h.h.drops.known.append(topaz)
     assert h._valuable_pile(_scene()) is topaz
+
+
+def test_a_hunter_on_a_map_whose_monsters_drops_are_not_known_says_so_once():
+    # perception.drops.MONSTERS doesn't know a Snail off the first map (whose drops are pinned): its drops (but potions
+    # and mesos) aren't looked for there.
+    from gamelab.behavior.hunter import Hunter
+    said = []
+    Hunter(SimpleNamespace(), KEYS, mapdata.parse(1, tree(), "Test Map", {}, {"2": "Snail"}, {"2": 2}), log=said.append)
+    assert len(said) == 1 and said[0].startswith("drops not known for Snail ")
 
 
 def _detour_hunt(piles, times):

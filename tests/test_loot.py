@@ -164,6 +164,7 @@ def test_each_map_looks_for_its_own_monsters_drops():
     odd = _map(5, "Stump", "Jr. Necki")
     assert drops.items_for(odd) == drops.MONSTERS["Stump"].items + ("Orange Potion", "White Potion", "Blue Potion")
     assert drops.unknown(odd) == ["Jr. Necki"] and drops.unknown(first) == []
+    assert drops.unknown_note(odd).startswith("drops not known for Jr. Necki ") and drops.unknown_note(tree) is None
 
 
 def test_a_drop_whose_kind_cant_be_a_file_name_is_refused(tmp_path):
