@@ -510,20 +510,22 @@ def cmd_hunt(args) -> int:
     _record(f"hunt-{args.mode}", hunter.model.id)
     if not _to_game():
         return 1
-    if args.mode == "kill":
-        s = hunter.look()
-        targets = [t for t in s.monsters if kinds is None or t.kind in kinds]
-        if s.where is None or not targets:
-            print("no target in sight" if s.where else "can't find her")
-            return 1
-        near = args.near if args.near is not None else 0
-        target = min(targets, key=lambda t: abs(t.x - s.where.x - near))
-        hunter.report.stop = hunter.kill(target, seconds=args.seconds)
-    else:
-        ground = {int(v) for v in args.ground.split(",")} if args.ground else None
-        hunter.clear(kinds, ground=ground, max_kills=args.kills, seconds=args.seconds)
-        hunter.looter.mop_up()  # drops still on her platform: kills the fight couldn't place, or left before
-    final = hunter.look(loot=True)
+    from .behavior.retreat import on_alarm
+    with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
+        if args.mode == "kill":
+            s = hunter.look()
+            targets = [t for t in s.monsters if kinds is None or t.kind in kinds]
+            if s.where is None or not targets:
+                print("no target in sight" if s.where else "can't find her")
+                return 1
+            near = args.near if args.near is not None else 0
+            target = min(targets, key=lambda t: abs(t.x - s.where.x - near))
+            hunter.report.stop = hunter.kill(target, seconds=args.seconds)
+        else:
+            ground = {int(v) for v in args.ground.split(",")} if args.ground else None
+            hunter.clear(kinds, ground=ground, max_kills=args.kills, seconds=args.seconds)
+            hunter.looter.mop_up()  # drops still on her platform: kills the fight couldn't place, or left before
+        final = hunter.look(loot=True)
     _annotate(final, _shot("hunt_end.png"))
     left = ", ".join(f"{d.item.kind} at {d.x - final.where.x:+.0f}" for d in final.loot) or "none"
     print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}; drops left on her platform: {left}"
@@ -664,7 +666,9 @@ def cmd_probe(args) -> int:
     _record(f"probe-{p.name}", hunter.model.id)
     if not _to_game():
         return 1
-    report = probe.run(hunter, nav, p, seconds=args.seconds, crowd=args.crowd)
+    from .behavior.retreat import on_alarm
+    with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
+        report = probe.run(hunter, nav, p, seconds=args.seconds, crowd=args.crowd)
     print(f"done: {report}. Logged to {paths.PROBE_LOG}: `python -m gamelab probe score` reads it")
     return 0
 
@@ -722,7 +726,9 @@ def cmd_nav(args) -> int:
     if not _to_game():
         return 1
     start = time.monotonic()
-    trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
+    from .behavior.retreat import on_alarm
+    with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
+        trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
     print(f"{trip.result} in {time.monotonic() - start:.1f} s: {len(trip.moves)} moves in {trip.chains} chains, "
           f"{trip.misses} landed somewhere else, {trip.hits} hit on the way, {trip.waits} waits for monsters, "
           f"{trip.kills} monsters shot dead on the way; time looking {trip.time['look']:.1f} s, "
@@ -744,16 +750,19 @@ def cmd_tour(args) -> int:
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below,
                 rest_avoid=args.rest_avoid)
     kinds = set(args.kinds.split(",")) if args.kinds else None
+    from .behavior.retreat import on_alarm
     if args.loop:  # the hunt loop (gamelab/docs/hunt-modes.md): one decision per look, for --minutes
         from .behavior import hunt
         if kinds is not None:
             tour.worth = kinds
         if args.ground_tie is not None:  # grounds about as good: the one she left longest ago (README: Route diversity)
             hunt.GROUND_TIE = args.ground_tie
-        report = hunt.Hunt(tour, log=_log).run(minutes=args.minutes)
+        with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
+            report = hunt.Hunt(tour, log=_log).run(minutes=args.minutes)
         print(f"hunt done: {report}")
         return 0
-    report = tour.run(stops=args.stops, kinds=kinds, kills_per_stop=args.kills, seconds_per_stop=args.seconds)
+    with on_alarm(hunter):
+        report = tour.run(stops=args.stops, kinds=kinds, kills_per_stop=args.kills, seconds_per_stop=args.seconds)
     print(f"tour done: {report}")
     return 0
 
@@ -1875,7 +1884,8 @@ def main(argv=None) -> int:
             client.check_alarm()
         return args.func(args)
     except client.LieDetectorAlarm as e:
-        print(f"LIE DETECTOR: {e}. gamelab stopped all input (a running player stays up, locked, recording it).\n"
+        print(f"LIE DETECTOR: {e}. gamelab stopped all input (a running player stays up, locked, recording it; it "
+              "takes only her pet's food, and a hunt's retreat to a safe place in the first 12 s).\n"
               "Answer it in the game yourself. Once it has been off the screen for a minute, run "
               "`python -m gamelab clear-alarm`, then start the player again.")
         return LIE_DETECTOR_EXIT

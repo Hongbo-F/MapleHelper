@@ -1065,6 +1065,11 @@ class World:
         """The player lets go of every key at `clock_t` (a plan's end, or a cancel)."""
         self._push(self.ms_of(clock_t), "release", None, tag, clock_t)
 
+    def call_at(self, clock_t: float, fn) -> None:
+        """Call fn(world) when the world gets to clock time `clock_t` (at its tick, before it moves her): a test's look
+        at the world at a given moment, whatever the stack is doing then."""
+        self._push(self.ms_of(clock_t), "call", fn, "", clock_t)
+
     def withdraw(self, tag: str) -> None:
         """Forget the key events of plan `tag` the world hasn't taken yet."""
         self._events = [v for v in self._events if not (v[2].tag == tag and v[2].kind in ("down", "up", "release"))]
@@ -1126,6 +1131,8 @@ class World:
                 self.note(f"{action} still held: seen now")
                 self._seen_due[action] = max(self.ms, self._seen_due.get(action, -10_000))
                 self._seen(action, True)
+        elif e.kind == "call":
+            e.data(self)
         elif e.kind == "liftoff":
             self._liftoff(e.data)
         elif e.kind == "drop":

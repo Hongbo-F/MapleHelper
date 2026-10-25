@@ -12,7 +12,10 @@
   world.Noise can round the dot to whole pixels and hide her tag, her dot or her EXP number for a while.
 - `FakePlayer`: what gamelab.control.client offers (submit, send, done, wait, cancel), running each plan's keys
   on the world: plans run one after another, `end_ms` makes one last longer, every key still held is let
-  go at a plan's end, and cancel withdraws a plan not started yet or cuts a running one short.
+  go at a plan's end, and cancel withdraws a plan not started yet or cuts a running one short. With `alarm_at` set
+  the player sees the Lie Detector then, as the real one's watchdog would (client's check_alarm, alarm_up and
+  alarm_age too): a plan running stops at it, and after it only what control.player.alarm_refusal lets through plays
+  (her pet's food; her retreat's moves, cut at alarm.RETREAT_WINDOW_S).
 - `patched`: puts them in place (and points every gamelab path under gamelab/lab at a temporary folder),
   restoring everything afterwards. Anything that would touch the real game, or write anywhere under the
   real gamelab/lab, raises SimViolation.
@@ -540,6 +543,8 @@ class Plan:
     end: float = 0.0
     state: str = "queued"  # queued | withdrawn | cut
     error: str | None = None
+    kind: str | None = None   # client.send's: what it is to the player with the Lie Detector alarm up
+    alarm: str | None = None  # the Lie Detector error it's answered with: refused at its start, or stopped by the alarm
 
 
 @dataclass
@@ -559,14 +564,34 @@ class FakePlayer:
     def __init__(self, world: World, clock: Clock, trace: Trace, keys: GameKeys):
         from ..control.player import allowed_keys
         self.world, self.clock, self.trace = world, clock, trace
+        self.keys = keys
         self.allowed = allowed_keys(keys)
         self.plans: dict[str, Plan] = {}
         self.order: list[Plan] = []
         self.free_from = clock.now  # after a cancel: the player takes a moment to notice it and stop
+        self.alarm_at: float | None = None  # when the player sees the Lie Detector (the fake clock), if it does
+        self.fed: dict[str, float] = {}     # pet food plans it took with the alarm up -> when they started
+        self.played: dict[str, tuple] = {}  # plan id -> (its kind, its key and mouse events at clock times) as played
+
+    # --- the Lie Detector (client.check_alarm, alarm_up, alarm_age) -------------------------------------------------
+
+    def alarm_up(self) -> bool:
+        return self.alarm_at is not None and self.clock.now >= self.alarm_at
+
+    def check_alarm(self) -> None:
+        if self.alarm_up():
+            raise client.LieDetectorAlarm(f"Lie Detector seen at {self.trace.at(self.alarm_at):.3f} s")
+
+    def alarm_age(self) -> float | None:
+        return self.clock.now - self.alarm_at if self.alarm_up() else None
+
+    # --- plans ---------------------------------------------------------------------------------------------------
 
     def send(self, events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan",
              end_ms: int | None = None, kind: str | None = None) -> str:
         from ..control.player import validate
+        if kind is None:
+            self.check_alarm()  # as client.send: none goes out with the alarm up but the kinds the player takes then
         self.clock.charge()
         events = [list(e) for e in events]
         capture = {"fps": fps, "duration_ms": duration_ms, "scale": scale, "lead_ms": lead_ms}
@@ -575,7 +600,7 @@ class FakePlayer:
             plan["end_ms"] = end_ms
         last = max((e[0] for e in events), default=0)
         p = Plan(f"{name}_{len(self.order):04d}", len(self.order), name, events, lead_ms / 1000,
-                 (lead_ms + max(last, end_ms or 0, duration_ms)) / 1000, self.clock.now)
+                 (lead_ms + max(last, end_ms or 0, duration_ms)) / 1000, self.clock.now, kind=kind)
         try:
             validate(plan, self.allowed)
         except ValueError as e:
@@ -605,6 +630,8 @@ class FakePlayer:
         self.clock.mark()
         if p.error:
             raise client.PlayerError(p.error)
+        if p.alarm:
+            raise client.LieDetectorAlarm(p.alarm)
         return {"sent": [[round(e[0]), *e[1:]] for e in p.events],
                 "problems": ["cancelled"] if p.state == "cut" else []}
 
@@ -639,13 +666,51 @@ class FakePlayer:
 
     def _schedule(self, p: Plan, start: float) -> None:
         p.start, p.end = start, start + p.length
+        self.played.pop(p.id, None)
+        self.fed.pop(p.id, None)
         if p.error:  # the real player refuses it without pressing anything
             p.end = start
             return
+        cutoff = self._cutoff(p, start)
+        if cutoff <= start:  # refused for the Lie Detector, nothing pressed
+            p.end = start
+            return
+        played = []
         for e in p.events:
+            at = start + p.lead + e[0] / 1000
+            if at >= cutoff:  # stopped by the alarm (or her retreat's window): nothing after
+                continue
             if len(e) == 3 and e[2] in ("down", "up"):
-                self.world.key(start + p.lead + e[0] / 1000, e[1], e[2] == "down", p.id)
+                self.world.key(at, e[1], e[2] == "down", p.id)
+            played.append([round(at, 4), *e[1:]])
+        p.end = min(p.end, cutoff)
         self.world.release_all(p.end, p.id)
+        self.played[p.id] = (p.kind, played)
+
+    def _cutoff(self, p: Plan, start: float) -> float:
+        """When plan `p`, starting at `start`, stops for the Lie Detector (math.inf: it doesn't), as the real player
+        has it: one running when it's seen stops then, whatever its kind; one starting after plays only if
+        player.alarm_refusal lets it through, a retreat until alarm.RETREAT_WINDOW_S after the sighting. Sets
+        `p.alarm` to the error it's answered with."""
+        from ..control.alarm import LIE_DETECTOR_ERROR, PET_FOOD, PLAN_KINDS, RETREAT, RETREAT_WINDOW_S
+        from ..control.player import alarm_refusal
+        p.alarm, seen = None, self.alarm_at
+        if seen is None:
+            return math.inf
+        if start < seen:
+            if p.end > seen:
+                p.alarm = LIE_DETECTOR_ERROR
+            return seen
+        if p.kind not in PLAN_KINDS:
+            p.alarm = LIE_DETECTOR_ERROR
+            return start
+        fed = [t for pid, t in self.fed.items() if pid != p.id]
+        if why := alarm_refusal({"kind": p.kind, "events": p.events}, self.keys, start - seen, fed, start):
+            p.alarm = f"{LIE_DETECTOR_ERROR}: {why}"
+            return start
+        if p.kind == PET_FOOD:
+            self.fed[p.id] = start
+        return seen + RETREAT_WINDOW_S if p.kind == RETREAT else math.inf
 
     def _requeue(self, index: int) -> None:
         """Plans queued after `index` start as soon as the ones before them are done."""
@@ -685,7 +750,7 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
     try:
         for name in ("monotonic", "sleep", "time", "perf_counter", "strftime"):
             put(time, name, getattr(clock, "monotonic" if name == "perf_counter" else name))
-        for name in ("submit", "send", "done", "wait", "cancel"):
+        for name in ("submit", "send", "done", "wait", "cancel", "check_alarm", "alarm_up", "alarm_age"):
             put(client, name, getattr(player, name))
         mods = [m for n, m in list(sys.modules.items()) if n.startswith("gamelab") and not n.startswith("gamelab.sim")]
         for mod in mods:

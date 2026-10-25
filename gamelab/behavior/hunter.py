@@ -29,6 +29,7 @@ from maplehelper.config import GameKeys
 from .. import paths, telemetry
 from ..attack import danger
 from ..attack.reach import LOOK_DOWN, LOOK_UP
+from ..control import client
 from ..control.actions import Actions
 from ..control.navigator import Navigator
 from ..localization.gains import ExpMeter, Gain
@@ -112,7 +113,10 @@ class Hunter:
             self.actions.throw_listeners.append(feed.throw)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:
-        """A look (Senses.look); drops are looked for as her inventory allows (only mesos when it's full)."""
+        """A look (Senses.look); drops are looked for as her inventory allows (only mesos when it's full). Not with
+        the Lie Detector alarm up (client.LieDetectorAlarm): a hunt that only looks for a while (waiting, resting)
+        stops there too, as at its next key plan, and retreats (behavior.retreat)."""
+        client.check_alarm()
         return self.senses.look(mobs, wide, loot, mesos_only=self.looter.inventory_full)
 
     def clear(self, kinds=None, **kw) -> Report:
@@ -183,7 +187,9 @@ class Hunter:
     def feed_pet_if_due(self, s: Scene | None = None) -> bool:
         """Follow her pet's fullness and give it a food when it's low (behavior.pet.PetCare.tend); never read yet, it's
         read first, but only with no monster within PET_CLEAR of her in look `s` (the read takes a few s). True if
-        its fullness is known. Nothing without a pet food key."""
+        its fullness is known. Nothing without a pet food key. Not with the Lie Detector alarm up: her pet's care is the
+        hunt's, which stops there (client.LieDetectorAlarm; the pet babysitter, `pet --every`, goes on feeding it)."""
+        client.check_alarm()
         clear = s is None or s.where is None or not any(
             abs(m.x - s.where.x) < PET_CLEAR and abs(m.y - s.where.y) < 120 for m in s.monsters)
         return self.pet.tend(read_ok=clear) is not None

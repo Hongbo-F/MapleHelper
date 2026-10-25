@@ -2115,3 +2115,127 @@ def tour_tree_rest(sim):
     26 and 27, the only ones with no monster in reach; the caps 0-5 above the VR are safe too, but narrower than a
     rest wants, tour.MIN_REST_WIDTH) and on the chair until HP is back."""
     return _rest(sim)
+
+
+# --- the Lie Detector during a hunt: she stops, and retreats to a safe place within 10 s (behavior.retreat) ---------
+# The user, 2026-10-24: "just stop any in-progress hunt when this happens", "On a lie detector you should move to a safe
+# place, within 10s". The player sees it at FakePlayer.alarm_at, as the real one's watchdog would: the plan running
+# stops then, and after it only her retreat's moves (for alarm.RETREAT_WINDOW_S) and her pet's food play.
+
+MOUSE_EVENTS = ("mouse", "lbutton", "rbutton")
+
+
+def safe_there(sim) -> bool:
+    """Whether the world has her on a safe place now, by what behavior.retreat counts as one, the look aside: standing
+    on a safe platform (MapModel.safe), or where the danger with every spawn point's monster at its point is at most
+    retreat.SAFE_DANGER, on a platform or on a rope."""
+    from ..behavior.retreat import SAFE_DANGER
+    w = sim.world
+    d = danger.of_map(sim.model, danger.Her(w.character.max_hp, w.character.level))
+    if w.mode == "rope" and w.rope is not None:
+        return d.on_rope(w.rope, w.y, None) <= SAFE_DANGER
+    if w.mode != "ground" or w.plat is None:
+        return False
+    return sim.model.safe(w.plat.id) or d.at(w.plat.id, w.x, None) <= SAFE_DANGER
+
+
+def lie_detector(after: float, minutes: float = 5):
+    """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm), the player seeing the Lie Detector `after`
+    s into the run. The result: how the hunt stopped (`stopped`: the alarm's message), the retreat (Retreat.record),
+    where the world has her RETREAT_S after the sighting and whether that's a safe place (`then`: at that very moment,
+    World.call_at, whatever the retreat was doing), every key and mouse event played from the sighting on (`after`: [s
+    after it, the plan's kind, the event]), and what became of a retreat's plan sent past the player's window
+    (`late_retreat`)."""
+    def run(sim):
+        from ..behavior.hunt import Hunt
+        from ..behavior.retreat import on_alarm
+        from ..control.alarm import RETREAT, RETREAT_S, RETREAT_WINDOW_S
+        tour = sim.tour_stack()
+        seen = sim.player.alarm_at = sim.clock.now + after
+        then = {}
+
+        def look(w):
+            then.update({"t": round(w.origin + w.ms / 1000 - seen, 3), "x": round(w.x, 1), "y": round(w.y, 1),
+                         "platform": None if w.plat is None else w.plat.id, "mode": w.mode, "safe": safe_there(sim)})
+        sim.world.call_at(seen + RETREAT_S, look)
+        watch, stopped = None, None
+        try:
+            with on_alarm(tour.h, rng=random.Random(sim.scenario.seed)) as watch:
+                Hunt(tour, log=sim.log).run(minutes=minutes)
+        except client.LieDetectorAlarm as e:
+            stopped = str(e)
+        sim.clock.sleep(max(0.0, seen + RETREAT_S + 0.1 - sim.clock.now))  # (past the tick `look` is called at)
+        sim.world.advance(sim.clock.now)
+        played = sorted([round(t - seen, 3), kind, *event] for kind, events in sim.player.played.values()
+                        for t, *event in events if t >= seen)
+        sim.clock.sleep(max(0.0, seen + RETREAT_WINDOW_S + 0.5 - sim.clock.now))
+        try:
+            client.submit([[0, sim.keys.left.name, "down"], [40, sim.keys.left.name, "up"]], lead_ms=0, name="late",
+                          kind=RETREAT)
+            late = "played"
+        except client.LieDetectorAlarm as e:
+            late = str(e)
+        retreat = None if watch is None or watch.retreat is None else watch.retreat.record()
+        return {"stopped": stopped, "retreat": retreat, "then": then, "after": played, "late_retreat": late}
+    return run
+
+
+def _moves_alone(tr: dict) -> bool:
+    """From the sighting on, nothing played but her moves' keys (her arrows, jump, up, down: the world's keys), no
+    attack, pick-up, pet food or mouse, and only in her retreat's plans."""
+    keys = _move_keys(tr)
+    return all(kind == "retreat" and event[0] in keys for _, kind, *event in tr["result"]["after"])
+
+
+def _move_keys(tr: dict) -> set[str]:
+    """Her moves' keys on the scenario's map (her arrows, jump, up and down)."""
+    k = her_on(SCENARIOS[tr["scenario"]].map_id)[0]
+    return {k.left.name, k.right.name, k.jump.name, k.up.name, k.down.name}
+
+
+LIE_DETECTOR_EXPECTS = (
+    check("the hunt stopped at the Lie Detector",
+          lambda tr: (tr["result"]["stopped"] or "").startswith("Lie Detector")),
+    logs("LIE DETECTOR: retreat"),
+    check("on a safe place 10 s after the sighting", lambda tr: tr["result"]["then"]["safe"]),
+    check("there within 10 s", lambda tr: tr["result"]["retreat"]["took"] <= 10.0),
+    check("her moves alone after the sighting, no attack and no mouse", _moves_alone),
+    check("her retreat's moves refused past the player's window",
+          lambda tr: "are over" in tr["result"]["late_retreat"]))
+
+
+def _went(why: str):
+    return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
+
+
+@tree((28, 247.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+    _went("a rope as safe: no safe platform near"),
+    check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
+          and tr["result"]["then"]["x"] == 146)))
+def loop_tree_lie_detector(sim):
+    """`tour --loop --map 10002073` from 28 (as loop_tree_run), the Lie Detector seen 110 s in, while she hunts the
+    floor (33): the hunt stops at once (the plan running cut, nothing of hers after it); no safe platform is near (28,
+    the nearest place no monster reaches, is 4.3 s by route, past retreat.NEAR_S with the crowd's stops), so up onto
+    the rope at 146 from 32, at its safest height (attack.ropes), avoiding the monsters, her moves alone; a retreat plan
+    past the player's 12 s is refused. (From the floor's crowd, of seeds 1-12 seen at 40, 75, 110 and 150 s, 81% are on
+    a safe place at 10 s; from 24, shooting 23, all: loop_tree_lie_detector_23.)"""
+    return lie_detector(110.0)(sim)
+
+
+@tree((28, 247.0), monsters="all", seed=3, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+    _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
+def loop_tree_lie_detector_28(sim):
+    """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
+    danger 0 by attack.danger, though not MapModel.safe), 1.7 s by route."""
+    return lie_detector(40.0)(sim)
+
+
+@tree((25, 220.0), monsters="all", seed=1, limit=500, noise=_CROWD[0], her=_LUCKY,
+      realism=dataclasses.replace(_CROWD[1], zero_walls=True),
+      expects=LIE_DETECTOR_EXPECTS + (check("onto 25, the safe platform under 24", lambda tr: tr["result"]["then"][
+          "platform"] == 25),))
+def loop_tree_lie_detector_23(sim):
+    """The hunt loop as live on 2026-10-24 (loop_tree_23: 23 its only ground, Lucky Seven, the crowd), the Lie Detector
+    seen 60 s in, as she shoots 23 from 24 at 231 (attack.spots): down onto 25, the safe platform under 24 (0.9 s by
+    route)."""
+    return harness._only(lie_detector(60.0), (23,))(sim)
