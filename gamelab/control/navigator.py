@@ -128,9 +128,13 @@ HIT = 0.004          # HP lost (fraction) that counts as a hit
 FALL_LOOKS = 2
 # Where a fighting trip's monsters are searched (Navigator.trip_monsters): as high above her feet as the chain's
 # highest platform, a jump over it (JUMP_HEIGHT), her body (motion.bodies.HER_TALL) and the map's tallest monster
-# reach, and as low as its lowest platform and this much more (a monster's feet a little under the surface by its
-# sprite: the detector finds only whole ones).
+# reach, and as low as its lowest platform, the map's tallest monster (one on a platform under it whose head reaches
+# her feet there) and this much more (a monster's feet a little under the surface by its sprite: the detector finds
+# only whole ones). Without the tallest monster below, on 20 of 472 random chains on Tree Dungeon a Green Mushroom
+# standing on the step under the chain's lowest platform, 24-56 below it, could touch her and wasn't searched for
+# (review, 2026-10-24: from 20 at x -78 walking off onto 21, one on 22 at x -64 reached her 1.8 s on).
 TRIP_LOOK_BELOW = 15
+SAME_SIGHTING = 5  # map units: a monster found again on the same frame within this of one found before is it
 
 # How a trip treats monsters (Navigator.go's `mode`).
 AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
@@ -605,24 +609,26 @@ class Navigator:
         chains stop short of a leg one of them could touch her on), where its chain's legs go (`platforms`: the
         platforms of the route's next moves): the look's own if it searched the whole screen, or its band (Senses.band)
         takes in from as high as she gets over them (the highest, a jump over it, her body and the map's tallest
-        monster: TRIP_LOOK_BELOW) to as low as the lowest; else its frame searched again over all of that (Eyes.monsters:
-        a band as tall, in game about a band's time more, 23 ms at the game's own 1366x768). A fight looks at the band
-        around her (her stars reach 60 up and down), so most of a trip's looks are band looks (`_look`). The hook a
-        look policy that knows more replaces (a memory of the monsters seen off the band)."""
+        monster: TRIP_LOOK_BELOW) to as low as the lowest and the tallest monster under it; else its frame searched
+        again over all of that (Eyes.monsters: a band as tall, in game about a band's time more, 23 ms at the game's own
+        1366x768), with the look's own kept too (a feed's frame may be gone by then: Feed.frame_of gives a blank one). A
+        fight looks at the band around her (her stars reach 60 up and down), so most of a trip's looks are band looks
+        (`_look`). The hook a look policy that knows more replaces (a memory of the monsters seen off the band)."""
         if s.wide or not s.searched or s.where is None or s.tag is None:
             return list(s.monsters)
         ps = [self.model.platform(p) for p in platforms]
         if not ps:
             return list(s.monsters)
-        y = s.where.y
-        up = max(y - p.top for p in ps) + JUMP_HEIGHT + her_body.HER_TALL + self._tallest()
-        down = max(her_body.low_end(p) - y for p in ps) + TRIP_LOOK_BELOW
+        y, tallest = s.where.y, self._tallest()
+        up = max(y - p.top for p in ps) + JUMP_HEIGHT + her_body.HER_TALL + tallest
+        down = max(her_body.low_end(p) - y for p in ps) + tallest + TRIP_LOOK_BELOW
         band_up, band_down = self.senses.band
         if up <= band_up and down <= band_down:
             return list(s.monsters)
         eyes = self.senses.eyes
-        found = eyes.monsters(s, max(up, band_up), max(down, band_down))
-        return [s.place(m, self.model, eyes.bar(s, m)) for m in found]
+        found = [s.place(m, self.model, eyes.bar(s, m)) for m in eyes.monsters(s, max(up, band_up), max(down, band_down))]
+        kept = [m for m in s.monsters if not any(_same_sighting(m, f) for f in found)]
+        return kept + found
 
     def _tallest(self) -> float:
         """The tallest box (for touches: localization.monsters.touch_box) of the map's monsters."""
@@ -1250,6 +1256,12 @@ def _route_record(st: TripState, dst: int, path: list[Move], src: int, x: float,
 def _platforms(path: list[Move]) -> set[int]:
     """The platforms the first moves of a route (as many as a chain takes: flow.MAX_LEGS) go from and onto."""
     return {p for m in path[:MAX_LEGS] for p in (m.src, m.dst)}
+
+
+def _same_sighting(a: Monster, b: Monster) -> bool:
+    """Whether two monsters found on the same frame and placed on the map are one: of a kind, standing within
+    SAME_SIGHTING of each other."""
+    return a.kind == b.kind and abs(a.x - b.x) <= SAME_SIGHTING and abs(a.y - b.y) <= SAME_SIGHTING
 
 
 def _after(running: "_Running", path: list[Move]) -> list[Move]:

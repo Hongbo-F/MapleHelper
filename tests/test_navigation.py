@@ -1621,8 +1621,20 @@ def test_a_fighting_trip_searches_for_monsters_where_its_chain_goes(model):
               searched=True, monsters=[walker(300, platform=c.id)])
     # Her own platform: the band takes in a jump's height over it (77), her body (65) and a snail's (33, as it flinches).
     assert nav.trip_monsters(s, {c.id}) == s.monsters and not asked
-    assert nav.trip_monsters(s, {c.id, d.id}) == [] and len(asked) == 1  # D, 200 above: searched again
+    # D, 200 above: searched again. The look's own monster is kept though the search finds none (a feed's frame gone).
+    assert nav.trip_monsters(s, {c.id, d.id}) == s.monsters and len(asked) == 1
     up, down = asked[0]
     assert up == pytest.approx(200 + JUMP_HEIGHT + bodies.HER_TALL + nav._tallest()) and down == 75.0
+    # Below: as low as the lowest platform and the tallest monster under it (its head reaches her feet there).
+    from gamelab.control.navigator import TRIP_LOOK_BELOW
+    nav.senses.band = (300.0, 40.0)
+    nav.trip_monsters(s, {c.id})
+    assert asked[-1][1] == pytest.approx(nav._tallest() + TRIP_LOOK_BELOW)
+    # Found again on the same frame, it's one monster, not two; one more found is added.
+    from gamelab.perception.mobs import Mob
+    s.monsters = [s.place(Mob("pig", 1, 1, 30, 30, 0.9), model, None)]
+    nav.senses.eyes.monsters = lambda s, up, down: [Mob("pig", 1, 1, 30, 30, 0.9), Mob("pig", 120, 0, 30, 30, 0.9)]
+    got = nav.trip_monsters(s, {c.id, d.id})
+    assert [m.mob.x for m in got] == [1, 120] and got[0] == s.monsters[0]
     s.wide = True
-    assert nav.trip_monsters(s, {c.id, d.id}) == s.monsters and len(asked) == 1
+    assert nav.trip_monsters(s, {c.id, d.id}) == s.monsters
