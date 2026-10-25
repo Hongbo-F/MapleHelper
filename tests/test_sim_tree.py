@@ -280,6 +280,21 @@ def test_other_players_dots_show_in_the_minimap_windows_view_and_not_under_hers(
         assert eyes.in_window(-5000) and eyes.in_window(5000)
 
 
+def test_the_camera_keeps_her_529_down_there_so_from_28_the_horny_mushrooms_on_31_are_behind_the_chat_bar():
+    """fakes.CAMERA_DOWN: on the study's frames from 28 screen y = map y + 579 (her feet at row 529, not the first map's
+    489): 31's Horny Mushrooms stand at rows 701-718, under the HUD's top (675.5), and aren't searched; 30's Greens
+    are."""
+    from gamelab.screen import STRETCHED
+    from gamelab.sim import fakes
+    m = tree_map()
+    clock = fakes.Clock()
+    w = world(m, 28, 247.0, monsters=[("Horny Mushroom", 31, -152.0), ("Green Mushroom", 30, 64.0)], origin=clock.now)
+    eyes = fakes.FakeEyes(w, clock, m)
+    assert eyes.camera.offset[1] == 529.0
+    assert eyes.camera.to_screen(247.0, w.y, (247.0, w.y))[1] == pytest.approx(529.0 * STRETCHED.stretch)
+    assert [mob.kind for mob in eyes.look().frame.screen.mobs] == ["green-mushroom"]
+
+
 # --- landing on a floor that rises the way she flies ---------------------------------------------------------------
 
 def test_a_step_onto_a_floor_that_rises_the_way_she_flies_lands_her():

@@ -40,7 +40,7 @@ from ..control import client
 from ..localization.mapdata import MapModel
 from ..localization.monsters import FLINCH_S
 from ..localization.pose import GRASS_OVERHANG
-from ..localization.pose import Camera, Localizer
+from ..localization.pose import CAMERA_OFFSET, Camera, Localizer
 from ..paths import LAB
 from ..perception import exp_number
 from ..perception.eyes import Eyes, Observation
@@ -69,6 +69,14 @@ PLAY_BOTTOM = int(FRAME[0] * 0.88)  # the bottom bar starts below (screen.HUD_TO
 # show (their corners at y 72 on all their saved frames).
 WINDOW_ROWS = {10002073: 112}
 WINDOW_DOT_ROW = 49.5
+# Where the game's camera keeps her up and down (map units from the screen's top), on a map where it was seen apart
+# from pose.CAMERA_OFFSET's 489 (fitted on the first map): on Tree Dungeon, Forest Up North II 529, as on all 19 of the
+# study's frames from 28 (screen y = map y + 579, the labelled monsters' feet on their footholds) and in the hour of
+# live telemetry there (the view's top at -579 on 29,127 of 29,146 looks, 2026-10-24). On its one frame from 19 it
+# was 545 (screen y = map y + 1184): not understood (the camera's lag after a move, or a dead band; not modelled).
+# With 489 a look from 28 found the Horny Mushrooms on 31 above the HUD (feet at row 673), which the game hides
+# behind the chat bar (rows 701-718 on the study's frames).
+CAMERA_DOWN = {10002073: 529.0}
 KINDS = ("pig", "slime", "snail", "orange-mushroom")  # what the real detector has templates for (on the first map;
                                                       # on another, the map's kinds too: detector_kinds)
 ITEM_SIZE = {"mesos": (13, 13), "leather": (20, 18)}  # half-size px (w, h)
@@ -284,7 +292,8 @@ class FakeEyes(Eyes):
     def __init__(self, world: World, clock: Clock, model: MapModel, guard: Callable[[], None] | None = None):
         """`guard`: called before every look; it raises when the fakes aren't in place (sim.scenarios.Sim)."""
         self.world, self.clock, self.model = world, clock, model
-        self.camera = Camera(model.bounds)  # the game's camera (the default offset)
+        # the game's camera: the default offset, or where it was seen keeping her on this map (CAMERA_DOWN)
+        self.camera = Camera(model.bounds, (CAMERA_OFFSET[0], CAMERA_DOWN.get(model.id, CAMERA_OFFSET[1])))
         self.loc = Localizer(model)
         self.detector = FakeDetector(detector_kinds(model), clock=clock)
         self._loot = FakeLoot(clock)

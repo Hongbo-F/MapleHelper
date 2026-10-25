@@ -866,7 +866,10 @@ at EVA 42 she'd evade no Horny). A Horny takes 9 of her 30-70 stars, a Green 5, 
 a hit pushes a Horny back only from 40 damage after its DEF 10 (two in three of her stars), a Green from 25 (every one),
 so a Horny keeps walking at her through a third of them (`world.PUSH_BY_DAMAGE`). The monsters walk 100 units a second
 and stay on their platform (no Slime hops: unmodelled; they're 24 of the map's 1,003 spawn EXP). The camera is fixed
-across in the fake eyes as on screen, rows below the HUD's top aren't searched (the chat bar's strip), and other
+across in the fake eyes as on screen and keeps her 529 units below the screen's top, not the first map's 489
+(`fakes.CAMERA_DOWN`: on all the study's frames from 28 and in the hour of live telemetry there; 545 on its one frame
+from 19, not understood), so from 28 the Horny Mushrooms on 31 are behind the chat bar, as in game (with 489 a look
+found them at row 673, over the HUD); rows below the HUD's top aren't searched (the chat bar's strip), and other
 players' dots show only in the minimap window's rows (`fakes.WINDOW_ROWS`, her dot 49.5 rows from its top as on the
 study's frame from 19: from 28 nobody above y -1113 is seen) and not within 56 units of hers (`Noise.dot_under`, in
 the crowd presets). The other players (presets `crowd`, `crowd-slow`, this map's alone): five camps where the study
@@ -880,8 +883,8 @@ star), her MP, the Slimes' hops, the arrival band's passers-by, HeavenClient's w
 Twelve scenarios: `nav_tree_bottom_to_top` (the floor to 6, 22 moves in 28 s, up the four choke ropes, never the grab
 from 30), `nav_tree_up_by_29`, `nav_tree_rope_miss`, `nav_tree_top_cluster`, `nav_tree_mid_portal_to_top` (12 to 8 at
 137, 8.8 s), `nav_tree_left_ropes` (31 to 27 by -192 and -8), `nav_tree_down`, `loop_tree_run` (5 minutes from 28: 23,
-19, 7 and 15, 58 kills, 1,134 EXP), `loop_tree_walls` (its twin with `zero_walls`, on a seed where a knock off the rope
-at -192 took her out of the tower), `loop_tree_crowd` (3 minutes among the camps: 8 kills, nobody else killing a
+19, 7 and 15, 59 kills, 1,218 EXP), `loop_tree_walls` (its twin with `zero_walls`, on a seed where a knock off the rope
+at -192 took her out of the tower), `loop_tree_crowd` (3 minutes among the camps: 10 kills, nobody else killing a
 Horny), `tour_tree_run` (`--stops 3`: 33, 32 and 31 in 704 s), `tour_tree_rest` (low on HP on 23: down to 25). Her pet's
 care runs as in game but for its read: `sim.fakes.FakePetCare` reads her pet's fullness off the world (60 at a run's
 start: fed once, 60 -> 90) where `behavior.pet.PetCare` opens her Character Info and reads it.
@@ -947,7 +950,7 @@ that miss most (planned, taken, missed, the platforms she ended on): `jump 24->2
 
 **What looks wrong there, for the next phase** (the defaults are unchanged):
 - **Where she stands:** every ground is hunted standing on it, among its monsters: the hunt loop's rules are 'close
-  quarters' and 'in passing', hardly ever 'shoot' (`loop_tree_run`: 154 and 148 of 331; 'shoot' on 2 of seeds 1-10),
+  quarters' and 'in passing', hardly ever 'shoot' (`loop_tree_run`: 174 and 137 of 351; 'shoot' on 2 of seeds 1-10),
   since no platform `MapModel.safe` counts as safe reaches a ground at ±60 (only 25, 26 and 27 are safe, and they reach
   none). The study's best stands,
   7 at -100 and 8 at 137 (185-190 spawn EXP in reach), are not where she goes: she took up 7 14 times in 10 runs and 8
@@ -965,7 +968,7 @@ that miss most (planned, taken, missed, the platforms she ended on): `jump 24->2
   and up wants guarding by where she is (not only by where the plan has her) near the exits.
 - **Ground choice with crowding:** `hunt.PLAYER_DISCOUNT` is off (1.0), so the loop goes where the camps take the Greens
   as readily as anywhere: among the crowd she made 34.0 EXP a minute (median 30.6) where the same world empty made 52.8,
-  and in `loop_tree_crowd` 3 of her 8 kills were Greens the camps hadn't reached yet. The study's per-kind discount
+  and in `loop_tree_crowd` 4 of her 10 kills were Greens the camps hadn't reached yet. The study's per-kind discount
   (a Green spawn with a rival on its ground 0.3, a Horny 0.85) and its narrower contest test are to be weighed here.
 - **Lucky Seven against the regular attack:** the hunt loop throws the regular attack only, and the simulator throws
   Lucky Seven as a star (its damage and MP aren't modelled): a Horny's 9 stars are about 11 s of throwing, while it
