@@ -106,25 +106,28 @@ def test_a_monster_100_up_and_close_is_hit_only_with_the_attack_near_the_top_of_
         assert took == (500 - p[1] > 56), key  # her feet over 56 up: the monster's under 44 over them
 
 
-def test_the_same_height_farther_off_is_hit_lower_in_the_jump_or_from_the_ground():
+def test_the_same_height_farther_off_is_hit_lower_in_the_jump_or_from_the_ground(monkeypatch):
     # "After the jump you can hit monsters that is far away horizontally, remember the widening vertical search as
     # horizontal scale out": the windows reach 5 higher every 20 ahead, so 100 up is in reach lower in the jump
-    # farther off, and from the ground from 271 (a pig).
+    # farther off: 290 off with the attack keyed at once. From the ground the search's windows reach it from 271 (a
+    # pig), but her decisions keep to SHOT_UP (60) above her until a probe settles the windows' top (UP_BY_SEARCH off:
+    # with the logs' lower top, 21, from 357).
     floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 600)
     keys = {}
-    for dx in (80, 160, 220):
+    for dx in (80, 160, 220, 290):
         m = pig(400 + dx, 400, up.id)
         c = cover(LEDGE, floor, 400, [m])
         assert not c.ground(m)
         keys[dx] = c.best(m, ("up",)).key_ms
-    assert keys[80] > keys[160] > keys[220], keys
+    assert keys[80] > keys[160] > keys[220] >= keys[290] == reach.KEY_FIRST_MS, keys
     far = pig(400 + 290, 400, up.id)
+    monkeypatch.setattr(reach, "UP_BY_SEARCH", True)
     assert cover(LEDGE, floor, 400, [far]).ground(far)
     assert reach.can_shoot(290, -100) and not reach.can_shoot(250, -100)
 
 
-def test_with_up_by_search_off_the_ground_is_capped_60_above_her(monkeypatch):
-    monkeypatch.setattr(reach, "UP_BY_SEARCH", False)
+def test_the_ground_is_capped_60_above_her_until_a_probe_settles_the_windows_top():
+    assert not reach.UP_BY_SEARCH
     assert not reach.can_shoot(290, -100) and reach.can_shoot(200, -60)
 
 
@@ -247,18 +250,50 @@ def test_a_runs_jump_records_are_counted_with_what_the_looks_after_them_saw():
 # --- the stance takes them -------------------------------------------------------------------------------------------
 
 def test_the_stance_jump_throws_at_a_monster_above_with_the_attack_when_it_surely_picks_it():
+    # A pig 100 above her 150 off: out of reach from the ground (SHOT_UP), in reach from a jump in place 95 ms on (her
+    # feet 34 up), her body clear of it however it walks meanwhile (125 units/s either way: _arc_meets).
     from maplehelper.engine import LEFT, RIGHT
     from gamelab.attack.stance import plan_of, stance
-    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 450)
-    m = pig(450, 400, up.id)
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 550)
+    m = pig(550, 400, up.id)
     for facing in (RIGHT, LEFT):
         act = stance(400, 500, floor, [m], facing=facing, jumps=lambda: cover(LEDGE, floor, 400, [m]))
         plan = plan_of(act)
         assert act[:2] == ("jump_throw", RIGHT) and plan.way == 0 and plan.why == "above", act
-        assert plan.shot.window[0] <= plan.key_ms <= plan.shot.window[1] and plan.shot.rise >= 60
+        assert plan.shot.window[0] <= plan.key_ms <= plan.shot.window[1] and 20 <= plan.shot.rise <= 60
         assert plan.shot.turn == (facing == LEFT)
     # without what her jumps reach: as before, nothing she can do from here
     assert stance(400, 500, floor, [m], facing=RIGHT)[0] in ("wait", "approach", "back")
+    # and in the world: the pig hurt, her body never touched
+    w = still(world(LEDGE, floor.id, 400.0, monsters=[("Pig", up.id, 550.0)], facing="right"))
+    w.invulnerable_ms = 0
+    plan = plan_of(stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: cover(LEDGE, floor, 400, [m])))
+    tap(w, 0.0, "alt", 0.04)
+    tap(w, plan.key_ms / 1000, "f", 0.04)
+    w.advance(1.5)
+    assert w.monsters[0].hp < w.monsters[0].hp_max and w.touches == 0, w.log[-5:]
+
+
+@pytest.mark.parametrize("dx", [0, 30, 50, 60])
+def test_the_stance_never_jumps_up_into_a_monster_overhead(dx):
+    # Right under a pig 100 above her (her box 22 either side, its touch box 34, and as far as it can walk by then),
+    # a jump in place meets it before the star leaves: in the world it touched her 0.16 s after the jump key from 0 to
+    # 30 off (review, 2026-10-25). The query has the shot (near the top of the jump); the stance doesn't take it.
+    from maplehelper.engine import RIGHT
+    from gamelab.attack import stance as stance_mod
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 400 + dx)
+    m = pig(400 + dx, 400, up.id)
+    c = cover(LEDGE, floor, 400, [m])
+    ups = [s for s in c.of(m) if s.kind == "up"]
+    if dx >= 30:
+        assert ups  # (right overhead, at 0, the search's bands from her feet don't have it)
+    assert all(stance_mod._arc_meets(400, 500, floor, s, [m], None) for s in ups)
+    act = stance_mod.stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c)
+    plan = stance_mod.plan_of(act)
+    assert plan is None or plan.shot.kind != "up", act
+    # one on her own platform is the fight's (her keeping off): a jump in place doesn't take her any nearer it
+    mine = pig(400 + dx + 80, 500, floor.id)
+    assert not any(stance_mod._arc_meets(400, 500, floor, s, [mine], None) for s in ups)
 
 
 def test_on_her_way_a_jump_forward_that_hits_one_goes_before_a_throw_from_the_ground():
@@ -271,3 +306,166 @@ def test_on_her_way_a_jump_forward_that_hits_one_goes_before_a_throw_from_the_gr
     act = stance(400, 500, floor, [m], facing=RIGHT, jumps=jumps, toward=1)
     assert act[:2] == ("jump_throw", RIGHT) and plan_of(act).way == 1 and plan_of(act).why == "passing"
     assert stance(400, 500, floor, [m], facing=RIGHT, jumps=jumps, toward=-1) == ("throw", RIGHT)  # not her way
+
+
+# --- the stance's safety checks on a jump forward or back ----------------------------------------------------------
+
+def _passing():
+    """She stands at 400 on LEDGE's floor travelling right, a pig on the floor 300 on (in reach from the ground): the
+    jump forward in passing (landing about 84 on) and the shot it makes."""
+    from gamelab.attack.stance import plan_of, stance
+    from maplehelper.engine import RIGHT
+    floor = plat(LEDGE, 500, 400)
+    m = pig(700, 500, floor.id)
+    c = cover(LEDGE, floor, 400, [m])
+    act = stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c, toward=1)
+    assert act[0] == "jump_throw" and plan_of(act).way == 1
+    return floor, m, c, plan_of(act).shot
+
+
+def _shot_of(floor, m, cover_, lo=25.0, hi=1475.0, around=None, danger=None, goal=None):
+    """stance._jump_shot's jump forward in passing (as _passing's), where she keeps to `lo`..`hi`."""
+    from gamelab.attack.stance import _jump_shot
+    from maplehelper.engine import RIGHT
+    return _jump_shot(400, 500, floor, [m], cover_, lo, hi, RIGHT, [m] if around is None else around, danger, None,
+                      toward=1, kinds=("forward",), why="passing", goal=goal)
+
+
+def test_a_jump_forward_is_taken_only_if_however_it_goes_it_lands_where_she_keeps_to():
+    floor, m, c, sh = _passing()
+    near, far = sh.land_span
+    assert near < sh.land_x < far and sh.lands_sure  # 12 units early or late, slower, the kick short: all on the floor
+    assert _shot_of(floor, m, c, hi=far) is not None
+    assert _shot_of(floor, m, c, hi=far - 1) is None  # her keeping off the platform's end: lo..hi
+    assert _shot_of(floor, m, c, lo=near + 1) is None
+
+
+def test_a_jump_forward_whose_short_kick_lands_on_the_platform_above_is_not_taken():
+    # Under a platform 60 up whose end is at 450: the kick at full speed (149) lands her on the floor at 484, at 119
+    # (the arrow seen at the jump's own step) up on the platform (review, 2026-10-25), as physics.sure_landing finds
+    # of the same jump; with the platform's end at 440 every way lands on the floor, and she takes it.
+    from gamelab.attack.stance import plan_of, stance
+    from maplehelper.engine import RIGHT
+    for end, sure in ((450, False), (440, True)):
+        model = build({"1": [seg(1, 0, 500, 1500, 500)], "2": [seg(2, 200, 440, end, 440)]})
+        floor = plat(model, 500, 600)
+        m = pig(780, 500, floor.id)
+        c = reach.coverage(model, floor, 400.0, 500, [m])
+        fwd = [s for s in c.of(m) if s.kind == "forward"]
+        assert fwd and all(s.land is floor and s.lands_sure == sure for s in fwd), end
+        j = physics.jump_of("forward", 1)
+        assert physics.sure_landing(model, 400 + j.run, 500, j.vx, -physics.JUMP_SPEED, floor,
+                                    group=floor.group) == sure
+        act = stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c, toward=1)
+        assert (act[0] == "jump_throw" and plan_of(act).way == 1) == sure, (end, act)
+
+
+def test_a_jump_forward_that_passes_into_a_monster_above_its_arc_is_not_taken():
+    # A block 60 up from 480 to 530 that her arc comes down under (her feet 13 up at 480, every way she may go under
+    # its floor there, her head over it): with a pig on it her box meets the pig's on the way (_arc_meets), so no jump
+    # forward; without, she takes it.
+    from gamelab.attack import stance as stance_mod
+    from maplehelper.engine import RIGHT
+    model = build({"1": [seg(1, 0, 500, 1500, 500)], "2": [seg(2, 480, 440, 530, 440)]})
+    floor, block = plat(model, 500, 400), plat(model, 440, 505)
+    m = pig(700, 500, floor.id)
+    on_block = pig(505, 440, block.id)
+    c = reach.coverage(model, floor, 400.0, 500, [m])  # (with the block's pig about, the air's pick takes it first)
+    fwd = [s for s in c.of(m) if s.kind == "forward"]
+    assert fwd and all(s.land is floor and s.lands_sure for s in fwd)
+    assert all(stance_mod._arc_meets(400, 500, floor, s, [m, on_block], None) for s in fwd)
+    assert not any(stance_mod._arc_meets(400, 500, floor, s, [m], None) for s in fwd)
+    act = stance_mod.stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c, toward=1, around=[m, on_block])
+    assert not (act[0] == "jump_throw" and stance_mod.plan_of(act) and stance_mod.plan_of(act).way), act
+    act = stance_mod.stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c, toward=1)
+    assert act[0] == "jump_throw" and stance_mod.plan_of(act).way == 1, act
+    # a monster on her platform where she'd land: _into
+    floor, m, c, sh = _passing()
+    assert _shot_of(floor, m, c, around=[m, pig(sh.land_x + 20, 500, floor.id)]) is None
+
+
+def test_a_jump_forward_lands_no_more_dangerous_than_jump_danger_over_where_she_stands():
+    from gamelab.attack import stance as stance_mod
+    floor, m, c, sh = _passing()
+
+    class Danger:  # (attack.danger's interface the stance reads)
+        def __init__(self, landing):
+            self.landing = landing
+
+        def keep_off(self, kind):
+            return 0.0
+
+        def at(self, pid, x, around):
+            return self.landing if x > 450 else 0.0
+
+    assert _shot_of(floor, m, c, danger=Danger(stance_mod.JUMP_DANGER)) is not None
+    assert _shot_of(floor, m, c, danger=Danger(stance_mod.JUMP_DANGER + 0.001)) is None
+
+
+def test_in_passing_a_jump_forward_lands_no_more_than_pass_slack_past_where_she_is_going():
+    from gamelab.attack import stance as stance_mod
+    floor, m, c, sh = _passing()
+    far = sh.land_span[1]
+    assert _shot_of(floor, m, c, goal=far - stance_mod.PASS_SLACK) is not None
+    assert _shot_of(floor, m, c, goal=far - stance_mod.PASS_SLACK - 1) is None  # (a rope's foot 60 on: she'd walk back)
+    act = stance_mod.stance(400, 500, floor, [m], facing="right", jumps=lambda: c, toward=1, goal=460.0)
+    assert act == ("throw", "right"), act
+
+
+def test_the_hunt_travels_toward_its_objectives_place_or_where_her_route_leaves_her_platform():
+    from types import SimpleNamespace
+    from gamelab.behavior.hunt import MIN_MOVE, Hunt
+    h = object.__new__(Hunt)
+    s = SimpleNamespace(where=SimpleNamespace(x=400.0), platform=SimpleNamespace(id=1))
+    asked = []
+
+    def leaves_at(here, x, dst, dst_x=None):
+        asked.append((here.id, x, dst, dst_x))
+        return 250.0
+    h.nav = SimpleNamespace(leaves_at=leaves_at)
+    h.obj = None
+    assert h._toward(s) is None
+    h.obj = SimpleNamespace(platform=1, x=600.0)
+    assert h._toward(s) == 600.0
+    h.obj = SimpleNamespace(platform=1, x=400.0 + MIN_MOVE - 1)
+    assert h._toward(s) is None  # (too near to be going anywhere)
+    h.obj = SimpleNamespace(platform=1, x=None)
+    assert h._toward(s) is None
+    h.obj = SimpleNamespace(platform=7, x=90.0)
+    assert h._toward(s) == 250.0 and asked == [(1, 400.0, 7, 90.0)]
+    h.nav = SimpleNamespace(leaves_at=lambda here, x, dst, dst_x=None: None)
+    assert h._toward(s) is None
+
+
+def test_the_navigator_says_where_the_quickest_way_leaves_her_platform():
+    from gamelab.control.navigator import Navigator
+    from gamelab.motion.route import Planner
+    steps = build({"1": [seg(1, 0, 500, 1500, 500)], "2": [seg(2, 300, 440, 700, 440)]})
+    floor, block = plat(steps, 500, 100), plat(steps, 440, 400)
+    nav = object.__new__(Navigator)
+    nav.planner = Planner(steps)
+    assert nav.leaves_at(floor, 100.0, floor.id, 160.0) == 160.0
+    first = nav.planner.plan(floor.id, 100.0, block.id)[0]
+    at = nav.leaves_at(floor, 100.0, block.id, 500.0)
+    assert at == (first.takeoff if first.takeoff is not None else first.x) and 100.0 <= at <= 300.0
+    alone = build({"1": [seg(1, 0, 500, 1500, 500)], "2": [seg(2, 300, 200, 700, 200)]})  # 300 up: no way there
+    nav.planner = Planner(alone)
+    assert nav.leaves_at(plat(alone, 500, 100), 100.0, plat(alone, 200, 400).id) is None
+
+
+@pytest.mark.parametrize("dx,hits", [(50, False), (150, True)])
+def test_the_hunt_counts_in_reach_from_a_jump_only_what_the_stance_would_jump_at(dx, hits):
+    # A pig 100 above her: right overhead the query has a shot near the top of the jump, but her body would meet it
+    # (the stance won't take it), so the hunt loop and grinding don't stay to shoot it (Hunt._jump_hits); 150 off,
+    # in place from early in the jump, they do.
+    from types import SimpleNamespace
+    from maplehelper.engine import RIGHT
+    from gamelab.behavior.hunt import Hunt
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 400 + dx)
+    m = pig(400 + dx, 400, up.id)
+    assert any(s.kind == "up" for s in cover(LEDGE, floor, 400, [m]).of(m))
+    h = object.__new__(Hunt)
+    h.h = SimpleNamespace(actions=SimpleNamespace(facing=RIGHT), danger=None)
+    h.model = LEDGE
+    s = SimpleNamespace(where=SimpleNamespace(x=400.0, y=500.0), platform=floor, monsters=[m])
+    assert h._jump_hits(s, m) == hits and h._hits(s, m) == hits

@@ -107,22 +107,29 @@ SMALL_STEP_END = 40  # ... and how near her platform's end that step may take he
 _THROW_VERBS = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back": "jumping back, throwing"}
 # A jump throw at what no throw from the ground reaches from where she stands (_jump_shot: a monster on a platform above
 # her, up close only from high in the jump, farther off from lower: attack.reach.shots, the windows widening with the
-# distance): she takes one if it lands her back on her platform, where she keeps to, her body meeting no monster's on
-# the way (motion.bodies, each where it can be by then: MonsterTrack.reach's spread, at its speed), and, forward or
-# back, where the danger is at most JUMP_DANGER more than where she stands (attack.danger: a guess, a tenth of a Horny
-# Mushroom's touch, 16% of her HP). The choice among them (the choice model): every one of these throws once, and a
-# throw's lock (0.73 s, the game's: COMBAT.attack_lock_ms) is most of what it costs, the jump's flight (0.62 s) inside
-# it; so what decides is what it gains: a throw from the ground when anything's in reach from there (no jump's lock
-# extra, JUMP_THROW_LOCK_EXTRA_MS), else the jump whose attack comes soonest at the target pick_target's order takes
-# first (hurt first, then the nearest), in place before forward before back (the least ground covered: the least
-# danger), forward along the way she's going first; travelling, a jump forward along her way that hits one over a
-# throw from the ground (PASSING_JUMPS: the throw and 84 units of her way, 0.56 s of her walk, in one lock).
+# distance): she takes one if it lands her back on her platform, where she keeps to, however a jump forward or back goes
+# (lifting off 12 units early or late, 10% slower, the kick short at 126 or 119: physics.jump_variants, as a route
+# jump's landing is checked), her body meeting no monster's on the way (motion.bodies, each where it can be by then:
+# MonsterTrack.reach's spread, at its speed; in place, the monsters off her platform: right under one above, her box
+# meets it), and, forward or back, where the danger is at most JUMP_DANGER more than where she stands (attack.danger: a
+# guess, a tenth of a Horny Mushroom's touch, 16% of her HP). The choice among them (the choice model): every one of
+# these throws once, and a throw's lock (0.73 s, the game's: COMBAT.attack_lock_ms) is most of what it costs, the jump's
+# flight (0.62 s) inside it; so what decides is what it gains: a throw from the ground when anything's in reach from
+# there (no jump's lock extra, JUMP_THROW_LOCK_EXTRA_MS), else the jump whose attack comes soonest at the target
+# pick_target's order takes first (hurt first, then the nearest), in place before forward before back (the least ground
+# covered: the least danger), forward along the way she's going first; travelling, a jump forward along her way that
+# hits one over a throw from the ground (PASSING_JUMPS: the throw and 84 units of her way, 0.56 s of her walk, in one
+# lock).
 JUMP_DANGER = 0.016
 ARC_STEP = 0.02  # s between the places along a jump her body is checked at (as motion.flow's danger, DANGER_STEP)
 # In passing (stance's `toward`: travelling that way), a jump forward that way whose attack hits a monster takes her
 # on as she shoots (a jump's 83 units, 0.56 s of her walk, for an attack 40 ms later and a lock 0.1 s longer than a
-# throw's from the ground): taken over a throw from the ground at a monster that way, on the same terms as above.
+# throw's from the ground): taken over a throw from the ground at a monster that way, on the same terms as above, and
+# only if it lands her no more than PASS_SLACK past where she's going on her platform (the objective's place there, or
+# where her route leaves it: behavior.hunt's _toward): a rope's foot or a jump's takeoff 15-80 ahead, overshot, has her
+# walk back (review, 2026-10-25), which a throw from the ground doesn't.
 PASSING_JUMPS = True
+PASS_SLACK = MIN_MOVE  # units: a shorter walk back isn't worth a step (stance's own MIN_MOVE)
 
 
 @dataclass(frozen=True)
@@ -200,7 +207,7 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
            facing: str | None = None, can_jump: Callable[[float, float], bool] | None = None,
            tops: dict[str, float] | None = None, halves: dict[str, float] | None = None,
            around: list[Monster] | None = None, danger: Danger | None = None,
-           jumps: Callable[[], reach.Coverage] | None = None, toward: int = 0) -> tuple:
+           jumps: Callable[[], reach.Coverage] | None = None, toward: int = 0, goal: float | None = None) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units) to step away,
@@ -217,8 +224,9 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     and from her jumps (attack.reach.coverage, worked out when first asked): with nothing in reach from the ground, a
     jump throw whose attack surely hits a wanted monster from the air comes before a step or a walk (_jump_shot: a
     monster on a platform above her, out of a star's reach from the ground), ('jump_throw', side, JumpPlan)
-    or ('jump_back', side, JumpPlan); `toward` (+1/-1: she's travelling that way), a jump forward that way that hits
-    one comes before a throw from the ground (PASSING_JUMPS)."""
+    or ('jump_back', side, JumpPlan); `toward` (+1/-1: she's travelling that way, to map x `goal` on her platform if
+    given), a jump forward that way that hits one, landing short of `goal` (PASS_SLACK), comes before a throw from the
+    ground (PASSING_JUMPS)."""
     can_jump = can_jump or (lambda a, b: True)
     around = wanted if around is None else around
     mine = [t for t in wanted if t.platform == platform.id]
@@ -233,7 +241,7 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     if in_reach:
         if toward and PASSING_JUMPS and jumps is not None:
             jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, around, danger, halves, toward,
-                              kinds=("forward",), why="passing")
+                              kinds=("forward",), why="passing", goal=goal)
             if jump is not None:
                 return jump
         return ("throw", _throw_side(x, in_reach, facing))
@@ -261,16 +269,18 @@ def air_gap(act: str | tuple) -> float | None:
 def _jump_shot(x: float, y: float, platform: Platform, wanted: list[Monster], cover: reach.Coverage, lo: float,
                hi: float, facing: str | None, around: list[Monster], danger: Danger | None,
                halves: dict[str, float] | None, toward: int = 0, kinds: tuple[str, ...] = reach.JUMP_KINDS,
-               why: str = "") -> tuple | None:
+               why: str = "", goal: float | None = None) -> tuple | None:
     """A jump throw at one of `wanted` from map (x, y) on `platform` (stance's): of the shots `cover` has at them
     (attack.reach.shots) of `kinds`, those whose jump lands her back on her platform between `lo` and `hi` (where
-    she keeps to), her body meeting no monster's on the way (_arc_meets), a jump forward or back neither landing nor
-    passing into one (_into) nor, with `danger`, landing where the danger is more than JUMP_DANGER over where she
-    stands; an 'up' as she'd make it (turning in the air if she doesn't face that way by her keys, `facing`). Of
-    those, at the target pick_target's order would take first (hurt first, then the nearest), the one soonest done:
-    in place, then forward (`toward` first: she's going that way; in passing, `why` 'passing', only that way), then
-    back, the soonest attack key first. None if there's none. `why`: the plan's (else 'above' at a monster off her
-    level above her, 'reach' at one that isn't)."""
+    she keeps to), a jump forward or back however it goes (reach.Shot.lands_sure, land_span: lifting off early or
+    late, slower, the kick short, as a route jump's landing is checked), her body meeting no monster's on the way
+    (_arc_meets), a jump forward or back neither landing nor passing into one (_into) nor, with `danger`, landing
+    where the danger is more than JUMP_DANGER over where she stands; an 'up' as she'd make it (turning in the air if
+    she doesn't face that way by her keys, `facing`). Of those, at the target pick_target's order would take first
+    (hurt first, then the nearest), the one soonest done: in place, then forward (`toward` first: she's going that
+    way; in passing, `why` 'passing', only that way, and landing no more than PASS_SLACK past `goal`, where she's
+    going on her platform, if given), then back, the soonest attack key first. None if there's none. `why`: the
+    plan's (else 'above' at a monster off her level above her, 'reach' at one that isn't)."""
     here_danger = None
     best = None
     for t in wanted:
@@ -282,15 +292,22 @@ def _jump_shot(x: float, y: float, platform: Platform, wanted: list[Monster], co
                 continue
             if why == "passing" and sh.jump.way != toward:
                 continue
-            if sh.land is None or sh.land.id != platform.id or not lo <= sh.land_x <= hi:
+            if sh.land is None or sh.land.id != platform.id or not sh.lands_sure:
+                continue
+            near, far = sh.land_span
+            if not (lo <= near and far <= hi):
                 continue
             if sh.kind != "up":
-                if _into(x, sh.land_x, platform, around, halves):
+                end = far if sh.jump.way > 0 else near  # the farthest along her way it may take her
+                if why == "passing" and goal is not None and (end - goal) * sh.jump.way > PASS_SLACK:
+                    continue
+                if _into(x, end, platform, around, halves):
                     continue
                 if danger is not None:
                     if here_danger is None:
                         here_danger = danger.at(platform.id, x, around)
-                    if danger.at(platform.id, sh.land_x, around) > here_danger + JUMP_DANGER:
+                    if any(danger.at(platform.id, lx, around) > here_danger + JUMP_DANGER
+                           for lx in {sh.land_x, near, far}):
                         continue
             if _arc_meets(x, y, platform, sh, around, halves):
                 continue
@@ -309,18 +326,37 @@ def _jump_shot(x: float, y: float, platform: Platform, wanted: list[Monster], co
     return ("jump_throw", side, JumpPlan(sh.key_ms, sh.jump.way, True, reason, sh))
 
 
+def jump_hits(x: float, y: float, platform: Platform, m: Monster, cover: reach.Coverage, facing: str | None = None,
+              around: list[Monster] | None = None, danger: Danger | None = None,
+              halves: dict[str, float] | None = None) -> bool:
+    """Whether the stance would jump-throw at `m` from map (x, y) on `platform` with nothing in reach from the ground
+    (_jump_shot's terms: a shot `cover` has at it landing her back where she keeps to however it goes, her body clear
+    of every monster `around` her, the danger kept; as she'd make it, facing `facing`): what the hunt loop and grinding
+    count as in reach from a jump (behavior.hunt's _jump_hits), so they don't stay to shoot what the stance won't.
+    Where she keeps to as with monsters on her platform if any of `around` is on it."""
+    around = [m] if around is None else around
+    lo, hi = _stand_limits(platform, crowded=any(t.platform == platform.id for t in around))
+    return _jump_shot(x, y, platform, [m], cover, lo, hi, facing, around, danger, halves) is not None
+
+
 def _arc_meets(x: float, y: float, platform: Platform, sh: reach.Shot, around: list[Monster],
                halves: dict[str, float] | None) -> bool:
     """Whether her body (motion.bodies) over shot `sh`'s jump from map (x, y), from the plan's first key until she
     lands, meets a monster's of `around`, each where it can be by then (from where it was seen, either way at its
     kind's speed, MONSTER_SPEED: DEFAULT_SPEED for a kind the table lacks; its box for touches, touch_box), every
-    ARC_STEP. A jump in place lands where she stood: what walks into her there is the fight's (her keeping off)."""
-    if sh.kind == "up":
-        return False
+    ARC_STEP; a jump forward or back so too as its slowest variant goes (the one landing nearest: Shot.alts), longer
+    at each place. A jump in place, against the monsters off her platform: up into the one she throws at on a
+    platform above (review, 2026-10-25: right under it, her box met a pig 100 above her from 0.14 s to 0.54 s after
+    the jump key, before the star left); where she stands, what walks into her is the fight's (her keeping off),
+    jumping or not."""
     j = sh.jump
-    landing = (sh.land, sh.land_x, sh.land_s)
+    flights = [(j, (sh.land, sh.land_x, sh.land_s))]
+    if sh.alts:
+        flights.append(min(sh.alts, key=lambda a: abs(a[1][1] - x)))
     boxes = []
     for m in around:
+        if sh.kind == "up" and m.platform == platform.id:
+            continue
         q = platform if m.platform == platform.id else platform.peer(m.platform)
         if q is None:
             continue
@@ -330,16 +366,19 @@ def _arc_meets(x: float, y: float, platform: Platform, sh: reach.Shot, around: l
         boxes.append((m, q, half, tall, MONSTER_SPEED.get(m.kind, DEFAULT_SPEED)))
     if not boxes:
         return False
-    t, end = -j.lead_s, physics.JUMP_LAG + sh.land_s
-    while t <= end + 1e-9:
-        fx, fy, _ = _pose(platform, x, j, max(t, -j.lead_s), landing)
-        since = t + j.lead_s
-        for m, q, half, tall, speed in boxes:
-            lo, hi = max(q.left, m.x - speed * since), min(q.right, m.x + speed * since)
-            feet = q.y_at(min(max(fx, lo), hi))
-            if her_body.touches(fx, fy, lo, hi, half, feet, tall):
-                return True
-        t += ARC_STEP
+    for jj, landing in flights:
+        if landing[0] is None:
+            continue
+        t, end = -jj.lead_s, physics.JUMP_LAG + landing[2]
+        while t <= end + 1e-9:
+            fx, fy, _ = _pose(platform, x, jj, max(t, -jj.lead_s), landing)
+            since = t + jj.lead_s
+            for m, q, half, tall, speed in boxes:
+                lo, hi = max(q.left, m.x - speed * since), min(q.right, m.x + speed * since)
+                feet = q.y_at(min(max(fx, lo), hi))
+                if her_body.touches(fx, fy, lo, hi, half, feet, tall):
+                    return True
+            t += ARC_STEP
     return False
 
 

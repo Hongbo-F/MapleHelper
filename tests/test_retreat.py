@@ -281,7 +281,10 @@ def _sweep(name: str, seeds, times, only=None, feed: bool = False) -> list[dict]
 # from the same places her retreat fared worse (the floor and 32: 20 of 38 against 23 of 30). Not fixed: the feed, which
 # serves `tour --loop`'s looks by default, leaves the sweep out of the looks it serves. Since her jumps' attacks are
 # weighed and her jump throws turn in the air (2026-10-25), 26 of 32 without the feed (with it 28 of 32, none out of the
-# map; shooting 23 from 24, 32 of 32): no longer an expected failure, the hunt before the sighting gone otherwise.
+# map; shooting 23 from 24, 32 of 32): no longer an expected failure, the hunt before the sighting gone otherwise. With
+# the review's fixes of 2026-10-25 (her body clear of a monster above over a jump in place, a jump forward's landing
+# however it goes, the ground's reach capped 60 above her again): 24 of 31 without the feed (one run out of the
+# map before the sighting), 28 of 29 with it (three out, on seeds 5-8), 32 of 32 shooting 23 from 24.
 
 
 @pytest.mark.slow
@@ -297,7 +300,9 @@ def test_on_most_seeds_she_is_on_a_safe_place_10_s_after_the_sighting(name, only
     `tour --loop` takes them by default since then (each half of the seeds a test of its own: a run with the feed takes
     about 9 s), 24 of 29 (14 of 16 on seeds 1-4, 10 of 13 on 5-8, where three of seed 8's fell out of the map before the
     sighting); shooting 23 from 24, as live, 31 of 32 (47 of 48 over seeds 1-12). Since her jumps' attacks are weighed
-    (2026-10-25): with the feed 28 of 32 (14 of 16 on each half), without it 26 of 32, shooting 23 from 24 32 of 32. On
+    (2026-10-25): with the feed 28 of 32 (14 of 16 on each half), without it 26 of 32, shooting 23 from 24 32 of 32;
+    with the review's fixes, 28 of 29 with the feed (16 of 16, 12 of 13), 24 of 31 without, 32 of 32 shooting 23 from
+    24. On
     every run nothing but her moves after it (no attack, pick-up, pet food or mouse), and her retreat's moves refused
     past the player's 12 s."""
     tree_map()

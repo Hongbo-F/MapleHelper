@@ -174,11 +174,18 @@ AREA_UP = SEARCH_TOP0
 AIR_SEARCH = True
 # Whether a throw from the ground reaches monsters more than SHOT_UP above her where the star's search picks them (its
 # windows widen 5 up for every 20 ahead: 100 above her from about 270 off, 124 at most, at 385-400 ahead), as the
-# simulator's world always had it. In the same play, from the ground, Green Mushrooms 69 above her 185-214 off (from
-# 15 at 14), 74-76 above 223 off (21 at 19) and 100 above 291 off (24 at 22, as she lifted off) were killed: each
-# where the client's top (SEARCH_TOP0, 44) has the search pick a Green Mushroom (from 157, 177 and 277 off), none
-# where the logs' lower one (21) would (from 237, 277 and 357): its kills say 44. False: SHOT_UP caps it, as before.
-UP_BY_SEARCH = True
+# simulator's world always had it. Off until the top-60 probe settles the first window's top (SEARCH_TOP0: 44, the
+# client's, or the logs' 21, from which a pig 100 above her is picked from 357 off, not 271): too high a top has her
+# throw from the ground at monsters above her that the star doesn't take, and the simulator, which picks by the same
+# windows, can't show it. In the same play, from the ground, Green Mushrooms 69 above her 185-214 off (from 15 at 14),
+# 74-76 above 223 off (21 at 19) and 100 above 291 off (24 at 22) were killed, where 44 has the search pick them and
+# 21 wouldn't; but that's suggestive, not decisive (review, 2026-10-25): the ±0.2 s window put back from the kill
+# misplaces where in a jump the attack came (6 of the 30 kills above her, all 61-133 above with looks on the ground
+# only, no model explains), the first was airborne 0.09 s on, the third's only look in the window was airborne (as
+# she lifted off), and the second has a single look. Its shot logs' fit (the bands' floor and the lean to 21) wasn't
+# run again. True: the search's windows alone, no cap above her (`python -m gamelab probe run top-60`, then `probe
+# score`, decides it with SEARCH_TOP0).
+UP_BY_SEARCH = False
 AIR_MARGIN = 6       # how far into the area a body must reach for an attack from a jump to pick it surely:
                      # about one frame of her climb when a jump throw's attack starts
 # The claw up close (see above): a regular attack from the ground first looks for a monster right in front of
@@ -852,9 +859,10 @@ def air_hits(top: float, gap_ms: float) -> bool:
 # 0.2775 s after lift-off (physics.APEX_S); up close (the area, or the first bands) 44 over her feet, so a monster
 # whose feet are 100 above where she stood only with the attack starting 155-400 ms after lift-off (her feet 62 up,
 # AIR_MARGIN into it: physics.lift_time), 110 above within 70 ms of the top (207-348 ms), 115 at most (77 + 44 -
-# AIR_MARGIN), at the very top; farther off the windows reach higher, so lower in the jump and from the ground
-# (UP_BY_SEARCH: a pig 100 above her from 271 off, 110 from 311), up to 124 over her feet at the last band (385-400
-# ahead), from a jump 201 above where she stood.
+# AIR_MARGIN), at the very top; farther off the windows reach higher, so lower in the jump (and from the ground with
+# UP_BY_SEARCH, off until a probe settles the windows' top: a pig 100 above her from 271 off, 110 from 311; capped at
+# SHOT_UP, 60, without), up to 124 over her feet at the last band (385-400 ahead), from a jump 201 above where she
+# stood.
 KEY_FIRST_MS = physics.JUMP_ATTACK_MS  # the soonest an attack key goes after its jump key (40: in game, keyed so, a
                      # star from the jump killed a snail; keyed at the jump key the game may take the attack first,
                      # on the ground, which nothing has measured)
@@ -874,7 +882,9 @@ class Shot:
     (physics.Jump) with the attack key `key_ms` after the jump key (keyed anywhere in `window`, ms after it, the attack
     still picks `target` surely), throwing `side` (+1 right, -1 left); `turn`: an 'up' that turns her in the air first
     (physics.AIR_TURN_MS; a jump back always does). Where she is when it picks (`x`, her feet `rise` over where she
-    stood), and where the jump lands her (`land`, `land_x`, `land_s` s after lift-off)."""
+    stood), and where the jump lands her (`land`, `land_x`, `land_s` s after lift-off); `alts`, a jump forward's or
+    back's other ways of going (physics.jump_variants: lifting off early or late, slower, the kick short) and where
+    each lands, as a route jump's are checked (physics.sure_landing): `lands_sure`, `land_span`."""
     side: int
     target: Monster
     jump: physics.Jump | None = None
@@ -886,11 +896,24 @@ class Shot:
     land_x: float = 0.0
     land_s: float = 0.0
     turn: bool = False
+    alts: tuple = ()  # ((physics.Jump, (platform, x, s)), ...): the jump's variants and their landings
 
     @property
     def kind(self) -> str:
         """'ground', or the jump's kind ('up', 'forward', 'back')."""
         return "ground" if self.jump is None else self.jump.kind
+
+    @property
+    def lands_sure(self) -> bool:
+        """Whether every way the jump may go (`alts`) lands on the platform it's meant to (`land`): a kick that leaves
+        short (126 or 119 units/s) from under a platform's end lands up on it (review, 2026-10-25)."""
+        return self.land is not None and all(land is self.land for _, (land, _, _) in self.alts)
+
+    @property
+    def land_span(self) -> tuple[float, float]:
+        """The least and the most map x the jump lands at, its variants' (`alts`) with its own."""
+        xs = [self.land_x, *(lx for _, (_, lx, _) in self.alts)]
+        return min(xs), max(xs)
 
     def text(self) -> str:
         """The shot for a log line: "a jump forward throwing right, the attack 40 ms in (40-120), 26 up: horny-mushroom
@@ -979,6 +1002,7 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
             way = {"up": 0, "forward": side, "back": -side}[kind]
             j = physics.jump_of(kind, way)
             landing = physics.jump_landing(model, platform, x, j)
+            alts = tuple((v, physics.jump_landing(model, platform, x, v)) for v in physics.jump_variants(j))
             picks: dict[int, tuple] = {}
 
             def pick(k: int, j=j, landing=landing, picks=picks, side=side) -> tuple:
@@ -1017,7 +1041,7 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
                             hi += step
                         seen.add(id(m))
                         out.append(Shot(side, m, j, k, (k, hi), p0[0], y - p0[1], landing[0], landing[1], landing[2],
-                                        turn=kind == "back" or start == TURN_KEY_MS))
+                                        turn=kind == "back" or start == TURN_KEY_MS, alts=alts))
                     k += step
     return out
 

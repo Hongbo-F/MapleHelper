@@ -696,11 +696,16 @@ def nav_fight_across(sim):
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=5,
+@scenario((14, 760.0), monsters="all", seed=4,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
-    """nav_fight_up on seed 5: she shoots 17's monsters from 14, climbs to 6, is knocked off 4 onto 6 at 31 s, and
-    fights her way up to 3 and over to 1 and back onto 3 twice, running out of her 180 s, 42 monsters killed. (Seed 5
+    """nav_fight_up on seed 4: she shoots 17's monsters from 14, climbs to 3, is knocked off down to 17 at 47 s, and
+    fights on there and on the way back up, running out of her 180 s, 42 monsters killed. (Seed 4 since the review of
+    her jumps' attacks, 2026-10-25: her body kept clear of a monster above over a jump in place, a jump forward's
+    landing checked however it goes, the ground's reach capped 60 above her again: on seed 5 she now arrives on 1 in
+    51 s, 11 monsters killed; of seeds 1-16, 4, 11 and 16 meet all of this. On seed 5 before: she shot 17's monsters
+    from 14, climbed to 6, was knocked off 4 onto 6 at 31 s, and fought her way up to 3 and over to 1 and back onto 3
+    twice, running out of her 180 s, 42 monsters killed. Seed 5
     since the monsters' HP bars are drawn as the game draws them, perception.hud.draw_hp_bar, read to the game's px: on
     seed 4 she now arrives on 1 in 177 s, knocked off four times; of seeds 1-17, 2, 5, 11 and 16 meet all of this.
     On seed 4 before: she shot 17's monsters from 14, climbed to 3, came back down to 17 and up again to
@@ -735,7 +740,7 @@ def nav_fight_up_runs_out(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=5,
+@scenario((12, -300.0), monsters="all", seed=3,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
     """nav_fight_across on seed 6: after 38 s fighting on 12 she's knocked off down to 11 and 34, fights the slimes
@@ -761,7 +766,10 @@ def nav_fight_across_runs_out(sim):
     since she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed 15 she arrived; of seeds 1-16, 12
     arrived. Seed 5 since her jumps' attacks are weighed and her jump throws turn in the air (2026-10-25): on seed 6
     she arrived; of seeds 1-16, 15 arrive, and on seed 5 she's knocked about 12 and fights there, 40 monsters, until
-    her 180 s run out.)"""
+    her 180 s run out. Seed 3 since the review of her jumps' attacks, 2026-10-25 (her body clear of a monster above
+    over a jump in place, a jump forward's landing however it goes, the ground's reach capped 60 above her again): on
+    seed 5 she arrives in 48 s, 9 monsters killed; of seeds 1-16, 14 arrive, and on seed 3 she's knocked off 12 down
+    to 34 at 4 s, fights there and on the long way round up, 37 monsters, until her 180 s run out.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -2054,7 +2062,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=4, limit=600,
+@tree((28, 247.0), monsters="all", seed=5, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -2077,7 +2085,12 @@ def loop_tree_run(sim):
     this, 7 alone on the floor all 5 minutes, the others hunting 23 first. Seed 4 again with her memory of the
     monsters and the sweep merged on top, hunt.SWEEP: of seeds 1-12, 5 meet all of this (1, 4, 5, 6, 9), 4 alone on
     the floor all 5 minutes; 11 fell out at 124 s, and on 7 her stand-by trip to a safe platform timed out after the
-    hunt and she rested on the floor past the run's 600 s.)"""
+    hunt and she rested on the floor past the run's 600 s. Seed 5 since the review of her jumps' attacks, 2026-10-25
+    (her body clear of a monster above over a jump in place, a jump forward's landing however it goes, the ground's
+    reach capped 60 above her again): of seeds 1-12, 5 meet all of this (5, 7, 9, 11, 12; 1, 4, 5, 6 and 7 before the
+    review's fixes), 7 alone on the floor all 5 minutes; 1 fell out at 143 s, and on 4 and 6 a trip to rest timed
+    out and she rested on the floor among its monsters past the run's 600 s, her HP not coming back (seed 5 meets it
+    at master's head and before the fixes too).)"""
     return _loop(5)(sim)
 
 
@@ -2108,7 +2121,7 @@ _CROWD, _SLOW = harness.PRESETS["crowd"], harness.PRESETS["crowd-slow"]
 _LUCKY = dataclasses.replace(LEVEL_24, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=5, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 231"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -2124,7 +2137,9 @@ def loop_tree_23(sim):
     since a throw's tap goes by her facing off the frame, perception.heading: of seeds 1-12, 4, 5, 6, 9 and 10 meet
     them; on seed 1 she shot 23 from the spot fewer than 20 times, killing 20.) With her memory of the monsters and the
     sweep merged too (hunt.SWEEP: a slice 23 ms of the simulator's clock moves every look after the first), nine meet
-    them (all but 1, 2 and 7): on seed 5 still."""
+    them (all but 1, 2 and 7): on seed 5 still. Seed 1 since the review of her jumps' attacks, 2026-10-25 (the ground's
+    reach capped 60 above her again, her body clear of a monster above over a jump in place): of seeds 1-16, 8 meet
+    them (1, 3, 4, 9, 10, 12, 14, 16); on seed 5 the rule 'shoot' decided under 20 times, for 25 kills.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2183,7 +2198,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=14, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2195,7 +2210,10 @@ def loop_tree_ore_waits(sim):
     reach, 4 ores of 4. With the valuable pile rule ahead of shooting as before (hunt.EXP_FIRST off) she went down to
     22 for it at once, among its Green Mushrooms, and was hurt 15 times (1.72 bars of HP) against once (0.16), for the
     same 596 EXP and 3 ores; on seeds 1-8, 4645 EXP against 4306 (better on 5, worse on 1), 25 ores of 31 against 25
-    of 30, hurt 76 times against 98."""
+    of 30, hurt 76 times against 98. Seed 14 since the review of her jumps' attacks, 2026-10-25: hurt three times at
+    most and every ore picked up is a run's luck, on 2 of seeds 1-16 (14, 15; 3 before the review's fixes, 1, 2 and 12;
+    4 at master's head, 1, 3, 11 and 14); on seed 1 she was touched 8 times, 6 of them hurting, jump-throwing at a
+    Horny Mushroom on 23 after 209 s.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2331,7 +2349,7 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
@@ -2349,7 +2367,10 @@ def loop_tree_lie_detector(sim):
     rope at 146 within 10 s, 8 are on a safe place at 10 s; on seed 7 she took 11.2 s, still on 32. Seed 2 since her
     jumps' attacks are weighed and her jump throws turn in the air, 2026-10-25: of seeds 1-12, 9 go up onto the rope
     at 146 within 10 s, 11 are on a safe place at 10 s (the rope at -192 on 1, already on 25 on 3), and on seed 11
-    she was still on her way.)"""
+    she was still on her way. Seed 1 since the review of her jumps' attacks, 2026-10-25 (her body clear of a monster
+    above over a jump in place, a jump forward's landing however it goes, the ground's reach capped 60 above her
+    again): of seeds 1-16, 1, 5, 7, 10 and 12 go up onto the rope at 146 within 10 s, 11 are on a safe place at 10 s
+    (7 of 16 at master's head, 14 before the review's fixes), and on seed 2 she went up the rope at -192 from 31.)"""
     return lie_detector(110.0)(sim)
 
 

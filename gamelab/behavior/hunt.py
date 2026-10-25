@@ -82,7 +82,7 @@ from .. import telemetry
 from ..attack import reach, ropes, spots
 from ..attack.ropes import Refuge
 from ..attack.spots import GROUND_MARGIN, Spot
-from ..attack.stance import MIN_MOVE, act_text, close_to, open_above, stance
+from ..attack.stance import MIN_MOVE, act_text, close_to, jump_hits, open_above, stance
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
@@ -693,11 +693,16 @@ class Hunt:
 
     def _jump_hits(self, s: Scene, m: Monster) -> bool:
         """Whether the attack from one of her jumps from where she stands in look `s` surely hits `m` (attack.reach's
-        coverage, every monster of the look about her: _cover), the jump landing her back on her platform; False with
-        fight.JUMP_SHOTS off."""
+        coverage, every monster of the look about her: _cover) on the stance's terms (stance.jump_hits: the jump
+        landing her back where she keeps to however it goes, her body clear of the look's monsters, the danger kept),
+        so she doesn't stay to shoot what the stance won't jump at; False with fight.JUMP_SHOTS off."""
         cover = self._cover(s, [m])
-        return cover is not None and any(sh.jump is not None and sh.land is not None and sh.land.id == s.platform.id
-                                         for sh in cover().of(m))
+        if cover is None or not any(sh.jump is not None for sh in cover().of(m)):
+            return False
+        actions = getattr(self.h, "actions", None)
+        return jump_hits(s.where.x, s.where.y, s.platform, m, cover(), getattr(actions, "facing", None),
+                         s.monsters if any(o is m for o in s.monsters) else [*s.monsters, m], self.danger,
+                         getattr(self, "_halves", None))
 
     def _cover(self, s: Scene, targets, around=None):
         """What her attacks reach from where she stands in look `s` at `targets` (fight.jump_cover, as a callable worked
@@ -814,17 +819,21 @@ class Hunt:
             telemetry.emit("event", kind="backstop", text=f"FINISH_S: {FINISH_S:.0f} s finishing for {o.text()}")
         return None
 
-    def _stance(self, s: Scene, targets, visible, hidden, approach: bool, log: bool = True, toward: int = 0) -> tuple:
+    def _stance(self, s: Scene, targets, visible, hidden, approach: bool, log: bool = True,
+                goal: float | None = None) -> tuple:
         """stance's answer for `targets` in look `s` (fight._take_stance's with `log`), with what her jumps' attacks
-        reach (_cover: the same for both) and, travelling, the way she goes (`toward`)."""
+        reach (_cover: the same for both) and, travelling, where she's going on her platform (`goal`, map x: _toward),
+        the way she goes."""
         jumps = self._cover(s, targets, visible + hidden)
+        toward = 0 if goal is None else (1 if goal > s.where.x else -1)
         if log:
             return fight._take_stance(self.h, self.fs, s, targets, visible, hidden, approach, toward=toward,
-                                      jumps=jumps)
+                                      jumps=jumps, goal=goal)
         here = s.platform
         return stance(s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
                       can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops,
-                      halves=self._halves, around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward)
+                      halves=self._halves, around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward,
+                      goal=goal)
 
     def _shoot(self, s: Scene, targets, visible, hidden, now: float, rule: str, approach: bool) -> None:
         """One step of stance's answer: a throw (fight's bookkeeping kept), or a walk."""
@@ -853,20 +862,22 @@ class Hunt:
             return False
         return any(self._hits(s, m) for m in targets) or self._pass_step(s, [*targets, *others]) is not None
 
-    def _toward(self, s: Scene) -> int:
-        """Which way along her platform her trip goes next (+1 right, -1 left; 0: not known, or not along it): to the
-        objective's place on her platform, else to where the navigator's route leaves it (its first move's takeoff)."""
+    def _toward(self, s: Scene) -> float | None:
+        """Where along her platform her trip goes next (map x; None: not known, not along it, or under MIN_MOVE off):
+        the objective's place on her platform, else where the navigator's route leaves it (its first move's takeoff).
+        Its way is the way she's travelling (stance's `toward`); a jump forward in passing lands no farther than it
+        (stance's `goal`, PASS_SLACK)."""
         o = self.obj
         if o is None or s.where is None or s.platform is None:
-            return 0
+            return None
         x = s.where.x
         if o.platform == s.platform.id:
             goal = o.x
         else:
             goal = self.nav.leaves_at(s.platform, x, o.platform, o.x)
         if goal is None or abs(goal - x) < MIN_MOVE:
-            return 0
-        return 1 if goal > x else -1
+            return None
+        return goal
 
     def _pass_step(self, s: Scene, targets) -> tuple | None:
         """In passing, a step along her platform out from under a target above her too close sideways for the
@@ -892,7 +903,7 @@ class Hunt:
         above her (_pass_step), else on her way."""
         t0 = time.monotonic()
         self._note("in passing")
-        act = self._stance(s, targets, visible, hidden, approach=False, toward=self._toward(s))
+        act = self._stance(s, targets, visible, hidden, approach=False, goal=self._toward(s))
         if fight.knocked_move(self.h, s, act):
             return None
         if act[0] in THROWS:

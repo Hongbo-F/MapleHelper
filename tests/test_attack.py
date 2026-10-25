@@ -222,11 +222,10 @@ def test_off_level_a_star_needs_more_room_the_smaller_the_monster():
     assert reach.min_dx(-60, *reach.body_of("pig", body)) == 110.5
     assert reach.min_dx(0, *reach.body_of("pig", body)) == 30.5 and reach.max_dx(34.5) == 434.5
     # A pig flinching after a hit (54 tall) is picked from 111, one standing (38) from 171. 120 above her the
-    # last bands pick each kind (a pig from 351): her decisions throw there (reach.UP_BY_SEARCH: the user's kills
-    # from the ground 69-100 above her on 2026-10-24), and with it off nothing over 60 above her (in_band).
+    # last bands pick each kind (a pig from 351), but nothing that high is in band (in_band: 60 is measured; the
+    # search's own reach there waits for the probe of its top: reach.UP_BY_SEARCH, tested in test_jump_reach).
     assert reach.min_dx(60, 54, 34) == 111 and reach.min_dx(60, 38, 34) == 171
-    assert reach.min_dx(-120, *reach.body_of("pig")) == 351 and reach.can_shoot(360, -120)
-    assert not reach.can_shoot(340, -120)
+    assert reach.min_dx(-120, *reach.body_of("pig")) == 351 and not reach.can_shoot(360, -120)
     # Her decisions: never where the claw would swipe it (on her level a pig to 99), and a kind she doesn't
     # know is taken as a pig.
     assert reach.shot_dx(0) == 99 and reach.shot_dx(0, "snail") == 84

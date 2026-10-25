@@ -363,8 +363,12 @@ class Actions:
         self._thrown(throw_ms, direction)
         self.play(sorted(events, key=lambda e: e[0]), "jump_back")  # the player wants them in time order
         self.facing = direction
-        # Locked until the attack's lock ends, which is after she lands.
-        self.lock_until = time.monotonic() + (throw_ms + COMBAT.attack_lock_ms) / 1000
+        # Locked until the attack's lock ends, which is after she lands: counted, as a jump throw's, from when the plan
+        # is done, its last key the attack's (keyed 85-480 ms after the jump key, 0.89 s on; she lands 0.14-0.54 s
+        # after it, 770 ms into the plan). Until 2026-10-25 it counted the attack key's time into the plan again (play
+        # waits for the plan): 235 ms more before her next jump or attack, up to 630 with the attack keyed later
+        # (review, 2026-10-25).
+        self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
 
     def _thrown(self, key_ms: int, direction: str) -> None:

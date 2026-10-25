@@ -49,6 +49,24 @@ def test_the_attack_keys_come_as_long_after_the_jump_keys_as_attack_reach_reckon
         assert at("f") - at("alt") == gap, method
 
 
+def test_a_jump_backs_lock_counts_from_when_its_plan_is_done_as_a_jump_throws(monkeypatch):
+    """play waits for the plan, whose last key is the attack's: her lock runs the attack's lock and a jump throw's
+    margin from then, however late in the jump the attack is keyed (until the review of 2026-10-25 it counted the
+    attack key's time into the plan again: 235 ms more by default, 630 keyed 480 ms after the jump key)."""
+    from gamelab.control import actions as actions_mod
+    from maplehelper.game import COMBAT
+    now = [100.0]
+    monkeypatch.setattr(actions_mod.time, "monotonic", lambda: now[0])
+    want = (COMBAT.attack_lock_ms + actions_mod.JUMP_THROW_LOCK_EXTRA_MS) / 1000
+    for key_ms in (None, 85, 480):
+        a = actions([])
+        a.jump_throw(RIGHT, key_ms)
+        assert a.lock_until == pytest.approx(now[0] + want)
+        a.lock_until = 0.0
+        a.jump_back(RIGHT, key_ms)
+        assert a.lock_until == pytest.approx(now[0] + want), key_ms
+
+
 def test_a_throw_turns_her_only_when_she_faces_the_other_way():
     sent = []
     a = actions(sent)

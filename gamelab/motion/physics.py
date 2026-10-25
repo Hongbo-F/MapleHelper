@@ -353,6 +353,24 @@ def jump_of(kind: str, way: int = 0, lead_ms: float | None = None) -> Jump:
     return Jump(kind, way, v, lead / 1000, abs(body.run_x(tau, 0.0, way, SHOE)))
 
 
+LANDING_SLOP = 12.0  # how many units early or late a jump from standing may lift off (sure_landing's default)
+
+
+def jump_variants(j: Jump, slop: float = LANDING_SLOP) -> list[Jump]:
+    """The ways jump `j` may go otherwise, as sure_landing tries a route jump's: lifting off `slop` units early or late
+    along its way, 10% slower, as slow as SLOW_TAKEOFF (126: three of the game's steps of the arrow, the blind spot),
+    and a jump forward from standing at KICK_SPEED too (119: the arrow seen at the jump's own step, 4% of kicks keyed
+    FORWARD_JUMP_MS after it by the median lags, up to 27% within what the sweeps allow: KICK_JUMPS' reason to stay
+    off). A jump in place has none (it lands where she stood)."""
+    if not j.way:
+        return []
+    out = [replace(j, run=j.run - slop), replace(j, run=j.run + slop), replace(j, vx=j.vx * 0.9),
+           replace(j, vx=j.vx * SLOW_TAKEOFF)]
+    if j.kind == "forward":
+        out.append(replace(j, vx=j.way * KICK_SPEED))
+    return out
+
+
 def jump_landing(model: MapModel, platform: Platform, x: float, j: Jump) -> tuple[Platform | None, float, float]:
     """Where jump `j` from map x on `platform` lands: (platform, x, s after lift-off), flown by the engine (flight,
     the walls of her platform's foothold group) from where she lifts off (her run first, within her platform)."""
