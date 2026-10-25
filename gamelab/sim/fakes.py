@@ -705,7 +705,8 @@ class FakePlayer:
             p.alarm = LIE_DETECTOR_ERROR
             return start
         fed = [t for pid, t in self.fed.items() if pid != p.id]
-        if why := alarm_refusal({"kind": p.kind, "events": p.events}, self.keys, start - seen, fed, start):
+        plan = {"kind": p.kind, "events": p.events, "capture": {"lead_ms": round(p.lead * 1000)}}
+        if why := alarm_refusal(plan, self.keys, start - seen, fed, start):
             p.alarm = f"{LIE_DETECTOR_ERROR}: {why}"
             return start
         if p.kind == PET_FOOD:

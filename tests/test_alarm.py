@@ -287,6 +287,27 @@ def test_with_the_alarm_up_a_pet_food_plan_is_one_tap_of_its_key_and_nothing_els
     assert alarm_refusal({"kind": "throw", "events": _tap("u")}, keys, 1.0, [], 100.0) is not None
 
 
+def test_with_the_alarm_up_a_plan_let_through_holds_the_player_no_longer_than_it_has_to():
+    """Review, 2026-10-24: a pet food plan with a lead of 1.5 s was taken and tapped at 1.5 s, one with end_ms 2000
+    held the player 2 s (and `validate` bounds a lead only by the frames recorded). Whole within TAP_MAX_MS, from its
+    start: its lead, its tap, its end; a retreat's lead too (its moves end with its window)."""
+    from gamelab.control.player import TAP_MAX_MS, alarm_refusal
+    keys = _keys()
+
+    def food(events=None, **kw):
+        return {"kind": "pet_food", "events": events or _tap("u"), **kw}
+    for ok in (food(), food(capture={"lead_ms": 0}), food(capture={"lead_ms": TAP_MAX_MS}), food(end_ms=TAP_MAX_MS),
+               food(_tap("u", TAP_MAX_MS - 40))):
+        assert alarm_refusal(ok, keys, 30.0, [], 100.0) is None, ok
+    for late in (food(capture={"lead_ms": 1500}), food(capture={"lead_ms": -1}), food(capture={"lead_ms": "0"}),
+                 food(end_ms=2000), food(_tap("u", 19_000))):
+        assert alarm_refusal(late, keys, 30.0, [], 100.0) is not None, late
+    run = [[0, "left", "down"], [1500, "left", "up"]]
+    assert alarm_refusal({"kind": "retreat", "events": run, "end_ms": 3000}, keys, 1.0, [], 100.0) is None
+    assert "starts within" in alarm_refusal({"kind": "retreat", "events": run, "capture": {"lead_ms": 5000}}, keys,
+                                            1.0, [], 100.0)
+
+
 def test_with_the_alarm_up_a_retreat_is_her_moves_alone_for_its_window_with_every_key_let_go():
     from gamelab.control import alarm as alarm_mod
     from gamelab.control.player import alarm_refusal
@@ -366,6 +387,17 @@ def test_with_the_alarm_up_the_player_feeds_her_pet_and_refuses_the_rest(monkeyp
     for i in range(2, 4):
         assert "error" not in p.run(_plan(f"food{i + 1}", _tap("u")))
     assert "a minute at most" in p.run(_plan("food5", _tap("u")))["error"]
+
+
+def test_with_the_alarm_up_a_pet_food_plan_that_would_hold_the_player_is_refused_at_once(monkeypatch, tmp_path):
+    game = _Game(monkeypatch, tmp_path)
+    p, said = _alarmed_player()
+    started = time.perf_counter()
+    late = dict(_plan("food1", _tap("u")), capture={"lead_ms": 1500})
+    held = dict(_plan("food2", _tap("u")), end_ms=2000)
+    for plan in (late, held):
+        assert p.run(plan)["error"].startswith(LIE_DETECTOR_ERROR)
+    assert time.perf_counter() - started < 0.2 and game.sent == [] and p.fed == []
 
 
 def test_with_the_alarm_up_her_retreat_is_played_until_its_window_ends_and_refused_after(monkeypatch, tmp_path):

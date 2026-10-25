@@ -57,7 +57,8 @@ IDLE_LIMIT_S = 24 * 60 * 60
 MAX_EVENTS = 400
 MAX_PLAN_MS = 20_000
 MAX_FRAMES = 900
-TAP_MAX_MS = 200   # with the alarm up, a pet food plan's key is let go within this of going down (a tap: 40 ms)
+TAP_MAX_MS = 200   # with the alarm up, a pet food plan is over within this of its start (a tap: 40 ms), and a plan
+                   # let through starts within it (its lead: 0 from Actions, the client's default 100)
 RETREAT_OVER = "the retreat's time after the Lie Detector is over: stopped pressing"
 # Past this, the player's log becomes player.log.1 (the one before goes) when the player starts. It writes
 # about 40 bytes a plan, some 150 KB an hour of hunting, and was never cut: 5 MB is about 30 hours.
@@ -124,26 +125,36 @@ def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: l
     """Why the player won't run `plan` with the Lie Detector alarm up (None: it will), `since` s after the sighting
     (None: when isn't known), the pet food plans it ran with the alarm up having started at `fed` (time.monotonic(), as
     `now`). Two kinds go (alarm.PLAN_KINDS), and only as their kind says:
-    - `pet_food`: one tap of her pet food key (config.toml [keys] pet_food), down and up within TAP_MAX_MS, nothing
-      else; PET_FOOD_PER_MIN in any minute at most;
+    - `pet_food`: one tap of her pet food key (config.toml [keys] pet_food) and nothing else, the whole plan over within
+      TAP_MAX_MS of its start (its key down and up, its end: it holds the player no longer); PET_FOOD_PER_MIN in any
+      minute at most;
     - `retreat`: her moves alone (her arrows, jump, up and down: walking, jumping, climbing, dropping), every key it
       presses let go by its end, until RETREAT_WINDOW_S after the sighting.
-    Neither moves the mouse, clicks, resizes the window or records; every other plan is refused, as before. `plan` is
-    well-formed already (`validate`)."""
+    Neither moves the mouse, clicks, resizes the window or records, and either starts within TAP_MAX_MS (its lead);
+    every other plan is refused, as before. `plan` is well-formed already (`validate`)."""
     kind = plan.get("kind")
     if kind not in PLAN_KINDS:
         return "only her pet's food and her retreat go with the alarm up"
     events = plan.get("events", [])
-    if plan.get("window_client") is not None or plan.get("capture", {}).get("fps", 0):
+    cap = plan.get("capture", {})
+    if plan.get("window_client") is not None or cap.get("fps", 0):
         return "no window resize or recording with the alarm up"
     if any(len(e) != 3 or e[1] in MOUSE_BUTTONS for e in events):
         return "no mouse with the alarm up"
+    # Its start bounded: `validate` bounds a plan's lead only by the frames it records, and with none a plan let
+    # through could wait any time before its first key, holding the player (a retreat's moves, the stop once the alarm
+    # is cleared) while it did.
+    lead = cap.get("lead_ms", 100)
+    if not (isinstance(lead, (int, float)) and 0 <= lead <= TAP_MAX_MS):
+        return f"a plan with the alarm up starts within {TAP_MAX_MS} ms (its lead_ms: {lead!r})"
     if kind == PET_FOOD:
         key = keys.pet_food.name if keys is not None and keys.pet_food is not None else None
         if key is None:
             return "no pet food key is bound"
-        if [e[1:] for e in events] != [[key, "down"], [key, "up"]] or events[1][0] - events[0][0] > TAP_MAX_MS:
-            return f"a pet food plan is one tap of {key!r} and nothing else"
+        end = plan.get("end_ms")
+        if [e[1:] for e in events] != [[key, "down"], [key, "up"]] or events[1][0] > TAP_MAX_MS \
+                or end is not None and end > TAP_MAX_MS:
+            return f"a pet food plan is one tap of {key!r} within {TAP_MAX_MS} ms and nothing else"
         if sum(1 for t in fed if now - t < 60) >= PET_FOOD_PER_MIN:
             return f"{PET_FOOD_PER_MIN} pet foods a minute at most with the alarm up"
         return None

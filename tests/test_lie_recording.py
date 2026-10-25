@@ -762,7 +762,7 @@ def test_with_the_alarm_up_the_served_player_takes_her_pet_food_and_nothing_else
         screen.kind = 1
         served.wait_for(alarm_file.exists)
         assert "error" not in client.submit(_tap("u"), name="pet_food", kind="pet_food", focus=False, timeout=5)
-        with pytest.raises(client.LieDetectorAlarm, match="one tap of 'u' and nothing else"):
+        with pytest.raises(client.LieDetectorAlarm, match="one tap of 'u' within 200 ms and nothing else"):
             client.submit(_tap("u") + _tap("ctrl", 100), name="pet_food", kind="pet_food", focus=False, timeout=5)
         with pytest.raises(client.LieDetectorAlarm):  # a hunt's plan: refused here already, as before
             client.submit(_tap("ctrl"), name="throw", focus=False, timeout=5)
