@@ -43,6 +43,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .. import paths, telemetry
+from ..perception.framecheck import BadLook
 
 HUNGRY = 1             # fullness the pet loses a tick (the game data's info/hungry of the Snail pets)
 TICK_S = 75            # s a point on average: 60 + random 0..30 for hungry 1 (above); the readings' best fixed fit 74.1
@@ -181,7 +182,15 @@ class PetCare:
             return None
         state["checked"] = self.clock()
         state.pop("retry_at", None)
-        fullness = self._open()
+        try:
+            fullness = self._open()
+        except BadLook as e:
+            # A look or capture not of the game as expected (perception.framecheck): nothing is done on it (no Esc,
+            # no food), and it's tried again RETRY_S later. Before, it escaped the hunt's pause and stopped the hunt.
+            self.log(f"pet: its fullness couldn't be read: {e.why}")
+            state["retry_at"] = self.clock() + RETRY_S
+            _save(state)
+            return None
         if fullness is None:
             if self.clock() - state.get("fed", 0.0) >= FALLBACK_S:
                 self._feed()

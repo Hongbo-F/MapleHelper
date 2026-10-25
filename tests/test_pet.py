@@ -129,6 +129,28 @@ def test_esc_is_never_pressed_without_the_window_open_and_food_comes_only_after_
     assert game.plans == ["pet_info", "pet_info", "pet_food"]
 
 
+def test_a_look_that_fails_its_checks_in_a_check_has_nothing_pressed_on_it_and_leaves_it_for_later(state):
+    """A look or capture not of the game as expected (perception.framecheck.BadLook) inside a check: before, it escaped
+    the hunt's pause (Hunt.run waits out only LookLost) and stopped the hunt. Nothing is pressed on it, not even an
+    Esc it can't see a window for, nor the food that's otherwise given once FALLBACK_S passed, and it's tried again
+    RETRY_S later."""
+    from gamelab.perception.framecheck import BadLook, Problem
+    game = _Game(50)
+
+    class Eyes(_Eyes):
+        def _capture(self):  # (the window opened by the double-click, then the game window moved)
+            if game.open:
+                raise BadLook(Problem("moved", "the game window moved while it was captured"))
+            return super()._capture()
+
+    said = []
+    care = PetCare(_Actions(game), Eyes(), ocr=game, log=said.append, clock=lambda: 1000.0 + pet.FALLBACK_S)
+    assert care.check() is None
+    assert game.plans == ["pet_info"] and said == ["pet: its fullness couldn't be read: the game window moved while it "
+                                                   "was captured"]
+    assert json.loads(state.read_text())["retry_at"] == 1000.0 + pet.FALLBACK_S + pet.RETRY_S
+
+
 def test_another_player_s_window_is_closed_and_the_check_tried_again_soon(state):
     game = _Game(50, theirs=True)  # someone standing on her takes the double-click
     care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: 1000.0)
