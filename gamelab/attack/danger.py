@@ -9,9 +9,9 @@ A monster counts by
   a pig takes 1.7% of her 642 HP, so on the first map nothing does, and every decision there is as it was;
 - whether it can get to her (`walk`): along its own platform (a monster never leaves it: localization.monsters), and
   onto another only if its kind hops (MapModel.mob_hops), off its platform within HOP_ACROSS across and HOP_UP up of
-  hers (from one over hers by an end: it can't drop through its own), HOP_CHANCE as likely. One walking a platform just under or over hers touches her where their bodies overlap
-  (hers HER_HALF either side of her feet and HER_TALL tall, its own half its width and its top: game data), as one on
-  hers does;
+  hers (from one over hers by an end: it can't drop through its own), HOP_CHANCE as likely. One walking a platform
+  just under or over hers touches her where their bodies overlap (hers HER_HALF either side of her feet and HER_TALL
+  tall, its own half its width and its top: game data), as one on hers does;
 - how soon (`soon`): the walk to where it would touch her, at its speed (game data), weighed exp(-t / THREAT_S): 1 for
   one touching her now, as a respawn on top of her does, about a third for one THREAT_S away.
 A spawn point counts as its monster at the point (`at` with no look: the picture she plans by), or, with the monsters a

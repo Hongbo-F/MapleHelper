@@ -26,8 +26,9 @@ With the map's danger (attack.danger), the group policy lets a monster of a kind
 as its danger warrants (Danger.keep_off: a Horny Mushroom 162 units on Tree Dungeon; no kind on the first map, and
 on West Rocky Mountain II an Axe Stump's 80 is inside the claw's reach), and then does whichever of a jump back, a
 step away and a throw from where she is leaves her the least danger (_escape: the monsters around her and the spawn
-points they don't account for; a jump back toward another one, or onto a spawn point, isn't an escape). From where
-she is it's a throw from the ground, a jump throw only where that would be a claw swipe: a jump in place by one
+points they don't account for; a jump back toward another one, or onto a spawn point, isn't an escape, nor a move
+into or through a monster's body), a step only if it's clearly safer (ESCAPE_THROW: it doesn't throw). From
+where she is it's a throw from the ground, a jump throw only where that would be a claw swipe: a jump in place by one
 walks it into her as she lands.
 """
 
@@ -39,6 +40,7 @@ from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import DEFAULT_SPEED, MONSTER_SPEED, MONSTER_TOP, Monster
 from ..motion import physics
+from ..motion.flow import HER_HALF
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from . import reach
 from .danger import Danger
@@ -58,6 +60,13 @@ JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less
 JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
 JUMP_BACK_SPAN = 95  # how far a jump back carries her (by the engine 87-97 units with the lags spread as measured,
                      # 94 at the median: control.actions.JB_RUN_MS)
+# Escaping a monster that hits hard (_escape), a step away (STEP_AWAY) is taken over a jump back or a throw from where
+# she is only if it leaves her this much less danger (attack.danger: the share of her HP touches would take): they
+# throw, the step doesn't (0.8 s without one live). A guess, at what the throw buys: two in three of a Horny
+# Mushroom's stars push it back (sim.world.PUSH_BY_DAMAGE), and 40 units more between them is 0.01-0.02 less danger
+# 150-200 off. By danger alone the step always won (it goes 120 to the jump's 95: a lone Horny 150 off, 0.042 against
+# 0.049), and she never threw.
+ESCAPE_THROW = 0.03
 # Whether she jump-throws at a monster too close for a star from the ground that's too short for a jump back's
 # attack to pick (a snail: reach.air_hits). By the attack's area keyed 40 ms after the jump (physics.JUMP_ATTACK_MS)
 # it's picked, and in game on 2026-10-20 one such star killed a snail. But the user, watching her hunt on
@@ -233,7 +242,7 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     if (danger is not None and platform is not None and not small
             and danger.keep_off(nearest.kind) > reach.claw_edge(half_of(nearest.kind, halves))):
         return _escape(x, side, room, can_jump, danger, platform, mine if around is None else around,
-                       close_to(nearest, x, halves))
+                       close_to(nearest, x, halves), halves)
     if not small and room >= JUMP_BACK_ROOM and not behind and can_jump(x, x + back * JUMP_BACK_SPAN):
         return ("jump_back", side)
     if small and not JUMP_THROW_SNAILS:
@@ -259,26 +268,42 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
 
 
 def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float], bool], danger: Danger,
-            platform: Platform, around: list[Monster], swipe: bool) -> tuple:
+            platform: Platform, around: list[Monster], swipe: bool, halves: dict[str, float] | None = None) -> tuple:
     """From a monster on her platform that hits hard, on `side` of her, too near (Danger.keep_off): of a jump back
     (JUMP_BACK_SPAN away, throwing back; with JUMP_BACK_ROOM of `room` behind her), a step away (STEP_AWAY, or the
     room there is, STEP_ROOM at least) and a throw from where she is, the one leaving her the least danger (Danger.at,
-    with the monsters `around` her and the spawn points they don't account for), the first of those of equal danger.
-    From where she is it's a throw from the ground, or a jump throw where that would be a claw swipe (`swipe`) and a
-    jump doesn't land her on a platform overhead. A monster behind her makes the way back worse by its own danger,
-    not a rule of its own: with a Horny Mushroom on each side of her on Tree Dungeon's 23 the jump back (no monster
-    within JUMP_BACK_CLEAR behind) almost never could."""
+    with the monsters `around` her and the spawn points they don't account for), the first of those of equal danger;
+    the step, which doesn't throw, only if it's ESCAPE_THROW safer than the others. From where she is it's a throw
+    from the ground, or a jump throw where that would be a claw swipe (`swipe`) and a jump doesn't land her on a
+    platform overhead. A monster behind her makes the way back worse by its own danger (with a Horny Mushroom on each
+    side of her on Tree Dungeon's 23 the old rule, no monster within JUMP_BACK_CLEAR behind, let a jump back 1 time in
+    332), and a move whose way or landing would take her into a monster's body (any kind's, on her platform: _into, by
+    half its width, `halves`) is no escape."""
     away = directions.opposite(side)
     back = directions.sign(away)
     options = []  # (danger there, order, act)
-    if room >= JUMP_BACK_ROOM and can_jump(x, x + back * JUMP_BACK_SPAN):
-        options.append((danger.at(platform.id, x + back * JUMP_BACK_SPAN, around), 0, ("jump_back", side)))
-    if room >= STEP_ROOM:
-        step = min(STEP_AWAY, room)
-        options.append((danger.at(platform.id, x + back * step, around), 1, ("back", away, step)))
+    jump = x + back * JUMP_BACK_SPAN
+    if room >= JUMP_BACK_ROOM and can_jump(x, jump) and not _into(x, jump, platform, around, halves):
+        options.append((danger.at(platform.id, jump, around), 0, ("jump_back", side)))
+    step = min(STEP_AWAY, room)
+    if room >= STEP_ROOM and not _into(x, x + back * step, platform, around, halves):
+        options.append((danger.at(platform.id, x + back * step, around) + ESCAPE_THROW, 1, ("back", away, step)))
     options.append((danger.at(platform.id, x, around), 2,
                     ("jump_throw", side) if swipe and can_jump(x, x) else ("throw", side)))
     return min(options, key=lambda o: (round(o[0], 6), o[1]))[2]
+
+
+def _into(x: float, goal: float, platform: Platform, around: list[Monster], halves: dict[str, float] | None) -> bool:
+    """Whether a move along `platform` from map x to `goal` would take her into a monster's body: one of `around` on it
+    ahead of her, up to where its body (half its width: half_of, and her HER_HALF) meets hers at `goal` (hunt's
+    _in_the_way, for any kind: a touch, and its knock, whatever it takes)."""
+    for m in around:
+        if m.platform != platform.id:
+            continue
+        r = half_of(m.kind, halves) + HER_HALF
+        if (x < m.x <= goal + r) if goal > x else (goal - r <= m.x < x):
+            return True
+    return False
 
 
 def _throw_side(x: float, in_reach: list[Monster], facing: str | None) -> str:
