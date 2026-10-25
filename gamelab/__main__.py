@@ -935,8 +935,10 @@ def _around_her(frame: np.ndarray, x: int, y: int, geo=None) -> np.ndarray:
 
 
 def cmd_sheet(args) -> int:
+    if Path(args.recording).is_dir():
+        return _folder_sheet(args, Path(args.recording))
     rec = recordings.load(args.recording)
-    keep = [i for i, t in enumerate(rec.times) if args.start <= t <= args.end][::args.every]
+    keep = [i for i, t in enumerate(rec.times) if args.start <= t <= args.end][::args.every or 3]
     frames, times = rec.frames[keep], rec.times[keep]
     if args.around_her:
         rows = track(frames, times, _calibration(rec.geo).template)
@@ -945,6 +947,27 @@ def cmd_sheet(args) -> int:
     recordings.contact_sheet(frames, times, path, cols=args.cols, every=1,
                              zoom=AROUND_HER_ZOOM if args.around_her else 1)
     print(path)
+    return 0
+
+
+def _folder_sheet(args, folder: Path) -> int:
+    """A recording kept as JPEG frames with an index (save-recent's, its part before a Lie Detector, or a Lie
+    Detector's own): a contact sheet of a frame every --every (by default a second's at 10 a second), --shrink times
+    smaller, from --start to --end s; or with --video, all of it as an mp4 playing in real time. Saved in its folder."""
+    if args.around_her:
+        print("error: --around-her is for the recordings saved by name (her name tag's crop)")
+        return 1
+    rec = recordings.load_folder(folder)
+    if args.video:
+        path = folder / "video.mp4"
+        n = recordings.folder_video(rec, path, start=args.start, end=args.end)
+        print(f"{n} frames, {n / recordings.VIDEO_FPS:.0f} s in real time: {path}")
+    else:
+        path = folder / "sheet.png"
+        n = recordings.folder_sheet(rec, path, start=args.start, end=args.end,
+                                    every=args.every or recordings.SHEET_EVERY,
+                                    shrink=args.shrink or recordings.SHEET_SHRINK, cols=args.cols)
+        print(f"{n} of its {len(rec.frames)} frames: {path}")
     return 0
 
 
@@ -1362,6 +1385,47 @@ def _lie_detector_seen(frame) -> None:
         alarm.raise_alarm(frame, "lie_detector (seen by watch)")
 
 
+# --- the rolling recording -------------------------------------------------------------------------------
+
+def cmd_recorder(args) -> int:
+    """The rolling recording (control.rolling): the game's window 10 times a second, the last 5 minutes kept in memory,
+    saved on a Lie Detector alarm and by `save-recent`; until Ctrl+C. Reads the screen only: no keys, and the game is
+    never brought forward. With --status, how the running one is doing."""
+    from .control import rolling
+    if args.status:
+        print("\n".join(rolling.status_lines()))
+        return 0
+    lock = rolling.only_one()  # held until the process ends
+    if lock is None:
+        print("a recorder is running already (one at a time): `recorder --status` says how it's doing")
+        return 0
+    rolling.quiet()
+    rec = rolling.Recorder(rolling.GameWindow(_game_title()), rolling.ScreenGrab(), log=lambda m: print(m, flush=True))
+    rec.run(args.minutes * 60 if args.minutes else None)
+    return 0
+
+
+def cmd_save_recent(args) -> int:
+    """The running recorder's last --seconds saved to gamelab/lab/recent/<time>[-name]/ (frames, index, summary): it's
+    asked through its inbox, and the folder is printed last."""
+    from .analysis import disk
+    from .control import rolling
+    try:
+        out = rolling.ask(args.seconds, args.name)
+    except rolling.NotRunning as e:
+        print(f"error: {e}")
+        return 1
+    if "error" in out:
+        print(f"error: the recorder didn't save: {out['error']}")
+        return 1
+    gaps = ", ".join(f"{why} {s:g} s" for why, s in out["gaps"].items())
+    window_size = "" if out["window"] is None else f", the window {out['window'][0]}x{out['window'][1]}"
+    print(f"saved {out['seconds']:g} s: {out['frames']} frames ({disk.size(out['bytes'])}){window_size}"
+          + (f"; no frame: {gaps}" if gaps else "") + f" (`sheet FOLDER`, `sheet FOLDER --video` to look at it)")
+    print(out["folder"])
+    return 0
+
+
 # --- what gamelab keeps on disk --------------------------------------------------------------------------
 
 def cmd_lab_usage(args) -> int:
@@ -1676,12 +1740,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--regular-attack", action="store_true", help="throw with the plain attack key (no MP)")
     s.set_defaults(func=cmd_combo)
 
-    s = sub.add_parser("sheet", help="contact sheet of a recording")
-    s.add_argument("recording")
-    s.add_argument("--start", type=float, default=-1e9)
-    s.add_argument("--end", type=float, default=1e9)
-    s.add_argument("--every", type=int, default=3)
+    s = sub.add_parser("sheet", help="contact sheet of a recording: one saved by name, or a folder of JPEG frames "
+                                     "with an index (save-recent's, its `before` part, a Lie Detector's), saved in it; "
+                                     "--video: the folder as an mp4 instead")
+    s.add_argument("recording", help="a recording's name, or a folder")
+    s.add_argument("--start", type=float, default=-1e9, help="from this far in: ms (a folder's: s)")
+    s.add_argument("--end", type=float, default=1e9, help="to this far in: ms (a folder's: s)")
+    s.add_argument("--every", type=int, help="every so many frames (default 3; a folder's 10: a second's)")
     s.add_argument("--cols", type=int, default=8)
+    s.add_argument("--shrink", type=int, help="a folder's frames this many times smaller (default 4)")
+    s.add_argument("--video", action="store_true", help="a folder: an mp4 playing in real time, its gaps shown")
     s.add_argument("--around-her", action="store_true", help="zoom in on her instead of the whole crop")
     s.set_defaults(func=cmd_sheet)
 
@@ -1745,6 +1813,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_bodies)
 
+    s = sub.add_parser("recorder", help="the rolling recording: the game's window 10 times a second, the last 5 "
+                                        "minutes kept in memory, saved on a Lie Detector alarm and by save-recent; "
+                                        "reads the screen only (no keys, never brings the game forward)")
+    s.add_argument("--status", action="store_true", help="how the running recorder is doing (starts none)")
+    s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
+    s.set_defaults(func=cmd_recorder)
+    s = sub.add_parser("save-recent", help="save the running recorder's last minutes to gamelab/lab/recent/<time>/ "
+                                           "(frames, index, summary) and print the folder")
+    s.add_argument("--seconds", type=float, default=300.0, help="how far back (default 300, all it keeps)")
+    s.add_argument("--name", help="a word added to the folder's name")
+    s.set_defaults(func=cmd_save_recent)
     s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, the Lie Detector's "
                                          "recordings, screenshots, telemetry, harness runs, golden traces), by kind; "
                                          "deletes nothing")

@@ -11,7 +11,10 @@ One folder a cycle, paths.LIE_RECORDINGS/<YYYYmmdd-HHMMSS> (when it was first se
                  game, with the `scores` and `seen` of what was on top, its picture not saved);
   summary.json   at the end (`Recording.summary`): when it was first and last seen, how long the recording ran, its
                  frames, the forms seen and when each first and last showed, whether the Truth Booth did (the
-                 outcome as far as the picture tells), how it ended, the alarm's screenshot and the window's size.
+                 outcome as far as the picture tells), how it ended, the alarm's screenshot and the window's size;
+  before/        written by the rolling recorder when it runs (control.rolling): the game 10 times a second for the 5
+                 minutes before the alarm and on into this recording's first seconds, frames, index and summary of
+                 its own.
 
 It writes only pictures of the game's window that the watchdog grabbed anyway: nothing of the mouse or the keyboard.
 It never touches the game, and nothing here can answer the Lie Detector.
@@ -75,7 +78,10 @@ JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY,
 # about 175 MB at 290 KB a frame, so 10 GB holds about 58 of those; 18 that went to the Truth Booth (8 minutes,
 # 560 MB), 14 at the cap. The Lie Detector came about an hour apart at the most often (00:47, 01:58 and 02:54 on
 # 2026-10-19: tests/fixtures/lie_detector), so 58 cycles are two days of play without a break, weeks of evenings.
-# D: had 98 GB free on 2026-10-24. At 1920x1080, about 260 MB a cycle answered and 39 of them in the 10 GB.
+# D: had 98 GB free on 2026-10-24. At 1920x1080, about 260 MB a cycle answered and 39 of them in the 10 GB. Since
+# 2026-10-24 the rolling recording's 5 minutes before the alarm go into a cycle's folder too (`before/`, about 650 MB
+# at 1366x768: control.rolling) and count: about 0.8 GB a cycle answered, 12 of them in the 10 GB (32 GB free on D:
+# that evening).
 KEEP_BYTES = 10 * 1024 ** 3
 QUEUE_ITEMS = 16  # grabs waiting to be written (4 s of them, 3 MB a 1366x768 frame, 6 at 1920x1080); past it one is
                   # dropped
@@ -288,13 +294,17 @@ def recordings(root: Path | None = None) -> list[Path]:
 
 
 def size_of(folder: Path) -> int:
-    """The bytes of the files in a recording's folder."""
+    """The bytes of the files in a recording's folder and the folders in it (the rolling recording's part before the
+    Lie Detector, `before/`: control.rolling)."""
     total = 0
     try:
         with os.scandir(folder) as it:
             for entry in it:
                 try:
-                    total += entry.stat().st_size if entry.is_file() else 0
+                    if entry.is_dir(follow_symlinks=False):
+                        total += size_of(Path(entry.path))
+                    elif entry.is_file():
+                        total += entry.stat().st_size
                 except OSError:
                     pass
     except OSError:
