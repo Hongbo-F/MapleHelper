@@ -802,11 +802,18 @@ def air_takes(ahead: float, dy: float, top: float, half: float, margin: float = 
 def in_area(ahead: float, dy: float, top: float, rise: float = 0.0, half: float = 0.0) -> bool:
     """Whether an attack's star can pick a monster `ahead` units in front of her (its middle), its feet `dy`
     below hers as she stands (+ below), its body `top` tall (and `half` wide either side), when the attack
-    starts with her `rise` units up in a jump: air_takes from her feet then (the area about them, or the search's
-    widening windows). From the ground (`rise` 0), the star's search picks it (picks)."""
+    starts with her `rise` units up in a jump: the area about her feet then, and for one above her level (more than
+    LEVEL over her feet as she stands) the search's widening windows too (air_takes). From the ground (`rise` 0), the
+    star's search picks it (picks). What her decisions keep as in a jump throw's path (behavior.fight._in_path: what a
+    kill is matched to, and what's kept thrown at, hidden, for a while) and what shields others (shielded) go by this.
+    Below her the windows from a jump reach far monsters only (from 44 up, 104 below her feet at 385-400 ahead), which
+    take a star only with none nearer: listed, they were kept thrown at and hidden, and the step-down probe's fights on
+    2 went on to its 120 s cap on seeds 1, 5 and 9 of 1-12 (none at the base; with them left out, as here, only 4)."""
     if rise == 0:
         return picks(ahead, dy, top, half)
-    return air_takes(ahead, dy + rise, top, half)
+    if dy < -LEVEL:
+        return air_takes(ahead, dy + rise, top, half)
+    return reaches_into(ahead, dy + rise, top, half, STAR_RANGE, AREA_DOWN, AREA_UP)
 
 
 def air_rise(gap_ms: float) -> float:

@@ -99,7 +99,7 @@ JUMP_THROW_TURN_MS = 205
 # keyed under physics.JUMP_BACK_ATTACK_MS after the jump key: the stance asks for it only at a monster too short for
 # a later one to pick, reach.air_hits). Every other jump throw that turns her jumps at once and taps the arrow in the
 # air (physics.AIR_TURN_MS after the jump key, as the jump backs do), its attack JUMP_BACK_ATTACK_MS (85) after the jump
-# key at the soonest: 85 ms after the plan starts, not 245; by the engine she comes down 3.3 units on.
+# key at the soonest: 85 ms after the plan starts, not 245; by the engine she comes down 3.8 units on (5.3 so).
 # A jump forward (a jump throw with `way`): the arrow that way held from the plan's start, the jump physics.FORWARD_JUMP_MS
 # after it (the kick: she leaves at full speed, 149), and let go this long after the jump key, once the game has seen it
 # held at the jump's step (it acts on the jump 50-80 ms after its key): in the air it does nothing (it steers toward

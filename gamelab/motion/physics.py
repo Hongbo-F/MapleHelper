@@ -288,11 +288,12 @@ FORWARD_JUMP_MS = 40
 # 61 ms after the jump, two steps at least, but for 0.2% of jumps by the spread of the two). Seen before the jump's
 # step, the arrow would kick her off at 119 toward the monster (tapped 20 ms after the jump key, by the engine over
 # the game's steps a third of such jumps go 75 units forward); seen after it, it turns her in the air and steers
-# her at most 8.9 units/s: by the engine she comes down 3.3 units on (2.7-4.3 over the steps' phase; an attack
+# her at most 8.9 units/s: by the engine she comes down 3.8 units on (2.7-4.3 over the steps' phase; an attack
 # playing then stops her, without the slide). The jump backs turn so, the arrow 60 ms after their jump key
 # (control.actions.JB_TURN_MS). Tapped before the jump instead (as until 2026-10-25), the tap walks her: jumped 80 ms
 # after it, she leaves at 18-84 units/s and comes down 12-53 units on (33 on average); 205 ms after it
-# (actions.JUMP_THROW_TURN_MS), standing again, she comes down 2-7 on, the attack 245 ms after the tap.
+# (actions.JUMP_THROW_TURN_MS), standing again, she comes down 5.3 on (1.8-7.0), the attack 245 ms after
+# the tap (D:/MapleHelper-scratch/ov-jump/carry.py).
 AIR_TURN_MS = 60
 
 
