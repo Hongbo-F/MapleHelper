@@ -115,11 +115,12 @@ PRESET_MAPS = {"crowd": (TREE,), "crowd-slow": (TREE,)}
 # What isn't known of the game, switched on with `--world` (each a world.Realism field, or her own: world.Her):
 # group 0's walls stopping her whatever her group, the map's sides as HeavenClient has them, a rope grabbed as it does
 # (82 up at most), a touch's HP as a share of PADamage (as fitted on the first map) rather than meowdb's formula, and
-# no evasion at all (the study: at EVA 42 she'd evade no Horny Mushroom).
+# no evasion at all (the study: at EVA 42 she'd evade no Horny Mushroom), and her potions Red Potions (100 HP: which
+# she carries isn't known; world.POTION_HP's 30% otherwise, 226 HP on Tree Dungeon).
 WORLDS = {"zero-walls": {"zero_walls": True}, "client-sides": {"sides": "client"},
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
-          "no-evade": {"evade": 1e-9}}
-HER_FIELDS = ("defence", "evade")
+          "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}}
+HER_FIELDS = ("defence", "evade", "potion")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture

@@ -276,7 +276,7 @@ POSE_SPELL_S = 1.0       # s a monster's pose reads right or wrong at a time (No
 DROP_LIFE = 180.0        # s drops lie before they vanish (a guess: in game they lie over a minute, 95% at 60 s of 337
                          # followed, and the hunts' telemetry can't say more; analysis.respawn)
 PICK_REACH = 15.0
-POTION_HP = 0.30
+POTION_HP = 0.30         # of her HP a potion heals where what it heals isn't known (Her.potion): as on the first map
 # Her pet's potions (Her.pet), as meowdb's page on this game's pets has them (meowdb.com/msclassic/formulas/pets,
 # read 2026-10-24): it drinks when "HP after the hit x 100 / MaxHP < Warning", the warning a multiple of 5% (System
 # Options), one potion she picked, from her stock; potions "at least 0.2 seconds apart (unconfirmed)". So the pet
@@ -480,6 +480,7 @@ class Her:
                                  # share of her HP (PET_GAP); None: no pet
     evade: float = 0.0           # her evasion against a touch, as EVADE_ACC (her chance is this over the monster's
                                  # accuracy); 0: EVADE_ACC, as fitted
+    potion: float | None = None  # HP a potion of hers heals (her key's and her pet's); None: POTION_HP of her HP
 
 
 LEVEL_19 = Her()
@@ -492,6 +493,9 @@ LEVEL_23 = Her(max_hp=730.0, level=23, exp=31_736, defence=DEFENCE, pet=0.45)
 # 15-17% of hers (the study's 113-134 at DEF 64), a Green (54) 49-59, a Slime 7-9; by a share of PADamage as fitted
 # on the first map (`defence` None: the harness's `--touch share`) 75, 37 and 9, give or take 70%. Which holds isn't
 # known: one Horny touch's px on her HP bar (17 px of 104 by the formula, 10 by the share, at 1366x768) tells.
+# Which potion she carries on the new maps isn't known: POTION_HP's 30% is 219 HP at 730 and 226 at 752, between a Red
+# Potion's 100 and an Orange Potion's 250 (the game data; the Tree Dungeon study's monsters_drops.md); the harness's
+# `--world red-potion` has her drink Red Potions.
 LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=0.45)
 
 
@@ -1198,7 +1202,7 @@ class World:
                     return
                 self.potions_left -= 1
             self.potions_used += 1
-            self.hp = min(1.0, self.hp + POTION_HP)
+            self.hp = min(1.0, self.hp + self._potion())
             self.note("drinks a potion")
         elif action == "pet_food":
             self.pet_fed += 1
@@ -1453,9 +1457,14 @@ class World:
         self.knocked = True
         self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
 
+    def _potion(self) -> float:
+        """The share of her HP a potion of hers heals: Her.potion over her HP, or POTION_HP where that isn't known."""
+        her = self.character
+        return POTION_HP if her.potion is None else her.potion / her.max_hp
+
     def _pet_drinks(self) -> None:
         """Her pet's auto potion, right after a touch took HP (Her.pet; PET_GAP): below its warning, a potion from
-        her stock (Realism.potions), POTION_HP as her own."""
+        her stock (Realism.potions), as her own heals (_potion)."""
         pet = self.character.pet
         if pet is None or self.hp >= pet - 1e-9 or self.ms - self.pet_drank_ms < PET_GAP * 1000:
             return
@@ -1470,7 +1479,7 @@ class World:
         self.potions_used += 1
         self.pet_potions += 1
         self.pet_drank_ms = self.ms
-        self.hp = min(1.0, self.hp + POTION_HP)
+        self.hp = min(1.0, self.hp + self._potion())
         self.note(f"her pet drinks a potion for her: HP {self.hp:.1%}")
 
     def pet_fullness(self) -> float:

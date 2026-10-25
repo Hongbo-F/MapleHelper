@@ -391,6 +391,8 @@ def test_the_harness_runs_tree_dungeon_with_its_crowd_and_the_unknowns_switched_
     assert sc.her == dataclasses.replace(LEVEL_24, defence=None)
     assert harness.scenario("loop", 1, "game", map_id=TREE).her is None  # as she is there (scenarios.HER)
     assert harness.scenario("tour", 2, map_id=TREE, world=("client-reach",)).realism.rope_reach == ROPE_REACH_CLIENT
+    assert harness.scenario("loop", 1, map_id=TREE, world=("red-potion",)).her == dataclasses.replace(LEVEL_24,
+                                                                                                    potion=100.0)
     with pytest.raises(ValueError, match="10002073's alone"):
         harness.scenario("loop", 1, "crowd")  # the camps stand on Tree Dungeon's platforms
     assert harness.main(["run", "loop", "--preset", "crowd", "--seeds", "1"]) == 2

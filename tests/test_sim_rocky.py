@@ -105,6 +105,13 @@ def test_her_pet_drinks_a_potion_right_after_a_touch_leaves_her_under_its_warnin
     assert w.hp == pytest.approx(0.43) and w.potions_used == 0
 
 
+def test_a_potion_heals_what_it_heals_where_that_is_known_and_a_share_of_her_hp_where_not(model, monkeypatch):
+    w = _touched(model, monkeypatch, 0.48, Her(max_hp=752.0, pet=0.45, potion=100.0))  # a Red Potion's 100 HP
+    assert w.hp == pytest.approx(0.43 + 100.0 / 752.0) and w.pet_potions == 1
+    w = _touched(model, monkeypatch, 0.48, Her(max_hp=752.0, pet=0.45))
+    assert w.hp == pytest.approx(0.43 + world_mod.POTION_HP)
+
+
 def test_her_pet_drinks_from_her_stock_and_with_none_left_nothing(model, monkeypatch):
     w = _touched(model, monkeypatch, 0.48, Her(pet=0.45), Realism(potions=1))
     assert w.potions_left == 0 and w.pet_potions == 1
