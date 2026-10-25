@@ -1224,7 +1224,11 @@ BODY_RECORDINGS = ("stand_snail", "walk_snail")  # she stands still while snails
 def cmd_heading(args) -> int:
     """Which way she faces on saved frames (perception.heading: her picture above her name tag against her pictures),
     and with --learn, frames whose facing you know teach her pictures (lab, or with --seed the seed in gamelab/assets
-    that stands in until she has her own). Offline: no game, no keys."""
+    that stands in until she has her own). Her tag is found as a look finds it, or with --tags where a study put it (a
+    JSON list of {"file", "tag": [x, y]}, look-frame px: a window's own "BugBaby" label, Character Info's, can take
+    the search). Offline: no game, no keys."""
+    import json
+
     import cv2
 
     from .perception.heading import Heading
@@ -1241,7 +1245,9 @@ def cmd_heading(args) -> int:
         return 1
     template, full_path = _calibration(geo).template, paths.calibrated(paths.TAG_FULL, geo.suffix)
     lab, seed = paths.calibrated(paths.HEADING, geo.suffix), paths.calibrated(paths.HEADING_SEED, geo.suffix)
-    bank = Heading(geo, seed if args.seed else lab, None if args.seed else seed, background=False)
+    bank = Heading(geo, seed if args.seed else lab, None if args.seed else seed, background=False, log=print)
+    placed = ({Path(o["file"]).name: tuple(o["tag"]) for o in json.loads(Path(args.tags).read_text())}
+              if args.tags else {})
     if args.fresh:
         bank.forget()
     print(f"her pictures: {len(bank.refs)} from {len(bank.pool)} boxes ({bank.path if bank.path.exists() else seed})")
@@ -1250,7 +1256,8 @@ def cmd_heading(args) -> int:
         k = geo.look_scale
         frame = full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
                                                interpolation=cv2.INTER_AREA)
-        at = NameTag(template, full_path, geo).find(full)  # (a tag of its own each: frames of different places)
+        # (a tag of its own each: frames of different places)
+        at = placed.get(f.name) or NameTag(template, full_path, geo).find(full)
         r = bank.read(frame, at)
         print(f"{f.name}: tag {at}; " + (f"faces {r.side}" if r.side else f"can't tell ({r.why})")
               + (f" (matched {r.score:.2f}, {r.margin:.2f} ahead of the other way)" if r.why not in
@@ -1920,6 +1927,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--seed", action="store_true", help="the seed in gamelab/assets (in git), which stands in until "
                                                        "she has pictures of her own in gamelab/lab, not those")
     s.add_argument("--fresh", action="store_true", help="drop the pictures first (a new outfit)")
+    s.add_argument("--tags", help="where her tag is on the frames, not where a look finds it: a JSON list of "
+                                  "{\"file\", \"tag\": [x, y]} (look-frame px), by file name")
     s.set_defaults(func=cmd_heading)
 
     s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, the Lie Detector's "

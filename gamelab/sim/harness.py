@@ -48,8 +48,10 @@ What a run gave is read from the simulated world, not from the bot's own reports
   coverage         her moves, platforms and plans, for the coverage report (analysis.coverage.tally: what it
                    keeps of the run's telemetry, 3-7 KB a run as saved)
   turning          her throws and jump throws, those that tapped an arrow to turn her first (control.actions: 80 ms
-                   more a throw, 205 a jump throw, and a few units walked), and the frames that told the other way
-                   from her last arrow (the hunter's 'heading' events): `--world knock-turns` has a knock turn her
+                   more a throw, 205 a jump throw, and a few units walked), her attacks that went the other way from
+                   where the stack threw them (world.World.wrong_way), and the frames that told the other way from
+                   her last arrow (the hunter's 'heading' events): `--world knock-turns` has a knock turn her,
+                   `heading-wrong` and `heading-wrong-sure` her frames read the wrong way
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -144,6 +146,12 @@ IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body as the client has it (`client-body`: 22 either side of her feet and 65 tall, motion.bodies, which the
 # planner keeps her clear of monsters by), not the simulator's 15 and 55 (world.HER_HALF, HER_HEIGHT).
 WORLDS["client-body"] = {"her_box": HER_BOX_CLIENT}
+# ... and her facing read the wrong way off 1% of her frames, in runs of one pose (world.Noise.heading_wrong): as weakly
+# as every frame read the wrong way on 2026-10-24 (0.31, 0.24 ahead: never strong, which her throws' taps go by), and,
+# the worst case, as surely as she's read right (0.6, 0.4 ahead: strong).
+WORLDS["heading-wrong"] = {"heading_wrong": (0.01, 0.31, 0.24, True)}
+WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
+NOISE_FIELDS = ("heading_wrong",)  # WORLDS' fields that are world.Noise's
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
 # measured them offline (17 saved frames x 5, medians, after the profiling pass): a look placing her 12.0 ms of
@@ -224,8 +232,10 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
     her = scenarios.her_on(map_id)[1]
     for name in world:
         fields = WORLDS[name]
-        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items() if k not in HER_FIELDS})
+        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()
+                                                  if k not in HER_FIELDS and k not in NOISE_FIELDS})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
+        noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
     fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
     return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else "")
@@ -271,21 +281,23 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
                               "searches": f.get("searches"), "searching_s": f.get("searching_s"),
                               "senses": f["senses"], "tracker": f["tracker"]}
     out["looks"] = sim.eyes.counts["looks"]
-    out["turning"] = turning(trace["plans"], records)
+    out["turning"] = turning(trace["plans"], records, sim.world)
     out["nav"] = navigation(trace["log"], sim.model)
     out["nav"]["glances"] = sim.eyes.counts["glances"] + (
         trace["feed"]["senses"].get("glances from the feed", 0) if feed else 0)
     return out
 
 
-def turning(plans: list, records: list[dict]) -> dict:
+def turning(plans: list, records: list[dict], world=None) -> dict:
     """Her throws and jump throws (the plans the player ran), those of them that tapped an arrow to turn her first
-    (control.actions.Actions._turn), and the frames that told the other way from her last arrow (telemetry events
-    'heading': behavior.hunter)."""
+    (control.actions.Actions._turn), her attacks that went the other way from where the stack threw them (the
+    `world`'s count), and the frames that told the other way from her last arrow (telemetry events 'heading':
+    behavior.hunter)."""
     throws = [p for p in plans if p[1] in ("throw", "jump_throw")]
     turned = [p for p in throws if any(e[1] in ("left", "right") for e in p[2])]
     return {"throws": len(throws), "turned": len(turned),
             "jump_turned": sum(1 for p in turned if p[1] == "jump_throw"),
+            "attacks": getattr(world, "attacks_meant", None), "wrong_way": getattr(world, "wrong_way", None),
             "against": sum(1 for r in records if r.get("topic") == "event" and r.get("kind") == "heading")}
 
 

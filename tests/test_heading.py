@@ -1,11 +1,13 @@
 """Which way she faces, seen on a frame (perception.heading): her picture above her name tag against her pictures and
-their mirror images, on frames whose facing is known (tests/fixtures/heading: 21 frames at 1366x768 in her outfit of
-2026-10-24, and 23 of the old recordings' at 1920x1080 half size, labelled by the keys sent); her keys going by it
-(control.actions.Actions.see); and the simulator, whose eyes see the world's facing and whose world can turn her
-without a key (sim.world.Noise.turned, Realism.knock_turns)."""
+their mirror images, on frames whose facing is known (tests/fixtures/heading: 20 frames at 1366x768 in her outfit of
+2026-10-24, and 23 of the old recordings' at 1920x1080 half size, labelled by the keys sent); her pictures kept and
+read back safely; her keys going by it (control.actions.Actions.see, faces); and the simulator, whose eyes see the
+world's facing (or the wrong way: sim.world.Noise.heading_wrong) and whose world can turn her without a key
+(Noise.turned, Realism.knock_turns)."""
 
 import dataclasses
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,6 +67,16 @@ def other(side: str) -> str:
     return LEFT if side == RIGHT else RIGHT
 
 
+def scene(name: str) -> str:
+    """Which of the 2026-10-24 study's scenes a native frame is of: frames of one scene are near alike (her on the
+    same spot, in the same pose), so one is never read with pictures of another of the same scene."""
+    for prefix, place in (("n28", "West Rocky II"), ("first", "Tree Dungeon"), ("here", "Tree Dungeon"),
+                          ("hp0_1353", "hit on her chair"), ("hp0_1648", "hit"), ("nm_", "by the portal")):
+        if name.startswith(prefix):
+            return place
+    raise AssertionError(name)
+
+
 # --- perception -----------------------------------------------------------------------------------------------------
 
 def test_her_box_follows_the_windows_size():
@@ -72,20 +84,23 @@ def test_her_box_follows_the_windows_size():
     assert heading.box_px(NATIVE) == (71, 11, 23, 4)
 
 
-def test_each_frame_at_1366x768_is_read_with_pictures_of_the_other_20_both_ways_round():
-    """Leave one out over the 21 frames and their mirror images: none read the wrong way, one not told (hp0_135329
-    mirrored, on her chair hit-tinted: 0.04 between the ways), as measured (README, Her heading)."""
+def test_each_scene_at_1366x768_is_read_with_pictures_of_the_other_scenes():
+    """Leave one scene out over the 20 frames (5 scenes): none read the wrong way, one not told (hp0_135320, hit on
+    her chair: neither way like her, 0.21), 15 of the 19 told strongly, as measured (README, Her heading). (A mirror
+    image would only swap the two ways' scores: it tells nothing more.)"""
     items = crops("native")
-    wrong, untold = [], []
-    for i, (crop, side, f) in enumerate(items):
-        bank = bank_of(items[:i] + items[i + 1:], "native")
-        for mirror, truth in ((False, side), (True, other(side))):
-            r = bank.read(*placed(crop, "native", mirror))
-            if r.side is None:
-                untold.append((f["file"], mirror, r.why))
-            elif r.side != truth:
-                wrong.append((f["file"], mirror))
-    assert not wrong and len(untold) <= 1, (wrong, untold)
+    wrong, untold, strong = [], [], 0
+    for place in sorted({scene(f["file"]) for _, _, f in items}):
+        bank = bank_of([c for c in items if scene(c[2]["file"]) != place], "native")
+        for crop, side, f in items:
+            if scene(f["file"]) == place:
+                r = bank.read(*placed(crop, "native"))
+                if r.side is None:
+                    untold.append((f["file"], r.why))
+                elif r.side != side:
+                    wrong.append(f["file"])
+                strong += r.strong and r.side == side
+    assert not wrong and untold == [("hp0_135320.png", "low")] and strong >= 15, (wrong, untold, strong)
 
 
 def test_the_old_recordings_frames_are_read_with_pictures_of_other_recordings():
@@ -101,13 +116,17 @@ def test_the_old_recordings_frames_are_read_with_pictures_of_other_recordings():
         assert sum(r.side is not None for r, _ in reads) >= 0.9 * len(reads)
 
 
-def test_the_seed_tells_her_facing_on_the_saved_frames_and_their_mirror_images():
-    """The seed in gamelab/assets (21 frames at 1366x768) on the two full frames of tests/fixtures/native, her tag
-    found as a look finds it: she faces left, and right in the frames mirrored (her tag where the mirror puts it: the
-    game doesn't mirror her name)."""
+def test_the_seed_tells_her_facing_on_the_saved_frames_of_a_scene_it_wasnt_made_from():
+    """The seed in gamelab/assets (16 frames at 1366x768, all the fixture's scenes but West Rocky Mountain II's) on
+    the two full frames of tests/fixtures/native, which are of that scene, her tag found as a look finds it: she faces
+    left, and right in the frames mirrored (her tag where the mirror puts it: the game doesn't mirror her name)."""
     seed = paths.calibrated(paths.HEADING_SEED, NATIVE.suffix)
     bank = Heading(NATIVE, None, seed)
     assert bank.ready and len(bank.refs) <= heading.REFERENCES
+    made_of = {crop.tobytes() for crop in bank.pool}
+    n28 = [heading.canonical(heading.cut(*placed(c, "native"), NATIVE), side) for c, side, f in crops("native")
+           if scene(f["file"]) == "West Rocky II"]
+    assert len(bank.pool) == 16 and n28 and not made_of & {c.tobytes() for c in n28}  # (not made of that scene)
     template = FIXTURES / "native" / "tag_template_1366x768.npy"
     for name in ("n28_000.png", "n28_008.png"):
         full = np.asarray(Image.open(FIXTURES / "native" / name).convert("RGB"))
@@ -135,6 +154,7 @@ def test_a_decisive_picture_is_the_only_one_matched(monkeypatch):
     items = crops("native")
     bank = bank_of(items, "native")
     assert len(bank.refs) > 1
+    bank.read(*placed(items[0][0], "native"))  # (its best picture now tried first)
     calls = []
     real = heading.cv2.matchTemplate
     monkeypatch.setattr(heading.cv2, "matchTemplate", lambda *a, **k: calls.append(1) or real(*a, **k))
@@ -158,6 +178,64 @@ def test_her_pictures_learn_from_looks_whose_keys_leave_no_doubt_and_are_kept(tm
     again = Heading(NATIVE, path)
     assert len(again.refs) == len(bank.refs) and len(again.pool) == heading.FIRST
     assert not Heading(STRETCHED, path).ready  # pictures of another window size aren't hers there
+
+
+def test_a_file_of_her_pictures_cut_off_or_of_another_box_is_set_aside_for_the_seed_and_written_anew(tmp_path):
+    """Her pictures in lab that can't be read (a file cut off) or are of another box (her box's size changed since)
+    don't stop a look: the seed stands in, it's said, and the next save writes the file whole again."""
+    items = crops("native")
+    seed = tmp_path / "seed.npz"
+    bank_of(items[:8], "native", seed)
+    path = tmp_path / "heading_1366x768.npz"
+    path.write_bytes(seed.read_bytes()[:len(seed.read_bytes()) // 2])  # cut off
+    said = []
+    bank = Heading(NATIVE, path, seed, background=False, log=said.append)
+    assert bank.ready and len(bank.pool) == 8 and "can't be read" in said[0]
+    assert bank.read(*placed(items[0][0], "native")).side == items[0][1]
+    bank.save()
+    assert len(Heading(NATIVE, path).pool) == 8 and not list(tmp_path.glob("*.part"))  # whole again, in its place
+    np.savez_compressed(path, pool=np.zeros((3, 10, 10, 3), np.uint8), refs=np.zeros((0, 0, 0, 3), np.float32),
+                        client=np.array(NATIVE.client))  # (no box kept, as before it was: its boxes say)
+    said.clear()
+    assert len(Heading(NATIVE, path, seed, log=said.append).pool) == 8 and "another box" in said[0]
+
+
+def test_a_save_that_fails_leaves_the_last_whole_file(tmp_path, monkeypatch):
+    items = crops("native")
+    path = tmp_path / "h.npz"
+    bank = bank_of(items[:8], "native", path)
+    before = path.read_bytes()
+    bank.add(*placed(items[9][0], "native"), items[9][1])
+
+    def refused(*a):
+        raise PermissionError("held by a reader")
+    monkeypatch.setattr(heading.os, "replace", refused)
+    bank.save()
+    assert path.read_bytes() == before and not list(tmp_path.glob("*.part"))
+
+
+def test_pictures_made_from_a_pool_dropped_meanwhile_are_dropped_too(tmp_path, monkeypatch):
+    """forget while a thread makes pictures from the pool as it was: those pictures aren't used or kept."""
+    items = crops("native")
+    path = tmp_path / "h.npz"
+    bank = Heading(NATIVE, path)
+    for crop, side, _ in items[:12]:
+        bank.add(*placed(crop, "native"), side)
+    started, go = threading.Event(), threading.Event()
+    real = heading.references
+
+    def slow(pool, k=heading.REFERENCES):
+        started.set()
+        go.wait(5)
+        return real(pool, k)
+    monkeypatch.setattr(heading, "references", slow)
+    bank.rebuild()
+    assert started.wait(5)
+    bank.forget()
+    go.set()
+    bank.wait()
+    assert not bank.ready and not bank.pool
+    assert len(Heading(NATIVE, path).pool) == 0  # the old pool isn't back on disk
 
 
 def test_pictures_that_keep_reading_the_other_way_from_her_keys_are_dropped(tmp_path):
@@ -201,12 +279,12 @@ def taps(a: Actions) -> bool:
     return any(e[1] in ("left", "right") for e in a.sent[-1][1])
 
 
-def test_after_a_move_the_frame_says_which_way_she_faces_and_the_throw_doesnt_tap(keys_at):
+def test_after_a_move_a_strong_frame_says_which_way_she_faces_and_the_throw_doesnt_tap(keys_at):
     a, now = keys_at
     a.play([[0, "left", "down"], [300, "left", "up"]], "walk")  # a mover's move: the keys leave it unknown
     a.facing = None
-    assert a.see(LEFT, now[0] + 0.1) is None and a.heading is None and a.saw == "too soon after an arrow"
-    assert a.see(LEFT, now[0] + 0.3 + HEADING_SETTLE_S) is None
+    assert a.see(LEFT, now[0] + 0.1, strong=True) is None and a.heading is None and a.saw == "too soon after an arrow"
+    assert a.see(LEFT, now[0] + 0.3 + HEADING_SETTLE_S, strong=True) is None
     assert a.heading == LEFT and a.facing_by == "frame" and a.saw == "told otherwise"
     assert a.facing is None  # the decisions still go by her keys', as before
     now[0] += 1.0
@@ -215,6 +293,31 @@ def test_after_a_move_the_frame_says_which_way_she_faces_and_the_throw_doesnt_ta
     a.lock_until = a.arrow_until = 0.0
     a.throw(RIGHT)  # the other way: the tap, counted
     assert taps(a) and a.heading == a.facing == RIGHT and a.turns == 1 and a.turn_ms == 80
+
+
+def test_a_frame_that_isnt_strong_adds_a_tap_but_never_takes_one_away(keys_at):
+    """Reading.strong or not: after a move a frame that isn't strong tells her heading, but the throw that way still
+    taps (as with her keys' facing unknown); with her keys' facing that way it changes nothing; told the other way it
+    makes the throw tap, the safe way, whichever it's right about."""
+    a, now = keys_at
+    a.facing = None
+    later = now[0] + 1.0
+    assert a.see(LEFT, later) is None and a.heading == LEFT and a.facing_by == "frame" and not a.faces(LEFT)
+    now[0] = later + 0.5
+    a.throw(LEFT)
+    assert taps(a) and a.turns == 1
+    a.lock_until = a.arrow_until = 0.0
+    a.see(LEFT, now[0] + 1.0)  # agrees with her keys: nothing changes
+    assert a.saw == "as it was" and a.facing_by == "keys" and a.faces(LEFT)
+    now[0] += 1.5
+    a.throw(LEFT)
+    assert not taps(a)
+    a.lock_until = a.arrow_until = 0.0
+    a.see(RIGHT, now[0] + 1.0)  # the other way, not strongly: a tap either way
+    assert a.heading == RIGHT and not a.faces(LEFT) and not a.faces(RIGHT)
+    now[0] += 1.5
+    a.throw(LEFT)
+    assert taps(a)
 
 
 def test_a_frame_telling_the_other_way_from_her_last_arrow_goes_over_it_and_is_said_once(keys_at):
@@ -278,31 +381,26 @@ def test_her_keys_say_her_facing_beyond_doubt_only_well_after_her_arrow_with_no_
 needs_tree = pytest.mark.skipif(not scenarios.available(TREE), reason="needs Tree Dungeon's game data (gamedata/data)")
 
 
-def _kill_on_23(noise=None, realism=None, read=True, seed=1, start=-150.0, mushrooms=(120.0,)):
-    """`hunt kill` of the rightmost Horny Mushroom on 23 (Tree Dungeon; her at `start`, mushrooms at `mushrooms`): every
-    throw checked against the world's facing once its plan has played (its star leaves the way she faces). `read`
-    False: eyes that can't read her picture. What came of it, and the trace."""
-    out = {"throws": 0, "wrong way": 0}
+def _kill_on_23(noise=None, realism=None, read=True, seed=1, start=-150.0, mushrooms=(120.0,), facing=RIGHT):
+    """`hunt kill` of the rightmost Horny Mushroom on 23 (Tree Dungeon; her at `start`, mushrooms at `mushrooms`): her
+    attacks counted, and those that went the other way from where the stack threw them (the world's count, by her
+    facing as each started). `read` False: eyes that can't read her picture. What came of it, and the trace."""
+    out = {}
 
     def fn(sim):
         if not read:
             sim.eyes.heading = lambda obs: Reading(None, why="no pictures")
         h = sim.hunter()
-        for name in ("throw", "jump_throw"):
-            method = getattr(h.actions, name)
-
-            def checked(direction, method=method):
-                method(direction)
-                sim.world.advance(sim.clock.now)
-                out["throws"] += 1
-                out["wrong way"] += sim.world.facing != direction
-            setattr(h.actions, name, checked)
-        s = h.look()
-        out["ended"] = h.kill(max(s.monsters, key=lambda m: m.x), seconds=40)
-        out["counts"] = dict(h.heading_counts)
+        try:
+            s = h.look()
+            out["ended"] = h.kill(max(s.monsters, key=lambda m: m.x), seconds=40)
+        finally:  # (she may die: SimDied ends the run)
+            out["counts"] = dict(h.heading_counts)
+            out["throws"], out["wrong way"] = sim.world.attacks_meant, sim.world.wrong_way
+            out["taps"] = h.actions.turns
         return {}
     sc = scenarios.Scenario("heading_kill_23", fn, (23, start), monsters=[("Horny Mushroom", 23, x) for x in mushrooms],
-                            seed=seed, limit=60, noise=noise, realism=realism, map_id=TREE)
+                            seed=seed, limit=60, noise=noise, realism=realism, map_id=TREE, facing=facing)
     trace = scenarios.run_scenario(sc)
     out["knocks"] = sum("knocked by" in line for line in trace["world_log"])
     return out, trace
@@ -341,11 +439,31 @@ def test_in_a_world_where_a_knock_turns_her_the_frame_keeps_her_stars_going_the_
 @needs_tree
 def test_over_eight_seeds_of_knocks_that_turn_her_her_stars_go_the_wrong_way_only_when_decided_before_one():
     """As above on seeds 1-8: with the frame, at most one wrong-way star a knock (4 for 10 knocks, as measured), where
-    eyes that can't read her picture send 16 the wrong way (19 knocks)."""
+    eyes that can't read her picture send 16 the wrong way (19 knocks). (Knocks that turned her; the stars by the
+    world's count, World.wrong_way.)"""
     seen = [_kill_on_23(seed=k, **KNOCKED)[0] for k in range(1, 9)]
     blind = [_kill_on_23(seed=k, read=False, **KNOCKED)[0] for k in range(1, 9)]
     wrong = sum(o["wrong way"] for o in seen)
     assert wrong <= sum(o["knocks"] for o in seen) and sum(o["wrong way"] for o in blind) >= 3 * wrong
+
+
+@needs_tree
+def test_frames_read_the_wrong_way_but_not_strongly_never_take_a_tap_away(monkeypatch):
+    """Noise.heading_wrong on every frame, her facing away from the Horny Mushroom at the start: read as weakly as the
+    frames read the wrong way on 2026-10-24 (0.31, 0.24 ahead), her first throw taps the arrow first (the safe way;
+    the rest she throws by her keys, the frames coming while her attack plays) and none goes the wrong way, as with no
+    frame read wrong. Were a frame that isn't strong let take a tap away (Actions.faces by `heading` alone), or were
+    the wrong frames strong (which none read was), every star would go the wrong way."""
+    away = dict(facing=LEFT, seed=1)
+    right, _ = _kill_on_23(**away)
+    weak, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.31, 0.24, False)), **away)
+    assert weak["ended"] == right["ended"] == "killed" and weak["wrong way"] == right["wrong way"] == 0, (weak, right)
+    assert weak["taps"] == right["taps"] == 1 and weak["counts"]["against"] == 1  # (said, as live)
+    sure, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.6, 0.4, False)), **away)
+    assert sure["taps"] == 0 and sure["wrong way"] == sure["throws"] >= 8, sure
+    monkeypatch.setattr(Actions, "faces", lambda self, direction: self.heading == direction)
+    ungated, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.31, 0.24, False)), **away)
+    assert ungated["taps"] == 0 and ungated["wrong way"] == ungated["throws"] >= 8, ungated
 
 
 @needs_tree
@@ -382,6 +500,21 @@ def test_the_fake_eyes_see_the_worlds_facing_but_not_on_a_rope_nor_on_frames_tha
     scenarios.run_scenario(scenarios.Scenario("heading_unsure", many, (23, 73.0), map_id=TREE,
                                               noise=Noise(heading_unsure=0.2)))
     assert 0.1 <= unsure["share"] <= 0.3
+    wrong = {}
+
+    def runs(sim):
+        h = sim.hunter()
+        reads = []
+        for _ in range(200):
+            reads.append(sim.eyes.heading(h.look()))
+            sim.clock.sleep(0.05)
+        wrong["reads"] = [(r.side != sim.world.facing, r.score) for r in reads]
+        return {}
+    scenarios.run_scenario(scenarios.Scenario("heading_wrong", runs, (23, 73.0), map_id=TREE,
+                                              noise=Noise(heading_wrong=(0.3, 0.31, 0.24, True))))
+    flips = [w for w, _ in wrong["reads"]]
+    assert 0.1 <= sum(flips) / len(flips) <= 0.5 and all(score == 0.31 for w, score in wrong["reads"] if w)
+    assert sum(a != b for a, b in zip(flips, flips[1:])) < sum(flips) / 2  # in runs (a spell, 20 looks), not alone
 
 
 # --- the live check's command (watch --heading) ---------------------------------------------------------------------

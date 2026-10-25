@@ -9,10 +9,12 @@ of plan (control.alarm): her pet's food (feed_pet's), and her retreat's moves (`
 Which way she faces is known two ways: by her keys (`facing`: the way her plans last turned her or threw, unknown
 after a move), and off a look's frame (perception.heading, which the hunter passes on: `see`). Whether a throw taps the
 arrow to turn her first goes by `heading`: the frame's where it's sure and newer than what her keys last did (after a
-move, a knock, her player's own keys, a plan cut short), else her keys'. Where the frame can't tell, her keys' stands,
-but after a hit it's unknown: the throw taps first. The decisions (attack.stance's side she keeps working, the close
-monster she jumps away from) go by her keys' as before: going by the frame's too, which knows her facing after a move
-where her keys don't, the simulator's hunt loop made 12% less EXP a minute and the tour 3% (README, Her heading).
+move, a knock, her player's own keys, a plan cut short), else her keys'. The frame takes a tap away only where it's
+strong (heading.Reading.strong: none of the frames read the wrong way on 2026-10-24 was), and adds one wherever it tells
+otherwise (`faces`). Where the frame can't tell, her keys' stands, but after a hit it's unknown: the throw taps first.
+The decisions (attack.stance's side she keeps working, the close monster she jumps away from) go by her keys' as
+before: going by the frame's too, which knows her facing after a move where her keys don't, the simulator's hunt loop
+made 12% less EXP a minute and the tour 3% (README, Her heading).
 """
 
 import dataclasses
@@ -111,11 +113,13 @@ class Actions:
                             # retreat's moves); None: refused then
         # Which way she faces (None: unknown). `facing`: by her keys, the way her last plan turned her or threw
         # (None after a move), set at `_keys_at`; `keys_facing`: the way her last arrow turned her (None after a move),
-        # at `_arrow_at`; `seen`: the frame's (see), at `seen_at`. `heading` is the newer of `facing` and `seen`.
+        # at `_arrow_at`; `seen`: the frame's (see), at `seen_at`, and whether that frame was strong (`seen_strong`).
+        # `heading` is the newer of `facing` and `seen`.
         self._facing: str | None = None
         self.keys_facing: str | None = None
         self.seen: str | None = None
         self.seen_at = -1e18
+        self.seen_strong = False
         self._keys_at = 0.0
         self._arrow_at = 0.0
         self.arrows_at = -1e18    # when the last arrow a plan pressed goes down or up (time.monotonic)
@@ -215,10 +219,11 @@ class Actions:
         last arrow could show what it did (HEADING_SETTLE_S after it), or of a navigator's chain still playing, tell
         nothing; nor do those while her attack plays (until `arrow_until`, when she can't turn and her pictures read
         her worst: perception.heading) unless they're `strong` (heading.Reading.strong). A frame that's sure is her
-        `heading`; one that can't tell leaves it, but after a hit since it was last set (`hit_at`: the time of the
-        last look that saw her HP drop), when a knock may have turned her, makes it unknown: the next throw taps the
-        arrow first. Returns her last arrow's way the first time a frame tells the other (else None), for the hunter
-        to log. What came of the frame is in `saw`."""
+        `heading` where it tells otherwise, or agrees and is strong (one that agrees and isn't changes nothing: a throw
+        that way goes without a tap only by her keys or a strong frame, `faces`); one that can't tell leaves it, but
+        after a hit since it was last set (`hit_at`: the time of the last look that saw her HP drop), when a knock may
+        have turned her, makes it unknown: the next throw taps the arrow first. Returns her last arrow's way the first
+        time a frame tells the other (else None), for the hunter to log. What came of the frame is in `saw`."""
         if self._blind:
             self.saw = "a chain playing"
             return None
@@ -231,14 +236,15 @@ class Actions:
         if side is None:
             self.saw = "not told"
             if hit_at is not None and hit_at >= max(self._keys_at, self.seen_at) and self.heading is not None:
-                self.seen, self.seen_at = None, t
+                self.seen, self.seen_at, self.seen_strong = None, t, False
                 self.saw = "unknown after a hit"
             return None
         against = None
         if self.keys_facing is not None and side != self.keys_facing and not self._doubted:
             against, self._doubted = self.keys_facing, True
         self.saw = "told otherwise" if side != self.heading else "as it was"
-        self.seen, self.seen_at = side, t
+        if side != self.heading or strong:
+            self.seen, self.seen_at, self.seen_strong = side, t, strong
         return against
 
     def keys_say(self, t: float, hit_at: float | None = None) -> str | None:
@@ -326,9 +332,17 @@ class Actions:
     def _attack_key(self) -> str:
         return (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
 
+    def faces(self, direction: str) -> bool:
+        """Whether she faces `direction` surely enough for a throw that way to go without the tap that turns her: her
+        `heading` is that way by her keys, or by a strong frame (heading.Reading.strong). A frame that isn't strong
+        can add a tap (where it tells otherwise: see) but never take one away: every frame read the wrong way on
+        2026-10-24 (README, Her heading) was weaker than that, and a star the wrong way costs more than a tap."""
+        return self.heading == direction and (self.facing_by == "keys" or self.seen_strong)
+
     def _turn(self, direction: str) -> tuple[list, int]:
-        """The tap that turns her toward `direction` (none if she already faces it: `heading`), and when it's done."""
-        if self.heading == direction:
+        """The tap that turns her toward `direction` (none if she surely faces it already: `faces`), and when it's
+        done."""
+        if self.faces(direction):
             return [], 0
         arrow = self.arrow(direction)
         return [[0, arrow, "down"], [MOVEMENT.tap_turn_ms, arrow, "up"]], MOVEMENT.tap_turn_ms + TURN_SETTLE_MS

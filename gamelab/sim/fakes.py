@@ -36,6 +36,7 @@ from pathlib import Path
 import numpy as np
 
 from maplehelper.config import GameKeys
+from maplehelper.engine import LEFT, RIGHT
 from maplehelper.ocr.exp_table import EXP_TO_NEXT
 
 from ..behavior.pet import PetCare
@@ -57,7 +58,7 @@ from ..screen import SCALE
 from ..screen import UNITS_PER_HALF_PX
 from ..screen import SCREEN_SCALE
 from ..perception.kinds import kind_of
-from .world import LEVEL_19, POSE_SPELL_S, Noise, World, exp_pixels
+from .world import HEADING_SPELL_S, LEVEL_19, POSE_SPELL_S, Noise, World, exp_pixels
 
 START = 10_000.0          # the fake clock's start (monotonic() is never near 0 in real runs)
 EPOCH = 1_800_000_000.0   # what time.time() reads at the start (a fixed date, for strftime)
@@ -491,13 +492,31 @@ class FakeEyes(Eyes):
     def _heading(self) -> Reading:
         """Which way she faces as perception.heading reads her picture now: the world's facing, matched as her
         pictures matched on her own frames (0.6, 0.4 ahead); not told on a rope (only her back shows), nor on
-        Noise.heading_unsure's share of frames (drawn per tick)."""
+        Noise.heading_unsure's share of frames (drawn per tick); the other way on Noise.heading_wrong's."""
         w = self.world
         if w.mode == "rope":
             return Reading(None, why="rope")
         if self.noise.heading_unsure and w.chance("heading") < self.noise.heading_unsure:
             return Reading(None, 0.5, 0.02, "close")
+        if self.noise.heading_wrong:
+            share, score, margin, runs = self.noise.heading_wrong
+            draw = w.chance(f"heading_wrong:{self._pose()}", int(w.t // HEADING_SPELL_S)) if runs else \
+                w.chance("heading_wrong")
+            if draw < share:
+                return Reading(LEFT if w.facing == RIGHT else RIGHT, score, margin)
         return Reading(w.facing, 0.6, 0.4)
+
+    def _pose(self) -> str:
+        """Her pose as her picture shows it (for Noise.heading_wrong's runs): in the air, on the chair, attacking,
+        lying down, walking or standing."""
+        w = self.world
+        if w.mode != "ground":
+            return w.mode
+        if w.sitting:
+            return "chair"
+        if w.attack_ms[0] <= w.ms < w.attack_ms[1]:
+            return "attack"
+        return "prone" if "down" in w.held else "walk" if w.vx else "stand"
 
     def heading(self, obs: Observation) -> Reading:
         """Eyes.heading over the world: what her picture showed when the look's frame was drawn (_heading); not told

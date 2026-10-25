@@ -402,10 +402,12 @@ class Eyes:
             return False
 
     def heading_bank(self) -> Heading:
-        """Her pictures for these eyes' window size (perception.heading: kept in lab, the seed in assets until then)."""
+        """Her pictures for these eyes' window size (perception.heading: kept in lab, the seed in assets until then, or
+        where lab's can't be read, which the eyes' log says)."""
         if getattr(self, "_heading", None) is None:
             self._heading = Heading(self.geo, paths.calibrated(paths.HEADING, self.geo.suffix),
-                                    paths.calibrated(paths.HEADING_SEED, self.geo.suffix))
+                                    paths.calibrated(paths.HEADING_SEED, self.geo.suffix),
+                                    log=lambda text: getattr(self, "log", print)(text))
         return self._heading
 
     def bar(self, obs: Observation, mob: Mob) -> float | None:

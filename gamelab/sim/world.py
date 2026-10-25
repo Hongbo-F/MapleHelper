@@ -291,6 +291,8 @@ RESPAWN = 8.0
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
                          # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
 POSE_SPELL_S = 1.0       # s a monster's pose reads right or wrong at a time (Noise.pose_wrong)
+HEADING_SPELL_S = 1.0    # s one pose of hers reads the wrong way at a time (Noise.heading_wrong in runs): a pose her
+                         # pictures read wrong reads so on every frame while she holds it
 DROP_LIFE = 180.0        # s drops lie before they vanish (a guess: in game they lie over a minute, 95% at 60 s of 337
                          # followed, and the hunts' telemetry can't say more; analysis.respawn)
 PICK_REACH = 15.0
@@ -475,9 +477,16 @@ class Noise:
                                  # times in 29 under 46 units off, against 28 in 48 at 46-130: (46, 0.35); () off
     heading_unsure: float = 0.0  # share of frames whose picture of her can't tell which way she faces (perception.
                                  # heading), drawn per frame: on the old recordings 1.4% of the frames read with
-                                 # her own pictures, 1 of 42 at 1366x768 (on a rope it never can: FakeEyes)
+                                 # her own pictures, 1 of 20 at 1366x768, each scene read with pictures of the
+                                 # others (on a rope it never can: FakeEyes)
     turned: tuple = ()           # ((at, side), ...): s since the start when something that isn't her keys turns her
                                  # (her player's own arrow, ...): her frame shows it, her keys don't know
+    heading_wrong: tuple = ()    # (share, score, margin, runs): that share of frames read her facing the wrong way,
+                                 # matching `score`, `margin` ahead; `runs` True: drawn per pose of hers for each
+                                 # HEADING_SPELL_S (a pose her pictures don't know), False: per frame. Of the frames
+                                 # read the wrong way on 2026-10-24 none was strong (heading.Reading.strong): with
+                                 # pictures of walks and jumps alone, 9 of 426 frames of throws, at 0.31, 0.24 ahead;
+                                 # () off
 
     @staticmethod
     def during(spells: tuple, t: float) -> bool:
@@ -959,6 +968,12 @@ class World:
         self.kills: dict[str, int] = {}
         self.touches = 0                # monsters touching her (evaded ones too)
         self.evaded = 0
+        # The ways the stack means its attacks to go, (when its key goes out, way), from the Sim's throw listener
+        # (control.actions: before the plan plays, so its key goes then or later), and of the attacks the game took
+        # that one was meant for, how many went the other way (her facing as each started: _aim)
+        self.meant: list[tuple[float, str]] = []
+        self.attacks_meant = 0
+        self.wrong_way = 0
         self.picked: dict[str, int] = {}
         self.messages: list[tuple[float, str]] = []
         self.portals = [pt for pt in model.portals if pt.kind == PORTAL_EXIT]
@@ -1670,6 +1685,13 @@ class World:
         alone; then, as the client does, the line to a star's pick alone is checked (sight_stop): stopped, the
         attack hits nothing, and no other monster takes it."""
         self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
+        due = [way for when, way in self.meant if when <= self.attack_key_at + 1e-6]
+        if due:  # (the latest meant by then: one whose key the game didn't take is passed over)
+            self.meant = [(when, way) for when, way in self.meant if when > self.attack_key_at + 1e-6]
+            self.attacks_meant += 1
+            if self.facing != due[-1]:
+                self.wrong_way += 1
+                self.note(f"attack meant {due[-1]} goes {self.facing}")
         if self.mode == "ground" or (AIR_PICK == "v83" and self.mode == "air"):
             stances = reach.CLAW.stances
             target = self.swiped(self.facing, stances[int(self.chance("stance") * len(stances))])

@@ -11,9 +11,10 @@ Her pictures are her own: a pool of boxes cut from looks whose keys say which wa
 from looks well after the last arrow sent and with no hit since; behavior.hunter), all turned to face left, and
 reduced to at most REFERENCES pose pictures, each the median of a cluster of the pool (standing, walking, in the air,
 after a throw, on her chair). They're kept under gamelab/lab per window size (heading.npz, heading_1366x768.npz), as
-her name tag is; until there are any, the seed in gamelab/assets stands in (her at 1366x768 in her outfit of
-2026-10-24, `python -m gamelab heading --seed`). Looks where the pictures keep disagreeing with keys that can't be
-wrong mean they're no longer hers (a new outfit): the pool is dropped and learnt again (OUTFIT).
+her name tag is, with the window size and box they're for (a file of another, or one that can't be read, is set
+aside); until there are any, the seed in gamelab/assets stands in (her at 1366x768 in her outfit of 2026-10-24,
+`python -m gamelab heading --seed --tags`). Looks where the pictures keep disagreeing with keys that can't be wrong mean
+they're no longer hers (a new outfit): the pool is dropped and learnt again (OUTFIT).
 
 Measured on 2026-10-24 (README, Her heading; D:/MapleHelper-scratch/heading/eval): on the old recordings (the first
 map, 1920x1080 looks at half size; her outfit of 2026-10-18 to 21), each recording read with pictures learnt from the
@@ -21,14 +22,20 @@ others, 1,232 of 1,249 frames told and every one right (the walks, the turns in 
 chains, the chair and pick-ups), 17 not told (1.4%); 131 more were of her under the minimap, where 4 had been read the
 wrong way.
 With pictures learnt from walks and jumps alone, 9 of 426 frames of throws told were the wrong way, all barely like
-her: while her attack plays her keys go by frames told surely (ATTACK_SCORE, ATTACK_MARGIN) alone, and none of those
-was (control.actions.Actions.see). On 21 frames at 1366x768 (her outfit of 2026-10-24:
-standing, on her chair, hit, behind the portal's glow) and their mirror images, each read with pictures from the other
-20, 41 of 42 right and one not told. A read takes 0.2 ms at half size (p95 0.4) and 0.7 at 1366x768 (at most 1.6).
+her, none strong (ATTACK_SCORE, ATTACK_MARGIN: Reading.strong): while her attack plays her keys go by strong frames
+alone (control.actions.Actions.see), and a throw goes without its tap only by her keys or a strong frame
+(Actions.faces). At 1366x768 (her outfit of 2026-10-24), 20 frames of 5 scenes, all of her standing still (standing, on
+her chair, hit, behind the portal's glow), each scene read with pictures from the other four: 19 right, 15 of them
+strongly, one not told, none wrong. The seed is 16 of them, all but West Rocky Mountain II's 4, and reads every one of
+that scene's 30 frames (and their mirror images) right and strongly. A read takes 0.2 ms at half size (p95 0.4) and
+about 1 ms at 1366x768 (at most 2.6, with the live hunt running).
 """
 
+import os
 import threading
+import zipfile
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -173,11 +180,14 @@ def decide(as_is: float, flipped: float) -> Reading:
 
 class Heading:
     """Her pictures for look frames of geometry `geo`, kept at `path` (None: nowhere), the `seed` (a file like
-    `path`'s, or None) standing in until there are any. `background`: the pictures are made again on a thread of
-    their own (False: at once, as tests want)."""
+    `path`'s, or None) standing in until there are any, or where `path`'s can't be read or aren't of this window's size
+    and box (said to `log`). `background`: the pictures are made again on a thread of their own (False: at once, as
+    tests want)."""
 
-    def __init__(self, geo: Geometry, path: Path | None = None, seed: Path | None = None, background: bool = True):
+    def __init__(self, geo: Geometry, path: Path | None = None, seed: Path | None = None, background: bool = True,
+                 log: Callable[[str], None] | None = None):
         self.geo, self.path, self.background = geo, path, background
+        self.log = log or (lambda text: None)
         self.pool: deque[np.ndarray] = deque(maxlen=POOL)
         # The pictures, and the order they're tried in (the one that matched best last first): one tuple, swapped
         # whole when a thread makes new ones
@@ -185,11 +195,13 @@ class Heading:
         self._new = 0                # boxes learnt since the pictures were last made
         self._learnt_at = -1e18      # when the last box was learnt (its look's time)
         self._making: threading.Thread | None = None
+        self._generation = 0         # bumped by forget: pictures a thread was making from the pool before are dropped
+        self._saving = threading.Lock()  # one save at a time (a thread's and forget's)
         self.checks: deque[bool] = deque(maxlen=OUTFIT[1])  # the last looks learn could check: whether they agreed
         self.counts = {"read": 0, "told": 0, "learnt": 0, "disagreed": 0, "forgot": 0}
-        source = path if path is not None and path.exists() else seed
-        if source is not None and source.exists():
-            self._load(source)
+        for source in (path, seed):
+            if source is not None and source.exists() and self._load(source):
+                break
 
     @property
     def refs(self) -> list[np.ndarray]:
@@ -255,56 +267,92 @@ class Heading:
         return True
 
     def rebuild(self) -> None:
-        """Make the pictures again from the pool (on a thread of their own if `background`), and keep both (`path`)."""
+        """Make the pictures again from the pool (on a thread of their own if `background`), and keep both (`path`).
+        The thread isn't a daemon: a run that ends while it works waits the 65 ms for it rather than cut it off (and
+        the file is written whole before it's put in place: save)."""
         if self._making is not None and self._making.is_alive():
             return
-        pool = list(self.pool)
+        pool, generation = list(self.pool), self._generation
         self._new = 0
         if not self.background:
-            self._made(pool, references(pool))
+            self._made(generation, pool, references(pool))
             return
-        self._making = threading.Thread(target=lambda: self._made(pool, references(pool)), name="heading-pictures",
-                                        daemon=True)
+        self._making = threading.Thread(target=lambda: self._made(generation, pool, references(pool)),
+                                        name="heading-pictures")
         self._making.start()
 
-    def _made(self, pool: list[np.ndarray], refs: list[np.ndarray]) -> None:
-        self._bank = (refs, list(range(len(refs))))
-        self.save(pool=pool)
+    def _made(self, generation: int, pool: list[np.ndarray], refs: list[np.ndarray]) -> None:
+        """Pictures made from `pool`: used and kept, unless the pool was dropped meanwhile (forget)."""
+        with self._saving:
+            if generation != self._generation:
+                return
+            self._bank = (refs, list(range(len(refs))))
+        self.save(pool=pool, refs=refs, generation=generation)
 
     def forget(self) -> None:
         """Drop the pool and the pictures: they're not of her as she is now."""
-        self.pool.clear()
-        self._bank, self._new = ([], []), 0
+        with self._saving:
+            self._generation += 1
+            self.pool.clear()
+            self._bank, self._new = ([], []), 0
         self.checks.clear()
         self.counts["forgot"] += 1
         self.save()
 
-    def save(self, path: Path | None = None, pool: list[np.ndarray] | None = None) -> None:
-        """The pool (by default as it is now) and the pictures, at `path` (by default where they're kept; nowhere if
-        None)."""
+    def save(self, path: Path | None = None, pool: list[np.ndarray] | None = None,
+             refs: list[np.ndarray] | None = None, generation: int | None = None) -> None:
+        """The pool and the pictures (by default as they are now), at `path` (by default where they're kept; nowhere
+        if None), with the window size and box they're for: written to a file of its own and then put in its place,
+        so a run cut off meanwhile leaves the last whole one. Not if the pool was dropped since `generation`."""
         path = path or self.path
         if path is None:
             return
         pool = list(self.pool) if pool is None else pool
+        refs = self.refs if refs is None else refs
         boxes = np.stack(pool) if pool else np.zeros((0, 0, 0, 3), np.uint8)
-        refs = np.stack(self.refs) if self.refs else np.zeros((0, 0, 0, 3), np.float32)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(path, pool=boxes, refs=refs, client=np.array(self.geo.client))
-        except OSError:
-            pass
+        pictures = np.stack(refs) if refs else np.zeros((0, 0, 0, 3), np.float32)
+        part = path.with_name(f"{path.name}.{os.getpid()}.part")
+        with self._saving:
+            if generation is not None and generation != self._generation:
+                return
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(part, "wb") as f:
+                    np.savez_compressed(f, pool=boxes, refs=pictures, client=np.array(self.geo.client),
+                                        box=np.array(box_px(self.geo)))
+                os.replace(part, path)  # (refused on Windows while a reader holds it: the next save tries again)
+            except OSError:
+                try:
+                    part.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def wait(self) -> None:
         """Until the pictures being made (if any) are."""
         if self._making is not None:
             self._making.join()
 
-    def _load(self, path: Path) -> None:
-        with np.load(path) as z:
-            if tuple(z["client"]) != tuple(self.geo.client):
-                return
-            self.pool.extend(np.ascontiguousarray(b) for b in z["pool"])
-            refs = [np.ascontiguousarray(r, np.float32) for r in z["refs"]]
+    def _load(self, path: Path) -> bool:
+        """Her pictures and pool from a file `save` wrote, if it's of this window's size and box: False, nothing
+        taken, if it isn't or can't be read (said to `log`: the seed stands in, and the next save writes it anew)."""
+        up, down, half, _ = box_px(self.geo)
+        shape = (up - down, 2 * half, 3)
+        try:
+            with np.load(path) as z:
+                if tuple(z["client"]) != tuple(self.geo.client):
+                    return False
+                pool, pictures = z["pool"], z["refs"]
+                box = tuple(int(v) for v in z["box"]) if "box" in z.files else None
+        except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile) as e:
+            self.log(f"her pictures at {path} can't be read ({type(e).__name__}: {e}): set aside")
+            return False
+        if (box is not None and box != box_px(self.geo)) or any(len(a) and a.shape[1:] != shape
+                                                                 for a in (pool, pictures)):
+            self.log(f"her pictures at {path} are of another box than {shape[1]}x{shape[0]} px: set aside")
+            return False
+        self.pool.extend(np.ascontiguousarray(b) for b in pool)
+        refs = [np.ascontiguousarray(r, np.float32) for r in pictures]
         if not refs and len(self.pool) >= FIRST:
             refs = references(list(self.pool))
         self._bank = (refs, list(range(len(refs))))
+        return True

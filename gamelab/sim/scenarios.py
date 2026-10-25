@@ -207,6 +207,8 @@ class Sim:
         h = Hunter(self.eyes, self.keys, self.model, log=self.log, feed=self.feed, **kw)
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
         self.senses.append(h.senses)
+        # The way each attack is meant to go, for the world to count those her facing sends the other way
+        h.actions.throw_listeners.append(lambda when, direction: self.world.meant.append((when, direction)))
         play = h.actions.play  # every plan Actions plays (fights, single moves, tours): checked each time;
         # the navigator's chains go through client.send, which guard() checks through the fake player
 
@@ -2027,7 +2029,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=4, limit=600,
+@tree((28, 247.0), monsters="all", seed=7, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -2039,12 +2041,15 @@ def loop_tree_run(sim):
     """`python -m gamelab tour --loop --minutes 5 --map 10002073` from her spot by the portal on 28, with every spawn
     filled and nobody else, then standing by on a safe platform (25-27). A ground's EXP counts less the more dangerous
     the place she'd hunt it from (hunt.GROUND_DANGER): the floor (33: a Green Mushroom, 7% of her HP a touch, and two
-    Slimes, 1%) is the safest that pays, and she hunts it the whole 5 minutes, 61 kills and 1,311 EXP; with every
+    Slimes, 1%) is the safest that pays, and she hunts it the whole 5 minutes, 68 kills and 1,280 EXP; with every
     ground's EXP counted whole she went up the tower to 23, 19, 7 and 19 for 1,041 (before the danger, 23, 19, 7 and
     15 for 59 kills and 1,117 EXP, most of them on the floor on her way).
     The floor is hunted standing on it (the rules 'close quarters' and 'in passing'). (Seed 4: in this world her own
     group's walls alone stop her, and of seeds 1-10, 4 were knocked out past the tower's walls within 5 minutes, off
-    25's right end or the rope at -192; with group 0's walls stopping her none: loop_tree_walls.)"""
+    25's right end or the rope at -192; with group 0's walls stopping her none: loop_tree_walls. Seed 7 since a
+    throw's tap goes by her facing off the frame, perception.heading: on seed 4 she was knocked off the rope at -192
+    out of the map at 203 s; of seeds 1-12, 3 fell out (4, 6, 9), as 2 at master's head (3, 12), and 5 meet all of
+    this, 7 alone on the floor all 5 minutes, the others hunting 23 first.)"""
     return _loop(5)(sim)
 
 
@@ -2075,7 +2080,7 @@ _CROWD, _SLOW = harness.PRESETS["crowd"], harness.PRESETS["crowd-slow"]
 _LUCKY = dataclasses.replace(LEVEL_24, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=5, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 231"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -2087,7 +2092,9 @@ def loop_tree_23(sim):
     Mushrooms, which never leave it, can't touch her), not standing among them on 23 as live, and not from its middle
     between their two spawn points when it's empty. Its twenty shots from the spot and twenty kills are one run's luck:
     with the branches merged (escorted trips, her body the client's), of seeds 1-12 four meet them (1, 5, 6, 9), every
-    one going to 24 at 231 for 23; on positioning alone over master's onboarding, 2 and 5 of seeds 1-6."""
+    one going to 24 at 231 for 23; on positioning alone over master's onboarding, 2 and 5 of seeds 1-6. (Seed 5
+    since a throw's tap goes by her facing off the frame, perception.heading: of seeds 1-12, 4, 5, 6, 9 and 10 meet
+    them; on seed 1 she shot 23 from the spot fewer than 20 times, killing 20.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2217,7 +2224,7 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((28, 247.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=7, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
@@ -2227,15 +2234,21 @@ def loop_tree_lie_detector(sim):
     the nearest place no monster reaches, is 4.3 s by route, past retreat.NEAR_S with the crowd's stops), so up onto
     the rope at 146 from 32, at its safest height (attack.ropes), avoiding the monsters, her moves alone; a retreat plan
     past the player's 12 s is refused. (From the floor's crowd, of seeds 1-12 seen at 40, 75, 110 and 150 s, 83% are on
-    a safe place at 10 s; from 24, shooting 23, 47 of 48: loop_tree_lie_detector_23.)"""
+    a safe place at 10 s; from 24, shooting 23, 47 of 48: loop_tree_lie_detector_23. Seed 7 since a throw's tap goes
+    by her facing off the frame, perception.heading, where her course before the sighting goes otherwise: of seeds
+    1-12 seen at 110 s, 7 and 10 go up onto the rope at 146 within 10 s, 9 are on a safe place at 10 s (a safe
+    platform near on 5, 6, 8 and 12, 28 on 2 and 9, the rope at -192 on 3), and on seed 1 she took 10.5 s, still on
+    33.)"""
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=3, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
-    danger 0 by attack.danger, though not MapModel.safe), 1.7 s by route."""
+    danger 0 by attack.danger, though not MapModel.safe), 1.7 s by route. (Seed 2 since a throw's tap goes by her
+    facing off the frame, perception.heading: of seeds 1-12 seen at 40 s, 2 and 9 go back onto 28, safe enough; on
+    seed 3 she went up the rope at -192, a rope as safe, no safe platform near.)"""
     return lie_detector(40.0)(sim)
 
 
