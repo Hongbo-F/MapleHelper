@@ -1286,6 +1286,75 @@ def test_what_her_glances_show_is_judged_by_how_long_it_lasts_not_by_how_many_sh
         assert behind + OFF_PATH_S <= at < behind + OFF_PATH_S + 2 * every
 
 
+def _watch_coming(model, monkeypatch, legs, tracks, known=()):
+    """Navigator._watch over a plan of `legs` while her dot follows it and each glance comes from a feed whose state
+    follows `tracks` (tracking.Track, re-found in every frame), on a clock of its own, glanced at every 1/30 s: why it
+    was cut ('' if not), and when (s into the plan). `known`: the monsters the look it was planned from had."""
+    from types import SimpleNamespace
+
+    import gamelab.control.navigator as nv
+    from gamelab.localization.pose import Localizer
+    clock = {"now": 100.0}
+    monkeypatch.setattr(nv, "time", SimpleNamespace(monotonic=lambda: clock["now"],
+                                                     sleep=lambda s: clock.update(now=clock["now"] + max(0.0, s))))
+    nav = _navigator(model)
+    localizer = Localizer(model)
+    start = nv.time.monotonic()
+
+    def glance():
+        t = nv.time.monotonic() - start
+        x, p = next(((sp.x_at(t), sp.platform) for leg in legs for sp in leg.spans if sp.t0 <= t <= sp.t1),
+                    (legs[-1].end.x, legs[-1].end.platform.id))
+        for tr in tracks:
+            tr.last_seen = nv.time.monotonic()
+        senses.glanced = SimpleNamespace(placed=True, t=nv.time.monotonic(), tracks=tracks)
+        return localizer.to_dot(x, model.platform(p).y_at(x)), 1.0
+    senses = _glancing(localizer, glance)
+    nav.senses = senses
+    nav.senses.wait_frame = lambda timeout: nv.time.sleep(1 / 30)
+    nav.flow.expected = lambda legs, t: None
+    cut_at = []
+    monkeypatch.setattr(nv.client, "done", lambda pid: nv.time.monotonic() - start > legs[-1].end.t + 0.2)
+    monkeypatch.setattr(nv.client, "cancel", lambda pid: cut_at.append(nv.time.monotonic() - start) or True)
+    monkeypatch.setattr(nv.client, "wait", lambda pid, timeout=120: {})
+    nav._sent_plans = ["running"]
+    cut, _ = nav._watch(nv._Running("running", legs, start, False, known=tuple(known)), 1.0,
+                        legs[-1].end.platform.id, send=None, st=SimpleNamespace())
+    return cut, (cut_at[0] if cut_at else None)
+
+
+def test_a_monster_the_feed_sees_coming_into_the_running_chain_cuts_it_short_while_she_can_stop(model, monkeypatch):
+    """Navigator._watch with a feed's glances (REACT): a monster it follows that one of the running chain's legs ahead
+    of her now meets cuts the plan short, REACT_LEAD_S or more before the touch; not one the look the chain was planned
+    from had (planned against, or past on purpose), not without room to stop before her platform's end (she'd slide
+    off it), and not once it's too late."""
+    from gamelab.control.navigator import COMING, REACT_LEAD_S
+    from gamelab.localization.monsters import MonsterTrack
+    from gamelab.localization.tracking import Track
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.route import Move
+    c = by_y(model, 500, 400)  # 0..800
+    run = Leg(Move("walk_off", c.id, c.id, 700, 700, "right"), Body(0.0, 100, c, run=1), Body(2.0, 400, c, run=1),
+              [Span(c.id, 0.0, 2.0, 100, 400)])
+    pig = lambda x: Track(1, "pig", c.id, x, 500.0, None, 100.0, 100.0)
+    cut, at = _watch_coming(model, monkeypatch, [run], [pig(470.0)])
+    assert cut.startswith(COMING) and "pig on" in cut and at is not None and at < 2.0 - REACT_LEAD_S
+    assert _watch_coming(model, monkeypatch, [run], [pig(470.0)],
+                         known=[MonsterTrack(c.id, 460.0, kind="pig")])[0] == ""  # the look had it
+    assert _watch_coming(model, monkeypatch, [run], [pig(2000.0)])[0] == ""  # nowhere near
+    # Room to stop: running right along 0..800, only up to REACT_ROOM short of its end; in the air, never.
+    from gamelab.control.navigator import REACT_ROOM, _Running
+    nav = _navigator(model)
+    to_end = Leg(run.move, Body(0.0, 500, c, run=1), Body(2.0, 800, c, run=1), [Span(c.id, 0.0, 2.0, 500, 800)])
+    running = _Running("running", [to_end], 0.0, False)
+    at_room = (800 - REACT_ROOM - 500) / 150  # (150 units/s along it)
+    assert nav._room_to_stop(running, at_room - 0.05) and not nav._room_to_stop(running, at_room + 0.05)
+    a, b = by_y(model, 300, 100), by_y(model, 360, 300)
+    jump = Leg(Move("jump", a.id, b.id, 150, 260, "right"), Body(0.0, 150, a),
+               Body(0.7, 260, b, run=1, landed=True), [Span(a.id, 0.0, 0.1, 150, 165)])
+    assert not nav._room_to_stop(_Running("running", [jump], 0.0, False), 0.4)
+
+
 def test_her_dot_stands_where_it_stood_until_it_moves_away_from_there():
     """navigator._stood: since when, and where, her dot has stood: within STILL of where it stood (on both axes) it
     stands there still, however it creeps; once it's further from there, it stands where it is from then; a glance

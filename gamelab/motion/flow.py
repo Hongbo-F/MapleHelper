@@ -711,13 +711,17 @@ class Flow:
                     out.append((t, *piece.at(t)))
         return out
 
-    def danger(self, leg: Leg, monsters: list[MonsterTrack], linger: float = 0.0) -> tuple[MonsterTrack, float] | None:
+    def danger(self, leg: Leg, monsters: list[MonsterTrack], linger: float = 0.0,
+               after: float | None = None) -> tuple[MonsterTrack, float] | None:
         """The first monster that could touch her on this leg (and, if `linger`, while she stands that long where it
         ends), and when: her box (motion.bodies) wherever her feet are (path), against each monster's box wherever
-        it can be by then (MonsterTrack.reach: along its own platform, whichever that is). None if none could."""
+        it can be by then (MonsterTrack.reach: along its own platform, whichever that is). None if none could.
+        `after`: only from that plan time on (the leg's rest, for a plan running: Navigator._coming)."""
         if not monsters:
             return None
         path = self.path(leg, linger)
+        if after is not None:
+            path = [p for p in path if p[0] >= after]
         if not path:
             return None
         lo_x, hi_x = min(x for _, x, _ in path), max(x for _, x, _ in path)

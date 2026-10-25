@@ -103,6 +103,7 @@ class Senses:
         eyes.drop_names = items_for(model)  # the drops looked for: the map's monsters' (perception.drops)
         self._glanced = -1e18  # the frame time of the last glance from the feed
         self.glanced_at: float | None = None  # when the frame the last glance saw was shown (time.monotonic)
+        self.glanced = None  # the feed's state (worldstate.WorldState) the last glance came from; None: taken here
         self.counts = {"from the feed": 0, "taken here": 0, "glances from the feed": 0}
         self.failed = {"looks": 0, "lost": 0}  # looks that failed their checks, and times that made LookLost
         self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
@@ -200,13 +201,16 @@ class Senses:
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Her minimap dot and HP (Eyes.glance), and when its frame was shown (`glanced_at`): with a feed, from its
-        newest frame, one shown FEED_GLANCE_EVERY_S after the last glance's at the soonest (and after it)."""
+        newest frame, one shown FEED_GLANCE_EVERY_S after the last glance's at the soonest (and after it), its state
+        kept (`glanced`: the monsters it follows, for a plan running to react to: control.navigator)."""
         if self.feed is not None and self.feed.alive:
             st = self.feed.glance(self._glanced + max(FEED_GLANCE_EVERY_S, 1e-3))
             if st is not None:
                 self._glanced = self.glanced_at = st.t
+                self.glanced = st
                 self.counts["glances from the feed"] += 1
                 return st.dot, st.hp
+        self.glanced = None
         out = self.eyes.glance()
         self.glanced_at = self.eyes.seen_at if self.eyes.seen_at is not None else time.monotonic()
         return out
