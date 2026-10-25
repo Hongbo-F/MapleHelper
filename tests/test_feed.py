@@ -51,10 +51,10 @@ def test_a_look_is_never_handed_a_frame_from_before_it_asked(monkeypatch):
     assert not fresh(WorldState(3, 10.5, False), want)  # the game wasn't on screen
     band = Asks(after=10.0, band=True)
     assert fresh(state(4, 10.1, band_at=10.0), band) and not fresh(state(5, 10.4, band_at=10.05), band)
-    assert not fresh(state(5, 10.1, band_at=9.95), band)  # searched before the look asked: not the search it asked for
-    monkeypatch.setattr(feed, "ASK_ONLY_STALE", True)  # (it asked only for what was stale: any recent search)
+    # Reading the feed (ASK_ONLY_STALE, the default): any search of her band within MOBS_FRESH_S of the frame will do.
     assert fresh(state(4, 10.1, band_at=9.95), band) and not fresh(state(5, 10.1, band_at=9.75), band)
-    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)
+    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)  # asking for everything: the search it asked for, on a frame since
+    assert not fresh(state(5, 10.1, band_at=9.95), band)
     assert not fresh(state(6, 10.1, band_at=10.1), Asks(after=10.0, wide=True))
     loot = Asks(after=10.0, loot=True)
     assert not fresh(state(7, 10.1), loot) and fresh(state(8, 10.1, loot=[]), loot)
@@ -94,7 +94,8 @@ def sync(monkeypatch):
     return f, clock, eyes
 
 
-def test_the_sync_feed_hands_a_look_the_frame_after_it_asked_its_cost_later(sync):
+def test_the_sync_feed_hands_a_look_the_frame_after_it_asked_its_cost_later(sync, monkeypatch):
+    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)  # a look asking for all it wants, its band searched on its frame
     f, clock, eyes = sync
     eyes.mobs = [pig(1100)]
     clock.sleep(0.5)
@@ -111,7 +112,30 @@ def test_the_sync_feed_hands_a_look_the_frame_after_it_asked_its_cost_later(sync
     assert f.counts["frames"] >= 30  # it went on looking between the looks, 30 times a second
 
 
-def test_the_sync_feeds_searches_come_back_their_cost_later_merged_as_of_their_frame(sync):
+def test_a_look_reads_the_feeds_world_state_without_waiting_for_a_search_of_its_own(sync):
+    # Reading (ASK_ONLY_STALE, the default): the next frame placing her, its monsters those the feed follows (re-found in
+    # it) and a search of her band within MOBS_FRESH_S; it waits for that frame's step alone, not for a search.
+    f, clock, eyes = sync
+    eyes.mobs = [pig(1100)]
+    clock.sleep(0.5)  # (the pig found, and followed since)
+    c, waits, searched = feed.COSTS, [], 0
+    for _ in range(20):
+        asked = clock.now
+        st = f.latest(Asks(asked, band=True))
+        assert st is not None and st.t >= asked and fresh(st, Asks(asked, band=True))
+        assert [m.kind for m in st.monsters] == ["pig"] and st.t - st.band_at <= feed.MOBS_FRESH_S + 1e-9
+        waits.append(clock.now - asked)
+        searched += st.band_at >= asked
+        clock.sleep(0.037)
+    # The next game frame (1/60 s at most) and its step (capture, her place, the pig re-found), now and then a frame's
+    # more while a search was out; never the band's own search on top (c.band, 26 ms), as asking had it.
+    assert max(waits) <= 2 / feed.GAME_HZ + c.capture + c.look + c.refind + c.beside + 1e-9
+    assert sorted(waits)[len(waits) // 2] < c.capture + c.look + c.band
+    assert searched < 20  # most looks read a search from before they asked
+
+
+def test_the_sync_feeds_searches_come_back_their_cost_later_merged_as_of_their_frame(sync, monkeypatch):
+    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)  # (the look waits for the search it asked for)
     f, clock, eyes = sync
     clock.sleep(0.5)  # (the first frame's search of the whole screen is back)
     eyes.mobs = [pig(1100)]
@@ -291,9 +315,12 @@ def test_the_child_runs_below_normal_and_hands_out_states_frames_and_events():
     assert client.bye is not None and client.bye["frames"] > 10
 
 
-def test_a_late_state_has_its_frames_slot_in_the_ring_even_when_its_search_was_back_before_the_frame_went_out():
+def test_a_late_state_has_its_frames_slot_in_the_ring_even_when_its_search_was_back_before_the_frame_went_out(
+        monkeypatch):
     # The drawn frames' searches are back at once, often before their own frame's state has gone out: a late state
-    # copied from it then had no slot (14 of 42 here), and a look given it got a black frame.
+    # copied from it then had no slot (14 of 42 here), and a look given it got a black frame. (Each look asks for her
+    # band searched on a frame of its own, so there are as many late states.)
+    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)
     client = FeedClient(functools.partial(drawn_runner, 0), hz=30.0)
     came = []
     client.on_state = lambda st: came.append((st.seq, st.late, st.slot, client.ring.slot_of(st.seq)))
@@ -309,8 +336,10 @@ def test_a_late_state_has_its_frames_slot_in_the_ring_even_when_its_search_was_b
     assert all(slot == seq % feed.RING_SLOTS for seq, _, slot, _ in came if slot is not None)
 
 
-def test_the_childs_frames_keep_their_rate_while_a_slow_search_is_out():
-    # Each search takes 0.15 s; in the frame loop (as they were) the feed made fewer than 7 frames a second.
+def test_the_childs_frames_keep_their_rate_while_a_slow_search_is_out(monkeypatch):
+    # Each search takes 0.15 s; in the frame loop (as they were) the feed made fewer than 7 frames a second. (The look
+    # asks for her band searched on a frame of its own, and waits for it.)
+    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)
     client = FeedClient(functools.partial(drawn_runner, 0, 0.15), hz=30.0)
     try:
         assert client.alive, client.why

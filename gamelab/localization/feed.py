@@ -14,10 +14,11 @@ next frame, her throws) go up another.
 
 The stack's side (`FeedClient`) keeps the last few states, read off the pipe by a thread of its own:
 - `latest(after, want)`: the newest state of a frame shown at `after` or later (a look sees what came of
-  the keys sent before it) that has what's wanted fresh: monsters in her band searched on a frame shown at
-  `after` or later and within MOBS_FRESH_S of its own (tracked ones are re-found every frame), the whole
-  screen likewise within WIDE_FRESH_S, drops searched on that very frame (a pile just picked up must not be
-  seen again). If none has, it asks for it of the next frame, once, and waits, FEED_WAIT_S at most; then (or
+  the keys sent before it) that has what's wanted fresh: her place and the monsters followed are that frame's
+  (re-found every frame), monsters new in her band of a search within MOBS_FRESH_S of it, the whole screen within
+  WIDE_FRESH_S, drops searched on that very frame (a pile just picked up must not be seen again). If none has, it
+  asks the next frame for what the newest state wouldn't have fresh by then (to_ask: so a look reads the feed's
+  world state and waits for a frame, not for a search, ASK_ONLY_STALE), and waits, FEED_WAIT_S at most; then (or
   once the game isn't in front, or the child has died) None, and Senses takes the look itself as before.
 - `wait_frame(timeout)`: until a new frame's state comes; `drain_events(upto)`: every event since the last
   drain of a frame up to the one a look shows, each once.
@@ -55,7 +56,7 @@ FRAME_SHAPE = (540, 960, 3)  # ... each of this shape at 1920x1080 (frame_shape)
 MOBS_FRESH_S = 0.3   # a look's monsters: her band searched at most this long before its frame. It's searched every
                      # 0.2 s (worldstate.BAND_EVERY_S), and the frame after that and the search itself take about 0.1 s
                      # more: with 0.25, on the saved frames a third of the frames searched it, every look asking.
-                     # (Asking for it, as a look does unless ASK_ONLY_STALE, it's searched on a frame of its own.)
+                     # (Without ASK_ONLY_STALE a look asks for it on a frame of its own.)
 WIDE_FRESH_S = 0.5   # ... the whole screen (it's searched every second; tracked monsters are re-found every frame)
 FEED_WAIT_S = 0.6    # s a look waits for the feed before it takes the look itself (the whole screen with every
                      # drop in view takes ~0.25 s)
@@ -64,17 +65,19 @@ NOT_VISIBLE_S = 0.25  # s between checks while the game isn't wholly on screen
 KEEP = 8             # states the stack's side keeps
 EVENTS_KEPT = 10_000  # events kept for the next drain at most (the oldest go: a stack that never drains)
 BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS
-# True: a look asks the next frame only for what the newest state wouldn't have fresh by then (to_ask); False:
-# for everything it wants, as a blocking look searches it all on its own frame. Asking only for what's stale,
-# the feed's own loop on the saved frames (a look every 0.1 s, every 5th with the drops) searched her band 4.9
-# times a second instead of 7.0 and looked at 21.7 frames a second instead of 18.3. But a look's monsters were
-# then up to 0.3 s older than its frame, and in the simulator (harness, preset game, 20 seeds x 20 min, --costs
-# measured, --feed; the feed's frames charged their measured costs, so its slower frame rate counts) asking for
-# everything made the hunt loop 7.1% +- 1.8% better (15 of 19 seeds; one fell out of the map at the basin's
-# end), rests 3.32 -> 2.63 a run, and the tour 9.0% +- 2.7% (15 of 20). Asking for her band always and the
-# whole screen only when stale was no better (-0.5% and -1.6%). Searching her band every 0.1 s instead of 0.2
-# gained 3.5% in both.
-ASK_ONLY_STALE = False
+# True: a look reads the feed's world state, and asks the next frame only for what the newest state wouldn't have fresh
+# by then (to_ask): her place and the monsters it follows are of the look's own frame (re-found in every frame), the
+# monsters new in her band of a search within MOBS_FRESH_S, the whole screen within WIDE_FRESH_S; the drops it asks for
+# are searched on that frame. False: it asks for everything it wants, as a blocking look searches it all on its own
+# frame. On 2026-10-21 (preset game on the first map, the searches still in the frame loop, 20 seeds x 20 min, --costs
+# measured) asking for everything made the hunt loop 7.1% +- 1.8% better and the tour 9.0% +- 2.7%; asking only for
+# what's stale, the feed's own loop on the saved frames had searched her band 4.9 times a second instead of 7.0 and
+# looked at 21.7 frames a second instead of 18.3. With the searches on a thread of their own and the feed the default
+# (2026-10-24; Tree Dungeon's crowd, zero-walls, the regular attack, 8 seeds x 10 min, --costs measured), reading made
+# the hunt loop's EXP a minute 72.4 against asking's 68.4 and 73.1 without a feed (+7.5% seed by seed against that,
+# standard error 16.5%; asking +1.9%, 18.0%): level within the spread, and a look waits for its frame, not for a search
+# of its own (README, Continuous perception).
+ASK_ONLY_STALE = True
 # Whether a look at her band from the feed also has the monsters it follows off the band (Feed.look: Scene.swept, for
 # her memory), as the sweep's slices had them without a feed; False: the band's alone, as before 2026-10-24.
 TRACKED = True
@@ -349,12 +352,18 @@ def to_ask(want: Asks, newest: WorldState | None, frame_s: float = 1.0 / HZ) -> 
                 loot_wide=want.loot_wide, mesos_only=want.mesos_only)
 
 
+def adds(ask: Asks, asked: Asks) -> bool:
+    """Whether `ask` wants a search that `asked` (what a look has asked for so far) didn't."""
+    return ((ask.band and not asked.band) or (ask.wide and not asked.wide) or (ask.loot and not asked.loot)
+            or (ask.loot_wide and not asked.loot_wide))
+
+
 def fresh(st: WorldState, want: Asks) -> bool:
     """Whether state `st` is good for a look that wants `want`: shown at `want.after` or later, and fresh as
-    the look needs (see the top): the monsters it wants searched on a frame shown at `want.after` or later (the
-    search it asked for, as a blocking look searches its own frame; with ASK_ONLY_STALE it asked only for what
-    was stale, and any recent enough will do), and within MOBS_FRESH_S (WIDE_FRESH_S) of the state's frame.
-    One where she isn't placed is as good as a look would be."""
+    the look needs (see the top): the monsters it wants searched within MOBS_FRESH_S (WIDE_FRESH_S) of the state's
+    frame (with ASK_ONLY_STALE, the default, any search that recent will do: it asked only for what was stale;
+    without, the search it asked for, on a frame shown at `want.after` or later, as a blocking look searches its own
+    frame). One where she isn't placed is as good as a look would be."""
     if not st.visible or st.t < want.after:
         return False
     if not st.placed:
@@ -517,7 +526,7 @@ class FeedClient(Feed):
                 self.alive, self.why = False, self.why or "the feed's process ended"
 
     def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
-        deadline, asked = time.monotonic() + timeout, None
+        deadline, asked, seen = time.monotonic() + timeout, None, None
         with self._cond:
             while True:
                 if not self.alive:
@@ -535,10 +544,13 @@ class FeedClient(Feed):
                     return None
                 seq = newest.seq if newest is not None else 0
                 # Nothing fresh as of the newest state: asked of the next frame, once (it's searched on it, or as
-                # soon as the search out is back); with ASK_ONLY_STALE, again at each new frame, for what's stale.
-                if asked is None or (ASK_ONLY_STALE and seq != asked):
-                    self._send("ask", to_ask(want, newest))
-                    asked = seq
+                # soon as the search out is back); with ASK_ONLY_STALE, at each new frame again for a search gone
+                # stale since that wasn't asked for yet (adds).
+                ask = to_ask(want, newest) if asked is None or (ASK_ONLY_STALE and seq != seen) else None
+                if ask is not None and (asked is None or adds(ask, asked)):
+                    self._send("ask", ask)
+                    asked = ask if asked is None else asked.merge(ask)
+                seen = seq
                 self._cond.wait(left)
 
     def frame_of(self, st: WorldState) -> np.ndarray:
@@ -738,7 +750,7 @@ class SyncFeed(Feed):
                 self.counts["searching"] += self.costs.of(st)
 
     def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
-        deadline, asked = time.monotonic() + timeout, False
+        deadline, asked = time.monotonic() + timeout, None
         while True:
             now = time.monotonic()
             self._settle(now)
@@ -746,10 +758,11 @@ class SyncFeed(Feed):
             if st is not None:
                 self._seen_seq = max(self._seen_seq, st.seq)
                 return st
-            if (not asked or ASK_ONLY_STALE) and not any(fresh(st, want) for _, st in self.states):
+            if (asked is None or ASK_ONLY_STALE) and not any(fresh(st, want) for _, st in self.states):
                 ask = to_ask(want, newest_frame([st for _, st in self.states]), 1.0 / self.hz)
-                self.asks = ask if self.asks is None else self.asks.merge(ask)
-                asked = True
+                if asked is None or adds(ask, asked):  # (as FeedClient.latest: once, and a search gone stale since)
+                    self.asks = ask if self.asks is None else self.asks.merge(ask)
+                    asked = ask if asked is None else asked.merge(ask)
             if now >= deadline:
                 return None
             wakes = [ready for ready, st in self.states if ready > now and fresh(st, want)]
