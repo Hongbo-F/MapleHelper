@@ -321,6 +321,89 @@ def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():
     assert h._valuable_pile(_scene()) is None
 
 
+def _shooter(piles, kill_s=4.0, exp=40.0, travel=2.0, players=()):
+    """_hunt with what EXP before loot reads too: a wanted monster takes `kill_s` to kill and gives `exp`, a star from
+    where she stands hits any monster off her platform, her log kept (`said`)."""
+    h = _hunt(piles, travel=travel)
+    h.kinds, h.tour = None, SimpleNamespace(exp={"horny-mushroom": exp})
+    h.h.attacks = SimpleNamespace(kill_s=lambda m: kill_s)
+    h._hits = lambda s, m: True
+    h._loot_said, h.said = {}, []
+    h.log = h.said.append
+    h._seen = SimpleNamespace(players=list(players))
+    return h
+
+
+def _horny(platform=3):
+    return SimpleNamespace(kind="horny-mushroom", platform=platform, x=200.0, y=-60.0)
+
+
+def test_exp_before_loot_a_pile_that_will_still_be_there_waits_for_what_is_in_reach():
+    """The user, 2026-10-24: "The hunt should be driven by maximizing the exp gain". A valuable pile 10 s old (its life
+    DROP_LIFE, 90 s), nobody by it: with a Horny Mushroom in reach she shoots first; with nothing in reach it goes."""
+    ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
+    h = _shooter([ore])
+    s = _scene()
+    assert h._at_risk(s, ore, 4.0) == 0.0
+    assert not h._loot_first(s, ore, [_horny()])
+    assert ("sapphire-ore on platform 2 at x 100 (worth 120, at risk 0%) against 10.0 EXP a second in reach for 4 s, "
+            "6.6 s there and back: shooting first") in h.said[-1]  # (3 s to it: the planner's 2, and 1 to get off)
+    assert h._loot_first(s, ore, [])  # nothing in reach: at once
+    h.kinds = {"horny-mushroom"}  # a monster not worth hunting in reach doesn't hold it up
+    assert h._loot_first(s, ore, [SimpleNamespace(kind="slime", platform=3, x=0.0, y=0.0)])
+
+
+def test_exp_before_loot_a_pile_at_risk_goes_first_when_it_is_worth_more_than_the_trip_s_exp():
+    # 10 s of its life left: gone if she shoots 11 s first, then goes (3 s there and PICK_S): no URGENT_MARGIN to spare
+    ore = _pile(hunt.DROP_LIFE - 10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
+    s = _scene()
+    slow = _shooter([ore], kill_s=11.0)  # the regular attack at a Horny Mushroom: 3.6 EXP a second
+    assert slow._at_risk(s, ore, 11.0) == 1.0
+    assert slow._at_risk(s, ore, 0.0) == pytest.approx((3.6 + 30 - 10) / 30, abs=0.01)  # going now: some to spare
+    assert slow._at_risk(s, _pile(hunt.DROP_LIFE - 3), 0.0) == 0.0  # gone before she's there anyway
+    assert slow._loot_first(s, ore, [_horny()])  # 120 x 0.5 = 60 against 3.6 x 6.6 = 24
+    fast = _shooter([ore], kill_s=3.3)  # Lucky Seven's: 12.1 EXP a second, 80 over the trip
+    assert not fast._loot_first(s, ore, [_horny()])
+
+
+def test_exp_before_loot_another_player_by_a_pile_puts_it_at_risk_once_it_is_not_hers_alone():
+    rival = SimpleNamespace(rival=True, near=lambda x, y, dx, dy: True, x=120.0)
+    s = _scene()
+    young = _pile(2)
+    h = _shooter([young], players=[rival])
+    assert h._at_risk(s, young, 4.0) == 0.0  # hers alone until OWN_S: 2 + 4 + 3 + 0.6 s in
+    assert h._at_risk(s, young, 10.0) == hunt.RIVAL_TAKES
+    theirs = _pile(40, hers=False)
+    assert h._at_risk(s, theirs, 0.0) == hunt.RIVAL_TAKES
+    assert _shooter([theirs])._at_risk(s, theirs, 0.0) == 0.0  # nobody by it
+
+
+def test_a_trip_for_a_pile_that_went_first_is_called_off_for_what_goes_first_now():
+    ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0, rushed=1)
+    h = _shooter([ore])
+    spot = Objective("spot", 1, 0.0, ground=1)
+    h.stack, h.obj = [spot], Objective("pile", 2, 100.0, pile=ore, why="valuable pile")
+    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=1), where=SimpleNamespace(x=0.0, y=0.0), monsters=[],
+                        players=[])
+    h._travel = lambda rule: rule
+    assert h._while_travelling(s, [], [], [], time.monotonic()) == "valuable pile"  # nothing in reach: on her way
+    assert h._while_travelling(s, [_horny()], [], [], time.monotonic()) is None
+    assert h.obj is spot and ore.rushed == 0 and ore.tries == 0 and ore in h.h.drops.known
+    assert "sapphire-ore on platform 2 at x 100: later, shooting what's in reach first" in h.said[-1]
+
+
+def test_picking_up_yields_to_what_is_in_reach_while_she_hunts():
+    from gamelab.behavior.looting import DropSpot, Looter
+    said = []
+    s = SimpleNamespace(where=SimpleNamespace(x=0.0), platform=SimpleNamespace(id=1), monsters=[], loot=[])
+    hunter = SimpleNamespace(look=lambda **kw: s, log=said.append)
+    looter = Looter(hunter)
+    looter.yield_to = lambda look: True
+    drops = DropSpot(10.0, 0.0, 1, time.monotonic(), True)
+    assert looter.collect(drops) is False and looter.pending == [drops]
+    assert said == ["  something in reach first: the drops later"]
+
+
 def test_on_another_map_a_drop_is_valuable_at_twice_its_bronze_coin():
     # Tree Dungeon's monsters drop 25-53 mesos (looting.coins_for: a bronze coin there 33.4): a Slime Bubble (50) is
     # under two of them, a Topaz Ore (80) not; on the first map a bubble is 3 of its coins (15), valuable.

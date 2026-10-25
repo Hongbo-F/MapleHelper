@@ -10,6 +10,7 @@ inventory is full: the game says so in the pickup log, and then she only takes m
 
 import time
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -198,6 +199,9 @@ class Looter:
         self.inventory_full = False  # pick-up failed for want of room: items are left, mesos still taken
         self.unpickable: list[tuple[float, int, float]] = []  # (x, platform, when) of drops she couldn't take
         self._failed_picks = 0  # items in a row that stayed under her (see FAILED_PICKS)
+        # Whether a look's monsters call her off picking up (collect, mop_up), leaving the drops for later: the hunt
+        # loop's EXP before loot (behavior.hunt: a wanted monster in reach); None: never
+        self.yield_to: Callable[[Scene], bool] | None = None
 
     def wanted(self, loot: list[Loot]) -> list[Loot]:
         """The drops worth going for: not ones she failed to pick up, and only mesos with her inventory full."""
@@ -251,6 +255,10 @@ class Looter:
         Returns True when done with them."""
         s = self.h.look(loot=True)
         if s.where is None or s.platform is None or drops.platform != s.platform.id:
+            self.pending.append(drops)
+            return False
+        if self.yield_to is not None and self.yield_to(s):
+            self.h.log("  something in reach first: the drops later")
             self.pending.append(drops)
             return False
         if _guarded(drops.x, drops.platform, s.monsters):
@@ -340,6 +348,9 @@ class Looter:
                 return  # in the air, or knocked off: whatever is left, the tour sees
             here = s.platform.id
             seen = [d for d in s.loot if d.platform == here]
+            if self.yield_to is not None and self.yield_to(s) and self.wanted(seen):
+                self.h.log("  something in reach first: the rest of the drops later")
+                return
             if any(_picked_up(t, seen) for t in tried):
                 self._failed_picks = 0  # an item she went back for is gone: she picked it up
             left = self.wanted(seen)

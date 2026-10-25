@@ -11,13 +11,14 @@ in the order listed, 6 before 3):
                        Horny Mushroom within 169): stance's answer (jump back, jump-throw, step back)
   6a  valuable pile    a pile with a drop worth VALUABLE mesos or more on its own (looting.Worth: the game
                        data's prices; on the first map a Slime Bubble, a White Potion, a gold coin; on another
-                       twice its bronze coin, `valuable`) within VALUABLE_TRAVEL: at once, ahead of shooting,
-                       travelling or not; on the way only close quarters and HP stop her
+                       twice its bronze coin, `valuable`) within VALUABLE_TRAVEL: at once with nothing in reach,
+                       travelling or not; with something in reach only if it goes first (EXP before loot, below)
    2  high ground      on a platform she can't safely stand on, with a spot that reaches her ground: back up;
                        also back to the spot from any other platform (after a pile there), unless the
                        ground is in reach from it or she's leaving
    6  urgent pile      drops whose remaining life is under the time to get there plus URGENT_MARGIN, within
-                       URGENT_TRAVEL; above shooting, or drops lay until they vanished where respawns never stop
+                       URGENT_TRAVEL; above shooting if it goes first (below), or drops lay until they vanished
+                       where respawns never stop
    3  shoot            a target in reach from her spot (or the ground she hunts on): throw, step out from
                        under, close in along her platform
    4  in passing       travelling: a target in reach, thrown at from where she is (or a step of PASS_STEP at
@@ -41,6 +42,17 @@ in the order listed, 6 before 3):
                        platform where nowhere along it is safe enough (_refuge, attack.ropes)
   10  loot elsewhere   leaving: the piles left when she decided, the most worth per second of travel first
   11  advance          leaving: one trip to the next ground's spot
+
+EXP before loot (`_loot_first`; the user, 2026-10-24: "The hunt should be driven by maximizing the exp gain"): no pile
+goes ahead of shooting what's in reach by a fixed priority. One that will still be there when she has killed what's in
+reach waits; one at risk by then (`_at_risk`: its life running out, another player by it once it's no longer hers
+alone) goes first only if what waiting would likely lose of it, at MESO_EXP an meso, is more than the EXP she'd make
+from what's in reach (Attacks.kill_s) over the trip there and back (rules 6a and 6). A trip for a valuable pile is
+called off when that no longer holds (a monster comes into reach), and so is picking one up (Looter.yield_to): the pile
+stays known, and is gone for again once nothing is in reach. (On a trip for an urgent pile she shoots in passing, as
+before: it has URGENT_MARGIN to spare.) In the live hunts of 2026-10-24 (1474 looks with a wanted monster in
+reach on another platform than hers), she didn't throw within 1.5 s on 184: on 78 she was picking up a pile, on 43 the
+valuable pile rule had her off to one (20 of those deciding it or on the way).
 
 She leaves a ground by the rate rule (`_leaving`): her EXP rate there falls clearly below what the best
 other ground would give, travel included, or nothing is left there and nothing is due back. Not for the ground she'd
@@ -182,6 +194,16 @@ PICK_S = 0.6           # s standing on a pile (4 presses)
 # 66.8, its ores but Bronze and the Magic Potion; on West Rocky Mountain II 51.8, its Opal, Orihalcon, Silver, Emerald
 # and Adamantium Ores and a gold coin).
 VALUABLE = 30.0
+# EXP before loot (`_loot_first`): what a meso of drops is worth to her in EXP, against what she'd shoot meanwhile. A
+# guess putting EXP first: at it a valuable ore on Tree Dungeon (looting.Worth.valuable 66.8) is worth 33 EXP, under a
+# Horny Mushroom's kill (41), and an at-risk pile 4 s there and back goes first when what's in reach makes her under
+# 8 EXP a second (the regular attack's 3.7 at a Horny Mushroom; Lucky Seven's 12.5 doesn't let it).
+MESO_EXP = 0.5
+# s a kill's drops are its killer's alone (the game's ownership: nobody else can pick them up meanwhile; looting.
+# cant_pick has seen mesos she stood on twice stay). The simulator's (sim.world.Realism.rival_owns), not measured.
+OWN_S = 15.0
+RIVAL_TAKES = 0.5      # guess: the chance another player by a pile that isn't hers alone takes it before she's there
+EXP_FIRST = True       # EXP before loot on; off, the piles' fixed priorities as before (6a and 6 ahead of shooting)
 VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (URGENT_TRAVEL's 12, and a little),
 VALUABLE_TRIES = 2      # ... this many times at most (then it's a pile like the others): by one, a monster can stand
                         # (guarded: looting.collect leaves it, not a try), and she can't shoot it from where it lies
@@ -362,6 +384,7 @@ class Hunt:
         self._seen: Scene | None = None      # the latest look of all (a trip starts from it if it's still fresh)
         self._published = None
         self._end = float("inf")  # when the running hunt ends (run)
+        self._loot_said: dict[int, bool] = {}  # pile (its id) -> whether it went first when she last said (_loot_first)
 
     # --- the loop ------------------------------------------------------------------------------------
 
@@ -378,6 +401,10 @@ class Hunt:
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
         senses = self.h.senses
         sweep, senses.sweep = senses.sweep, self.sweep  # (only while no feed serves her looks: Senses.look)
+        looter = self.h.looter
+        yield_to = looter.yield_to
+        if EXP_FIRST:
+            looter.yield_to = self._yields  # picking up stops for what's in reach
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         try:
@@ -395,6 +422,7 @@ class Hunt:
             self._leave_ground()
         finally:
             senses.sweep = sweep  # as it was, whatever ended the hunt
+            looter.yield_to = yield_to
         self.report.seconds = time.monotonic() - start
         self._log_memory()
         if meter.since is not None:
@@ -465,7 +493,7 @@ class Hunt:
         targets, visible, hidden = self._targets(s, now)
         if self._close_quarters(s, targets):
             return self._shoot(s, targets, visible, hidden, now, "close quarters", approach=False)
-        if (pile := self._valuable_pile(s)) is not None:
+        if (pile := self._valuable_pile(s)) is not None and self._loot_first(s, pile, targets):
             self.log(f"  {_contents(pile)} on platform {pile.platform} at x {pile.x:.0f} (worth {pile.value:.0f}): "
                      f"picking it up now")
             return self._go_for(pile, "valuable pile", s)
@@ -476,7 +504,10 @@ class Hunt:
         return self._at_ground(s, targets, visible, hidden, now)
 
     def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
-        if self.obj.why == "valuable pile":  # at once: only close quarters (above) and her HP stop her
+        o = self.obj
+        if o.why == "valuable pile":  # at once: only close quarters (above), her HP and what's in reach that goes
+            if not self._loot_first(s, o.pile, targets):  # first now (EXP before loot) stop her
+                return self._call_off(o)  # the pile waits
             return self._travel("valuable pile")
         # In passing she shoots her targets, and steps out from under any wanted monster above her (which isn't a
         # target, out of reach: as _interrupt has them, or a trip stopped for one went on, then again). Those are
@@ -497,7 +528,7 @@ class Hunt:
             self.obj.detours += 1
             self.log(f"  {_contents(pile)} on platform {pile.platform} at x {pile.x:.0f}: on the way ({extra:+.1f} s)")
             return self._go_for(pile, "on the way", s)
-        if self.obj.kind != "pile" and self._exit_piles is None and (pile := self._urgent_pile(s)) is not None:
+        if self.obj.kind != "pile" and self._exit_piles is None and (pile := self._urgent_pile(s)) is not None                 and self._loot_first(s, pile, targets):
             return self._go_for(pile, "urgent pile", s)
         return self._travel(self._rule if self._rule in ("advance", "loot elsewhere", "urgent pile", "on the way",
                                                          "high ground", "back to spot", "better spot", "lull loot")
@@ -513,7 +544,7 @@ class Hunt:
         # reach, and below shooting the drops lay there until they vanished (a quarter of them). Not while
         # she's leaving: then only the piles left when she decided; her kills on the trips to them made
         # new urgent piles, and she never left.
-        if not leaving and (pile := self._urgent_pile(s)) is not None:
+        if not leaving and (pile := self._urgent_pile(s)) is not None and self._loot_first(s, pile, targets):
             return self._go_for(pile, "urgent pile", s)
         # Off the ground and its spot (after a pile elsewhere): back, unless she can stand here with the
         # ground in reach, or she's leaving it. Without this she hunted the pile's platform under the old
@@ -941,6 +972,78 @@ class Hunt:
                 best = (p.worth / t, p)
         return None if best is None else best[1]
 
+    def _loot_first(self, s: Scene, p: Pile, monsters, say: bool = True) -> bool:
+        """EXP before loot: whether pile `p` goes ahead of shooting what's in reach of `monsters` from where she stands
+        in look `s` (_shoot_rate). With nothing in reach, it does. Else only if what waiting would likely lose of it
+        (its worth x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso) is more than the EXP she'd
+        make from what's in reach over the trip there and back (and PICK_S on it). Said in her log when the answer for
+        a pile changes (`say`)."""
+        if not EXP_FIRST:
+            return True
+        rate, busy = self._shoot_rate(s, monsters)
+        if rate <= 0.0:
+            return True
+        risk = self._at_risk(s, p, busy)
+        to = self._travel_to_pile(s, p)
+        trip = 2 * to + PICK_S
+        first = risk * p.value * MESO_EXP > rate * trip
+        if say and self._loot_said.get(id(p)) != first:
+            self._loot_said[id(p)] = first
+            what = (f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f} (worth {p.value:.0f}, at risk "
+                    f"{risk:.0%}) against {rate:.1f} EXP a second in reach for {busy:.0f} s, "
+                    f"{trip:.1f} s there and back")
+            self.log(what + (": the pile first" if first else ": shooting first"))
+            if telemetry.recording():
+                telemetry.emit("event", kind="loot_first", first=first, worth=round(p.value, 1), risk=round(risk, 2),
+                               rate=round(rate, 2), busy=round(busy, 1), trip=round(trip, 1), platform=p.platform,
+                               x=round(p.x))
+        return first
+
+    def _shoot_rate(self, s: Scene, monsters) -> tuple[float, float]:
+        """EXP a second she'd make shooting the wanted ones of `monsters` in reach from where she stands in look `s` (as
+        rule 3 has them: a star from there hits it, or it's on her platform), and s it takes to kill them all
+        (Attacks.kill_s: what each has left, the attack she'd throw); (0, 0) with none."""
+        if s.where is None or s.platform is None:
+            return 0.0, 0.0
+        here = s.platform.id
+        near = [m for m in monsters if (self.kinds is None or m.kind in self.kinds)
+                and (m.platform == here or self._hits(s, m))]
+        if not near:
+            return 0.0, 0.0
+        busy = sum(self.h.attacks.kill_s(m) for m in near)
+        exp = sum(self.tour.exp.get(m.kind, self._avg_exp()) for m in near)
+        return (exp / busy if busy > 0 else 0.0), busy
+
+    def _at_risk(self, s: Scene, p: Pile, wait: float) -> float:
+        """The chance pile `p` is gone if she first shoots for `wait` s, then goes for it: by its life (DROP_LIFE, a
+        guess), 0 with URGENT_MARGIN or more of it left once she'd be there, 1 with none, in proportion between (0 if
+        it's gone before she could be there going now); RIVAL_TAKES at least if another player is by it (players.
+        near_rival) and it isn't hers alone by then (OWN_S; a pile no kill of hers explains never is)."""
+        now = time.monotonic()
+        left, to = DROP_LIFE - (now - p.since), self._travel_to_pile(s, p) + PICK_S
+        if left < to:
+            return 0.0
+        risk = min(1.0, max(0.0, (wait + to + URGENT_MARGIN - left) / URGENT_MARGIN))
+        players = (self._seen or s).players
+        if near_rival(players, p.x, p.y) is not None and (not p.hers or now - p.since + wait + to >= OWN_S):
+            risk = max(risk, RIVAL_TAKES)
+        return risk
+
+    def _call_off(self, o: Objective) -> None:
+        """Her trip for a pile that went first ends where she is (something in reach goes first now): the pile stays
+        known, not counted as tried nor rushed, and the objective under it, if any, is hers again."""
+        p = o.pile
+        if o.why == "valuable pile":
+            p.rushed = max(0, p.rushed - 1)
+        self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, shooting what's in reach first")
+        self.obj = self.stack.pop() if self.stack else None
+        return None
+
+    def _yields(self, s: Scene) -> bool:
+        """Looter.yield_to while she hunts: whether picking up stops for what's in reach in look `s` (EXP before loot:
+        any wanted monster in reach, the pile under her waiting)."""
+        return self._shoot_rate(s, s.monsters)[0] > 0.0
+
     def _detour(self, s: Scene, slack: float = 0.0) -> tuple[float, Pile] | None:
         """Rule 5b: travelling, the pile a stop at costs DETOUR_S at most on top of the trip (and `slack` more):
         her way to it (and its drops' landing, for one not seen yet), PICK_S on it and her way on from it to the
@@ -1246,7 +1349,9 @@ class Hunt:
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):
             return True  # not worth it any more (`_pass` drops it)
         if o is not None and o.why == "valuable pile":
-            return False  # at once: nothing else stops her
+            # At once: nothing else stops her, but something in reach that goes first now (`_loot_first`)
+            wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
+            return not self._loot_first(s, o.pile, wanted, say=False)
         if self._valuable_pile(s) is not None or self._owed(s, s.monsters) is not None:
             return True
         wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]

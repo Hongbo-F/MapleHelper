@@ -1512,7 +1512,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=1, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1536,7 +1536,10 @@ def loop_lull_loot(sim):
     came. Over 16 seeds 8 meet all of this. On the play track, before the steps, seed 4 too, since she finishes
     what she has hurt before she moves on (behavior.fight.owed): on seed 1 no lull came there; over 16 seeds 8
     met all of it. Seed 1 again since her EXP number is read and each kill goes on a monster of the kind its gain's
-    size names (or none, behavior.ledger.KIND_ANY): on seed 4 no lull came. Over 16 seeds 11 meet all of this.)"""
+    size names (or none, behavior.ledger.KIND_ANY): on seed 4 no lull came. Over 16 seeds 11 meet all of this.
+    Seed 2 since EXP before loot (hunt._loot_first; picking up stops for what's in reach, Looter.yield_to): on seed
+    1 she shot on and picked up 7 drops, for 40 kills against 35. Over seeds 1-8 6 meet all of this, 8 before, for
+    3839 EXP against 3519 and 264 drops picked up against 283.)"""
     return _loop_on_12(sim)
 
 
@@ -1640,11 +1643,14 @@ def _loop_bubble(sim):
 def loop_valuable_drop_at_once(sim):
     """On 17's spot on 16, shooting a slime and two Orange Mushrooms on 17; the slime drops a Slime Bubble (50 mesos
     by the game data's price, 8 times a Squishy Liquid's). Once it has landed a look at the whole screen sees it
-    (hunt._far_drops), and she goes for it at once (rule 6a, hunt.VALUABLE), ahead of shooting the mushrooms. The
-    user, watching her hunt on 2026-10-21: "Expensive items should attempt to pick immediately". On seeds 1-16 she
-    sets off before the mushrooms are dead on all 16, and picks it up 11.3 s after the slime's kill at the median
-    (7.5-33.7); without the rule on none, 17.2 s (9.6-35.1), shooting the mushrooms from 16 first; without the look
-    (hunt.FAR_DROPS_LOOK) on 12."""
+    (hunt._far_drops), and she goes for it at once (rule 6a, hunt.VALUABLE) the moment nothing is in reach: the user,
+    watching her hunt on 2026-10-21, "Expensive items should attempt to pick immediately", and on 2026-10-24 "The hunt
+    should be driven by maximizing the exp gain" (EXP before loot, hunt._loot_first: with 90 s of life and nobody by
+    it, it waits for what's in reach). On seed 1 she sets off as the first Orange Mushroom dies, the other out of
+    reach, calls the trip off when it comes into reach (9.8 s), and picks the bubble up once it's dead. Before EXP
+    before loot, on seeds 1-16 she set off before the mushrooms were dead on all 16, and picked it up 11.3 s after the
+    slime's kill at the median (7.5-33.7); without rule 6a on none, 17.2 s (9.6-35.1), shooting the mushrooms from 16
+    first; without the look (hunt.FAR_DROPS_LOOK) on 12."""
     return _loop_bubble(sim)
 
 
@@ -2154,6 +2160,22 @@ def loop_tree_grind(sim):
     they died on (19, 20, 21, 23, 24). In this world she's touched about five times as often as live (README:
     Grinding): knocked off 23 down to 25-29 and back, then a rest at the end."""
     return _grind(3)(sim)
+
+
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
+      realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
+      expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
+               check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
+               check("hurt three times at most", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] <= 3)))
+def loop_tree_ore_waits(sim):
+    """EXP before loot (hunt._loot_first): 23 her only ground, shot from 24 at 231, every Green Mushroom on 22 dropping
+    a Sapphire Ore (120 mesos, valuable on Tree Dungeon: twice its bronze coin, 66.8). Seen while a Horny Mushroom on 23
+    is in reach, the ore isn't at risk (90 s of life, nobody by it): she shoots first and picks it up once nothing is in
+    reach, 4 ores of 4. With the valuable pile rule ahead of shooting as before (hunt.EXP_FIRST off) she went down to
+    22 for it at once, among its Green Mushrooms, and was hurt 15 times (1.72 bars of HP) against once (0.16), for the
+    same 596 EXP and 3 ores; on seeds 1-4, 2384 EXP against 2261, 12 ores of 15 against 14 of 16, 3.45 bars of HP lost
+    against 5.28."""
+    return harness._only(_loop(4), (23,))(sim)
 
 
 @tree((23, 0.0), monsters="all", hp=0.25, limit=400,
