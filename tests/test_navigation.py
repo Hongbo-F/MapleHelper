@@ -1687,3 +1687,39 @@ def test_a_fighting_trip_searches_for_monsters_where_its_chain_goes(model):
     assert [m.mob.x for m in got] == [1, 120] and got[0] == s.monsters[0]
     s.wide = True
     assert nav.trip_monsters(s, {c.id, d.id}) == s.monsters
+
+
+def test_a_fighting_trip_keeps_clear_of_the_monsters_her_memory_has_where_its_chain_goes(model, monkeypatch):
+    """Navigator.remembered: with her memory (a hunter's: Hunter.navigator), the monsters it has on the platforms the
+    chain goes from and onto that the look couldn't have found (off its view: this look's frame is a pixel wide), seen
+    within TRIP_MEMORY_S, are kept clear of too, as of their last sighting and their walking not known (wherever they
+    can have walked since); not one the look found (as the memory matches a sighting), one seen too long ago, one where
+    the chain doesn't go, or one in the look's view; nothing without a memory. The tracker's tracks stay the looks'."""
+    import time
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from gamelab.control.navigator import TRIP_MEMORY_S
+    a, c, d = by_y(model, 300, 100), by_y(model, 500, 400), by_y(model, 300, 700)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, _escort(), (c.id, 450))
+    assert len(monsters) == 1 and {c.id, d.id} <= {m.src for m in path} | {m.dst for m in path}
+    s.t = 10.0
+
+    def entry(pid, x, seen):
+        return SimpleNamespace(kind="horny-mushroom", platform=pid, x=x, seen=seen)
+    hidden = entry(d.id, 600.0, 9.0)  # 1 s ago on D, not in this look
+    found = entry(c.id, 470.0, 9.5)  # the look's own (walked 20 units since)
+    old = entry(d.id, 650.0, 10.0 - TRIP_MEMORY_S - 0.5)
+    away = entry(a.id, 100.0, 9.0)
+    nav.memory = SimpleNamespace(alive=lambda t, min_p: [hidden, found, old, away])
+    monsters, tail = nav._chain_monsters(st, s, path)
+    assert [(m.platform, m.x) for m in monsters] == [(c.id, 450.0), (d.id, 600.0)] and tail == monsters
+    m = monsters[1]
+    assert m.heading == 0 and m.vx is None and m.seen_at == pytest.approx(s.t - time.monotonic() - 1.0, abs=0.5)
+    assert m.reach(m.seen_at + 1.0, d) == pytest.approx((max(d.left, 600.0 - m.speed), min(d.right, 600.0 + m.speed)))
+    assert len(nav.tracker.last[1]) == 1  # the tracker's: the look's alone
+    s.frame = np.zeros((1, 2000, 3), np.uint8)  # a view 2000 px wide around her: D's in it, where the look searched
+    assert len(nav._chain_monsters(st, s, path)[0]) == 1
+    nav.memory = None
+    assert len(nav._chain_monsters(st, s, path)[0]) == 1

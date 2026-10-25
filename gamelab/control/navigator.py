@@ -26,8 +26,9 @@ escort: a chain stops short of a leg one could touch her on, and she shoots it f
 where she stands (the escort's `clear_for`), else the move costs extra so a way around is taken, else she hops
 it (one in the way of a run along her platform), else waits for it to move off, then goes anyway; on a trip to
 rest (`detour`) a way around comes before a shot. The monsters for that are searched where the chain's legs go
-(`trip_monsters`: her fights look at the band around her). Without an escort the mode is `avoid`, as described
-above.
+(`trip_monsters`: her fights look at the band around her), and with her memory of the monsters (`memory`: a hunter's)
+the ones it has there that the look didn't find are kept clear of too (`remembered`). Without an escort the mode is
+`avoid`, as described above.
 """
 
 import random
@@ -38,7 +39,9 @@ from typing import NamedTuple, Protocol
 
 from .. import telemetry
 from ..localization.mapdata import MapModel, Platform
-from ..localization.monsters import Monster, MonsterTrack, Tracker, bodies, touch_box, tracks_record
+from ..localization.memory import EDGE, MATCH_SLACK, MATCH_SPEED, MATCH_WALK_S, SURE
+from ..localization.monsters import (DEFAULT_SPEED, MONSTER_HEIGHT, Monster, MonsterTrack, Tracker, bodies, touch_box,
+                                     tracks_record)
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..motion import bodies as her_body
@@ -136,6 +139,17 @@ FALL_LOOKS = 2
 # (review, 2026-10-24: from 20 at x -78 walking off onto 21, one on 22 at x -64 reached her 1.8 s on).
 TRIP_LOOK_BELOW = 15
 SAME_SIGHTING = 5  # map units: a monster found again on the same frame within this of one found before is it
+# A fighting trip's chains keep clear too of the monsters her memory has where the chain's legs go that the look
+# couldn't have found, last seen off its view across (Navigator.remembered: Hunter.memory, localization.memory; at
+# memory.SURE), seen within this long: where one can be by now is wherever it can have walked since at its kind's speed,
+# either way (its walking not known), 200 units at 2 s. Longer shuts most of a platform to her chains for little (a
+# guess). Taking every monster it had there that the look didn't find, those in view too (hidden under damage numbers,
+# or gone), the hunt loop on Tree Dungeon (crowd, zero-walls, the regular attack, 8 seeds of 10 minutes) was hurt on
+# its trips 29.5 times a run against 28.3 without, lost as much HP on them (2.42 bars), and spent 12% longer on them
+# (MEET_S fired 25 times against 9). Off its view only, those runs were the same as without, seed for seed: in the
+# simulator a chain's platforms are in view when a trip's looks are taken (live, the client's narrower 1366x768 view
+# leaves more off it; not measured).
+TRIP_MEMORY_S = 2.0
 
 # How a trip treats monsters (Navigator.go's `mode`).
 AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
@@ -288,11 +302,14 @@ class Navigator:
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
                  health: Callable[[Scene], str | None] | None = None,
                  potions: Callable[[Scene], None] | None = None, escort: Escort | None = None,
-                 variety: float | None = None, rng: random.Random | None = None):
+                 variety: float | None = None, rng: random.Random | None = None, memory=None):
         """`health(scene)` returns a reason to stop (low HP), and may drink a potion; `potions(scene)` only
         drinks (transit trips); `escort` fights on the way (without one she avoids monsters instead).
-        `variety`: the moves' random weights (route.NOISE by default; 0 for none)."""
+        `variety`: the moves' random weights (route.NOISE by default; 0 for none). `memory`: her memory of the
+        monsters (localization.memory.Memory, a hunter's), whose monsters where a fighting trip's chain goes it keeps
+        clear of too (`remembered`); None, only the looks'."""
         self.senses, self.actions, self.model, self.log = senses, actions, model, log
+        self.memory = memory
         self.health = health or (lambda s: None)
         self.potions = potions or (lambda s: None)
         self.escort = escort
@@ -624,6 +641,8 @@ class Navigator:
             seen = self.trip_monsters(s, _platforms(path)) if self.fight else s.monsters
             tracks = self.tracker.update(s.t, seen, seen_at=s.t - time.monotonic())
             st.sighted = list(zip(tracks, [m for m in seen if m.platform is not None]))  # (as the tracker keeps them)
+            if self.fight:  # and those her memory has there that the look didn't find (not into the tracker's)
+                tracks = tracks + self.remembered(s, _platforms(path), seen, s.t - time.monotonic())
             if telemetry.recording():
                 telemetry.emit("monsters", **tracks_record(tracks, self.model))
         if not self.fight:
@@ -651,7 +670,7 @@ class Navigator:
         again over all of that (Eyes.monsters: a band as tall, in game about a band's time more, 23 ms at the game's own
         1366x768), with the look's own kept too (a feed's frame may be gone by then: Feed.frame_of gives a blank one). A
         fight looks at the band around her (her stars reach 60 up and down), so most of a trip's looks are band looks
-        (`_look`). The hook a look policy that knows more replaces (a memory of the monsters seen off the band)."""
+        (`_look`). What her memory has there that the look didn't find comes on top (`remembered`)."""
         if s.wide or not s.searched or s.where is None or s.tag is None:
             return list(s.monsters)
         ps = [self.model.platform(p) for p in platforms]
@@ -667,6 +686,35 @@ class Navigator:
         found = [s.place(m, self.model, eyes.bar(s, m)) for m in eyes.monsters(s, max(up, band_up), max(down, band_down))]
         kept = [m for m in s.monsters if not any(_same_sighting(m, f) for f in found)]
         return kept + found
+
+    def remembered(self, s: Scene, platforms, seen: list[Monster], seen_at: float) -> list[MonsterTrack]:
+        """The monsters her memory has (`memory`, at memory.SURE) on `platforms` (where a fighting trip's chain goes)
+        that look `s` couldn't have found: last seen with their body not wholly inside its view across (memory.EDGE in
+        from the screen's sides, as the memory's covers have it; trip_monsters searches the chain's platforms over the
+        rest), within TRIP_MEMORY_S before it, and not found by it (`seen`: one of a kind on the same platform within
+        what it can have walked since, as the memory matches a sighting, is it). As tracks as of their last sighting
+        (`seen_at`: the look's time in the plan's, less their age), their walking not known: wherever they can have
+        walked since at their kind's speed. None without a memory."""
+        if self.memory is None or s.where is None:
+            return []
+        view = None
+        if s.tag is not None and getattr(s.frame, "shape", None) is not None:
+            view = s.map_x(0) + EDGE, s.map_x(s.frame.shape[1]) - EDGE
+        out = []
+        for e in self.memory.alive(s.t, SURE):
+            age = s.t - e.seen
+            if e.platform not in platforms or not 0 < age <= TRIP_MEMORY_S:
+                continue
+            half, top = touch_box(e.kind, self.tracker.body.get(e.kind))
+            if view is not None and view[0] <= e.x - half and e.x + half <= view[1]:
+                continue  # in view, where the look and trip_monsters searched
+            speed = self.tracker.walking.get(e.kind, DEFAULT_SPEED)
+            slack = MATCH_SLACK + MATCH_SPEED * speed * min(age, MATCH_WALK_S)
+            if any(m.kind == e.kind and m.platform == e.platform and abs(m.x - e.x) <= slack for m in seen):
+                continue
+            out.append(MonsterTrack(e.platform, e.x, speed, 0, half, None, seen_at - age,
+                                    MONSTER_HEIGHT.get(e.kind, top), 0, e.kind, top))
+        return out
 
     def _tallest(self) -> float:
         """The tallest box (for touches: localization.monsters.touch_box) of the map's monsters."""
@@ -1182,8 +1230,11 @@ class Navigator:
         p = end.platform
         there = replace(s, where=replace(s.where, x=end.x, y=p.y_at(end.x), platform=p))
         threats = self.fight and self._threats()  # (where the next chain's legs go: trip_monsters)
-        seen = self.trip_monsters(s, {p.id} | _platforms(_after(running, st.path))) if threats else s.monsters
+        ahead = {p.id} | _platforms(_after(running, st.path))
+        seen = self.trip_monsters(s, ahead) if threats else s.monsters
         tracks = tuple(self.tracker.update(s.t, seen, seen_at=s.t - running.ends))  # as of the next start
+        if threats:  # and those her memory has there that the look didn't find
+            tracks += tuple(self.remembered(s, ahead, seen, s.t - running.ends))
         if not self.fight:  # avoiding them: the next chain keeps clear of them
             return _Ahead(there, tracks)
         if st.until is not None and st.until(there):

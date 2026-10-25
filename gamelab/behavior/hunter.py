@@ -163,10 +163,10 @@ class Hunter:
 
     def navigator(self, fighting: bool = False, rng: random.Random | None = None) -> Navigator:
         """A navigator for her: `fighting`, she shoots monsters on the way (hunting tours) instead of
-        avoiding them."""
+        avoiding them; its fighting trips keep clear of the monsters her memory has too (Navigator.remembered)."""
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
                          potions=self.drink_if_low, escort=fight.FightOnTheWay(self) if fighting else None,
-                         rng=rng)
+                         rng=rng, memory=self.memory)
 
     def hold_sweep(self, s: Scene) -> bool:
         """Whether the sweep holds its slice back in look `s` (SWEEP_LOCK_S): she's pressed, or a monster is in her band
