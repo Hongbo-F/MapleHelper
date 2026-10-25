@@ -604,10 +604,15 @@ class Navigator:
         return [t for t in tracks if self.escort.threat(t.kind)], tracks
 
     def _threats(self) -> bool:
-        """Whether any kind of the map's monsters counts (Escort.threat), worked out once."""
+        """Whether any kind of the map's monsters counts (Escort.threat), worked out once. A kind that counts and hops
+        (MapModel.mob_hops) is said: its tracks don't follow it off its platform (MonsterTrack.reach), and no map of
+        hers has one yet."""
         if self._threat_kinds is None:
             kinds = {kind_of(name) for names in self.model.monsters_by_platform.values() for name in names}
             self._threat_kinds = frozenset(k for k in kinds if self.escort is not None and self.escort.threat(k))
+            if hoppers := sorted({kind_of(n) for n, hops in self.model.mob_hops.items() if hops} & self._threat_kinds):
+                self.log(f"  kinds that hop and whose touch counts ({', '.join(hoppers)}): her trips plan as if they "
+                         f"never left their platforms (MonsterTrack.reach)")
         return bool(self._threat_kinds)
 
     def trip_monsters(self, s: Scene, platforms) -> list[Monster]:

@@ -1502,9 +1502,9 @@ def _escort(shots=None):
 
 
 def test_a_fighting_trip_reads_which_kinds_count_before_its_first_look(model):
-    """Navigator.begin: with an escort, the kinds whose touch counts (Escort.threat: the game data's touch damage, a
-    first read of which took half a second) are worked out as the trip begins, not between its first look and chain;
-    without one, never."""
+    """Navigator.begin: with an escort, the kinds whose touch counts (Escort.threat: the danger model's shares since the
+    branches met; when the escort read the game data itself a first read took half a second) are worked out as the
+    trip begins, not between its first look and chain; without one, never."""
     from types import SimpleNamespace
     d = by_y(model, 300, 700)
     nav = _navigator(model, escort=SimpleNamespace(threat=lambda kind: True))
@@ -1512,6 +1512,25 @@ def test_a_fighting_trip_reads_which_kinds_count_before_its_first_look(model):
     assert nav._threat_kinds is None
     nav.begin(d.id, mode="transit")
     assert nav._threat_kinds is not None
+
+
+def test_a_kind_that_counts_and_hops_is_said_its_tracks_keep_to_their_platforms():
+    """Navigator._threats: MonsterTrack.reach keeps a monster on its platform, and attack.danger has a kind that hops
+    leave it. No kind whose touch counts hops on her three maps (test_danger); on a map with one (test_danger's Hopper,
+    a Horny Mushroom's touch that hops) the navigator says so, once; with only the Horny Mushroom, nothing."""
+    from types import SimpleNamespace
+
+    from test_danger import build
+    said = []
+    hopper = build([(0, 500, 800, 500)], [("99", 300, 500), ("19", 600, 500)])
+    nav = _navigator(hopper, escort=SimpleNamespace(threat=lambda kind: True))
+    nav.log = said.append
+    assert nav._threats() and nav._threats()
+    assert len(said) == 1 and "(hopper)" in said[0] and "MonsterTrack.reach" in said[0], said
+    said.clear()
+    nav = _navigator(hopper, escort=SimpleNamespace(threat=lambda kind: kind == "horny-mushroom"))
+    nav.log = said.append
+    assert nav._threats() and said == []
 
 
 def test_thinking_is_counted_once_however_many_chains_a_pass_plans(model, monkeypatch):

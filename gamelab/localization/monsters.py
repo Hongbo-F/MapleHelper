@@ -224,7 +224,12 @@ class MonsterTrack:
         return lo + (k if k <= hi - lo else 2 * (hi - lo) - k)
 
     def reach(self, t: float, p: Platform) -> tuple[float, float]:
-        """Where its centre can be at plan time t (it never leaves its platform)."""
+        """Where its centre can be at plan time t (it never leaves its platform). A kind that hops can
+        (MapModel.mob_hops: attack.danger's `walk` has it onto a platform within HOP_ACROSS and HOP_UP, HOP_CHANCE as
+        likely, a guess), but the tracks her trips keep clear of are those whose touch counts (the escort's `threat`),
+        and none of those hops on her three maps (the slimes, pigs and Orange Mushrooms that do count for nothing:
+        tests/test_danger.py): followed off its platform here, one would be planned as if it always hopped. The
+        navigator says so of a map where one does (Navigator._threats)."""
         dt = max(0.0, t - self.seen_at)
         if self.vx is not None:  # seen walking: where it's heading, give or take a turn
             c, spread = self.at(t, p), TURN_SLACK + 20.0 * dt
