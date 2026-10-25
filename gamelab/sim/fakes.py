@@ -276,8 +276,11 @@ class FakeLoot:
 
 
 def detector_kinds(model: MapModel) -> tuple[str, ...]:
-    """The kinds the fake detector finds on map `model`: KINDS, and the map's own (the stack's colour gates for West
-    Rocky Mountain II's are another track's: here they're taken as found)."""
+    """The kinds the fake detector finds on map `model`: KINDS, and the map's own, as the real one at 1920x1080 looks
+    for them (sprites.detector_for: the kinds with a hand-made colour gate, and the map's with gates learned against its
+    background, perception.gates). Each is found as its kind: the real one, searching kinds of one body as one and
+    telling them apart side by side, found all 44 of Tree Dungeon's labelled mushrooms in plain view, none as the other
+    kind (Perception)."""
     return KINDS + tuple(sorted({kind_of(s.name) for s in model.spawns if s.name} - set(KINDS)))
 
 

@@ -643,7 +643,9 @@ and an Axe Stump's Bronze Ore, a Dark Stump's Tree Branch and Lemon: 4 of Tree D
 Mountain II's 25) as rarely as the rarest it gives that monster, its ores' 0.2%. They had been 1%, five times that: on
 Tree Dungeon a valuable drop (66.8 and up) came 0.0177 a kill (weighed by spawn points), 80% of it from those four, the
 same Sapphire Ore 1% from a Horny Mushroom and 0.3% from a slime; now 0.0064. The harness weighs what she picked up by
-the world's map's worth. None of it is measured, and no scenario runs those maps yet. On the first map nothing changed: `game-drops`' hunt loop over 4 minutes on seeds 1 and 2 gave the same outcomes
+the world's map's worth. None of it is measured. No scenario drops them (the new maps' scenarios drop coins); the
+harness's `game-drops` on Tree Dungeon is in its table (In game, on Tree Dungeon). On the first map nothing changed:
+`game-drops`' hunt loop over 4 minutes on seeds 1 and 2 gave the same outcomes
 to the field, and the 86 golden traces are byte-identical.
 
 `bench-look` and `bodies` on saved frames, and the saved frames' feed, place her by the map's own minimap picture now,
@@ -1141,7 +1143,8 @@ reached. Two exits (`out00` at 282 on 28, `out01` at 281 on 12) lead to 10002070
 can't move across (Localization), and its minimap window shows 112 of its picture's 183 rows, scrolled with her. She's
 level 24 (HP 752, MP 601), with West Rocky Mountain II's keys and pet. The read-only study of 2026-10-24 has the rest
 (`D:/MapleHelper-scratch/map3/study/ONBOARDING.md`: structure, grounds, stands, monsters and drops, crowding, the 20
-native frames hand-labelled), and nothing of it but the motion and the simulator is done on this branch.
+native frames hand-labelled). Its monsters and drops as the stack sees them are under Perception (learned gates, kinds
+that share a body, drops per map); its motion and the simulator there are below.
 
 **The motion** (offline, from the game data and the planner: 175 moves, 74 jumps, 39 drops, 36 walk-offs, 13
 jump-ups, 7 climbs, 6 climb-downs; every place gets to every other but the caps):
@@ -1215,11 +1218,16 @@ saw them (`harness.TREE_CAMPS`: by 28 killing 29's and 30's Greens, by 21 and 23
 after they land, every spawn point filled, respawns at 8.8 s or 30 s; with `Realism.shared_exp` (off) a kill of
 theirs she hurt gives her its EXP by the share of its HP she took. Her potions (her pet's) heal 30% of her HP, 226,
 as on the first map (`world.POTION_HP`): which she carries there isn't known, a Red Potion heals 100 and an Orange 250
-(`--world red-potion`: 100, `world.Her.potion`). Not modelled: the two mushrooms' one body (the perception track's: a
-look naming a Green a Horny at 0.89), Lucky Seven (its 8-9 MP a cast; the sim throws it as a star), her MP, the
-Slimes' hops, the arrival band's passers-by, HeavenClient's wall rule, and the map's drops (`world.GAME_DROPS` has none
-of its kinds, so every kill there drops coins alone and the harness's drops and their value are coins only; the study's
-`monsters_drops.json` has the table: caps, potions, ores, the Magic Potion).
+(`--world red-potion`: 100, `world.Her.potion`). The fake eyes name each monster as its kind, as the map's detector
+does (`fakes.detector_kinds`): its two mushrooms, one body with two caps, are searched as one and told apart, and of the
+44 labelled in plain view it found all, none as the other kind (Perception: Kinds of one shape). Its drops: in the
+default world and preset `game` a kill drops coins, as on the other maps; with `game-drops` its monsters' drops
+(`world.game_drops`, Drops per map: a Horny Mushroom's cap 40% of kills, coins 72%, nothing the map's loot detector
+doesn't look for), drawn where they lie and named as that detector names them; what she picks up is weighed by the
+map's worth either way (a bronze coin 33.4, not the first map's 15: so the harness's mesos a minute there are 2.23 times
+what they were before the two met, her runs otherwise the same to the field on the two seeds of each run tried). Not
+modelled: Lucky Seven (its 8-9 MP a cast; the sim throws it as a star), her MP, the Slimes' hops, the arrival band's
+passers-by and HeavenClient's wall rule.
 
 Twelve scenarios: `nav_tree_bottom_to_top` (the floor to 6, 22 moves in 28 s, up the four choke ropes, never the grab
 from 30), `nav_tree_up_by_29`, `nav_tree_rope_miss`, `nav_tree_top_cluster`, `nav_tree_mid_portal_to_top` (12 to 8 at
@@ -1241,6 +1249,8 @@ brackets; `python -m gamelab.sim.harness run POLICY --map 10002073 [--preset P] 
 | tour | 58.4 (56.6) | 46.2 | 93% | 15.9 | 5 | 4 | 103 (88) |
 | loop, `--world zero-walls` | 46.1 (51.8) | 29.4 | 77% | 21.3 | 9 | 0 | 214 (182) |
 | tour, `--world zero-walls` | 70.8 (67.2) | 54.6 | 91% | 19.7 | 8 | 0 | 129 (110) |
+| loop, `--preset game-drops --world zero-walls` | 36.8 (35.3) | 29.8 | 79% | 18.9 | 6 | 0 | 206 (182) |
+| tour, `--preset game-drops --world zero-walls` | 63.8 (61.0) | 51.6 | 93% | 18.9 | 7 | 0 | 117 (91) |
 | loop, `--preset crowd --world zero-walls` | 30.6 (25.9) | 18.0 | 77% | 21.3 | 8 | 0 | 186 (178) |
 | tour, `--preset crowd --world zero-walls` | 45.6 (44.5) | 26.5 | 84% | 20.3 | 10 | 0 | 116 (103) |
 | loop, `--preset crowd-slow --world zero-walls` | 30.9 (27.8) | 18.1 | 77% | 20.5 | 8 | 0 | 183 (165) |
@@ -1270,6 +1280,14 @@ over the HUD), the loop with group 0's walls makes 46.1 a minute where it made 5
   the runs, which her death ended 12.6 minutes in on average; `crowd-slow`: 30 s, 192 a run, 16.2 a minute, more than
   the 13.6 a minute the study saw on her screen alone, where these are the whole map's): the loop 30.6 and 30.9 a
   minute where the same world empty made 46.1; the tour 45.6 and 46.1 where 70.8.
+- **Its monsters' drops** (`game-drops`, run once the perception and motion work met: a kill drops a Horny's or a
+  Green's cap 40% of the time besides its coins 72%, their potions and ores at OSMLib's rates; Drops per map): the loop
+  36.8 a minute where with coins 46.1 (seed by seed -9.4 ± 4.3, 3 of 10 better), the tour 63.8 where 70.8 (-7.0 ± 4.4,
+  4 better). She picked up 31 drops a run where 22 (a kill drops 1.3 things where 1), and fewer of her runs died (6 and
+  7 where 9 and 8), the loop's sooner (9.2 minutes in on average where 13.6). The rates aren't the game's (OSMLib's,
+  never seen there), so this shows the hunt running with the map's items in its piles, not what they'd cost her in
+  game. Her mesos' worth a minute goes by the map's worth in all the runs now (with coins alone 37.0, where the runs
+  saved before the two met say 16.6, at the first map's 15 a coin).
 - **The grab's reach** (`client-reach`, HeavenClient's 82): 47.0 against 46.1 (the same median, 51.8), the planner
   taking the grab from 30 in neither (`climb 30->27` was taken in no run).
 - **A portal taken:** in one of these 140 runs (`no-evade`, seed 5, 321 s), and in one of 130 on an earlier build of
@@ -1457,8 +1475,8 @@ cost half again what it had at 1920x1080 half size (below): step 1's colour test
 pixels. Now step 1 always works at the 1920x1080 window's half size, 0.703 px per game px, where everything it goes by
 was measured (its thresholds, `MIN_COVER`, `MIN_BODY_PIXELS`, `MAX_CHECKS`, the colour gates, the whole screen's
 bands): at 1366x768 the band or the screen is shrunk 1.42 times for it (area averaged, 1.7 ms for a fight's band),
-and the colour gates see about what they saw on the stretched window (the perception track's learned gates, made on
-its half-size frames, included). Step 2 then works at full size, with the game's own pictures:
+and the colour gates see about what they saw on the stretched window (the learned gates, Perception, made on its
+half-size frames, included). Step 2 then works at full size, with the game's own pictures:
 - **Several frames a place.** Blurred, a monster's frames were alike, and the one whose silhouette matched best was
   good enough to check. Crisp, they aren't: drawn as the game draws them, a snail or slime checked with that frame
   scored 0.43-0.55 where its own frame, a few spots down at the same place, scored 1.000, and 16 of 120 were missed.
@@ -1619,8 +1637,8 @@ player:
   platforms to the unit (their feet where the sprite's origin is), as the frame they show, with scores near 1.00 where
   nothing is in front of them. Then again with the game minimized: it should come back to the front and look, where it
   had stopped with "not calibrated at 432x54".
-- `python -m gamelab map --map 10004021`: her place by her dot alone, about x -880 on stair 28 until the map track's
-  fit of this map's minimap picture is in (then -792).
+- `python -m gamelab map --map 10004021`: her place by her dot alone, through the map's minimap picture: about x -800
+  on stair 28, where the ropes put her at -792 (by the first map's picture place it read -880).
 - `python -m gamelab watch --minutes 2 --map 10004021`, started with the game minimized: it should say it's waiting
   for the game, start when it's restored (never restoring it itself), and its frames be 1366x768.
 - `python -m gamelab bench-look --live --n 100 --map 10004021` with the game in front, and `bench-capture --n 100`: a

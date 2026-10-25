@@ -326,6 +326,32 @@ def test_the_camera_keeps_her_529_down_there_so_from_28_the_horny_mushrooms_on_3
     assert [mob.kind for mob in eyes.look().frame.screen.mobs] == ["green-mushroom"]
 
 
+def test_with_the_maps_drops_its_kills_drop_what_its_detectors_look_for_and_the_fake_eyes_name_them_so():
+    """The harness's `game-drops` on Tree Dungeon (world.MAP_DROPS: its monsters' drops, perception.drops): a Horny
+    Mushroom's kills drop its cap 40% of the time and coins 72%, and nothing the map's loot detector doesn't look for
+    (drops.items_for); the fake eyes draw a drop where it lies, named as that detector names it, and the fake monster
+    detector looks for the map's kinds, as its learned gates do (perception.gates)."""
+    from gamelab.perception import drops
+    from gamelab.perception.kinds import kind_of
+    from gamelab.sim import fakes
+    from gamelab.sim.world import MAP_DROPS, MESOS_SHARE, Drop
+    m = tree_map()
+    clock = fakes.Clock()
+    w = world(m, 28, 247.0, monsters=[("Green Mushroom", 30, 64.0)], origin=clock.now, realism=Realism(drops=MAP_DROPS))
+    looked_for = {kind_of(name) for name in drops.items_for(m)} | {"mesos"}
+    kills = [w._drop_kinds("horny-mushroom", w._drop_rng) for _ in range(4000)]
+    assert set().union(*kills) <= looked_for
+    assert sum("horny-mushroom-cap" in k for k in kills) / len(kills) == pytest.approx(0.40, abs=0.03)
+    assert sum("mesos" in k for k in kills) / len(kills) == pytest.approx(MESOS_SHARE, abs=0.03)
+    assert {"horny-mushroom", "green-mushroom", "slime"} <= set(fakes.detector_kinds(m))
+    p = m.platform(28)
+    w.drops.append(Drop("horny-mushroom-cap", 200.0, p.y_at(200.0), p.id, w.t))
+    eyes = fakes.FakeEyes(w, clock, m)
+    seen = eyes.look().frame.screen
+    assert [i.kind for i in seen.items] == ["horny-mushroom-cap"]
+    assert [mob.kind for mob in seen.mobs] == ["green-mushroom"]
+
+
 # --- landing on a floor that rises the way she flies ---------------------------------------------------------------
 
 def test_a_step_onto_a_floor_that_rises_the_way_she_flies_lands_her():
