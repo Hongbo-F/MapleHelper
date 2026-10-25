@@ -61,6 +61,10 @@ MAX_FRAMES = 900
 TAP_MAX_MS = 200   # with the alarm up, a pet food plan is over within this of its start (a tap: 40 ms), and a plan
                    # let through starts within it (its lead: 0 from Actions, the client's default 100)
 RETREAT_OVER = "the retreat's time after the Lie Detector is over: stopped pressing"
+# A Lie Detector cycle's end (a minute without it on screen) waits this long at most for the YOLO shadow's check of a
+# frame of that minute (ShadowWorker: it may yet see a pattern board there); past it, a check that hangs (a GPU driver
+# stuck) no longer holds the end, nor the player's stop after `clear-alarm`.
+SHADOW_WAIT_S = 30.0
 # Past this, the player's log becomes player.log.1 (the one before goes) when the player starts. It writes
 # about 40 bytes a plan, some 150 KB an hour of hunting, and was never cut: 5 MB is about 30 hours.
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -222,6 +226,103 @@ class Alarm(threading.Event):
         super().set()
 
 
+class ShadowWorker(threading.Thread):
+    """The YOLO shadow's checks (perception.lie_detector_yolo: pattern boards, recorded, never acted on), on a thread of
+    their own: the watchdog hands it a frame of a cycle (`offer`) and grabs on at once; when it's free it checks the
+    newest frame handed it (those handed it meanwhile go unchecked), and the result waits, however late, for the
+    watchdog to take it (`take`) onto the frame it was of. First it warms the shadow up (its `warm`, if it has one:
+    the model loaded and a first check), when the player starts: measured 5.0 s to import torch and ultralytics and 3.9 s
+    to load the model and check once on an idle PC.
+
+    On the watchdog's thread (f404c55) the first sighting's check loaded all that there, and the 21:02 recording of
+    2026-10-24 has no frame from its first, at 0 s, to 16.1 s, by when the Truth Booth showed: the mouse mini-game was
+    lost (and the alarm itself, set only after the check, waited as long). A check that fails is handed back as such
+    (logged by the watchdog); a warm-up that fails turns the shadow off for good (each check would load it again)."""
+
+    def __init__(self, shadow, log=None):
+        super().__init__(name="lie-detector-shadow", daemon=True)
+        self.shadow = shadow
+        self.log = log or (lambda msg: None)
+        self.stopped = threading.Event()
+        self.ready = threading.Event()  # warmed up (or that failed): checks are made from now on
+        self.off = False                # its warm-up failed: no checks
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._next: tuple | None = None   # the newest frame handed it, not taken yet: (t, frame, tag)
+        self._busy: float | None = None   # the t of the frame being checked
+        self._done: list[tuple] = []      # checks back, not taken yet: (t, frame, tag, score, suggestions, error)
+
+    def offer(self, t: float, frame: np.ndarray, tag=None) -> None:
+        """A frame grabbed at `t` (the watchdog's clock), to check when it's free (in place of any handed it before
+        and not taken yet); `tag` comes back with its result."""
+        if self.off:
+            return
+        with self._lock:
+            self._next = (t, frame, tag)
+        self._wake.set()
+
+    def take(self) -> list[tuple]:
+        """The checks back since the last take, oldest first: (t, frame, tag, score, suggestions, error), score and
+        suggestions None if it failed (error: the exception)."""
+        with self._lock:
+            out, self._done = self._done, []
+        return out
+
+    def out(self) -> list[float]:
+        """The grab times of the frames whose checks aren't taken yet: being checked, waiting, or back."""
+        with self._lock:
+            return ([t for t in (self._busy, self._next and self._next[0]) if t is not None]
+                    + [r[0] for r in self._done])
+
+    def idle(self) -> bool:
+        """Whether nothing is being checked or waiting to be (what's back may be waiting to be taken)."""
+        with self._lock:
+            return self._busy is None and self._next is None
+
+    def run(self) -> None:
+        self._warm_up()
+        self.ready.set()
+        while not self.stopped.is_set():
+            if not self._wake.wait(0.2):
+                continue
+            with self._lock:
+                self._wake.clear()
+                job, self._next = self._next, None
+                if job is None or self.off:
+                    continue
+                self._busy = job[0]
+            t, frame, tag = job
+            try:
+                score, suggestions = self.shadow.check(frame)
+                result = (t, frame, tag, float(score), suggestions, None)
+            except Exception as e:  # handed back: the watchdog logs it
+                result = (t, frame, tag, None, None, e)
+            with self._lock:
+                self._done.append(result)
+                self._busy = None
+
+    def _warm_up(self) -> None:
+        warm = getattr(self.shadow, "warm", None)
+        if warm is None:
+            return
+        started = time.monotonic()
+        try:
+            warm()
+        except Exception as e:
+            self.off = True
+            self._say(f"the YOLO shadow couldn't be loaded ({type(e).__name__}: {e}): it's off, the Lie Detector "
+                      "watched and recorded as ever")
+            return
+        self._say(f"the YOLO shadow is ready: loaded and a first check in {time.monotonic() - started:.1f} s, off the "
+                  "watch")
+
+    def _say(self, msg: str) -> None:
+        try:
+            self.log(msg)
+        except Exception:
+            pass  # a log that can't be written stops nothing
+
+
 class Watchdog(threading.Thread):
     """Looks at the game every `interval` seconds, whether or not a plan is running, and records each Lie Detector's
     whole cycle.
@@ -233,6 +334,13 @@ class Watchdog(threading.Thread):
     `cap_s` after the first sight, when the recording stops and the cycle goes on unrecorded. A grab with the game
     window gone, minimized or covered by another window (checked for the Lie Detector all the same) is recorded as
     such, with no frame, and doesn't count as the Lie Detector gone.
+
+    `shadow` (True: the YOLO checkpoint, perception.lie_detector_yolo; or one made for tests; None or False: none)
+    checks the game's frames of a cycle for the mouse mini-game's pattern board on a thread of its own (ShadowWorker),
+    warmed up from the start: a look never waits for it, so the frames keep coming 4 a second whatever it does. Its
+    checks come back late, each recorded with the frame it was of, and a board seen keeps the cycle going as a sight of
+    the Lie Detector at that frame would (`_shadow_back`; the end waits for its check of the cycle's last minute,
+    SHADOW_WAIT_S at most); it never starts a cycle, nor sends anything.
 
     `alarm` is never cleared: the player takes plans again only once a person has started it again (`player
     --elevate`: the user's UAC click), as when it shut down at the alarm. `cleared` is set, and the player stops
@@ -253,13 +361,14 @@ class Watchdog(threading.Thread):
                  shadow=False):
         super().__init__(name="lie-detector-watch", daemon=True)
         from ..perception.lie_detector import LieDetectorSpotter
-        from ..perception.lie_detector_yolo import YoloPatternShadow
+        from ..perception.lie_detector_yolo import FORM, YoloPatternShadow
         from . import lie_recorder
         from .alarm import raise_alarm
         self.title = game_title
         self.alarm = alarm
         self.spotter = spotter or LieDetectorSpotter()
-        self.shadow = YoloPatternShadow() if shadow is True else shadow
+        self.shadow = (YoloPatternShadow() if shadow is True else shadow) or None
+        self.shadow_form = FORM
         self.grab = grab
         self.interval = interval
         self.on_alarm = on_alarm or raise_alarm
@@ -280,6 +389,12 @@ class Watchdog(threading.Thread):
         self.troubles: dict[str, int] = {}
         self.alarm_written = alarm.is_set()   # whether the alarm file was there since `alarm` was set: its going
                                               # is a person clearing it
+        self.filed_at: float | None = None    # the last look that found the alarm file there, `alarm` set
+        # The YOLO shadow's checks, on a thread of their own, warming up from now (the player's start): never in the
+        # looks, which grab and record on meanwhile.
+        self.shadow_worker = ShadowWorker(self.shadow, self._say) if self.shadow is not None else None
+        if self.shadow_worker is not None:
+            self.shadow_worker.start()
 
     def run(self) -> None:
         with mss.MSS() as sct:
@@ -297,30 +412,23 @@ class Watchdog(threading.Thread):
                 self.stopped.wait(due - time.monotonic())
         if self.recording is not None:
             self._end_recording("stopped")
+        if self.shadow_worker is not None:
+            self.shadow_worker.stopped.set()  # (not waited for: a check that hangs holds up nothing)
         for rec in self.ended:
             rec.join(timeout=20)  # its last frames and summary written before the player exits
 
     def tick(self, now: float, sct=None) -> None:
-        """One look at the game (`now`: monotonic s), and what follows from it."""
+        """One look at the game (`now`: monotonic s), and what follows from it: first the YOLO shadow's checks come
+        back since the last (`_shadow_back`), then the look."""
+        self._shadow_back(now)
         frame, why = self._look(sct)
-        scores = suggestions = None
+        scores = None
         if frame is not None:
             try:
                 scores = self.spotter.scores(frame)
             except Exception as e:  # (a frame it can't take, such as one smaller than its templates)
                 self._trouble("the Lie Detector check failed", e)
                 frame, why = None, "check failed"
-            else:
-                # Shadow YOLO runs only within a cycle started by the existing spotter. It can keep that cycle
-                # alive during pattern play, but can neither start an alarm nor send any input.
-                template_seen = bool(scores) and max(scores.values()) >= 1
-                if self.shadow is not None and (template_seen or self.cycle_t0 is not None):
-                    try:
-                        from ..perception.lie_detector_yolo import FORM
-                        shadow_score, suggestions = self.shadow.check(frame)
-                        scores = {**scores, FORM: shadow_score}
-                    except Exception as e:  # the template alarm and frame recording still work without YOLO
-                        self._trouble("the YOLO shadow check failed", e)
         seen = scores is not None and max(scores.values()) >= 1
         shown = frame is not None and why is None  # the game itself, nothing over it: only then is the frame saved
         if seen or not shown:
@@ -340,17 +448,18 @@ class Watchdog(threading.Thread):
                                                        "stopped)"))
             self._start_recording(info)
         elif seen and self.alarm_written and not alarm_up():
-            # Cleared while it's still up (the cycle not over): raised again, so gamelab's commands go on refusing
-            # (exit code 3) and the player doesn't stop with it on screen; paged again, as nobody may be at it.
-            self._raise(frame)
-            self.alarm_written = alarm_up()
-            self._say("the Lie Detector alarm was cleared while the Lie Detector is still on screen: raised again "
-                      f"(clear it once it has been off the screen for {self.end_s:g} s)")
+            self._raise_again(frame)
+        number = None
         if self.recording is not None:
-            self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why, suggestions=suggestions)
+            number = self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why)
             if now - self.cycle_t0 >= self.cap_s:
                 self._end_recording("cap")
-        if self.cycle_t0 is not None and self.gone_for(now):
+        # The shadow checks the game's own frames of a cycle (a covered one counts as the Lie Detector up anyway, and
+        # isn't saved), on its thread: it can keep the cycle going through the pattern play, but neither start one nor
+        # send anything.
+        if self.shadow_worker is not None and self.cycle_t0 is not None and shown:
+            self.shadow_worker.offer(now, frame, (self.recording, number))
+        if self.cycle_t0 is not None and self.gone_for(now) and not self._shadow_out(now):
             if self.recording is not None:
                 self._end_recording("gone")
             self.cycle_t0 = None
@@ -358,7 +467,7 @@ class Watchdog(threading.Thread):
                       + (" (waiting for `clear-alarm`, then the player stops)" if alarm_up() else ""))
         if self.alarm.is_set() and not self.cleared.is_set():
             if alarm_up():
-                self.alarm_written = True
+                self.alarm_written, self.filed_at = True, now
             elif self.alarm_written and self.cycle_t0 is None and self.gone_for(now):
                 self.cleared.set()  # a person cleared it, and none on screen for end_s: the player stops
                 self._say(f"the Lie Detector alarm was cleared and none has been on screen for {self.end_s:g} s: "
@@ -368,6 +477,45 @@ class Watchdog(threading.Thread):
     def gone_for(self, now: float) -> bool:
         """Whether the game has shown no Lie Detector for end_s, every look of it showing the game."""
         return self.gone_since is not None and now - self.gone_since >= self.end_s
+
+    def _raise_again(self, frame) -> None:
+        """Cleared while it's still up (the cycle not over): raised again, so gamelab's commands go on refusing (exit
+        code 3) and the player doesn't stop with it on screen; paged again, as nobody may be at it."""
+        self._raise(frame)
+        self.alarm_written = alarm_up()
+        self._say("the Lie Detector alarm was cleared while the Lie Detector is still on screen: raised again "
+                  f"(clear it once it has been off the screen for {self.end_s:g} s)")
+
+    def _shadow_back(self, now: float) -> None:
+        """The YOLO shadow's checks back since the last look (ShadowWorker), however late: each onto the frame it was
+        of in the cycle's recording (Recording.add_shadow), if that's still being written; and a pattern board seen
+        (a score of 1 or more) is the Lie Detector seen then, in the cycle going on, as the spotter's sight would be: the
+        stretch without it starts after that frame (here: at the next look without it, as late as the check), and an
+        alarm cleared since that frame's look is raised again. A check of a cycle over is left: the shadow can't start
+        one."""
+        if self.shadow_worker is None:
+            return
+        for t, frame, (rec, number), score, suggestions, error in self.shadow_worker.take():
+            if error is not None:  # the template alarm and frame recording still work without YOLO
+                self._trouble("the YOLO shadow check failed", error)
+                continue
+            if rec is not None and rec is self.recording:
+                rec.add_shadow(t - self.cycle_t0, number, self.shadow_form, score, suggestions, late=now - t)
+            if score < 1 or self.cycle_t0 is None or t < self.cycle_t0:
+                continue
+            if self.gone_since is not None and self.gone_since <= t:
+                self.gone_since = None
+            if self.alarm_written and (self.filed_at is None or t > self.filed_at) and not alarm_up():
+                self._raise_again(frame)
+
+    def _shadow_out(self, now: float) -> bool:
+        """Whether the cycle's end waits for the YOLO shadow: its check of a frame of the stretch without the Lie
+        Detector (grabbed from gone_since until the end came due) isn't back yet, SHADOW_WAIT_S past that due at most (a
+        check that hangs holds the end, and the player's stop, no longer)."""
+        if self.shadow_worker is None or self.gone_since is None:
+            return False
+        due = self.gone_since + self.end_s
+        return now - due < SHADOW_WAIT_S and any(self.gone_since <= t < due for t in self.shadow_worker.out())
 
     def _look(self, sct):
         """(the frame, None); (the frame, "covered"): another window is over some of the game, the frame being

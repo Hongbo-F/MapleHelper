@@ -28,7 +28,8 @@ class YoloPatternShadow:
 
     The score is the number of detections divided by MIN_PATTERNS, so >= 1 means a likely active
     pattern board. Each suggestion has a bounding box and centre in original frame pixels, plus its
-    confidence. A model can be injected for tests; otherwise it is loaded on the first check.
+    confidence. A model can be injected for tests; otherwise it is loaded on the first check (`warm`: when the
+    player starts).
     """
 
     def __init__(self, model_path: Path = MODEL, confidence: float = CONFIDENCE,
@@ -48,6 +49,13 @@ class YoloPatternShadow:
                 self.device = 0 if torch.cuda.is_available() else "cpu"
             self._model = YOLO(str(self.model_path))
         return self._model
+
+    def warm(self) -> None:
+        """Load the model and check a blank game frame once: the first check is the slow one (5.0 s to import torch and
+        ultralytics, 3.9 s to load the model and check once, on an idle PC; about 16 s live under load). The player
+        does it when it starts, off its watch (control.player.ShadowWorker), so a Lie Detector's first frames don't
+        wait for it."""
+        self.check(np.zeros((NATIVE_FRAME[1], NATIVE_FRAME[0], 3), np.uint8))
 
     def check(self, frame: np.ndarray) -> tuple[float, list[dict]]:
         """Return (normalized pattern-board score, pattern-centre suggestions); never sends input."""

@@ -8,10 +8,13 @@ One folder a cycle, paths.LIE_RECORDINGS/<YYYYmmdd-HHMMSS> (when it was first se
   index.jsonl    a line a grab: `t` (s since the first sight) and either the frame's number `i`, its `file`, the
                  spotter's per-form `scores` (match / threshold, 1 = seen) and whether the Lie Detector was `seen`,
                  or `game`: why there is no frame ("no window", "minimized"; or "covered": another window over the
-                 game, with the `scores` and `seen` of what was on top, its picture not saved);
+                 game, with the `scores` and `seen` of what was on top, its picture not saved); and, when the YOLO
+                 shadow's check of a frame comes back (late: it checks on a thread of its own), a line of its own
+                 with the frame's `t` and `i`, its `shadow` score, `seen`, `suggestions` and `late` (`add_shadow`);
   summary.json   at the end (`Recording.summary`): when it was first and last seen, how long the recording ran, its
                  frames, the forms seen and when each first and last showed, whether the Truth Booth did (the
-                 outcome as far as the picture tells), how it ended, the alarm's screenshot and the window's size;
+                 outcome as far as the picture tells), how it ended, the alarm's screenshot and the window's size, the
+                 shadow's checks (how many, their suggestions, the latest one came back, those lost);
   before/        written by the rolling recorder when it runs (control.rolling): the game 10 times a second for the 5
                  minutes before the alarm and on into this recording's first seconds, frames, index and summary of
                  its own.
@@ -109,7 +112,8 @@ class Recording:
         self.missing: Counter = Counter()  # grabs with no frame, by why
         self.forms: dict[str, dict] = {}   # form: first, last, frames
         self.first_seen = self.last_seen = None
-        self.shadow_checks = self.shadow_suggestions = 0
+        self.shadow_checks = self.shadow_suggestions = self.shadow_lost = 0
+        self.shadow_late = 0.0  # the latest a shadow's check came back, s after its grab
         self.last_t = 0.0
         self.window = None
         self.end = None
@@ -122,12 +126,12 @@ class Recording:
         threading.Thread(target=self._prune, args=(keep_bytes,), name="lie-detector-prune", daemon=True).start()
 
     def add(self, t: float, frame: np.ndarray | None, scores: dict[str, float] | None = None,
-            why: str | None = None, suggestions: list[dict] | None = None) -> None:
+            why: str | None = None) -> int | None:
         """One grab, `t` s after the first sight: a frame (RGB) with the spotter's scores of it, or None and why
         there is none (the game window gone or minimized; or covered by another window, with the scores of what was
-        on top, which aren't saved as a picture). YOLO's optional shadow suggestions are recorded, never acted on.
-        Never blocks: with the queue full the frame is dropped (counted, and the next line in the index says how
-        many went before it)."""
+        on top, which aren't saved as a picture). Returns the frame's number (None: no frame), which the YOLO shadow's
+        check of it comes back with (`add_shadow`). Never blocks: with the queue full the frame is dropped (counted,
+        and the next line in the index says how many went before it)."""
         record: dict = {"t": round(t, 3)}
         if frame is None:
             record["game"] = why or "no window"
@@ -147,12 +151,7 @@ class Recording:
                     form["last"] = record["t"]
                     form["frames"] += 1
             if seen:
-                self.first_seen = record["t"] if self.first_seen is None else self.first_seen
-                self.last_seen = record["t"]
-        if suggestions is not None:
-            record["suggestions"] = suggestions
-            self.shadow_checks += 1
-            self.shadow_suggestions += len(suggestions)
+                self._seen_at(record["t"])
         self.grabs += 1
         self.last_t = t
         if self._dropped_since:
@@ -165,6 +164,40 @@ class Recording:
             self._dropped_since += 1
             if self.dropped == 1:
                 self._say(f"Lie Detector recording: the disk is behind, a frame dropped at {t:.1f} s (counted)")
+        return record.get("i")
+
+    def add_shadow(self, t: float, i: int | None, form: str, score: float, suggestions: list[dict],
+                   late: float) -> bool:
+        """The YOLO shadow's check of the grab `t` s after the first sight (frame number `i`, as `add` returned it),
+        come back `late` s after the grab (control.player.ShadowWorker: it checks off the watchdog's thread, which
+        grabs on meanwhile): a line of its own in the index, after the frame's, with `t` and `i` as the frame's,
+        `shadow` (its score: the patterns found / perception.lie_detector_yolo.MIN_PATTERNS, 1 = a pattern board),
+        `seen`, `suggestions` (every pattern found: box, centre, confidence; never acted on) and `late`; `form` seen at
+        `t` if the score is 1 or more, as a spotter's form. False if it isn't kept: the recording ended (its summary may
+        be written), or the queue full (counted)."""
+        if self.end is not None:
+            return False
+        record = {"t": round(t, 3), "i": i, "shadow": round(float(score), 3), "seen": score >= 1,
+                  "suggestions": suggestions, "late": round(late, 3)}
+        try:
+            self._queue.put_nowait((record, None))
+        except queue.Full:
+            self.shadow_lost += 1
+            return False
+        self.shadow_checks += 1
+        self.shadow_suggestions += len(suggestions)
+        self.shadow_late = max(self.shadow_late, late)
+        if score >= 1:
+            f = self.forms.setdefault(form, {"first": record["t"], "last": record["t"], "frames": 0})
+            f["first"], f["last"] = min(f["first"], record["t"]), max(f["last"], record["t"])
+            f["frames"] += 1
+            self._seen_at(record["t"])
+        return True
+
+    def _seen_at(self, t: float) -> None:
+        """The Lie Detector seen at `t` (s after the first sight): its first and last sight (the shadow's come late)."""
+        self.first_seen = t if self.first_seen is None else min(self.first_seen, t)
+        self.last_seen = t if self.last_seen is None else max(self.last_seen, t)
 
     def finish(self, end: str) -> None:
         """End it ('gone': off the screen for END_S, 'cap': CAP_S after the first sight, 'stopped': the player
@@ -190,7 +223,8 @@ class Recording:
                 "frames": self.frames, "frame_bytes": self.bytes, "grabs": self.grabs,
                 "not_showing": dict(self.missing), "dropped": self.dropped, "write_errors": self.errors,
                 "forms": self.forms, "truth_booth": booth, "outcome": outcome, "end": self.end,
-                "shadow": {"checks": self.shadow_checks, "suggestions": self.shadow_suggestions},
+                "shadow": {"checks": self.shadow_checks, "suggestions": self.shadow_suggestions,
+                           "late_max_s": round(self.shadow_late, 3), "lost": self.shadow_lost},
                 "end_stretch_s": self.end_s, "cap_s": self.cap_s, "alarm_screenshot": self.screenshot,
                 "window": self.window, "jpeg_quality": JPEG_QUALITY}
 
