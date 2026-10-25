@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from gamelab.localization import feed
+from gamelab.localization import senses as senses_mod
 from gamelab.localization.feed import Asks, FeedClient, Ring, SyncFeed, fresh, run
 from gamelab.localization.senses import Senses
 from gamelab.localization.worldstate import Schedule, SearchThread, WorldState, WorldStep
@@ -94,6 +95,7 @@ def sync(monkeypatch):
     eyes = Drawn(model)
     clock = Clock()
     monkeypatch.setattr(feed, "time", clock)
+    monkeypatch.setattr(senses_mod, "time", clock)  # (a look's freshness goes by it: Senses.fresh_after)
     step = WorldStep(Senses(eyes, model, band=(100, 100)))
     f = SyncFeed(step, lambda ropes: eyes.frame(clock.now, ropes))
     clock.tick = f.tick
@@ -470,7 +472,7 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     clock.sleep(0.5)
     asked = clock.now
     s = senses.look()
-    assert s.t >= asked and s.searched and [m.kind for m in s.monsters] == ["pig"]
+    assert s.t >= asked - senses_mod.MAX_AGE_S and s.searched and [m.kind for m in s.monsters] == ["pig"]
     assert [e.kind for e in s.events] == ["appeared"]  # what the feed saw since: once
     assert senses.look(mobs=False).events == [] and getattr(eyes, "looks", 0) == 0
     a, b = senses.glance(), senses.glance()
@@ -483,9 +485,58 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     assert eyes.glances == 1
 
 
+def test_a_look_is_the_newest_frame_newer_than_the_last_looks_and_after_her_keys_effect(sync, monkeypatch):
+    # Senses.fresh_after: (a) never the last look's frame again, (b) shown KEY_EFFECT_S after her last key at the
+    # soonest, (c) at most MAX_AGE_S old: a look after a pause takes the newest frame in, without waiting for another.
+    from gamelab.localization import senses as senses_mod
+    f, clock, eyes = sync
+    monkeypatch.setattr(senses_mod, "time", clock)
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    clock.sleep(1.0)
+    asked = clock.now
+    first = senses.look(mobs=False)
+    assert clock.now == asked and asked - senses_mod.MAX_AGE_S <= first.t <= asked  # (c): the newest in, no wait
+    again = senses.look(mobs=False)
+    assert again.t > first.t and clock.now > asked  # (a): the next frame, waited for
+    keyed = clock.now
+    senses.keyed = lambda: keyed  # a key just went
+    after_keys = senses.look(mobs=False)
+    assert after_keys.t >= keyed + senses_mod.KEY_EFFECT_S - 1e-9  # (b): what came of it shows
+    assert clock.now - keyed < senses_mod.KEY_EFFECT_S + 2 / feed.HZ  # ... the frame after that, no later
+    clock.sleep(0.5)
+    asked = clock.now
+    assert senses.look(mobs=False).t >= asked - senses_mod.MAX_AGE_S and clock.now == asked  # long after: (c) again
+
+
+def test_her_last_key_is_her_last_plans_end_less_what_it_ran_on_after_it(monkeypatch):
+    # Actions.last_key: a plan played (Actions.play) ends with its last key, as its result is read; a navigator chain's
+    # runs on past its last key to her landing (end_ms), and cut short every key is let go then.
+    from types import SimpleNamespace
+
+    from gamelab.control import actions as actions_mod, client, navigator
+    from gamelab.control.actions import Actions
+    now = [50.0]
+    monkeypatch.setattr(actions_mod, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=lambda s: None))
+    monkeypatch.setattr(client, "submit", lambda *a, **k: now.__setitem__(0, now[0] + 0.4))
+    monkeypatch.setattr(Actions, "hold_back", lambda self, events: None)
+    a = Actions(SimpleNamespace(), skill=False)
+    assert a.last_key < 0
+    a.play([[0, "left", "down"], [400, "left", "up"]], "walk")
+    assert a.last_key == 50.4
+    nav = navigator.Navigator.__new__(navigator.Navigator)
+    nav.actions, nav._tails = a, {"chain": 0.3}
+    now[0] = 60.0
+    nav._ended("chain")
+    assert a.last_key == pytest.approx(59.7)
+    nav._tails["cut"] = 0.3
+    now[0] = 61.0
+    nav._ended("cut", cut=True)
+    assert a.last_key == 61.0 and nav._tails == {}
+
+
 def test_a_look_after_a_glance_saw_her_still_takes_that_frame_and_waits_for_none(sync):
     # Navigator.recover: once a glance from the feed has seen her standing still, the look placing her may be of that
-    # very frame (Senses.look's `after`); taken anew, it waits for the feed's next frame.
+    # very frame (Senses.look's `after`); the next look is of a newer frame (Senses.fresh_after).
     f, clock, eyes = sync
     senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
     clock.sleep(0.5)
@@ -494,7 +545,7 @@ def test_a_look_after_a_glance_saw_her_still_takes_that_frame_and_waits_for_none
     s = senses.look(mobs=False, after=seen)
     assert s.t == seen and clock.now == asked and getattr(eyes, "looks", 0) == 0
     s = senses.look(mobs=False)
-    assert s.t >= asked and clock.now > asked
+    assert s.t > seen and clock.now > asked
 
 
 def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band_and_sweeps_only_once_it_is_down(sync):

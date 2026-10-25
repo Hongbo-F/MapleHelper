@@ -151,6 +151,10 @@ class Actions:
         self.turn_ms = 0
         self.pressed = False  # keys sent since the last look (then a move isn't a knockback)
         self._sent_at = 0.0    # when the last key plan was sent (a look older than that may be out of date)
+        # When the last key of her plans went, as far as it's known (time.monotonic): a plan's end as its result is read,
+        # less what it ran on after its last key (`ended`). A look from the perception service is of a frame shown
+        # senses.KEY_EFFECT_S after it at the soonest, so it sees what came of the keys before it.
+        self.last_key = -1e18
         self.lock_until = 0.0  # when her last attack stops locking out the next one
         self.arrow_until = 0.0  # ... and stops swallowing arrows (ARROW_LOCK_MS after its key)
         self._attack_at = 0.0   # when the last attack key went down (time.monotonic)
@@ -207,8 +211,16 @@ class Actions:
         Lie Detector alarm up (client.send's; these actions' own by default)."""
         self.hold_back(events)
         self._sent_at = time.monotonic()
-        client.submit(events, lead_ms=0, focus=True, name=name, kind=kind or self.kind)
+        try:
+            client.submit(events, lead_ms=0, focus=True, name=name, kind=kind or self.kind)
+        finally:
+            self.ended()  # (refused or cut short, keys may have gone too)
         self.pressed = True
+
+    def ended(self, tail_s: float = 0.0) -> None:
+        """A plan of hers is over, its result just read (or it was cut short: every key let go now, `tail_s` 0): its
+        last key went `tail_s` s before now, what it ran on after it (a chain's end_ms past its last key)."""
+        self.last_key = max(self.last_key, time.monotonic() - tail_s)
 
     def hold_back(self, events: list) -> None:
         """Wait just long enough that no jump or attack key in a plan of `events` (starting now) goes down

@@ -68,6 +68,20 @@ ROPE_PAD: int | None = ROPE_MATCH_PX + MAX_ROPE_WIDTH
 # minimap pixels), and over 20 seeds of 20 minutes the tour made 5.0% less EXP a minute (standard error 2.6%), the
 # hunt loop 2.4% more (1.6%). Not tried in game.
 FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
+# What a look from the feed is by default (2026-10-25; the user: "perception should just always run and the other
+# modules just work based on latest perception result"): the newest state of a frame
+# - newer than the last look's (a look never decides on a frame twice),
+# - shown KEY_EFFECT_S after the last key her plans sent at the soonest (`keyed`: Actions.last_key): the game acts on a
+#   key 66-68 ms after it's sent (README, Motion planning), so the look sees what came of the keys before it,
+# - and shown MAX_AGE_S before the look at the most;
+# with its searches as fresh as a look needs (feed.fresh). Before, a look was the first frame shown after it was asked
+# for, whatever came before. In the simulator (D:/MapleHelper-scratch/perceive/latcov2.py: the hunt loop on Tree Dungeon,
+# crowd, zero-walls, the attack choice, the costs measured, 4 seeds of 5 minutes), against a frame after the ask: a plan's
+# end to the next decision 122 ms (median; p90 265) against 66 (250), touches that hurt her a run 44.0 against 49.0, HP
+# lost 4.51 against 5.10 bars; the Lie Detector's retreat on a safe place 10 s after the sighting 28 of 28 runs against
+# 24 of 29 (test_retreat's sweep); the newest new frame without waiting for the keys' effect, 67 ms, 49.2, 4.75, 27 of 28.
+KEY_EFFECT_S = 0.068
+MAX_AGE_S = 0.1
 # Looks that fail their checks are taken again this long apart (each a capture: 5-30 ms), for up to LOST_S; then
 # LookLost. The window dragged at 16:48:44 on 2026-10-24 gave four bad looks in 4.1 s (16:48:44.0-48.1); a look that
 # fails for longer than LOST_S makes a hunt stand still (`regain`), looking again every PAUSE_POLL_S.
@@ -127,6 +141,8 @@ class Senses:
         self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
         self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
         self.sweep_counts = {"slices": 0, "held": 0}  # slices the sweep searched, and held back (sweep_hold)
+        self.keyed: Callable[[], float] = lambda: -1e18  # when her last key went (the hunter's: Actions.last_key)
+        self._looked = -1e18  # the frame time of the last look from the feed
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False,
              after: float | None = None) -> Scene:
@@ -139,9 +155,11 @@ class Senses:
         s = None
         if self._feed_up():
             asked = time.monotonic()
-            s = self.feed.look(self, mobs, wide, loot, mesos_only, after)
+            s = self.feed.look(self, mobs, wide, loot, mesos_only, self.fresh_after() if after is None else after)
             if not wide:
                 self._feed_paced(s is None, time.monotonic() - asked)
+            if s is not None:
+                self._looked = max(self._looked, s.t)
         served = s is not None
         if s is None:
             s = self._take()
@@ -170,6 +188,11 @@ class Senses:
         for listener in self.listeners:
             listener(s)
         return s
+
+    def fresh_after(self) -> float:
+        """When a look's frame may have been shown at the soonest, by default (KEY_EFFECT_S, MAX_AGE_S): after the last
+        look's frame, KEY_EFFECT_S after her last key, and MAX_AGE_S before now."""
+        return max(time.monotonic() - MAX_AGE_S, self._looked + 1e-6, self.keyed() + KEY_EFFECT_S)
 
     def _feed_up(self) -> bool:
         """Whether looks and glances come from the feed now: there's one, it's alive, and it isn't resting

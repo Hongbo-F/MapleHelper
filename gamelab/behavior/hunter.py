@@ -110,6 +110,7 @@ class Hunter:
         self._halves = fight.body_sizes(model)[1]  # each kind's half width (game data), for `pressed`
         mode = attack or ("skill" if skill else "regular")
         self.actions = Actions(keys, skill=mode != "regular")
+        self.senses.keyed = lambda: self.actions.last_key  # a look sees what came of her keys (Senses.fresh_after)
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
         if note := drops.unknown_note(model):  # its monsters whose drops aren't known, said once
             log(note)

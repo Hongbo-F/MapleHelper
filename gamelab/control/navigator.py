@@ -360,6 +360,7 @@ class Navigator:
         self._threat_kinds: frozenset | None = None  # the map's kinds whose touch counts (_threats), once worked out
         self._tallest_box: float | None = None       # the map's tallest monster box (_tallest), once worked out
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
+        self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
 
     @property
     def fight(self) -> bool:
@@ -1070,9 +1071,10 @@ class Navigator:
             events = chain_keys.sorted()
             end_ms = max(max(e[0] for e in events), ms(chain_legs[-1].end.t + tail))
             self.actions.sent_at = time.monotonic()
-            return (client.send(events, lead_ms=0, focus=True, name="flow", end_ms=end_ms,
-                                kind=getattr(self.actions, "kind", None)),
-                    end_ms / 1000)
+            plan_id = client.send(events, lead_ms=0, focus=True, name="flow", end_ms=end_ms,
+                                  kind=getattr(self.actions, "kind", None))
+            self._tails[plan_id] = (end_ms - max(e[0] for e in events)) / 1000  # (its run on past its last key)
+            return plan_id, end_ms / 1000
 
         tail = self._tail(legs, path, monsters) if why == "long" and st is not None else None
         more, tail = tail is not None, tail or 0.0
@@ -1098,6 +1100,7 @@ class Navigator:
                     client.cancel(pid)
                 except Exception:
                     pass
+            self._ended(None, cut=True)
             raise
 
     def _watch(self, current: _Running, hp: float, dst: int, send, st: TripState | None) -> tuple[str, list]:
@@ -1138,10 +1141,12 @@ class Navigator:
                 if current.tail and time.monotonic() >= last:
                     if not client.cancel(current.plan_id):
                         client.wait(current.plan_id)
+                    self._ended(current.plan_id, cut=True)
                     break
                 if (last if current.tail else current.ends) - time.monotonic() <= END_WATCH:
                     if client.done(current.plan_id):
                         client.wait(current.plan_id)
+                        self._ended(current.plan_id)
                         break
                     time.sleep(END_POLL_S)
                     continue
@@ -1180,13 +1185,22 @@ class Navigator:
                 for pid in [current.plan_id] + ([queued.plan_id] if queued else []):
                     if not client.cancel(pid):
                         client.wait(pid)
+                self._ended(current.plan_id, cut=True)
                 if queued:
                     sent = sent[:len(sent) - len(queued.legs)]
                 break
             if client.done(current.plan_id):
                 client.wait(current.plan_id)
+                self._ended(current.plan_id)
                 over = True  # the queued chain takes over, or the next one is still to come (see above)
         return cut, sent
+
+    def _ended(self, plan_id: str | None, cut: bool = False) -> None:
+        """A chain's plan is over, its result read: its last key went its run on past it before now (send's), or now,
+        cut short (every key let go: Actions.ended)."""
+        tail = self._tails.pop(plan_id, 0.0)
+        if hasattr(self.actions, "ended"):  # (a stand-in for Actions may not have it)
+            self.actions.ended(0.0 if cut else tail)
 
     def _coming(self, running: _Running) -> tuple[MonsterTrack, float, int] | None:
         """A monster the feed follows (the last glance's state: Senses.glanced) that the running chain's legs ahead of
