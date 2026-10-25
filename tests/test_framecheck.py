@@ -612,8 +612,11 @@ def test_a_hunt_sends_nothing_while_its_looks_fail_and_hunts_on_after():
     log = trace["log"]
     assert any("standing still: the capture is offset by (+26, +26)" in line for line in log), log
     assert any("the game looks as expected again" in line for line in log)
-    # (a plan sent as the looks began to fail may still play out: the last before the window was at 20.49 s)
-    quiet = [p for p in trace["plans"] if window[0] + 0.5 <= p[0] < window[1]]
+    # (a plan decided on the last look that passed may still go out before a look fails: with the hunt's positioning and
+    # escorted trips, a throw decided at 20.02 s on a look before the window went at 20.64 s, the first look failing at
+    # 20.73 s; on the branch alone the last before the window was at 20.49 s)
+    failed = next(float(line.split()[0]) for line in log if "a look failed its checks" in line)
+    quiet = [p for p in trace["plans"] if failed + 0.5 <= p[0] < window[1]]
     assert quiet == [], quiet
     assert any(p[0] >= window[1] for p in trace["plans"])  # hunting on after
     assert trace["result"]["hunt_stop"] == "time up"
