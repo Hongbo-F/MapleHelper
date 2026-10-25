@@ -251,7 +251,9 @@ def _waiting(model, kinds):
     h.model, h.kinds = model, kinds
     h.h = SimpleNamespace(danger=Danger(model, HER), knocked=lambda s: False)
     h.visit = Visit(g, spots.Spot(g, 400.0, 1.0, False))
-    return h, SimpleNamespace(platform=model.platform(g), where=SimpleNamespace(x=400.0, y=500.0), monsters=[])
+    h.tour = SimpleNamespace(hunting_grounds=lambda visit_s=None: [g], stats={})  # the only ground
+    h._skip, h._rope_rest, h._hanging = {}, 0.0, None  # (no rope on these maps: rule 9 on one never comes up)
+    return h, SimpleNamespace(platform=model.platform(g), where=SimpleNamespace(x=400.0, y=500.0), monsters=[], hp=1.0)
 
 
 def test_waiting_she_steps_off_between_two_spawn_points_of_a_kind_that_hits_hard():

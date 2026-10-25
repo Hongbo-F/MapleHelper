@@ -348,6 +348,36 @@ class Mover:
         return abs(x - m.rope_x) <= ON_ROPE_X and m.rope_top - HANG_TOLERANCE <= y <= m.rope_bottom + HANG_TOLERANCE \
             and abs(y - p.y_at(m.rope_x)) > HANG_TOLERANCE
 
+    def hang(self, rope: Rope, y: float, from_top: bool, s: Scene) -> Scene:
+        """Onto `rope` from the platform she stands on (look `s`), to about her feet at map y (a place to wait on:
+        attack.ropes): from its top (`from_top`), lined up on it and down to y; else grabbing it as a climb does (a
+        running jump at it holding up, or straight up from under it: _climb), up held about as long as the climb from
+        where she grabs it to y (a rope at her platform's very end, as Tree Dungeon's at -8 over 20's, is jumped at:
+        lined up under it, she walked off the end). A look once she's still (on it, or wherever she ended up)."""
+        p = s.where.platform
+        if p is None:
+            return s
+        if from_top:
+            down = self.actions.keys.down.name
+            self.line_up_rope(rope.x)
+            self._send([[0, down, "down"], [int(1000 * max(0.0, y - rope.top) / CLIMB_SPEED), down, "up"]], "hang")
+        else:
+            self._climb(Move("climb", p.id, p.id, rope.x, rope.x, rope_x=rope.x, rope_top=rope.top,
+                             rope_bottom=rope.bottom), s, to=y)
+        self._on_rope()
+        return self.locate()
+
+    def unhang(self, rope: Rope, y: float, from_top: bool) -> Scene:
+        """Off `rope`, her feet at about map y on it, back onto the platform she got on from (hang's): up over its top
+        (`from_top`), else down past its bottom, where she lets go onto the platform under it. A look once she's
+        standing."""
+        k = self.actions.keys
+        if from_top:
+            self._send([[0, k.up.name, "down"], [climb_ms(max(0.0, y - rope.top)), k.up.name, "up"]], "unhang")
+        else:
+            self._send([[0, k.down.name, "down"], [climb_ms(max(0.0, rope.bottom - y)), k.down.name, "up"]], "unhang")
+        return self.settle(2.0)
+
     def off_rope(self, s: Scene) -> Scene:
         """She's on a rope (no platform under her dot): climb up onto the platform if she's near its
         top, else jump off it sideways (towards the side a fall lands on a platform). Off a rope that

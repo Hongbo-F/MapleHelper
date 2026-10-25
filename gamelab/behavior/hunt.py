@@ -37,7 +37,8 @@ in the order listed, 6 before 3):
    8  lull loot        nothing wanted on this ground and a kill of hers due back: piles she can pick up first
    9  wait             monsters about or due back: stand still, for the patience at most, where she is or at the
                        safest place along her platform that still has the ground's spawn points in reach
-                       (_wait_place: not between two Horny Mushrooms' spawn points)
+                       (_wait_place: not between two Horny Mushrooms' spawn points), or on a rope from her
+                       platform where nowhere along it is safe enough (_refuge, attack.ropes)
   10  loot elsewhere   leaving: the piles left when she decided, the most worth per second of travel first
   11  advance          leaving: one trip to the next ground's spot
 
@@ -60,9 +61,11 @@ from dataclasses import dataclass, field
 from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
-from ..attack import reach, spots
+from ..attack import reach, ropes, spots
+from ..attack.ropes import Refuge
 from ..attack.spots import GROUND_MARGIN, Spot
 from ..attack.stance import MIN_MOVE, act_text, close_to, open_above, stance
+from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.players import near_rival
@@ -123,6 +126,16 @@ PATIENCE = {"ground": 1.0, "spot": 2.0, "none": 0.4}  # rule 9: today's patience
 WAIT_GAIN = 0.03
 WAIT_STEP = 100.0      # ... in steps of this many units at most (0.7 s at her 149 units/s), a look after each: the walk
                        # is blind (actions.walk), and a respawn or a monster walking in changes where's safest
+# Rule 9 on a rope (_refuge: attack.ropes): only where it's this much safer (the danger, a share of the HP she has
+# left) than anywhere along her platform, its own danger and the HP she doesn't regain there for HANG_EXPECT_S (the
+# live median respawn on Tree Dungeon's 23) counted: getting on and off takes 0.6-1.5 s she throws at nothing, a fresh
+# respawn walking at her unanswered meanwhile. A guess, so a rope is no default: on Tree Dungeon's 20, waiting for its
+# Horny Mushroom, the rope at -8 (out of its reach, 0.70 s on and off) against 0.11 at 20's safest place.
+ROPE_GAIN = 0.05
+HANG_EXPECT_S = 17.0
+HANG_MAX_S = 60.0      # backstop: s on a rope before she gets off whatever comes
+ROPE_AGAIN_S = 10.0    # s before another rope, after she got off one for anything but a monster to shoot
+OFF_TO_SHOOT = "a monster to shoot, and nothing where she lands"
 # A ground's EXP a second (the rate rule, the next ground) counts 1 - GROUND_DANGER x the danger where she'd stand to
 # hunt it (its spot's: attack.spots, the spawn points' monsters at their points), never under 0: on Tree Dungeon 23
 # shot from 24 (danger 0.07) keeps 86%, 10 hunted standing among its two Horny Mushrooms (0.18) 64%. In the simulator's
@@ -310,6 +323,9 @@ class Hunt:
         self._wide_at = -1e9
         self._idle_since: float | None = None
         self._stay_said: tuple | None = None  # the visit, its throws and kills when she last said she stays (_stay)
+        self._hanging: Refuge | None = None  # the rope she waits on (rule 9: _refuge), while she's on it ...
+        self._hung_at = 0.0                  # ... since when
+        self._rope_rest = 0.0                # no rope before this (ROPE_AGAIN_S)
         self._rule = ""
         self._potions_out = False
         self._potion_misses = 0              # potions in a row that brought no HP back
@@ -356,11 +372,15 @@ class Hunt:
         """One look and one step."""
         s = self._look()
         if s.where is None or s.platform is None:
+            if self._on_refuge(s):  # waiting on a rope (rule 9)
+                return self._while_hanging(s)
+            self._hanging = None
             if s.where is not None:  # in the air, or on a rope
                 self.nav._onto_platform(s)
             else:
                 time.sleep(0.2)
             return None
+        self._hanging = None  # on a platform: off any rope she waited on
         self._book(s)
         self._s = s
         self._publish()
@@ -1199,10 +1219,13 @@ class Hunt:
     # --- waiting ------------------------------------------------------------------------------------
 
     def _wait(self, s: Scene, targets) -> None:
-        """Rule 9: wait a moment, where she is or (a walk along her platform) at a safer place (_wait_place)."""
+        """Rule 9: wait a moment, where she is, on a rope (_refuge), or (a walk along her platform) at a safer place
+        (_wait_place)."""
         self._note("wait")
         if self._idle_since is None:
             self._idle_since = time.monotonic()
+        if (r := self._refuge(s)) is not None:
+            return self._hang(s, r)
         if (step := self._wait_place(s)) is not None:
             side, units, goal, there = step
             self.log(f"  waiting at x {goal:.0f} instead (danger {there:.2f} there)")
@@ -1218,25 +1241,135 @@ class Hunt:
         look's monsters), if it's WAIT_GAIN safer than here and stance.MIN_MOVE away, and the way there doesn't pass
         a monster that counts (_in_the_way). Never on a map where no kind counts as a danger (the first map: she waits
         where she is, as she did), nor from a look a touch's knock may still be moving her in (fight.knocked_move's)."""
-        d, here, x = self.danger, s.platform, s.where.x
+        d, x = self.danger, s.where.x
         if d is None or not d.any or self.h.knocked(s):
             return None
-        xs = spots._stand_xs(here.left + GROUND_MARGIN, here.right - GROUND_MARGIN)
-        if not xs:
+        now, best = self._safest_along(s)
+        if best is None or now - best[0] < WAIT_GAIN or best[1] < MIN_MOVE:
             return None
-        need = self._spawns_in_reach(s, x)
+        there, units, goal = best
+        return (RIGHT if goal > x else LEFT), units, goal, there
+
+    def _safest_along(self, s: Scene) -> tuple[float, tuple[float, float, float] | None]:
+        """The danger where she is (Danger.at with this look's monsters), and the safest of _wait_place's places along
+        her platform as (its danger, how far, its x), None if there's none."""
+        d, here, x = self.danger, s.platform, s.where.x
         now = d.at(here.id, x, s.monsters)
+        need = self._spawns_in_reach(s, x)
         best = None  # (danger, distance, x)
-        for g in xs:
+        for g in spots._stand_xs(here.left + GROUND_MARGIN, here.right - GROUND_MARGIN):
             if self._spawns_in_reach(s, g) < need or self._in_the_way(s, x, g):
                 continue
             there = d.at(here.id, g, s.monsters)
             if best is None or (round(there, 6), abs(g - x)) < (round(best[0], 6), best[1]):
                 best = (there, abs(g - x), g)
-        if best is None or now - best[0] < WAIT_GAIN or best[1] < MIN_MOVE:
+        return now, best
+
+    # --- waiting on a rope ----------------------------------------------------------------------------
+
+    def _refuge(self, s: Scene) -> Refuge | None:
+        """Rule 9: a rope to wait on instead (attack.ropes), or None: one she can get onto from her platform and back
+        (by a walk along it that passes no monster that counts: _in_the_way), safer than anywhere along her platform
+        (_safest_along, where she is too) by ROPE_GAIN of the HP she has left (a touch takes more of less), what she
+        doesn't regain there while she waits (REGEN_S for HANG_EXPECT_S) on top of its own danger; and whose foot,
+        where she comes back down to shoot what she waited for, is no more than WAIT_GAIN more dangerous than the
+        safest place along her platform as she plans (_foot_floor). On Tree Dungeon that leaves none: 31's rope
+        comes down 40 units from its Horny Mushroom's spawn point (0.16 there, 0.12 at 31's safest place; taken, in
+        the simulator she made 25% less EXP for the same HP, 8 seeds of 8 minutes on 31 alone), 10's by its two
+        (0.23 against 0.18), and over 20 and 19 the ropes hang at the platforms' very ends (attack.ropes.ROPE_IN).
+        Only while she waits for more than getting on and off takes: this ground the only one she'd go to, or a
+        kill of hers due back no sooner. Never where nothing counts as a danger, nor ROPE_AGAIN_S after she got off
+        one for anything but a monster to shoot."""
+        d, here, x, now = self.danger, s.platform, s.where.x, time.monotonic()
+        if d is None or not d.any or self.h.knocked(s) or now < self._rope_rest:
             return None
-        there, units, goal = best
-        return (RIGHT if goal > x else LEFT), units, goal, there
+        due = self._due_back()
+        if due is None and self._elsewhere():
+            return None  # she'll leave on her patience (1-2 s): no time for a rope
+        options = ropes.refuges(self.model, d, here.id, s.monsters)
+        if not options:
+            return None
+        at, best = self._safest_along(s)
+        safest = min(at, best[0]) if best is not None else at
+        cost = ropes.REGEN_S * HANG_EXPECT_S
+        floor = self._foot_floor(here.id)
+        for r in options:  # the safest first
+            if due is not None and due < r.on_s + r.off_s:
+                continue
+            if safest - (r.danger + cost) < ROPE_GAIN * max(s.hp, 0.1) or self._in_the_way(s, x, r.x):
+                continue
+            if d.at(here.id, r.x) > floor + WAIT_GAIN:
+                continue  # she comes back down by a spawn point: there respawns land on her
+            return r
+        return None
+
+    def _foot_floor(self, pid: int) -> float:
+        """The danger of the safest of _wait_place's places along platform `pid` as she plans (every spawn point's
+        monster at its point): what the foot of a rope she'd wait on is held to (_refuge)."""
+        p, d = self.model.platform(pid), self.danger
+        xs = spots._stand_xs(p.left + GROUND_MARGIN, p.right - GROUND_MARGIN) or [(p.left + p.right) / 2]
+        return min(d.at(pid, g) for g in xs)
+
+    def _hang(self, s: Scene, r: Refuge) -> None:
+        """Rule 9 on a rope: to its x along her platform, onto it and to her height there (control.mover.hang)."""
+        at, best = self._safest_along(s)
+        safest = min(at, best[0]) if best is not None else at
+        self.log(f"  waiting on the rope at x {r.x:.0f} (feet at y {r.y:.0f}; danger {r.danger:.2f} there, "
+                 f"{safest:.2f} at best on platform {s.platform.id})")
+        telemetry.emit("event", kind="rope", text=f"on the rope at x {r.x:.0f}, y {r.y:.0f}")
+        self.nav.mover.hang(r.rope, r.y, r.from_top, s)
+        self._hanging, self._hung_at = r, time.monotonic()
+        return None
+
+    def _on_refuge(self, s: Scene) -> bool:
+        """Whether look `s` (on no platform) has her on the rope she went to wait on (by it, between its ends)."""
+        r = self._hanging
+        return (r is not None and s.where is not None and abs(s.where.x - r.x) <= ON_ROPE_X
+                and r.rope.top - HANG_TOLERANCE <= s.where.y <= r.rope.bottom + HANG_TOLERANCE)
+
+    def _while_hanging(self, s: Scene) -> None:
+        """A look while she waits on a rope (a whole-screen one: the ground's monsters): off it (control.mover.unhang)
+        when there's a reason to (_off_rope), else a moment more. Potions as anywhere (Hunter.health_check)."""
+        self._note("wait")
+        wide = self.h.look(mobs=True, wide=True, loot=False)
+        if wide.where is not None and wide.platform is None:
+            s = self._seen = wide
+        why = self._off_rope(s)
+        if why is None:
+            time.sleep(0.1)
+            return None
+        r = self._hanging
+        self.log(f"  off the rope at x {r.x:.0f}: {why}")
+        self.nav.mover.unhang(r.rope, s.where.y, r.from_top)
+        self._hanging = None
+        if why != OFF_TO_SHOOT:
+            self._rope_rest = time.monotonic() + ROPE_AGAIN_S
+        return None
+
+    def _off_rope(self, s: Scene) -> str | None:
+        """Why she gets off the rope she waits on now, or None: HP to rest at (Hunter.health_check, which drinks
+        meanwhile); the rope no safer than where she'd land; a monster she hunts on the ground (or in reach of where
+        she lands), with none where she lands so near that a throw at it would be the claw's swipe (stance.close_to:
+        she lets it pass under her; waiting for a Horny Mushroom to walk out of its keep-off, 162, she hung for
+        minutes on 31 in the simulator); nothing due back and another ground to go to; or HANG_MAX_S up there."""
+        r, d, now = self._hanging, self.danger, time.monotonic()
+        if (stop := self.h.health_check(s)) is not None:
+            return f"{stop}: to rest"
+        seen = s.monsters
+        below = d.at(r.platform, r.x, seen)
+        if d.on_rope(r.rope, s.where.y, seen) > below:
+            return "no safer than below"
+        land = self.model.platform(r.platform)
+        wanted = [m for m in seen if (self.kinds is None or m.kind in self.kinds)
+                  and (m.platform == self.visit.ground
+                       or reach.can_hit(land, r.x, land.y_at(r.x), m, others=seen))]
+        if wanted and not any(m.platform == r.platform and close_to(m, r.x, self._halves) for m in seen):
+            return OFF_TO_SHOOT
+        if self._due_back() is None and self._elsewhere():
+            return "nothing due back, and another ground to go to"
+        if now - self._hung_at >= HANG_MAX_S:
+            return f"{HANG_MAX_S:.0f} s on it"
+        return None
 
     def _in_the_way(self, s: Scene, x: float, g: float) -> bool:
         """Whether a walk along her platform from map x to `g` would touch a monster that counts as a danger: one of

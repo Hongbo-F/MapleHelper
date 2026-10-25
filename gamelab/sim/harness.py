@@ -38,6 +38,7 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    and fresh_hp_lost, the HP they took
   wait_s           seconds the hunt loop spent waiting for respawns (its rules 'wait' and 'lull loot', from its 'hunt'
                    records), and wait_hp_lost, the HP touches took then
+  ropes            how often the hunt loop went to wait on a rope (its rule 9: telemetry events kind 'rope')
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances
@@ -340,6 +341,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "wait_s": round(sum(max(0.0, min(b, end) - a) for a, b in waits), 1),
         "wait_hp_lost": round(sum(hp for t, hp in world.touch_log if t <= end and any(a <= t <= b for a, b in waits)),
                               3),
+        "ropes": sum(1 for r in events if r.get("kind") == "rope"),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
 

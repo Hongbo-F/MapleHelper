@@ -1,8 +1,12 @@
-"""Ropes as places to wait out monsters (attack.ropes, attack.danger's on_rope), on synthetic maps: which kinds can
-reach her on a rope (a walker under it only as high as its body, a hopper as high as its hop's frames, a flier
-anywhere), and the ropes she can get onto from a platform and back, at what height and what it takes."""
+"""Ropes as places to wait out monsters (attack.ropes, attack.danger's on_rope, the hunt loop's rule 9 on a rope), on
+synthetic maps: which kinds can reach her on a rope (a walker under it only as high as its body, a hopper as high as
+its hop's frames, a flier anywhere), the ropes she can get onto from a platform and back, at what height and what it
+takes, and when the hunt loop hangs on one, and gets off it. And in the simulator, end to end, on a platform no place
+along which is safe from its Horny Mushrooms' spawn points."""
 
 import math
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -105,3 +109,95 @@ def test_how_high_a_kind_reaches_and_whether_it_flies_come_with_the_map():
     data = mapdata._mob_touch({"7", "13", "19"})  # a slime (its hop's frames), the Green and Horny Mushrooms
     assert data["mob_tall"] == {"7": 66.0, "13": 52.0, "19": 52.0}
     assert data["mob_flies"] == {"7": False, "13": False, "19": False}
+
+
+# --- the hunt loop's rule 9 on a rope ---------------------------------------------------------------------------------
+
+def _hunt(model, ground, grounds=None, due=None, hp=1.0):
+    from gamelab.attack import spots
+    from gamelab.behavior.hunt import Hunt, Visit
+    h = object.__new__(Hunt)
+    h.model, h.kinds, h._skip, h._rope_rest, h._hanging, h._hung_at = model, {"horny-mushroom"}, {}, 0.0, None, 0.0
+    lows = []
+    h.h = SimpleNamespace(danger=Danger(model, HER), knocked=lambda s: False,
+                          health_check=lambda s: "HP low" if s.hp < 0.3 else lows.append(s.hp))
+    h.visit = Visit(ground, spots.Spot(ground, 400.0, 1.0, False))
+    h.tour = SimpleNamespace(hunting_grounds=lambda visit_s=None: list(grounds or [ground]), stats={})
+    h._due_back = lambda: due
+    h._halves = {}
+    s = SimpleNamespace(platform=model.platform(ground), where=SimpleNamespace(x=400.0, y=500.0), monsters=[], hp=hp)
+    return h, s
+
+
+# Three Horny Mushrooms' spawn points along the floor, 300 apart: nowhere along it is out of a fresh one's reach, and
+# the rope's foot (150 from two of them) is as safe as anywhere on it.
+LIVES = [("19", 100, 500), ("19", 400, 500), ("19", 700, 500)]
+
+
+def test_she_waits_on_a_rope_only_where_nowhere_along_her_platform_is_safe_enough():
+    model = build([FLOOR, OVER], LIVES, [ROPE])
+    g = on(model, 100, 500)
+    h, s = _hunt(model, g)
+    r = h._refuge(s)
+    assert r is not None and r.x == 250 and r.danger == 0.0
+    at, best = h._safest_along(s)
+    from gamelab.behavior.hunt import ROPE_GAIN
+    assert min(at, best[0]) - r.danger >= ROPE_GAIN
+    # With another ground to go to and nothing of hers due back, she leaves on her patience: no time for a rope.
+    h2, s2 = _hunt(model, g, grounds=[g, 7])
+    assert h2._refuge(s2) is None
+    h2._due_back = lambda: 9.0  # a kill of hers due back in 9 s: she waits, and the rope is worth it
+    assert h2._refuge(s2) is not None
+    h2._due_back = lambda: 0.5  # due sooner than getting on and off takes
+    assert h2._refuge(s2) is None
+    # One spawn point only, far from her: a place along the floor is safe enough, and the rope no default.
+    one = build([FLOOR, OVER], [("19", 50, 500)], [ROPE])
+    h3, s3 = _hunt(one, on(one, 100, 500))
+    assert h3._refuge(s3) is None
+    # The rope's foot right by a spawn point (where respawns land on her as she comes back down): not a refuge.
+    foot = build([FLOOR, OVER], [("19", 100, 500), ("19", 270, 500), ("19", 700, 500)], [ROPE])
+    h4, s4 = _hunt(foot, on(foot, 100, 500))
+    assert h4._refuge(s4) is None
+    # Where nothing counts as a danger (slimes: the first map's case), never.
+    weak = build([FLOOR, OVER], [("7", 100, 500), ("7", 400, 500), ("7", 700, 500)], [ROPE])
+    h5, s5 = _hunt(weak, on(weak, 100, 500))
+    h5.kinds = {"slime"}
+    assert h5._refuge(s5) is None
+
+
+def test_on_the_rope_she_lets_a_monster_pass_under_her_and_gets_off_to_shoot_one_away_from_her_landing():
+    from gamelab.behavior.hunt import HANG_MAX_S, OFF_TO_SHOOT
+    model = build([FLOOR, OVER], LIVES, [ROPE])
+    g = on(model, 100, 500)
+    h, s = _hunt(model, g)
+    h._hanging, h._hung_at = h._refuge(s), time.monotonic()
+    up = SimpleNamespace(platform=None, where=SimpleNamespace(x=250.0, y=h._hanging.y), monsters=[], hp=0.9)
+    assert h._on_refuge(up) and h._off_rope(up) is None  # nothing about: she stays
+    up.monsters = [seen("horny-mushroom", 300.0, 500.0, g)]  # back, by her landing (a claw's swipe from it)
+    assert h._off_rope(up) is None
+    up.monsters = [seen("horny-mushroom", 500.0, 500.0, g)]  # walked off: down to shoot it
+    assert h._off_rope(up) == OFF_TO_SHOOT
+    up.monsters, up.hp = [], 0.2
+    assert h._off_rope(up) == "HP low: to rest"
+    up.hp = 0.9
+    h._hung_at -= HANG_MAX_S
+    assert h._off_rope(up).endswith("s on it")
+    assert not h._on_refuge(SimpleNamespace(platform=None, where=SimpleNamespace(x=300.0, y=400.0)))
+
+
+def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypatch):
+    """The hunt loop for 3 minutes on the floor above (its three Horny Mushrooms, respawns 17 s after a kill), started
+    on it: she goes to wait on the rope when it's empty, gets off to shoot what comes back, and lives."""
+    from gamelab.sim import harness, scenarios, world
+    from gamelab.sim.world import Realism
+    model = build([FLOOR, OVER], LIVES, [ROPE])
+    if world.mob_info(19) is None:
+        pytest.skip("needs the Horny Mushroom's game data (gamedata/data)")
+    g = on(model, 100, 500)
+    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=2,
+                            limit=400, realism=Realism(respawn=17.0), may_die=True)
+    trace = scenarios.run_scenario(sc, model)
+    log = "\n".join(trace["log"])
+    assert "waiting on the rope at x 250" in log and "off the rope at x 250" in log, trace["result"]
+    assert any("grabs the rope at x 250" in line for line in trace["world_log"])
+    assert not trace["world"]["dead"] and sum(trace["world"]["kills"].values()) >= 3
