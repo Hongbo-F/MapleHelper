@@ -1240,6 +1240,24 @@ plans by (the loop's 463 EXP a minute, camping 23 at 228 against 283 live) do. J
 brought to the game's (respawn delays spread about 14 s, points 28% full, the upper tower contested, touches as often as
 live: the gaps in `D:/MapleHelper-scratch/wf-prior/wf_a8ab59d8-9df__understand_sim.md`), or the game.
 
+**Merged** (2026-10-24, over positioning, the escorted trips and the capture checks; Tree Dungeon, `crowd`, zero-walls,
+seed by seed against the hunt loop as merged, which positioning made much stronger there: its grounds and spots by the
+danger shoot 23 from 24, where grinding's loop goes up the tower to 10 and 7):
+
+| | the regular attack, 4 seeds of 5 min | the regular attack, 8 of 10 min | Lucky Seven, 8 of 10 min |
+|---|---|---|---|
+| EXP a minute, the hunt loop | 85.6 | 74.5 | 228.3 |
+| ... grinding | 78.4 (-4.6%, standard error 17.2%; better on 2) | 64.6 (+0.1%, 20.7%; better on 3) | 187.5 (-12.9%, 11.2%; better on 2) |
+| kills a run | 13.0 / 12.0 | 22.3 / 20.6 | 66.6 / 54.9 |
+| HP lost a run (bars) | 5.8 / 6.4 | 10.7 / 10.6 | 11.2 / 9.7 |
+| touches that hurt on trips | 17.0 / 10.3 | 28.3 / 21.4 | 29.1 / 29.3 |
+| rests a run; deaths | 0.8 / 1.0; 0 | 2.6 / 3.3; 0 | 3.1 / 3.8; 0 |
+
+Grinding as it was measured above (167 EXP a minute, 20-minute runs, against the memory alone's 138) makes 188 on the
+merged stack, where the hunt loop makes 228: it no longer beats it in the simulator. With the regular attack (as live
+now) the two are level within the runs' spread, and her kills take about three times as long as the loop's model
+starts from (`KILL_S_PER_EXP` is Lucky Seven's, learned from her throws as she goes).
+
 **To check in game.** Without attacking: `watch --minutes 5 --map 10002073` while the user plays or she stands on 23,
 then `python -m gamelab patrol <its telemetry file>`: the belief's stops and the choices it would make (each pull should
 name monsters in view; no stop should be skipped unless she or someone emptied it within its refill), and `memory` on it
