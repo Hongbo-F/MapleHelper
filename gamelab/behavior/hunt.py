@@ -42,7 +42,8 @@ in the order listed, 6 before 3):
   11  advance          leaving: one trip to the next ground's spot
 
 She leaves a ground by the rate rule (`_leaving`): her EXP rate there falls clearly below what the best
-other ground would give, travel included, or nothing is left there and nothing is due back. Objectives
+other ground would give, travel included, or nothing is left there and nothing is due back. Not for the ground she'd
+pick again at once (the only one: `--grounds 23`, or a value map with one): then it's waiting (`_elsewhere`). Objectives
 are suspended, not ended, when a higher rule fires: they keep their route weights and their clock
 (OBJECTIVE_S, suspensions included).
 
@@ -306,6 +307,7 @@ class Hunt:
         self._progress = 0.0
         self._wide_at = -1e9
         self._idle_since: float | None = None
+        self._stay_said: tuple | None = None  # the visit, its throws and kills when she last said she stays (_stay)
         self._rule = ""
         self._potions_out = False
         self._potion_misses = 0              # potions in a row that brought no HP back
@@ -956,18 +958,43 @@ class Hunt:
                 v.empty_since = now
             if now - v.empty_since < EMPTY_CONFIRM_S:
                 return None  # to be confirmed (not left on patience meanwhile: then it wouldn't be skipped)
+            if not self._elsewhere():
+                return self._stay("nothing left here")
             self._skip[v.ground] = now + SKIP_S
             return "nothing left here, and nothing due back"
         if covered or due is not None:
             v.empty_since = None
         judged = covered or s.platform.id in (v.ground, v.spot.platform)
         if judged and self._idle_since is not None and now - self._idle_since >= self._patience(s) and due is None:
+            if not self._elsewhere():
+                return self._stay("nothing came into reach")
             return "nothing came into reach"
         if here_s < MIN_STAY and v.throws < MIN_THROWS:
             return None
         rate, best = self._rate_here(), self._best_rate(s)
         if best is not None and rate < LEAVE_MARGIN * best[0]:
             return f"{rate:.2f} EXP/s here, {best[0]:.2f} to be had at platform {best[1]}"
+        return None
+
+    def _elsewhere(self) -> bool:
+        """Whether leaving now would take her to another ground, as _next_ground picks: one she isn't skipping, or with
+        every one skipped, the soonest back of the others. Not when this one is all there is: live on 2026-10-24 with
+        23 the only ground (20261024-165414-tour.jsonl), "nothing came into reach" fired about once a second for 11
+        minutes and 23 was picked again at once, each time a visit of about a second and no EXP in the value map (113
+        of them: record_visit)."""
+        now, here = time.monotonic(), self.visit.ground
+        others = [g for g in self.tour.hunting_grounds(self._visit_s) if g != here]
+        return any(self._skip.get(g, 0) <= now for g in others) or any(k != here for k in self._skip)
+
+    def _stay(self, why: str) -> None:
+        """A reason to leave for the ground she'd pick again (not _elsewhere): she stays, waiting (rule 9), and it's
+        progress as picking it again was (STUCK_S: so the stuck guard fires as it did); said once until she throws or
+        kills there again."""
+        self._progress = time.monotonic()
+        v = self.visit
+        if self._stay_said != (said := (id(v), v.throws, len(v.kills))):
+            self._stay_said = said
+            self.log(f"  staying at platform {self.visit.ground}: {why}, and no other ground to go to")
         return None
 
     def _covers_ground(self, s: Scene) -> bool:

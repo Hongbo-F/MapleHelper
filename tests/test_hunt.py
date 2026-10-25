@@ -172,7 +172,7 @@ def test_potions_are_out_only_after_two_in_a_row_bring_no_hp_back(monkeypatch):
 def test_the_ground_is_judged_empty_only_from_looks_that_cover_it_for_a_while():
     h = _hunt([])
     h.visit = Visit(17, Spot(16, 636.0, 0.35, True), arrived=time.monotonic() - 30)
-    h.kinds, h._skip, h._idle_since = None, {}, None
+    h.kinds, h._skip, h._idle_since = None, {4: time.monotonic() + 60}, None  # another ground to go back to
     h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=17, left=861.0, right=1389.0))
     h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: [])
 
@@ -186,6 +186,38 @@ def test_the_ground_is_judged_empty_only_from_looks_that_cover_it_for_a_while():
     assert h._leaving(look(16, [(16, 501, 669)])) is None and h.visit.empty_since is not None  # band look: kept
     h.visit.empty_since -= hunt.EMPTY_CONFIRM_S
     assert h._leaving(on_spot) == "nothing left here, and nothing due back" and 17 in h._skip
+
+
+def test_she_doesnt_leave_a_ground_for_itself_she_waits_there():
+    """With the ground she's at the only one she'd go to (23 alone, live on 2026-10-24), neither an empty ground nor
+    her patience running out is a reason to leave: she stays (waiting), says so once, and it's progress as a new ground
+    was. With another ground to go to, or one skipped to come back to, she leaves as before."""
+    lines = []
+    h = _hunt([])
+    h.log = lines.append
+    h.visit = Visit(23, Spot(24, 231.0, 0.95, False), arrived=time.monotonic() - 30)
+    h.kinds, h._skip, h._idle_since, h._stay_said, h._progress = None, {}, None, None, 0.0
+    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=23, left=-197.0, right=186.0))
+    grounds = [23]
+    h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: list(grounds))
+    empty = SimpleNamespace(platform=SimpleNamespace(id=24), looked=[(23, -197, 186)], monsters=[], players=[],
+                            where=SimpleNamespace(x=231.0, y=-430.0))
+    assert h._leaving(empty) is None and h.visit.empty_since is not None  # empty: to be confirmed
+    h.visit.empty_since -= hunt.EMPTY_CONFIRM_S
+    assert h._leaving(empty) is None and 23 not in h._skip and h._progress > 0  # stays, not skipped
+    assert h._leaving(empty) is None and len(lines) == 1 and "staying at platform 23" in lines[0]  # said once
+    # Out of view of the ground (not covered), her patience run out: the same.
+    away = SimpleNamespace(platform=SimpleNamespace(id=24), looked=[], monsters=[], players=[],
+                           where=SimpleNamespace(x=231.0, y=-430.0))
+    h._idle_since = time.monotonic() - 10
+    assert h._leaving(away) is None
+    h.visit.throws += 1  # a throw since: said again
+    assert h._leaving(away) is None and len(lines) == 2
+    h._skip = {20: time.monotonic() + 60}  # another ground, skipped for now: the soonest back, so she goes
+    assert h._leaving(away) == "nothing came into reach"
+    h._skip, grounds[:] = {}, [23, 20]  # another ground to go to
+    assert h._leaving(away) == "nothing came into reach"
+    assert h._leaving(empty) == "nothing left here, and nothing due back" and 23 in h._skip
 
 
 def test_she_finishes_what_she_hurt_before_she_sets_off_for_another_platform(monkeypatch):
