@@ -593,8 +593,14 @@ cap and the gold coin one each. Not found: the coins it doesn't look for, 4 edge
 The first map's detector, the one she hunted with, found 12 of the 39 sightings, 6 of the 13 drops: the coins and the
 potion. (A whole screen took 360-420 ms with the map's pictures, 260-340 with the first map's, with other work loading
 the CPU; a look searches the strips above the platforms.) In those hunts (13 runs, 8,795 scenes) the first map's
-detector found mesos 1,091 times, potions 122 (Orange 50, Red 46, Blue 26) and Squishy Liquid 6: none of the first
-map's own items where they don't drop, and none of the caps and ores, which it didn't look for.
+detector found mesos 1,091 times, potions 122 (Orange 50, Red 46, Blue 26) and Squishy Liquid 6 (on 33, by the slimes),
+and none of the caps and ores, which it didn't look for. The day's longest watch (09:54-13:05, 75,760 scenes searched,
+her by the portal on 28) did name the first map's items where they don't drop, with the same detector: a Snail Shell
+219 times (one thing that didn't move, on 27 at x -8, from 10:59:54 to 11:01:54; no monster spawns on 27), Squishy
+Liquid 41 times (on 30 at x 146, 10:42:22-46; the slimes spawn on 33) and a Pig's Head 4 times (on 24 at x 298, by two
+players, within 0.3 s), and no mesos. No frame of them was saved: a false match on a player, a pet or the scenery, or
+an item a player dropped, can't be told apart, and what matched may match one of Tree Dungeon's pictures now (the
+check in game below).
 
 **What they're worth** (`looting.PRICES`, `Worth`, `coins_for`). Every map's items are priced from the game data
 (`info/price`, by item id; a test checks each): of the new maps', an Opal Ore 160, a Sapphire 120, an Orihalcon 100, a
@@ -632,8 +638,9 @@ with her the band, the drops' strips and the camera; on its 5 frames by the port
 the game to the front) with drops lying in view: each named as its kind on `lab/shots/hunt_look.png` (an ore by its
 colour), and nothing named where none lies, the portal's light, the other players and their pets and name tags
 included; then `python -m gamelab watch --minutes 3 --map 10002073` (it searches her platform for drops twice a second
-and every platform in view every 2 s, and its telemetry's scenes list what it found, `loot`). The same on West Rocky
-Mountain II (`--map 10004021`). Frames saved with drops on them (`snap --scale 1`) would check the drops on none yet:
+and every platform in view every 2 s, and its telemetry's scenes list what it found, `loot`): where `loot` names a drop
+with no kill near it (as the Snail Shell on 27 above), `snap --scale 1` while it lies there, and label the frame. The
+same on West Rocky Mountain II (`--map 10004021`). Frames saved with drops on them (`snap --scale 1`) would check the drops on none yet:
 Tree Dungeon's ores but Bronze, its Fragment of Magic, Magic Potion, Slime Bubble and Squishy Liquid and the potions but
 the Orange, and all of West Rocky Mountain II's.
 
