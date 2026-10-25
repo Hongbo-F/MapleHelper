@@ -1133,7 +1133,7 @@ def test_in_transit_the_fights_in_her_way_dont_go_on_to_finish_what_she_has_hurt
 
     from gamelab.control.navigator import HUNT, TRANSIT
     asked = []
-    escort = SimpleNamespace(clear_way=lambda s, x, finish=True: asked.append(finish) or 1)
+    escort = SimpleNamespace(clear_way=lambda s, x, finish=True: asked.append(finish) or 1, threat=lambda kind: False)
     nav = _navigator(model, escort=escort)
     c = by_y(model, 500, 400)
     for mode in (HUNT, TRANSIT):
@@ -1156,7 +1156,7 @@ def test_a_trip_starts_from_the_callers_look_while_it_still_shows_where_she_is(m
     t = 100.0
     look = Scene(t=t, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0, where=Where(400, 500, c, (0, 0)),
                  searched=True)
-    escorted = _navigator(model, escort=SimpleNamespace())
+    escorted = _navigator(model, escort=SimpleNamespace(threat=lambda kind: False))
     clock = {"now": t + 0.1}
     import gamelab.control.navigator as nv
     monkeypatch.setattr(nv.time, "monotonic", lambda: clock["now"])
@@ -1499,6 +1499,19 @@ def _escort(shots=None):
     asked = []
     return SimpleNamespace(threat=lambda kind: True, asked=asked,
                            clear_for=lambda s, m, finish=True: asked.append((m, finish)) or shots)
+
+
+def test_a_fighting_trip_reads_which_kinds_count_before_its_first_look(model):
+    """Navigator.begin: with an escort, the kinds whose touch counts (Escort.threat: the game data's touch damage, a
+    first read of which took half a second) are worked out as the trip begins, not between its first look and chain;
+    without one, never."""
+    from types import SimpleNamespace
+    d = by_y(model, 300, 700)
+    nav = _navigator(model, escort=SimpleNamespace(threat=lambda kind: True))
+    nav.begin(d.id, mode="avoid")
+    assert nav._threat_kinds is None
+    nav.begin(d.id, mode="transit")
+    assert nav._threat_kinds is not None
 
 
 def test_a_trip_with_an_escort_shoots_first_a_monster_that_could_touch_her_on_the_way(model, monkeypatch):
