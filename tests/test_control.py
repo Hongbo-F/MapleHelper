@@ -138,25 +138,57 @@ def test_no_jump_in_her_key_plans_is_keyed_in_the_kicks_blind_spot():
     assert run_ms(MIN_RUN) == round(MIN_RUN / 0.149 + 54) and body.jump_window_ok(run_ms(MIN_RUN), SHOE, LAGS)
 
 
-def test_a_jump_throw_that_turns_her_jumps_once_the_turns_tap_has_stopped_walking_her():
+def test_a_jump_throw_that_turns_her_turns_in_the_air_or_first_with_its_wait():
+    # She jumps at once and taps the arrow in the air (AIR_TURN_MS after the jump key, once she's off the ground), the
+    # attack JUMP_BACK_ATTACK_MS after the jump key, as the jump backs turn: by the engine she comes down 3.8 units on
+    # (2.7-4.3), against 5.3 with the tap first and the jump JUMP_THROW_TURN_MS after it, the attack 160 ms sooner.
     from maplehelper.game import MOVEMENT
+    from gamelab.control import actions as actions_mod
     from gamelab.control.actions import JUMP_THROW_TURN_MS
     from gamelab.motion import body
-    from gamelab.motion.physics import SHOE
+    from gamelab.motion.physics import AIR_TURN_MS, JUMP_BACK_ATTACK_MS, SHOE
     sent = []
     a = actions(sent)
     a.facing = "left"
     a.jump_throw(RIGHT)
     (_, events), = sent
     at = lambda k, how: next(t for t, name, h_ in events if name == k and h_ == how)
-    assert at("right", "down") == 0 and at("right", "up") == MOVEMENT.tap_turn_ms
-    lift = at("alt", "down") / 1000 + JUMP_LAG
-    assert at("alt", "down") == JUMP_THROW_TURN_MS and lift > body.hold_time(MOVEMENT.tap_turn_ms, SHOE, LAGS) + 0.03
-    # Facing the right way already, no tap, and the jump goes at once.
+    assert at("alt", "down") == 0 and at("right", "down") == AIR_TURN_MS and at("f", "down") == JUMP_BACK_ATTACK_MS
+    assert a.facing == RIGHT
+    # An attack that must come sooner (air_turn False), or with AIR_TURN off: the tap first, and the jump once its
+    # walk has stopped.
+    for kw in ({"air_turn": False}, {}):
+        sent.clear()
+        a.lock_until, a.facing = 0.0, "left"
+        old = actions_mod.AIR_TURN
+        actions_mod.AIR_TURN = bool(kw)
+        try:
+            a.jump_throw(RIGHT, **kw)
+        finally:
+            actions_mod.AIR_TURN = old
+        (_, events), = sent
+        assert at("right", "down") == 0 and at("right", "up") == MOVEMENT.tap_turn_ms
+        lift = at("alt", "down") / 1000 + JUMP_LAG
+        assert at("alt", "down") == JUMP_THROW_TURN_MS and lift > body.hold_time(MOVEMENT.tap_turn_ms, SHOE, LAGS) + 0.03
+    # Facing the right way already, no tap, and the jump goes at once; its attack as late as asked.
     sent.clear()
     a.lock_until = 0.0
-    a.jump_throw(RIGHT)
-    assert [e[1] for e in sent[0][1]] == ["alt", "alt", "f", "f"] and sent[0][1][0][0] == 0
+    a.jump_throw(RIGHT, 230)
+    assert [e[1] for e in sent[0][1]] == ["alt", "alt", "f", "f"] and sent[0][1][0][0] == 0 and sent[0][1][2][0] == 230
+
+
+def test_a_jump_forward_holds_the_arrow_through_its_kick_and_throws_that_way():
+    from gamelab.control.actions import FORWARD_HOLD_MS
+    from gamelab.motion.physics import FORWARD_JUMP_MS
+    sent = []
+    a = actions(sent)
+    a.facing = "left"
+    a.jump_throw(RIGHT, 60, way=1)
+    (_, events), = sent
+    at = lambda k, how: next(t for t, name, h_ in events if name == k and h_ == how)
+    assert at("right", "down") == 0 and at("alt", "down") == FORWARD_JUMP_MS
+    assert at("right", "up") == FORWARD_JUMP_MS + FORWARD_HOLD_MS and at("f", "down") == FORWARD_JUMP_MS + 60
+    assert a.facing == RIGHT and [e[1] for e in events].count("right") == 2  # the held arrow, no tap besides
 
 
 def test_the_movers_drop_steps_off_a_spot_where_it_wouldnt_go_through(monkeypatch):

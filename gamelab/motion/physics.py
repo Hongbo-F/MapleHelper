@@ -5,11 +5,12 @@ foothold group, as the simulator flies her). All in map units. The walk, the jum
 from motion.body, the engine that moves her as the game does.
 """
 
+import bisect
 import itertools
 import math
 import os
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from maplehelper import config
 
@@ -255,7 +256,142 @@ def jump_rise(ms: float) -> float:
     up: still on it until lift-off (JUMP_LAG), then the game's arc (77 units up 277 ms after lift-off,
     back down 555 ms after it)."""
     t = ms / 1000 - JUMP_LAG
-    return max(0.0, JUMP_SPEED * t - GRAVITY * t * t / 2) if t > 0 else 0.0
+    return max(0.0, rise_after(t)) if t > 0 else 0.0
+
+
+# --- her jumps over time ------------------------------------------------------------------------------
+# Where she is, from the jump key on, in each kind of jump a key plan makes: what the attack from a jump picks
+# (attack.reach.shots: where she is when it starts), and where she lands. The arc is the engine's (body.air_step:
+# gravity from JUMP_SPEED up, capped at FALL_SPEED; with the arrow held the way she flies her speed stays as it was,
+# with none the air drags her 1 unit/s² sideways, under 0.2 units over a jump), in closed form: the engine's step
+# moves her by the mean of two speeds, exact under a steady pull, so the two agree to rounding but for where a wall
+# stops her (`pose`, as body.fly). An attack in the air leaves her arc as it is: the 60 fps jump throws jump_throw_0
+# and _1 (the attack 100 ms after the jump key) rose 78-79 units and came down within 0.1 units of where they left,
+# and the jump backs jb_k190 and jb_k290 (the attack 110 and 210 ms after the jump key, mid-flight) came down 78.7
+# and 78.3 units away, as the engine flies them without one (rec_measure, D:/MapleHelper-scratch/jump-attack). She
+# lands where the arc meets a floor, and an attack still playing then stops her there (jump backs and jump throws
+# slid 1.4-2.9 units in game: sim.world; with none she slides on, LAND_SLIDE).
+APEX_S = JUMP_SPEED / GRAVITY  # 0.2775 s from lift-off to the top of her jump, JUMP_HEIGHT (77.0) over where she left ...
+AIR_S = 2 * APEX_S             # ... and 0.555 s until she is back down at that height (a jump on flat ground)
+CAP_S = (JUMP_SPEED + FALL_SPEED) / GRAVITY  # 0.6125 s after lift-off she falls at the cap (FALL_SPEED), 35 under
+KICK_SPEED = SHOE.kick * WALK_SPEED  # 119: leaving from standing with the arrow the game sees as it sees the jump
+# A jump forward from standing: the jump key this long after the arrow, in the kick's window by the median lags
+# (body.jump_window_ok, 40-52 ms): one or two of the game's steps of the arrow, then the kick to full speed (149), and
+# 4.5% leave at 126 by the median lags (three steps: body.short_takeoff_chance). In game (60 fps, the kick sweep of
+# 2026-10-21, kick2_40_l and _r) jumps keyed 40 ms after the arrow came down 82.7 and 85.1 units from where they lifted
+# off (149 x AIR_S is 82.7), within 2 units of where she stood; keyed 60 ms after it, 71 (kick2_60_r: three steps,
+# 126). Sooner, the arrow can come after the jump's step: from standing she leaves straight up, and the arrow in the
+# air does nothing (87% of jumps keyed with the arrow leave short of full speed by the median lags).
+FORWARD_JUMP_MS = 40
+# A jump in place that has to turn her: the arrow toward the target tapped this long after the jump key, once she's off
+# the ground (the jump is seen at its step 50 ms after its key, the arrow 51 ms after its own: 60 ms later it's seen
+# 61 ms after the jump, two steps at least, but for 0.2% of jumps by the spread of the two). Seen before the jump's
+# step, the arrow would kick her off at 119 toward the monster (tapped 20 ms after the jump key, by the engine over
+# the game's steps a third of such jumps go 75 units forward); seen after it, it turns her in the air and steers
+# her at most 8.9 units/s: by the engine she comes down 3.3 units on (2.7-4.3 over the steps' phase; an attack
+# playing then stops her, without the slide). The jump backs turn so, the arrow 60 ms after their jump key
+# (control.actions.JB_TURN_MS). Tapped before the jump instead (as until 2026-10-25), the tap walks her: jumped 80 ms
+# after it, she leaves at 18-84 units/s and comes down 12-53 units on (33 on average); 205 ms after it
+# (actions.JUMP_THROW_TURN_MS), standing again, she comes down 2-7 on, the attack 245 ms after the tap.
+AIR_TURN_MS = 60
+
+
+def rise_after(t: float) -> float:
+    """How high her feet are over where she lifted off, t s after lift-off (negative once she's below it): the
+    game's arc, up at JUMP_SPEED under GRAVITY, falling at FALL_SPEED from CAP_S on."""
+    if t <= CAP_S:
+        return JUMP_SPEED * t - GRAVITY * t * t / 2
+    return JUMP_SPEED * CAP_S - GRAVITY * CAP_S * CAP_S / 2 - FALL_SPEED * (t - CAP_S)
+
+
+def lift_time(rise: float) -> tuple[float, float] | None:
+    """When (s after lift-off) her feet are `rise` over where she lifted off, on the way up and on the way down
+    (None if her jump doesn't get that high: JUMP_HEIGHT)."""
+    disc = JUMP_SPEED ** 2 - 2 * GRAVITY * rise
+    if disc < 0:
+        return None
+    return (JUMP_SPEED - math.sqrt(disc)) / GRAVITY, (JUMP_SPEED + math.sqrt(disc)) / GRAVITY
+
+
+@dataclass(frozen=True)
+class Jump:
+    """One kind of jump as a key plan makes it, from standing: how she leaves the ground, timed from the jump key.
+    `kind`: 'up' (in place: no arrow but a turn's tap in the air), 'forward' (the arrow held toward `way`, the jump
+    FORWARD_JUMP_MS after it: the kick), 'back' (control.actions' jump back: away from what she throws at, the jump
+    actions.JB_RUN_MS after the arrow), 'run' (running already at full speed). `way`: which way she goes (+1 right,
+    -1 left, 0 up); `vx`: her sideways speed leaving the ground; `lead_s`: s from the plan's first key (the arrow) to
+    the jump key; `run`: how far along `way` she has gone from where she stood by lift-off (JUMP_LAG after the jump
+    key)."""
+    kind: str
+    way: int
+    vx: float
+    lead_s: float = 0.0
+    run: float = 0.0
+
+    def arc(self, t: float) -> tuple[float, float]:
+        """Where her feet are t s after the jump key, against where she stood: (how far along x, signed; how high),
+        on flat ground and with nothing in her way (pose has the map)."""
+        if t <= JUMP_LAG:
+            return self.way * self.run * max(0.0, (t + self.lead_s) / (JUMP_LAG + self.lead_s)), 0.0
+        tau = t - JUMP_LAG
+        return self.way * self.run + self.vx * tau, rise_after(tau)
+
+
+def jump_of(kind: str, way: int = 0, lead_ms: float | None = None) -> Jump:
+    """The jump `kind` makes toward `way` (+1 right, -1 left; 'up' none), by the engine with the median lags: her speed
+    and run at lift-off from the arrow's lead (body.run_x, body.takeoff). 'forward' leaves at full speed 1.1 units on
+    (the kick: FORWARD_JUMP_MS after the arrow); 'back', JB_RUN_MS (150) after its arrow, at full speed 14.3 units on;
+    'run' at full speed from where the jump key goes."""
+    if kind == "up" or not way:
+        return Jump("up", 0, 0.0)
+    if kind == "run":
+        return Jump("run", way, way * WALK_SPEED, 0.0, WALK_SPEED * JUMP_LAG)
+    lead = (FORWARD_JUMP_MS if kind == "forward" else BLIND_ENDS_MS) if lead_ms is None else lead_ms
+    tau = lead / 1000 + JUMP_LAG - LAGS.on  # how long the game has seen the arrow held when she lifts off
+    v = body.takeoff(body.run_speed(tau, 0.0, way, SHOE), way, SHOE)
+    return Jump(kind, way, v, lead / 1000, abs(body.run_x(tau, 0.0, way, SHOE)))
+
+
+def jump_landing(model: MapModel, platform: Platform, x: float, j: Jump) -> tuple[Platform | None, float, float]:
+    """Where jump `j` from map x on `platform` lands: (platform, x, s after lift-off), flown by the engine (flight,
+    the walls of her platform's foothold group) from where she lifts off (her run first, within her platform)."""
+    x0 = min(max(x + j.way * j.run, platform.left), platform.right)
+    land, lx, s, _ = flight(model, x0, platform.y_at(x0), j.vx, -JUMP_SPEED, group=platform.group,
+                            arrow=j.way)
+    return land, lx, s
+
+
+def pose(model: MapModel, platform: Platform, x: float, j: Jump, t: float,
+         landing: tuple[Platform | None, float, float] | None = None) -> tuple[float, float, bool]:
+    """Her feet t s after jump `j`'s key, from map x on `platform`: (map x, map y, whether she's in the air). The arc
+    (Jump.arc) over where she lifts off, stopped sideways by a wall of her platform's group where her feet meet it, as
+    body.fly stops her; from its landing (`landing`: jump_landing's, worked out if not given) on her feet are there."""
+    landing = landing if landing is not None else jump_landing(model, platform, x, j)
+    land, lx, s = landing
+    if t <= JUMP_LAG:
+        dx, _ = j.arc(t)
+        x1 = min(max(x + dx, platform.left), platform.right)
+        return x1, platform.y_at(x1), False
+    x0 = min(max(x + j.way * j.run, platform.left), platform.right)
+    y0 = platform.y_at(x0)
+    tau = t - JUMP_LAG
+    if land is not None and tau >= s:
+        return lx, land.y_at(lx), False
+    nx = x0 + j.vx * tau
+    if j.vx:
+        _, (xs, ys), _ = _known(model, platform.group if body.OWN_GROUP_WALLS else body.EVERY_WALL)
+        lo, hi = sorted((x0, nx))
+        i = bisect.bisect_left(xs, lo)
+        hits = []
+        while i < len(xs) and xs[i] <= hi:
+            if xs[i] != x0:
+                feet = y0 - rise_after((xs[i] - x0) / j.vx)
+                if ys[i][0] <= feet <= ys[i][1]:
+                    hits.append(xs[i])
+            i += 1
+        if hits:
+            nx = min(hits) if j.vx > 0 else max(hits)
+    return nx, y0 - rise_after(tau), True
 
 
 def air_time(dy_up: float) -> float | None:

@@ -25,12 +25,15 @@ from maplehelper.game import COMBAT
 
 from .. import directions, paths, telemetry
 from ..attack import reach
-from ..attack.stance import TOO_CLOSE, act_text, air_gap, decide, open_above, pct, pick_target, stance
+from ..attack.stance import (TOO_CLOSE, act_text, air_gap, decide, open_above, pct, pick_target, plan_of,
+                             stance)
+from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
-from ..localization.monsters import (MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster, bodies,
-                                     dead_one, seen_again)
+from ..localization.monsters import (DEFAULT_SPEED, MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster,
+                                     MonsterTrack, bodies, dead_one, seen_again, speeds)
 from ..localization.scene import Scene
+from ..motion import physics
 from .looting import DropSpot
 
 if TYPE_CHECKING:
@@ -48,6 +51,12 @@ IN_HER_WAY = TOO_CLOSE + 40  # a monster of any kind this close on her platform 
 THROWS = ("throw", "jump_throw", "jump_back")  # the stances that throw a star (each an Actions method)
 JUMPS = ("jump_throw", "jump_back")  # ... and of those, the ones that jump
 MOVES = JUMPS + ("back", "approach")  # the stances that move her (each but a throw from the ground)
+# Whether the stances weigh her jumps' attacks (attack.reach.coverage, attack.stance's `jumps`): with nothing in
+# reach from the ground, a jump throw at a monster her attack from the air surely picks (on a platform above: up to
+# 115 above her up close, 201 at the last band), timed for it; in passing, a jump forward on her way that hits one.
+# False: as before (throws from the ground, a jump throw or a jump back only up close, their attack at the fixed
+# JUMP_ATTACK_MS and JUMP_BACK_ATTACK_MS).
+JUMP_SHOTS = True
 STEADY_WAIT_S = 0.05  # s before the next look when a jump or a step waits out a touch's knock (knocked_move)
 GUARD_SECONDS = 15  # longest spent shooting a monster out of the way while travelling
 GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she travels on
@@ -326,29 +335,146 @@ def body_sizes(model: MapModel | None) -> tuple[dict[str, float], dict[str, floa
     return {kind: b.top for kind, b in body.items()}, {kind: b.half for kind, b in body.items()}
 
 
+def walk_on(model: MapModel) -> reach.Where:
+    """Where a monster of a look will be t s on (attack.reach.shots' `where`): one seen walking (its pose 'move', facing
+    a way) walks on that way at its kind's speed (the game data's: localization.monsters.speeds), turning back at its
+    platform's ends, as MonsterTrack.at plans it; any other stays where it was seen. An attack from a jump picks
+    0.1-0.5 s after the look: a Horny Mushroom walks 7-35 units meanwhile, a band and more of the star's search."""
+    walking = speeds(model)
+
+    def where(m: Monster, t: float) -> float:
+        if m.pose != "move" or not m.facing or m.platform is None:
+            return m.x
+        try:
+            p = model.platform(m.platform)
+        except (KeyError, IndexError):
+            return m.x
+        half = reach.body_of(m.kind)[1]
+        return MonsterTrack(m.platform, m.x, half=half, vx=m.facing * walking.get(m.kind, DEFAULT_SPEED)).at(t, p)
+    return where
+
+
+def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[Monster]):
+    """What her attacks reach from where she stands in look `s` at `targets`, from the ground and from her jumps
+    (attack.reach.coverage, by the map's bodies; `around`: every monster about her, each where it walks to by then:
+    walk_on), as a callable working it out when first asked (attack.stance's `jumps`): None with JUMP_SHOTS off."""
+    if not JUMP_SHOTS or s.where is None or s.platform is None:
+        return None
+    done = []
+
+    def cover() -> reach.Coverage:
+        if not done:
+            done.append(reach.coverage(model, s.platform, s.where.x, s.where.y, targets, sizes=bodies(model),
+                                       others=around, where=walk_on(model)))
+        return done[0]
+    return cover
+
+
 def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], visible: list[Monster],
-                 hidden: list[Monster], approach: bool) -> tuple:
-    """What to do about the monsters to `fight` (attack.stance, by each kind's size), walking up to them
-    only if `approach`. For a throw, everything in the star's path is kept (st.aimed): a kill is matched
-    against it."""
+                 hidden: list[Monster], approach: bool, toward: int = 0, jumps=None) -> tuple:
+    """What to do about the monsters to `fight` (attack.stance, by each kind's size, with what her jumps' attacks
+    reach: jump_cover, or `jumps` if given), walking up to them only if `approach`; `toward`: she's travelling that
+    way (stance's). For a throw, everything in the star's path is kept (st.aimed): a kill is matched against it. A
+    jump throw that a stance chose for where its attack reaches is logged with its numbers and sent as a telemetry
+    'jump' record when it's carried out (throw_act: log_jump)."""
     here = s.platform
     body = bodies(h.model)  # each kind's body (game data)
     tops, halves = body_sizes(h.model)
+    around = visible + hidden
     act = stance(s.where.x, s.where.y, here, fight, approach, h.actions.facing,
                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
-                 around=visible + hidden, danger=h.danger)
+                 around=around, danger=h.danger,
+                 jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
     st.last_act, st.last_hidden = act, bool(hidden)
     throwing = act[0] in THROWS
     if throwing:
-        st.aimed = _in_path(s, act[1], visible + hidden, air_gap(act[0]), body, st.flinching)
+        plan = plan_of(act)
+        at = s if plan is None or plan.shot is None else _moved(s, plan.shot.x)
+        st.aimed = _in_path(at, act[1], around, attack_gap(h.actions, act), body, st.flinching)
     if telemetry.recording():
         telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden),
                        aimed=[{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1)} for m in st.aimed]
                        if throwing else [])
     return act
+
+
+def attack_gap(actions, act: tuple) -> float | None:
+    """How long after its jump key the attack key of a throwing stance `act` goes as her actions will press it
+    (attack.stance.air_gap; None from the ground): a jump throw in place that turns her in the air has it
+    JUMP_BACK_ATTACK_MS after the jump key at the soonest (control.actions.Actions.jump_throw, AIR_TURN), whatever the
+    stance's own timing, so she's higher when it picks."""
+    gap = air_gap(act)
+    plan = plan_of(act)
+    if (act[0] == "jump_throw" and gap is not None and actions_mod.AIR_TURN
+            and (plan is None or (not plan.way and plan.air_turn)) and not actions.faces(act[1])):
+        return max(gap, physics.JUMP_BACK_ATTACK_MS)
+    return gap
+
+
+def _moved(s: Scene, x: float) -> Scene:
+    """Look `s` with her at map x instead (where a jump has her when its attack picks), for _in_path."""
+    from dataclasses import replace
+    return replace(s, where=replace(s.where, x=x))
+
+
+def log_jump(h: "Hunter", s: Scene, act: tuple) -> None:
+    """A jump throw or jump back a stance chose for what its attack reaches (its JumpPlan has the shot): her log says
+    what it's for and the shot's numbers, and a telemetry 'jump' record carries them (`kind`: why, attack.stance's
+    JumpPlan.why; the jump's kind, the side, the attack key ms after the jump key and the window of keys that pick the
+    same, how high she is then, the target, how far off and above, where she lands), so a live run shows how often
+    each fires (sim.harness counts them: attack_kinds' `chosen`) and what came of it (its kills: the ledger's)."""
+    plan = plan_of(act)
+    if plan is None or plan.shot is None:
+        return
+    sh, x, y = plan.shot, s.where.x, s.where.y
+    t = sh.target
+    if hasattr(h, "jump_counts"):
+        h.jump_counts[f"{plan.why}: {sh.kind}"] += 1
+    h.log(f"    jump ({plan.why}): {sh.text()}, {y - t.y:+.0f} above her; lands at x {sh.land_x:.0f}")
+    if telemetry.recording():
+        telemetry.emit("jump", kind=plan.why, jump=sh.kind, side=sh.side, key_ms=sh.key_ms, window=list(sh.window),
+                       rise=round(sh.rise, 1), target=t.kind, dx=round(t.x - x, 1), up=round(y - t.y, 1),
+                       platform=t.platform, x=round(x, 1), land_x=round(sh.land_x, 1), way=plan.way)
+
+
+def throw_act(h: "Hunter", s: Scene, act: tuple) -> None:
+    """Carry out a throwing stance `act` (THROWS) decided from look `s` with her actions (control.actions.Actions): a
+    throw from the ground, a jump throw (in place or forward, its attack timed as its JumpPlan says:
+    attack.stance.plan_of), a jump back. One whose plan has its shot is logged (log_jump), and its target goes to the
+    attack choice as the throw's (behavior.attacks.Attacks.aimed: its own pick goes by a throw from the ground, which
+    has no monster on a platform above in its way)."""
+    plan = plan_of(act)
+    attacks = getattr(h, "attacks", None)
+    if plan is not None and plan.shot is not None:
+        log_jump(h, s, act)
+        if attacks is not None:
+            attacks.aimed = plan.shot.target
+    try:
+        _throw(h.actions, act, plan)
+    finally:
+        if attacks is not None:
+            attacks.aimed = None  # (its key took it, or no choice was asked: no Lucky Seven key)
+
+
+def _throw(actions, act: tuple, plan) -> None:
+    """throw_act's keys: the Actions method for `act`, with its JumpPlan's timing (`plan`), if any."""
+    if act[0] == "throw":
+        actions.throw(act[1])
+    elif act[0] == "jump_throw":
+        if plan is None:
+            actions.jump_throw(act[1])
+        else:
+            actions.jump_throw(act[1], plan.key_ms, plan.way, plan.air_turn)
+    elif act[0] == "jump_back":
+        if plan is None:
+            actions.jump_back(act[1])
+        else:
+            actions.jump_back(act[1], plan.key_ms)
+    else:
+        raise ValueError(f"not a throw: {act!r}")
 
 
 def knocked_move(h: "Hunter", s: Scene, act: tuple) -> bool:
@@ -378,8 +504,7 @@ def _carry_out(h: "Hunter", st: FightState, s: Scene, act: tuple, fight: list[Mo
     if act[0] in THROWS:
         st.calm_since = None
         st.note_throw(now)
-        {"throw": h.actions.throw, "jump_throw": h.actions.jump_throw,
-         "jump_back": h.actions.jump_back}[act[0]](act[1])
+        throw_act(h, s, act)
         h.report.throws += 1
         return None
     if act[0] in ("back", "approach"):

@@ -249,14 +249,17 @@ def test_in_the_simulator_a_number_covered_for_a_while_counts_its_kills_and_not_
     once, the cover's coming and going none; those under it a kind not known, at the time its change came. (From 2 s
     to 22, 7 kills under it, since her facing is read off the frame, perception.heading: from 6 to 24.5 s two kills a
     second apart now come just before it goes, and the meter counts 23 of her 24 kills, as it counted 30 of 31 with
-    the cover from 6 to 25 s before: kills that close at the cover's end are its weakness, not this test's.)"""
+    the cover from 6 to 25 s before: kills that close at the cover's end are its weakness, not this test's. Since her
+    jump throws turn in the air and her attacks reach as the windows widen, 2026-10-25, the 5 under it come by 18.6 s,
+    each counted late.)"""
     h, sim = _hunt("hunt_clear_basin", noise=Noise(exp_hidden=((2.0, 22.0),)))
     world = [k for k in sim.world.kill_log if k[3] == "her"]
     hidden = [k for k in world if 2.0 <= k[0] < 22.0]
     unknown = [t for t, k in h.told if k is None]
-    assert hidden and len(unknown) == len(hidden) and h.meter.counts["late"] == len(hidden) - 1  # (the last: when it's read)
+    # each counted late (UNREAD_WAIT_S on), but the last if the cover goes before then: counted when it's read
+    assert hidden and len(unknown) == len(hidden) and h.meter.counts["late"] in (len(hidden) - 1, len(hidden))
     for (t, *_), told in zip(hidden, unknown):
-        assert 0 <= told - fakes.START - t < 0.6  # (the look after the kill)
+        assert 0 <= told - fakes.START - t < 0.8  # (the look after the kill: 0.76 s on, after a throw's lock)
     assert h.exp_gains == len(world) and h.meter.total == sim.world.exp  # every kill counted once, and the EXP
     assert h.meter.counts["over"] == 0
 

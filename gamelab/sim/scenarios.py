@@ -670,7 +670,7 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=4,
+@scenario((12, -300.0), monsters="all", seed=6,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down to
@@ -686,7 +686,9 @@ def nav_fight_across(sim):
     seeds 12 arrive, 8 showing all of it. Seed 4 since the game moves her in 30 ms steps (body.STEP) and jumps
     from standing wait 150 ms after the arrow: on seed 1 nothing hit her on the way any more. Over 16 seeds 10
     arrive, 6 showing all of it; 11 and 8 just before; on seed 4 she's knocked off 12 down to 34 at 5 s and
-    comes the long way round, the staircase's monsters cutting her chains short three times.)"""
+    comes the long way round, the staircase's monsters cutting her chains short three times. Seed 6 since her jumps'
+    attacks are weighed and her jump throws turn in the air (2026-10-25): on seed 4 no chain was cut short any more.
+    Over 16 seeds 15 arrive, 6 showing all of it: 6, 7, 12, 13, 14 and 15.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -733,7 +735,7 @@ def nav_fight_up_runs_out(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=6,
+@scenario((12, -300.0), monsters="all", seed=5,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
     """nav_fight_across on seed 6: after 38 s fighting on 12 she's knocked off down to 11 and 34, fights the slimes
@@ -757,7 +759,9 @@ def nav_fight_across_runs_out(sim):
     On the play track, before the steps, seed 15 since she finishes what she has hurt before she moves on
     (behavior.fight.owed): on seed 2 she arrived there; of seeds 1-16, 14 arrived, against 12 before. Then seed 7
     since she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed 15 she arrived; of seeds 1-16, 12
-    arrived.)"""
+    arrived. Seed 5 since her jumps' attacks are weighed and her jump throws turn in the air (2026-10-25): on seed 6
+    she arrived; of seeds 1-16, 15 arrive, and on seed 5 she's knocked about 12 and fights there, 40 monsters, until
+    her 180 s run out.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1060,16 +1064,20 @@ def fight_snail_stab(sim):
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
                                 ("Orange Mushroom", 2, 200.0)], seed=1, limit=60,
-          expects=(check("no throw from platform 4", lambda tr: not any(p[1] in THROWS for p in tr["plans"])),
+          expects=(check("no throw from the ground from platform 4",
+                         lambda tr: not any(p[1] == "throw" for p in tr["plans"])),
                    check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
-                   check("she moves on: nothing in reach",
-                         lambda tr: "nothing left in reach" in _result(tr, "report"))))
+                   check("jump throws over the step kill them",
+                         lambda tr: "kills: 3 orange-mushroom" in _result(tr, "report"))))
 def fight_step_wall(sim):
     """She's on platform 4 at x 520, nothing on it, Orange Mushrooms up on 2: 60 above her, 320-440 along,
     behind the step wall that joins 2 and 4 (one foothold group). By distance they're in reach, but no star
-    from 4 gets past that wall (live: 0 of 3 in the shot log, 0 of 5 in the telemetry, all 4 kills of 40
-    throws on 4): she doesn't throw at them, and moves on. With the old decisions she threw left at them
-    for the whole fight, and every star hit nothing."""
+    from the ground on 4 gets past that wall (live: 0 of 3 in the shot log, 0 of 5 in the telemetry, all 4 kills
+    of 40 throws on 4): she doesn't throw at them from the ground. With the old decisions she threw left at them
+    for the whole fight, and every star hit nothing. Since her jumps' attacks are weighed (attack.reach.shots,
+    2026-10-25), she jump-throws: 40 up, the v83 line's row (28 over her feet) clears the step's 60, and the three
+    die. Unmeasured in game: `probe run step-up --style jump_throw` (the README's Probes); until then she moved on,
+    nothing in reach."""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1270,13 +1278,15 @@ def tour_hunt_other_spot(sim):
     return _hunt_17_pigs(sim)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1240.0)], seed=6, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1240.0)], seed=1, limit=400,
           expects=(logs("that no spot reaches: onto the platform"),))
 def tour_hunt_onto_platform(sim):
     """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself.
     (Seed 6 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 the other
     walked into reach first. With the other pig from 1240, as tour_hunt_other_spot's, seeds 3, 5, 6, 8 and 9
-    of 1-12 show it; from 1320, 1, 3, 6, 11 and 12.)"""
+    of 1-12 show it; from 1320, 1, 3, 6, 11 and 12. Seed 1 since her jumps' attacks are weighed and her jump throws
+    turn in the air (2026-10-25): of seeds 1-16, 1, 5, 8 and 9 show it; on the others the other pig walks into reach
+    first.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -2319,7 +2329,7 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((28, 247.0), monsters="all", seed=3, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
@@ -2334,28 +2344,34 @@ def loop_tree_lie_detector(sim):
     1-12 seen at 110 s, 7 and 10 go up onto the rope at 146 within 10 s, 9 are on a safe place at 10 s (a safe
     platform near on 5, 6, 8 and 12, 28 on 2 and 9, the rope at -192 on 3), and on seed 1 she took 10.5 s, still on
     33. Seed 3 with her memory of the monsters and the sweep merged too, hunt.SWEEP: 1, 3, 9 and 12 go up onto the
-    rope at 146 within 10 s, 8 are on a safe place at 10 s; on seed 7 she took 11.2 s, still on 32.)"""
+    rope at 146 within 10 s, 8 are on a safe place at 10 s; on seed 7 she took 11.2 s, still on 32. Seed 2 since her
+    jumps' attacks are weighed and her jump throws turn in the air, 2026-10-25: of seeds 1-12, 9 go up onto the rope
+    at 146 within 10 s, 11 are on a safe place at 10 s (the rope at -192 on 1, already on 25 on 3), and on seed 11
+    she was still on her way.)"""
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
     danger 0 by attack.danger, though not MapModel.safe), 1.7 s by route. (Seed 2 since a throw's tap goes by her
     facing off the frame, perception.heading: of seeds 1-12 seen at 40 s, 2 and 9 go back onto 28, safe enough; on
-    seed 3 she went up the rope at -192, a rope as safe, no safe platform near.)"""
+    seed 3 she went up the rope at -192, a rope as safe, no safe platform near. Seed 1 since her jumps' attacks are
+    weighed and her jump throws turn in the air, 2026-10-25: of seeds 1-12 seen at 40 s, 1 goes back onto 28; 8 go up
+    the rope at 146, 2 the one at -192, and on 3 she's on 25 already, all on a safe place at 10 s.)"""
     return lie_detector(40.0)(sim)
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=4, limit=500, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=LIE_DETECTOR_EXPECTS + (check("onto 25, the safe platform under 24", lambda tr: tr["result"]["then"][
           "platform"] == 25),))
 def loop_tree_lie_detector_23(sim):
     """The hunt loop as live on 2026-10-24 (loop_tree_23: 23 its only ground, Lucky Seven, the crowd), the Lie Detector
     seen 60 s in, as she shoots 23 from 24 at 231 (attack.spots): down onto 25, the safe platform under 24 (0.9 s by
-    route)."""
+    route). (Seed 4 since her jumps' attacks are weighed and her jump throws turn in the air, 2026-10-25: of seeds
+    1-12, 9 go down onto 25 and 10 are on a safe place at 10 s; on seeds 1 and 2 she was still on her way.)"""
     return harness._only(lie_detector(60.0), (23,))(sim)
 
 

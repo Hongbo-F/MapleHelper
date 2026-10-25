@@ -149,6 +149,8 @@ class Hunter:
         # Her facing off the frames: looks, told or not (and why), what her keys made of each (Actions.saw), and those
         # that told the other way from her last arrow ('against')
         self.heading_counts: Counter[str] = Counter()
+        # The jump throws her stances chose for what their attack reaches, by why and the jump's kind (fight.log_jump)
+        self.jump_counts: Counter[str] = Counter()
         self._shots = len(list(paths.HEADING_SHOTS.glob("*.png"))) if paths.HEADING_SHOTS.exists() else 0
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
                                   self.drops.on_look, self.wounds.on_look, self.memory.on_look, self.attacks.on_look]

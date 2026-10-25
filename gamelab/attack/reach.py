@@ -35,7 +35,12 @@ keyed 100 ms after the jump started 42-49 units up, its area over a snail (24-26
 at snails 3-77 units away on 2026-10-19, at most one hurt the snail, and the monsters on the platform 60
 above took the stars. RustMS's port of the v83 client has no case for the air: the claw and the search as
 from the ground, from as high as she is, which picks no snail 35-85 off from 21-26 up (`probe run air` weighs
-the two; the simulator's world has either, sim.world.AIR_PICK).
+the two; the simulator's world has either, sim.world.AIR_PICK). Since 2026-10-25 the area reaches to the first
+window's top over her feet (44), and past it the search's own windows from where her feet are then pick too
+(`air_takes`, AIR_SEARCH): they widen with the distance, so a monster on a platform above is hit from high in the
+jump up close and from lower, or from the ground, farther off, as the user's play has it. `shots` and `Coverage` say,
+for where she stands, every jump and attack key that surely hits each monster: one query for the stance, the hunt
+loop, grinding and her trips, the throw from the ground its case with no jump.
 
 What stops a star is checked on the attack's pick alone, as the client does it (RustMS Combat.cpp:1289-1307;
 ohmi69's reading of this game's client and meowdb's page on it say the same): the claw and the star's search
@@ -150,9 +155,30 @@ LOOK_UP = SHOT_UP + 80
 LOOK_DOWN = SHOT_DOWN + 15
 # The area an attack from a jump picks its target in (see above). Its floor is fitted to the live throws
 # of 2026-10-19 (jump-throws missed snails; throws from the ground hit pigs, slimes and Orange Mushrooms
-# 60 below her): 18-21 below her feet. Of its top, only that monsters 60 above her are in it is known.
+# 60 below her): 18-21 below her feet. Of its top, only that monsters 60 above her are in it is known: from 42-49
+# up, their feet 11-18 over hers. So it's the first window's top (SEARCH_TOP0, 44; 65 until 2026-10-25, a guess),
+# and past it the search's own windows reach higher the farther ahead (AIR_SEARCH): the user, 2026-10-25, "monster
+# 100 units up hit only near the top of the jump. After the jump you can hit monsters that is far away
+# horizontally, remember the widening vertical search as horizontal scale out".
 AREA_DOWN = 19
-AREA_UP = 65
+AREA_UP = SEARCH_TOP0
+# Whether an attack from a jump also picks what the star's search would from where her feet are then (its bands, the
+# windows about SHOT_H over her feet widening with the distance: air_takes), the area aside. The user's play on
+# Tree Dungeon (watch 2026-10-24 17:05, 4.5 min) bears it out: of her 30 kills of monsters 15+ above her, 23 have a
+# look within 0.2 s of the attack's start (put back from the kill's EXP: the star's delay and flight) from where the
+# ground's search (UP_BY_SEARCH) or the air's area or bands pick it; by the old area (to 65 above her feet) and the
+# ground capped 60 above her (SHOT_UP), 20 (at 0.35 s, 24 against 21; the other 6 no model has, their attack likely
+# earlier in a jump the window misses). From a jump, a Green Mushroom 58 above her feet 229 off (in the band's
+# window, 74 there; over the area's 44), from 22 at 19, 133 above where she stood (D:/MapleHelper-scratch/ov-jump/
+# val_user.py). False: the area alone.
+AIR_SEARCH = True
+# Whether a throw from the ground reaches monsters more than SHOT_UP above her where the star's search picks them (its
+# windows widen 5 up for every 20 ahead: 100 above her from about 270 off, 124 at most, at 385-400 ahead), as the
+# simulator's world always had it. In the same play, from the ground, Green Mushrooms 69 above her 185-214 off (from
+# 15 at 14), 74-76 above 223 off (21 at 19) and 100 above 291 off (24 at 22, as she lifted off) were killed: each
+# where the client's top (SEARCH_TOP0, 44) has the search pick a Green Mushroom (from 157, 177 and 277 off), none
+# where the logs' lower one (21) would (from 237, 277 and 357): its kills say 44. False: SHOT_UP caps it, as before.
+UP_BY_SEARCH = True
 AIR_MARGIN = 6       # how far into the area a body must reach for an attack from a jump to pick it surely:
                      # about one frame of her climb when a jump throw's attack starts
 # The claw up close (see above): a regular attack from the ground first looks for a monster right in front of
@@ -348,9 +374,11 @@ def shot_dx(dy: float, kind: str | None = None) -> float:
 
 def can_shoot(dx: float, dy: float, reach: float = SHOT_RANGE, kind: str | None = None) -> bool:
     """Whether a throw from where she stands hits a monster of `kind` (default: a pig) dx along (either
-    way) and dy below (+) with a star: in band, from shot_dx sideways out to `reach`, and no farther than
-    the search picks it (max_dx). Terrain aside (can_hit: with it)."""
-    return in_band(dy) and shot_dx(dy, kind) <= abs(dx) <= min(reach, max_dx(body_of(kind)[1]))
+    way) and dy below (+) with a star: in band (above her, with UP_BY_SEARCH, as high as the search's windows
+    reach: shot_dx says from how far off), from shot_dx sideways out to `reach`, and no farther than the search
+    picks it (max_dx). Terrain aside (can_hit: with it)."""
+    return ((in_band(dy) or (UP_BY_SEARCH and dy < 0)) and shot_dx(dy, kind) <= abs(dx)
+            <= min(reach, max_dx(body_of(kind)[1])))
 
 
 # --- the claw, up close --------------------------------------------------------------------------------
@@ -756,15 +784,29 @@ def reaches_into(ahead: float, dy: float, top: float, half: float, far: float, d
     return near - half <= ahead <= far + half and top - dy >= -down and -dy < up
 
 
+def air_takes(ahead: float, dy: float, top: float, half: float, margin: float = 0.0) -> bool:
+    """Whether an attack starting with her in the air can pick a monster `ahead` units in front of her (its middle),
+    its feet `dy` below her feet then (+ below), its body `top` tall and `half` wide either side: its body reaches
+    into the area about her feet (AREA_DOWN below them to AREA_UP above, its near side within STAR_RANGE ahead), or
+    (AIR_SEARCH) overlaps its band's window of the star's search from her feet then (search_band: from SEARCH_START
+    ahead, the windows about SHOT_H over her feet one unit wider up and down for every SEARCH_SPREAD ahead), by
+    `margin` (reaching that far into either, every way: a pick that is sure). Of those, the nearest is picked."""
+    if reaches_into(ahead, dy, top, half - margin, STAR_RANGE, AREA_DOWN - margin, AREA_UP - margin):
+        return True
+    if not AIR_SEARCH:
+        return False
+    near, far, bottom, roof = body_box(ahead, dy, top, half)
+    return search_band(near + margin, far - margin, bottom + margin, roof - margin) is not None
+
+
 def in_area(ahead: float, dy: float, top: float, rise: float = 0.0, half: float = 0.0) -> bool:
     """Whether an attack's star can pick a monster `ahead` units in front of her (its middle), its feet `dy`
     below hers as she stands (+ below), its body `top` tall (and `half` wide either side), when the attack
-    starts with her `rise` units up in a jump: its body reaches into the area then (AREA_DOWN to AREA_UP
-    about her feet, its near side within STAR_RANGE ahead). From the ground (`rise` 0), the star's search
-    picks it (picks)."""
+    starts with her `rise` units up in a jump: air_takes from her feet then (the area about them, or the search's
+    widening windows). From the ground (`rise` 0), the star's search picks it (picks)."""
     if rise == 0:
         return picks(ahead, dy, top, half)
-    return reaches_into(ahead, dy + rise, top, half, STAR_RANGE, AREA_DOWN, AREA_UP)
+    return air_takes(ahead, dy + rise, top, half)
 
 
 def air_rise(gap_ms: float) -> float:
@@ -786,3 +828,222 @@ def air_hits(top: float, gap_ms: float) -> bool:
     A snail (24) stays under the area of a jump throw (its floor 30 up) and of a jump back (25); keyed
     40 ms after the jump (7), the attack picks every kind."""
     return top >= air_floor(gap_ms) + AIR_MARGIN
+
+
+# --- what her attacks reach: from the ground and from each of her jumps -----------------------------------
+# "Which monsters can she hit by jumping" as one query (`shots`, `Coverage`), for the stance, the hunt loop, grinding
+# and her trips alike. An attack picks its target when it starts (JUMP_LAG after its key, up to ATTACK_DECIDE_LAG_MS
+# later: the same input lag as a jump's lift-off, so it starts about as long after lift-off as its key came after the
+# jump key), from where she is then; the star that leaves STAR_DELAY_MS (520) after the key is only a picture. From a
+# jump, the nearest monster whose body reaches into the area about her feet or into its band's window of the star's
+# search from her feet then (air_takes: the windows about SHOT_H over her feet, 12 - 5k to 44 + 5k above them in band
+# k, SEARCH_START + 20 k ahead: one unit wider up and down every SEARCH_SPREAD ahead), her feet wherever the jump has
+# them then (physics.pose: her arc over time, for every kind of jump a key plan makes, physics.jump_of); its line is
+# checked as from the ground (wall_in_way, from her feet then: as sim.world's sight_stop has it). From the ground the
+# special case with no jump: can_hit, the same search from her feet on the ground. So how high a monster can be and
+# still be hit follows from her arc and the distance: her feet at most JUMP_HEIGHT (77) over where she jumped from,
+# 0.2775 s after lift-off (physics.APEX_S); up close (the area, or the first bands) 44 over her feet, so a monster
+# whose feet are 100 above where she stood only with the attack starting 155-400 ms after lift-off (her feet 62 up,
+# AIR_MARGIN into it: physics.lift_time), 110 above within 70 ms of the top (207-348 ms), 115 at most (77 + 44 -
+# AIR_MARGIN), at the very top; farther off the windows reach higher, so lower in the jump and from the ground
+# (UP_BY_SEARCH: a pig 100 above her from 271 off, 110 from 311), up to 124 over her feet at the last band (385-400
+# ahead), from a jump 201 above where she stood.
+KEY_FIRST_MS = physics.JUMP_ATTACK_MS  # the soonest an attack key goes after its jump key (40: in game, keyed so, a
+                     # star from the jump killed a snail; keyed at the jump key the game may take the attack first,
+                     # on the ground, which nothing has measured)
+KEY_LAST_MS = 480    # the latest tried: it starts 545 ms after the jump key, as she comes down to where she left
+KEY_STEP_MS = 10     # the attack keys tried, this far apart
+KEY_SLACK_MS = 15    # a key counts as sure only if keyed this much sooner or later the attack picks the same monster:
+                     # the game sees a key 7.7 ms either side of when it's due on average (body.Lags, one sd), twice
+TURN_KEY_MS = physics.JUMP_BACK_ATTACK_MS  # a jump that turns her in the air (physics.AIR_TURN_MS: the arrow 60 ms
+                     # after the jump key) has its attack key this long after the jump key at the soonest, as the jump
+                     # backs do (85: the turn seen 111 ms after the jump key, the attack starting 150 after it)
+JUMP_KINDS = ("up", "forward", "back")  # the jumps tried (physics.jump_of): in place, toward the throw, away from it
+
+
+@dataclass(frozen=True)
+class Shot:
+    """An attack she can make from where she stands, at `target`: from the ground (`jump` None), or from a jump
+    (physics.Jump) with the attack key `key_ms` after the jump key (keyed anywhere in `window`, ms after it, the attack
+    still picks `target` surely), throwing `side` (+1 right, -1 left); `turn`: an 'up' that turns her in the air first
+    (physics.AIR_TURN_MS; a jump back always does). Where she is when it picks (`x`, her feet `rise` over where she
+    stood), and where the jump lands her (`land`, `land_x`, `land_s` s after lift-off)."""
+    side: int
+    target: Monster
+    jump: physics.Jump | None = None
+    key_ms: int = 0
+    window: tuple[int, int] = (0, 0)
+    x: float = 0.0
+    rise: float = 0.0
+    land: Platform | None = None
+    land_x: float = 0.0
+    land_s: float = 0.0
+    turn: bool = False
+
+    @property
+    def kind(self) -> str:
+        """'ground', or the jump's kind ('up', 'forward', 'back')."""
+        return "ground" if self.jump is None else self.jump.kind
+
+    def text(self) -> str:
+        """The shot for a log line: "a jump forward throwing right, the attack 40 ms in (40-120), 26 up: horny-mushroom
+        +180"."""
+        way = "right" if self.side > 0 else "left"
+        if self.jump is None:
+            return f"from the ground {way}: {self.target.kind} {self.target.x - self.x:+.0f}"
+        jump = {"up": "a jump in place", "forward": "a jump forward", "back": "a jump back"}.get(self.kind, self.kind)
+        return (f"{jump} throwing {way}{' (turning in the air)' if self.turn and self.kind == 'up' else ''}, the "
+                f"attack {self.key_ms} ms in ({self.window[0]}-{self.window[1]}), {self.rise:.0f} up: "
+                f"{self.target.kind} {self.target.x - self.x:+.0f}")
+
+
+Where = Callable[[Monster, float], float]  # a monster -> its map x that many s from now (its walk predicted)
+Placed = list[tuple[Monster, float, float, float, float]]  # (monster, its x, its feet's y, how tall, half its width)
+
+
+def _air_pick(px: float, feet: float, side: int, rows: Placed, margin: float) -> Monster | None:
+    """The monster an attack from a jump picks from map (px, her feet `feet`), throwing `side`: the nearest whose body
+    reaches into the area about her feet or its band's window of the search (air_takes), as sim.world's air_pick; None
+    unless it reaches `margin` into it and no other reaching in at all is within `margin` as near (not surely it,
+    then). `rows`: the monsters about, placed (Placed)."""
+    best = second = None
+    for m, mx, my, top, half in rows:
+        ahead, dy = (mx - px) * side, my - feet
+        if not air_takes(ahead, dy, top, half):
+            continue
+        row = (abs(ahead), m, ahead, dy, top, half)
+        if best is None or row[0] < best[0]:
+            best, second = row, best
+        elif second is None or row[0] < second[0]:
+            second = row
+    if best is None:
+        return None
+    _, m, ahead, dy, top, half = best
+    if second is not None and second[0] - best[0] < margin:
+        return None
+    if not air_takes(ahead, dy, top, half, margin):
+        return None
+    return m
+
+
+def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster],
+          sizes: dict[str, MobBody] | None = None, kinds: tuple[str, ...] = JUMP_KINDS,
+          where: Where | None = None, others: list[Monster] | None = None) -> list[Shot]:
+    """Every attack from map (x, y) on `platform` that surely hits one of `monsters`, from the ground and from her
+    jumps: one Shot per target and way of attacking, from the ground and for each of `kinds` of jump
+    (physics.jump_of) each way she can throw from it ('up' either way, with and without a turn in the air; 'forward'
+    toward the throw; 'back' away from it, turning in the air), with the soonest attack key from KEY_FIRST_MS (with a
+    turn, TURN_KEY_MS) that picks the target surely keyed KEY_SLACK_MS sooner or later too, and how much later it still
+    would (Shot.window). From the ground: can_hit (in reach, nothing stopping its star or that of one the attack takes
+    first; of `others`, every monster around her, `monsters` by default). From a jump: the attack's pick (the area
+    about her feet, or the search's widening windows: air_takes) from where her feet are when the attack starts (physics.pose; _air_pick, AIR_MARGIN into it, at both ends of
+    ATTACK_DECIDE_LAG_MS), of all of `others`, and its line not stopped (wall_in_way, from her feet then: stopped, the
+    attack hits nothing); the monsters where `where` says they'll be (default: where they are). `sizes`: the kinds'
+    bodies (localization.monsters.bodies: the map's game data; body_of's tables by default). Map units, y down."""
+    others = monsters if others is None else others
+    out: list[Shot] = []
+    for m in monsters:
+        if can_hit(platform, x, y, m, others=others):
+            out.append(Shot(1 if m.x > x else -1, m, x=x))
+    wanted = {id(m) for m in monsters}
+    near = [m for m in others if abs(m.x - x) <= STAR_RANGE + 150
+            and -LOOK_UP - physics.JUMP_HEIGHT <= m.y - y <= LOOK_DOWN + 20]
+    if not kinds or not any(id(m) in wanted for m in near):
+        return out
+    places = {m.platform: platform if m.platform == platform.id else platform.peer(m.platform) for m in near}
+    body = {id(m): body_of(m.kind, sizes) for m in near}
+
+    def placed(t: float) -> Placed:
+        rows = []
+        for m in near:
+            mx = m.x if where is None else where(m, t)
+            q = places.get(m.platform)
+            my = m.y if q is None or where is None else q.y_at(min(max(mx, q.left), q.right))
+            rows.append((m, mx, my, *body[id(m)]))
+        return rows
+
+    still = placed(0.0) if where is None else None
+    lag, decide = physics.JUMP_LAG, physics.ATTACK_DECIDE_LAG_MS / 1000
+    step = KEY_STEP_MS // 2
+    for side in (-1, 1):
+        if not any(id(m) in wanted and (m.x - x) * side >= -60 for m in near):
+            continue  # (a jump forward can carry her past one 60 behind at most before its attack starts)
+        for kind in kinds:
+            way = {"up": 0, "forward": side, "back": -side}[kind]
+            j = physics.jump_of(kind, way)
+            landing = physics.jump_landing(model, platform, x, j)
+            picks: dict[int, tuple] = {}
+
+            def pick(k: int, j=j, landing=landing, picks=picks, side=side) -> tuple:
+                if k not in picks:
+                    t0 = k / 1000 + lag
+                    p0 = physics.pose(model, platform, x, j, t0, landing)
+                    p1 = physics.pose(model, platform, x, j, t0 + decide, landing)
+                    m = None
+                    if p0[2] and p1[2]:
+                        a = still or placed(j.lead_s + t0)
+                        b = still or placed(j.lead_s + t0 + decide)
+                        m = _air_pick(p0[0], p0[1], side, a, AIR_MARGIN)
+                        if m is not None and m is not _air_pick(p1[0], p1[1], side, b, AIR_MARGIN):
+                            m = None
+                        if m is not None:
+                            mx = next(r[1] for r in a if r[0] is m)
+                            target = platform if m.platform == platform.id else platform.peer(m.platform)
+                            if wall_in_way(platform, p0[0], p0[1], mx, 0.0, target, None, body[id(m)]) is not None:
+                                m = None
+                    picks[k] = (m, p0)
+                return picks[k]
+
+            starts = (KEY_FIRST_MS, TURN_KEY_MS) if kind == "up" else (TURN_KEY_MS if kind == "back" else KEY_FIRST_MS,)
+            for start in starts:
+                seen: set[int] = set()
+                k = start
+                while k <= KEY_LAST_MS:
+                    m, p0 = pick(k)
+                    if not p0[2]:
+                        break  # landed by then: the attack would start on the ground
+                    if (m is not None and id(m) in wanted and id(m) not in seen
+                            and all(pick(k + d)[0] is m for d in (-KEY_SLACK_MS, KEY_SLACK_MS))):
+                        hi = k
+                        while (hi + step <= KEY_LAST_MS and pick(hi + step)[0] is m
+                               and pick(hi + step + KEY_SLACK_MS)[0] is m):
+                            hi += step
+                        seen.add(id(m))
+                        out.append(Shot(side, m, j, k, (k, hi), p0[0], y - p0[1], landing[0], landing[1], landing[2],
+                                        turn=kind == "back" or start == TURN_KEY_MS))
+                    k += step
+    return out
+
+
+class Coverage:
+    """What her attacks reach from one place (shots): by monster, every way to hit it, and the best of each kind."""
+
+    def __init__(self, shot_list: list[Shot]):
+        self.shots = shot_list
+        self._by: dict[int, list[Shot]] = {}
+        for s in shot_list:
+            self._by.setdefault(id(s.target), []).append(s)
+
+    def of(self, m: Monster) -> list[Shot]:
+        """Every way to hit `m` from here (none: out of reach of any attack from here)."""
+        return self._by.get(id(m), [])
+
+    def hits(self, m: Monster, kinds: tuple[str, ...] | None = None) -> bool:
+        """Whether some attack from here (of `kinds`: 'ground', 'up', 'forward', 'back'; any by default) hits `m`."""
+        return any(kinds is None or s.kind in kinds for s in self.of(m))
+
+    def ground(self, m: Monster) -> bool:
+        """Whether a throw from the ground hits `m` (can_hit)."""
+        return self.hits(m, ("ground",))
+
+    def best(self, m: Monster, kinds: tuple[str, ...] | None = None) -> Shot | None:
+        """The way to hit `m` that's soonest done: from the ground, else the jump with the soonest attack key (in
+        place before forward before back, on a tie)."""
+        order = {"ground": 0, "up": 1, "forward": 2, "back": 3}
+        cands = [s for s in self.of(m) if kinds is None or s.kind in kinds]
+        return min(cands, key=lambda s: (s.jump is not None, s.key_ms, order.get(s.kind, 9)), default=None)
+
+
+def coverage(model, platform: Platform, x: float, y: float, monsters: list[Monster], **kw) -> Coverage:
+    """shots from map (x, y) on `platform` at `monsters`, by monster (Coverage). Keywords: shots'."""
+    return Coverage(shots(model, platform, x, y, monsters, **kw))

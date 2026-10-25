@@ -279,15 +279,16 @@ def _sweep(name: str, seeds, times, only=None, feed: bool = False) -> list[dict]
 # The retreat is the same either way (the sweep is off by then: Hunt.run's `finally`); the hunt before it isn't: on the
 # floor more often at the sighting (38 of 61 runs against 30 of 61), hit just before it more often (14 against 8), and
 # from the same places her retreat fared worse (the floor and 32: 20 of 38 against 23 of 30). Not fixed: the feed, which
-# serves `tour --loop`'s looks by default, leaves the sweep out of the looks it serves.
-NO_FEED_SWEEP = pytest.mark.xfail(strict=True, reason="--no-feed, hunt.SWEEP: 15 of 32 on a safe place at 10 s (above)")
+# serves `tour --loop`'s looks by default, leaves the sweep out of the looks it serves. Since her jumps' attacks are
+# weighed and her jump throws turn in the air (2026-10-25), 26 of 32 without the feed (with it 28 of 32, none out of the
+# map; shooting 23 from 24, 32 of 32): no longer an expected failure, the hunt before the sighting gone otherwise.
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("name,only,share,feed,seeds", [
     ("loop_tree_lie_detector", None, 0.7, True, range(1, 5)),
     ("loop_tree_lie_detector", None, 0.7, True, range(5, 9)),
-    pytest.param("loop_tree_lie_detector", None, 0.7, False, range(1, 9), marks=NO_FEED_SWEEP),
+    ("loop_tree_lie_detector", None, 0.7, False, range(1, 9)),
     ("loop_tree_lie_detector_23", (23,), 0.9, False, range(1, 9))])
 def test_on_most_seeds_she_is_on_a_safe_place_10_s_after_the_sighting(name, only, share, feed, seeds):
     """The hunt loop on Tree Dungeon, the Lie Detector seen at 40, 75, 110 or 150 s, seeds 1-8: from the floor's crowd
@@ -295,8 +296,10 @@ def test_on_most_seeds_she_is_on_a_safe_place_10_s_after_the_sighting(name, only
     room), the rest knocked back by the Green Mushrooms on 32 and 30 on the way; with her looks from the feed, as
     `tour --loop` takes them by default since then (each half of the seeds a test of its own: a run with the feed takes
     about 9 s), 24 of 29 (14 of 16 on seeds 1-4, 10 of 13 on 5-8, where three of seed 8's fell out of the map before the
-    sighting); shooting 23 from 24, as live, 31 of 32 (47 of 48 over seeds 1-12). On every run nothing but her moves
-    after it (no attack, pick-up, pet food or mouse), and her retreat's moves refused past the player's 12 s."""
+    sighting); shooting 23 from 24, as live, 31 of 32 (47 of 48 over seeds 1-12). Since her jumps' attacks are weighed
+    (2026-10-25): with the feed 28 of 32 (14 of 16 on each half), without it 26 of 32, shooting 23 from 24 32 of 32. On
+    every run nothing but her moves after it (no attack, pick-up, pet food or mouse), and her retreat's moves refused
+    past the player's 12 s."""
     tree_map()
     runs = _sweep(name, seeds, (40.0, 75.0, 110.0, 150.0), only, feed)
     # (the runs that fell out of the map before the sighting are left out, three of seed 8's with the feed: up to a

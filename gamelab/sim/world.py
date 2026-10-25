@@ -60,8 +60,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   sideways, by the monster's body (right under or over her, none is hit).
   In the air, the nearest whose body reaches into the attack's area (its near side within
   reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is
-  then) takes a star (with AIR_PICK 'v83', the claw and the search as from the ground, from where she is
-  then). For all of these, bodies are their kind's half width either side and as tall as
+  then) or into its band's window of the star's search from her feet then (AIR_PICK 'widening', the
+  default: reach.air_takes) takes a star (with 'area', the area alone; with 'v83', the claw and the search
+  as from the ground, from where she is then). For all of these, bodies are their kind's half width either side and as tall as
   their kind walking (monster_data.MONSTER_HEIGHT), taller while they flinch after a hit
   (monster_data.FLINCH_S, flinch tops from the game data); not their frames (World.top says why). So a
   jump throw's attack, starting 46 units up, passes over a snail. All of these pick by the bodies alone,
@@ -295,8 +296,12 @@ PUSH_BY_DAMAGE = True
 # and 8 of 12 at 85-130 (and 6 of 8 throws from the ground at 85-130), where 'area' takes every one of them and
 # 'v83' none at 35-85. Noise.air_snail has the area's pick of a snail that close miss as often as that (preset
 # `game-air`), so the harness can weigh stance.JUMP_THROW_SNAILS. Which picture holds, `probe run air` asks: this
-# lets the probe's scorer be checked in a world of either.
-AIR_PICK = "area"
+# lets the probe's scorer be checked in a world of either. 'widening', the default since 2026-10-25: the nearest whose
+# body reaches into the area (now to reach.AREA_UP, 44, over her feet) or into its band's window of the star's search
+# from her feet then (reach.air_takes, as her decisions have it): the windows widen with the distance, so a monster on
+# a platform above is picked from low in the jump far off and only near its top up close, as the user's play of
+# 2026-10-24 has it (reach.AIR_SEARCH). Up close on her own platform it's the area, as before.
+AIR_PICK = "widening"
 DROP_DELAY = 2.0
 # s from a kill until the monster is back at its spawn point (a guess; Realism.respawn). Not the game's, by its live
 # telemetry of 2026-10-19 to 21 (analysis.respawn: README, Respawns and drop life): there a platform she emptied,
@@ -1682,6 +1687,22 @@ class World:
                 best = (abs(ahead), m)
         return None if best is None else best[1]
 
+    def air_pick(self, facing: str) -> SimMonster | None:
+        """The live monster an attack starting with her in the air picks on her `facing` side (AIR_PICK 'widening'):
+        the nearest her whose body reaches into the area about her feet or into its band's window of the star's
+        search from her feet now (reach.air_takes), whatever the terrain (_aim checks the line to it)."""
+        t, d, best = self.t, directions.sign(facing), None
+        for m in self.monsters:
+            if not m.alive:
+                continue
+            mx = m.at(t)
+            ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
+            if not reach.air_takes(ahead, dy, self.top(m), m.half):
+                continue
+            if best is None or abs(ahead) < best[0]:
+                best = (abs(ahead), m)
+        return None if best is None else best[1]
+
     def swiped(self, facing: str, stance: str) -> SimMonster | None:
         """The live monster the claw's `stance` swipes on her `facing` side: the nearest her (by distance,
         feet to feet, as the client has it) whose body reaches into the stance's box (reach.claw_takes), on
@@ -1732,8 +1753,9 @@ class World:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
         lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
         seeded: reach.CLAW's), and the claw swipes the nearest monster that stance's box reaches (swiped);
-        else the star's search picks (search_pick). In the air, the nearest in the attack's area takes the
-        star (AIR_PICK 'area'), or as on the ground from where she is then ('v83'). Each picks by the bodies
+        else the star's search picks (search_pick). In the air, the nearest in the attack's area or its band's
+        window of the search from her feet takes the star (AIR_PICK 'widening': air_pick), the nearest in the area
+        alone ('area'), or as on the ground from where she is then ('v83'). Each picks by the bodies
         alone; then, as the client does, the line to a star's pick alone is checked (sight_stop): stopped, the
         attack hits nothing, and no other monster takes it."""
         self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
@@ -1751,7 +1773,8 @@ class World:
             if target is None:
                 target = self.search_pick(self.facing)
         else:
-            target = self.nearest_in(self.facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP)
+            target = (self.air_pick(self.facing) if AIR_PICK == "widening"
+                      else self.nearest_in(self.facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP))
             swipe = False
             if target is not None and target.kind == "snail" and self.noise.air_snail:
                 near, take = self.noise.air_snail

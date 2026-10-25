@@ -91,6 +91,9 @@ class Attacks:
         self._last: Scene | None = None  # the latest look that searched for monsters, placed
         self._kills = kills or (lambda: [])
         self._killed = 0
+        # The monster the next throw is at, if the stack knows better than a throw from the ground would (a jump's
+        # attack at one on a platform above: behavior.fight.throw_act), taken by that throw's key alone
+        self.aimed: Monster | None = None
 
     # --- after every look ------------------------------------------------------------------------
 
@@ -128,8 +131,9 @@ class Attacks:
     # --- at every throw --------------------------------------------------------------------------
 
     def key(self, side: str) -> str:
-        """The attack key a throw that way goes out with now (Actions' attack key asks this): its choice logged."""
-        target = self.target(side)
+        """The attack key a throw that way goes out with now (Actions' attack key asks this): its choice logged. Its
+        target: `aimed`, if set (and then cleared), else what a throw that way takes (target)."""
+        target, self.aimed = (self.aimed if self.aimed is not None else self.target(side)), None
         hp, pdd = self.stats.get(target.kind, (0.0, 0.0)) if target is not None else (0.0, 0.0)
         left = None if target is None else self.reckon(target)
         alive = None if left is None else left.alive() or left  # as it is if it's alive when the throw lands

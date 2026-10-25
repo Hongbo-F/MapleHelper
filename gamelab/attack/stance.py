@@ -30,16 +30,22 @@ points they don't account for; a jump back toward another one, or onto a spawn p
 into or through a monster's body), a step only if it's clearly safer (ESCAPE_THROW: it doesn't throw). From
 where she is it's a throw from the ground, a jump throw only where that would be a claw swipe: a jump in place by one
 walks it into her as she lands.
+With what her jumps' attacks reach (`jumps`: attack.reach.coverage), nothing in reach from the ground has her
+jump-throw at a monster on a platform above where an attack from a jump surely picks it (_jump_shot), in place,
+forward or back, its attack key as soon in the jump as that pick is sure (JumpPlan); and on her way somewhere
+(`toward`), a jump forward along it that hits one goes before a throw from the ground (PASSING_JUMPS).
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
-from ..localization.monsters import DEFAULT_SPEED, MONSTER_SPEED, MONSTER_TOP, Monster
+from ..localization.monsters import DEFAULT_SPEED, MONSTER_SPEED, MONSTER_TOP, Monster, touch_box
 from ..motion import physics
+from ..motion import bodies as her_body
 from ..motion.bodies import HER_HALF
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from . import reach
@@ -99,6 +105,42 @@ SMALL_STEP_END = 40  # ... and how near her platform's end that step may take he
                      # to the far end on; with it off (SNAIL_FAR_END False) this isn't used: 37 arrive with any
 
 _THROW_VERBS = {"throw": "throwing", "jump_throw": "jump-throwing", "jump_back": "jumping back, throwing"}
+# A jump throw at what no throw from the ground reaches from where she stands (_jump_shot: a monster on a platform above
+# her, up close only from high in the jump, farther off from lower: attack.reach.shots, the windows widening with the
+# distance): she takes one if it lands her back on her platform, where she keeps to, her body meeting no monster's on
+# the way (motion.bodies, each where it can be by then: MonsterTrack.reach's spread, at its speed), and, forward or
+# back, where the danger is at most JUMP_DANGER more than where she stands (attack.danger: a guess, a tenth of a Horny
+# Mushroom's touch, 16% of her HP). The choice among them (the choice model): every one of these throws once, and a
+# throw's lock (0.73 s, the game's: COMBAT.attack_lock_ms) is most of what it costs, the jump's flight (0.62 s) inside
+# it; so what decides is what it gains: a throw from the ground when anything's in reach from there (no jump's lock
+# extra, JUMP_THROW_LOCK_EXTRA_MS), else the jump whose attack comes soonest at the target pick_target's order takes
+# first (hurt first, then the nearest), in place before forward before back (the least ground covered: the least
+# danger), forward along the way she's going first; travelling, a jump forward along her way that hits one over a
+# throw from the ground (PASSING_JUMPS: the throw and 84 units of her way, 0.56 s of her walk, in one lock).
+JUMP_DANGER = 0.016
+ARC_STEP = 0.02  # s between the places along a jump her body is checked at (as motion.flow's danger, DANGER_STEP)
+# In passing (stance's `toward`: travelling that way), a jump forward that way whose attack hits a monster takes her
+# on as she shoots (a jump's 83 units, 0.56 s of her walk, for an attack 40 ms later and a lock 0.1 s longer than a
+# throw's from the ground): taken over a throw from the ground at a monster that way, on the same terms as above.
+PASSING_JUMPS = True
+
+
+@dataclass(frozen=True)
+class JumpPlan:
+    """How a jump throw or a jump back goes (control.actions.Actions.jump_throw, jump_back): the attack key `key_ms`
+    after the jump key; `way` +1/-1 a jump forward that way (0: in place); `air_turn` False: turning, the tap goes
+    before the jump (an attack too soon in the jump to turn first: a short monster); why it was chosen (`why`: the
+    telemetry 'jump' record's kind) and the shot it makes (attack.reach.Shot), if worked out."""
+    key_ms: int = physics.JUMP_ATTACK_MS
+    way: int = 0
+    air_turn: bool = True
+    why: str = ""
+    shot: reach.Shot | None = None
+
+
+def plan_of(act: tuple) -> JumpPlan | None:
+    """A jump throw's or jump back's plan (JumpPlan), if the stance gave one (else its defaults)."""
+    return act[2] if len(act) > 2 and isinstance(act[2], JumpPlan) else None
 
 
 def _side_of(t: Monster, x: float) -> str:
@@ -157,7 +199,8 @@ def open_above(model: MapModel, platform: Platform, x0: float, x1: float) -> boo
 def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approach: bool = True,
            facing: str | None = None, can_jump: Callable[[float, float], bool] | None = None,
            tops: dict[str, float] | None = None, halves: dict[str, float] | None = None,
-           around: list[Monster] | None = None, danger: Danger | None = None) -> tuple:
+           around: list[Monster] | None = None, danger: Danger | None = None,
+           jumps: Callable[[], reach.Coverage] | None = None, toward: int = 0) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units) to step away,
@@ -170,7 +213,12 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     localization.monsters.bodies; MONSTER_TOP and MONSTER_HALF by default). `around`: every monster around
     her, of any kind (`wanted` by default): one the attack takes first whose star is stopped shields those
     behind it (reach.shielded). `danger`: the map's (attack.danger), for how near a monster that hits hard may come
-    (Danger.keep_off) and where she goes from it (_escape)."""
+    (Danger.keep_off) and where she goes from it (_escape). `jumps`: what her attacks reach from here, from the ground
+    and from her jumps (attack.reach.coverage, worked out when first asked): with nothing in reach from the ground, a
+    jump throw whose attack surely hits a wanted monster from the air comes before a step or a walk (_jump_shot: a
+    monster on a platform above her, out of a star's reach from the ground), ('jump_throw', side, JumpPlan)
+    or ('jump_back', side, JumpPlan); `toward` (+1/-1: she's travelling that way), a jump forward that way that hits
+    one comes before a throw from the ground (PASSING_JUMPS)."""
     can_jump = can_jump or (lambda a, b: True)
     around = wanted if around is None else around
     mine = [t for t in wanted if t.platform == platform.id]
@@ -183,18 +231,131 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
                                (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
                                else None, danger, platform, around)
     if in_reach:
+        if toward and PASSING_JUMPS and jumps is not None:
+            jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, around, danger, halves, toward,
+                              kinds=("forward",), why="passing")
+            if jump is not None:
+                return jump
         return ("throw", _throw_side(x, in_reach, facing))
+    if jumps is not None:
+        jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, around, danger, halves, toward)
+        if jump is not None:
+            return jump
     act = _step_from_under(x, y, platform, wanted, lo, hi, around)
     if act is None and approach:
         act = _close_in(x, y, platform, wanted, lo, hi, around)
     return act or ("wait",)
 
 
-def air_gap(act: str) -> float | None:
-    """How long after its jump key a stance's attack key comes ('jump_throw', 'jump_back'; physics), or
-    None for a throw from the ground: how high she is when the attack picks its target follows from it
+def air_gap(act: str | tuple) -> float | None:
+    """How long after its jump key a stance's attack key comes ('jump_throw', 'jump_back': its plan's, plan_of, else
+    physics'), or None for a throw from the ground: how high she is when the attack picks its target follows from it
     (reach.air_rise)."""
-    return {"jump_throw": physics.JUMP_ATTACK_MS, "jump_back": physics.JUMP_BACK_ATTACK_MS}.get(act)
+    plan = plan_of(act) if isinstance(act, tuple) else None
+    name = act[0] if isinstance(act, tuple) else act
+    if plan is not None and name in ("jump_throw", "jump_back"):
+        return plan.key_ms
+    return {"jump_throw": physics.JUMP_ATTACK_MS, "jump_back": physics.JUMP_BACK_ATTACK_MS}.get(name)
+
+
+def _jump_shot(x: float, y: float, platform: Platform, wanted: list[Monster], cover: reach.Coverage, lo: float,
+               hi: float, facing: str | None, around: list[Monster], danger: Danger | None,
+               halves: dict[str, float] | None, toward: int = 0, kinds: tuple[str, ...] = reach.JUMP_KINDS,
+               why: str = "") -> tuple | None:
+    """A jump throw at one of `wanted` from map (x, y) on `platform` (stance's): of the shots `cover` has at them
+    (attack.reach.shots) of `kinds`, those whose jump lands her back on her platform between `lo` and `hi` (where
+    she keeps to), her body meeting no monster's on the way (_arc_meets), a jump forward or back neither landing nor
+    passing into one (_into) nor, with `danger`, landing where the danger is more than JUMP_DANGER over where she
+    stands; an 'up' as she'd make it (turning in the air if she doesn't face that way by her keys, `facing`). Of
+    those, at the target pick_target's order would take first (hurt first, then the nearest), the one soonest done:
+    in place, then forward (`toward` first: she's going that way; in passing, `why` 'passing', only that way), then
+    back, the soonest attack key first. None if there's none. `why`: the plan's (else 'above' at a monster off her
+    level above her, 'reach' at one that isn't)."""
+    here_danger = None
+    best = None
+    for t in wanted:
+        for sh in cover.of(t):
+            if sh.jump is None or sh.kind not in kinds:
+                continue
+            side = RIGHT if sh.side > 0 else LEFT
+            if sh.kind == "up" and sh.turn != (facing != side):
+                continue
+            if why == "passing" and sh.jump.way != toward:
+                continue
+            if sh.land is None or sh.land.id != platform.id or not lo <= sh.land_x <= hi:
+                continue
+            if sh.kind != "up":
+                if _into(x, sh.land_x, platform, around, halves):
+                    continue
+                if danger is not None:
+                    if here_danger is None:
+                        here_danger = danger.at(platform.id, x, around)
+                    if danger.at(platform.id, sh.land_x, around) > here_danger + JUMP_DANGER:
+                        continue
+            if _arc_meets(x, y, platform, sh, around, halves):
+                continue
+            hurt = t.bar is not None
+            order = {"up": 0, "forward": 1 if not toward or sh.jump.way == toward else 2, "back": 3}[sh.kind]
+            rank = (not hurt, t.bar if hurt else 0.0, abs(t.x - x) + 2 * abs(t.y - y), order, sh.key_ms)
+            if best is None or rank < best[0]:
+                best = (rank, sh, t)
+    if best is None:
+        return None
+    _, sh, t = best
+    side = RIGHT if sh.side > 0 else LEFT
+    reason = why or ("above" if t.y < y - reach.LEVEL else "reach")
+    if sh.kind == "back":
+        return ("jump_back", side, JumpPlan(sh.key_ms, -sh.side, True, reason, sh))
+    return ("jump_throw", side, JumpPlan(sh.key_ms, sh.jump.way, True, reason, sh))
+
+
+def _arc_meets(x: float, y: float, platform: Platform, sh: reach.Shot, around: list[Monster],
+               halves: dict[str, float] | None) -> bool:
+    """Whether her body (motion.bodies) over shot `sh`'s jump from map (x, y), from the plan's first key until she
+    lands, meets a monster's of `around`, each where it can be by then (from where it was seen, either way at its
+    kind's speed, MONSTER_SPEED: DEFAULT_SPEED for a kind the table lacks; its box for touches, touch_box), every
+    ARC_STEP. A jump in place lands where she stood: what walks into her there is the fight's (her keeping off)."""
+    if sh.kind == "up":
+        return False
+    j = sh.jump
+    landing = (sh.land, sh.land_x, sh.land_s)
+    boxes = []
+    for m in around:
+        q = platform if m.platform == platform.id else platform.peer(m.platform)
+        if q is None:
+            continue
+        half, tall = touch_box(m.kind)
+        if halves and m.kind in halves:
+            half = halves[m.kind]
+        boxes.append((m, q, half, tall, MONSTER_SPEED.get(m.kind, DEFAULT_SPEED)))
+    if not boxes:
+        return False
+    t, end = -j.lead_s, physics.JUMP_LAG + sh.land_s
+    while t <= end + 1e-9:
+        fx, fy, _ = _pose(platform, x, j, max(t, -j.lead_s), landing)
+        since = t + j.lead_s
+        for m, q, half, tall, speed in boxes:
+            lo, hi = max(q.left, m.x - speed * since), min(q.right, m.x + speed * since)
+            feet = q.y_at(min(max(fx, lo), hi))
+            if her_body.touches(fx, fy, lo, hi, half, feet, tall):
+                return True
+        t += ARC_STEP
+    return False
+
+
+def _pose(platform: Platform, x: float, j: physics.Jump, t: float, landing: tuple) -> tuple[float, float, bool]:
+    """Her feet t s after jump `j`'s key (from -j.lead_s, the plan's first key) from map x on `platform`:
+    physics.pose without the walls (the shot's own landing, worked out with them, ends it)."""
+    land, lx, s = landing
+    if t <= physics.JUMP_LAG:
+        dx, _ = j.arc(t)
+        x1 = min(max(x + dx, platform.left), platform.right)
+        return x1, platform.y_at(x1), False
+    tau = t - physics.JUMP_LAG
+    if land is not None and tau >= s:
+        return lx, land.y_at(lx), False
+    x0 = min(max(x + j.way * j.run, platform.left), platform.right)
+    return x0 + j.vx * tau, platform.y_at(x0) - physics.rise_after(tau), True
 
 
 def half_of(kind: str, halves: dict[str, float] | None = None) -> float:
@@ -376,7 +537,10 @@ def act_text(act: tuple, wanted: list[Monster], x: float, hidden: list[Monster])
         def name(t: Monster) -> str:
             return f"{t.kind} {t.x - x:+.0f}" + (" hidden" if any(t is h for h in hidden) else "")
 
-        return f"{_THROW_VERBS[act[0]]} {act[1]} ({', '.join(name(t) for t in side[:3])})"
+        plan = plan_of(act)
+        how = "" if plan is None else (f" {'forward ' if plan.way and act[0] == 'jump_throw' else ''}"
+                                       f"at {plan.key_ms} ms{f', {plan.why}' if plan.why else ''}")
+        return f"{_THROW_VERBS[act[0]]} {act[1]}{how} ({', '.join(name(t) for t in side[:3])})"
     if act[0] in ("back", "approach"):
         return f"{'stepping away' if act[0] == 'back' else 'closing in'} {act[1]} {act[2]:.0f}"
     return "nothing in reach"

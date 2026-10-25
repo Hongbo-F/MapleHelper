@@ -366,6 +366,17 @@ class Navigator:
         """Fighting on the way (the escort's hunt or transit mode) rather than avoiding monsters."""
         return self._mode in FIGHTING
 
+    def leaves_at(self, here: Platform, x: float, dst: int, dst_x: float | None = None) -> float | None:
+        """Where along platform `here` (from map x) the quickest way onto platform `dst` leaves it (its first move's
+        takeoff, or where that starts), or `dst_x` if `dst` is `here`; None if there's no way."""
+        if dst == here.id:
+            return dst_x
+        path = self.planner.plan(here.id, x, dst)
+        if not path:
+            return None
+        first = path[0]
+        return first.takeoff if first.takeoff is not None else first.x
+
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
            scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False,

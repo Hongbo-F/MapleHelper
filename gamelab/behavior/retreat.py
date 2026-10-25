@@ -33,8 +33,10 @@ whole map, mostly its floor (33) among its Green Mushrooms, with her looks from 
 default, 24 of 29 (seeds 1-8, 2026-10-25), the rest short of one in the time (the safest place within reach) or off the
 rope at its foot. Without the feed (`--no-feed`) the hunt loop's sweep (hunt.SWEEP) has her worse placed when it comes,
 and it's 15 of 32 (28 of 29 with the sweep off; 39 of 47 over seeds 1-12 at master's head before the sweep came in, the
-rest knocked back on the way up to the rope at 146 or to 28): tests/test_retreat.py, NO_FEED_SWEEP;
-D:/MapleHelper-scratch/ldpet/sweep.py, D:/MapleHelper-scratch/integ3/rebase/ldsweep.py.
+rest knocked back on the way up to the rope at 146 or to 28): tests/test_retreat.py;
+D:/MapleHelper-scratch/ldpet/sweep.py, D:/MapleHelper-scratch/integ3/rebase/ldsweep.py. Since her jumps' attacks are
+weighed (2026-10-25): with the feed 28 of 32, without it 26 of 32, shooting 23 from 24 32 of 32
+(D:/MapleHelper-scratch/ov-jump/sweep_count.py).
 """
 
 import math
