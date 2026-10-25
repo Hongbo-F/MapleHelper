@@ -11,6 +11,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image
@@ -1329,7 +1330,9 @@ def cmd_watch(args) -> int:
     telemetry for the mini-map. It never sends a key and never brings the game to the front: a frame the
     game isn't wholly showing isn't read. With --lie-detector it also checks the screen for the Lie Detector
     and pages whoever is at the PC (the player keeps its own watchdog regardless): on a thread of its own, the
-    frame handed over as soon as it's taken, before its step (it had waited for the step, in the frame loop)."""
+    frame handed over as soon as it's taken, before its step (it had waited for the step, in the frame loop). With
+    --heading it reads which way she faces off every frame (perception.heading, her pictures in lab or the seed),
+    says each change, and publishes it with the scenes (her `facing_seen`): turn her with the arrows and watch."""
     from .localization import feed, worldstate
     from .perception.drops import unknown_note
     from .perception.lie_detector import LieDetectorSpotter
@@ -1345,7 +1348,23 @@ def cmd_watch(args) -> int:
     started = time.monotonic()
     until = started + args.minutes * 60 if args.minutes else None
     w = {"scene": -1e9, "tracks": -1e9, "status": started, "lie": -1e9, "visible": None, "loot": [], "looked": [],
-         "frames": 0, "seen": 0, "alarm": False}
+         "frames": 0, "seen": 0, "alarm": False, "facing": "", "told": 0, "read": 0}
+    if args.heading:
+        bank = runner.eyes.heading_bank()
+        print(f"her facing off every frame: {len(bank.refs)} pictures of her from {len(bank.pool)} boxes"
+              + ("" if bank.ready else " (none: nothing can be told; `heading --learn` makes some from saved frames)"))
+
+    def facing(st: worldstate.WorldState):
+        """Which way the frame shows her facing (--heading), each change said."""
+        r = runner.eyes.heading(SimpleNamespace(frame=st.frame, tag=st.tag, tag_seen=st.tag_seen, geo=st.geo, t=st.t))
+        w["read"] += 1
+        w["told"] += r.side is not None
+        said = r.side or f"can't tell ({r.why})"
+        if said != w["facing"]:
+            w["facing"] = said
+            _log(f"  her frame: faces {r.side} (matched {r.score:.2f}, {r.margin:.2f} ahead)" if r.side else
+                 f"  her frame: {said}")
+        return r
 
     def check(full) -> None:  # the Lie Detector, on its thread
         if spotter.seen(full) and not w["alarm"]:
@@ -1387,11 +1406,15 @@ def cmd_watch(args) -> int:
                             + (f" (another player's, #{by})" if by is not None else "")))
             if st.loot is not None:
                 w["loot"], w["looked"] = st.loot, st.looked
+            seen = facing(st) if args.heading else None
             if now - w["scene"] >= WATCH_SCENE_S:
                 w["scene"] = now
                 s = worldstate.to_scene(st, model, band, mobs=True, wide=True)
                 s.loot, s.looked = w["loot"], w["looked"]  # as of the last frame searched for drops (LOOT_EVERY_S)
-                telemetry.emit("scene", **s.record())
+                record = s.record()
+                if seen is not None and record["her"] is not None:
+                    record["her"]["facing_seen"] = seen.side
+                telemetry.emit("scene", **record)
             if now - w["tracks"] >= WATCH_TRACKS_S:
                 w["tracks"] = now
                 telemetry.emit("tracks", list=[tr.record() for tr in st.tracks], frames=st.seq)
@@ -1411,10 +1434,11 @@ def cmd_watch(args) -> int:
             per_minute = meter.per_minute(now)
             exp = "" if meter.at is None else f"; EXP {meter.at[1]:,}" + (
                 "" if per_minute is None else f", {per_minute:.0f} a minute")
+            told = f"; her facing told on {w['told']} of {w['read']} frames" if args.heading else ""
             print(f"{time.strftime('%H:%M:%S')} {rate:.1f} frames a second ({w['seen']} with the game on screen); "
-                  f"{len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'{exp}",
-                  flush=True)
-            w["status"], w["frames"], w["seen"] = now, 0, 0
+                  f"{len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'{exp}"
+                  f"{told}", flush=True)
+            w["status"], w["frames"], w["seen"], w["told"], w["read"] = now, 0, 0, 0, 0
 
     # Nobody waits for watch's searches (each is merged at the next frame), so its wait for the next frame needn't
     # end when one is back: time.sleep's, on Windows' fine timer, not an Event's, which ends on its 15.6 ms ticks.
@@ -1750,6 +1774,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
     s.add_argument("--lie-detector", action="store_true",
                    help="also check the screen for the Lie Detector and page whoever is at the PC")
+    s.add_argument("--heading", action="store_true",
+                   help="also read which way she faces off every frame and say each change (turn her and watch)")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_watch)
 

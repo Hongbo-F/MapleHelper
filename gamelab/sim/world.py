@@ -473,6 +473,11 @@ class Noise:
                                  # under `near` units ahead takes it only with chance `take`, else hits nothing.
                                  # In the live hunts of 2026-10-21 such jump throws hurt or killed the snail 6
                                  # times in 29 under 46 units off, against 28 in 48 at 46-130: (46, 0.35); () off
+    heading_unsure: float = 0.0  # share of frames whose picture of her can't tell which way she faces (perception.
+                                 # heading), drawn per frame: on the old recordings 1.4% of the frames read with
+                                 # her own pictures, 1 of 42 at 1366x768 (on a rope it never can: FakeEyes)
+    turned: tuple = ()           # ((at, side), ...): s since the start when something that isn't her keys turns her
+                                 # (her player's own arrow, ...): her frame shows it, her keys don't know
 
     @staticmethod
     def during(spells: tuple, t: float) -> bool:
@@ -512,6 +517,9 @@ class Realism:
                                     # (ROPE_REACH_CLIENT: HeavenClient's)
     her_box: tuple[float, float] | None = None  # her body for touches, (half its width, its height): None, HER_HALF
                                                 # and HER_HEIGHT; HER_BOX_CLIENT, the client's (motion.bodies)
+    knock_turns: bool = False    # a touch's knock turns her to face the monster: HeavenClient's Player::damage doesn't
+                                 # (it never calls set_direction), and in the old recordings she never turned without
+                                 # an arrow, but no recording has a knock with no arrow held (README, Her heading)
 
 
 @dataclass(frozen=True)
@@ -977,6 +985,8 @@ class World:
             self._push(self._rival_stays(), "rival_moves")
         for m in self.monsters:
             self._camps_watch(m)
+        for at, side in self.noise.turned:
+            self._push(int(at * 1000), "turned", side)
 
     # --- set-up -------------------------------------------------------------------------------------
 
@@ -1133,6 +1143,8 @@ class World:
                 self._seen(action, True)
         elif e.kind == "call":
             e.data(self)
+        elif e.kind == "turned":
+            self.turn(e.data)
         elif e.kind == "liftoff":
             self._liftoff(e.data)
         elif e.kind == "drop":
@@ -1223,6 +1235,12 @@ class World:
         if self.sitting:
             self.sitting = False
             self.still_ms = self.ms + int(STAND_UP * 1000)
+
+    def turn(self, side: str, why: str = "turned from outside") -> None:
+        """Something that isn't her keys turns her `side` (Noise.turned, Realism.knock_turns): her frame shows it."""
+        if side != self.facing and not self.dead:
+            self.facing = side
+            self.note(f"{why}: she faces {side}")
 
     def _pressed(self, action: str, at: float) -> None:
         ground = self.mode == "ground"
@@ -1529,6 +1547,8 @@ class World:
         self._pet_drinks()
         if self.mode == "rope":
             self._leave_rope()
+        if self.realism.knock_turns:
+            self.turn(LEFT if away > 0 else RIGHT, f"knocked by {m.kind} #{m.idx}")
         self.knocked = True
         self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
 

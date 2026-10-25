@@ -13,13 +13,14 @@ It's made of the layers below: Senses (perception and localization: every look),
 her keys), a Looter (what she picks up and remembers), and the fight loops (behavior.fight). After every
 look, whoever took it, the hunter keeps count of her EXP and her HP: a kill is her EXP going up, its number read
 when it changes (perception.exp_number), and the gain's size says what kind it was, or that it was several kills,
-or none (localization.gains).
+or none (localization.gains). It also reads which way she faces off the look's frame (perception.heading) for her
+keys (Actions.see), and logs where that tells the other way from her last arrow.
 """
 
 import json
 import random
 import time
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Callable
 
 import numpy as np
@@ -42,6 +43,7 @@ from ..localization.worldstate import reading_of
 from ..motion import physics
 from ..perception import drops, exp_number
 from ..perception.eyes import Eyes
+from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from . import fight
 from .fight import Report
@@ -62,6 +64,9 @@ HP_ZERO_SHOTS = 5     # frames of such looks saved, to find out why
 # (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
 # from a look in that time comes while she's in the air (and is lost) or still sliding, from where she no longer is.
 KNOCK_S = 0.45
+ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
+                 # only her back shows and her facing isn't read
+HEADING_SHOTS_MAX = 200  # crops of her kept in lab/heading where the frame and her last arrow disagreed, at most
 
 
 class Hunter:
@@ -106,8 +111,13 @@ class Hunter:
         self.ledger = Ledger(self, self.drops)
         self.wounds = Wounds(self.ledger)
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
-        self.senses.listeners += [self._vitals, self._others, self._publish, self.ledger.on_look, self.drops.on_look,
-                                  self.wounds.on_look]
+        self.facing_seen = Reading(None, why="no look")  # which way the last look's frame showed her facing
+        # Her facing off the frames: looks, told or not (and why), what her keys made of each (Actions.saw), and those
+        # that told the other way from her last arrow ('against')
+        self.heading_counts: Counter[str] = Counter()
+        self._shots = len(list(paths.HEADING_SHOTS.glob("*.png"))) if paths.HEADING_SHOTS.exists() else 0
+        self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
+                                  self.drops.on_look, self.wounds.on_look]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw]
         if feed is not None:  # whose kills are whose (localization.tracking)
             self.actions.throw_listeners.append(feed.throw)
@@ -244,6 +254,48 @@ class Hunter:
             self._log_hit(s)
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False
 
+    def _heading(self, s: Scene) -> None:
+        """Which way her look's frame shows her facing (Eyes.heading; not asked on a rope), for her keys (Actions.see:
+        where it's sure and new enough it's her heading, which her throws' taps go by; after a hit, not sure makes it
+        unknown). Where her keys leave no doubt, the look teaches her pictures (Eyes.learn_heading). A frame telling
+        the other way from her last arrow is logged as an event 'heading' with how long after the arrow and the last
+        hit, and her crop kept in lab/heading (HEADING_SHOTS_MAX at most): how often a knock or anything else turns her
+        without a key."""
+        a, eyes = self.actions, self.senses.eyes
+        if not hasattr(eyes, "heading"):  # (eyes that don't read her picture: the facing is her keys')
+            return
+        rope = s.where is not None and s.where.platform is None and any(
+            abs(r.x - s.where.x) <= ROPE_SLACK and r.top - ROPE_SLACK <= s.where.y <= r.bottom + ROPE_SLACK
+            for r in self.model.ropes)
+        reading = Reading(None, why="rope") if rope else eyes.heading(s)
+        self.facing_seen = reading
+        c = self.heading_counts
+        c["looks"] += 1
+        c["told" if reading.side is not None else f"not told ({reading.why})"] += 1
+        if (sure := a.keys_say(s.t, self.hit_at)) is not None and not rope:
+            eyes.learn_heading(s, sure, reading)
+        against = a.see(reading.side, s.t, self.hit_at, reading.strong)
+        c[a.saw] += 1
+        if against is None:
+            return
+        c["against"] += 1
+        since_arrow = s.t - a.arrows_at
+        since_hit = None if self.hit_at is None else s.t - self.hit_at
+        text = (f"the frame shows her facing {reading.side}, her last arrow {against} ({since_arrow:.1f} s after it, "
+                + ("no hit before" if since_hit is None else f"{since_hit:.1f} s after a hit")
+                + f"; matched {reading.score:.2f}, {reading.margin:.2f} ahead of {against})")
+        self.log(f"  {text}")
+        shot = None
+        if self._shots < HEADING_SHOTS_MAX:
+            shot = paths.HEADING_SHOTS / f"{time.strftime('%Y%m%d-%H%M%S')}-{c['against']}-keys-{against}.png"
+            if eyes.keep_heading(s, shot):
+                self._shots += 1
+            else:
+                shot = None
+        telemetry.emit("event", kind="heading", text=text, seen=reading.record(), keys=against,
+                       since_arrow=round(since_arrow, 2), since_hit=None if since_hit is None else round(since_hit, 2),
+                       **({"shot": shot.name} if shot is not None else {}))
+
     def _gained(self, g: Gain, s: Scene) -> None:
         """A gain of her EXP: its kills counted (exp_events, told, the report), each at its time, or, if no kill
         explains it, logged; with her EXP as read, for the mini-map and the run's record (telemetry 'exp')."""
@@ -286,8 +338,10 @@ class Hunter:
         emptied by someone else; hers are the 'kill' events already)."""
         if telemetry.recording():
             record = s.record()
-            if record["her"] is not None:
-                record["her"]["facing"] = self.actions.facing
+            if record["her"] is not None:  # which way she faces as best known (keys or frame: facing_by), by her keys
+                a = self.actions             # alone, and by the frame alone
+                record["her"].update(facing=a.heading, facing_by=a.facing_by, facing_keys=a.facing,
+                                     facing_seen=self.facing_seen.side)
             telemetry.emit("scene", **record)
             telemetry.emit("drops", inventory_full=self.looter.inventory_full, pending=[
                 {"x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform, "mesos": d.mesos}

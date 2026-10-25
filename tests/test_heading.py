@@ -1,9 +1,13 @@
 """Which way she faces, seen on a frame (perception.heading): her picture above her name tag against her pictures and
 their mirror images, on frames whose facing is known (tests/fixtures/heading: 21 frames at 1366x768 in her outfit of
-2026-10-24, and 23 of the old recordings' at 1920x1080 half size, labelled by the keys sent)."""
+2026-10-24, and 23 of the old recordings' at 1920x1080 half size, labelled by the keys sent); her keys going by it
+(control.actions.Actions.see); and the simulator, whose eyes see the world's facing and whose world can turn her
+without a key (sim.world.Noise.turned, Realism.knock_turns)."""
 
+import dataclasses
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,14 +16,19 @@ from PIL import Image
 from maplehelper.engine import LEFT, RIGHT
 
 from gamelab import paths
+from gamelab.control import actions as actions_mod
+from gamelab.control.actions import HEADING_SETTLE_S, LEARN_AFTER_S, Actions
 from gamelab.perception import heading
-from gamelab.perception.heading import Heading
+from gamelab.perception.heading import Heading, Reading
 from gamelab.perception.nametag import NameTag
 from gamelab.screen import NATIVE, STRETCHED
+from gamelab.sim import scenarios
+from gamelab.sim.world import Noise, Realism
 
 FIXTURES = Path(__file__).parent / "fixtures"
 LABELS = json.loads((FIXTURES / "heading" / "labels.json").read_text(encoding="utf-8"))
 GEOS = {"native": NATIVE, "old": STRETCHED}
+TREE = 10002073
 
 
 def crops(kind: str) -> list[tuple[np.ndarray, str, dict]]:
@@ -165,3 +174,251 @@ def test_pictures_that_keep_reading_the_other_way_from_her_keys_are_dropped(tmp_
         assert not bank.learn(frame, tag, other(side), t, r)
         t += heading.LEARN_EVERY_S
     assert bank.counts["forgot"] == 1 and not bank.ready and not bank.pool
+
+
+# --- her keys going by it (control.actions) -----------------------------------------------------------------------
+
+@pytest.fixture
+def keys_at(monkeypatch):
+    """Actions on a clock of the test's own (now[0]), its plans kept (`sent`), each through hold_back as play does."""
+    now = [1000.0]
+    monkeypatch.setattr(actions_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(actions_mod.time, "sleep", lambda s: now.__setitem__(0, now[0] + s))
+    key = lambda name: SimpleNamespace(name=name)
+    a = Actions(SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), attack=key("f"),
+                                lucky_seven=None, pick_up=key("z"), hp_potion=None, chair=None))
+    a.sent = []
+
+    def play(events, name):
+        a.hold_back(events)
+        a.sent.append((name, events))
+    a.play = play
+    return a, now
+
+
+def taps(a: Actions) -> bool:
+    """Whether the last throw tapped an arrow first."""
+    return any(e[1] in ("left", "right") for e in a.sent[-1][1])
+
+
+def test_after_a_move_the_frame_says_which_way_she_faces_and_the_throw_doesnt_tap(keys_at):
+    a, now = keys_at
+    a.play([[0, "left", "down"], [300, "left", "up"]], "walk")  # a mover's move: the keys leave it unknown
+    a.facing = None
+    assert a.see(LEFT, now[0] + 0.1) is None and a.heading is None and a.saw == "too soon after an arrow"
+    assert a.see(LEFT, now[0] + 0.3 + HEADING_SETTLE_S) is None
+    assert a.heading == LEFT and a.facing_by == "frame" and a.saw == "told otherwise"
+    assert a.facing is None  # the decisions still go by her keys', as before
+    now[0] += 1.0
+    a.throw(LEFT)
+    assert not taps(a) and a.heading == a.facing == LEFT and a.facing_by == "keys" and a.turns == 0
+    a.lock_until = a.arrow_until = 0.0
+    a.throw(RIGHT)  # the other way: the tap, counted
+    assert taps(a) and a.heading == a.facing == RIGHT and a.turns == 1 and a.turn_ms == 80
+
+
+def test_a_frame_telling_the_other_way_from_her_last_arrow_goes_over_it_and_is_said_once(keys_at):
+    a, now = keys_at
+    a.facing = None
+    a.throw(RIGHT)  # tapped right
+    later = a.arrow_until + 0.5
+    assert a.see(LEFT, later) == RIGHT and a.heading == LEFT  # turned without a key: said, and the frame goes
+    assert a.see(LEFT, later + 0.1) is None                    # ... once
+    now[0] = later + 1
+    a.throw(RIGHT)
+    assert taps(a)  # the throw turns her back first
+
+
+def test_while_her_attack_plays_only_a_strong_frame_counts(keys_at):
+    a, now = keys_at
+    a.facing = RIGHT
+    a.throw(RIGHT)  # no tap; her attack plays until arrow_until
+    t = now[0] + 0.3
+    assert t < a.arrow_until
+    assert a.see(LEFT, t) is None and a.heading == RIGHT and a.saw == "her attack playing"
+    assert a.see(LEFT, t, strong=True) == RIGHT and a.heading == LEFT
+
+
+def test_a_frame_that_cant_tell_leaves_her_facing_but_after_a_hit_makes_it_unknown(keys_at):
+    a, now = keys_at
+    a.facing = RIGHT
+    t = now[0] + 2.0
+    assert a.see(None, t) is None and a.heading == RIGHT and a.saw == "not told"
+    assert a.see(None, t + 0.1, hit_at=t + 0.05) is None and a.heading is None and a.saw == "unknown after a hit"
+    now[0] = t + 1
+    a.throw(RIGHT)
+    assert taps(a)  # unknown: the safe tap
+
+
+def test_no_frame_counts_while_a_navigator_chain_plays(keys_at):
+    a, now = keys_at
+    a.facing = RIGHT
+    a.sent_at = now[0]  # the navigator's chains go out around play (client.send)
+    assert a.see(LEFT, now[0] + 5) is None and a.heading == RIGHT and a.saw == "a chain playing"
+    now[0] += 6
+    a.facing = None  # the navigator: the chains are over
+    assert a.see(LEFT, now[0] + 0.1) is None  # what they last pressed may not show yet
+    assert a.see(LEFT, now[0] + HEADING_SETTLE_S + 0.01) is None and a.heading == LEFT
+
+
+def test_her_keys_say_her_facing_beyond_doubt_only_well_after_her_arrow_with_no_hit_or_doubt(keys_at):
+    a, now = keys_at
+    a.walk(RIGHT, 50)
+    end = a.arrows_at
+    assert a.keys_say(end + 0.1) is None and a.keys_say(end + LEARN_AFTER_S) == RIGHT
+    assert a.keys_say(end + 1, hit_at=end + 0.5) is None  # a hit since: a knock may have turned her
+    a.see(LEFT, end + 1)
+    assert a.keys_say(end + 2) is None  # a frame said otherwise
+    a.facing = None
+    assert a.keys_say(end + 3) is None  # a move: the keys don't know
+
+
+# --- the simulator --------------------------------------------------------------------------------------------------
+
+needs_tree = pytest.mark.skipif(not scenarios.available(TREE), reason="needs Tree Dungeon's game data (gamedata/data)")
+
+
+def _kill_on_23(noise=None, realism=None, read=True, seed=1, start=-150.0, mushrooms=(120.0,)):
+    """`hunt kill` of the rightmost Horny Mushroom on 23 (Tree Dungeon; her at `start`, mushrooms at `mushrooms`): every
+    throw checked against the world's facing once its plan has played (its star leaves the way she faces). `read`
+    False: eyes that can't read her picture. What came of it, and the trace."""
+    out = {"throws": 0, "wrong way": 0}
+
+    def fn(sim):
+        if not read:
+            sim.eyes.heading = lambda obs: Reading(None, why="no pictures")
+        h = sim.hunter()
+        for name in ("throw", "jump_throw"):
+            method = getattr(h.actions, name)
+
+            def checked(direction, method=method):
+                method(direction)
+                sim.world.advance(sim.clock.now)
+                out["throws"] += 1
+                out["wrong way"] += sim.world.facing != direction
+            setattr(h.actions, name, checked)
+        s = h.look()
+        out["ended"] = h.kill(max(s.monsters, key=lambda m: m.x), seconds=40)
+        out["counts"] = dict(h.heading_counts)
+        return {}
+    sc = scenarios.Scenario("heading_kill_23", fn, (23, start), monsters=[("Horny Mushroom", 23, x) for x in mushrooms],
+                            seed=seed, limit=60, noise=noise, realism=realism, map_id=TREE)
+    trace = scenarios.run_scenario(sc)
+    out["knocks"] = sum("knocked by" in line for line in trace["world_log"])
+    return out, trace
+
+
+@needs_tree
+def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
+    """Turned away from the Horny Mushroom twice while she shoots it (Noise.turned: her player's own arrow, say): the
+    next look's frame tells, so the throw after it taps back first, and only the two throws decided before each turn
+    (it came while they waited out her attack lock) go the wrong way; the second turn, against her last arrow, is
+    logged. With eyes that can't read her picture, her keys think she faces it: every star after the turn goes the
+    wrong way (and the mushroom walks into her)."""
+    turned = Noise(turned=((1.5, LEFT), (4.0, LEFT)))
+    out, trace = _kill_on_23(turned)
+    assert out["ended"] == "killed" and out["throws"] >= 8 and out["wrong way"] == 2, out
+    assert out["counts"]["against"] == 1
+    assert any("the frame shows her facing left, her last arrow right" in line for line in trace["log"])
+    blind, _ = _kill_on_23(turned, read=False)
+    assert blind["wrong way"] >= 4, blind
+
+
+KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True), start=0.0, mushrooms=(160.0, -150.0))
+
+
+@needs_tree
+def test_in_a_world_where_a_knock_turns_her_the_frame_keeps_her_stars_going_the_right_way():
+    """Realism.knock_turns (not the game's, by HeavenClient): shooting the mushroom on her right, the one on her left
+    walks into her and the knock turns her to face it. The frame tells (logged, against her last arrow), and of her
+    stars only one decided before a knock goes the wrong way; with eyes that can't read her picture, 4 do (seed 3)."""
+    out, _ = _kill_on_23(seed=3, **KNOCKED)
+    assert out["knocks"] >= 1 and out["wrong way"] <= 1 and out["counts"]["against"] >= 1, out
+    blind, _ = _kill_on_23(seed=3, read=False, **KNOCKED)
+    assert blind["wrong way"] >= 4, blind
+
+
+@needs_tree
+def test_over_eight_seeds_of_knocks_that_turn_her_her_stars_go_the_wrong_way_only_when_decided_before_one():
+    """As above on seeds 1-8: with the frame, at most one wrong-way star a knock (4 for 10 knocks, as measured), where
+    eyes that can't read her picture send 16 the wrong way (19 knocks)."""
+    seen = [_kill_on_23(seed=k, **KNOCKED)[0] for k in range(1, 9)]
+    blind = [_kill_on_23(seed=k, read=False, **KNOCKED)[0] for k in range(1, 9)]
+    wrong = sum(o["wrong way"] for o in seen)
+    assert wrong <= sum(o["knocks"] for o in seen) and sum(o["wrong way"] for o in blind) >= 3 * wrong
+
+
+@needs_tree
+def test_the_fake_eyes_see_the_worlds_facing_but_not_on_a_rope_nor_on_frames_that_cant_tell():
+    seen = {}
+
+    def fn(sim):
+        h = sim.hunter()
+        s = h.look()
+        seen["ground"] = (sim.eyes.heading(s), sim.world.facing)
+        sim.world.turn(LEFT)
+        seen["turned"] = sim.eyes.heading(h.look())
+        return {}
+    scenarios.run_scenario(scenarios.Scenario("heading_eyes", fn, (23, 73.0), map_id=TREE))
+    (r, facing), turned = seen["ground"], seen["turned"]
+    assert r.side == facing == RIGHT and r.strong and turned.side == LEFT
+    hanging = {}
+
+    def on_rope(sim):
+        hanging["r"] = sim.eyes.heading(sim.hunter().look())
+        return {}
+    scenarios.run_scenario(scenarios.Scenario("heading_rope", on_rope, (29, -8.0), hanging=-150.0, map_id=TREE))
+    assert hanging["r"].side is None and hanging["r"].why == "rope"
+    unsure = {}
+
+    def many(sim):
+        h = sim.hunter()
+        reads = []
+        for _ in range(200):
+            reads.append(sim.eyes.heading(h.look()))
+            sim.clock.sleep(0.05)
+        unsure["share"] = sum(r.side is None for r in reads) / len(reads)
+        return {}
+    scenarios.run_scenario(scenarios.Scenario("heading_unsure", many, (23, 73.0), map_id=TREE,
+                                              noise=Noise(heading_unsure=0.2)))
+    assert 0.1 <= unsure["share"] <= 0.3
+
+
+# --- the live check's command (watch --heading) ---------------------------------------------------------------------
+
+def test_watch_says_each_change_of_her_facing_and_publishes_it_with_the_scenes(monkeypatch, tmp_path):
+    """`watch --heading` reads her facing off every frame (the runner's eyes, Eyes.heading), says each change (not
+    every frame), counts how many frames told it, and puts it on the scenes (her `facing_seen`); it presses
+    nothing."""
+    from gamelab import __main__ as cli, telemetry
+    from gamelab.localization import feed, worldstate
+    from gamelab.localization.senses import Senses
+    from gamelab.localization.worldstate import WorldStep
+    from gamelab.perception.frames import ListFrames
+    from test_feed import _Look
+    from test_worldstate import Drawn, small_map
+    monkeypatch.setattr(telemetry, "FOLDER", tmp_path)
+    monkeypatch.setattr(feed, "quiet", lambda: None)
+    logged = []
+    monkeypatch.setattr(cli, "_log", logged.append)
+    model = small_map()
+    eyes = Drawn(model)
+
+    class Turning(_Look):  # she faces right for the first 0.6 s, then left (the arrow pressed by hand)
+        def heading_bank(self):
+            return SimpleNamespace(refs=[1], pool=[1, 2], ready=True)
+
+        def heading(self, obs):
+            return Reading(RIGHT if obs.t - self.t0 < 0.6 else LEFT, 0.6, 0.4)
+
+    def runner(args):
+        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
+        return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), Turning(eyes), step)
+    monkeypatch.setattr(cli, "_watch_runner", runner)
+    assert cli.main(["watch", "--minutes", "0.03", "--hz", "30", "--heading"]) == 0
+    said = [line.strip() for line in logged if "her frame" in line]
+    assert said == ["her frame: faces right (matched 0.60, 0.40 ahead)",
+                    "her frame: faces left (matched 0.60, 0.40 ahead)"]
+    (path,) = tmp_path.glob("*-watch.jsonl")
+    seen = [r["her"]["facing_seen"] for r in telemetry.read(path) if r["topic"] == "scene" and r["her"]]
+    assert seen[0] == RIGHT and seen[-1] == LEFT

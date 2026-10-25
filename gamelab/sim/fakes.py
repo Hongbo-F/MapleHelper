@@ -47,6 +47,7 @@ from ..localization.pose import CAMERA_OFFSET, Camera, Localizer
 from ..paths import LAB
 from ..perception import exp_number
 from ..perception.eyes import Eyes, Observation
+from ..perception.heading import Reading
 from ..perception.loot import Item
 from ..perception.match import suppress_overlaps
 from ..perception.minimap import OTHER_SHIFT, PICTURE_BASE, Marker
@@ -210,6 +211,7 @@ class Frame(np.ndarray):
 class Screen:
     mobs: list[Mob] = field(default_factory=list)
     items: list[Item] = field(default_factory=list)
+    heading: Reading = Reading(None, why="no pictures")  # which way she faces, as her picture shows it
 
 
 class FakeDetector:
@@ -458,7 +460,7 @@ class FakeEyes(Eyes):
 
     def _draw(self, frame: np.ndarray, her: tuple[int, int], x: float, y: float) -> Screen:
         u, floor = UNITS_PER_HALF_PX, her[1] - 8
-        screen = Screen()
+        screen = Screen(heading=self._heading())
         for m, mx, my, alive in self.world.visible_monsters():
             if self._unseen(m, alive):
                 continue
@@ -485,6 +487,31 @@ class FakeEyes(Eyes):
             if 0 <= cx - iw // 2 and cx + iw // 2 <= FRAME[1] and 0 <= item.y - ih // 2 and bottom <= PLAY_BOTTOM:
                 screen.items.append(item)
         return screen
+
+    def _heading(self) -> Reading:
+        """Which way she faces as perception.heading reads her picture now: the world's facing, matched as her
+        pictures matched on her own frames (0.6, 0.4 ahead); not told on a rope (only her back shows), nor on
+        Noise.heading_unsure's share of frames (drawn per tick)."""
+        w = self.world
+        if w.mode == "rope":
+            return Reading(None, why="rope")
+        if self.noise.heading_unsure and w.chance("heading") < self.noise.heading_unsure:
+            return Reading(None, 0.5, 0.02, "close")
+        return Reading(w.facing, 0.6, 0.4)
+
+    def heading(self, obs: Observation) -> Reading:
+        """Eyes.heading over the world: what her picture showed when the look's frame was drawn (_heading); not told
+        where her name tag wasn't seen."""
+        screen = getattr(obs.frame, "screen", None)
+        if screen is None or obs.tag is None or not getattr(obs, "tag_seen", True):
+            return Reading(None, why="no tag")
+        return screen.heading
+
+    def learn_heading(self, obs: Observation, side: str, reading: Reading | None = None) -> bool:
+        return False  # the world's facing needs no pictures
+
+    def keep_heading(self, obs: Observation, path) -> bool:
+        return False  # no pixels of her to keep
 
     def _pose_wrong(self, m) -> bool:
         """Whether monster `m`'s pose reads wrong now (Noise.pose_wrong), drawn per monster for each spell."""

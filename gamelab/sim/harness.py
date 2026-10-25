@@ -47,6 +47,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances
   coverage         her moves, platforms and plans, for the coverage report (analysis.coverage.tally: what it
                    keeps of the run's telemetry, 3-7 KB a run as saved)
+  turning          her throws and jump throws, those that tapped an arrow to turn her first (control.actions: 80 ms
+                   more a throw, 205 a jump throw, and a few units walked), and the frames that told the other way
+                   from her last arrow (the hunter's 'heading' events): `--world knock-turns` has a knock turn her
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -88,7 +91,7 @@ STARTS = {FIRST_MAP: START_AT, 10004021: ROCKY_START_AT, TREE: TREE_START_AT}
 # (nothing about respawns, other players or potions is measured), chosen to be harder than "plain"; and arrows
 # pressed right after an attack's key swallowed, as measured in game (world.ARROW_LOCK).
 _GAME_NOISE = Noise(miss=0.275, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, hit_hidden=(1.0, 3.0),
-                    detect_miss=0.1)
+                    detect_miss=0.1, heading_unsure=0.014)
 PRESETS = {
     "plain": (Noise(), Realism()),
     "game": (_GAME_NOISE, Realism(spawn_share=0.6, rival_every=25.0, potions=60, lock_arrows=True)),
@@ -134,7 +137,8 @@ PRESET_MAPS = {"crowd": (TREE,), "crowd-17": (TREE,), "crowd-slow": (TREE,)}
 # throws, not 12), the stack unchanged (the simulator acts on its key as on the attack's).
 WORLDS = {"zero-walls": {"zero_walls": True}, "client-sides": {"sides": "client"},
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
-          "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN}}
+          "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
+          "knock-turns": {"knock_turns": True}}
 HER_FIELDS = ("defence", "evade", "potion", "stars")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body as the client has it (`client-body`: 22 either side of her feet and 65 tall, motion.bodies, which the
@@ -267,10 +271,22 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
                               "searches": f.get("searches"), "searching_s": f.get("searching_s"),
                               "senses": f["senses"], "tracker": f["tracker"]}
     out["looks"] = sim.eyes.counts["looks"]
+    out["turning"] = turning(trace["plans"], records)
     out["nav"] = navigation(trace["log"], sim.model)
     out["nav"]["glances"] = sim.eyes.counts["glances"] + (
         trace["feed"]["senses"].get("glances from the feed", 0) if feed else 0)
     return out
+
+
+def turning(plans: list, records: list[dict]) -> dict:
+    """Her throws and jump throws (the plans the player ran), those of them that tapped an arrow to turn her first
+    (control.actions.Actions._turn), and the frames that told the other way from her last arrow (telemetry events
+    'heading': behavior.hunter)."""
+    throws = [p for p in plans if p[1] in ("throw", "jump_throw")]
+    turned = [p for p in throws if any(e[1] in ("left", "right") for e in p[2])]
+    return {"throws": len(throws), "turned": len(turned),
+            "jump_turned": sum(1 for p in turned if p[1] == "jump_throw"),
+            "against": sum(1 for r in records if r.get("topic") == "event" and r.get("kind") == "heading")}
 
 
 def navigation(log: list[str], model) -> dict:

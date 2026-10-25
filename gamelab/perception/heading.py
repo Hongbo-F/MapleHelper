@@ -15,10 +15,11 @@ her name tag is; until there are any, the seed in gamelab/assets stands in (her 
 2026-10-24, `python -m gamelab heading --seed`). Looks where the pictures keep disagreeing with keys that can't be
 wrong mean they're no longer hers (a new outfit): the pool is dropped and learnt again (OUTFIT).
 
-Measured on 2026-10-24 (README, Her heading; D:/MapleHelper-scratch/heading/eval): on the old recordings (the first map,
-1920x1080 looks at half size; her outfit of 2026-10-18 to 21), each recording read with pictures learnt from the others,
-1,232 of 1,249 frames told and every one right (the walks, the turns in mid-air, the taps, throws, knockback, chains, the
-chair and pick-ups), 17 not told (1.4%); 131 more were of her under the minimap, where 4 had been read the wrong way.
+Measured on 2026-10-24 (README, Her heading; D:/MapleHelper-scratch/heading/eval): on the old recordings (the first
+map, 1920x1080 looks at half size; her outfit of 2026-10-18 to 21), each recording read with pictures learnt from the
+others, 1,232 of 1,249 frames told and every one right (the walks, the turns in mid-air, the taps, throws, knockback,
+chains, the chair and pick-ups), 17 not told (1.4%); 131 more were of her under the minimap, where 4 had been read the
+wrong way.
 With pictures learnt from walks and jumps alone, 9 of 426 frames of throws told were the wrong way, all barely like
 her: while her attack plays her keys go by frames told surely (ATTACK_SCORE, ATTACK_MARGIN) alone, and none of those
 was (control.actions.Actions.see). On 21 frames at 1366x768 (her outfit of 2026-10-24:
@@ -45,9 +46,10 @@ UP, DOWN, HALF = 50, 8, 16
 PAD = 3  # ... looked for this far around where her tag puts it, every way: her picture sways a px or two as she walks,
          # and the tag is found to a px
 SURE = 0.08    # her facing is told when the better way matches at least this much better than the other: on the old
-               # recordings with REFERENCES pictures the right way led by 0.29 or more on 95% of the frames, by less than
-               # this on 1.4%, and never trailed
-LOW = 0.3      # ... and at least this well (a picture of someone else in her place, or her behind a window, matches less)
+               # recordings with REFERENCES pictures the right way led by 0.29 or more on 95% of the frames, by less
+               # than this on 1.4%, and never trailed
+LOW = 0.3      # ... and at least this well (a picture of someone else in her place, or her behind a window, matches
+               # less)
 # Sure enough to go over her keys while her attack plays (control.actions.Actions.see: Reading.strong), matching at
 # least ATTACK_SCORE and ATTACK_MARGIN ahead: of the old recordings' 461 frames of throws, the chair and pick-ups read
 # with pictures learnt from walks and jumps alone (none of a throw), 377 pass and none of the 9 read the wrong way

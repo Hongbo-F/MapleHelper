@@ -689,34 +689,38 @@ def nav_fight_across(sim):
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=6,
+@scenario((14, 760.0), monsters="all", seed=4,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
-    """nav_fight_up on seed 6: she shoots 17's monsters from 14, climbs to 3, is knocked off 3 down to 17 at 55 s
-    and off 17 down to 25 at 81 s, back up by 23 and the rope past its end, and runs out of her 180 s on her way up
-    again, 39 monsters killed. (Seed 6 since her EXP number is read and each kill goes on a monster of the kind its
-    gain's size names: on seed 2 the fights no longer take live monsters for dead (a slime killed on 17 at 4.3 s had
-    been put on an Orange Mushroom, left alone then as dying), and she arrives on 1 in 103 s. Of seeds 1-48,
-    9 meet all of this, as before. On seed 2 before: knocked off 3 down to 17 at 88 s and off 17 down to 25 at 138
-    and 149 s, each time back up by 23 and the rope past its end, she ran out of her 180 s on her way up again, 39
-    monsters killed. Seed 2 since the play track was rebased onto the game's steps and the live fixes: on seed 1 she
-    arrives (nav_fight_up's seed again). Of seeds 1-48, 9 meet all of this. On seed 1 before: she shot 17's monsters
-    from 14 for 48 s, climbed to 3 and shot 1's, was knocked down onto 17 and off it down to 35 at 103 s, fought there
-    until 162 s, and on the long way round up the staircase ran out of her 180 s on 19, 45 monsters killed. Seed 1 since
-    the game moves her in 30 ms steps (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 4 she now
-    arrives; of seeds 1-48, 41 arrive, 42 just before. Seed 4 had been since the drops and walk-offs kept clear of the
-    basin's cliffs: knocked off 3 down to 17 at 84 s, she had gone the long way round, down from 25 to 32 and up the
-    staircase, fighting 48 monsters, and run out of time on 21. Seed 10 on the perception track, where it arrived before
-    monsters walked 125 units/s; with the physics and attack tracks it arrives there. Seed 11 then, where with the
-    client's star search and claw stab it arrives too: knocked off 4 at 26 s and hit off the jump from 3 to 1, it had
-    gone the long way round, fighting 38 monsters, and run out of time on 16. Of seeds 1-48, 41 arrive, against 37
-    before and 36 at the physics and attack tracks' merge. On the play track, before the steps, seed 17 since she
-    finishes what she has hurt before she moves on (behavior.fight.owed): on seed 4 she arrived there; of seeds 1-48,
-    46 arrived, against 41 before. Then seed 18 since she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on
-    seed 17 she arrived; of seeds 1-48, 41 arrived, 46 with the jump throws in that world, whose jump throws' area picks
-    a snail. On seed 18 since she stabs a snail on 3 where she stands, not stepping to 3's far end
-    (stance.SNAIL_FAR_END), at 40 s, she was knocked off 3 down to 17 at 86 s, off 17 down to 25 at 89 s and off 17 to
-    35 at 141 s, and ran out of time, 48 monsters in all.)"""
+    """nav_fight_up on seed 4: she shoots 17's monsters from 14, climbs to 3, comes back down to 17 and up again to
+    3, is knocked off down to 25 at 112 s, back up by 23 and the rope to 17, then down to 35, knocked off 33 back
+    onto it at 142 s, and runs out of her 180 s on 33, 40 monsters killed. (Seed 4 since a throw's tap goes by her
+    facing off the frame, perception.heading: on seed 6 she now arrives, in 151 s; of seeds 1-16, 4 and 5 meet all
+    of this. On seed 6 before: knocked off 3 down to 17 at 55 s and off 17 down to 25 at 81 s, back up by 23 and the
+    rope past its end, she ran out of her 180 s on her way up again, 39 monsters killed. Seed 6 since her EXP number
+    is read and each kill goes on a monster of the kind its gain's size names: on seed 2 the fights no longer take
+    live monsters for dead (a slime killed on 17 at 4.3 s had been put on an Orange Mushroom, left alone then as
+    dying), and she arrives on 1 in 103 s. Of seeds 1-48, 9 meet all of this, as before. On seed 2 before: knocked
+    off 3 down to 17 at 88 s and off 17 down to 25 at 138 and 149 s, each time back up by 23 and the rope past its
+    end, she ran out of her 180 s on her way up again, 39 monsters killed. Seed 2 since the play track was rebased
+    onto the game's steps and the live fixes: on seed 1 she arrives (nav_fight_up's seed again). Of seeds 1-48, 9
+    meet all of this. On seed 1 before: she shot 17's monsters from 14 for 48 s, climbed to 3 and shot 1's, was
+    knocked down onto 17 and off it down to 35 at 103 s, fought there until 162 s, and on the long way round up the
+    staircase ran out of her 180 s on 19, 45 monsters killed. Seed 1 since the game moves her in 30 ms steps
+    (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 4 she now arrives; of seeds 1-48, 41
+    arrive, 42 just before. Seed 4 had been since the drops and walk-offs kept clear of the basin's cliffs: knocked
+    off 3 down to 17 at 84 s, she had gone the long way round, down from 25 to 32 and up the staircase, fighting 48
+    monsters, and run out of time on 21. Seed 10 on the perception track, where it arrived before monsters walked
+    125 units/s; with the physics and attack tracks it arrives there. Seed 11 then, where with the client's star
+    search and claw stab it arrives too: knocked off 4 at 26 s and hit off the jump from 3 to 1, it had gone the
+    long way round, fighting 38 monsters, and run out of time on 16. Of seeds 1-48, 41 arrive, against 37 before and
+    36 at the physics and attack tracks' merge. On the play track, before the steps, seed 17 since she finishes what
+    she has hurt before she moves on (behavior.fight.owed): on seed 4 she arrived there; of seeds 1-48, 46 arrived,
+    against 41 before. Then seed 18 since she never jump-throws at a snail (stance.JUMP_THROW_SNAILS): on seed 17
+    she arrived; of seeds 1-48, 41 arrived, 46 with the jump throws in that world, whose jump throws' area picks a
+    snail. On seed 18 since she stabs a snail on 3 where she stands, not stepping to 3's far end
+    (stance.SNAIL_FAR_END), at 40 s, she was knocked off 3 down to 17 at 86 s, off 17 down to 25 at 89 s and off 17
+    to 35 at 141 s, and ran out of time, 48 monsters in all.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1200,7 +1204,7 @@ def tour_hunt_from_safe_spot(sim):
     return _tour_hunt(17, 4)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=3, limit=400,
+@scenario((36, 300.0), monsters="all", seed=5, limit=400,
           expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
                    logs("collecting drops on platform 36"),
                    check("the stop's report counts HP lost", lambda tr: tr["result"]["damage_taken"] > 0),
@@ -1216,7 +1220,10 @@ def tour_hunt_basin(sim):
     meet all of this, 10 with such a trip (at master's head all 24 did; on the play track before the rebase
     11, 11 with such a trip and 2 with no trip at all): the escort's fights in her way finish what she has
     hurt (behavior.fight.owed), and on the basin, where respawns never stop, there is always another. Found,
-    not fixed: README, the rebase's entry.)"""
+    not fixed: README, the rebase's entry. Seed 5 since a throw's tap goes by her facing off the frame,
+    perception.heading: on seed 3 a trip to drops runs out its 60 s again; of seeds 1-16, 9 meet all of this, as
+    just before, the first of them 4, where the ledger places 50 of its 56 kills placed right, under
+    tests/test_ledger.py's 90%; on 5, 48 of 51.)"""
     return _tour_hunt(36, 5)(sim)
 
 
@@ -1239,7 +1246,7 @@ def _hunt_17_pigs(sim):
     return tour.hunt(17, {"pig"}, kills=2, seconds=90)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1240.0)], seed=6, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1260.0)], seed=6, limit=400,
           expects=(logs("out of reach here: over to platform"),))
 def tour_hunt_other_spot(sim):
     """Tour.hunt of two pigs on 17 from 14: one dies, the other is out of reach, so over to a spot that
@@ -1248,7 +1255,9 @@ def tour_hunt_other_spot(sim):
     the physics and attack tracks it doesn't; of seeds 1-16 only 6 shows it. The other pig starts at 1240,
     not 1320, since her own floor stops a star down past 14's end (reach.LINE 'v83', 2026-10-21): the spot on
     14 is at 756, reaching 17 out to 1166, not 716, and from 1320 no seed of 1-32 showed it; from 1240 seeds
-    1 and 6 of 1-12 do.)"""
+    1 and 6 of 1-12 do. From 1260 since a throw's tap goes by her facing off the frame, perception.heading: her
+    first throw no longer taps the arrow she faces already, and from 1240 no seed of 1-16 shows it, the other pig
+    walking into reach first; from 1220, 1260 and 1280 seed 6 does.)"""
     return _hunt_17_pigs(sim)
 
 

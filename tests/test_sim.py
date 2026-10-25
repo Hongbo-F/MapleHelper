@@ -1465,13 +1465,15 @@ def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_ba
     """nav_jump_after_kill at the route's takeoffs of that night (old_route_takeoffs: 16 -> 14 off 16's right end
     from 33-45 units back), with the chain's first arrow held back only to 0.6 s after her last throw's key (as
     played in game from 00:49 on 2026-10-21): she sets off about 0.12 s late, the jump goes at its planned time
-    from short of where it was meant to, and she falls to 25 on every seed of 1-8 that kills the pig, as 8 of 10
-    such chains did in game. (With the swallowed arrow seen at 0.835 s, as fitted to her dot's first move before,
-    3 of the 7 fell to 25 and 4 were cut short on 16, standing still where the run starts while the plan had her
-    on: navigator.OFF_SPAN.) Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
+    from short of where it was meant to, and she falls to 25 on 6 of seeds 1-8 (all of which kill the pig), as 8
+    of 10 such chains did in game. (With the swallowed arrow seen at 0.835 s, as fitted to her dot's first move
+    before, 3 of the 7 that killed it then fell to 25 and 4 were cut short on 16, standing still where the run
+    starts while the plan had her on: navigator.OFF_SPAN. Before her facing was read off the frame,
+    perception.heading, 7 seeds killed it and all 7 fell: her first throw no longer taps the arrow she faces
+    already, and the pig dies elsewhere.) Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
     landed = _after_kill_landings(monkeypatch)
-    assert landed[800] == ["6"] * 7
-    assert landed[600] == ["25"] * 7
+    assert landed[800] == ["6"] * 8
+    assert landed[600] == ["6", "25", "25", "6", "25", "25", "25", "25"]
 
 
 @REAL
@@ -1480,9 +1482,10 @@ def test_with_the_placed_takeoffs_the_jump_onto_14_lands_even_with_the_arrows_he
     from 16's right end, at 654, landing with room if she leaves up to 22 units early): set off late, held back
     only to 0.6 s, the jump from 15-30 units short still lands on 14 on every seed of 1-8 that kills the pig, as
     held back to 0.8 s. Each of the night's two fixes alone keeps her off 25 here; the hold-back is for every
-    other plan that sets off right after a throw."""
+    other plan that sets off right after a throw. (Every seed of 1-8 kills the pig since her facing is read off the
+    frame: 7 of them before.)"""
     landed = _after_kill_landings(monkeypatch)
-    assert landed[800] == ["6"] * 7 and landed[600] == ["6"] * 7
+    assert landed[800] == ["6"] * 8 and landed[600] == ["6"] * 8
 
 
 def _climb_then_jump(seed: int, x: float) -> dict:

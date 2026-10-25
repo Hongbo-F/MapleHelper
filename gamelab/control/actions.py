@@ -5,6 +5,14 @@ attack lock ends; it never decides anything (attack and behavior do).
 Every plan goes through `send`, blocking until the player has run it, except the navigator's chains
 (control.navigator), which are queued with client.send. With the Lie Detector alarm up the player takes only two kinds
 of plan (control.alarm): her pet's food (feed_pet's), and her retreat's moves (`moves_only`'s, behavior.retreat).
+
+Which way she faces is known two ways: by her keys (`facing`: the way her plans last turned her or threw, unknown
+after a move), and off a look's frame (perception.heading, which the hunter passes on: `see`). Whether a throw taps the
+arrow to turn her first goes by `heading`: the frame's where it's sure and newer than what her keys last did (after a
+move, a knock, her player's own keys, a plan cut short), else her keys'. Where the frame can't tell, her keys' stands,
+but after a hit it's unknown: the throw taps first. The decisions (attack.stance's side she keeps working, the close
+monster she jumps away from) go by her keys' as before: going by the frame's too, which knows her facing after a move
+where her keys don't, the simulator's hunt loop made 12% less EXP a minute and the tour 3% (README, Her heading).
 """
 
 import dataclasses
@@ -22,6 +30,12 @@ from .alarm import PET_FOOD, RETREAT
 
 TAP_MS = 40          # a key tap: released this long after it's pressed
 TURN_SETTLE_MS = 30  # after the arrow tap that turns her, before the next key
+# A frame tells which way she faces only from this long after the last arrow a plan pressed (pressed or let go): in
+# the old recordings she turned 60-110 ms after an arrow went down (50 ms taps too, and the toward-taps in mid-air of
+# the jump backs), never without one; with a frame's own lag and the player's start on top.
+HEADING_SETTLE_S = 0.2
+# ... and her keys tell it beyond doubt (for her pictures to learn from: perception.heading) from this long after.
+LEARN_AFTER_S = 0.25
 # A jump throw's attack key comes JUMP_ATTACK_MS after its jump key, and a jump back's JUMP_BACK_ATTACK_MS
 # after its own (both in motion.physics: attack.reach reads them too, since how high she is when the attack
 # starts decides what it can hit).
@@ -95,9 +109,23 @@ class Actions:
         self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP)
         self.kind = kind    # what its plans are to the player with the Lie Detector alarm up (alarm.RETREAT: her
                             # retreat's moves); None: refused then
-        self.facing: str | None = None  # which way she faces (None: unknown), so throws only turn when needed
+        # Which way she faces (None: unknown). `facing`: by her keys, the way her last plan turned her or threw
+        # (None after a move), set at `_keys_at`; `keys_facing`: the way her last arrow turned her (None after a move),
+        # at `_arrow_at`; `seen`: the frame's (see), at `seen_at`. `heading` is the newer of `facing` and `seen`.
+        self._facing: str | None = None
+        self.keys_facing: str | None = None
+        self.seen: str | None = None
+        self.seen_at = -1e18
+        self._keys_at = 0.0
+        self._arrow_at = 0.0
+        self.arrows_at = -1e18    # when the last arrow a plan pressed goes down or up (time.monotonic)
+        self._blind = False       # a plan went out around play (a navigator chain): its arrows aren't known here
+        self._doubted = False     # a frame has told the other way from her last arrow (told once: see)
+        self.saw = ""             # what came of the last frame `see` was given (for the hunter's counts)
+        self.turns = 0            # throws that tapped the arrow to turn her first, and the time it added (ms)
+        self.turn_ms = 0
         self.pressed = False  # keys sent since the last look (then a move isn't a knockback)
-        self.sent_at = 0.0     # when the last key plan was sent (a look older than that may be out of date)
+        self._sent_at = 0.0    # when the last key plan was sent (a look older than that may be out of date)
         self.lock_until = 0.0  # when her last attack stops locking out the next one
         self.arrow_until = 0.0  # ... and stops swallowing arrows (ARROW_LOCK_MS after its key)
         self._attack_at = 0.0   # when the last attack key went down (time.monotonic)
@@ -105,12 +133,55 @@ class Actions:
         # (behavior.ledger) matches EXP gains to the stars that could have made them.
         self.throw_listeners: list = []
 
+    @property
+    def facing(self) -> str | None:
+        """Which way she faces by her keys (None: unknown): what the decisions go by."""
+        return self._facing
+
+    @facing.setter
+    def facing(self, side: str | None) -> None:
+        """Her keys' doing: the way a plan's arrow turned her, or None after a move (control.mover, control.navigator).
+        A navigator's chains are over by then: frames show what they did from now on (see)."""
+        self._keys(side, arrow=True)
+
+    @property
+    def heading(self) -> str | None:
+        """Which way she faces as best known (None: unknown), what a throw's tap goes by: the frame's (`seen`) where
+        it's newer than what her keys last did, else her keys' (`facing`)."""
+        return self.seen if self.seen_at >= self._keys_at else self._facing
+
+    @property
+    def facing_by(self) -> str:
+        """Who `heading` is from: "frame" or "keys"."""
+        return "frame" if self.seen_at >= self._keys_at else "keys"
+
+    def _keys(self, side: str | None, arrow: bool) -> None:
+        """Her keys set her facing: by an arrow (or a move, None), or by a throw that didn't need one."""
+        now = time.monotonic()
+        self._facing, self._keys_at = side, now
+        if arrow:
+            self.keys_facing, self._arrow_at, self._doubted = side, now, False
+        if self._blind:
+            self._blind = False
+            self.arrows_at = max(self.arrows_at, now)
+
+    @property
+    def sent_at(self) -> float:
+        """When the last key plan was sent (a look older than that may be out of date)."""
+        return self._sent_at
+
+    @sent_at.setter
+    def sent_at(self, t: float) -> None:
+        """A plan sent around play (the navigator's chains, client.send): which arrows it presses isn't known here, so
+        no frame tells her facing until the navigator says it's over (by setting `facing`)."""
+        self._sent_at, self._blind = t, True
+
     def play(self, events: list, name: str, kind: str | None = None) -> None:
         """Run a key plan (events in time order) and wait until the player has. Held back first if a jump
         or attack in it would come inside her attack lock (hold_back). `kind`: what it is to the player with the
         Lie Detector alarm up (client.send's; these actions' own by default)."""
         self.hold_back(events)
-        self.sent_at = time.monotonic()
+        self._sent_at = time.monotonic()
         client.submit(events, lead_ms=0, focus=True, name=name, kind=kind or self.kind)
         self.pressed = True
 
@@ -118,7 +189,8 @@ class Actions:
         """Wait just long enough that no jump or attack key in a plan of `events` (starting now) goes down
         before her attack lock ends, and no arrow before her attack stops swallowing arrows (ARROW_LOCK_MS):
         pressed inside them, they're ignored. Every plan that can press them comes through here: Actions'
-        own, the mover's single moves (via play), and the navigator's chains."""
+        own, the mover's single moves (via play), and the navigator's chains: when its last arrow goes is kept
+        (`arrows_at`), as frames before then and HEADING_SETTLE_S after can't show what it did to her facing."""
         locked = {self.keys.jump.name, self.keys.attack.name}
         if self.keys.lucky_seven is not None:
             locked.add(self.keys.lucky_seven.name)
@@ -132,6 +204,54 @@ class Actions:
             wait = max(wait, self.arrow_until - (now + first / 1000))
         if wait > 0:
             time.sleep(wait)
+        last = max((e[0] for e in events if len(e) == 3 and e[1] in arrows), default=None)
+        if last is not None:
+            self.arrows_at = max(self.arrows_at, time.monotonic() + last / 1000)
+
+    # --- which way she faces --------------------------------------------------------------------
+
+    def see(self, side: str | None, t: float, hit_at: float | None = None, strong: bool = False) -> str | None:
+        """What the frame of a look shown at `t` says of her facing (`side`; None: it can't tell). Frames before her
+        last arrow could show what it did (HEADING_SETTLE_S after it), or of a navigator's chain still playing, tell
+        nothing; nor do those while her attack plays (until `arrow_until`, when she can't turn and her pictures read
+        her worst: perception.heading) unless they're `strong` (heading.Reading.strong). A frame that's sure is her
+        `heading`; one that can't tell leaves it, but after a hit since it was last set (`hit_at`: the time of the
+        last look that saw her HP drop), when a knock may have turned her, makes it unknown: the next throw taps the
+        arrow first. Returns her last arrow's way the first time a frame tells the other (else None), for the hunter
+        to log. What came of the frame is in `saw`."""
+        if self._blind:
+            self.saw = "a chain playing"
+            return None
+        if t < self.arrows_at + HEADING_SETTLE_S:
+            self.saw = "too soon after an arrow"
+            return None
+        if t < self.arrow_until and not strong:
+            self.saw = "her attack playing"
+            return None
+        if side is None:
+            self.saw = "not told"
+            if hit_at is not None and hit_at >= max(self._keys_at, self.seen_at) and self.heading is not None:
+                self.seen, self.seen_at = None, t
+                self.saw = "unknown after a hit"
+            return None
+        against = None
+        if self.keys_facing is not None and side != self.keys_facing and not self._doubted:
+            against, self._doubted = self.keys_facing, True
+        self.saw = "told otherwise" if side != self.heading else "as it was"
+        self.seen, self.seen_at = side, t
+        return against
+
+    def keys_say(self, t: float, hit_at: float | None = None) -> str | None:
+        """Which way her keys say beyond doubt that she faces in a frame shown at `t` (for her pictures to learn
+        from), or None: her last arrow LEARN_AFTER_S or more before it, with no hit since, no navigator chain
+        playing, and no frame having told otherwise."""
+        if self._blind or self.keys_facing is None or self._doubted:
+            return None
+        if t < self.arrows_at + LEARN_AFTER_S or t < self._arrow_at:
+            return None
+        if hit_at is not None and hit_at >= self._arrow_at:
+            return None
+        return self.keys_facing
 
     def arrow(self, direction: str) -> str:
         """The name of the arrow key for `direction`."""
@@ -152,7 +272,7 @@ class Actions:
         events, t = self._turn(direction)
         self._thrown(t, direction)
         self.play(events + tap(t, self._attack_key()), "throw")
-        self.facing = direction
+        self._turned(events, direction, t)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
 
@@ -164,14 +284,14 @@ class Actions:
         attack starting that high in the jump went over a snail. Turning first, the jump waits for the
         turn's tap to stop walking her (JUMP_THROW_TURN_MS), so it goes straight up."""
         self.wait_lock()
-        events, t = self._turn(direction)
-        if events:  # turned: the jump waits until the tap's walk has stopped (JUMP_THROW_TURN_MS)
+        turn, t = self._turn(direction)
+        if turn:  # turned: the jump waits until the tap's walk has stopped (JUMP_THROW_TURN_MS)
             t = max(t, JUMP_THROW_TURN_MS)
         key, jump = self._attack_key(), self.keys.jump.name
-        events += tap(t, jump) + tap(t + JUMP_ATTACK_MS, key)
+        events = turn + tap(t, jump) + tap(t + JUMP_ATTACK_MS, key)
         self._thrown(t + JUMP_ATTACK_MS, direction)
         self.play(events, "jump_throw")
-        self.facing = direction
+        self._turned(turn, direction, t)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
 
@@ -207,11 +327,19 @@ class Actions:
         return (self.keys.lucky_seven if self.skill and self.keys.lucky_seven else self.keys.attack).name
 
     def _turn(self, direction: str) -> tuple[list, int]:
-        """The tap that turns her toward `direction` (none if she already faces it), and when it's done."""
-        if self.facing == direction:
+        """The tap that turns her toward `direction` (none if she already faces it: `heading`), and when it's done."""
+        if self.heading == direction:
             return [], 0
         arrow = self.arrow(direction)
         return [[0, arrow, "down"], [MOVEMENT.tap_turn_ms, arrow, "up"]], MOVEMENT.tap_turn_ms + TURN_SETTLE_MS
+
+    def _turned(self, tap_events: list, direction: str, key_ms: int) -> None:
+        """After a throw her way by her keys is `direction`: its tap (`tap_events`; none if her heading was that way
+        already) turned her, its key `key_ms` into the plan, counted (`turns`, `turn_ms`)."""
+        self._keys(direction, arrow=bool(tap_events))
+        if tap_events:
+            self.turns += 1
+            self.turn_ms += key_ms
 
     # --- moving and looting -------------------------------------------------------------------
 
