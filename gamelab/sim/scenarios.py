@@ -278,9 +278,13 @@ def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = No
 
 def unmet(trace: dict, sc: Scenario | None = None) -> list[str]:
     """What scenario `sc` (the trace's own by default) expects that its trace doesn't show. Unless it
-    `may_die`, every scenario expects her alive at the end."""
+    `may_die`, every scenario expects her alive and on the map at the end: not dead, not through a portal
+    (world.SimLeftMap), not fallen out of the map (world.SimFellOut), none of which the world counts as another."""
     sc = sc or SCENARIOS[trace["scenario"]]
-    out = [f"she died: {trace['result']}"] if trace["world"]["dead"] and not sc.may_die else []
+    w = trace["world"]
+    gone = ("she died" if w["dead"] else "she went through a portal" if w.get("left_map_at") is not None
+            else "she fell out of the map" if w.get("fell_out_at") is not None else None)
+    out = [f"{gone}: {trace['result']}"] if gone and not sc.may_die else []
     for what, ok in sc.expects:
         try:
             good = bool(ok(trace))

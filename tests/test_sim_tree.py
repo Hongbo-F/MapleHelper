@@ -242,6 +242,17 @@ def test_up_held_at_a_portal_takes_her_out_of_the_map_in_the_air_too_and_no_plan
         assert m.portal_near(m.platform(pid), 240.0) and not m.portal_near(m.platform(pid), 110.0)
 
 
+def test_a_scenario_that_takes_a_portal_or_falls_out_of_the_map_is_unmet_as_a_death_is():
+    """scenarios.unmet: the world counts a portal taken (left_map_at) and a fall out of the map (fell_out_at) apart from
+    a death, and none of them is her alive at the end, unless the scenario `may_die`."""
+    sc = scenarios.Scenario("t", lambda sim: None, (28, 247.0), map_id=TREE)
+    for world, why in (({"dead": True}, "she died"), ({"dead": False, "left_map_at": 3.0}, "she went through a portal"),
+                       ({"dead": False, "fell_out_at": 4.0}, "she fell out of the map"), ({"dead": False}, None)):
+        trace = {"scenario": "t", "result": "r", "world": world}
+        assert scenarios.unmet(trace, sc) == ([f"{why}: r"] if why else [])
+        assert scenarios.unmet(trace, scenarios.Scenario("t", sc.fn, sc.start, may_die=True, map_id=TREE)) == []
+
+
 # --- other players ---------------------------------------------------------------------------------------------------
 
 def _camp_world(m, **kw):
