@@ -254,8 +254,6 @@ class TripState:
                        # that goes the quickest way, by its weights
     detour: bool = False  # with an escort, a way around a monster that could touch her comes before a shot at it (the
                           # trips to rest at low HP: Navigator._meet)
-    hurry: bool = False  # without an escort, a monster in the way of the first move is neither waited out nor gone round
-                         # (a pass each): she goes regardless, as after WAIT_LOOKS (behavior.retreat, against the clock)
     shots: int = 0       # shots at a monster that could touch her on the way, in a row without a move between
                          # (MAX_FIGHTS at most: _meet)
     blocked: float | None = None  # since when its chains have stopped short of such a monster without a move between
@@ -328,7 +326,7 @@ class Navigator:
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
            scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False,
-           stand_until: float | None = None, hurry: bool = False) -> Trip:
+           stand_until: float | None = None) -> Trip:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
         with a look that includes monsters (late in the chain before, when it follows on from that one):
         True ends the trip early ('in position'). `mode` (AVOID, HUNT or TRANSIT; the navigator's own by
@@ -338,10 +336,9 @@ class Navigator:
         vary). `detour`: with an escort, a way around a monster that could touch her before a shot at it (a trip to
         rest: TripState.detour). While its looks fail (LookLost) it stands still up to its deadline, or `stand_until`
         (time.monotonic) if that's sooner: the hunt's end, for its trip to rest (Tour.rest), which then stops it as a
-        pass would (Hunt.run). `hurry`: no wait for a monster in the way, nor a pass to look for a way round it
-        (TripState.hurry)."""
+        pass would (Hunt.run)."""
         st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary,
-                        detour=detour, hurry=hurry)
+                        detour=detour)
         while not st.over:
             try:
                 self.step(st)
@@ -355,8 +352,7 @@ class Navigator:
 
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-              scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False,
-              hurry: bool = False) -> TripState:
+              scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
         it lies on (mapdata.MapModel.twins): she's there on either."""
         dst = self.model.place_of(dst)
@@ -370,7 +366,7 @@ class Navigator:
                               # Dungeon, a chain then planned from a look that old: review, 2026-10-24; Hunter.danger
                               # has it from the map's cache since)
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode,
-                       keep_off=frozenset(keep_off), vary=vary, detour=detour, hurry=hurry)
+                       keep_off=frozenset(keep_off), vary=vary, detour=detour)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -818,7 +814,7 @@ class Navigator:
         """A monster in the way of the first move (nothing chained because of it): look for a way around
         (the move costs extra from `planned_at` on), else wait for it to go, WAIT_LOOKS looks at most.
         Waiting only makes sense where no monster can reach her meanwhile. True to look again."""
-        safe_here = not st.hurry and self._safe_to_stand(s.where.x, s.where.platform, move, monsters)
+        safe_here = self._safe_to_stand(s.where.x, s.where.platform, move, monsters)
         if not legs and why == "monster" and st.waited < WAIT_LOOKS and safe_here:
             if _key(move) not in st.avoid:
                 st.avoid[_key(move)] = planned_at

@@ -18,8 +18,8 @@ platform she gets to, at its safest height; she regains no HP there, so only whe
 time: the safest place she gets to in that time, by the same danger, or where she is if that's it.
 
 How: her moves alone, as the navigator plans them keeping clear of monsters (navigator.AVOID: never a fight; the
-quickest way; in a hurry, TripState.hurry: a monster in the way is neither waited out nor gone round), its plans of kind
-alarm.RETREAT, which the player takes for alarm.RETREAT_WINDOW_S (12 s) after the sighting and cuts there: her arrows,
+quickest way; a monster in the way of a move waited out where she can stand, or gone round, as on any trip), its plans of
+kind alarm.RETREAT, which the player takes for alarm.RETREAT_WINDOW_S (12 s) after the sighting and cuts there: her arrows,
 jump, up and down (Actions.moves_only: no attack, pick-up or pet food), every key let go by a plan's end, and no mouse
 (whoever is at the PC may be answering the Lie Detector with it: the mover's nudge of the mouse sends nothing). A go
 knocked back, or a rope missed, is followed by another from where she is (TRIES) while there's time. No potion or pet
@@ -161,7 +161,7 @@ def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | No
             deadline = seen + RETREAT_WINDOW_S
             seconds = min(deadline - time.monotonic(), trip_s(p.seconds) + GO_SLACK_S)  # longer: from where she is
             trip = nav.go(p.platform, x=p.rope.x if p.rope else p.x, seconds=max(0.1, seconds), mode=AVOID, scene=s,
-                          vary=False, stand_until=deadline, hurry=True)
+                          vary=False, stand_until=deadline)
             out.result = trip.result
             if p.rope is not None and trip.result == "arrived":
                 s = nav.mover.locate(tries=LOCATE_TRIES)
