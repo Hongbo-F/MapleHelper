@@ -42,7 +42,7 @@ from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 
-from ..perception.eyes import Eyes, Observation
+from ..perception.eyes import Eyes, Observation, band_rows
 from ..perception.frames import Frame
 from ..screen import STRETCHED, Geometry
 from .senses import Senses
@@ -75,6 +75,9 @@ BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS
 # whole screen only when stale was no better (-0.5% and -1.6%). Searching her band every 0.1 s instead of 0.2
 # gained 3.5% in both.
 ASK_ONLY_STALE = False
+# Whether a look at her band from the feed also has the monsters it follows off the band (Feed.look: Scene.swept, for
+# her memory), as the sweep's slices had them without a feed; False: the band's alone, as before 2026-10-24.
+TRACKED = True
 
 
 # --- frames in shared memory --------------------------------------------------------------------------
@@ -413,11 +416,21 @@ class Feed:
         pass
 
     def look(self, senses: Senses, mobs: bool, wide: bool, loot: bool, mesos_only: bool):
-        """The Scene of a look with these arguments from the feed, or None (Senses then looks itself)."""
+        """The Scene of a look with these arguments from the feed, or None (Senses then looks itself). A look at her
+        band also has the monsters the feed follows off it, re-found in that frame (`Scene.swept`, as the sweep's: the
+        fights go by the band's, her memory takes them all), and says where it searched (`Scene.rows`): her band, and
+        the whole screen while the feed's last search of it is within WIDE_FRESH_S of the frame (everything on screen
+        then was found, and followed since)."""
         st = self.latest(wanted(time.monotonic(), mobs, wide, loot, mesos_only))
         if st is None:
             return None
-        return to_scene(st, senses.model, senses.band, mobs, wide, loot, mesos_only, self.frame_of(st))
+        s = to_scene(st, senses.model, senses.band, mobs, wide, loot, mesos_only, self.frame_of(st))
+        if TRACKED and s.searched and not s.wide:
+            s.swept = [m for m in st.monsters if not any(m is k for k in s.monsters)]
+            s.rows = [senses._map_rows(s, band_rows(s, *senses.band))]
+            if st.wide_at is not None and st.t - st.wide_at <= WIDE_FRESH_S:
+                s.rows.append(senses._play_rows(s))
+        return s
 
     def glance(self, after: float, timeout: float = GLANCE_WAIT_S) -> WorldState | None:
         """The newest visible state of a frame shown at `after` or later (waited for), or None."""

@@ -48,8 +48,9 @@ class Scene(Observation):
     monsters: list[Monster] = field(default_factory=list)  # monsters seen, placed on the map
     searched: bool = False        # monsters were looked for (an empty `monsters` then means none was seen)
     wide: bool = False            # ... on the whole screen (else only in the band around her level)
-    swept: list[Monster] = field(default_factory=list)  # monsters a slice of the sweep found, out of the band
-                                                         # (Senses.sweep; not `monsters`: the fights go by the band's)
+    swept: list[Monster] = field(default_factory=list)  # monsters a slice of the sweep found, out of the band, or
+                                                         # those a feed follows there (Senses.sweep, feed.Feed.look;
+                                                         # not `monsters`: the fights go by the band's)
     rows: list[tuple[float, float]] = field(default_factory=list)  # where monsters were looked for: map y from, to
                                                                     # (the band, a slice of the sweep, the screen)
     loot: list[Loot] = field(default_factory=list)         # drops seen on the ground (find_loot)

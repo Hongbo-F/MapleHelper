@@ -217,8 +217,8 @@ class Memory:
     # --- keeping it up ---------------------------------------------------------------------------------
 
     def on_look(self, s: Scene) -> None:
-        """A Senses listener: the look's monsters (band and sweep: Scene.monsters and Scene.swept) into the memory, and
-        its 'memory' record sent (telemetry) every RECORD_EVERY_S at most."""
+        """A Senses listener: the look's monsters (band, and the sweep's or the feed's off it: Scene.monsters and
+        Scene.swept) into the memory, and its 'memory' record sent (telemetry) every RECORD_EVERY_S at most."""
         if s.where is not None:
             self._her = (s.where.x, s.where.y)
         if not s.searched or s.where is None:

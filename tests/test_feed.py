@@ -421,6 +421,29 @@ def test_senses_look_through_the_feed_and_look_themselves_once_its_down(sync):
     assert eyes.glances == 1
 
 
+def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band_and_sweeps_only_once_it_is_down(sync):
+    # Her memory takes what the feed follows off her band (Scene.swept, as the sweep's slices had it), with the whole
+    # screen as searched while the feed's last search of it is fresh; the sweep's slices only once the feed is gone.
+    from gamelab.localization.memory import Memory
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f, sweep=True)
+    memory = Memory(f.step.model)
+    senses.listeners.append(memory.on_look)
+    eyes.mobs = [pig(1100), pig(1200, 300)]  # one in her band, one on the platform 200 above (off it)
+    clock.sleep(1.25)  # (the whole screen searched at 101.03, back by 101.2: the one above followed since)
+    s = senses.look()
+    above = f.step.model.platform_under(1200, 300).id
+    assert [m.x for m in s.monsters] == [pytest.approx(1100, abs=3)]
+    assert [(m.x, m.platform) for m in s.swept] == [(pytest.approx(1200, abs=3), above)]
+    assert len(s.rows) == 2 and s.rows[1][0] < s.rows[0][0] and s.rows[1][1] >= s.rows[0][1]  # her band, the screen
+    assert len(memory.alive(s.t)) == 2 and senses.sweep_counts["slices"] == 0
+    clock.sleep(0.4)  # the whole screen's search over 0.6 s old now: her band's rows alone
+    assert len(senses.look().rows) == 1
+    f.alive = False  # the feed's gone: her looks are taken here, and sweep the screen again
+    s = senses.look()
+    assert eyes.looks == 1 and senses.sweep_counts["slices"] == 1 and len(s.rows) == 2
+
+
 def test_glances_from_the_feed_come_as_often_as_its_frames_or_63_ms_apart(sync, monkeypatch):
     """Senses.glance from the feed, a frame waited for before each (as the navigator glances): with
     FEED_GLANCE_EVERY_S 0, every frame it looks at (30 a second), with GLANCE_EVERY_S every other one; each glance's

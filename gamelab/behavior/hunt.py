@@ -236,8 +236,9 @@ PLAYER_PILES = False
 # 2026-10-24 on Tree Dungeon, Forest Up North II her whole-screen looks came a median 4.9 s apart (up to 22.8 s) while
 # she shot, and nothing she saw elsewhere was kept: the memory has nothing to go by between them. With it, in the
 # simulator, her memory held 0.62-0.66 of the monsters on screen off her band, 0.19-0.42 without (Tree Dungeon's crowd,
-# the first map's game preset), and her EXP a minute was as before (hunter.SWEEP_LOCK_S). Never with a continuous feed
-# (it searches the whole screen every second).
+# the first map's game preset), and her EXP a minute was as before (hunter.SWEEP_LOCK_S). Never while a continuous feed
+# serves her looks (it searches the whole screen every second, and her band looks have what it follows: feed.TRACKED);
+# once the feed is gone, her looks taken without it sweep (Senses.look).
 SWEEP = True
 
 
@@ -376,7 +377,7 @@ class Hunt:
         self._progress = start
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
         senses = self.h.senses
-        sweep, senses.sweep = senses.sweep, self.sweep and senses.feed is None
+        sweep, senses.sweep = senses.sweep, self.sweep  # (only while no feed serves her looks: Senses.look)
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         try:
