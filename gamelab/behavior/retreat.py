@@ -29,8 +29,12 @@ telemetry ('retreat' events) say where, why and how long it took.
 
 In the simulator (Tree Dungeon, the hunt loop, the Lie Detector at 40, 75, 110 or 150 s): shooting 23 from 24, as live,
 47 of 48 runs (seeds 1-12) are on a safe place 10 s after the sighting (onto 25, 2.3 s at the median); hunting the
-whole map, mostly its floor (33) among its Green Mushrooms, 39 of 47 (83%), the rest knocked back on the way up to the
-rope at 146 or to 28 (tests/test_retreat.py; D:/MapleHelper-scratch/ldpet/sweep.py).
+whole map, mostly its floor (33) among its Green Mushrooms, with her looks from the feed as `tour --loop` takes them by
+default, 24 of 29 (seeds 1-8, 2026-10-25), the rest short of one in the time (the safest place within reach) or off the
+rope at its foot. Without the feed (`--no-feed`) the hunt loop's sweep (hunt.SWEEP) has her worse placed when it comes,
+and it's 15 of 32 (28 of 29 with the sweep off; 39 of 47 over seeds 1-12 at master's head before the sweep came in, the
+rest knocked back on the way up to the rope at 146 or to 28): tests/test_retreat.py, NO_FEED_SWEEP;
+D:/MapleHelper-scratch/ldpet/sweep.py, D:/MapleHelper-scratch/integ3/rebase/ldsweep.py.
 """
 
 import math
