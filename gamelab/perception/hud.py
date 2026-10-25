@@ -165,20 +165,31 @@ def draw_hp_bar(frame: np.ndarray, x: float, top: float, left: float, scale: flo
     """Draw a monster's HP bar into `frame` (an RGB look frame of `scale` px a game px) as the game shows it over a
     monster whose centre is at `x` and top at `top` (BAR_AT), `left` of its fill green: for the simulator's frames and
     tests. Each frame px takes the share of it each game px of the bar covers (as a stretched window blends them), the
-    rest of it what was there."""
-    bar = _bar_picture(left)
+    rest of it what was there. The bar's frame px are worked out once for each fill and place within a px (`_drawn`:
+    2.7 ms a bar, 27% of what the simulator's feed cost, before)."""
     ox, oy = x + (BAR_AT[0] - 1) * scale, top + (BAR_AT[1] - 1) * scale  # the black frame outside's top-left
     c0, r0 = int(np.floor(ox)), int(np.floor(oy))
-    ax, ay = _cover(bar.shape[1], scale, ox - c0), _cover(bar.shape[0], scale, oy - r0)
-    cols, rows = np.arange(c0, c0 + ax.shape[0]), np.arange(r0, r0 + ay.shape[0])
-    cx, ry = (cols >= 0) & (cols < frame.shape[1]), (rows >= 0) & (rows < frame.shape[0])
-    if not cx.any() or not ry.any():
+    n = int(round(BAR_FILL[1] * min(1.0, max(0.0, left))))
+    picture, covered = _drawn(n, ox - c0, oy - r0, scale)
+    h, w = picture.shape[:2]
+    y0, x0, y1, x1 = max(0, r0), max(0, c0), min(frame.shape[0], r0 + h), min(frame.shape[1], c0 + w)
+    if y1 <= y0 or x1 <= x0:
         return
-    ax, ay = ax[cx], ay[ry]
+    region = frame[y0:y1, x0:x1]
+    region[...] = np.clip(np.rint(region * (1 - covered[y0 - r0:y1 - r0, x0 - c0:x1 - c0])
+                                  + picture[y0 - r0:y1 - r0, x0 - c0:x1 - c0]), 0, 255).astype(frame.dtype)
+
+
+@lru_cache(maxsize=512)
+def _drawn(n: int, px: float, py: float, scale: float) -> tuple[np.ndarray, np.ndarray]:
+    """A bar `n` game px of whose fill are green, as frame px of `scale` game px each, its black frame's top-left
+    `px`, `py` into its first frame px: what each frame px gets of it, and how much of each it covers."""
+    bar = _bar_picture(n / BAR_FILL[1])
+    ax, ay = _cover(bar.shape[1], scale, px), _cover(bar.shape[0], scale, py)
     picture = np.einsum("ig,ghc,jh->ijc", ay, bar, ax)
     covered = ay.sum(axis=1)[:, None, None] * ax.sum(axis=1)[None, :, None]
-    region = frame[rows[ry][0]:rows[ry][-1] + 1, cols[cx][0]:cols[cx][-1] + 1]
-    region[...] = np.clip(np.rint(region * (1 - covered) + picture), 0, 255).astype(frame.dtype)
+    picture.flags.writeable = covered.flags.writeable = False
+    return picture, covered
 
 
 def hp_bar(frame: np.ndarray, x: int, top: int, geo: Geometry = STRETCHED) -> float | None:
@@ -195,11 +206,9 @@ def hp_bar(frame: np.ndarray, x: int, top: int, geo: Geometry = STRETCHED) -> fl
     then the end is read as halfway along what covers it, to the first red or black after it (on the clips, 0.45, 0.73
     and 0.47 where the next frame without it read 0.46, 0.72 and 0.50)."""
     s = geo.frame_scale
-    (ax, ay), (sx, up, down) = BAR_AT, BAR_SLACK
+    (ax, ay) = BAR_AT
     fw, fh = BAR_FRAME[0] * s, BAR_FRAME[1] * s
-    x0, y0 = max(0, int(np.floor(x + (ax - sx) * s - 2))), max(0, int(np.floor(top + (ay - up) * s - 2)))
-    x1 = min(frame.shape[1], int(np.ceil(x + (ax + sx) * s + fw + 2)))
-    y1 = min(frame.shape[0], int(np.ceil(top + (ay + down) * s + fh + 2)))
+    x0, y0, x1, y1 = bar_box(frame.shape, x, top, geo)
     if x1 - x0 < fw or y1 - y0 < fh:
         return None
     box = frame[y0:y1, x0:x1]
@@ -227,6 +236,19 @@ def hp_bar(frame: np.ndarray, x: int, top: int, geo: Geometry = STRETCHED) -> fl
         if left is not None:
             return left
     return None
+
+
+def bar_box(shape: tuple, x: float, top: float, geo: Geometry = STRETCHED) -> tuple[int, int, int, int]:
+    """Where hp_bar looks for the bar of a monster whose centre is at `x` and top at `top` in a look frame of `shape`
+    (geometry `geo`): x0, y0, x1, y1 (BAR_AT, BAR_SLACK), cut at the frame's edges. What it reads depends on these px
+    alone (and where the monster is in them)."""
+    s = geo.frame_scale
+    (ax, ay), (sx, up, down) = BAR_AT, BAR_SLACK
+    fw, fh = BAR_FRAME[0] * s, BAR_FRAME[1] * s
+    x0, y0 = max(0, int(np.floor(x + (ax - sx) * s - 2))), max(0, int(np.floor(top + (ay - up) * s - 2)))
+    x1 = min(shape[1], int(np.ceil(x + (ax + sx) * s + fw + 2)))
+    y1 = min(shape[0], int(np.ceil(top + (ay + down) * s + fh + 2)))
+    return x0, y0, x1, y1
 
 
 def _rows_in(lo: float, hi: float) -> list[int]:

@@ -44,7 +44,8 @@ from .monsters import Monster
 from .pose import Where
 from .scene import Loot, Scene, find_loot
 from .senses import Senses
-from .tracking import DYING, EDGE_PX, HIDDEN, LIVE, Event, MonsterTracker, Track, View, overlap, same, snapshot
+from .tracking import (DYING, EDGE_PX, HIDDEN, LIVE, STAR_WINDOW, Event, MonsterTracker, Track, View, overlap, same,
+                       snapshot)
 
 # Ropes are searched every frame: placed by a rope in one frame and by her dot alone in the next, her x (and
 # with it every monster's) would step by up to a minimap pixel (11.4 units) from frame to frame, which the
@@ -58,6 +59,13 @@ WIDE_EVERY_S = 1.0    # s between searches of the whole screen (122 ms each, ben
 LOOT_EVERY_S = 0.5    # `watch`: s between searches for the drops on her platform ...
 LOOT_WIDE_EVERY_S = 2.0  # ... and on every platform in view
 HP_DROP = 0.004       # HP lost from one frame to the next that counts as a hit (control.navigator.HIT)
+# A monster followed has its HP bar read (perception.hud.hp_bar, 1.1 ms each) in a frame while it shows one (it did
+# within BAR_SHOWN_S: a frame or two) or a throw of hers went its way in the last tracking.STAR_WINDOW; else every
+# BAR_EVERY-th frame, its track's bar as last read meanwhile (a monster nobody hits shows none). Read in every frame, the
+# bars were 74% of what the simulator's feed cost (loop_tree_lie_detector: 37.5 s of its 41 in SyncFeed.tick), and live
+# pays for them as much.
+BAR_EVERY = 5
+BAR_SHOWN_S = 0.25
 HIT_MERGE_S = 0.2     # a drop this soon after the last is the same hit, if the bar takes a few frames to go down
 
 
@@ -388,6 +396,7 @@ class WorldStep:
         work = {"re-finds": 0, "fallbacks": 0}
         fallbacks = getattr(self.eyes.detector, "fallbacks", 0)
         refound: dict[int, Monster] = {}
+        unread: set[int] = set()  # the tracks re-found whose bars weren't read (_bar_due)
         if placed:
             self.counts["placed"] += 1
             for tr in self.tracker.live():
@@ -399,7 +408,10 @@ class WorldStep:
                 work["re-finds"] += 1
                 m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN)
                 if m is not None:
-                    refound[tr.id] = s.place(m, self.model, self.eyes.bar(s, m))
+                    read = self._bar_due(tr, t)
+                    refound[tr.id] = s.place(m, self.model, self.eyes.bar(s, m) if read else None)
+                    if not read:
+                        unread.add(tr.id)
             work["fallbacks"] = getattr(self.eyes.detector, "fallbacks", 0) - fallbacks
             self.counts["re-finds"] += work["re-finds"]
             self.counts["re-found"] += len(refound)
@@ -407,7 +419,9 @@ class WorldStep:
         her = (s.where.x, s.where.y) if placed else None
         events += self.tracker.update(t, refound, [], view, her, s.players)
         seen: list[Monster] = []  # re-found (two tracks may have found one)
-        for m in refound.values():
+        for tid, m in refound.items():
+            if tid in unread and (tr := self.tracker.tracks.get(tid)) is not None:
+                m = replace(m, bar=tr.bar)  # (its bar as last read)
             if not any(same(m.mob, k.mob) for k in seen):
                 seen.append(m)
         exp = np.zeros((0,), bool) if s.exp is None else np.asarray(s.exp, bool)
@@ -532,6 +546,14 @@ class WorldStep:
             self.gains.append(g)
             for i, kind in enumerate(g.kinds):
                 self.tracker.gain(g.when(i), kind)
+
+    def _bar_due(self, tr: Track, t: float) -> bool:
+        """Whether track `tr`'s HP bar is read in the frame shown at t (BAR_EVERY, BAR_SHOWN_S)."""
+        if tr.bar_at is not None and t - tr.bar_at <= BAR_SHOWN_S:
+            return True
+        if any(0 <= t - th.t <= STAR_WINDOW and tr.id in th.aimed for th in self.tracker.throws):
+            return True
+        return (self.seq + tr.id) % BAR_EVERY == 0
 
     def _box(self, s: Scene, tr: Track, t: float) -> tuple[int, int, int, int] | None:
         """Where track `tr`'s picture should be in this frame (half-size px), from where it should be on the

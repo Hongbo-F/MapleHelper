@@ -362,3 +362,39 @@ def test_a_frame_that_fails_its_checks_says_why_in_its_state_and_is_neither_plac
                        bad=Problem("window", "the game isn't in front"))
     assert not hidden.visible and hidden.bad.kind == "window" and not hidden.usable
     assert step.step(None, good.t + 0.4, False, why="gone").bad == Problem("window", "gone")
+
+
+def test_a_monsters_bar_is_read_while_it_shows_one_or_she_threw_its_way_else_every_5th_frame():
+    # worldstate.BAR_EVERY, BAR_SHOWN_S: in between, its track's bar as last read. (The searches read the bars of what
+    # they find: none here but the first frame's.)
+    from gamelab.localization.worldstate import BAR_EVERY
+    model = small_map()
+    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(band_s=None, wide_s=None))
+    reads, bar = [], {"left": None}
+
+    def read(obs, mob):
+        reads.append(obs.t)
+        return bar["left"]
+    step.eyes.bar = read
+    step.eyes.mobs = [pig(1100)]
+    frames(step, 30, asks={0: Asks(band=True)})  # (found, and followed since)
+    (tr,) = step.tracker.tracks.values()
+    reads.clear()
+    states = frames(step, 3 * BAR_EVERY, start=101.0)
+    assert len(reads) == 3  # unhurt, nobody throwing at it: every 5th frame
+    bar["left"] = 0.6  # hit by someone: its next read shows it, and from then on it's read every frame
+    states = frames(step, 2 * BAR_EVERY, start=102.0)
+    first = next(i for i, st in enumerate(states) if st.monsters[0].bar == 0.6)
+    assert first < BAR_EVERY and len(reads) == 3 + 1 + (2 * BAR_EVERY - first - 1)
+    assert all(st.monsters[0].bar == 0.6 for st in states[first:])
+    # A track whose bar went (none shown for BAR_SHOWN_S) is read every 5th frame again, its last bar kept meanwhile;
+    # one she threw at is read every frame.
+    bar["left"] = None
+    frames(step, 30, start=103.0)
+    reads.clear()
+    states = frames(step, 2 * BAR_EVERY, start=104.0)
+    assert len(reads) == 2 and all(st.monsters[0].bar == (None if st.t in reads else 0.6) for st in states)
+    step.throw(105.0, "right")
+    reads.clear()
+    frames(step, BAR_EVERY, start=105.01)
+    assert len(reads) == BAR_EVERY

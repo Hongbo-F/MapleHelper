@@ -50,7 +50,7 @@ from ..paths import LAB
 from ..perception import exp_number
 from ..perception.eyes import Eyes, Observation
 from ..perception.heading import Reading
-from ..perception.hud import draw_hp_bar
+from ..perception.hud import bar_box, draw_hp_bar
 from ..perception.loot import Item
 from ..perception.match import suppress_overlaps
 from ..perception.minimap import OTHER_SHIFT, PICTURE_BASE, Marker
@@ -318,6 +318,7 @@ class FakeEyes(Eyes):
         self.counts = {"looks": 0, "glances": 0, "tag hidden": 0, "dot hidden": 0}  # for the trace
         self.frame_counts = {"frames": 0, "tag hidden": 0, "dot hidden": 0}  # the feed's frames (observe)
         self._exp_drawn: tuple[int, np.ndarray] | None = None  # her EXP number's box, for the EXP she has gained
+        self._bars: dict[tuple, float | None] = {}  # what a bar's box read (`bar`), by its px
 
     @property
     def noise(self) -> Noise:
@@ -407,8 +408,17 @@ class FakeEyes(Eyes):
     def bar(self, obs: Observation, mob: Mob) -> float | None:
         """Eyes.bar, off the bar drawn over it as the game draws it (perception.hud.draw_hp_bar); with
         Realism.bars_empty a bar up reads empty, as the stack read them live at 1366x768 until 2026-10-25 (hud.hp_bar
-        took the black frame around the fill for the bar)."""
-        left = super().bar(obs, mob)
+        took the black frame around the fill for the bar). Read as live reads it (hud.hp_bar), once for each picture of
+        the box it reads and place of the monster in it (the sky around, the bars drawn as the game draws them: few
+        pictures), 1.1 ms a read otherwise: 8 of the 18 s a scenario with the feed took."""
+        x, top = mob.x, mob.y - mob.h // 2
+        x0, y0, x1, y1 = bar_box(obs.frame.shape, x, top, obs.geo)
+        key = (np.asarray(obs.frame[y0:y1, x0:x1]).tobytes(), x1 - x0, x - x0, top - y0, obs.geo.client)
+        if key not in self._bars:
+            if len(self._bars) > 4096:
+                self._bars.clear()
+            self._bars[key] = super().bar(obs, mob)
+        left = self._bars[key]
         return 0.0 if left is not None and self.world.realism.bars_empty else left
 
     def monsters_rows(self, obs: Observation, rows: tuple[int, int]) -> list[Mob]:
