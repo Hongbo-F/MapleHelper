@@ -612,10 +612,15 @@ and a gold coin). A drop the table doesn't know stays at the first map's dearest
 table it would have become the Magic Potion's 250, and every drop not known valuable).
 
 **In the simulator** (`world.game_drops`, the harness's `game-drops`): the first map's drops as seen there
-(`GAME_DROPS`); on another map each kill drops mesos 72% of the time (the first map's kinds' 63-80%) and each item of
-its monster's at OSMLib's rate, 1% where it gives none (Tree Dungeon 22 such entries, West Rocky Mountain II 25), and
-the harness weighs what she picked up by the world's map's worth. Neither is measured, and no scenario runs those maps
-yet. On the first map nothing changed: `game-drops`' hunt loop over 4 minutes on seeds 1 and 2 gave the same outcomes
+(`GAME_DROPS`); on another map a monster seen there drops as it did (Tree Dungeon's slimes: Squishy Liquid 65% of
+kills, where OSMLib gives 40%), and its other drops at OSMLib's rates (a slime's Orihalcon and Sapphire Ore); a monster
+not seen in game drops mesos 72% of the time (the first map's kinds' 63-80%) and each item of its at OSMLib's rate, and
+where it gives none (the Magic Potion, a Fragment of Magic, Sapphire and Orihalcon Ore from the mushrooms, a Stump's
+and an Axe Stump's Bronze Ore, a Dark Stump's Tree Branch and Lemon: 4 of Tree Dungeon's 22 rows, 4 of West Rocky
+Mountain II's 25) as rarely as the rarest it gives that monster, its ores' 0.2%. They had been 1%, five times that: on
+Tree Dungeon a valuable drop (66.8 and up) came 0.0177 a kill (weighed by spawn points), 80% of it from those four, the
+same Sapphire Ore 1% from a Horny Mushroom and 0.3% from a slime; now 0.0064. The harness weighs what she picked up by
+the world's map's worth. None of it is measured, and no scenario runs those maps yet. On the first map nothing changed: `game-drops`' hunt loop over 4 minutes on seeds 1 and 2 gave the same outcomes
 to the field, and the 86 golden traces are byte-identical.
 
 `bench-look` and `bodies` on saved frames, and the saved frames' feed, place her by the map's own minimap picture now,

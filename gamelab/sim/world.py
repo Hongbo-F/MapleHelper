@@ -338,27 +338,40 @@ GAME_DROPS = (
 )
 # Realism.drops of a world that drops what its own map's monsters drop (`game_drops`): the harness's `game-drops`.
 MAP_DROPS = "map"
-# On a map whose drops weren't seen in game (`game_drops`): a kill drops mesos this often (the first map's four kinds'
-# 63-80% of their piles with coins, on average) and an item of its monster's (perception.drops) at OSMLib's reference
-# rate, or at NO_RATE where it gives none (the Magic Potion, a Fragment of Magic, ...). Neither is the game's: OSMLib's
-# "may not represent MapleStory Classic World rates", and the first map's slimes dropped Squishy Liquid at 65% where it
-# gives 40%, a Slime Bubble at 10% for its 3%.
+# On another map (`game_drops`) a monster whose drops were seen in game on the first map (GAME_DROPS: the slime, ...)
+# drops what it dropped there, and its other drops (perception.drops: a slime's Orihalcon and Sapphire Ore) at OSMLib's
+# reference rates. One not seen in game drops mesos this often (the first map's four kinds' 63-80% of their piles with
+# coins, on average) and each item of its at OSMLib's rate; where OSMLib gives none (the Magic Potion, a Fragment of
+# Magic, a Stump's Bronze Ore: 4 of Tree Dungeon's 22 rows, 4 of West Rocky Mountain II's 25), as rarely as the rarest
+# it gives that monster (every one's ores', 0.2%), or NO_RATE where it gives it none. At 1% those four had made
+# valuable drops (66.8 and up) 0.0177 a kill on Tree Dungeon (weighed by spawn points), 80% of it theirs, the same ore
+# 1% from one monster and 0.3% from another; at the rarest, 0.0064. Neither is the game's: OSMLib's "may not represent
+# MapleStory Classic World rates", and the first map's slimes dropped Squishy Liquid at 65% where it gives 40%, a Slime
+# Bubble at 10% for its 3%.
 MESOS_SHARE = 0.72
-NO_RATE = 0.01
+NO_RATE = 0.002
 
 
 def game_drops(model) -> tuple:
     """What a kill drops on map `model` in a world closer to the game's: (monster kind, drop kind, chance), as
-    GAME_DROPS. The first map's are GAME_DROPS, as seen in game; another's are its monsters' (perception.drops: mesos
-    MESOS_SHARE of kills, each item at its reference rate), a monster the table doesn't know dropping mesos alone."""
+    GAME_DROPS. The first map's are GAME_DROPS, as seen in game; another's are its monsters': a monster seen in game
+    (GAME_DROPS' kinds) as seen there, the rest (perception.drops) mesos MESOS_SHARE of kills, and each of their other
+    items at its reference rate, or their rarest one's where it has none (NO_RATE where they have none); a monster
+    neither knows drops mesos alone."""
     if getattr(model, "id", None) == drop_data.FIRST_MAP:
         return GAME_DROPS
+    seen: dict[str, list] = {}
+    for row in GAME_DROPS:
+        seen.setdefault(row[0], []).append(row)
     out = []
     for name in drop_data.monsters_of(model):
         kind, known = kind_of(name), drop_data.MONSTERS.get(name)
-        out.append((kind, "mesos", MESOS_SHARE))
+        rows = list(seen.get(kind, [(kind, "mesos", MESOS_SHARE)]))
         if known is not None:
-            out += [(kind, kind_of(item), known.rates.get(item, NO_RATE)) for item in known.items]
+            rarest, had = min(known.rates.values(), default=NO_RATE), {drop for _, drop, _ in rows}
+            rows += [(kind, kind_of(item), known.rates.get(item, rarest)) for item in known.items
+                     if kind_of(item) not in had]
+        out += rows
     return tuple(out)
 
 # Another player (Realism.rival_every) hunts one place at a time: it kills a monster within RIVAL_REACH across and

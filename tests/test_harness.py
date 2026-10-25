@@ -316,9 +316,10 @@ def test_her_trips_are_counted_from_the_stacks_log(model):
 
 def test_a_world_drops_what_its_maps_monsters_drop(model):
     """The harness's `game-drops` (Realism.drops MAP_DROPS): on the first map what was seen there in game (GAME_DROPS);
-    on another its monsters' drops (perception.drops), at OSMLib's reference rates, and mesos."""
+    on another a monster seen in game drops as it did there, and its other drops (perception.drops) at OSMLib's
+    reference rates; one not seen in game its drops at those rates (an item with none as its rarest), and mesos."""
     from types import SimpleNamespace
-    from gamelab.perception.drops import FIRST_MAP
+    from gamelab.perception.drops import FIRST_MAP, MONSTERS
     from gamelab.sim.world import GAME_DROPS, MAP_DROPS, MESOS_SHARE, NO_RATE, game_drops
 
     def a_map(map_id, *names):
@@ -328,9 +329,17 @@ def test_a_world_drops_what_its_maps_monsters_drop(model):
     tree = game_drops(a_map(10002073, "Horny Mushroom", "Slime", "Horny Mushroom"))
     assert tree[:3] == (("horny-mushroom", "mesos", MESOS_SHARE), ("horny-mushroom", "horny-mushroom-cap", 0.40),
                         ("horny-mushroom", "orange-potion", 0.01))
-    assert ("horny-mushroom", "magic-potion", NO_RATE) in tree and ("slime", "slime-bubble", 0.03) in tree
-    assert len(tree) == 2 + 7 + 5
-    # A world on this made-up map, of snails (a kind the table doesn't know): mesos alone.
+    # The Magic Potion, which OSMLib gives no rate for: as rarely as a Horny Mushroom's rarest, its Topaz Ore (it had
+    # been 1%, five times that)
+    assert ("horny-mushroom", "magic-potion", 0.002) in tree and ("horny-mushroom", "sapphire-ore", 0.002) in tree
+    # The slime as seen in game (Squishy Liquid 65%, where OSMLib gives 40%), and its ores, not seen there, at OSMLib's
+    assert [r for r in tree if r[0] == "slime"] == [r for r in GAME_DROPS if r[0] == "slime"] + [
+        ("slime", "orihalcon-ore", 0.002), ("slime", "sapphire-ore", 0.003)]
+    assert len(tree) == 1 + 7 + 4 + 2
+    # A monster neither knows: mesos alone; one with no rate given at all: NO_RATE.
+    assert game_drops(a_map(5, "Jr. Necki")) == (("jr.-necki", "mesos", MESOS_SHARE),)
+    assert NO_RATE <= min(r for m in MONSTERS.values() for r in m.rates.values())
+    # A world on this made-up map, of snails (the first map's, seen in game): what they dropped there.
     w = world(model, plat(model, 360, 300).id, 240.0, realism=Realism(drops=MAP_DROPS))
-    assert w._drop_table == (("snail", "mesos", MESOS_SHARE),)
+    assert w._drop_table == tuple(r for r in GAME_DROPS if r[0] == "snail")
     assert harness.PRESETS["game-drops"][1].drops == MAP_DROPS
