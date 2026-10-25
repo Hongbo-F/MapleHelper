@@ -1267,7 +1267,7 @@ REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's gam
 # on Tree Dungeon, Forest Up North II 9 and 9 s (2026-10-24, 8 workers).
 SLOW_SCENARIOS = {"feed_tour_hunt_basin", "feed_loop_basin", "feed_loop_rival", "tour_run", "loop_run",
                   "tour_rocky_run", "loop_rocky_run", "tour_tree_run", "loop_tree_run"}
-# Not met since her escorted trips keep clear of the monsters whose touch counts (fight.TRIP_PAD), tuned on Tree
+# Not met since her escorted trips keep clear of the monsters whose touch counts (Escort.threat), tuned on Tree
 # Dungeon only until the work is taken to other maps: on West Rocky Mountain II the Axe Stump (75) counts, and
 # loop_rocky_run fell out of the map at 536 s (work/safe-travel, 2026-10-24).
 NOT_YET = {"nav_rocky_fight_bridge", "loop_rocky_run", "tour_rocky_run"}

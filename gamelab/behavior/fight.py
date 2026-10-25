@@ -27,11 +27,10 @@ from .. import directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import TOO_CLOSE, act_text, air_gap, decide, open_above, pct, pick_target, stance
 from ..control.actions import STAR_DELAY_MS
-from ..localization.mapdata import MapModel, MobBody, touch_damage
+from ..localization.mapdata import MapModel, MobBody
 from ..localization.monsters import (MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster, bodies,
                                      dead_one, seen_again)
 from ..localization.scene import Scene
-from ..perception.kinds import kind_of
 from .looting import DropSpot
 
 if TYPE_CHECKING:
@@ -52,15 +51,13 @@ MOVES = JUMPS + ("back", "approach")  # the stances that move her (each but a th
 STEADY_WAIT_S = 0.05  # s before the next look when a jump or a step waits out a touch's knock (knocked_move)
 GUARD_SECONDS = 15  # longest spent shooting a monster out of the way while travelling
 GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she travels on
-# The kinds her trips keep clear of (FightOnTheWay.threat): a touch damage (PADamage, game data: mapdata.touch_damage)
-# of this or more. By meowdb's formula (sim.world.touch_damage, at DEF 75) that is 5.1% of her 752 HP at level 24, the
-# share work/positioning's danger counts from (attack.danger.DANGER_MIN, 5%): on Tree Dungeon, Forest Up North II a
-# Horny Mushroom (110: 16%) and a Green Mushroom (54: 7.3%), not a Slime (13); on West Rocky Mountain II an Axe Stump
-# (75: 10.8% at level 23), not a Dark Stump (34: 4.2%); on the first map nothing (an Orange Mushroom's 17 is 2.0% of
-# 642 HP at level 19), so her chains there are planned blind as before (though whether the next follows on, and the
-# run on past a chain's end, are judged by her box now: motion.bodies). Live on Tree Dungeon on 2026-10-24, 74 of 186
-# touches came on trips (33% of the HP lost), 28 of 48 travel hits a Green Mushroom's, 14 a Horny's.
-TRIP_PAD = 40.0
+# The kinds her trips keep clear of (FightOnTheWay.threat) are those the danger model counts (Hunter.danger,
+# attack.danger.DANGER_MIN: a touch taking 5% of her HP or more, by meowdb's formula at her level and HP, config.toml
+# [character]): on Tree Dungeon, Forest Up North II at level 24 a Horny Mushroom (16%) and a Green Mushroom (7.2%), not
+# a Slime (1.2%); on West Rocky Mountain II at 23 an Axe Stump (10.8%), not a Dark Stump (4.3%); on the first map at 19
+# nothing (an Orange Mushroom 2.0%), so her chains there are planned blind as before (though whether the next follows
+# on, and the run on past a chain's end, are judged by her box now: motion.bodies). Live on Tree Dungeon on 2026-10-24,
+# 74 of 186 touches came on trips (33% of the HP lost), 28 of 48 travel hits a Green Mushroom's, 14 a Horny's.
 # A monster she has hurt (Hunter.wounds) is finished before she moves on, from where she is or from a walk this
 # long along her platform at most (a second's walk at 149 units/s): in the live hunt loops of 2026-10-21 she set
 # off 44 times with a monster's HP bar down and it in reach or a step of 18-99 units away (to a pile, a spot,
@@ -813,7 +810,6 @@ class FightOnTheWay:
         self.h = h
         self.kinds: set[str] | None = None  # shoot monsters in reach of these kinds only (None: all); any
                                             # in her way is shot
-        self._pads: dict[str, float] | None = None  # kind -> its touch damage (threat), read once
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice), else one she
@@ -854,12 +850,10 @@ class FightOnTheWay:
         return self.h.report.exp_kills - before
 
     def threat(self, kind: str) -> bool:
-        """Whether her trips keep clear of monsters of `kind`: a touch by one takes TRIP_PAD of touch damage or more
-        (the map's game data: mapdata.touch_damage). A kind the data doesn't have doesn't count."""
-        if self._pads is None:
-            self._pads = {kind_of(name): pad for name, pad in touch_damage(self.h.model).items()} \
-                if self.h.model is not None else {}
-        return self._pads.get(kind, 0.0) >= TRIP_PAD
+        """Whether her trips keep clear of monsters of `kind`: the danger model counts its touch (Hunter.danger: a share
+        of her HP of DANGER_MIN or more at her level, from the map's game data). A kind the data doesn't have doesn't
+        count."""
+        return self.h.danger.share(kind) > 0
 
     def clear_for(self, s: Scene, m: Monster, finish: bool = True) -> int | None:
         """Shoot monster `m`, one that could touch her on the chain of moves ahead (the navigator's `in_the_way`), if a

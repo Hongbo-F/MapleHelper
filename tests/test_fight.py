@@ -242,18 +242,21 @@ def test_the_escorts_fight_in_her_way_finishes_wounds_only_when_asked():
     assert escort.clear_way(s, -400.0) is None and not asked  # nothing in her way that way
 
 
-def test_the_escort_keeps_her_trips_clear_of_the_kinds_whose_touch_counts(monkeypatch):
-    # FightOnTheWay.threat: a touch damage (PADamage, the map's game data) of TRIP_PAD or more: on Tree Dungeon the
-    # two mushrooms, not its slimes; on the first map nothing (an Orange Mushroom's 17 is its highest).
-    pads = {"Horny Mushroom": 110.0, "Green Mushroom": 54.0, "Slime": 13.0}
-    monkeypatch.setattr(fight_mod, "touch_damage", lambda model: pads)
-    escort = fight_mod.FightOnTheWay(SimpleNamespace(model=object()))
+def test_the_escort_keeps_her_trips_clear_of_the_kinds_whose_touch_counts():
+    # FightOnTheWay.threat: the kinds the danger model counts (Hunter.danger: a touch taking DANGER_MIN of her HP or
+    # more, at her level): on Tree Dungeon at level 24 the two mushrooms, not its slimes; on the first map at level 19
+    # nothing (an Orange Mushroom takes 2.0% of her 642 HP).
+    from gamelab.attack.danger import Danger, Her
+    shares = {"horny-mushroom": 0.161, "green-mushroom": 0.072}
+    escort = fight_mod.FightOnTheWay(SimpleNamespace(danger=SimpleNamespace(share=lambda k: shares.get(k, 0.0))))
     assert escort.threat("horny-mushroom") and escort.threat("green-mushroom")
     assert not escort.threat("slime") and not escort.threat("pig")
-    first = mapdata.load(10000012) if (mapdata.CACHE / "10000012.json").exists() else None
-    if first is not None and mapdata.touch_damage(first):
-        assert max(mapdata.touch_damage(first).values()) < fight_mod.TRIP_PAD
-
+    for map_id, her, counted in ((10002073, Her(752.0, 24.0), {"horny-mushroom", "green-mushroom"}),
+                                 (10000012, Her(642.0, 19.0), set())):
+        if (mapdata.CACHE / f"{map_id}.json").exists() and (model := mapdata.load(map_id)).mob_damage:
+            escort = fight_mod.FightOnTheWay(SimpleNamespace(danger=Danger(model, her)))
+            kinds = {kind for kind in Danger(model, her).threats}
+            assert {kind for kind in kinds if escort.threat(kind)} == counted, map_id
 
 def test_the_escort_shoots_a_monster_on_the_way_only_where_a_star_reaches_it(monkeypatch):
     # FightOnTheWay.clear_for: one that could touch her on the chain ahead (the navigator's), shot from where she

@@ -338,9 +338,10 @@ class Navigator:
             raise ValueError(f"no {mode!r} trip without an escort" if mode in MODES else f"unknown mode {mode!r}")
         # Transit: low HP is why she's going (to rest), so potions only.
         health = self.potions if mode in (TRANSIT, TRANSIT_AVOID) else self.health
-        if mode in FIGHTING:  # the kinds whose touch counts, read now rather than between a look and its chain: the
-            self._threats()   # first read of the game data took 535 ms (Tree Dungeon; the chain then planned from a
-                              # look that old: review, 2026-10-24)
+        if mode in FIGHTING:  # the kinds whose touch counts, worked out now rather than between a look and its chain
+            self._threats()   # (when the escort read the game data itself the first read took 535 ms on Tree
+                              # Dungeon, a chain then planned from a look that old: review, 2026-10-24; Hunter.danger
+                              # has it from the map's cache since)
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode,
                        keep_off=frozenset(keep_off), vary=vary, detour=detour)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she

@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
-from functools import cached_property, lru_cache
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -650,30 +650,6 @@ def _mob_die_s(ids: set[str]) -> dict[str, float]:
                   if isinstance(f, Canvas)]
         if delays:
             out[i] = sum(delays) / 1000
-    return out
-
-
-@lru_cache(maxsize=64)
-def _pa_damage(mob_id: int) -> float | None:
-    """Monster `mob_id`'s touch damage (info/PADamage in the game data, before her defence), or None without the game
-    data copy (or no such monster in it)."""
-    try:
-        from gamedata.canvas import _mob_pack
-        return float((_mob_pack().image(f"Mob/{mob_id:07d}.img").get("info") or {}).get("PADamage") or 0)
-    except (OSError, KeyError, ValueError):
-        return None
-
-
-def touch_damage(model: MapModel) -> dict[str, float]:
-    """Monster name -> its touch damage (PADamage) for the monsters spawning on the map, read from the game data when
-    asked (not kept in the map's cache: one cache serves several checkouts of the code). A monster the copy doesn't
-    have is left out. On the first map a snail 3, a slime 13, a pig 15, an Orange Mushroom 17; on Tree Dungeon,
-    Forest Up North II a Green Mushroom 54 and a Horny Mushroom 110."""
-    out = {}
-    for s in model.spawns:
-        name = s.name or str(s.mob_id)
-        if name not in out and (pad := _pa_damage(s.mob_id)) is not None:
-            out[name] = pad
     return out
 
 
