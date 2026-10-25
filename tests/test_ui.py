@@ -93,6 +93,41 @@ def test_live_source_looks_for_a_newer_run_once_a_second(tmp_path):
     assert fresh and src.path.name == "20261020-020000-tour.jsonl" and [r["text"] for r in records] == ["b"]
 
 
+def test_live_source_shows_the_perception_services_scenes_and_the_commands_plans(tmp_path):
+    """What's on screen (scenes, tracks, her EXP, the deaths and hits it saw) from the perception service's file while it
+    grows, the rest from the newest command's (its scenes left out meanwhile: they'd flip the page between two views);
+    with no command's file, the service's is the run; once it stops growing, the command's own scenes again."""
+    import json
+
+    from gamelab.ui.sources import PERCEIVE_LIVE_S, LiveSource
+
+    def write(path, *records):
+        with path.open("a", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+    service = tmp_path / "20261025-090000-perceive.jsonl"
+    write(service, {"topic": "session", "t": 1.0, "map": 7, "command": "perceive"},
+          {"topic": "scene", "t": 1.1, "her": {"x": 10}})
+    now = [100.0]
+    src = LiveSource(tmp_path, clock=lambda: now[0])
+    fresh, records = src.poll()  # no command yet: the service's file is the run
+    assert fresh and [r["topic"] for r in records] == ["session", "scene"] and src.path == service
+    tour = tmp_path / "20261025-090500-tour.jsonl"
+    write(tour, {"topic": "session", "t": 2.0, "map": 7, "command": "tour"},
+          {"topic": "scene", "t": 2.1, "her": {"x": 0}}, {"topic": "route", "t": 2.2, "moves": []})
+    write(service, {"topic": "scene", "t": 2.15, "her": {"x": 11}}, {"topic": "tracks", "t": 2.16, "list": []},
+          {"topic": "event", "t": 2.17, "kind": "died", "text": "died #3"}, {"topic": "log", "t": 2.18, "text": "x"})
+    now[0] = 101.5
+    fresh, records = src.poll()
+    assert fresh and src.path == tour  # the command's file is the run now, from its start
+    assert [(r["topic"], r["t"]) for r in records] == [("session", 2.0), ("scene", 2.15), ("tracks", 2.16),
+                                                       ("event", 2.17), ("route", 2.2)]
+    write(tour, {"topic": "scene", "t": 3.0, "her": {"x": 1}}, {"topic": "log", "t": 3.1, "text": "tour"})
+    now[0] = 101.6 + PERCEIVE_LIVE_S  # the service's file hasn't grown since: the command's own scenes
+    fresh, records = src.poll()
+    assert not fresh and [r["topic"] for r in records] == ["scene", "log"]
+
+
 def test_the_state_keeps_the_latest_of_each_topic_and_her_trail():
     s = State()
     s.apply({"topic": "session", "map": 1, "t": 10.0})

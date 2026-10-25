@@ -257,8 +257,9 @@ class Follower:
         return _records(lines)
 
 
-def newest(folder: Path = FOLDER, now: float | None = None) -> Path | None:
-    """The telemetry file written to last (the run in progress, while there is one), if any.
+def newest(folder: Path = FOLDER, now: float | None = None, match: Callable[[str], bool] | None = None) -> Path | None:
+    """The telemetry file written to last (the run in progress, while there is one), if any; with `match`, of the files
+    whose names it takes (ui.sources: the perception service's apart from the commands').
 
     The window and the web page look for a newer run every second. On Windows os.scandir has each file's
     last write without a call per file: 0.10 ms with 40 files and 2.9 ms with 1000, where Path.glob and a
@@ -275,7 +276,8 @@ def newest(folder: Path = FOLDER, now: float | None = None) -> Path | None:
     now = time.time() if now is None else now
     try:
         with os.scandir(folder) as entries:
-            listed = [(e.stat().st_mtime, e.name) for e in entries if e.name.endswith(".jsonl")]
+            listed = [(e.stat().st_mtime, e.name) for e in entries if e.name.endswith(".jsonl")
+                      and (match is None or match(e.name))]
     except OSError:  # no folder yet (or a file gone while looking: the next look finds the rest)
         return None
     files = []
