@@ -399,7 +399,7 @@ def _hunter(args, **kw):
     model = mapdata.load(args.map)
     eyes = _eyes(model, cfg.game_window_title)
     feed = _feed(model, cfg.game_window_title, eyes.geo) if getattr(args, "feed", False) else None
-    return Hunter(eyes, keys, model, log=_log, feed=feed, **kw)
+    return Hunter(eyes, keys, model, log=_log, feed=feed, sweep=bool(getattr(args, "sweep", None)), **kw)
 
 
 def cmd_pet(args) -> int:
@@ -1077,9 +1077,13 @@ def cmd_bench_look(args) -> int:
         st = step.step(lambda ropes: eyes.look_at(full, None, ropes), time.monotonic(), True, asks)
         step.came_back()
         return st
+    # A look with the sweep on (Senses.sweep, as the hunt loop's are): her band and a slice of the rest of the screen
+    # in turn, the slices going round from look to look, and the frames with them.
+    swept = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN), sweep=True)
     looks = {"Senses.look: no monsters": lambda: senses.look(mobs=False),
              "Senses.look: her band": lambda: senses.look(),
              "Senses.look: band + loot on her platform": lambda: senses.look(loot=True),
+             "Senses.look: ... and a slice of the sweep": lambda: swept.look(loot=True),
              "Senses.look: whole screen + all loot": lambda: senses.look(wide=True, loot=True),
              "feed step: her place, monsters re-found": frame_step,
              "feed step: ... and her band searched": lambda: frame_step(Asks(band=True)),
@@ -1613,12 +1617,52 @@ def cmd_respawn(args) -> int:
     return 0
 
 
+def cmd_memory(args) -> int:
+    """Her memory of the monsters (localization.memory) run again on a recorded run: what it would have held at each
+    look, as 'memory' records in a copy of the run (`--out`, for `minimap --replay`), and how it went. Offline: no game,
+    no keys."""
+    import json
+    from collections import Counter
+    from .attack import reach
+    from .localization import mapdata, memory
+    records = telemetry.read(Path(args.file))
+    session = next((r for r in records if r.get("topic") == "session"), {})
+    model = mapdata.load(args.map or session.get("map") or DEFAULT_MAP)
+    kept = memory.Memory(model)
+    out = memory.replay(records, model, (reach.LOOK_UP, reach.LOOK_DOWN), memory=kept)
+    mem = [r for r in out if r.get("topic") == "memory"]
+    looks = sum(1 for r in records if r.get("topic") == "scene" and r.get("searched"))
+    held = Counter()
+    for r in mem:
+        for e in r["list"]:
+            if e["state"] == "seen":
+                held["sure" if e["p"] >= memory.SURE else "unsure"] += 1
+    n = max(1, len(mem))
+    print(f"{args.file}: map {model.id}, {looks} looks searched for monsters, {len(mem)} 'memory' records")
+    print(f"  monsters held a record: {held['sure'] / n:.2f} sure (p >= {memory.SURE}), {held['unsure'] / n:.2f} less")
+    c = kept.counts
+    print(f"  {c['new']} monsters seen, {c['killed']} killed by her, {c['gone']} forgotten by looks covering their "
+          f"place, {c['aged']} by age")
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            for r in out:
+                f.write(json.dumps(r, separators=(",", ":")) + "\n")
+        print(f"  written: {args.out} (python -m gamelab minimap --replay {args.out})")
+    return 0
+
+
 # --- the command line ------------------------------------------------------------------------------------
 
 def feed_arg(s) -> None:
     s.add_argument("--feed", action="store_true",
                    help="looks and glances from a continuous feed: the game looked at every frame in a process of its "
                         "own (not tried in game yet)")
+
+
+def sweep_arg(s, default: str) -> None:
+    s.add_argument("--sweep", action=argparse.BooleanOptionalAction, default=None,
+                   help="each look at the band around her also searches a slice of the rest of the screen in turn, so "
+                        f"her memory of the monsters is kept up (localization.senses; default: {default})")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1685,6 +1729,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
     s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
     feed_arg(s)
+    sweep_arg(s, "off")
     s.set_defaults(func=cmd_hunt)
 
     s = sub.add_parser("probe", help="in-game probes of what a star hits: list them, run one, score their log")
@@ -1736,6 +1781,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="each trip chooses among the N best distinct ways by their times (route.ROUTES; default 1: "
                         "the quickest, varied by the moves' random weights; README: Route diversity)")
     feed_arg(s)
+    sweep_arg(s, "off")
     s.set_defaults(func=cmd_nav)
 
     s = sub.add_parser("tour", help="hunt the map: sweep the platforms worth hunting (nearest next, varied a "
@@ -1764,6 +1810,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --loop: of the grounds within this share of the best's score, the one she left longest "
                         "ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
     feed_arg(s)
+    sweep_arg(s, "off")
     s.set_defaults(func=cmd_tour)
 
     s = sub.add_parser("pet", help="keep her pet fed: its fullness followed in time (read once off her Character Info) "
@@ -1961,6 +2008,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--text", help="also write the report to this file")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.set_defaults(func=cmd_respawn)
+
+    s = sub.add_parser("memory", help="her memory of the monsters run again on a recorded run: what it would have held "
+                                      "at each look, for the mini-map (offline; no game, no keys)")
+    s.add_argument("file", help="a telemetry file (.jsonl)")
+    s.add_argument("--out", help="write the run with 'memory' records in it here (for minimap --replay)")
+    s.add_argument("--map", type=int, help="the map (default: the run's)")
+    s.set_defaults(func=cmd_memory)
     return p
 
 

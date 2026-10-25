@@ -134,6 +134,32 @@ def test_the_hunt_loop_s_piles_and_rates_are_drawn():
     assert not np.array_equal(img, view.draw(State()))
 
 
+def test_the_monsters_she_remembers_are_drawn_faded_by_their_age():
+    m = model()
+    view = MapView(m, width=400)
+    c = by_y(m, 500, 400)
+    seen = {"kind": "pig", "platform": c.id, "y": 500, "p": 1.0, "misses": 0, "state": "seen"}
+    s = State()
+    s.apply({"topic": "memory", "t": 10.0, "list": [
+        {**seen, "id": 1, "x": 300, "age": 0.0},                       # just seen
+        {**seen, "id": 2, "x": 600, "age": 30.0, "p": 0.4, "misses": 2},  # long ago, and missed since
+        {**seen, "id": 3, "x": 450, "age": 0.5, "p": 0.0, "state": "killed"}]})
+    img, bare = view.draw(s).astype(int), view.draw(State()).astype(int)
+
+    def ring(x):  # the brightest px of the ring's top, over the map's background
+        px, py = view.pt(x, 500 - 12)
+        return (img[py - 8:py - 5, px - 1:px + 2] - bare[py - 8:py - 5, px - 1:px + 2]).sum(axis=2).max()
+    assert ring(300) > 2 * ring(600) > 0  # faded with its age
+    px, py = view.pt(450, 500 - 12)
+    cross = img[py - 5:py + 6, px - 5:px + 6]
+    assert (cross[..., 0] - cross[..., 1]).max() > 80  # killed: a red cross where it was
+    s.apply({"topic": "scene", "t": 20.0, "her": {"x": 100, "y": 500, "platform": c.id}, "hp": 1.0, "mp": 1.0,
+             "monsters": []})  # 10 s on, with no new 'memory' record: the fresh one has aged too
+    later = view.draw(s).astype(int)
+    px, py = view.pt(300, 500 - 12)
+    assert (later[py - 8:py - 5, px - 1:px + 2] - bare[py - 8:py - 5, px - 1:px + 2]).sum(axis=2).max() < ring(300)
+
+
 class OldView(MapView):
     """MapView.draw as it was before it was made faster: the tour's platforms drawn every time, and the
     reach bands blended over the whole picture."""

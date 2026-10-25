@@ -14,7 +14,9 @@ her keys), a Looter (what she picks up and remembers), and the fight loops (beha
 look, whoever took it, the hunter keeps count of her EXP and her HP: a kill is her EXP going up, its number read
 when it changes (perception.exp_number), and the gain's size says what kind it was, or that it was several kills,
 or none (localization.gains). It also reads which way she faces off the look's frame (perception.heading) for her
-keys (Actions.see), and logs where that tells the other way from her last arrow.
+keys (Actions.see), and logs where that tells the other way from her last arrow. And every look's monsters go into her
+memory of them (localization.memory: what she has seen anywhere, kept across looks), her kills marking the ones they
+were.
 """
 
 import json
@@ -30,11 +32,13 @@ from maplehelper.config import GameKeys
 from .. import paths, telemetry
 from ..attack import danger
 from ..attack.reach import LOOK_DOWN, LOOK_UP
+from ..attack.stance import close_to
 from ..control import client
 from ..control.actions import Actions
 from ..control.navigator import Navigator
 from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
+from ..localization.memory import Memory
 from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..localization.scene import Scene
@@ -67,6 +71,19 @@ KNOCK_S = 0.45
 ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
                  # only her back shows and her facing isn't read
 HEADING_SHOTS_MAX = 200  # crops of her kept in lab/heading where the frame and her last arrow disagreed, at most
+# The sweep (Senses.sweep) searches its slice only where it costs her nothing: while her last attack's lock has
+# SWEEP_LOCK_S to go at least (her next attack waits for it anyway: Actions.wait_lock), or with no monster in her band
+# (nothing to react to); never while she's pressed (`pressed`: in close quarters, a monster on her platform within the
+# claw's swipe, stance.close_to, where the hunt loop's rule 1 has stance jump back or step away; or her HP within
+# SWEEP_HP of `low_hp`). A slice is 16.7 ms at the game's own 1366x768 (bench-look), and 23 ms of the simulator's clock.
+# Searched on every look but in close quarters or at low HP, the slices cost the simulator's hunt loop on Tree Dungeon
+# (preset crowd, zero-walls, 20 seeds of 20 minutes, against the code before the sweep) 23% of its EXP a minute
+# (standard error 11%), and once every 0.4 s at most 11% (6.5%), though with them free (no time on the simulator's
+# clock) it made 2% more (6.7%, 16 seeds of 10 minutes); held so, 0.1% less (9.1%), and on the first map 1.3% more
+# (1.8%, preset game, 60 seeds). Her memory then holds 0.62 of the monsters on screen off her band there (0.70 with a
+# slice on every look, 0.42 with none: README, Her memory of the monsters).
+SWEEP_LOCK_S = 0.05
+SWEEP_HP = 0.1
 
 
 class Hunter:
@@ -74,15 +91,19 @@ class Hunter:
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
                  low_hp: float = 0.35, potion_hp: float = 0.5, skill: bool = False, feed=None,
-                 her: danger.Her | None = None):
+                 her: danger.Her | None = None, sweep: bool = False):
         """`feed`: a continuous feed for her looks and glances (localization.feed), told of her throws. `her`: her HP and
-        level, what a touch is measured against (attack.danger; config.toml [character] by default)."""
+        level, what a touch is measured against (attack.danger; config.toml [character] by default). `sweep`: her looks
+        at the band around her also search a slice of the rest of the screen in turn (Senses.sweep), where it costs her
+        nothing (`hold_sweep`)."""
         self.model, self.log = model, log
         c = physics.CHARACTER
         self.danger = danger.of_map(model, her or danger.Her(c.hp, c.level))  # where touches would cost her
         self.low_hp, self.potion_hp = low_hp, potion_hp
-        self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
+        self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed, sweep=sweep)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
+        self.senses.sweep_hold = self.hold_sweep
+        self._halves = fight.body_sizes(model)[1]  # each kind's half width (game data), for `pressed`
         self.actions = Actions(keys, skill)
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
         if note := drops.unknown_note(model):  # its monsters whose drops aren't known, said once
@@ -110,6 +131,9 @@ class Hunter:
         self.drops = DropStore(self.worth)
         self.ledger = Ledger(self, self.drops)
         self.wounds = Wounds(self.ledger)
+        # The monsters she has seen anywhere, kept across looks (localization.memory), her kills (the ledger's) marking
+        # the ones they were: after the ledger, so a look's kills are in it.
+        self.memory = Memory(model, kills=lambda: self.ledger.kills)
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
         self.facing_seen = Reading(None, why="no look")  # which way the last look's frame showed her facing
         # Her facing off the frames: looks, told or not (and why), what her keys made of each (Actions.saw), and those
@@ -117,8 +141,8 @@ class Hunter:
         self.heading_counts: Counter[str] = Counter()
         self._shots = len(list(paths.HEADING_SHOTS.glob("*.png"))) if paths.HEADING_SHOTS.exists() else 0
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
-                                  self.drops.on_look, self.wounds.on_look]
-        self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw]
+                                  self.drops.on_look, self.wounds.on_look, self.memory.on_look]
+        self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw]
         if feed is not None:  # whose kills are whose (localization.tracking)
             self.actions.throw_listeners.append(feed.throw)
 
@@ -143,6 +167,20 @@ class Hunter:
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
                          potions=self.drink_if_low, escort=fight.FightOnTheWay(self) if fighting else None,
                          rng=rng)
+
+    def hold_sweep(self, s: Scene) -> bool:
+        """Whether the sweep holds its slice back in look `s` (SWEEP_LOCK_S): she's pressed, or a monster is in her band
+        and her attack's lock is over, or nearly."""
+        return self.pressed(s) or (bool(s.monsters) and self.actions.lock_until - time.monotonic() < SWEEP_LOCK_S)
+
+    def pressed(self, s: Scene) -> bool:
+        """Whether she's pressed in look `s`: a monster on her platform within the claw's swipe (stance.close_to), or
+        her HP within SWEEP_HP of `low_hp`."""
+        if s.hp < self.low_hp + SWEEP_HP:
+            return True
+        if s.where is None or s.platform is None:
+            return False
+        return any(m.platform == s.platform.id and close_to(m, s.where.x, self._halves) for m in s.monsters)
 
     def knocked(self, s: Scene) -> bool:
         """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it)

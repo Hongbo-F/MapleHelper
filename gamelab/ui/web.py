@@ -43,7 +43,7 @@ import cv2
 
 from ..attack import reach
 from ..attack.reach import SHOT_DOWN, SHOT_H, SHOT_UP, STAR_REACH, shot_dx
-from .render import JUMP_ARC, KIND, PLAYERS, REACH_ALPHA, STYLE, MapView
+from .render import JUMP_ARC, KIND, PLAYERS, REACH_ALPHA, REMEMBER_FADE_S, REMEMBER_FAINT, STYLE, MapView
 from .state import LATEST, TRAIL, State
 
 POLL_S = 0.025          # how often the telemetry is read: on average a record waits half of it (at 0.1 s,
@@ -352,6 +352,7 @@ def map_payload(view: MapView) -> dict:
         "stops": [[[w.x1, min(w.y1, w.y2), max(w.y1, w.y2), reach.faces(w)] for w in p.walls]
                   if reach.WALLS_BLOCK else [] for p in m.platforms],
         "jump_arc": JUMP_ARC, "zoom": ZOOM, "around": AROUND,
+        "remember": {"fade_s": REMEMBER_FADE_S, "faint": REMEMBER_FAINT},  # (_monsters_remembered)
     }
 
 
@@ -709,7 +710,7 @@ const $ = id => document.getElementById(id);
 
 function blank() {
   return {t: 0, map: null, session: {}, scene: null, route: null, chain: null, monsters: null, stance: null,
-          drops: null, tour: null, hunt: null, trail: [], logs: []};
+          drops: null, tour: null, hunt: null, memory: null, trail: [], logs: []};
 }
 let S = blank(), status = {};
 let rev = 0;                                  // goes up with every change to the map's state: drawn again
@@ -1006,10 +1007,30 @@ function draw(v, her, at, when) {
     }
     ctx.globalAlpha = 1;
   }
-  // the monsters in the last look, those aimed at ringed (_monsters_seen), and the drops seen (_loot)
+  // the monsters she remembers, faded with their age (_monsters_remembered), as of where she's drawn
+  const mem = S.memory, R = M.remember;
+  if (mem && R) {
+    const later = Math.max(0, (when == null ? S.t : when) - (mem.t == null ? S.t : mem.t));
+    for (const e of mem.list || []) {
+      const p = P(e.x, e.y - 12);
+      if ((e.state || "seen") !== "seen") {
+        const c = e.state === "killed" ? C.danger : C.dim;
+        stroke(c, 1, () => { ctx.moveTo(p[0] - 5 * u, p[1] - 5 * u); ctx.lineTo(p[0] + 5 * u, p[1] + 5 * u);
+                             ctx.moveTo(p[0] - 5 * u, p[1] + 5 * u); ctx.lineTo(p[0] + 5 * u, p[1] - 5 * u); });
+        continue;
+      }
+      ctx.globalAlpha = Math.max(R.faint, 1 - Math.max(0, (e.age || 0) + later) / R.fade_s);
+      if (e.misses) ctx.setLineDash([4 * u, 3.3 * u]);   // broken: looks covering its place have missed it
+      circle(p, 7, M.kind[e.kind] || C.text, 1);
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+  }
+  // the monsters in the last look (and its slice of the sweep), those aimed at ringed (_monsters_seen), and the drops
+  // seen (_loot)
   const aimed = new Set(((S.stance || {}).aimed || []).map(a => Math.round(a.x) + "," + Math.round(a.y)));
   const scene = S.scene || {};
-  for (const mo of scene.monsters || []) {
+  for (const mo of [...(scene.monsters || []), ...(scene.swept || [])]) {
     const p = P(mo.x, mo.y - 12);
     circle(p, 4, M.kind[mo.kind] || C.text, -1);
     if (aimed.has(Math.round(mo.x) + "," + Math.round(mo.y))) circle(p, 8, C.danger, 1);

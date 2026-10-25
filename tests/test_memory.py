@@ -224,3 +224,22 @@ def test_the_memory_takes_every_look_and_replays_from_the_records_as_it_ran():
     last = [r for r in again if r["topic"] == "memory"][-1]
     assert last["t"] == s.t and last["list"] == live.record(s.t)["list"]
     assert [e["state"] for e in last["list"]] == ["seen", "seen"] and last["list"][0]["misses"] > 0  # B's: missed
+
+
+def test_the_hunter_lets_the_sweep_search_only_where_it_costs_her_nothing(monkeypatch):
+    from gamelab.behavior import hunter
+    from gamelab.behavior.hunter import Hunter
+    clock = [100.0]
+    monkeypatch.setattr(hunter.time, "monotonic", lambda: clock[0])
+    h = object.__new__(Hunter)
+    h.low_hp, h._halves = 0.3, {"pig": 34.0}
+    h.actions = SimpleNamespace(lock_until=0.0)
+    here = SimpleNamespace(id=A)
+    look = lambda monsters, hp=1.0: SimpleNamespace(hp=hp, where=SimpleNamespace(x=1000.0, y=500.0), platform=here,
+                                                    monsters=monsters)
+    assert not h.hold_sweep(look([]))                      # nothing in her band: nothing to react to
+    assert h.hold_sweep(look([mon(1300, A)]))              # one in her band, and her next attack due now
+    h.actions.lock_until = clock[0] + 0.3                  # ... while she waits for her attack's lock: free
+    assert not h.hold_sweep(look([mon(1300, A)]))
+    assert h.hold_sweep(look([mon(1080, A)]))              # close quarters: never
+    assert h.hold_sweep(look([], hp=0.35))                 # nor with her HP near --low-hp

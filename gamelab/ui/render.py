@@ -36,7 +36,12 @@ MOB_HP = (90, 230, 90)
 HP_BAR, MP_BAR = (230, 70, 70), (80, 130, 255)
 BAR_BACK = (50, 55, 70)      # empty bars, and the line above the text panel
 KIND = {"pig": (255, 150, 170), "slime": (110, 235, 110), "snail": (130, 170, 255),
-        "orange-mushroom": (255, 150, 40)}
+        "orange-mushroom": (255, 150, 40), "horny-mushroom": (210, 130, 255), "green-mushroom": (80, 205, 175)}
+# The monsters she remembers (the 'memory' topic, localization.memory): a ring of the kind's colour around where each
+# was seen last, fading with its age to REMEMBER_FAINT of its colour over REMEMBER_FADE_S, broken once looks covering
+# its place have missed it; a cross where one was killed (red) or forgotten (dim), while the memory keeps it.
+REMEMBER_FADE_S = 20.0
+REMEMBER_FAINT = 0.25
 COVER_TAKEN = (90, 230, 90)     # coverage_picture: a move taken (thicker the more often)
 COVER_PLANNED = (240, 200, 60)  # ... planned, never taken
 COVER_NEVER = (200, 70, 70)     # ... never planned
@@ -110,7 +115,8 @@ class MapView:
         her = state.her()
         if her is not None:
             self._reach(img, her)
-        self._monsters_seen(img, scene.get("monsters") or [], state.stance)
+        self._monsters_remembered(img, state.memory, state.t)
+        self._monsters_seen(img, [*(scene.get("monsters") or []), *(scene.get("swept") or [])], state.stance)
         self._loot(img, scene.get("loot") or [])
         self._players(img, scene.get("players") or [])
         self._trail(img, state.trail)
@@ -247,6 +253,27 @@ class MapView:
                 cv2.circle(img, (x, y), 8, DANGER, 1, cv2.LINE_AA)
             if t.get("bar") is not None:
                 cv2.line(img, (x - 6, y - 7), (x - 6 + int(12 * t["bar"]), y - 7), MOB_HP, 2)
+
+    def _monsters_remembered(self, img, memory: dict | None, now: float) -> None:
+        """The monsters she remembers (the 'memory' record): a ring where each was seen last, its kind's colour faded
+        with its age (REMEMBER_FADE_S, counted on to `now`), broken once looks covering its place have missed it; a
+        cross for one killed (red) or forgotten (dim)."""
+        if not memory:
+            return
+        later = max(0.0, now - memory.get("t", now))
+        for e in memory.get("list") or []:
+            x, y = self.pt(e["x"], e["y"] - 12)
+            if e.get("state", "seen") != "seen":
+                colour = DANGER if e["state"] == "killed" else DIM
+                cv2.line(img, (x - 5, y - 5), (x + 5, y + 5), colour, 1, cv2.LINE_AA)
+                cv2.line(img, (x - 5, y + 5), (x + 5, y - 5), colour, 1, cv2.LINE_AA)
+                continue
+            colour = faded(KIND.get(e["kind"], TEXT), remembered_alpha(e.get("age", 0.0) + later))
+            if e.get("misses"):
+                for a in range(0, 360, 60):  # broken: looks covering its place have missed it
+                    cv2.ellipse(img, (x, y), (7, 7), 0, a, a + 35, colour, 1, cv2.LINE_AA)
+            else:
+                cv2.circle(img, (x, y), 7, colour, 1, cv2.LINE_AA)
 
     def _players(self, img, players: list) -> None:
         """Other players where their minimap dots put them: a dot of their kind's colour, ringed dark."""
@@ -385,6 +412,17 @@ class MapView:
         for text in list(state.logs)[-max(0, (self.size[1] - line) // 15):]:
             cv2.putText(img, text[:110], (10, line), FONT, 0.36, DIM, 1, cv2.LINE_AA)
             line += 15
+
+
+def remembered_alpha(age: float) -> float:
+    """How strongly a monster remembered `age` s ago is drawn: 1 when just seen, down to REMEMBER_FAINT at
+    REMEMBER_FADE_S and after."""
+    return max(REMEMBER_FAINT, 1.0 - max(0.0, age) / REMEMBER_FADE_S)
+
+
+def faded(colour: tuple[int, int, int], alpha: float) -> tuple[int, int, int]:
+    """`colour` that much of the way from the map's background."""
+    return tuple(int(round(b + (c - b) * alpha)) for c, b in zip(colour, BACKGROUND))
 
 
 def coverage_picture(model: MapModel, rows, width: int = 1600, title: str = "") -> np.ndarray:
