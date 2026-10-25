@@ -1191,7 +1191,8 @@ class Navigator:
             return None
         tracks, ids, seen = [], [], state.t - running.start
         for tr in state.tracks:
-            if tr.state not in (LIVE, HIDDEN) or tr.platform is None or state.t - tr.last_seen > REACT_AGAIN_S                     or now - self._reacted.get(tr.id, -1e18) < REACT_AGAIN_S:
+            if tr.state not in (LIVE, HIDDEN) or tr.platform is None or state.t - tr.last_seen > REACT_AGAIN_S \
+                    or now - self._reacted.get(tr.id, -1e18) < REACT_AGAIN_S:
                 continue
             if (self.fight and not self.escort.threat(tr.kind)) or self._known(tr, running.known, seen):
                 continue
@@ -1218,7 +1219,8 @@ class Navigator:
             for sp in leg.spans:
                 if sp.t0 <= t <= sp.t1:
                     p, x, go = self.model.platform(sp.platform), sp.x_at(t), sp.x1 - sp.x0
-                    return (x + REACT_ROOM <= p.right) if go > 0 else (x - REACT_ROOM >= p.left) if go < 0                         else p.left <= x <= p.right
+                    return (x + REACT_ROOM <= p.right) if go > 0 else (x - REACT_ROOM >= p.left) if go < 0 \
+                        else p.left <= x <= p.right
         return False
 
     def _known(self, tr, known: tuple, t: float) -> bool:

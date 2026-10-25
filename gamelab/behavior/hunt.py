@@ -528,7 +528,8 @@ class Hunt:
             self.obj.detours += 1
             self.log(f"  {_contents(pile)} on platform {pile.platform} at x {pile.x:.0f}: on the way ({extra:+.1f} s)")
             return self._go_for(pile, "on the way", s)
-        if self.obj.kind != "pile" and self._exit_piles is None and (pile := self._urgent_pile(s)) is not None                 and self._loot_first(s, pile, targets):
+        if self.obj.kind != "pile" and self._exit_piles is None and (pile := self._urgent_pile(s)) is not None \
+                and self._loot_first(s, pile, targets):
             return self._go_for(pile, "urgent pile", s)
         return self._travel(self._rule if self._rule in ("advance", "loot elsewhere", "urgent pile", "on the way",
                                                          "high ground", "back to spot", "better spot", "lull loot")
@@ -1370,7 +1371,8 @@ class Hunt:
             return True
         if self._detour(s) is not None:
             return True
-        return o is not None and o.kind != "pile" and self._exit_piles is None             and (pile := self._urgent_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False)
+        return o is not None and o.kind != "pile" and self._exit_piles is None \
+            and (pile := self._urgent_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False)
 
     def _arrived(self, o: Objective) -> None:
         if o.kind == "spot":

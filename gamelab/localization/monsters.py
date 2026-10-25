@@ -279,7 +279,8 @@ class Tracker:
         was, in the time of the plan they're for."""
         when, tracks = self.last
         # The last look's tracks, each with how far it can have walked since, if it was seen walking (WALK_MATCH).
-        before = [(mo, mo.facing * mo.speed * (t - when) if WALK_MATCH else 0.0) for mo in tracks]             if t - when < MATCH_WITHIN else []
+        before = [(mo, mo.facing * mo.speed * (t - when) if WALK_MATCH else 0.0) for mo in tracks] \
+            if t - when < MATCH_WITHIN else []
         out = []
         for m in monsters:
             if m.platform is None:
