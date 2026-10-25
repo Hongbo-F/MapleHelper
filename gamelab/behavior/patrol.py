@@ -7,8 +7,13 @@ The map, once (Patrol):
 - points: every spawn point of a kind she hunts (Point: its platform, x, kind and the kind's EXP, game data);
 - stops (Stop): on each platform from which she can get at spawn points, the x that reaches the most of their EXP: her
   own platform's she walks up to (all of each), another's as much of it as a star reaches from there (attack.spots.
-  coverage, about +-60 units up and down: reach.SHOT_UP, SHOT_DOWN). A stop is where a leg of the loop ends; what comes
-  into reach on the way she shoots in passing (behavior.hunt, rule 4);
+  coverage, about +-60 units up and down: reach.SHOT_UP, SHOT_DOWN), less what touches there would cost her while she
+  shoots it (the danger hook, below: STOP_DANGER), so of places reaching as much the safest, not the middle. On Tree
+  Dungeon, with the positioning model's danger, 3 of its 26 stops move that way (11, 18 and 22, by 20-77 units, to
+  places 0.003-0.014 safer); 23's stays at x 8, between its two Horny Mushroom points (0.29; 0.15 at -147), for the
+  Green Mushroom point on 24 a star reaches from there. A stop is where a leg of the loop ends; what comes into reach on
+  the way she shoots in passing (behavior.hunt, rule 4); waiting there, she waits at the safest place along it that
+  keeps its spawn points in reach (the hunt loop's rule 9: hunt._wait_place);
 - the route times between stops (motion.route.Planner.arrive: on Tree Dungeon up the tower is slow, 24 to 6 21 s by its
   ropes, down quick, 6 to 24 8 s).
 
@@ -49,11 +54,12 @@ reach since (`left_at`: she'd been there to see it); a point her memory has none
 from the stop.
 
 The danger hook (`Patrol.danger(platform, x)`): how badly she can be touched fighting at a place, in the positioning
-model's unit (attack.danger.Danger.at, branch work/positioning: the share of her HP touches would take there, each
-monster or spawn point weighed by how soon it gets to her), which plugs in as it is; she loses DANGER_HP_S of her HP a
-second for each unit of it. By default (default_danger), 0 where no monster can touch her (MapModel.safe), else the
-touch shares (touch_shares: the game data's touch damage over her HP) of the platform's spawn points of kinds whose touch
-takes DANGER_MIN of her HP or more: by no kind's name. What she loses there is learned as she goes (`hp_rate`: the hook
+model's unit (attack.danger.Danger.at: the share of her HP touches would take there, each monster or spawn point weighed
+by how soon it gets to her), which grinding plugs in (behavior.grind: the hunter's, Hunter.danger); she loses
+DANGER_HP_S of her HP a second for each unit of it. By default (default_danger), 0 where no monster can touch her
+(MapModel.safe), else the
+touch shares (touch_shares: the positioning model's, from the game data's touch damage at her level, over her HP) of the
+platform's spawn points of kinds whose touch takes DANGER_MIN of her HP or more: by no kind's name. What she loses there is learned as she goes (`hp_rate`: the hook
 as a prior, HP_PRIOR_S, and the HP she's seen go there).
 
 The numbers marked "guess" are starting values for the simulator's A/B runs; the rest say where they were measured, or
@@ -66,12 +72,14 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 
+from ..attack import danger as danger_model
 from ..attack import reach, spots
 from ..attack.reach import EDGE_MARGIN, SHOT_DOWN, SHOT_UP
 from ..localization.mapdata import SPAWN_REACH, MapModel
 from ..localization.memory import MEMORY_S, SURE
 from ..localization.monsters import Monster
 from ..localization.players import Player, near_rival
+from ..motion import physics
 from ..motion.physics import WALK_SPEED
 from ..perception.kinds import kind_of
 
@@ -113,18 +121,19 @@ TAKE_N = 4.0           # guess
 TAKE_KEEP_S = 10.0     # guess (the crowding study's Green Mushrooms went within about 4 s)
 # The danger hook (see the top): the share of her HP a second she loses fighting at a place, for each unit of its danger.
 # Live, hunting 23 (two Horny Mushroom points) on 2026-10-24 she lost 0.28-0.31 bars of HP a minute, 0.005 a second,
-# where the positioning model's Danger.at at 23's stop is 0.285: 0.0175. The default's danger there is 0.33 (two Horny
-# Mushroom points, 0.164 each): 0.0058 a second.
+# where the positioning model's Danger.at at 23's stop is 0.285: 0.0175. The default's danger there is 0.32 (two Horny
+# Mushroom points, 0.161 each): 0.0056 a second.
 DANGER_HP_S = 0.0175
-# The default (default_danger): a kind counts when a touch by it takes this share of her HP or more (the positioning
-# model's DANGER_MIN: her pet drinks a potion under 45%; on Tree Dungeon a Horny Mushroom takes 15-18% of her 752 HP, a
-# Green Mushroom about 7%, a Slime under 2%; on the first map no kind counts) ...
-DANGER_MIN = 0.05
-# ... a touch taking TOUCH_PER_PAD HP for each point of its kind's touch damage (PADamage, game data): live on Tree
-# Dungeon on 2026-10-24 a Horny Mushroom's 110 took 113-134 HP a touch (123.5 on average), the README's ...
-TOUCH_PER_PAD = 1.12
-HER_HP = 752.0         # ... of her HP: at level 24 (config.toml has none; the positioning model's attack.danger.Her)
+# The default (default_danger): a kind counts when a touch by it takes this share of her HP or more, the positioning
+# model's (attack.danger.DANGER_MIN: on Tree Dungeon a Horny Mushroom takes 16.1% of her 752 HP at level 24, a Green
+# Mushroom 7.2%, a Slime 1.2%; on the first map no kind counts).
+DANGER_MIN = danger_model.DANGER_MIN
 HP_PRICE = 100.0       # guess: what a bar of her HP costs her, in EXP (her pet's potions, and the risk)
+# A stop's place along its platform (stops_of) weighs the EXP it reaches against what touches there cost while she
+# shoots it: KILL_S_PER_EXP s a point of EXP, DANGER_HP_S of her HP a second a unit of danger, HP_PRICE EXP a bar of HP,
+# so 0.149 of its EXP a unit of danger (by the guesses those are). With the default hook, the same all along a platform,
+# it changes no stop.
+STOP_DANGER = KILL_S_PER_EXP * DANGER_HP_S * HP_PRICE
 # ... and blended with the HP she has seen go on each platform (Patrol.learn_hp: the drops of her HP bar between looks
 # there), the hook counting as HP_PRIOR_S s there: in the simulator's crowd on Tree Dungeon she lost 1.3-1.4 bars a
 # minute alive whatever she did (20 bars a run, her 60 potions), live 0.28-0.33.
@@ -210,9 +219,10 @@ def points_of(model: MapModel, kinds: set[str] | None, exp: dict[str, float]) ->
     return out
 
 
-def stops_of(model: MapModel, points: list[Point]) -> list[Stop]:
+def stops_of(model: MapModel, points: list[Point], danger: Callable[[int, float], float] | None = None) -> list[Stop]:
     """A stop on each platform from which she gets at points: the x (every STAND_STEP, EDGE_MARGIN from its ends) that
-    reaches the most EXP, the nearest its middle of those; her own platform's points count whole wherever she stands."""
+    reaches the most EXP, less STOP_DANGER of it a unit of the `danger` hook's there (None: none), the nearest its
+    middle of those; her own platform's points count whole wherever she stands."""
     out = []
     for p in model.places:
         lo, hi = p.left + EDGE_MARGIN, p.right - EDGE_MARGIN
@@ -232,6 +242,8 @@ def stops_of(model: MapModel, points: list[Point]) -> list[Stop]:
                 if kept[key] > 0:
                     cov.append((q.id, round(kept[key], 3)))
             value = sum(points[i].exp * c for i, c in cov)
+            if value > 0 and danger is not None:
+                value *= max(0.0, 1.0 - STOP_DANGER * danger(p.id, x))
             if value > 0 and (best is None or (round(value, 6), -abs(x - mid)) > best[:2]):
                 best = (round(value, 6), -abs(x - mid), x, tuple(cov))
         if best is not None:
@@ -291,22 +303,14 @@ def refill_mean(n: int = 1, scale: float = 1.0) -> float:
     return (REFILL_D0 + max(1, n) * REFILL_TAU) * scale
 
 
-def touch_shares(model: MapModel, hp: float = HER_HP) -> dict[str, float]:
-    """Kind -> the share of her HP (`hp`) a touch by it takes: TOUCH_PER_PAD x its touch damage (PADamage, read from
-    the game data as mapdata reads a monster's EXP). {} without the game data copy: no danger by default."""
-    ids = {s.mob_id: kind_of(s.name or str(s.mob_id)) for s in model.spawns}
-    try:
-        pads = _pads(tuple(sorted(ids)))
-    except (OSError, KeyError, ValueError, ImportError):
-        return {}
-    return {ids[i]: TOUCH_PER_PAD * pad / hp for i, pad in pads.items() if pad > 0}
-
-
-@lru_cache(maxsize=None)
-def _pads(ids: tuple[int, ...]) -> dict[int, float]:
-    from gamedata.canvas import _mob_pack
-    pack = _mob_pack()
-    return {i: float((pack.image(f"Mob/{i:07d}.img").get("info") or {}).get("PADamage") or 0) for i in ids}
+def touch_shares(model: MapModel, her: danger_model.Her | None = None) -> dict[str, float]:
+    """Kind -> the share of her HP a touch by it takes, as the positioning model has it (attack.danger.Danger.share:
+    the map's touch damage, MapModel.mob_damage, by meowdb's formula at her level, over her HP; 0 under DANGER_MIN), for
+    `her` (None: config.toml [character], as Hunter.danger's). {} on a map whose touch damage wasn't read: no danger."""
+    if her is None:
+        c = physics.CHARACTER
+        her = danger_model.Her(c.hp, c.level)
+    return {k: t.share for k, t in danger_model.of_map(model, her).threats.items()}
 
 
 def default_danger(model: MapModel, points: list[Point], touch: dict[str, float]) -> Callable[[int, float], float]:
@@ -471,10 +475,10 @@ class Patrol:
                  danger: Callable[[int, float], float] | None = None, touch: dict[str, float] | None = None):
         self.model = model
         self.points = points_of(model, kinds, exp)
-        self.stops = stops_of(model, self.points)
+        self.danger = danger or default_danger(model, self.points, touch_shares(model) if touch is None else touch)
+        self.stops = stops_of(model, self.points, self.danger)
         self.belief = Belief(model, self.points)
         self.travel = travel
-        self.danger = danger or default_danger(model, self.points, touch_shares(model) if touch is None else touch)
         avg = [q.exp for q in self.points]
         self.avg_exp = sum(avg) / len(avg) if avg else 10.0
         self.min_exp = min(avg, default=10.0)  # the cheapest kind's EXP (PULL_MIN)

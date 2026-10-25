@@ -1,6 +1,6 @@
 """Grinding (behavior.patrol, behavior.grind): the loop it chooses against camping, the next stop
 along it and what pulls her off it, other players' areas, no flip-flopping between loops, the belief of each spawn
-point, kills in passing on another platform, and a pause while looks fail. On synthetic
+point, kills in passing on another platform, a stop's place by the danger, and a pause while looks fail. On synthetic
 maps, route times stand-ins; the pause in the simulator on Tree Dungeon (its game data)."""
 
 import math
@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from gamelab.attack import reach
 from gamelab.behavior import grind, patrol
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.grind import Grind
@@ -518,6 +519,21 @@ def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch)
     g.h.memory.update(1.5, [_sight(model, HORNY, 150, -200)], None)
     s.t, g._alt = 1.5, None
     assert g._interrupt(s) is True and g._reroute
+
+
+def test_a_stop_is_the_safest_place_that_reaches_as_much():
+    # One platform with two Horny Mushroom points (250, 350): she gets at both wherever she stands on it, so with no
+    # danger along it (the default's is the platform's) its stop is its middle; with a danger hook highest at 250 (the
+    # positioning model's shape: Danger.at), the safest place reaching as much, its far end.
+    model = _map([(0, 600, 0), (2000, 2600, 0)], [(250, 0, "h"), (350, 0, "h"), (2300, 0, "h")])
+    a = _pid(model, 300, 0)
+    flat = _patrol(model, lambda a, b: 5.0)
+    assert flat.stops[flat.stop_on(a)].x == pytest.approx(300.0, abs=patrol.STAND_STEP)
+    p = patrol.Patrol(model, {HORNY}, {HORNY: 41.0}, flat.travel,
+                      danger=lambda pid, x: 0.3 * math.exp(-abs(x - 250) / 100) if pid == a else 0.0)
+    plat = model.platform(a)
+    assert p.stops[p.stop_on(a)].x == pytest.approx(plat.right - reach.EDGE_MARGIN)
+    assert p.stops[p.stop_on(a)].cover == flat.stops[flat.stop_on(a)].cover  # (as much)
 
 
 def test_a_pause_moves_grindings_clocks_on():

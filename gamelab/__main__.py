@@ -1665,7 +1665,8 @@ def cmd_patrol(args) -> int:
     from .localization import mapdata, memory
     from .localization.players import Player
     from .motion.route import Planner
-    from .attack import reach
+    from .attack import danger, reach
+    from .motion import physics
     from .perception.kinds import kind_of
     records = telemetry.read(Path(args.file)) if args.file else []
     session = next((r for r in records if r.get("topic") == "session"), {})
@@ -1674,7 +1675,9 @@ def cmd_patrol(args) -> int:
     best = max(exp.values(), default=0)
     kinds = {k for k, e in exp.items() if e >= 0.25 * best} or None  # tour.WORTH's cut
     planner = Planner(model)
-    p = patrol.Patrol(model, kinds, exp, travel=planner.arrive)
+    c = physics.CHARACTER  # the danger hook as grinding's (Hunter.danger: config.toml [character])
+    d = danger.of_map(model, danger.Her(c.hp, c.level))
+    p = patrol.Patrol(model, kinds, exp, travel=planner.arrive, danger=lambda pid, x: d.at(pid, x))
     print(f"{model.name}: {len(p.points)} spawn points of {sorted(kinds or ())}, {len(p.stops)} stops")
     for st in p.stops:
         reached = ", ".join(f"{p.points[q].kind} on {p.points[q].platform}" + ("" if c >= 1 else f" ({c:.0%})")

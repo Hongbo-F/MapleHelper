@@ -65,7 +65,7 @@ STATE_EVERY_S = 60.0   # s between two 'grind' records 'state' (what it did so f
 class Grind(Hunt):
     """The hunt loop grinding round the map (see the top). `patrol`: its loop and belief (None: one for the map, from
     the tour's kinds worth hunting and their EXP, the navigator's route times, and for the danger hook the hunter's
-    map danger if it has one: attack.danger, branch work/positioning; else patrol's default)."""
+    map danger, the positioning model's: Hunter.danger, attack.danger; patrol's default for a hunter without one)."""
 
     def __init__(self, tour, log=print, rng=None, sweep: bool | None = None, patrol: Patrol | None = None):
         super().__init__(tour, log=log, rng=rng, sweep=sweep)
