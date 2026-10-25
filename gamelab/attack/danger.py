@@ -9,7 +9,7 @@ A monster counts by
   a pig takes 1.7% of her 642 HP, so on the first map nothing does, and every decision there is as it was;
 - whether it can get to her (`walk`): along its own platform (a monster never leaves it: localization.monsters), and
   onto another only if its kind hops (MapModel.mob_hops), off its platform within HOP_ACROSS across and HOP_UP up of
-  hers, HOP_CHANCE as likely. One walking a platform just under or over hers touches her where their bodies overlap
+  hers (from one over hers by an end: it can't drop through its own), HOP_CHANCE as likely. One walking a platform just under or over hers touches her where their bodies overlap
   (hers HER_HALF either side of her feet and HER_TALL tall, its own half its width and its top: game data), as one on
   hers does;
 - how soon (`soon`): the walk to where it would touch her, at its speed (game data), weighed exp(-t / THREAT_S): 1 for
@@ -151,11 +151,19 @@ class Danger:
                 return (0.0 if a <= mx <= b else min(abs(mx - a), abs(mx - b))), 1.0
         if not t.hops or q.id == p.id:
             return None
-        # Off its platform: from where it is nearest hers, onto hers, then along it.
+        # Off its platform: from where it is nearest hers, onto hers, then along it. Over hers it can't drop through its
+        # own platform: it leaves by an end, the one of the shorter way that gets it onto hers.
         gap = max(p.left - q.right, q.left - p.right, 0.0)
+        if gap > HOP_ACROSS:
+            return None
         eq = q.clamp(p.clamp(mx))
+        if gap == 0 and q.y_at(eq) < p.y_at(p.clamp(eq)):
+            ends = [e for e in (q.left, q.right) if abs(p.clamp(e) - e) <= HOP_ACROSS]
+            if not ends:
+                return None
+            eq = min(ends, key=lambda e: abs(mx - e) + abs(p.clamp(e) - e) + abs(x - p.clamp(e)))
         ep = p.clamp(eq)
-        if gap > HOP_ACROSS or q.y_at(eq) - p.y_at(ep) > HOP_UP:
+        if q.y_at(eq) - p.y_at(ep) > HOP_UP:
             return None
         return max(0.0, abs(mx - eq) + abs(ep - eq) + abs(x - ep) - reach), HOP_CHANCE
 

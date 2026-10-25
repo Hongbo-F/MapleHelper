@@ -12,6 +12,7 @@ Game data stays on this computer (gamedata/data, git-ignored); nothing here is c
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 from pathlib import Path
@@ -499,10 +500,14 @@ def load(map_id: int) -> MapModel:
     if len(touch) < 2:
         # Cached before touch damage and hops were kept: read with the model from the game data copy (none without
         # it), and not written to the cache: one cache can serve several checkouts of the code at once.
+        lives = {_mob_id(s) for s in _monster_lives(raw["tree"])}
         try:
-            touch = _mob_touch({_mob_id(s) for s in _monster_lives(raw["tree"])})
-        except (OSError, KeyError, ValueError):  # no copy of the game data, or no such monster in it
+            touch = _mob_touch(lives)
+        except (OSError, KeyError, ValueError) as e:  # no copy of the game data, or no such monster in it
             touch = {}
+            if lives:  # every kind then counts as no danger (attack.danger): the positioning is off, said so
+                print(f"map {map_id}: no touch damage for its monsters ({type(e).__name__}: {e}): every place counts "
+                      f"as safe (attack.danger)", file=sys.stderr)
     return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"],
                  raw["mob_bodies"], raw["mob_die_s"], raw.get("mob_speeds"), touch.get("mob_damage"),
                  touch.get("mob_hops"))

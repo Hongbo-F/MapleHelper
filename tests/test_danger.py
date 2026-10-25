@@ -86,6 +86,33 @@ def test_a_monster_that_never_leaves_its_platform_cant_come_over_one_that_hops_c
     assert Danger(far, HER).at(on(far, 600, 560), 600) == 0.0
 
 
+def test_a_kind_that_hops_from_a_platform_over_hers_leaves_it_by_an_end():
+    # Hers 0..800 at y 500; one 100 above it at 200..500, over its middle: a hopper right above her can't drop through
+    # its platform, it walks to the nearer end (here the left, 100 off) and down, then along hers to her.
+    model = build([(0, 500, 800, 500), (200, 400, 500, 400)], [("99", 300, 400)])
+    d, here, up = Danger(model, HER), on(model, 400, 500), on(model, 300, 400)
+    walk = (300 - 200) + (300 - 200) - REACH
+    assert d.of("hopper", model.platform(up), 300, model.platform(here), 300) == pytest.approx(
+        HOP_CHANCE * d.share("hopper") * soon(walk / 100))
+    assert d.at(here, 300) < HOP_CHANCE * d.share("hopper")  # not as if it dropped onto her
+    # From one wider than hers by more than a hop on each side it never gets down onto hers.
+    wide = build([(300, 500, 500, 500), (0, 400, 800, 400)], [("99", 400, 400)])
+    assert Danger(wide, HER).at(on(wide, 400, 500), 400) == 0.0
+
+
+def test_a_map_whose_touch_damage_cant_be_read_says_so(monkeypatch, capsys):
+    from gamelab.sim import scenarios
+    if not scenarios.available(10002073):
+        pytest.skip("needs Tree Dungeon's game data (gamedata/data)")
+
+    def broken(ids):
+        raise OSError("no game data copy")
+    monkeypatch.setattr(mapdata, "_mob_touch", broken)
+    model = mapdata.load(10002073)
+    assert not model.mob_damage and not Danger(model, HER).any
+    assert "map 10002073: no touch damage" in capsys.readouterr().err
+
+
 def test_one_walking_a_platform_just_under_or_over_hers_touches_her_where_they_overlap():
     # Her platform 300..700 at y 500; one 30 below it at 600..1000 (its monster's top, 51, reaches into her), one
     # 70 above at 0..400 (beyond her height, HER_TALL: it walks over her head).
