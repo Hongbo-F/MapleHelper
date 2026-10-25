@@ -17,7 +17,7 @@ from PIL import Image
 
 from maplehelper.engine import LEFT, RIGHT
 
-from gamelab import paths
+from gamelab import paths, telemetry
 from gamelab.control import actions as actions_mod
 from gamelab.control.actions import HEADING_SETTLE_S, LEARN_AFTER_S, Actions
 from gamelab.perception import heading
@@ -411,13 +411,18 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
     """Turned away from the Horny Mushroom twice while she shoots it (Noise.turned: her player's own arrow, say): the
     next look's frame tells, so the throw after it taps back first, and only the two throws decided before each turn
     (it came while they waited out her attack lock) go the wrong way; the second turn, against her last arrow, is
-    logged. With eyes that can't read her picture, her keys think she faces it: every star after the turn goes the
-    wrong way (and the mushroom walks into her)."""
+    logged, and her scenes carry the heading, who it's by and the frame's reading. With eyes that can't read her
+    picture, her keys think she faces it: every star after the turn goes the wrong way (and the mushroom walks into
+    her)."""
     turned = Noise(turned=((1.5, LEFT), (4.0, LEFT)))
-    out, trace = _kill_on_23(turned)
+    with telemetry.captured() as records:
+        out, trace = _kill_on_23(turned)
     assert out["ended"] == "killed" and out["throws"] >= 8 and out["wrong way"] == 2, out
     assert out["counts"]["against"] == 1
     assert any("the frame shows her facing left, her last arrow right" in line for line in trace["log"])
+    hers = [r["her"] for r in records if r["topic"] == "scene" and r.get("her")]
+    assert hers and {"facing", "facing_by", "facing_keys", "facing_seen", "facing_strong"} <= set(hers[0])
+    assert any(h["facing_by"] == "frame" and h["facing_seen"] == LEFT and h["facing_strong"] for h in hers)
     blind, _ = _kill_on_23(turned, read=False)
     assert blind["wrong way"] >= 4, blind
 
@@ -521,9 +526,9 @@ def test_the_fake_eyes_see_the_worlds_facing_but_not_on_a_rope_nor_on_frames_tha
 
 def test_watch_says_each_change_of_her_facing_and_publishes_it_with_the_scenes(monkeypatch, tmp_path):
     """`watch --heading` reads her facing off every frame (the runner's eyes, Eyes.heading), says each change (not
-    every frame), counts how many frames told it, and puts it on the scenes (her `facing_seen`); it presses
-    nothing."""
-    from gamelab import __main__ as cli, telemetry
+    every frame), counts how many frames told it, and puts it on the scenes (her `facing_seen`, and whether strongly:
+    `facing_strong`); it presses nothing."""
+    from gamelab import __main__ as cli
     from gamelab.localization import feed, worldstate
     from gamelab.localization.senses import Senses
     from gamelab.localization.worldstate import WorldStep
@@ -553,5 +558,6 @@ def test_watch_says_each_change_of_her_facing_and_publishes_it_with_the_scenes(m
     assert said == ["her frame: faces right (matched 0.60, 0.40 ahead)",
                     "her frame: faces left (matched 0.60, 0.40 ahead)"]
     (path,) = tmp_path.glob("*-watch.jsonl")
-    seen = [r["her"]["facing_seen"] for r in telemetry.read(path) if r["topic"] == "scene" and r["her"]]
-    assert seen[0] == RIGHT and seen[-1] == LEFT
+    hers = [r["her"] for r in telemetry.read(path) if r["topic"] == "scene" and r["her"]]
+    assert hers[0]["facing_seen"] == RIGHT and hers[-1]["facing_seen"] == LEFT
+    assert all(h["facing_strong"] for h in hers)  # (0.6, 0.4 ahead: strong, Reading.strong)

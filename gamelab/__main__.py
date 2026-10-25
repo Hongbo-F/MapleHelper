@@ -1420,7 +1420,7 @@ def cmd_watch(args) -> int:
                 s.loot, s.looked = w["loot"], w["looked"]  # as of the last frame searched for drops (LOOT_EVERY_S)
                 record = s.record()
                 if seen is not None and record["her"] is not None:
-                    record["her"]["facing_seen"] = seen.side
+                    record["her"].update(facing_seen=seen.side, facing_strong=seen.strong)
                 telemetry.emit("scene", **record)
             if now - w["tracks"] >= WATCH_TRACKS_S:
                 w["tracks"] = now

@@ -339,9 +339,10 @@ class Hunter:
         if telemetry.recording():
             record = s.record()
             if record["her"] is not None:  # which way she faces as best known (keys or frame: facing_by), by her keys
-                a = self.actions             # alone, and by the frame alone
+                a = self.actions             # alone, and by the frame alone (and whether strongly: only a strong
+                # frame takes a throw's tap away, Actions.faces)
                 record["her"].update(facing=a.heading, facing_by=a.facing_by, facing_keys=a.facing,
-                                     facing_seen=self.facing_seen.side)
+                                     facing_seen=self.facing_seen.side, facing_strong=self.facing_seen.strong)
             telemetry.emit("scene", **record)
             telemetry.emit("drops", inventory_full=self.looter.inventory_full, pending=[
                 {"x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform, "mesos": d.mesos}
