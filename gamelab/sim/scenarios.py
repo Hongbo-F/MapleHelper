@@ -2019,13 +2019,16 @@ def nav_tree_down(sim):
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
                ends("standing by on a safe platform", key="stop"),
-               check("a thousand EXP or more", lambda tr: tr["world"]["exp"] >= 1000)))
+               check("a thousand EXP or more", lambda tr: tr["world"]["exp"] >= 1000),
+               check("not up the tower among the Horny Mushrooms (19, 7, 10)",
+                     lambda tr: not set(tr["result"]["grounds"]) & {7, 10, 19})))
 def loop_tree_run(sim):
     """`python -m gamelab tour --loop --minutes 5 --map 10002073` from her spot by the portal on 28, with every spawn
     filled and nobody else, then standing by on a safe platform (25-27). A ground's EXP counts less the more dangerous
     the place she'd hunt it from (hunt.GROUND_DANGER): the floor (33: a Green Mushroom, 7% of her HP a touch, and two
-    Slimes, 1%) is the safest that pays, and she hunts it the whole 5 minutes, 59 kills and 1,274 EXP; before the
-    danger she went up the tower to 23, 19, 7 and 15 for 59 kills and 1,117 EXP, most of them on the floor on her way.
+    Slimes, 1%) is the safest that pays, and she hunts it the whole 5 minutes, 61 kills and 1,311 EXP; with every
+    ground's EXP counted whole she went up the tower to 23, 19, 7 and 19 for 1,041 (before the danger, 23, 19, 7 and
+    15 for 59 kills and 1,117 EXP, most of them on the floor on her way).
     The floor is hunted standing on it (the rules 'close quarters' and 'in passing'). (Seed 4: in this world her own
     group's walls alone stop her, and of seeds 1-10, 4 were knocked out past the tower's walls within 5 minutes, off
     25's right end or the rope at -192; with group 0's walls stopping her none: loop_tree_walls.)"""

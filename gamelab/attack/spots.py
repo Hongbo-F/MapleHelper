@@ -41,7 +41,8 @@ NEAR_BEST = 0.7      # spots scoring at least this share of the best one's count
 X_STEP = 10          # map units between the places along a platform tried as spots
 UNREACHABLE = 1e6    # s: what a spot with no route to it costs
 # A spot's score: the share of the ground in reach from it less this times its danger (attack.danger: the share of her
-# HP its touches would take, the spawn points' monsters at their points). At 1 a place where a Horny Mushroom's touch
+# HP its touches would take, the spawn points' monsters at their points). A guess, not measured (nor swept in the
+# simulator), which says what a ground's reach is worth against HP: at 1 a place where a Horny Mushroom's touch
 # (16% of her HP) is about to come is worth 16% of a ground in reach less: on Tree Dungeon 24 at 231 (95% of 23 in
 # reach, 24's Green by her: danger 0.07, score 0.88) wins over 23's own safest place (0.15 at x -147: 0.85), and 8 at
 # 157 (all of 7 in reach, 0.17: 0.83) over 7's (0.25: 0.75).

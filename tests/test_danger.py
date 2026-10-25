@@ -284,8 +284,56 @@ def test_waiting_she_never_walks_past_a_monster_that_hits_hard_and_looks_again_a
     assert not h._in_the_way(s, 400.0, 360.0) and h._in_the_way(s, 400.0, 340.0)  # its body and hers meet at 343
 
 
+def test_waiting_she_walks_one_step_at_most_then_looks_again():
+    from gamelab.behavior.hunt import WAIT_STEP, HuntReport
+    model = build([(0, 500, 800, 500)], [("19", 300, 500), ("19", 500, 500)])
+    h, s = _waiting(model, {"horny-mushroom"})
+    walks, lines = [], []
+    h.h.actions = SimpleNamespace(walk=lambda side, units: walks.append((side, units)))
+    h.report, h._rule, h._idle_since, h._s, h.log = HuntReport(), "", None, None, lines.append
+    side, units, goal, _ = h._wait_place(s)
+    assert units > WAIT_STEP  # the place is several steps off ...
+    h._wait(s, [])
+    assert walks == [(side, WAIT_STEP)] and h.report.rules["wait"] == 1  # ... she walks one, and the next look decides
+    assert f"waiting at x {goal:.0f} instead" in lines[0]
+    s.where.x = goal + (60 if side == "left" else -60)  # 60 short of it: the rest of the way
+    h._wait(s, [])
+    assert walks[-1] == (side, 60.0)
+
+
 def test_a_ground_counts_less_of_its_exp_the_more_dangerous_its_stand():
     from gamelab.behavior import hunt
     assert hunt._safe_share(spots.Spot(1, 0.0, 1.0, False)) == 1.0
     assert hunt._safe_share(spots.Spot(1, 0.0, 1.0, False, 0.1)) == pytest.approx(1 - hunt.GROUND_DANGER * 0.1)
     assert hunt._safe_share(spots.Spot(1, 0.0, 1.0, False, 0.9)) == 0.0
+
+
+def test_of_two_grounds_as_good_she_goes_to_the_one_with_the_safer_stand(monkeypatch):
+    """_next_ground and the rate rule (_best_rate) weigh a ground's EXP a second by the danger where she'd stand to hunt
+    it (_safe_share): of two grounds giving as much, the one shot from a safe spot; and the one among Horny Mushrooms
+    only when it gives enough more."""
+    from gamelab.behavior import hunt
+    from gamelab.behavior.hunt import Hunt, HuntReport, Visit
+    values = {7: 20.0, 8: 20.0}
+    stands = {7: spots.Spot(7, 0.0, 1.0, False, 0.18), 8: spots.Spot(9, 0.0, 0.9, True, 0.0)}
+    h = object.__new__(Hunt)
+    h.tour = SimpleNamespace(ground_values=lambda: values, hunting_grounds=lambda visit_s=None: list(values) + [33],
+                             stats={})
+    h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: 10.0))
+    h.model, h.kinds, h.rng, h.log = None, None, SimpleNamespace(uniform=lambda a, b: 1.0), lambda text: None
+    h._skip, h._left, h.visit, h.stack, h.obj, h.report = {}, {}, None, [], None, HuntReport()
+    h.h = SimpleNamespace(danger=object())
+    monkeypatch.setattr(hunt.spots, "best_spot", lambda model, g, kinds, danger=None: stands.get(g, stands[8]))
+    monkeypatch.setattr(hunt.spots, "spot", lambda model, g, where, travel, kinds, danger=None: stands[g])
+    s = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=33), x=0.0), players=[])
+    h._next_ground(s)
+    assert h.visit.ground == 8  # as much EXP, from a safe spot
+    values[7] = 20.0 / hunt._safe_share(stands[7]) * 1.05  # 5% more than its danger costs: worth it
+    h.visit = None
+    h._next_ground(s)
+    assert h.visit.ground == 7
+    # The rate rule, hunting 33: the best other ground's rate counts its stand's danger the same way.
+    values[7] = 20.0
+    h.visit = Visit(33, spots.Spot(33, 0.0, 1.0, False))
+    rate, g = h._best_rate(SimpleNamespace(platform=SimpleNamespace(id=33), where=s.where, players=[]))
+    assert g == 8 and rate == pytest.approx(20.0 / (10.0 + h._visit_s(8)))

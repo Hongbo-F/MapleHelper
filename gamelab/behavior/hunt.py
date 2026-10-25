@@ -115,9 +115,11 @@ RESPAWN = 8.0
 PATIENCE = {"ground": 1.0, "spot": 2.0, "none": 0.4}  # rule 9: today's patience values
 # Rule 9: waiting, she walks to a safer place along her platform (_wait_place) only for this much less danger there
 # (attack.danger: the share of her HP touches would take; the spawn points this look's monsters don't account for may
-# fill at any moment). On Tree Dungeon's 23 at x -10, on a Horny Mushroom's spawn point with the other 105 off, it's
-# 0.27; at -147, 132 and 242 from them, 0.14. Live on 2026-10-24 she waited at x -10 +- 5 for 49 s, 37% of her waits
-# within 20 units of a spawn point, and respawns landed on her there twice (11% and 19% of her HP).
+# fill at any moment). A guess, not measured: under it the walk isn't worth its time and the throws it may cost (on
+# 24, 206 is 0.009 safer than the spot at 231: she stays). On Tree Dungeon's 23 at x -10, on a Horny Mushroom's spawn
+# point with the other 105 off, it's 0.27; at -147, 132 and 242 from them, 0.14. Live on 2026-10-24 she waited at x -10
+# +- 5 for 49 s, 37% of her waits within 20 units of a spawn point, and respawns landed on her there twice (11% and 19%
+# of her HP).
 WAIT_GAIN = 0.03
 WAIT_STEP = 100.0      # ... in steps of this many units at most (0.7 s at her 149 units/s), a look after each: the walk
                        # is blind (actions.walk), and a respawn or a monster walking in changes where's safest
