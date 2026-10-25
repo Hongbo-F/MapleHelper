@@ -258,6 +258,7 @@ def test_the_escort_keeps_her_trips_clear_of_the_kinds_whose_touch_counts():
             kinds = {kind for kind in Danger(model, her).threats}
             assert {kind for kind in kinds if escort.threat(kind)} == counted, map_id
 
+
 def test_the_escort_shoots_a_monster_on_the_way_only_where_a_star_reaches_it(monkeypatch):
     # FightOnTheWay.clear_for: one that could touch her on the chain ahead (the navigator's), shot from where she
     # stands if a star reaches it (reach.can_hit): a fight at its kind on its platform, one kill, never walking after
