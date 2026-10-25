@@ -950,6 +950,14 @@ class World:
         self.mp_potions = 0             # thrown)
         self.no_mp = 0
         self.attacks = 0                # attacks her keys made, either key
+        # Every attack the game took, as it came out (_attack): (when its key went out, s of the run; the name of the
+        # key plan that pressed it, as the stack's player was sent it; "ground" or "air" when it started; how far she
+        # was above the platform she last stood on then; the kind of the monster it picked, or None; what came of it:
+        # "kill", "hit", "swipe" (the claw's, not killing), "miss" (Noise.miss), "stopped" (its line: sight_stop) or
+        # "nothing" (no monster picked, or one dead by then); how far above her feet the pick's were, + above). What
+        # each kind of throw hit (sim.harness: `attack_kinds`).
+        self.attack_log: list[tuple] = []
+        self._key_tag = ""              # the plan of the key being taken (_handle), for attack_log
         self.pet_drank_ms = -10_000     # when her pet last drank one
         self.pet_fed = 0                # times she fed her pet (the pet food key)
         self.pet_full = PET_FULLNESS     # her pet's fullness (Her.pet) as of pet_since (pet_fullness)
@@ -1181,6 +1189,7 @@ class World:
             if e.kind == "down":
                 if action not in self.held:
                     self.held[action] = self._sent(e)
+                    self._key_tag = e.tag
                     self._pressed(action, self.held[action])
             elif (since := self.held.pop(action, None)) is not None:
                 self._released(action, self._sent(e), since)
@@ -1331,7 +1340,7 @@ class World:
             self.attack_key_at = at
             self.sitting = False
             self.attacks += 1
-            self._push(self.ms_of(at + JUMP_LAG), "aim", (self.ms, skill))  # it starts then (_aim)
+            self._push(self.ms_of(at + JUMP_LAG), "aim", (self.ms, skill, self._key_tag))  # it starts then (_aim)
         elif action == "up":
             if self._through_portal():
                 return
@@ -1719,7 +1728,7 @@ class World:
         return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
                                   body=(self.top(m), m.half))
 
-    def _aim(self, key_ms: int, skill: bool = False) -> None:
+    def _aim(self, key_ms: int, skill: bool = False, tag: str = "") -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
         lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
         seeded: reach.CLAW's), and the claw swipes the nearest monster that stance's box reaches (swiped);
@@ -1751,26 +1760,35 @@ class World:
         stop = None if target is None or swipe else self.sight_stop(target)
         if stop is not None:
             target, stop = None, (target, stop)
-        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe, stop, skill))
+        rise = self.last_plat.y_at(self.last_plat.clamp(self.x)) - self.y  # her height above where she last stood
+        picked = target if stop is None else stop[0]
+        up = None if picked is None else self.y - picked.y(picked.at(self.t))  # its feet above hers, + above
+        how = (key_ms / 1000, tag.rsplit("_", 1)[0], self.mode, round(rise, 1),
+               None if picked is None else picked.kind, None if up is None else round(up, 1))
+        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe, stop, skill, how))
 
     def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None,
-                skill: bool = False) -> None:
+                skill: bool = False, how: tuple | None = None) -> None:
         """The attack's damage, STAR_DELAY after its key: on the monster it picked when it started (_aim),
         a claw swipe or a star; none if what stops a star stopped it (`stop`: the monster picked, and the
-        foothold). `skill`: Lucky Seven's (Her.skill), its stars' damage on a swipe's pick too."""
+        foothold). `skill`: Lucky Seven's (Her.skill), its stars' damage on a swipe's pick too. `how`: what _aim
+        knew of it, for attack_log."""
         if stop is not None:
             picked, f = stop
             where = f"the wall at x {f.x1:.0f}" if f.x1 == f.x2 else f"the floor at y {f.y1:.0f}"
             self.note(f"star thrown {facing} at {picked.kind} #{picked.idx}: stopped by {where}")
+            self._logged(how, "stopped")
             return
         if m is None or not m.alive:
             self.note(f"star thrown {facing}: no hit")
+            self._logged(how, "nothing")
             return
         mx = m.at(self.t)
         dx = mx - self.x
         what = "claw swipe" if swipe else "star"
         if not swipe and self.noise.miss and self.chance("miss") < self.noise.miss:
             self.note(f"star misses {m.kind} #{m.idx} at {dx:+.0f}")
+            self._logged(how, "miss")
             return
         her = self.character
         stars = her.skill if skill else her.stars
@@ -1779,6 +1797,7 @@ class World:
         else:
             damage = stars if stars != 1.0 else CLAW if swipe else 1.0
         m.hp = round(m.hp - damage, 6)
+        self._logged(how, "swipe" if swipe and m.hp > 1e-9 else "hit" if m.hp > 1e-9 else "kill")
         if m.hp > 1e-9:
             m.hit_at = self.t
             if self._pushes(m, swipe):
@@ -1790,6 +1809,13 @@ class World:
                 self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left): not pushed")
             return
         self._kill(m, mx, what)
+
+    def _logged(self, how: tuple | None, outcome: str) -> None:
+        """An attack's outcome into attack_log (`how`: _aim's (key time, plan, ground or air, her rise, the kind picked,
+        how far above her feet it was))."""
+        if how is not None:
+            t, plan, mode, rise, kind, up = how
+            self.attack_log.append((round(t, 3), plan, mode, rise, kind, outcome, up))
 
     def _damage(self, stars: float, swipe: bool) -> float:
         """An attack's damage drawn (Her.spread), in average stars (STAR_MEAN): a claw swipe's (CLAW_DAMAGE), one star's

@@ -329,6 +329,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
                               "senses": f["senses"], "tracker": f["tracker"]}
     out["looks"] = sim.eyes.counts["looks"]
     out["turning"] = turning(trace["plans"], records, sim.world)
+    out["attack_kinds"] = attack_kinds(sim.world, records)
     out["nav"] = navigation(trace["log"], sim.model)
     out["nav"]["glances"] = sim.eyes.counts["glances"] + (
         trace["feed"]["senses"].get("glances from the feed", 0) if feed else 0)
@@ -341,11 +342,41 @@ def turning(plans: list, records: list[dict], world=None) -> dict:
     `world`'s count), and the frames that told the other way from her last arrow (telemetry events 'heading':
     behavior.hunter)."""
     throws = [p for p in plans if p[1] in ("throw", "jump_throw")]
-    turned = [p for p in throws if any(e[1] in ("left", "right") for e in p[2])]
+    turned = [p for p in throws if any(e[1] in ("left", "right") for e in p[2])
+              and not (p[1] == "jump_throw" and _forward(p[2]))]  # (a forward jump's arrow carries her: no tap)
     return {"throws": len(throws), "turned": len(turned),
             "jump_turned": sum(1 for p in turned if p[1] == "jump_throw"),
             "attacks": getattr(world, "attacks_meant", None), "wrong_way": getattr(world, "wrong_way", None),
             "against": sum(1 for r in records if r.get("topic") == "event" and r.get("kind") == "heading")}
+
+
+def _forward(events: list) -> bool:
+    """Whether a jump throw's key plan is a forward one (control.actions.Actions.jump_throw with a carry): its arrow
+    held from before its jump key until after it, not a turning tap let go before the jump."""
+    jump = min((e[0] for e in events if e[1] in ("alt", "jump") and e[2] == "down"), default=None)
+    ups = [e[0] for e in events if e[1] in ("left", "right") and e[2] == "up"]
+    return jump is not None and any(u > jump for u in ups)
+
+
+def attack_kinds(world, records: list[dict]) -> dict:
+    """What each kind of throw hit, from the world's own log of her attacks (world.World.attack_log): by the key plan
+    that pressed it (control.actions: "throw", "jump_throw", "jump_back"; a chain's, "flow"), how many and what came of
+    each ("kill", "hit", "swipe", "miss", "stopped", "nothing": `hit_nothing` the last two), those started in the air,
+    and of those the ones that picked a monster whose feet were LEVEL or more above hers then (`up`); and the jump
+    throws the stack chose, by why (its telemetry 'jump' records' `kind`: attack.stance)."""
+    out: dict = {}
+    for _, plan, mode, _, _, outcome, up in getattr(world, "attack_log", []):
+        k = out.setdefault(plan, Counter())
+        k["n"] += 1
+        k[outcome] += 1
+        k["air"] += mode == "air"
+        k["up"] += up is not None and up >= _LEVEL
+        k["hit_nothing"] += outcome in ("stopped", "nothing")
+    chosen = Counter(r.get("kind") for r in records if r.get("topic") == "jump")
+    return {"plans": {k: dict(v) for k, v in out.items()}, "chosen": dict(chosen)}
+
+
+_LEVEL = 15.0  # (attack.reach.LEVEL) a pick this far above her feet or more is off her level, above her
 
 
 def navigation(log: list[str], model) -> dict:
