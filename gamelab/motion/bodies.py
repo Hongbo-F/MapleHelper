@@ -3,7 +3,9 @@
 A monster hurts her when its body and hers overlap: none of the maps' monsters has an attack of its own, so the
 client hurts by the body. So the planner (motion.flow's danger) checks a move by her box all along the way her feet
 go, on the ground, in the air and on a rope, against each monster's box wherever it can be by then
-(localization.monsters.MonsterTrack.reach), on any platform her box passes, not only along her own.
+(localization.monsters.MonsterTrack.reach), on any platform her box passes, not only along her own. Her box here is
+the one the whole stack goes by: the danger of a place (attack.danger: who can touch her where she stands or hangs,
+how far a fight keeps a monster off), a fight's escape (attack.stance) and a wait's walk (behavior.hunt) too.
 
 Her box (HER_HALF, HER_TALL) is the v83 client's for her standing, Box(-22, -65, 22, 0) from her feet (RustMS's port of
 the decompiled client, Gameplay/MapleMap/MobAttackRules.h, `user_body`, from the client's FUN_0045183b; prone it's
@@ -11,7 +13,8 @@ the decompiled client, Gameplay/MapleMap/MobAttackRules.h, `user_body`, from the
 facing left and 64 tall, 62 jumping, 60-65 on a rope (Character.wz's body and head frames have no boxes of their own:
 D:/MapleHelper-scratch/safe-travel/char_extent.py). HeavenClient's touch test (MapMobs::find_colliding) takes her as a
 line 50 tall, from where she was a frame ago to where she is, with no width; the simulator's world has her 15 either
-side and 55 tall (sim.world.HER_HALF, HER_HEIGHT: flow.HER_HALF, which the hop was timed with in game). In game on
+side and 55 tall (sim.world.HER_HALF, HER_HEIGHT; the hop was timed in game with the 15: flow.HOP_HALF), the client's
+with `--world client-body`. In game on
 2026-10-24 the one touch with her on a rope (15:17:49, climbing 11 -> 10 on Tree Dungeon, Forest Up North II) came with
 her feet 41-58 under platform 10's surface by her minimap dot (16 units a pixel), the monster unseen: her body
 reaches 41 above her feet at least. Nothing logged tells 50, 55 and 65 apart (a MISS leaves no trace, and few hits had

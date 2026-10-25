@@ -146,9 +146,12 @@ REGRAB_AFTER = 0.3       # s after leaving a rope before up grabs one again
 # used before (149 out, 220 up: a 12-unit rise), by about 2 sd: weak, so False puts those back.
 ROPE_JUMP_SHOE = True
 ROPE_JUMP = ((SHOE.rope_vx * SHOE.vmax, SHOE.rope_vy * SHOE.vjump) if ROPE_JUMP_SHOE else (WALK_SPEED, 220.0))
-HER_HALF = flow.HER_HALF
+# Her body for the world's touches: 15 either side of her feet and 55 tall, as the simulator has had it (the hop was
+# timed in game with the 15: flow.HOP_HALF), or the client's (Realism.her_box, `--world client-body`): 22 either side,
+# 65 tall (motion.bodies, which the stack plans by: her trips, attack.danger).
+HER_HALF = 15.0
 HER_HEIGHT = 55.0
-HER_BOX_CLIENT = (her_body.HER_HALF, her_body.HER_TALL)  # ... or the client's (Realism.her_box): 22 either side, 65 tall
+HER_BOX_CLIENT = (her_body.HER_HALF, her_body.HER_TALL)
 # A jump key the game takes in the air does nothing. When it takes one isn't measured: the 18 jumps recorded
 # lifted off 45-95 ms after their key, and a key pressed while she was in the air (or held from before) never
 # jumped her again on landing. Taken when it acts on it (Lags.jump after the key, as the world's clock

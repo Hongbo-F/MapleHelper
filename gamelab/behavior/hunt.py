@@ -8,7 +8,7 @@ in the order listed, 6 before 3):
 
    1  close quarters   a target on her platform the claw would swipe (stance.close_to, by its size: a pig
                        within 111, a snail within 96), or nearer than its danger warrants (attack.danger: a
-                       Horny Mushroom within 162): stance's answer (jump back, jump-throw, step back)
+                       Horny Mushroom within 169): stance's answer (jump back, jump-throw, step back)
   6a  valuable pile    a pile with a drop worth VALUABLE mesos or more on its own (looting.Worth: the game
                        data's prices; on the first map a Slime Bubble, a White Potion, a gold coin; on another
                        twice its bronze coin, `valuable`) within VALUABLE_TRAVEL: at once, ahead of shooting,
@@ -70,7 +70,7 @@ from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.players import near_rival
 from ..localization.scene import Scene
-from ..motion.flow import HER_HALF
+from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
@@ -1380,7 +1380,7 @@ class Hunt:
         """Why she gets off the rope she waits on now, or None: HP to rest at (Hunter.health_check, which drinks
         meanwhile); the rope no safer than where she'd land; a monster she hunts on the ground (or in reach of where
         she lands), with none where she lands so near that a throw at it would be the claw's swipe (stance.close_to:
-        she lets it pass under her; waiting for a Horny Mushroom to walk out of its keep-off, 162, she hung for
+        she lets it pass under her; waiting for a Horny Mushroom to walk out of its keep-off, then 162, she hung for
         minutes on 31 in the simulator); nothing due back and another ground to go to; or HANG_MAX_S up there."""
         r, d, now = self._hanging, self.danger, time.monotonic()
         if (stop := self.h.health_check(s)) is not None:

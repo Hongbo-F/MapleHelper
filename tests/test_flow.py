@@ -147,13 +147,13 @@ def test_hops_over_a_monster_walking_at_her(model):
 
 
 def test_a_hop_leaves_the_ground_before_she_can_touch_it_on_the_way_up(model):
-    from gamelab.motion.flow import HER_HALF
+    from gamelab.motion.flow import HOP_HALF
     from gamelab.motion.physics import GRAVITY, JUMP_SPEED
     c = by_y(model, 500, 400)
     pig = MonsterTrack(c.id, 420, speed=70.0, half=34.0, vx=0.0, height=46.0)
     hop = Flow(model, KEYS).hop(Body(0.0, 100, c), pig, 1, Keys(KEYS))
     rise = (JUMP_SPEED - (JUMP_SPEED ** 2 - 2 * GRAVITY * 46) ** 0.5) / GRAVITY  # s to climb 46 units
-    assert 420 - hop.move.x == pytest.approx(34 + HER_HALF + WALK_SPEED * rise + 3, abs=2)
+    assert 420 - hop.move.x == pytest.approx(34 + HOP_HALF + WALK_SPEED * rise + 3, abs=2)
     assert hop.end.x > 420  # comes down past its middle: any knockback pushes her on
 
 

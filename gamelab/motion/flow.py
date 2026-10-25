@@ -110,9 +110,9 @@ PRE_ARROW = 0.1      # s before the predicted top that the next move's arrow is 
 # landed every jump. A run after a climb (held longer) still goes down early: she gets going as the
 # climb-over ends, as the plan has her.
 STEP_EARLY_MAX_MS = 250
-HER_HALF = 15        # half her body's width as the simulator's world has it (sim.world.HER_HALF) and the hop was timed
-                     # with in game (hop: 7 hops took no damage); what a monster touches her by in a plan is her box,
-                     # the client's (motion.bodies: 22 either side, 65 tall), which danger goes by
+HOP_HALF = 15        # half her width as the hop was timed with in game (hop: 7 hops took no damage), not her body:
+                     # what a monster touches her by in a plan is her box, the client's (motion.bodies: 22 either side,
+                     # 65 tall), which danger goes by, as attack.danger does
 DANGER_STEP = 0.05   # s between the moments danger checks her at (the shortest overlap of her box and a monster's:
                      # falling at the cap past one about 0.18 s, sideways at both their speeds about 0.4 s)
 APEX_T = JUMP_SPEED / GRAVITY  # s from leaving the ground to the top of a jump (0.28)
@@ -777,7 +777,7 @@ class Flow:
         closing = WALK_SPEED + max(0.0, -(mo.vx or 0.0) * d)  # how fast the gap shrinks
         disc = JUMP_SPEED ** 2 - 2 * GRAVITY * mo.height
         rise = (JUMP_SPEED - disc ** 0.5) / GRAVITY if disc > 0 else APEX_T  # s to clear its height
-        gap = mo.half + HER_HALF + closing * rise + 3   # distance to its middle at takeoff
+        gap = mo.half + HOP_HALF + closing * rise + 3   # distance to its middle at takeoff
         t = b.t
         while t < b.t + HOP_HORIZON and (mo.at(t, a) - her_x(t)) * d > gap:
             t += 0.01

@@ -14,7 +14,7 @@ from gamelab.attack.danger import HER_TALL, HOP_CHANCE, THREAT_S, Danger, Her, s
 from gamelab.localization import mapdata
 from gamelab.localization.monsters import Monster
 from gamelab.localization.pose import Where
-from gamelab.motion.flow import HER_HALF
+from gamelab.motion.bodies import HER_HALF
 from gamelab.perception.mobs import Mob
 
 HER = Her(hp=752.0, level=24.0)
@@ -229,7 +229,8 @@ def test_escaping_with_the_way_back_clear_she_jumps_back_and_throws_and_never_st
         for off in (60, 100, 140, 150):
             front = seen("horny-mushroom", 500 + off, 500, p.id)
             assert stance.stance(500, 500, p, [front], danger=d) == ("jump_back", "right"), (spawns, off)
-    # A Green Mushroom behind her: no move whose way or landing takes her into its body (its half 28 and her 15).
+    # A Green Mushroom behind her: no move whose way or landing takes her into its body (its half 28 and her 22,
+    # motion.bodies).
     model = build([(0, 500, 1000, 500)], [("19", 630, 500), ("13", 300, 500)])
     d, p = Danger(model, HER), model.platform(0)
     front = seen("horny-mushroom", 630, 500, p.id)
@@ -237,11 +238,12 @@ def test_escaping_with_the_way_back_clear_she_jumps_back_and_throws_and_never_st
         act = stance.stance(500, 500, p, [front], around=[front, seen("green-mushroom", behind_x, 500, p.id)],
                             danger=d)
         assert act[0] != "back", (behind_x, act)
-        if act[0] == "jump_back":  # 95 back: clear of it only with it 150 behind (55 > 43)
+        if act[0] == "jump_back":  # 95 back: clear of it only with it 150 behind (55 > 50)
             assert behind_x == 350
-    assert stance._into(500, 380, p, [seen("green-mushroom", 350, 500, p.id)], None)
-    assert not stance._into(500, 405, p, [seen("green-mushroom", 350, 500, p.id)], None)
-    assert not stance._into(500, 380, p, [seen("green-mushroom", 350, 500, p.id + 1)], None)  # another platform's
+    edge = 350 + stance.half_of("green-mushroom") + HER_HALF  # (a pig's half without the map's game data: 34)
+    assert stance._into(500, edge - 1, p, [seen("green-mushroom", 350, 500, p.id)], None)
+    assert not stance._into(500, edge + 1, p, [seen("green-mushroom", 350, 500, p.id)], None)
+    assert not stance._into(500, edge - 1, p, [seen("green-mushroom", 350, 500, p.id + 1)], None)  # another platform's
 
 
 def _waiting(model, kinds):

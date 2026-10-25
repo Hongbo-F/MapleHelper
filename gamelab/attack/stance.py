@@ -23,8 +23,8 @@ A snail too close for a star from the ground is never jump-thrown at (JUMP_THROW
 where a throw from the ground is a star if her platform has the room, else stabs it (not to a short platform's
 far end: SNAIL_FAR_END).
 With the map's danger (attack.danger), the group policy lets a monster of a kind that hits hard come only as near
-as its danger warrants (Danger.keep_off: a Horny Mushroom 162 units on Tree Dungeon; no kind on the first map, and
-on West Rocky Mountain II an Axe Stump's 80 is inside the claw's reach), and then does whichever of a jump back, a
+as its danger warrants (Danger.keep_off: a Horny Mushroom 169 units on Tree Dungeon; no kind on the first map, and
+on West Rocky Mountain II an Axe Stump's 87 is inside the claw's reach, 110), and then does whichever of a jump back, a
 step away and a throw from where she is leaves her the least danger (_escape: the monsters around her and the spawn
 points they don't account for; a jump back toward another one, or onto a spawn point, isn't an escape, nor a move
 into or through a monster's body), a step only if it's clearly safer (ESCAPE_THROW: it doesn't throw). From
@@ -40,7 +40,7 @@ from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import DEFAULT_SPEED, MONSTER_SPEED, MONSTER_TOP, Monster
 from ..motion import physics
-from ..motion.flow import HER_HALF
+from ..motion.bodies import HER_HALF
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from . import reach
 from .danger import Danger

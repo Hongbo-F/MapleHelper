@@ -10,8 +10,9 @@ A monster counts by
 - whether it can get to her (`walk`): along its own platform (a monster never leaves it: localization.monsters), and
   onto another only if its kind hops (MapModel.mob_hops), off its platform within HOP_ACROSS across and HOP_UP up of
   hers (from one over hers by an end: it can't drop through its own), HOP_CHANCE as likely. One walking a platform
-  just under or over hers touches her where their bodies overlap (hers HER_HALF either side of her feet and HER_TALL
-  tall, its own half its width and its top: game data), as one on hers does;
+  just under or over hers touches her where their bodies overlap (hers the client's box, HER_HALF either side of her
+  feet and HER_TALL tall: motion.bodies, which her trips are planned by too; its own half its width and its top: game
+  data), as one on hers does;
 - how soon (`soon`): the walk to where it would touch her, at its speed (game data), weighed exp(-t / THREAT_S): 1 for
   one touching her now, as a respawn on top of her does, about a third for one THREAT_S away.
 A spawn point counts as its monster at the point (`at` with no look: the picture she plans by), or, with the monsters a
@@ -34,7 +35,7 @@ from dataclasses import dataclass
 
 from ..localization.mapdata import MapModel, Platform, Rope
 from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, speeds
-from ..motion.flow import HER_HALF
+from ..motion.bodies import HER_HALF, HER_TALL
 from ..perception.kinds import kind_of
 
 # Her DEF in meowdb's touch formula (touch_taken): not known; this is what makes the formula give the first map's 100
@@ -54,8 +55,6 @@ DANGER_MIN = 0.05
 # back (two in three of a Horny's, every one a Green's: sim.world.PUSH_BY_DAMAGE). At 100 units/s a Horny Mushroom
 # 100 units off counts 0.71, 200 off 0.39, 400 off 0.12.
 THREAT_S = 1.7
-HER_TALL = 55.0     # her body's height (the simulator's: sim.world.HER_HEIGHT): a monster on a platform this far
-                    # above hers at most, or as far below as its top, touches her where they overlap
 # A kind that hops (MapModel.mob_hops) can leave its platform onto one whose end is within HOP_ACROSS across and
 # HOP_UP up of where it is (or any way down); how often it does isn't measured (pigs were seen on platforms where
 # none spawn: localization.monsters): HOP_CHANCE, a guess. No kind that hops passes DANGER_MIN on the three maps.
@@ -64,9 +63,9 @@ HOP_UP = 60.0
 HOP_CHANCE = 0.25
 # A fight lets a monster on her platform come as near as where its danger reaches this (keep_off): then she jumps back
 # or steps away (attack.stance). Half a Horny Mushroom's touch (8% of her HP): it walks at her 100 units/s, and this
-# keeps it 162 units off, where a fix in game on 2026-10-24 had 170 for that kind alone (stance.KEEP_OFF); a Green
-# Mushroom (7.2%) or an Axe Stump (10.8% at 62.5 units/s: 80 units) is let as near as the claw would swipe it, as
-# before.
+# keeps it 169 units off (162 with the simulator's 15-wide body for hers), where a fix in game on 2026-10-24 had 170
+# for that kind alone (stance.KEEP_OFF); a Green Mushroom (7.2%) or an Axe Stump (10.8% at 62.5 units/s: 87 units) is
+# let as near as the claw would swipe it, as before.
 KEEP_DANGER = 0.08
 
 
