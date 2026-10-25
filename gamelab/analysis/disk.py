@@ -3,7 +3,8 @@ reads. Recordings and screenshots are measurement evidence and are never deleted
 pruned when a run starts or goes on in a new part (telemetry.prune: the newest 2 GB are kept, and none is
 deleted for its age), and `lab-usage --prune-telemetry` applies the same now; the Lie Detector's recordings
 when one starts (control.lie_recorder.prune: the newest 10 GB besides the one being written), and the rolling
-recording's saves and its alarm clips when one is made (control.rolling: the newest 5 GB of each besides it).
+recording's saves and its alarm clips when one is made (control.rolling: the newest 5 GB of saves and 30 GB of
+clips besides it).
 """
 
 import os

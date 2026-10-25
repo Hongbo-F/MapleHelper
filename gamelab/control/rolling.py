@@ -114,11 +114,16 @@ FOLDER_SLACK_S = 2.0  # ... a recording counts as the alarm's if its folder is n
 # 2026-10-25: "a 2nd line of defense"): from CLIP_BEFORE_S before the alarm to CLIP_AFTER_S after, 10 a second, in
 # paths.ALARM_CLIPS, written once its last moment is past (or, cut short, when the recorder stops). Its moments are
 # held by the clip itself as they come, so a ring that loses them first (its cap) loses none of the clip's. Written as
-# PNG, lossless: 70 s at 1366x768 is about 560 MB (813 KB a frame on the six frames of PNG_PARAMS' note), in about 10 s
-# on ENCODERS threads; the oldest go past CLIPS_KEEP_BYTES, about 9 of them (D: had 27 GB free on 2026-10-25).
+# PNG, lossless: 70 s at 1366x768 is about 560 MB (813 KB a frame on the six frames of PNG_PARAMS' note), in about 14 s
+# on ENCODERS threads; the oldest go past CLIPS_KEEP_BYTES, about 55 of them (D: had 27 GB free on 2026-10-25; the
+# user is making room).
 CLIP_BEFORE_S = 10.0
 CLIP_AFTER_S = 60.0
-CLIPS_KEEP_BYTES = 5 * 1024 ** 3
+CLIPS_KEEP_BYTES = 30 * 1024 ** 3  # (5 GB until the user asked for 30, 2026-10-25)
+# The part before the Lie Detector ends this long after the alarm: the player's own frames begin about 1.5 s after it
+# (it pages first). It's written with the clip, once CLIP_AFTER_S are past: until 2026-10-25 it was written at once, as
+# the player's recording began, and its 3,000 frames' encoding ran beside the grabs while the Lie Detector was up.
+BEFORE_TAIL_S = 5.0
 SAVES_WAITING = 4     # saves waiting to be written at most; a request past it is answered "busy"
 ASK_TAKEN_S = 3.0     # save-recent: the recorder takes a request within this (it looks every tick), or isn't running
 ASK_WAIT_S = 180.0    # ... and answers within this (writing 5 minutes of frames takes seconds)
@@ -147,11 +152,13 @@ class Item:
 
 @dataclass(slots=True)
 class Clip:
-    """An alarm's clip being gathered: the alarm (ALARM.json's), when it was seen (time.time's clock) and its moments
-    held so far, from CLIP_BEFORE_S before it (Recorder.check_alarm, then each tick's)."""
+    """An alarm's saves being gathered: the alarm (ALARM.json's), when it was seen (time.time's clock), its clip's
+    moments held so far, from CLIP_BEFORE_S before it (Recorder.check_alarm, then each tick's), and what the ring held
+    as the alarm was seen, for the part before it."""
     info: dict
     seen: float
     items: list[Item]
+    before: list[Item]
 
 
 class Ring:
@@ -422,8 +429,10 @@ class Recorder:
             self.close()
 
     def check_alarm(self) -> None:
-        """A Lie Detector alarm not seen before (by its time): what the ring holds now, and later what comes until the
-        player's recording of it has begun, goes to that recording's folder as `before/` (on the saver's thread)."""
+        """A Lie Detector alarm not seen before (by its time): what the ring holds now, and what comes in its first
+        BEFORE_TAIL_S, goes to the player's recording of it as `before/`, and its clip to `clips`; both are written once
+        the clip's last moment is past (check_clips), so nothing heavy runs beside the grabs while the Lie Detector is
+        up (the user, 2026-10-25)."""
         info = alarm.alarm_info()
         key = None if info is None else info.get("time")
         if key is None or key == self.alarm_handled:  # (none, or one read as it was written: looked at again soon)
@@ -437,19 +446,20 @@ class Recorder:
         seen_as = f", {info['form']}" if info.get("form") else ""
         self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}): saving the "
                   f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it, and its own clip "
-                  f"from {CLIP_BEFORE_S:g} s before it to {CLIP_AFTER_S:g} s after in {self.clips}")
-        self.jobs.put(lambda: self._save_before(info, seen, snapshot))
-        # The clip's moments are held from now on (`tick` adds each to it), the ring's from CLIP_BEFORE_S before the
-        # alarm first: the ring may lose them, its cap, before the clip's end.
-        self.pending_clips.append(Clip(info, seen, [it for it in snapshot if it.t > seen - CLIP_BEFORE_S]))
+                  f"from {CLIP_BEFORE_S:g} s before it to {CLIP_AFTER_S:g} s after in {self.clips}, once those "
+                  f"{CLIP_AFTER_S:g} s are past")
+        # The moments are held from now on (`tick` adds each to the clip), the ring's from CLIP_BEFORE_S before the
+        # alarm first, and all it holds now for the part before: the ring may lose them, its cap, before the clip's end.
+        self.pending_clips.append(Clip(info, seen, [it for it in snapshot if it.t > seen - CLIP_BEFORE_S], snapshot))
 
     def check_clips(self, now: float, cut_short: bool = False) -> None:
-        """Each alarm's clip whose last moment is past (`cut_short`: all, as the recorder stops): its moments up to
-        CLIP_AFTER_S after the alarm, queued to be written."""
+        """Each alarm whose clip's last moment is past (`cut_short`: all, as the recorder stops): its clip, the moments
+        up to CLIP_AFTER_S after the alarm, then its part before, queued to be written."""
         for clip in [c for c in self.pending_clips if cut_short or now >= c.seen + CLIP_AFTER_S]:
             self.pending_clips.remove(clip)
             items = [it for it in clip.items if it.t <= clip.seen + CLIP_AFTER_S]
             self.jobs.put(lambda clip=clip, items=items: self._save_clip(clip, items, cut_short))
+            self.jobs.put(lambda clip=clip: self._save_before(clip))
 
     def read_inbox(self) -> None:
         """Take each request in the inbox (renamed <id>.taken) and queue its save: the last `seconds` as the ring holds
@@ -509,9 +519,11 @@ class Recorder:
             self._say(f"recorder: save-recent failed ({answer['error']})")
         self._answer(rid, taken, answer)
 
-    def _save_before(self, info: dict, seen: float, snapshot: list[Item]) -> None:
+    def _save_before(self, clip: Clip) -> None:
+        info, seen, snapshot = clip.info, clip.seen, clip.before
         folder = self.lie_folder(seen)
-        items = snapshot + (self.ring.after(snapshot[-1].t) if snapshot else self.ring.last(self.ring.seconds))
+        since = snapshot[-1].t if snapshot else seen - self.ring.seconds
+        items = snapshot + [it for it in clip.items if since < it.t <= seen + BEFORE_TAIL_S]
         if folder is not None:
             dest = folder / BEFORE
             self._prune_lie(folder)
@@ -558,9 +570,9 @@ class Recorder:
 
     def lie_folder(self, seen: float) -> Path | None:
         """The player's recording of the Lie Detector seen at `seen` (time.time's clock): the newest folder in
-        lie_root named for no more than FOLDER_SLACK_S before it, with no part before it yet; waited for up to
-        `folder_wait` s. None if none comes."""
-        deadline = time.monotonic() + self.folder_wait
+        lie_root named for no more than FOLDER_SLACK_S before it, with no part before it yet; waited for until
+        `folder_wait` s after the alarm (written a minute after it, the part waits no more). None if none comes."""
+        deadline = time.monotonic() + max(0.0, seen + self.folder_wait - self.clock())
         while True:
             for folder in reversed(lie_recorder.recordings(self.lie_root)):
                 made = stamp_time(folder.name)

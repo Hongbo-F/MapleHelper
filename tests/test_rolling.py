@@ -378,18 +378,21 @@ def test_a_lie_detector_alarm_saves_the_5_minutes_before_it_into_the_player_s_re
     alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 21:50:00"}), encoding="utf-8")
     os.utime(alarm_file, (seen, seen))
     run_ticks(rec, 5, poll=True)  # it's seen at the next look
-    assert rec.jobs.unfinished_tasks == 1
+    assert rec.pending_clips and rec.jobs.unfinished_tasks == 0  # nothing written while the Lie Detector is up ...
     run_ticks(rec, 15)  # the player pages, then starts its recording
     player = tmp_path / "lie_detector" / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
     player.mkdir(parents=True)
-    assert rec.flush(60)  # (3,000 frames written: 3 s, 10 and more with the PC busy)
+    run_ticks(rec, 580, poll=True)
+    assert rec.flush(60) and not (player / BEFORE).exists()
+    run_ticks(rec, 10, poll=True)  # ... until the alarm's clip's 60 s are past
+    assert rec.flush(60)  # (3,000 frames written as JPEG: 10 s, more with the PC busy)
     before = player / BEFORE
     s = summary(before)
     assert s["kind"] == "before the Lie Detector" and s["alarm"]["time"] == "2026-10-24 21:50:00"
     assert s["player_recording"] == str(player)
-    # The 5 minutes up to the alarm (3,000 moments as it was seen; its moment 0.5 s at most before), and on until the
-    # player's recording began.
-    assert 3000 <= s["ticks"] <= 3020 and s["alarm_t"] == pytest.approx(300.0, abs=0.6)
+    # The 5 minutes up to the alarm (3,000 moments as it was seen; its moment 0.5 s at most before), and its first 5 s
+    # (BEFORE_TAIL_S: the player's own frames begin about 1.5 s after it).
+    assert 3044 <= s["ticks"] <= 3051 and s["alarm_t"] == pytest.approx(300.0, abs=0.6)
     assert s["frames"] == s["ticks"] == len(list(before.glob("*.jpg"))) and s["seconds"] == s["ticks"] / 10
     assert any("saved" in m and "before the Lie Detector" in m for m in rec.said)
     # The same alarm isn't saved again; the player's own folder is left as it was, but for the part.
@@ -415,7 +418,7 @@ def test_an_alarm_save_keeps_the_lie_detector_s_recordings_to_their_budget_whate
     player = root / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
     player.mkdir()
     (player / "00000.jpg").write_bytes(b"p" * 50_000)  # the recording under way: spared, and not in the sum
-    run_ticks(rec, 5, poll=True)
+    run_ticks(rec, 605, poll=True)  # (written once the alarm's clip's 60 s are past)
     assert rec.flush(10)
     assert sorted(p.name for p in root.iterdir()) == ["20261021-100000", "20261022-100000", player.name]
     assert (player / BEFORE / SUMMARY).exists() and (player / "00000.jpg").exists()
@@ -428,7 +431,8 @@ def test_an_alarm_with_no_recording_of_the_player_s_goes_to_the_recent_folder(tm
     run_ticks(rec, 50, poll=True)
     alarm_file.write_text(json.dumps({"reason": "lie_detector (seen by watch)", "time": "2026-10-24 21:51:00"}),
                           encoding="utf-8")
-    run_ticks(rec, 5, poll=True)
+    os.utime(alarm_file, (rec.clock(), rec.clock()))
+    run_ticks(rec, 605, poll=True)
     assert rec.flush(10)
     (folder,) = (tmp_path / "recent").iterdir()
     assert folder.name.endswith("-lie-detector") and summary(folder)["player_recording"] is None
@@ -444,7 +448,8 @@ def test_an_alarm_for_the_image_quiz_or_the_mini_game_s_notice_is_saved_by_itsel
     rec = recorder(tmp_path, folder_wait=0.3)
     run_ticks(rec, 50, poll=True)
     alarm.raise_alarm(None, form="quiz warning")
-    run_ticks(rec, 5, poll=True)
+    os.utime(alarm_file, (rec.clock(), rec.clock()))  # (the fake clock's now)
+    run_ticks(rec, 605, poll=True)
     assert rec.flush(10)
     (folder,) = (tmp_path / "recent").iterdir()
     assert folder.name.endswith("-lie-detector-quiz-warning")
@@ -467,8 +472,8 @@ def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_60_s_after(tmp_p
     rec = recorder(tmp_path, folder_wait=0.3)
     run_ticks(rec, 400, poll=True)
     seen = _alarm_at(rec, alarm_file)
-    run_ticks(rec, 595, poll=True)  # 59.5 s on: not yet
-    assert rec.flush(10) and not (tmp_path / "alarm_clips").exists()
+    run_ticks(rec, 595, poll=True)  # 59.5 s on: not yet, and nor is the part before it
+    assert rec.flush(10) and not (tmp_path / "alarm_clips").exists() and not (tmp_path / "recent").exists()
     run_ticks(rec, 10, poll=True)
     assert rec.flush(10)
     (clip,) = (tmp_path / "alarm_clips").iterdir()
@@ -540,7 +545,8 @@ def test_an_alarm_up_as_it_starts_is_not_saved_but_the_next_one_is(tmp_path, ala
     run_ticks(rec, 10, poll=True)
     assert rec.jobs.unfinished_tasks == 0
     alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 21:00:00"}), encoding="utf-8")
-    run_ticks(rec, 10, poll=True)
+    os.utime(alarm_file, (rec.clock(), rec.clock()))
+    run_ticks(rec, 605, poll=True)
     assert rec.flush(5) and len(list((tmp_path / "recent").iterdir())) == 1
     rec.close()
 
