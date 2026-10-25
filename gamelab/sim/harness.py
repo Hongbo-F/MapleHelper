@@ -205,8 +205,18 @@ def _loop_nosweep(sim) -> None:
     _loop(sim, sweep=False)
 
 
+def _loop_grind(sim) -> None:
+    """The hunt loop grinding round the map (`tour --loop --grind`: behavior.grind), on the same hunter, navigator and
+    map knowledge as `loop`."""
+    from ..behavior.grind import Grind
+    h = sim.hunter(low_hp=0.3, potion_hp=0.45)
+    tour = sim.tour(h, sim.navigator(h, fight=True, seed=POLICY_SEED), seed=POLICY_SEED)
+    while True:
+        Grind(tour, log=tour.log).run(minutes=600)
+
+
 POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid, "loop-hp50": _loop_hp50,
-            "loop-nosweep": _loop_nosweep}
+            "loop-nosweep": _loop_nosweep, "loop-grind": _loop_grind}
 
 
 def _only(policy, grounds: tuple[int, ...]):

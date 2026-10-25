@@ -2111,6 +2111,35 @@ def loop_tree_wait(sim):
     return harness._only(_loop(4), (20,))(sim)
 
 
+def _grind(minutes: float):
+    def run(sim, tour=None):
+        from ..behavior.grind import Grind
+        tour = tour or sim.tour_stack()
+        g = Grind(tour, log=sim.log)
+        r = g.run(minutes=minutes)
+        return {"report": str(r), "grounds": r.grounds, "kills": r.kills, "rules": dict(sorted(r.rules.items())),
+                "rests": r.rests, "hunt_stop": r.stop, "loops": g.patrol.loops, "stays": [round(x, 1) for x in g.stays],
+                "credit": {str(k): v for k, v in sorted(g.credit.items(), key=lambda kv: str(kv[0]))}}
+    return run
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      realism=Realism(camps=harness.TREE_CAMPS, respawn=30.0, zero_walls=True),
+      expects=(logs("loop: ["), logs("next: stop"), logs("grinding:"),
+               check("three stops or more", lambda tr: len(tr["result"]["grounds"]) >= 3),
+               check("kills credited to two platforms or more", lambda tr: len(tr["result"]["credit"]) >= 2),
+               check("no stop camped past STOP_MAX_S and a pass",
+                     lambda tr: max(tr["result"]["stays"], default=0) < 120)))
+def loop_tree_grind(sim):
+    """`python -m gamelab tour --loop --grind --minutes 3 --map 10002073` from 23 among the crowding study's other
+    players (harness.TREE_CAMPS) with respawns at 30 s (preset crowd-slow's): the loop over the map's spawn points chosen
+    by its EXP a minute (behavior.patrol: the upper tower's 14, 10, 8, 12), its stops taken in turn, what she meets on
+    the way shot in passing, kills credited to the platforms they died on. In this world she's touched about five times
+    as often as live (README: Grinding): on seed 1 her trips up the tower end in rests twice, and in 3 minutes she gets
+    to no stop to stay at; she kills on 18-23 on the way."""
+    return _grind(3)(sim)
+
+
 @tree((28, 247.0), monsters="all", seed=2, limit=1200,
       expects=(logs("tour: sweep"), check("two stops hunted or more", lambda tr: len(tr["result"]["visited"]) >= 2),
                check("she fed her pet", _fed_her_pet)))

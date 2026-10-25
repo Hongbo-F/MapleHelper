@@ -759,7 +759,11 @@ def cmd_tour(args) -> int:
         if args.ground_tie is not None:  # grounds about as good: the one she left longest ago (README: Route diversity)
             hunt.GROUND_TIE = args.ground_tie
         with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
-            report = hunt.Hunt(tour, log=_log, sweep=args.sweep).run(minutes=args.minutes)
+            if args.grind:  # going round the map as a player grinds (behavior.grind; README: Grinding)
+                from .behavior.grind import Grind
+                report = Grind(tour, log=_log, sweep=args.sweep).run(minutes=args.minutes)
+            else:
+                report = hunt.Hunt(tour, log=_log, sweep=args.sweep).run(minutes=args.minutes)
         print(f"hunt done: {report}")
         return 0
     with on_alarm(hunter):
@@ -1651,6 +1655,70 @@ def cmd_memory(args) -> int:
     return 0
 
 
+def cmd_patrol(args) -> int:
+    """Grinding's view of a map (behavior.patrol): its stops, the loop it would take and camping's best, before she has
+    seen anything; with a recorded run (`file`), its looks run through her memory and the belief, and every `--every` s
+    from where she was, the next stop grinding would have taken there and why. Offline: no game, no keys."""
+    import re
+    from collections import Counter
+    from .behavior import patrol
+    from .localization import mapdata, memory
+    from .localization.players import Player
+    from .motion.route import Planner
+    from .attack import reach
+    from .perception.kinds import kind_of
+    records = telemetry.read(Path(args.file)) if args.file else []
+    session = next((r for r in records if r.get("topic") == "session"), {})
+    model = mapdata.load(args.map or session.get("map") or DEFAULT_MAP)
+    exp = {kind_of(n): e for n, e in model.mob_exp.items()}
+    best = max(exp.values(), default=0)
+    kinds = {k for k, e in exp.items() if e >= 0.25 * best} or None  # tour.WORTH's cut
+    planner = Planner(model)
+    p = patrol.Patrol(model, kinds, exp, travel=planner.arrive)
+    print(f"{model.name}: {len(p.points)} spawn points of {sorted(kinds or ())}, {len(p.stops)} stops")
+    for st in p.stops:
+        reached = ", ".join(f"{p.points[q].kind} on {p.points[q].platform}" + ("" if c >= 1 else f" ({c:.0%})")
+                            for q, c in st.cover)
+        print(f"  stop {st.platform} at x {st.x:.0f}: {reached}")
+    p.belief.t = 0.0
+    p.replan(0.0, force=True)
+    camp = p.camping(0.0)
+    print(f"loop: {p.plan.text(p.platform_of)}; camping at {p.platform_of(camp.stops[0])}: {camp.rate * 60:.0f}")
+    if not records:
+        return 0
+    kept, kills = memory.Memory(model), []
+    kept.kills = lambda: kills
+    kill_re = re.compile(r"^(?P<kind>\S+) down on platform (?P<platform>-?\d+)")
+    band, last, start, why = (reach.LOOK_UP, reach.LOOK_DOWN), None, None, Counter()
+    for r in records:
+        topic = r.get("topic")
+        if topic == "event" and r.get("kind") == "kill" and (m := kill_re.match(r.get("text", ""))):
+            kills.append(memory._Kill(r["t"], m["kind"], int(m["platform"]), float(r.get("x") or 0.0)))
+        if topic != "scene":
+            continue
+        t, her = r["t"], r.get("her") or {}
+        start = t if start is None else start
+        if not r.get("searched") or her.get("x") is None:
+            continue
+        players = [Player(q["id"], q["kind"], q["x"], q["y"], q.get("platform"), (0.0, 0.0), t, t)
+                   for q in r.get("players", [])]
+        sights = [memory._monster(m) for m in [*r.get("monsters", []), *r.get("swept", [])]]
+        kept.update(t, sights, memory.cover_of_record(r, band), players)
+        p.belief.update(t, kept, players)
+        if her.get("platform") is None or (last is not None and t - last < args.every):
+            continue
+        last = t
+        if (changed := p.replan(t)) is not None:
+            print(f"{t - start:7.1f}  loop: {p.plan.text(p.platform_of)} ({changed})")
+        j, info = p.choose(t, her["platform"], her["x"], current=p.stop_on(her["platform"]))
+        if j is not None:
+            why[info["why"]] += 1
+            print(f"{t - start:7.1f}  on {her['platform']} at x {her['x']:.0f}: next {patrol.choice_text(info)}")
+    print(f"choices: {dict(why)}; refills x{p.belief.scale:.2f} of the model ({len(p.belief.refills)} watched); others "
+          f"take {({k: round(p.belief.take(k), 2) for k in sorted({q.kind for q in p.points})})}")
+    return 0
+
+
 # --- the command line ------------------------------------------------------------------------------------
 
 def feed_arg(s) -> None:
@@ -1802,6 +1870,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--loop", action="store_true",
                    help="hunt with the hunt loop instead of the sweep's stops (gamelab/docs/hunt-modes.md)")
     s.add_argument("--minutes", type=float, default=20, help="with --loop: how long to hunt, then stand by")
+    s.add_argument("--grind", action="store_true",
+                   help="with --loop: go round the map in a loop of stops chosen by EXP a minute, shooting what comes "
+                        "into reach on the way, instead of hunting one ground at a time (behavior.grind; README: "
+                        "Grinding; simulator-tested only)")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--ways", type=int, metavar="N",
                    help="each trip chooses among the N best distinct ways by their times (route.ROUTES; default 1: "
@@ -2015,6 +2087,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="write the run with 'memory' records in it here (for minimap --replay)")
     s.add_argument("--map", type=int, help="the map (default: the run's)")
     s.set_defaults(func=cmd_memory)
+
+    s = sub.add_parser("patrol", help="grinding's view of a map: its stops, the loop and camping's best; with a "
+                                      "recorded run, the next stop it would have taken along it (offline; no game, "
+                                      "no keys)")
+    s.add_argument("file", nargs="?", help="a telemetry file (.jsonl) to run through her memory and the belief")
+    s.add_argument("--every", type=float, default=5.0, help="s between the choices printed along the run")
+    s.add_argument("--map", type=int, help="the map (default: the run's, else the first)")
+    s.set_defaults(func=cmd_patrol)
     return p
 
 
