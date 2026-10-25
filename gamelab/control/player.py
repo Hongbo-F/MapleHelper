@@ -14,10 +14,11 @@ runs normally and talks to it through files. To keep that safe it only ever:
   held), the player pages whoever is at the PC, records the Lie Detector's whole cycle
   (control.lie_recorder) while refusing every plan but two kinds (alarm_refusal: a tap of her pet food key,
   a few a minute; her retreat's moves, arrows, jump, up and down, for alarm.RETREAT_WINDOW_S after the
-  sighting; neither with the mouse), and stops once a person has run `python -m gamelab clear-alarm` and the
-  Lie Detector has been off the screen for a minute; it won't start again until the alarm is cleared (it never
-  tries to answer it, and never moves her by itself: her retreat is the running hunt's, behavior.retreat, which
-  knows the map and where she is; with no hunt running, nothing moves her),
+  sighting; neither with the mouse; those two held to it with the alarm file up too, raised by another program), and
+  stops once a person has run `python -m gamelab clear-alarm` and the Lie Detector has been off the screen for a
+  minute; it won't start again until the alarm is cleared (it never tries to answer it, and never moves her by
+  itself: her retreat is the running hunt's, behavior.retreat, which knows the map and where she is; with no hunt
+  running, nothing moves her),
 - records the game's client area while a plan runs,
 - writes results to gamelab/lab/outbox.
 
@@ -194,6 +195,17 @@ def alarm_up() -> bool:
     except OSError:
         return True
     return True
+
+
+def _alarm_age() -> float | None:
+    """Seconds since the Lie Detector was seen by the alarm file's `at` (alarm.raise_alarm: time.time()), or None if it
+    can't be told (no file, no `at`, an `at` to come)."""
+    try:
+        at = json.loads(ALARM.read_text(encoding="utf-8")).get("at")
+    except (OSError, ValueError, AttributeError):
+        return None
+    now = time.time()
+    return now - at if isinstance(at, (int, float)) and at <= now else None
 
 
 class Alarm(threading.Event):
@@ -449,17 +461,25 @@ class Player:
         """Play a plan (checked by `validate` first) and return its result: the keys sent and when,
         any problems, and the frames (saved beside the result) if it records. With the alarm up already, only a
         plan alarm_refusal lets through: never brought to the front, and played to its end (a retreat's to its
-        window's), not stopped by the alarm it came in."""
+        window's), not stopped by the alarm it came in. A plan of a kind that goes with the alarm up (alarm.PLAN_KINDS)
+        is held to the same with the alarm file up though this player hasn't seen the Lie Detector (`watch
+        --lie-detector` raised it), its sighting the file's `at`: such a plan gets past the client's check of the file
+        (client.send), and had played as any, the game brought to the front while the test was being answered."""
         during = self.alarm.is_set()
-        if during and plan.get("kind") not in PLAN_KINDS:
+        kind = plan.get("kind")
+        if during and kind not in PLAN_KINDS:
             return {"error": LIE_DETECTOR_ERROR}
+        filed = not during and kind in PLAN_KINDS and alarm_up()
         validate(plan, self.allowed)
         cutoff = None  # (perf_counter) when a retreat's window ends: its keys stop there
-        if during:
-            if (refused := self._with_alarm(plan)) is not None:
+        if during or filed:
+            at = getattr(self.alarm, "at", None)  # (a plain Event: when isn't known, and no retreat goes)
+            since = _alarm_age() if filed else None if at is None else time.monotonic() - at
+            if (refused := self._with_alarm(plan, since, filed)) is not None:
                 return refused
-            if plan["kind"] == RETREAT:
-                cutoff = time.perf_counter() + (self.alarm.at + RETREAT_WINDOW_S - time.monotonic())
+            if kind == RETREAT:
+                cutoff = time.perf_counter() + (RETREAT_WINDOW_S - since)
+            during = True  # (filed: as if it came in with this player's alarm)
         hwnd = window.find_game(self.title)
         if plan.get("window_client"):  # before anything else: the capture's area is the new client area
             window.resize_client(hwnd, *plan["window_client"])
@@ -551,22 +571,22 @@ class Player:
             result["frames"] = len(frames)
         return result
 
-    def _with_alarm(self, plan: dict) -> dict | None:
-        """A plan of a kind that goes with the alarm up: its refusal (the Lie Detector error, and why), or None, logged
-        either way (a pet food counted)."""
+    def _with_alarm(self, plan: dict, since: float | None, filed: bool = False) -> dict | None:
+        """A plan of a kind that goes with the alarm up, `since` s after the sighting (None: when isn't known): its
+        refusal (the Lie Detector error, and why), or None, logged either way (a pet food counted). `filed`: the alarm
+        is the alarm file's, this player not having seen the Lie Detector."""
         now = time.monotonic()
         self.fed = [t for t in self.fed if now - t < 60]
-        at = getattr(self.alarm, "at", None)  # (a plain Event: when isn't known, and no retreat goes)
-        since = None if at is None else now - at
         kind, name = plan["kind"], plan.get("id", "?")
+        up = "Lie Detector alarm up" + (" (its file's; this player hasn't seen it)" if filed else "")
         if why := alarm_refusal(plan, self.keys, since, self.fed, now):
-            self.log(f"Lie Detector alarm up: refused {name} ({kind}): {why}")
+            self.log(f"{up}: refused {name} ({kind}): {why}")
             return {"error": f"{LIE_DETECTOR_ERROR}: {why}"}
         if kind == PET_FOOD:
             self.fed.append(now)
-            self.log(f"Lie Detector alarm up: her pet's food ({name}), {len(self.fed)} in the last minute")
+            self.log(f"{up}: her pet's food ({name}), {len(self.fed)} in the last minute")
         else:
-            self.log(f"Lie Detector alarm up: her retreat's plan {name}, {since:.1f} s after the sighting "
+            self.log(f"{up}: her retreat's plan {name}, {since:.1f} s after the sighting "
                      f"({sum(1 for e in plan['events'] if e[2] == 'down')} keys; it's cut at {RETREAT_WINDOW_S:g} s)")
         return None
 

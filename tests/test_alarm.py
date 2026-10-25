@@ -416,6 +416,40 @@ def test_with_the_alarm_up_her_retreat_is_played_until_its_window_ends_and_refus
     assert game.sent == [("left", True), ("left", False)]
 
 
+def test_with_the_alarm_file_up_but_unseen_by_the_player_its_kinds_go_by_the_alarm_s_rules(monkeypatch, tmp_path,
+                                                                                           alarm_file):
+    """Review, 2026-10-24: a plan with a kind gets past the client's check of the alarm file, and a player whose own
+    watchdog hadn't seen the Lie Detector (`watch --lie-detector` raised it) played it as any: the game brought to the
+    front while the test was answered, no limit a minute, no window, no key check."""
+    from gamelab.control import alarm as alarm_mod
+    from gamelab.control import player as player_mod
+    from gamelab.control.player import Alarm, allowed_keys
+    game = _Game(monkeypatch, tmp_path)
+    keys, said = _keys(), []
+    p = Player(allowed_keys(keys), "Game", Alarm(), keys=keys, log=said.append)  # its own alarm not set
+    alarm_file.write_text(json.dumps({"reason": "lie_detector (seen by watch)", "at": time.time() - 2.0}),
+                          encoding="utf-8")
+    for i in range(3):
+        assert "error" not in p.run(_plan(f"food{i}", _tap("u")))
+    assert "a minute at most" in p.run(_plan("food3", _tap("u")))["error"]
+    assert "one tap of 'u'" in p.run(_plan("food4", _tap("u") + _tap("ctrl", 100)))["error"]
+    assert "error" not in p.run(_plan("flow", [[0, "left", "down"], [100, "left", "up"]], "retreat"))
+    assert "isn't one of her moves' keys" in p.run(_plan("flow2", _tap("ctrl"), "retreat"))["error"]
+    assert game.fronted == [] and game.sent == [("u", True), ("u", False)] * 3 + [("left", True), ("left", False)]
+    assert said[0] == "Lie Detector alarm up (its file's; this player hasn't seen it): her pet's food (food0), 1 in " \
+                      "the last minute"
+    # Seen past the window by the file's `at`, or when isn't known: no retreat.
+    alarm_file.write_text(json.dumps({"at": time.time() - alarm_mod.RETREAT_WINDOW_S - 1}), encoding="utf-8")
+    assert "are over" in p.run(_plan("flow3", _tap("left"), "retreat"))["error"]
+    alarm_file.write_text(json.dumps({"reason": "lie_detector"}), encoding="utf-8")
+    assert "isn't known" in p.run(_plan("flow4", _tap("left"), "retreat"))["error"]
+    # The file gone, a plan of a kind plays as any (the game brought forward if it asks).
+    alarm_file.unlink()
+    monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "Game" if game.fronted else "other")
+    assert "error" not in p.run(_plan("food5", _tap("u")))
+    assert game.fronted == ["Game"]
+
+
 def test_a_plan_running_when_the_alarm_goes_off_is_stopped_whatever_its_kind(monkeypatch, tmp_path):
     from gamelab.control.player import Alarm, allowed_keys
     game = _Game(monkeypatch, tmp_path)
