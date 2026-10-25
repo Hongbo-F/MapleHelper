@@ -165,6 +165,8 @@ Other commands (`python -m gamelab -h` lists them all):
 | `tour --stops 3 --kills 5` | A hunting sweep of the map, then rest and stand by |
 | `tour --loop --minutes 20` | The hunt loop instead of the sweep's stops (`docs/hunt-modes.md`; simulator-tested only): one decision after every look, for 20 minutes, then rest and stand by |
 | `tour --loop --no-sweep` | Her looks search the band around her alone, not a slice of the rest of the screen as well (`hunt.SWEEP`; on by default with `--loop`, off elsewhere: `--sweep` on `tour`, `nav` and `hunt` turns it on; see Her memory of the monsters) |
+| `tour --loop --grind` | The hunt loop going round the map in a loop of stops chosen by EXP a minute, shooting what comes into reach on the way and leaving a stop once nothing's left in reach, instead of hunting one ground at a time (`behavior/grind.py`; see Grinding; simulator-tested only) |
+| `patrol [FILE] [--map M]` | Grinding's view of a map (its stops, the loop it would take, camping's best), and with a recorded run, the next stop grinding would have taken every few seconds along it, and why; no game, no keys |
 | `memory FILE --out OUT` | Her memory of the monsters run again on a recorded run (its looks' monsters and what each searched, her kills from its 'kill' events): what it held, and a copy of the run with its 'memory' records for `minimap --replay OUT`; no game, no keys |
 | `tour --rest-avoid` | On the trips to rest and to stand by, keep clear of monsters instead of shooting the ones in the way (simulator-tested only) |
 | `minimap` | The live mini-map, following the run in progress: a window beside the game, and the same as a web page for a phone on the same Wi-Fi; see below |
@@ -1043,6 +1045,160 @@ choice of ground's belief); monsters seen while she's in the air are placed by t
 the feed it takes the feed's scenes as they are (a band look's band, its whole-screen searches); a kind read wrong for
 a look (a Horny taken for a Green) is a new monster, and the other one is forgotten by looks; the replay doesn't have
 her throws, so a monster she shot at is missed by looks as any other there.
+
+## Grinding
+
+`tour --loop --grind` (`behavior/grind.py`, `behavior/patrol.py`; simulator-tested only, off by default): the hunt loop
+going round the map as an experienced player grinds, not hunting one ground and waiting there for its respawns. On
+2026-10-24 the user played 4.5 minutes on Tree Dungeon, Forest Up North II while `watch` recorded it
+(`lab/telemetry/20261024-170558-watch.jsonl`) and, set against her hunts of that day, said she should hunt their way:
+"this would how an experience player will grind to get EXP". By `D:/MapleHelper-scratch/compare/compare.py` (moving:
+faster than 30 units/s between two looks under 2 s apart; path: |dx| + |dy| between them; kill distance: across from
+her to where her kill died) and the stays as the harness counts them below (`D:/MapleHelper-scratch/exp-grounds/grind/
+user_moves.py`: a run of looks on one platform, one in the air or on a rope not ending it):
+
+| | the user | one ground (14:01) | blind rotation (15:16) | positioning (16:54) |
+|---|---|---|---|---|
+| EXP a minute | 484 | 283 | 204 | 215 |
+| kills a minute | 14.8 | 9.2 | 6.7 | 7.2 |
+| HP lost a minute (bars) | 0.33 | 0.31 | 0.33 | 0.06 |
+| time moving | 59% | 43% | 42% | 31% |
+| path a minute (units) | 8210 | 2020 | 1868 | 1247 |
+| stays on a platform, median / longest | 1.0 / 11 s | 2.0 / 69 s | 0.8 / 29 s | 2.4 / 98 s |
+| kill distance, median | 126 | 176 | 171 | 158 |
+
+The user never camps: a circuit up the tower to the top cluster (8, 6, 9, 7) and back down (12, 16, 19, 21, 23, 24,
+20), killing what's in reach on the way and closing in, for about her one-ground damage (14 of their 18 hits came while
+moving, the pet drinking potions). The blind rotation lost because it travelled without fighting, to grounds others had
+emptied.
+
+**The map** (`patrol.Patrol`, once per map). Its spawn points of the kinds she hunts (`Point`: platform, x, kind, the
+kind's EXP), and on each platform from which she gets at any, a stop (`Stop`): the x that reaches the most spawn EXP,
+her own platform's points whole (she walks up to them), another platform's as much of it as a star reaches from there
+(`spots.coverage`). Route times between stops from the planner (`Planner.arrive`): up Tree Dungeon's tower is slow (24
+to 6, 21 s by its ropes), down quick (6 to 24, 8 s). 31 points and 26 stops there.
+
+**The belief** (`patrol.Belief`, at every look, from her memory of the monsters). Each point's monsters now or at any
+time ahead (`stock`): those her memory has, each at the nearest point of its kind on its platform; else, for a point her
+kill emptied or a look saw empty (a look covering its whole platform, `Memory.covered`), a refill clock: nothing for 5 s,
+then back with time constant 12.8 s times the platform's points (`not_back`, fitted on the live respawn report: a
+platform's first monster back a median 13.9 s after her kill emptied it, 0.74 not back at 8 s, 0.55 at 12.56 s); else,
+never seen, 0.35 (the uncamped 19-21 had a monster 31-39% of the time live). The clock's scale is learned from the
+refills she watches (a point her kill emptied, seen empty within 2 s before the look that sees it back), 5 refills' worth
+of the model: in the simulator it came out at 0.5-0.9 of the model with its 8.8 s respawns (`crowd`) and 0.8-2.3 with 30 s
+(`crowd-slow`). What of a point is hers (`share`): all of it, but with another player's minimap dot by it (200 across,
+100 up or down) within 20 s, what others leave of its kind (`take`), learned from her memory: of the monsters she saw by
+another player, gone without a kill of hers against killed by her or seen there 10 s on, 0.5 counting as 4 monsters.
+The crowding study saw others take Green Mushrooms within about 4 s and leave Horny Mushrooms; replayed on the user's
+recording, it learned 0.25 and 0.10.
+
+**The loop** (`Patrol.best`): a round of 2 to 12 stops, by its EXP a minute in the long run. Going round every `cycle` s,
+she catches at a point 1 / sum over k of not_back(k cycle) monsters a round (`caught`: after a kill it's back R s later,
+and she kills it at her first round after that); the cycle is the round's route times, 1 s a stop, and her shooting:
+0.085 s a point of EXP (Lucky Seven live on Tree Dungeon: 3.85 throws a Horny Mushroom's kill, 2.95 a Green's, a throw
+every 0.84 s), learned from her throws and the EXP they gave (300 EXP's worth of the prior: with the regular attack it's
+about three times as long). Less what touches cost (`HP_PRICE`, 100 EXP a bar of HP, a guess) by the danger hook. Grown
+from each of the 8 stops worth the most on their own, adding the stop that raises the rate most at its cheapest place in
+the round. Camping, a round of one stop (`Patrol.camping`), isn't taken up: it's logged with each loop to compare. A new
+round replaces hers only when it's 15% better by the same belief and 60 s after the last change, looked for every 20 s
+at her next-stop decisions: no flip-flopping. On Tree Dungeon before she has seen anything (`python -m gamelab patrol
+--map 10002073`): 14, 10, 8, 12 (the top cluster and the middle of the tower), 466 EXP a minute, a round of 50 s (12
+of travel, 33 of shooting, 14 points); 19-24 round by the safe platforms, 337; camping at 23, 229, where her hunt loop
+camping there made 283 live (with her kills on 22 and 24 from 23 and 24).
+
+**The next stop** (`Patrol.choose`, when she leaves a stop): along the loop from the last loop stop she was at, the first
+expected to hold a quarter of what it holds full by the time she gets there (`SKIP_FULL`, under the 0.35 of a point
+never seen: an emptied stretch is skipped until it's due, an unseen one never); and a stop whose monsters she has seen
+(her memory's, not the belief's guesses) pulls her off the loop when they're 2 kills' worth or more and give 1.5 times
+the EXP a second of the loop's next (each counting its travel and kills).
+
+**At a stop and on the way** (`grind.Grind`, the hunt loop with these in place of its grounds). Arrived on its platform,
+she shoots what's in reach on any platform and what's on hers (stance closes in), walks along hers to bring monsters she
+remembers into reach (the rule 'reach'), and leaves once nothing she can get at was seen within 3.5 s and no respawn in
+reach is due within 2 s, 0.3 s after (a hit monster hides under its damage numbers: fight's hidden targets keep it a
+target meanwhile), 40 s at most while nothing's in reach. No better spot (rule 7), no lull loot (8), no waiting for
+respawns (9 only for those 0.3 s), no rate rule, no trip back for the piles of a stop she leaves (10). On the legs the
+hunt loop's rule 4 shoots what a star reaches on any platform (15 s a platform), rule 4b finishes what she hurt, 5 and 5b
+pick up the piles on her platform and on the way. After a rest the next stop is chosen from where she rested. Kills are
+credited to the platform they died on (the end of the log: "kills by platform"); the value map (`lab/grounds.json`)
+isn't written: its EXP a visit credits a ground with its neighbours' kills (48% of 23's live), and a stop's visit is a
+few seconds.
+
+**The danger hook** (`Patrol.danger(platform, x)`, a share of her HP a second fighting there): by default 0 where no
+monster can touch her (`MapModel.safe`), else 0.0025 for each point there of a kind she keeps off (`stance.KEEP_OFF`):
+camping 23 (two Horny Mushroom points) she lost 0.28-0.31 bars a minute live. Blended with the HP she has seen go on
+each platform (`hp_rate`, the hook counting as 60 s there): a cost, never a ban. The positioning branch's
+`attack.danger` can be plugged in as the hook.
+
+**What it says** (the log, and telemetry 'grind'): each loop taken up ("loop: [14, 10, 8, 12]: 466 EXP a minute (a round
+50 s: 12 s of travel, 33 of shooting; 14 spawn points, 393 EXP) (the first; camping at 8 would give 407)"), each next
+stop ("next: stop 7 at x -95, 1.7 s away: 97 EXP expected (74 seen), 8.9 EXP/s with its kills; pulled (stop 12's 5.0
+EXP/s)", with the stops skipped and when each is due), each stop left ("leaving stop 14: nothing left in reach (3.5 s
+there, 41 EXP)"), every 60 s and at the end what it did and learned: loops, stops, stays, pulls, skips, the refill scale,
+her kill time, what others take, HP a minute by platform, kills by platform. `python -m gamelab patrol FILE` runs a
+recorded run through her memory and the belief and prints, every few seconds, the next stop grinding would have taken
+from where she was. On the user's recording it sends her up to 10, 8, 12 and 14 by the loop and, 7 times of 25, pulls
+her to what she sees (to 7 from 8 and from 19, to 20, 23 and 24 from the platforms by them).
+
+**What the harness says** (Tree Dungeon, `--world zero-walls,lucky-seven`: the hunt loop as `tour --loop --skill`
+throws, 10 seeds of 20 minutes, the policies `loop` at bc036b9 (base), `loop` here (the memory, half (V)) and
+`loop-grind`; per seed in `D:/MapleHelper-scratch/exp-grounds/grind/runs`, the moves measured as the user's above, from
+the runs' looks and glances):
+
+| `crowd` | base | memory | grinding |
+|---|---|---|---|
+| EXP a minute (while alive) | 136.9 (163.4) | 137.6 (177.2) | 143.9 (178.4) |
+| kills a minute alive | 4.68 | 4.96 | 5.08 |
+| HP lost a minute alive (bars) | 1.29 | 1.40 | 1.38 |
+| rests a run, deaths | 6.0, 6 | 5.9, 9 | 6.6, 8 |
+| time moving, waiting | 45%, 1% | 46%, 1% | 44%, 0% |
+| path a minute | 4011 | 4309 | 4164 |
+| stays median / longest | 1.0 / 109 s | 1.0 / 106 s | 1.0 / 105 s |
+| kill distance | 137 | 139 | 130 |
+
+| `crowd-slow` (30 s respawns) | base | memory | grinding |
+|---|---|---|---|
+| EXP a minute (while alive) | 111.3 (149.2) | 118.0 (151.2) | 117.2 (155.3) |
+| kills a minute alive | 4.22 | 4.24 | 4.44 |
+| HP lost a minute alive (bars) | 1.28 | 1.37 | 1.42 |
+| rests a run, deaths | 5.0, 6 | 5.4, 9 | 5.3, 9 |
+| time moving, waiting | 47%, 3% | 48%, 3% | 47%, 2% |
+| path a minute | 4718 | 5389 | 5129 |
+| stays median / longest | 1.0 / 157 s | 1.0 / 58 s | 1.0 / 58 s |
+| kill distance | 159 | 151 | 135 |
+
+Seed by seed, grinding against the memory alone: +4.6% EXP a minute on `crowd` (standard error 8.0%), -0.6% on
+`crowd-slow` (7.7%); while alive +0.6% (4.6%) and +2.7% (7.5%). Nothing either way: the simulator can't judge this yet.
+(The base matches the positioning branch's own run of the same 10 seeds, 136.9.) Why:
+- Her world there is denser and harder than the game. Every spawn point is filled from the start and back 8.8 s (or
+  30 s) after her kill, nobody hunts the tower's top or the Horny Mushrooms, so a stop or a leg always has monsters in
+  reach: she makes 1-10 stops a run (3-9 with 30 s respawns), a median 15-390 s at each, fighting what keeps coming.
+  Live a point had a monster 28% of the time, and the user moved on after a median 1 s.
+- She's touched about five times as often as live (1.3-1.4 bars a minute alive, the game 0.3), so every policy goes
+  through its 60 potions and dies or rests (5-7 rests a run): how long she lives decides more than where she hunts.
+  Grinding's trips up the tower end in rests at 25 (loop_tree_grind: twice in 3 minutes, no stop reached).
+- The moves' measures don't tell the policies apart there (stays a median 1 s, 44-48% moving, 4000-5400 units a
+  minute for all three): knockbacks and jump throws move her as much as the patrol does.
+So her simulated patrol doesn't look like the user's (few stops, long stays at them), where the live numbers it plans
+by (the loop's 466 EXP a minute, camping 23 at 229 against 283 live) do. Judging it needs the simulator's crowd brought
+to the game's (respawn delays spread about 14 s, points 28% full, the upper tower contested, touches as often as live:
+the gaps in `D:/MapleHelper-scratch/wf-prior/wf_a8ab59d8-9df__understand_sim.md`), or the game.
+
+**To check in game.** Without attacking: `watch --minutes 5 --map 10002073` while the user plays or she stands on 23,
+then `python -m gamelab patrol <its telemetry file>`: the belief's stops and the choices it would make (each pull should
+name monsters in view; no stop should be skipped unless she or someone emptied it within its refill), and `memory` on it
+for the mini-map. Supervised, attacking (once the user allows it): `tour --loop --grind --skill --minutes 10 --map
+10002073` from 23 or 24, the user at the PC: the log's "loop:" line at the start, "next:" lines every few seconds to 30 s
+(not minutes), no stop held past 40 s while nothing's in reach, kills credited across 6-10 platforms by the end, HP lost
+under half a bar a minute and no rest, EXP a minute (the summary's, off her EXP number) against 283 camping and the user's
+484; if she spends her time on trips up the tower without fighting, the loop's travel is too dear and `patrol.STOP_S` or
+the kill time is off.
+
+Not done: the HP price isn't fitted (100 EXP a bar is a guess) and doesn't count the trip to rest from far up the
+tower; the stops are one per platform (not the positioning branch's safest places on it); a stop's points are reached
+as a share of their platform, not where each monster walks; the loop is never re-chosen in the simulator's runs (the
+first one stays 15% better or the belief doesn't change enough); the learned refill scale, kill time and takes start
+again each run (not saved across runs, as the value map is); `--feed` and `nav`/`hunt` don't grind.
 
 ## Her EXP number
 
