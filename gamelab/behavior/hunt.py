@@ -129,8 +129,9 @@ WAIT_STEP = 100.0      # ... in steps of this many units at most (0.7 s at her 1
 # Rule 9 on a rope (_refuge: attack.ropes): only where it's this much safer (the danger, a share of the HP she has
 # left) than anywhere along her platform, its own danger and the HP she doesn't regain there for HANG_EXPECT_S (the
 # live median respawn on Tree Dungeon's 23) counted: getting on and off takes 0.6-1.5 s she throws at nothing, a fresh
-# respawn walking at her unanswered meanwhile. A guess, so a rope is no default: on Tree Dungeon's 20, waiting for its
-# Horny Mushroom, the rope at -8 (out of its reach, 0.70 s on and off) against 0.11 at 20's safest place.
+# respawn walking at her unanswered meanwhile. A guess, so a rope is no default: on Tree Dungeon's 31, waiting for its
+# Horny Mushroom, the rope at -192 (out of its reach, 1.1 s on and off) is 0.10 safer than 31's safest place (0.12),
+# where on its Green Mushroom grounds no rope gains more than 0.05 (and 31's foot rules it out: _refuge).
 ROPE_GAIN = 0.05
 HANG_EXPECT_S = 17.0
 HANG_MAX_S = 60.0      # backstop: s on a rope before she gets off whatever comes
