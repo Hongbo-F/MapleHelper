@@ -44,11 +44,12 @@ def test_she_is_level_19_on_the_first_map_and_level_23_with_her_pet_on_west_rock
     assert scenarios.her_on(1) == (SIM_KEYS, LEVEL_19)  # any other map (a synthetic one): the first map's
     assert (LEVEL_19.max_hp, LEVEL_19.level, LEVEL_19.exp, LEVEL_19.defence, LEVEL_19.pet) == (642, 19, 421, None, None)
     assert (LEVEL_23.max_hp, LEVEL_23.level, LEVEL_23.exp, LEVEL_23.pet) == (730, 23, 31_736, 0.45)
-    # Her bindings from 2026-10-23: attack ctrl, Lucky Seven shift, no potion keys (her pet drinks them), pet food u
+    # Her bindings from 2026-10-23: attack ctrl, Lucky Seven shift (its own: world.Her.skill), no potion keys (her pet
+    # drinks them), pet food u
     assert SIM_KEYS_PET == dataclasses.replace(SIM_KEYS, attack=K("ctrl"), lucky_seven=K("shift"), hp_potion=None,
                                                mp_potion=None, pet_food=K("u"))
     assert world_mod._actions(SIM_KEYS_PET) == {"left": "left", "right": "right", "up": "up", "down": "down",
-                                                "alt": "jump", "ctrl": "attack", "shift": "attack", "z": "pick",
+                                                "alt": "jump", "ctrl": "attack", "shift": "skill", "z": "pick",
                                                 "d": "chair", "u": "pet_food"}
 
 

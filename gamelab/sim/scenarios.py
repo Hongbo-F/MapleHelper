@@ -98,6 +98,7 @@ class Scenario:
     may_die: bool = False        # unless set, every scenario also expects her alive at the end
     map_id: int = MAP_ID         # the map it's on (real_map)
     her: Her | None = None       # her HP, level and pet (world.Her); None: as she is on the map (HER)
+    attack: str | None = None    # the stack's attack a throw (behavior.attacks.MODES); None: the hunter's own
     doc: str = ""
 
 
@@ -204,6 +205,8 @@ class Sim:
         self.guard()
         c = self.world.character  # what a touch is measured against: her as the world plays her
         kw.setdefault("her", danger.Her(c.max_hp, c.level))
+        if self.scenario.attack is not None:  # Lucky Seven or the regular attack a throw (behavior.attacks)
+            kw.setdefault("attack", self.scenario.attack)
         h = Hunter(self.eyes, self.keys, self.model, log=self.log, feed=self.feed, **kw)
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
         self.senses.append(h.senses)

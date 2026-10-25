@@ -39,6 +39,7 @@ from maplehelper.config import GameKeys
 from maplehelper.engine import LEFT, RIGHT
 from maplehelper.ocr.exp_table import EXP_TO_NEXT
 
+from ..attack.choice import MP_STEPS
 from ..behavior.pet import PetCare
 from ..control import client
 from ..localization.mapdata import MapModel
@@ -336,6 +337,9 @@ class FakeEyes(Eyes):
     def _hp(self) -> float:
         return round(self.world.hp * 147) / 147  # the bar is 147 px long
 
+    def _mp(self) -> float:
+        return round(self.world.mp * MP_STEPS) / MP_STEPS  # as her MP bar shows it (attack.choice.MP_STEPS)
+
     def _dot(self, counts: dict | None = None) -> tuple[float, float] | None:
         """Her minimap dot as minimap.her_dot reads it: exact, or (Noise.dot_px) to whole pixels; None
         while something covers the minimap (Noise.dot_hidden), counted in `counts` (her looks' by default)."""
@@ -430,7 +434,7 @@ class FakeEyes(Eyes):
         found = self._ropes(her, x, y) if ropes else []
         seen = not Noise.during(self.noise.tag_hidden, w.t)
         counts["tag hidden"] += not seen
-        s = Observation(t=t, frame=frame, tag=her if seen else None, hp=self._hp(), mp=w.mp,
+        s = Observation(t=t, frame=frame, tag=her if seen else None, hp=self._hp(), mp=self._mp(),
                         ground=self._ground(her) if seen else None, dot=self._dot(counts), others=self._others(),
                         ropes=found)
         s.exp, s.exp_box = exp_pixels(w.exp), self._exp_box()
@@ -486,8 +490,8 @@ class FakeEyes(Eyes):
                     and 0 <= mob.y - h // 2 and mob.y + h // 2 <= PLAY_BOTTOM):
                 continue
             screen.mobs.append(mob)
-            if alive and m.hp < m.hp_max:
-                _bar(frame, cx, mob.y - h // 2, m.hp / m.hp_max)
+            if alive and m.hp < m.hp_max:  # (drawn empty with Realism.bars_empty, as the stack reads them live)
+                _bar(frame, cx, mob.y - h // 2, 0.0 if self.world.realism.bars_empty else m.hp / m.hp_max)
         for d in self.world.live_drops():
             iw, ih = ITEM_SIZE.get(d.kind, (18, 18))
             cx, bottom = round(her[0] + (d.x - x) / u), round(floor + (d.y - y) / u)

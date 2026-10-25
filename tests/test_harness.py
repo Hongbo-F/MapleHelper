@@ -2,6 +2,8 @@
 policies on the same seeds (gamelab.sim.harness). Synthetic maps need no game data; the real-map test is
 skipped without it."""
 
+import dataclasses
+
 import pytest
 
 from gamelab.behavior.hunter import Hunter
@@ -12,6 +14,7 @@ from gamelab.sim import world as world_mod
 from gamelab.sim.fakes import Clock, FakeEyes, SimTimeout
 from gamelab.sim.world import DROP_LIFE, Noise, Realism, World
 
+from maplehelper.keys import parse as K
 from test_sim import KEYS, plat, still, tap, tree
 
 
@@ -216,6 +219,33 @@ def test_lucky_seven_does_three_stars_a_cast(model):
         w.advance(1.5)
         assert w.monsters[0].alive is alive
     assert harness.WORLDS["lucky-seven"] == {"stars": world_mod.LUCKY_SEVEN} and "stars" in harness.HER_FIELDS
+
+
+def test_her_lucky_seven_key_casts_at_its_mp_and_throws_nothing_without_it(model):
+    """world.Her.skill (`--attack`): the Lucky Seven key's attack is Lucky Seven, CAST_MP of her MP (Her.mp) a cast, the
+    attack key's still the regular star; with less MP than a cast nothing is thrown and no lock taken; her MP comes back
+    at MP_REGEN a second."""
+    keys = dataclasses.replace(KEYS, lucky_seven=K("g"))
+    her = world_mod.Her(mp=601.0, skill=world_mod.LUCKY_SEVEN)
+    c = plat(model, 500, 400)
+
+    def w_of():
+        return still(World(model, keys, (c.id, 100.0), monsters=[("Pig", c.id, 400.0)], facing="right",
+                           character=her))
+    w = w_of()
+    tap(w, 0.0, "f", 0.04)  # the regular star: a pig lives on
+    w.advance(1.5)
+    assert w.monsters[0].alive and w.casts == 0 and w.attacks == 1
+    tap(w, 1.5, "g", 0.04)  # a cast: dead
+    w.advance(3.0)
+    assert not w.monsters[0].alive and w.casts == 1 and w.mp_used == world_mod.CAST_MP
+    assert w.mp * 601 == pytest.approx(601 - world_mod.CAST_MP + world_mod.MP_REGEN * 1.5, abs=0.1)
+    w = w_of()
+    w.mp = 10 / 601  # under a cast's 11
+    tap(w, 0.0, "g", 0.04)
+    w.advance(1.5)
+    assert w.monsters[0].alive and w.no_mp == 1 and w.casts == 0 and w.attacks == 0 and w.attack_lock_ms <= 0
+    assert harness.ATTACK_HER == {"skill": world_mod.LUCKY_SEVEN, "spread": True}
 
 
 def test_a_touch_by_a_monster_just_back_at_its_spawn_point_is_a_fresh_one(model):

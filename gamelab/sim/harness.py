@@ -3,6 +3,7 @@
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
                                              [--feed] [--costs coded|measured] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
+                                             [--attack choice|skill|regular]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
     python -m gamelab.sim.harness rests [--trips 40]            trips to rest at low HP, transit vs --rest-avoid
@@ -14,13 +15,19 @@ her as she plays each (sim.scenarios.HER: level 23 and 24, her pet drinking her 
 POLICY-PRESET-MAP; the presets are the same worlds on every map, but `crowd`, `crowd-17` and `crowd-slow`, Tree
 Dungeon's other players (TREE_CAMPS), which are that map's alone. `--world` switches on what isn't known of the game
 there (WORLDS: group 0's walls, the client's sides, the client's rope reach, a touch as a share of PADamage, no
-evasion), each saved as a suffix of the name.
+evasion), each saved as a suffix of the name. `--attack` has the stack choose her attack a throw as live (behavior.
+attacks: Lucky Seven but the regular attack to finish a monster and while her MP is under a cast; Lucky Seven whenever
+she has the MP; the regular attack always) in a world where her Lucky Seven key casts it at its MP (ATTACK_HER) and
+the monsters' HP bars read empty as live (ATTACK_REALISM).
 What a run gave is read from the simulated world, not from the bot's own reports (those miss kills):
 
   exp_per_min      EXP she got, per minute of the horizon (a death stops the count)
   kills, rival     her kills, and another player's (Realism.rival_every)
   hp_lost, hp_low  HP lost to touches (each as the world took it: by the monster's touch damage), and
                    her lowest HP; potions; died_at
+  casts, mp_used   her Lucky Seven casts and the MP they took (world.CAST_MP each), mp_per_min a minute alive;
+                   mp_potions, the MP potions her pet drank for her (world.Her.pet_mp); no_mp, casts pressed with too
+                   little MP (nothing thrown); attacks, her attacks with either key
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
                    counts against the bar as a death does; left_map_at, the same for up held at a portal
                    (world.SimLeftMap)
@@ -152,6 +159,14 @@ WORLDS["client-body"] = {"her_box": HER_BOX_CLIENT}
 WORLDS["heading-wrong"] = {"heading_wrong": (0.01, 0.31, 0.24, True)}
 WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 NOISE_FIELDS = ("heading_wrong",)  # WORLDS' fields that are world.Noise's
+# Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
+# live (world.LUCKY_SEVEN), CAST_MP a cast of her MP (world.Her.mp: LEVEL_24's 601) and nothing with less, her attack
+# key's the regular star; each star's damage drawn against the monster's HP in the game data (world.Her.spread), so a
+# monster's HP left is as the stack reckons it (attack.choice: its finishing throws).
+ATTACK_HER = {"skill": LUCKY_SEVEN, "spread": True}
+# ... and the monsters' HP bars as the stack reads them live on Tree Dungeon at 1366x768: empty once hurt (Realism.
+# bars_empty), so what a monster has left is her throws' reckoning alone (behavior.attacks).
+ATTACK_REALISM = {"bars_empty": True}
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
 # measured them offline (17 saved frames x 5, medians, after the profiling pass): a look placing her 12.0 ms of
@@ -239,11 +254,14 @@ def _only(policy, grounds: tuple[int, ...]):
 # --- one run -------------------------------------------------------------------------------------------
 
 def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-             feed: bool = False, map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = ()):
+             feed: bool = False, map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (),
+             attack: str | None = None):
     """The Scenario for one run: the policy hunting on map `map_id` from its START_AT[seed] (STARTS) in world `seed`
     until the horizon. `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a
     little); `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed); `world`: the
-    switches of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default)."""
+    switches of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default);
+    `attack`: the stack's attack a throw (behavior.attacks.MODES), with her as ATTACK_HER and the bars as
+    ATTACK_REALISM (None: the regular attack, her as the map has her)."""
     from . import scenarios
     if map_id not in PRESET_MAPS.get(preset, (map_id,)):
         raise ValueError(f"preset {preset} is map {', '.join(map(str, PRESET_MAPS[preset]))}'s alone")
@@ -255,21 +273,26 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
                                                   if k not in HER_FIELDS and k not in NOISE_FIELDS})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
         noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
+    if attack is not None:
+        her = dataclasses.replace(her, **ATTACK_HER)
+        realism = dataclasses.replace(realism, **ATTACK_REALISM)
     fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
     return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else "")
-                              + "".join(f":{w}" for w in world) + (f":g{'-'.join(map(str, grounds))}" if grounds else ""),
+                              + "".join(f":{w}" for w in world) + (f":g{'-'.join(map(str, grounds))}" if grounds else "")
+                              + (f":attack-{attack}" if attack else ""),
                               fn,
                               starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
                               realism=realism, may_die=True, think=think, feed=feed, map_id=map_id,
-                              her=her if world else None)
+                              her=her if world or attack else None, attack=attack)
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
             feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
-            world: tuple = (), grounds: tuple = ()) -> dict:
+            world: tuple = (), grounds: tuple = (), attack: str | None = None) -> dict:
     """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS); `ways`:
-    the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on."""
+    the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on;
+    `attack`: the stack's attack a throw (scenario)."""
     from .. import telemetry
     from ..motion import route
     from . import fakes, scenarios
@@ -281,7 +304,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         if ways is not None:
             route.ROUTES = ways
         with telemetry.captured() as records:
-            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id, world, grounds))
+            trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, feed, map_id, world, grounds,
+                                                    attack))
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
@@ -293,6 +317,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         out["world"] = list(world)
     if grounds:
         out["grounds"] = list(grounds)
+    if attack:
+        out["attack"] = attack
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     if feed:
         f = trace["feed"]
@@ -376,6 +402,12 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         **_travelling(world, records, end),
         "hp_low": round(world.hp_low, 3),
         "potions": world.potions_used,
+        "casts": world.casts,
+        "mp_used": round(world.mp_used, 1),
+        "mp_per_min": round(world.mp_used / (end / 60), 2) if end else None,
+        "mp_potions": world.mp_potions,
+        "no_mp": world.no_mp,
+        "attacks": world.attacks,
         "died_at": world.died_at,
         "fell_out_at": world.fell_out_at,
         "left_map_at": world.left_map_at,
@@ -470,8 +502,8 @@ def _waits(records: list[dict]) -> list[tuple[float, float]]:
 
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
              feed: bool = False, costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
-             world: tuple = (), grounds: tuple = ()) -> list[dict]:
-    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id, tuple(world), tuple(grounds))
+             world: tuple = (), grounds: tuple = (), attack: str | None = None) -> list[dict]:
+    args = [(policy, k, preset, minutes, think, feed, costs, ways, map_id, tuple(world), tuple(grounds), attack)
             for k in range(1, seeds + 1)]
     if jobs <= 1:
         return [run_one(*a) for a in args]
@@ -484,7 +516,8 @@ def _run_one_args(a: tuple) -> dict:
     return run_one(*a)
 
 
-COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "died_at", "fell_out_at",
+COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "mp_per_min", "mp_potions",
+           "died_at", "fell_out_at",
            "left_map_at",
            "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost",
            "alive_s", "hurt", "fresh_hurt", "wait_s", "wait_hp_lost")
@@ -726,6 +759,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="what isn't known of the game, switched on (WORLDS; again for another)")
     r.add_argument("--grounds", type=lambda v: tuple(int(g) for g in v.split(",")), default=(),
                    help="hunt only these grounds, e.g. 23 (default: all of them)")
+    r.add_argument("--attack", choices=("choice", "skill", "regular"),
+                   help="the stack's attack a throw (behavior.attacks), her Lucky Seven key casting it at its MP "
+                        "(ATTACK_HER): choice, Lucky Seven but the regular attack to finish a monster and while her MP "
+                        "is under a cast (live's default); skill, Lucky Seven while she has the MP; regular, the "
+                        "regular attack (default: the regular attack, her as the map has her)")
     c = sub.add_parser("compare")
     c.add_argument("baseline")
     c.add_argument("candidate")
@@ -755,14 +793,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
         return 2
     results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.feed, args.costs,
-                       args.ways, args.map, tuple(args.world), args.grounds)
+                       args.ways, args.map, tuple(args.world), args.grounds, args.attack)
     print(table(results))
     name = args.save or (f"{args.policy}-{args.preset}" + ("-feed" if args.feed else "")
                          + (f"-{args.costs}" if args.costs != "coded" else "")
                          + (f"-ways{args.ways}" if args.ways is not None else "")
                          + (f"-{args.map}" if args.map != FIRST_MAP else "")
                          + "".join(f"-{w}" for w in args.world)
-                         + (f"-g{'-'.join(map(str, args.grounds))}" if args.grounds else ""))
+                         + (f"-g{'-'.join(map(str, args.grounds))}" if args.grounds else "")
+                         + (f"-attack-{args.attack}" if args.attack else ""))
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
     return 0

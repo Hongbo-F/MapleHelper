@@ -250,13 +250,32 @@ KNOCK_MOB = 18.0
 KNOCK_MOB_S = 0.25
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
 CLAW_DAMAGE = (9, 11)
+STAR_MEAN = sum(STAR_DAMAGE) / 2  # a star's damage on average: the unit of a monster's HP with Her.spread
 # What one of her attacks does, in stars (Her.stars): 1, her regular attack's star as above (and a swipe its CLAW of
 # one); LUCKY_SEVEN, Lucky Seven as she threw it live on Tree Dungeon, Forest Up North II (tour --loop --skill,
 # 2026-10-24, 26.9 minutes): 3.85 throws a Horny Mushroom's kill and 2.95 a Green's, by the kills her EXP gains named,
 # where the regular attack's 9 and 5 stars (HITS' fit, stars_to_kill) take 12.4 and 6.9 with preset game's misses. At
 # 3 stars a cast they take 4.1 and 2.8 there. Lucky Seven has no stab of its own up close (the stab is the regular
-# attack's: README, Attack), so with it a swipe's pick takes a cast's damage too; its MP isn't kept.
+# attack's: README, Attack), so with it a swipe's pick takes a cast's damage too. With `stars` it's every attack's, and
+# its MP isn't kept; as Her.skill, the Lucky Seven key's alone, its MP kept (below).
 LUCKY_SEVEN = 3.0
+# Her MP (Her.mp; kept from 2026-10-24, when the stack began choosing Lucky Seven or the regular attack a throw:
+# behavior.attacks). With Her.skill set, the Lucky Seven key's attack is Lucky Seven: SKILL_STARS stars of Her.skill /
+# SKILL_STARS of the regular star each, CAST_MP a cast, and with less MP than that the key throws nothing (no attack, no
+# lock), as in game. She regains MP_REGEN a second all the while, and her pet (Her.pet_mp) drinks an MP potion of hers,
+# MP_POTION, when a cast leaves her under its warning. All from the live telemetry of 2026-10-24 on Tree Dungeon
+# (level 24, 601 MP):
+# - MP_REGEN: her bar rose 92.6 MP in 286 s of the 20:57 run (the regular attack alone: no casts), a px (5.8 MP) about
+#   every 20 s;
+# - CAST_MP: attack.choice.cast_mp at her Lucky Seven's level (10: 11 MP); her bar fell a median 11.4 a cast (99 casts);
+# - MP_POTION: the median rise of her bar over 97 of the pet's drinks (in two clusters, 127-145 and 173-203);
+# - PET_MP: a warning in System Options' 5% steps; the reading before each drink was 0.058-0.067 of her bar (35-40 MP),
+#   a cast after it under 5%.
+SKILL_STARS = 2
+CAST_MP = 11.0
+MP_REGEN = 0.32
+MP_POTION = 185.0
+PET_MP = 0.05
 # A touch by a monster within this many s of its respawn came from its spawn point, onto her or beside her (World.
 # fresh_log): what a waiting place by a spawn point costs.
 FRESH_S = 1.5
@@ -529,6 +548,8 @@ class Realism:
     knock_turns: bool = False    # a touch's knock turns her to face the monster: HeavenClient's Player::damage doesn't
                                  # (it never calls set_direction), and in the old recordings she never turned without
                                  # an arrow, but no recording has a knock with no arrow held (README, Her heading)
+    bars_empty: bool = False     # a hurt monster's HP bar drawn empty, whatever it has left: as the stack reads them on
+                                 # Tree Dungeon at 1366x768 (perception.hud.hp_bar: 83 of 87 bars seen in a run read 0)
 
 
 @dataclass(frozen=True)
@@ -546,8 +567,8 @@ class Her:
     """Her as the simulator plays her: her HP (what a touch takes is a share of it), her level and EXP when a run
     starts (her EXP number: sim.fakes), how a touch's damage is worked out, and her pet. LEVEL_19 is her on the first
     map, where the golden traces and the harness's runs were fitted; LEVEL_23 on West Rocky Mountain II (from
-    2026-10-23: level 23, HP 730 and MP 584 by her bars there, her pet drinking her potions). Her MP isn't kept: the
-    regular attack the stack throws with costs none."""
+    2026-10-23: level 23, HP 730 and MP 584 by her bars there, her pet drinking her potions). Her MP is kept where
+    `mp` is set (LEVEL_24): then the Lucky Seven key's casts cost it (`skill`, CAST_MP)."""
     max_hp: float = MAX_HP
     level: int = 19
     exp: int = 421               # EXP into her level (as on the saved frames of 2026-10-18)
@@ -559,6 +580,13 @@ class Her:
     potion: float | None = None  # HP a potion of hers heals (her key's and her pet's); None: POTION_HP of her HP
     stars: float = 1.0           # what one of her attacks does, in stars: 1 the regular attack (a swipe CLAW of one);
                                  # LUCKY_SEVEN, Lucky Seven as thrown live (a swipe's pick as much)
+    mp: float = 0.0              # her MP when full (MP_REGEN, CAST_MP); 0: not kept
+    skill: float | None = None   # what the Lucky Seven key's attack does, in stars (LUCKY_SEVEN; CAST_MP a cast, and
+                                 # nothing with less MP); None: as the attack key's (`stars`), whatever her MP
+    pet_mp: float | None = None  # her pet's MP warning (PET_MP): it drinks an MP potion of hers (MP_POTION) when a cast
+                                 # leaves her under this share of her MP; None: it doesn't
+    spread: bool = False         # each of her stars' damage drawn (STAR_DAMAGE, a whole number as likely each, less the
+                                 # monster's defence) against its HP in the game data, not a star's worth each
 
 
 LEVEL_19 = Her()
@@ -566,15 +594,16 @@ LEVEL_19 = Her()
 # drink herself (Hunter's potion_hp in Sim.tour_stack and sim.harness), so the pet does what her own potions did.
 LEVEL_23 = Her(max_hp=730.0, level=23, exp=31_736, defence=DEFENCE, pet=0.45)
 # On Tree Dungeon, Forest Up North II (from 2026-10-24): level 24, HP 752 and MP 601 (the study's: her bars), her EXP
-# into the level not read yet (0). Her MP isn't kept (the regular attack costs none; Lucky Seven, 8-9 MP a cast, isn't
-# thrown by the hunt loop). A touch by meowdb's formula at DEFENCE: a Horny Mushroom (PADamage 110) takes 111-131 HP,
+# into the level not read yet (0). Her MP kept: her casts of Lucky Seven take CAST_MP each, her pet drinks for her under
+# PET_MP (MP_REGEN, MP_POTION); with `skill` None (the default) the Lucky Seven key throws as the attack key does. A
+# touch by meowdb's formula at DEFENCE: a Horny Mushroom (PADamage 110) takes 111-131 HP,
 # 15-17% of hers (the study's 113-134 at DEF 64), a Green (54) 49-59, a Slime 7-9; by a share of PADamage as fitted
 # on the first map (`defence` None: the harness's `--touch share`) 75, 37 and 9, give or take 70%. Which holds isn't
 # known: one Horny touch's px on her HP bar (17 px of 104 by the formula, 10 by the share, at 1366x768) tells.
 # Which potion she carries on the new maps isn't known: POTION_HP's 30% is 219 HP at 730 and 226 at 752, between a Red
 # Potion's 100 and an Orange Potion's 250 (the game data; the Tree Dungeon study's monsters_drops.md); the harness's
 # `--world red-potion` has her drink Red Potions.
-LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=0.45)
+LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=0.45, mp=601.0, pet_mp=PET_MP)
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -915,6 +944,11 @@ class World:
         self.potions_left = self.realism.potions
         self.potions_used = 0           # potions drunk, by her key or by her pet
         self.pet_potions = 0            # ... of them her pet's (Her.pet)
+        self.casts = 0                  # Lucky Seven casts (Her.mp kept), the MP they took, the MP potions her pet
+        self.mp_used = 0.0              # drank for her (Her.pet_mp), and the casts pressed with too little MP (none
+        self.mp_potions = 0             # thrown)
+        self.no_mp = 0
+        self.attacks = 0                # attacks her keys made, either key
         self.pet_drank_ms = -10_000     # when her pet last drank one
         self.pet_fed = 0                # times she fed her pet (the pet food key)
         self.pet_full = PET_FULLNESS     # her pet's fullness (Her.pet) as of pet_since (pet_fullness)
@@ -1028,6 +1062,8 @@ class World:
             info = None if mob_id is None else mob_info(int(mob_id))
             half, height = _body_of(kind, bodies.get(kind), info)
             hits = float(hits_of(kind, info))
+            if self.character.spread and info is not None and info.hp > 0:  # in average stars, not whole ones
+                hits = info.hp * (info.pdd + 100) / 100 / STAR_MEAN
             m = SimMonster(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
                            speeds.get(kind, monster_data.DEFAULT_SPEED), half, height, hits, hits)
             if kind in bodies:
@@ -1117,6 +1153,8 @@ class World:
         self._touch()
         if self.sitting:
             self.hp = min(1.0, self.hp + CHAIR_HP_PER_S * dt)
+        if self.character.mp > 0 and self.mp < 1.0:
+            self.mp = min(1.0, self.mp + MP_REGEN * dt / self.character.mp)
         self.ms += TICK_MS
 
     def _through_portal(self) -> bool:
@@ -1171,7 +1209,7 @@ class World:
                     self._fly(f, self.ms, d, skip=self.plat)
                     self.note(f"drops through platform {e.data}")
         elif e.kind == "aim":
-            self._aim(e.data)
+            self._aim(*e.data)
         elif e.kind == "star":
             self._attack(*e.data)
         elif e.kind == "loot":
@@ -1282,13 +1320,17 @@ class World:
             # It lifts her off at the game's step Lags.jump later on average, if she's on the ground then
             # (_liftoff); with JUMP_TAKEN_LATE, one pressed just before she lands jumps her once she has.
             self._push(self._acts(at, self._lag("jump", LAGS.jump, LAGS.sd_jump)), "liftoff", self.mode)
-        elif action == "attack":
+        elif action in ("attack", "skill"):
             if self.ms < self.attack_lock_ms or self.mode == "rope":
                 return
+            skill = action == "skill" and self.character.skill is not None
+            if skill and self.character.mp > 0 and not self._cast():
+                return  # too little MP: nothing thrown, no lock
             self.attack_lock_ms = self.ms + int(ATTACK_LOCK * 1000)
             self.attack_key_at = at
             self.sitting = False
-            self._push(self.ms_of(at + JUMP_LAG), "aim", self.ms)  # it starts then (_aim)
+            self.attacks += 1
+            self._push(self.ms_of(at + JUMP_LAG), "aim", (self.ms, skill))  # it starts then (_aim)
         elif action == "up":
             if self._through_portal():
                 return
@@ -1676,7 +1718,7 @@ class World:
         return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
                                   body=(self.top(m), m.half))
 
-    def _aim(self, key_ms: int) -> None:
+    def _aim(self, key_ms: int, skill: bool = False) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
         lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
         seeded: reach.CLAW's), and the claw swipes the nearest monster that stance's box reaches (swiped);
@@ -1708,12 +1750,13 @@ class World:
         stop = None if target is None or swipe else self.sight_stop(target)
         if stop is not None:
             target, stop = None, (target, stop)
-        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe, stop))
+        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe, stop, skill))
 
-    def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None) -> None:
+    def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None,
+                skill: bool = False) -> None:
         """The attack's damage, STAR_DELAY after its key: on the monster it picked when it started (_aim),
         a claw swipe or a star; none if what stops a star stopped it (`stop`: the monster picked, and the
-        foothold)."""
+        foothold). `skill`: Lucky Seven's (Her.skill), its stars' damage on a swipe's pick too."""
         if stop is not None:
             picked, f = stop
             where = f"the wall at x {f.x1:.0f}" if f.x1 == f.x2 else f"the floor at y {f.y1:.0f}"
@@ -1728,8 +1771,13 @@ class World:
         if not swipe and self.noise.miss and self.chance("miss") < self.noise.miss:
             self.note(f"star misses {m.kind} #{m.idx} at {dx:+.0f}")
             return
-        stars = self.character.stars
-        m.hp = round(m.hp - (stars if stars != 1.0 else CLAW if swipe else 1.0), 6)
+        her = self.character
+        stars = her.skill if skill else her.stars
+        if her.spread:
+            damage = self._damage(stars, swipe and stars == 1.0)
+        else:
+            damage = stars if stars != 1.0 else CLAW if swipe else 1.0
+        m.hp = round(m.hp - damage, 6)
         if m.hp > 1e-9:
             m.hit_at = self.t
             if self._pushes(m, swipe):
@@ -1741,6 +1789,33 @@ class World:
                 self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left): not pushed")
             return
         self._kill(m, mx, what)
+
+    def _damage(self, stars: float, swipe: bool) -> float:
+        """An attack's damage drawn (Her.spread), in average stars (STAR_MEAN): a claw swipe's (CLAW_DAMAGE), one star's
+        (STAR_DAMAGE), or SKILL_STARS stars of `stars` / SKILL_STARS of one each; every star a whole number from its
+        least to its most, as likely each, seeded by the tick."""
+        lo, hi = CLAW_DAMAGE if swipe else STAR_DAMAGE
+        n, each = (1, 1.0) if swipe or stars == 1.0 else (SKILL_STARS, stars / SKILL_STARS)
+        lo, hi = round(lo * each), round(hi * each)
+        total = sum(lo + int(self.chance(f"damage:{k}") * (hi - lo + 1)) for k in range(n))
+        return total / STAR_MEAN
+
+    def _cast(self) -> bool:
+        """A Lucky Seven cast's MP (CAST_MP) taken, if she has it (Her.mp): then her pet may drink for her (Her.pet_mp).
+        False with too little: nothing is thrown."""
+        her = self.character
+        if self.mp * her.mp < CAST_MP - 1e-9:
+            self.no_mp += 1
+            self.note(f"Lucky Seven with {self.mp * her.mp:.0f} MP: not enough, nothing thrown")
+            return False
+        self.mp -= CAST_MP / her.mp
+        self.casts += 1
+        self.mp_used += CAST_MP
+        if her.pet_mp is not None and self.mp < her.pet_mp and self.pet_fullness() > pet_care.PACKED_AT:
+            self.mp = min(1.0, self.mp + MP_POTION / her.mp)
+            self.mp_potions += 1
+            self.note(f"her pet drinks an MP potion for her: MP {self.mp:.1%}")
+        return True
 
     def _pushes(self, m: SimMonster, swipe: bool) -> bool:
         """Whether this hit pushes monster `m` back (PUSH_BY_DAMAGE: drawn by push_chance, seeded by the tick)."""
@@ -1929,6 +2004,7 @@ class World:
                 "evaded": self.evaded, **({"fell_out_at": round(self.fell_out_at, 3)} if self.fell_out_at else {}),
                 **({"left_map_at": round(self.left_map_at, 3)} if self.left_map_at is not None else {}),
                 **({"pet_potions": self.pet_potions} if self.pet_potions else {}),
+                **({"casts": self.casts, "mp_potions": self.mp_potions} if self.casts else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
 
@@ -1948,7 +2024,7 @@ def _actions(keys: GameKeys) -> dict[str, str]:
     """Key name -> what it does."""
     out = {}
     for field_name, action in (("left", "left"), ("right", "right"), ("up", "up"), ("down", "down"),
-                               ("jump", "jump"), ("attack", "attack"), ("lucky_seven", "attack"),
+                               ("jump", "jump"), ("attack", "attack"), ("lucky_seven", "skill"),
                                ("pick_up", "pick"), ("chair", "chair"), ("hp_potion", "potion"),
                                ("pet_food", "pet_food")):
         k = getattr(keys, field_name, None)
