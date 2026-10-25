@@ -242,21 +242,27 @@ class Hello:
 
 
 class Writer:
-    """A client's pipe, written by a thread of its own from a queue: the newest QUEUE_KEEP messages at most, the older
+    """A client's pipe, written by a thread of its own from a queue: the newest QUEUE_KEEP states at most, the older
     dropped (counted, and a `gap` said before the next), so a client that doesn't read never holds anything up (a pipe's
-    buffer is 8 KB, and a write waits until it's read)."""
+    buffer is 8 KB, and a write waits until it's read). What's said to the client alone (`put` with `keep`: its
+    welcome, a new run, a full frame's answer) is never dropped, and goes first."""
 
     def __init__(self, conn, keep: int = QUEUE_KEEP, name: str = "perceive-writer"):
         self.conn, self.keep = conn, keep
         self.q: deque[bytes] = deque()
+        self.said: deque[bytes] = deque()  # (never dropped)
         self.cond = threading.Condition()
         self.dropped, self.gap, self.alive = 0, 0, True
         self._thread = threading.Thread(target=self._run, name=name, daemon=True)
         self._thread.start()
 
-    def put(self, data: bytes) -> None:
+    def put(self, data: bytes, keep: bool = False) -> None:
         with self.cond:
             if not self.alive:
+                return
+            if keep:
+                self.said.append(data)
+                self.cond.notify()
                 return
             if len(self.q) >= self.keep:
                 self.q.popleft()
@@ -273,11 +279,14 @@ class Writer:
     def _run(self) -> None:
         while True:
             with self.cond:
-                self.cond.wait_for(lambda: self.q or not self.alive)
+                self.cond.wait_for(lambda: self.q or self.said or not self.alive)
                 if not self.alive:
                     return
-                gap, self.gap = self.gap, 0
-                data = self.q.popleft()
+                if self.said:
+                    gap, data = 0, self.said.popleft()
+                else:
+                    gap, self.gap = self.gap, 0
+                    data = self.q.popleft()
             try:
                 if gap:
                     self.conn.send_bytes(pickle.dumps(("gap", gap)))
@@ -298,7 +307,8 @@ class _Client:
         self.since = time.monotonic()
 
     def send(self, *msg) -> None:
-        self.writer.put(pickle.dumps(msg))
+        """A message to this client alone (never dropped)."""
+        self.writer.put(pickle.dumps(msg), keep=True)
 
 
 class Service:
@@ -432,7 +442,7 @@ class Service:
         with self._lock:
             targets = [c for c in self.clients.values() if c.hello is not None]
         for c in targets:
-            c.writer.put(data)
+            c.writer.put(data, keep=True)
 
     def attached(self) -> list[Hello]:
         with self._lock:

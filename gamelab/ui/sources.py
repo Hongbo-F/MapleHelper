@@ -16,6 +16,9 @@ from .. import telemetry
 PERCEIVED = ("scene", "tracks", "exp")
 PERCEIVED_EVENTS = ("died", "exp_gain", "hp_drop")
 PERCEIVE_LIVE_S = 3.0  # s since the service's file last grew within which its records are the page's
+# What the command's scenes say of her that the service's don't: which way she faces, by her keys and her frames (the
+# hunter's: behavior.hunter._publish), carried onto the service's scenes from the command's latest.
+HER_OWN = ("facing", "facing_by", "facing_keys", "facing_seen", "facing_strong")
 
 
 def perceive_file(name: str) -> bool:
@@ -74,6 +77,7 @@ class LiveSource:
         self._perceived = _Followed(folder, perceive_file, rescan_s)
         self._perceived_at: float | None = None  # when the service's file last gave records
         self._alone = False  # the service's file is the run (no command's yet)
+        self._her: dict = {}  # HER_OWN as the command's latest scene had them
 
     @property
     def path(self) -> Path | None:
@@ -94,10 +98,19 @@ class LiveSource:
             self._alone, fresh = False, True
         if self._perceived_at is None or now - self._perceived_at > PERCEIVE_LIVE_S:
             return fresh, records
+        for r in records:
+            if r.get("topic") == "scene" and r.get("her"):
+                self._her = {k: r["her"][k] for k in HER_OWN if k in r["her"]}
         own = [r for r in records if r.get("topic") not in PERCEIVED]
-        theirs = [r for r in seen if r.get("topic") in PERCEIVED
+        theirs = [self._with_her(r) for r in seen if r.get("topic") in PERCEIVED
                   or (r.get("topic") == "event" and r.get("kind") in PERCEIVED_EVENTS)]
         return fresh, sorted(own + theirs, key=lambda r: r.get("t", 0.0))
+
+    def _with_her(self, r: dict) -> dict:
+        """A service's scene with what the command's say of her that it doesn't (HER_OWN)."""
+        if r.get("topic") != "scene" or not r.get("her") or not self._her:
+            return r
+        return {**r, "her": {**self._her, **r["her"]}}
 
 
 class ReplaySource:

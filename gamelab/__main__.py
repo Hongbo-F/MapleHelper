@@ -31,6 +31,7 @@ from .screen import STRETCHED, geometry
 DEFAULT_MAP = 10000012  # Victoria Road: Thicket Around the Beach II
 FRONT_WAIT_S = 3.0  # s a hunting command waits for the game to come to the front before it gives up (_to_game)
 MINIMIZED_POLL_S = 0.5  # s between looks at whether the minimized game was restored (`watch` waits: _game_geometry)
+GAME_POLL_S = 5.0       # s between looks for the game's window while a command waits for it (_wait_for_game)
 MINIMAP_TRIES = 3       # times the map's minimap picture is tried before a command that acts stops (_minimap_picture),
 MINIMAP_RETRY_S = 0.5   # ... this long apart (in case what kept it from loading passes)
 # `watch`: how often it says on the console how what the perception service sees is going (the service publishes the
@@ -432,10 +433,12 @@ def cmd_pet(args) -> int:
     Detector alarm up it goes on: the food by the fullness followed (the player takes it then), no read until the alarm
     is cleared; a food the player refuses or doesn't answer (it isn't running) is tried again at the next follow. Its
     looks and panels are the perception service's frames (it sends keys, but doesn't hunt: the service keeps its idle
-    pace for it)."""
+    pace for it). With --every and no game running it waits for the game (the babysitter restarted it every 5 s)."""
+    title = _game_title()
+    if args.every:
+        _wait_for_game(title)
     hunter = _hunter(args, throws=False)
     _record("pet", args.map)
-    title = _game_title()
     if args.read and client.alarm_up():
         print("pet fullness: not read with the Lie Detector alarm up (the read double-clicks her)")
     elif args.read:
@@ -469,6 +472,21 @@ def _close_perception() -> None:
         print(f"perception: {perception.served} states handed out, {perception.refused} times none in time, "
               f"{perception.connects} connections, {perception.gaps} states dropped for reading too slowly"
               + (f"; {down}" if down and down != "closed" else ""))
+
+
+def _wait_for_game(title: str) -> None:
+    """Until the game's window is there (GAME_POLL_S apart), said once: a command that keeps running between sessions
+    (`pet --every`) waits for the game instead of ending (the babysitter started it again every 5 s)."""
+    said = False
+    while True:
+        try:
+            window.find_game(title)
+            return
+        except RuntimeError as e:
+            if not said:
+                print(f"waiting for the game ({e}); nothing is sent meanwhile", flush=True)
+                said = True
+        time.sleep(GAME_POLL_S)
 
 
 def _to_game() -> bool:

@@ -295,3 +295,19 @@ def test_the_pet_command_goes_on_when_a_food_is_refused_or_not_answered(monkeypa
     assert m.main(["pet"]) == 0 and m.main(["pet"]) == 0
     out = capsys.readouterr().out
     assert "pet: no food given (LieDetectorAlarm" in out and "pet: no food given (PlayerError" in out
+def test_the_pet_babysitter_waits_for_the_game_instead_of_ending(monkeypatch, capsys):
+    """`pet --every 1` with no game running waits for its window (said once), where it ended and the babysitter started
+    it again every 5 s (babysit.log: "no window titled 'MapleStory'")."""
+    from gamelab import __main__ as m
+    from gamelab import window
+    tries = []
+
+    def find_game(title):
+        tries.append(title)
+        if len(tries) < 3:
+            raise RuntimeError("no window titled 'MapleStory'; is the game running?")
+        return 1
+    monkeypatch.setattr(window, "find_game", find_game)
+    monkeypatch.setattr(m.time, "sleep", lambda s: None)
+    m._wait_for_game("MapleStory")
+    assert len(tries) == 3 and capsys.readouterr().out.count("waiting for the game") == 1

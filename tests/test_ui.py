@@ -114,7 +114,7 @@ def test_live_source_shows_the_perception_services_scenes_and_the_commands_plans
     assert fresh and [r["topic"] for r in records] == ["session", "scene"] and src.path == service
     tour = tmp_path / "20261025-090500-tour.jsonl"
     write(tour, {"topic": "session", "t": 2.0, "map": 7, "command": "tour"},
-          {"topic": "scene", "t": 2.1, "her": {"x": 0}}, {"topic": "route", "t": 2.2, "moves": []})
+          {"topic": "scene", "t": 2.1, "her": {"x": 0, "facing": "left"}}, {"topic": "route", "t": 2.2, "moves": []})
     write(service, {"topic": "scene", "t": 2.15, "her": {"x": 11}}, {"topic": "tracks", "t": 2.16, "list": []},
           {"topic": "event", "t": 2.17, "kind": "died", "text": "died #3"}, {"topic": "log", "t": 2.18, "text": "x"})
     now[0] = 101.5
@@ -122,6 +122,7 @@ def test_live_source_shows_the_perception_services_scenes_and_the_commands_plans
     assert fresh and src.path == tour  # the command's file is the run now, from its start
     assert [(r["topic"], r["t"]) for r in records] == [("session", 2.0), ("scene", 2.15), ("tracks", 2.16),
                                                        ("event", 2.17), ("route", 2.2)]
+    assert records[1]["her"] == {"x": 11, "facing": "left"}  # (her facing as the command's scenes have it)
     write(tour, {"topic": "scene", "t": 3.0, "her": {"x": 1}}, {"topic": "log", "t": 3.1, "text": "tour"})
     now[0] = 101.6 + PERCEIVE_LIVE_S  # the service's file hasn't grown since: the command's own scenes
     fresh, records = src.poll()
