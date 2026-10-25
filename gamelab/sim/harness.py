@@ -15,10 +15,10 @@ her as she plays each (sim.scenarios.HER: level 23 and 24, her pet drinking her 
 POLICY-PRESET-MAP; the presets are the same worlds on every map, but `crowd`, `crowd-17` and `crowd-slow`, Tree
 Dungeon's other players (TREE_CAMPS), which are that map's alone. `--world` switches on what isn't known of the game
 there (WORLDS: group 0's walls, the client's sides, the client's rope reach, a touch as a share of PADamage, no
-evasion), each saved as a suffix of the name. `--attack` has the stack choose her attack a throw as live (behavior.
-attacks: Lucky Seven but the regular attack to finish a monster and while her MP is under a cast; Lucky Seven whenever
-she has the MP; the regular attack always) in a world where her Lucky Seven key casts it at its MP (ATTACK_HER) and
-the monsters' HP bars read empty as live (ATTACK_REALISM).
+evasion, the monsters' HP bars read empty), each saved as a suffix of the name. `--attack` has the stack choose her
+attack a throw as live (behavior.attacks: Lucky Seven but the regular attack to finish a monster and while her MP is
+under a cast; Lucky Seven whenever she has the MP; the regular attack always) in a world where her Lucky Seven key
+casts it at its MP (ATTACK_HER).
 What a run gave is read from the simulated world, not from the bot's own reports (those miss kills):
 
   exp_per_min      EXP she got, per minute of the horizon (a death stops the count)
@@ -27,7 +27,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    her lowest HP; potions; died_at
   casts, mp_used   her Lucky Seven casts and the MP they took (world.CAST_MP each), mp_per_min a minute alive;
                    mp_potions, the MP potions her pet drank for her (world.Her.pet_mp); no_mp, casts pressed with too
-                   little MP (nothing thrown); attacks, her attacks with either key
+                   little MP (nothing thrown); attacks, her attacks with either key; finishes, the regular attack
+                   thrown to finish a monster her throws or its bar make low (`--attack choice`: its 'attack'
+                   records)
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
                    counts against the bar as a death does; left_map_at, the same for up held at a portal
                    (world.SimLeftMap)
@@ -153,6 +155,10 @@ IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body as the client has it (`client-body`: 22 either side of her feet and 65 tall, motion.bodies, which the
 # planner keeps her clear of monsters by), not the simulator's 15 and 55 (world.HER_HALF, HER_HEIGHT).
 WORLDS["client-body"] = {"her_box": HER_BOX_CLIENT}
+# ... and the monsters' HP bars read empty once they're hurt (`bars-empty`: Realism.bars_empty, sim.fakes.FakeEyes.bar),
+# as the stack read them live at 1366x768 until 2026-10-25 (perception.hud.hp_bar took the bar's black frame for its
+# fill: 488 of 567 bars read 0), so what a monster has left was her throws' reckoning alone (behavior.attacks).
+WORLDS["bars-empty"] = {"bars_empty": True}
 # ... and her facing read the wrong way off 1% of her frames, in runs of one pose (world.Noise.heading_wrong): as weakly
 # as every frame read the wrong way on 2026-10-24 (0.31, 0.24 ahead: never strong, which her throws' taps go by), and,
 # the worst case, as surely as she's read right (0.6, 0.4 ahead: strong).
@@ -164,9 +170,6 @@ NOISE_FIELDS = ("heading_wrong",)  # WORLDS' fields that are world.Noise's
 # key's the regular star; each star's damage drawn against the monster's HP in the game data (world.Her.spread), so a
 # monster's HP left is as the stack reckons it (attack.choice: its finishing throws).
 ATTACK_HER = {"skill": LUCKY_SEVEN, "spread": True}
-# ... and the monsters' HP bars as the stack reads them live on Tree Dungeon at 1366x768: empty once hurt (Realism.
-# bars_empty), so what a monster has left is her throws' reckoning alone (behavior.attacks).
-ATTACK_REALISM = {"bars_empty": True}
 # What the simulator's looks take (sim.fakes), to compare against: "coded", the fakes' own (a look 100 ms, as
 # the README had them before the speedups of 2026-10-20); "measured", today's, as bench-look and bench-capture
 # measured them offline (17 saved frames x 5, medians, after the profiling pass): a look placing her 12.0 ms of
@@ -260,8 +263,8 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
     until the horizon. `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a
     little); `feed`: her looks and glances from a continuous feed (localization.feed.SyncFeed); `world`: the
     switches of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default);
-    `attack`: the stack's attack a throw (behavior.attacks.MODES), with her as ATTACK_HER and the bars as
-    ATTACK_REALISM (None: the regular attack, her as the map has her)."""
+    `attack`: the stack's attack a throw (behavior.attacks.MODES), with her as ATTACK_HER (None: the regular attack,
+    her as the map has her)."""
     from . import scenarios
     if map_id not in PRESET_MAPS.get(preset, (map_id,)):
         raise ValueError(f"preset {preset} is map {', '.join(map(str, PRESET_MAPS[preset]))}'s alone")
@@ -275,7 +278,6 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
         noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
     if attack is not None:
         her = dataclasses.replace(her, **ATTACK_HER)
-        realism = dataclasses.replace(realism, **ATTACK_REALISM)
     fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
     return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else "")
@@ -408,6 +410,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "mp_potions": world.mp_potions,
         "no_mp": world.no_mp,
         "attacks": world.attacks,
+        "finishes": sum(1 for r in records if r.get("topic") == "attack" and r.get("why") == "finish"),
         "died_at": world.died_at,
         "fell_out_at": world.fell_out_at,
         "left_map_at": world.left_map_at,
@@ -517,7 +520,7 @@ def _run_one_args(a: tuple) -> dict:
 
 
 COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "mp_per_min", "mp_potions",
-           "died_at", "fell_out_at",
+           "finishes", "died_at", "fell_out_at",
            "left_map_at",
            "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost",
            "alive_s", "hurt", "fresh_hurt", "wait_s", "wait_hp_lost")

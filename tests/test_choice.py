@@ -167,7 +167,7 @@ def test_a_bar_read_between_empty_and_full_sets_what_is_left(monkeypatch):
     a.on_look(_look([("horny-mushroom", 200.0, 0.08)]))  # never thrown at: its bar, 32 of its 403 HP
     assert a.key("right") == KEYS7.attack.name
     a2, _ = _attacks()
-    a2.on_look(_look([("horny-mushroom", 200.0, 0.0)]))  # read empty (as on Tree Dungeon live): its whole HP
+    a2.on_look(_look([("horny-mushroom", 200.0, 0.0)]))  # read empty (as at 1366x768 until 2026-10-25): its whole HP
     assert a2.key("right") == KEYS7.lucky_seven.name
     assert a2.left(a2._last.monsters[0]) > 400 - 0.725 * 150 * 100 / 110 - 1
 

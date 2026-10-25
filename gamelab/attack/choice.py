@@ -36,8 +36,9 @@ import numpy as np
 
 # Her regular attack's star: what it does before the monster's defence. What hers did on the first map at level 19
 # (sim.world.STAR_DAMAGE, 30-70 as read off the monsters' bars there); at level 24 on Tree Dungeon not measured: the HP
-# bars over the monsters read empty there (perception.hud.hp_bar: of the 87 bars seen in the 20:57 run of 2026-10-24,
-# 83 read 0, walking on after, 4 a share), so her damage can't be read off them. A guess, the simulator's.
+# bars over the monsters read empty there until 2026-10-25 (perception.hud.hp_bar: of the 87 bars seen in the 20:57 run
+# of 2026-10-24, 83 read 0, walking on after, 4 a share), and her damage hasn't been read off them since. A guess, the
+# simulator's.
 STAR = (30, 70)
 # Lucky Seven's damage, in regular stars (two stars a cast, each SKILL / 2 of the regular one's): sim.world.LUCKY_SEVEN,
 # fitted to her live hunts with it on Tree Dungeon (tour --loop --skill, 2026-10-24: 3.85 throws a Horny Mushroom's

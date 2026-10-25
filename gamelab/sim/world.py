@@ -548,8 +548,9 @@ class Realism:
     knock_turns: bool = False    # a touch's knock turns her to face the monster: HeavenClient's Player::damage doesn't
                                  # (it never calls set_direction), and in the old recordings she never turned without
                                  # an arrow, but no recording has a knock with no arrow held (README, Her heading)
-    bars_empty: bool = False     # a hurt monster's HP bar drawn empty, whatever it has left: as the stack reads them on
-                                 # Tree Dungeon at 1366x768 (perception.hud.hp_bar: 83 of 87 bars seen in a run read 0)
+    bars_empty: bool = False     # a hurt monster's HP bar read empty, whatever it has left (sim.fakes.FakeEyes.bar): as
+                                 # the stack read them at 1366x768 until 2026-10-25 (perception.hud.hp_bar: 83 of 87
+                                 # bars seen in a run read 0; harness `--world bars-empty`)
 
 
 @dataclass(frozen=True)

@@ -694,12 +694,16 @@ def nav_fight_across(sim):
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=4,
+@scenario((14, 760.0), monsters="all", seed=5,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
-    """nav_fight_up on seed 4: she shoots 17's monsters from 14, climbs to 3, comes back down to 17 and up again to
-    3, is knocked off down to 25 at 112 s, back up by 23 and the rope to 17, then down to 35, knocked off 33 back
-    onto it at 142 s, and runs out of her 180 s on 33, 40 monsters killed. (Seed 4 since a throw's tap goes by her
+    """nav_fight_up on seed 5: she shoots 17's monsters from 14, climbs to 6, is knocked off 4 onto 6 at 31 s, and
+    fights her way up to 3 and over to 1 and back onto 3 twice, running out of her 180 s, 42 monsters killed. (Seed 5
+    since the monsters' HP bars are drawn as the game draws them, perception.hud.draw_hp_bar, read to the game's px: on
+    seed 4 she now arrives on 1 in 177 s, knocked off four times; of seeds 1-17, 2, 5, 11 and 16 meet all of this.
+    On seed 4 before: she shot 17's monsters from 14, climbed to 3, came back down to 17 and up again to
+    3, was knocked off down to 25 at 112 s, back up by 23 and the rope to 17, then down to 35, knocked off 33 back
+    onto it at 142 s, and ran out of her 180 s on 33, 40 monsters killed. Seed 4 since a throw's tap goes by her
     facing off the frame, perception.heading: on seed 6 she now arrives, in 151 s; of seeds 1-16, 4 and 5 meet all
     of this. On seed 6 before: knocked off 3 down to 17 at 55 s and off 17 down to 25 at 81 s, back up by 23 and the
     rope past its end, she ran out of her 180 s on her way up again, 39 monsters killed. Seed 6 since her EXP number
@@ -2123,7 +2127,7 @@ def loop_tree_wait(sim):
     return harness._only(_loop(4), (20,))(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=2, limit=1200,
+@tree((28, 247.0), monsters="all", seed=1, limit=1200,
       expects=(logs("tour: sweep"), check("two stops hunted or more", lambda tr: len(tr["result"]["visited"]) >= 2),
                check("she fed her pet", _fed_her_pet)))
 def tour_tree_run(sim):
@@ -2131,8 +2135,10 @@ def tour_tree_run(sim):
     the escort's fights on the way. The floor's and 32's respawns keep her fighting on the way: each stop takes
     minutes, and the third is often not reached in its time (README: Tree Dungeon, Forest Up North II). (A touch can
     knock her past the tower's wall and out of the map, a simulator effect: with the escorted trips alone seed 2 went
-    out at 635 s and the scenario was on seed 6; with positioning and her body the client's too, seeds 1-12 all meet
-    this but 6, out at 872 s by x -308, and it's on seed 2 again.)"""
+    out at 635 s and the scenario was on seed 6; with positioning and her body the client's too, seeds 1-12 all met
+    this but 6, out at 872 s by x -308, and it was on seed 2 again; since the monsters' HP bars are drawn as the game
+    draws them, perception.hud.draw_hp_bar, seed 2 goes out at 771 s by x 332 and seed 7 runs past its 1200 s, seeds 1
+    and 3-6 meet it, and it's on seed 1.)"""
     return sim.tour_stack().run(stops=3)
 
 
@@ -2191,7 +2197,7 @@ def _lucky_seven_again(tr: dict) -> bool:
 
 @tree((24, 231.0), monsters={22, 23}, seed=1, limit=300, may_die=True, noise=_CROWD[0], feed=True, attack="choice",
       her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER, pet_mp=None),
-      realism=Realism(respawn=17.0, zero_walls=True, **harness.ATTACK_REALISM),
+      realism=Realism(respawn=17.0, zero_walls=True),
       expects=(logs("Lucky Seven: horny-mushroom"), logs("< a cast's 11"),
                check("Lucky Seven again once her MP came back", _lucky_seven_again),
                check("never Lucky Seven with too little MP", lambda tr: not any(
@@ -2199,13 +2205,13 @@ def _lucky_seven_again(tr: dict) -> bool:
                check("her looks from the feed", lambda tr: tr["feed"]["senses"]["from the feed"] > 0)))
 def loop_tree_mp_runs_out(sim):
     """The hunt loop as live runs by default (tour --loop: the feed, the attack choice), her pet drinking no MP potions
-    and her MP at 12% (72 of 601) when it starts, 23 her only ground, shot from 24 at 231, the bars over hurt monsters
-    read empty as live at 1366x768 (harness.ATTACK_REALISM). Lucky Seven while she has the MP for a cast, the regular
-    attack once she hasn't (a cast with too little throws nothing in game: never pressed then), Lucky Seven again as her
-    MP comes back (world.MP_REGEN, 0.32 MP a second: a cast every 34 s or so): on seed 1, 13 casts (6 on what she
-    started with, 7 as it came back) and 193 regular throws for her MP, 20 kills, none pressed short. The harness's runs
-    never showed this, their pet's potion under 5% keeping her over a cast (review, 2026-10-25), nor did a scenario run
-    with the feed and the choice before."""
+    and her MP at 12% (72 of 601) when it starts, 23 her only ground, shot from 24 at 231. Lucky Seven while she has
+    the MP for a cast (or the regular attack to finish a monster its bar shows low), the regular attack once she hasn't
+    (a cast with too little throws nothing in game: never pressed then), Lucky Seven again as her MP comes back
+    (world.MP_REGEN, 0.32 MP a second: a cast every 34 s or so): on seed 1, 13 casts and 185 regular throws for her MP,
+    19 kills, none pressed short (with the bars read empty, as live before 2026-10-25: 13, 193 and 20). The harness's
+    runs never showed this, their pet's potion under 5% keeping her over a cast (review, 2026-10-25), nor did a scenario
+    run with the feed and the choice before."""
     sim.world.mp = 0.12
     return harness._only(_loop(4), (23,))(sim)
 
@@ -2353,12 +2359,12 @@ def loop_tree_lie_detector_23(sim):
     return harness._only(lie_detector(60.0), (23,))(sim)
 
 
-# Her as `tour --loop` plays by default (the feed, the attack choice): Lucky Seven's key casting it at its MP, each star's
-# damage drawn, and the bars over hurt monsters read empty as live (harness.ATTACK_HER, ATTACK_REALISM); group 0's walls
+# Her as `tour --loop` plays by default (the feed, the attack choice): Lucky Seven's key casting it at its MP, and each
+# star's damage drawn (harness.ATTACK_HER), the bars over hurt monsters read as they show; group 0's walls
 # stopping her (in the default world a touch knocked her out of the map past the tower's wall on 3 of seeds 1-12 of
 # loop_tree_lie_detector_grind, and 2 of feed_loop_tree_lie_detector, a simulator effect).
 _LIVE = dict(feed=True, attack="choice", her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER),
-             realism=Realism(zero_walls=True, **harness.ATTACK_REALISM))
+             realism=Realism(zero_walls=True))
 _FROM_THE_FEED = check("her looks from the feed", lambda tr: tr["feed"]["senses"]["from the feed"] > 0)
 
 

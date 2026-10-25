@@ -6,9 +6,9 @@
   filled in as localization (Senses.look, Scene.place, find_loot, pose.refine) inverts them (her name
   tag, the grass under her, the ropes in view, her minimap dot and the other player's), glance() and messages(). Monsters and
   drops are drawn into the frame as data its fake detectors read (Eyes.monsters, monsters_wide, items),
-  and hurt monsters' HP bars as pixels (Eyes.bar reads those); her EXP number as the bar shows it
-  (perception.exp_number draws it with the game's glyphs: her level and EXP at the start, World.character, and what she
-  has gained), read as in game.
+  and hurt monsters' HP bars as pixels, as the game draws them (Eyes.bar reads those); her EXP number as the bar shows
+  it (perception.exp_number draws it with the game's glyphs: her level and EXP at the start, World.character, and what
+  she has gained), read as in game.
   world.Noise can round the dot to whole pixels and hide her tag, her dot or her EXP number for a while.
 - `FakePlayer`: what gamelab.control.client offers (submit, send, done, wait, cancel), running each plan's keys
   on the world: plans run one after another, `end_ms` makes one last longer, every key still held is let
@@ -50,6 +50,7 @@ from ..paths import LAB
 from ..perception import exp_number
 from ..perception.eyes import Eyes, Observation
 from ..perception.heading import Reading
+from ..perception.hud import draw_hp_bar
 from ..perception.loot import Item
 from ..perception.match import suppress_overlaps
 from ..perception.minimap import OTHER_SHIFT, PICTURE_BASE, Marker
@@ -57,7 +58,7 @@ from ..perception.mobs import REFIND_PAD, Mob
 from ..perception.terrain import ScreenRope
 from ..screen import SCALE
 from ..screen import UNITS_PER_HALF_PX
-from ..screen import SCREEN_SCALE
+from ..screen import SCREEN_SCALE, STRETCHED
 from ..perception.kinds import kind_of
 from .world import HEADING_SPELL_S, LEVEL_19, POSE_SPELL_S, Noise, World, exp_pixels
 
@@ -403,6 +404,13 @@ class FakeEyes(Eyes):
             box[:, 20:50] = 255
         return box
 
+    def bar(self, obs: Observation, mob: Mob) -> float | None:
+        """Eyes.bar, off the bar drawn over it as the game draws it (perception.hud.draw_hp_bar); with
+        Realism.bars_empty a bar up reads empty, as the stack read them live at 1366x768 until 2026-10-25 (hud.hp_bar
+        took the black frame around the fill for the bar)."""
+        left = super().bar(obs, mob)
+        return 0.0 if left is not None and self.world.realism.bars_empty else left
+
     def monsters_rows(self, obs: Observation, rows: tuple[int, int]) -> list[Mob]:
         """The monsters drawn wholly within those rows, as a slice's search finds them, charged DETECT_SLICE_S."""
         self.clock.sleep(DETECT_SLICE_S)
@@ -490,8 +498,8 @@ class FakeEyes(Eyes):
                     and 0 <= mob.y - h // 2 and mob.y + h // 2 <= PLAY_BOTTOM):
                 continue
             screen.mobs.append(mob)
-            if alive and m.hp < m.hp_max:  # (drawn empty with Realism.bars_empty, as the stack reads them live)
-                _bar(frame, cx, mob.y - h // 2, 0.0 if self.world.realism.bars_empty else m.hp / m.hp_max)
+            if alive and m.hp < m.hp_max:  # (read empty with Realism.bars_empty: `bar`)
+                draw_hp_bar(frame, cx, mob.y - h // 2, m.hp / m.hp_max, STRETCHED.frame_scale)
         for d in self.world.live_drops():
             iw, ih = ITEM_SIZE.get(d.kind, (18, 18))
             cx, bottom = round(her[0] + (d.x - x) / u), round(floor + (d.y - y) / u)
@@ -573,16 +581,6 @@ class FakeEyes(Eyes):
 
 
 _BLANK = np.full(FRAME + (3,), SKY, np.uint8)
-
-
-def _bar(frame: np.ndarray, x: int, top: int, left: float) -> None:
-    """A monster's HP bar above it (what hud.hp_bar reads): green for what's left, black for what's lost."""
-    y0, x0, width = top - 18, x - 18, 36
-    if y0 - 1 < 0 or x0 - 1 < 0 or x0 + width + 1 > frame.shape[1]:
-        return
-    frame[y0 - 1:y0 + 5, x0 - 1:x0 + width + 1] = (165, 165, 165)
-    frame[y0:y0 + 4, x0:x0 + width] = (0, 0, 0)
-    frame[y0:y0 + 4, x0:x0 + round(width * left)] = (0, 196, 0)
 
 
 # --- control -----------------------------------------------------------------------------------------

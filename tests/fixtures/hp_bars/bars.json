@@ -1,0 +1,282 @@
+[
+ {
+  "file": "n_horny_png.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.3261,
+  "hi": null,
+  "from": "gamelab/lab/shots/hp0_135320.png",
+  "what": "a Horny Mushroom's bar, 15 of 46 px green; the old reader 0.0"
+ },
+ {
+  "file": "n_horny_trail_png.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.2609,
+  "hi": null,
+  "from": "gamelab/lab/shots/hp0_135339.png",
+  "what": "a star's trail across its end and a glow over its right half; the old reader None"
+ },
+ {
+  "file": "n_horny_beside_green_png.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.3696,
+  "hi": null,
+  "from": "D:/MapleHelper-scratch/live/hpcheck_000.png",
+  "what": "a Horny Mushroom's bar, a Green Mushroom 31 px left of it"
+ },
+ {
+  "file": "n_green_beside_horny_png.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": null,
+  "hi": null,
+  "from": "D:/MapleHelper-scratch/live/hpcheck_000.png",
+  "what": "the Green Mushroom beside it: no bar of its own"
+ },
+ {
+  "file": "n_number_over_top.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.413,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235133-heading-wrong/00055.jpg",
+  "what": "a damage number over its frame's top"
+ },
+ {
+  "file": "n_tiny_bright_red.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.0435,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235133-heading-wrong/00070.jpg",
+  "what": "2 px green, the latest damage bright red to the end"
+ },
+ {
+  "file": "n_dark_red.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.3913,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235133-heading-wrong/00140.jpg",
+  "what": "the latest damage dark red after the green"
+ },
+ {
+  "file": "n_tiny_dark_red.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.0435,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235341-lie-detector-2351/00565.jpg",
+  "what": "2 px green, dark red after"
+ },
+ {
+  "file": "n_number_over_top_2.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.4783,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235341-lie-detector-2351/01370.jpg",
+  "what": "a damage number over its top (the frame matching 0.89)"
+ },
+ {
+  "file": "n_low_match.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.3478,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261025-002903-anti-macro/01985.jpg",
+  "what": "her weapon over its left, a crescent past its end (the frame matching 0.84)"
+ },
+ {
+  "file": "n_near_full.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.9348,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261025-002903-anti-macro/00970.jpg",
+  "what": "43 of 46 px green"
+ },
+ {
+  "file": "n_crescent_hides_end.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.3478,
+  "hi": 0.5435,
+  "from": "gamelab/lab/recent/20261025-002903-anti-macro/00375.jpg",
+  "what": "a white crescent over its end: between 0.35 and 0.54 (the next frame 0.46)"
+ },
+ {
+  "file": "n_glow_over_end.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.7174,
+  "hi": 0.7391,
+  "from": "gamelab/lab/recent/20261025-002903-anti-macro/00585.jpg",
+  "what": "a yellow glow over its end (the frames before 0.72)"
+ },
+ {
+  "file": "n_orange_over_end.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.3696,
+  "hi": 0.5652,
+  "from": "gamelab/lab/recent/20261025-002903-anti-macro/01965.jpg",
+  "what": "an orange glow over its end (the next frame 0.50)"
+ },
+ {
+  "file": "n_dying_all_red.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": null,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261025-002903-anti-macro/01705.jpg",
+  "what": "a Green Mushroom's as it dies: all dark red, no green"
+ },
+ {
+  "file": "n_dying_red_black.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": null,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261025-005643-lie-detector-0055/01460.jpg",
+  "what": "a Horny Mushroom's as it dies: red and black"
+ },
+ {
+  "file": "n_two_bars.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.3696,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235133-heading-wrong/00925.jpg",
+  "what": "two bars 39 px apart, 9 rows"
+ },
+ {
+  "file": "n_two_bars_other.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": 0.5,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235133-heading-wrong/00925.jpg",
+  "what": "the other of the two"
+ },
+ {
+  "file": "n_party_bar.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": null,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261025-002903-anti-macro/00935.jpg",
+  "what": "a party member's bar (red) where a monster's would be"
+ },
+ {
+  "file": "n_outline_no_bar.png",
+  "size": "1366x768",
+  "x": 48,
+  "top": 50,
+  "share": null,
+  "hi": null,
+  "from": "gamelab/lab/recent/20261024-235133-heading-wrong/00475.jpg",
+  "what": "no bar; the old reader took a platform's black outline for an empty one"
+ },
+ {
+  "file": "h_slime_slid.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": 0.7386,
+  "hi": null,
+  "from": "gamelab/lab/recordings/do_walk.npz#21",
+  "what": "a slime's bar, slid 7 px left matching 0.81 nearer where it's expected"
+ },
+ {
+  "file": "h_pig_beside_bar.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": 0.5068,
+  "hi": null,
+  "from": "gamelab/lab/recordings/do_l7c.npz#9",
+  "what": "a pig's bar, another bar's end against its left"
+ },
+ {
+  "file": "h_number_over_left.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": 0.8855,
+  "hi": null,
+  "from": "gamelab/lab/z2_shoot1.png",
+  "what": "a damage number over its left and top (z2_shoot1.png)"
+ },
+ {
+  "file": "h_rope_hides_end.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": 0.3599,
+  "hi": 0.5454,
+  "from": "gamelab/lab/recordings/do_attack2.npz#42",
+  "what": "a rope over its end: between 0.35 and 0.55"
+ },
+ {
+  "file": "h_near_full.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": 0.986,
+  "hi": null,
+  "from": "gamelab/lab/recordings/do_attack5.npz#57",
+  "what": "nearly full"
+ },
+ {
+  "file": "h_rope_over_left.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": 0.4295,
+  "hi": null,
+  "from": "gamelab/lab/recordings/fight1.npz#3",
+  "what": "a rope over its left"
+ },
+ {
+  "file": "h_slime_stand.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": 0.7309,
+  "hi": null,
+  "from": "gamelab/lab/recordings/do_l7.npz#21",
+  "what": "a slime standing"
+ },
+ {
+  "file": "h_no_bar.png",
+  "size": "1920x1080",
+  "x": 36,
+  "top": 36,
+  "share": null,
+  "hi": null,
+  "from": "gamelab/lab/recordings/esc_climb.npz#0",
+  "what": "no bar of its own (another's, lower left of it); the old reader read 0.0"
+ }
+]

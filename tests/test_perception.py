@@ -2,6 +2,7 @@
 monster detector on pictures."""
 
 import dataclasses
+import json
 from pathlib import Path
 
 import cv2
@@ -20,6 +21,7 @@ from gamelab.perception.match import suppress_overlaps
 from gamelab.perception.mobs import ASSETS, INDEX, MobDetector, read_meta
 from gamelab.perception.sprites import SPRITES
 from gamelab.perception.terrain import ROPE_GAP, ScreenRope, find_ropes, ground_extent, rope_mask
+from gamelab.screen import NATIVE, STRETCHED
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SKY = (60, 140, 230)
@@ -228,14 +230,116 @@ def test_ground_extent_stops_at_the_platform_edges():
     assert ground_extent(frame, 180, 200) == pytest.approx((100, 249), abs=1)
 
 
-def test_hp_bar_reads_the_green_fraction():
-    frame = np.full((200, 200, 3), SKY, np.uint8)
-    frame[87:93, 68:112] = (165, 165, 165)  # border
-    frame[88:92, 70:100] = (0, 196, 0)    # 30 px green
-    frame[88:92, 100:105] = (140, 0, 0)   # 5 px red (latest damage)
-    frame[88:92, 105:110] = (0, 0, 0)     # 5 px black
-    assert hud.hp_bar(frame, 90, 100) == pytest.approx(0.75)
-    assert hud.hp_bar(np.full((200, 200, 3), SKY, np.uint8), 90, 100) is None
+@pytest.mark.parametrize("geo", [NATIVE, STRETCHED], ids=["1366x768", "1920x1080"])
+def test_a_monsters_hp_bar_as_the_game_draws_it_reads_its_green_share(geo):
+    # Drawn as the game draws it (hud.draw_hp_bar: the white frame between black ones, three rows of green over a red
+    # one), at every place a game px can fall in a half-size look's px: to the game's px at 1366x768, within one at
+    # half size of 1920x1080 (whose look blends the 1-px lines).
+    s = geo.frame_scale
+    for left in np.linspace(0.03, 0.98, 25):
+        for x, top in [(100, 100), (101, 100), (100, 101), (103, 102)]:
+            frame = np.full((200, 220, 3), SKY, np.uint8)
+            hud.draw_hp_bar(frame, x, top, left, s)
+            got = hud.hp_bar(frame, x, top, geo)
+            assert got == pytest.approx(round(46 * left) / 46, abs=0.0 if geo is NATIVE else 1 / 46), (left, x, top)
+    assert hud.hp_bar(np.full((200, 220, 3), SKY, np.uint8), 100, 100, geo) is None
+
+
+@pytest.mark.parametrize("geo", [NATIVE, STRETCHED], ids=["1366x768", "1920x1080"])
+def test_a_bar_with_no_green_isnt_a_monsters_to_read(geo):
+    # A party member's bar over a player is the same frame filled red, and a monster's as it dies red and black.
+    s = geo.frame_scale
+    frame = np.full((200, 220, 3), SKY, np.uint8)
+    hud.draw_hp_bar(frame, 100, 100, 0.0, s)
+    assert hud.hp_bar(frame, 100, 100, geo) is None
+    party = np.full((200, 220, 3), SKY, np.uint8)
+    hud.draw_hp_bar(party, 100, 100, 0.6, s)
+    green = (party[..., 0] < 40) & (party[..., 1] > 120) & (party[..., 2] < 40)
+    party[green] = party[green][:, [1, 0, 2]]  # its green red
+    assert hud.hp_bar(party, 100, 100, geo) is None
+
+
+def test_a_bar_is_read_where_the_monster_is_and_its_end_under_a_cover_halfway_along_it():
+    # Two bars, each over its own monster 60 px apart; a monster between them owns neither (each 30 px off).
+    frame = np.full((200, 300, 3), SKY, np.uint8)
+    hud.draw_hp_bar(frame, 100, 100, 0.25, 1.0)
+    hud.draw_hp_bar(frame, 160, 100, 0.75, 1.0)
+    assert hud.hp_bar(frame, 100, 100, NATIVE) == pytest.approx(12 / 46)
+    assert hud.hp_bar(frame, 160, 100, NATIVE) == pytest.approx(34 / 46)
+    assert hud.hp_bar(frame, 130, 100, NATIVE) is None
+    # Something light over the end of the green (the fill's 21st to 30th px: a crescent of light, say): the end is
+    # under it, read halfway along it; a damage number's gold over the frame's top rows leaves the green rows' end.
+    covered = np.full((200, 220, 3), SKY, np.uint8)
+    hud.draw_hp_bar(covered, 100, 100, 0.6, 1.0)  # 28 px green
+    lo, top = 100 - 25 + 2, 100 - 29
+    covered[top + 2:top + 6, lo + 20:lo + 30] = (255, 200, 230)
+    assert hud.hp_bar(covered, 100, 100, NATIVE) == pytest.approx(25 / 46)
+    numbered = np.full((200, 220, 3), SKY, np.uint8)
+    hud.draw_hp_bar(numbered, 100, 100, 0.6, 1.0)
+    numbered[top - 8:top + 3, lo + 15:lo + 40] = (250, 200, 40)
+    assert hud.hp_bar(numbered, 100, 100, NATIVE) == pytest.approx(28 / 46)
+
+
+BARS = FIXTURES / "hp_bars"
+_BAR_CASES = json.loads((BARS / "bars.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", _BAR_CASES, ids=[c["file"][:-4] for c in _BAR_CASES])
+def test_labelled_bars_read_their_share(case):
+    # Crops of frames of the game (tests/fixtures/hp_bars/README.md): at 1366x768 the saved frames of 2026-10-24 and the
+    # rolling recorder's clips of 24-25 (JPEG), at 1920x1080 half-size looks of the first map's recordings; each a bar
+    # over its monster with the share of its fill green by pixel count, or where something hides its end the range it's
+    # in, or none to read. Until 2026-10-25 hp_bar read 0 off every bar at 1366x768 but these crops' 3.
+    frame = np.asarray(Image.open(BARS / case["file"]).convert("RGB"))
+    geo = NATIVE if case["size"] == "1366x768" else STRETCHED
+    got = hud.hp_bar(frame, case["x"], case["top"], geo)
+    if case["share"] is None:
+        assert got is None, case["what"]
+    elif case["hi"] is None:
+        assert got == pytest.approx(case["share"], abs=0.5 / 46 if geo is NATIVE else 1 / 46), case["what"]
+    else:
+        assert case["share"] <= got <= case["hi"], case["what"]
+
+
+def _labelled_frame(name: str, size: str) -> np.ndarray | None:
+    """A frame of the labelled set (tests/fixtures/hp_bars/labelled.json) out of gamelab/lab as a look sees it."""
+    path = paths.LAB / name.split("#")[0]
+    if not path.exists():
+        return None
+    if "#" in name:
+        return np.load(path)["frames"][int(name.split("#")[1])]
+    full = np.asarray(Image.open(path).convert("RGB"))
+    return full if size == "1366x768" else cv2.resize(full, (960, 540), interpolation=cv2.INTER_AREA)
+
+
+@pytest.mark.parametrize("size", ["1366x768", "1920x1080"])
+def test_the_labelled_bars_in_the_saved_frames(size):
+    # Every labelled bar over its monster as the detector found it (574 at 1366x768 on the rolling recorder's clips of
+    # 2026-10-24 and 25, 178 at 1920x1080 on the first map's recordings and screenshots), and monsters with no bar of
+    # their own; on the frames in gamelab/lab, where there are any (they're the machine's own). Measured 2026-10-25: at
+    # 1366x768 563 of the 564 with their end in view read within half a px of the fill (0.001 off on average; the old
+    # reader 0.539 off, 486 of them 0.0 and 63 none), and none of 408 monsters with no bar (the old reader 47); at
+    # 1920x1080 160 of 161 within a px (0.003 off; the old reader 0.518, 111 of them 0.0), 1 of 132 with none.
+    labelled = json.loads((BARS / "labelled.json").read_text(encoding="utf-8"))[size]
+    geo = NATIVE if size == "1366x768" else STRETCHED
+    seen = good = hidden = none_ok = none_n = 0
+    for name, rows in labelled.items():
+        frame = _labelled_frame(name, size)
+        if frame is None:
+            continue
+        for x, top, share, hi in rows:
+            got = hud.hp_bar(frame, x, top, geo)
+            if share is None:
+                none_n += 1
+                none_ok += got is None
+            elif hi is None:
+                seen += 1
+                good += got is not None and abs(got - share) <= (0.5 if geo is NATIVE else 1) / 46 + 1e-9
+            else:
+                hidden += got is not None and share - 0.03 <= got <= hi + 0.03
+    if seen == 0:
+        pytest.skip("needs the labelled frames (gamelab/lab: recent/, recordings/)")
+    assert good / seen >= 0.98 and none_ok / none_n >= 0.98
 
 
 def test_touches_show_as_purple_text_above_her():
@@ -564,44 +668,3 @@ def test_window_cover_from_the_integral_image_is_the_tm_ccorr_sum():
             ccorr = cv2.matchTemplate(coarse, np.ones((h, w), np.float32), cv2.TM_CCORR)
             assert cover.sums(h, w).shape == ccorr.shape
             assert np.abs(cover.sums(h, w) - ccorr).max() / (h * w) < 1e-4
-
-
-def loop_hp_bar(frame, x, top):
-    """hud.hp_bar as it was: the longest run found pixel by pixel in Python."""
-    y0, x0 = max(0, top - hud.BAR_ABOVE), max(0, x - hud.BAR_SEARCH)
-    box = frame[y0:max(y0, top + 2), x0:x + hud.BAR_SEARCH].astype(np.int16)
-    if box.size == 0:
-        return None
-    r, g, b = box[..., 0], box[..., 1], box[..., 2]
-    green = (g > 120) & (r < 15) & (b < 15)
-    inside = (b < 15) & ((r < 15) | ((r > 90) & (g < 50)))
-    best = None
-    for y in range(inside.shape[0]):
-        run, start = 0, 0
-        for i, on in enumerate(inside[y]):
-            run = run + 1 if on else 0
-            if run == 1:
-                start = i
-            if run >= hud.BAR_MIN_RUN and (best is None or run > best[0]):
-                best = (run, y, start)
-    if best is None:
-        return None
-    run, y, start = best
-    return float(green[y, start:start + run].sum()) / run
-
-
-def test_monster_hp_bars_read_as_before():
-    rng = np.random.default_rng(0)
-    colours = np.array([(0, 196, 0), (0, 130, 0), (0, 0, 0), (140, 0, 0), SKY, GRASS, (165, 165, 165)], np.uint8)
-    seen = 0
-    for _ in range(300):
-        frame = np.full((120, 160, 3), SKY, np.uint8)
-        for _ in range(rng.integers(1, 6)):  # bars and runs of bar colours, some of them as long as each other
-            y, x0 = rng.integers(0, 120), rng.integers(0, 150)
-            frame[y:y + rng.integers(1, 5), x0:x0 + rng.choice([20, 22, 25, 25, 30, 36, 60])] = colours[rng.integers(0, 4)]
-        frame[rng.random((120, 160)) < 0.05] = colours[rng.integers(0, 7)]  # specks
-        for x, top in [(rng.integers(-10, 170), rng.integers(-10, 130)) for _ in range(4)] + [(80, 60), (5, 3)]:
-            old = loop_hp_bar(frame, x, top)
-            assert hud.hp_bar(frame, x, top) == old
-            seen += old is not None
-    assert seen > 200

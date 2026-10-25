@@ -13,7 +13,8 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
   each taking off its attack's damage as drawn, or nothing (choice.MISS); a look that sees it alive LANDS_S or more
   after a throw rules out what that throw would have killed it with (Left.alive), and one that reads its HP bar
   between empty and full sets it from the bar (the throws that can't have landed by then still taken off). A bar up
-  but read empty (on Tree Dungeon at 1366x768 that's what a hurt monster's bar reads: attack.choice.STAR) still says
+  but read empty (at 1366x768 every hurt monster's bar read so until 2026-10-25, perception.hud.hp_bar taking the
+  bar's black frame for its fill; the harness's `--world bars-empty`) still says
   her damage shows: not all her throws at it missed (Left.hit), once none is out that could have shown since the
   last look and not landed by LANDS_S (SHOWS_S). Before (review, 2026-10-25) such a bar counted for nothing, and in
   the simulator with the bars drawn empty she reckoned a target's HP 86-98 off (median), throwing no regular attack
@@ -231,6 +232,6 @@ class Attacks:
 
 
 def _believable(bar: float | None) -> bool:
-    """Whether an HP bar read is a share to go by: between empty and full (on Tree Dungeon at 1366x768 a hurt monster's
-    bar reads 0: attack.choice.STAR)."""
+    """Whether an HP bar read is a share to go by: between empty and full (a bar is up only once she has hurt it, and
+    one with no green, as a monster dies, reads None: perception.hud.hp_bar)."""
     return bar is not None and 0.0 < bar < 1.0
