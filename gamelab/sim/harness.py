@@ -11,10 +11,10 @@ A run hunts for a fixed time (the horizon) from one of its map's START_AT, on a 
 random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ. On the first
 map by default; `--map 10004021` on West Rocky Mountain II, `--map 10002073` on Tree Dungeon, Forest Up North II, with
 her as she plays each (sim.scenarios.HER: level 23 and 24, her pet drinking her potions), saved as
-POLICY-PRESET-MAP; the presets are the same worlds on every map, but `crowd` and `crowd-slow`, Tree Dungeon's other
-players (TREE_CAMPS), which are that map's alone. `--world` switches on what isn't known of the game there (WORLDS:
-group 0's walls, the client's sides, the client's rope reach, a touch as a share of PADamage, no evasion), each saved
-as a suffix of the name.
+POLICY-PRESET-MAP; the presets are the same worlds on every map, but `crowd`, `crowd-17` and `crowd-slow`, Tree
+Dungeon's other players (TREE_CAMPS), which are that map's alone. `--world` switches on what isn't known of the game
+there (WORLDS: group 0's walls, the client's sides, the client's rope reach, a touch as a share of PADamage, no
+evasion), each saved as a suffix of the name.
 What a run gave is read from the simulated world, not from the bot's own reports (those miss kills):
 
   exp_per_min      EXP she got, per minute of the horizon (a death stops the count)
@@ -113,12 +113,14 @@ TREE_CAMPS = (Camp(28, 250.0, (29, 30), (GREEN,)), Camp(21, 90.0, (21, 22), (GRE
               Camp(19, 200.0, (19,), (GREEN,)), Camp(33, 120.0, (32, 33), (GREEN, SLIME)))
 # Tree Dungeon's crowd: "game"'s errors, other players' dots under hers unseen (Noise.dot_under: 56 units, the study's
 # frames), every spawn point filled (MeowDB lifts its cap from 6 players on), the camps above instead of "game"'s one
-# roaming rival, and respawns at MeowDB's mean, 8.8 s ("crowd"), or 30 s ("crowd-slow": the first map's slow refill,
-# README: Respawns and drop life). Only on that map (PRESET_MAPS).
+# roaming rival, and respawns at MeowDB's mean, 8.8 s ("crowd"), at 17 s ("crowd-17": the live median on 23 after her
+# last kill there, 1.7-57 s, telemetry of 2026-10-24: README, Positioning), or 30 s ("crowd-slow": the first map's slow
+# refill, README: Respawns and drop life). Only on that map (PRESET_MAPS).
 _CROWD_NOISE = dataclasses.replace(_GAME_NOISE, dot_under=56.0)
 PRESETS["crowd"] = (_CROWD_NOISE, Realism(respawn=8.8, camps=TREE_CAMPS, potions=60, lock_arrows=True))
+PRESETS["crowd-17"] = (_CROWD_NOISE, Realism(respawn=17.0, camps=TREE_CAMPS, potions=60, lock_arrows=True))
 PRESETS["crowd-slow"] = (_CROWD_NOISE, Realism(respawn=30.0, camps=TREE_CAMPS, potions=60, lock_arrows=True))
-PRESET_MAPS = {"crowd": (TREE,), "crowd-slow": (TREE,)}
+PRESET_MAPS = {"crowd": (TREE,), "crowd-17": (TREE,), "crowd-slow": (TREE,)}
 # What isn't known of the game, switched on with `--world` (each a world.Realism field, or her own: world.Her):
 # group 0's walls stopping her whatever her group, the map's sides as HeavenClient has them, a rope grabbed as it does
 # (82 up at most), a touch's HP as a share of PADamage (as fitted on the first map) rather than meowdb's formula, and

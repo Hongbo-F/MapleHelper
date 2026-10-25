@@ -414,6 +414,9 @@ def test_the_harness_runs_tree_dungeon_with_its_crowd_and_the_unknowns_switched_
     assert sc.start == harness.TREE_START_AT[1] and sc.name == "loop:crowd:1:10002073:zero-walls:touch-share"
     assert sc.realism.camps == harness.TREE_CAMPS and sc.realism.respawn == 8.8 and sc.realism.zero_walls
     assert sc.noise.dot_under == 56.0 and sc.realism.spawn_share == 1.0 and sc.realism.rival_every == 0
+    for preset, respawn in (("crowd-17", 17.0), ("crowd-slow", 30.0)):  # the live median on 23, the first map's refill
+        other = harness.scenario("loop", 1, preset, map_id=TREE)
+        assert other.realism.respawn == respawn and other.realism.camps == harness.TREE_CAMPS
     assert sc.her == dataclasses.replace(LEVEL_24, defence=None)
     assert harness.scenario("loop", 1, "game", map_id=TREE).her is None  # as she is there (scenarios.HER)
     assert harness.scenario("tour", 2, map_id=TREE, world=("client-reach",)).realism.rope_reach == ROPE_REACH_CLIENT
