@@ -7,8 +7,9 @@ reads it converts its px with it.
 
 Eyes is perception's only door to pixels. `look` gives an Observation (her name tag, HP and MP, the
 ground under her, her minimap dot and other players', ropes, her EXP number and the box it's read from);
-localization then asks about that look's frame through Eyes (`monsters`, `items`, `bar`) instead of reading pixels
-itself, so the simulator (gamelab.sim) can stand in for the game by answering the same questions.
+localization then asks about that look's frame through Eyes (`monsters`, `items`, `bar`, and which way she faces:
+`heading`) instead of reading pixels itself, so the simulator (gamelab.sim) can stand in for the game by answering the
+same questions.
 
 A look is checked before anything is read from it (perception.framecheck): the game window where it was read to be,
 in front, uncovered, on the screen and the size the eyes are for, its frame fresh and lined up with the client area,
@@ -30,6 +31,7 @@ from ..screen import STRETCHED, Geometry
 from . import framecheck
 from .exp_number import read_box
 from .framecheck import BadLook, Problem
+from .heading import Heading, Reading, her_box
 from .hud import BAR_ROW, HP_BAR, bars, exp_number_box, hp_bar, hp_fill
 from .loot import Item, LootDetector
 from .minimap import PICTURE_MATCH, Marker, MinimapPicture, dot_in_box, her_dot, minimap_box, other_dots
@@ -136,6 +138,7 @@ class Eyes:
         self.log: Callable[[str], None] = print  # what the eyes say (the window moved; the capture reopened)
         self.glances_failed = 0            # glances that failed their checks (no dot from them)
         self.name_tag = NameTag(tag_template, paths.calibrated(paths.TAG_FULL, geo.suffix), geo)
+        self._heading: Heading | None = None  # her pictures (heading_bank: made on first use)
         self.want_ropes = False  # Senses turns this on
         self.minimap = MinimapPicture(minimap_picture, geo) if minimap_picture is not None else None
         # Where ropes are looked for, from her minimap dot and her name tag's centre: ranges of x on screen
@@ -368,6 +371,42 @@ class Eyes:
         h, w = obs.frame.shape[:2]
         return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing,
                                     (0, 0, w, int(h * obs.geo.hud_top)), fallback)
+
+    def heading(self, obs: Observation) -> Reading:
+        """Which way she faces in a look's frame (perception.heading), by her picture above her name tag: not told
+        where the tag wasn't seen (`tag_seen` False: where the camera puts her), nor before she has pictures."""
+        tag = obs.tag if getattr(obs, "tag_seen", True) else None
+        if obs.frame is None:
+            return Reading(None, why="no frame")
+        return self.heading_bank().read(obs.frame, tag)
+
+    def learn_heading(self, obs: Observation, side: str, reading: Reading | None = None) -> bool:
+        """A look whose keys say beyond doubt that she faces `side` teaches her pictures (Heading.learn; `reading`:
+        what they read on it). True if they learnt it."""
+        if obs.frame is None or obs.tag is None or not getattr(obs, "tag_seen", True):
+            return False
+        return self.heading_bank().learn(obs.frame, obs.tag, side, obs.t, reading)
+
+    def keep_heading(self, obs: Observation, path) -> bool:
+        """Save her box from a look's frame, three times its size around her (PNG at `path`), for a look by eye at why
+        the frame and her keys disagreed. True if it was saved."""
+        if obs.frame is None or obs.tag is None:
+            return False
+        x0, y0, x1, y1 = her_box(obs.tag, obs.geo)
+        w, h = x1 - x0, y1 - y0
+        crop = obs.frame[max(0, y0 - h):y1 + h, max(0, x0 - w):x1 + w]
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return bool(cv2.imwrite(str(path), cv2.cvtColor(np.ascontiguousarray(crop), cv2.COLOR_RGB2BGR)))
+        except (OSError, cv2.error):
+            return False
+
+    def heading_bank(self) -> Heading:
+        """Her pictures for these eyes' window size (perception.heading: kept in lab, the seed in assets until then)."""
+        if getattr(self, "_heading", None) is None:
+            self._heading = Heading(self.geo, paths.calibrated(paths.HEADING, self.geo.suffix),
+                                    paths.calibrated(paths.HEADING_SEED, self.geo.suffix))
+        return self._heading
 
     def bar(self, obs: Observation, mob: Mob) -> float | None:
         """A monster's HP bar (the fraction left), or None if it hasn't been hit."""

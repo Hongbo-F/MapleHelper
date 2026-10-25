@@ -1220,6 +1220,49 @@ def cmd_bench_capture(args) -> int:
 BODY_RECORDINGS = ("stand_snail", "walk_snail")  # she stands still while snails walk: the camera is still
 
 
+def cmd_heading(args) -> int:
+    """Which way she faces on saved frames (perception.heading: her picture above her name tag against her pictures),
+    and with --learn, frames whose facing you know teach her pictures (lab, or with --seed the seed in gamelab/assets
+    that stands in until she has her own). Offline: no game, no keys."""
+    import cv2
+
+    from .perception.heading import Heading
+    from .perception.nametag import NameTag
+    from .screen import of_frame
+    files = [Path(f) for f in args.frames]
+    if not files:
+        print("name some saved frames (PNG, the game's whole client area)")
+        return 1
+    fulls = [np.asarray(Image.open(f).convert("RGB")) for f in files]
+    geo = of_frame(fulls[0])
+    if any(of_frame(f) != geo for f in fulls):
+        print("the frames aren't all of one size")
+        return 1
+    template, full_path = _calibration(geo).template, paths.calibrated(paths.TAG_FULL, geo.suffix)
+    lab, seed = paths.calibrated(paths.HEADING, geo.suffix), paths.calibrated(paths.HEADING_SEED, geo.suffix)
+    bank = Heading(geo, seed if args.seed else lab, None if args.seed else seed, background=False)
+    if args.fresh:
+        bank.forget()
+    print(f"her pictures: {len(bank.refs)} from {len(bank.pool)} boxes ({bank.path if bank.path.exists() else seed})")
+    added = 0
+    for f, full in zip(files, fulls):
+        k = geo.look_scale
+        frame = full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
+                                               interpolation=cv2.INTER_AREA)
+        at = NameTag(template, full_path, geo).find(full)  # (a tag of its own each: frames of different places)
+        r = bank.read(frame, at)
+        print(f"{f.name}: tag {at}; " + (f"faces {r.side}" if r.side else f"can't tell ({r.why})")
+              + (f" (matched {r.score:.2f}, {r.margin:.2f} ahead of the other way)" if r.why not in
+                 ("no pictures", "no tag", "off the frame", "minimap") else ""))
+        if args.learn and at is not None:
+            added += bank.add(frame, at, args.learn)
+    if args.learn:
+        bank.rebuild()
+        print(f"learnt {added} of {len(files)} frames as facing {args.learn}: {len(bank.refs)} pictures from "
+              f"{len(bank.pool)} boxes, kept at {bank.path}")
+    return 0
+
+
 def cmd_bodies(args) -> int:
     """Where the monster detector puts monsters: their feet against the platform's surface on saved
     screenshots, and their x from frame to frame on recordings (analysis/bodies.py). Offline: no game, no
@@ -1841,6 +1884,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--seconds", type=float, default=300.0, help="how far back (default 300, all it keeps)")
     s.add_argument("--name", help="a word added to the folder's name")
     s.set_defaults(func=cmd_save_recent)
+
+    s = sub.add_parser("heading", help="which way she faces on saved frames (her picture above her name tag), and "
+                                       "her pictures learnt from frames whose facing you know (offline; no game, no "
+                                       "keys)")
+    s.add_argument("frames", nargs="*", help="saved frames (PNG: the game's whole client area), all of one size")
+    s.add_argument("--learn", choices=(LEFT, RIGHT), help="these frames show her facing this way: her pictures learn "
+                                                         "them")
+    s.add_argument("--seed", action="store_true", help="the seed in gamelab/assets (in git), which stands in until "
+                                                       "she has pictures of her own in gamelab/lab, not those")
+    s.add_argument("--fresh", action="store_true", help="drop the pictures first (a new outfit)")
+    s.set_defaults(func=cmd_heading)
+
     s = sub.add_parser("lab-usage", help="what gamelab keeps under gamelab/lab (recordings, the Lie Detector's "
                                          "recordings, screenshots, telemetry, harness runs, golden traces), by kind; "
                                          "deletes nothing")

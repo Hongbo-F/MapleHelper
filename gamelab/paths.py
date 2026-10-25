@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 CONFIG = REPO / "config.toml"
 ASSETS = ROOT / "assets"          # screenshot cut-outs and Lie Detector templates (in git)
+HEADING_SEED = ASSETS / "heading.npz"  # her pictures that tell which way she faces until she has her own (HEADING),
+                                       # per window size (calibrated: heading_1366x768.npz): perception.heading
 
 LAB = ROOT / "lab"
 SHOTS = LAB / "shots"            # the pictures commands save (snap, act, hunt look, map, ...)
@@ -22,6 +24,8 @@ RECORDER = LAB / "recorder"      # the rolling recorder's inbox, outbox and stat
 CALIBRATION = LAB / "calibration.json"
 TAG_TEMPLATE = LAB / "tag_template.npy"
 TAG_FULL = LAB / "tag_template_full.npy"  # her name tag at full resolution (made on first look)
+HEADING = LAB / "heading.npz"    # her pictures that tell which way she faces, learnt as she plays (perception.heading)
+HEADING_SHOTS = LAB / "heading"  # crops of her where the frame and her keys disagreed on her facing (behavior.hunter)
 SHOT_LOG = LAB / "shots2.jsonl"  # every throw: where she, the target and the rest in front were, and whether it hit
 OLD_SHOT_LOG = LAB / "shots.jsonl"  # ... as logged until 2026-10-20: a kill made every throw in flight a hit
 PROBE_LOG = LAB / "probe_geometry.jsonl"  # the in-game probes' throws (behavior.probe): every monster in front,
@@ -33,7 +37,7 @@ TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-m
 
 
 def calibrated(path: Path, suffix: str) -> Path:
-    """One of the calibration's files (CALIBRATION, TAG_TEMPLATE, TAG_FULL) for a game window of another client size
-    than 1920x1080 (screen.Geometry.suffix: "_1366x768"); `suffix` "" is the file itself. Her name tag is drawn at
-    the game's size, so each size has its own."""
+    """One of the calibration's files (CALIBRATION, TAG_TEMPLATE, TAG_FULL; her pictures HEADING and HEADING_SEED) for a
+    game window of another client size than 1920x1080 (screen.Geometry.suffix: "_1366x768"); `suffix` "" is the file
+    itself. Her name tag and her picture are drawn at the game's size, so each size has its own."""
     return path.with_name(f"{path.stem}{suffix}{path.suffix}")

@@ -1,0 +1,233 @@
+{
+ "native": {
+  "size": [
+   58,
+   72
+  ],
+  "tag": [
+   29,
+   78
+  ],
+  "client": [
+   1366,
+   768
+  ],
+  "frames": [
+   {
+    "file": "n28_000.png",
+    "side": "left"
+   },
+   {
+    "file": "n28_008.png",
+    "side": "left"
+   },
+   {
+    "file": "n28_016.png",
+    "side": "left"
+   },
+   {
+    "file": "n28_024.png",
+    "side": "left"
+   },
+   {
+    "file": "first_000.png",
+    "side": "left"
+   },
+   {
+    "file": "here_003.png",
+    "side": "left"
+   },
+   {
+    "file": "here_030.png",
+    "side": "left"
+   },
+   {
+    "file": "hp0_135315.png",
+    "side": "left"
+   },
+   {
+    "file": "hp0_135320.png",
+    "side": "left"
+   },
+   {
+    "file": "hp0_135323.png",
+    "side": "left"
+   },
+   {
+    "file": "hp0_164845.png",
+    "side": "left"
+   },
+   {
+    "file": "hp0_164847.png",
+    "side": "left"
+   },
+   {
+    "file": "nm_menu_btn.png",
+    "side": "left"
+   },
+   {
+    "file": "nm_pet6.png",
+    "side": "left"
+   },
+   {
+    "file": "nm_pet7.png",
+    "side": "left"
+   },
+   {
+    "file": "nm_pet1.png",
+    "side": "left"
+   },
+   {
+    "file": "hp0_135329.png",
+    "side": "right"
+   },
+   {
+    "file": "hp0_135339.png",
+    "side": "right"
+   },
+   {
+    "file": "nm_equip.png",
+    "side": "right"
+   },
+   {
+    "file": "nm_keys.png",
+    "side": "right"
+   },
+   {
+    "file": "nm_verify.png",
+    "side": "right"
+   }
+  ]
+ },
+ "old": {
+  "size": [
+   42,
+   52
+  ],
+  "tag": [
+   21,
+   56
+  ],
+  "client": [
+   1920,
+   1080
+  ],
+  "frames": [
+   {
+    "recording": "chain",
+    "frame": 40,
+    "side": "right"
+   },
+   {
+    "recording": "do_turn",
+    "frame": 14,
+    "side": "left"
+   },
+   {
+    "recording": "do_walk",
+    "frame": 14,
+    "side": "left"
+   },
+   {
+    "recording": "do_walk2",
+    "frame": 15,
+    "side": "left"
+   },
+   {
+    "recording": "jb_k165",
+    "frame": 12,
+    "side": "left"
+   },
+   {
+    "recording": "jb_k165",
+    "frame": 46,
+    "side": "right"
+   },
+   {
+    "recording": "jb_k190",
+    "frame": 14,
+    "side": "left"
+   },
+   {
+    "recording": "jb_k190",
+    "frame": 21,
+    "side": "right"
+   },
+   {
+    "recording": "jb_k290",
+    "frame": 31,
+    "side": "left"
+   },
+   {
+    "recording": "jb_k290",
+    "frame": 12,
+    "side": "right"
+   },
+   {
+    "recording": "jb_k450",
+    "frame": 44,
+    "side": "left"
+   },
+   {
+    "recording": "jb_k450",
+    "frame": 24,
+    "side": "right"
+   },
+   {
+    "recording": "jump_back_land",
+    "frame": 29,
+    "side": "left"
+   },
+   {
+    "recording": "jump_back_land",
+    "frame": 83,
+    "side": "right"
+   },
+   {
+    "recording": "knockback",
+    "frame": 74,
+    "side": "right"
+   },
+   {
+    "recording": "motion",
+    "frame": 74,
+    "side": "right"
+   },
+   {
+    "recording": "star_left",
+    "frame": 81,
+    "side": "left"
+   },
+   {
+    "recording": "star_right",
+    "frame": 65,
+    "side": "right"
+   },
+   {
+    "recording": "walk",
+    "frame": 24,
+    "side": "right"
+   },
+   {
+    "recording": "walk1000",
+    "frame": 31,
+    "side": "right"
+   },
+   {
+    "recording": "walk300",
+    "frame": 20,
+    "side": "right"
+   },
+   {
+    "recording": "walk600",
+    "frame": 13,
+    "side": "left"
+   },
+   {
+    "recording": "walkjump",
+    "frame": 17,
+    "side": "right"
+   }
+  ]
+ }
+}
