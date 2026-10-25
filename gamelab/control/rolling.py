@@ -1,5 +1,5 @@
-"""The rolling recording: the game's client area 10 times a second, the last 5 minutes kept in memory as JPEG, so what
-led up to a moment can be saved after it. The user asked for it on 2026-10-24 (21:50): something had popped up in the
+"""The rolling recording: the game's client area 10 times a second, the last 5 minutes kept in memory losslessly (its
+pixels zstd-compressed: `pack`; JPEG until 2026-10-25), so what led up to a moment can be saved after it. The user asked for it on 2026-10-24 (21:50): something had popped up in the
 game wanting an answer within 10 s, and nothing recorded it (the player's Lie Detector check knew only the countdown,
 the mouse mini-game and the Truth Booth, and records only once it has seen one). It was the image quiz: since
 2026-10-25 the player knows it and its warning, and the mini-game's notice, so their alarms are saved as any.
@@ -12,19 +12,21 @@ babysitter, hunts or not. What it keeps is saved:
     (control.lie_recorder), so the whole cycle is kept with what led up to it; as one is written, the Lie Detector's
     recordings are pruned to their 10 GB counting those parts (`_prune_lie`), whatever the player's age; and, on its
     own whatever becomes of those, the alarm's clip, from 10 s before it to 60 s after, to
-    paths.ALARM_CLIPS/<YYYYmmdd-HHMMSS>-lie-detector[-<form>] (CLIP_BEFORE_S, CLIP_AFTER_S);
+    paths.ALARM_CLIPS/<YYYYmmdd-HHMMSS>-lie-detector[-<form>] (CLIP_BEFORE_S, CLIP_AFTER_S), lossless (PNG);
   - on demand (`python -m gamelab save-recent`, `ask` here): the last N s, to paths.RECENT/<YYYYmmdd-HHMMSS>[-name],
     asked through a file inbox (paths.RECORDER: inbox/<id>.json, taken as <id>.taken, answered in outbox/<id>.json).
 
 A saved part (`write_part`), one folder:
-  00000.jpg ...  the frames, as grabbed (JPEG_PARAMS);
+  00000.jpg ...  the frames, as grabbed, encoded as they're written: JPEG (JPEG_PARAMS), or PNG (PNG_PARAMS: the
+                 alarm's clip);
   index.jsonl    in time order, a line a frame: `i`, `file`, `t` (s from the part's first moment) and `at` (the clock
                  time); and a line a gap, the moments in a row with no frame for the same reason: `gap` (why: "no
                  window", "minimized", "no client area", "off the screen", "not in front", "covered", "moved", "capture
                  failed", "not encoded"), `t` and `until` (its first and last moment), `ticks`;
   summary.json   what it is (`kind`: "save-recent" or "before the Lie Detector", with the alarm and the moment it was
                  seen, `alarm_t`), `from` and `to`, `seconds`, `ticks`, `frames`, their `bytes`, the `gaps` (s by why),
-                 `fps`, `jpeg_quality` and the `window`'s size (the last frame's).
+                 `fps`, the `format` ("jpeg" or "png"), `jpeg_quality` (a JPEG part's) and the `window`'s size (the
+                 last frame's).
 
 A frame is kept only when the screen shows the game: its window there and not minimized, wholly on the monitors, in
 front, and no other program's window over any of it (window.shows at perception.framecheck's COVER_GRID, then
@@ -40,7 +42,8 @@ capture.RETRY_S (17 ms looks). mss takes none; its grab costs 2-3 ms more CPU (R
 
 Imports: numpy, OpenCV, the shared modules, perception.framecheck (COVER_GRID), and control.alarm and
 control.lie_recorder (the JPEG settings, the Lie Detector's folders, and pruning a folder of recordings: `recent/`, and
-the Lie Detector's when a part goes into one, `_prune_lie`).
+the Lie Detector's when a part goes into one, `_prune_lie`); zstd from the standard library (Python 3.14's
+compression.zstd; zlib before it).
 """
 
 import ctypes
@@ -54,6 +57,7 @@ import time
 import uuid
 from collections import Counter, deque
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,18 +68,36 @@ from .. import capture, paths, window
 from ..perception import framecheck
 from . import alarm, lie_recorder
 
+try:
+    from compression import zstd  # (Python 3.14)
+
+    def _compress(raw: bytes) -> bytes:
+        return zstd.compress(raw, ZSTD_LEVEL)
+    _decompress = zstd.decompress
+except ImportError:  # (an older Python: zlib, lossless too, slower)
+    import zlib
+
+    def _compress(raw: bytes) -> bytes:
+        return zlib.compress(raw, 1)
+    _decompress = zlib.decompress
+
 FPS = 10.0         # moments a second: a frame or a gap each
 SECONDS = 300.0    # the last 5 minutes are kept (3,000 moments at FPS)
-# Frames are kept as JPEG at the Lie Detector recordings' settings (quality 75, full-resolution colour), so a frame of
-# either reads alike (`spot --image` sees on one what the watchdog would have). On the 85 distinct saved 1366x768 game
-# frames with a picture (D:/MapleHelper-scratch/rolling/jpeg_measure2.py): 221 KB a frame (47-307), 33.0 dB PSNR, 4.0
-# ms to encode on one thread: 650 MB for 3,000, 900 at the busiest. Half-resolution colour (4:2:0) would be 170 KB
-# and 2.6 ms, at 30.8 dB, the countdown's thin yellow title losing its colour (lie_recorder.JPEG_QUALITY's notes);
-# quality 60 at full colour, 169 KB. At 1920x1080 a frame is about half as big again.
-JPEG_PARAMS = lie_recorder.JPEG_PARAMS
+# Frames are kept losslessly since 2026-10-25 (the user asked): their BGR pixels zstd-compressed at level 1 (`pack`).
+# On six 1366x768 frames saved losslessly (three scenes, a calibration shot, two Lie Detector boards; D:/MapleHelper-
+# scratch's lossless.py): 757 KB a frame (381-1163) and 8.4 ms to pack, 2.2 GB for 5 minutes, 3.4 at the busiest.
+# PNG at its fastest (level 1) was as big and took 55 ms, too slow for 10 a second; WebP lossless 502 KB in 667 ms;
+# zstd level 3, 666 KB in 12.8 ms. They were JPEG (quality 75, full-resolution colour) until then: 253 KB in 4.6 ms on
+# the same frames, 33 dB PSNR. A part is encoded as it's written: JPEG (`before/` and `save-recent`'s, as before) or
+# PNG (the alarm's clip: lossless on disk too).
+ZSTD_LEVEL = 1
+JPEG_PARAMS = lie_recorder.JPEG_PARAMS  # the Lie Detector recordings' settings: a frame of either reads alike
+PNG_PARAMS = [cv2.IMWRITE_PNG_COMPRESSION, 1]  # 813 KB and 55 ms a frame on the six: on ENCODERS threads as it's written
+ENCODERS = 4       # threads encoding a part's frames as it's written (OpenCV and zstd let go of the GIL)
 # The frames kept take at most this much memory: past it the oldest go, younger than SECONDS or not (counted as
-# `trimmed` in the status). 5 minutes at 1366x768 always fit (900 MB at the busiest); at 1920x1080 about 4 to 5.
-MAX_BYTES = 1024 ** 3
+# `trimmed` in the status). 5 minutes at 1366x768 always fit (3.4 GB at the busiest); at 1920x1080, twice the pixels,
+# about 4 (1 GB, 5 minutes of JPEG, until 2026-10-25). The PC has 32 GB.
+MAX_BYTES = 4 * 1024 ** 3
 MAX_ITEMS = int(2 * SECONDS * FPS)  # moments kept at most whatever the clock does (it can be set back)
 RECENT_KEEP_BYTES = 5 * 1024 ** 3  # save-recent's saves: the oldest go, when one is made, past this (about 8 of 5 min)
 ALARM_POLL_S = 0.5    # how often it looks for a new Lie Detector alarm
@@ -91,8 +113,9 @@ FOLDER_SLACK_S = 2.0  # ... a recording counts as the alarm's if its folder is n
 # Each alarm also gets a clip of its own, whatever becomes of the player's recording and the part before it (the user,
 # 2026-10-25: "a 2nd line of defense"): from CLIP_BEFORE_S before the alarm to CLIP_AFTER_S after, 10 a second, in
 # paths.ALARM_CLIPS, written once its last moment is past (or, cut short, when the recorder stops). Its moments are
-# held by the clip itself as they come, so a ring that loses them first (its 1 GB cap) loses none of the clip's. 70 s
-# at 1366x768 is about 120 MB (170 KB a frame on Tree Dungeon); the oldest go past CLIPS_KEEP_BYTES, about 40 of them.
+# held by the clip itself as they come, so a ring that loses them first (its cap) loses none of the clip's. Written as
+# PNG, lossless: 70 s at 1366x768 is about 560 MB (813 KB a frame on the six frames of PNG_PARAMS' note), in about 10 s
+# on ENCODERS threads; the oldest go past CLIPS_KEEP_BYTES, about 9 of them (D: had 27 GB free on 2026-10-25).
 CLIP_BEFORE_S = 10.0
 CLIP_AFTER_S = 60.0
 CLIPS_KEEP_BYTES = 5 * 1024 ** 3
@@ -110,11 +133,16 @@ NAME_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 
 @dataclass(frozen=True, slots=True)
 class Item:
-    """One moment: a frame (JPEG, its size) or a gap (why there's no frame)."""
+    """One moment: a frame (its pixels packed losslessly: `pack`; its size) or a gap (why there's no frame)."""
     t: float                     # when (time.time's clock): the frame's grab, the gap's look at the window
-    jpeg: bytes | None = None    # None: a gap
+    data: bytes | None = None    # the frame's BGR pixels, compressed (`pack`); None: a gap
     why: str = ""                # a gap's reason
     size: tuple[int, int] | None = None  # a frame's width, height
+
+    def pixels(self) -> np.ndarray:
+        """The frame's BGR pixels, as grabbed."""
+        w, h = self.size
+        return np.frombuffer(_decompress(self.data), np.uint8).reshape(h, w, 3)
 
 
 @dataclass(slots=True)
@@ -139,19 +167,19 @@ class Ring:
     def add(self, item: Item) -> None:
         with self.lock:
             self.items.append(item)
-            if item.jpeg is not None:
-                self.bytes += len(item.jpeg)
+            if item.data is not None:
+                self.bytes += len(item.data)
                 self.frames += 1
             since = item.t - self.seconds + 1e-6  # (a moment exactly `seconds` before the newest is out)
             trimming = False  # frames went for the cap: so do the gaps before the oldest left
             while self.items:
                 old = self.items[0]
                 if not (old.t <= since or self.bytes > self.max_bytes or len(self.items) > self.max_items
-                        or (trimming and old.jpeg is None)):
+                        or (trimming and old.data is None)):
                     break
                 self.items.popleft()
-                if old.jpeg is not None:
-                    self.bytes -= len(old.jpeg)
+                if old.data is not None:
+                    self.bytes -= len(old.data)
                     self.frames -= 1
                     if old.t > since:
                         self.trimmed += 1
@@ -178,7 +206,7 @@ class Ring:
     def gaps(self) -> Counter:
         """The gaps kept: moments by why."""
         with self.lock:
-            return Counter(it.why for it in self.items if it.jpeg is None)
+            return Counter(it.why for it in self.items if it.data is None)
 
 
 # --- what it looks at and grabs ------------------------------------------------------------------------------------
@@ -237,11 +265,18 @@ class ScreenGrab:
         self.grabber.close()
 
 
-def encode(frame: np.ndarray) -> bytes:
-    """A frame (BGRA as grabbed, or BGR) as JPEG (JPEG_PARAMS; the alpha is dropped)."""
-    ok, buf = cv2.imencode(".jpg", frame, JPEG_PARAMS)
+def pack(frame: np.ndarray) -> bytes:
+    """A frame (BGRA as grabbed, or BGR) kept losslessly: its BGR pixels compressed (the alpha is dropped by OpenCV,
+    1.7 ms; numpy's slice made contiguous took 6.6 ms); Item.pixels gives them back. 9.5 ms on the six frames."""
+    bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR) if frame.shape[2] == 4 else np.ascontiguousarray(frame)
+    return _compress(memoryview(bgr).cast("B"))
+
+
+def encode(frame: np.ndarray, png: bool = False) -> bytes:
+    """A frame's pixels (BGR) as a JPEG (JPEG_PARAMS), or a PNG (PNG_PARAMS), to write."""
+    ok, buf = cv2.imencode(".png" if png else ".jpg", frame, PNG_PARAMS if png else JPEG_PARAMS)
     if not ok:
-        raise ValueError("the JPEG encoder refused it")
+        raise ValueError("the encoder refused it")
     return buf.tobytes()
 
 
@@ -258,7 +293,7 @@ class Recorder:
     def __init__(self, game, grab: Callable[[dict], np.ndarray], ring: Ring | None = None, *,
                  box: Path | None = None, lie_root: Path | None = None, recent: Path | None = None,
                  clips: Path | None = None, clock: Callable[[], float] = time.time,
-                 encode_frame: Callable[[np.ndarray], bytes] = encode, fps: float = FPS,
+                 pack_frame: Callable[[np.ndarray], bytes] = pack, fps: float = FPS,
                  log: Callable[[str], None] = print, folder_wait: float = FOLDER_WAIT_S,
                  recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES,
                  clips_keep: int = CLIPS_KEEP_BYTES):
@@ -268,7 +303,7 @@ class Recorder:
         self.lie_root = Path(lie_root or paths.LIE_RECORDINGS)
         self.recent = Path(recent or paths.RECENT)
         self.clips = Path(clips or paths.ALARM_CLIPS)
-        self.clock, self.encode, self.fps, self.log = clock, encode_frame, fps, log
+        self.clock, self.pack, self.fps, self.log = clock, pack_frame, fps, log
         self.folder_wait, self.recent_keep, self.lie_keep = folder_wait, recent_keep, lie_keep
         self.clips_keep = clips_keep
         self.pending_clips: list[Clip] = []  # alarms whose clip's last moment isn't past yet
@@ -316,7 +351,7 @@ class Recorder:
         item = Item(t, None, why)
         if not why:
             try:
-                item = Item(t, self.encode(frame), size=(int(frame.shape[1]), int(frame.shape[0])))
+                item = Item(t, self.pack(frame), size=(int(frame.shape[1]), int(frame.shape[0])))
                 self._costs.append(time.perf_counter() - started)
             except Exception as e:
                 item = Item(t, None, "not encoded")
@@ -501,7 +536,7 @@ class Recorder:
         summary = write_part(dest, items, {
             "kind": "the alarm's clip", "alarm": clip.info, "alarm_at": day_time(clip.seen),
             "alarm_t": None if not items else round(clip.seen - items[0].t, 3),
-            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, self.fps)
+            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, self.fps, png=True)
         self._saved(dest, summary)
 
     def _prune_lie(self, spare: Path) -> None:
@@ -637,17 +672,18 @@ class Recorder:
 
 # --- a saved part ---------------------------------------------------------------------------------------------------
 
-def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS) -> dict:
-    """Write moments into `folder` (made here; raises if it's there already): the frames, index.jsonl and summary.json
-    (`info`'s fields first, then the counts: the module's notes). Returns the summary."""
+def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, png: bool = False) -> dict:
+    """Write moments into `folder` (made here; raises if it's there already): the frames, as JPEG (or `png`), on
+    ENCODERS threads a batch at a time, index.jsonl and summary.json (`info`'s fields first, then the counts: the
+    module's notes). Returns the summary."""
     folder.mkdir(parents=True)
     t0 = items[0].t if items else 0.0
     lines, gaps, run = [], Counter(), None
-    frames = size = 0
+    shots = []  # the frames, in order
     shape = None
     for it in items:
         t = round(it.t - t0, 3)
-        if it.jpeg is None:
+        if it.data is None:
             gaps[it.why] += 1
             if run is not None and run["gap"] == it.why:
                 run["until"], run["ticks"] = t, run["ticks"] + 1
@@ -656,17 +692,23 @@ def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS) ->
                 lines.append(run)
             continue
         run = None
-        name = f"{frames:05d}.jpg"
-        (folder / name).write_bytes(it.jpeg)
-        lines.append({"i": frames, "file": name, "t": t, "at": clock_time(it.t)})
-        frames += 1
-        size += len(it.jpeg)
+        name = f"{len(shots):05d}.{'png' if png else 'jpg'}"
+        lines.append({"i": len(shots), "file": name, "t": t, "at": clock_time(it.t)})
+        shots.append((name, it))
         shape = it.size
+    size = 0
+    with ThreadPoolExecutor(ENCODERS) as pool:
+        for k in range(0, len(shots), 4 * ENCODERS):  # (a batch at a time: the frames' pixels aren't all out at once)
+            batch = shots[k:k + 4 * ENCODERS]
+            for (name, _), data in zip(batch, pool.map(lambda shot: encode(shot[1].pixels(), png), batch)):
+                (folder / name).write_bytes(data)
+                size += len(data)
     (folder / INDEX).write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
     summary = {**info, "from": day_time(t0) if items else None, "to": day_time(items[-1].t) if items else None,
                "seconds": round(items[-1].t - t0 + 1 / fps, 1) if items else 0.0, "ticks": len(items),
-               "frames": frames, "bytes": size, "gaps": {why: round(n / fps, 1) for why, n in gaps.items()},
-               "fps": fps, "jpeg_quality": lie_recorder.JPEG_QUALITY, "window": None if shape is None else list(shape)}
+               "frames": len(shots), "bytes": size, "gaps": {why: round(n / fps, 1) for why, n in gaps.items()},
+               "fps": fps, "format": "png" if png else "jpeg", "jpeg_quality": None if png else lie_recorder.JPEG_QUALITY,
+               "window": None if shape is None else list(shape)}
     (folder / SUMMARY).write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary
 

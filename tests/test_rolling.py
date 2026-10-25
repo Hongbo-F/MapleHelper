@@ -102,6 +102,16 @@ def run_ticks(rec: Recorder, n: int, poll: bool = False) -> None:
         rec.clock.step(1 / rec.fps)
 
 
+def a_part(folder, *sizes, kind="x"):
+    """A saved part on disk whose frames take these many bytes each (written as they are: what pruning counts)."""
+    folder.mkdir(parents=True)
+    for i, n in enumerate(sizes):
+        (folder / f"{i:05d}.jpg").write_bytes(b"b" * n)
+    (folder / INDEX).write_text("".join(json.dumps({"i": i, "file": f"{i:05d}.jpg", "t": i / 10}) + "\n"
+                                        for i in range(len(sizes))), encoding="utf-8")
+    (folder / SUMMARY).write_text(json.dumps({"kind": kind}), encoding="utf-8")
+
+
 def lines(folder):
     return [json.loads(s) for s in (folder / INDEX).read_text(encoding="utf-8").splitlines()]
 
@@ -117,9 +127,8 @@ def test_the_ring_keeps_exactly_the_last_5_minutes_of_moments_at_10_a_second(tmp
     assert len(items) == 3000 and rec.ring.frames == 3000
     assert items[-1].t - items[0].t == pytest.approx(299.9) and rec.ring.span() == pytest.approx(300.0)
     assert all(b.t - a.t == pytest.approx(0.1, abs=1e-6) for a, b in zip(items, items[1:]))
-    # The newest 3,000 grabs, in order: each frame decodes to the grab it was.
-    first = cv2.imdecode(np.frombuffer(items[0].jpeg, np.uint8), cv2.IMREAD_COLOR)
-    assert np.abs(first.astype(int) - bgra(3001)[..., :3]).mean() < 2 and items[0].size == (64, 48)
+    # The newest 3,000 grabs, in order: each frame's pixels are the grab's, exactly (lossless since 2026-10-25).
+    assert np.array_equal(items[0].pixels(), bgra(3001)[..., :3]) and items[0].size == (64, 48)
     assert rec.grab.n == 6000 and rec.ring.trimmed == 0
     assert len(rec.ring.last(30)) == 300 and rec.ring.last(30)[0] is items[2700]
     rec.close()
@@ -135,7 +144,7 @@ def test_a_frame_is_kept_only_while_the_game_shows_else_a_gap_says_why(tmp_path)
         rec.clock.step()
     items = list(rec.ring.items)
     assert [it.why for it in items] == plan
-    assert [it.jpeg is not None for it in items] == [not why for why in plan]
+    assert [it.data is not None for it in items] == [not why for why in plan]
     assert grab.n == plan.count("")  # never grabbed while the game didn't show: nothing of another window
     assert rec.counts == {"frame": 4, "covered": 2, "not in front": 1, "minimized": 1, "no window": 1,
                           "off the screen": 1}
@@ -157,7 +166,7 @@ def test_a_window_over_the_game_or_the_game_moving_during_the_grab_drops_the_fra
     assert rec.tick().why == "moved" and rec.ring.frames == 0
     grab.during = None
     rec.clock.step()
-    assert rec.tick().jpeg is not None and grab.n == 3 and game.checks == 6  # a look before each grab and after
+    assert rec.tick().data is not None and grab.n == 3 and game.checks == 6  # a look before each grab and after
     rec.close()
 
 
@@ -396,7 +405,7 @@ def test_an_alarm_save_keeps_the_lie_detector_s_recordings_to_their_budget_whate
     player's recording under way spared however big."""
     root = tmp_path / "lie_detector"
     for stamp, size in (("20261020-100000", 4000), ("20261021-100000", 3000), ("20261022-100000", 2000)):
-        rolling.write_part(root / stamp / BEFORE, [Item(1.0, b"b" * size, size=(4, 4))], {"kind": "x"})
+        a_part(root / stamp / BEFORE, size)
         (root / stamp / "00000.jpg").write_bytes(b"j" * 100)  # all an old player counts of it
     rec = recorder(tmp_path, lie_keep=7500)  # the two newer, about 6.3 KB with their index and summary, fit
     run_ticks(rec, 50, poll=True)
@@ -468,9 +477,14 @@ def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_60_s_after(tmp_p
     assert s["alarm"]["form"] == "mini-game notice" and s["asked"] == [-10.0, 60.0] and s["cut_short"] is False
     assert s["alarm_t"] == pytest.approx(10.0, abs=0.15) and 699 <= s["ticks"] <= 701 and s["frames"] == s["ticks"]
     assert lines(clip)[-1]["t"] == pytest.approx(70.0, abs=0.15)
-    # ... besides the part before it, its own way (here no recording of the player's began: to recent/).
+    # Lossless: PNG, each frame exactly the grab it was.
+    assert s["format"] == "png" and s["jpeg_quality"] is None and lines(clip)[0]["file"] == "00000.png"
+    shot = cv2.imread(str(clip / "00000.png"))
+    grab_n = next(k for k in range(256) if k * 3 % 256 == shot[0, -1, 0])  # (Grab's frames: a shade a grab)
+    assert np.array_equal(shot, bgra(grab_n)[..., :3])
+    # ... besides the part before it, its own way (here no recording of the player's began: to recent/), JPEG.
     (before,) = (tmp_path / "recent").iterdir()
-    assert summary(before)["kind"] == "before the Lie Detector"
+    assert summary(before)["kind"] == "before the Lie Detector" and summary(before)["format"] == "jpeg"
     assert summary(before)["alarm_t"] == pytest.approx(40.0, abs=0.6)  # all the ring held: 40 s
     assert any("its own clip from 10 s before it to 60 s after" in m for m in rec.said)
     rec.close()
@@ -505,7 +519,7 @@ def test_an_alarm_s_clip_is_written_cut_short_when_the_recorder_stops(tmp_path, 
 def test_an_alarm_s_clips_are_kept_to_their_budget(tmp_path, alarm_file):
     root = tmp_path / "alarm_clips"
     for stamp in ("20261020-100000-lie-detector", "20261021-100000-lie-detector"):
-        rolling.write_part(root / stamp, [Item(1.0, b"c" * 4000, size=(4, 4))], {"kind": "x"})
+        a_part(root / stamp, 4000)
     rec = recorder(tmp_path, folder_wait=0.3, clips_keep=6000)  # the newer old one fits beside the next, not both
     run_ticks(rec, 50, poll=True)
     _alarm_at(rec, alarm_file)
@@ -538,7 +552,7 @@ def test_memory_is_bounded_the_oldest_frames_go_past_the_cap(tmp_path):
         ring.add(Item(k / 10 + 0.05, None, "covered"))
         assert ring.bytes <= 10_000
     assert ring.frames == 10 and ring.trimmed == 90  # younger than 5 minutes, gone for the cap
-    assert ring.items[0].jpeg is not None and ring.items[0].t == 9.0
+    assert ring.items[0].data is not None and ring.items[0].t == 9.0
     clock_set_back = Ring(max_items=50)
     for k in range(200):
         clock_set_back.add(Item(1000.0 - k, None, "covered"))
@@ -548,8 +562,7 @@ def test_memory_is_bounded_the_oldest_frames_go_past_the_cap(tmp_path):
 def test_disk_is_bounded_the_oldest_saves_go_and_a_lie_detector_cycle_counts_its_part_before(tmp_path):
     recent = tmp_path / "recent"
     for n, stamp in enumerate(("20261024-100000", "20261024-110000", "20261024-120000")):
-        rolling.write_part(recent / stamp, [Item(1000.0 + k / 10, b"y" * 1000, size=(4, 4)) for k in range(10)],
-                           {"kind": "save-recent"})
+        a_part(recent / stamp, *[1000] * 10, kind="save-recent")
     rec = recorder(tmp_path, recent_keep=25_000)
     run_ticks(rec, 10)
     rec.clock.t = time.time()
@@ -565,7 +578,7 @@ def test_disk_is_bounded_the_oldest_saves_go_and_a_lie_detector_cycle_counts_its
     assert any("deleted the 1 oldest saves" in m for m in rec.said)
     # The Lie Detector's recordings are pruned counting the part before each.
     cycle = tmp_path / "lie_detector" / "20261024-090000"
-    rolling.write_part(cycle / BEFORE, [Item(1.0, b"z" * 5000, size=(4, 4))], {"kind": "before the Lie Detector"})
+    a_part(cycle / BEFORE, 5000, kind="before the Lie Detector")
     (cycle / "00000.jpg").write_bytes(b"j" * 100)
     assert lie_recorder.size_of(cycle) == 5100 + (cycle / BEFORE / INDEX).stat().st_size \
         + (cycle / BEFORE / SUMMARY).stat().st_size
@@ -603,7 +616,7 @@ def test_the_status_is_written_though_a_reader_has_it_open_for_a_moment(tmp_path
 
 
 def test_a_saved_part_makes_a_sheet_and_a_video_and_so_does_a_lie_detector_recording(tmp_path):
-    items = [Item(1000.0 + k / 10, rolling.encode(bgra(k)), size=(64, 48)) for k in range(30)]
+    items = [Item(1000.0 + k / 10, rolling.pack(bgra(k)), size=(64, 48)) for k in range(30)]
     items[10:15] = [Item(it.t, None, "covered") for it in items[10:15]]
     folder = tmp_path / "part"
     rolling.write_part(folder, items, {"kind": "save-recent"})
