@@ -1,6 +1,7 @@
-"""Grinding (behavior.patrol, behavior.grind) on synthetic maps: the loop it chooses against camping, the next stop
+"""Grinding (behavior.patrol, behavior.grind): the loop it chooses against camping, the next stop
 along it and what pulls her off it, other players' areas, no flip-flopping between loops, the belief of each spawn
-point, and kills in passing on another platform. No game data, no simulator: route times are stand-ins."""
+point, kills in passing on another platform, and a pause while looks fail. On synthetic
+maps, route times stand-ins; the pause in the simulator on Tree Dungeon (its game data)."""
 
 import math
 import time
@@ -517,3 +518,55 @@ def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch)
     g.h.memory.update(1.5, [_sight(model, HORNY, 150, -200)], None)
     s.t, g._alt = 1.5, None
     assert g._interrupt(s) is True and g._reroute
+
+
+def test_a_pause_moves_grindings_clocks_on():
+    # Looks failing their checks for 30 s (Hunt.run's pause: Senses.regain): the hunt loop's clocks move on (the stop's
+    # stay, STOP_MAX_S's), and grinding's own: her EXP a second over the run, where she'd go instead looked at afresh,
+    # and the HP gone over the pause not charged to a platform.
+    from gamelab.attack.spots import Spot
+    from gamelab.behavior.hunt import Visit
+    g, now = object.__new__(Grind), time.monotonic()
+    g._progress, g.obj, g.stack, g._idle_since, g._hanging, g._rope_rest = now, None, [], None, None, 0.0
+    g.visit = Visit(23, Spot(23, 8.0, 1.0, False), arrived=now - 5.0)
+    g._start, g._alt, g._hp = now - 60.0, (now, None, 3, {}), (now, 0.9, 23)
+    g._paused(30.0)
+    assert g._start == pytest.approx(now - 30.0) and g._alt is None and g._hp is None
+    assert g.visit.arrived == pytest.approx(now + 25.0) and g._progress == pytest.approx(now + 30.0)
+
+
+def test_a_grind_stands_still_while_its_looks_fail_and_grinds_on_after():
+    """Grinding is the hunt loop's subclass, so its pause is the hunt loop's (Hunt.run: LookLost, Senses.regain): from
+    20 s to 35 s of loop_tree_grind's 90 s every look fails its checks; it stands still, says why, sends no plan from
+    LOST_S after the first failure until the looks pass, and grinds on after, its stop not left for the time stood."""
+    import dataclasses
+
+    from gamelab.perception.framecheck import BadLook, Problem
+    from gamelab.sim.scenarios import _grind as grinding
+    if scenarios.real_map(10002073) is None:
+        pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
+    window = (20.0, 35.0)
+
+    def run(sim):
+        real = sim.eyes.look
+
+        def look():
+            if window[0] <= sim.clock.elapsed < window[1]:
+                sim.clock.sleep(0.03)  # a capture's time
+                raise BadLook(Problem("offset", "the capture is offset by (+26, +26) px from the game's client area"))
+            return real()
+
+        sim.eyes.look = look
+        return grinding(1.5)(sim)
+
+    sc = dataclasses.replace(scenarios.SCENARIOS["loop_tree_grind"], name="loop_tree_grind_lost", fn=run, expects=())
+    trace = scenarios.run_scenario(sc)
+    log = trace["log"]
+    assert any("standing still: the capture is offset" in line for line in log), log
+    assert any("the game looks as expected again" in line for line in log)
+    failed = next(float(line.split()[0]) for line in log if "a look failed its checks" in line)
+    assert [p for p in trace["plans"] if failed + 0.5 <= p[0] < window[1]] == []
+    assert any(p[0] >= window[1] for p in trace["plans"])  # grinding on after
+    after = [line for line in log if float(line.split()[0]) >= window[1]]
+    assert not any(f"{grind.STOP_MAX_S:.0f} s here" in line for line in after[:20]), after[:20]
+    assert trace["result"]["hunt_stop"] == "time up"

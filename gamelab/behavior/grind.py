@@ -88,6 +88,16 @@ class Grind(Hunt):
         self._log_grind()
         return report
 
+    def _paused(self, seconds: float) -> None:
+        """She stood still `seconds` while looks failed their checks (the hunt loop's pause: Senses.regain): the hunt
+        loop's clocks move on (a stop's stay and STOP_MAX_S, LEAVE_CONFIRM_S go by the visit's), and so do grinding's
+        own: her EXP a second over the run (`_rate_here`), and where she'd go instead, looked at afresh (`_alt`); the
+        HP gone over the pause isn't charged to a platform (`_hp`). The spawn points' belief and the stops' `left_at`
+        are the game's clocks, which ran on, and aren't moved."""
+        super()._paused(seconds)
+        self._start += seconds
+        self._alt = self._hp = None
+
     # --- what she knows ------------------------------------------------------------------------------------
 
     def _look(self) -> Scene:
