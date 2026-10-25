@@ -2111,6 +2111,19 @@ def loop_tree_wait(sim):
     return harness._only(_loop(4), (20,))(sim)
 
 
+@tree((28, 247.0), monsters="all", seed=2, limit=1200,
+      expects=(logs("tour: sweep"), check("two stops hunted or more", lambda tr: len(tr["result"]["visited"]) >= 2),
+               check("she fed her pet", _fed_her_pet)))
+def tour_tree_run(sim):
+    """`python -m gamelab tour --stops 3 --map 10002073` from 28: the sweep's three nearest grounds from the bottom,
+    the escort's fights on the way. The floor's and 32's respawns keep her fighting on the way: each stop takes
+    minutes, and the third is often not reached in its time (README: Tree Dungeon, Forest Up North II). (A touch can
+    knock her past the tower's wall and out of the map, a simulator effect: with the escorted trips alone seed 2 went
+    out at 635 s and the scenario was on seed 6; with positioning and her body the client's too, seeds 1-12 all meet
+    this but 6, out at 872 s by x -308, and it's on seed 2 again.)"""
+    return sim.tour_stack().run(stops=3)
+
+
 def _grind(minutes: float):
     def run(sim, tour=None):
         from ..behavior.grind import Grind
@@ -2138,19 +2151,6 @@ def loop_tree_grind(sim):
     as often as live (README: Grinding): on seed 1 her trips up the tower end in rests twice, and in 3 minutes she gets
     to no stop to stay at; she kills on 18-23 on the way."""
     return _grind(3)(sim)
-
-
-@tree((28, 247.0), monsters="all", seed=2, limit=1200,
-      expects=(logs("tour: sweep"), check("two stops hunted or more", lambda tr: len(tr["result"]["visited"]) >= 2),
-               check("she fed her pet", _fed_her_pet)))
-def tour_tree_run(sim):
-    """`python -m gamelab tour --stops 3 --map 10002073` from 28: the sweep's three nearest grounds from the bottom,
-    the escort's fights on the way. The floor's and 32's respawns keep her fighting on the way: each stop takes
-    minutes, and the third is often not reached in its time (README: Tree Dungeon, Forest Up North II). (A touch can
-    knock her past the tower's wall and out of the map, a simulator effect: with the escorted trips alone seed 2 went
-    out at 635 s and the scenario was on seed 6; with positioning and her body the client's too, seeds 1-12 all meet
-    this but 6, out at 872 s by x -308, and it's on seed 2 again.)"""
-    return sim.tour_stack().run(stops=3)
 
 
 @tree((23, 0.0), monsters="all", hp=0.25, limit=400,
