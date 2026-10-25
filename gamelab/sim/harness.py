@@ -22,7 +22,7 @@ What a run gave is read from the simulated world, not from the bot's own reports
   hp_lost, hp_low  HP lost to touches (each as the world took it: by the monster's touch damage), and
                    her lowest HP; potions; died_at
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
-                   counts against the bar as a death does; left_map_at, the same for up pressed at a portal
+                   counts against the bar as a death does; left_map_at, the same for up held at a portal
                    (world.SimLeftMap)
   touches, hurt    monsters touching her, and those of the touches she didn't evade
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),

@@ -206,7 +206,9 @@ def test_a_star_that_doesnt_push_a_horny_mushroom_leaves_it_walking_at_her(monke
 
 # --- the portals -----------------------------------------------------------------------------------------------------
 
-def test_up_on_the_ground_at_a_portal_takes_her_out_of_the_map_and_the_stack_never_presses_it_there():
+def test_up_held_at_a_portal_takes_her_out_of_the_map_in_the_air_too_and_no_planned_climb_is_near_one():
+    """As HeavenClient takes a portal (mapdata.PORTAL_BOX): up held with her feet within 25 of it across and from 100
+    above it to 25 below, on the ground or in the air, unless she's on a rope, sitting or attacking."""
     from gamelab.motion.route import Planner
     from gamelab.sim.world import SimLeftMap
     m = tree_map()
@@ -216,7 +218,23 @@ def test_up_on_the_ground_at_a_portal_takes_her_out_of_the_map_and_the_stack_nev
     with pytest.raises(SimLeftMap):
         w.advance(0.5)
     assert w.summary()["left_map_at"] == 0.0
-    # No move of the planner's holds up on the ground within 60 of either (MapModel.portal_near): no rope is near one.
+    for dx, taken in ((10, True), (40, False)):  # up pressed in the air, at the top of a jump straight up
+        w = world(m, 28, out00.x - dx)
+        tap(w, 0.0, "alt", 0.05)
+        w.key(0.3, "up", True)
+        if taken:
+            with pytest.raises(SimLeftMap):
+                w.advance(1.0)
+            assert w.summary()["left_map_at"] == 0.3 and any("in the air" in line for line in w.log)
+        else:
+            w.advance(1.0)
+    w = world(m, 28, out00.x - 60)  # up held walking into its box: taken there
+    w.key(0.0, "up", True)
+    w.key(0.1, "right", True)
+    with pytest.raises(SimLeftMap):
+        w.advance(2.0)
+    assert out00.x - 26 < w.x <= out00.x - 24
+    # No move of the planner's holds up within 60 of either, nor over one (MapModel.portal_near): no rope is near one.
     for mv in Planner(m).moves:
         if mv.kind in ("climb", "rope_jump"):
             assert not m.portal_near(m.platform(mv.src), mv.rope_x), mv

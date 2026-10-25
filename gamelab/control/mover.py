@@ -46,8 +46,11 @@ CLIMB_EXTRA_MS = 500      # up (or down) is held this much longer than the climb
 # jumped from. The jump key goes ROPE_JUMP_KEY_MS after the arrow (off_rope's, 30): the game acts on the arrow 66 ms
 # after its key and on the jump 65 ms after its own, each at its next 30 ms step (motion.body: Lags, STEP), so the
 # arrow is held by the jump's step.
-PORTAL_UP_MS = 100       # by a portal, up goes down this long after a jump's key: she's off the ground (JUMP_LAG 65 ms
-                          # and the game's next 30 ms step), so it can't take the portal
+# By a portal, up goes down PORTAL_UP_MS after a jump's key: she's off the ground then (JUMP_LAG 65 ms and the game's
+# next 30 ms step). That keeps her from taking it only if the game takes a portal on the ground alone, which isn't
+# known: HeavenClient takes one in the air too (mapdata.PORTAL_BOX, 100 above it), as the simulator does. No plan
+# climbs within MapModel.portal_near of one, and no rope on the three maps hangs there.
+PORTAL_UP_MS = 100
 HANG_TOLERANCE = 15
 ON_ROPE_X = 25
 ROPE_JUMP_KEY_MS = 40
@@ -269,9 +272,9 @@ class Mover:
         arrow = self.actions.arrow(directions.toward(sign))
         t = run_ms(max(run, MIN_RUN))
         at_rope = t + int(1000 * lead / WALK_SPEED)
-        # Up is held from the jump on (in the air, so a portal on the way can't take her), or when
-        # walking into a rope, from shortly before she reaches it.
-        up_from = t if lead else max(0, t - 250)
+        # Up is held from the jump on (by a portal PORTAL_UP_MS after its key, once she's off the ground), or when
+        # walking into a rope (never by a portal), from shortly before she reaches it.
+        up_from = (t + (PORTAL_UP_MS if portal else 0)) if lead else max(0, t - 250)
         events = [[0, arrow, "down"], [up_from, k.up.name, "down"], [at_rope + 120, arrow, "up"],
                   [at_rope + hold_up, k.up.name, "up"]]
         if lead:
@@ -280,8 +283,8 @@ class Mover:
 
     def _climb_from_under(self, hold_up: int, portal: bool = False) -> None:
         """Standing under the rope: jump straight up holding up. By a portal (`portal`), up only once she's off the
-        ground (PORTAL_UP_MS after the jump's key: physics.JUMP_LAG and a step): up on the ground there would take it.
-        No rope on the three maps hangs within MapModel.portal_near of one."""
+        ground (PORTAL_UP_MS after the jump's key: physics.JUMP_LAG and a step), which helps only if the game takes a
+        portal on the ground alone (PORTAL_UP_MS). No rope on the three maps hangs within MapModel.portal_near of one."""
         k = self.actions.keys
         up = 40 + PORTAL_UP_MS if portal else 0
         self._send([[up, k.up.name, "down"], *tap(40, k.jump.name),

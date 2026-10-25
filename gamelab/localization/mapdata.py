@@ -171,6 +171,15 @@ class Portal:
     to_map: int | None
 
 
+# Where a portal takes her (HeavenClient, Gameplay/MapleMap/Portal.cpp and Stage.cpp, read 2026-10-24): while up is held
+# and she isn't climbing, sitting or attacking (Stage::update; no ground check, so in the air too), with her feet within
+# PORTAL_BOX[0] of its x and from PORTAL_BOX[1] above its point to PORTAL_BOX[2] below (Portal::bounds: (-25, -100) to
+# (25, 25)). Whether the game itself takes one in the air isn't known; the simulator does (sim.world). A portal of
+# PORTAL_EXIT's kind leads to another map (the spawn points, kind 0, lead nowhere).
+PORTAL_BOX = (25.0, 100.0, 25.0)
+PORTAL_EXIT = 2
+
+
 @dataclass(frozen=True)
 class MobBody:
     """A monster's body, from the boxes (lt/rb, map units from its feet) of its frames in the game data
@@ -298,10 +307,13 @@ class MapModel:
         p = self.platform(pid)
         return not any(runs_under(self.platform(q), p, reach) for q in self.spawn_platforms)
 
-    def portal_near(self, p: Platform, x: float, dx: float = 60, dy: float = 40) -> bool:
-        """Whether a portal stands on platform `p` near map x (within `dx` along it and `dy` of its
-        surface): holding up there would take it."""
-        return any(abs(pt.x - x) < dx and abs(pt.y - p.y_at(pt.x)) < dy for pt in self.portals)
+    def portal_near(self, p: Platform, x: float, dx: float = 60, dy: float = 40, below: float = 125) -> bool:
+        """Whether holding up on platform `p` near map x, or jumping from there, could take a portal: one within `dx`
+        along it and `dy` of its surface (the spawn points too), or an exit up to `below` under it (PORTAL_BOX: an
+        exit takes her from 100 above it). On Tree Dungeon, Forest Up North II no platform is within 125 above
+        either exit."""
+        return any(abs(pt.x - x) < dx and -dy < pt.y - p.y_at(pt.x) < (below if pt.kind == PORTAL_EXIT else dy)
+                   for pt in self.portals)
 
     @cached_property
     def spawn_platforms(self) -> dict[int, int]:

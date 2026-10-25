@@ -45,8 +45,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   about 1.6% for a pig, 0.3% for a snail, give or take 70%; or, her DEF known, by meowdb's formula: Her) and
   knock her back ~58 units (the median
   logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS). At 0% HP she dies, and the
-  run ends (SimDied); up pressed on the ground at a portal takes her through it, out of the map, and the run
-  ends too (SimLeftMap);
+  run ends (SimDied); up held at a portal (mapdata.PORTAL_BOX: from 100 above it to 25 below, in the air too, as
+  HeavenClient has it) takes her through it, out of the map, and the run ends too (SimLeftMap);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
   jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
   that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
@@ -115,7 +115,7 @@ from ..attack import reach
 from ..behavior import pet as pet_care
 from ..control.actions import STAR_DELAY_MS
 from ..localization import monsters as monster_data
-from ..localization.mapdata import MapModel, Platform, Rope
+from ..localization.mapdata import PORTAL_BOX, PORTAL_EXIT, MapModel, Platform, Rope
 from ..motion import body, flow
 from ..motion.physics import (CLIMB_SPEED, DROP_LAG, GRAB_SURE, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE,
                                WALK_SPEED)
@@ -291,7 +291,6 @@ PET_GAP = 0.2
 PET_FULLNESS = 60.0
 CHAIR_HP_PER_S = 0.03
 STAND_UP = 0.2           # s the arrow press that stands her up from the chair takes
-PORTAL_REACH = (25.0, 40.0)
 # What isn't known of the game's physics, which the simulator can run either way (Realism.sides, zero_walls,
 # rope_reach; the defaults are the simulator's own, as its golden traces were recorded with):
 # - The map's sides. The simulator's: its platforms' outermost ends, which stop her in the air only. HeavenClient's
@@ -363,10 +362,12 @@ class SimDied(Exception):
 
 
 class SimLeftMap(SimDied):
-    """Up pressed on the ground at a portal (within PORTAL_REACH of it): she went through it to another map, and a
-    simulated run ends there. The stack never presses up on the ground within 60 units of one (mapdata.MapModel.
-    portal_near, the spawn points' too: the climbs, flow and the mover keep it): on Tree Dungeon, Forest Up North II
-    nowhere right of x 118 on 28 and 12 (their exits at 282 and 281, the spawn points from 178)."""
+    """Up held at a portal (World._through_portal: in its box, mapdata.PORTAL_BOX, while she isn't on a rope, sitting
+    or attacking, on the ground or in the air, as HeavenClient takes one; whether the game takes one in the air isn't
+    known): she went through it to another map, and a simulated run ends there. No plan holds up within 60 units of
+    one (mapdata.MapModel.portal_near, the spawn points' too, and an exit up to 125 below: the climbs, flow and the
+    mover keep it): on Tree Dungeon, Forest Up North II nowhere right of x 118 on 28 and 12 (their exits at 282 and
+    281, the spawn points from 178)."""
 
 
 class SimFellOut(SimDied):
@@ -884,7 +885,7 @@ class World:
         self.evaded = 0
         self.picked: dict[str, int] = {}
         self.messages: list[tuple[float, str]] = []
-        self.portals = [pt for pt in model.portals if pt.kind == 2]
+        self.portals = [pt for pt in model.portals if pt.kind == PORTAL_EXIT]
         self.sides = _sides(model, self.realism.sides)
         self.arms = self.realism.rope_reach - JUMP_HEIGHT  # she grabs a rope this far above her feet (ARMS)
         self.dead = False
@@ -1013,10 +1014,27 @@ class World:
             self._air()
         else:
             self._climb(dt)
+        if "up" in self.held:
+            self._through_portal()
         self._touch()
         if self.sitting:
             self.hp = min(1.0, self.hp + CHAIR_HP_PER_S * dt)
         self.ms += TICK_MS
+
+    def _through_portal(self) -> bool:
+        """Up held: in an exit's box (mapdata.PORTAL_BOX) while she isn't on a rope, sitting or attacking, she goes
+        through it and leaves the map (SimLeftMap), on the ground or in the air (HeavenClient's Stage::update)."""
+        if self.left_map_at is not None or self.mode == "rope" or self.sitting or self.ms < self.attack_lock_ms:
+            return False
+        for pt in self.portals:
+            if abs(pt.x - self.x) <= PORTAL_BOX[0] and pt.y - PORTAL_BOX[1] <= self.y <= pt.y + PORTAL_BOX[2]:
+                where = "on the ground" if self.mode == "ground" else "in the air"
+                self.note(f"up at portal {pt.name} (to map {pt.to_map}) {where}: she leaves the map")
+                self.left_map_at = self.t
+                self.held.clear()
+                self.seen.clear()
+                return True
+        return False
 
     def _handle(self, e: Event) -> None:
         if e.kind in ("down", "up"):
@@ -1163,14 +1181,9 @@ class World:
             self.sitting = False
             self._push(self.ms_of(at + JUMP_LAG), "aim", self.ms)  # it starts then (_aim)
         elif action == "up":
+            if self._through_portal():
+                return
             if ground:
-                for pt in self.portals:
-                    if abs(pt.x - self.x) < PORTAL_REACH[0] and abs(pt.y - self.y) < PORTAL_REACH[1]:
-                        self.note(f"up at portal {pt.name} (to map {pt.to_map}): she leaves the map")
-                        self.left_map_at = self.t
-                        self.held.clear()
-                        self.seen.clear()
-                        return
                 self._grab_from_ground()
         elif action == "down":
             if ground:
