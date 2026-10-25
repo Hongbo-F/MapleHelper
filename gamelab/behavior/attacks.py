@@ -4,15 +4,18 @@ look (Senses.listeners), whoever takes it, and from the throws themselves; every
 attack key asks `key` (the fights, the hunt loop, grinding and the navigator's fights on the way alike).
 
 - The monster a throw takes: the likeliest in its way from where she stands in the last look that searched for
-  monsters (ledger.in_path: the claw's stance, else the star's search's first band), else the one she last threw at
-  that way within fight.HIDDEN_FOR (hit, it hides under its damage numbers), else none: then nothing seen is in its
-  way, and it's the regular attack (no MP thrown at nothing).
-- Its HP left (`left`): its HP in the game data (MapModel.mob_hp), less what she has taken of it. Her throws at a
-  monster are kept with it (`Mark`, followed look to look: monsters.seen_again), each at its attack's damage on
-  average after the monster's defence, times 1 - choice.MISS; a look that reads its HP bar between empty and full
-  sets it from the bar (the throws whose stars can't have landed by then, LANDS_S, still taken off). A monster she
-  hasn't thrown at, whose bar no look reads, has its whole HP: others' damage to it isn't known (on Tree Dungeon at
-  1366x768 the bars read empty: attack.choice.STAR).
+  monsters (ledger.in_path: the claw's stance, else the star's search's first band) that isn't likelier dead than
+  alive by her throws (DEAD_LIKELY: one is, and the star takes the next), else the one she last threw at that way
+  within fight.HIDDEN_FOR (hit, it hides under its damage numbers), else none: then nothing seen is in its way, and
+  it's the regular attack (no MP thrown at nothing).
+- What it has left (`reckon`: attack.choice.Left, a chance of each amount): its HP in the game data (MapModel.mob_hp),
+  less her throws at it. Her throws at a monster are kept with it (`Mark`, followed look to look: monsters.seen_again),
+  each taking off its attack's damage as drawn, or nothing (choice.MISS); a look that sees it alive LANDS_S or more
+  after a throw rules out what that throw would have killed it with (Left.alive), and one that reads its HP bar
+  between empty and full sets it from the bar (the throws that can't have landed by then still taken off). A throw is
+  chosen by what the monster has left if it's still alive when the throw lands. A monster she hasn't thrown at, whose
+  bar no look reads, has its whole HP: others' damage to it isn't known (on Tree Dungeon at 1366x768 the bars read
+  empty: attack.choice.STAR).
 - Her MP: the latest look's bar share (Scene.mp) of her MP when full (config.toml [character] mp).
 
 Each choice is logged with its numbers, and sent as a telemetry 'attack' record; `counts` keeps them for the run's
@@ -28,7 +31,7 @@ from maplehelper.engine import RIGHT
 
 from .. import telemetry
 from ..attack import choice
-from ..attack.choice import Attack
+from ..attack.choice import Attack, Left
 from ..localization.mapdata import MapModel
 from ..localization.monsters import TRACK_SLACK, Monster, seen_again
 from ..localization.scene import Scene
@@ -41,21 +44,22 @@ LANDS_S = 0.85     # s after a throw's attack key that its damage can show on it
 LOST_S = 3.0       # s unseen before a monster she threw at is forgotten (ledger.WOUND_LOST_S) ...
 FORGET_S = 15.0    # ... and s since her last throw at it (ledger.WOUND_S)
 MODES = ("choice", "skill", "regular")  # attack.choice.pick's modes: `tour --attack` (choice by default)
+DEAD_LIKELY = 0.5  # a monster in a throw's way this likely dead by her throws (Left.dead) isn't what it takes: the next is
 
 
 @dataclass
 class Mark:
-    """A monster she has thrown at: as a look last saw it, when, her throws at it (when, the damage each did on
-    average), and what its HP bar last read as HP (with the look's time), if a look read one."""
+    """A monster she has thrown at: as a look last saw it, when, what it has left as of the throws looks have seen
+    land (`left`), and her throws at it since (when, which attack)."""
     m: Monster
     seen: float
-    throws: list[tuple[float, float]] = field(default_factory=list)
-    bar_hp: float | None = None
-    bar_t: float = 0.0
+    left: Left
+    pending: list[tuple[float, Attack]] = field(default_factory=list)
+    last: float | None = None  # her last throw at it
 
     @property
     def thrown(self) -> float:
-        return self.throws[-1][0] if self.throws else self.seen
+        return self.seen if self.last is None else self.last
 
 
 class Attacks:
@@ -97,8 +101,15 @@ class Attacks:
             if (again := seen_again(mk.m, s.monsters)) is None:
                 continue
             mk.m, mk.seen = again, s.t
-            if _believable(again.bar) and (hp := self.stats.get(again.kind)) is not None:
-                mk.bar_hp, mk.bar_t = again.bar * hp[0], s.t
+            landed = [a for t, a in mk.pending if t <= s.t - LANDS_S]
+            mk.pending = [(t, a) for t, a in mk.pending if t > s.t - LANDS_S]
+            if _believable(again.bar) and (stats := self.stats.get(again.kind)) is not None:
+                mk.left = Left.of(again.bar * stats[0], stats[1])
+            elif landed:  # alive after them: what would have killed it ruled out
+                left = mk.left
+                for a in landed:
+                    left = left.after(a, choice.MISS)
+                mk.left = left.alive() or mk.left  # (none alive: her throws did less than reckoned, taken as nothing)
         self.marks = [mk for mk in self.marks if s.t - mk.seen < LOST_S and s.t - mk.thrown < FORGET_S]
 
     # --- at every throw --------------------------------------------------------------------------
@@ -107,28 +118,32 @@ class Attacks:
         """The attack key a throw that way goes out with now (Actions' attack key asks this): its choice logged."""
         target = self.target(side)
         hp, pdd = self.stats.get(target.kind, (0.0, 0.0)) if target is not None else (0.0, 0.0)
-        left = None if target is None else self.left(target)
-        attack, why = choice.pick(left, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
+        left = None if target is None else self.reckon(target)
+        alive = None if left is None else left.alive() or left  # as it is if it's alive when the throw lands
+        what = None if target is None else float("inf") if alive is None else alive
+        attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
         now = time.monotonic()
-        if target is not None:
+        if target is not None and target.kind in self.stats:
             mk = self._mark_of(target)
             if mk is None:
-                mk = Mark(target, now)
+                mk = Mark(target, now, left)
                 self.marks.append(mk)
-            mk.throws.append((now, attack.mean(pdd) * (1 - choice.MISS)))
+            mk.pending.append((now, attack))
+            mk.last = now
         self.counts[attack.key] += 1
         self.counts[why] += 1
-        self._say(attack, why, target, left, hp)
+        self._say(attack, why, target, left, alive, hp)
         return getattr(self.keys, attack.key).name
 
     def target(self, side: str) -> Monster | None:
-        """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look, else the
-        one she last threw at that way within HIDDEN_FOR (unseen: under its damage numbers), else None."""
+        """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look that isn't
+        likely dead by her throws (DEAD_LIKELY; the likeliest if all are), else the one she last threw at that way
+        within HIDDEN_FOR (unseen: under its damage numbers), else None."""
         s = self._last
         if s is not None and s.where is not None and s.platform is not None:
             path = in_path(s, side, s.monsters)
             if path:
-                return path[0]
+                return next((m for m in path if (left := self.reckon(m)) is None or left.dead < DEAD_LIKELY), path[0])
             x = s.where.x
             now = time.monotonic()
             recent = [mk for mk in self.marks if now - mk.thrown < HIDDEN_FOR and (mk.m.x > x) == (side == RIGHT)]
@@ -136,34 +151,39 @@ class Attacks:
                 return max(recent, key=lambda mk: mk.thrown).m
         return None
 
-    def left(self, m: Monster) -> float:
-        """The HP monster `m` has left as she reckons it (see the module's docstring), at least 1; inf for a kind
-        whose HP isn't known."""
+    def reckon(self, m: Monster) -> Left | None:
+        """What monster `m` has left as she reckons it (see the module's docstring), her throws at it that no look
+        has seen land yet taken off; None for a kind whose HP isn't known."""
         stats = self.stats.get(m.kind)
         if stats is None:
-            return float("inf")
-        hp = stats[0]
+            return None
         mk = self._mark_of(m)
-        if mk is not None and mk.bar_hp is not None:
-            left = mk.bar_hp - sum(d for t, d in mk.throws if t > mk.bar_t - LANDS_S)
-        elif mk is not None:
-            left = hp - sum(d for _, d in mk.throws)
-        elif _believable(m.bar):
-            left = m.bar * hp
-        else:
-            left = hp
-        return max(1.0, left)
+        if mk is None:
+            return Left.of(m.bar * stats[0] if _believable(m.bar) else stats[0], stats[1])
+        left = mk.left
+        for _, a in mk.pending:
+            left = left.after(a, choice.MISS)
+        return left
+
+    def left(self, m: Monster) -> float:
+        """The HP monster `m` has left on average as she reckons it if it's alive (`reckon`); inf for a kind whose HP
+        isn't known."""
+        left = self.reckon(m)
+        if left is None:
+            return float("inf")
+        return (left.alive() or left).hp
 
     def kill_s(self, m: Monster) -> float:
-        """s she takes to kill monster `m` from what it has left (`left`), with the attack she'd throw (Lucky Seven
-        while she has the MP for a cast in a mode that throws it), her misses (choice.MISS), her throws THROW_S
-        apart."""
-        hp, pdd = self.stats.get(m.kind, (0.0, 0.0))
-        left = self.left(m) if hp else choice.REGULAR.mean() * 3  # an unknown kind: three regular stars
+        """s she takes to kill monster `m` from what it has left if alive (`reckon`), with the attack she'd throw
+        (Lucky Seven while she has the MP for a cast in a mode that throws it), her misses (choice.MISS), her throws
+        THROW_S apart."""
+        left = self.reckon(m)
         attack = self.skill if (self.skill is not None and self.mode != "regular" and
                                 (self.mp is None or choice.can_cast(self.mp, self.max_mp, self.skill.mp))) \
             else self.regular
-        return attack.throws(left, pdd) / (1 - choice.MISS) * choice.THROW_S
+        if left is None:  # an unknown kind: three regular stars
+            return 3 * choice.REGULAR.mean() / attack.mean() / (1 - choice.MISS) * choice.THROW_S
+        return (left.alive() or left).throws(attack) / (1 - choice.MISS) * choice.THROW_S
 
     def summary(self) -> str:
         """Her throws by attack and why, for the end of a run's log ("" without a choice asked: mode 'regular')."""
@@ -176,14 +196,16 @@ class Attacks:
     def _mark_of(self, m: Monster) -> Mark | None:
         return next((mk for mk in self.marks if mk.m is m or seen_again(mk.m, [m]) is m), None)
 
-    def _say(self, attack: Attack, why: str, target: Monster | None, left: float | None, hp: float) -> None:
+    def _say(self, attack: Attack, why: str, target: Monster | None, left: Left | None, alive: Left | None,
+             hp: float) -> None:
         mp = None if self.mp is None else max(0.0, choice.mp_points(self.mp, self.max_mp))
         if target is None:
             what = "nothing seen in its way"
-        elif left is None or left == float("inf"):
+        elif left is None or alive is None:
             what = target.kind
         else:
-            what = f"{target.kind} ~{left:.0f}/{hp:.0f} HP"
+            what = f"{target.kind} ~{alive.hp:.0f}/{hp:.0f} HP" + (f" if alive ({left.dead:.0%} dead)"
+                                                                   if left.dead >= 0.05 else "")
         reason = {"MP": f"MP {mp:.0f} < a cast's {self.skill.mp:.0f}" if self.skill is not None and mp is not None
                   else "MP", "finish": "finishing it", "damage": "", "skill": "", "regular": "",
                   "nothing in its way": ""}.get(why, why)
@@ -191,7 +213,8 @@ class Attacks:
                  + ("" if mp is None or why == "MP" else f" (MP {mp:.0f})"))
         if telemetry.recording():
             telemetry.emit("attack", key=attack.key, why=why, kind=None if target is None else target.kind,
-                           left=None if left is None or left == float("inf") else round(left), hp=hp,
+                           left=None if alive is None else round(alive.hp),
+                           dead=None if left is None else round(left.dead, 3), hp=hp,
                            mp=None if mp is None else round(mp))
 
 

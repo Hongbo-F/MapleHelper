@@ -19,6 +19,13 @@ throw is
 less the monster's defence (x 100 / (PDDamage + 100), meowdb's formula, as the simulator's stars: sim.world), and its
 MP a throw. How many throws take a monster's HP (`throws`) is worked out exactly from that (misses aside: they cost
 both attacks alike).
+
+What a monster has left is reckoned as a chance of each amount (`Left`), not one number: each of her throws at it takes
+off its attack's damage as drawn, or nothing with a miss's chance (MISS), and a look seeing it alive after a throw
+could have landed rules out every amount that throw would have killed it with (`Left.alive`). By her throws' average
+damage alone, a Green Mushroom with two casts thrown at it and still walking had 16 HP left, and the regular attack
+went to finish it; seen alive then, one of the two most likely missed, and it has about 83 (four times in five), a
+throw of Lucky Seven's, not a regular star's: in the simulator 17 of 25 of those finishing throws didn't kill.
 """
 
 import functools
@@ -38,8 +45,8 @@ STAR = (30, 70)
 SKILL = 3.0
 SKILL_STARS = 2
 # Of her throws, the share that do nothing (a star that misses, or a monster gone from where it was thrown at): the
-# simulator's game preset (Noise.miss), whose Lucky Seven fits her live throws a kill (above). A guess: what her own
-# throws' damage is counted at (behavior.attacks), never what an attack is chosen by.
+# simulator's game preset (Noise.miss), whose Lucky Seven fits her live throws a kill (above). A guess: the chance a
+# throw of hers took nothing off a monster as she reckons it (Left.after), never what an attack is chosen by.
 MISS = 0.275
 # Throws (expected, misses aside) the regular attack may take more than Lucky Seven at a monster for it to be the
 # regular attack (`finishes`): a quarter of a throw, about 0.2 s of hers (THROW_S), against a cast's MP. A guess. At 0
@@ -78,20 +85,76 @@ class Attack:
         """How many throws take `hp` HP of a monster of defence `pdd` on average (misses aside)."""
         if hp <= 0:
             return 0.0
-        need = math.ceil(hp * (pdd + 100) / 100 - 1e-9)  # in damage before the defence
-        table = _throws(self.stars, self.lo, self.hi, max(256, 1 << need.bit_length()))
-        return float(table[need])
+        k = need(hp, pdd)
+        return float(self.table(k)[k])
+
+    def table(self, top: int) -> np.ndarray:
+        """Expected throws (misses aside) to deal each whole damage 0 .. `top` at least, before the defence."""
+        return _throws(self.stars, self.lo, self.hi, max(256, 1 << (top + 1).bit_length()))
+
+    def pmf(self) -> np.ndarray:
+        """The chance of each whole damage a throw does before the defence (index = damage)."""
+        return _pmf(self.stars, self.lo, self.hi)
 
     def one_throw(self, hp: float, pdd: float = 0.0) -> float:
         """The chance one throw takes `hp` HP (misses aside)."""
         if hp <= 0:
             return 1.0
-        need = math.ceil(hp * (pdd + 100) / 100 - 1e-9)
-        pmf = _pmf(self.stars, self.lo, self.hi)
-        return float(pmf[need:].sum())
+        return float(self.pmf()[need(hp, pdd):].sum())
 
 
 REGULAR = Attack("attack", 1, *STAR)
+
+
+def need(hp: float, pdd: float = 0.0) -> int:
+    """The damage before the defence that takes `hp` HP of a monster of defence `pdd` (x 100 / (pdd + 100))."""
+    return max(0, math.ceil(hp * (pdd + 100) / 100 - 1e-9))
+
+
+@dataclass(frozen=True, eq=False)
+class Left:
+    """What a monster has left as she reckons it: `p[k]` the chance it takes k more damage before its defence `pdd`
+    to kill it, k from 0 (dead already) to its whole HP's."""
+    p: np.ndarray
+    pdd: float = 0.0
+
+    @classmethod
+    def of(cls, hp: float, pdd: float = 0.0) -> "Left":
+        """`hp` HP left, for sure."""
+        p = np.zeros(need(hp, pdd) + 1)
+        p[-1] = 1.0
+        return cls(p, pdd)
+
+    def after(self, attack: Attack, miss: float = MISS) -> "Left":
+        """As it is after a throw of `attack` at it: its damage as drawn taken off, or nothing (a miss, `miss`)."""
+        dealt = np.convolve(self.p[::-1], attack.pmf())  # the damage dealt so far, from her first throw on
+        top = len(self.p) - 1
+        folded = dealt[:top + 1].copy()
+        folded[top] += dealt[top + 1:].sum()  # all of its HP or more: dead
+        return Left((1 - miss) * folded[::-1] + miss * self.p, self.pdd)
+
+    def alive(self) -> "Left | None":
+        """As it is, seen alive: none of it dead, the rest in proportion; None if her throws as reckoned can't have
+        left it alive (they did less than reckoned)."""
+        p = self.p.copy()
+        p[0] = 0.0
+        total = p.sum()
+        return None if total < 1e-12 else Left(p / total, self.pdd)
+
+    @property
+    def dead(self) -> float:
+        """The chance it's dead already."""
+        return float(self.p[0])
+
+    @property
+    def hp(self) -> float:
+        """The HP it has left on average."""
+        return float(self.p @ np.arange(len(self.p))) * 100 / (self.pdd + 100)
+
+    def throws(self, attack: Attack) -> float:
+        """How many throws of `attack` take what it has left, on average (misses aside)."""
+        top = len(self.p) - 1
+        return float(self.p @ attack.table(top)[:top + 1])
 
 
 def lucky_seven(level: float, skill: float = SKILL) -> Attack:
@@ -116,19 +179,20 @@ def can_cast(share: float, max_mp: float, cost: float) -> bool:
     return mp_points(share, max_mp) >= cost
 
 
-def finishes(hp: float, pdd: float, regular: Attack = REGULAR, skill: Attack | None = None) -> bool:
-    """Whether the regular attack takes `hp` HP of a monster of defence `pdd` about as fast as `skill` would: its
-    expected throws within FINISH_SLACK of the skill's."""
+def finishes(hp: "float | Left", pdd: float = 0.0, regular: Attack = REGULAR, skill: Attack | None = None) -> bool:
+    """Whether the regular attack takes what a monster of defence `pdd` has left (`hp` HP, or as reckoned: Left)
+    about as fast as `skill` would: its expected throws within FINISH_SLACK of the skill's."""
     skill = skill or lucky_seven(1)
-    return regular.throws(hp, pdd) <= skill.throws(hp, pdd) + FINISH_SLACK
+    left = hp if isinstance(hp, Left) else Left.of(hp, pdd)
+    return left.throws(regular) <= left.throws(skill) + FINISH_SLACK
 
 
-def pick(hp: float | None, pdd: float, mp_share: float | None, max_mp: float, skill: Attack | None,
+def pick(hp: "float | Left | None", pdd: float, mp_share: float | None, max_mp: float, skill: Attack | None,
          mode: str = "choice", regular: Attack = REGULAR) -> tuple[Attack, str]:
-    """The attack a throw is, and why: `hp` the HP its monster has left as she reckons it (None: no monster seen in
-    its way), `pdd` its defence, `mp_share` her MP bar's share (None: not read) of `max_mp`, `skill` Lucky Seven (None:
-    she has none bound), `mode` 'regular' (the regular attack always), 'skill' (Lucky Seven whenever she has the MP)
-    or 'choice' (the module's rules)."""
+    """The attack a throw is, and why: `hp` what its monster has left as she reckons it (HP, or a Left; None: no
+    monster seen in its way), `pdd` its defence, `mp_share` her MP bar's share (None: not read) of `max_mp`, `skill`
+    Lucky Seven (None: she has none bound), `mode` 'regular' (the regular attack always), 'skill' (Lucky Seven whenever
+    she has the MP) or 'choice' (the module's rules)."""
     if skill is None or mode == "regular":
         return regular, "regular"
     if mp_share is not None and not can_cast(mp_share, max_mp, skill.mp):
@@ -137,6 +201,8 @@ def pick(hp: float | None, pdd: float, mp_share: float | None, max_mp: float, sk
         return skill, "skill"
     if hp is None:
         return regular, "nothing in its way"
+    if not isinstance(hp, Left) and math.isinf(hp):  # a kind whose HP isn't known
+        return skill, "damage"
     if finishes(hp, pdd, regular, skill):
         return regular, "finish"
     return skill, "damage"

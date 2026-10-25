@@ -13,7 +13,8 @@ from gamedata.paths import TABLES
 from maplehelper.keys import parse as K
 from gamelab.attack import choice
 from gamelab.attack.choice import REGULAR, can_cast, cast_mp, finishes, lucky_seven, pick
-from gamelab.behavior.attacks import Attacks
+from gamelab.behavior.attacks import LANDS_S, Attacks
+from gamelab.behavior.ledger import in_path
 from gamelab.control.actions import Actions
 from gamelab.localization.monsters import Monster
 from gamelab.perception.mobs import Mob
@@ -100,11 +101,43 @@ def test_she_casts_at_a_fresh_monster_and_finishes_it_with_the_regular_attack(mo
     for _ in range(3):
         keys.append(a.key("right"))
         a.on_look(_look([("green-mushroom", 250.0, None)]))
-    # 233 HP: a cast (150 on average) leaves 83, too much for a regular star; a second leaves none to reckon with (1)
+    # 233 HP: a cast (150 on average) leaves 83, too much for a regular star; after a second it's dead 97% of the
+    # time, and if it isn't, it has 11 left on average: a regular star's
     assert keys[:2] == [KEYS7.lucky_seven.name] * 2 and keys[2] == KEYS7.attack.name
     assert a.counts["lucky_seven"] == 2 and a.counts["finish"] == 1
     assert "Lucky Seven: green-mushroom ~233/233 HP (MP 595)" in said[0]
-    assert "the regular attack: green-mushroom ~1/233 HP; finishing it" in said[2]
+    assert "the regular attack: green-mushroom ~11/233 HP if alive (97% dead); finishing it" in said[2]
+
+
+def test_seen_alive_after_her_throws_landed_what_would_have_killed_it_is_ruled_out():
+    """With misses (choice.MISS), a Green Mushroom seen walking after two casts landed most likely took one of them,
+    not both: about 100 HP left, a cast's work, where her throws' average damage alone left 16."""
+    a, said = _attacks()
+    t0 = time.monotonic()
+    a.on_look(_look([("green-mushroom", 250.0, None)], t=t0))
+    a.key("right")
+    a.key("right")
+    m = a._last.monsters[0]
+    assert a.reckon(m).dead == pytest.approx(0.51, abs=0.01)  # not seen since: maybe dead ...
+    assert a.left(m) == pytest.approx(104, abs=1)  # ... and if it isn't, a cast's work left
+    a.on_look(_look([("green-mushroom", 250.0, None)], t=t0 + 1.0 + LANDS_S))  # alive after both
+    left = a.reckon(a._last.monsters[0])
+    assert left.dead == 0.0 and left.hp == pytest.approx(104, abs=1)
+    assert a.key("right") == KEYS7.lucky_seven.name and a.counts["finish"] == 0
+
+
+def test_a_throw_takes_the_next_in_its_way_past_one_likely_dead():
+    a, _ = _attacks()
+    monkey = choice.MISS
+    try:
+        choice.MISS = 0.0
+        a.on_look(_look([("green-mushroom", 250.0, None), ("horny-mushroom", 255.0, None)]))
+        assert [m.kind for m in in_path(a._last, "right", a._last.monsters)] == ["green-mushroom", "horny-mushroom"]
+        a.key("right")
+        a.key("right")  # two sure casts at the Green: dead 97%
+        assert a.target("right").kind == "horny-mushroom"
+    finally:
+        choice.MISS = monkey
 
 
 def test_a_bar_read_between_empty_and_full_sets_what_is_left(monkeypatch):
