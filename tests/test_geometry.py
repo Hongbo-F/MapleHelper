@@ -151,6 +151,7 @@ def test_nothing_but_the_simulator_assumes_the_1920x1080_window():
 DEFAULT_ON_PURPOSE = {
     ("__main__.py", "load"): "_calibration: at 1920x1080, the calibration's files as they always were",
     ("localization/worldstate.py", "WorldState"): "a frame not visible: nothing was read off it",
+    ("localization/service.py", "WorldState"): "no game window seen yet: nothing was read, and no geometry is known",
     ("perception/exp_number.py", "read_box"): "READ_BOX: 1920x1080's box, named so",
 }
 STRETCHED_ON_PURPOSE = {

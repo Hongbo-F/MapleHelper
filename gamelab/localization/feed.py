@@ -209,19 +209,20 @@ def saved_world(files: list[str], map_id: int, template: np.ndarray, band: tuple
                   WorldStep(senses, schedule=schedule, searches=SearchThread(senses)))
 
 
-def run(runner: Runner, hz: float, poll: Callable[[float], tuple[Asks | None, bool]],
+def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float], tuple[Asks | None, bool]],
         emit: Callable[[WorldState, Frame | None], None], until: float | None = None,
         shown: Callable[[Frame], None] | None = None) -> None:
-    """Frame after frame, `hz` a second: `poll(wait)` waits up to `wait` s for what's asked (asks, stop), and
+    """Frame after frame, `hz` a second (or as often as `hz()` says, asked at each frame: the perception service's
+    rate follows who's attached): `poll(wait)` waits up to `wait` s for what's asked (asks, stop), and
     what's asked is done on the first frame shown at the time asked for, taken at once then (its searches on
     it, or as soon as the one out is back). Each frame's state goes to `emit`, and so do the late states of the
     frames searched, as their searches come back (with no frame: theirs is in the past). The poll should end
     early when the searches' answer is in (the step's `searches.wake`). `shown(frame)`, if given, sees each
     frame showing the game as soon as it's taken, before the step. Ends on stop, at `until`
     (time.monotonic), or when the frames run out."""
-    period = 1.0 / hz
     due, pending = time.monotonic(), None
     while True:
+        period = 1.0 / (hz() if callable(hz) else hz)
         for st in runner.step.came_back():  # searches back while it waited
             emit(st, None)
         now = time.monotonic()

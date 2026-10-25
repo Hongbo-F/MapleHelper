@@ -1486,6 +1486,56 @@ def _lie_detector_seen(frame) -> None:
         alarm.raise_alarm(frame, "lie_detector (seen by watch)")
 
 
+# --- the perception service ----------------------------------------------------------------------------
+
+def cmd_perceive(args) -> int:
+    """The perception service (localization.service): the game looked at every frame at all times, the latest of what
+    it saw handed to every command (its clients) and published for the mini-map (lab/telemetry/<time>-perceive.jsonl).
+    It never sends a key and never brings the game forward, and waits for the game window when there's none. One at a
+    time on the PC. With --frames, saved frames instead of the game, round and round, nothing published (offline)."""
+    from .attack import reach
+    from .localization import feed, service
+    from .screen import of_frame
+    lock = service.only_one()  # held until the process ends
+    if lock is None:
+        print("a perception service is running already (one at a time on the PC)")
+        return 0
+    service.settle()
+    band, title = (reach.LOOK_UP, reach.LOOK_DOWN), _game_title()
+    publish = None
+    if args.frames:
+        files = sorted(str(p) for p in Path(args.frames).glob("*.png"))
+        if not files:
+            print(f"no frames in {args.frames} (PNG: the game's whole client area, all of one size)")
+            return 1
+        geo = of_frame(np.asarray(Image.open(files[0]).convert("RGB")))
+
+        def make(map_id, g):
+            return feed.saved_world(files, map_id, _calibration(g).template, band, hold=args.hold,
+                                    schedule=service.IDLE)
+
+        def where():
+            return geo, None
+        print(f"perceiving {len(files)} saved frames of {geo.client[0]}x{geo.client[1]}, each {args.hold} in a row")
+    else:
+        def make(map_id, g):
+            return service.screen_world(map_id, title, _calibration(g).template, band, geo=g, log=_log)
+
+        def where():
+            return service.window_geometry(title)
+        path = telemetry.record_to("perceive", telemetry.FOLDER)
+        publish = service.Publisher(band, log=_log)
+        print(f"perceiving the game for every command; telemetry: {path} (the mini-map follows it); Ctrl+C stops",
+              flush=True)
+    svc = service.Service(make, args.map, where, info=service.info_path(), log=_log, publish=publish)
+    try:
+        svc.serve(time.monotonic() + args.minutes * 60 if args.minutes else None)
+    except KeyboardInterrupt:
+        pass
+    print(f"perceived: {svc.status()}")
+    return 0
+
+
 # --- the rolling recording -------------------------------------------------------------------------------
 
 def cmd_recorder(args) -> int:
@@ -1911,6 +1961,16 @@ def build_parser() -> argparse.ArgumentParser:
                                                             "the game is there)")
     s.add_argument("--read", action="store_true", help="read its fullness off her Character Info now (a double-click)")
     s.set_defaults(func=cmd_pet)
+
+    s = sub.add_parser("perceive", help="the perception service: the game looked at every frame at all times, for "
+                                        "every command and the mini-map; one at a time, never sends keys or brings "
+                                        "the game forward")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP, help="the map it looks at until a command names another")
+    s.add_argument("--frames", help="a folder of saved frames (PNG, the game's whole client area, all of one size) "
+                                    "looked at instead of the game, round and round (offline)")
+    s.add_argument("--hold", type=int, default=30, help="--frames: each looked at this many times in a row")
+    s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
+    s.set_defaults(func=cmd_perceive)
 
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "
                                      "followed, deaths and who killed them), for the mini-map; never sends keys or "

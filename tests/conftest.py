@@ -80,6 +80,9 @@ def offline(monkeypatch, tmp_path):
     for mod in (paths, alarm, client, player):
         monkeypatch.setattr(mod, "ALARM", tmp_path / "ALARM.json")
     monkeypatch.setattr(alarm, "page", refuse("gamelab.control.alarm.page"))
+    from gamelab.localization import service
+    monkeypatch.setattr(service, "_start_detached", refuse("gamelab.localization.service._start_detached (the "
+                                                           "perception service started)"))
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 
