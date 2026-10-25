@@ -11,9 +11,11 @@ localization then asks about that look's frame through Eyes (`monsters`, `items`
 itself, so the simulator (gamelab.sim) can stand in for the game by answering the same questions.
 
 A look is checked before anything is read from it (perception.framecheck): the game window where it was read to be,
-in front, uncovered and the size the eyes are for, its frame fresh and lined up with the client area, and the map's
-minimap picture found. One that fails raises BadLook, saying why; `recover` then does what it can (localization.senses
-takes it again, and gives up after a while). A glance that fails has no dot and keeps the last HP read.
+in front, uncovered, on the screen and the size the eyes are for, its frame fresh and lined up with the client area,
+and the map's minimap picture found. One that fails raises BadLook, saying why; `recover` then does what it can
+(localization.senses takes it again, and gives up after a while). While the window is unfit in a way only the user sets
+right (framecheck.WAIT_KINDS: another size, partly off the screen, gone), a look asks the window alone: the game isn't
+brought to the front or captured. A glance that fails has no dot and keeps the last HP read.
 """
 
 import time
@@ -46,6 +48,11 @@ EXP_TEXT = 150      # her EXP number's text pixels are brighter than this (in an
 # as asked (about every 30 ms in the navigator). Glances keep this pace without a feed: the simulator
 # charges a glance mss's 35 ms (sim.fakes.GLANCE_S), so a faster one isn't tried there. Not tried in game.
 GLANCE_EVERY_S = 0.063
+# `recover`: while frames keep failing as the capture's own fault (framecheck.CAPTURE_KINDS), the duplication is opened
+# afresh at the first and mss takes over at the second, then the two again in turn this often (mss lasts
+# capture.RETRY_S, 10 s, a time). Before, only the first two failures of a run of any kind did anything, so a capture
+# still lagging after a drag that had first failed as "moved" was never tried again (the reviewer's repro_attempts.py).
+CAPTURE_AGAIN_S = 5.0
 
 
 def tag_below_feet(geo: Geometry = STRETCHED) -> int:
@@ -124,6 +131,8 @@ class Eyes:
         self.screen = screen or capture.shared()
         self._glanced = -GLANCE_EVERY_S    # when the last glance began
         self.area: dict[str, int] | None = None  # where the client area was at the last look that passed
+        self._waited: Problem | None = None  # what the last look waited out without touching the window (WAIT_KINDS)
+        self._fixes, self._fixed_at = 0, -1e18  # what `recover` did about the capture since a frame last passed, when
         self.log: Callable[[str], None] = print  # what the eyes say (the window moved; the capture reopened)
         self.glances_failed = 0            # glances that failed their checks (no dot from them)
         self.name_tag = NameTag(tag_template, paths.calibrated(paths.TAG_FULL, geo.suffix), geo)
@@ -158,6 +167,7 @@ class Eyes:
                                                interpolation=cv2.INTER_AREA)
         if self.check_frames and (bad := framecheck.frame_problem(full, geo)) is not None:  # before her name tag,
             return self._refused(t, frame, bad)                         # whose template is cut from the first look
+        self._fixes = 0  # the capture is fine
         picture = None
         if self.minimap is not None:
             mx0, my0, mx1, my1 = minimap_box(geo)
@@ -259,6 +269,16 @@ class Eyes:
         """What's wrong with the game window for a capture of `area` (framecheck.window_problem), or None."""
         return framecheck.window_problem(window.find_game(self.title), area, self.title, self.geo)
 
+    def window_wait(self) -> Problem | None:
+        """What's wrong with the game window that only the user sets right (framecheck.WAIT_KINDS: gone, minimized,
+        another size, partly off the screen), asked of the window alone: no capture, and the game not brought to the
+        front; None if nothing is."""
+        try:
+            wrong = self._window_problem(self._client_area())
+        except RuntimeError as e:  # no game window
+            return Problem("gone", str(e))
+        return wrong if wrong is not None and wrong.kind in framecheck.WAIT_KINDS else None
+
     def _to_front(self) -> None:
         """Bring the game to the front unless it's there already: a capture sees whatever window is on top."""
         if window.foreground_title() != self.title:
@@ -268,15 +288,26 @@ class Eyes:
     def _capture(self) -> np.ndarray:
         """The whole client area, full size, RGB, with the game in front, as the screen showed it after
         this began (a look sees what came of the keys before it). Raises BadLook if the game window isn't fit to
-        capture (gone, minimized, not the size the templates were made for, not in front, covered), moved while it
-        was captured, or the frame is stale (framecheck)."""
-        self._to_front()
-        begun = time.monotonic()
+        capture (gone, minimized, not the size the templates were made for, partly off the screen, not in front,
+        covered), moved while it was captured, or the frame is stale (framecheck). While it's unfit in a way the user
+        sets right (window_wait), the game isn't brought to the front: a hunt standing still on a resized window
+        looked twice a second, and would have pulled the game over whatever the user was doing every time (the
+        reviewer's focus.py: 136 times in 63 s). A minimized game is restored, as it always was, unless the last look
+        was waiting for the user already."""
+        wait = self.window_wait()
+        if wait is not None and (wait.kind != "minimized" or getattr(self, "_waited", None) is not None):
+            self._waited = wait
+            raise BadLook(wait)
+        self._waited = None
         try:
+            self._to_front()
+            begun = time.monotonic()
             area = self._client_area()
             wrong = self._window_problem(area)
-        except RuntimeError as e:  # no game window
-            raise BadLook(Problem("window", str(e))) from None
+        except BadLook:
+            raise
+        except RuntimeError as e:  # the game window gone meanwhile
+            raise BadLook(Problem("gone", str(e))) from None
         if wrong is not None:
             raise BadLook(wrong)
         shot = self.screen.shot(area, after=begun)
@@ -285,7 +316,7 @@ class Eyes:
         try:
             after = self._client_area()  # read again: a window being dragged moves between the two (16:48:45)
         except RuntimeError as e:
-            raise BadLook(Problem("window", str(e))) from None
+            raise BadLook(Problem("gone", str(e))) from None
         if wrong := framecheck.moved_problem(area, after) or framecheck.stale_problem(shot.t, time.monotonic()):
             raise BadLook(wrong)
         if self.area is not None and area != self.area:
@@ -295,13 +326,13 @@ class Eyes:
         self.area = area
         return full
 
-    def recover(self, problem: Problem, attempt: int = 0) -> None:
-        """After a look that failed its checks (`problem`; `attempt`: the failures in a row before it), before the
-        next: the minimap's picture and her name tag are searched for afresh; if the capture itself may be at fault
-        (framecheck.CAPTURE_KINDS: the frame offset from the window, or old), the duplication is opened afresh on
-        the first failure, and on the second mss takes over for capture.RETRY_S (the window moving is waited out:
-        its next look reads where it is). The game window is never moved or resized here. (The simulator's eyes
-        have none of these, and nothing is done.)"""
+    def recover(self, problem: Problem) -> None:
+        """After a look that failed its checks (`problem`), before the next: the minimap's picture and her name tag are
+        searched for afresh; if the capture itself may be at fault (framecheck.CAPTURE_KINDS: the frame offset from the
+        window, or old), the duplication is opened afresh at the first such failure since a frame last passed, mss
+        takes over for capture.RETRY_S at the second, and then the two in turn every CAPTURE_AGAIN_S while they last
+        (the window moving is waited out: its next look reads where it is). The game window is never moved or resized
+        here. (The simulator's eyes have none of these, and nothing is done.)"""
         if getattr(self, "minimap", None) is not None:
             self.minimap.lose()
         if getattr(self, "name_tag", None) is not None:
@@ -309,12 +340,16 @@ class Eyes:
         screen, log = getattr(self, "screen", None), getattr(self, "log", print)
         if problem.kind not in framecheck.CAPTURE_KINDS:
             return
-        if attempt == 0 and hasattr(screen, "reopen"):
+        fixes, now = getattr(self, "_fixes", 0), time.monotonic()
+        if fixes >= 2 and now - getattr(self, "_fixed_at", -1e18) < CAPTURE_AGAIN_S:
+            return
+        if fixes % 2 == 0 and hasattr(screen, "reopen"):
             screen.reopen()
             log("  the capture is duplicated afresh")
-        elif attempt == 1 and hasattr(screen, "fall_back"):
+        elif fixes % 2 == 1 and hasattr(screen, "fall_back"):
             screen.fall_back(problem.why)
             log(f"  the capture falls back to mss for {capture.RETRY_S:.0f} s")
+        self._fixes, self._fixed_at = fixes + 1, now
 
     # --- questions about a look's frame -----------------------------------------------------------
 

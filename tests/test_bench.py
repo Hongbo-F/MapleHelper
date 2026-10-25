@@ -55,6 +55,10 @@ def test_saved_frames_must_be_the_games_size(tmp_path):
 def test_live_refuses_unless_the_game_is_in_front(monkeypatch):
     # bring_to_front still raises (conftest): refusing must not try it.
     monkeypatch.setattr(window, "foreground_title", lambda: "Notepad")
+    monkeypatch.setattr(window, "find_game", lambda title: 1)  # the game there, the size its eyes are for
+    monkeypatch.setattr(window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 1920, "height": 1080})
+    monkeypatch.setattr(window, "minimized", lambda hwnd: False)
+    monkeypatch.setattr(window, "on_screen", lambda area: True)
     eyes = bench.FrontEyes.__new__(bench.FrontEyes)
     eyes.title = "MapleStory"
     with pytest.raises(RuntimeError, match="isn't in front"):

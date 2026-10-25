@@ -16,7 +16,9 @@ A look taken here is never handed on unless it passed its checks: the eyes' (per
 the frame lined up with it, the minimap's picture found) and her place on the map (localization.placecheck). One that
 fails is taken again, RETRY_GAP_S later, after the eyes have done what they can (Eyes.recover); after LOST_S of
 failing, `look` raises LookLost, and nothing acts on the game until a look passes again (a hunt stands still and
-looks every PAUSE_POLL_S: `regain`). What failed, and when it's right again, is logged and sent as telemetry events.
+looks every PAUSE_POLL_S: `regain`; while the window is unfit in a way only the user sets right, another size, say, a
+look asks the window alone: Eyes.window_wait). What failed, and when it's right again, is logged and sent as telemetry
+events.
 """
 
 import time
@@ -80,7 +82,6 @@ class Senses:
         self.failed = {"looks": 0, "lost": 0}  # looks that failed their checks, and times that made LookLost
         self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
         self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
-        self._attempts = 0  # looks failed in a row (Eyes.recover goes by it)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False) -> Scene:
         """Her map position from the minimap dot; her screen position from her name tag, or from the
@@ -133,8 +134,7 @@ class Senses:
                     self.log(f"  ... then: {problem.why}")
                 telemetry.emit("event", kind="look", text=problem.why)
                 self._failing = (now if self._failing is None else self._failing[0], problem.why)
-            self.eyes.recover(problem, self._attempts)  # (before the next look, which may be a while: `regain`)
-            self._attempts += 1
+            self.eyes.recover(problem)  # (before the next look, which may be a while: `regain`)
             if now - self._failing[0] >= LOST_S:
                 self.failed["lost"] += 1
                 raise LookLost(problem)
@@ -146,7 +146,7 @@ class Senses:
             text = f"the game looks as expected again ({time.monotonic() - self._failing[0]:.1f} s after a look failed)"
             self.log(f"  {text}")
             telemetry.emit("event", kind="look", text=text)
-        self._failing, self._attempts = None, 0
+        self._failing = None
 
     def regain(self, lost: LookLost, until: float) -> Scene | None:
         """After LookLost: nothing is sent while a look is taken every PAUSE_POLL_S, until one passes its checks (it's

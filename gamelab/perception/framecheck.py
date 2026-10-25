@@ -61,9 +61,19 @@ HUD_FOUND = 600
 # waits 20 ms at most for one (capture.FRESH_WAIT_S); not seen in game.
 STALE_S = 2.0
 
+# A window over the game is looked for at a grid of points over its client area (window.shows), COVER_GRID[0] spaces
+# across and COVER_GRID[1] down from one corner (8 px in) to the other: 7 x 5 points, 225 x 188 px apart at 1366x768,
+# so a window that size anywhere over it is seen (the five points of before, its middle and corners, missed a box over
+# x 300-660, y 60-360). 35 calls of WindowFromPoint: 0.23 ms (2026-10-24, the PC busy with simulator runs), a
+# look 20-50 ms, a glance's 63 ms apart.
+COVER_GRID = (6, 4)
+
 # What a Problem is about, which decides what Eyes.recover does about it:
 #   size     the client isn't the size the eyes are for: waited out, never resized here
-#   window   the game minimized, not in front, or covered by another window
+#   minimized  the game minimized (a look restores it, as it always did, unless it's waiting for the user already)
+#   gone     no game window
+#   offscreen  part of the client area isn't on any monitor (the desktop resized?): waited out, never moved here
+#   window   the game not in front, or covered by another window
 #   moved    the game window moved while the look was taken
 #   offset   the frame doesn't line up with the client area (both anchors off)
 #   minimap  the minimap window's title strip isn't where it should be (closed, moved or covered)
@@ -73,6 +83,10 @@ STALE_S = 2.0
 #   tag      her name tag's full-size template couldn't be cut (she isn't on screen)
 #   place    her minimap dot puts her off the map (localization.placecheck)
 CAPTURE_KINDS = ("offset", "stale")  # the capture itself may be at fault: the duplication is reopened
+# The user sets these right (or the game is restarted): until they are, a look asks the window alone, and neither
+# brings the game to the front nor captures it (Eyes.window_wait), so a hunt standing still never pulls the game over
+# what the user is doing meanwhile.
+WAIT_KINDS = ("size", "minimized", "gone", "offscreen")
 
 
 @dataclass(frozen=True)
@@ -151,8 +165,10 @@ def ends_right(full: np.ndarray) -> bool:
 
 def find_offset(full: np.ndarray) -> tuple[int, int] | None:
     """How far a frame is off its client area (dx, dy: the game's picture moved right and down), by where the HUD's
-    border is in it: None if it isn't within OFFSET_REACH of where it should be (not the game, or covered). About 4 ms;
-    only asked of a frame that failed."""
+    border is in it: None if it isn't within OFFSET_REACH of where it should be (not the game, or covered). Across, by
+    whichever of its ends is nearer where it should be: something over one end (a game window over x 1080) only
+    shortens the border found, and a frame really off has both ends off alike. About 4 ms; only asked of a frame that
+    failed."""
     h, w = full.shape[:2]
     y0, y1 = max(0, HUD_TOP_GAME - OFFSET_REACH), min(h - 1, HUD_TOP_GAME + OFFSET_REACH + 1)
     x0, x1 = max(0, HUD_ENDS[0] - OFFSET_REACH), min(w, HUD_ENDS[1] + OFFSET_REACH + 1)
@@ -165,7 +181,8 @@ def find_offset(full: np.ndarray) -> tuple[int, int] | None:
     if counts[best] < HUD_FOUND:
         return None
     xs = np.flatnonzero(pair[best])
-    return x0 + int(xs[0]) - HUD_ENDS[0], y0 + best - HUD_TOP_GAME
+    left, right = x0 + int(xs[0]) - HUD_ENDS[0], x0 + int(xs[-1]) - HUD_ENDS[1]
+    return left if abs(left) <= abs(right) else right, y0 + best - HUD_TOP_GAME
 
 
 def frame_problem(full: np.ndarray, geo: Geometry) -> Problem | None:
@@ -181,8 +198,10 @@ def frame_problem(full: np.ndarray, geo: Geometry) -> Problem | None:
         if off is None:
             return Problem("offset", "the capture doesn't show the game where its window is: neither the minimap "
                                      "window nor the HUD is in its place (another window, or not the game)")
-        return Problem("offset", f"the capture is offset by ({off[0]:+d}, {off[1]:+d}) px from the game's client area "
-                                 f"(the window moving while it was captured?)")
+        if off != (0, 0):
+            return Problem("offset", f"the capture is offset by ({off[0]:+d}, {off[1]:+d}) px from the game's client "
+                                     f"area (the window moving while it was captured?)")
+        hud_off = False  # the border is where it should be, an end of it covered (a game window over x 1080)
     if minimap_off:
         return Problem("minimap", "the minimap window's title isn't at the top left (the minimap closed, moved or "
                                   "covered)")
@@ -193,16 +212,21 @@ def frame_problem(full: np.ndarray, geo: Geometry) -> Problem | None:
 
 
 def window_problem(hwnd: int, area: dict, title: str, geo: Geometry) -> Problem | None:
-    """What's wrong with the game window for a capture: minimized, not the client size the eyes are for, not in
-    front, or with another window over it (window.shows); None if nothing is. 0.06 ms."""
+    """What's wrong with the game window for a capture: minimized, not the client size the eyes are for, partly off the
+    screen, not in front, or with another window over it (window.shows, at COVER_GRID's points); None if nothing is.
+    Those the user sets right (WAIT_KINDS) are asked first. About 0.25 ms (COVER_GRID's points the most of it)."""
     if window.minimized(hwnd):
-        return Problem("window", "the game is minimized: waiting for it to be restored")
+        return Problem("minimized", "the game is minimized: waiting for it to be restored")
     size = (area["width"], area["height"])
     if size != geo.client:
         return size_problem(size, geo)
+    if not window.on_screen(area):
+        return Problem("offscreen", f"the game's client at ({area['left']}, {area['top']}) is partly off the screen "
+                                    f"(the desktop resized?): waiting for the user to move it back (it isn't moved "
+                                    f"here)")
     if window.foreground_title() != title:
         return Problem("window", "the game isn't in front")
-    if not window.shows(hwnd, area):
+    if not window.shows(hwnd, area, grid=COVER_GRID):
         return Problem("window", "another window is over the game")
     return None
 

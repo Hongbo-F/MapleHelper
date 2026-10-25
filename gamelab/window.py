@@ -38,6 +38,9 @@ user32.IsIconic.argtypes = (wintypes.HWND,)
 user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
 user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
 user32.WindowFromPoint.argtypes = (wintypes.POINT,)
+user32.MonitorFromPoint.argtypes = (wintypes.POINT, wintypes.DWORD)
+user32.MonitorFromPoint.restype = wintypes.HMONITOR
+MONITOR_DEFAULTTONULL = 0  # MonitorFromPoint: no monitor (None) for a point on none
 user32.WindowFromPoint.restype = wintypes.HWND
 user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
 user32.GetAncestor.restype = wintypes.HWND
@@ -97,13 +100,28 @@ def dpi_awareness() -> int | None:
         return None
 
 
-def shows(hwnd: int, area: dict, inset: int = 8) -> bool:
+def shows(hwnd: int, area: dict, inset: int = 8, grid: tuple[int, int] | None = None) -> bool:
     """Whether the screen shows window `hwnd` at its client area's middle and near each corner (`inset` px
-    in): no other window is over those points. Screen captures see whatever is on top."""
+    in): no other window is over those points. Screen captures see whatever is on top. With `grid` (spaces across and
+    down), at a grid of points from one of those corners to the other instead."""
     x0, y0 = area["left"] + inset, area["top"] + inset
     x1, y1 = area["left"] + area["width"] - 1 - inset, area["top"] + area["height"] - 1 - inset
-    points = [((x0 + x1) // 2, (y0 + y1) // 2), (x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+    if grid is None:
+        points = [((x0 + x1) // 2, (y0 + y1) // 2), (x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+    else:
+        points = [(x0 + (x1 - x0) * i // grid[0], y0 + (y1 - y0) * j // grid[1])
+                  for i in range(grid[0] + 1) for j in range(grid[1] + 1)]
     return all(user32.GetAncestor(user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) == hwnd for x, y in points)
+
+
+def on_screen(area: dict) -> bool:
+    """Whether every corner of a client area is on a monitor (none of it hangs off the desktop, as a window can after
+    the desktop was resized: Chrome Remote Desktop fits it to the device it's used from). Off the desktop
+    WindowFromPoint finds no window at all, and `shows` would take that for another window over the game."""
+    x0, y0 = area["left"], area["top"]
+    x1, y1 = x0 + area["width"] - 1, y0 + area["height"] - 1
+    return all(user32.MonitorFromPoint(wintypes.POINT(x, y), MONITOR_DEFAULTTONULL)
+               for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)))
 
 
 def resize_client(hwnd: int, width: int, height: int) -> tuple[int, int]:

@@ -30,7 +30,7 @@ from ..paths import LAB
 from ..perception import exp_number
 from ..perception.eyes import EXP_TEXT, Eyes, rgb_of, tag_below_feet
 from ..perception.exp_number import read_box
-from ..perception.framecheck import BadLook
+from ..perception.framecheck import BadLook, Problem
 from ..perception.hud import BAR_ROW, HP_BAR, bars, exp_number_box
 from ..perception.lie_detector import LieDetectorSpotter
 from ..perception.minimap import her_dot, minimap_box, other_dots
@@ -134,7 +134,8 @@ class FrontEyes(Eyes):
 
     def _to_front(self) -> None:
         if window.foreground_title() != self.title:
-            raise RuntimeError("the game isn't in front; bring it forward yourself (bench-look never does)")
+            raise BadLook(Problem("window", "the game isn't in front; bring it forward yourself (bench-look never "
+                                            "does)"))
 
 
 class Timer:
