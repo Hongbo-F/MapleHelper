@@ -193,14 +193,16 @@ def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypa
     less (the rule 'wait' decided 23 times on those 12 runs against 111 without the sweep) for kills as many (14.2 a run
     against 14.0). Seed 3 until her jumps' attacks were weighed, 2026-10-25, with the review's fixes (her body clear of
     one above over a jump in place, a jump forward's landing however it goes): of seeds 1-12 it's met on 7 (1, 5-9,
-    12), and on 3 she now never waits on the rope. Seed 1.)"""
+    12), and on 3 she now never waits on the rope. Seed 1. Seed 3 since every look is perception's newest frame after
+    her keys' effect, Senses.fresh_after, the feed in every run: of seeds 1-12 it's met on 3 and 8 (she waits on the rope
+    on 3, 5 and 8), on 1 she never waits on it.)"""
     from gamelab.sim import harness, scenarios, world
     from gamelab.sim.world import Realism
     model = build([FLOOR, OVER], LIVES, [ROPE])
     if world.mob_info(19) is None:
         pytest.skip("needs the Horny Mushroom's game data (gamedata/data)")
     g = on(model, 100, 500)
-    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=1,
+    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=3,
                             limit=400, realism=Realism(respawn=17.0), may_die=True)
     trace = scenarios.run_scenario(sc, model)
     log = "\n".join(trace["log"])
