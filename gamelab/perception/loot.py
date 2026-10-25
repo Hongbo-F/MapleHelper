@@ -76,7 +76,7 @@ MIN_SOLID = 10       # fewer solid pixels than this, and its colours are checked
 # brightness alone an Iron Ore's picture scores 0.998 where a Silver Ore lies, and its colours are 12.1 off there, under
 # PIXEL_SLACK. Drawn 1:1 on West Rocky Mountain II's frames with a fifth of it behind a piece of a monster's sprite, 9
 # of 43 Silver Ores were taken for Iron Ore (a third: 14), and none now; the shape scores of the two came within 0.005
-# of each other (README: Perception, drops of the new maps).
+# of each other (README: Perception, drops of each map).
 SAME_SHAPE = 0.02
 # The game's message when pick-up fails for want of room: "You can't get anymore items." (seen when her
 # Etc tab filled up). It's in the client, not the game data, so this matches it and the usual other wordings.
