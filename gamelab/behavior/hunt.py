@@ -258,9 +258,9 @@ PLAYER_PILES = False
 # 2026-10-24 on Tree Dungeon, Forest Up North II her whole-screen looks came a median 4.9 s apart (up to 22.8 s) while
 # she shot, and nothing she saw elsewhere was kept: the memory has nothing to go by between them. With it, in the
 # simulator, her memory held 0.62-0.66 of the monsters on screen off her band, 0.19-0.42 without (Tree Dungeon's crowd,
-# the first map's game preset), and her EXP a minute was as before (hunter.SWEEP_LOCK_S). Never while a continuous feed
-# serves her looks (it searches the whole screen every second, and her band looks have what it follows: feed.TRACKED);
-# once the feed is gone, her looks taken without it sweep (Senses.look).
+# the first map's game preset), and her EXP a minute was as before (hunter.SWEEP_LOCK_S). Never in a look a continuous
+# feed serves (it searches the whole screen every second, and her band looks have what it follows: feed.TRACKED); her
+# looks taken without it sweep, while the feed rests or once it's gone (Senses.look).
 SWEEP = True
 
 

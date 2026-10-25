@@ -487,6 +487,25 @@ def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band_and_sweeps_o
     assert eyes.looks == 1 and senses.sweep_counts["slices"] == 1 and len(s.rows) == 2
 
 
+def test_a_look_taken_here_while_the_feed_is_up_sweeps_resting_or_refused(sync, monkeypatch):
+    # A feed resting (FEED_REST_S) or giving no look is still alive: the looks taken here meanwhile sweep as without it
+    # (review, 2026-10-25: they swept nothing, and her memory had only her band from them).
+    from gamelab.localization import senses as senses_mod
+    f, clock, eyes = sync
+    monkeypatch.setattr(senses_mod, "time", clock)
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f, sweep=True)
+    eyes.mobs = [pig(1100), pig(1200, 300)]
+    clock.sleep(1.25)
+    senses._feed_rest = clock.now + senses_mod.FEED_REST_S  # resting, as _feed_paced rests it
+    s = senses.look()
+    assert eyes.looks == 1 and senses.sweep_counts["slices"] == 1 and len(s.rows) == 2
+    senses._feed_rest = -1e18
+    monkeypatch.setattr(f, "look", lambda *args: None)  # up, but gives none
+    s = senses.look()
+    assert eyes.looks == 2 and senses.sweep_counts["slices"] == 2 and len(s.rows) == 2
+    assert f.alive and senses.counts["taken here"] == 2
+
+
 def test_a_slow_feed_is_rested_and_her_looks_and_glances_are_taken_here_meanwhile(sync, monkeypatch):
     # Starved of the CPU (its child runs at below-normal priority), the feed's looks come slowly: after FEED_SLOW_LOOKS
     # of them in a row waiting FEED_SLOW_S or more, it rests FEED_REST_S; then one look tries it again.

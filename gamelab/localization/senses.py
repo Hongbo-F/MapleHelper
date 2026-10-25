@@ -6,7 +6,7 @@ players are (their minimap dots, followed from look to look: localization.player
 Every look anyone takes goes through `Senses.look`, and the listeners run after each one, in order:
 the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there.
 
-With the sweep on (`sweep`) and no feed serving her looks, a look at the band around her also searches one slice of the
+With the sweep on (`sweep`), a look at the band around her taken here (no feed serving it) also searches one slice of the
 rest of the screen, the next in turn from the top down (SWEEP_SLICE map units tall, overlapping by the tallest body): the whole view every few slices
 (4 at the game's own 1366x768, standing on a platform), for a slice's search more. What a slice finds goes into
 `Scene.swept`, not `Scene.monsters`: the fights go by the band's monsters as before. `sweep_hold`, asked after the
@@ -17,11 +17,12 @@ look's band and slice (`Scene.rows` says where a look searched).
 With a continuous feed (localization.feed: the game looked at every frame in a process of its own), a look
 is the feed's state of the first frame shown after it was asked for, with what it needs fresh (see
 feed.fresh), and the events since the last look come with it (Scene.events); a look at her band has the monsters the
-feed follows off it too (`Scene.swept`, for her memory: Feed.look), so there's no sweep while the feed serves her
-looks. Glances come from the feed's newest frames. When the feed can't give one (the game not in front, the feed gone
-or too slow), the look or glance is taken here as without it, and once the feed is gone her looks sweep again; a feed
-whose looks keep coming slowly (starved of the CPU) is rested a while, her looks and glances taken here meanwhile
-(FEED_SLOW_S, FEED_REST_S). Without a feed nothing changes.
+feed follows off it too (`Scene.swept`, for her memory: Feed.look), so a look the feed serves has no sweep. Glances
+come from the feed's newest frames. When the feed can't give one (the game not in front, the feed gone or too slow),
+the look or glance is taken here as without it, the sweep's slice and all; a feed whose looks keep coming slowly
+(starved of the CPU) is rested a while, her looks and glances taken here meanwhile (FEED_SLOW_S, FEED_REST_S), and
+those looks sweep too: on the saved frames with the machine busy, 217 of 329 looks were taken here so, and without
+their slices her memory had only her band from them. Without a feed nothing changes.
 
 A look taken here is never handed on unless it passed its checks: the eyes' (perception.framecheck: the game window,
 the frame lined up with it, the minimap's picture found) and her place on the map (localization.placecheck). One that
@@ -100,7 +101,7 @@ class Senses:
     def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None, sweep: bool = False):
         """`band`: how far above and below her feet (map units) a look searches for monsters. `feed`: a
         continuous feed to take looks and glances from (localization.feed.Feed), or None. `sweep`: a look at the band
-        also searches a slice of the rest of the screen (see the top; only while no feed is up: the feed searches the
+        also searches a slice of the rest of the screen (see the top; only in a look taken here: the feed searches the
         whole screen every second, and follows what it found)."""
         self.eyes, self.model, self.band = eyes, model, band
         self.feed = feed
@@ -147,7 +148,7 @@ class Senses:
             if mobs and s.tag is not None and s.where is not None:
                 s.monsters = self.search(s, wide)
                 s.searched, s.wide = True, wide
-                if not wide and self.sweep and (self.feed is None or not self.feed.alive):
+                if not wide and self.sweep:  # (not served by the feed: resting, refused or gone)
                     if self.sweep_hold is not None and self.sweep_hold(s):
                         self.sweep_counts["held"] += 1
                     else:
