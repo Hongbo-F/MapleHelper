@@ -351,11 +351,12 @@ def turning(plans: list, records: list[dict], world=None) -> dict:
 
 
 def _forward(events: list) -> bool:
-    """Whether a jump throw's key plan is a forward one (control.actions.Actions.jump_throw with a carry): its arrow
-    held from before its jump key until after it, not a turning tap let go before the jump."""
+    """Whether a jump throw's key plan is a forward one (control.actions.Actions.jump_throw with `way`): its arrow
+    held from before its jump key until after it, not a turning tap let go before the jump nor one in the air."""
     jump = min((e[0] for e in events if e[1] in ("alt", "jump") and e[2] == "down"), default=None)
+    downs = [e[0] for e in events if e[1] in ("left", "right") and e[2] == "down"]
     ups = [e[0] for e in events if e[1] in ("left", "right") and e[2] == "up"]
-    return jump is not None and any(u > jump for u in ups)
+    return jump is not None and any(d < jump for d in downs) and any(u > jump for u in ups)
 
 
 def attack_kinds(world, records: list[dict]) -> dict:
@@ -363,17 +364,38 @@ def attack_kinds(world, records: list[dict]) -> dict:
     that pressed it (control.actions: "throw", "jump_throw", "jump_back"; a chain's, "flow"), how many and what came of
     each ("kill", "hit", "swipe", "miss", "stopped", "nothing": `hit_nothing` the last two), those started in the air,
     and of those the ones that picked a monster whose feet were LEVEL or more above hers then (`up`); and the jump
-    throws the stack chose, by why (its telemetry 'jump' records' `kind`: attack.stance)."""
+    throws the stack chose, by why (its telemetry 'jump' records' `kind`: attack.stance), with what came of each
+    (`chosen_by`: why and the jump's kind -> outcomes, the record matched to the first jump's attack keyed within
+    CHOSEN_KEY_S after it; 'unmatched' if none was)."""
     out: dict = {}
-    for _, plan, mode, _, _, outcome, up in getattr(world, "attack_log", []):
+    log = getattr(world, "attack_log", [])
+    for _, plan, mode, _, _, outcome, up in log:
         k = out.setdefault(plan, Counter())
         k["n"] += 1
         k[outcome] += 1
         k["air"] += mode == "air"
         k["up"] += up is not None and up >= _LEVEL
         k["hit_nothing"] += outcome in ("stopped", "nothing")
-    chosen = Counter(r.get("kind") for r in records if r.get("topic") == "jump")
-    return {"plans": {k: dict(v) for k, v in out.items()}, "chosen": dict(chosen)}
+    jumps = [r for r in records if r.get("topic") == "jump"]
+    chosen = Counter(r.get("kind") for r in jumps)
+    from .fakes import EPOCH
+    keyed = sorted((t, outcome) for t, plan, *_rest, outcome, _ in log if plan in ("jump_throw", "jump_back"))
+    by: dict[str, Counter] = {}
+    i = 0
+    for r in sorted(jumps, key=lambda r: r["t"]):
+        at = r["t"] - EPOCH
+        while i < len(keyed) and keyed[i][0] < at - 1e-6:
+            i += 1
+        hit = keyed[i][1] if i < len(keyed) and keyed[i][0] <= at + CHOSEN_KEY_S else "unmatched"
+        if hit != "unmatched":
+            i += 1
+        by.setdefault(f"{r.get('kind')}: {r.get('jump')}", Counter())[hit] += 1
+    return {"plans": {k: dict(v) for k, v in out.items()}, "chosen": dict(chosen),
+            "chosen_by": {k: dict(v) for k, v in by.items()}}
+
+
+CHOSEN_KEY_S = 1.5  # (attack_kinds) a chosen jump's attack key comes this soon after its record at the latest: its key
+                    # at most 0.48 s into the jump (attack.reach.KEY_LAST_MS), after a wait for her lock
 
 
 _LEVEL = 15.0  # (attack.reach.LEVEL) a pick this far above her feet or more is off her level, above her

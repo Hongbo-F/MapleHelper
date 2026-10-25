@@ -222,6 +222,28 @@ def test_with_the_area_alone_the_world_misses_far_high_ones(monkeypatch):
     assert w.monsters[0].hp == w.monsters[0].hp_max
 
 
+# --- what a live run's telemetry says of them ----------------------------------------------------------------------
+
+def test_a_runs_jump_records_are_counted_with_what_the_looks_after_them_saw():
+    from gamelab.analysis import jumps
+
+    def look(t, bar, x=150.0):
+        return {"t": t, "topic": "scene", "her": {"x": 50.0},
+                "monsters": [{"kind": "green-mushroom", "platform": 22, "x": x, "bar": bar}]}
+
+    def jump(t, kind="above", how="up"):
+        return {"t": t, "topic": "jump", "kind": kind, "jump": how, "key_ms": 155, "target": "green-mushroom",
+                "platform": 22, "x": 50.0, "dx": 100.0, "up": 100.0}
+    rows = [look(99.9, None), jump(100.0), look(100.8, 0.6),                          # its bar shows: a hit
+            look(199.9, 0.6), jump(200.0, "passing", "forward"), look(200.5, 0.6),
+            {"t": 200.9, "topic": "exp", "kinds": ["green-mushroom"]},                 # its EXP: a kill
+            look(299.9, 0.4), jump(300.0), look(300.8, 0.4, x=400.0)]                 # nothing seen
+    got = jumps.outcomes(rows)
+    assert [j["outcome"] for j in got] == ["hit", "kill", "nothing seen"]
+    text = jumps.table(got, minutes=5.0)
+    assert "above    up          2  0.40" in text and "passing  forward     1" in text
+
+
 # --- the stance takes them -------------------------------------------------------------------------------------------
 
 def test_the_stance_jump_throws_at_a_monster_above_with_the_attack_when_it_surely_picks_it():
