@@ -163,6 +163,7 @@ class Grabber:
         self._mss = None
         self.retry_at = 0.0
         self.counts = {"dxgi": 0, "mss": 0, "failed": 0, "duplicated again": 0}  # shots by method, and troubles
+        self.reopened = 0  # duplications closed for a look whose frame failed its checks (perception.framecheck)
         self.error: str | None = None  # why DXGI failed last
         self.seq = 0                   # shots taken: a DxgiShot is only good until the next
         self.lock = threading.RLock()
@@ -209,6 +210,19 @@ class Grabber:
         self.error = str(e)
         self.retry_at = self.clock() + RETRY_S
 
+    def reopen(self) -> None:
+        """Duplicate the monitor afresh at the next shot (a look's frame didn't line up with the game window, or was
+        old: perception.framecheck)."""
+        with self.lock:
+            self.close_dxgi()
+            self.reopened += 1
+
+    def fall_back(self, why: str) -> None:
+        """mss for RETRY_S, as when DXGI fails (a look's frame still didn't line up once it was duplicated afresh)."""
+        with self.lock:
+            if self.method == "dxgi":
+                self.failed(CaptureError(why))
+
     def mss_screen(self):
         if self._mss is None:
             self._mss = _open_mss()
@@ -229,6 +243,7 @@ class Grabber:
     def summary(self) -> str:
         """Shots by method and what went wrong, for a report."""
         text = f"capture {self.method}: " + ", ".join(f"{k} {v}" for k, v in self.counts.items())
+        text += f", reopened {self.reopened}" if self.reopened else ""
         return text + (f"; DXGI failed last with: {self.error}" if self.error else "")
 
 
@@ -567,8 +582,8 @@ class Dxgi:
         each, given a view of the mapped texture)."""
         w, h = self.size
         for x0, y0, x1, y1 in boxes:
-            if not (0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h):
-                raise ValueError(f"box {(x0, y0, x1, y1)} isn't on the {w}x{h} monitor")
+            if not (0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h):  # (the window moved off it, or the desktop resized)
+                raise CaptureError(f"box {(x0, y0, x1, y1)} isn't on the {w}x{h} monitor")
             _call(self._context, CONTEXT_COPY_SUBRESOURCE_REGION, self._staging, 0, x0, y0, 0, self._last, 0,
                   byref(_D3DBox(x0, y0, 0, x1, y1, 1)),
                   argtypes=(c_void_p, c_uint, c_uint, c_uint, c_uint, c_void_p, c_uint, c_void_p), restype=None)

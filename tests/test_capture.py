@@ -256,6 +256,22 @@ def test_other_failures_fall_back_to_mss():
     assert isinstance(g.shot(AREA), capture.MssShot) and "0x887A0005" in g.error
 
 
+def test_the_grabber_reopens_and_falls_back_when_told():
+    """A look whose frame doesn't line up with the game window (perception.framecheck) has the duplication opened
+    afresh, and if that doesn't mend it, mss for RETRY_S (Eyes.recover)."""
+    clock = Clock()
+    opener = Opener(clock, first_frames(111_000), first_frames(112_000))
+    g = grabber(clock, opener)
+    assert isinstance(g.shot(AREA), capture.DxgiShot)
+    g.reopen()
+    assert opener.opened[0].closed and g.reopened == 1
+    assert isinstance(g.shot(AREA), capture.DxgiShot) and len(opener.opened) == 2
+    g.fall_back("frames offset")
+    assert isinstance(g.shot(AREA), capture.MssShot) and g.error == "frames offset"
+    clock.now += RETRY_S
+    assert "reopened 1" in g.summary() and g.counts["failed"] == 1
+
+
 def test_mss_alone_never_duplicates():
     clock = Clock()
     g = grabber(clock, Opener(clock, CaptureError("must not be opened")), method="mss")
@@ -364,6 +380,9 @@ class RecordingScreen:
 class GameEyes(Eyes):
     def _client_area(self):
         return dict(AREA)
+
+    def _window_problem(self, area):
+        return None
 
     def _to_front(self):
         pass
