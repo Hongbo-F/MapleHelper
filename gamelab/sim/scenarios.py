@@ -2178,6 +2178,35 @@ def loop_tree_ore_waits(sim):
     return harness._only(_loop(4), (23,))(sim)
 
 
+def _lucky_seven_again(tr: dict) -> bool:
+    """A throw of Lucky Seven after one of the regular attack for her MP: her MP back (and the stack casts only with
+    the MP for it)."""
+    log = tr["log"]
+    low = next((i for i, line in enumerate(log) if "< a cast's" in line), None)
+    return low is not None and any("Lucky Seven:" in line for line in log[low:])
+
+
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=300, may_die=True, noise=_CROWD[0], feed=True, attack="choice",
+      her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER, pet_mp=None),
+      realism=Realism(respawn=17.0, zero_walls=True, **harness.ATTACK_REALISM),
+      expects=(logs("Lucky Seven: horny-mushroom"), logs("< a cast's 11"),
+               check("Lucky Seven again once her MP came back", _lucky_seven_again),
+               check("never Lucky Seven with too little MP", lambda tr: not any(
+                   "not enough, nothing thrown" in line for line in tr["world_log"])),
+               check("her looks from the feed", lambda tr: tr["feed"]["senses"]["from the feed"] > 0)))
+def loop_tree_mp_runs_out(sim):
+    """The hunt loop as live runs by default (tour --loop: the feed, the attack choice), her pet drinking no MP potions
+    and her MP at 12% (72 of 601) when it starts, 23 her only ground, shot from 24 at 231, the bars over hurt monsters
+    read empty as live at 1366x768 (harness.ATTACK_REALISM). Lucky Seven while she has the MP for a cast, the regular
+    attack once she hasn't (a cast with too little throws nothing in game: never pressed then), Lucky Seven again as her
+    MP comes back (world.MP_REGEN, 0.32 MP a second: a cast every 34 s or so): on seed 1, 13 casts (6 on what she
+    started with, 7 as it came back) and 193 regular throws for her MP, 20 kills, none pressed short. The harness's runs
+    never showed this, their pet's potion under 5% keeping her over a cast (review, 2026-10-25), nor did a scenario run
+    with the feed and the choice before."""
+    sim.world.mp = 0.12
+    return harness._only(_loop(4), (23,))(sim)
+
+
 @tree((23, 0.0), monsters="all", hp=0.25, limit=400,
       expects=(logs("resting on platform"), no_log("couldn't reach a safe platform"),
                check("rests on a floating platform below", lambda tr: tr["world"]["platform"] in (25, 26, 27)),
