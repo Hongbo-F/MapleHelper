@@ -92,6 +92,12 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     return plan_id
 
 
+def busy() -> bool:
+    """Whether a plan is waiting for the player or being played (its file in the inbox, from this process or any
+    other): keys of a plan sent now would come after it, or in the middle of what it does (control.window_size)."""
+    return any(INBOX.glob("*.json")) or any(INBOX.glob("*.running"))
+
+
 def done(plan_id: str) -> bool:
     """Whether the player has answered the plan (its result is waiting)."""
     return (OUTBOX / f"{plan_id}.json").exists()

@@ -54,7 +54,9 @@ def test_asks_from_every_client_are_merged_and_mesos_only_if_each_asked_only_for
     assert both.mesos_only  # (to_scene filters what each wants of a frame searched for all)
     # A full ask is a frame asked for at its time, its searches what the others asked
     asked = svc._take(a, ("full", 7, 10.5), merged)
-    assert asked.after == 10.1 and asked.band and svc._fulls == [(a, 7, 10.5)]
+    assert asked.after == 10.1 and asked.band and svc._fulls == [(a, 7, 10.5, False)]
+    svc._take(a, ("full", 8, 10.6, True), asked)  # (one that takes the client at any size: ServiceClient.full_frame)
+    assert svc._fulls[-1] == (a, 8, 10.6, True)
 
 
 def test_the_hunts_pace_and_her_throws_follow_the_commands_attached():
@@ -604,7 +606,10 @@ def test_the_commands_attach_as_what_they_are_and_none_has_a_feed_or_sweep_flag(
         def full_frame(self, after):
             raise AssertionError("no frame wanted here")
     monkeypatch.setattr(service, "ServiceClient", Client)
-    monkeypatch.setattr(cli, "_eyes", lambda model, title, perception, restore: SimpleNamespace(log=print))
+    monkeypatch.setattr(cli, "_eyes", lambda model, title, perception, restore: SimpleNamespace(log=print,
+                                                                                               geo=STRETCHED))
+    fits = []  # (the commands that hunt set a client of the wrong size right as they start: test_window_size)
+    monkeypatch.setattr(cli, "_fit_start", lambda title, fix: fits.append(type(fix).__name__))
     monkeypatch.setattr(mapdata, "load", lambda map_id: small_map())
     monkeypatch.setattr(hunter_mod, "Hunter", lambda eyes, keys, model, log, feed, **kw: SimpleNamespace(feed=feed))
     for argv, viewer, throws, want in ((["tour", "--loop"], False, True, (True, True)),
@@ -614,6 +619,7 @@ def test_the_commands_attach_as_what_they_are_and_none_has_a_feed_or_sweep_flag(
         cli._hunter(args, viewer=viewer, throws=throws)
         name, kw = made[-1]
         assert (kw["acts"], kw["throws"]) == want, argv
+    assert fits == ["SizeFix"]  # the tour's alone: the pet and `hunt look` send no Alt+Enter as they start
     cli._PERCEPTION.clear()
 
 

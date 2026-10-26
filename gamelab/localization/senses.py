@@ -26,6 +26,12 @@ RETRY_GAP_S later; after LOST_S of that `look` raises LookLost, and nothing acts
 front meanwhile when it isn't (Feed.bring_forward). A glance with no state to give has no dot and the last HP; after
 GLANCE_LOST_S of none, it raises LookLost too (a chain running is cut: control.navigator). What failed, and when it's
 right again, is logged and sent as telemetry events.
+
+A fault Alt+Enter twice mends (framecheck.FIX_KINDS: the client another size, the game drawing off it) is handed to
+`window_fix` where the command gave one (control.window_size.SizeFix: the commands that act), at every look that has
+nothing to act on for it: it makes its tries once the fault has stood a while, the hunt loop's while it stands still
+(`regains`, Hunt.run); any other command's looks wait for its first try before LookLost. Once it has set the client
+right, the looks after have LOST_S afresh, and no look or glance is of a frame shown before the window settled.
 """
 
 import time
@@ -34,7 +40,7 @@ from collections.abc import Callable
 from .. import telemetry
 from ..perception.drops import items_for
 from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, band_rows, tag_below_feet
-from ..perception.framecheck import LookLost, Problem
+from ..perception.framecheck import FIX_KINDS, LookLost, Problem
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..screen import STRETCHED
 from .mapdata import MapModel
@@ -124,6 +130,15 @@ class Senses:
         self._looked = -1e18  # the frame time of the last look
         self._usable = -1e18  # when the last state to act on came (a look's or a glance's: GLANCE_LOST_S)
         self._hp = 1.0        # the last HP a state read (a glance without one keeps it)
+        # What sets the game's client right with Alt+Enter twice (control.window_size.SizeFix, which the commands that
+        # act give; None: the user sets it back): called with each look that has nothing to act on for a fault it
+        # mends (FIX_KINDS), True if it did; `passed()` once a look passes again.
+        self.window_fix = None
+        self.settled = -1e18  # when the window last settled after it set it right: no frame shown before counts
+        self._set_right = -1e18  # ... and when it said so: LOST_S counts from then
+        # Whether LookLost is met by standing still and looking again (`regain`: the hunt loop, Hunt.run), where the
+        # fix makes its tries; if not, a look with nothing to act on for its fault waits for its first try first.
+        self.regains = False
 
     @property
     def feed(self):
@@ -143,14 +158,17 @@ class Senses:
         let go of, say: Navigator.recover). Raises LookLost once there has been none to act on for LOST_S (at once
         while there still is none, after that)."""
         while True:
-            s = self.feed.look(self, mobs, wide, loot, mesos_only, self.fresh_after() if after is None else after)
+            s = self.feed.look(self, mobs, wide, loot, mesos_only,
+                               self.fresh_after() if after is None else max(after, self.settled))
             if s is not None:
                 break
             problem = self.feed.problem() or Problem("perception", "no state from perception in time")
             # The game brought forward first (once a second at most): after LOST_S every look raises at once, and a hunt
             # standing still on a game not in front (`regain`) would never bring it forward again otherwise.
             self.feed.bring_forward(problem)
-            self._failed(problem)  # (raises LookLost after LOST_S)
+            if self._mend(problem):
+                continue  # (set right: the next look is of a frame shown after the window settled)
+            self._failed(problem, hold=self._fixing(problem))  # (raises LookLost after LOST_S)
             time.sleep(RETRY_GAP_S)
         self._passed()
         self.counts["looks"] += 1
@@ -171,11 +189,12 @@ class Senses:
         look's frame, KEY_EFFECT_S after her last key (with `keys`; by default as KEYS_WAIT says), and MAX_AGE_S before
         now."""
         keys = KEYS_WAIT == "all" if keys is None else keys
-        return max(time.monotonic() - MAX_AGE_S, self._looked + 1e-6, self.keyed() + KEY_EFFECT_S if keys else -1e18)
+        return max(time.monotonic() - MAX_AGE_S, self._looked + 1e-6, self.keyed() + KEY_EFFECT_S if keys else -1e18,
+                   self.settled)
 
-    def _failed(self, problem: Problem) -> None:
+    def _failed(self, problem: Problem, hold: bool = False) -> None:
         """A look found nothing to act on (`problem`): said once (and when the why changes); LookLost once that has
-        gone on for LOST_S."""
+        gone on for LOST_S (since the window fix last set the client right, if that's later), unless `hold`."""
         now = time.monotonic()
         self.failed["looks"] += 1
         if self._failing is None or self._failing[1] != problem.why:
@@ -185,9 +204,27 @@ class Senses:
                 self.log(f"  ... then: {problem.why}")
             telemetry.emit("event", kind="look", text=problem.why)
             self._failing = (now if self._failing is None else self._failing[0], problem.why)
-        if now - self._failing[0] >= LOST_S:
+        if now - max(self._failing[0], self._set_right) >= LOST_S and not hold:
             self.failed["lost"] += 1
             raise LookLost(problem)
+
+    def _mend(self, problem: Problem) -> bool:
+        """A look with nothing to act on for `problem`, handed to the window fix if it's one it mends: whether it set the
+        client right now (the looks after then have LOST_S afresh, of frames shown after the window settled)."""
+        fix = self.window_fix
+        if fix is None or problem.kind not in FIX_KINDS or not fix(problem):
+            return False
+        self._set_right = time.monotonic()
+        self.settled = max(self.settled, getattr(fix, "settled", None) or self._set_right)
+        return True
+
+    def _fixing(self, problem: Problem) -> bool:
+        """Whether a look with nothing to act on for a fault the window fix mends is taken again past LOST_S: in a
+        command that stops on LookLost (not `regains`), while the fix is still to make its first try at it, which it
+        makes once the fault has stood window_size.STEADY_S (a plan holding it off is waited for a while:
+        SizeFix.pending). Without this, LookLost (3 s) came before it, and those commands stopped untried."""
+        fix = self.window_fix
+        return problem.kind in FIX_KINDS and not self.regains and fix is not None and fix.pending()
 
     def _passed(self) -> None:
         """A look passed its checks: if looks had failed before it, that's over (said so)."""
@@ -195,6 +232,8 @@ class Senses:
             text = f"the game looks as expected again ({time.monotonic() - self._failing[0]:.1f} s after a look failed)"
             self.log(f"  {text}")
             telemetry.emit("event", kind="look", text=text)
+            if self.window_fix is not None:
+                self.window_fix.passed()  # (the client right again: its going wrong again starts afresh)
         self._failing = None
 
     def regain(self, lost: LookLost, until: float) -> Scene | None:
@@ -219,7 +258,7 @@ class Senses:
         the soonest (and after it), when its frame was shown (`glanced_at`), and its state (`glanced`: the monsters it
         follows, for a plan running to react to: control.navigator). With no state to act on: no dot and the last HP,
         and LookLost once there has been none for GLANCE_LOST_S."""
-        st = self.feed.glance(self._glanced + max(FEED_GLANCE_EVERY_S, 1e-3))
+        st = self.feed.glance(max(self._glanced + max(FEED_GLANCE_EVERY_S, 1e-3), self.settled))
         if st is not None:
             self._glanced = self.glanced_at = st.t
             self.glanced, self._usable, self._hp = st, time.monotonic(), st.hp

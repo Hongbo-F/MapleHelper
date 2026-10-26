@@ -83,6 +83,10 @@ def offline(monkeypatch, tmp_path):
     from gamelab.localization import service
     monkeypatch.setattr(service, "_start_detached", refuse("gamelab.localization.service._start_detached (the "
                                                            "perception service started)"))
+    # The size fix's tries an hour and its lock are the test's own (a worker's test beside another's took its mutex).
+    from gamelab.control import window_size
+    monkeypatch.setattr(window_size, "WINDOW_TRIES", tmp_path / "window_tries.json")
+    monkeypatch.setattr(window_size, "LOCK", f"Local\\gamelab-window-fix-test-{os.getpid()}-{tmp_path.name}")
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 

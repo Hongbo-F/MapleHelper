@@ -36,6 +36,7 @@ HIT_LOG = LAB / "hits.jsonl"     # hits taken standing still: how far each pushe
 PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)
+WINDOW_TRIES = LAB / "window_tries.json"  # when Alt+Enter was tried on the client (control.window_size), by any process
 
 
 def calibrated(path: Path, suffix: str) -> Path:

@@ -40,7 +40,7 @@ WATCH_STATUS_S = 10.0
 WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for it (the player checks 4 a second)
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
 # subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
-GAME_COMMANDS = {"player", "calibrate", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
+GAME_COMMANDS = {"player", "calibrate", "window", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
 LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command
 
 SW_SHOWMINNOACTIVE = 7  # ShellExecute: start the player minimized, not activated
@@ -184,13 +184,56 @@ def _shot(name: str) -> Path:
 
 def cmd_window(args) -> int:
     """Resize the game's client area (through the player: a normal program can't), then save a full-size screenshot
-    of it. Sends no keys."""
+    of it. Sends no keys. With --recover, set a client of another size than 1366x768 (or the game drawing off it) back
+    with Alt+Enter twice instead (_window_recover)."""
+    if args.recover:
+        return _window_recover(args.force)
+    if args.size is None:
+        print("give the size (1366x768 or 1920x1080), or --recover")
+        return 1
     width, height = (int(v) for v in args.size.lower().split("x"))
     result = client.submit(fps=10, duration_ms=200, scale=1, lead_ms=0, name="window", window_client=(width, height))
     path = _shot(f"window_{width}x{height}.png")
     Image.fromarray(result["frames"][-1]).save(path)
     print(f"client area now {result['client']['width']}x{result['client']['height']}: {path}")
     return 0
+
+
+def _window_recover(force: bool) -> int:
+    """`window --recover`: one try at setting the client back to 1366x768 with Alt+Enter twice, full screen and back
+    (control.window_size.refit, as a hunt does when its looks have nothing to act on for it; not counted in its tries
+    an hour), saying the client's size and place before and after, and how long the window took to settle after each
+    Alt+Enter. A client that's 1366x768 already, windowed and drawn where it is (by the perception service's newest
+    state), is left as it is, unless `force` (to try it). The Lie Detector is looked for before each Alt+Enter on the
+    service's picture, as a viewer of it (started if none runs)."""
+    from .control import window_size
+    from .localization import service
+    from .screen import GAME_VIEW
+    title = _game_title()
+    hwnd = window.find_game(title)
+    area = window.client_rect(hwnd)
+    full = window.full_screen(hwnd, area)
+    print(f"the game's client: {area['width']}x{area['height']} at ({area['left']}, {area['top']}) (desktop px)"
+          f"{', full screen' if full else ''}; DPI awareness {window.dpi_awareness()}", flush=True)
+    perception = service.ServiceClient("window", title=title, log=_log)
+    _PERCEPTION.append(perception)
+    perception.ready(PERCEPTION_WAIT_S)
+    problem = perception.problem()
+    drawn = problem is not None and problem.kind == "drawn"
+    if drawn:
+        print(f"the perception service says: {problem.why}")
+    if window_size.size_of(area) == GAME_VIEW and not full and not drawn and not force:
+        print("it's 1366x768 already, drawn where it is: nothing to do (--force switches full screen and back all the "
+              "same, to try it)")
+        return 0
+    out = window_size.refit(title, GAME_VIEW, log=print, spot=_lie_detector_look(perception))
+    if out.held:  # (not tried, and not said: minimized, the alarm, or something going on)
+        print(f"no Alt+Enter: {out.why}")
+    elif out.after is not None:
+        area = window.client_rect(window.find_game(title))
+        print(f"the game's client now: {area['width']}x{area['height']} at ({area['left']}, {area['top']})"
+              f"{', full screen' if out.full else ''}")
+    return 0 if out.ok else 1
 
 
 def cmd_snap(args) -> int:
@@ -415,18 +458,79 @@ def _perception(model, title: str, name: str, acts: bool, throws: bool = False):
     return perception
 
 
-def _hunter(args, viewer: bool = False, throws: bool = True, **kw):
+def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way): her looks
     and glances from the perception service (_perception), as a command that sends keys and tells her throws, or with
-    `viewer` one that does neither (`hunt look`); `throws` False: it sends keys but doesn't hunt (`pet`)."""
+    `viewer` one that does neither (`hunt look`); `throws` False: it sends keys but doesn't hunt (`pet`). A command that
+    hunts sets a client of the wrong size right with Alt+Enter twice (control.window_size.SizeFix): at its start if
+    the eyes have no calibration at its size (_fit_start: it waits while it isn't, where it stopped), and on its looks
+    later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client before
+    the eyes are made (the pet's: PetWait)."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
+    from .screen import GAME_VIEW
     cfg, keys, _ = her_setup()
+    title = cfg.game_window_title
     model = mapdata.load(args.map)
-    perception = _perception(model, cfg.game_window_title, args.cmd + ("-" + args.mode if hasattr(args, "mode") else ""),
+    perception = _perception(model, title, args.cmd + ("-" + args.mode if hasattr(args, "mode") else ""),
                              acts=not viewer, throws=throws and not viewer)
-    eyes = _eyes(model, cfg.game_window_title, perception, restore=not viewer)
-    return Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
+    fix = _size_fix(title, perception) if throws and not viewer else None
+    if fix is not None:
+        _fit_start(title, fix)
+    if fit is not None:
+        fit(perception)
+    eyes = _eyes(model, title, perception, restore=not viewer)
+    hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
+    if fix is not None and eyes.geo.client == GAME_VIEW:  # (Alt+Enter sets the game's own size, not the stretched one)
+        hunter.senses.window_fix = fix
+    return hunter
+
+
+START_POLL_S = 1.0  # s between looks at the window (no capture) while a command that acts waits at its start for it
+
+
+def _calibrated(size: tuple[int, int]) -> bool:
+    """Whether the eyes have a calibration for a client of this size (window.CLIENT_SIZES, calibrated)."""
+    return size in window.CLIENT_SIZES and calibration.files(geometry(*size))[0].exists()
+
+
+def _lie_detector_look(perception):
+    """control.window_size.refit's look for the Lie Detector before each Alt+Enter: on the perception service's picture
+    of the client at whatever size (ServiceClient.full_frame with any_size; it raises if there's none: then no first
+    Alt+Enter)."""
+    from .control.window_size import lie_detector_seen
+    return lambda: lie_detector_seen(perception.full_frame(time.monotonic(), any_size=True))
+
+
+def _size_fix(title: str, perception):
+    """What sets a client of the wrong size (or the game drawing off it) right with Alt+Enter twice, for a command that
+    hunts (control.window_size.SizeFix), its look for the Lie Detector on the perception service's picture."""
+    from .control.window_size import SizeFix
+    return SizeFix(title, log=_log, spot=_lie_detector_look(perception))
+
+
+def _fit_start(title: str, fix) -> None:
+    """A command that acts, at its start: a client of a size the eyes have no calibration for (full screen at
+    3840x2160, say) is set right with Alt+Enter twice at once (`fix`, without its STEADY_S wait), and waited for while
+    it isn't (said once; the fix's second try AGAIN_S later, then it's the user's): it stopped with "not calibrated at
+    3840x2160 yet" before. The Lie Detector alarm stops it, as at any such command's start."""
+    from .perception.framecheck import size_problem
+    from .screen import NATIVE
+    said = None
+    while True:
+        client.check_alarm()
+        geo = _game_geometry(title, restore=True)  # (a minimized game brought back first, as its first look did)
+        if _calibrated(geo.client):
+            if said is not None:
+                _log(f"the game's client is {geo.client[0]}x{geo.client[1]}: going on")
+            return
+        if fix(size_problem(geo.client, NATIVE), wait=False):
+            continue
+        if said != geo.client:
+            said = geo.client
+            _log(f"the game's client is {geo.client[0]}x{geo.client[1]}, a size the eyes aren't calibrated for: "
+                 f"waiting for it to be set back (nothing else is sent; Ctrl+C stops)")
+        time.sleep(START_POLL_S)
 
 
 def cmd_pet(args) -> int:
@@ -523,12 +627,13 @@ def cmd_hunt(args) -> int:
         for path in (paths.OLD_SHOT_LOG, paths.SHOT_LOG):
             _shot_summary(path)
         return 0
+    if args.mode != "look":
+        _record(f"hunt-{args.mode}", args.map)  # (before the hunter, whose start may set the client right: _fit_start)
     hunter = _hunter(args, viewer=args.mode == "look", low_hp=args.low_hp, potion_hp=args.potion_hp,
                      attack=_attack(args))  # (`look`: what her looks make of the game; no keys)
     if args.mode == "look":
         return _hunt_looks(hunter, args.every, args.seconds) if args.every else _hunt_look(hunter)
     kinds = set(args.kinds.split(",")) if args.kinds else None
-    _record(f"hunt-{args.mode}", hunter.model.id)
     if not _to_game():
         return 1
     from .behavior.retreat import on_alarm
@@ -682,9 +787,9 @@ def cmd_probe(args) -> int:
     if trouble := probe.problems(mapdata.load(args.map), p):
         print(f"probe {p.name} can't run like that: {'; '.join(trouble)}")
         return 1
+    _record(f"probe-{p.name}", args.map)  # (before the hunter, whose start may set the client right: _fit_start)
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp)  # the regular attack: no --skill
     nav = hunter.navigator()
-    _record(f"probe-{p.name}", hunter.model.id)
     if not _to_game():
         return 1
     from .behavior.retreat import on_alarm
@@ -742,12 +847,12 @@ def _ways(args) -> None:
 
 def cmd_nav(args) -> int:
     _ways(args)
+    _record("nav", args.map)  # (before the hunter, whose start may set the client right: _fit_start)
     hunter = _hunter(args)
     nav = hunter.navigator(fighting=args.fight)
     if args.avoid:  # those kinds of move cost 20 times as much: any other way wins
         weight = nav.weight
         nav.weight = lambda m: weight(m) * (20.0 if m.kind in args.avoid else 1.0)
-    _record("nav", hunter.model.id)
     if not _to_game():
         return 1
     start = time.monotonic()
@@ -767,9 +872,9 @@ def cmd_nav(args) -> int:
 def cmd_tour(args) -> int:
     from .behavior.tour import Tour
     _ways(args)
+    _record("tour", args.map)  # (before the hunter, whose start may set the client right: _fit_start)
     hunter = _hunter(args, low_hp=args.low_hp, potion_hp=args.potion_hp, attack=_attack(args))
     nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
-    _record("tour", hunter.model.id)
     if not _to_game():
         return 1
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below,
@@ -1476,7 +1581,7 @@ def cmd_perceive(args) -> int:
         return 0
     service.settle()
     band, title = (reach.LOOK_UP, reach.LOOK_DOWN), _game_title()
-    publish = None
+    publish, glimpse = None, None
     if args.frames:
         files = sorted(str(p) for p in Path(args.frames).glob("*.png"))
         if not files:
@@ -1498,12 +1603,17 @@ def cmd_perceive(args) -> int:
 
         def where():
             return service.window_geometry(title)
+
+        def glimpse():  # (the client at any size, for the size fix's and the pet's looks)
+            from .perception import frames
+            return frames.glimpse(title)
         path = telemetry.record_to("perceive", telemetry.FOLDER)
         publish = service.Publisher(band, log=_log)
         print(f"perceiving the game for every command; telemetry: {path} (the mini-map follows it); Ctrl+C stops",
               flush=True)
     svc = service.Service(make, args.map, where, address=service.pipe_address(on_saved),
-                          info=service.info_path(on_saved), log=_log, publish=publish, stuck_s=service.STUCK_S)
+                          info=service.info_path(on_saved), log=_log, publish=publish, stuck_s=service.STUCK_S,
+                          glimpse=glimpse)
     try:
         svc.serve(time.monotonic() + args.minutes * 60 if args.minutes else None)
     except KeyboardInterrupt:
@@ -1786,8 +1896,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_calibrate)
 
     s = sub.add_parser("window", help="resize the game's client area to 1366x768 (the game's own size: pixel for "
-                                      "pixel) or 1920x1080, through the player; sends no keys")
-    s.add_argument("size", choices=["1366x768", "1920x1080"])
+                                      "pixel) or 1920x1080, through the player; sends no keys. --recover: set a "
+                                      "client of another size (or the game drawing off it) back to 1366x768 with "
+                                      "Alt+Enter twice (full screen and back), as the commands that act do")
+    s.add_argument("size", nargs="?", choices=["1366x768", "1920x1080"])
+    s.add_argument("--recover", action="store_true", help="Alt+Enter twice, through the player, if the client isn't "
+                   "1366x768 or the game draws off it; says the size before and after (the game switches to full "
+                   "screen and back: only with someone at the PC)")
+    s.add_argument("--force", action="store_true", help="with --recover: switch even if the client is right "
+                   "already, to try it")
     s.set_defaults(func=cmd_window)
 
     s = sub.add_parser("snap", help="save a screenshot of the game to gamelab/lab/shots/snap.png")

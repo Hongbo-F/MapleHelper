@@ -347,14 +347,17 @@ class Service:
     saved frames: feed.saved_world); `geometry()` says the game window's geometry or why there's none (window_geometry;
     saved frames: theirs). Clients reach it at `address` with `authkey` (written to `info` for them). `publish`: its
     telemetry (Publisher), or None. `stuck_s`: its watchdog's (STUCK_S: the process ends if the frame loop hangs that
-    long; None, the tests' in-process services: none)."""
+    long; None, the tests' in-process services: none). `glimpse()`: the game's client as the screen shows it at any
+    size (perception.frames.glimpse), for a `full` ask that takes any size while the frames aren't fit to read for a
+    fault Alt+Enter mends (framecheck.FIX_KINDS); None: such an ask is answered as any."""
 
     def __init__(self, make: Callable[[int, Geometry], Runner], map_id: int,
                  geometry: Callable[[], tuple[Geometry | None, Problem | None]], *, address: str = ADDRESS,
                  authkey: bytes | None = None, info: Path | None = None, log: Callable[[str], None] = print,
                  publish: "Publisher | None" = None, idle_hz: float = IDLE_HZ, active_hz: float = ACTIVE_HZ,
-                 stuck_s: float | None = None):
+                 stuck_s: float | None = None, glimpse: Callable[[], np.ndarray | None] | None = None):
         self.make, self.map_id, self.geometry, self.log = make, map_id, geometry, log
+        self.glimpse = glimpse
         self.address, self.authkey = address, authkey or secrets.token_bytes(32)
         self.info = info
         self.publish = publish
@@ -677,7 +680,7 @@ class Service:
         if kind == "throw" and self.runner is not None:
             self.runner.step.throw(msg[1], msg[2])
         elif kind == "full":
-            self._fulls.append((c, msg[1], msg[2]))
+            self._fulls.append((c, msg[1], msg[2], len(msg) > 3 and bool(msg[3])))  # (its last: any size will do)
             ask = Asks(msg[2])
             return ask if asks is None else replace(asks.merge(ask), mesos_only=asks.mesos_only)
         return asks
@@ -687,20 +690,33 @@ class Service:
         self._answer_fulls(frame, None)
 
     def _answer_fulls(self, frame, st: WorldState | None) -> None:
+        """The full asks due answered: with `frame` (one showing the game, into the full ring), or with why there's none
+        (`st`'s problem); an ask that takes any size, while the problem is one Alt+Enter mends (FIX_KINDS: the client
+        another size, the game drawing off it), with the client's picture as it is (`glimpse`, down the pipe: 6 MB at
+        most, a few times a minute at most)."""
+        from ..perception.framecheck import FIX_KINDS
         with self._lock:
             due = [f for f in self._fulls if (frame.t if frame is not None else st.t) >= f[2] - 1e-9]
             self._fulls = [f for f in self._fulls if f not in due]
-        for c, rid, _ in due:
+        seen = None
+        for c, rid, _, any_size in due:
             if frame is not None and self.full_ring is not None and frame.full is not None:
                 self._full_seq += 1
                 slot = self.full_ring.put(self._full_seq, frame.t, frame.full)
                 self.counts["fulls"] += 1
                 c.send("full", rid, {"seq": self._full_seq, "slot": slot, "t": frame.t, "epoch": self.epoch,
                                      "bad": None if slot is not None else Problem("size", "another size")})
-            else:
-                bad = st.bad if st is not None else Problem("gone", "no frame")
-                c.send("full", rid, {"seq": None, "slot": None, "t": st.t if st is not None else time.monotonic(),
-                                     "epoch": self.epoch, "bad": bad})
+                continue
+            bad = st.bad if st is not None else Problem("gone", "no frame")
+            if any_size and self.glimpse is not None and bad is not None and bad.kind in FIX_KINDS:
+                seen = self.glimpse() if seen is None else seen
+                if seen is not None:
+                    self.counts["fulls"] += 1
+                    c.send("full", rid, {"seq": None, "slot": None, "t": time.monotonic(), "epoch": self.epoch,
+                                         "bad": None, "frame": seen})
+                    continue
+            c.send("full", rid, {"seq": None, "slot": None, "t": st.t if st is not None else time.monotonic(),
+                                 "epoch": self.epoch, "bad": bad})
 
     def _emit(self, st: WorldState, frame) -> None:
         """feed.run's: each frame's state into the ring and to every client (pickled once), and published."""
@@ -1118,25 +1134,28 @@ class ServiceClient(Feed):
         w, h = st.geo.frame_size
         return np.zeros((h, w, 3), np.uint8)
 
-    def full_frame(self, after: float, timeout: float = FULL_WAIT_S) -> np.ndarray:
+    def full_frame(self, after: float, timeout: float = FULL_WAIT_S, any_size: bool = False) -> np.ndarray:
         """The game window at full size (RGB) as shown at `after` or later: the pet's panels, the pick-up log. Raises
         BadLook if the service had none to give (the game not on screen, the service not reached). A command that sends
-        keys has the game brought to the front first if it wasn't, and asks again once (as its own capture did)."""
+        keys has the game brought to the front first if it wasn't, and asks again once (as its own capture did). With
+        `any_size`, while the frames aren't fit to read for a fault Alt+Enter mends (the client another size, the game
+        drawing off it), the client's picture as it is, unchecked (perception.frames.glimpse: 1366x768, or 1920x1080
+        brought from any other size): what the size fix looks for the Lie Detector on, and the pet for the HUD."""
         try:
-            return self._full(after, timeout)
+            return self._full(after, timeout, any_size)
         except BadLook as e:
             if not self.hello.acts or e.kind != "window":
                 raise
             self._fronted = -1e18
             self.bring_forward(e.problem)
             time.sleep(0.3)
-            return self._full(time.monotonic(), timeout)
+            return self._full(time.monotonic(), timeout, any_size)
 
-    def _full(self, after: float, timeout: float) -> np.ndarray:
+    def _full(self, after: float, timeout: float, any_size: bool = False) -> np.ndarray:
         with self._cond:
             self._rid += 1
             rid = self._rid
-        if not self._send("full", rid, after):
+        if not self._send("full", rid, after, *((True,) if any_size else ())):
             raise BadLook(Problem("perception", self.why or "the perception service isn't reached"))
         with self._cond:
             self._cond.wait_for(lambda: rid in self._fulls or not self.alive, timeout)
@@ -1146,6 +1165,8 @@ class ServiceClient(Feed):
             raise BadLook(Problem("perception", self.why or f"no frame from the perception service within {timeout} s"))
         if got["bad"] is not None:
             raise BadLook(got["bad"])
+        if got.get("frame") is not None:  # (any size: the client's picture down the pipe)
+            return got["frame"]
         frame = None if ring is None or got["epoch"] != self.epoch else ring.get(got["slot"], got["seq"])
         if frame is None:
             raise BadLook(Problem("perception", "the frame was gone before it was copied"))

@@ -394,6 +394,8 @@ class Hunt:
             looter.yield_to = self._yields  # picking up stops for what's in reach
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
+        regains = self.h.senses.regains
+        self.h.senses.regains = True  # (a client the window fix mends is set right while she stands still: regain)
         try:
             self._next_ground(self.nav.mover.settle())
             while time.monotonic() < end:
@@ -409,6 +411,7 @@ class Hunt:
             self._leave_ground()
         finally:
             looter.yield_to = yield_to
+            self.h.senses.regains = regains
         self.report.seconds = time.monotonic() - start
         self._log_memory()
         if meter.since is not None:
