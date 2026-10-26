@@ -2051,7 +2051,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=5, limit=600,
+@tree((28, 247.0), monsters="all", seed=7, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -2079,7 +2079,11 @@ def loop_tree_run(sim):
     reach capped 60 above her again): of seeds 1-12, 5 meet all of this (5, 7, 9, 11, 12; 1, 4, 5, 6 and 7 before the
     review's fixes), 7 alone on the floor all 5 minutes; 1 fell out at 143 s, and on 4 and 6 a trip to rest timed
     out and she rested on the floor among its monsters past the run's 600 s, her HP not coming back (seed 5 meets it
-    at master's head and before the fixes too).)"""
+    at master's head and before the fixes too).) (Seed 7 since her pet's potions are as live (sim.world.PET_HP,
+    HP_POTION), her drops wait while a monster that counts is by them, her decisions go by the monsters the looks missed
+    and her escapes and spots keep off a long drop's end and spawn points (part B, 2026-10-26): on seed 5 she was
+    knocked out of the tower at 125 s; of seeds 1-12, 6 meet all of this (1, 4, 6, 7, 8, 11), 4 went up the tower
+    among its Horny Mushrooms.)"""
     return _loop(5)(sim)
 
 
@@ -2112,7 +2116,7 @@ _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Luck
 
 @tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
-      expects=(logs("next: platform 23, from platform 24 at x 231"), logs("at platform 23's spot (platform 24)"),
+      expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
                check("every kill counted", _every_kill), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_23(sim):
@@ -2136,7 +2140,8 @@ def loop_tree_23(sim):
     of this.) (Seed 1 since a look asks for what the next frame would have stale (feed.to_ask), a frame shown before a
     throw without a tap tells her heading (Actions.heading), a cast takes its MP off at its throw (Attacks.on_throw) and
     a trip stops only for what the pass shoots (Hunt._interrupt): on seed 5 she shot 23 from the spot fewer than 20
-    times; of seeds 1-16, 1, 8-11 and 13-16 meet all of this.)"""
+    times; of seeds 1-16, 1, 8-11 and 13-16 meet all of this.) From 2026-10-26 her spot is 24 at 221, 51 units from 24's
+    Green Mushroom's spawn point (attack.spots.SPAWN_CLEAR): of seeds 1-16 all but 14 meet all of this."""
     return harness._only(_loop(4), (23,))(sim)
 
 

@@ -44,7 +44,8 @@ from ..perception.kinds import kind_of
 # 113-134 a touch (15-18% of her HP bar).
 DEFENCE = 75.0
 # A kind whose touch takes less than this share of her HP is no danger worth giving up reach, a throw or a step for:
-# her pet drinks a potion for her under 45%, and the first map's golden traces were made with every kind so (by the
+# her pet drinks a potion for her under 70% (live on 2026-10-25: 6 Orange Potions in 10.95 minutes, each 230-250 HP of
+# her 774, only under 0.70; sim.world.PET_HP), and the first map's golden traces were made with every kind so (by the
 # formula a pig takes 1.7% of her 642 HP at level 19, an Orange Mushroom 2.0%, a slime 1.2%). Of the other maps' kinds,
 # a Horny Mushroom takes 16% of her 752 HP at level 24, a Green Mushroom 7.2%, an Axe Stump 10.8% of her 730 at 23;
 # a Dark Stump 4.3% and a Slime 1.2% don't count.
