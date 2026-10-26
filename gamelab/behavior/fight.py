@@ -417,13 +417,13 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
 def attack_gap(actions, act: tuple) -> float | None:
     """How long after its jump key the attack key of a throwing stance `act` goes as her actions will press it
     (attack.stance.air_gap; None from the ground): a jump throw in place that turns her in the air has it
-    JUMP_BACK_ATTACK_MS after the jump key at the soonest (control.actions.Actions.jump_throw, AIR_TURN), whatever the
+    AIR_TURN_ATTACK_MS after the jump key at the soonest (control.actions.Actions.jump_throw, AIR_TURN), whatever the
     stance's own timing, so she's higher when it picks."""
     gap = air_gap(act)
     plan = plan_of(act)
     if (act[0] == "jump_throw" and gap is not None and actions_mod.AIR_TURN
             and (plan is None or (not plan.way and plan.air_turn)) and not actions.faces(act[1])):
-        return max(gap, physics.JUMP_BACK_ATTACK_MS)
+        return max(gap, physics.AIR_TURN_ATTACK_MS)
     return gap
 
 
@@ -467,26 +467,44 @@ def throw_act(h: "Hunter", s: Scene, act: tuple) -> bool:
         if attacks is not None:
             attacks.aimed = plan.shot.target
     try:
-        return _throw(h.actions, act, plan) is not False
+        return _throw(h.actions, act, plan, _turn_key(h, s, act)) is not False
     finally:
         if attacks is not None:
             attacks.aimed = None  # (its key took it, or no choice was asked: no Lucky Seven key)
 
 
-def _throw(actions, act: tuple, plan) -> bool | None:
+def _throw(actions, act: tuple, plan, turn: int = physics.AIR_TURN_ATTACK_MS) -> bool | None:
     """throw_act's keys: the Actions method for `act`, with its JumpPlan's timing (`plan`), if any; what it returns
-    (False: dropped)."""
+    (False: dropped). Without one, a jump that turns her in the air has its attack `turn` ms after its jump key
+    (attack.reach.turn_key_ms: AIR_TURN_LEAD_MS after the arrow, sooner for a monster too short to pick then)."""
     if act[0] == "throw":
         return actions.throw(act[1])
     if act[0] == "jump_throw":
         if plan is None:
-            return actions.jump_throw(act[1])
+            if turn == physics.AIR_TURN_ATTACK_MS:  # (as callers that don't know of it: the tests' fakes)
+                return actions.jump_throw(act[1])
+            return actions.jump_throw(act[1], turn_key=turn)
         return actions.jump_throw(act[1], plan.key_ms, plan.way, plan.air_turn)
     if act[0] == "jump_back":
         if plan is None:
-            return actions.jump_back(act[1])
+            return actions.jump_back(act[1]) if turn == physics.AIR_TURN_ATTACK_MS else actions.jump_back(act[1], turn)
         return actions.jump_back(act[1], plan.key_ms)
     raise ValueError(f"not a throw: {act!r}")
+
+
+def _turn_key(h: "Hunter", s: Scene, act: tuple) -> int:
+    """The attack key (ms after the jump key) of stance `act`'s jump if it turns her in the air: reach.turn_key_ms for
+    the nearest monster on her platform the way it throws (a stance's jump up close is at it), by its kind's height
+    (the map's game data); AIR_TURN_ATTACK_MS with none."""
+    if act[0] not in JUMPS or s.where is None or s.platform is None:
+        return physics.AIR_TURN_ATTACK_MS
+    x, here = s.where.x, s.platform.id
+    ahead = [m for m in s.monsters if m.platform == here and (m.x > x) == (act[1] == RIGHT)]
+    if not ahead:
+        return physics.AIR_TURN_ATTACK_MS
+    nearest = min(ahead, key=lambda m: abs(m.x - x))
+    b = bodies(h.model).get(nearest.kind)
+    return reach.turn_key_ms(b.top if b is not None else MONSTER_TOP["pig"])
 
 
 def knocked_move(h: "Hunter", s: Scene, act: tuple) -> bool:

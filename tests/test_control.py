@@ -31,15 +31,20 @@ def test_jump_back_turns_and_throws_just_before_landing():
     assert lift < at("right", "down") + 1000 * LAGS.on         # the game sees the turn once she's off the ground
     assert at("right", "down") < at("f", "down") < apex        # turned in the air, then the key
     leaves = at("f", "down") + STAR_DELAY_MS                    # ... the star leaves ~520 ms later
-    assert 0 <= land - leaves <= 40                            # just before landing
+    # as she lands, give or take: the attack physics.AIR_TURN_LEAD_MS after the turn's arrow (until 2026-10-26 25 ms
+    # after it, the star just before she landed, and both live jump backs of 2026-10-25 threw the wrong way)
+    assert -40 <= land - leaves <= 40
+    assert at("f", "down") - at("right", "down") >= 60
     assert at("left", "up") <= at("right", "down")             # no longer holding away when she lands
 
 
 def test_the_attack_keys_come_as_long_after_the_jump_keys_as_attack_reach_reckons():
     # attack.reach works out what an attack from a jump hits from these gaps (motion.physics): the key
     # plans must keep to them.
-    from gamelab.motion.physics import JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS
-    for method, gap in (("jump_throw", JUMP_ATTACK_MS), ("jump_back", JUMP_BACK_ATTACK_MS)):
+    from gamelab.attack import reach
+    from gamelab.motion.physics import AIR_TURN_ATTACK_MS, JUMP_ATTACK_MS
+    assert reach.TURN_KEY_MS == AIR_TURN_ATTACK_MS  # (a jump back turns her in the air)
+    for method, gap in (("jump_throw", JUMP_ATTACK_MS), ("jump_back", AIR_TURN_ATTACK_MS)):
         sent = []
         a = actions(sent)
         a.facing = RIGHT
@@ -158,20 +163,22 @@ def test_no_jump_in_her_key_plans_is_keyed_in_the_kicks_blind_spot():
 
 def test_a_jump_throw_that_turns_her_turns_in_the_air_or_first_with_its_wait():
     # She jumps at once and taps the arrow in the air (AIR_TURN_MS after the jump key, once she's off the ground), the
-    # attack JUMP_BACK_ATTACK_MS after the jump key, as the jump backs turn: by the engine she comes down 3.8 units on
+    # attack AIR_TURN_LEAD_MS after that arrow at the soonest (AIR_TURN_ATTACK_MS: live on 2026-10-25, 25 ms after it,
+    # 10 of 28 air turns went the wrong way), as the jump backs turn: by the engine she comes down 3.8 units on
     # (2.7-4.3), against 5.3 with the tap first and the jump JUMP_THROW_TURN_MS after it, the attack 160 ms sooner.
     from maplehelper.game import MOVEMENT
     from gamelab.control import actions as actions_mod
     from gamelab.control.actions import JUMP_THROW_TURN_MS
     from gamelab.motion import body
-    from gamelab.motion.physics import AIR_TURN_MS, JUMP_BACK_ATTACK_MS, SHOE
+    from gamelab.motion.physics import AIR_TURN_ATTACK_MS, AIR_TURN_LEAD_MS, AIR_TURN_MS, SHOE
     sent = []
     a = actions(sent)
     a.facing = "left"
     a.jump_throw(RIGHT)
     (_, events), = sent
     at = lambda k, how: next(t for t, name, h_ in events if name == k and h_ == how)
-    assert at("alt", "down") == 0 and at("right", "down") == AIR_TURN_MS and at("f", "down") == JUMP_BACK_ATTACK_MS
+    assert at("alt", "down") == 0 and at("right", "down") == AIR_TURN_MS and at("f", "down") == AIR_TURN_ATTACK_MS
+    assert at("f", "down") - at("right", "down") == AIR_TURN_LEAD_MS >= 60
     assert a.facing == RIGHT
     # An attack that must come sooner (air_turn False), or with AIR_TURN off: the tap first, and the jump once its
     # walk has stopped.
@@ -264,3 +271,23 @@ def test_climbing_a_rope_by_a_portal_the_mover_holds_up_only_once_she_is_off_the
         up_at = next(e[0] for e in events if e[1] == "up" and e[2] == "down")
         jump_at = next(e[0] for e in events if e[1] == "alt" and e[2] == "down")
         assert up_at == jump_at + (mover_mod.PORTAL_UP_MS if portal else 0)
+
+
+def test_a_jump_that_turns_her_in_the_air_has_its_attack_60_ms_after_the_arrow_where_the_kind_allows():
+    """reach.turn_key_ms: a Horny or Green Mushroom (51 tall) is picked by an attack AIR_TURN_ATTACK_MS (120 ms) after
+    the jump key, the turn's arrow AIR_TURN_LEAD_MS (60) before it (25 ms, as until 2026-10-26: 10 of 28 such turns
+    threw the wrong way live); a pig (38) or a slime (40) only sooner, its attack as late as it's still picked, a snail
+    by none (JUMP_BACK_ATTACK_MS: none can turn and pick it). A jump back at a pig keys its attack so (fight._turn_key,
+    from the nearest monster the way it throws)."""
+    from gamelab.attack import reach
+    from gamelab.behavior.fight import _turn_key
+    from gamelab.motion.physics import AIR_TURN_ATTACK_MS, JUMP_BACK_ATTACK_MS
+    assert reach.turn_key_ms(51) == AIR_TURN_ATTACK_MS == 120 and reach.air_hits(51, 145)
+    assert JUMP_BACK_ATTACK_MS < reach.turn_key_ms(38) < AIR_TURN_ATTACK_MS and reach.air_hits(38, reach.turn_key_ms(38))
+    assert not reach.air_hits(38, reach.turn_key_ms(38) + 5) and reach.turn_key_ms(24) == JUMP_BACK_ATTACK_MS
+    from test_attack import PLAT, target
+    h = SimpleNamespace(model=None)
+    s = SimpleNamespace(where=SimpleNamespace(x=500.0, y=500.0), platform=PLAT, monsters=[target(560), target(300)])
+    assert _turn_key(h, s, ("jump_back", RIGHT)) == reach.turn_key_ms(38)  # the pig on her right
+    s.monsters = [target(560, kind="orange-mushroom")]
+    assert _turn_key(h, s, ("jump_throw", RIGHT)) == AIR_TURN_ATTACK_MS and _turn_key(h, s, ("throw", RIGHT)) == 120

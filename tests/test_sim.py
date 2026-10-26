@@ -538,6 +538,28 @@ def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model
     assert not w.monsters[0].alive and w.kills == {"snail": 1}
 
 
+def test_an_arrow_turning_her_in_the_air_at_the_step_of_the_attacks_key_turns_her_too_late_for_it(model):
+    """world.AIR_TURN_SAME_STEP: facing left, she jumps and taps right in the air (physics.AIR_TURN_MS after the jump
+    key), the attack after it: 25 ms after (as until 2026-10-26: 10 of 28 such turns threw the wrong way live) the arrow
+    and the key are acted on at the same step for some of the step's phases, and that attack goes left at nothing, the
+    pig on her right alive; 60 after (physics.AIR_TURN_LEAD_MS) never."""
+    from gamelab.motion.physics import AIR_TURN_LEAD_MS, AIR_TURN_MS
+    c = plat(model, 500, 400)
+    for gap, wrong in ((25, True), (AIR_TURN_LEAD_MS, False)):
+        missed = 0
+        for phase in PHASES:
+            w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 360.0)], facing="left", step_phase=phase))
+            w.invulnerable_ms = 10_000
+            tap(w, 0.0, "alt", 0.04)
+            tap(w, AIR_TURN_MS / 1000, "right", 0.04)
+            tap(w, (AIR_TURN_MS + gap) / 1000, "f", 0.04)
+            w.advance(1.0)
+            late = any("at the step of the attack's key: it goes left" in line for line in w.log)
+            assert late == (w.monsters[0].hp == 3) and w.facing == "right", (gap, phase)
+            missed += late
+        assert (missed > 0) is wrong and missed <= len(PHASES) // 3, (gap, missed)
+
+
 def test_noise_can_have_a_jump_throw_miss_a_snail_close_by_as_in_game(model):
     # Noise.air_snail (near, take): the area's pick of a snail under `near` ahead takes it with chance `take`, else
     # the star hits nothing (live, 6 of 29 jump throws at a snail under 46 off hurt it). Farther, and other kinds,

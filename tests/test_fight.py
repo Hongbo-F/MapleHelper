@@ -69,7 +69,7 @@ def _fighter(monkeypatch, looks, on_look=None):
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(time, "sleep", lambda s: None)
     h.look, h.health_check = look, lambda s: None
-    h.actions.throw = h.actions.jump_throw = h.actions.jump_back = lambda side: throws.append((round(clock[0], 1), side))
+    h.actions.throw = h.actions.jump_throw = h.actions.jump_back =         lambda side, *a, **k: throws.append((round(clock[0], 1), side))
     h.looter.sweep_through = lambda s, deaths: None
     h.looter.mop_up = lambda stood=None: None  # looking for loot is tested on its own (test_loot.py)
     return h, throws

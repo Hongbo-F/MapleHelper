@@ -118,8 +118,10 @@ BLIND_ENDS_MS = max(body.blind_ends_ms(SHOE, replace(LAGS, jump=LAGS.on + gap, s
 JUMP_ATTACK_MS = 40        # a jump throw's attack key comes this long after the jump key. In game on 2026-10-20,
                            # at a snail 20-60 units away: keyed 100 ms after the jump (the macro's F1 combo), the
                            # star went over it; keyed 40 ms after, a star hit it for 78 and killed it
-JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's: right after she turns in mid-air (actions.JB_THROW_MS 235
-                           # less JB_RUN_MS 150, when the jump key goes down)
+JUMP_BACK_ATTACK_MS = 85   # ... and a jump back's at the soonest: right after she turns in mid-air (the arrow toward
+                           # the monster AIR_TURN_MS after the jump key), what decides which kinds one can pick at all
+                           # (attack.stance); keyed AIR_TURN_LEAD_MS after the arrow wherever the kind allows
+                           # (AIR_TURN_ATTACK_MS, below: reach.turn_key_ms)
 ATTACK_DECIDE_LAG_MS = 11  # it can start up to this much later than that (60 fps recordings jump_throw_0 and
                            # _1, keys 100 ms apart: her attack pose first shows 91-110 ms after lift-off)
 # fly's landings, the FLY_CACHE_SIZE most recently used. Each is worked out from its start rounded as its
@@ -295,6 +297,16 @@ FORWARD_JUMP_MS = 40
 # (actions.JUMP_THROW_TURN_MS), standing again, she comes down 5.3 on (1.8-7.0), the attack 245 ms after
 # the tap (D:/MapleHelper-scratch/ov-jump/carry.py).
 AIR_TURN_MS = 60
+# ... and the attack key this long after that arrow at the soonest: live on 2026-10-25 (the hunt of 23:43), with the
+# attack 25 ms after the arrow (85 ms after the jump key), 10 of the 28 jumps that turned her in the air threw the wrong
+# way by her frames (36%; none unreadable) and none of those 10 killed, where 10 of the 18 that turned did; the throws
+# from the ground that tapped first, their attack 80 ms after the arrow, turned on all 68 readable ones
+# (D:/MapleHelper-scratch/analysis-1025/jumps-perception-skeptic/airturn2.py). So 60: the attack 120 ms after the jump
+# key (AIR_TURN_ATTACK_MS), where her air attack still picks a Horny or a Green Mushroom (51 tall; reach.air_hits up to
+# about 145 ms) but not a pig (38) or a slime (40), picked only to about 105 and 110 ms: at those the attack goes as
+# late as it still picks them (reach.turn_key_ms), sooner than this after the arrow.
+AIR_TURN_LEAD_MS = 60
+AIR_TURN_ATTACK_MS = AIR_TURN_MS + AIR_TURN_LEAD_MS
 
 
 def rise_after(t: float) -> float:

@@ -302,6 +302,14 @@ PUSH_BY_DAMAGE = True
 # a platform above is picked from low in the jump far off and only near its top up close, as the user's play of
 # 2026-10-24 has it (reach.AIR_SEARCH). Up close on her own platform it's the area, as before.
 AIR_PICK = "widening"
+# In the air, an arrow the game acts on at the same step (STEP_MS) as an attack's key turns her too late for that
+# attack: it goes the way she faced before (the turn shows, the star doesn't follow). Live on 2026-10-25 (the hunt of
+# 23:43) 10 of 28 jumps that turned her in the air threw the wrong way, the attack 25 ms after the arrow, and none of 68
+# throws from the ground with it 80 ms after (analysis-1025/jumps-perception-skeptic/airturn2.py); how the game
+# decides isn't known, and this has 25 ms apart fail one time in six (5 ms of the step's 30 shared), 60 ms never.
+# Before 2026-10-26 the world turned her as it saw the arrow, whatever came at that step: 2 of 201 such jumps went
+# the wrong way in the harness (master's hunt loop on Tree Dungeon, 8 seeds of 10 minutes). False: as before.
+AIR_TURN_SAME_STEP = True
 DROP_DELAY = 2.0
 # s from a kill until the monster is back at its spawn point (a guess; Realism.respawn). Not the game's, by its live
 # telemetry of 2026-10-19 to 21 (analysis.respawn: README, Respawns and drop life): there a platform she emptied,
@@ -1000,6 +1008,7 @@ class World:
                                         # landing until the next step: body.LANDING_ENDS_STEP)
         self.step_arrow = 0             # the arrow the game moved her with at its last step on the ground
         self.facing = facing
+        self._air_turn: tuple[int, str] | None = None  # the step an arrow last turned her in the air at, her way before
         self.seen: dict[str, int] = {}  # the arrows the game sees held -> the order it saw them pressed in
         self._seen_count = 0
         self._seen_due: dict[str, int] = {}  # each arrow's latest change the game is yet to see (its tick)
@@ -1292,7 +1301,8 @@ class World:
         self._push(ms, "seen", (action, down))
 
     def _seen(self, action: str, down: bool) -> None:
-        """The game sees an arrow go down (she turns that way, and it stands her up from the chair) or up."""
+        """The game sees an arrow go down (she turns that way, and it stands her up from the chair) or up. In the air
+        the step it turned her at, and the way she faced before, are kept (AIR_TURN_SAME_STEP)."""
         if self.dead:
             return
         if not down:
@@ -1300,7 +1310,10 @@ class World:
             return
         self._seen_count += 1
         self.seen[action] = self._seen_count
-        self.facing = LEFT if action == "left" else RIGHT
+        side = LEFT if action == "left" else RIGHT
+        if self.mode == "air" and side != self.facing:
+            self._air_turn = (self.ms, self.facing)
+        self.facing = side
         if self.sitting:
             self.sitting = False
             self.still_ms = self.ms + int(STAND_UP * 1000)
@@ -1346,7 +1359,8 @@ class World:
             self.attack_key_at = at
             self.sitting = False
             self.attacks += 1
-            self._push(self.ms_of(at + JUMP_LAG), "aim", (self.ms, skill, self._key_tag))  # it starts then (_aim)
+            step = self._acts(at, self._lag(action, LAGS.on, LAGS.sd_on))  # the step the game acts on it at
+            self._push(self.ms_of(at + JUMP_LAG), "aim", (self.ms, skill, self._key_tag, step))  # it starts then
         elif action == "up":
             if self._through_portal():
                 return
@@ -1750,7 +1764,7 @@ class World:
         return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
                                   body=(self.top(m), m.half))
 
-    def _aim(self, key_ms: int, skill: bool = False, tag: str = "") -> None:
+    def _aim(self, key_ms: int, skill: bool = False, tag: str = "", step: int | None = None) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
         lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
         seeded: reach.CLAW's), and the claw swipes the nearest monster that stance's box reaches (swiped);
@@ -1758,24 +1772,30 @@ class World:
         window of the search from her feet takes the star (AIR_PICK 'widening': air_pick), the nearest in the area
         alone ('area'), or as on the ground from where she is then ('v83'). Each picks by the bodies
         alone; then, as the client does, the line to a star's pick alone is checked (sight_stop): stopped, the
-        attack hits nothing, and no other monster takes it."""
+        attack hits nothing, and no other monster takes it. In the air an arrow acted on at its key's `step` turned
+        her too late for it (AIR_TURN_SAME_STEP): it goes the way she faced before."""
         self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
+        facing = self.facing
+        if (AIR_TURN_SAME_STEP and step is not None and self._air_turn is not None and self._air_turn[0] == step
+                and self.mode == "air"):
+            facing = self._air_turn[1] or facing
+            self.note(f"turned {self.facing} at the step of the attack's key: it goes {facing}")
         due = [way for when, way in self.meant if when <= self.attack_key_at + 1e-6]
         if due:  # (the latest meant by then: one whose key the game didn't take is passed over)
             self.meant = [(when, way) for when, way in self.meant if when > self.attack_key_at + 1e-6]
             self.attacks_meant += 1
-            if self.facing != due[-1]:
+            if facing != due[-1]:
                 self.wrong_way += 1
-                self.note(f"attack meant {due[-1]} goes {self.facing}")
+                self.note(f"attack meant {due[-1]} goes {facing}")
         if self.mode == "ground" or (AIR_PICK == "v83" and self.mode == "air"):
             stances = reach.CLAW.stances
-            target = self.swiped(self.facing, stances[int(self.chance("stance") * len(stances))])
+            target = self.swiped(facing, stances[int(self.chance("stance") * len(stances))])
             swipe = target is not None
             if target is None:
-                target = self.search_pick(self.facing)
+                target = self.search_pick(facing)
         else:
-            target = (self.air_pick(self.facing) if AIR_PICK == "widening"
-                      else self.nearest_in(self.facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP))
+            target = (self.air_pick(facing) if AIR_PICK == "widening"
+                      else self.nearest_in(facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP))
             swipe = False
             if target is not None and target.kind == "snail" and self.noise.air_snail:
                 near, take = self.noise.air_snail
@@ -1789,7 +1809,7 @@ class World:
         up = None if picked is None else self.y - picked.y(picked.at(self.t))  # its feet above hers, + above
         how = (key_ms / 1000, tag.rsplit("_", 1)[0], self.mode, round(rise, 1),
                None if picked is None else picked.kind, None if up is None else round(up, 1))
-        self._push(key_ms + int(STAR_DELAY * 1000), "star", (self.facing, target, swipe, stop, skill, how))
+        self._push(key_ms + int(STAR_DELAY * 1000), "star", (facing, target, swipe, stop, skill, how))
 
     def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None,
                 skill: bool = False, how: tuple | None = None) -> None:

@@ -26,7 +26,8 @@ from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT, MOVEMENT
 
 from .. import directions
-from ..motion.physics import (AIR_TURN_MS, BLIND_ENDS_MS, FORWARD_JUMP_MS, JUMP_ATTACK_MS, JUMP_BACK_ATTACK_MS,
+from ..motion.physics import (AIR_TURN_ATTACK_MS, AIR_TURN_MS, BLIND_ENDS_MS, FORWARD_JUMP_MS, JUMP_ATTACK_MS,
+                              JUMP_BACK_ATTACK_MS,
                               KICK_JUMPS, hold_ms)
 from ..screen import STRETCHED_CLIENT
 from . import client
@@ -81,9 +82,12 @@ STAR_DELAY_MS = 520  # the star leaves this long after the attack key, in the ai
                      # 2026-10-25, the swing beside her 524-536 ms after the key in jump_throw_0 and _1 (the key 100 ms
                      # after the jump key) and jb_k165-jb_k450 (85-370 ms), 508 in snail_jt40b (40 ms): wherever in
                      # the jump the key goes)
-JB_TURN_MS = JB_RUN_MS + 60  # the arrow toward the monster: turning as soon as she's off the ground
-JB_THROW_MS = JB_RUN_MS + JUMP_BACK_ATTACK_MS  # the attack key right after (235), so the star leaves just
-                               # before she lands (235 + 520 = 755; she lands 150 + 65 + 555 = 770 ms in)
+JB_TURN_MS = JB_RUN_MS + AIR_TURN_MS  # the arrow toward the monster: turning as soon as she's off the ground
+JB_THROW_MS = JB_RUN_MS + AIR_TURN_ATTACK_MS  # the attack key physics.AIR_TURN_LEAD_MS after it (270), the star
+                               # leaving as she lands (270 + 520 = 790; she lands 150 + 65 + 555 = 770 ms in). Until
+                               # 2026-10-26 25 ms after the arrow (235), the star just before she landed, and both live
+                               # jump backs of 2026-10-25 threw the wrong way: the attack picks its target as it starts,
+                               # in the air either way
 # A jump throw that turns her first: the turn's arrow tap (MOVEMENT.tap_turn_ms) walks her, and a jump that
 # lifts off before she has stopped carries that speed into the air (the arrow is let go by then: no kick).
 # Keyed TURN_SETTLE_MS (30) after the tap, the jump lifted off with her at 71 units/s and came down 44 units
@@ -96,10 +100,11 @@ JB_THROW_MS = JB_RUN_MS + JUMP_BACK_ATTACK_MS  # the attack key right after (235
 # jump TURN_SETTLE_MS after the tap).
 JUMP_THROW_TURN_MS = 205
 # ... which is now only for an attack that has to come too soon in the jump for her to turn in the air first (an attack
-# keyed under physics.JUMP_BACK_ATTACK_MS after the jump key: the stance asks for it only at a monster too short for
+# keyed under physics.AIR_TURN_ATTACK_MS after the jump key: the stance asks for it only at a monster too short for
 # a later one to pick, reach.air_hits). Every other jump throw that turns her jumps at once and taps the arrow in the
-# air (physics.AIR_TURN_MS after the jump key, as the jump backs do), its attack JUMP_BACK_ATTACK_MS (85) after the jump
-# key at the soonest: 85 ms after the plan starts, not 245; by the engine she comes down 3.8 units on (5.3 so).
+# air (physics.AIR_TURN_MS after the jump key, as the jump backs do), its attack AIR_TURN_ATTACK_MS (120, the arrow's
+# physics.AIR_TURN_LEAD_MS after it; 85 until 2026-10-26, when 36% of such turns went the wrong way live) after the jump
+# key at the soonest: 120 ms after the plan starts, not 245; by the engine she comes down 3.8 units on (5.3 so).
 # A jump forward (a jump throw with `way`): the arrow that way held from the plan's start, the jump physics.FORWARD_JUMP_MS
 # after it (the kick: she leaves at full speed, 149), and let go this long after the jump key, once the game has seen it
 # held at the jump's step (it acts on the jump 50-80 ms after its key): in the air it does nothing (it steers toward
@@ -338,14 +343,16 @@ class Actions:
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
         return True
 
-    def jump_throw(self, direction: str, key_ms: int | None = None, way: int = 0, air_turn: bool = True) -> bool:
+    def jump_throw(self, direction: str, key_ms: int | None = None, way: int = 0, air_turn: bool = True,
+                   turn_key: int = AIR_TURN_ATTACK_MS) -> bool:
         """Face `direction`, jump and attack in mid-air: in the air the attack throws a star even at point-blank range,
         where on the ground the claw only swipes (9-11 damage against 30-70 for a star, seen with slimes crowding her in
         the basin). The attack key comes `key_ms` after the jump key (JUMP_ATTACK_MS, 40, by default: while she's still
         low; the macro's F1 combo times it at 100 ms, and an attack starting that high in the jump went over a snail;
         later in the jump it starts higher, for a monster on a platform above her: attack.reach.shots says when).
         `way` 0 jumps in place: turning first, she taps the arrow in the air (AIR_TURN_MS after the jump key) and the
-        attack comes JUMP_BACK_ATTACK_MS after it at the soonest; with `air_turn` False (an attack that must come sooner,
+        attack comes `turn_key` after the jump key at the soonest (AIR_TURN_ATTACK_MS, AIR_TURN_LEAD_MS after the arrow; sooner
+        for a monster too short to pick then: reach.turn_key_ms); with `air_turn` False (an attack that must come sooner,
         at a monster too short for a later one), the tap goes first and the jump waits for its walk to stop
         (JUMP_THROW_TURN_MS). `way` +1/-1 jumps forward that way (the arrow held: FORWARD_JUMP_MS before the jump, let go
         FORWARD_HOLD_MS after it), which faces her that way: a throw that way. False: dropped once her lock was waited
@@ -362,7 +369,7 @@ class Actions:
             events = [[0, arrow, "down"], *tap(t, jump), [t + FORWARD_HOLD_MS, arrow, "up"], *tap(t + key_ms, key)]
         elif not self.faces(direction) and air_turn and AIR_TURN:
             t, wanted = 0, key_ms
-            key_ms = max(key_ms, JUMP_BACK_ATTACK_MS)
+            key_ms = max(key_ms, turn_key)
             turn = tap(AIR_TURN_MS, self.arrow(direction))
             events = [*tap(0, jump), *turn, *tap(key_ms, key)]
             added = key_ms - wanted
@@ -389,7 +396,8 @@ class Actions:
         (about 90 units), and out of its way. A star leaves about 520 ms after the attack key, so the
         key goes in right after lift-off: pressed later, the star left after she had landed. The caller
         makes sure there's room behind her. `key_ms`: the attack key that long after the jump key
-        (JUMP_BACK_ATTACK_MS, 85, by default: right after the turn; later, for a monster higher up)."""
+        (AIR_TURN_ATTACK_MS, 120, by default: AIR_TURN_LEAD_MS after the turn's arrow; sooner for a monster too short
+        to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; later, for a monster higher up)."""
         self.wait_lock()
         key = self._attack_key(direction)
         away = self.arrow(directions.opposite(direction))

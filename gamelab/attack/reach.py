@@ -838,6 +838,17 @@ def air_floor(gap_ms: float) -> float:
     return air_rise(gap_ms) - AREA_DOWN
 
 
+def turn_key_ms(top: float) -> int:
+    """The attack key of a jump that turns her in the air, at a monster on her platform at least `top` tall (ms after
+    the jump key): physics.AIR_TURN_ATTACK_MS, the turn's arrow physics.AIR_TURN_LEAD_MS before it, where its attack
+    still picks such a monster (air_hits); else the latest one from physics.JUMP_BACK_ATTACK_MS on that does (a pig:
+    105, its arrow 45 ms before), or that if none does."""
+    for k in range(physics.AIR_TURN_ATTACK_MS, physics.JUMP_BACK_ATTACK_MS, -5):
+        if air_hits(top, k):
+            return k
+    return physics.JUMP_BACK_ATTACK_MS
+
+
 def air_hits(top: float, gap_ms: float) -> bool:
     """Whether an attack keyed `gap_ms` after the jump key surely picks a monster on her platform that is
     at least `top` tall (localization.monsters.MONSTER_TOP): its body reaches AIR_MARGIN into the area.
@@ -871,9 +882,10 @@ KEY_LAST_MS = 480    # the latest tried: it starts 545 ms after the jump key, as
 KEY_STEP_MS = 10     # the attack keys tried, this far apart
 KEY_SLACK_MS = 15    # a key counts as sure only if keyed this much sooner or later the attack picks the same monster:
                      # the game sees a key 7.7 ms either side of when it's due on average (body.Lags, one sd), twice
-TURN_KEY_MS = physics.JUMP_BACK_ATTACK_MS  # a jump that turns her in the air (physics.AIR_TURN_MS: the arrow 60 ms
+TURN_KEY_MS = physics.AIR_TURN_ATTACK_MS  # a jump that turns her in the air (physics.AIR_TURN_MS: the arrow 60 ms
                      # after the jump key) has its attack key this long after the jump key at the soonest, as the jump
-                     # backs do (85: the turn seen 111 ms after the jump key, the attack starting 150 after it)
+                     # backs do (120: physics.AIR_TURN_LEAD_MS after the arrow; 85 until 2026-10-26, 36% of those went
+                     # the wrong way live)
 JUMP_KINDS = ("up", "forward", "back")  # the jumps tried (physics.jump_of): in place, toward the throw, away from it
 
 
