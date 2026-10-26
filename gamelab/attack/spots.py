@@ -17,6 +17,9 @@ the platforms below them, and from above she shoots down (it used to be the one 
 she hunts the ground standing on it, from its safest place (the middle where nothing counts as a danger, as on
 the first map, where no kind does).
 
+A spot keeps SPAWN_CLEAR from the spawn points on its platform of the kinds that count as a danger, where any place
+there that reaches the ground does (`_off_spawns`): a monster back at its point touches her there.
+
 `spots` lists the places to shoot a platform from; `spot` picks one for her where she is, `spot_for`
 one that reaches more of the monsters still there, and `spot_at` one for planning a sweep.
 """
@@ -34,7 +37,7 @@ from ..perception.kinds import kind_of
 from . import reach
 from .danger import Danger
 from .reach import EDGE_MARGIN, SHOT_DOWN, SHOT_RANGE, SHOT_UP, body_of, can_hit, clear_span, max_dx, shot_dx
-from .stance import KNOCKBACK_ROOM
+from .stance import KNOCKBACK_ROOM, LONG_DROP, end_drop
 
 MIN_COVERAGE = 0.3   # shoot from another platform only if this much of the hunting platform is in reach
 NEAR_BEST = 0.7      # spots scoring at least this share of the best one's count as good: the nearest wins
@@ -51,6 +54,16 @@ GROUND_MARGIN = EDGE_MARGIN + KNOCKBACK_ROOM  # hunting a ground standing on it,
                                               # stance does with monsters about: a touch knocks her back), and so on a
                                               # spot with monsters that count as a danger (_margin): on 24, 211 had 24's
                                               # Green knock her off its left end in the simulator
+
+# A spot keeps this far from the spawn points on its platform of the kinds that count as a danger (attack.danger): a
+# monster back at its point touches her within its half width and hers (28 and 22 on Tree Dungeon: 50), where some
+# place on the platform still reaches the ground (`_off_spawns`); the knock room from an end (GROUND_MARGIN) gives way
+# for it at an end with a short drop under it (stance.end_drop under LONG_DROP: a knock off it costs a climb back, not a
+# fall). Live on 2026-10-25 her spot for 23 on 24 (x 231) was 41 units from 24's Green Mushroom's point (272): she was
+# within 50 units of it 172 of her 220 s on 24, a Green respawned on top of her there (touch #11, pushed 69 units), and
+# 24's Green made 14 of her 34 touches, 0.96 bars (D:/MapleHelper-scratch/analysis-1025/damage-skeptic on24.py).
+# Now 221 (51 off; 24's left end drops 74 units to 25), 23 still in reach from it.
+SPAWN_CLEAR = 50.0
 
 Travel = Callable[[int, float, int], float | None]  # seconds from (platform, x) to a platform, None: no route
 
@@ -149,7 +162,9 @@ def _spots(model: MapModel, target: int, danger: Danger | None = None) -> list[S
         if hi < lo:
             continue
         best = None  # (score, x): the first x of the best score on p
-        for x in _xs_within(_stand_xs(lo, hi), p, _margin(p, danger)):
+        xs = _off_spawns(model, p, danger, _xs_within(_stand_xs(lo, hi), p, _margin(p, danger)),
+                         lambda x: _score_of(grid, p.id, x))
+        for x in xs:
             c, d = grid.get((p.id, x), (0.0, 0.0))
             if c > 0 and (best is None or c - DANGER_WEIGHT * d > best[0] + 1e-9):
                 best = (c - DANGER_WEIGHT * d, x)
@@ -192,6 +207,51 @@ def _margin(p: Platform, danger: Danger | None) -> float:
     if danger is None or not danger.any or not any(q == p.id for q, _, _ in danger.points):
         return EDGE_MARGIN
     return GROUND_MARGIN
+
+
+def _off_spawns(model: MapModel, p: Platform, danger: Danger | None, xs: list[float],
+                score: Callable[[float], float | None]) -> list[float]:
+    """Those of `xs` along platform `p` SPAWN_CLEAR or more from its spawn points of kinds that count as a danger
+    (`danger`'s) that reach the ground (`score`: the spot's score there, None out of reach); with none, the places
+    nearest GROUND_MARGIN from its ends that are, where the end has a short drop under it (stance.end_drop under
+    LONG_DROP; EDGE_MARGIN at least): the knock room gives way only as far as it must. Taken only if the best of them
+    scores within the share of her HP a touch by the kind whose point the best of `xs` is on takes (a respawn there is
+    on her before she can shoot it); else `xs` as they were (so too where nothing counts: the first map). On Tree
+    Dungeon 8 at 147, 15 units from its Green Mushroom's point, stays the spot for 7: off it, 8's Horny Mushroom's
+    point at 33 is nearer (107 scores 0.47 against 0.82)."""
+    points = [] if danger is None or not danger.any else [(sx, kind) for q, sx, kind in danger.points if q == p.id]
+    if not points:
+        return xs
+    scores = {x: score(x) for x in xs}
+    best = max(((v, x) for x, v in scores.items() if v is not None), default=None)
+    if best is None:
+        return xs
+
+    def clear(x: float) -> bool:
+        return all(abs(x - sx) >= SPAWN_CLEAR for sx, _ in points)
+    ok = [x for x, v in scores.items() if v is not None and clear(x)]
+    if not ok:
+        margin = _margin(p, danger)
+        lo = p.left + (GROUND_MARGIN if end_drop(model, p, -1) >= LONG_DROP else EDGE_MARGIN)
+        hi = p.right - (GROUND_MARGIN if end_drop(model, p, 1) >= LONG_DROP else EDGE_MARGIN)
+        wider = [x for x in _stand_xs(p.left + EDGE_MARGIN, p.right - EDGE_MARGIN)
+                 if lo <= x <= hi and clear(x) and (scores.setdefault(x, score(x)) is not None)]
+        if wider:
+            def off(x: float) -> float:
+                return max(p.left + margin - x, x - (p.right - margin), 0.0)
+            near = min(off(x) for x in wider)
+            ok = [x for x in wider if off(x) <= near + 1e-6]
+    on = max((danger.share(kind) for sx, kind in points if abs(best[1] - sx) < SPAWN_CLEAR), default=0.0)
+    if ok and max(scores[x] for x in ok) >= best[0] - on - 1e-9:
+        return ok
+    return xs
+
+
+def _score_of(grid: dict, pid: int, x: float) -> float | None:
+    """A spot's score at map x on platform `pid` by `grid` (_grid: its coverage less DANGER_WEIGHT times its danger),
+    None with nothing in reach there."""
+    c, d = grid.get((pid, x), (0.0, 0.0))
+    return c - DANGER_WEIGHT * d if c > 0 else None
 
 
 def _xs_within(xs: list[float], p: Platform, margin: float) -> list[float]:
@@ -305,7 +365,10 @@ def spot_for(model: MapModel, pid: int, left: list[Monster], current: Spot, here
         if p.id == pid:
             continue
         ok = spot_ok(model, p.id, worth)
-        for x in _xs_within(_stand_xs(p.left + EDGE_MARGIN, p.right - EDGE_MARGIN), p, _margin(p, danger)):
+        xs = _xs_within(_stand_xs(p.left + EDGE_MARGIN, p.right - EDGE_MARGIN), p, _margin(p, danger))
+        if ground is not None:
+            xs = _off_spawns(model, p, danger, xs, lambda x, pid=p.id: _score_of(grid, pid, x))
+        for x in xs:
             c, d = grid.get((p.id, x), (0.0, 0.0))
             if not ok and not _better(c - DANGER_WEIGHT * d, ground):
                 continue

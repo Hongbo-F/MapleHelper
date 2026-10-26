@@ -396,12 +396,12 @@ def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[M
 
 def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], visible: list[Monster],
                  hidden: list[Monster], approach: bool, toward: int = 0, jumps=None,
-                 goal: float | None = None) -> tuple:
+                 goal: float | None = None, edges: tuple[float, float] | None = None, up=None) -> tuple:
     """What to do about the monsters to `fight` (attack.stance, by each kind's size, with what her jumps' attacks
     reach: jump_cover, or `jumps` if given), walking up to them only if `approach`; `toward`: she's travelling that
-    way, to map x `goal` on her platform if given (stance's). For a throw, everything in the star's path is kept
-    (st.aimed): a kill is matched against it. A jump throw that a stance chose for where its attack reaches is logged
-    with its numbers and sent as a telemetry 'jump' record when it's carried out (throw_act: log_jump)."""
+    way, to map x `goal` on her platform if given; `edges`, `up`: stance's. For a throw, everything in the star's path
+    is kept (st.aimed): a kill is matched against it. A jump throw that a stance chose for where its attack reaches is
+    logged with its numbers and sent as a telemetry 'jump' record when it's carried out (throw_act: log_jump)."""
     here = s.platform
     body = bodies(h.model)  # each kind's body (game data)
     tops, halves = body_sizes(h.model)
@@ -410,7 +410,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
-                 goal=goal)
+                 goal=goal, edges=edges, up=up)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")

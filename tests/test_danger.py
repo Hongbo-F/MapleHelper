@@ -354,3 +354,70 @@ def test_of_two_grounds_as_good_she_goes_to_the_one_with_the_safer_stand(monkeyp
     h.visit = Visit(33, spots.Spot(33, 0.0, 1.0, False))
     rate, g = h._best_rate(SimpleNamespace(platform=SimpleNamespace(id=33), where=s.where, players=[]))
     assert g == 8 and rate == pytest.approx(20.0 / (10.0 + h._visit_s(8)))
+
+
+def test_her_steps_away_keep_drop_room_from_an_end_with_a_long_drop_and_none_from_another():
+    """stance.drop_limits (`edges`): DROP_ROOM in from an end with the next platform under it LONG_DROP or more down (or
+    none), the end itself where the drop is short; an escape's step toward a long drop stops DROP_ROOM from it, and with
+    less room than that, there's no step that way (live on 2026-10-25 three knocks took her off Tree Dungeon's 23 from
+    52-79 units in, each after a step toward its left end)."""
+    model = build([(0, 500, 1000, 500), (1000, 540, 1300, 540)], [("19", 300, 500)])  # nothing under its left end
+    d, p = Danger(model, HER), model.platform_under(500, 500)
+    assert stance.end_drop(model, p, -1) == math.inf and stance.end_drop(model, p, 1) == 40
+    assert stance.drop_limits(model, p) == (stance.DROP_ROOM, 1000)
+    horny = seen("horny-mushroom", 300, 500, p.id)
+    for x in (150.0, 180.0, 230.0):  # escaping left from one on her right
+        mine = seen("horny-mushroom", x + 60, 500, p.id)
+        act = stance.stance(x, 500, p, [mine], around=[mine], danger=d, edges=stance.drop_limits(model, p))
+        assert not (act[0] == "back" and x - act[2] < stance.DROP_ROOM), (x, act)
+        assert not (act[0] == "jump_back" and x - stance.JUMP_BACK_SPAN < stance.DROP_ROOM), (x, act)
+        old = stance.stance(x, 500, p, [mine], around=[mine], danger=d)  # without: stepped toward the drop
+        assert old[:2] in (("back", "left"), ("jump_back", "right")), (x, old)
+    assert horny.platform == p.id
+
+
+def test_under_a_platform_overhead_an_escape_can_be_the_jump_up_onto_it():
+    """stance._escape's `up` (overhead): on her platform under another one within her jump height, a jump (back, or in
+    place) lands her up on it; the jump up, throwing back as she rises, is an escape by the danger where she'd land
+    there, where a Horny Mushroom on her platform can't reach her (60 above: over its 51 units)."""
+    model = build([(0, 500, 1000, 500), (0, 440, 400, 440)], [("19", 300, 500)])
+    d = Danger(model, HER)
+    her, over = model.platform_under(700, 500), model.platform_under(200, 440)
+    assert stance.overhead(model, her, 200) is over and stance.overhead(model, her, 700) is None
+    assert not stance.open_above(model, her, 200, 200)
+    mine = seen("horny-mushroom", 260, 500, her.id)
+    up = lambda x: stance.overhead(model, her, x)  # noqa: E731
+    act = stance.stance(200, 500, her, [mine], around=[mine], danger=d, can_jump=lambda a, b: stance.open_above(
+        model, her, a, b), up=up, edges=stance.drop_limits(model, her))
+    assert act[0] == "jump_throw" and act[1] == "right" and stance.plan_of(act).why == f"up onto {over.id}"
+    assert d.at(over.id, 200, [mine]) < d.at(her.id, 200, [mine])
+    before = stance.stance(200, 500, her, [mine], around=[mine], danger=d,
+                           can_jump=lambda a, b: stance.open_above(model, her, a, b))
+    assert before[0] != "jump_throw" or stance.plan_of(before) is None
+
+
+def test_of_the_monsters_in_reach_one_on_her_platform_that_counts_is_thrown_at_first():
+    """stance._throw_side with the danger (TOUCHER_FIRST): toward a monster in reach on her platform whose kind counts,
+    whichever way she faces (live on 2026-10-25 her spot's Green Mushroom on 24 made 14 of her 34 touches, 3 while she
+    shot 23's Horny Mushrooms the other way); without the danger, the way she faces as before."""
+    model = build([(0, 500, 1000, 500), (1000, 520, 1600, 520)], [("13", 700, 500), ("19", 1300, 520)])
+    d, p = Danger(model, HER), model.platform_under(500, 500)
+    green = seen("green-mushroom", 330, 500, p.id)
+    low = seen("horny-mushroom", 720, 520, model.platform_under(1300, 520).id)
+    assert stance.stance(500, 500, p, [green, low], facing="right") == ("throw", "right")
+    assert stance.stance(500, 500, p, [green, low], facing="right", danger=d) == ("throw", "left")
+
+
+def test_a_spot_keeps_clear_of_its_platforms_spawn_points_where_that_is_worth_it():
+    """attack.spots._off_spawns (SPAWN_CLEAR): of the places tried as a spot along a platform, those 50 units or more from
+    its spawn points of kinds that count (a monster back at its point is on her before she can shoot it); with none,
+    the nearest ones past the knock room from an end with a short drop under it (here its left, 75 over the platform
+    under it: Tree Dungeon's 24 over 25; its right a long drop); taken only within the touch's share of the best score,
+    else the places as they were. Where nothing counts, as they were."""
+    model = build([(176, 425, 310, 425), (44, 500, 276, 500)], [("13", 272, 425)])
+    d, p = Danger(model, HER), model.platform_under(250, 425)
+    xs = [231.0, 241.0, 251.0]  # GROUND_MARGIN from its ends, all within 50 of 272
+    assert spots._off_spawns(model, p, d, xs, lambda x: 1.0 - abs(x - 231) / 1000) == [221.0]
+    assert spots._off_spawns(model, p, d, xs, lambda x: 1.0 - abs(x - 231) / 50) == xs  # 221 scores 0.8: not worth it
+    assert spots._off_spawns(model, p, d, [181.0, 191.0, 231.0], lambda x: 1.0) == [181.0, 191.0]
+    assert spots._off_spawns(model, p, None, xs, lambda x: 1.0) == xs

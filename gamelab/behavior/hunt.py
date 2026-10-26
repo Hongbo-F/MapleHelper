@@ -92,7 +92,7 @@ from .. import telemetry
 from ..attack import reach, ropes, spots
 from ..attack.ropes import Refuge
 from ..attack.spots import GROUND_MARGIN, Spot
-from ..attack.stance import MIN_MOVE, act_text, close_to, jump_hits, open_above, stance
+from ..attack.stance import MIN_MOVE, act_text, close_to, drop_limits, jump_hits, open_above, overhead, stance
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
@@ -919,14 +919,24 @@ class Hunt:
         the way she goes."""
         jumps = self._cover(s, targets, visible + hidden)
         toward = 0 if goal is None else (1 if goal > s.where.x else -1)
+        edges, up = self._edges(s)
         if log:
             return fight._take_stance(self.h, self.fs, s, targets, visible, hidden, approach, toward=toward,
-                                      jumps=jumps, goal=goal)
+                                      jumps=jumps, goal=goal, edges=edges, up=up)
         here = s.platform
         return stance(s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
                       can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops,
                       halves=self._halves, around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward,
-                      goal=goal)
+                      goal=goal, edges=edges, up=up)
+
+    def _edges(self, s: Scene) -> tuple:
+        """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something
+        counts as a danger; (None, None) where nothing does (the first map, as it was)."""
+        d = getattr(self.h, "danger", None)
+        if d is None or not d.any or s.platform is None or getattr(self, "model", None) is None:
+            return None, None
+        here, model = s.platform, self.model
+        return drop_limits(model, here), (lambda x: overhead(model, here, x))
 
     def _shoot(self, s: Scene, targets, visible, hidden, now: float, rule: str, approach: bool) -> None:
         """One step of stance's answer: a throw (fight's bookkeeping kept), or a walk."""

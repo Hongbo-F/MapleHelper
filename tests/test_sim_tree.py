@@ -457,3 +457,23 @@ def test_the_harness_has_the_hunt_loop_with_low_hp_at_half_to_compare_against():
         with pytest.raises(Stop):
             harness.POLICIES[policy](sim)
         assert made[-1] == (low, 0.45)
+
+
+def test_on_tree_dungeon_23s_left_end_is_a_long_drop_its_left_part_is_under_22_and_23_is_shot_from_24_off_its_green():
+    """What the live hunt of 2026-10-25 lost to, on the map's own data: 23's left end drops 389 units to 29 (her steps
+    away keep 100 from it: stance.drop_limits), its right 37 onto 24, 24's left 74 onto 25 and its right is the tower's
+    wall; left of x 10 22 is overhead (a jump lands her on it: stance.overhead), and her spot for 23 on 24 keeps 50 from
+    24's Green Mushroom's spawn point at 272 (it was 231) with 23 still in reach."""
+    from gamelab.attack import danger as danger_mod
+    from gamelab.attack import spots, stance
+    m = tree_map()
+    p23, p24 = m.platform(23), m.platform(24)
+    assert round(stance.end_drop(m, p23, -1)) == 389 and round(stance.end_drop(m, p23, 1)) == 37
+    assert round(stance.end_drop(m, p24, -1)) == 74 and stance.end_drop(m, p24, 1) == 0.0
+    assert stance.drop_limits(m, p23) == (p23.left + stance.DROP_ROOM, p23.right)
+    assert stance.drop_limits(m, p24) == (p24.left, p24.right)
+    assert stance.overhead(m, p23, -118).id == 22 and stance.overhead(m, p23, 50) is None
+    d = danger_mod.of_map(m, danger_mod.Her(hp=752.0, level=24.0))
+    sp = spots.best_spot(m, 23, {"horny-mushroom", "green-mushroom"}, d)
+    assert sp.platform == 24 and abs(sp.x - 272) >= spots.SPAWN_CLEAR and sp.coverage >= 0.95, sp
+    assert spots.best_spot(m, 7, {"horny-mushroom", "green-mushroom"}, d) == spots.Spot(8, 147.0, 1.0, False, 0.182)
