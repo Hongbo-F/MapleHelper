@@ -207,8 +207,8 @@ PICK_S = 0.6           # s standing on a pile (4 presses)
 # that it didn't (localization.unseen: the feed's hidden tracks, her memory's of the last UNSEEN_S), or (DUE_BACK) a
 # spawn point's monster due back. The pile waits, still known, for a look that clears it; a trip for it is called off
 # at the chain that sees it not clear (`_call_off`). 100 units, not the analysis's "~150" (a Horny Mushroom walking at
-# her 100 units a second is on her in about a second at 150): in the simulator (Tree Dungeon, crowd, `--world zero-walls --world
-# near-misses`, `--attack choice`, 8 seeds of 5 minutes) with 150 she lost 0.92 bars of HP a minute alive, drank 13.6
+# her 100 units a second is on her in about a second at 150): in the simulator (Tree Dungeon, crowd, `--world
+# zero-walls --world near-misses`, `--attack choice`, 8 seeds of 5 minutes, before the review of 2026-10-26) with 150 she lost 0.92 bars of HP a minute alive, drank 13.6
 # potions a run and picked up 115 mesos' worth a minute; with 100 0.87, 12.9 and 130 (EXP a minute 297.7 and 307.4);
 # without it (and HP_EXP) 1.13, 16.9 and 170. Replayed on the live hunt of 2026-10-25 (78 times she went for a pile),
 # 150 has 47 of them wait, 100 44: the stays of both carried 7 of her touches and 1.04 bars of HP, of the 3.4 she lost
@@ -237,15 +237,23 @@ DUE_TO = 12.0
 # MESO_EXP; the knocks off a platform a touch can bring aren't counted (attack.stance keeps her off a long drop's end).
 # The user is short of money for potions.
 HP_EXP = 250.0
-# Whether her fights, her drops' price and guards go by the monsters about her that a look didn't find (`_unseen`:
-# localization.unseen); off, by the look's alone (and the fight's own hidden ones), as before. With her trips'
-# (control.navigator.UNSEEN_TRIPS: the numbers there). Not her throws' attack (behavior.attacks: Lucky Seven at what's
-# in the look's way, the regular attack at "nothing in its way"): taken by those too (review of 2026-10-26), in the
-# simulator a quarter of her casts at one of them hit nothing, and her MP items went up 6% a run, her casts a kill 6%
-# (Tree Dungeon, crowd, near-misses, the hunt loop, 8 seeds of 5 minutes, the dead ones' tracks left out already:
-# localization.unseen.hidden; D:/MapleHelper-scratch/hunt-ab/B/fix/out/round1.txt), where live 9 of 325 throws went
-# out as "nothing in its way" on 2026-10-25, the regular attack, and her MP is short.
+# Whether her fights, her drops' price and guards and her throws' attack go by the monsters about her that a look didn't
+# find (`_unseen`: localization.unseen); off, by the look's alone (and the fight's own hidden ones), as before. With her
+# trips' (control.navigator.UNSEEN_TRIPS: the numbers there).
 UNSEEN_FIGHTS = True
+# ... her throws' attack (behavior.attacks: Lucky Seven at one in its way, the regular attack at "nothing seen in its
+# way"; `_unseen_here`, those on her platform). A monster under her body is one the looks miss (none within 25 units in
+# 1317 live looks), and a throw at it went out as the regular attack. Taken with the dead ones' tracks in (before the
+# review of 2026-10-26: localization.unseen.hidden) it spent 11-13% more MP for her EXP (16 seeds of 10 minutes: the
+# review's). With them left out, in the simulator (Tree Dungeon, crowd, `--attack choice`, 16 seeds of 5 minutes; D:/
+# MapleHelper-scratch/hunt-ab/B/fix/out/round6.txt), against without: grinding, EXP a minute +9.1% and +7.4% (near-
+# misses, zero-walls; 2.4 and 3.7 standard errors), MP for her EXP +1.6% and -3.8%, HP lost -12% and 0%; the hunt loop
+# +1.3% and -4.9% EXP (neither 1.6 standard errors), MP for her EXP +4.7% and +5.1% (2 standard errors each), HP +7% and
+# +3%: in all, 3% more EXP for 2% more MP an EXP. Only those within 1 s (the review's "strong evidence"): +5.2%, +5.9%,
+# +1.0%, -2.0% EXP and +3.8%, -4.0%, +5.0%, +1.2% MP an EXP; within 50 units of her alone, +2.4%, +3.5%, -1.5%, +1.3%
+# EXP. Live on 2026-10-25 9 of her 325 throws went out as "nothing seen in its way" (the simulator, near-misses: 82 of
+# 955), so live it counts for less either way.
+UNSEEN_ATTACK = True
 # Rule 6a: a pile with a drop in it worth this many mesos on its own (looting.Worth, the game data's prices: Pile.
 # dearest) is gone for at once, ahead of shooting: of the first map's drops a Slime Bubble (50) and a White Potion (35),
 # 2-8 times a pile's coins (15) or its other items (the user, watching her hunt on 2026-10-21: "Expensive items
@@ -457,6 +465,9 @@ class Hunt:
         if EXP_FIRST:
             looter.yield_to = self._yields  # picking up stops for what's in reach
         looter.unseen = self._unseen  # ... and the monsters about that a look missed guard drops too
+        attacks = getattr(self.h, "attacks", None)
+        if attacks is not None and UNSEEN_ATTACK:  # ... and a throw's attack goes by those on her platform (attacks)
+            attacks.unseen = self._unseen_here
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         regains = self.h.senses.regains
@@ -482,6 +493,8 @@ class Hunt:
             self._leave_ground()
         finally:
             looter.yield_to, looter.unseen = yield_to, about
+            if attacks is not None:
+                attacks.unseen = None
             self.h.senses.regains = regains
         self.report.seconds = time.monotonic() - start
         self._log_memory()
@@ -762,6 +775,14 @@ class Hunt:
         here = s.platform.id
         mine = [m for m in more if m.platform == here and d.share(m.kind) > 0 and not any(_same(m, t) for t in targets)]
         return targets + mine, visible, hidden + more
+
+    def _unseen_here(self, s: Scene) -> list[Monster]:
+        """Those of `_unseen` on her platform in look `s` whose kind counts as a danger (her throws' attack goes by them:
+        behavior.attacks, UNSEEN_ATTACK), where something does."""
+        d = getattr(self.h, "danger", None)
+        if s.platform is None or d is None or not d.any:
+            return []
+        return [m for m in self._unseen(s) if m.platform == s.platform.id and d.share(m.kind) > 0]
 
     def _unseen(self, s: Scene) -> list[Monster]:
         """The monsters about that look `s` didn't find (localization.unseen: the feed's hidden tracks that count, none
@@ -1209,7 +1230,8 @@ class Hunt:
         """Why pile `p` isn't to be gone for from look `s` now, or None: a monster that counts as a danger (`_touchers`:
         seen, about unseen, or with DUE_BACK due back at its spawn point by the time she'd be there) within PILE_CLEAR
         of the stretch of its platform from where she'd land (`_landing`), or stands on it, to the pile (see
-        PILE_CLEAR). Said in her log when it changes for a pile. Never where nothing counts as a danger (the first map)."""
+        PILE_CLEAR). Said in her log when it changes for a pile. Never where nothing counts as a danger (the first
+        map)."""
         d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
         if d is None or not d.any or p.platform is None or s.where is None or s.platform is None:
             return None

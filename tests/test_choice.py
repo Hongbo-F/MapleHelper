@@ -436,6 +436,20 @@ def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_t
     assert a.target("right") is not None and a.target("left") is None
 
 
+def test_a_monster_about_that_the_look_missed_takes_a_throw_its_way_as_the_looks_own():
+    """Attacks.unseen (the hunt loop's Hunt._unseen_here, hunt.UNSEEN_ATTACK): a monster under her body the look didn't
+    find (none within 25 units in 1317 live looks) is in the throw's way, so it's Lucky Seven at it; with nothing about
+    either, the regular attack ("nothing seen in its way", no MP thrown at nothing). The dead ones' tracks aren't among
+    them (localization.unseen.hidden: tests/test_hunt.py)."""
+    a, said = _attacks()
+    a.on_look(_look([]))
+    assert a.key("right") == KEYS7.attack.name and a.counts["nothing in its way"] == 1
+    under = _look([("horny-mushroom", 15.0, None)]).monsters[0]
+    a.unseen = lambda s: [under]
+    assert a.target("right") is under and a.target("left") is None
+    assert a.key("right") == KEYS7.lucky_seven.name and "Lucky Seven: horny-mushroom" in said[-1]
+
+
 def test_actions_ask_the_choice_for_each_throws_key():
     act = Actions(KEYS7, skill=True)
     asked = []

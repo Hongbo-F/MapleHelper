@@ -699,7 +699,8 @@ def test_her_own_kills_ghost_and_a_track_out_of_sight_too_long_keep_no_pile_wait
     fresh drop waiting and drew throws at nothing. A Horny Mushroom she killed at 752 half a second ago, its track out
     of sight 0.4 s: the pile it dropped at 750 doesn't wait for it, nor is it a target, with the kill in her ledger
     (unseen._hers) or the feed's own word that her gain goes on it (Track.owed); one out of sight past unseen.TRACK_S
-    keeps nothing waiting either; one out of sight 0.4 s that no kill is on does (the look missed it)."""
+    keeps nothing waiting either, nor takes a throw's Lucky Seven (Hunt._unseen_here); one out of sight 0.4 s that no
+    kill is on does (the look missed it)."""
     from gamelab.behavior.ledger import Kill
     from gamelab.localization.tracking import HIDDEN, Track
     from gamelab.localization.unseen import TRACK_S
@@ -717,10 +718,11 @@ def test_her_own_kills_ghost_and_a_track_out_of_sight_too_long_keep_no_pile_wait
         s = _on(ground, 700.0, m)
         s.tracks, s.t = [tr], now
         targets, _, hidden = h._with_unseen(s, [], [], [])
-        return h._pile_block(s, pile), targets, hidden
-    why, targets, hidden = check(track(0.4), [Kill(now - 0.5, "horny-mushroom", ground, 750.0, 500.0, ground)])
-    assert why is None and targets == [] and hidden == []
-    assert check(track(0.4, owed=True))[:2] == (None, [])
-    assert check(track(TRACK_S + 0.3))[:2] == (None, [])
-    why, targets, _ = check(track(0.4))
+        return h._pile_block(s, pile), targets, hidden, h._unseen_here(s)
+    why, targets, hidden, throw = check(track(0.4), [Kill(now - 0.5, "horny-mushroom", ground, 750.0, 500.0, ground)])
+    assert why is None and targets == hidden == throw == []
+    assert check(track(0.4, owed=True))[:2] == (None, []) and check(track(0.4, owed=True))[3] == []
+    assert check(track(TRACK_S + 0.3))[:2] == (None, []) and check(track(TRACK_S + 0.3))[3] == []
+    why, targets, _, throw = check(track(0.4))
     assert why == "a horny-mushroom unseen 2 units from her way to it" and [t.x for t in targets] == [752.0]
+    assert [t.x for t in throw] == [752.0]  # (her throws' attack goes by it: behavior.attacks, UNSEEN_ATTACK)
