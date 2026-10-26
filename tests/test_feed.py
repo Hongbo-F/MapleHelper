@@ -4,7 +4,9 @@ drained once, what's asked is done on the next frame (its searches off the frame
 Senses on it: every look and glance from it, standing still (LookLost) while it has nothing to act on, and going on
 after. The perception service that runs it live is test_service's."""
 
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -281,6 +283,22 @@ def test_a_rate_gone_up_takes_from_the_next_frame():
     gaps = np.diff(out)
     assert len(out) == 7 and gaps[0] >= 0.45 and all(g < 0.15 for g in gaps[1:5]), gaps
     assert gaps[5] >= 0.2 and gaps[4] < 0.15, gaps  # (gone down: the frame due at the old rate first)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows' priority classes")
+def test_a_worker_started_at_idle_priority_stays_there_and_one_at_normal_goes_below_it():
+    """feed.quiet (the harness's workers): a background job started at idle (D:/MapleHelper-scratch/cpu/hunt/
+    bg_quiet.cmd, every child inheriting it) had its workers go up to below normal."""
+    import subprocess
+    code = ("import ctypes; from gamelab.localization import feed; feed.quiet(); k = ctypes.windll.kernel32; "
+            "k.GetCurrentProcess.restype = ctypes.c_void_p; k.GetPriorityClass.argtypes = (ctypes.c_void_p,); "
+            "print(k.GetPriorityClass(k.GetCurrentProcess()))")
+    classes = []
+    for start in (feed.IDLE_CLASS, 0x20):  # (IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS)
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
+                             creationflags=start, cwd=Path(__file__).parent.parent)
+        classes.append(int(out.stdout.split()[-1]))
+    assert classes == [feed.IDLE_CLASS, feed.BELOW_NORMAL]
 
 
 def test_frames_the_game_isnt_showing_say_so_and_are_not_read():

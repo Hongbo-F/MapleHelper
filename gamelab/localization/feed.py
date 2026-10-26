@@ -66,6 +66,7 @@ RECOVER_EVERY_S = 0.2  # s at least between two of the eyes' recoveries while fr
 KEEP = 8             # states the stack's side keeps
 EVENTS_KEPT = 10_000  # events kept for the next drain at most (the oldest go: a stack that never drains)
 BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS (quiet: the harness's and soak's workers)
+IDLE_CLASS = 0x40      # ... and IDLE_PRIORITY_CLASS (a process started at it stays there)
 # True: a look reads the feed's world state, and asks the next frame only for what the newest state wouldn't have fresh
 # by then (to_ask): her place and the monsters it follows are of the look's own frame (re-found in every frame), the
 # monsters new in her band of a search within MOBS_FRESH_S, the whole screen within WIDE_FRESH_S; the drops it asks for
@@ -247,13 +248,17 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
 
 def quiet() -> None:
     """This process at below-normal priority (the game and the perception service keep their pace: the harness's,
-    soak's and the offline measurements' workers), and OpenCV on one thread: the monster search's own threads do the
-    work, and OpenCV's 24 on top only cost (a 1920x1080 conversion took 25 ms of CPU across them)."""
+    soak's and the offline measurements' workers), or at idle if it was started there (a background job's, with all its
+    children: its workers had gone up to below normal), and OpenCV on one thread: the monster search's own threads do
+    the work, and OpenCV's 24 on top only cost (a 1920x1080 conversion took 25 ms of CPU across them)."""
     if sys.platform == "win32":
         k = ctypes.windll.kernel32
         k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.GetPriorityClass.argtypes = (ctypes.c_void_p,)
+        k.GetPriorityClass.restype = ctypes.c_uint
         k.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_uint)
-        k.SetPriorityClass(k.GetCurrentProcess(), BELOW_NORMAL)
+        if k.GetPriorityClass(k.GetCurrentProcess()) != IDLE_CLASS:
+            k.SetPriorityClass(k.GetCurrentProcess(), BELOW_NORMAL)
     import cv2
     cv2.setNumThreads(1)
 
