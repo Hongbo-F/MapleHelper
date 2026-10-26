@@ -196,13 +196,14 @@ def test_the_regular_attack_with_mp_under_a_cast_and_with_nothing_in_the_way():
     assert r.key("right") == KEYS7.attack.name
 
 
-def test_a_casts_mp_is_off_at_its_throw_and_a_frame_shown_before_it_showed_reads_no_more():
+def test_a_casts_mp_is_off_at_its_throw_and_a_frame_shown_before_it_could_show_reads_it_less():
     """A look that doesn't wait for her keys' effect (senses.KEYS_WAIT "moves" or "none") can be of a frame shown
     before a throw's key, right after it: its bar still reads the MP the cast took. The cast's MP is taken off at its
-    throw (Attacks.on_throw), and such a bar is believed only where it's lower, as is one shown before MP_SHOWS_S after
-    it (live a cast's MP first showed 0.21-0.53 s after its key); one shown then is her MP again (her pet's potion,
-    say). (With KEYS_WAIT "moves", in loop_tree_mp_runs_out she cast with 5 MP, nothing thrown: the look after her
-    last cast, shown before its key, read the 12 it took.)"""
+    throw (Attacks.on_throw), and a bar read off a frame shown under MP_FIRST_S after it is less the cast; under
+    MP_SHOWS_S, less it as far as her reckoning goes (live a cast's MP first showed 0.21-0.53 s after its key): her
+    pet's potion shows at once, less the cast, and in full once the cast surely shows. (With KEYS_WAIT "moves", in
+    loop_tree_mp_runs_out she cast with 5 MP, nothing thrown: the look after her last cast, shown before its key, read
+    the 12 it took.)"""
     from gamelab.behavior.attacks import MP_SHOWS_S
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)], mp=20 / MAX_MP))
@@ -215,17 +216,69 @@ def test_a_casts_mp_is_off_at_its_throw_and_a_frame_shown_before_it_showed_reads
     assert a.key("right") == KEYS7.attack.name and a.counts["MP"] == 1
     a.on_throw(at + 1.0, "right")  # (the regular attack: no MP)
     assert a.mp == pytest.approx(9 / MAX_MP)
-    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + 0.3))  # too soon for the cast's MP to show
-    assert a.mp == pytest.approx(9 / MAX_MP)
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + 0.1))  # the pet's potion: the cast can't show
+    assert a.mp == pytest.approx(0.5 - 11 / MAX_MP)
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + 0.3))  # it may show: her reckoning stands
+    assert a.mp == pytest.approx(0.5 - 11 / MAX_MP)
     a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + MP_SHOWS_S))
     assert a.mp == 0.5 and a.key("right") == KEYS7.lucky_seven.name
+
+
+def test_her_mp_follows_her_pets_drink_and_presses_that_took_none_while_she_casts_on():
+    """With a look 0.2-0.34 s after each key (live), every read comes inside MP_SHOWS_S of a cast. Believed then only
+    where it was lower (review of 2026-10-26), her MP as reckoned only went down: under the warning a drink read 0.25 s
+    after her next cast's key stayed 1.3 px, and she threw the regular attack for 'MP' with 126 MP; over 40 casts with
+    1 press in 10 taking none she reckoned 35 MP against 103. Now the drink is believed less that cast, and the
+    reckoning keeps within a cast and a px of her bar."""
+    mon = [("horny-mushroom", 250.0, None)]
+    said = []
+    a = Attacks(MODEL, KEYS7, "choice", max_mp=623.0, level=16, log=said.append)
+    t = time.monotonic()
+    a.on_look(_look(mon, mp=6 / 104, t=t))              # 6 px: 36 MP
+    assert a.key("right") == KEYS7.lucky_seven.name
+    a.on_throw(t + 0.05, "right")                        # under the pet's warning
+    a.on_look(_look(mon, mp=0.0, t=t + 0.35))            # its 0: not believed
+    assert a.key("right") == KEYS7.lucky_seven.name     # ~22 MP: a cast's
+    a.on_throw(t + 0.90, "right")
+    a.on_look(_look(mon, mp=21 / 104, t=t + 1.15))       # the drink shows: 21 px (126 MP)
+    assert a.mp == pytest.approx(21 / 104 - 14 / 623)
+    assert a.key("right") == KEYS7.lucky_seven.name and a.counts["MP"] == 0
+    b = Attacks(MODEL, KEYS7, "choice", max_mp=623.0, level=16, log=lambda line: None)
+    true, t = 600.0, time.monotonic()
+    b.on_look(_look(mon, mp=round(true / 623 * 104) / 104, t=t))
+    for i in range(40):
+        assert b.key("right") == KEYS7.lucky_seven.name
+        b.on_throw(t + 0.05, "right")
+        true -= 0 if i % 10 == 9 else 14  # one press in ten takes none
+        true += 0.17                        # her regen
+        b.on_look(_look(mon, mp=int(true / 623 * 104) / 104, t=t + 0.35))  # the bar as drawn (whole px)
+        assert -1e-9 <= true - b.mp * 623 <= 14 + 623 / 104 + 1e-9, i
+        t += 0.85
+
+
+def test_a_bar_read_lower_than_her_reckoning_is_believed_at_once():
+    """A cast her reckoning missed (or MP taken otherwise) shows as a bar lower than she reckons: believed, less the
+    casts it can't show yet, whatever the casts it may."""
+    a, _ = _attacks()
+    t = time.monotonic()
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.8, t=t))
+    a.key("right")
+    a.on_throw(t + 0.05, "right")
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=t + 0.35))  # (the cast may show)
+    assert a.mp == pytest.approx(0.5)
+    a.key("right")
+    a.on_throw(t + 0.40, "right")
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.4, t=t + 0.45))  # (that one can't)
+    assert a.mp == pytest.approx(0.4 - 11 / MAX_MP)
 
 
 def test_a_zero_read_under_her_pets_mp_warning_is_her_mp_as_reckoned():
     """Live on 2026-10-25 her MP bar read 0 for up to 0.6 s after a cast took her under her pet's 5% warning, from 6-9
     px (of 104), while she had about 20-35 MP: 11 regular throws went out for 'MP 0'. Such a 0 (within WARNING_S of a
-    read of WARNING_STEPS or less) is her last read less her casts since: from 7 px (40 MP at 601) and a cast (11), 29
-    MP, a cast's; from 3 px (17), 6: the regular attack. A 0 after a read of more, or read longer, is believed."""
+    read above 0, it or her MP as reckoned since WARNING_STEPS or less) is her last read less her casts since: from 7
+    px (40 MP at 601) and a cast (11), 29 MP, a cast's; from 3 px (17), 6: the regular attack; from 10 px and two
+    casts, 36 (replayed live, two such 0s were believed by the read alone). Counted once a run of 0s. A 0 after a read
+    of more, or read longer, is believed."""
     from gamelab.behavior.attacks import MP_SHOWS_S, WARNING_S
     t0 = time.monotonic()
     for px, key in ((7, KEYS7.lucky_seven.name), (3, KEYS7.attack.name)):
@@ -236,6 +289,17 @@ def test_a_zero_read_under_her_pets_mp_warning_is_her_mp_as_reckoned():
         a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.0, t=t0 + 0.05 + MP_SHOWS_S))  # the warning's 0
         assert a.mp == pytest.approx(px / 104 - 11 / MAX_MP) and a.key("right") == key, px
         assert a.counts["MP 0 under the warning"] == 1 and not any("MP 0 <" in line for line in said)
+    c, said = _attacks()  # from 10 px (58 MP) and two casts, 36 (6.2 px) as reckoned: the warning's too
+    c.on_look(_look([("horny-mushroom", 250.0, None)], mp=10 / 104, t=t0))
+    for k in range(2):
+        c.key("right")
+        c.on_throw(t0 + 0.05 + 0.85 * k, "right")
+    for k in range(3):  # three looks of 0 in a row: one run of them, counted once
+        c.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.0, t=t0 + 1.2 + 0.1 * k))
+    assert c.mp == pytest.approx(10 / 104 - 22 / MAX_MP) and c.key("right") == KEYS7.lucky_seven.name
+    assert c.counts["MP 0 under the warning"] == 1
+    assert "her MP bar's 0 under her pet's warning not believed 1 times" in c.summary()
+    assert "MP 0 under" not in c.summary().split(";")[0]  # (apart from the regular attack's reasons)
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)], mp=7 / 104, t=t0))
     a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.0, t=t0 + WARNING_S + 0.1))  # too long since: believed
@@ -259,7 +323,7 @@ def test_a_ground_throws_cast_is_taken_off_at_its_own_key():
     act.facing = "right"
     act.throw("right")
     assert sent[0][1][0][1] == KEYS7.lucky_seven.name
-    assert a.mp == pytest.approx(1.0 - 11 / MAX_MP) and a._cast is None and a._cast_at == act._attack_at
+    assert a.mp == pytest.approx(1.0 - 11 / MAX_MP) and a._cast is None and a._casts[-1][0] == act._attack_at
 
 
 def test_a_monster_dying_where_a_kill_was_placed_is_no_throws_target_nor_marked():

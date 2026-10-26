@@ -31,15 +31,21 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
   9.7% without: her stars that hit another in their path than the one she aimed at, and misreads).
 - Her MP: the latest look's bar share (Scene.mp) of her MP when full (config.toml [character] mp), less her casts
   that look's frame can't show yet. A cast's MP is taken off as its throw goes out (`on_throw`, told by Actions after
-  its key is chosen, at the key's own time), and a bar read off a frame shown before MP_SHOWS_S after the last cast's
-  key is believed only where it's lower: live a cast's MP first showed 0.21-0.53 s after its key (until 2026-10-26
-  it was believed from senses.KEY_EFFECT_S, 68 ms, on, and Actions.throw told of a ground throw's cast only at the
+  its key is chosen, at the key's own time); live a cast's MP first showed 0.21-0.53 s after its key, so a bar read
+  off a frame shown at t is less the casts keyed after t - MP_FIRST_S (not shown yet), and less those keyed between
+  t - MP_SHOWS_S and then (shown or not) where her MP as reckoned says so: between the two her reckoning stands, past
+  them the bar is believed so (her pet's drink, her regen, a press that took no MP: `_believed`). Until 2026-10-26 the
+  bar was believed from senses.KEY_EFFECT_S, 68 ms, on, and Actions.throw told of a ground throw's cast only at the
   next throw, with that one's key time: harmless while the look before the next key came before the cast showed, 8
-  of 10 pairs live, one cast low in the other 2). (Taking the bar as it read, with KEYS_WAIT "moves" in
+  of 10 pairs live, one cast low in the other 2. (Taking the bar as it read, with KEYS_WAIT "moves" in
   loop_tree_mp_runs_out she cast Lucky Seven with 5 MP, nothing thrown: the look after her last cast, shown before
-  its key, read the 12 MP it took.) Under her pet's MP warning the bar reads 0 for up to 0.6 s after the cast that
-  took her there, while she still has the MP for a cast (WARNING_STEPS): such a 0 isn't believed, her MP is the last
-  read less her casts since.
+  its key, read the 12 MP it took.) For a day (review, 2026-10-26) a read within MP_SHOWS_S of a cast was believed
+  only where it was lower: with a look 0.2-0.34 s after each key, nothing that raised her MP showed while she kept
+  casting, and replayed through the live hunts of 23:43 to 01:03 she threw the regular attack for 'MP' 91 times, 45
+  of them with a cast's MP surely hers (D:/MapleHelper-scratch/hunt-ab/review-a-correct/mp_replay_code.py); the
+  harness 11.75 a run, every one with the MP. Under her pet's MP warning the bar reads 0 for up to 0.6 s after the
+  cast that took her there, while she still has the MP for a cast (WARNING_STEPS): such a 0 isn't believed, her MP
+  is the last read less her casts since.
 
 Each choice is logged with its numbers, and sent as a telemetry 'attack' record; `counts` keeps them for the run's
 report.
@@ -72,18 +78,22 @@ LOST_S = 3.0       # s unseen before a monster she threw at is forgotten (ledger
 FORGET_S = 15.0    # ... and s since her last throw at it (ledger.WOUND_S)
 MODES = ("choice", "skill", "regular")  # attack.choice.pick's modes: `tour --attack` (choice by default)
 DEAD_LIKELY = 0.5  # a monster in a throw's way this likely dead by her throws (Left.dead) isn't its target: the next is
-# s after a cast's attack key that its MP shows on her bar: live on 2026-10-25 (the hunt of 23:43, 1366x768) a cast that
-# went out first showed 0.21-0.53 s after its key, the bar falling over 0.1-0.2 s more (isolated casts:
-# D:/MapleHelper-scratch/analysis-1025/mp-attack-check/nodrop.py, lowcheck2.py). A read off a frame shown sooner is
-# believed only where it's lower than her MP as reckoned (on_throw took the cast off).
+# s after a cast's attack key that its MP may first show on her bar (MP_FIRST_S), and by when it has (MP_SHOWS_S): live
+# on 2026-10-25 (the hunt of 23:43, 1366x768) a cast that went out first showed 0.21-0.53 s after its key, the bar
+# falling over 0.1-0.2 s more (isolated casts: D:/MapleHelper-scratch/analysis-1025/mp-attack-check/nodrop.py,
+# lowcheck2.py). A read off a frame shown at t is less the casts keyed after t - MP_FIRST_S, and those keyed from
+# t - MP_SHOWS_S to then are taken off it as far as her reckoning (on_throw took them off) says (`_believed`).
+MP_FIRST_S = 0.21
 MP_SHOWS_S = 0.55
 # Her pet's MP warning (System Options, 5% steps: sim.world.PET_MP) makes the bar read 0: live on 2026-10-25 every one
 # of 26 runs of 0 reads began 0.20-0.46 s after a cast's key and lasted 0.6 s at most, ending in the pet's drink (24)
 # or, the potions out, in the true 3 px and 1 px; no look ever read 4 or 5 px, and the bar read 6-9 px before each, so
 # the cast took her under 5% (about 20-35 MP: a cast's 14 more), and 11 regular throws went out for 'MP 0' with the MP
 # for a cast (mp-attack-check/zeros.py, series.py). Which frame the game draws then isn't known (perception.hud.mp_fill
-# finds no blue on its row: a warning flash?). So a 0 read within WARNING_S of a read of WARNING_STEPS or less (of
-# choice.MP_STEPS) isn't believed: her MP is the last read less her casts since (and a 0 read longer is).
+# finds no blue on its row: a warning flash?). So a 0 read within WARNING_S of a read above 0 isn't believed where that
+# read, or her MP as reckoned since (the read less her casts), is WARNING_STEPS or less (of choice.MP_STEPS): her MP is
+# the reckoning (and a 0 read longer is believed). By the reckoning too since the review of 2026-10-26: replayed, 2 of
+# the live runs of 0 came after a read of 10 px and two casts (5.3 px, 33 MP) and were believed.
 WARNING_STEPS = 9
 WARNING_S = 2.0
 
@@ -122,8 +132,10 @@ class Attacks:
         self.marks: list[Mark] = []
         self.mp: float | None = None    # her MP bar's share in the latest look, less her casts it can't show (on_look)
         self._cast: float | None = None  # the MP share of the cast `key` chose, until its throw says when it's keyed
-        self._cast_at = -1e18            # when the last cast's attack key went down (on_throw)
+        self._casts: list[tuple[float, float]] = []  # her casts' attack keys (on_throw) and their MP shares, from
+                                                      # MP_SHOWS_S before the latest look on
         self._read: tuple[float, float] | None = None  # the last bar share read above 0, and when (WARNING_STEPS)
+        self._warned = False  # the last bar read was a 0 under her pet's warning (counted once a run of them)
         self.counts: Counter = Counter()  # throws by attack (its key) and by why
         self._last: Scene | None = None  # the latest look that searched for monsters, placed
         self._kills = kills or (lambda: [])
@@ -136,8 +148,8 @@ class Attacks:
 
     def on_look(self, s: Scene) -> None:
         """Her MP; the marks followed, their bars read, forgotten when unseen LOST_S, untouched FORGET_S or killed."""
-        if (read := self._mp_read(s)) is not None:  # (shown before the last cast's MP could show: only lower)
-            self.mp = read if self.mp is None or s.t >= self._cast_at + MP_SHOWS_S else min(self.mp, read)
+        if (read := self._mp_read(s)) is not None:
+            self.mp = self._believed(read, s.t)
         kills = self._kills()
         for k in kills[self._killed:]:
             if getattr(k, "placed", False):
@@ -199,7 +211,8 @@ class Attacks:
             return
         if self.mp is not None:
             self.mp = max(0.0, self.mp - self._cast)
-        self._cast_at, self._cast = at, None
+        self._casts.append((at, self._cast))
+        self._cast = None
 
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look that isn't
@@ -271,9 +284,10 @@ class Attacks:
         c = self.counts
         if not c:
             return ""
-        whys = ", ".join(f"{k} {c[k]}" for k in ("finish", "MP", "nothing in its way", "MP 0 under the warning")
-                         if c[k])
-        return f"Lucky Seven {c['lucky_seven']}, the regular attack {c['attack']}" + (f" ({whys})" if whys else "")
+        whys = ", ".join(f"{k} {c[k]}" for k in ("finish", "MP", "nothing in its way") if c[k])
+        warned = c["MP 0 under the warning"]
+        return (f"Lucky Seven {c['lucky_seven']}, the regular attack {c['attack']}" + (f" ({whys})" if whys else "")
+                + (f"; her MP bar's 0 under her pet's warning not believed {warned} times" if warned else ""))
 
     def _dying(self, m: Monster, t: float, seen: list[Monster] = ()) -> bool:
         """Whether `m` is taken for one dying where a kill of hers was placed (ledger.dying), at t, seen with `seen`."""
@@ -281,17 +295,31 @@ class Attacks:
 
     def _mp_read(self, s: Scene) -> float | None:
         """Her MP bar's share as look `s` read it, or None: not read, or a 0 under her pet's warning (within WARNING_S
-        of a read of WARNING_STEPS px or less), counted ('MP 0 under the warning')."""
+        of a read above 0, it or her MP as reckoned WARNING_STEPS px or less), counted once a run of them ('MP 0 under the
+        warning': live the bar read 0 on up to 6 looks in a row, 10 a second)."""
         if s.mp is None:
             return None
         if s.mp > 0.0:
-            self._read = (s.t, s.mp)
+            self._read, self._warned = (s.t, s.mp), False
             return s.mp
         if self._read is not None and s.t - self._read[0] <= WARNING_S \
-                and self._read[1] <= WARNING_STEPS / choice.MP_STEPS + 1e-9:
-            self.counts["MP 0 under the warning"] += 1
+                and min(self._read[1], 1.0 if self.mp is None else self.mp) <= WARNING_STEPS / choice.MP_STEPS + 1e-9:
+            if not self._warned:
+                self.counts["MP 0 under the warning"] += 1
+            self._warned = True
             return None
+        self._warned = False
         return s.mp
+
+    def _believed(self, read: float, t: float) -> float:
+        """Her MP from bar share `read` off a frame shown at `t`: less her casts keyed after t - MP_FIRST_S (it can't
+        show them yet), and her MP as reckoned where that's within what the casts keyed from t - MP_SHOWS_S to then
+        (shown or not) leave of it; past those bounds, the bound (a drink, regen or a press that took no MP shows,
+        less a cast at most; a cast her reckoning missed, at once)."""
+        self._casts = [(at, mp) for at, mp in self._casts if at > t - MP_SHOWS_S]
+        hi = max(0.0, read - sum(mp for at, mp in self._casts if at > t - MP_FIRST_S))
+        lo = max(0.0, hi - sum(mp for at, mp in self._casts if at <= t - MP_FIRST_S))
+        return hi if self.mp is None else min(max(self.mp, lo), hi)
 
     def _mark_of(self, m: Monster) -> Mark | None:
         return next((mk for mk in self.marks if mk.m is m or seen_again(mk.m, [m]) is m), None)
