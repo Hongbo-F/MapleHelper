@@ -22,10 +22,11 @@ as they start and end, any number at once, none of them its children:
   merged with the others'), `throw`, `full` (the next frame at full size: the pet's panels, the pick-up log's OCR),
   `status`, `bye`;
 - the frames in shared memory (localization.feed.Ring: RING_SLOTS look frames, FULL_SLOTS full-size ones), each
-  run's own (`epoch`): when the map changes (a command that acts names another) or the game is first seen, a new
-  run with new rings, told to every client.
-A client gone (its pipe closed) is dropped. A client of a service gone reconnects every RECONNECT_S, and starts one
-(`ensure`: detached, through WMI as the babysitter does, so it outlives the command) at most every ENSURE_EVERY_S.
+  run's own (`epoch`): when the map changes (a command that hunts names another, or one that acts while none hunts:
+  Service._hello) or the game is first seen, a new run with new rings, told to every client.
+A client gone (its pipe closed) is dropped. A client of a service gone (or silent SILENT_S) reconnects every
+RECONNECT_S, and starts one (`ensure`: detached, through WMI as the babysitter does, so it outlives the command) at
+most every ENSURE_EVERY_S. A service whose frame loop hangs ends itself (STUCK_S), for another to be started.
 
 Measured before it was built (D:/MapleHelper-scratch/perceive: README, The perception service): a state reaches a
 client 0.13-0.25 ms after it goes, a frame copies out of the ring in 1-1.6 ms, and a client that never read held the
@@ -59,6 +60,12 @@ from .worldstate import (LOOT_EVERY_S, LOOT_WIDE_EVERY_S, Asks, Schedule, Search
 
 ADDRESS = r"\\.\pipe\gamelab-perceive"
 MUTEX = "Local\\gamelab-perceive"
+# `perceive --frames` (saved frames, offline) has a pipe, mutex and info file of its own: the live service starts and is
+# reached beside it (with the live ones, a run of it on the PC kept the service from starting, and a command from the
+# same checkout acted on saved frames). A command reaches it with GAMELAB_PERCEIVE=saved (`which`), and starts none.
+SAVED_ADDRESS = ADDRESS + "-saved"
+SAVED_MUTEX = MUTEX + "-saved"
+WHICH = "GAMELAB_PERCEIVE"
 RING_SLOTS = 8        # look frames kept in shared memory: at 30 Hz the newest 267 ms (25 MB at 1366x768)
 FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a look frame is half size)
 ACTIVE_HZ = 30.0      # frames a second with a command that hunts attached ...
@@ -74,6 +81,16 @@ ENSURE_EVERY_S = 10.0  # s at least between two starts of the service by a clien
 HELLO_WAIT_S = 3.0    # s a command waits at its start for the service's welcome before it says why there's none
 FULL_WAIT_S = 1.0     # s a `full` ask waits for its frame
 STATUS_S = 10.0       # s between the service's lines on the console
+# A service whose frame loop hasn't gone round for STUCK_S (BUILD_STUCK_S while it makes a run: the map's templates
+# loaded), or whose search has been out that long, ends its process (EXIT_STUCK): its clients' `ensure` and the
+# babysitter start another. With the process and its pipe up and the loop hung, every look found nothing to act on and a
+# hunt stood still to its end, nothing restarting it. The loop goes round at least every 1/IDLE_HZ s, and every
+# NOT_VISIBLE_S without the game; a search takes 0.03-0.3 s. A client that hears nothing for SILENT_S (a state comes
+# every 0.1 s at the least, every 0.25 s without the game) drops its connection and reconnects.
+STUCK_S = 10.0
+BUILD_STUCK_S = 60.0
+EXIT_STUCK = 3
+SILENT_S = 10.0
 # watch's records (now the service's): scenes 10 times a second, tracks twice a second (a scene is ~400 bytes, the
 # tracks ~850: about 20 MB an hour, which telemetry's 2 GB hold 4 days of)
 SCENE_S = 0.1
@@ -81,9 +98,21 @@ TRACKS_S = 0.5
 EVENTS = ("died", "exp_gain")  # tracker events published as telemetry 'event' records (and hits, new ones)
 
 
-def info_path() -> Path:
-    """Where the running service says how to reach it (its pid, the pipe, the authkey): lab/perceive.json."""
-    return paths.LAB / "perceive.json"
+def saved(which: str | None = None) -> bool:
+    """Whether the service meant is the one on saved frames (`perceive --frames`): `which`, by default GAMELAB_PERCEIVE's."""
+    return (os.environ.get(WHICH, "") if which is None else which) == "saved"
+
+
+def pipe_address(saved_frames: bool | None = None) -> str:
+    """The pipe of the live service, or of the one on saved frames (`saved`)."""
+    return SAVED_ADDRESS if (saved() if saved_frames is None else saved_frames) else ADDRESS
+
+
+def info_path(saved_frames: bool | None = None) -> Path:
+    """Where the running service says how to reach it (its pid, the pipe, the authkey): lab/perceive.json, or
+    lab/perceive-saved.json for the one on saved frames (`saved`)."""
+    on_saved = saved() if saved_frames is None else saved_frames
+    return paths.LAB / ("perceive-saved.json" if on_saved else "perceive.json")
 
 
 def log_path() -> Path:
@@ -134,9 +163,10 @@ _ENSURED = [-1e18]  # when ensure last started one
 def ensure(map_id: int | None = None, log: Callable[[str], None] = print) -> bool:
     """Start the service (`python -m gamelab perceive`, from this checkout, its console in lab/perceive.log) unless one
     runs, at most every ENSURE_EVERY_S: detached through WMI, as the babysitter starts its programs, so it outlives the
-    command that started it and a restart of whatever started that. True if one was started."""
+    command that started it and a restart of whatever started that. True if one was started. None is started for a
+    command reaching the one on saved frames (GAMELAB_PERCEIVE=saved: it's started by hand)."""
     now = time.monotonic()
-    if now - _ENSURED[0] < ENSURE_EVERY_S or running():
+    if saved() or now - _ENSURED[0] < ENSURE_EVERY_S or running():
         return False
     _ENSURED[0] = now
     command = (f'cmd.exe /c set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& "{sys.executable}" -u -X utf8 -m '
@@ -207,7 +237,8 @@ def serve_saved(files: list[str], map_id: int, template: np.ndarray, band: tuple
     settle()
     geo = of_frame(np.asarray(Image.open(files[0]).convert("RGB")))
     svc = Service(lambda m, g: feed.saved_world(files, m, template, band, hold=hold, schedule=IDLE), map_id,
-                  lambda: (geo, None), address=address, info=Path(info), log=(lambda m: None) if quiet else print)
+                  lambda: (geo, None), address=address, info=Path(info), log=(lambda m: None) if quiet else print,
+                  stuck_s=STUCK_S)
     svc.serve(None if seconds is None else time.monotonic() + seconds)
 
 
@@ -315,17 +346,21 @@ class Service:
     """The perception service's process (see the top). `make(map_id, geo)` builds what it looks with (screen_world, or
     saved frames: feed.saved_world); `geometry()` says the game window's geometry or why there's none (window_geometry;
     saved frames: theirs). Clients reach it at `address` with `authkey` (written to `info` for them). `publish`: its
-    telemetry (Publisher), or None."""
+    telemetry (Publisher), or None. `stuck_s`: its watchdog's (STUCK_S: the process ends if the frame loop hangs that
+    long; None, the tests' in-process services: none)."""
 
     def __init__(self, make: Callable[[int, Geometry], Runner], map_id: int,
                  geometry: Callable[[], tuple[Geometry | None, Problem | None]], *, address: str = ADDRESS,
                  authkey: bytes | None = None, info: Path | None = None, log: Callable[[str], None] = print,
-                 publish: "Publisher | None" = None, idle_hz: float = IDLE_HZ, active_hz: float = ACTIVE_HZ):
+                 publish: "Publisher | None" = None, idle_hz: float = IDLE_HZ, active_hz: float = ACTIVE_HZ,
+                 stuck_s: float | None = None):
         self.make, self.map_id, self.geometry, self.log = make, map_id, geometry, log
         self.address, self.authkey = address, authkey or secrets.token_bytes(32)
         self.info = info
         self.publish = publish
         self.idle_hz, self.active_hz = idle_hz, active_hz
+        self.stuck_s = stuck_s
+        self._beat = (time.monotonic(), BUILD_STUCK_S)  # when the frame loop last went round, and how long it may not
         self.runner: Runner | None = None
         self.geo: Geometry | None = None
         self.epoch = 0
@@ -393,21 +428,25 @@ class Service:
         self._drop(c)
 
     def _hello(self, c: _Client, hello: Hello) -> None:
-        """A client said what it is: welcomed with the run's rings, or refused (a second command that acts, on another
-        map). A command that acts on another map than the one looked at has the service look at its map (a new run)."""
+        """A client said what it is: welcomed with the run's rings, or refused (a second command that hunts, on another
+        map). The map looked at is held by the commands that hunt (`fast`): one on another map than the one looked at
+        has the service look at its map (a new run); any other client (a viewer, or `pet`, which sends keys but reads
+        only whole frames) moves it only while none holds it, and is never refused. (The pet's babysitter, `pet --every
+        1` on its map outside hunts, held it as a command that acts, and a hunt on any other map was refused at its
+        start: the babysitter stops the pet only once it sees a hunt.)"""
         with self._lock:
-            acting = [o for o in self.clients.values() if o is not c and o.hello is not None and o.hello.acts
-                      and o.hello.map is not None]
+            holding = [o for o in self.clients.values() if o is not c and o.hello is not None and o.hello.fast
+                       and o.hello.map is not None]
             wanted = self._rebuild if self._rebuild is not None else self.map_id
             if hello.map is not None and hello.map != wanted:
-                held = [o for o in acting if o.hello.map == wanted]
-                if held and hello.acts:
+                held = [o for o in holding if o.hello.map == wanted]
+                if held and hello.fast:
                     self.counts["refused"] += 1
                     c.send("refused", f"the perception service is looking at map {wanted} for {held[0].hello.name} "
                                       f"(pid {held[0].hello.pid}): stop it first, or run this on map {wanted}")
                     c.hello = hello
                     return
-                if hello.acts or not acting:  # (a viewer moves it only while no command that acts holds it)
+                if not held:
                     self._rebuild = hello.map
                     self._cond.notify_all()
             c.hello = hello
@@ -422,12 +461,25 @@ class Service:
             c.writer.close()
             self.counts["dropped"] += c.writer.dropped
             self._fulls = [f for f in self._fulls if f[0] is not c]
+            self._follow()
         try:
             c.conn.close()
         except OSError:
             pass
         if c.hello is not None:
             self.log(f"perception: {c.hello.name} (pid {c.hello.pid}) detached")
+
+    def _follow(self) -> None:
+        """A client gone: with no command that hunts left to hold the map, the newest command that acts on another map
+        has the service look at its map (its states wait for that run: ServiceClient.on_map)."""
+        hellos = [o.hello for o in self.clients.values() if o.hello is not None and o.hello.map is not None]
+        if any(h.fast for h in hellos):
+            return
+        wanted = self._rebuild if self._rebuild is not None else self.map_id
+        acting = [h for h in hellos if h.acts]
+        if acting and acting[-1].map != wanted:
+            self._rebuild = acting[-1].map
+            self._cond.notify_all()
 
     def _welcome(self) -> dict:
         """What a client needs to read this run's frames (None for the rings while the game hasn't been seen)."""
@@ -472,6 +524,8 @@ class Service:
         yet), a state every feed.NOT_VISIBLE_S saying why."""
         if self._listener is None:
             self.listen()
+        if self.stuck_s is not None:
+            threading.Thread(target=self._watchdog, name="perceive-watchdog", daemon=True).start()
         try:
             while not self._stop and (until is None or time.monotonic() < until):
                 if self.runner is None or self._rebuild is not None:
@@ -488,9 +542,42 @@ class Service:
             self._stop = True
             self._cond.notify_all()
 
+    def _went_round(self, limit: float | None = None) -> None:
+        """The frame loop went round (its next turn due within `limit` s, by default `stuck_s`)."""
+        self._beat = (time.monotonic(), limit if limit is not None else (self.stuck_s or STUCK_S))
+
+    def stuck(self, now: float | None = None) -> str | None:
+        """Why the service is stuck (the frame loop not gone round in time, a search out too long), or None."""
+        now = time.monotonic() if now is None else now
+        at, limit = self._beat
+        if now - at > limit:
+            return f"the frame loop hasn't gone round for {now - at:.1f} s"
+        searches = None if self.runner is None else self.runner.step.searches
+        since = getattr(searches, "since", None)
+        if since is not None and now - since > (self.stuck_s or STUCK_S):
+            return f"a search has been out for {now - since:.1f} s"
+        return None
+
+    def _watchdog(self) -> None:
+        """The process ended (EXIT_STUCK) once it's `stuck`, so that another is started (the clients' `ensure`, the
+        babysitter): its pipe and mutex go with it."""
+        while not self._stop:
+            time.sleep(min(1.0, self.stuck_s / 4))
+            if self._stop:
+                return
+            if (why := self.stuck()) is not None:
+                self.log(f"perception: stuck ({why}): the service ends, for another to be started")
+                for out in (sys.stdout, sys.stderr):
+                    try:
+                        out.flush()
+                    except (OSError, ValueError, AttributeError):
+                        pass
+                os._exit(EXIT_STUCK)
+
     def _build(self) -> bool:
         """A new run: the map to look at (an acting client's, or the one before) on the window's geometry, new rings,
         told to every client. False while the window can't be read (no game, minimized, another size)."""
+        self._went_round(BUILD_STUCK_S)
         geo, problem = (self.geo, None) if self.geo is not None else self.geometry()
         if geo is None:
             self._why = problem
@@ -505,6 +592,7 @@ class Service:
                 self._rebuild = None
             self._why = Problem("picture", f"the perception service can't look at map {map_id}: {e}")
             return self.runner is not None
+        self._went_round()
         runner.step.searches.wake = self.wake  # (the frame loop may be waiting for a request or its next frame)
         old = (self.runner, self.ring, self.full_ring)
         with self._lock:
@@ -535,7 +623,9 @@ class Service:
         step.tracker.throws_known = any(h.throws for h in attached)
 
     def _not_visible(self) -> None:
-        """No run to look with: a state saying why, to every client, then a wait (asks are dropped meanwhile)."""
+        """No run to look with: a state saying why, to every client, then a wait (asks are dropped meanwhile). Its
+        number goes on from the last state's (a run's frames are numbered from 1, the run before's carry on here)."""
+        self._went_round()
         self._seq += 1
         why = getattr(self, "_why", None) or Problem("gone", "the game isn't running")
         st = WorldState(self._seq, time.monotonic(), False, why=why.why, bad=why, epoch=self.epoch)
@@ -548,6 +638,7 @@ class Service:
     def _poll(self, wait: float) -> tuple[Asks | None, bool]:
         """feed.run's: what the clients asked (merged), and whether to stop (asked to, or a new run is due), waiting up
         to `wait` s for a request or the searches' answer."""
+        self._went_round()
         deadline = time.monotonic() + wait
         asks = None
         with self._cond:
@@ -625,6 +716,8 @@ class Service:
         self._say()
 
     def _send_state(self, out: WorldState, st: WorldState | None = None) -> None:
+        if not out.late:
+            self._seq = max(self._seq, out.seq)  # (`_not_visible`'s go on from it)
         data = pickle.dumps(("state", out))
         with self._lock:
             targets = [c for c in self.clients.values() if c.hello is not None]
@@ -767,22 +860,26 @@ class ServiceClient(Feed):
     """The perception service from a command's side (a localization.feed.Feed: what Senses reads). `name`, `acts` (it
     sends keys: the game is brought forward for it, `bring_forward`), `throws` (it tells her throws), `fast` (it hunts:
     the service's hunting pace while it's attached; by default as `acts` and `throws`), `map_id` (the map it decides
-    on): what it says of itself. It connects (and reconnects, every RECONNECT_S) on a thread of its own; while it can't,
-    `ensure` (service.ensure; None: never) starts the service. `address`, `info`: where to reach it (tests: their own).
-    `title`: the game window's, for `bring_forward`."""
+    on): what it says of itself. It connects (and reconnects, every RECONNECT_S, and after SILENT_S without a word from
+    the service) on a thread of its own; while it can't, `ensure` (service.ensure; None: never) starts the service.
+    `address`, `info`: where to reach it (by default the live service's, or with GAMELAB_PERCEIVE=saved the one on saved
+    frames: `pipe_address`, `info_path`; tests: their own). `title`: the game window's, for `bring_forward`. A command that
+    acts on a map is handed only states of the service's run on that map (`on_map`), and of the run it was last
+    welcomed to (a state of the run before can come after the new run's welcome, which goes first)."""
 
     def __init__(self, name: str, *, acts: bool = False, throws: bool = False, fast: bool | None = None,
-                 map_id: int | None = None, title: str = "", address: str = ADDRESS, info: Path | None = None,
+                 map_id: int | None = None, title: str = "", address: str | None = None, info: Path | None = None,
                  ensure: Callable[..., bool] | None = ensure, log: Callable[[str], None] = print,
                  start: bool = True):
         self.hello = Hello(name, os.getpid(), acts, throws, acts and throws if fast is None else fast, map_id)
-        self.title, self.address, self.info = title, address, info or info_path()
+        self.title, self.address, self.info = title, address or pipe_address(), info or info_path()
         self._ensure, self.log = ensure, log
         self.states: deque[WorldState] = deque(maxlen=KEEP)
         self.events: deque[Event] = deque(maxlen=EVENTS_KEPT)
         self.dropped = 0           # events lost because nothing drained them
         self.gaps = 0              # states the service dropped for this client (it read too slowly)
         self.served = self.refused = 0
+        self.stale = 0             # states of a run before the one it was welcomed to, left out
         self.on_state: Callable[[WorldState], None] | None = None
         self.alive, self.why = False, "not connected yet"
         self.welcome: dict | None = None
@@ -819,20 +916,28 @@ class ServiceClient(Feed):
                 with self._cond:
                     self._cond.wait_for(lambda: self._closing, RECONNECT_S)
                 continue
-            said = False
+            said, silent = False, False
             try:
                 self._send_on(conn, ("hello", self.hello.__dict__))
                 while not self._closing:
+                    if not conn.poll(SILENT_S):  # (a service whose frame loop hangs: its pipe up, nothing said)
+                        silent = True
+                        break
                     self._take(conn.recv())
                     if self.refusal is not None:
                         break
             except (EOFError, OSError, pickle.UnpicklingError, ValueError):
                 pass
+            except TypeError:  # (closed by `close` between the poll and the read: its handle None)
+                if not self._closing:
+                    raise
             with self._cond:
                 self._conn = None
                 down = self.alive
                 self.alive = False
-                self.why = self.refusal or ("closed" if self._closing else "the perception service's process ended")
+                self.why = self.refusal or ("closed" if self._closing else
+                                            f"nothing from the perception service for {SILENT_S:g} s" if silent else
+                                            "the perception service's process ended")
                 self._cond.notify_all()
             try:
                 conn.close()
@@ -865,12 +970,16 @@ class ServiceClient(Feed):
         with self._cond:
             if kind == "state":
                 st = msg[1]
+                if st.epoch != self.epoch:  # (the run before's, queued before the new run's welcome went: it goes first)
+                    self.stale += 1
+                    return
                 self.states.append(st)
                 if self.on_state is not None:
                     self.on_state(st)
-                room = EVENTS_KEPT - len(self.events)
-                self.dropped += max(0, len(st.events) - room)
-                self.events.extend(st.events)
+                if self.on_map():  # (another map's run's events aren't this command's)
+                    room = EVENTS_KEPT - len(self.events)
+                    self.dropped += max(0, len(st.events) - room)
+                    self.events.extend(st.events)
             elif kind in ("welcome", "epoch"):
                 self._open(msg[1])
                 self.alive, self.why = True, ""
@@ -939,20 +1048,30 @@ class ServiceClient(Feed):
 
     # --- the Feed -------------------------------------------------------------------------------------------
 
+    def on_map(self) -> bool:
+        """Whether the states it's handed are of its map: a command that acts on one is handed only those of the
+        service's run on it (once a reconnect has it welcomed to a service on another map, the babysitter's say, that
+        service's run is moving to its map: its states till then are the other map's). Any other: whatever it looks at."""
+        if not self.hello.acts or self.hello.map is None:
+            return True
+        w = self.welcome or {}
+        return w.get("map") == w.get("next", w.get("map")) == self.hello.map
+
     def latest(self, want: Asks, timeout: float = feed.FEED_WAIT_S) -> WorldState | None:
         deadline, asked, seen = time.monotonic() + timeout, None, None
         with self._cond:
             while True:
-                st = newest_fresh(self.states, want) if self.alive else None
+                live = self.alive and self.on_map()
+                st = newest_fresh(self.states, want) if live else None
                 if st is not None:
                     self.served += 1
                     return st
                 left = deadline - time.monotonic()
-                newest = newest_frame(self.states) if self.alive else None
+                newest = newest_frame(self.states) if live else None
                 if (newest is not None and newest.t >= want.after and not newest.usable) or left <= 0:
                     self.refused += 1
                     return None
-                if self.alive:
+                if live:
                     seq = newest.seq if newest is not None else 0
                     ask = to_ask(want, newest) if asked is None or (feed.ASK_ONLY_STALE and seq != seen) else None
                     if ask is not None and (asked is None or adds(ask, asked)):
@@ -963,10 +1082,14 @@ class ServiceClient(Feed):
 
     def problem(self) -> Problem | None:
         """Why there's no state to act on now: the newest one's (the game not on screen or not as expected), or the
-        service not reached; None if the newest is usable."""
+        service not reached, or its run not on this command's map yet; None if the newest is usable."""
         with self._cond:
             if not self.alive:
                 return Problem("perception", self.why or "the perception service isn't reached")
+            if not self.on_map():
+                w = self.welcome or {}
+                return Problem("perception", f"the perception service looks at map {w.get('map')}, not "
+                                             f"{self.hello.map}: waiting for its run on {self.hello.map}")
             newest = newest_frame(self.states)
             if newest is None:
                 return Problem("perception", "no state from the perception service yet")

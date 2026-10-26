@@ -103,23 +103,73 @@ def test_a_clients_queue_keeps_its_newest_drops_the_oldest_and_says_a_gap():
     assert states[-3:] == [7, 8, 9] and len(states) == 10 - w.dropped and states == sorted(states)
 
 
-def test_a_second_command_that_acts_on_another_map_is_refused_and_one_alone_moves_the_service():
+def _joining(svc: Service, cid: int, said: list) -> service._Client:
+    c = service._Client(cid, SimpleNamespace(send_bytes=lambda b: None, close=lambda: None))
+    svc.clients[cid] = c
+    c.send = lambda *msg: said.append((cid, *msg))
+    return c
+
+
+def test_a_second_command_that_hunts_on_another_map_is_refused_and_one_alone_moves_the_service():
     svc = _svc()
     svc.map_id = 5
-    hunt = _attach(svc, name="tour", acts=True, map=5)
-    other = service._Client(9, SimpleNamespace(send_bytes=lambda b: None, close=lambda: None))
-    svc.clients[9] = other
+    hunt = _attach(svc, name="tour", acts=True, throws=True, fast=True, map=5)
     said = []
-    other.send = lambda *msg: said.append(msg)
-    svc._hello(other, Hello(name="nav", acts=True, map=6))
-    assert said[0][0] == "refused" and "map 5 for tour" in said[0][1] and svc._rebuild is None
-    viewer = service._Client(10, SimpleNamespace(send_bytes=lambda b: None, close=lambda: None))
-    viewer.send = lambda *msg: said.append(msg)
+    other = _joining(svc, 9, said)
+    svc._hello(other, Hello(name="nav", acts=True, throws=True, fast=True, map=6))
+    assert said[0][1] == "refused" and "map 5 for tour" in said[0][2] and svc._rebuild is None
+    viewer = _joining(svc, 10, said)
     svc._hello(viewer, Hello(name="map", map=6))  # a viewer on another map: welcomed, the hunt keeps its map
-    assert said[-1][0] == "welcome" and svc._rebuild is None
+    assert said[-1][1] == "welcome" and svc._rebuild is None
     del svc.clients[hunt.id], svc.clients[9]
-    svc._hello(other, Hello(name="nav", acts=True, map=6))  # alone now: the service looks at its map next
-    assert said[-1][0] == "welcome" and svc._rebuild == 6
+    svc._hello(other, Hello(name="nav", acts=True, throws=True, fast=True, map=6))  # alone now: its map next
+    assert said[-1][1] == "welcome" and svc._rebuild == 6
+
+
+def test_the_pets_babysitter_holds_no_map_and_a_hunt_on_another_moves_the_service():
+    # `pet --every 1` (the babysitter's, outside hunts) sends keys but doesn't hunt, and reads only whole frames: it
+    # holds no map. A hunt on another map attaching while it runs moves the service to its map (before, it was refused
+    # and ended at its start: the babysitter stops the pet only once it sees a hunt); the pet is never refused, and once
+    # no command that hunts is left, the service follows the map of the newest command that acts.
+    svc = _svc()
+    svc.map_id = 5
+    said = []
+    pet = _joining(svc, 1, said)
+    svc._hello(pet, Hello(name="pet", acts=True, map=5))
+    hunt = _joining(svc, 2, said)
+    svc._hello(hunt, Hello(name="tour", acts=True, throws=True, fast=True, map=6))
+    assert [m[1] for m in said] == ["welcome", "welcome"] and svc._rebuild == 6
+    svc.map_id, svc._rebuild = 6, None  # (the run on 6 made)
+    late = _joining(svc, 3, said)
+    svc._hello(late, Hello(name="pet", acts=True, map=5))  # a pet on 5 while the hunt holds 6: welcomed, nothing moves
+    assert said[-1][1] == "welcome" and svc._rebuild is None
+    svc._drop(hunt)  # the hunt over: the newest command that acts names the map
+    assert svc._rebuild == 5
+    svc.map_id, svc._rebuild = 5, None  # (the run on 5 made)
+    svc._drop(late)
+    svc._drop(pet)  # (with none left the map stays)
+    assert svc._rebuild is None and svc.map_id == 5
+
+
+def test_a_command_that_acts_is_handed_only_states_of_its_maps_run():
+    # A reconnect welcomes a command to whatever run the service is on (one the babysitter started on another map, say):
+    # its looks get none of that run's states until its own map's run is welcomed, and none of a run before the one it's
+    # welcomed to (they can come after the new run's welcome, which is sent first). A viewer takes whatever it looks at.
+    from gamelab.localization.worldstate import WorldState
+    hunt = ServiceClient("tour", acts=True, throws=True, map_id=2, start=False, ensure=None)
+    viewer = ServiceClient("watch", map_id=2, start=False, ensure=None)
+    now = time.monotonic()
+    for c in (hunt, viewer):
+        c._take(("welcome", {"epoch": 4, "pid": 7, "map": 1, "next": 2, "ring": None}))
+        c._take(("state", _state(10, now + 0.01, epoch=4)))
+        c._take(("state", _state(11, now + 0.02, epoch=3)))  # (the run before's)
+    assert [st.seq for st in hunt.states] == [10] and hunt.stale == 1
+    assert hunt.latest(Asks(now), timeout=0.05) is None and "waiting for its run on 2" in hunt.problem().why
+    assert viewer.latest(Asks(now), timeout=0.05).seq == 10
+    hunt._take(("epoch", {"epoch": 5, "pid": 7, "map": 2, "next": 2, "ring": None}))
+    hunt._take(("state", _state(12, now + 0.03, epoch=4)))  # (queued before the new run's welcome went)
+    hunt._take(("state", _state(1, now + 0.04, epoch=5)))
+    assert hunt.latest(Asks(now), timeout=0.05).seq == 1 and hunt.stale == 2 and hunt.problem() is None
 
 
 # --- the real thing on a test pipe ------------------------------------------------------------------------------
@@ -135,13 +185,31 @@ def full_runner():
     return feed.Runner(ListFrames(frames), _Look(eyes), step)
 
 
+class Hanging:
+    """Frames that stop coming after `n` (the screen's capture hung): the frame loop waits on the next for ever."""
+
+    def __init__(self, frames, n: int):
+        self.frames, self.n = frames, n
+
+    def next(self, after: float):
+        self.n -= 1
+        if self.n < 0:
+            time.sleep(3600)
+        return self.frames.next(after)
+
+
 def serve(address: str, info: str, seconds: float, idle_hz: float, active_hz: float, full: bool = False,
-          slow: float = 0.0) -> None:
-    """A service in a process of its own, on the drawn frames (their searches `slow` s each)."""
-    make = (lambda map_id, geo: full_runner()) if full else (lambda map_id, geo: drawn_runner(0, slow))
+          slow: float = 0.0, hang_after: int | None = None, stuck_s: float | None = None) -> None:
+    """A service in a process of its own, on the drawn frames (their searches `slow` s each; none after `hang_after`
+    frames), with a watchdog of `stuck_s` (None: none)."""
+    def make(map_id, geo):
+        runner = full_runner() if full else drawn_runner(0, slow)
+        if hang_after is not None:
+            runner.frames = Hanging(runner.frames, hang_after)
+        return runner
     service.settle()
     svc = Service(make, 1, lambda: (STRETCHED, None), address=address, info=Path(info), log=lambda m: None,
-                  idle_hz=idle_hz, active_hz=active_hz)
+                  idle_hz=idle_hz, active_hz=active_hz, stuck_s=stuck_s)
     svc.serve(until=time.monotonic() + seconds)
 
 
@@ -149,13 +217,14 @@ class Running:
     """A service process on a pipe of the test's own."""
 
     def __init__(self, tmp_path: Path, name: str, seconds: float = 30.0, idle_hz: float = 10.0,
-                 active_hz: float = 30.0, full: bool = False, at: "Running | None" = None, slow: float = 0.0):
+                 active_hz: float = 30.0, full: bool = False, at: "Running | None" = None, slow: float = 0.0,
+                 hang_after: int | None = None, stuck_s: float | None = None):
         """`at`: where another one ran (started again there, as the babysitter starts it at the same address)."""
         pipe = rf"\\.\pipe\gamelab-perceive-test-{os.getpid()}-{name}-{time.monotonic_ns()}"
         self.address, self.info = (at.address, at.info) if at else (pipe, tmp_path / f"{name}.json")
         ctx = multiprocessing.get_context("spawn")
         self.proc = ctx.Process(target=serve, args=(self.address, str(self.info), seconds, idle_hz, active_hz, full,
-                                                    slow), daemon=True)
+                                                    slow, hang_after, stuck_s), daemon=True)
         self.proc.start()
 
     def client(self, name: str, **kw) -> ServiceClient:
@@ -246,6 +315,130 @@ def test_a_command_stands_still_while_the_service_is_gone_and_goes_on_with_the_n
         svc.stop()
         if again is not None:
             again.stop()
+
+
+def test_a_service_whose_frame_loop_hangs_ends_itself_and_the_hunt_goes_on_with_the_next(tmp_path):
+    # Its capture hung (the frames stop coming), the process and its pipe up: its watchdog ends it (EXIT_STUCK), the
+    # command stands still meanwhile, and goes on with the one started next (the babysitter's or ensure's). Before,
+    # nothing noticed: every look found nothing to act on, and a hunt stood still to its end.
+    svc = Running(tmp_path, "hung", hang_after=30, stuck_s=2.0)
+    hunt = svc.client("tour", acts=True, throws=True)
+    again = None
+    try:
+        assert hunt.ready(30.0), hunt.why
+        assert hunt.latest(Asks(time.monotonic()), timeout=5.0) is not None
+        svc.proc.join(30.0)
+        assert svc.proc.exitcode == service.EXIT_STUCK
+        assert hunt.latest(Asks(time.monotonic()), timeout=0.3) is None and hunt.problem().kind == "perception"
+        again = Running(tmp_path, "hung", at=svc)
+        assert hunt.ready(30.0), hunt.why
+        assert hunt.latest(Asks(time.monotonic()), timeout=5.0) is not None and hunt.connects == 2
+    finally:
+        hunt.close()
+        svc.stop()
+        if again is not None:
+            again.stop()
+
+
+def test_a_client_that_hears_nothing_from_the_service_reconnects(tmp_path, monkeypatch):
+    # The service's frame loop hung with no watchdog (its pipe still up): the client drops its connection after
+    # SILENT_S without a word, says why, and connects again; nothing is handed out to act on meanwhile.
+    monkeypatch.setattr(service, "SILENT_S", 1.0)
+    svc = Running(tmp_path, "silent", hang_after=30)
+    said = []
+    hunt = ServiceClient("tour", acts=True, throws=True, address=svc.address, info=svc.info, ensure=None,
+                         log=said.append)
+    try:
+        assert hunt.ready(30.0), hunt.why
+        assert hunt.latest(Asks(time.monotonic()), timeout=5.0) is not None
+        deadline = time.monotonic() + 15.0
+        while hunt.connects < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert hunt.connects >= 2 and any("nothing from the perception service for 1 s" in m for m in said), said
+        assert hunt.latest(Asks(time.monotonic()), timeout=0.3) is None
+    finally:
+        hunt.close()
+        svc.stop()
+
+
+def test_a_client_closed_between_its_poll_and_its_read_ends_quietly(monkeypatch):
+    # `close` closes the connection from another thread: between the reader's poll and its read the handle is gone
+    # (multiprocessing raises TypeError then: ReadFile on None). Closing, that's the end; otherwise it's a bug, raised.
+    client = ServiceClient("tour", acts=True, start=False, ensure=None, log=lambda m: None)
+    bug = []
+
+    class Conn:
+        def send(self, msg):
+            pass
+
+        def poll(self, timeout):
+            return True
+
+        def recv(self):
+            if bug:
+                raise TypeError("a bug")
+            client._closing = True  # (`close` on another thread, as the read began)
+            raise TypeError("ReadFile() argument 1 must be int, not None")
+
+        def close(self):
+            pass
+    monkeypatch.setattr(client, "_connect", lambda: Conn())
+    client._run()  # (returns)
+    assert not client.alive and client.why == "closed"
+    client._closing = False
+    bug.append(True)
+    with pytest.raises(TypeError):
+        client._run()
+
+
+def test_the_watchdog_says_a_loop_that_hasnt_gone_round_or_a_search_out_too_long():
+    svc = _svc(stuck_s=10.0)
+    now = time.monotonic()
+    svc._went_round()
+    assert svc.stuck(now + 5.0) is None and "hasn't gone round for 11" in svc.stuck(now + 11.0)
+    svc._went_round(service.BUILD_STUCK_S)  # making a run (the map's templates loaded): longer
+    assert svc.stuck(now + 30.0) is None
+    svc._went_round()
+    svc.runner = SimpleNamespace(step=SimpleNamespace(searches=SimpleNamespace(since=now - 10.5)))
+    assert "a search has been out for 10" in svc.stuck(now)
+    svc.runner.step.searches.since = None
+    assert svc.stuck(now) is None
+
+
+def test_perceive_on_saved_frames_has_a_pipe_mutex_and_info_file_of_its_own(tmp_path, monkeypatch):
+    # `perceive --frames` (offline) never takes the live service's mutex, pipe or info file: the live one starts and
+    # is reached beside it. A command reaches it with GAMELAB_PERCEIVE=saved, and starts none.
+    from PIL import Image
+
+    from gamelab import __main__ as cli
+    Image.fromarray(np.zeros((768, 1366, 3), np.uint8)).save(tmp_path / "a.png")
+    held, made = [], []
+    monkeypatch.setattr(service, "only_one", lambda name=service.MUTEX: held.append(name) or 1)
+    monkeypatch.setattr(service, "settle", lambda: None)
+
+    class Made:
+        def __init__(self, make, map_id, where, **kw):
+            made.append(kw)
+
+        def serve(self, until=None):
+            pass
+
+        def status(self):
+            return {}
+    monkeypatch.setattr(service, "Service", Made)
+    assert cli.main(["perceive", "--frames", str(tmp_path), "--minutes", "0.01"]) == 0
+    assert held == [service.SAVED_MUTEX] and made[0]["address"] == service.SAVED_ADDRESS
+    assert made[0]["info"].name == "perceive-saved.json" and made[0]["stuck_s"] == service.STUCK_S
+    assert service.SAVED_MUTEX != service.MUTEX and service.SAVED_ADDRESS != service.ADDRESS
+    monkeypatch.setenv(service.WHICH, "saved")
+    c = ServiceClient("watch", start=False)
+    assert (c.address, c.info.name) == (service.SAVED_ADDRESS, "perceive-saved.json")
+    monkeypatch.setattr(service, "_start_detached", lambda *a: pytest.fail("started a service"))
+    monkeypatch.setattr(service, "_ENSURED", [-1e18])
+    assert service.ensure(1, log=lambda m: None) is False
+    monkeypatch.delenv(service.WHICH)
+    c = ServiceClient("watch", start=False)
+    assert (c.address, c.info.name) == (service.ADDRESS, "perceive.json")
 
 
 def _client_process(address: str, info: str) -> None:
@@ -422,6 +615,42 @@ def test_the_commands_attach_as_what_they_are_and_none_has_a_feed_or_sweep_flag(
         name, kw = made[-1]
         assert (kw["acts"], kw["throws"]) == want, argv
     cli._PERCEPTION.clear()
+
+
+def test_watch_counts_the_frames_of_a_new_run_numbered_from_1_again(monkeypatch):
+    # A run's frames are numbered from 1 (the map changed, or the service started again): watch goes on counting them
+    # and saying what they show. Before, it waited for the new numbers to pass the old (0 frames a second meanwhile).
+    from collections import deque
+
+    from gamelab import __main__ as cli
+    from gamelab.localization.worldstate import WorldState
+    from gamelab.perception.framecheck import Problem
+    logged = []
+    monkeypatch.setattr(cli, "_log", logged.append)
+    script = [((1, 1), WorldState(k, 0.0, True, tag=(480, 308), where=(1000.0, 500.0, 0, (0.0, 0.0))))
+              for k in range(1, 40)]
+    script += [((2, 1), WorldState(k, 0.0, False, why="the game is minimized",
+                                   bad=Problem("minimized", "the game is minimized"))) for k in range(1, 5)]
+
+    class Perception:  # the service's client: a state at each wait, then the service started again
+        def __init__(self):
+            self.states, self.run = deque(maxlen=8), None
+
+        def wait_frame(self, timeout):
+            time.sleep(0.002)
+            if script:
+                run, st = script.pop(0)
+                if run != self.run:
+                    self.run = run
+                    self.states.clear()
+                self.states.append(st)
+            return True
+
+        def status(self):
+            return {}
+    monkeypatch.setattr(cli, "_perception", lambda model, title, name, acts: Perception())
+    assert cli.main(["watch", "--minutes", "0.01", "--map", "10000012"]) == 0
+    assert logged[:2] == ["the game is on screen: watching", "not watching: the game is minimized"]
 
 
 def test_a_command_on_another_map_waits_for_the_services_run_on_it(tmp_path):

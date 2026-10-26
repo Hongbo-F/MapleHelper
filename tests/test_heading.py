@@ -595,7 +595,7 @@ def test_watch_says_each_change_of_her_facing(monkeypatch):
 
     class Perception:  # the service's client: a new state at each wait, 30 a second
         def __init__(self):
-            self.states, self.seq = deque(maxlen=8), 0
+            self.states, self.seq, self.run = deque(maxlen=8), 0, (1, 1)
 
         def wait_frame(self, timeout):
             time.sleep(1 / 30)

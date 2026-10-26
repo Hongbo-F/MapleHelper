@@ -268,6 +268,8 @@ class Worker(Searches):
         self._box = None        # done, not taken
         self._stop = False
         self.done = 0           # jobs done
+        self.since: float | None = None  # when the job being done began (time.monotonic; None: none): the service's
+                                         # watchdog's (localization.service: a search that never ends)
         self._thread = threading.Thread(target=self._run, name=name, daemon=True)
         self._thread.start()
 
@@ -302,12 +304,13 @@ class Worker(Searches):
                 if self._stop:
                     return
                 job, self._job, self._busy = self._job, None, True
+                self.since = time.monotonic()
             try:
                 out = self.fn(job)
             except Exception as e:  # a bug: raised in the frame loop by `take`
                 out = e
             with self._cond:
-                self._box, self._busy = out, False
+                self._box, self._busy, self.since = out, False, None
                 self.done += 1
             wake = self.wake
             if wake is not None:

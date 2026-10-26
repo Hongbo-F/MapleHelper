@@ -1379,11 +1379,13 @@ def cmd_watch(args) -> int:
     started = time.monotonic()
     until = started + args.minutes * 60 if args.minutes else None
     w = {"status": started, "lie": -1e9, "visible": None, "frames": 0, "seen": 0, "alarm": False, "facing": "",
-         "told": 0, "read": 0, "hers": 0, "others": 0, "seq": 0, "exp": None}
+         "told": 0, "read": 0, "hers": 0, "others": 0, "seq": 0, "exp": None, "run": None}
     try:
         while until is None or time.monotonic() < until:
             perception.wait_frame(0.5)
             now = time.monotonic()
+            if perception.run != w["run"]:  # a new run (the map changed, the service started again): numbered from 1
+                w["run"], w["seq"] = perception.run, 0
             states = [st for st in list(perception.states) if st.seq > w["seq"] and not st.late]
             for st in states:
                 w["seq"], w["frames"] = max(w["seq"], st.seq), w["frames"] + 1
@@ -1459,13 +1461,18 @@ def cmd_perceive(args) -> int:
     """The perception service (localization.service): the game looked at every frame at all times, the latest of what
     it saw handed to every command (its clients) and published for the mini-map (lab/telemetry/<time>-perceive.jsonl).
     It never sends a key and never brings the game forward, and waits for the game window when there's none. One at a
-    time on the PC. With --frames, saved frames instead of the game, round and round, nothing published (offline)."""
+    time on the PC; it ends itself if its frame loop hangs (service.STUCK_S), for the babysitter or a command to start
+    another. With --frames, saved frames instead of the game, round and round, nothing published (offline), at a pipe,
+    mutex and info file of its own (service.SAVED_ADDRESS: the live one starts and runs beside it; a command reaches
+    it with GAMELAB_PERCEIVE=saved)."""
     from .attack import reach
     from .localization import feed, service
     from .screen import of_frame
-    lock = service.only_one()  # held until the process ends
+    on_saved = bool(args.frames)
+    lock = service.only_one(service.SAVED_MUTEX if on_saved else service.MUTEX)  # held until the process ends
     if lock is None:
-        print("a perception service is running already (one at a time on the PC)")
+        print("a perception service " + ("on saved frames " if on_saved else "") + "is running already (one at a time "
+              "on the PC)")
         return 0
     service.settle()
     band, title = (reach.LOOK_UP, reach.LOOK_DOWN), _game_title()
@@ -1483,7 +1490,8 @@ def cmd_perceive(args) -> int:
 
         def where():
             return geo, None
-        print(f"perceiving {len(files)} saved frames of {geo.client[0]}x{geo.client[1]}, each {args.hold} in a row")
+        print(f"perceiving {len(files)} saved frames of {geo.client[0]}x{geo.client[1]}, each {args.hold} in a row, "
+              f"at {service.SAVED_ADDRESS} (commands reach it with {service.WHICH}=saved)")
     else:
         def make(map_id, g):
             return service.screen_world(map_id, title, _calibration(g).template, band, geo=g, log=_log)
@@ -1494,7 +1502,8 @@ def cmd_perceive(args) -> int:
         publish = service.Publisher(band, log=_log)
         print(f"perceiving the game for every command; telemetry: {path} (the mini-map follows it); Ctrl+C stops",
               flush=True)
-    svc = service.Service(make, args.map, where, info=service.info_path(), log=_log, publish=publish)
+    svc = service.Service(make, args.map, where, address=service.pipe_address(on_saved),
+                          info=service.info_path(on_saved), log=_log, publish=publish, stuck_s=service.STUCK_S)
     try:
         svc.serve(time.monotonic() + args.minutes * 60 if args.minutes else None)
     except KeyboardInterrupt:
