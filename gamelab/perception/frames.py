@@ -14,12 +14,22 @@ a framecheck.Problem (`problem`), which the feed's state carries.
 
 A frame the capture still holds from more than HELD_S before the look asked keeps its own time (until 2026-10-26 it was
 stamped as now, the screen as it still was): the game draws many times a second, so it's a stall, and a look waiting
-for a frame after its keys mustn't take that picture for one. Each frame's picture is one of a few kept from frame to
-frame (`Pictures`), never one somebody still holds.
+for a frame after its keys mustn't take that picture for one. Those held shorter, from HELD_COUNT_S, are stamped as now
+still and counted (`holds`: the service's console line says them), to tell live how often they come. Each frame's
+picture is one of a few kept from frame to frame (`Pictures`), never one somebody still holds.
+
+With `cover_check` on (the perception service's, while its rolling recording runs: control.recording) a frame also
+says whether another program's window was over any of the game (`Frame.over`: window.over, every window above it in
+the z-order, asked just before the shot and again just after it, as `gamelab recorder` asks around its grabs): the
+grid's points (window.shows, in framecheck.window_problem) miss a window between them (a notification, a small box) and
+one clicks pass through. What perception reads is as before (such a frame is visible all the same); the recording
+keeps none of it.
 """
 
+import ctypes
 import sys
 import time
+from ctypes import wintypes
 from dataclasses import dataclass
 
 import cv2
@@ -38,6 +48,11 @@ from .framecheck import Problem
 # was stamped as now and acted on (D:/MapleHelper-scratch/pconst/plan: 0.3% of the hunts' waits on perception). Short
 # of STALE_S, where such a frame becomes a problem (the duplication made afresh).
 HELD_S = 0.5
+# ... and one held from this long before it was asked, short of HELD_S, is stamped as now still but counted (`holds`):
+# three frames' time at 60 a second, where DXGI's 20 ms wait and a frame drawn every 16.7 ms would have given a fresh
+# one. How often they come isn't known (the review of 2026-10-26: the `held` event says only those past HELD_S); if
+# often, HELD_S comes down to them.
+HELD_COUNT_S = 0.05
 # Pictures a ScreenFrames keeps to convert frames into (`Pictures`): the frame loop's, its search's, the recording's
 # queue (8) and the one before, and a few held by the clients' answers. Past it a picture is made new (counted).
 PICTURES = 24
@@ -52,6 +67,9 @@ class Frame:
     new: bool = True         # False: the same picture as the frame before (nothing on screen changed)
     why: str = ""            # why it isn't visible ...
     problem: Problem | None = None  # ... as a framecheck.Problem (its kind decides what's done about it)
+    # Another program's window over any of the game at its shot (ScreenFrames.cover_check: window.over, before and
+    # after it): "" none, else that window in a few words; None not asked (the rolling recording keeps no such frame).
+    over: str | None = None
 
     @staticmethod
     def unfit(t: float, problem: Problem) -> "Frame":
@@ -114,6 +132,8 @@ class ScreenFrames:
         self.pictures = Pictures()
         self.held = 0          # frames given with their own time, held by the capture from HELD_S before they were asked
         self._holding = False  # (one said, until a fresh frame comes)
+        self._holds = [0, 0.0]  # frames stamped as now though held from HELD_COUNT_S before, the longest (`holds`)
+        self.cover_check = False  # window.over asked before and after each shot (Frame.over): the service's recording
 
     def next(self, after: float) -> Frame:
         """The game as the screen shows it: a frame shown at `after` or later if one comes (the grabber waits
@@ -130,6 +150,7 @@ class ScreenFrames:
             return Frame.unfit(now, Problem("gone", f"the game isn't running ({e})"))
         if wrong is not None:
             return Frame.unfit(now, wrong)
+        over = covering(hwnd, area) if self.cover_check else None  # (before the shot ...)
         try:
             shot = self.grabber.shot(area, after=after)
             full = shot.crop(0, 0, area["width"], area["height"], self.pictures.convert)
@@ -143,6 +164,8 @@ class ScreenFrames:
         if bad := moved or framecheck.stale_problem(shot.t, time.monotonic()) or framecheck.drawn_problem(
                 full, self.geo, lambda: window.inset(hwnd, area)):
             return Frame.unfit(time.monotonic(), bad)
+        if over == "":
+            over = covering(hwnd, area)  # (... and after it: a window that came meanwhile)
         if self.area is not None and area != self.area:
             text = f"the game window moved: ({self.area['left']}, {self.area['top']}) -> ({area['left']}, {area['top']})"
             self.log(f"  {text}")
@@ -155,7 +178,10 @@ class ScreenFrames:
         # than HELD_S before it, a stall: its own time (HELD_S).
         if after - shown <= HELD_S:
             self._holding = False
-            return Frame(full, shown if shown >= after else time.monotonic(), True, new)
+            if after - shown >= HELD_COUNT_S:
+                self._holds[0] += 1
+                self._holds[1] = max(self._holds[1], after - shown)
+            return Frame(full, shown if shown >= after else time.monotonic(), True, new, over=over)
         self.held += 1
         if not self._holding:
             self._holding = True
@@ -163,7 +189,76 @@ class ScreenFrames:
                     f"time until a new one comes")
             self.log(f"  {text}")
             telemetry.emit("event", kind="held", text=text)
-        return Frame(full, shown, True, new)
+        return Frame(full, shown, True, new, over=over)
+
+    def holds(self) -> tuple[int, float]:
+        """Frames stamped as now though the capture held them from HELD_COUNT_S (short of HELD_S) before they were
+        asked for, since the last call, and the longest of those holds (s)."""
+        n, longest = self._holds
+        self._holds = [0, 0.0]
+        return n, longest
+
+
+# window.over's walk up the z-order, here with Python's lock kept through the calls made for every window above the game
+# (GetWindow, IsWindowVisible; IsIconic and GetWindowThreadProcessId for the shown ones): user32 reads them from the
+# desktop's own memory, sending no message, so none can wait on another program. Through window.over (ctypes letting
+# the lock go at each call, 2 a window, most of them hidden) the two walks of a frame took 1.75 ms of the perception
+# service's frame interval, its search threads taking the lock at each call; with it kept, 1.2 ms, most of it the walk
+# itself (277 windows above: the lowest shown of this PC's 278, the worst; D:/MapleHelper-scratch/pconst/finish/replay,
+# b_nf* and a_fin* against the branch as reviewed: the interval less its measured parts, medians 1.9 and 1.3 ms against
+# 0.1). Alone, 0.47 ms a walk against window.over's 0.60; with 3 threads of Python churning beside it, 0.35 s against
+# 9.7 (over_same.py, the same answer on all 84 windows and boxes tried). Live, the game in front has only the topmost
+# windows above it: 44 above the window in front on this PC, 0.077 ms a walk (above_front.py). The compositor's
+# (window._cloaked, window._drawn) only for a shown window of another program, as window.over asks them, letting it go.
+_held = ctypes.PyDLL("user32") if sys.platform == "win32" else None
+if _held is not None:
+    _held.GetWindow.argtypes = (wintypes.HWND, wintypes.UINT)
+    _held.GetWindow.restype = wintypes.HWND
+    for _name in ("IsWindowVisible", "IsIconic"):
+        getattr(_held, _name).argtypes = (wintypes.HWND,)
+        getattr(_held, _name).restype = wintypes.BOOL
+    _held.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.c_void_p)
+    _held.GetWindowThreadProcessId.restype = wintypes.DWORD
+
+
+def _over(hwnd: int, area: dict) -> int | None:
+    """window.over, its walk with Python's lock kept (above): another program's window shown over any of `area`."""
+    if _held is None:
+        return window.over(hwnd, area)
+    x0, y0 = area["left"], area["top"]
+    x1, y1 = x0 + area["width"], y0 + area["height"]
+    pid = wintypes.DWORD(0)
+    _held.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    game = pid.value
+    above = _held.GetWindow(hwnd, window.GW_HWNDPREV)
+    for _ in range(window.OVER_MAX):
+        if not above:
+            return None
+        if _held.IsWindowVisible(above) and not _held.IsIconic(above):
+            _held.GetWindowThreadProcessId(above, ctypes.byref(pid))
+            if pid.value != game and not window._cloaked(above):
+                left, top, right, bottom = window._drawn(above)
+                if left < x1 and right > x0 and top < y1 and bottom > y0 and right > left and bottom > top:
+                    return above
+        above = _held.GetWindow(above, window.GW_HWNDPREV)
+    return None
+
+
+def covering(hwnd: int, area: dict) -> str:
+    """Another program's window over any of the game's client area `area`, in a few words (window.over's test, `_over`;
+    named by window.describe: its class and box, never its title), or "" if none. 0.077 ms with the 44 windows above
+    the window in front on this PC (2026-10-26, the median of 500: D:/MapleHelper-scratch/pconst/finish/above_front.py),
+    0.47 with all 277 (over_same.py)."""
+    try:
+        above = _over(hwnd, area)
+    except Exception as e:  # (the window gone meanwhile: nothing of the frame is kept either)
+        return f"not known ({type(e).__name__})"
+    if above is None:
+        return ""
+    try:
+        return window.describe(above)
+    except Exception:  # (gone meanwhile)
+        return "another window"
 
 
 def glimpse(title: str, grabber: capture.Grabber | None = None) -> np.ndarray | None:
@@ -204,4 +299,4 @@ class ListFrames:
             time.sleep(wait)
         full = self.frames[self.i]
         self.i += 1
-        return Frame(full, time.monotonic(), True)
+        return Frame(full, time.monotonic(), True, over="")  # (a saved frame: no window over it)

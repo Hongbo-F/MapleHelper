@@ -315,10 +315,12 @@ def from_key(items: list[Item], i: int) -> list[Item]:
 
 class GameWindow:
     """The game window as the recorder asks after it (`check`): its client area (screen px, an mss box) when the screen
-    shows all of it, else None and why not, in a few words. `detail` names the window over it, when one was."""
+    shows all of it, else None and why not, in a few words. `detail` names the window over it, when one was. `over`:
+    what looks for a window over it (window.over by default; the perception service's recording passes
+    perception.frames' walk, which keeps Python's lock through its calls: its frame loop runs beside it)."""
 
-    def __init__(self, title: str):
-        self.title = title
+    def __init__(self, title: str, over: Callable[[int, dict], int | None] | None = None):
+        self.title, self._over = title, over
         self.covering: int | None = None  # the other program's window over the game at the last check (window.over)
 
     def check(self) -> tuple[dict | None, str]:
@@ -338,7 +340,7 @@ class GameWindow:
         self.covering = None
         if not window.shows(hwnd, area, grid=framecheck.COVER_GRID):
             return None, "covered"
-        self.covering = window.over(hwnd, area)
+        self.covering = (self._over or window.over)(hwnd, area)
         if self.covering is not None:
             return None, "covered"
         return area, ""
@@ -422,7 +424,8 @@ class Recorder:
     (paths.ALARM_CLIPS). Moments made elsewhere come in through `add` (the perception service's frames: from another
     thread than the ticks'). `encoders`: threads a save is encoded on (ENCODERS; or what it says at each save);
     `cpu`: the recording's CPU so far, s (by default the process's: its status's share of a core); `source`: where its
-    frames come from, as the status says it; `extra`: more for the status (the service's counts)."""
+    frames come from, as the status says it; `extra`: more for the status (the service's counts); `apart`: its saves
+    written in a process of their own (write_part_apart: the perception service's)."""
 
     def __init__(self, game, grab: Callable[[dict], np.ndarray], ring: Ring | None = None, *,
                  box: Path | None = None, lie_root: Path | None = None, recent: Path | None = None,
@@ -432,7 +435,8 @@ class Recorder:
                  recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES,
                  clips_keep: int = CLIPS_KEEP_BYTES, encoders: int | Callable[[], int] = ENCODERS,
                  cpu: Callable[[], float] = time.process_time, source: str = "its own grabs (mss)",
-                 extra: Callable[[], dict] | None = None, writer_priority: int = WRITER_PRIORITY):
+                 extra: Callable[[], dict] | None = None, writer_priority: int = WRITER_PRIORITY,
+                 apart: bool = False):
         self.game, self.grab, self.ring = game, grab, ring or Ring()
         box = Path(box or paths.RECORDER)
         self.inbox, self.outbox, self.status_path = box / "inbox", box / "outbox", box / "status.json"
@@ -443,7 +447,7 @@ class Recorder:
         self.folder_wait, self.recent_keep, self.lie_keep = folder_wait, recent_keep, lie_keep
         self.clips_keep = clips_keep
         self.encoders, self.cpu, self.source, self.extra = encoders, cpu, source, extra
-        self.writer_priority = writer_priority
+        self.writer_priority, self.apart = writer_priority, apart
         self._lock = threading.RLock()  # what a moment changes (the clips, the counts), `add` coming from another thread
         self.pending_clips: list[Clip] = []  # alarms whose clip's last moment isn't past yet
         self.started = self.clock()
@@ -498,10 +502,11 @@ class Recorder:
         self.add(item, cost=cost)
         return item
 
-    def add(self, item: Item, after: Item | None = None, cost: float | None = None) -> bool:
+    def add(self, item: Item, after: Item | None = None, cost: float | None = None, detail: str = "") -> bool:
         """A moment into the ring and the clips being gathered, counted (`tick`'s, or the perception service's: from
         another thread). `after`: a difference's frame before it, which must be the ring's newest (False, not added, if
-        a moment came between: a whole frame is kept instead); `cost`: s it took, for the status."""
+        a moment came between: a whole frame is kept instead); `cost`: s it took, for the status; `detail`: a gap's
+        window over the game, for the log (else the last check's: GameWindow.detail)."""
         with self._lock:
             if not self.ring.add(item, after):
                 return False
@@ -510,16 +515,19 @@ class Recorder:
             self.counts[item.why or "frame"] += 1
             if cost is not None:
                 self._costs.append(cost)
-            self._said(item.why)
+            self._said(item.why, detail)
         return True
 
-    def _said(self, why: str) -> None:
+    def _said(self, why: str, detail: str = "") -> None:
         """The log says when the game starts or stops showing (a moment of the window moving or a grab failing
         changes nothing: those come and go)."""
         if why in ("moved", "capture failed", "not encoded") or why == self.state:
             return
         self.state = why
-        detail = self.game.detail() if why == "covered" and hasattr(self.game, "detail") else ""
+        if not detail:
+            detail = self.game.detail() if why == "covered" and hasattr(self.game, "detail") else ""
+        elif not detail.startswith("by "):
+            detail = "by " + detail
         self._say("recorder: the game is on screen: recording" if not why else
                   f"recorder: not recording: {why}" + (f" ({detail})" if detail else ""))
 
@@ -643,6 +651,13 @@ class Recorder:
         """Threads the next save is encoded on (`encoders`, or what it says now)."""
         return max(1, int(self.encoders() if callable(self.encoders) else self.encoders))
 
+    def _write(self, folder: Path, items: list[Item], info: dict, png: bool = False) -> dict:
+        """A part written (write_part), in a process of its own if `apart` (write_part_apart)."""
+        if self.apart:
+            return write_part_apart(folder, items, info, self.fps, png=png, encoders=self.writers(), log=self._say)
+        return write_part(folder, items, info, self.fps, png=png, encoders=self.writers(),
+                          priority=self.writer_priority)
+
     def _save_loop(self) -> None:
         low_priority(self.writer_priority)  # (in the perception service, beside its frame loop: the frames first)
         while True:
@@ -663,9 +678,7 @@ class Recorder:
                 self._say(f"recorder: deleted the {len(gone)} oldest saves to keep the rest under "
                           f"{self.recent_keep / 1024 ** 3:g} GB")
             folder = new_folder(self.recent, name)
-            summary = write_part(folder, snapshot, {"kind": "save-recent", "name": name or None,
-                                                    "asked_s": seconds}, self.fps, encoders=self.writers(),
-                                 priority=self.writer_priority)
+            summary = self._write(folder, snapshot, {"kind": "save-recent", "name": name or None, "asked_s": seconds})
             answer = {"folder": str(folder),
                       **{k: summary[k] for k in ("seconds", "frames", "bytes", "gaps", "window")}}
             self._saved(folder, summary)
@@ -685,11 +698,10 @@ class Recorder:
         else:
             lie_recorder.prune(self.recent, self.recent_keep)
             dest = new_folder(self.recent, safe_name(f"lie-detector {info.get('form') or ''}".strip()))
-        summary = write_part(dest, items, {
+        summary = self._write(dest, items, {
             "kind": "before the Lie Detector", "alarm": info, "alarm_at": day_time(seen),
             "alarm_t": None if not items else round(seen - items[0].t, 3),
-            "player_recording": None if folder is None else str(folder)}, self.fps, encoders=self.writers(),
-            priority=self.writer_priority)
+            "player_recording": None if folder is None else str(folder)})
         self._saved(dest, summary)
         if folder is None:
             self._say(f"recorder: no recording of the player's began within {self.folder_wait:g} s of the alarm "
@@ -701,11 +713,10 @@ class Recorder:
             self._say(f"recorder: deleted the {len(gone)} oldest alarm clips to keep the rest under "
                       f"{self.clips_keep / 1024 ** 3:g} GB")
         dest = new_folder(self.clips, safe_name(f"lie-detector {clip.info.get('form') or ''}".strip()))
-        summary = write_part(dest, items, {
+        summary = self._write(dest, items, {
             "kind": "the alarm's clip", "alarm": clip.info, "alarm_at": day_time(clip.seen),
             "alarm_t": None if not items else round(clip.seen - items[0].t, 3),
-            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, self.fps, png=True,
-            encoders=self.writers(), priority=self.writer_priority)
+            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, png=True)
         self._saved(dest, summary)
 
     def _prune_lie(self, spare: Path) -> None:
@@ -802,6 +813,8 @@ class Recorder:
                 "trimmed": self.ring.trimmed,
                 "gaps_s": {k: round(v / self.fps, 1) for k, v in self.ring.gaps().items()},
                 **self._rate, "saves": self.saves, "last_save": self.last_save,
+                # (what it still has to write: a babysitter stops it only with none, babysit3.ps1)
+                "pending_clips": len(self.pending_clips), "saves_waiting": self.jobs.unfinished_tasks,
                 "max_bytes": self.ring.max_bytes, "seconds": self.ring.seconds, "fps_asked": self.fps,
                 "source": self.source, **(self.extra() if self.extra is not None else {})}
 
@@ -900,6 +913,58 @@ def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, pn
                "window": None if shape is None else list(shape), "sources": dict(sources)}
     (folder / SUMMARY).write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary
+
+
+# A part written apart (`write_part_apart`) takes this long at most: 300 s of frames took 24-31 s written in the
+# perception service (the numbers review of 2026-10-26), its process's start about 1 s more.
+APART_TIMEOUT_S = 600.0
+IDLE_CLASS = 0x40  # Windows' IDLE_PRIORITY_CLASS
+NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+
+
+def write_part_apart(folder: Path, items: list[Item], info: dict, fps: float = FPS, png: bool = False,
+                     encoders: int = ENCODERS, log: Callable[[str], None] = print) -> dict:
+    """write_part in a process of its own (`python -m gamelab.control.partwriter`, below normal priority, or Idle if
+    this process is: as `gamelab recorder` ran), the moments handed down its stdin (pickled, the frames' compressed
+    bytes as they are) and the summary back on its stdout: the perception service's saves, so that none shares its
+    Python lock with the frame loop. Written in the service itself, a save of 120 s during a hunt replayed made the
+    frame loop's steps wait 18-21 ms (median) against 1-2 outside it, 8.4-9.7 frames a second against 13.0-14.3, the
+    writers at the lowest thread priority or at normal alike; written apart, 3-4 ms, 9.6-10.7 frames a second (the
+    rest the CPU's: the replay keeps both processes to 12 CPUs) (D:/MapleHelper-scratch/pconst/finish/replay: s_p*,
+    d_in4-5, d_apart4-5, the machine 16-32% busy). If the process can't be started or fails, written here instead (a
+    folder it left half written moved aside first, `<name>.failed-<time>`), said in `log`."""
+    import pickle
+    import subprocess
+    flags = 0
+    if sys.platform == "win32":
+        k = ctypes.windll.kernel32
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.GetPriorityClass.argtypes = (ctypes.c_void_p,)
+        flags = NO_WINDOW | (IDLE_CLASS if k.GetPriorityClass(k.GetCurrentProcess()) == IDLE_CLASS else BELOW_NORMAL)
+    began = time.monotonic()
+    proc = None
+    try:
+        proc = subprocess.Popen([sys.executable, "-m", "gamelab.control.partwriter"], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=str(paths.REPO),
+                                creationflags=flags)
+        pickle.dump({"folder": str(folder), "info": info, "fps": fps, "png": png, "encoders": encoders,
+                     "n": len(items)}, proc.stdin, protocol=5)
+        for it in items:  # (a frame's bytes go down the pipe as they are: pickle writes a big one straight out)
+            pickle.dump((it.t, it.data, it.why, it.size, it.key, it.rgb, it.seq, it.run), proc.stdin, protocol=5)
+        proc.stdin.close()
+        out, _ = proc.communicate(timeout=max(1.0, APART_TIMEOUT_S - (time.monotonic() - began)))
+        answer = json.loads(out.decode("utf-8").strip().splitlines()[-1])
+        if "summary" not in answer:
+            raise RuntimeError(answer.get("error", "no summary"))
+        return answer["summary"]
+    except Exception as e:  # (it couldn't start, it failed, the pipe broke, it took too long)
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(10)
+        log(f"recorder: a part written apart failed ({type(e).__name__}: {e}): written here instead: {folder}")
+        if folder.exists():
+            folder.rename(folder.with_name(f"{folder.name}.failed-{time.strftime('%H%M%S')}"))
+        return write_part(folder, items, info, fps, png, encoders)
 
 
 def low_priority(priority: int = WRITER_PRIORITY) -> None:
@@ -1022,7 +1087,10 @@ def status_lines(box: Path | None = None, now: float | None = None) -> list[str]
     gaps = ", ".join(f"{k} {v:g} s" for k, v in st.get("gaps_s", {}).items()) or "none"
     lines = [f"recorder {head}: pid {st.get('pid')}, started {st.get('started')}, status of {st.get('updated_at')}",
              f"  its frames: {st.get('source', 'its own grabs (mss)')}, {st.get('fps_asked', FPS):g} a second asked"
-             + (f"; dropped {st['dropped']} (its queue full), late {st.get('late', 0)}" if "dropped" in st else ""),
+             + (f"; dropped {st['dropped']} (its queue full), late {st.get('late', 0)}, covered "
+                f"{st.get('covered', 0)}; its own grabs {st.get('own_moments', 0)} ({st.get('floor_moments', 0)} for "
+                f"the floor, the frame loop too slow: taken {st.get('floor_times', 0)} times"
+                + ("; now" if st.get("floor") else "") + ")" if "dropped" in st else ""),
              f"  the game {'on screen: recording' if st.get('showing') else 'not recording: ' + str(st.get('why'))}",
              f"  kept {st.get('kept_s', 0):g} s of the last {st.get('seconds', SECONDS):g}: {st.get('frames', 0)} "
              f"frames ({st.get('bytes', 0) / 1024 ** 2:.0f} MB of {st.get('max_bytes', MAX_BYTES) / 1024 ** 2:.0f}); "
@@ -1031,7 +1099,9 @@ def status_lines(box: Path | None = None, now: float | None = None) -> list[str]
         lines.append(f"  {st['fps']:g} frames a second; " + (
             f"{st['ms_a_frame']:g} ms a frame (look, grab, look, JPEG), CPU {st['cpu_ms_a_frame']:g} ms a frame, "
             if st.get("ms_a_frame") else "") + f"{st['core_share']:.3f} of a core")
-    lines.append(f"  saves: {st.get('saves', 0)}" + (f", the last {st['last_save']}" if st.get("last_save") else ""))
+    lines.append(f"  saves: {st.get('saves', 0)}" + (f", the last {st['last_save']}" if st.get("last_save") else "")
+                 + (f"; to write: {st.get('saves_waiting', 0)} saves, {st.get('pending_clips', 0)} alarms' clips"
+                    if st.get("saves_waiting") or st.get("pending_clips") else ""))
     return lines
 
 

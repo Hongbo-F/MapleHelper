@@ -139,3 +139,40 @@ def test_the_collections_are_counted_and_timed_for_each_reader():
     assert gcstats.STATS.callback in gc.callbacks and gc.callbacks.count(gcstats.STATS.callback) == 1
     gcstats.install()
     assert gc.callbacks.count(gcstats.STATS.callback) == 1 and sys.modules["gamelab.gcstats"] is gcstats
+
+
+GC_ANYWHERE = """
+import gc, sys, threading
+sys.path.insert(0, sys.argv[1])
+from gamelab import gcstats
+gcstats.install()
+junk, done = [], [0]
+def work():
+    for i in range(20000):
+        junk.append([i])
+        if len(junk) > 2000:
+            junk.clear()
+        gcstats.STATS.take("reader")
+        done[0] += 1
+gc.set_threshold(1)
+t = threading.Thread(target=work, daemon=True)
+t.start()
+t.join(30)
+gc.set_threshold(2000, 10, 10)
+print("hung" if t.is_alive() else f"done {done[0]} {sum(gcstats.STATS.total)}", flush=True)
+sys.stdout.flush()
+import os
+os._exit(0)
+"""
+
+
+def test_a_collection_starting_inside_a_take_never_hangs_the_process():
+    """A collection can start at any allocation, `take`'s own too: with the collector's threshold at 1, take() in a loop
+    beside the collections (the review of 2026-10-26 hung the first take so, the callback waiting for the lock its own
+    thread held). In a process of its own: a hang would freeze every collection of this one."""
+    import subprocess
+    from pathlib import Path
+    root = str(Path(__file__).resolve().parents[1])
+    out = subprocess.run([sys.executable, "-c", GC_ANYWHERE, root], capture_output=True, text=True, timeout=120)
+    words = out.stdout.split()
+    assert words[:2] == ["done", "20000"] and int(words[2]) > 1000, (out.stdout, out.stderr[-2000:])

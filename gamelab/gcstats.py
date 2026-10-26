@@ -41,7 +41,11 @@ class GcStats:
         self._lock = threading.Lock()
 
     def callback(self, phase: str, info: dict) -> None:
-        """gc.callbacks': a collection began or ended (they run one at a time, holding Python's lock)."""
+        """gc.callbacks': a collection began or ended (they run one at a time, holding Python's lock). It takes no lock
+        of its own: a collection can start in any thread at any allocation, `take`'s too, and one that waited there
+        for a lock its own thread held would hang the process (the review of 2026-10-26 hung `take` so with the
+        collector's threshold at 1 and 50). The readers' windows are copied in one step (list() of a dict's values,
+        which no other thread interrupts) and each changed in place."""
         if phase == "start":
             self._began = time.perf_counter()
             return
@@ -52,19 +56,22 @@ class GcStats:
         self.total[gen] += 1
         self.pause += took
         self.longest = max(self.longest, took)
-        with self._lock:
-            for w in self._windows.values():
-                w.counts[gen] += 1
-                w.pause += took
-                w.longest = max(w.longest, took)
+        for w in list(self._windows.values()):
+            w.counts[gen] += 1
+            w.pause += took
+            w.longest = max(w.longest, took)
 
     def take(self, reader: str) -> dict:
         """What came since `reader` last asked (since it first did, the first time): `collections` by generation,
-        `pause_ms` in all, `longest_ms`, `seconds` the window; `frozen`, the objects in the permanent generation."""
+        `pause_ms` in all, `longest_ms`, `seconds` the window; `frozen`, the objects in the permanent generation. The
+        new window is made before the lock is taken (a collection may start as it's made: `callback`)."""
         now = time.monotonic()
-        with self._lock:
-            w = self._windows.get(reader) or _Window()
-            self._windows[reader] = _Window()
+        fresh = _Window()
+        with self._lock:  # (between readers only)
+            w = self._windows.get(reader)
+            self._windows[reader] = fresh
+        if w is None:
+            w = fresh
         return {"collections": list(w.counts), "pause_ms": round(1000 * w.pause, 2),
                 "longest_ms": round(1000 * w.longest, 2), "seconds": round(now - w.since, 1),
                 "frozen": gc.get_freeze_count()}

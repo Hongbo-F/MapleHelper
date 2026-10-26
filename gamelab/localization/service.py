@@ -634,6 +634,8 @@ class Service:
             return self.runner is not None
         self._went_round()
         runner.step.searches.wake = self.wake  # (the frame loop may be waiting for a request or its next frame)
+        if self.recording is not None and hasattr(runner.frames, "cover_check"):
+            runner.frames.cover_check = True  # (the screen's frames say whether a window was over the game: Frame.over)
         old = (self.runner, self.ring, self.full_ring)
         with self._lock:
             self.runner, self.geo, self.map_id, self._rebuild = runner, geo, map_id, None
@@ -813,6 +815,10 @@ class Service:
             line += self.publish.status(now)
         if self.recording is not None:
             line += self.recording.line()
+        if self.runner is not None and hasattr(self.runner.frames, "holds"):
+            held, longest = self.runner.frames.holds()  # (frames.HELD_COUNT_S: how often the capture holds a frame)
+            if held:
+                line += f"; {held} frames held 50-500 ms (the longest {1000 * longest:.0f} ms), stamped as now"
         self.log(line + "; " + gcstats.STATS.line("status"))
 
     def close(self) -> None:

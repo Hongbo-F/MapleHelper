@@ -99,3 +99,49 @@ def test_a_frame_the_capture_holds_from_long_before_the_look_keeps_its_own_time_
     shown[0] = time.monotonic() - frames_module.framecheck.STALE_S - 0.5
     f = frames.next(time.monotonic())
     assert not f.visible and f.problem.kind == "stale"
+
+
+def test_with_the_cover_check_a_frame_says_whether_another_window_was_over_the_game_before_or_after_its_shot(
+        screen, monkeypatch):
+    """window.over, asked just before the shot and again just after it (the perception service's, for its recording):
+    a notification between the grid's points, which window.shows misses, named; the frame still visible to perception.
+    Without the check (no recording), not asked at all."""
+    over = {"calls": 0, "at": set()}
+
+    def window_over(hwnd, area):
+        over["calls"] += 1
+        return 99 if over["calls"] in over["at"] else None
+    monkeypatch.setattr(frames_module, "_over", window_over)  # (window.over's test, its walk with the lock kept)
+    monkeypatch.setattr(window, "describe", lambda hwnd: f"a window of class 'Toast' ({hwnd})")
+    frames = ScreenFrames("MapleStory", grabber=screen, log=lambda m: None)
+    f = frames.next(time.monotonic())
+    assert f.visible and f.over is None and over["calls"] == 0  # (not asked)
+    frames.cover_check = True
+    f = frames.next(time.monotonic())
+    assert f.visible and f.over == "" and over["calls"] == 2  # before and after the shot: nothing over it
+    over["at"] = {4}  # a window come during the shot: seen after it
+    f = frames.next(time.monotonic())
+    assert f.visible and f.over == "a window of class 'Toast' (99)" and over["calls"] == 4
+    over["at"] = {5}  # one there before it: not asked again
+    f = frames.next(time.monotonic())
+    assert f.visible and f.over.startswith("a window of class") and over["calls"] == 5
+
+
+def test_frames_held_50_to_500_ms_are_stamped_as_now_and_counted(screen, monkeypatch):
+    """Short of HELD_S a held frame is the screen as it still is (stamped as now, as before), but one held from
+    HELD_COUNT_S is counted, with the longest, for the service's console line (how often they come live)."""
+    frames = ScreenFrames("MapleStory", grabber=screen, log=lambda m: None)
+    real, shown = screen.shot, [None]
+
+    def shot(area, after=None, at=None):
+        s = real(area)
+        s.t = shown[0]
+        return s
+    monkeypatch.setattr(screen, "shot", shot)
+    for held in (0.01, 0.03, 0.08, 0.3, 0.2):
+        asked = time.monotonic()
+        shown[0] = asked - held
+        assert frames.next(asked).t >= asked
+    n, longest = frames.holds()
+    assert n == 3 and longest == pytest.approx(0.3, abs=0.01) and frames.held == 0
+    assert frames.holds() == (0, 0.0)
