@@ -63,9 +63,12 @@ HP_DROP = 0.004       # HP lost from one frame to the next that counts as a hit 
 # within BAR_SHOWN_S: a frame or two) or a throw of hers went its way in the last tracking.STAR_WINDOW; else every
 # BAR_EVERY-th frame, its track's bar as last read meanwhile (a monster nobody hits shows none). Read in every frame, the
 # bars were 74% of what the simulator's feed cost (loop_tree_lie_detector: 37.5 s of its 41 in SyncFeed.tick), and live
-# pays for them as much.
+# pays for them as much. One seen again after BAR_UNSEEN_S or more unseen (hidden under her damage numbers, 1-3 s in
+# game) has it read in the frame it's back in: its bar as last read is from before what hid it, and carried over, the
+# probes read a star that hit as a miss (test_probe's hidden target: 2 of 30 so, with every star a hit).
 BAR_EVERY = 5
 BAR_SHOWN_S = 0.25
+BAR_UNSEEN_S = 0.15
 HIT_MERGE_S = 0.2     # a drop this soon after the last is the same hit, if the bar takes a few frames to go down
 
 
@@ -548,8 +551,10 @@ class WorldStep:
                 self.tracker.gain(g.when(i), kind)
 
     def _bar_due(self, tr: Track, t: float) -> bool:
-        """Whether track `tr`'s HP bar is read in the frame shown at t (BAR_EVERY, BAR_SHOWN_S)."""
+        """Whether track `tr`'s HP bar is read in the frame shown at t (BAR_EVERY, BAR_SHOWN_S, BAR_UNSEEN_S)."""
         if tr.bar_at is not None and t - tr.bar_at <= BAR_SHOWN_S:
+            return True
+        if tr.state == HIDDEN or t - tr.last_seen >= BAR_UNSEEN_S:  # (seen again)
             return True
         if any(0 <= t - th.t <= STAR_WINDOW and tr.id in th.aimed for th in self.tracker.throws):
             return True

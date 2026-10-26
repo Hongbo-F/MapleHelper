@@ -364,9 +364,10 @@ def test_a_frame_that_fails_its_checks_says_why_in_its_state_and_is_neither_plac
     assert step.step(None, good.t + 0.4, False, why="gone").bad == Problem("window", "gone")
 
 
-def test_a_monsters_bar_is_read_while_it_shows_one_or_she_threw_its_way_else_every_5th_frame():
+def test_a_monsters_bar_is_read_while_it_shows_one_or_she_threw_its_way_else_every_5th_frame(monkeypatch):
     # worldstate.BAR_EVERY, BAR_SHOWN_S: in between, its track's bar as last read. (The searches read the bars of what
-    # they find: none here but the first frame's.)
+    # they find: none here but the first frame's.) BAR_UNSEEN_S: seen again after a while unseen, its bar is read in the
+    # frame it's back in (a pause between the batches below counts as one).
     from gamelab.localization.worldstate import BAR_EVERY
     model = small_map()
     step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(band_s=None, wide_s=None))
@@ -398,3 +399,14 @@ def test_a_monsters_bar_is_read_while_it_shows_one_or_she_threw_its_way_else_eve
     reads.clear()
     frames(step, BAR_EVERY, start=105.01)
     assert len(reads) == BAR_EVERY
+    # Hidden 0.3 s (under her damage numbers, say), then back: read in the frame it's back in, whatever BAR_EVERY says
+    # (its bar as last read is from before it hid), and not in the next.
+    from gamelab.localization import worldstate
+    monkeypatch.setattr(worldstate, "BAR_EVERY", 10_000)
+    frames(step, 30, start=110.0)
+    step.eyes.mobs = []
+    frames(step, 9, start=111.0)
+    step.eyes.mobs = [pig(1100)]
+    reads.clear()
+    back = frames(step, 3, start=111.3)
+    assert len(reads) == 1 and reads[0] == back[0].t and back[0].monsters
