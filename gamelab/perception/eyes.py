@@ -394,7 +394,7 @@ class Eyes:
     def refind(self, obs: Observation, mob: Mob, box: tuple[int, int, int, int], fallback: bool = True) -> Mob | None:
         """Monster `mob`, seen in an earlier frame, looked for again where its picture should be now (`box`:
         x0, y0, x1, y1), above the bottom bar (MobDetector.refind; without `fallback`, only with the template
-        that matched it last)."""
+        that matched it last and its animation's next frames, not its kind's whole set)."""
         h, w = obs.frame.shape[:2]
         return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing,
                                     (0, 0, w, int(h * obs.geo.hud_top)), fallback)

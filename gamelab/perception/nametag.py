@@ -36,8 +36,9 @@ SAME_NAME = (20, 60)   # full-size px around a match (rows, columns) where other
 # (D:/MapleHelper-scratch/cpu/perception/tag_ab.py).
 NEAR = (240, 120)
 NEAR_FRAME = (80, 40)
-FULL_EVERY = 150       # ... and every this many looks the whole play area anyway, so a wrong match can't stick (5 s at
-                       # 30 frames a second; every 30 looks, at 35 ms each, it was 1.2 ms a frame)
+FULL_EVERY = 30        # ... and every this many looks the whole play area anyway, so a wrong match can't stick: 1 s
+                       # hunting (the service's 30 frames a second), 6 s between hunts (5 a second). At 35 ms each, 1.2
+                       # ms a frame (150, tried on 2026-10-26: 5 s hunting but 30 s between hunts)
 # After this many looks in a row without her tag, the full-size template is cut again from calibration's half-size one
 # (`_cut`, about 35 ms), in case it no longer matches her (kept from another day); if the half-size one doesn't find her
 # either, nothing changes. In the tours on Tree Dungeon on 2026-10-24 (7,646 looks, 1.8 a second) her tag was hidden 14

@@ -177,8 +177,7 @@ def test_a_monster_whose_animation_stepped_on_is_refound_as_its_new_frame(tmp_pa
     # At the game's own size a monster's frames differ crisply: here its next frame is its colours 4 px across inside
     # the same outline. The frame it was found as still passes there, 4 px off where it stands (0.80); its next frame,
     # tried as that's under REFIND_GOOD, finds it where it stands. With step 1 at full size (as at 1920x1080 half size,
-    # where frames were alike) the frame it was found as is all there is, and so it is for a hidden track's re-find
-    # (without `fallback`) at any step: its next frames are left to the searches.
+    # where frames were alike) the frame it was found as is all there is.
     right = pig().copy()
     nxt = right.copy()
     nxt[..., :3] = np.roll(right[..., :3], 4, axis=1)
@@ -189,15 +188,14 @@ def test_a_monster_whose_animation_stepped_on_is_refound_as_its_new_frame(tmp_pa
     scene, later = frame(), frame()
     pasted.paste(scene, right, 500, 300)
     pasted.paste(later, nxt, 500, 300)
-    as_found = ("pig_move0", 0.796, 564)
-    for search_scale, refound in ((mobs.SEARCH_SCALE, ("pig_move1", 1.0, 560)), (1.0, as_found)):
+    for search_scale, refound in ((mobs.SEARCH_SCALE, ("pig_move1", 1.0, 560)), (1.0, ("pig_move0", 0.796, 564))):
         detector = MobDetector(folder, threads=1, frame_scale=NATIVE.frame_scale, search_scale=search_scale)
         seen = detector.detect(scene, (250, 420))[0]
         box = (seen.x - seen.w // 2, seen.y - seen.h // 2, seen.x + seen.w // 2, seen.y + seen.h // 2)
         assert (seen.template, seen.foot_x) == ("pig_move0", 500 + PIG_ORIGIN[0])
-        for fallback, want in ((True, refound), (False, as_found)):
+        for fallback in (True, False):
             m = detector.refind(later, box, "pig", seen.template, seen.facing, fallback=fallback)
-            assert (m.template, m.score, m.foot_x) == want and detector.fallbacks == 0
+            assert (m.template, m.score, m.foot_x) == refound and detector.fallbacks == 0
 
 
 # --- drops ------------------------------------------------------------------------------------------------------

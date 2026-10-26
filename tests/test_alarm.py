@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from gamelab.control import alarm, client
-from gamelab.perception import lie_detector
+from gamelab.perception import framecheck, lie_detector
 from gamelab.perception.lie_detector import LieDetectorSpotter
 from gamelab.__main__ import LIE_DETECTOR_EXIT, main
 from gamelab.control.player import LIE_DETECTOR_ERROR, Player, Watchdog, _sleep_until
@@ -150,43 +150,76 @@ def test_the_look_near_the_forms_places_scores_every_lie_detector_seen_in_game_a
             assert near[form] == pytest.approx(whole[form], abs=1e-4) and near[form] >= 1
 
 
+CLEAN = "lie_detector/without/2026-10-25_005500_before_the_notice.jpg"  # 1366x768, its capture anchors in place
+
+
 def pasted(png: str, form: str, to: tuple[int, int]) -> np.ndarray:
-    """A clean scene (stretched to 1920x1080) with `form`'s window cut from a saved Lie Detector screen (1920x1080) at
-    its place, pasted at `to` (x, y): a form somewhere it has never shown."""
-    import cv2
-    scene = cv2.resize(img("lie_detector/without/2026-10-25_005500_before_the_notice.jpg"), lie_detector.TEMPLATE_FRAME,
-                       interpolation=cv2.INTER_LINEAR)
+    """A clean scene of the game's own size (its capture anchors in place) with `form`'s window, cut around its place
+    from a saved Lie Detector screen brought to that size (`native`), pasted at `to` (x, y, game px): a form somewhere
+    it has never shown."""
+    scene = img(CLEAN).copy()
+    k = lie_detector.TEMPLATE_FRAME[0] / lie_detector.NATIVE_FRAME[0]
     (x, y), = lie_detector.PLACES[form][:1]
     if form == "countdown":
         h, w = LieDetectorSpotter().template.shape
     else:
         h, w = (2 * n for n in LieDetectorSpotter().half[form][0].shape)
-    cut = img(f"lie_detector/{png}")[y - 8:y + h + 8, x - 8:x + w + 8]
+    x0, y0, x1, y1 = (round(v / k) for v in (x - 8, y - 8, x + w + 8, y + h + 8))
+    cut = native(img(f"lie_detector/{png}"))[y0:y1, x0:x1]
     scene[to[1]:to[1] + cut.shape[0], to[0]:to[0] + cut.shape[1]] = cut
     return scene
 
 
-@pytest.mark.parametrize("png, form, to", [("2026-10-19_004720_countdown.png", "countdown", (300, 700)),
-                                           ("2026-10-19_015828_mini_game_notice.png", "mini-game notice", (200, 300))])
+def drawn_off(frame: np.ndarray, dx: int = -18, dy: int = -85) -> np.ndarray:
+    """A 1366x768 frame as the game drawing its picture off its client shows it (2026-10-25 23:40: 18 px left and 85
+    up, black where nothing is drawn)."""
+    out = np.zeros_like(frame)
+    out[:frame.shape[0] + dy, :frame.shape[1] + dx] = frame[-dy:, -dx:]
+    return out
+
+
+def watching(tmp_path, frames, spotter=None) -> tuple[Watchdog, int]:
+    """A Watchdog on `frames` in turn, looked with until its alarm: (it, how many looks that took)."""
+    frames = iter(frames)
+    flag = threading.Event()
+    dog = Watchdog("MapleStory", flag, spotter=spotter or LieDetectorSpotter(), grab=lambda: next(frames),
+                   on_alarm=lambda f: None, folder=tmp_path, log=lambda m: None)
+    looks = 0
+    while not flag.is_set():
+        dog.tick(looks * 0.25)
+        looks += 1
+    dog.recording.finish("stopped")
+    return dog, looks
+
+
+@pytest.mark.parametrize("png, form, to", [("2026-10-19_004720_countdown.png", "countdown", (200, 480)),
+                                           ("2026-10-19_015828_mini_game_notice.png", "mini-game notice", (140, 210))])
 def test_a_lie_detector_somewhere_it_never_showed_is_seen_by_the_watchdog_s_whole_frame_look(tmp_path, png, form, to):
     """The look near the forms' places doesn't see a form elsewhere; the whole frame's, every WHOLE_EVERY-th look, does:
     the alarm within that many looks of its first showing (2 s at 4 a second)."""
     frame = pasted(png, form, to)
     spotter = LieDetectorSpotter()
     assert spotter.scores(frame)[form] >= 1 and max(spotter.near(frame).values()) < 1
-    frames = iter([SCENE] + [frame] * 20)  # (the first look, of the whole frame, sees no Lie Detector)
-    flag = threading.Event()
-    dog = Watchdog("MapleStory", flag, spotter=spotter, grab=lambda: next(frames), on_alarm=lambda f: None,
-                   folder=tmp_path, log=lambda m: None)
-    looks = 0
-    while not flag.is_set():
-        dog.tick(looks * 0.25)
-        looks += 1
+    assert not framecheck.anchors_off(frame)  # (the picture in its place: `near` is what most looks ask)
+    dog, looks = watching(tmp_path, [img(CLEAN)] + [frame] * 20)  # (the first look, of the whole frame, sees none)
     assert looks == 1 + lie_detector.WHOLE_EVERY and dog.form == form  # seen at its 8th look, the 9th in all
-    dog.recording.finish("stopped")
 
 
-def test_the_watchdog_looks_at_the_whole_frame_every_whole_every_th_look_and_in_a_cycle_and_at_other_sizes(tmp_path):
+@pytest.mark.parametrize("png, form", [("2026-10-25_002828_quiz.jpg", "quiz"),
+                                       ("2026-10-25_002758_quiz_warning.jpg", "quiz warning"),
+                                       ("2026-10-25_005501_mini_game_notice.jpg", "mini-game notice")])
+def test_a_lie_detector_on_a_picture_drawn_off_the_client_is_seen_at_its_first_look(tmp_path, png, form):
+    """The game drawing its picture off its client moves every form off its places, where `near` looks: such a frame
+    (neither capture anchor in its place) is looked at whole, so the form is seen at the first look of it."""
+    frame = drawn_off(img(f"lie_detector/{png}"))
+    spotter = LieDetectorSpotter()
+    assert spotter.scores(frame)[form] >= 1 and max(spotter.near(frame).values()) < 1
+    assert framecheck.anchors_off(frame) and not framecheck.anchors_off(img(f"lie_detector/{png}"))
+    dog, looks = watching(tmp_path, [img(CLEAN)] * 3 + [frame] * 20)
+    assert looks == 4 and dog.form == form
+
+
+def test_the_watchdog_looks_at_the_whole_frame_every_whole_every_th_look_and_in_a_cycle_and_off_the_places(tmp_path):
     class Spy:
         def __init__(self):
             self.calls, self.up = [], False
@@ -199,23 +232,33 @@ def test_the_watchdog_looks_at_the_whole_frame_every_whole_every_th_look_and_in_
             self.calls.append("near")
             return {"countdown": 1.5 if self.up else 0.1}
 
-    spy = Spy()
-    dog = Watchdog("MapleStory", threading.Event(), spotter=spy, grab=lambda: SCENE, on_alarm=lambda f: None,
+    spy, clean = Spy(), img(CLEAN)
+    shown = {"frame": clean}
+    dog = Watchdog("MapleStory", threading.Event(), spotter=spy, grab=lambda: shown["frame"], on_alarm=lambda f: None,
                    folder=tmp_path, log=lambda m: None)
     looks = iter(range(100))
-    for _ in range(17):
-        dog.tick(next(looks) * 0.25)
-    assert spy.calls == (["whole"] + ["near"] * 7) * 2 + ["whole"]
-    spy.calls.clear()
-    dog.client_size = (1600, 900)  # (grabbed so: the places aren't known at that size)
-    for _ in range(3):
-        dog.tick(next(looks) * 0.25)
-    assert spy.calls == ["whole"] * 3
-    spy.calls.clear()
-    dog.client_size, spy.up = (1366, 768), True
-    for _ in range(4):
-        dog.tick(next(looks) * 0.25)
-    assert spy.calls == ["near", "whole", "whole", "whole"] and dog.cycle_t0 is not None  # in a cycle: the whole frame
+
+    def look(n: int, frame) -> list[str]:
+        spy.calls.clear()
+        shown["frame"] = frame
+        for _ in range(n):
+            dog.tick(next(looks) * 0.25)
+        return spy.calls
+
+    assert look(17, clean) == (["whole"] + ["near"] * 7) * 2 + ["whole"]  # (looks 1-17)
+    import cv2
+    assert look(2, cv2.resize(clean, lie_detector.TEMPLATE_FRAME)) == ["whole"] * 2  # (no anchors at another size)
+    assert look(1, SCENE) == ["whole"]
+    assert look(2, drawn_off(clean)) == ["whole"] * 2  # (its picture off the client: neither anchor in its place)
+    minimap_closed = clean.copy()
+    minimap_closed[:30, :100] = 0  # (one anchor is enough: the HUD's border in its place)
+    assert look(2, minimap_closed) == ["near"] * 2  # (looks 23 and 24)
+    assert look(2, clean) == ["whole", "near"]
+    dog.anchors_off = lambda frame: 1 / 0  # (a check that fails: the whole frame)
+    assert look(1, clean) == ["whole"]
+    dog.anchors_off = framecheck.anchors_off
+    spy.up = True
+    assert look(4, clean) == ["near", "whole", "whole", "whole"] and dog.cycle_t0 is not None  # in a cycle: whole
     dog.recording.finish("stopped")
 
 

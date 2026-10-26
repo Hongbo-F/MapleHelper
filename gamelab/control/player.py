@@ -28,7 +28,8 @@ only by a player started again, which takes the user's UAC click. Start it with 
 player --elevate`; stop it with `python -m gamelab stop`.
 
 Of gamelab, this module itself imports only paths, window and control.alarm (its constants: what goes with the alarm
-up), and control.lie_recorder and perception.lie_detector when a Watchdog is created. Plans come from control.client.
+up), and control.lie_recorder, perception.lie_detector and perception.framecheck (its capture anchors; it imports
+paths, screen and window) when a Watchdog is created. Plans come from control.client.
 """
 
 import json
@@ -367,12 +368,20 @@ class Watchdog(threading.Thread):
     again, paged too, so gamelab's commands go on refusing. An alarm file that never got written (the disk full)
     can't be cleared: then the player stays up, locked, until it's stopped.
 
-    A look matches each form only around the places it has always shown (the spotter's `near`), and every
-    lie_detector.WHOLE_EVERY-th look (the first too) the whole frame (`scores`): a form shown anywhere else is seen
-    within that many looks, 2 s. The whole frame is looked at every time while a cycle is in progress (what it records
-    is as it ever was) and while the game's client is of another size than 1366x768 or 1920x1080 (the places aren't
-    known there). At 4 looks a second, 0.14 cores against 0.61 (D:/MapleHelper-scratch/cpu/ldwatch/roi_eval.py). A
-    spotter without `near` (the tests' own) is asked for `scores` every time.
+    A look matches each form only around the places it has always shown (the spotter's `near`) on a frame of the
+    game's own size, 1366x768, whose picture is where it belongs: either capture anchor in its place (the minimap's
+    title strip, the HUD's border: perception.framecheck.anchors_off, 0.04 ms). Every lie_detector.WHOLE_EVERY-th look
+    (the first too) is of the whole frame (`scores`): a form shown anywhere else on such a frame is seen within that
+    many looks, 2 s. The whole frame is looked at every time while a cycle is in progress (what it records is as it
+    ever was), on a frame of any other size (a client of 1920x1080, or of another size brought to it: no anchors are
+    measured there), and with neither anchor in its place: the game drawing its picture off its client (2026-10-25
+    23:40 and 2026-10-26 00:29, 18 px left and 85 up) moves every form off its places too, and `near` saw none of the
+    2,230 such frames the whole frame sees (D:/MapleHelper-scratch/cpu/review-safety/ld). Of the 16,050 saved frames
+    at 1366x768 (the recordings, before/, the rolling saves, the clips, the fixtures), the 3,809 that show a form all
+    have an anchor in place, and every one of the 16,050 drawn off so has neither (D:/MapleHelper-scratch/cpu/fix/
+    anchors_scan.py). A check that fails says the whole frame. At 4 looks a second on saved hunt frames, 0.07-0.12
+    cores against 0.55-0.58 with the whole frame every look (D:/MapleHelper-scratch/cpu/fix/out/watch.txt). A spotter
+    without `near` (the tests' own) is asked for `scores` every time.
 
     `grab` (for tests) stands in for grabbing the game: it returns a frame (RGB), (a frame, "covered"), or why
     there's none ("no window", "minimized"; None is "no window"). Nothing that goes wrong in a look, the recording or
@@ -382,7 +391,8 @@ class Watchdog(threading.Thread):
                  interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None,
                  shadow=False):
         super().__init__(name="lie-detector-watch", daemon=True)
-        from ..perception.lie_detector import WHOLE_EVERY, LieDetectorSpotter
+        from ..perception.framecheck import anchors_off
+        from ..perception.lie_detector import NATIVE_FRAME, WHOLE_EVERY, LieDetectorSpotter
         from ..perception.lie_detector_yolo import FORM, YoloPatternShadow
         from . import lie_recorder
         from .alarm import raise_alarm
@@ -391,7 +401,7 @@ class Watchdog(threading.Thread):
         self.spotter = spotter or LieDetectorSpotter()
         self.whole_every = WHOLE_EVERY
         self.looks = 0                        # looks with a frame so far (every whole_every-th of the whole frame)
-        self.client_size: tuple[int, int] | None = None  # the game's client as last grabbed (None: `grab`'s frames)
+        self.anchors_off, self.native = anchors_off, NATIVE_FRAME
         self.shadow = (YoloPatternShadow() if shadow is True else shadow) or None
         self.shadow_form = FORM
         self.grab = grab
@@ -506,15 +516,24 @@ class Watchdog(threading.Thread):
 
     def _scores(self, frame) -> dict[str, float]:
         """The spotter's scores of a look's frame: near the forms' places (`near`), or of the whole frame (`scores`) on
-        every whole_every-th look, the first too, while a cycle is in progress, and with the game's client of a size
-        whose places aren't known (see the top)."""
-        from ..perception.lie_detector import NATIVE_FRAME, TEMPLATE_FRAME
+        every whole_every-th look, the first too, while a cycle is in progress, and on a frame whose places aren't
+        known: of another size than the game's own, or its picture off its place (`in_place`; see the top)."""
         self.looks += 1
         near = getattr(self.spotter, "near", None)
         if (near is None or self.looks % self.whole_every == 1 % self.whole_every or self.cycle_t0 is not None
-                or self.client_size not in (None, NATIVE_FRAME, TEMPLATE_FRAME)):
+                or not self.in_place(frame)):
             return self.spotter.scores(frame)
         return near(frame)
+
+    def in_place(self, frame) -> bool:
+        """Whether a frame is of the game's own size (lie_detector.NATIVE_FRAME) with its picture where it belongs:
+        either capture anchor in its place (framecheck.anchors_off). False if that can't be told (the minimap title's
+        picture unreadable, say): the whole frame is looked at then."""
+        try:
+            return (frame.shape[1], frame.shape[0]) == self.native and not self.anchors_off(frame)
+        except Exception as e:
+            self._trouble("the capture anchors' check failed", e)
+            return False
 
     def gone_for(self, now: float) -> bool:
         """Whether the game has shown no Lie Detector for end_s, every look of it showing the game."""
@@ -586,7 +605,6 @@ class Watchdog(threading.Thread):
         client_area = window.client_rect(hwnd)
         if client_area["width"] <= 0 or client_area["height"] <= 0:
             return "minimized"
-        self.client_size = (client_area["width"], client_area["height"])
         # A screen capture sees whatever is on top (window.shows: the middle and near each corner). Still checked for
         # the Lie Detector, as it always was (it may show round the window over it), but not saved, nor counted as
         # the Lie Detector gone: a terminal opened over the game had gone to disk as frames of it, and after a

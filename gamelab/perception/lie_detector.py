@@ -18,7 +18,8 @@ test begins. Never try to answer it automatically: a person has to.
 
 Each form has always shown at one place (PLACES), and the player's watchdog looks 4 times a second: most of its looks
 match each form only around its places (`near`, 11 ms of CPU at 1366x768), every WHOLE_EVERY-th the whole frame
-(`scores`, 151 ms), for a window anywhere else.
+(`scores`, 151 ms), for a window anywhere else; and every look the whole frame on a frame whose places aren't known (of
+another size, or the game's picture drawn off its client: control.player.Watchdog).
 
 The key player, which runs as administrator, loads this module: it imports only gamelab.paths.
 """
