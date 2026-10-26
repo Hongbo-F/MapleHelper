@@ -16,6 +16,13 @@ from .. import telemetry
 PERCEIVED = ("scene", "tracks", "exp")
 PERCEIVED_EVENTS = ("died", "exp_gain", "hp_drop")
 PERCEIVE_LIVE_S = 3.0  # s since the service's file last grew within which its records are the page's
+# The commands' files the directory says were written within this long are asked their last write (telemetry.newest's
+# recent_s), the rest go by the directory (a file written to for longer than that, its directory entry not brought up
+# to date, would go by when it was made: a hunt is hours, and the babysitter starts the pet again after each). On the
+# live folder (340 files, 20 written within a day, 2026-10-26): 1.5 ms of CPU a scan against 14.3 with RECENT_S's 7
+# days, the same file found, a scan a second while the page is open (D:/MapleHelper-scratch/cpu/apply/newestbench.py).
+# The service's files keep RECENT_S: it runs for days.
+COMMANDS_RECENT_S = 86400.0
 # What the command's scenes say of her that the service's don't: which way she faces, by her keys and her frames (the
 # hunter's: behavior.hunter._publish), carried onto the service's scenes from the command's latest.
 HER_OWN = ("facing", "facing_by", "facing_keys", "facing_seen", "facing_strong")
@@ -30,8 +37,8 @@ class _Followed:
     """The newest telemetry file of a kind (`match` its names), followed as it grows; a newer run's file replaces it,
     a run's next part continues it (see LiveSource)."""
 
-    def __init__(self, folder: Path, match, rescan_s: float):
-        self.folder, self.match, self.rescan_s = folder, match, rescan_s
+    def __init__(self, folder: Path, match, rescan_s: float, recent_s: float = telemetry.RECENT_S):
+        self.folder, self.match, self.rescan_s, self.recent_s = folder, match, rescan_s, recent_s
         self.path: Path | None = None
         self._follower: telemetry.Follower | None = None
         self._scanned: float | None = None  # when the folder was last looked through
@@ -39,7 +46,7 @@ class _Followed:
     def poll(self, now: float) -> tuple[bool, list[dict]]:
         if self._scanned is None or now - self._scanned >= self.rescan_s:
             self._scanned = now
-            newest = telemetry.newest(self.folder, match=self.match)
+            newest = telemetry.newest(self.folder, match=self.match, recent_s=self.recent_s)
             if newest is not None and newest != self.path:
                 follower = telemetry.Follower(newest)
                 records = follower.poll()
@@ -73,7 +80,7 @@ class LiveSource:
     def __init__(self, folder: Path = telemetry.FOLDER, rescan_s: float = 1.0,
                  clock: Callable[[], float] = time.monotonic):
         self.folder, self.rescan_s, self._clock = folder, rescan_s, clock
-        self._run = _Followed(folder, lambda name: not perceive_file(name), rescan_s)
+        self._run = _Followed(folder, lambda name: not perceive_file(name), rescan_s, COMMANDS_RECENT_S)
         self._perceived = _Followed(folder, perceive_file, rescan_s)
         self._perceived_at: float | None = None  # when the service's file last gave records
         self._alone = False  # the service's file is the run (no command's yet)

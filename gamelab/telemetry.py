@@ -257,7 +257,8 @@ class Follower:
         return _records(lines)
 
 
-def newest(folder: Path = FOLDER, now: float | None = None, match: Callable[[str], bool] | None = None) -> Path | None:
+def newest(folder: Path = FOLDER, now: float | None = None, match: Callable[[str], bool] | None = None,
+           recent_s: float = RECENT_S) -> Path | None:
     """The telemetry file written to last (the run in progress, while there is one), if any; with `match`, of the files
     whose names it takes (ui.sources: the perception service's apart from the commands').
 
@@ -269,8 +270,9 @@ def newest(folder: Path = FOLDER, now: float | None = None, match: Callable[[str
     newest until that part closed (hours, for `watch`), and the page froze on it. So the files the
     directory says were written in the last RECENT_S are asked with os.stat (it opens them), the rest go
     by the directory: a part still open was made in that time (a part is MAX_BYTES at most: hunting writes
-    that in 15 hours, `watch` in 4). 1.0 ms with 40 recent files, 24 ms with 1000. Comparing the names
-    `record_to` gives was no faster (3.3 ms with 1000) and is wrong once a year: they're in local time, so
+    that in 15 hours, `watch` in 4). 1.0 ms with 40 recent files, 24 ms with 1000. `recent_s` (RECENT_S by default)
+    says how recent: the web page asks of the commands' files the last day's (ui.sources.COMMANDS_RECENT_S). Comparing
+    the names `record_to` gives was no faster (3.3 ms with 1000) and is wrong once a year: they're in local time, so
     in the hour that repeats when the clocks go back, a finished run's name sorts after the one in
     progress."""
     now = time.time() if now is None else now
@@ -282,7 +284,7 @@ def newest(folder: Path = FOLDER, now: float | None = None, match: Callable[[str
         return None
     files = []
     for mtime, name in listed:
-        if now - mtime < RECENT_S:
+        if now - mtime < recent_s:
             try:
                 mtime = os.stat(folder / name).st_mtime
             except OSError:  # gone meanwhile

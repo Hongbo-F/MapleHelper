@@ -92,7 +92,11 @@ SECONDS = 300.0    # the last 5 minutes are kept (3,000 moments at FPS)
 # PNG (the alarm's clip: lossless on disk too).
 ZSTD_LEVEL = 1
 JPEG_PARAMS = lie_recorder.JPEG_PARAMS  # the Lie Detector recordings' settings: a frame of either reads alike
-PNG_PARAMS = [cv2.IMWRITE_PNG_COMPRESSION, 1]  # 813 KB and 55 ms a frame on the six: on ENCODERS threads as it's written
+# (813 KB and 55 ms a frame on the six, on ENCODERS threads as it's written.) Without PNG's row filters: on 80 frames
+# of the two alarm clips of 2026-10-26, 31.0 ms of CPU a frame against 54.6, 581 KB against 538, the same pixels read
+# back: a clip's 700 frames 17 s of CPU less, in the burst after an alarm (D:/MapleHelper-scratch/cpu/apply/
+# pngbench.py).
+PNG_PARAMS = [cv2.IMWRITE_PNG_COMPRESSION, 1, cv2.IMWRITE_PNG_FILTER, cv2.IMWRITE_PNG_FILTER_NONE]
 ENCODERS = 4       # threads encoding a part's frames as it's written (OpenCV and zstd let go of the GIL)
 # The frames kept take at most this much memory: past it the oldest go, younger than SECONDS or not (counted as
 # `trimmed` in the status). 5 minutes at 1366x768 always fit (3.4 GB at the busiest); at 1920x1080, twice the pixels,
