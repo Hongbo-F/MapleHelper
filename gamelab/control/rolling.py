@@ -5,7 +5,12 @@ the mouse mini-game and the Truth Booth, and records only once it has seen one).
 2026-10-25 the player knows it and its warning, and the mini-game's notice, so their alarms are saved as any.
 
 `python -m gamelab recorder` runs it (README: The rolling recording), at below-normal priority, kept running by the
-babysitter, hunts or not. What it keeps is saved:
+babysitter, hunts or not. Since 2026-10-26 the perception service keeps it instead, from its own frames (the user:
+"The recording should probably just take frames from within the same perception process to have a rolling window copy
+of things in memory, match fps or fps/2"): control.recording feeds a Recorder here from outside (`add`), every
+other frame of its 30 a second, each kept as its difference from the one before (`pack_diff`; a whole frame every
+second: a chain, decoded whole, `decode`), and takes a moment itself as this recorder does (`tick`) while the service
+has no frame of the game to give. One recorder at a time, whichever (MUTEX). What it keeps is saved:
   - on a Lie Detector alarm (control.alarm's ALARM.json, written by the player's watchdog, whatever form it was seen
     as: its `form`): the 5 minutes before it, and on until the player's own recording of it has begun, go into that
     recording's folder as `before/`
@@ -20,13 +25,15 @@ A saved part (`write_part`), one folder:
   00000.jpg ...  the frames, as grabbed, encoded as they're written: JPEG (JPEG_PARAMS), or PNG (PNG_PARAMS: the
                  alarm's clip);
   index.jsonl    in time order, a line a frame: `i`, `file`, `t` (s from the part's first moment) and `at` (the clock
-                 time); and a line a gap, the moments in a row with no frame for the same reason: `gap` (why: "no
-                 window", "minimized", "no client area", "off the screen", "not in front", "covered", "moved", "capture
-                 failed", "not encoded"), `t` and `until` (its first and last moment), `ticks`;
+                 time), and for one of the perception service's its frame number and run (`seq`, `run`: its state's
+                 `seq` and `epoch`, so a frame can be joined to what perception made of it); and a line a gap, the
+                 moments in a row with no frame for the same reason: `gap` (why: "no window", "minimized", "no client
+                 area", "off the screen", "not in front", "covered", "moved", "capture failed", "not encoded", "no
+                 whole frame"), `t` and `until` (its first and last moment), `ticks`;
   summary.json   what it is (`kind`: "save-recent" or "before the Lie Detector", with the alarm and the moment it was
                  seen, `alarm_t`), `from` and `to`, `seconds`, `ticks`, `frames`, their `bytes`, the `gaps` (s by why),
-                 `fps`, the `format` ("jpeg" or "png"), `jpeg_quality` (a JPEG part's) and the `window`'s size (the
-                 last frame's).
+                 `fps`, the `format` ("jpeg" or "png"), `jpeg_quality` (a JPEG part's), the `window`'s size (the
+                 last frame's) and the frames' `sources` (how many were the perception service's, how many grabbed).
 
 A frame is kept only when the screen shows the game: its window there and not minimized, wholly on the monitors, in
 front, and no other program's window over any of it (window.shows at perception.framecheck's COVER_GRID, then
@@ -142,16 +149,65 @@ NAME_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 
 @dataclass(frozen=True, slots=True)
 class Item:
-    """One moment: a frame (its pixels packed losslessly: `pack`; its size) or a gap (why there's no frame)."""
-    t: float                     # when (time.time's clock): the frame's grab, the gap's look at the window
-    data: bytes | None = None    # the frame's BGR pixels, compressed (`pack`); None: a gap
+    """One moment: a frame (its pixels packed losslessly: `pack`, or as its difference from the frame before it,
+    `pack_diff`; its size) or a gap (why there's no frame)."""
+    t: float                     # when (time.time's clock): the frame's grab (or showing), the gap's look at the window
+    data: bytes | None = None    # the frame's pixels, compressed (`pack`, `pack_diff`); None: a gap
     why: str = ""                # a gap's reason
     size: tuple[int, int] | None = None  # a frame's width, height
+    key: bool = True             # a whole frame; False: its difference from the frame just before it (a chain's)
+    rgb: bool = False            # its pixels are RGB (the perception service's frames), not BGR (a grab's)
+    seq: int | None = None       # the perception service's frame number (its state's `seq`) ...
+    run: int | None = None       # ... in its run (`epoch`)
 
-    def pixels(self) -> np.ndarray:
-        """The frame's BGR pixels, as grabbed."""
+    def raw(self) -> np.ndarray:
+        """What's packed, as it was: a whole frame's pixels (BGR, or RGB if `rgb`), or a difference's."""
         w, h = self.size
         return np.frombuffer(_decompress(self.data), np.uint8).reshape(h, w, 3)
+
+    def pixels(self) -> np.ndarray:
+        """A whole frame's BGR pixels, as grabbed or shown (a difference's are its chain's: `decode`)."""
+        if not self.key:
+            raise ValueError("a frame kept as its difference from the one before: decode its chain (rolling.decode)")
+        px = self.raw()
+        return cv2.cvtColor(px, cv2.COLOR_RGB2BGR) if self.rgb else px
+
+
+def decode(items: list[Item]):
+    """Each frame's BGR pixels in turn, of moments in a row (a part's, a ring's, a chain): a whole frame's as kept, a
+    difference added to the frame just before it (uint8, wrapping round: pack_diff's), so exactly as shown. Yields
+    (item, pixels); pixels None for a difference with no frame just before it (a gap between, or the first)."""
+    before = None
+    for it in items:
+        if it.data is None:
+            before = None  # (a gap breaks a chain: the recording starts a new one after it)
+            continue
+        if it.key:
+            before = it.raw()
+        elif before is not None and before.shape == (it.size[1], it.size[0], 3):
+            before = np.add(before, it.raw())
+        else:
+            before = None
+            yield it, None
+            continue
+        yield it, cv2.cvtColor(before, cv2.COLOR_RGB2BGR) if it.rgb else before
+
+
+def chains(items: list[Item]) -> list[list[Item]]:
+    """The frames of moments in a row, in chains: a whole frame and the differences right after it, each chain decoded
+    on its own (`decode`); differences with no whole frame before them make a chain that can't be."""
+    out: list[list[Item]] = []
+    going = False  # the moment before was a frame (of the last chain)
+    for it in items:
+        if it.data is None:
+            going = False
+            continue
+        if it.key or not going:
+            out.append([it])
+        else:
+            out[-1].append(it)
+        going = True
+    return out
 
 
 @dataclass(slots=True)
@@ -167,7 +223,9 @@ class Clip:
 
 class Ring:
     """The last `seconds` of moments, oldest first, at most `max_bytes` of frames: past it the oldest go first, younger
-    than `seconds` or not (`trimmed` counts those frames). Thread-safe: the recorder adds, the saver reads."""
+    than `seconds` or not (`trimmed` counts those frames). A chain (a whole frame and the differences right after it:
+    `chains`) goes whole, once its last moment is out (so the ring holds `seconds` or up to a chain's more), or for the
+    cap. Thread-safe: the recorders add, the saver reads."""
 
     def __init__(self, seconds: float = SECONDS, max_bytes: int = MAX_BYTES, max_items: int = MAX_ITEMS):
         self.seconds, self.max_bytes, self.max_items = seconds, max_bytes, max_items
@@ -175,8 +233,11 @@ class Ring:
         self.bytes = self.frames = self.trimmed = 0
         self.lock = threading.Lock()
 
-    def add(self, item: Item) -> None:
+    def add(self, item: Item, after: Item | None = None) -> bool:
+        """Add `item` (with `after`: only if the newest is that one, the difference's frame before it; False if not)."""
         with self.lock:
+            if after is not None and (not self.items or self.items[-1] is not after):
+                return False
             self.items.append(item)
             if item.data is not None:
                 self.bytes += len(item.data)
@@ -185,29 +246,49 @@ class Ring:
             trimming = False  # frames went for the cap: so do the gaps before the oldest left
             while self.items:
                 old = self.items[0]
-                if not (old.t <= since or self.bytes > self.max_bytes or len(self.items) > self.max_items
+                n = self._chain()
+                if not (self.items[n - 1].t <= since or self.bytes > self.max_bytes or len(self.items) > self.max_items
                         or (trimming and old.data is None)):
                     break
-                self.items.popleft()
-                if old.data is not None:
-                    self.bytes -= len(old.data)
-                    self.frames -= 1
-                    if old.t > since:
-                        self.trimmed += 1
-                        trimming = True
+                for _ in range(n):
+                    gone = self.items.popleft()
+                    if gone.data is not None:
+                        self.bytes -= len(gone.data)
+                        self.frames -= 1
+                        if gone.t > since:
+                            self.trimmed += 1
+                            trimming = True
+            return True
+
+    def _chain(self) -> int:
+        """How many moments go with the oldest: 1 (a gap, a frame alone), or a chain's (the lock held)."""
+        if self.items[0].data is None:
+            return 1
+        n, items = 1, self.items
+        while n < len(items) and items[n].data is not None and not items[n].key:
+            n += 1
+        return n
+
+    def newest(self) -> Item | None:
+        with self.lock:
+            return self.items[-1] if self.items else None
 
     def last(self, seconds: float) -> list[Item]:
-        """The moments of the last `seconds` up to the newest, oldest first (a list of its own)."""
+        """The moments of the last `seconds` up to the newest, oldest first (a list of its own), from a whole frame:
+        a difference first takes its chain's frames before it too."""
         with self.lock:
             if not self.items:
                 return []
             since = self.items[-1].t - seconds + 1e-6
-            return [it for it in self.items if it.t > since]
+            items = list(self.items)
+        return from_key(items, next((i for i, it in enumerate(items) if it.t > since), len(items)))
 
     def after(self, t: float) -> list[Item]:
-        """The moments after `t`, oldest first."""
+        """The moments after `t`, oldest first (from a whole frame, as `last`)."""
         with self.lock:
-            return [it for it in self.items if it.t > t]
+            items = list(self.items)
+        return from_key(items, next((i for i, it in enumerate(items) if it.t > t), len(items)))
+
 
     def span(self) -> float:
         """How long the moments kept cover (s): from the oldest to the newest, and the newest's tick."""
@@ -218,6 +299,13 @@ class Ring:
         """The gaps kept: moments by why."""
         with self.lock:
             return Counter(it.why for it in self.items if it.data is None)
+
+
+def from_key(items: list[Item], i: int) -> list[Item]:
+    """items[i:], or from the whole frame of the chain items[i] is in, if it's a difference (so it can be decoded)."""
+    while 0 < i < len(items) and items[i].data is not None and not items[i].key and items[i - 1].data is not None:
+        i -= 1
+    return items[i:]
 
 
 # --- what it looks at and grabs ------------------------------------------------------------------------------------
@@ -293,6 +381,24 @@ def pack(frame: np.ndarray) -> bytes:
     return _compress(memoryview(cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR, dst=bgr)).cast("B"))
 
 
+def pack_diff(frame: np.ndarray, before: np.ndarray) -> bytes:
+    """A frame (3 channels, as the perception service shows it: RGB) kept as its difference from the frame before it,
+    uint8 wrapping round (`decode` adds it back: exactly the frame), compressed as `pack` does. Much of a game frame is
+    as it was 67 ms before (the map, the HUD), so the difference is mostly zeros: on 150 consecutive 1366x768 frames of
+    2026-10-26 01:02 (D:/MapleHelper-scratch/pconst/hunt-recorder/rec_bench.py) 332 KB a frame against `pack`'s 482,
+    in 7.6 ms against 8.9. The difference is the thread's own picture, made again only when the size changes."""
+    diff = getattr(_packing, "diff", None)
+    if diff is None or diff.shape != frame.shape:
+        diff = _packing.diff = np.empty(frame.shape, np.uint8)
+    np.subtract(frame, before, out=diff)
+    return _compress(memoryview(diff).cast("B"))
+
+
+def pack_whole(frame: np.ndarray) -> bytes:
+    """A frame of 3 channels kept whole, as it is (RGB stays RGB: Item.rgb says which), compressed as `pack` does."""
+    return _compress(memoryview(np.ascontiguousarray(frame)).cast("B"))
+
+
 def encode(frame: np.ndarray, png: bool = False) -> bytes:
     """A frame's pixels (BGR) as a JPEG (JPEG_PARAMS), or a PNG (PNG_PARAMS), to write."""
     ok, buf = cv2.imencode(".png" if png else ".jpg", frame, PNG_PARAMS if png else JPEG_PARAMS)
@@ -309,7 +415,10 @@ class Recorder:
     after the other (`flush` waits for them). `game` says whether the screen shows the game (GameWindow), `grab`
     grabs a box of the screen (ScreenGrab); tests pass fakes, and their own folders: `box` (the inbox, the outbox and
     the status file: paths.RECORDER), `lie_root` (paths.LIE_RECORDINGS), `recent` (paths.RECENT) and `clips`
-    (paths.ALARM_CLIPS)."""
+    (paths.ALARM_CLIPS). Moments made elsewhere come in through `add` (the perception service's frames: from another
+    thread than the ticks'). `encoders`: threads a save is encoded on (ENCODERS; or what it says at each save);
+    `cpu`: the recording's CPU so far, s (by default the process's: its status's share of a core); `source`: where its
+    frames come from, as the status says it; `extra`: more for the status (the service's counts)."""
 
     def __init__(self, game, grab: Callable[[dict], np.ndarray], ring: Ring | None = None, *,
                  box: Path | None = None, lie_root: Path | None = None, recent: Path | None = None,
@@ -317,7 +426,9 @@ class Recorder:
                  pack_frame: Callable[[np.ndarray], bytes] = pack, fps: float = FPS,
                  log: Callable[[str], None] = print, folder_wait: float = FOLDER_WAIT_S,
                  recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES,
-                 clips_keep: int = CLIPS_KEEP_BYTES):
+                 clips_keep: int = CLIPS_KEEP_BYTES, encoders: int | Callable[[], int] = ENCODERS,
+                 cpu: Callable[[], float] = time.process_time, source: str = "its own grabs (mss)",
+                 extra: Callable[[], dict] | None = None):
         self.game, self.grab, self.ring = game, grab, ring or Ring()
         box = Path(box or paths.RECORDER)
         self.inbox, self.outbox, self.status_path = box / "inbox", box / "outbox", box / "status.json"
@@ -327,6 +438,8 @@ class Recorder:
         self.clock, self.pack, self.fps, self.log = clock, pack_frame, fps, log
         self.folder_wait, self.recent_keep, self.lie_keep = folder_wait, recent_keep, lie_keep
         self.clips_keep = clips_keep
+        self.encoders, self.cpu, self.source, self.extra = encoders, cpu, source, extra
+        self._lock = threading.RLock()  # what a moment changes (the clips, the counts), `add` coming from another thread
         self.pending_clips: list[Clip] = []  # alarms whose clip's last moment isn't past yet
         self.started = self.clock()
         self.state: str | None = None  # the last moment's gap reason ("": a frame), as the log last said it
@@ -337,7 +450,7 @@ class Recorder:
         self._next_alarm = self._next_status = self.started
         self._next_log = self.started + LOG_EVERY_S
         self._costs: list[float] = []  # s a frame (look, grab, look, encode) since the last status
-        self._cpu, self._wall = time.process_time(), time.monotonic()
+        self._cpu, self._wall = self.cpu(), time.monotonic()
         self._rate = {"fps": None, "ms_a_frame": None, "cpu_ms_a_frame": None, "core_share": None}
         self.jobs: queue.Queue = queue.Queue()
         self._stop = threading.Event()
@@ -369,20 +482,31 @@ class Recorder:
                 if not why and after != area:
                     why = "moved"
         t = self.clock()
-        item = Item(t, None, why)
+        item, cost = Item(t, None, why), None
         if not why:
             try:
                 item = Item(t, self.pack(frame), size=(int(frame.shape[1]), int(frame.shape[0])))
-                self._costs.append(time.perf_counter() - started)
+                cost = time.perf_counter() - started
             except Exception as e:
                 item = Item(t, None, "not encoded")
                 self._say(f"recorder: a frame wasn't encoded ({type(e).__name__}: {e})")
-        self.ring.add(item)
-        for clip in self.pending_clips:  # (held there too: the ring may lose them, its cap, before the clip's end)
-            clip.items.append(item)
-        self.counts[item.why or "frame"] += 1
-        self._said(item.why)
+        self.add(item, cost=cost)
         return item
+
+    def add(self, item: Item, after: Item | None = None, cost: float | None = None) -> bool:
+        """A moment into the ring and the clips being gathered, counted (`tick`'s, or the perception service's: from
+        another thread). `after`: a difference's frame before it, which must be the ring's newest (False, not added, if
+        a moment came between: a whole frame is kept instead); `cost`: s it took, for the status."""
+        with self._lock:
+            if not self.ring.add(item, after):
+                return False
+            for clip in self.pending_clips:  # (held there too: the ring may lose them, its cap, before the clip's end)
+                clip.items.append(item)
+            self.counts[item.why or "frame"] += 1
+            if cost is not None:
+                self._costs.append(cost)
+            self._said(item.why)
+        return True
 
     def _said(self, why: str) -> None:
         """The log says when the game starts or stops showing (a moment of the window moving or a grab failing
@@ -456,21 +580,27 @@ class Recorder:
             seen = alarm.ALARM.stat().st_mtime
         except OSError:
             seen = self.clock()
-        snapshot = self.ring.last(self.ring.seconds)
+        # The moments are held from now on (`add` adds each to the clip, the lock keeping out a moment between), the
+        # ring's from CLIP_BEFORE_S before the alarm first (from a whole frame), and all it holds now for the part
+        # before: the ring may lose them, its cap, before the clip's end.
+        with self._lock:
+            snapshot = self.ring.last(self.ring.seconds)
+            first = next((i for i, it in enumerate(snapshot) if it.t > seen - CLIP_BEFORE_S), len(snapshot))
+            self.pending_clips.append(Clip(info, seen, from_key(snapshot, first), snapshot))
         seen_as = f", {info['form']}" if info.get("form") else ""
         self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}): saving the "
                   f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it, and its own clip "
                   f"from {CLIP_BEFORE_S:g} s before it to {CLIP_AFTER_S:g} s after in {self.clips}, once those "
                   f"{CLIP_AFTER_S:g} s are past")
-        # The moments are held from now on (`tick` adds each to the clip), the ring's from CLIP_BEFORE_S before the
-        # alarm first, and all it holds now for the part before: the ring may lose them, its cap, before the clip's end.
-        self.pending_clips.append(Clip(info, seen, [it for it in snapshot if it.t > seen - CLIP_BEFORE_S], snapshot))
 
     def check_clips(self, now: float, cut_short: bool = False) -> None:
         """Each alarm whose clip's last moment is past (`cut_short`: all, as the recorder stops): its clip, the moments
         up to CLIP_AFTER_S after the alarm, then its part before, queued to be written."""
-        for clip in [c for c in self.pending_clips if cut_short or now >= c.seen + CLIP_AFTER_S]:
-            self.pending_clips.remove(clip)
+        with self._lock:
+            due = [c for c in self.pending_clips if cut_short or now >= c.seen + CLIP_AFTER_S]
+            for clip in due:
+                self.pending_clips.remove(clip)
+        for clip in due:
             items = [it for it in clip.items if it.t <= clip.seen + CLIP_AFTER_S]
             self.jobs.put(lambda clip=clip, items=items: self._save_clip(clip, items, cut_short))
             self.jobs.put(lambda clip=clip: self._save_before(clip))
@@ -504,7 +634,12 @@ class Recorder:
 
     # --- saving (the saver's thread) ---
 
+    def writers(self) -> int:
+        """Threads the next save is encoded on (`encoders`, or what it says now)."""
+        return max(1, int(self.encoders() if callable(self.encoders) else self.encoders))
+
     def _save_loop(self) -> None:
+        below_normal()  # (in the perception service, beside its frame loop: the frames come first)
         while True:
             job = self.jobs.get()
             try:
@@ -524,7 +659,7 @@ class Recorder:
                           f"{self.recent_keep / 1024 ** 3:g} GB")
             folder = new_folder(self.recent, name)
             summary = write_part(folder, snapshot, {"kind": "save-recent", "name": name or None,
-                                                    "asked_s": seconds}, self.fps)
+                                                    "asked_s": seconds}, self.fps, encoders=self.writers())
             answer = {"folder": str(folder),
                       **{k: summary[k] for k in ("seconds", "frames", "bytes", "gaps", "window")}}
             self._saved(folder, summary)
@@ -547,7 +682,7 @@ class Recorder:
         summary = write_part(dest, items, {
             "kind": "before the Lie Detector", "alarm": info, "alarm_at": day_time(seen),
             "alarm_t": None if not items else round(seen - items[0].t, 3),
-            "player_recording": None if folder is None else str(folder)}, self.fps)
+            "player_recording": None if folder is None else str(folder)}, self.fps, encoders=self.writers())
         self._saved(dest, summary)
         if folder is None:
             self._say(f"recorder: no recording of the player's began within {self.folder_wait:g} s of the alarm "
@@ -562,7 +697,8 @@ class Recorder:
         summary = write_part(dest, items, {
             "kind": "the alarm's clip", "alarm": clip.info, "alarm_at": day_time(clip.seen),
             "alarm_t": None if not items else round(clip.seen - items[0].t, 3),
-            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, self.fps, png=True)
+            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, self.fps, png=True,
+            encoders=self.writers())
         self._saved(dest, summary)
 
     def _prune_lie(self, spare: Path) -> None:
@@ -645,7 +781,7 @@ class Recorder:
         status (frames a second; ms a frame from the first look to the JPEG; the process's CPU a frame, and its share
         of a core, everything counted), the saves."""
         now = self.clock()
-        cpu, wall = time.process_time(), time.monotonic()
+        cpu, wall = self.cpu(), time.monotonic()
         if wall - self._wall >= 1.0 or (stopped and wall > self._wall):  # (else the last's rate)
             frames, d_cpu, d_wall = len(self._costs), cpu - self._cpu, wall - self._wall
             self._rate = {"fps": round(frames / d_wall, 2),
@@ -659,7 +795,8 @@ class Recorder:
                 "trimmed": self.ring.trimmed,
                 "gaps_s": {k: round(v / self.fps, 1) for k, v in self.ring.gaps().items()},
                 **self._rate, "saves": self.saves, "last_save": self.last_save,
-                "max_bytes": self.ring.max_bytes, "seconds": self.ring.seconds, "fps_asked": self.fps}
+                "max_bytes": self.ring.max_bytes, "seconds": self.ring.seconds, "fps_asked": self.fps,
+                "source": self.source, **(self.extra() if self.extra is not None else {})}
 
     def write_status(self, stopped: bool = False) -> None:
         """The status file, put in place whole. Windows refuses to replace a file another program has open, as
@@ -698,45 +835,74 @@ class Recorder:
 
 # --- a saved part ---------------------------------------------------------------------------------------------------
 
-def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, png: bool = False) -> dict:
+NO_KEY = "no whole frame"  # a gap's why: a difference whose chain's whole frame the part doesn't have
+
+
+def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, png: bool = False,
+               encoders: int = ENCODERS) -> dict:
     """Write moments into `folder` (made here; raises if it's there already): the frames, as JPEG (or `png`), on
-    ENCODERS threads a batch at a time, index.jsonl and summary.json (`info`'s fields first, then the counts: the
-    module's notes). Returns the summary."""
+    `encoders` threads below normal priority, a chain at a time each (a whole frame and its differences: `chains`,
+    `decode`), a batch of chains at once; index.jsonl and summary.json (`info`'s fields first, then the counts: the
+    module's notes). A difference with no whole frame before it in `items` is a gap (NO_KEY). Returns the summary."""
     folder.mkdir(parents=True)
+    groups = chains(items)
+    lost = {id(it) for group in groups if not group[0].key for it in group}
     t0 = items[0].t if items else 0.0
     lines, gaps, run = [], Counter(), None
-    shots = []  # the frames, in order
+    names: dict[int, str] = {}  # a frame's file, by id(item)
+    sources = Counter()
     shape = None
     for it in items:
         t = round(it.t - t0, 3)
-        if it.data is None:
-            gaps[it.why] += 1
-            if run is not None and run["gap"] == it.why:
+        if it.data is None or id(it) in lost:
+            why = it.why if it.data is None else NO_KEY
+            gaps[why] += 1
+            if run is not None and run["gap"] == why:
                 run["until"], run["ticks"] = t, run["ticks"] + 1
             else:
-                run = {"gap": it.why, "t": t, "until": t, "ticks": 1}
+                run = {"gap": why, "t": t, "until": t, "ticks": 1}
                 lines.append(run)
             continue
         run = None
-        name = f"{len(shots):05d}.{'png' if png else 'jpg'}"
-        lines.append({"i": len(shots), "file": name, "t": t, "at": clock_time(it.t)})
-        shots.append((name, it))
+        name = names[id(it)] = f"{len(names):05d}.{'png' if png else 'jpg'}"
+        line = {"i": len(names) - 1, "file": name, "t": t, "at": clock_time(it.t)}
+        if it.seq is not None:
+            line.update(seq=it.seq, run=it.run)
+        lines.append(line)
+        sources["perception service" if it.rgb else "grabbed"] += 1
         shape = it.size
+
+    def encoded(group: list[Item]) -> list[bytes]:
+        return [encode(px, png) for _, px in decode(group)]
     size = 0
-    with ThreadPoolExecutor(ENCODERS) as pool:
-        for k in range(0, len(shots), 4 * ENCODERS):  # (a batch at a time: the frames' pixels aren't all out at once)
-            batch = shots[k:k + 4 * ENCODERS]
-            for (name, _), data in zip(batch, pool.map(lambda shot: encode(shot[1].pixels(), png), batch)):
-                (folder / name).write_bytes(data)
-                size += len(data)
+    groups = [g for g in groups if g[0].key]
+    # Chains a batch: about 4 frames a thread (16 whole frames, as before chains), at least a chain a thread.
+    per = max(encoders, 4 * encoders // max(1, round(sum(map(len, groups)) / max(1, len(groups)))))
+    with ThreadPoolExecutor(encoders, "rolling-writer", below_normal) as pool:
+        for k in range(0, len(groups), per):  # (a batch at a time: the frames' pixels aren't all out at once)
+            batch = groups[k:k + per]
+            for group, datas in zip(batch, pool.map(encoded, batch)):
+                for it, data in zip(group, datas):
+                    (folder / names[id(it)]).write_bytes(data)
+                    size += len(data)
     (folder / INDEX).write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
     summary = {**info, "from": day_time(t0) if items else None, "to": day_time(items[-1].t) if items else None,
                "seconds": round(items[-1].t - t0 + 1 / fps, 1) if items else 0.0, "ticks": len(items),
-               "frames": len(shots), "bytes": size, "gaps": {why: round(n / fps, 1) for why, n in gaps.items()},
+               "frames": len(names), "bytes": size, "gaps": {why: round(n / fps, 1) for why, n in gaps.items()},
                "fps": fps, "format": "png" if png else "jpeg", "jpeg_quality": None if png else lie_recorder.JPEG_QUALITY,
-               "window": None if shape is None else list(shape)}
+               "window": None if shape is None else list(shape), "sources": dict(sources)}
     (folder / SUMMARY).write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary
+
+
+def below_normal() -> None:
+    """The calling thread below normal priority (Windows; elsewhere nothing): a save's writers in the perception
+    service, beside its frame loop."""
+    if sys.platform == "win32":
+        k = ctypes.windll.kernel32
+        k.GetCurrentThread.restype = ctypes.c_void_p
+        k.SetThreadPriority.argtypes = (ctypes.c_void_p, ctypes.c_int)
+        k.SetThreadPriority(k.GetCurrentThread(), -1)  # THREAD_PRIORITY_BELOW_NORMAL
 
 
 def new_folder(root: Path, name: str = "") -> Path:
@@ -848,6 +1014,8 @@ def status_lines(box: Path | None = None, now: float | None = None) -> list[str]
             if age > STATUS_STALE_S else "running")
     gaps = ", ".join(f"{k} {v:g} s" for k, v in st.get("gaps_s", {}).items()) or "none"
     lines = [f"recorder {head}: pid {st.get('pid')}, started {st.get('started')}, status of {st.get('updated_at')}",
+             f"  its frames: {st.get('source', 'its own grabs (mss)')}, {st.get('fps_asked', FPS):g} a second asked"
+             + (f"; dropped {st['dropped']} (its queue full), late {st.get('late', 0)}" if "dropped" in st else ""),
              f"  the game {'on screen: recording' if st.get('showing') else 'not recording: ' + str(st.get('why'))}",
              f"  kept {st.get('kept_s', 0):g} s of the last {st.get('seconds', SECONDS):g}: {st.get('frames', 0)} "
              f"frames ({st.get('bytes', 0) / 1024 ** 2:.0f} MB of {st.get('max_bytes', MAX_BYTES) / 1024 ** 2:.0f}); "
@@ -879,6 +1047,15 @@ def only_one(name: str = MUTEX):
         k32.CloseHandle(handle)
         return None
     return handle
+
+
+def let_go(handle) -> None:
+    """A mutex `only_one` gave, let go before the process ends (the perception service's recording, closed)."""
+    if sys.platform == "win32" and handle not in (None, True):
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        k32.CloseHandle(handle)
 
 
 def quiet() -> None:

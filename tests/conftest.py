@@ -87,6 +87,9 @@ def offline(monkeypatch, tmp_path):
     from gamelab.control import window_size
     monkeypatch.setattr(window_size, "WINDOW_TRIES", tmp_path / "window_tries.json")
     monkeypatch.setattr(window_size, "LOCK", f"Local\\gamelab-window-fix-test-{os.getpid()}-{tmp_path.name}")
+    # Nor the recorders' mutex (the one `gamelab recorder` or the perception service's recording holds on the PC).
+    from gamelab.control import rolling
+    monkeypatch.setattr(rolling, "MUTEX", f"Local\\gamelab-rolling-recorder-test-{os.getpid()}-{tmp_path.name}")
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 

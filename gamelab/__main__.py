@@ -704,9 +704,12 @@ def _log(message: str) -> None:
 
 
 def _record(command: str, map_id: int) -> None:
-    """Record this run's telemetry (lab/telemetry), for the mini-map to follow live or replay later."""
+    """Record this run's telemetry (lab/telemetry), for the mini-map to follow live or replay later, Python's garbage
+    collections among it once a minute (gcstats)."""
+    from . import gcstats
     path = telemetry.record_to(command)
     telemetry.emit("session", map=map_id, command=command, mode="live")
+    gcstats.report_every(telemetry.emit, when=telemetry.to_file)
     _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`: a window, and a page for a phone)")
 
 
@@ -1551,8 +1554,8 @@ def cmd_watch(args) -> int:
     for the game. With --lie-detector it also checks the screen for the Lie Detector, the service's frame at full size
     every WATCH_LIE_DETECTOR_S, and pages whoever is at the PC (the player keeps its own watchdog regardless); with
     --heading it reads which way she faces off every frame (perception.heading, her pictures in lab or the seed) and
-    says each change: turn her with the arrows and watch. (--hz: the service's rate is its own now: service.ACTIVE_HZ
-    while a command hunts, IDLE_HZ otherwise.)"""
+    says each change: turn her with the arrows and watch. (--hz: the service's rate is its own now: service.HZ,
+    whoever is attached.)"""
     from .localization import mapdata
     from .perception.drops import unknown_note
     from .perception.lie_detector import LieDetectorSpotter
@@ -1655,9 +1658,12 @@ def cmd_perceive(args) -> int:
     it saw handed to every command (its clients) and published for the mini-map (lab/telemetry/<time>-perceive.jsonl).
     It never sends a key and never brings the game forward, and waits for the game window when there's none. One at a
     time on the PC; it ends itself if its frame loop hangs (service.STUCK_S), for the babysitter or a command to start
-    another. With --frames, saved frames instead of the game, round and round, nothing published (offline), at a pipe,
-    mutex and info file of its own (service.SAVED_ADDRESS: the live one starts and runs beside it; a command reaches
-    it with GAMELAB_PERCEIVE=saved)."""
+    another. It keeps the rolling recording (control.recording: its frames 15 times a second, the last 5 minutes,
+    what `gamelab recorder` kept) unless --no-record, once no `gamelab recorder` runs. With --frames, saved frames
+    instead of the game, round and round, nothing published or recorded (offline), at a pipe, mutex and info file of its
+    own (service.SAVED_ADDRESS: the live one starts and runs beside it; a command reaches it with
+    GAMELAB_PERCEIVE=saved)."""
+    from . import gcstats
     from .attack import reach
     from .localization import feed, service
     from .screen import of_frame
@@ -1669,7 +1675,7 @@ def cmd_perceive(args) -> int:
         return 0
     service.settle()
     band, title = (reach.LOOK_UP, reach.LOOK_DOWN), _game_title()
-    publish, glimpse = None, None
+    publish, glimpse, recording = None, None, None
     if args.frames:
         files = sorted(str(p) for p in Path(args.frames).glob("*.png"))
         if not files:
@@ -1679,7 +1685,7 @@ def cmd_perceive(args) -> int:
 
         def make(map_id, g):
             return feed.saved_world(files, map_id, _calibration(g).template, band, hold=args.hold,
-                                    schedule=service.IDLE)
+                                    schedule=service.SCHEDULE)
 
         def where():
             return geo, None
@@ -1695,13 +1701,19 @@ def cmd_perceive(args) -> int:
         def glimpse():  # (the client at any size, for the size fix's and the pet's looks)
             from .perception import frames
             return frames.glimpse(title)
+        telemetry.console_in_background()  # (its lines come from the frame loop: a disk that stalls holds up neither)
         path = telemetry.record_to("perceive", telemetry.FOLDER)
+        gcstats.report_every(telemetry.emit, when=telemetry.to_file)
         publish = service.Publisher(band, log=_log)
-        print(f"perceiving the game for every command; telemetry: {path} (the mini-map follows it); Ctrl+C stops",
-              flush=True)
+        if not args.no_record:
+            from .control.recording import Recording
+            recording = Recording(title, log=lambda m: print(m, flush=True))
+        print(f"perceiving the game for every command at {service.HZ:g} frames a second; telemetry: {path} (the "
+              f"mini-map follows it); " + ("the rolling recording: not kept (--no-record)" if recording is None else
+                                           "the rolling recording kept here") + "; Ctrl+C stops", flush=True)
     svc = service.Service(make, args.map, where, address=service.pipe_address(on_saved),
                           info=service.info_path(on_saved), log=_log, publish=publish, stuck_s=service.STUCK_S,
-                          glimpse=glimpse)
+                          glimpse=glimpse, recording=recording)
     try:
         svc.serve(time.monotonic() + args.minutes * 60 if args.minutes else None)
     except KeyboardInterrupt:
@@ -2132,6 +2144,8 @@ def build_parser() -> argparse.ArgumentParser:
                                     "looked at instead of the game, round and round (offline)")
     s.add_argument("--hold", type=int, default=30, help="--frames: each looked at this many times in a row")
     s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
+    s.add_argument("--no-record", action="store_true", help="without the rolling recording (`gamelab recorder` keeps "
+                                                            "it then)")
     s.set_defaults(func=cmd_perceive)
 
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "

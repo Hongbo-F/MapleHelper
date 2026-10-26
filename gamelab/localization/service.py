@@ -6,11 +6,15 @@ latest perception result"; and, asked how: "run one shared perception process at
 What it runs is the feed's frame loop (localization.feed.run: the world step on every frame, its searches on a thread
 of their own, localization.worldstate) on the screen (perception.frames.ScreenFrames, the process's one DXGI
 duplication: capture.shared). It never sends a key and never brings the game forward; it waits for the game window
-when there's none. Only one runs on the PC (a named mutex, MUTEX). Its rate and searches follow who's attached
-(`Clients`): with a command that hunts, ACTIVE_HZ and the feed's schedule (her band every 0.2 s, the whole screen every
-second); with none, IDLE_HZ and IDLE (her band every 0.5 s, the screen every 2 s, the drops at `watch`'s old rates).
-Her throws are known to the tracker while a command that tells them is attached. Its telemetry is `watch`'s was (a
-scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl.
+when there's none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoever is attached (the
+user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is running as a
+constant thing and hunt is only a consumer of it"): HZ frames a second and one schedule, SCHEDULE (her band every 0.2 s,
+the whole screen every second, the drops at `watch`'s rates); what a command asks is searched on the next frame besides,
+and changes neither. Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
+`watch`'s was (a scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl.
+It keeps the rolling recording too (control.recording, handed to it by `perceive`: its own frames, every other one,
+the last 5 minutes in memory; `perceive --no-record` without), which `gamelab recorder` kept with a capture of its own
+until 2026-10-26.
 
 The commands are its clients (`ServiceClient`, a localization.feed.Feed: what Senses reads), attaching and detaching
 as they start and end, any number at once, none of them its children:
@@ -50,14 +54,13 @@ from pathlib import Path
 
 import numpy as np
 
-from .. import paths, telemetry, window
+from .. import gcstats, paths, telemetry, window
 from ..perception.framecheck import BadLook, Problem
 from ..screen import Geometry, geometry
 from . import feed
 from .feed import Feed, Ring, Runner, frame_shape, newest_fresh, newest_frame, to_ask, adds
 from .tracking import Event
-from .worldstate import (LOOT_EVERY_S, LOOT_WIDE_EVERY_S, Asks, Schedule, SearchThread, WorldState, WorldStep,
-                         to_scene)
+from .worldstate import WATCH, Asks, Schedule, SearchThread, WorldState, WorldStep, to_scene
 
 ADDRESS = r"\\.\pipe\gamelab-perceive"
 MUTEX = "Local\\gamelab-perceive"
@@ -75,22 +78,26 @@ WHICH = "GAMELAB_PERCEIVE"
 # 153-324 ms). With 16, 346-356 ms (D:/MapleHelper-scratch/pconst/pnative-finish/margin.txt).
 RING_SLOTS = 16
 FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a look frame is half size)
-# Frames a second with a command that hunts attached (its looks' frames come at once, whatever the rate) ... Not 20
-# (tried on 2026-10-26): on the saved frames with a hunt's asks, 1.05-1.20 cores against 1.35-1.45 at 30
+# Frames a second, whoever is attached (a look's frame comes at once, whatever the rate). Until 2026-10-26 this was the
+# pace with a command that hunts attached (ACTIVE_HZ) and 10 a second with none (IDLE_HZ, with `watch`'s searches: her
+# band every 0.5 s, the screen every 2 s); the user, that morning: "Run the perception at the same rate between hunt and
+# idle". Not 20 (tried the same day): on the saved frames with a hunt's asks, 1.05-1.20 cores against 1.35-1.45 at 30
 # (D:/MapleHelper-scratch/cpu/apply/perc/prof_service.py), but live, 30 asked made 15.1 a second (2026-10-25 and 26: the
 # frame loop saturated), so 20 would have saved 0.03-0.15 cores there; and in the harness (Tree Dungeon, the hunt loop,
 # 24 seeds of 5 minutes, the simulator's feed at the rate) EXP a minute was 7.7% lower (by 17.5 a seed, standard error
 # 18.5; 10 seeds of 24 better), kills 12.8% fewer, HP lost 3.2% more (D:/MapleHelper-scratch/cpu/review-numbers/hz;
 # README, CPU). At 20 a glance (63 ms after the last) asked a frame of its own just after the regular one, and waited
-# behind its step.
-ACTIVE_HZ = 30.0
-# ... and with none: the pet's babysitter's wait, the mini-map and the web page. Not 5 with fewer searches (tried on
-# 2026-10-26: 0.20 cores on the saved frames against 0.83, prof_service.py as above): the user, the same day, "Don't
-# reduce perception fps please".
-IDLE_HZ = 10.0
-ACTIVE = Schedule()   # the feed's: her band every 0.2 s, the whole screen every second, the drops when asked
-IDLE = Schedule(band_s=0.5, wide_s=2.0, loot_s=LOOT_EVERY_S, loot_wide_s=LOOT_WIDE_EVERY_S)  # `watch`'s
-QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at ACTIVE_HZ): older ones are dropped, a gap said
+# behind its step. Nor 5 between hunts with fewer searches (0.20 cores on the saved frames against 0.83): the user,
+# "Don't reduce perception fps please". Between hunts on the crowd's saved frames (D:/MapleHelper-scratch/pconst/plan,
+# replay.py, no client): 10 a second with `watch`'s searches took 1.00 core; 30 with the hunt's, 1.42 cores, the frame
+# loop saturated at 14.5 a second (README, Perception at one pace).
+HZ = 30.0
+# What's searched without being asked, whoever is attached: the hunt's schedule (her band every 0.2 s, the whole screen
+# every second) and the drops at `watch`'s rates (her platform's every 0.5 s, every platform in view every 2 s), so the
+# mini-map has them in hunts too. A hunt's looks ask for the drops they want on the frame they take: a scheduled search
+# only comes before an asked one now and then (README, Perception at one pace).
+SCHEDULE = WATCH
+QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at HZ): older ones are dropped, a gap said
 KEEP = 8              # states a client keeps (feed.KEEP)
 EVENTS_KEPT = 10_000  # events a client keeps for its next drain at most
 RECONNECT_S = 0.5     # s between a client's tries to reach the service
@@ -101,9 +108,9 @@ STATUS_S = 10.0       # s between the service's lines on the console
 # A service whose frame loop hasn't gone round for STUCK_S (BUILD_STUCK_S while it makes a run: the map's templates
 # loaded), or whose search has been out that long, ends its process (EXIT_STUCK): its clients' `ensure` and the
 # babysitter start another. With the process and its pipe up and the loop hung, every look found nothing to act on and a
-# hunt stood still to its end, nothing restarting it. The loop goes round at least every 1/IDLE_HZ s, and every
+# hunt stood still to its end, nothing restarting it. The loop goes round at least every 1/HZ s, and every
 # NOT_VISIBLE_S without the game; a search takes 0.03-0.3 s. A client that hears nothing for SILENT_S (a state comes
-# every 1/IDLE_HZ s at the least, every 0.25 s without the game) drops its connection and reconnects.
+# every 1/HZ s at the least, every 0.25 s without the game) drops its connection and reconnects.
 STUCK_S = 10.0
 BUILD_STUCK_S = 60.0
 EXIT_STUCK = 3
@@ -220,7 +227,7 @@ def settle() -> None:
 # --- the game on screen ---------------------------------------------------------------------------------------
 
 def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[float, float],
-                 schedule: Schedule = IDLE, geo: Geometry = None, log: Callable[[str], None] = print) -> Runner:
+                 schedule: Schedule = SCHEDULE, geo: Geometry = None, log: Callable[[str], None] = print) -> Runner:
     """The game on screen (perception.frames.ScreenFrames on the process's grabber: never brought to the front), with
     monster templates for map `map_id` and her name tag (`template`, calibration's), for a game window of geometry
     `geo`. Raises RuntimeError if the map has a minimap picture that won't load."""
@@ -253,7 +260,7 @@ def serve_saved(files: list[str], map_id: int, template: np.ndarray, band: tuple
     from ..screen import of_frame
     settle()
     geo = of_frame(np.asarray(Image.open(files[0]).convert("RGB")))
-    svc = Service(lambda m, g: feed.saved_world(files, m, template, band, hold=hold, schedule=IDLE), map_id,
+    svc = Service(lambda m, g: feed.saved_world(files, m, template, band, hold=hold, schedule=SCHEDULE), map_id,
                   lambda: (geo, None), address=address, info=Path(info), log=(lambda m: None) if quiet else print,
                   stuck_s=STUCK_S)
     svc.serve(None if seconds is None else time.monotonic() + seconds)
@@ -285,7 +292,8 @@ class Hello:
     pid: int = 0
     acts: bool = False    # it sends keys (the game is brought forward for it; its map is followed)
     throws: bool = False  # it tells her throws (the tracker's kills are hers only after one her way)
-    fast: bool = False    # it hunts: the frames at ACTIVE_HZ and the feed's schedule while it's attached
+    fast: bool = False    # it hunts: it holds the map looked at (a second that hunts on another map is refused). Until
+                          # 2026-10-26 also the frames at the hunt's pace while it was attached (one pace now: HZ)
     map: int | None = None
 
 
@@ -371,14 +379,15 @@ class Service:
     def __init__(self, make: Callable[[int, Geometry], Runner], map_id: int,
                  geometry: Callable[[], tuple[Geometry | None, Problem | None]], *, address: str = ADDRESS,
                  authkey: bytes | None = None, info: Path | None = None, log: Callable[[str], None] = print,
-                 publish: "Publisher | None" = None, idle_hz: float = IDLE_HZ, active_hz: float = ACTIVE_HZ,
-                 stuck_s: float | None = None, glimpse: Callable[[], np.ndarray | None] | None = None):
+                 publish: "Publisher | None" = None, hz: float = HZ, stuck_s: float | None = None,
+                 glimpse: Callable[[], np.ndarray | None] | None = None, recording=None):
         self.make, self.map_id, self.geometry, self.log = make, map_id, geometry, log
         self.glimpse = glimpse
         self.address, self.authkey = address, authkey or secrets.token_bytes(32)
         self.info = info
         self.publish = publish
-        self.idle_hz, self.active_hz = idle_hz, active_hz
+        self.hz = hz
+        self.recording = recording  # control.recording.Recording (the command line's: no layer below imports it)
         self.stuck_s = stuck_s
         self._beat = (time.monotonic(), BUILD_STUCK_S)  # when the frame loop last went round, and how long it may not
         self.runner: Runner | None = None
@@ -397,6 +406,7 @@ class Service:
         self._rebuild: int | None = None  # a map to look at next (an acting client's)
         self._seq = 0                     # states made while there's no runner
         self.counts = {"connected": 0, "states": 0, "dropped": 0, "fulls": 0, "epochs": 0, "refused": 0}
+        gcstats.install()  # (the collections' counts and pauses on its console line: `_say`)
         self._status = time.monotonic()
         self._frames_since = 0
         self._listener = None
@@ -471,9 +481,6 @@ class Service:
                     self._cond.notify_all()
             c.hello = hello
             c.send("welcome", self._welcome())
-            if hello.fast:  # the frame loop's next frame at the hunt's pace, not IDLE_HZ's (feed.run)
-                self._woken = True
-                self._cond.notify_all()
         self.log(f"perception: {hello.name} (pid {hello.pid}) attached" + (", sends keys" if hello.acts else "")
                  + (f", map {hello.map}" if hello.map is not None else ""))
 
@@ -525,11 +532,12 @@ class Service:
             return [c.hello for c in self.clients.values() if c.hello is not None]
 
     def fast(self) -> bool:
-        """Whether a command that hunts is attached (ACTIVE_HZ, ACTIVE)."""
+        """Whether a command that hunts is attached (the recording's saves are written on fewer threads then)."""
         return any(h.fast for h in self.attached())
 
     def rate(self) -> float:
-        return self.active_hz if self.fast() else self.idle_hz
+        """Frames a second asked of the frame loop: `hz` (HZ), whoever is attached."""
+        return self.hz
 
     def status(self) -> dict:
         with self._lock:
@@ -549,6 +557,8 @@ class Service:
             self.listen()
         if self.stuck_s is not None:
             threading.Thread(target=self._watchdog, name="perceive-watchdog", daemon=True).start()
+        if self.recording is not None:
+            self.recording.start(hunting=self.fast)
         try:
             while not self._stop and (until is None or time.monotonic() < until):
                 if self.runner is None or self._rebuild is not None:
@@ -590,6 +600,7 @@ class Service:
                 return
             if (why := self.stuck()) is not None:
                 self.log(f"perception: stuck ({why}): the service ends, for another to be started")
+                telemetry.drain(1.0)  # (the console's and the telemetry's writers hold what's not written yet)
                 for out in (sys.stdout, sys.stderr):
                     try:
                         out.flush()
@@ -628,22 +639,24 @@ class Service:
         self._broadcast("epoch", welcome)
         if self.publish is not None:
             self.publish.started(runner, map_id)
-        self.log(f"perception: looking at map {map_id}, the game's client {geo.client[0]}x{geo.client[1]} "
-                 f"(run {self.epoch})")
         if old[0] is not None:
             old[0].step.close()
         for ring in old[1:]:
             if ring is not None:
                 ring.close(unlink=True)
+        del old
+        # Everything there is now (the run's templates, models, the modules) left alone by the garbage collector from
+        # here on, the run before (frozen with the one before it) collected first: gcstats.freeze.
+        frozen, took = gcstats.freeze()
+        self._went_round()
+        self.log(f"perception: looking at map {map_id}, the game's client {geo.client[0]}x{geo.client[1]} "
+                 f"(run {self.epoch}); {frozen:,} objects frozen for the garbage collector in {1000 * took:.0f} ms")
         return True
 
     def _tune(self) -> None:
-        """The step as the clients attached want it: the hunt's schedule while one hunts (ACTIVE) or IDLE, her throws
-        known while one tells them."""
-        attached = self.attached()
-        step = self.runner.step
-        step.schedule = ACTIVE if any(h.fast for h in attached) else IDLE
-        step.tracker.throws_known = any(h.throws for h in attached)
+        """The step as the clients attached want it: her throws known while one tells them. Its schedule is SCHEDULE
+        whoever is attached (until 2026-10-26 the hunt's while one hunted, `watch`'s otherwise)."""
+        self.runner.step.tracker.throws_known = any(h.throws for h in self.attached())
 
     def _not_visible(self) -> None:
         """No run to look with: a state saying why, to every client, the full asks in answered with it, then a wait
@@ -759,6 +772,8 @@ class Service:
             st.slot = self.ring.slot_of(st.seq)  # (feed.serve's: a late state copied before its frame went in)
         if not st.visible:
             self._answer_fulls(None, st)
+        if self.recording is not None and not st.late:
+            self.recording.saw(st, frame, self.epoch)  # (its picture by reference: never waits)
         self._send_state(replace(st, frame=None, epoch=self.epoch), st)
         if not st.late:
             self._frames_since += 1
@@ -786,7 +801,9 @@ class Service:
         line = f"{rate:.1f} frames a second (asked {self.rate():.0f}); attached: {names}"
         if self.publish is not None:
             line += self.publish.status(now)
-        self.log(line)
+        if self.recording is not None:
+            line += self.recording.line()
+        self.log(line + "; " + gcstats.STATS.line("status"))
 
     def close(self) -> None:
         self._stop = True
@@ -794,6 +811,8 @@ class Service:
             clients = list(self.clients.values())
         for c in clients:
             self._drop(c)
+        if self.recording is not None:  # (its saves queued written, the clips cut short)
+            self.recording.close()
         if self.runner is not None:
             self.runner.step.close()
         for ring in (self.ring, self.full_ring):

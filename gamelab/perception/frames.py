@@ -11,11 +11,18 @@ perception.framecheck); nor one the game drew off its client area (framecheck.dr
 frame known here: 2026-10-25 23:40), nor a capture that failed outright (kind "capture": a full-screen switch can make
 the screen's copy fail for a moment; the frame loop goes on, where it ended the service). Each says why in words and as
 a framecheck.Problem (`problem`), which the feed's state carries.
+
+A frame the capture still holds from more than HELD_S before the look asked keeps its own time (until 2026-10-26 it was
+stamped as now, the screen as it still was): the game draws many times a second, so it's a stall, and a look waiting
+for a frame after its keys mustn't take that picture for one. Each frame's picture is one of a few kept from frame to
+frame (`Pictures`), never one somebody still holds.
 """
 
+import sys
 import time
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
 from .. import capture, telemetry, window
@@ -23,6 +30,17 @@ from ..screen import STRETCHED, Geometry
 from . import framecheck
 from .eyes import rgb_of
 from .framecheck import Problem
+
+# A frame the duplication holds from this long before the look asked (its `after`) is a held one: given with its own
+# time, not now's, and said once (a `held` event) until frames come again. DXGI waits FRESH_WAIT_S (20 ms) for a new
+# frame and the game draws one every 16.7 ms in front, so a frame this old is a stall: live on 2026-10-26 01:21, a hunt
+# stood still on "the capture's newest frame is 2.1 s old" (framecheck.STALE_S), and before that a frame up to 2 s old
+# was stamped as now and acted on (D:/MapleHelper-scratch/pconst/plan: 0.3% of the hunts' waits on perception). Short
+# of STALE_S, where such a frame becomes a problem (the duplication made afresh).
+HELD_S = 0.5
+# Pictures a ScreenFrames keeps to convert frames into (`Pictures`): the frame loop's, its search's, the recording's
+# queue (8) and the one before, and a few held by the clients' answers. Past it a picture is made new (counted).
+PICTURES = 24
 
 
 @dataclass
@@ -41,11 +59,50 @@ class Frame:
         return Frame(None, t, False, why=problem.why, problem=problem)
 
 
+class Pictures:
+    """RGB pictures kept to convert the screen's frames into (`convert`, a Shot's convert: cv2.cvtColor into one), so
+    that a frame isn't fresh memory: a new 1366x768 picture a frame was 3 MB, 770 page faults that Windows' kernel
+    zeroes (its System process: about a core for 100,000 a second, D:/MapleHelper-scratch/cpu/review-numbers/
+    zerotest.py), 23,000 a second at 30 frames. A picture is converted into again only once nothing else holds it (its
+    reference count is the list's alone, as measured on one kept so: `_refs`), so a frame handed out (to the step, a
+    search, the recording, a client's answer) is never written over while it's held; with all `keep` held a new one is
+    made and not kept (`unkept`). Pictures of another size go when one of a new size is asked for."""
+
+    def __init__(self, keep: int = PICTURES):
+        self.keep = keep
+        self._kept: list[np.ndarray] = [np.empty((1, 1, 3), np.uint8)]  # (no other reference to it: the free count)
+        self._free_refs = self._refs(0)
+        self._kept.clear()
+        self.made = self.reused = self.unkept = 0
+
+    def _refs(self, i: int) -> int:
+        """Picture i's reference count, as read here (the same expression for the free count: what the interpreter
+        adds for the call itself is the same, whatever the Python)."""
+        return sys.getrefcount(self._kept[i])
+
+    def convert(self, bgra: np.ndarray) -> np.ndarray:
+        shape = (bgra.shape[0], bgra.shape[1], 3)
+        if self._kept and self._kept[0].shape != shape:
+            self._kept = [p for p in self._kept if p.shape == shape]
+        for i in range(len(self._kept)):
+            if self._refs(i) <= self._free_refs:
+                self.reused += 1
+                out = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGB, dst=self._kept[i])
+                return out
+        picture = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGB)
+        if len(self._kept) < self.keep:
+            self._kept.append(picture)
+            self.made += 1
+        else:
+            self.unkept += 1
+        return picture
+
+
 class ScreenFrames:
     """The game window as the screen shows it, through the process's grabber (DXGI desktop duplication or
     mss, capture.shared). Reads the screen only: no keys, and the game is never brought to the front. `geo`: the
     client size the eyes reading the frames are for (screen.Geometry); at any other, not visible. `log`: where a move
-    of the window is said."""
+    of the window is said, and a held frame. Each frame's picture is one of `pictures`' (Pictures)."""
 
     def __init__(self, title: str, grabber: capture.Grabber | None = None, geo: Geometry = STRETCHED, log=print):
         self.title = title
@@ -54,6 +111,9 @@ class ScreenFrames:
         self.log = log
         self.area: dict[str, int] | None = None  # where the client area was at the last frame read
         self._last: float | None = None  # the last frame's present time
+        self.pictures = Pictures()
+        self.held = 0          # frames given with their own time, held by the capture from HELD_S before they were asked
+        self._holding = False  # (one said, until a fresh frame comes)
 
     def next(self, after: float) -> Frame:
         """The game as the screen shows it: a frame shown at `after` or later if one comes (the grabber waits
@@ -72,7 +132,7 @@ class ScreenFrames:
             return Frame.unfit(now, wrong)
         try:
             shot = self.grabber.shot(area, after=after)
-            full = shot.crop(0, 0, area["width"], area["height"], rgb_of)
+            full = shot.crop(0, 0, area["width"], area["height"], self.pictures.convert)
         except Exception as e:  # (mss's GetDIBits refused, a duplication that couldn't be made: not the loop's end)
             return Frame.unfit(time.monotonic(), Problem("capture", f"the screen couldn't be captured "
                                                                     f"({type(e).__name__}: {e})"))
@@ -91,8 +151,19 @@ class ScreenFrames:
         shown = shot.t if shot.t is not None else time.monotonic()
         new = shown != self._last
         self._last = shown
-        # A frame shown before `after` is the screen as it still was when the grabber gave up waiting.
-        return Frame(full, shown if shown >= after else time.monotonic(), True, new)
+        # A frame shown before `after` is the screen as it still was when the grabber gave up waiting; one shown more
+        # than HELD_S before it, a stall: its own time (HELD_S).
+        if after - shown <= HELD_S:
+            self._holding = False
+            return Frame(full, shown if shown >= after else time.monotonic(), True, new)
+        self.held += 1
+        if not self._holding:
+            self._holding = True
+            text = (f"the capture holds a frame shown {after - shown:.2f} s before it was asked for: given with its own "
+                    f"time until a new one comes")
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="held", text=text)
+        return Frame(full, shown, True, new)
 
 
 def glimpse(title: str, grabber: capture.Grabber | None = None) -> np.ndarray | None:

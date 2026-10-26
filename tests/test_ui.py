@@ -31,10 +31,12 @@ def test_a_recording_can_be_followed_while_it_grows(tmp_path):
     try:
         follow = telemetry.Follower(path)
         telemetry.emit("log", text="one")
+        assert telemetry.flush()  # (written by the recorder's thread within telemetry.FLUSH_S; flush waits for it)
         assert [r["text"] for r in follow.poll()] == ["one"]
         assert follow.poll() == []
         telemetry.emit("log", text="two")
         telemetry.emit("log", text="three")
+        assert telemetry.flush()
         assert [r["text"] for r in follow.poll()] == ["two", "three"]
     finally:
         telemetry.stop()
@@ -593,11 +595,13 @@ def test_the_page_goes_on_into_a_run_s_next_part_without_starting_over(tmp_path)
     try:
         telemetry.emit("session", map=1, command="hunt", mode="live")
         telemetry.emit("tour", order=[], safe=[2], grounds=[3, 4])
+        telemetry.flush()  # (written by the recorder's thread within telemetry.FLUSH_S)
         feed = Feed(lambda map_id: MapView(m, width=300), LiveSource(tmp_path, clock=lambda: now[0]), live=True)
         feed.step()
         epoch = feed.epoch
         for i in range(30):
             telemetry.emit("log", text=f"line {i:02d} " + "x" * 30)
+            telemetry.flush()
             now[0] += 1.0
             feed.step()
     finally:

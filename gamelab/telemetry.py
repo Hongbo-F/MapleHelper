@@ -6,6 +6,13 @@ installed (`record_to`), so tests and library use pay nothing. Each line is
 {"t": seconds, "topic": topic, **data}. `t` is wall-clock time (the simulator's fake clock in a
 simulated run), so a replay keeps the original pace.
 
+A record is made into its line where it's emitted, and written by a thread of the recorder's own (`Recorder`), in
+batches FLUSH_S apart: a write held up by the disk never holds up the frame loop or a hunt (live, on 2026-10-25 and 26,
+the hunts and the perception service stood still together for 0.5-2 s now and then: plausibly the SSD's synchronous
+writes, not proven; D:/MapleHelper-scratch/pconst/plan). A reader following the file sees a record FLUSH_S after it at
+the latest (`flush` waits for those emitted so far). Past QUEUE_LINES waiting, records are dropped and counted
+(`Recorder.dropped`). The perception service's console goes the same way (`console_in_background`).
+
 Files are named for the time a run started and what it is (`<%Y%m%d-%H%M%S>-<name>.jsonl`); the newest
 run is the file written to last (`newest`). A run goes on in a new part past MAX_BYTES: a file of its own,
 named for the time the part starts (`...-<name>-part2.jsonl`, always later than the part before), that
@@ -47,19 +54,32 @@ Topics (map units; producers build the records, ui.state folds them):
                                                                not hers), backstop, follow, probe; `watch`:
                                                                died, exp_gain, hp_drop (the feed's events)
   log       text                                               every log line
+  gc        collections [gen 0, 1, 2], pause_ms, longest_ms,   once a minute (the perception service, the commands
+            frozen, seconds                                    that record telemetry: gcstats)
 """
 
+import atexit
 import json
 import os
 import re
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from .paths import TELEMETRY
+
+# The writer's thread writes what's waiting this often (and flushes it to the file): a reader following the file (the
+# mini-map, the web page) sees it this late at most. The service writes about 6 KB a second (a scene 10 times a second
+# at ~400 bytes, the tracks twice at ~850), so about 1 KB a batch.
+FLUSH_S = 0.2
+# Records waiting to be written at most, past which the newest are dropped (counted: Recorder.dropped). 50,000 are
+# about 2 hours of the service's records and 25 MB: only a disk that stopped taking writes fills it.
+QUEUE_LINES = 50_000
+BACKGROUND = True  # record_to's recorders write on their own thread (False: in the caller, as until 2026-10-26)
 
 FOLDER = TELEMETRY  # one file per run, newest last (git-ignored, like all of lab/)
 STAMP = "%Y%m%d-%H%M%S"  # file names start with the time the run (or the part) started
@@ -90,6 +110,8 @@ def emit(topic: str, **data) -> None:
         return
     try:
         sink({"t": round(time.time(), 3), "topic": topic, **data})
+    except _Stopped:  # (its writer couldn't write: it said why)
+        stop()
     except Exception as e:
         stop()
         print(f"telemetry stopped: can't record {topic!r} ({e})", file=sys.stderr)
@@ -100,35 +122,103 @@ def recording() -> bool:
     return _sink is not None
 
 
-class Recorder:
-    """Appends records to a JSON-lines file, one flushed line each, so a reader can follow along. With
-    `max_bytes`, a record that would take the file past it goes into a new part instead (see the top):
-    `path` is then the part being written, and `part` its number."""
+def to_file() -> bool:
+    """Whether records go into a file now (a Recorder's: not a test's `captured`)."""
+    return isinstance(_sink, Recorder)
 
-    def __init__(self, path: Path, max_bytes: int | None = None):
-        self.path, self.max_bytes, self.part = path, max_bytes, 1
+
+class _Stopped(Exception):
+    """A recorder whose writer couldn't write (a full disk): it said why; the records go nowhere now."""
+
+
+class Recorder:
+    """Appends records to a JSON-lines file, so a reader can follow along: each made into its line where it's emitted
+    (a value JSON can't hold raises there), and written with those before it by a thread of the recorder's own every
+    FLUSH_S (`background`; else at once, one flushed line each, as until 2026-10-26). With `max_bytes`, a record that
+    would take the file past it goes into a new part instead (see the top): `path` is then the part being written, and
+    `part` its number. Past `keep` records waiting the newest are dropped (`dropped` counts them); a write that fails
+    (a full disk) stops it, saying why once."""
+
+    def __init__(self, path: Path, max_bytes: int | None = None, background: bool = True, keep: int = QUEUE_LINES):
+        self.path, self.max_bytes, self.part, self.keep = path, max_bytes, 1, keep
         path.parent.mkdir(parents=True, exist_ok=True)
         self._file = path.open("a", encoding="utf-8")
         self._size = path.stat().st_size  # bytes in the file (lines are ASCII: json.dumps escapes the rest)
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()     # the file's (the writer's, or the caller's without one)
         self._session: dict | None = None  # the run's session record, to start each new part with
         named = re.fullmatch(r"(\d{8}-\d{6})-(.+)", path.stem)
         self._name = named.group(2) if named else path.stem
         self._started = int(time.mktime(time.strptime(named.group(1), STAMP))) if named else int(time.time())
+        self.dropped = 0
+        self.error: str | None = None
+        self._q: deque[tuple[str, float | None]] = deque()  # (a line, its record's time) waiting to be written
+        self._cond = threading.Condition()
+        self._queued = self._done = 0  # lines taken, and written (or given up) since
+        self._closing = self._hurry = False
+        self._thread = None
+        if background:
+            self._thread = threading.Thread(target=self._run, name="telemetry-writer", daemon=True)
+            self._thread.start()
 
     def __call__(self, record: dict) -> None:
         line = json.dumps(record, separators=(",", ":"), default=_plain) + "\n"
-        size = len(line) + len(os.linesep) - 1  # written in text mode: "\n" is os.linesep on disk
-        with self._lock:
-            if self._file.closed:
+        if record.get("topic") == "session" and "continues" not in record:
+            self._session = record
+        if self.error is not None:
+            raise _Stopped(self.error)
+        if self._thread is None:
+            with self._lock:
+                if not self._file.closed:
+                    self._write([(line, record.get("t"))])
+            return
+        with self._cond:
+            if self._closing:
                 return
-            if record.get("topic") == "session" and "continues" not in record:
-                self._session = record
+            if len(self._q) >= self.keep:
+                self.dropped += 1
+                return
+            self._q.append((line, record.get("t")))
+            self._queued += 1
+
+    def _run(self) -> None:
+        """The writer's thread: what's waiting, every FLUSH_S, until closed and nothing waits."""
+        while True:
+            with self._cond:
+                self._cond.wait_for(lambda: self._closing or self._hurry, FLUSH_S)
+                batch, closing, self._hurry = list(self._q), self._closing, False
+                self._q.clear()
+            if batch and self.error is None:
+                try:
+                    with self._lock:
+                        if not self._file.closed:
+                            self._write(batch)
+                except Exception as e:  # (a full disk, a part that couldn't be made: as emit's warning, once)
+                    self.error = f"{type(e).__name__}: {e}"
+                    print(f"telemetry stopped: can't write {self.path} ({self.error})", file=sys.stderr)
+            with self._cond:
+                self._done += len(batch)
+                self._cond.notify_all()
+                if closing and not self._q:
+                    return
+
+    def _write(self, batch: list[tuple[str, float | None]]) -> None:
+        """Lines into the file, a new part where one would take it past max_bytes, then flushed (the lock held)."""
+        for line, t in batch:
+            size = len(line) + len(os.linesep) - 1  # written in text mode: "\n" is os.linesep on disk
             if self.max_bytes is not None and self._size and self._size + size > self.max_bytes:
-                self._next_part(record.get("t"))
+                self._next_part(t)
             self._file.write(line)
-            self._file.flush()
             self._size += size
+        self._file.flush()
+
+    def flush(self, timeout: float = 5.0) -> bool:
+        """Wait (`timeout` s at most) until what was emitted so far is written: whether it is."""
+        if self._thread is None:
+            return True
+        with self._cond:
+            upto, self._hurry = self._queued, True
+            self._cond.notify_all()
+            return self._cond.wait_for(lambda: self._done >= upto or not self._thread.is_alive(), timeout)
 
     def _next_part(self, t: float | None) -> None:
         """Go on in a new file, named for now but always after the part before (so it sorts after it,
@@ -147,25 +237,44 @@ class Recorder:
         self._size = len(line) + len(os.linesep) - 1
         _prune(self.path.parent, spare=self.path)  # a run going for days deletes the oldest as it goes
 
-    def close(self) -> None:
+    def close(self, timeout: float = 5.0) -> None:
+        """What's waiting written (`timeout` s at most: a disk that takes no writes doesn't hold the run's end up for
+        longer), then the file closed."""
+        if self._thread is not None:
+            with self._cond:
+                self._closing = True
+                self._cond.notify_all()
+            self._thread.join(timeout)
         with self._lock:
             self._file.close()
 
 
-def record_to(name: str = "run", folder: Path = FOLDER, max_bytes: int | None = MAX_BYTES) -> Path | None:
+def record_to(name: str = "run", folder: Path = FOLDER, max_bytes: int | None = MAX_BYTES,
+              background: bool | None = None) -> Path | None:
     """Start recording to a new file in `folder` (named by the time and `name`), in parts of `max_bytes`,
     after deleting the oldest files there (`prune`); returns its path, or None (with a warning) if it
-    can't be written: the run goes on without telemetry."""
+    can't be written: the run goes on without telemetry. `background`: written by a thread of its own (BACKGROUND by
+    default; see the top)."""
     global _sink
     stop()
     _prune(folder)
     path = folder / f"{time.strftime(STAMP)}-{name}.jsonl"
     try:
-        _sink = Recorder(path, max_bytes)
+        _sink = Recorder(path, max_bytes, BACKGROUND if background is None else background)
     except OSError as e:
         print(f"telemetry off: can't write {path} ({e})", file=sys.stderr)
         return None
     return path
+
+
+def flush(timeout: float = 5.0) -> bool:
+    """Wait until what was emitted so far is in the file (`timeout` s at most): whether it is (True without a
+    recorder)."""
+    sink = _sink
+    return sink.flush(timeout) if isinstance(sink, Recorder) else True
+
+
+atexit.register(flush, 2.0)  # (a process ending without `stop`: what its writer holds goes in first)
 
 
 def prune(folder: Path = FOLDER, keep_days=_DEFAULT, keep_bytes: int | None = None, now: float | None = None,
@@ -209,11 +318,112 @@ def _prune(folder: Path, spare: Path | None = None) -> None:
 
 
 def stop() -> None:
-    """Stop recording (closes the file)."""
+    """Stop recording (what's waiting written, the file closed)."""
     global _sink
     sink, _sink = _sink, None
     if isinstance(sink, Recorder):
         sink.close()
+
+
+# --- the console, written by a thread of its own ---------------------------------------------------------------
+
+CONSOLE_KEEP = 20_000  # pieces of text waiting for the console at most (the newest dropped past it, counted)
+
+
+class Console:
+    """Text for the process's console streams (sys.stdout, sys.stderr: the service's go to lab/perceive.log or the
+    babysitter's file), written in order by a thread of its own every FLUSH_S and flushed: a `print(..., flush=True)`
+    returns at once, whatever the disk does. `drain` writes what's waiting now (the process's end, the watchdog's)."""
+
+    def __init__(self, keep: int = CONSOLE_KEEP):
+        self.keep, self.dropped = keep, 0
+        self._q: deque[tuple[object, str]] = deque()
+        self._cond = threading.Condition()
+        self._queued = self._done = 0
+        self._hurry = False
+        self._thread = threading.Thread(target=self._run, name="console-writer", daemon=True)
+        self._thread.start()
+
+    def put(self, stream, text: str) -> None:
+        with self._cond:
+            if len(self._q) >= self.keep:
+                self.dropped += 1
+                return
+            self._q.append((stream, text))
+            self._queued += 1
+
+    def _run(self) -> None:
+        while True:
+            with self._cond:
+                self._cond.wait_for(lambda: self._hurry, FLUSH_S)
+                batch, self._hurry = list(self._q), False
+                self._q.clear()
+            touched = []
+            for stream, text in batch:
+                try:
+                    stream.write(text)
+                    if stream not in touched:
+                        touched.append(stream)
+                except (OSError, ValueError):  # (a console gone: nothing to say it on)
+                    pass
+            for stream in touched:
+                try:
+                    stream.flush()
+                except (OSError, ValueError):
+                    pass
+            with self._cond:
+                self._done += len(batch)
+                self._cond.notify_all()
+
+    def drain(self, timeout: float = 2.0) -> bool:
+        """Wait (`timeout` s at most) until what was put so far is written."""
+        with self._cond:
+            upto, self._hurry = self._queued, True
+            self._cond.notify_all()
+            return self._cond.wait_for(lambda: self._done >= upto, timeout)
+
+
+class _Queued:
+    """A console stream whose writes go to a Console (its `flush` does nothing: the Console's thread flushes); the
+    rest is the stream's own (encoding, fileno, isatty)."""
+
+    def __init__(self, console: Console, stream):
+        self._console, self._stream = console, stream
+
+    def write(self, text: str) -> int:
+        self._console.put(self._stream, text)
+        return len(text)
+
+    def writelines(self, lines) -> None:
+        for line in lines:
+            self.write(line)
+
+    def flush(self) -> None:
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_CONSOLE: list[Console] = []
+
+
+def console_in_background() -> Console:
+    """The process's sys.stdout and sys.stderr written by a Console's thread from now on (once; the process's end
+    drains it): the perception service's, whose log lines came from the frame loop."""
+    if not _CONSOLE:
+        console = Console()
+        sys.stdout, sys.stderr = _Queued(console, sys.stdout), _Queued(console, sys.stderr)
+        _CONSOLE.append(console)
+        atexit.register(console.drain)
+    return _CONSOLE[0]
+
+
+def drain(timeout: float = 2.0) -> None:
+    """The telemetry emitted and the console's text so far written, `timeout` s at most each (before an os._exit)."""
+    flush(timeout)
+    for console in _CONSOLE:
+        console.drain(timeout)
 
 
 @contextmanager

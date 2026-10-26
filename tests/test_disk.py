@@ -48,6 +48,7 @@ def test_a_run_left_going_deletes_the_oldest_telemetry_as_it_goes_on_in_new_part
         telemetry.emit("session", map=1, command="watch", mode="watch")
         for i in range(40):
             telemetry.emit("log", text=f"line {i:02d} " + "x" * 30)
+        telemetry.flush()  # (the recorder's thread writes them, a new part as it goes)
         writing = telemetry._sink.path
     finally:
         telemetry.stop()
@@ -139,6 +140,7 @@ def test_a_run_s_next_part_is_followed_on_from_the_part_before_not_started_over(
         telemetry.emit("tour", order=[], safe=[5, 9], grounds=[36, 17])
         for i in range(40):
             telemetry.emit("log", text=f"line {i:02d} " + "x" * 30)
+            telemetry.flush()  # (written by the recorder's thread within telemetry.FLUSH_S)
             clock[0] += 0.5  # the folder is looked through every other poll
             started, records = source.poll()
             fresh.append(started)

@@ -1,8 +1,8 @@
 """The perception service (localization.service): one process looking at the game all the time, any number of
 commands attached to it as clients. In-process: what it does with what its clients say (asks merged, her throws known
-while a command tells them, the hunt's pace while one hunts, a client's queue dropping its oldest); and the real thing
-on a test pipe, the drawn frames of test_feed for a screen: two clients attached and detached, one that never reads
-leaving the frame loop at its rate, the service killed and started again under a client, a client killed."""
+while a command tells them, one pace and schedule whoever is attached, a client's queue dropping its oldest); and the
+real thing on a test pipe, the drawn frames of test_feed for a screen: two clients attached and detached, one that never
+reads leaving the frame loop at its rate, the service killed and started again under a client, a client killed."""
 
 import multiprocessing
 import os
@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from gamelab.localization import service
-from gamelab.localization.service import IDLE, ACTIVE, Hello, Service, ServiceClient, Writer
+from gamelab.localization.service import SCHEDULE, Hello, Service, ServiceClient, Writer
 from gamelab.localization.worldstate import Asks, SearchThread, WorldStep
 from gamelab.localization.senses import Senses
 from gamelab.perception.frames import ListFrames
@@ -59,41 +59,39 @@ def test_asks_from_every_client_are_merged_and_mesos_only_if_each_asked_only_for
     assert svc._fulls[-1] == (a, 8, 10.6, True)
 
 
-def test_the_hunts_pace_and_her_throws_follow_the_commands_attached():
-    svc = _svc(idle_hz=10.0, active_hz=30.0)
+def test_one_pace_and_schedule_whoever_is_attached_and_her_throws_follow_the_commands():
+    # The user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is
+    # running as a constant thing and hunt is only a consumer of it." Until then a command that hunts had the frames at
+    # 30 a second and the hunt's schedule while it was attached, and 10 a second with watch's searches otherwise.
+    svc = _svc()
     svc.runner = drawn_runner()
+    svc.runner.step.schedule = SCHEDULE  # (as screen_world makes it)
     try:
-        watch = _attach(svc, name="watch")
+        for name, kw in (("watch", {}), ("pet", {"acts": True}), ("tour", {"acts": True, "throws": True, "fast": True})):
+            _attach(svc, name=name, **kw)
+            svc._tune()
+            assert svc.rate() == service.HZ == 30.0 and svc.runner.step.schedule is SCHEDULE
+            assert svc.runner.step.tracker.throws_known == (name == "tour")  # (the one that tells her throws)
+        del svc.clients[max(svc.clients)]
         svc._tune()
-        assert svc.rate() == 10.0 and svc.runner.step.schedule == IDLE and not svc.runner.step.tracker.throws_known
-        pet = _attach(svc, name="pet", acts=True)  # it sends keys, but doesn't hunt nor tell her throws
-        svc._tune()
-        assert svc.rate() == 10.0 and svc.runner.step.schedule == IDLE and not svc.runner.step.tracker.throws_known
-        hunt = _attach(svc, name="tour", acts=True, throws=True, fast=True)
-        svc._tune()
-        assert svc.rate() == 30.0 and svc.runner.step.schedule == ACTIVE and svc.runner.step.tracker.throws_known
-        del svc.clients[hunt.id]
-        svc._tune()
-        assert svc.rate() == 10.0 and svc.runner.step.schedule == IDLE and not svc.runner.step.tracker.throws_known
-        assert {watch.id, pet.id} == set(svc.clients)
+        assert svc.rate() == 30.0 and svc.runner.step.schedule is SCHEDULE and not svc.runner.step.tracker.throws_known
+        assert svc.status()["hz"] == 30.0
     finally:
         svc.runner.step.close()
-    # The idle schedule is `watch`'s: her band every 0.5 s, the screen every 2 s, the drops at its rates
-    assert (IDLE.band_s, IDLE.wide_s, IDLE.loot_s, IDLE.loot_wide_s) == (0.5, 2.0, 0.5, 2.0)
-    assert service.IDLE_HZ == 10.0
-    assert (ACTIVE.band_s, ACTIVE.wide_s, ACTIVE.loot_s) == (0.2, 1.0, None)
+    # The hunt's schedule (her band every 0.2 s, the screen every second) and the drops at watch's rates
+    assert (SCHEDULE.band_s, SCHEDULE.wide_s, SCHEDULE.loot_s, SCHEDULE.loot_wide_s) == (0.2, 1.0, 0.5, 2.0)
+    assert not hasattr(service, "IDLE_HZ") and not hasattr(service, "ACTIVE")
 
 
-def test_a_command_that_hunts_attaching_wakes_the_frame_loop_and_a_viewer_doesnt():
-    """Its rate and schedule are the hunt's from the next frame on, not after IDLE_HZ's period (feed.run brings the next
-    frame's due forward once it's woken)."""
+def test_a_command_that_hunts_attaching_changes_nothing_of_the_frame_loops_pace():
+    """Its frames come at the one pace: its hello wakes nothing (until 2026-10-26 it brought the next frame forward to
+    the hunt's pace); `fast` only holds the map (test_a_second_command_that_hunts_on_another_map_is_refused...)."""
     svc = _svc()
     svc.map_id = 5
     said = []
     svc._hello(_joining(svc, 1, said), Hello(name="map", map=5))
-    assert not svc._woken
     svc._hello(_joining(svc, 2, said), Hello(name="tour", acts=True, throws=True, fast=True, map=5))
-    assert svc._woken and [m[1] for m in said] == ["welcome", "welcome"]
+    assert not svc._woken and [m[1] for m in said] == ["welcome", "welcome"]
 
 
 def test_a_clients_queue_keeps_its_newest_drops_the_oldest_and_says_a_gap():
@@ -213,7 +211,7 @@ class Hanging:
         return self.frames.next(after)
 
 
-def serve(address: str, info: str, seconds: float, idle_hz: float, active_hz: float, full: bool = False,
+def serve(address: str, info: str, seconds: float, hz: float, full: bool = False,
           slow: float = 0.0, hang_after: int | None = None, stuck_s: float | None = None) -> None:
     """A service in a process of its own, on the drawn frames (their searches `slow` s each; none after `hang_after`
     frames), with a watchdog of `stuck_s` (None: none)."""
@@ -224,22 +222,22 @@ def serve(address: str, info: str, seconds: float, idle_hz: float, active_hz: fl
         return runner
     service.settle()
     svc = Service(make, 1, lambda: (STRETCHED, None), address=address, info=Path(info), log=lambda m: None,
-                  idle_hz=idle_hz, active_hz=active_hz, stuck_s=stuck_s)
+                  hz=hz, stuck_s=stuck_s)
     svc.serve(until=time.monotonic() + seconds)
 
 
 class Running:
     """A service process on a pipe of the test's own."""
 
-    def __init__(self, tmp_path: Path, name: str, seconds: float = 30.0, idle_hz: float = 10.0,
-                 active_hz: float = 30.0, full: bool = False, at: "Running | None" = None, slow: float = 0.0,
-                 hang_after: int | None = None, stuck_s: float | None = None):
+    def __init__(self, tmp_path: Path, name: str, seconds: float = 30.0, hz: float = 30.0, full: bool = False,
+                 at: "Running | None" = None, slow: float = 0.0, hang_after: int | None = None,
+                 stuck_s: float | None = None):
         """`at`: where another one ran (started again there, as the babysitter starts it at the same address)."""
         pipe = rf"\\.\pipe\gamelab-perceive-test-{os.getpid()}-{name}-{time.monotonic_ns()}"
         self.address, self.info = (at.address, at.info) if at else (pipe, tmp_path / f"{name}.json")
         ctx = multiprocessing.get_context("spawn")
-        self.proc = ctx.Process(target=serve, args=(self.address, str(self.info), seconds, idle_hz, active_hz, full,
-                                                    slow, hang_after, stuck_s), daemon=True)
+        self.proc = ctx.Process(target=serve, args=(self.address, str(self.info), seconds, hz, full, slow, hang_after,
+                                                    stuck_s), daemon=True)
         self.proc.start()
 
     def client(self, name: str, **kw) -> ServiceClient:
@@ -274,12 +272,12 @@ def test_two_commands_attach_are_both_served_and_detach(tmp_path):
         assert seen is not None and seen.seq >= st.seq - 2 and seen.epoch == st.epoch == hunt.epoch
         status = viewer.status()
         assert sorted(c["name"] for c in status["clients"]) == ["tour", "watch"] and status["hz"] == 30.0
-        assert _rate(viewer, 1.0) > 20  # the hunt's pace while the tour is attached
+        assert _rate(viewer, 1.0) > 20  # one pace, the tour attached ...
         hunt.close()
         time.sleep(0.3)
         status = viewer.status()
-        assert [c["name"] for c in status["clients"]] == ["watch"] and status["hz"] == 10.0
-        assert _rate(viewer, 1.0) < 13  # idle again
+        assert [c["name"] for c in status["clients"]] == ["watch"] and status["hz"] == 30.0
+        assert _rate(viewer, 1.0) > 20  # ... or not (until 2026-10-26, 10 a second without it)
         assert all(e.t >= first.t for e in viewer.drain_events())  # its own events, from when it attached
     finally:
         hunt.close()
@@ -289,7 +287,7 @@ def test_two_commands_attach_are_both_served_and_detach(tmp_path):
 
 def test_a_client_that_never_reads_leaves_the_frame_loop_at_its_rate(tmp_path):
     import multiprocessing.connection
-    svc = Running(tmp_path, "stuck", idle_hz=30.0)
+    svc = Running(tmp_path, "stuck")
     reader = svc.client("watch")
     try:
         assert reader.ready(30.0), reader.why
@@ -611,14 +609,13 @@ def test_the_service_publishes_what_it_sees_as_watch_did(tmp_path, monkeypatch):
                         lambda box: ExpReading(421 + (13 if box[0, 0] else 0), 2.5, (19,)))
 
     def make(map_id, geo):
-        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=IDLE)
+        step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=SCHEDULE)
         return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), Gaining(eyes), step)
-    # The drops searched at watch's rates, to see them published (the service's IDLE searches them only when asked)
-    monkeypatch.setattr(service, "IDLE", worldstate.WATCH)
+    assert SCHEDULE is worldstate.WATCH  # (the drops searched at watch's rates, published)
     telemetry.record_to("perceive", tmp_path)
     address = rf"\\.\pipe\gamelab-perceive-test-pub-{os.getpid()}-{time.monotonic_ns()}"
     svc = Service(make, 1, lambda: (STRETCHED, None), address=address, log=lambda m: None,
-                  publish=service.Publisher((100, 100), log=lambda m: None), idle_hz=30.0)
+                  publish=service.Publisher((100, 100), log=lambda m: None))
     svc.serve(until=time.monotonic() + 1.8)
     assert touched == []
     (path,) = tmp_path.glob("*-perceive.jsonl")
