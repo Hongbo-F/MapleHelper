@@ -155,6 +155,38 @@ def test_watchdog_grabs_the_game_as_an_rgb_picture_of_its_own(monkeypatch):
     assert why == "covered" and np.array_equal(frame, bgra[:, :, 2::-1])
 
 
+@pytest.mark.parametrize("size", [(3840, 2160), (1600, 900)])
+def test_watchdog_brings_a_client_of_another_size_to_the_templates_size_and_sees_the_lie_detector_there(monkeypatch,
+                                                                                                       size):
+    """The game full screen at 3840x2160 (Alt+Enter twice puts it there on purpose: control.window_size), or resized:
+    grabbed as it was, no saved Lie Detector screen was seen at such a size (0.53-0.78 of the thresholds), and nothing
+    raised the alarm. Brought to 1920x1080 (lie_detector.to_template) it's seen; the game's own size and 1920x1080 are
+    handed over as they are."""
+    import cv2
+
+    from gamelab.control import player as player_mod
+    quiz = img("lie_detector/2026-10-25_002828_quiz.jpg")
+    shown = cv2.resize(quiz, size, interpolation=cv2.INTER_LINEAR)
+    area = {"left": 0, "top": 0, "width": size[0], "height": size[1]}
+    monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "minimized", lambda hwnd: False)
+    monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: dict(area))
+    monkeypatch.setattr(player_mod.window, "shows", lambda hwnd, area: True)
+
+    class Screen:
+        def grab(self, box):
+            return cv2.cvtColor(shown, cv2.COLOR_RGB2BGRA)
+
+    spotter = LieDetectorSpotter()
+    assert max(spotter.scores(shown).values()) < 1  # (as it was grabbed before)
+    dog = Watchdog("MapleStory", threading.Event(), spotter=spotter)
+    frame = dog._grab(Screen())
+    assert frame.shape == (1080, 1920, 3) and spotter.seen(frame)
+    shown = quiz  # (1366x768: as it is, the spotter stretching it itself)
+    area.update(width=1366, height=768)
+    assert dog._grab(Screen()).shape == (768, 1366, 3)
+
+
 def test_watchdog_says_why_it_has_no_picture_the_game_minimized_or_gone(monkeypatch):
     # Minimized, the game's client area isn't 0 x 0 (432x54 on 2026-10-24): Windows is asked.
     from gamelab.control import player as player_mod

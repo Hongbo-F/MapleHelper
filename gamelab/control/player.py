@@ -553,8 +553,12 @@ class Watchdog(threading.Thread):
         # the Lie Detector gone: a terminal opened over the game had gone to disk as frames of it, and after a
         # minute of it ended the cycle as answered with the Lie Detector maybe up behind.
         covered = not window.shows(hwnd, client_area)
-        # RGB, full size, a picture of its own: viewed as RGB in place, every OpenCV call on it copied it first
-        frame = cv2.cvtColor(np.asarray(sct.grab(client_area)), cv2.COLOR_BGRA2RGB)
+        # RGB, full size, a picture of its own: viewed as RGB in place, every OpenCV call on it copied it first. A
+        # client of another size than the game's own or 1920x1080 (full screen at 3840x2160, resized) is brought to
+        # 1920x1080, the templates' size (lie_detector.to_template): as it was, no saved Lie Detector screen was seen
+        # at such a size (0.53-0.78 of the thresholds), and Alt+Enter twice puts the game full screen on purpose.
+        from ..perception.lie_detector import to_template
+        frame = to_template(cv2.cvtColor(np.asarray(sct.grab(client_area)), cv2.COLOR_BGRA2RGB))
         return (frame, "covered") if covered else frame
 
     def _raise(self, frame) -> dict | None:

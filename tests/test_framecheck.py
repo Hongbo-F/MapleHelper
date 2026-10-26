@@ -134,10 +134,28 @@ def test_the_frame_of_23_40_is_the_game_drawing_off_its_client_not_the_capture_o
     assert framecheck.hud_seen(DRAWN)[1] == (-18, -85)
 
 
+def test_the_fault_as_the_capture_shows_it_is_drawn_too():
+    """The same fault again at 00:29:02 on 2026-10-26, as the capture showed it (the player's recording of a Lie
+    Detector's cycle, JPEG at 75: black under the HUD and right of x 1348, where the desktop grab of 23:40 has the
+    desktop): drawn at (-18, -85), with the window's frame known or not; its HUD's buttons seen at the same shift."""
+    capture = frame(FIXTURES / "capture" / "tree_002902_drawn.png")
+    assert int(capture[700:768].max()) == 0 and int(capture[:, 1350:].max()) == 0
+    for inset in (None, (18, 85), (8, 31)):
+        p = framecheck.drawn_problem(capture, NATIVE, inset)
+        assert p.kind == "drawn" and "(-18, -85)" in p.why
+    assert framecheck.frame_problem(capture, NATIVE).kind == "drawn"
+    seen, at = framecheck.hud_seen(capture)
+    assert seen >= framecheck.HUD_SEEN and at == (-18, -85)
+
+
 def test_the_good_frames_are_never_drawn_off_whatever_the_windows_frame():
-    """On the 19,977 saved 1366x768 frames (the lab's shots, recordings, the Lie Detector's and the rolling recorder's
-    frames, the scratch folders, these fixtures) none is "drawn", with no frame given or at (18, 85), (8, 31) or
-    (11, 45) (D:/MapleHelper-scratch/winfix/build/drawn_fp.py); here the fixtures, and shifted copies."""
+    """A frame is looked at for the game drawn off only once both anchors are off (framecheck.anchors_off): of the
+    29,416 saved 1366x768 frames (20,782 distinct: the lab's shots, recordings, the Lie Detector's and the rolling
+    recorder's frames, the scratch folders, these fixtures), 359 (245 distinct) were, 216 of them the fault (the 215
+    frames of 00:29:02-00:29:55 on 2026-10-26 and the fixture of 23:40) and drawn, all at (-18, -85); none of the other
+    143 (30 distinct: black map changes, the drag of 16:48, 16:55:33, countdown frames shrunk from 1920x1080) was,
+    with no frame given or at (8, 31), (10, 38), (11, 45), (13, 52), (15, 59) or (18, 85) (the review's scan,
+    D:/MapleHelper-scratch/winfix/review-detect/fp_lab.csv, fp_scratch.csv); here the fixtures, and shifted copies."""
     for good in [GOOD, OFFSET] + ROCKY:
         for inset in (None, (18, 85), (8, 31), (11, 45), (0, 0)):
             assert framecheck.drawn_problem(good, NATIVE, inset) is None

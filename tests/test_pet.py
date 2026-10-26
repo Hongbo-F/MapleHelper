@@ -2,6 +2,7 @@
 plan's name as the player keeps it."""
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -359,10 +360,12 @@ def waiting(state, monkeypatch):
     now = [10_000.0]
     tries, said = [], []
 
-    def refit(title, want, log, spot):
+    def refit(title, want, log, spot, on_try=None):
         tries.append(now[0])
+        if on_try is not None:
+            on_try()  # (as its first Alt+Enter goes)
         win.back()
-        return window_size.Refit(before=(3840, 2160), after=(1366, 768), ok=True, pressed=1)
+        return window_size.Refit(before=(3840, 2160), after=(1366, 768), ok=True, pressed=1, counted=True)
     monkeypatch.setattr(window_size, "refit", refit)
 
     def unfit():
@@ -418,6 +421,7 @@ def test_a_pet_due_a_food_while_it_waits_gets_one_alt_enter_twice_try_at_most_ev
 
 
 def test_no_try_unless_the_game_is_seen_in_play_and_no_alarm_is_up(waiting):
+    from gamelab.control import window_size
     w = waiting
     w.state.write_text(json.dumps({"level": 50.0, "at": w.now[0]}))
     w.win.full()
@@ -427,8 +431,11 @@ def test_no_try_unless_the_game_is_seen_in_play_and_no_alarm_is_up(waiting):
     assert w.wait() and w.wait() and w.tries == []
     assert sum("the game isn't seen in play" in s for s in w.said) == 1  # (said once)
     w.pictures["frame"] = None  # no picture from the perception service
+    assert w.wait() and "no picture of the client" not in w.said[-1]  # (looked at again AGAIN_S on, not each poll)
+    w.now[0] += window_size.AGAIN_S
     assert w.wait() and w.tries == [] and "no picture of the client" in w.said[-1]
     w.pictures["frame"] = _in_play()
+    w.now[0] += window_size.AGAIN_S
     client.ALARM.write_text("{}", encoding="utf-8")
     assert w.wait() and w.tries == [] and w.said[-1] == "pet: no Alt+Enter: the Lie Detector alarm is up"
     client.ALARM.unlink()
@@ -509,3 +516,152 @@ def test_pet_every_at_full_screen_waits_instead_of_ending_and_goes_on_when_its_r
     assert out.count("pet: waiting: the game is full screen (3840x2160); no food is sent") == 2
     assert out.count("pet: the game looks right again") == 2
     assert sleeps[:2] == [pet.WAIT_POLL_S] * 2 and 60 in sleeps
+
+
+def test_the_pets_try_is_counted_as_its_first_alt_enter_goes_and_one_that_sent_none_isnt(waiting, monkeypatch):
+    """Saved when the try ended, a try cut short (the babysitter stops the pet as a hunt starts, the hold alone 8 s)
+    was counted nowhere, and the pet started again 5 s later could try at once. One that sent no Alt+Enter (no picture
+    for the Lie Detector look) isn't one: the next look AGAIN_S on."""
+    from gamelab.control import window_size
+    w = waiting
+    w.state.write_text(json.dumps({"level": 50.0, "at": w.now[0]}))
+    w.win.full()
+
+    class Killed(BaseException):
+        pass
+
+    def killed(title, want, log, spot, on_try=None):
+        on_try()
+        raise Killed
+    monkeypatch.setattr(window_size, "refit", killed)
+    assert w.wait()
+    w.now[0] += window_size.STEADY_S
+    with pytest.raises(Killed):
+        w.wait()
+    assert json.loads(w.state.read_text())["window_try"] == w.now[0]
+    assert len(window_size.tries_within(window_size.WINDOW_TRIES, __import__("time").time())) == 1
+    w.state.write_text(json.dumps({"level": 50.0, "at": w.now[0]}))  # (a pet started again: no try kept)
+    asked = []
+
+    def blind(title, want, log, spot, on_try=None):
+        asked.append(w.now[0])
+        return window_size.Refit(before=(3840, 2160), after=(3840, 2160), full=True,
+                                 why="the screen couldn't be looked at for the Lie Detector (no frame)")
+    monkeypatch.setattr(window_size, "refit", blind)
+    w.wait()
+    assert asked == [w.now[0]] and "window_try" not in json.loads(w.state.read_text())
+    assert w.said[-1] == "pet: no Alt+Enter: the screen couldn't be looked at for the Lie Detector (no frame)"
+    w.now[0] += window_size.AGAIN_S - 1
+    w.wait()
+    assert len(asked) == 1
+    w.now[0] += 1
+    w.wait()
+    assert len(asked) == 2
+
+
+def _pet_every(monkeypatch, win, perception, eyes=NATIVE, stop_after=12, on_sleep=None):
+    """`pet --every 1` on a fake window (`win`) and perception service, its follows (`tend`) kept: what it said, the
+    follows, and the sleeps."""
+    import gamelab.__main__ as m
+    tended, sleeps = [], []
+
+    class Care:
+        def tend(self, present=True):
+            tended.append(dict(win.area))
+            return 80.0
+
+    def hunter(args, throws=True, fit=None, **kw):
+        fit(perception)
+        return SimpleNamespace(pet=Care(), eyes=SimpleNamespace(geo=eyes), senses=SimpleNamespace(feed=perception))
+
+    class Done(Exception):
+        pass
+
+    def sleep(s):
+        sleeps.append(s)
+        if on_sleep is not None:
+            on_sleep(len(sleeps))
+        if len(sleeps) > stop_after:
+            raise Done
+    monkeypatch.setattr(m, "_hunter", hunter)
+    monkeypatch.setattr(m, "_record", lambda command, map_id: None)
+    monkeypatch.setattr(m, "_game_title", lambda: "MapleStory")
+    monkeypatch.setattr(m, "_calibrated", lambda size: size in ((1366, 768), (1920, 1080)))
+    monkeypatch.setattr(m, "_lie_detector_look", lambda perception: lambda: None)
+    monkeypatch.setattr(m.telemetry, "emit", lambda *a, **k: None)
+    monkeypatch.setattr(pet.telemetry, "emit", lambda *a, **k: None)
+    monkeypatch.setattr(m.time, "sleep", sleep)
+    try:
+        code = m.main(["pet", "--every", "1"])
+    except Done:
+        code = None
+    return code, tended, sleeps
+
+
+def test_pet_every_waits_while_the_game_draws_its_picture_off_its_client(state, monkeypatch, capsys):
+    """2026-10-25 23:40 (and again 2026-10-26 00:29): the client 1366x768, the game drawing its picture 18 px left and
+    85 up. The perception service's newest state says so ("drawn"): the pet waits as at full screen, sending nothing,
+    and follows on once it's drawn right. Its one bounded try finds the game in play on that picture (the HUD's buttons
+    at the shift)."""
+    from PIL import Image
+
+    from gamelab.perception import framecheck
+    drawn = np.asarray(Image.open(Path(__file__).parent / "fixtures" / "capture" / "tree_234040_drawn.png")
+                       .convert("RGB"))
+    problem = framecheck.drawn_problem(drawn, NATIVE, (18, 85))
+    assert problem is not None and problem.kind == "drawn"
+    win = _Window().install(monkeypatch)
+    now = {"problem": None}
+
+    class Perception:
+        def problem(self):
+            return now["problem"]
+
+        def full_frame(self, after, timeout=1.0, any_size=False):
+            return drawn
+
+    def on_sleep(n):
+        now["problem"] = problem if 2 <= n < 6 else None
+    code, tended, sleeps = _pet_every(monkeypatch, win, Perception(), on_sleep=on_sleep)
+    out = capsys.readouterr().out
+    assert out.count("pet: waiting: the game draws its picture (-18, -85) px off its client area") == 1
+    assert out.count("pet: the game looks right again") == 1
+    assert sleeps[:2] == [60, 60] and sleeps[2:6] == [pet.WAIT_POLL_S] * 4  # (no follow, no food, while it lasts)
+    assert len(tended) == 2 + (len(sleeps) - 6)
+    seen, at = framecheck.hud_seen(drawn)  # (what its try looks for: the game in play)
+    assert seen >= framecheck.HUD_SEEN and at == (-18, -85)
+
+
+def test_pet_every_with_eyes_of_another_calibrated_size_ends_for_the_babysitter(state, monkeypatch, capsys):
+    """Eyes made at 1920x1080 (the client stretched), then the game back at its own 1366x768 windowed: it waited for
+    ever there ("not 1920x1080"), unfed, and tried to set back a size Alt+Enter never makes. It ends instead, for the
+    babysitter to start it again with eyes for the size."""
+    from gamelab.screen import STRETCHED
+    win = _Window({"left": 0, "top": 0, "width": 1920, "height": 1080}).install(monkeypatch)
+
+    class Perception:
+        def problem(self):
+            return None
+
+    code, tended, sleeps = _pet_every(monkeypatch, win, Perception(), eyes=STRETCHED,
+                                      on_sleep=lambda n: win.back() if n == 2 else None)
+    assert code == 0 and len(tended) == 2
+    assert ("pet: the game's client is 1366x768 now, a size calibrated but not the eyes' (1920x1080): the pet ends, "
+            "for its babysitter to start it again with eyes for it") in capsys.readouterr().out
+
+
+def test_the_pet_waits_while_another_command_is_setting_the_client_right(monkeypatch):
+    """`window --recover` runs beside the pet (the babysitter stops the pet only for hunts): while its try holds the
+    lock, the pet sends nothing (a food in its full-screen hold had the try give up with the game left full screen)."""
+    import gamelab.__main__ as m
+    from gamelab.control import window_size
+    from gamelab.localization.service import only_one
+    _Window().install(monkeypatch)
+    assert m._pet_unfit("MapleStory", None, (1366, 768)) is None
+    held = only_one(window_size.LOCK)
+    try:
+        problem = m._pet_unfit("MapleStory", None, (1366, 768))
+        assert problem.kind == "window" and "setting the game's client right" in problem.why
+    finally:
+        window_size._unlock(held)
+    assert m._pet_unfit("MapleStory", None, (1366, 768)) is None

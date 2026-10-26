@@ -395,9 +395,15 @@ class Hunt:
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         regains = self.h.senses.regains
-        self.h.senses.regains = True  # (a client the window fix mends is set right while she stands still: regain)
         try:
-            self._next_ground(self.nav.mover.settle())
+            # Her first look waits for the window fix's first try at a client it mends (Senses._fixing) as any
+            # command's does, and stops the hunt if that didn't set it right; from there on, her looks failing stand
+            # her still, and the fix makes its tries there (`regains`: Senses.regain). With `regains` set before it,
+            # LookLost (LOST_S, 3 s) came before the fix's STEADY_S (5 s), and `tour --loop` or `--grind` started on a
+            # client drawn off ended untried.
+            first = self.nav.mover.settle()
+            self.h.senses.regains = True
+            self._next_ground(first)
             while time.monotonic() < end:
                 try:
                     if self._pass() == "stop":

@@ -104,9 +104,7 @@ def glimpse(title: str, grabber: capture.Grabber | None = None) -> np.ndarray | 
     size fix's look for the Lie Detector before an Alt+Enter, the pet's for the HUD. Never brings the game forward. The
     process's grabber (capture.shared), as ScreenFrames'. A 3840x2160 picture takes 12 ms to convert and shrink
     (offline), its copy off the graphics card besides; 6.2 MB pickled down the pipe."""
-    import cv2
-
-    from .lie_detector import NATIVE_FRAME, TEMPLATE_FRAME
+    from .lie_detector import to_template
     try:
         hwnd = window.find_game(title)
         if window.minimized(hwnd):
@@ -115,11 +113,7 @@ def glimpse(title: str, grabber: capture.Grabber | None = None) -> np.ndarray | 
         full = (grabber or capture.shared()).shot(area).crop(0, 0, area["width"], area["height"], rgb_of)
     except Exception:  # (no window, no shot: a capture refused mid-switch)
         return None
-    size = (full.shape[1], full.shape[0])
-    if size in (NATIVE_FRAME, TEMPLATE_FRAME):
-        return full
-    shrink = size[0] >= TEMPLATE_FRAME[0] and size[1] >= TEMPLATE_FRAME[1]
-    return cv2.resize(full, TEMPLATE_FRAME, interpolation=cv2.INTER_AREA if shrink else cv2.INTER_LANCZOS4)
+    return to_template(full)
 
 
 class ListFrames:

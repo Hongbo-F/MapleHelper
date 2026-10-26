@@ -51,8 +51,9 @@ runs unattended beside the user's own play), with one bounded exception so the p
 followed says it's due a food (`due_to_feed`), the client's picture shows the game in play (its HUD's buttons:
 framecheck.hud_seen, on the perception service's picture at whatever size, perception.frames.glimpse), the fault has
 stood window_size.STEADY_S and no Lie Detector alarm is up, the one try the hunts make (control.window_size.refit), at
-most every TRY_EVERY_S (kept in paths.PET: across the babysitter's restarts) and within the hunts' HOURLY, said in the
-log.
+most every TRY_EVERY_S (kept in paths.PET: across the babysitter's restarts; counted as its first Alt+Enter goes, so
+a try cut short is one too) and within the hunts' HOURLY, said in the log; a look before it that came to nothing (the
+game not in play, no picture, no Alt+Enter sent) is made again window_size.AGAIN_S on, not at every poll.
 """
 
 import json
@@ -339,15 +340,17 @@ def due_to_feed(now: float) -> tuple[bool, float | None]:
 class PetWait:
     """`pet --every`'s wait while the game's client isn't fit to read (see the top): `unfit()` says what's wrong now
     (None: nothing), `picture()` is the client's picture at whatever size (the perception service's: raises BadLook if
-    there's none), `spot()` whether the Lie Detector is on it (window_size.refit's look before each Alt+Enter). Called
+    there's none), `spot()` the Lie Detector on it (window_size.refit's look before each Alt+Enter). Called
     (`__call__`) before each follow: whether to wait now, said once and when the why changes; and the one bounded
     Alt+Enter-twice try when the pet is due a food (`_try`). `clock`: time.time's stand-in (paths.PET's times)."""
 
     def __init__(self, title: str, unfit: Callable[[], Problem | None], picture: Callable[[], np.ndarray],
-                 spot: Callable[[], bool] | None = None, log: Callable[[str], None] = print, clock=time.time,
+                 spot: Callable[[], object] | None = None, log: Callable[[str], None] = print, clock=time.time,
                  want: tuple[int, int] = GAME_VIEW):
         self.title, self.unfit, self.picture, self.spot, self.log, self.clock = title, unfit, picture, spot, log, clock
         self.want = want
+        self._again = -1e18  # when a look before a try last came to nothing (the game not in play, no picture, no
+                             # Alt+Enter sent): looked at again window_size.AGAIN_S on, not at every poll
         self.waiting: tuple[float, str] | None = None  # since when it has waited, and why (said)
         self._since: tuple[str, float] | None = None   # the fault, and since when it has been so (window_size.STEADY_S)
         self._said: set[str] = set()                   # why no try was made, said once while it waits
@@ -383,31 +386,38 @@ class PetWait:
             return
         if client.alarm_up():
             return self._not_now("the Lie Detector alarm is up")
-        if now - _state().get("window_try", -1e18) < TRY_EVERY_S:
+        if now - _state().get("window_try", -1e18) < TRY_EVERY_S or now - self._again < window_size.AGAIN_S:
             return
         if len(window_size.tries_within(window_size.WINDOW_TRIES, time.time())) >= window_size.HOURLY:
             return self._not_now(f"Alt+Enter was tried {window_size.HOURLY} times in the last hour")
         try:
             seen, _ = framecheck.hud_seen(self.picture())
         except BadLook as e:
+            self._again = now
             return self._not_now(f"no picture of the client to look for the game in play on ({e.why})")
         if seen < framecheck.HUD_SEEN:
+            self._again = now
             return self._not_now(f"the game isn't seen in play (its HUD's buttons match {seen:.2f}, "
-                                 f"{framecheck.HUD_SEEN} needed: its login screen?)")
+                                 f"{framecheck.HUD_SEEN} needed: its login or character screen?)")
         food = "its fullness not known" if level is None else f"its fullness about {level:.0f}"
         self.log(f"pet: the pet is due a food ({food}) and the game is in play (its HUD seen, {seen:.2f}): one try at "
                  f"Alt+Enter twice, full screen and back")
+
+        def counted() -> None:  # (refit's on_try, as its first Alt+Enter goes: a try cut short is one too)
+            state = _state()
+            state["window_try"] = now
+            _save(state)
+            window_size.book(window_size.WINDOW_TRIES, time.time())
+            self.tried += 1
         try:
-            out = window_size.refit(self.title, self.want, self.log, self.spot)
+            out = window_size.refit(self.title, self.want, self.log, self.spot, on_try=counted)
         except RuntimeError as e:  # the game window gone meanwhile
             return self._not_now(str(e))
         if out.held:
             return self._not_now(out.why)
-        state = _state()
-        state["window_try"] = now
-        _save(state)
-        window_size.book(window_size.WINDOW_TRIES, time.time())
-        self.tried += 1
+        if not out.counted:  # (brought forward, no Alt+Enter sent: no picture, say)
+            self._again = now
+            return self._not_now(out.why)
         telemetry.emit("event", kind="pet", text=f"Alt+Enter twice tried: {out.text(self.want)}")
 
     def _not_now(self, why: str) -> None:

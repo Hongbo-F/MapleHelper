@@ -626,17 +626,30 @@ class Service:
         step.tracker.throws_known = any(h.throws for h in attached)
 
     def _not_visible(self) -> None:
-        """No run to look with: a state saying why, to every client, then a wait (asks are dropped meanwhile). Its
-        number goes on from the last state's (a run's frames are numbered from 1, the run before's carry on here)."""
+        """No run to look with: a state saying why, to every client, the full asks in answered with it, then a wait
+        (cut short by a full ask; asks and throws are dropped meanwhile). Its number goes on from the last state's (a
+        run's frames are numbered from 1, the run before's carry on here). A full ask was dropped here too, so with
+        the game full screen at the service's start (no run: 3840x2160 has no calibration, 23:01-23:22 on 2026-10-25)
+        the size fix's look for the Lie Detector never had a picture, and no Alt+Enter could go out."""
         self._went_round()
+        with self._cond:
+            self._keep_fulls()
         self._seq += 1
         why = getattr(self, "_why", None) or Problem("gone", "the game isn't running")
         st = WorldState(self._seq, time.monotonic(), False, why=why.why, bad=why, epoch=self.epoch)
         self._send_state(st)
         self._answer_fulls(None, st)
         with self._cond:
-            self._cond.wait_for(lambda: self._stop, feed.NOT_VISIBLE_S)
-            self._inbox.clear()
+            self._cond.wait_for(lambda: self._stop or any(m[0] == "full" for _, m in self._inbox), feed.NOT_VISIBLE_S)
+            self._keep_fulls()
+
+    def _keep_fulls(self) -> None:
+        """With no run (_not_visible; the lock held): the full asks in the inbox kept for their answer, the rest
+        dropped (nothing to ask of)."""
+        while self._inbox:
+            c, msg = self._inbox.popleft()
+            if msg[0] == "full":
+                self._take(c, msg, None)
 
     def _poll(self, wait: float) -> tuple[Asks | None, bool]:
         """feed.run's: what the clients asked (merged), and whether to stop (asked to, or a new run is due), waiting up

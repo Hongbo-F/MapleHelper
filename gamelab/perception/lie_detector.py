@@ -54,6 +54,22 @@ HALF_SIZE = {
 }
 
 
+def to_template(frame: np.ndarray) -> np.ndarray:
+    """A whole frame of the game's client (RGB) at the size `scores` matches it at: the game's own (NATIVE_FRAME, which
+    `scores` stretches itself) and the templates' (TEMPLATE_FRAME) as they are, any other brought to TEMPLATE_FRAME
+    (shrunk by area, stretched with Lanczos): a client full screen at 3840x2160, or resized. As they were, the saved
+    screens stretched to such a client scored 0.53-0.78 of their thresholds (D:/MapleHelper-scratch/winfix/
+    review-safety/watchdog_sizes.out); brought so, every form but the countdown is seen at every size tried, the
+    countdown at 3840x2160, 1600x900 and 1396x1952 (control.window_size.lie_detector_sighting). The player's watchdog
+    and the perception service's picture of a client of another size (perception.frames.glimpse) bring it so."""
+    size = (frame.shape[1], frame.shape[0])
+    if size in (NATIVE_FRAME, TEMPLATE_FRAME):
+        return frame
+    shrink = size[0] >= TEMPLATE_FRAME[0] and size[1] >= TEMPLATE_FRAME[1]
+    return cv2.resize(np.ascontiguousarray(frame), TEMPLATE_FRAME,
+                      interpolation=cv2.INTER_AREA if shrink else cv2.INTER_LANCZOS4)
+
+
 def yellow(rgb: np.ndarray) -> np.ndarray:
     """1.0 where a pixel is the Lie Detector title's yellow, else 0.0: red over 180, green over 140, blue
     under 110, and red over blue by more than 110. Tested in OpenCV (red minus blue saturates at 0, which

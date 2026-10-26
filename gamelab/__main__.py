@@ -463,9 +463,9 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     and glances from the perception service (_perception), as a command that sends keys and tells her throws, or with
     `viewer` one that does neither (`hunt look`); `throws` False: it sends keys but doesn't hunt (`pet`). A command that
     hunts sets a client of the wrong size right with Alt+Enter twice (control.window_size.SizeFix): at its start if
-    the eyes have no calibration at its size (_fit_start: it waits while it isn't, where it stopped), and on its looks
-    later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client before
-    the eyes are made (the pet's: PetWait)."""
+    the eyes have no calibration at its size (_fit_start: it waits START_WAIT_S at most, where it stopped), and on its
+    looks later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client
+    before the eyes are made (the pet's: PetWait)."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
     from .screen import GAME_VIEW
@@ -487,6 +487,10 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
 
 
 START_POLL_S = 1.0  # s between looks at the window (no capture) while a command that acts waits at its start for it
+# Guess: ... and that long at most, then it ends (the fix's two tries, AGAIN_S apart, end within a minute and a half
+# with a game that never takes the way back; then a minute and a half for the user): it waited for ever, and the
+# babysitter kept the pet stopped meanwhile (a command that hunts running), unfed.
+START_WAIT_S = 180.0
 
 
 def _calibrated(size: tuple[int, int]) -> bool:
@@ -496,27 +500,36 @@ def _calibrated(size: tuple[int, int]) -> bool:
 
 def _lie_detector_look(perception):
     """control.window_size.refit's look for the Lie Detector before each Alt+Enter: on the perception service's picture
-    of the client at whatever size (ServiceClient.full_frame with any_size; it raises if there's none: then no first
-    Alt+Enter)."""
-    from .control.window_size import lie_detector_seen
-    return lambda: lie_detector_seen(perception.full_frame(time.monotonic(), any_size=True))
+    of the client at whatever size (ServiceClient.full_frame with any_size; it raises if there's none: then no
+    Alt+Enter), a window_size.Sighting if it's there (the alarm is raised with it), else None."""
+    from .control.window_size import lie_detector_sighting
+    return lambda: lie_detector_sighting(perception.full_frame(time.monotonic(), any_size=True))
+
+
+def _in_play_look(perception):
+    """control.window_size.SizeFix's look for the game in play before a try: how well the HUD's buttons match on the
+    perception service's picture of the client (framecheck.hud_seen; it raises if there's none)."""
+    from .perception.framecheck import hud_seen
+    return lambda: hud_seen(perception.full_frame(time.monotonic(), any_size=True))[0]
 
 
 def _size_fix(title: str, perception):
     """What sets a client of the wrong size (or the game drawing off it) right with Alt+Enter twice, for a command that
-    hunts (control.window_size.SizeFix), its look for the Lie Detector on the perception service's picture."""
+    hunts (control.window_size.SizeFix), its looks for the Lie Detector and for the game in play (not at its login
+    screen) on the perception service's picture."""
     from .control.window_size import SizeFix
-    return SizeFix(title, log=_log, spot=_lie_detector_look(perception))
+    return SizeFix(title, log=_log, spot=_lie_detector_look(perception), in_play=_in_play_look(perception))
 
 
 def _fit_start(title: str, fix) -> None:
     """A command that acts, at its start: a client of a size the eyes have no calibration for (full screen at
     3840x2160, say) is set right with Alt+Enter twice at once (`fix`, without its STEADY_S wait), and waited for while
-    it isn't (said once; the fix's second try AGAIN_S later, then it's the user's): it stopped with "not calibrated at
-    3840x2160 yet" before. The Lie Detector alarm stops it, as at any such command's start."""
+    it isn't (said once; the fix's second try AGAIN_S later, then it's the user's), START_WAIT_S at most: then it ends
+    (RuntimeError), as it ended at once with "not calibrated at 3840x2160 yet" before. The Lie Detector alarm stops
+    it, as at any such command's start."""
     from .perception.framecheck import size_problem
     from .screen import NATIVE
-    said = None
+    said, start = None, time.monotonic()
     while True:
         client.check_alarm()
         geo = _game_geometry(title, restore=True)  # (a minimized game brought back first, as its first look did)
@@ -526,10 +539,14 @@ def _fit_start(title: str, fix) -> None:
             return
         if fix(size_problem(geo.client, NATIVE), wait=False):
             continue
+        if time.monotonic() - start >= START_WAIT_S:
+            raise RuntimeError(f"the game's client is still {geo.client[0]}x{geo.client[1]} after "
+                               f"{START_WAIT_S:g} s, a size the eyes aren't calibrated for: start it again once it's "
+                               f"1366x768")
         if said != geo.client:
             said = geo.client
             _log(f"the game's client is {geo.client[0]}x{geo.client[1]}, a size the eyes aren't calibrated for: "
-                 f"waiting for it to be set back (nothing else is sent; Ctrl+C stops)")
+                 f"waiting {START_WAIT_S:g} s at most for it to be set back (nothing else is sent; Ctrl+C stops)")
         time.sleep(START_POLL_S)
 
 
@@ -559,9 +576,9 @@ def cmd_pet(args) -> int:
             time.sleep(WAIT_POLL_S)
 
     hunter = _hunter(args, throws=False, fit=fit if args.every else None)
-    if waits:  # (from here on, the size the eyes are for)
-        waits[0].unfit = lambda: _pet_unfit(title, hunter.senses.feed, hunter.eyes.geo.client)
-        waits[0].want = hunter.eyes.geo.client
+    eyes = hunter.eyes.geo.client if waits else None
+    if waits:  # (from here on, the size the eyes are for; Alt+Enter sets the game's own, PetWait's `want`)
+        waits[0].unfit = lambda: _pet_unfit(title, hunter.senses.feed, eyes)
     _record("pet", args.map)
     if args.read and client.alarm_up():
         print("pet fullness: not read with the Lie Detector alarm up (the read double-clicks her)")
@@ -571,6 +588,10 @@ def cmd_pet(args) -> int:
     if args.read and not args.every:
         return 0
     while True:
+        if waits and (size := _pet_resized(title, eyes)) is not None:
+            _log(f"pet: the game's client is {size[0]}x{size[1]} now, a size calibrated but not the eyes' "
+                 f"({eyes[0]}x{eyes[1]}): the pet ends, for its babysitter to start it again with eyes for it")
+            return 0
         if waits and waits[0]():  # (the client unfit: nothing sent, said once)
             time.sleep(WAIT_POLL_S)
             continue
@@ -592,9 +613,11 @@ def cmd_pet(args) -> int:
 
 def _pet_unfit(title: str, perception, want: tuple[int, int] | None = None):
     """What keeps `pet --every` from following on now (behavior.pet.PetWait), or None: the client full screen, another
-    size than `want` (the eyes'; before they're made, any the eyes are calibrated for), or the game drawing off it (the
-    perception service's newest state). Read off the window alone, no capture; no game window or a minimized one is
-    `tend`'s (its time not counted), not this."""
+    size than `want` (the eyes'; before they're made, any the eyes are calibrated for), the game drawing off it (the
+    perception service's newest state), or another process's size fix trying (window_size.trying: `window --recover`
+    runs beside the pet, and a food in its full-screen hold had it give up). Read off the window alone, no capture; no
+    game window or a minimized one is `tend`'s (its time not counted), not this."""
+    from .control import window_size
     from .perception.framecheck import Problem, size_problem
     from .screen import NATIVE
     try:
@@ -604,6 +627,8 @@ def _pet_unfit(title: str, perception, want: tuple[int, int] | None = None):
         area = window.client_rect(hwnd)
     except RuntimeError:
         return None
+    if window_size.trying():
+        return Problem("window", "another command is setting the game's client right with Alt+Enter")
     size = (area["width"], area["height"])
     if window.full_screen(hwnd, area):
         return Problem("size", f"the game is full screen ({size[0]}x{size[1]})")
@@ -612,6 +637,23 @@ def _pet_unfit(title: str, perception, want: tuple[int, int] | None = None):
         return size_problem(size, geometry(*want) if want is not None else NATIVE)
     problem = perception.problem() if perception is not None else None
     return problem if problem is not None and problem.kind == "drawn" else None
+
+
+def _pet_resized(title: str, eyes: tuple[int, int]) -> tuple[int, int] | None:
+    """The client's size if it's windowed at a size the eyes are calibrated for that isn't the size of these (`eyes`):
+    `pet --every` ends then, for the babysitter to start it again with eyes for that size (waiting, it waited for ever
+    with eyes made at 1920x1080 and the game back at its own 1366x768, unfed); None otherwise (a size it waits on)."""
+    try:
+        hwnd = window.find_game(title)
+        if window.minimized(hwnd):
+            return None
+        area = window.client_rect(hwnd)
+    except RuntimeError:
+        return None
+    size = (area["width"], area["height"])
+    if size == eyes or window.full_screen(hwnd, area) or not _calibrated(size):
+        return None
+    return size
 
 
 def _close_perception() -> None:
