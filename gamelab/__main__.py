@@ -540,11 +540,28 @@ def cmd_pet(args) -> int:
     Detector alarm up it goes on: the food by the fullness followed (the player takes it then), no read until the alarm
     is cleared; a food the player refuses or doesn't answer (it isn't running) is tried again at the next follow. Its
     looks and panels are the perception service's frames (it sends keys, but doesn't hunt: the service keeps its idle
-    pace for it). With --every and no game running it waits for the game (the babysitter restarted it every 5 s)."""
+    pace for it). With --every and no game running it waits for the game (the babysitter restarted it every 5 s); and
+    while the client is another size, not calibrated at its size, or the game draws off it, it waits too, sending
+    nothing, its fullness followed (behavior.pet.PetWait: with one Alt+Enter-twice try at most every 30 minutes, once
+    the pet is due a food and the game is seen in play), where it ended ("not calibrated at 3840x2160 yet", 23:21 on
+    2026-10-25) and was started again every 5 s."""
+    from .behavior.pet import WAIT_POLL_S, PetWait
     title = _game_title()
+    waits: list = []
     if args.every:
         _wait_for_game(title)
-    hunter = _hunter(args, throws=False)
+
+    def fit(perception) -> None:  # (before the eyes: their calibration is for the size the client is)
+        wait = PetWait(title, lambda: _pet_unfit(title, perception), log=_log, spot=_lie_detector_look(perception),
+                       picture=lambda: perception.full_frame(time.monotonic(), any_size=True))
+        waits.append(wait)
+        while wait():
+            time.sleep(WAIT_POLL_S)
+
+    hunter = _hunter(args, throws=False, fit=fit if args.every else None)
+    if waits:  # (from here on, the size the eyes are for)
+        waits[0].unfit = lambda: _pet_unfit(title, hunter.senses.feed, hunter.eyes.geo.client)
+        waits[0].want = hunter.eyes.geo.client
     _record("pet", args.map)
     if args.read and client.alarm_up():
         print("pet fullness: not read with the Lie Detector alarm up (the read double-clicks her)")
@@ -554,6 +571,9 @@ def cmd_pet(args) -> int:
     if args.read and not args.every:
         return 0
     while True:
+        if waits and waits[0]():  # (the client unfit: nothing sent, said once)
+            time.sleep(WAIT_POLL_S)
+            continue
         try:
             present = not window.minimized(window.find_game(title))
         except RuntimeError:  # no game window: the pet isn't out
@@ -568,6 +588,30 @@ def cmd_pet(args) -> int:
         if not args.every:
             return 0
         time.sleep(args.every * 60)
+
+
+def _pet_unfit(title: str, perception, want: tuple[int, int] | None = None):
+    """What keeps `pet --every` from following on now (behavior.pet.PetWait), or None: the client full screen, another
+    size than `want` (the eyes'; before they're made, any the eyes are calibrated for), or the game drawing off it (the
+    perception service's newest state). Read off the window alone, no capture; no game window or a minimized one is
+    `tend`'s (its time not counted), not this."""
+    from .perception.framecheck import Problem, size_problem
+    from .screen import NATIVE
+    try:
+        hwnd = window.find_game(title)
+        if window.minimized(hwnd):
+            return None
+        area = window.client_rect(hwnd)
+    except RuntimeError:
+        return None
+    size = (area["width"], area["height"])
+    if window.full_screen(hwnd, area):
+        return Problem("size", f"the game is full screen ({size[0]}x{size[1]})")
+    wrong = size != want if want is not None else not _calibrated(size)
+    if wrong:
+        return size_problem(size, geometry(*want) if want is not None else NATIVE)
+    problem = perception.problem() if perception is not None else None
+    return problem if problem is not None and problem.kind == "drawn" else None
 
 
 def _close_perception() -> None:

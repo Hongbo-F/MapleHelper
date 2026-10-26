@@ -38,8 +38,21 @@ key) is the one the player takes then, a few a minute. Nothing is read until the
 double-clicks her, and whoever is at the PC may be answering the Lie Detector with the mouse. Never read yet, she gets
 a food once FALLBACK_S have passed since the last, as when the panel can't be read.
 
-Keys: pet food (config.toml [keys] pet_food), Esc, two left clicks on her and one on her window's SHOW PET INFO.
-Nothing else.
+Keys: pet food (config.toml [keys] pet_food), Esc, two left clicks on her and one on her window's SHOW PET INFO; and,
+while the game's client is unfit, at most one Alt+Enter-twice try every TRY_EVERY_S (PetWait). Nothing else.
+
+While the game's client isn't fit to read (`pet --every`, PetWait; since 2026-10-26): another size, not calibrated at
+its size, or the game drawing its picture off it (perception.framecheck.FIX_KINDS). At 23:21 on 2026-10-25 the game was
+full screen at 3840x2160 for about a minute and the pet's babysitter ended at once ("not calibrated at 3840x2160 yet"),
+started again every 5 s. Now it waits: says so once, sends nothing (no food either: the game may be at its login
+screen, where a key types into a field), keeps the fullness followed (`tend` counts the time when it's over, as time
+the game window was there), and carries on once the client is right again. It doesn't send Alt+Enter in general (it
+runs unattended beside the user's own play), with one bounded exception so the pet can't starve: once the fullness
+followed says it's due a food (`due_to_feed`), the client's picture shows the game in play (its HUD's buttons:
+framecheck.hud_seen, on the perception service's picture at whatever size, perception.frames.glimpse), the fault has
+stood window_size.STEADY_S and no Lie Detector alarm is up, the one try the hunts make (control.window_size.refit), at
+most every TRY_EVERY_S (kept in paths.PET: across the babysitter's restarts) and within the hunts' HOURLY, said in the
+log.
 """
 
 import json
@@ -49,8 +62,10 @@ from collections.abc import Callable
 import numpy as np
 
 from .. import paths, telemetry
-from ..control import client
-from ..perception.framecheck import BadLook
+from ..control import client, window_size
+from ..perception import framecheck
+from ..perception.framecheck import BadLook, Problem
+from ..screen import GAME_VIEW
 
 HUNGRY = 1             # fullness the pet loses a tick (the game data's info/hungry of the Snail pets)
 TICK_S = 75            # s a point on average: 60 + random 0..30 for hungry 1 (above); the readings' best fixed fit 74.1
@@ -71,6 +86,12 @@ LABEL = "FULLNESS"
 TITLE_WORDS = ("CHARACTERINFO", "LEVEL", "JOB", "FAME")  # what shows a Character Info window is open (any one)
 # Her name on the bottom bar, under her job, in game px at 1366x768 (x0, y0, x1, y1): "Rogue" above "BugBaby".
 NAME_BOX = (355, 735, 500, 765)
+# PetWait: while the client is unfit, its window looked at this often (no capture: its size, and the perception
+# service's newest state) ...
+WAIT_POLL_S = 5.0
+# ... and an Alt+Enter-twice try at most this often (the task of 2026-10-26: "at most once every 30 min"; a food is due
+# every 37 minutes or so at the most often: FOOD points at a point a TICK_S)
+TRY_EVERY_S = 30 * 60
 
 
 def _field(rows, label: str) -> int | None:
@@ -302,6 +323,97 @@ class PetCare:
             if not read_panel(self.eyes._capture(), self.ocr)["open"]:
                 return
         self.log("pet: the Character Info window didn't close with Esc")
+
+
+def due_to_feed(now: float) -> tuple[bool, float | None]:
+    """Whether the fullness followed (paths.PET) says the pet is due a food at `now` (time.time), as `tend` would give
+    it one there (followed under FOLLOW_FEED_BELOW; never read, FALLBACK_S since the last food), the time since counted
+    as the game window's (the pet out); and the fullness followed (None: not known). Nothing is saved."""
+    state = _state()
+    follow(state, now, True)
+    if "level" in state:
+        return state["level"] < FOLLOW_FEED_BELOW, state["level"]
+    return now - state.get("fed", 0.0) >= FALLBACK_S, None
+
+
+class PetWait:
+    """`pet --every`'s wait while the game's client isn't fit to read (see the top): `unfit()` says what's wrong now
+    (None: nothing), `picture()` is the client's picture at whatever size (the perception service's: raises BadLook if
+    there's none), `spot()` whether the Lie Detector is on it (window_size.refit's look before each Alt+Enter). Called
+    (`__call__`) before each follow: whether to wait now, said once and when the why changes; and the one bounded
+    Alt+Enter-twice try when the pet is due a food (`_try`). `clock`: time.time's stand-in (paths.PET's times)."""
+
+    def __init__(self, title: str, unfit: Callable[[], Problem | None], picture: Callable[[], np.ndarray],
+                 spot: Callable[[], bool] | None = None, log: Callable[[str], None] = print, clock=time.time,
+                 want: tuple[int, int] = GAME_VIEW):
+        self.title, self.unfit, self.picture, self.spot, self.log, self.clock = title, unfit, picture, spot, log, clock
+        self.want = want
+        self.waiting: tuple[float, str] | None = None  # since when it has waited, and why (said)
+        self._since: tuple[str, float] | None = None   # the fault, and since when it has been so (window_size.STEADY_S)
+        self._said: set[str] = set()                   # why no try was made, said once while it waits
+        self.tried = 0                                 # tries made
+
+    def __call__(self) -> bool:
+        problem = self.unfit()
+        now = self.clock()
+        if problem is None:
+            if self.waiting is not None:
+                self.log(f"pet: the game looks right again ({now - self.waiting[0]:.0f} s waited): its food goes by the "
+                         f"fullness followed")
+            self.waiting, self._since, self._said = None, None, set()
+            return False
+        if self.waiting is None or self.waiting[1] != problem.why:
+            self.log(f"pet: waiting: {problem.why}; no food is sent until it's right again (its fullness is still "
+                     f"followed)")
+            telemetry.emit("event", kind="pet", text=f"waiting: {problem.why}")
+            self.waiting = (now if self.waiting is None else self.waiting[0], problem.why)
+        if self._since is None or self._since[0] != problem.why:
+            self._since = (problem.why, now)
+        self._try(problem, now)
+        return True
+
+    def _try(self, problem: Problem, now: float) -> None:
+        """The one bounded try (see the top): made only for a fault Alt+Enter mends, stood window_size.STEADY_S, the pet
+        due a food, no alarm, none in the last TRY_EVERY_S (nor HOURLY in the hour, the hunts' included), and the game
+        in play on the client's picture."""
+        if problem.kind not in framecheck.FIX_KINDS or now - self._since[1] < window_size.STEADY_S:
+            return
+        due, level = due_to_feed(now)
+        if not due:
+            return
+        if client.alarm_up():
+            return self._not_now("the Lie Detector alarm is up")
+        if now - _state().get("window_try", -1e18) < TRY_EVERY_S:
+            return
+        if len(window_size.tries_within(window_size.WINDOW_TRIES, time.time())) >= window_size.HOURLY:
+            return self._not_now(f"Alt+Enter was tried {window_size.HOURLY} times in the last hour")
+        try:
+            seen, _ = framecheck.hud_seen(self.picture())
+        except BadLook as e:
+            return self._not_now(f"no picture of the client to look for the game in play on ({e.why})")
+        if seen < framecheck.HUD_SEEN:
+            return self._not_now(f"the game isn't seen in play (its HUD's buttons match {seen:.2f}, "
+                                 f"{framecheck.HUD_SEEN} needed: its login screen?)")
+        food = "its fullness not known" if level is None else f"its fullness about {level:.0f}"
+        self.log(f"pet: the pet is due a food ({food}) and the game is in play (its HUD seen, {seen:.2f}): one try at "
+                 f"Alt+Enter twice, full screen and back")
+        try:
+            out = window_size.refit(self.title, self.want, self.log, self.spot)
+        except RuntimeError as e:  # the game window gone meanwhile
+            return self._not_now(str(e))
+        if out.held:
+            return self._not_now(out.why)
+        state = _state()
+        state["window_try"] = now
+        _save(state)
+        window_size.book(window_size.WINDOW_TRIES, time.time())
+        self.tried += 1
+        telemetry.emit("event", kind="pet", text=f"Alt+Enter twice tried: {out.text(self.want)}")
+
+    def _not_now(self, why: str) -> None:
+        if why not in self._said:
+            self._said.add(why)
+            self.log(f"pet: no Alt+Enter: {why}")
 
 
 def _her_level(s) -> int | None:
