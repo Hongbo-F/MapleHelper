@@ -410,3 +410,34 @@ def test_a_monsters_bar_is_read_while_it_shows_one_or_she_threw_its_way_else_eve
     reads.clear()
     back = frames(step, 3, start=111.3)
     assert len(reads) == 1 and reads[0] == back[0].t and back[0].monsters
+
+
+def test_a_frames_refinds_on_the_pool_give_the_states_of_one_thread():
+    # worldstate.REFIND_THREADS: several followed at once, each read its bar if due, placed in turn: the same states,
+    # tracks and events as one after another, the re-finds on the pool's threads. A fake detector re-finds in Python, on
+    # the frame loop's thread; the real one's matches let go of Python's lock, so it gets the pool.
+    import threading
+    from gamelab.perception.mobs import MobDetector
+    model = small_map()
+    runs, where = {}, {}
+    for threads in (1, 4):
+        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), refind_threads=threads)
+        refind, seen = step.eyes.refind, set()
+        step.eyes.refind = lambda *a, **k: seen.add(threading.current_thread().name) or refind(*a, **k)
+
+        def walk(k, eyes=step.eyes):
+            eyes.mobs = [pig(700 + 125 * k / FPS), pig(1000 - 90 * k / FPS, facing=-1), pig(1250 + 60 * k / FPS)]
+            if k >= 40:
+                eyes.mobs = eyes.mobs[1:]  # one goes
+        late = []
+        states = frames(step, 60, each=walk, late=late)
+        runs[threads] = [(repr(st.tracks), st.monsters, st.events, st.work.get("re-finds", 0))
+                         for st in states + late]
+        where[threads] = seen
+        step.close()
+    assert runs[4] == runs[1] and sum(r[3] for r in runs[1]) > 100
+    assert where[1] == {threading.current_thread().name} and where[4] and all(n.startswith("refinds") for n in where[4])
+    assert WorldStep(Senses(Drawn(model), model, band=(100, 100)))._refinds is None  # (FakeDetector)
+    real = Drawn(model)
+    real.detector = MobDetector.__new__(MobDetector)
+    assert WorldStep(Senses(real, model, band=(100, 100)))._refinds._max_workers == worldstate.REFIND_THREADS

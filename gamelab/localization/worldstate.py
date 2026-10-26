@@ -27,6 +27,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -37,6 +38,7 @@ from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
 from ..perception.hud import exp_changed
 from ..perception.minimap import minimap_box
+from ..perception.mobs import Mob, MobDetector, _one_opencv_thread
 from ..screen import STRETCHED, Geometry
 from .gains import ExpMeter, Gain
 from .mapdata import MapModel
@@ -70,6 +72,15 @@ BAR_EVERY = 5
 BAR_SHOWN_S = 0.25
 BAR_UNSEEN_S = 0.15
 HIT_MERGE_S = 0.2     # a drop this soon after the last is the same hit, if the bar takes a few frames to go down
+# A frame's re-finds run at once on a pool of this many threads (the real monster detector's: its masked matches, in C
+# or OpenCV, let go of Python's lock; a lone re-find on the frame loop's thread, the hand-off costing more), each with
+# its HP bar's read if that's due, and the frame loop places them in turn: the states are one thread's. In a crowd
+# re-finds were most of the frame loop's step, 6 ms a monster followed (the CPU review, 2026-10-26: 42 ms a frame with
+# one followed, 110 with 12), and the loop made 15 frames a second of the 30 asked. With the masked match in C, on the
+# service's frame loop replayed on 600 frames of 2026-10-26 01:01's crowd (D:/MapleHelper-scratch/pconst/pnative, 30 a
+# second asked, the machine 70-80% busy): a frame's 11 re-finds 13.4-14.8 ms on 4 threads (3 runs), 30 frames a second,
+# the step 19.8-21.5 ms (median; p90 30.6-33.0); on 3 threads the step 23.0 (34.2), on 6 19.2 (29.2) for more CPU.
+REFIND_THREADS = 4
 
 
 @dataclass(frozen=True)
@@ -336,11 +347,17 @@ class WorldStep:
     """Frame after frame of the game, turned into WorldStates. `senses`: placing her and searching for monsters
     (its eyes look at the frames, its map places what they see); `throws`: whether her throws will be told
     (`throw`, for whose kills are whose: localization.tracking); `searches`: where the searches run (by default
-    at once on the caller's thread, InlineSearches; the feed's, a SearchThread)."""
+    at once on the caller's thread, InlineSearches; the feed's, a SearchThread); `refind_threads`: how many re-finds run
+    at once (by default REFIND_THREADS with a real monster detector; the simulator's fakes re-find on the caller's
+    thread, in Python)."""
 
     def __init__(self, senses: Senses, throws: bool = True, schedule: Schedule = Schedule(),
-                 searches: Searches | None = None):
+                 searches: Searches | None = None, refind_threads: int | None = None):
         self.senses, self.eyes, self.model = senses, senses.eyes, senses.model
+        if refind_threads is None:
+            refind_threads = REFIND_THREADS if isinstance(getattr(self.eyes, "detector", None), MobDetector) else 1
+        self._refinds = (ThreadPoolExecutor(refind_threads, "refinds", _one_opencv_thread) if refind_threads > 1
+                         else None)
         self.tracker = MonsterTracker(self.model, throws)
         self.schedule = schedule
         self.searches = searches if searches is not None else InlineSearches(senses)
@@ -405,6 +422,7 @@ class WorldStep:
         unread: set[int] = set()  # the tracks re-found whose bars weren't read (_bar_due)
         if placed:
             self.counts["placed"] += 1
+            todo = []  # (the track, where its picture should be)
             for tr in self.tracker.live():
                 if tr.state not in (LIVE, HIDDEN, DYING):
                     continue
@@ -412,10 +430,10 @@ class WorldStep:
                 if box is None:
                     continue
                 work["re-finds"] += 1
-                m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN)
+                todo.append((tr, box))
+            for (tr, _), (m, read, bar) in zip(todo, self._refind_all(s, todo, t)):
                 if m is not None:
-                    read = self._bar_due(tr, t)
-                    refound[tr.id] = s.place(m, self.model, self.eyes.bar(s, m) if read else None)
+                    refound[tr.id] = s.place(m, self.model, bar)
                     if not read:
                         unread.add(tr.id)
             work["fallbacks"] = getattr(getattr(self.eyes, "detector", None), "fallbacks", 0) - fallbacks
@@ -459,6 +477,26 @@ class WorldStep:
 
     def close(self) -> None:
         self.searches.close()
+        if self._refinds is not None:
+            self._refinds.shutdown(wait=False)
+
+    def _refind_all(self, s: Scene, todo: list[tuple[Track, tuple[int, int, int, int]]],
+                    t: float) -> list[tuple[Mob | None, bool, float | None]]:
+        """Each track of `todo` re-found in the frame of look `s` (shown at t) where its picture should be, with its HP
+        bar if that's due (`_bar_due`): (the monster found or None, whether its bar was read, the bar), in `todo`'s
+        order. More than one at once on the pool (REFIND_THREADS); meanwhile nothing else touches the tracker, as the
+        frame loop waits for them."""
+        if self._refinds is None or len(todo) < 2:
+            return [self._refind(s, tr, box, t) for tr, box in todo]
+        return list(self._refinds.map(lambda job: self._refind(s, job[0], job[1], t), todo))
+
+    def _refind(self, s: Scene, tr: Track, box: tuple[int, int, int, int],
+                t: float) -> tuple[Mob | None, bool, float | None]:
+        m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN)
+        if m is None:
+            return None, False, None
+        read = self._bar_due(tr, t)
+        return m, read, self.eyes.bar(s, m) if read else None
 
     def _hand_over(self) -> None:
         """The searches due (asked, or by the schedule), handed to the worker on the newest frame placed, if it's

@@ -36,6 +36,7 @@ shares its body with others isn't re-found where another's picture is the monste
 """
 
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -401,7 +402,8 @@ class MobDetector:
                         if a.frame and a.frame == b.frame and a.facing == b.facing and a.origin and b.origin}
         self.apart = {k: others for k, v in self.twins.items() if (others := tuple(t for t in v if t not in unit[k]))}
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
-        self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
+        self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind) ...
+        self._counting = threading.Lock()  # ... counted by re-finds on several threads at once (worldstate's pool)
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
         for t in (t for ts in self.templates.values() for t in ts):  # made ready for the C's masked match now too
             match.prepared(t.rgb, t.mask3)
@@ -436,7 +438,8 @@ class MobDetector:
         told apart from theirs side by side at its feet as a search tells them (`_its_kind`): the other kind's picture
         of a frame scores 0.79-0.92 on a mushroom and up to 1.00 on a stump, so a track would otherwise go on on
         another kind's monster walking past or standing where it died. The one found nearest the box's centre, or
-        None. On the caller's thread: a window is small, and the pool's hand-offs cost more."""
+        None. On the caller's thread: a window is small, and the pool's hand-offs cost more (the feed's step runs a
+        frame's re-finds at once, each on a thread of its own pool: localization.worldstate, REFIND_THREADS)."""
         h, w = frame.shape[:2]
         bx0, by0, bx1, by1 = bounds or (0, 0, w, h)
         pad = round(REFIND_PAD * self.px)
@@ -482,7 +485,8 @@ class MobDetector:
             best = None  # another kind's monster: not this one
         if best is not None or not fallback:
             return best
-        self.fallbacks += 1
+        with self._counting:
+            self.fallbacks += 1
         found = [_moved(m, x0, y0) for m in self._detect(window, None, _serial, (kind,))]
         found = [m for m in found if m.kind == kind and self._its_kind(frame[:by1, :bx1], m)]
         return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
