@@ -67,11 +67,12 @@ MUTEX = "Local\\gamelab-perceive"
 SAVED_ADDRESS = ADDRESS + "-saved"
 SAVED_MUTEX = MUTEX + "-saved"
 WHICH = "GAMELAB_PERCEIVE"
-# Look frames kept in shared memory: at ACTIVE_HZ the newest 533 ms (50 MB at 1366x768). A look's frame is copied out as
-# its state is taken, and one overwritten since comes out black (ServiceClient.frame_of: counted, `lost`). 8 until
-# 2026-10-26, 533 ms at the 15 frames a second live made then; at the 30 the native hot paths make, 267 ms, and on the
-# crowd's replays a look's frame was then overwritten 86-88 ms after the look had its state at the soonest (whole-screen
-# looks, their frames 254-268 ms old then: D:/MapleHelper-scratch/pconst/review-native-correct; master's 153-324 ms).
+# Look frames kept in shared memory: at 30 frames a second the newest 533 ms (50 MB at 1366x768). A look's frame is
+# copied out as its state is taken, and one overwritten since comes out black (ServiceClient.frame_of: counted, `lost`).
+# 8 until 2026-10-26, 533 ms at the 15 frames a second live made then; at the 30 the native hot paths make, 267 ms, and
+# on the crowd's replays a look's frame was then overwritten 86-88 ms after the look had its state at the soonest
+# (whole-screen looks, their frames 254-268 ms old then: D:/MapleHelper-scratch/pconst/review-native-correct; master's
+# 153-324 ms). With 16, 346-356 ms (D:/MapleHelper-scratch/pconst/pnative-finish/margin.txt).
 RING_SLOTS = 16
 FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a look frame is half size)
 # Frames a second with a command that hunts attached (its looks' frames come at once, whatever the rate) ... Not 20
