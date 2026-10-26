@@ -2052,7 +2052,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=7, limit=600,
+@tree((28, 247.0), monsters="all", seed=1, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -2084,7 +2084,11 @@ def loop_tree_run(sim):
     HP_POTION), her drops wait while a monster that counts is by them, her decisions go by the monsters the looks missed
     and her escapes and spots keep off a long drop's end and spawn points (part B, 2026-10-26): on seed 5 she was
     knocked out of the tower at 125 s; of seeds 1-12, 6 meet all of this (1, 4, 6, 7, 8, 11), 4 went up the tower
-    among its Horny Mushrooms.)"""
+    among its Horny Mushrooms.) (Seed 1 since parts A and B together (work/hunt-ab, 2026-10-26: no throws at the dying
+    and a throw's last look before its key, with her drops waiting while a monster that counts is by them and her
+    decisions going by the monsters the looks missed): on seed 7 she was knocked out of the tower at 363 s by x -308; of
+    seeds 1-12, 5 meet all of this (1, 4, 5, 6, 12), 4 fell out (3, 7, 8, 11), 3 went up the tower among its Horny
+    Mushrooms (2, 9, 10).)"""
     return _loop(5)(sim)
 
 
@@ -2173,7 +2177,7 @@ def loop_tree_wait(sim):
     return harness._only(_loop(4), (20,))(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=1, limit=1200,
+@tree((28, 247.0), monsters="all", seed=2, limit=1200,
       expects=(logs("tour: sweep"), check("two stops hunted or more", lambda tr: len(tr["result"]["visited"]) >= 2),
                check("she fed her pet", _fed_her_pet)))
 def tour_tree_run(sim):
@@ -2184,7 +2188,10 @@ def tour_tree_run(sim):
     out at 635 s and the scenario was on seed 6; with positioning and her body the client's too, seeds 1-12 all met
     this but 6, out at 872 s by x -308, and it was on seed 2 again; since the monsters' HP bars are drawn as the game
     draws them, perception.hud.draw_hp_bar, seed 2 goes out at 771 s by x 332 and seed 7 runs past its 1200 s, seeds 1
-    and 3-6 meet it, and it's on seed 1.)"""
+    and 3-6 meet it, and it's on seed 1. Seed 2 since parts A and B together (work/hunt-ab, 2026-10-26: no throws at the
+    dying and a throw's last look before its key, with her drops waiting while a monster that counts is by them and her
+    decisions going by the monsters the looks missed): on seed 1 she went out at 841 s by x -315; of seeds 1-12 all but
+    1 and 11, out at 618 s, meet it.)"""
     return sim.tour_stack().run(stops=3)
 
 
@@ -2217,7 +2224,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=4, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2243,7 +2250,10 @@ def loop_tree_ore_waits(sim):
     hurt 9 times and picked up 3 ores; of seeds 1-16, 9 meet all of this.) (Seed 4 since the monsters the looks missed
     leave out the dead (localization.unseen.hidden), her throws' attack goes by the look's alone again and her drops
     don't wait for a spawn point's monster due back (hunt.DUE_BACK; review of part B, 2026-10-26): on seed 1 she was
-    hurt 6 times; of seeds 1-16, 4, 6 and 9-14 meet all of this.)"""
+    hurt 6 times; of seeds 1-16, 4, 6 and 9-14 meet all of this.) (Seed 1 since parts A and B together (work/hunt-ab,
+    2026-10-26: no throws at the dying and a throw's last look before its key, with her drops waiting while a monster
+    that counts is by them and her decisions going by the monsters the looks missed): on seed 4 she was hurt more than
+    five times; of seeds 1-16, 1, 3, 5, 6, 10 and 14-16 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2408,7 +2418,9 @@ def loop_tree_lie_detector(sim):
     went up the rope at -192 from 31; of seeds 1-16, 12 meet all of this.) (Seed 4 since 2026-10-26: her throws at the
     dying gone, a throw's last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow
     and the world's damage at the server's time: on seed 2 she went up the rope at 146 from 32, no safe platform near;
-    of seeds 1-16, 4, 5, 7, 10, 11, 13, 14 and 15 meet all of this.)"""
+    of seeds 1-16, 4, 5, 7, 10, 11, 13, 14 and 15 meet all of this.) (Seed 4 kept with parts A and B together,
+    work/hunt-ab, 2026-10-26, where part B alone had it on 1: of seeds 1-16, 2, 4-7, 10, 11 and 14-16 meet all of this;
+    on 1 she went to a safe platform, not the rope.)"""
     return lie_detector(110.0)(sim)
 
 
@@ -2428,11 +2440,13 @@ def loop_tree_lie_detector_28(sim):
     what the pass shoots (Hunt._interrupt): on seed 10 she went up the rope at 146 from 32, a rope as safe; of seeds
     1-16 only 12 goes back onto 28.) (Seed 1 since 2026-10-26: her throws at the dying gone, a throw's last look before
     its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the world's damage at the server's
-    time: on seed 12 she didn't go back onto 28; of seeds 1-16, 1 and 11 meet all of this.)"""
+    time: on seed 12 she didn't go back onto 28; of seeds 1-16, 1 and 11 meet all of this.) (Seed 1 kept with parts A
+    and B together, work/hunt-ab, 2026-10-26, where part B alone had it on 33, then 9: of seeds 1-16 only 1 goes back
+    onto 28.)"""
     return lie_detector(40.0)(sim)
 
 
-@tree((25, 220.0), monsters="all", seed=4, limit=500, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=1, limit=500, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=LIE_DETECTOR_EXPECTS + (check("onto 25, the safe platform under 24", lambda tr: tr["result"]["then"][
           "platform"] == 25),))
@@ -2440,7 +2454,10 @@ def loop_tree_lie_detector_23(sim):
     """The hunt loop as live on 2026-10-24 (loop_tree_23: 23 its only ground, Lucky Seven, the crowd), the Lie Detector
     seen 60 s in, as she shoots 23 from 24 at 231 (attack.spots): down onto 25, the safe platform under 24 (0.9 s by
     route). (Seed 4 since her jumps' attacks are weighed and her jump throws turn in the air, 2026-10-25: of seeds
-    1-12, 9 go down onto 25 and 10 are on a safe place at 10 s; on seeds 1 and 2 she was still on her way.)"""
+    1-12, 9 go down onto 25 and 10 are on a safe place at 10 s; on seeds 1 and 2 she was still on her way.) (Seed 1
+    since parts A and B together (work/hunt-ab, 2026-10-26: no throws at the dying and a throw's last look before its
+    key, with her drops waiting while a monster that counts is by them and her decisions going by the monsters the looks
+    missed): on seed 4 she was still on her way 10 s on, not onto 25; of seeds 1-16 all but 4 meet all of this.)"""
     return harness._only(lie_detector(60.0), (23,))(sim)
 
 

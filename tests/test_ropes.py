@@ -198,7 +198,9 @@ def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypa
     on 3, 5 and 8), on 1 she never waits on it; with a look asking for what the next frame would have stale,
     feed.to_ask, and the fixes with it, on 3, 8 and 10, the only ones she waits on the rope on. Seed 2 since
     2026-10-26, a monster by a kill placed taken for the one dying there while its death animation plays,
-    ledger.dying: of seeds 1-12 it's met on 2, 4-7, 10 and 11, and on 3 she never waits on the rope.)"""
+    ledger.dying: of seeds 1-12 it's met on 2, 4-7, 10 and 11, and on 3 she never waits on the rope.) Seed 2 kept with
+    parts A and B together, work/hunt-ab, 2026-10-26, where part B alone had it on 4: of seeds 1-12 it's met on 1-3, 10
+    and 12; on 7 she went to rest with no safe platform reachable.)"""
     from gamelab.sim import harness, scenarios, world
     from gamelab.sim.world import Realism
     model = build([FLOOR, OVER], LIVES, [ROPE])
