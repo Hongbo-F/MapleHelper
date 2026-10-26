@@ -490,8 +490,12 @@ TAP_LOST_MS = 50         # an arrow tap this short (as sent) can be lost (Noise.
 # 7% within 50 units, 34% at 50-100 and 55% at 100-150 (attacking: 12%, 20%, 44%; 63% at 125-150 either way); and of
 # the hunter's 1317 searched looks none found one within 25 units of her (nor at 00:31, 3029, nor in the user's own
 # play, 1753): her body drawn over it, 22 units either side of her and 28 of a mushroom. Not only her body: 34% at
-# 50-100. The preset's detect_miss (10%) holds farther off.
-NEAR_SEEN = ((25.0, 0.0), (50.0, 0.07), (100.0, 0.34), (150.0, 0.55))
+# 50-100. Past 150 on her platform (review of 2026-10-26: D:/MapleHelper-scratch/hunt-ab/review-b-measure/scripts/
+# offplat.py, D:/MapleHelper-scratch/hunt-ab/B/fix/detect_bands.py) 49-52% (45-74% by 50 units, 65% in all, without the
+# tracks that ended dead or dropped: not a monster there), 60%; and off her platform (OFF_SEEN) 56-68% by 50 units, 60%
+# in all, 64-75% and 71% without those, 70%: the preset's detect_miss (10%) found 89% of them.
+NEAR_SEEN = ((25.0, 0.0), (50.0, 0.07), (100.0, 0.34), (150.0, 0.55), (float("inf"), 0.6))
+OFF_SEEN = 0.7
 
 
 @dataclass(frozen=True)
@@ -541,6 +545,8 @@ class Noise:
                                  # this near her, middle to middle, is found by a look only with that chance (drawn
                                  # per monster and look, as detect_miss), the first band that holds it; farther, as
                                  # detect_miss has it. NEAR_SEEN: as live; () off
+    off_seen: float | None = None  # ... and one on another platform with this chance (OFF_SEEN: as live); None: as
+                                   # detect_miss has it
     heading_wrong: tuple = ()    # (share, score, margin, runs): that share of frames read her facing the wrong way,
                                  # matching `score`, `margin` ahead; `runs` True: drawn per pose of hers for each
                                  # HEADING_SPELL_S (a pose her pictures don't know), False: per frame. Of the frames
@@ -1013,6 +1019,8 @@ class World:
         self.mp_potions = 0             # thrown)
         self.no_mp = 0
         self._mp_unshown: list[tuple[int, float]] = []  # (the tick her bar shows it at, its MP share): MP_SHOWS_MS
+        self.casts_nothing = 0          # ... and of her casts, those whose stars hit nothing (none picked, a dead one,
+                                        # or stopped by terrain): MP thrown at nothing
         self.attacks = 0                # attacks her keys made, either key
         # Every attack the game took, as it came out (_attack): (when its key went out, s of the run; the name of the
         # key plan that pressed it, as the stack's player was sent it; "ground" or "air" when it started; how far she
@@ -1893,10 +1901,12 @@ class World:
             where = f"the wall at x {f.x1:.0f}" if f.x1 == f.x2 else f"the floor at y {f.y1:.0f}"
             self.note(f"star thrown {facing} at {picked.kind} #{picked.idx}: stopped by {where}")
             self._logged(how, "stopped")
+            self.casts_nothing += skill
             return
         if m is None or not m.alive:
             self.note(f"star thrown {facing}: no hit")
             self._logged(how, "nothing")
+            self.casts_nothing += skill
             return
         mx = m.at(self.t)
         dx = mx - self.x

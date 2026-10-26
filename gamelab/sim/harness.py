@@ -28,7 +28,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    her lowest HP; potions; died_at
   casts, mp_used   her Lucky Seven casts and the MP they took (world.CAST_MP each), mp_per_min a minute alive;
                    mp_potions, the MP potions her pet drank for her (world.Her.pet_mp); no_mp, casts pressed with too
-                   little MP (nothing thrown); attacks, her attacks with either key; finishes, the regular attack
+                   little MP (nothing thrown); casts_nothing, her casts whose stars hit nothing (MP thrown at
+                   nothing: none picked, a dead one, or stopped by terrain); attacks, her attacks with either key;
+                   finishes, the regular attack
                    thrown to finish a monster her throws or its bar make low (`--attack choice`: its 'attack'
                    records), and mp_throws, thrown for her MP (as she reckons it, under a cast); mp_per_kill, the
                    MP a kill of hers, and mp_potions_per_min; at_dead, her attacks chosen at a monster dead by then
@@ -94,8 +96,8 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
-from .world import (DROP_LIFE, HER_BOX_CLIENT, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN, ROPE_REACH_CLIENT, Camp, Noise,
-                    Realism)
+from .world import (DROP_LIFE, HER_BOX_CLIENT, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, Camp,
+                    Noise, Realism)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -179,11 +181,12 @@ WORLDS["bars-empty"] = {"bars_empty": True}
 # the worst case, as surely as she's read right (0.6, 0.4 ahead: strong).
 WORLDS["heading-wrong"] = {"heading_wrong": (0.01, 0.31, 0.24, True)}
 WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
-# ... and the detector's misses near her as live (`near-misses`: world.NEAR_SEEN, Noise.near_seen): a monster on her
-# platform within 25 units of her never found, 7% of looks within 50, 34% within 100, 55% within 150 (the live hunt of
-# 2026-10-25), where the presets find it 90% of the time wherever it is.
-WORLDS["near-misses"] = {"near_seen": NEAR_SEEN}
-NOISE_FIELDS = ("heading_wrong", "near_seen")  # WORLDS' fields that are world.Noise's
+# ... and the detector's misses as live (`near-misses`: world.NEAR_SEEN, OFF_SEEN; Noise.near_seen, off_seen): a monster
+# on her platform within 25 units of her never found, 7% of looks within 50, 34% within 100, 55% within 150, 60%
+# farther; one on another platform 70% (the live hunt of 2026-10-25), where the presets find it 90% of the time wherever
+# it is.
+WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
+NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
 # MP (Her.cast_mp: LEVEL_25's 14 of 623) and nothing with less, her attack
@@ -471,6 +474,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "mp_per_min": round(world.mp_used / (end / 60), 2) if end else None,
         "mp_potions": world.mp_potions,
         "no_mp": world.no_mp,
+        "casts_nothing": world.casts_nothing,
         "attacks": world.attacks,
         "finishes": sum(1 for r in records if r.get("topic") == "attack" and r.get("why") == "finish"),
         "mp_throws": sum(1 for r in records if r.get("topic") == "attack" and r.get("why") == "MP"),

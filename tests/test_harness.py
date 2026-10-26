@@ -46,15 +46,16 @@ def test_a_hit_monster_hides_for_a_while_and_a_look_can_miss_one(model):
 
 
 def test_near_her_on_her_platform_a_look_finds_a_monster_as_seldom_as_live(model):
-    """`--world near-misses` (Noise.near_seen, world.NEAR_SEEN, the live hunt of 2026-10-25): a monster on her platform
-    within 25 units of her is never found, within 50 found by 7% of looks, within 100 by 34%, within 150 by 55%;
-    farther, and on another platform, as the preset's detect_miss has it."""
+    """`--world near-misses` (Noise.near_seen, world.NEAR_SEEN, OFF_SEEN; the live hunt of 2026-10-25): a monster on
+    her platform within 25 units of her is never found, within 50 found by 7% of looks, within 100 by 34%, within 150
+    by 55%, farther by 60%; one on another platform by 70% (Noise.off_seen; without it, as the preset's detect_miss
+    has it)."""
     c = plat(model, 500, 400)
     clock = Clock()
 
-    def found(x: float, pid: int = c.id, looks: int = 400) -> float:
+    def found(x: float, pid: int = c.id, looks: int = 400, off: float | None = None) -> float:
         w = still(World(model, KEYS, (c.id, 100.0), monsters=[("Snail", pid, x)], origin=clock.now,
-                        noise=Noise(near_seen=world_mod.NEAR_SEEN)))
+                        noise=Noise(near_seen=world_mod.NEAR_SEEN, off_seen=off)))
         w.invulnerable_ms = 10 ** 9
         eyes = FakeEyes(w, clock, model)
         h = Hunter(eyes, KEYS, model, log=lambda m: None)
@@ -67,12 +68,14 @@ def test_near_her_on_her_platform_a_look_finds_a_monster_as_seldom_as_live(model
     assert found(140.0) == pytest.approx(0.07, abs=0.04)
     assert found(180.0) == pytest.approx(0.34, abs=0.07)
     assert found(230.0) == pytest.approx(0.55, abs=0.07)
-    assert found(400.0) == 1.0  # past the bands (no detect_miss here)
+    assert found(400.0) == pytest.approx(0.6, abs=0.07)  # farther along her platform
     b = plat(model, 360, 300)
-    assert found(300.0, b.id) == 1.0  # on another platform
-    assert harness.WORLDS["near-misses"] == {"near_seen": world_mod.NEAR_SEEN} and "near_seen" in harness.NOISE_FIELDS
-    assert harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=("near-misses",)).noise.near_seen \
-        == world_mod.NEAR_SEEN
+    assert found(300.0, b.id) == 1.0  # on another platform: as detect_miss has it (none here) ...
+    assert found(300.0, b.id, off=world_mod.OFF_SEEN) == pytest.approx(0.7, abs=0.07)  # ... or off_seen
+    assert harness.WORLDS["near-misses"] == {"near_seen": world_mod.NEAR_SEEN, "off_seen": world_mod.OFF_SEEN}
+    assert {"near_seen", "off_seen"} <= set(harness.NOISE_FIELDS)
+    noise = harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=("near-misses",)).noise
+    assert (noise.near_seen, noise.off_seen) == (world_mod.NEAR_SEEN, world_mod.OFF_SEEN)
 
 
 def test_a_monsters_pose_can_read_wrong_in_spells_as_the_templates_do_in_game(model):
@@ -292,6 +295,10 @@ def test_her_lucky_seven_key_casts_at_its_mp_and_throws_nothing_without_it(model
     w.advance(3.0)
     assert not w.monsters[0].alive and w.casts == 1 and w.mp_used == world_mod.CAST_MP
     assert w.mp * 601 == pytest.approx(601 - world_mod.CAST_MP + world_mod.MP_REGEN * 1.5, abs=0.1)
+    assert w.casts_nothing == 0
+    tap(w, 3.0, "g", 0.04)  # another, with nothing left in its way: MP thrown at nothing (harness: casts_nothing)
+    w.advance(4.5)
+    assert w.casts == 2 and w.casts_nothing == 1
     w = w_of()
     w.mp = 10 / 601  # under a cast's 11
     tap(w, 0.0, "g", 0.04)

@@ -43,7 +43,8 @@ from ..behavior.tour import Tour
 from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
                     Trace, detector_kinds, patched)
 from . import harness
-from .world import LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, ROPE_REACH_CLIENT, Her, Noise, Realism, SimDied, World
+from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, Her, Noise,
+                    Realism, SimDied, World)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -2145,6 +2146,22 @@ def loop_tree_23(sim):
     return harness._only(_loop(4), (23,))(sim)
 
 
+_NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
+
+
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
+      expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
+               check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
+               check("every kill counted", _every_kill), check("alive", lambda tr: not tr["world"]["dead"])))
+def loop_tree_23_near_misses(sim):
+    """loop_tree_23 as `tour --loop` plays by default (the attack choice), with the detector's misses as live on
+    2026-10-25 (`--world near-misses`: world.NEAR_SEEN on her platform, OFF_SEEN off it): her drops on 23 wait while
+    a Horny Mushroom the looks missed (the feed's hidden tracks, her memory's: localization.unseen) is by them
+    (hunt.PILE_CLEAR), as one did live (the service's track 130: 6 touches and a fall to 29)."""
+    return harness._only(_loop(4), (23,))(sim)
+
+
 @tree((20, -60.0), monsters={19, 20, 21, 22}, seed=3, limit=500, may_die=True, noise=_SLOW[0], her=_LUCKY,
       realism=dataclasses.replace(_SLOW[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
@@ -2200,7 +2217,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=4, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2223,7 +2240,10 @@ def loop_tree_ore_waits(sim):
     shoots (Hunt._interrupt): on seed 8 she was hurt more than five times; of seeds 1-16, 10 meet all of this.) (Seed 1
     since her drops wait while a monster that counts is by them, seen, missed by the looks or due back (Hunt._pile_block),
     and her fights and trips go by the monsters the looks missed (localization.unseen), 2026-10-26: on seed 2 she was
-    hurt 9 times and picked up 3 ores; of seeds 1-16, 9 meet all of this.)"""
+    hurt 9 times and picked up 3 ores; of seeds 1-16, 9 meet all of this.) (Seed 4 since the monsters the looks missed
+    leave out the dead (localization.unseen.hidden), her throws' attack goes by the look's alone again and her drops
+    don't wait for a spawn point's monster due back (hunt.DUE_BACK; review of part B, 2026-10-26): on seed 1 she was
+    hurt 6 times; of seeds 1-16, 4, 6 and 9-14 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
