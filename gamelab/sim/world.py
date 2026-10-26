@@ -282,6 +282,14 @@ CAST_MP = 11.0
 MP_REGEN = 0.32
 MP_POTION = 185.0
 PET_MP = 0.05
+# Her MP bar is drawn this long after a cast's key without the cast's MP, and the drink of her pet's it brings
+# (World.mp_drawn: what her looks read; the cast is taken off her MP at its key, as the game decides on it then): live
+# on 2026-10-25 (the hunt of 23:43) a cast's MP was first seen off her bar 0.21-0.53 s after its key, a median 0.35,
+# over 24 isolated casts, her looks then 5-10 a second (D:/MapleHelper-scratch/analysis-1025/mp-attack-check/
+# nodrop.py): the server's, as a kill's gain (actions.DAMAGE_SHOWS_MS). Until the review of 2026-10-26 it was drawn at
+# the key, and her reckoning took a cast off a frame shown under 0.21 s after its key that showed it already, one cast
+# low (behavior.attacks; right live): 2.4 regular throws a run for 'MP' with a cast's MP hers.
+MP_SHOWS_MS = DAMAGE_SHOWS_MS
 # A touch by a monster within this many s of its respawn came from its spawn point, onto her or beside her (World.
 # fresh_log): what a waiting place by a spawn point costs.
 FRESH_S = 1.5
@@ -981,6 +989,7 @@ class World:
         self.mp_used = 0.0              # drank for her (Her.pet_mp), and the casts pressed with too little MP (none
         self.mp_potions = 0             # thrown)
         self.no_mp = 0
+        self._mp_unshown: list[tuple[int, float]] = []  # (the tick her bar shows it at, its MP share): MP_SHOWS_MS
         self.attacks = 0                # attacks her keys made, either key
         # Every attack the game took, as it came out (_attack): (when its key went out, s of the run; the name of the
         # key plan that pressed it, as the stack's player was sent it; "ground" or "air" when it started; how far she
@@ -1909,12 +1918,13 @@ class World:
 
     def _cast(self) -> bool:
         """A Lucky Seven cast's MP (CAST_MP) taken, if she has it (Her.mp): then her pet may drink for her (Her.pet_mp).
-        False with too little: nothing is thrown."""
+        False with too little: nothing is thrown. Her bar shows both MP_SHOWS_MS on (mp_drawn)."""
         her = self.character
         if self.mp * her.mp < her.cast_mp - 1e-9:
             self.no_mp += 1
             self.note(f"Lucky Seven with {self.mp * her.mp:.0f} MP: not enough, nothing thrown")
             return False
+        before = self.mp
         self.mp -= her.cast_mp / her.mp
         self.casts += 1
         self.mp_used += her.cast_mp
@@ -1922,7 +1932,13 @@ class World:
             self.mp = min(1.0, self.mp + her.mp_potion / her.mp)
             self.mp_potions += 1
             self.note(f"her pet drinks an MP potion for her: MP {self.mp:.1%}")
+        self._mp_unshown.append((self.ms + MP_SHOWS_MS, self.mp - before))
         return True
+
+    def mp_drawn(self) -> float:
+        """Her MP as her bar draws it now: less the casts (and her pet's drinks) it doesn't show yet (MP_SHOWS_MS)."""
+        self._mp_unshown = [(ms, d) for ms, d in self._mp_unshown if ms > self.ms]
+        return min(1.0, max(0.0, self.mp - sum(d for _, d in self._mp_unshown)))
 
     def _pushes(self, m: SimMonster, swipe: bool) -> bool:
         """Whether this hit pushes monster `m` back (PUSH_BY_DAMAGE: drawn by push_chance, seeded by the tick)."""

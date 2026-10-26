@@ -270,6 +270,23 @@ def test_her_lucky_seven_key_casts_at_its_mp_and_throws_nothing_without_it(model
     assert harness.ATTACK_HER == {"skill": world_mod.LUCKY_SEVEN, "spread": True}
 
 
+def test_her_mp_bar_shows_a_cast_and_her_pets_drink_the_servers_time_after_its_key(model):
+    """World.mp_drawn (what her looks read off her MP bar): a cast's MP and the drink of her pet's it brings show
+    MP_SHOWS_MS (0.29 s) after its key, the server's (live a cast's MP was first seen off her bar 0.21-0.53 s after its
+    key, a median 0.35); her MP itself is taken at the key, which the game decides a cast on."""
+    keys = dataclasses.replace(KEYS, lucky_seven=K("g"))
+    her = world_mod.Her(mp=601.0, skill=world_mod.LUCKY_SEVEN, pet_mp=world_mod.PET_MP)
+    c = plat(model, 500, 400)
+    w = still(World(model, keys, (c.id, 100.0), monsters=[("Pig", c.id, 400.0)], facing="right", character=her))
+    w.mp = 40 / 601  # a cast takes her under the pet's warning (30 MP): it drinks
+    tap(w, 0.0, "g", 0.04)
+    w.advance(0.2)
+    assert w.casts == 1 and w.mp_potions == 1 and w.mp > 0.2  # (taken, and the drink, at the key)
+    assert w.mp_drawn() == pytest.approx(40 / 601, abs=0.002)  # (her regen meanwhile)
+    w.advance(0.1 + world_mod.MP_SHOWS_MS / 1000)
+    assert w.mp_drawn() == pytest.approx(w.mp)
+
+
 def test_a_touch_by_a_monster_just_back_at_its_spawn_point_is_a_fresh_one(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 300.0)], facing="right"))

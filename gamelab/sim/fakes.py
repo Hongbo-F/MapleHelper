@@ -338,7 +338,7 @@ class FakeEyes(Eyes):
         return round(self.world.hp * 147) / 147  # the bar is 147 px long
 
     def _mp(self) -> float:
-        return round(self.world.mp * MP_STEPS) / MP_STEPS  # as her MP bar shows it (attack.choice.MP_STEPS)
+        return round(self.world.mp_drawn() * MP_STEPS) / MP_STEPS  # as her MP bar shows it (attack.choice.MP_STEPS)
 
     def _dot(self, counts: dict | None = None) -> tuple[float, float] | None:
         """Her minimap dot as minimap.her_dot reads it: exact, or (Noise.dot_px) to whole pixels; None
