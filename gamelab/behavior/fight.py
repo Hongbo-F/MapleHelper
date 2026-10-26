@@ -76,11 +76,11 @@ GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she tr
 FINISH_WALK = 150
 # When a throw's damage can show on its target, for the shot log (_score_shots, _target_gone): from LANDS_FROM_S
 # after its attack key (the star leaves STAR_DELAY_MS after it, less a look's slack) to SETTLED_S after it's due
-# (`due`: the release, then the flight at reach.STAR_SPEED). Which end the game shows it at isn't measured: a
-# star is seen flying up to 0.6 s to its target, but the HP bar may follow the attack's message to the server
-# instead; the simulator lands it at the release, whatever the distance. So a bar drop is a throw's hit only if
-# no other throw's damage can have shown in the same stretch between looks, and a kill only if a single throw
-# can have landed it (else undecided).
+# (`due`: the release, then the flight at reach.STAR_SPEED). So a bar drop is a throw's hit only if no other throw's
+# damage can have shown in the same stretch between looks, and a kill only if a single throw can have landed it
+# (else undecided). Live on 2026-10-25 the server's damage showed sooner: a kill's gain 0.15-0.46 s after the key, a
+# bar's first drop 0.21-0.55 (control.actions.DAMAGE_SHOWS_MS, which the simulator now applies): the shot log, which
+# no decision reads, still goes by the release (to redo: README, Her throws at the dead).
 LANDS_FROM_S = (STAR_DELAY_MS - 50) / 1000
 SETTLED_S = 0.3    # (as probe.SETTLED_S) a target seen this long after its star was due, its bar as before: missed
 HURT = 0.02        # a bar this much lower than before is a hit

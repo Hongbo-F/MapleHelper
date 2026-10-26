@@ -255,6 +255,28 @@ def test_a_runs_jump_records_are_counted_with_what_the_looks_after_them_saw():
     assert "above    up          2  0.40" in text and "passing  forward     1" in text
 
 
+def test_a_jumps_kill_is_a_gain_soon_after_its_attack_key_not_one_after_a_later_throws():
+    """analysis.jumps (KILL_AFTER): a kill's EXP gain shows 0.15-0.46 s after the key of the throw that made it (live on
+    2026-10-25): a gain 0.3 s after a jump's attack key (its record's time and key_ms) is its kill; one 1.2 s after it
+    but 0.3 s after a ground throw's key at the same kind is that throw's, not the jump's (until 2026-10-26 any gain
+    within 1.6 s of the jump record was, the hunter's own lagging ones)."""
+    from gamelab.analysis import jumps
+
+    def jump(t):
+        return {"t": t, "topic": "jump", "kind": "above", "jump": "up", "key_ms": 100, "target": "horny-mushroom",
+                "platform": 23, "x": 0.0, "dx": 100.0, "up": 60.0}
+
+    def attack(t, kind="horny-mushroom"):
+        return {"t": t, "topic": "attack", "key": "lucky_seven", "kind": kind}
+
+    gain = lambda t: {"t": t, "topic": "exp", "gain": 41, "kinds": ["horny-mushroom"]}
+    rows = [jump(10.0), attack(10.002), attack(10.95), jump(20.0), attack(20.002), attack(20.9)]
+    got = jumps.outcomes(rows, gains=[gain(10.4), gain(21.3)])
+    assert [j["outcome"] for j in got] == ["kill", "nothing seen"] and got[0]["key"] == pytest.approx(10.1)
+    assert jumps.kills_of([gain(21.3)], jumps.keys_of(rows)) == {20.9: 21.3}  # the ground throw's
+    assert jumps.outcomes(rows, gains=[gain(10.05)])[0]["outcome"] == "nothing seen"  # (too soon: not its)
+
+
 # --- the stance takes them -------------------------------------------------------------------------------------------
 
 def test_the_stance_jump_throws_at_a_monster_above_with_the_attack_when_it_surely_picks_it():

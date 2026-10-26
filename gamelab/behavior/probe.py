@@ -113,7 +113,8 @@ EVIDENCE_S = 0.9     # s after a star was due that a throw's evidence is gathere
 HIDDEN_MAX_S = 2.5   # ... and up to this long while its target is hidden (under its damage numbers: 1-3 s)
 EARLY_S = 0.15       # a target seen this long before its star was due, or later, has been seen since (`over`)
 BEFORE_HIT_S = (STAR_DELAY_MS - 50) / 1000  # s after the attack key a look still sees every bar as before the
-                     # throw: its damage shows STAR_DELAY_MS (520) after the key at the earliest
+                     # throw: its damage shows STAR_DELAY_MS (520) after the key at the earliest, as the probes were
+                     # built (live on 2026-10-25 the server's showed from 0.15 s: control.actions.DAMAGE_SHOWS_MS)
 SETTLED_S = 0.3      # a monster seen this long after the star was due with its bar as before wasn't hit
 HURT = 0.02          # a bar this much lower than before is a hit
 WAIT_S = 0.1         # s between looks while there's nothing to throw at

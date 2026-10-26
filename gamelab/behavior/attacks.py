@@ -62,10 +62,12 @@ from ..perception.kinds import kind_of
 from .ledger import dying, in_path
 
 HIDDEN_FOR = 1.8   # s a monster she threw at is still taken to be in a throw's way unseen (fight.HIDDEN_FOR)
-LANDS_S = 0.85     # s after a throw's attack key that its damage can show on its target's bar: the star leaves 0.52 s
-                   # after it (actions.STAR_DELAY_MS), and flies up to 0.6 s (434 units at 690 a second)
-SHOWS_S = 0.47     # s after a throw's attack key that its damage may first show: a bar's change is the throw's from
-                   # then on in the shot log (README: hunt shots), about when the star leaves
+LANDS_S = 0.6      # s after a throw's attack key by which its damage has shown on its target's bar, if it hit: the
+                   # server's (actions.DAMAGE_SHOWS_MS), live a Horny Mushroom's bar first lower 0.21-0.55 s after a
+                   # cast's key (p10-p90), a kill's gain by 0.46 s. 0.85 until 2026-10-26, when the star's flight was
+                   # taken for when it showed (its release 0.52 s after the key and up to 0.6 s in the air)
+SHOWS_S = 0.15     # s after a throw's attack key that its damage may first show: a kill's gain live from 0.15 s on, a
+                   # bar's drop from 0.21 (0.47 until 2026-10-26, about when the star leaves)
 LOST_S = 3.0       # s unseen before a monster she threw at is forgotten (ledger.WOUND_LOST_S) ...
 FORGET_S = 15.0    # ... and s since her last throw at it (ledger.WOUND_S)
 MODES = ("choice", "skill", "regular")  # attack.choice.pick's modes: `tour --attack` (choice by default)

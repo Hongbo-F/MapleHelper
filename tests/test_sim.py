@@ -464,10 +464,10 @@ def test_a_star_kills_gives_exp_and_drops_that_can_be_picked_up(model):
     c = plat(model, 500, 400)
     w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right")
     tap(w, 0.0, "f", 0.04)
-    w.advance(0.5)
-    assert w.monsters[0].alive  # the star leaves ~0.52 s after the key
-    w.advance(0.6)
-    assert not w.monsters[0].alive and w.kills == {"snail": 1} and w.exp == 2
+    w.advance(0.25)
+    assert w.monsters[0].alive  # the server's damage 0.29 s after the key (actions.DAMAGE_SHOWS_MS) ...
+    w.advance(0.3)
+    assert not w.monsters[0].alive and w.kills == {"snail": 1} and w.exp == 2  # ... before her star leaves (0.52)
     assert int((exp_pixels(0) != exp_pixels(w.exp)).sum()) >= 3
     w.advance(3.0)
     (d,) = w.live_drops()
@@ -984,7 +984,8 @@ def test_a_hit_pushes_a_monster_back_and_stands_it_while_it_flinches(model, monk
     m = shot(True)
     hit = m.hit_at
     at_hit = 600.0 - m.speed * hit
-    assert m.hp == 2 and hit == pytest.approx(0.52)  # a star (of 3) lands 520 ms after the key
+    # a star (of 3) lands 520 ms after the key: its push then, its damage the server's at 290 (actions.DAMAGE_SHOWS_MS)
+    assert m.hp == 2 and hit == pytest.approx(0.52)
     assert m.at(hit + 0.125) == pytest.approx(at_hit + 9)  # pushed away from her ...
     assert m.at(hit + 0.3) == m.at(hit + 0.59) == pytest.approx(at_hit + 18)  # ... 18 units, then it stands
     assert m.d == 0

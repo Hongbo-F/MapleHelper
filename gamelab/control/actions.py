@@ -82,6 +82,15 @@ STAR_DELAY_MS = 520  # the star leaves this long after the attack key, in the ai
                      # 2026-10-25, the swing beside her 524-536 ms after the key in jump_throw_0 and _1 (the key 100 ms
                      # after the jump key) and jb_k165-jb_k450 (85-370 ms), 508 in snail_jt40b (40 ms): wherever in
                      # the jump the key goes)
+# The server applies a throw's damage this long after its attack key, before its star leaves: a kill's EXP gain shows
+# then and its monster starts dying, a hurt one's HP bar drops. Live on 2026-10-25 (the hunt of 23:43, the perception
+# service's frames) a kill's gain showed 0.15-0.46 s after the key of the throw that made it, the median 0.29-0.33,
+# whatever the distance (37 gains with a single throw of hers in the 2.5 s before them:
+# D:/MapleHelper-scratch/analysis-1025/jumps-perception-skeptic/gain_delay.py), and a Horny Mushroom's bar first lower
+# 0.21-0.55 s after a cast's key (p10-p90; the median 0.40 for 85 casts, 0.31 for 16 regular stars:
+# D:/MapleHelper-scratch/hunt-ab/a/scripts/bar_delay.py). The simulator applies it so (sim.world), the frame showing
+# it then 0-33 ms later.
+DAMAGE_SHOWS_MS = 290
 JB_TURN_MS = JB_RUN_MS + AIR_TURN_MS  # the arrow toward the monster: turning as soon as she's off the ground
 JB_THROW_MS = JB_RUN_MS + AIR_TURN_ATTACK_MS  # the attack key physics.AIR_TURN_LEAD_MS after it (270), the star
                                # leaving as she lands (270 + 520 = 790; she lands 150 + 65 + 555 = 770 ms in). Until

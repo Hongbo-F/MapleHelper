@@ -48,10 +48,11 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   run ends (SimDied); up held at a portal (mapdata.PORTAL_BOX: from 100 above it to 25 below, in the air too, as
   HeavenClient has it) takes her through it, out of the map, and the run ends too (SimLeftMap);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
-  jump's lift-off), from where she is then, and its damage lands actions.STAR_DELAY_MS after the key, on
-  that monster (attack.reach), whatever the distance (in game the star is then seen flying up to 0.6 s more;
-  whether its damage shows when it gets there isn't measured, so the shot log allows for both:
-  behavior.fight.LANDS_FROM_S). On the ground the attack takes one of the claw's stances
+  jump's lift-off), from where she is then, and its damage is the server's actions.DAMAGE_SHOWS_MS (0.29 s) after
+  the key, on that monster (attack.reach), whatever the distance, before her star even leaves (actions.STAR_DELAY_MS:
+  in game it's then seen flying up to 0.6 s more): a kill's EXP and its monster dying then, a hurt one's bar lower,
+  its flinch and push (when the game shows those isn't measured). Until 2026-10-26 it landed at STAR_DELAY_MS, where
+  live a kill's gain showed 0.15-0.46 s after the key. On the ground the attack takes one of the claw's stances
   (reach.CLAW's, drawn per attack, seeded), and the nearest monster (by distance, feet to feet) whose
   body reaches into its box (reach.claw_takes: cut to reach.CLAW_FAR ahead of her, on her level or not) is
   swiped (a fifth of a star's damage); else the star's search picks (reach.search_band: of the monsters
@@ -116,7 +117,7 @@ from .. import directions
 from ..attack import reach
 from ..attack.danger import touch_taken
 from ..behavior import pet as pet_care
-from ..control.actions import STAR_DELAY_MS
+from ..control.actions import DAMAGE_SHOWS_MS, STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import PORTAL_BOX, PORTAL_EXIT, MapModel, Platform, Rope
 from ..motion import bodies as her_body
@@ -1251,6 +1252,8 @@ class World:
             self._aim(*e.data)
         elif e.kind == "star":
             self._attack(*e.data)
+        elif e.kind == "struck":
+            self._struck(*e.data)
         elif e.kind == "loot":
             self.drops += e.data
         elif e.kind == "respawn":
@@ -1780,7 +1783,7 @@ class World:
 
     def _aim(self, key_ms: int, skill: bool = False, tag: str = "", step: int | None = None) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
-        lands STAR_DELAY after the key (_attack). On the ground it takes one of the claw's stances (drawn,
+        is the server's DAMAGE_SHOWS_MS after the key (_attack). On the ground it takes one of the claw's stances (drawn,
         seeded: reach.CLAW's), and the claw swipes the nearest monster that stance's box reaches (swiped);
         else the star's search picks (search_pick). In the air, the nearest in the attack's area or its band's
         window of the search from her feet takes the star (AIR_PICK 'widening': air_pick), the nearest in the area
@@ -1823,14 +1826,15 @@ class World:
         up = None if picked is None else self.y - picked.y(picked.at(self.t))  # its feet above hers, + above
         how = (key_ms / 1000, tag.rsplit("_", 1)[0], self.mode, round(rise, 1),
                None if picked is None else picked.kind, None if up is None else round(up, 1))
-        self._push(key_ms + int(STAR_DELAY * 1000), "star", (facing, target, swipe, stop, skill, how))
+        self._push(key_ms + DAMAGE_SHOWS_MS, "star", (facing, target, swipe, stop, skill, how, key_ms))
 
     def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None,
-                skill: bool = False, how: tuple | None = None) -> None:
-        """The attack's damage, STAR_DELAY after its key: on the monster it picked when it started (_aim),
-        a claw swipe or a star; none if what stops a star stopped it (`stop`: the monster picked, and the
-        foothold). `skill`: Lucky Seven's (Her.skill), its stars' damage on a swipe's pick too. `how`: what _aim
-        knew of it, for attack_log."""
+                skill: bool = False, how: tuple | None = None, key_ms: int | None = None) -> None:
+        """The attack's damage, the server's DAMAGE_SHOWS_MS after its key (`key_ms`): on the monster it picked when it
+        started (_aim), a claw swipe or a star; none if what stops a star stopped it (`stop`: the monster picked, and
+        the foothold). Its HP (and bar), or its death and her EXP, then; its flinch, its push and its damage numbers (it
+        hides under them: Noise.hit_hidden) as the star lands, STAR_DELAY after the key (_struck). `skill`: Lucky
+        Seven's (Her.skill), its stars' damage on a swipe's pick too. `how`: what _aim knew of it, for attack_log."""
         if stop is not None:
             picked, f = stop
             where = f"the wall at x {f.x1:.0f}" if f.x1 == f.x2 else f"the floor at y {f.y1:.0f}"
@@ -1857,16 +1861,26 @@ class World:
         m.hp = round(m.hp - damage, 6)
         self._logged(how, "swipe" if swipe and m.hp > 1e-9 else "hit" if m.hp > 1e-9 else "kill")
         if m.hp > 1e-9:
-            m.hit_at = self.t
-            if self._pushes(m, swipe):
-                m.flinch_at = self.t
-                if MOB_KNOCKBACK:
-                    m.knock(self.t, 1 if mx >= self.x else -1)
-                self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left)")
-            else:
-                self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left): not pushed")
+            self.note(f"{what} hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp:g}/{m.hp_max:g} left)")
+            lands = self.ms if key_ms is None else max(self.ms, key_ms + int(STAR_DELAY * 1000))
+            self._push(lands, "struck", (m, swipe, what))
             return
         self._kill(m, mx, what)
+
+    def _struck(self, m: SimMonster, swipe: bool, what: str) -> None:
+        """A hit's star lands on monster `m` (STAR_DELAY after its key, its damage the server's already: _attack): its
+        damage numbers (it hides under them: Noise.hit_hidden), and its flinch and push if its damage reaches its
+        `pushed` (PUSH_BY_DAMAGE). Nothing if it's dead by then."""
+        if not m.alive:
+            return
+        m.hit_at = self.t
+        if self._pushes(m, swipe):
+            mx = m.at(self.t)
+            m.flinch_at = self.t
+            if MOB_KNOCKBACK:
+                m.knock(self.t, 1 if mx >= self.x else -1)
+        else:
+            self.note(f"the {what} at {m.kind} #{m.idx}: not pushed")
 
     def _logged(self, how: tuple | None, outcome: str) -> None:
         """An attack's outcome into attack_log (`how`: _aim's (key time, plan, ground or air, her rise, the kind picked,
