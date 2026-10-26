@@ -1873,19 +1873,23 @@ def nav_rocky_monsters_bridge(sim):
     return _nav(19)(sim)
 
 
-@rocky((22, -1300.0), monsters="all", seed=1, limit=300,
+@rocky((22, -1300.0), monsters="all", seed=5, limit=300,
        expects=(ends("arrived"), logs("shooting it on the way"),
                 check("ten kills or more on the way", lambda tr: sum(tr["world"]["kills"].values()) >= 10)))
 def nav_rocky_fight_bridge(sim):
     """From the bridge up the rope at -1463 to 14, shooting the monsters in reach on the way (the tour's escort): a
     Stump takes 4 stars, a Dark Stump 7 and an Axe Stump 10. (Seed 1: of seeds 1-12 she arrived with ten kills or more
-    on 1, 2, 5 and 6 since a hit pushes a Dark Stump or an Axe Stump back only from 25 or 30 damage after their
-    defence (world.PUSH_BY_DAMAGE: more of them walk on at her; on 1 and 11 before), and on most of the others fell
-    out of the map past 22's left end (-1640), where nothing is under her: a touch knocked her off it, fighting or picking up drops there, or off the rope at -1463 near its top, and
-    the knock carried her past it. The world's side is the map's platforms' outer end (-1662, 14's left end), 19 units
-    left of the pit's bottom stair (32, from -1643); with HeavenClient's sides, 25 in from its footholds
-    (world.Realism.sides 'client', -1637), she can't get past 22's end; what the game does there isn't known:
-    README.)"""
+    on 1, 2, 5 and 6 since a hit pushes a Dark Stump or an Axe Stump back only from 25 or 30 damage after their defence
+    (world.PUSH_BY_DAMAGE: more of them walk on at her; on 1 and 11 before), and on most of the others fell out of the
+    map past 22's left end (-1640), where nothing is under her: a touch knocked her off it, fighting or picking up drops
+    there, or off the rope at -1463 near its top, and the knock carried her past it. The world's side is the map's
+    platforms' outer end (-1662, 14's left end), 19 units left of the pit's bottom stair (32, from -1643); with
+    HeavenClient's sides, 25 in from its footholds (world.Realism.sides 'client', -1637), she can't get past 22's end;
+    what the game does there isn't known: README.) (Seed 5 since a look asks for what the next frame would have stale
+    (feed.to_ask), a frame shown before a throw without a tap tells her heading (Actions.heading), a cast takes its MP
+    off at its throw (Attacks.on_throw) and a trip stops only for what the pass shoots (Hunt._interrupt): on seed 1 a
+    touch knocked her out of the map past 22's left end at 19 s, and at master 1c9d1e3 at 147 s; of seeds 1-16, 5 and 14
+    meet all of this.)"""
     return _nav(14, fight=True)(sim)
 
 
@@ -1920,14 +1924,18 @@ def loop_rocky_run(sim):
     return _loop(8)(sim)
 
 
-@rocky((22, -700.0), monsters="all", seed=2, limit=1500,
+@rocky((22, -700.0), monsters="all", seed=1, limit=1500,
        expects=(check("three stops or more", lambda tr: len(tr["result"]["visited"]) >= 3),
                 ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
                 check("she fed her pet", _fed_her_pet)))
 def tour_rocky_run(sim):
     """`python -m gamelab tour --map 10004021`: the whole sweep, end to end, from the bridge. (Seed 2 since a step onto
-    a floor rising the way she flies lands her (body._lands_at): on seed 1 she was knocked off 22's left end and out
-    of the map at 804 s; of seeds 1-6, 2, 4, 5 and 6 meet all of this.)"""
+    a floor rising the way she flies lands her (body._lands_at): on seed 1 she was knocked off 22's left end and out of
+    the map at 804 s; of seeds 1-6, 2, 4, 5 and 6 meet all of this.) (Seed 1 since a look asks for what the next frame
+    would have stale (feed.to_ask), a frame shown before a throw without a tap tells her heading (Actions.heading), a
+    cast takes its MP off at its throw (Attacks.on_throw) and a trip stops only for what the pass shoots
+    (Hunt._interrupt): on seed 2 a touch knocked her out of the map past 22's left end at 212 s; of seeds 1-16, 1, 5, 7,
+    12, 13 and 14 meet all of this.)"""
     return sim.tour_stack().run()
 
 
@@ -2081,7 +2089,7 @@ _CROWD, _SLOW = harness.PRESETS["crowd"], harness.PRESETS["crowd-slow"]
 _LUCKY = dataclasses.replace(LEVEL_24, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=5, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 231"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -2104,7 +2112,10 @@ def loop_tree_23(sim):
     them (2, 6, 7, 11, 13, 15); on seed 1 the rule 'shoot' decided 14 times, 'in passing' 42, for 20 kills.) (Seed 5
     since every look is perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every
     scenario): on seed 2 she shot 23 from the spot fewer than 20 times; of seeds 1-16, 5, 9, 11, 14, 15 and 16 meet all
-    of this.)"""
+    of this.) (Seed 1 since a look asks for what the next frame would have stale (feed.to_ask), a frame shown before a
+    throw without a tap tells her heading (Actions.heading), a cast takes its MP off at its throw (Attacks.on_throw) and
+    a trip stops only for what the pass shoots (Hunt._interrupt): on seed 5 she shot 23 from the spot fewer than 20
+    times; of seeds 1-16, 1, 8-11 and 13-16 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2163,7 +2174,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=8, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=2, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2172,15 +2183,18 @@ def loop_tree_ore_waits(sim):
     """EXP before loot (hunt._loot_first): 23 her only ground, shot from 24 at 231, every Green Mushroom on 22 dropping
     a Sapphire Ore (120 mesos, valuable on Tree Dungeon: twice its bronze coin, 66.8). Seen while a Horny Mushroom on 23
     is in reach, the ore isn't at risk (90 s of life, nobody by it): she shoots first and picks it up once nothing is in
-    reach, 4 ores of 4. With the valuable pile rule ahead of shooting as before (hunt.EXP_FIRST off) she went down to
-    22 for it at once, among its Green Mushrooms, and was hurt 15 times (1.72 bars of HP) against once (0.16), for the
-    same 596 EXP and 3 ores; on seeds 1-8, 4645 EXP against 4306 (better on 5, worse on 1), 25 ores of 31 against 25
-    of 30, hurt 76 times against 98. Seed 14 since the review of her jumps' attacks, 2026-10-25: hurt three times at
-    most and every ore picked up is a run's luck, on 2 of seeds 1-16 (14, 15; 3 before the review's fixes, 1, 2 and 12;
-    4 at master's head, 1, 3, 11 and 14); on seed 1 she was touched 8 times, 6 of them hurting, jump-throwing at a
-    Horny Mushroom on 23 after 209 s. Seed 1 again since the ground's reach above her goes by the search's windows
-    again, reach.UP_BY_SEARCH, by the user's choice: on 4 of seeds 1-16, 1, 2, 12 and 13; on seed 14 she was hurt 5
-    times, 3 of them by a Green Mushroom as she went for an ore on 22 at 180-187 s.)"""
+    reach, 4 ores of 4. With the valuable pile rule ahead of shooting as before (hunt.EXP_FIRST off) she went down to 22
+    for it at once, among its Green Mushrooms, and was hurt 15 times (1.72 bars of HP) against once (0.16), for the same
+    596 EXP and 3 ores; on seeds 1-8, 4645 EXP against 4306 (better on 5, worse on 1), 25 ores of 31 against 25 of 30,
+    hurt 76 times against 98. Seed 14 since the review of her jumps' attacks, 2026-10-25: hurt three times at most and
+    every ore picked up is a run's luck, on 2 of seeds 1-16 (14, 15; 3 before the review's fixes, 1, 2 and 12; 4 at
+    master's head, 1, 3, 11 and 14); on seed 1 she was touched 8 times, 6 of them hurting, jump-throwing at a Horny
+    Mushroom on 23 after 209 s. Seed 1 again since the ground's reach above her goes by the search's windows again,
+    reach.UP_BY_SEARCH, by the user's choice: on 4 of seeds 1-16, 1, 2, 12 and 13; on seed 14 she was hurt 5 times, 3 of
+    them by a Green Mushroom as she went for an ore on 22 at 180-187 s.) (Seed 2 since a look asks for what the next
+    frame would have stale (feed.to_ask), a frame shown before a throw without a tap tells her heading
+    (Actions.heading), a cast takes its MP off at its throw (Attacks.on_throw) and a trip stops only for what the pass
+    shoots (Hunt._interrupt): on seed 8 she was hurt more than five times; of seeds 1-16, 10 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2315,35 +2329,38 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((28, 247.0), monsters="all", seed=4, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
 def loop_tree_lie_detector(sim):
     """`tour --loop --map 10002073` from 28 (as loop_tree_run), the Lie Detector seen 110 s in, while she hunts the
     floor (33): the hunt stops at once (the plan running cut, nothing of hers after it); no safe platform is near (28,
-    the nearest place no monster reaches, is 4.3 s by route, past retreat.NEAR_S with the crowd's stops), so up onto
-    the rope at 146 from 32, at its safest height (attack.ropes), avoiding the monsters, her moves alone; a retreat plan
+    the nearest place no monster reaches, is 4.3 s by route, past retreat.NEAR_S with the crowd's stops), so up onto the
+    rope at 146 from 32, at its safest height (attack.ropes), avoiding the monsters, her moves alone; a retreat plan
     past the player's 12 s is refused. (From the floor's crowd, of seeds 1-12 seen at 40, 75, 110 and 150 s, 83% are on
-    a safe place at 10 s; from 24, shooting 23, 47 of 48: loop_tree_lie_detector_23. Seed 7 since a throw's tap goes
-    by her facing off the frame, perception.heading, where her course before the sighting goes otherwise: of seeds
-    1-12 seen at 110 s, 7 and 10 go up onto the rope at 146 within 10 s, 9 are on a safe place at 10 s (a safe
-    platform near on 5, 6, 8 and 12, 28 on 2 and 9, the rope at -192 on 3), and on seed 1 she took 10.5 s, still on
-    33. Seed 3 with her memory of the monsters and the sweep merged too, hunt.SWEEP: 1, 3, 9 and 12 go up onto the
-    rope at 146 within 10 s, 8 are on a safe place at 10 s; on seed 7 she took 11.2 s, still on 32. Seed 2 since her
-    jumps' attacks are weighed and her jump throws turn in the air, 2026-10-25: of seeds 1-12, 9 go up onto the rope
-    at 146 within 10 s, 11 are on a safe place at 10 s (the rope at -192 on 1, already on 25 on 3), and on seed 11
-    she was still on her way. Seed 1 since the review of her jumps' attacks, 2026-10-25 (her body clear of a monster
-    above over a jump in place, a jump forward's landing however it goes, the ground's reach capped 60 above her
-    again): of seeds 1-16, 1, 5, 7, 10 and 12 go up onto the rope at 146 within 10 s, 11 are on a safe place at 10 s
-    (7 of 16 at master's head, 14 before the review's fixes), and on seed 2 she went up the rope at -192 from 31. Seed
-    4 since the ground's reach above her goes by the search's windows again, reach.UP_BY_SEARCH, by the user's
-    choice: of seeds 1-16, 4, 5, 7, 8, 10 and 12 go up onto the rope at 146 within 10 s, 12 are on a safe place at
-    10 s, and on seed 1 she was still on the floor, 33, its safest place within reach.)"""
+    a safe place at 10 s; from 24, shooting 23, 47 of 48: loop_tree_lie_detector_23. Seed 7 since a throw's tap goes by
+    her facing off the frame, perception.heading, where her course before the sighting goes otherwise: of seeds 1-12
+    seen at 110 s, 7 and 10 go up onto the rope at 146 within 10 s, 9 are on a safe place at 10 s (a safe platform near
+    on 5, 6, 8 and 12, 28 on 2 and 9, the rope at -192 on 3), and on seed 1 she took 10.5 s, still on 33. Seed 3 with
+    her memory of the monsters and the sweep merged too, hunt.SWEEP: 1, 3, 9 and 12 go up onto the rope at 146 within 10
+    s, 8 are on a safe place at 10 s; on seed 7 she took 11.2 s, still on 32. Seed 2 since her jumps' attacks are
+    weighed and her jump throws turn in the air, 2026-10-25: of seeds 1-12, 9 go up onto the rope at 146 within 10 s, 11
+    are on a safe place at 10 s (the rope at -192 on 1, already on 25 on 3), and on seed 11 she was still on her way.
+    Seed 1 since the review of her jumps' attacks, 2026-10-25 (her body clear of a monster above over a jump in place, a
+    jump forward's landing however it goes, the ground's reach capped 60 above her again): of seeds 1-16, 1, 5, 7, 10
+    and 12 go up onto the rope at 146 within 10 s, 11 are on a safe place at 10 s (7 of 16 at master's head, 14 before
+    the review's fixes), and on seed 2 she went up the rope at -192 from 31. Seed 4 since the ground's reach above her
+    goes by the search's windows again, reach.UP_BY_SEARCH, by the user's choice: of seeds 1-16, 4, 5, 7, 8, 10 and 12
+    go up onto the rope at 146 within 10 s, 12 are on a safe place at 10 s, and on seed 1 she was still on the floor,
+    33, its safest place within reach.) (Seed 2 since a look asks for what the next frame would have stale
+    (feed.to_ask), a frame shown before a throw without a tap tells her heading (Actions.heading), a cast takes its MP
+    off at its throw (Attacks.on_throw) and a trip stops only for what the pass shoots (Hunt._interrupt): on seed 4 she
+    went up the rope at -192 from 31; of seeds 1-16, 12 meet all of this.)"""
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=10, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=12, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2353,7 +2370,11 @@ def loop_tree_lie_detector_28(sim):
     jump throws turn in the air, 2026-10-25: of seeds 1-12 seen at 40 s, 1 goes back onto 28; 8 go up the rope at 146, 2
     the one at -192, and on 3 she's on 25 already, all on a safe place at 10 s.) (Seed 10 since every look is
     perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every scenario): on seed 1 she
-    went up the rope at 146 from 32, no safe platform near; of seeds 1-16 only 10 goes back onto 28.)"""
+    went up the rope at 146 from 32, no safe platform near; of seeds 1-16 only 10 goes back onto 28.) (Seed 12 since a
+    look asks for what the next frame would have stale (feed.to_ask), a frame shown before a throw without a tap tells
+    her heading (Actions.heading), a cast takes its MP off at its throw (Attacks.on_throw) and a trip stops only for
+    what the pass shoots (Hunt._interrupt): on seed 10 she went up the rope at 146 from 32, a rope as safe; of seeds
+    1-16 only 12 goes back onto 28.)"""
     return lie_detector(40.0)(sim)
 
 

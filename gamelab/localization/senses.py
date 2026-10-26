@@ -10,9 +10,9 @@ Every look and glance is the latest of what perception, looking at the game all 
 localization.feed.Feed: for a command the perception service, localization.service, whose world step runs on every
 frame; in the simulator SyncFeed; on saved frames and the tests' made-up ones InlineFeed, the step run on the eyes' frame
 when asked). A look is the newest state of a frame newer than the last look's, shown KEY_EFFECT_S after her last key
-and MAX_AGE_S before the look at the most (`fresh_after`), with what it needs fresh (feed.fresh: her band searched within
-0.3 s, the whole screen within 0.5 s, the drops on that very frame), the events since the last look with it
-(Scene.events); a look at her band has the monsters the feed follows off it too (`Scene.swept`, for her memory:
+and MAX_AGE_S before the look at the most (`fresh_after`, KEYS_WAIT), with what it needs fresh (feed.fresh: her band
+searched within 0.3 s, the whole screen within 0.5 s, the drops on that very frame), the events since the last look
+with it (Scene.events); a look at her band has the monsters the feed follows off it too (`Scene.swept`, for her memory:
 Feed.look). Glances are the newest frames, GLANCE_EVERY_S apart at the soonest. (Until 2026-10-25 a command could look
 for itself, `--no-feed`, and such looks swept the screen a slice at a time for her memory; the user: "We should just
 remove the --no-feed mode, perception should just always run and the other modules just work based on latest
@@ -68,14 +68,21 @@ FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
 #   key 66-68 ms after it's sent (README, Motion planning), so the look sees what came of the keys before it,
 # - and shown MAX_AGE_S before the look at the most;
 # with its searches as fresh as a look needs (feed.fresh). Before, a look was the first frame shown after it was asked
-# for, whatever came before. In the simulator (D:/MapleHelper-scratch/perceive/latcov2.py: the hunt loop on Tree
-# Dungeon, crowd, zero-walls, the attack choice, the costs measured, 4 seeds of 5 minutes), against a frame after the ask:
-# a plan's end to the next decision 122 ms (median; p90 265) against 66 (250), touches that hurt her a run 44.0 against
-# 49.0, HP lost 4.51 against 5.10 bars; the Lie Detector's retreat on a safe place 10 s after the sighting 28 of 28 runs
-# against 24 of 29 (test_retreat's sweep); the newest new frame without waiting for the keys' effect, 67 ms, 49.2, 4.75,
-# 27 of 28.
+# for, whatever came before. KEYS_WAIT says which looks wait for the keys' effect: every look ("all"), the one placing
+# her after a move alone (Mover.locate's first: "moves"), or none. In the simulator (master 1c9d1e3, her jump attacks
+# in; the hunt loop on Tree Dungeon, crowd, zero-walls, the attack choice, the costs measured, 16 seeds of 10 minutes;
+# README, The perception service) every look so had her touched on her trips 16.4 times a run (their HP 1.45 bars)
+# against 20.1 (1.66) for the mover's alone and 22.9 (1.85) for none, falling 33 times against 44 and 55, 75.4
+# touches in all against 85.6 and 90.0, 0.73 bars of HP lost a minute against 0.83 and 0.88, her plans cut by a hit
+# 30.2 times a run against 40.4 and 39.1, her EXP a minute level (225.3, 228.0, 235.4; +2.3% and -3.7% seed by seed,
+# standard errors 7.8% and 6.1%), her decisions later (a plan's end to the next, 135 ms at the median against 65), and
+# the Lie Detector's retreat on a safe place 10 s after the sighting on 27 of 31 runs with her moves alone on every
+# one (the mover's alone 28 of 31, a run with more than her moves; none 29 of 30, one so). Measured first with what
+# reads a look right after her keys taking a frame from before them for one after (feed.to_ask, Actions.heading,
+# Attacks.on_throw), the mover's alone had looked safest (13.2 touches on her trips against 21.8, 8 seeds).
 KEY_EFFECT_S = 0.068
 MAX_AGE_S = 0.1
+KEYS_WAIT = "all"  # which looks wait for her keys' effect: "all", "moves" (the mover's), "none"
 # Looks that fail their checks are taken again this long apart (each a capture: 5-30 ms), for up to LOST_S; then
 # LookLost. The window dragged at 16:48:44 on 2026-10-24 gave four bad looks in 4.1 s (16:48:44.0-48.1); a look that
 # fails for longer than LOST_S makes a hunt stand still (`regain`), looking again every PAUSE_POLL_S.
@@ -157,10 +164,12 @@ class Senses:
             listener(s)
         return s
 
-    def fresh_after(self) -> float:
+    def fresh_after(self, keys: bool | None = None) -> float:
         """When a look's frame may have been shown at the soonest, by default (KEY_EFFECT_S, MAX_AGE_S): after the last
-        look's frame, KEY_EFFECT_S after her last key, and MAX_AGE_S before now."""
-        return max(time.monotonic() - MAX_AGE_S, self._looked + 1e-6, self.keyed() + KEY_EFFECT_S)
+        look's frame, KEY_EFFECT_S after her last key (with `keys`; by default as KEYS_WAIT says), and MAX_AGE_S before
+        now."""
+        keys = KEYS_WAIT == "all" if keys is None else keys
+        return max(time.monotonic() - MAX_AGE_S, self._looked + 1e-6, self.keyed() + KEY_EFFECT_S if keys else -1e18)
 
     def _failed(self, problem: Problem) -> None:
         """A look found nothing to act on (`problem`): said once (and when the why changes); LookLost once that has

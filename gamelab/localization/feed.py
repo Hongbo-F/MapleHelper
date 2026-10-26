@@ -264,10 +264,13 @@ def wanted(after: float, mobs: bool, wide: bool, loot: bool, mesos_only: bool) -
 
 def to_ask(want: Asks, newest: WorldState | None, frame_s: float = 1.0 / HZ) -> Asks:
     """What to ask of the next frame for a look that wants `want`: all of it, or (ASK_ONLY_STALE) only what the
-    next frame wouldn't have fresh anyway, judging by the newest state."""
+    next frame wouldn't have fresh anyway, judging by the newest state. The next frame: a frame after `want.after`
+    or after the newest's, whichever is later (a look's `after` is often before the newest frame: Senses.fresh_after,
+    up to MAX_AGE_S before now; judged by `after` alone, a search the next frame would have stale went unasked, and the
+    look waited for the feed's own schedule, or FEED_WAIT_S)."""
     if not ASK_ONLY_STALE:
         return want
-    soon = want.after + frame_s
+    soon = max(want.after, newest.t if newest is not None else -1e18) + frame_s
     stale = lambda at, fresh_s: newest is None or at is None or soon - at > fresh_s
     return Asks(want.after, band=want.band and stale(newest and newest.band_at, MOBS_FRESH_S),
                 wide=want.wide and stale(newest and newest.wide_at, WIDE_FRESH_S), loot=want.loot,

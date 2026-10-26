@@ -18,6 +18,7 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import directions
 from ..localization.mapdata import MapModel, Platform, Rope
 from ..localization.scene import Scene
+from ..localization import senses as senses_mod
 from ..localization.senses import Senses
 from ..motion.body import ROPE_GROUP
 from ..motion.flow import ARROW_LAG
@@ -79,7 +80,10 @@ class Mover:
 
     def locate(self, tries: int = 40, mobs: bool = False, wide: bool = False, after: float | None = None) -> Scene:
         """A look that places her (its `where` is set). Waits up to ~10 s for her minimap dot (a window
-        or notification popping up over the minimap hides it). `after`: the first look's (Senses.look)."""
+        or notification popping up over the minimap hides it). `after`: the first look's (Senses.look; by default
+        what came of her keys shows in it: Senses.fresh_after, senses.KEYS_WAIT)."""
+        if after is None and hasattr(self.senses, "fresh_after"):  # (a stand-in for Senses may not have it)
+            after = self.senses.fresh_after(keys=senses_mod.KEYS_WAIT != "none")
         for i in range(tries):
             s = self.senses.look(mobs=mobs, wide=wide, after=after if i == 0 else None)
             if s.where is not None:

@@ -23,7 +23,13 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
   known: a monster's bar shows its damage to whoever dealt it, and the bars on monsters she hadn't thrown at in the
   live hunts of 2026-10-24 didn't go with other players by them (7.2% of sightings with a player on its platform,
   9.7% without: her stars that hit another in their path than the one she aimed at, and misreads).
-- Her MP: the latest look's bar share (Scene.mp) of her MP when full (config.toml [character] mp).
+- Her MP: the latest look's bar share (Scene.mp) of her MP when full (config.toml [character] mp), less her casts
+  that look's frame can't show yet. A look that doesn't wait for her keys' effect (senses.KEYS_WAIT "moves" or
+  "none": Senses.fresh_after) can be of a frame shown before a throw's key, right after it: so a cast's MP is taken
+  off as its throw goes out (`on_throw`), and a bar read off a frame shown before senses.KEY_EFFECT_S after the last
+  cast's key is believed only where it's lower. (Taking the bar as it read, with KEYS_WAIT "moves" in
+  loop_tree_mp_runs_out she cast Lucky Seven with 5 MP, nothing thrown: the look after her last cast, shown before
+  its key, read the 12 MP it took.)
 
 Each choice is logged with its numbers, and sent as a telemetry 'attack' record; `counts` keeps them for the run's
 report.
@@ -42,6 +48,7 @@ from ..attack.choice import Attack, Left
 from ..localization.mapdata import MapModel
 from ..localization.monsters import TRACK_SLACK, Monster, seen_again
 from ..localization.scene import Scene
+from ..localization.senses import KEY_EFFECT_S
 from ..perception.kinds import kind_of
 from .ledger import in_path
 
@@ -86,7 +93,9 @@ class Attacks:
         self.regular = choice.REGULAR
         self.stats = {kind_of(name): (hp, model.mob_pdd.get(name, 0.0)) for name, hp in model.mob_hp.items() if hp > 0}
         self.marks: list[Mark] = []
-        self.mp: float | None = None    # her MP bar's share in the latest look
+        self.mp: float | None = None    # her MP bar's share in the latest look, less her casts it can't show (on_look)
+        self._cast: float | None = None  # the MP share of the cast `key` chose, until its throw says when it's keyed
+        self._cast_at = -1e18            # when the last cast's attack key went down (on_throw)
         self.counts: Counter = Counter()  # throws by attack (its key) and by why
         self._last: Scene | None = None  # the latest look that searched for monsters, placed
         self._kills = kills or (lambda: [])
@@ -99,8 +108,8 @@ class Attacks:
 
     def on_look(self, s: Scene) -> None:
         """Her MP; the marks followed, their bars read, forgotten when unseen LOST_S, untouched FORGET_S or killed."""
-        if s.mp is not None:
-            self.mp = s.mp
+        if s.mp is not None:  # (a frame shown before the last cast's MP could show: only lower, on_throw took it off)
+            self.mp = s.mp if self.mp is None or s.t >= self._cast_at + KEY_EFFECT_S else min(self.mp, s.mp)
         kills = self._kills()
         for k in kills[self._killed:]:
             if getattr(k, "placed", False):
@@ -139,6 +148,7 @@ class Attacks:
         alive = None if left is None else left.alive() or left  # as it is if it's alive when the throw lands
         what = None if target is None else float("inf") if alive is None else alive
         attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
+        self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
         now = time.monotonic()
         if target is not None and target.kind in self.stats:
             mk = self._mark_of(target)
@@ -151,6 +161,15 @@ class Attacks:
         self.counts[why] += 1
         self._say(attack, why, target, left, alive, hp)
         return getattr(self.keys, attack.key).name
+
+    def on_throw(self, at: float, side: str) -> None:
+        """A throw (Actions.throw_listeners), its attack key going down at `at`: a cast `key` chose takes its MP off
+        now (looks shown before it could show still read it: on_look)."""
+        if self._cast is None:
+            return
+        if self.mp is not None:
+            self.mp = max(0.0, self.mp - self._cast)
+        self._cast_at, self._cast = at, None
 
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look that isn't

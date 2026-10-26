@@ -68,6 +68,20 @@ def test_a_look_is_never_handed_a_frame_from_before_it_asked(monkeypatch):
         assert not fresh(state(12, 10.1, tag=None, where=None, bad=Problem(kind, kind)), Asks(after=10.0))
 
 
+def test_a_look_asks_for_what_the_next_frame_would_have_stale_though_its_after_is_older():
+    """A look's `after` is often before the newest frame (Senses.fresh_after: up to MAX_AGE_S before now). What it asks
+    is judged by the next frame after the newest: the whole screen searched 0.5 s before the newest frame (WIDE_FRESH_S)
+    is stale by the next, so it's asked, though a frame at `after` would have had it fresh. (Judged by `after` alone it
+    went unasked: in the simulator a hunt's wide look waited FEED_WAIT_S for nothing and failed its checks.)"""
+    newest = state(1, 7.733, wide_at=7.233, band_at=7.6)
+    ask = feed.to_ask(Asks(after=7.654, wide=True), newest)
+    assert ask.wide
+    assert not feed.to_ask(Asks(after=7.654, wide=True), state(1, 7.733, wide_at=7.5)).wide  # fresh by the next
+    assert feed.to_ask(Asks(after=7.654, band=True), state(1, 7.733, band_at=7.45)).band  # 0.3 s: MOBS_FRESH_S
+    assert not feed.to_ask(Asks(after=7.654, band=True), newest).band
+    assert feed.to_ask(Asks(after=8.0, band=True), newest).band  # (after the newest: by `after`, as before)
+
+
 def test_a_bad_newest_state_gives_no_look_at_once_and_says_why(sync):
     # SyncFeed (and the service's client) as the frames fail their checks: no look given, at once (not after
     # FEED_WAIT_S), and `problem` says why; a glance has none either.
@@ -398,6 +412,7 @@ def test_senses_look_and_glance_through_the_feed_and_stand_still_while_it_has_no
 def test_a_look_is_the_newest_frame_newer_than_the_last_looks_and_after_her_keys_effect(sync, monkeypatch):
     # Senses.fresh_after: (a) never the last look's frame again, (b) shown KEY_EFFECT_S after her last key at the
     # soonest, (c) at most MAX_AGE_S old: a look after a pause takes the newest frame in, without waiting for another.
+    # KEYS_WAIT "moves" or "none": a look that isn't the mover's doesn't wait for the keys' effect.
     from gamelab.localization import senses as senses_mod
     f, clock, eyes = sync
     monkeypatch.setattr(senses_mod, "time", clock)
@@ -416,6 +431,26 @@ def test_a_look_is_the_newest_frame_newer_than_the_last_looks_and_after_her_keys
     clock.sleep(0.5)
     asked = clock.now
     assert senses.look(mobs=False).t >= asked - senses_mod.MAX_AGE_S and clock.now == asked  # long after: (c) again
+    monkeypatch.setattr(senses_mod, "KEYS_WAIT", "moves")
+    keyed = clock.now
+    newest = senses.look(mobs=False)
+    assert newest.t < keyed + senses_mod.KEY_EFFECT_S and clock.now - keyed < 2 / feed.HZ  # no wait for it
+    assert senses.fresh_after(keys=True) >= keyed + senses_mod.KEY_EFFECT_S  # (the mover's still does: Mover.locate)
+
+
+def test_the_movers_look_after_a_move_sees_what_her_keys_did(sync, monkeypatch):
+    # Mover.locate (placing her after a move) is of a frame shown KEY_EFFECT_S after her last key, KEYS_WAIT "moves" too.
+    from types import SimpleNamespace
+
+    from gamelab.control.mover import Mover
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    clock.sleep(1.0)
+    keyed = clock.now
+    senses.keyed = lambda: keyed
+    monkeypatch.setattr(senses_mod, "KEYS_WAIT", "moves")
+    s = Mover(senses, SimpleNamespace(nudge_mouse=lambda size: None), f.step.model).locate()
+    assert s.t >= keyed + senses_mod.KEY_EFFECT_S - 1e-9 and s.where is not None
 
 
 def test_her_last_key_is_her_last_plans_end_less_what_it_ran_on_after_it(monkeypatch):

@@ -184,6 +184,28 @@ def test_the_regular_attack_with_mp_under_a_cast_and_with_nothing_in_the_way():
     assert r.key("right") == KEYS7.attack.name
 
 
+def test_a_casts_mp_is_off_at_its_throw_and_a_frame_shown_before_it_showed_reads_no_more():
+    """A look that doesn't wait for her keys' effect (senses.KEYS_WAIT "moves" or "none") can be of a frame shown
+    before a throw's key, right after it: its bar still reads the MP the cast took. The cast's MP is taken off at its
+    throw (Attacks.on_throw), and such a bar is believed only where it's lower; one shown KEY_EFFECT_S after the
+    cast's key is her MP again (her pet's potion, say). (With KEYS_WAIT "moves", in loop_tree_mp_runs_out she cast
+    with 5 MP, nothing thrown: the look after her last cast, shown before its key, read the 12 it took.)"""
+    from gamelab.localization.senses import KEY_EFFECT_S
+    a, _ = _attacks()
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=20 / MAX_MP))
+    assert a.key("right") == KEYS7.lucky_seven.name
+    at = time.monotonic() + 0.08  # its attack key, 80 ms into the plan (a tap first)
+    a.on_throw(at, "right")
+    assert a.mp == pytest.approx(9 / MAX_MP)
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=20 / MAX_MP, t=at - 0.02))  # shown before its key
+    assert a.mp == pytest.approx(9 / MAX_MP)
+    assert a.key("right") == KEYS7.attack.name and a.counts["MP"] == 1
+    a.on_throw(at + 1.0, "right")  # (the regular attack: no MP)
+    assert a.mp == pytest.approx(9 / MAX_MP)
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + KEY_EFFECT_S))
+    assert a.mp == 0.5 and a.key("right") == KEYS7.lucky_seven.name
+
+
 def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_target():
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)]))

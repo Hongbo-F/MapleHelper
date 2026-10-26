@@ -140,6 +140,7 @@ class Hunter:
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
                                   self.drops.on_look, self.wounds.on_look, self.memory.on_look, self.attacks.on_look]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
+                                         self.attacks.on_throw,  # (a cast's MP)
                                          self.senses.feed.throw]  # (the feed's: whose kills are whose, tracking)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:

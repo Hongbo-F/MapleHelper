@@ -287,8 +287,8 @@ def test_after_a_move_a_strong_frame_says_which_way_she_faces_and_the_throw_does
     assert a.heading == LEFT and a.facing_by == "frame" and a.saw == "told otherwise"
     assert a.facing is None  # the decisions still go by her keys', as before
     now[0] += 1.0
-    a.throw(LEFT)
-    assert not taps(a) and a.heading == a.facing == LEFT and a.facing_by == "keys" and a.turns == 0
+    a.throw(LEFT)  # (no arrow: the frame still tells, as one shown before the throw would)
+    assert not taps(a) and a.heading == a.facing == LEFT and a.facing_by == "frame" and a.turns == 0
     a.lock_until = a.arrow_until = 0.0
     a.throw(RIGHT)  # the other way: the tap, counted
     assert taps(a) and a.heading == a.facing == RIGHT and a.turns == 1 and a.turn_ms == 80
@@ -317,6 +317,27 @@ def test_a_frame_that_isnt_strong_adds_a_tap_but_never_takes_one_away(keys_at):
     now[0] += 1.5
     a.throw(LEFT)
     assert taps(a)
+
+
+def test_a_frame_shown_before_a_throw_without_a_tap_still_tells(keys_at):
+    """A look that doesn't wait for her keys' effect (senses.KEYS_WAIT "moves" or "none") can be of a frame shown
+    before a throw's key, right after it. A throw that needed no tap pressed no arrow and didn't turn her, so that
+    frame, after her last arrow, still tells her heading: turned without a key, she's tapped back on the next throw.
+    (Counted against the throw's keys, with KEYS_WAIT "moves" every such look found her heading by her keys again,
+    and every star went the wrong way.)"""
+    a, now = keys_at
+    a.facing = RIGHT  # her keys' last arrow: right
+    now[0] += 2.0
+    a.throw(RIGHT)
+    assert not taps(a) and a.facing_by == "keys"
+    a.lock_until = a.arrow_until = 0.0
+    assert a.see(LEFT, now[0] - 0.02, strong=True) == RIGHT  # shown 20 ms before the throw's key: turned since
+    assert a.saw == "told otherwise" and a.heading == LEFT and a.facing_by == "frame"
+    now[0] += 1.0
+    a.throw(RIGHT)
+    assert taps(a) and a.heading == a.facing == RIGHT and a.facing_by == "keys" and a.turns == 1
+    assert a.see(LEFT, now[0] - 0.02, strong=True) is None and a.saw == "too soon after an arrow"  # before the tap
+    assert a.heading == RIGHT
 
 
 def test_every_throw_is_the_attack_choices_key_with_the_tap_her_heading_asks_for(keys_at):

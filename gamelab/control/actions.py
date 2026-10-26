@@ -135,7 +135,7 @@ class Actions:
         # Which way she faces (None: unknown). `facing`: by her keys, the way her last plan turned her or threw
         # (None after a move), set at `_keys_at`; `keys_facing`: the way her last arrow turned her (None after a move),
         # at `_arrow_at`; `seen`: the frame's (see), at `seen_at`, and whether that frame was strong (`seen_strong`).
-        # `heading` is the newer of `facing` and `seen`.
+        # `heading` is `seen` where its frame is newer than her last arrow, else `facing`.
         self._facing: str | None = None
         self.keys_facing: str | None = None
         self.seen: str | None = None
@@ -176,13 +176,15 @@ class Actions:
     @property
     def heading(self) -> str | None:
         """Which way she faces as best known (None: unknown), what a throw's tap goes by: the frame's (`seen`) where
-        it's newer than what her keys last did, else her keys' (`facing`)."""
-        return self.seen if self.seen_at >= self._keys_at else self._facing
+        it's newer than the last arrow her keys pressed, else her keys' (`facing`). A throw that went without a tap
+        leaves her facing as it was, so a frame shown before it still tells: a look that doesn't wait for her keys'
+        effect (senses.KEYS_WAIT "moves" or "none") can be of one shown before a throw's key, right after it."""
+        return self.seen if self.seen_at >= self._arrow_at else self._facing
 
     @property
     def facing_by(self) -> str:
         """Who `heading` is from: "frame" or "keys"."""
-        return "frame" if self.seen_at >= self._keys_at else "keys"
+        return "frame" if self.seen_at >= self._arrow_at else "keys"
 
     def _keys(self, side: str | None, arrow: bool) -> None:
         """Her keys set her facing: by an arrow (or a move, None), or by a throw that didn't need one."""
