@@ -1773,7 +1773,7 @@ def loop_noisy(sim):
     return _loop(2)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=4, limit=400, may_die=True,
+@scenario((36, 300.0), monsters="all", seed=3, limit=400, may_die=True,
           realism=Realism(spawn_share=0.5, rival_every=20.0),
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
                    _died("other")))
@@ -1782,9 +1782,7 @@ def loop_rival(sim):
     kills give her no EXP, so the ledger has only hers. (The rival hunts one place at a time, its dot on the minimap:
     here 21, then 2, away from her.) (Seed 3 since every look is perception's newest frame after her keys' effect
     (Senses.fresh_after, the feed in every scenario): with the twin that had the feed (17), perception sees some of the
-    rival's kills die, someone else's: of seeds 1-12, 8 meet all of this, 25 not.) (Seed 4 since the review of part A,
-    2026-10-26: a monster taken for one dying where her kill was placed stays among the monsters about her, the
-    stance's: on seed 3 no rival's kill died in view; of seeds 1-12, 4, 5, 7, 9 and 12 meet all of this.)"""
+    rival's kills die, someone else's: of seeds 1-12, 8 meet all of this, 25 not.)"""
     return _loop(3)(sim)
 
 

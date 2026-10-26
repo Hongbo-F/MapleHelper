@@ -320,21 +320,21 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     """What's there to fight: the monsters wanted and seen (not fading out where a kill died: this fight's, or one
     the ledger placed, ledger.dying), less
     the kills her EXP tells of; plus those she threw at that are hidden now. Returns those, the
-    monsters seen (but those fading out where this fight's kills died), and the hidden ones. Those hit lately
-    (st.flinching: their HP bar new or lower, or hidden under their damage numbers) may still flinch when her next
-    attack picks. One the ledger takes for dying stays among those seen, which are about her (the stance's danger, its
-    jumps' arcs): it's taken so by where it is (the nearest of its kind to where a kill was placed), and with the
-    dead one unseen, a live one beside it is (review of 2026-10-26)."""
+    monsters seen (but those fading out), and the hidden ones. Those hit lately (st.flinching: their HP bar new or
+    lower, or hidden under their damage numbers) may still flinch when her next attack picks. One the ledger takes for
+    dying is taken so by where it is (the nearest of its kind to where a kill was placed): with the dead one unseen, a
+    live one beside it is, for up to its death animation. Kept among the monsters about her (the stance's `around`:
+    its danger, its jumps' arcs, too close), a dead one drawn there had her step and jump away from the dead, and on
+    loop_rocky_bridge she fell out of the map so (review of 2026-10-26): it's left out of them, as before."""
     wanted = _wanted(s, kinds, ground, far)
     body = bodies(h.model)
     st.forget_faded(now, body)
     fading = st.fading(s.monsters)
-    gone = fading + [m for m in dying_seen(h, s, now, body) if m not in fading]  # (and by a kill the ledger placed)
-    wanted = [m for m in wanted if m not in gone]
-    seen = [m for m in s.monsters if m not in gone]  # (her throws' monsters followed among the live ones)
-    hit = st.just_hit(seen)
-    st.follow(seen, now)
+    fading += [m for m in dying_seen(h, s, now, body) if m not in fading]  # (and by a kill the ledger placed)
+    wanted = [m for m in wanted if m not in fading]
     visible = [m for m in s.monsters if m not in fading]
+    hit = st.just_hit(visible)
+    st.follow(visible, now)
     wanted = _count_kills(h, st, s, wanted, h.report.exp_kills - st.exp_counted, now)
     st.exp_counted = h.report.exp_kills
     st.forget_hidden(now)  # only after _count_kills: this look's kill may still be one of these
