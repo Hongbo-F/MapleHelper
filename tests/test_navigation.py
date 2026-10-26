@@ -1224,6 +1224,44 @@ def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(mode
     assert calls["cancel"] == ["running", "queued"] and calls["wait"] == ["running"]  # the queued one withdrawn
 
 
+def test_a_running_chain_is_cut_when_her_glances_have_no_state_to_act_on(model, monkeypatch):
+    """Navigator.follow: a glance that has had no state to act on for senses.GLANCE_LOST_S raises LookLost (perception
+    down, the game not on screen as expected): the plan running is cut, every key let go (client.cancel), and her last
+    key is now, before it's raised on (the trip stands still: Navigator.go, Senses.regain)."""
+    from types import SimpleNamespace
+
+    import gamelab.control.navigator as nv
+    from gamelab.localization.pose import Localizer
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.route import Move
+    from gamelab.perception.framecheck import LookLost, Problem
+    c = by_y(model, 500, 400)
+    nav = _navigator(model)
+    localizer = Localizer(model)
+    seen = iter([(localizer.to_dot(100, 500), 1.0), (localizer.to_dot(106, 500), 1.0)])
+
+    def glance():
+        try:
+            return next(seen)
+        except StopIteration:
+            raise LookLost(Problem("perception", "the perception service's process ended")) from None
+    nav.senses = _glancing(localizer, glance)
+    nav.flow.expected = lambda legs, t: c.id
+    ended = []
+    nav.actions.hold_back = lambda events: None
+    nav.actions.ended = lambda tail_s=0.0: ended.append((nv.time.monotonic(), tail_s))
+    walk = Leg(Move("walk_off", c.id, c.id, 300, 300, "right"), Body(0.0, 100, c, run=1), Body(1.0, 250, c, run=1),
+               [Span(c.id, 0.0, 1.0, 100, 250)])
+    keys = SimpleNamespace(sorted=lambda: [[0, "right", "down"], [1000, "right", "up"]])
+    cancelled = []
+    monkeypatch.setattr(nv.client, "send", lambda events, **kw: "running")
+    monkeypatch.setattr(nv.client, "done", lambda pid: False)
+    monkeypatch.setattr(nv.client, "cancel", lambda pid: cancelled.append(pid) or True)
+    with pytest.raises(LookLost):
+        nav.follow([walk], keys, 1.0, c.id, "end", trip=SimpleNamespace(chains=0))
+    assert cancelled == ["running"] and [tail for _, tail in ended] == [0.0]
+
+
 def _watch_still_dot(model, monkeypatch, legs, x, y, every=0.03):
     """Navigator._watch over a plan of `legs` (nothing queued after it) while her dot sits still at map (x, y), on a
     clock of its own, glanced at every `every` s (each glance's frame shown as it's taken): why it was cut ('' if
