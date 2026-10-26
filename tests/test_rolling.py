@@ -134,6 +134,18 @@ def test_the_ring_keeps_exactly_the_last_5_minutes_of_moments_at_10_a_second(tmp
     rec.close()
 
 
+def test_a_frame_packed_into_the_kept_bgr_picture_packs_as_a_fresh_one_and_reads_back_as_grabbed():
+    """pack's BGR picture is kept from frame to frame (a new one a frame was 3 MB of fresh memory, its page faults
+    zeroed by the kernel): what it packs is a fresh conversion's, whatever size came before."""
+    rng = np.random.default_rng(3)
+    frames = [rng.integers(0, 256, (48, 64, 4), np.uint8), rng.integers(0, 256, (30, 40, 4), np.uint8)]
+    for frame in frames + frames[::-1] + [frames[0][..., :3]]:
+        packed = rolling.pack(frame)
+        assert packed == rolling._compress(memoryview(np.ascontiguousarray(frame[..., :3])).cast("B"))
+        item = Item(0.0, packed, size=(frame.shape[1], frame.shape[0]))
+        assert np.array_equal(item.pixels(), frame[..., :3])
+
+
 def test_a_frame_is_kept_only_while_the_game_shows_else_a_gap_says_why(tmp_path):
     game, grab = Game(), Grab()
     rec = recorder(tmp_path, game=game, grab=grab)

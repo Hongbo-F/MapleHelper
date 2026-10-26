@@ -276,11 +276,21 @@ class ScreenGrab:
         self.grabber.close()
 
 
+_packing = threading.local()  # pack's BGR picture, a thread's, kept from frame to frame
+
+
 def pack(frame: np.ndarray) -> bytes:
     """A frame (BGRA as grabbed, or BGR) kept losslessly: its BGR pixels compressed (the alpha is dropped by OpenCV,
-    1.7 ms; numpy's slice made contiguous took 6.6 ms); Item.pixels gives them back. 9.5 ms on the six frames."""
-    bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR) if frame.shape[2] == 4 else np.ascontiguousarray(frame)
-    return _compress(memoryview(bgr).cast("B"))
+    1.7 ms; numpy's slice made contiguous took 6.6 ms); Item.pixels gives them back. 9.5 ms on the six frames. The BGR
+    picture is the thread's own, made again only when the size changes: a new one a frame was 3 MB of fresh memory, 770
+    page faults that Windows' kernel zeroes (its System process: about a core for 100,000 a second, D:/MapleHelper-
+    scratch/cpu/review-numbers/zerotest.py), 7,700 a second at FPS; compressed, nothing of it is kept."""
+    if frame.shape[2] != 4:
+        return _compress(memoryview(np.ascontiguousarray(frame)).cast("B"))
+    bgr = getattr(_packing, "bgr", None)
+    if bgr is None or bgr.shape[:2] != frame.shape[:2]:
+        bgr = _packing.bgr = np.empty((*frame.shape[:2], 3), np.uint8)
+    return _compress(memoryview(cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR, dst=bgr)).cast("B"))
 
 
 def encode(frame: np.ndarray, png: bool = False) -> bytes:

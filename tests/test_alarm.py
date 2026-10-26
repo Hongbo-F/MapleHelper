@@ -153,6 +153,17 @@ def test_the_look_near_the_forms_places_scores_every_lie_detector_seen_in_game_a
 CLEAN = "lie_detector/without/2026-10-25_005500_before_the_notice.jpg"  # 1366x768, its capture anchors in place
 
 
+def test_the_spotter_s_kept_pictures_change_no_score():
+    """Its stretched frame, its half and its grey are kept from look to look (8 MB of fresh memory a look before, page
+    faults the kernel zeroes): a frame's scores are those of a spotter that never looked, whatever size came before."""
+    countdown = img("lie_detector/2026-10-19_004720_countdown.png")
+    frames = [img(CLEAN), countdown, native(countdown), SCENE, img("lie_detector/2026-10-25_002828_quiz.jpg")]
+    spotter = LieDetectorSpotter()
+    for frame in frames + frames[::-1]:
+        assert spotter.scores(frame) == LieDetectorSpotter().scores(frame)
+        assert spotter.near(frame) == LieDetectorSpotter().near(frame)
+
+
 def pasted(png: str, form: str, to: tuple[int, int]) -> np.ndarray:
     """A clean scene of the game's own size (its capture anchors in place) with `form`'s window, cut around its place
     from a saved Lie Detector screen brought to that size (`native`), pasted at `to` (x, y, game px): a form somewhere

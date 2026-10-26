@@ -24,6 +24,8 @@ another size, or the game's picture drawn off its client: control.player.Watchdo
 The key player, which runs as administrator, loads this module: it imports only gamelab.paths.
 """
 
+import threading
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -122,6 +124,7 @@ class LieDetectorSpotter:
         self.template_yellow = cv2.countNonZero(self.template)
         self.half = {name: (cv2.cvtColor(np.asarray(Image.open(png).convert("RGB")), cv2.COLOR_RGB2GRAY), t)
                      for name, (png, t) in HALF_SIZE.items()}
+        self._pictures = threading.local()  # each thread's pictures a look is made in (`_kept`)
 
     def scores(self, frame: np.ndarray) -> dict[str, float]:
         """How well each form of the Lie Detector matches, as a fraction of its threshold (>= 1: seen). A frame that
@@ -158,19 +161,31 @@ class LieDetectorSpotter:
             out[name] = best / threshold
         return out
 
-    @staticmethod
-    def _stretched(frame: np.ndarray) -> np.ndarray:
-        """A frame of the game's own size (NATIVE_FRAME) stretched to TEMPLATE_FRAME; any other as it is."""
+    def _stretched(self, frame: np.ndarray) -> np.ndarray:
+        """A frame of the game's own size (NATIVE_FRAME) stretched to TEMPLATE_FRAME (into `_kept`'s picture); any
+        other as it is."""
         if frame.shape[:2] == NATIVE_FRAME[::-1]:
-            return cv2.resize(np.ascontiguousarray(frame), TEMPLATE_FRAME, interpolation=cv2.INTER_LINEAR)
+            out = self._kept("stretched", (TEMPLATE_FRAME[1], TEMPLATE_FRAME[0]) + frame.shape[2:], frame.dtype)
+            return cv2.resize(np.ascontiguousarray(frame), TEMPLATE_FRAME, dst=out, interpolation=cv2.INTER_LINEAR)
         return frame
 
-    @staticmethod
-    def _halved(frame: np.ndarray) -> np.ndarray:
-        """The frame at half size, grey: what the half-size templates are matched on."""
+    def _halved(self, frame: np.ndarray) -> np.ndarray:
+        """The frame at half size, grey: what the half-size templates are matched on (into `_kept`'s pictures)."""
         h, w = frame.shape[:2]
-        return cv2.cvtColor(cv2.resize(np.ascontiguousarray(frame), (w // 2, h // 2), interpolation=cv2.INTER_AREA),
-                            cv2.COLOR_RGB2GRAY)
+        half = cv2.resize(np.ascontiguousarray(frame), (w // 2, h // 2), interpolation=cv2.INTER_AREA,
+                          dst=self._kept("half", (h // 2, w // 2) + frame.shape[2:], frame.dtype))
+        return cv2.cvtColor(half, cv2.COLOR_RGB2GRAY, dst=self._kept("grey", (h // 2, w // 2), frame.dtype))
+
+    def _kept(self, name: str, shape: tuple[int, ...], dtype) -> np.ndarray:
+        """This thread's picture `name` of that shape, kept from look to look (made anew only when a frame's size
+        changes): the stretched frame, its half and its grey were 8 MB of fresh memory a look at 1366x768, 2,000 page
+        faults that Windows' kernel zeroes (its System process: about a core for 100,000 a second, D:/MapleHelper-
+        scratch/cpu/review-numbers/zerotest.py). What's in it is a look's own: nothing of it is handed out."""
+        kept = self._pictures.__dict__
+        out = kept.get(name)
+        if out is None or out.shape != shape or out.dtype != dtype:
+            out = kept[name] = np.empty(shape, dtype)
+        return out
 
     def score(self, frame: np.ndarray) -> float:
         """The best match over all forms, scaled so that THRESHOLD means seen."""
