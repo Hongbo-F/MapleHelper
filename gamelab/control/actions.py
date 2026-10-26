@@ -155,6 +155,7 @@ class Actions:
         # less what it ran on after its last key (`ended`). A look from the perception service is of a frame shown
         # senses.KEY_EFFECT_S after it at the soonest, so it sees what came of the keys before it.
         self.last_key = -1e18
+        self.of: Actions | None = None  # the actions these are made from (moves_only): told of every key here too
         self.lock_until = 0.0  # when her last attack stops locking out the next one
         self.arrow_until = 0.0  # ... and stops swallowing arrows (ARROW_LOCK_MS after its key)
         self._attack_at = 0.0   # when the last attack key went down (time.monotonic)
@@ -221,8 +222,13 @@ class Actions:
 
     def ended(self, tail_s: float = 0.0) -> None:
         """A plan of hers is over, its result just read (or it was cut short: every key let go now, `tail_s` 0): its
-        last key went `tail_s` s before now, what it ran on after it (a chain's end_ms past its last key)."""
-        self.last_key = max(self.last_key, time.monotonic() - tail_s)
+        last key went `tail_s` s before now, what it ran on after it (a chain's end_ms past its last key). The actions
+        these were made from (`of`: the hunter's, whose last key her looks wait for) are told too."""
+        t = time.monotonic() - tail_s
+        a = self
+        while a is not None:
+            a.last_key = max(a.last_key, t)
+            a = a.of
 
     def hold_back(self, events: list) -> None:
         """Wait just long enough that no jump or attack key in a plan of `events` (starting now) goes down
@@ -493,10 +499,15 @@ class Actions:
     def moves_only(self) -> "Actions":
         """These actions for her retreat from the Lie Detector (behavior.retreat): her moves' keys alone (arrows, jump,
         up and down; no pick-up, chair, potion, pet food or Lucky Seven), every plan of kind alarm.RETREAT, no mouse
-        (nudge_mouse), and her attack's locks as they are here (an arrow pressed inside one doesn't move her)."""
+        (nudge_mouse), and her attack's locks as they are here (an arrow pressed inside one doesn't move her). Her last
+        key is these actions' too, both ways (`of`): the retreat's looks are of frames that show what came of its keys
+        (Senses.keyed reads the hunter's: before, the retreat's own keys went unseen there, and on loop_tree_lie_detector's
+        seed 1, sighted at 40 s, 4 of its 13 looks were of frames shown less than senses.KEY_EFFECT_S after its last
+        key, two of them before it)."""
         keys = dataclasses.replace(self.keys, lucky_seven=None, pick_up=None, chair=None, sit=None, hp_potion=None,
                                    mp_potion=None, pet_food=None)
         out = Actions(keys, kind=RETREAT)
         out.facing, out.lock_until, out.arrow_until = self.facing, self.lock_until, self.arrow_until
         out._attack_at, out.sent_at = self._attack_at, self.sent_at
+        out.last_key, out.of = self.last_key, self
         return out

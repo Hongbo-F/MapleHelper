@@ -152,6 +152,32 @@ def test_her_retreat_s_actions_are_her_moves_alone_with_no_mouse_and_her_locks_k
     assert [(name, kind) for name, kind, _ in sent] == [("walk", RETREAT), ("mouse", None)]
 
 
+def test_her_retreats_keys_are_her_last_key_to_her_looks_too(monkeypatch):
+    # The retreat's actions start from her last key and tell the actions they're made from of each key of theirs: her
+    # looks wait for what came of her last key by those (the hunter's: Senses.keyed, Senses.fresh_after), so the
+    # retreat's looks see what its keys did. Before, its keys went unseen there: on loop_tree_lie_detector's seed 1
+    # (sighted at 40 s), 4 of its 13 looks were of frames shown less than KEY_EFFECT_S after its last key, two before it.
+    from gamelab.control import actions as actions_mod
+    from gamelab.localization.senses import KEY_EFFECT_S, Senses
+    now = [50.0]
+    monkeypatch.setattr(actions_mod, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=lambda s: None))
+    monkeypatch.setattr(client, "submit", lambda *a, **k: now.__setitem__(0, now[0] + 0.4))
+    monkeypatch.setattr(Actions, "hold_back", lambda self, events: None)
+    a = Actions(SIM_KEYS_PET)
+    senses = Senses.__new__(Senses)
+    senses.keyed = lambda: a.last_key  # (as the hunter has it)
+    a.play([[0, "left", "down"], [400, "left", "up"]], "walk")
+    moves = a.moves_only()
+    assert moves.last_key == a.last_key == 50.4
+    moves.play([[0, "right", "down"], [400, "right", "up"]], "walk")  # the retreat's walk
+    assert moves.last_key == a.last_key == senses.keyed() == 50.8
+    now[0] = 52.0
+    moves.ended(0.3)  # a navigator chain's end, its last key 0.3 s before it (Navigator._ended)
+    assert a.last_key == pytest.approx(51.7) and senses.keyed() + KEY_EFFECT_S > 51.7
+    a.ended(0.5)  # (none later than her last)
+    assert a.last_key == pytest.approx(51.7)
+
+
 def test_a_hunt_that_only_looks_stops_at_the_alarm_and_its_pet_care_with_it(monkeypatch):
     from gamelab.behavior.hunter import Hunter
 
