@@ -422,3 +422,17 @@ def test_the_commands_attach_as_what_they_are_and_none_has_a_feed_or_sweep_flag(
         name, kw = made[-1]
         assert (kw["acts"], kw["throws"]) == want, argv
     cli._PERCEPTION.clear()
+
+
+def test_a_command_on_another_map_waits_for_the_services_run_on_it(tmp_path):
+    # The service starts on map 1; a command that acts on map 2 attaches: it's welcomed, and ready() returns only once
+    # the service's run on map 2 has begun (a new run: its rings and epoch), so no state of map 1's run reaches it.
+    svc = Running(tmp_path, "maps")
+    hunt = svc.client("tour", acts=True, throws=True, map_id=2)
+    try:
+        assert hunt.ready(30.0), hunt.why
+        assert hunt.welcome["map"] == 2 and hunt.epoch == 2 and all(st.epoch == 2 for st in hunt.states)
+        assert hunt.latest(Asks(time.monotonic()), timeout=5.0) is not None
+    finally:
+        hunt.close()
+        svc.stop()

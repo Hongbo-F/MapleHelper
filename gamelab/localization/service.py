@@ -432,6 +432,7 @@ class Service:
     def _welcome(self) -> dict:
         """What a client needs to read this run's frames (None for the rings while the game hasn't been seen)."""
         return {"epoch": self.epoch, "pid": os.getpid(), "map": self.map_id,
+                "next": self._rebuild if self._rebuild is not None else self.map_id,  # (a new run due: its map)
                 "ring": None if self.ring is None else self.ring.name, "slots": RING_SLOTS,
                 "shape": None if self.ring is None else list(self.ring.shape),
                 "full": None if self.full_ring is None else self.full_ring.name, "full_slots": FULL_SLOTS,
@@ -914,10 +915,14 @@ class ServiceClient(Feed):
             return False
 
     def ready(self, timeout: float = HELLO_WAIT_S) -> bool:
-        """Wait (`timeout` s at most) to be welcomed. Raises RuntimeError if the service refused this command (another
-        command that acts holds it on another map)."""
+        """Wait (`timeout` s at most) to be welcomed, and if the service is to look at another map for it, for that run
+        (no state of the map before is handed out then). Raises RuntimeError if the service refused this command
+        (another command that acts holds it on another map)."""
+        def welcomed():
+            w = self.welcome or {}
+            return self.refusal is not None or (self.alive and w.get("next", w.get("map")) == w.get("map"))
         with self._cond:
-            self._cond.wait_for(lambda: self.alive or self.refusal is not None, timeout)
+            self._cond.wait_for(welcomed, timeout)
         if self.refusal is not None:
             raise RuntimeError(self.refusal)
         return self.alive

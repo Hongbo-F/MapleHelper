@@ -407,6 +407,9 @@ def _perception(model, title: str, name: str, acts: bool, throws: bool = False):
         w = perception.welcome
         _log(f"perception: the service (pid {w['pid']}, run {w['epoch']}, map {w['map']}) in "
              f"{time.monotonic() - started:.1f} s")
+        if w["map"] != model.id:  # (a viewer, while a command that acts holds it on its own map)
+            _log(f"perception: it looks at map {w['map']} for another command, not {model.id}: what it places is on "
+                 f"{w['map']}")
     else:
         _log(f"perception: {perception.why}; it's started if none runs, and this command stands still until it comes")
     return perception
