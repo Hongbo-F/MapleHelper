@@ -131,6 +131,94 @@ def test_spotter_scores_are_the_same_as_with_numpys_yellow(monkeypatch):
     assert new == [old.scores(f) for f in frames]
 
 
+def native(frame):
+    """A 1920x1080 frame shrunk to the game's own 1366x768, as test_spots_every_lie_detector_seen_in_game_at_the_game_s_
+    own_size_too shrinks it; a 1366x768 one as it is."""
+    return frame if frame.shape[:2] == (768, 1366) else np.asarray(Image.fromarray(frame).resize((1366, 768), Image.BOX))
+
+
+@pytest.mark.parametrize("png", SEEN_IN_GAME + WITHOUT, ids=lambda p: p.stem)
+def test_the_look_near_the_forms_places_scores_every_lie_detector_seen_in_game_as_the_whole_frame_does(png):
+    """The watchdog's look (`near`): each form matched only around where it has always shown, on the pictures the
+    whole frame's look matches, scores it as that look does where it's seen, at both sizes, and nothing higher."""
+    spotter = LieDetectorSpotter()
+    for frame in (img(png), native(img(png))):
+        whole, near = spotter.scores(frame), spotter.near(frame)
+        assert near.keys() == whole.keys() and all(near[f] <= whole[f] + 1e-4 for f in whole)
+        if png.parent.name != "without":
+            form = FORMS[png.stem.split("_", 2)[2]]
+            assert near[form] == pytest.approx(whole[form], abs=1e-4) and near[form] >= 1
+
+
+def pasted(png: str, form: str, to: tuple[int, int]) -> np.ndarray:
+    """A clean scene (stretched to 1920x1080) with `form`'s window cut from a saved Lie Detector screen (1920x1080) at
+    its place, pasted at `to` (x, y): a form somewhere it has never shown."""
+    import cv2
+    scene = cv2.resize(img("lie_detector/without/2026-10-25_005500_before_the_notice.jpg"), lie_detector.TEMPLATE_FRAME,
+                       interpolation=cv2.INTER_LINEAR)
+    (x, y), = lie_detector.PLACES[form][:1]
+    if form == "countdown":
+        h, w = LieDetectorSpotter().template.shape
+    else:
+        h, w = (2 * n for n in LieDetectorSpotter().half[form][0].shape)
+    cut = img(f"lie_detector/{png}")[y - 8:y + h + 8, x - 8:x + w + 8]
+    scene[to[1]:to[1] + cut.shape[0], to[0]:to[0] + cut.shape[1]] = cut
+    return scene
+
+
+@pytest.mark.parametrize("png, form, to", [("2026-10-19_004720_countdown.png", "countdown", (300, 700)),
+                                           ("2026-10-19_015828_mini_game_notice.png", "mini-game notice", (200, 300))])
+def test_a_lie_detector_somewhere_it_never_showed_is_seen_by_the_watchdog_s_whole_frame_look(tmp_path, png, form, to):
+    """The look near the forms' places doesn't see a form elsewhere; the whole frame's, every WHOLE_EVERY-th look, does:
+    the alarm within that many looks of its first showing (2 s at 4 a second)."""
+    frame = pasted(png, form, to)
+    spotter = LieDetectorSpotter()
+    assert spotter.scores(frame)[form] >= 1 and max(spotter.near(frame).values()) < 1
+    frames = iter([SCENE] + [frame] * 20)  # (the first look, of the whole frame, sees no Lie Detector)
+    flag = threading.Event()
+    dog = Watchdog("MapleStory", flag, spotter=spotter, grab=lambda: next(frames), on_alarm=lambda f: None,
+                   folder=tmp_path, log=lambda m: None)
+    looks = 0
+    while not flag.is_set():
+        dog.tick(looks * 0.25)
+        looks += 1
+    assert looks == 1 + lie_detector.WHOLE_EVERY and dog.form == form  # seen at its 8th look, the 9th in all
+    dog.recording.finish("stopped")
+
+
+def test_the_watchdog_looks_at_the_whole_frame_every_whole_every_th_look_and_in_a_cycle_and_at_other_sizes(tmp_path):
+    class Spy:
+        def __init__(self):
+            self.calls, self.up = [], False
+
+        def scores(self, frame):
+            self.calls.append("whole")
+            return {"countdown": 1.5 if self.up else 0.1}
+
+        def near(self, frame):
+            self.calls.append("near")
+            return {"countdown": 1.5 if self.up else 0.1}
+
+    spy = Spy()
+    dog = Watchdog("MapleStory", threading.Event(), spotter=spy, grab=lambda: SCENE, on_alarm=lambda f: None,
+                   folder=tmp_path, log=lambda m: None)
+    looks = iter(range(100))
+    for _ in range(17):
+        dog.tick(next(looks) * 0.25)
+    assert spy.calls == (["whole"] + ["near"] * 7) * 2 + ["whole"]
+    spy.calls.clear()
+    dog.client_size = (1600, 900)  # (grabbed so: the places aren't known at that size)
+    for _ in range(3):
+        dog.tick(next(looks) * 0.25)
+    assert spy.calls == ["whole"] * 3
+    spy.calls.clear()
+    dog.client_size, spy.up = (1366, 768), True
+    for _ in range(4):
+        dog.tick(next(looks) * 0.25)
+    assert spy.calls == ["near", "whole", "whole", "whole"] and dog.cycle_t0 is not None  # in a cycle: the whole frame
+    dog.recording.finish("stopped")
+
+
 def test_watchdog_grabs_the_game_as_an_rgb_picture_of_its_own(monkeypatch):
     from gamelab.control import player as player_mod
     rng = np.random.default_rng(0)
@@ -281,6 +369,56 @@ def test_waits_end_early_when_the_alarm_goes_off():
     assert _sleep_until(time.perf_counter() + 5, flag) is False
     assert time.perf_counter() - started < 0.5
     assert _sleep_until(time.perf_counter() + 0.01) is True
+
+
+def test_the_yolo_shadow_s_ready_line_says_the_device_it_checks_on():
+    """On the CPU a cycle's checks cost 6.4-6.7 cores, on the GPU 0.09-0.10: the player's log says which it got."""
+    from gamelab.control.player import ShadowWorker
+
+    class Shadow:
+        def __init__(self, device):
+            self.device = device
+
+        def warm(self):
+            pass
+
+    for device, said_as in (("cpu", "on the CPU"), (0, "on GPU 0")):
+        said = []
+        ShadowWorker(Shadow(device), said.append)._warm_up()
+        assert said[0].startswith(f"the YOLO shadow is ready {said_as}: loaded and a first check in"), said
+
+
+def _player_sending(monkeypatch, tmp_path, flag=None):
+    from gamelab.control import player as player_mod
+    from maplehelper.keys import parse
+    monkeypatch.setattr(player_mod, "INBOX", tmp_path)
+    monkeypatch.setattr(player_mod.window, "find_game", lambda title: 1)
+    monkeypatch.setattr(player_mod.window, "client_rect", lambda hwnd: {"left": 0, "top": 0, "width": 1366, "height": 768})
+    monkeypatch.setattr(player_mod.win32, "foreground_title", lambda: "Game")
+    monkeypatch.setattr(player_mod.win32, "send_key", lambda key, down: None)
+    return Player({"f": parse("f"), "g": parse("g")}, "Game", flag)
+
+
+def test_a_plan_s_keys_go_out_at_their_times(monkeypatch, tmp_path):
+    """The key thread sleeps between its checks and spins only before a key (player.FINAL_S): each key goes out at its
+    time, not before, and to within a few ms (here without the 1 ms timer serve asks for: a sleep on the alarm can
+    end a tick, 15.6 ms, late)."""
+    events = [[0, "f", "down"], [30, "f", "up"], [95, "g", "down"], [160, "g", "up"], [233, "f", "down"],
+              [420, "f", "up"]]
+    p = _player_sending(monkeypatch, tmp_path)
+    result = p.run({"id": "keys", "events": events, "capture": {"lead_ms": 0}})
+    late = [sent[0] - due[0] for sent, due in zip(result["sent"], events)]
+    assert len(late) == len(events) and min(late) >= 0 and np.median(late) < 5, late
+
+
+def test_a_wait_for_a_key_ends_at_once_when_the_alarm_goes_off(monkeypatch, tmp_path):
+    """Between its checks the key thread sleeps on the alarm itself: the alarm wakes it (it was seen within 10 ms)."""
+    from gamelab.control.player import Alarm
+    flag = Alarm()
+    p = _player_sending(monkeypatch, tmp_path, flag)
+    threading.Timer(0.1, flag.set).start()
+    result = p.run({"id": "long", "events": [[0, "f", "down"], [3000, "f", "up"]], "capture": {"lead_ms": 0}})
+    assert result["error"] == LIE_DETECTOR_ERROR and time.monotonic() - flag.at < 0.05
 
 
 def test_raised_alarm_blocks_gamelab_until_cleared(alarm_file, monkeypatch, tmp_path):

@@ -16,6 +16,10 @@ It comes in more than one form, and each is recognized:
 The notice and the quiz's warning are matched so that the hunt stops, and she retreats, before the
 test begins. Never try to answer it automatically: a person has to.
 
+Each form has always shown at one place (PLACES), and the player's watchdog looks 4 times a second: most of its looks
+match each form only around its places (`near`, 11 ms of CPU at 1366x768), every WHOLE_EVERY-th the whole frame
+(`scores`, 151 ms), for a window anywhere else.
+
 The key player, which runs as administrator, loads this module: it imports only gamelab.paths.
 """
 
@@ -52,6 +56,26 @@ HALF_SIZE = {
     "quiz": (ASSETS / "lie_detector_quiz.png", 0.7),
     "truth booth": (ASSETS / "truth_booth_timer.png", 0.85),
 }
+# Where each form has shown, its template's top-left in TEMPLATE_FRAME px (the countdown's two: its window, then the
+# second window with the yellow title): the same pixel on every recording and fixture of 2026-10-18 to 26 that showed
+# it (3,758 saved frames, 1,502 with a form: D:/MapleHelper-scratch/cpu/ldwatch/scan.jsonl, locs.py), the 1920x1080
+# ones and the 1366x768 ones stretched alike. `near` matches each form within NEAR_MARGIN px of these, on the very
+# pictures `scores` matches (the frame stretched, halved, grey): on those frames every form scored within 1e-4 of
+# `scores`, none missed, and nothing else scored higher than with `scores` (its boxes are inside the frame).
+PLACES = {
+    "countdown": ((910, 323), (1648, 589)),
+    "mini-game notice": ((1458, 680),),
+    "mini-game": ((432, 124),),
+    "quiz warning": ((598, 566),),
+    "quiz": ((604, 470),),
+    "truth booth": ((776, 40),),
+}
+NEAR_MARGIN = 48  # TEMPLATE_FRAME px around each place (24 at half size)
+# The watchdog's every this many looks is of the whole frame (`scores`): a form somewhere else is seen within that many
+# looks (2 s at 4 a second; the notice comes 10 s before the mini-game, the quiz's warning 30 s before the quiz). At 4
+# looks a second on the saved hunt frames, 35 ms of CPU a look against 151 for the whole frame's every time: 0.14 cores
+# against 0.61 (D:/MapleHelper-scratch/cpu/ldwatch/roi_eval.py).
+WHOLE_EVERY = 8
 
 
 def to_template(frame: np.ndarray) -> np.ndarray:
@@ -81,28 +105,71 @@ def yellow(rgb: np.ndarray) -> np.ndarray:
     return out
 
 
+def _box(place: tuple[int, int], size: tuple[int, int], frame: tuple[int, int], margin: int) -> tuple[slice, slice]:
+    """The rows and columns of a frame of size `frame` (w, h) within `margin` px of a picture of size `size` (w, h)
+    whose top-left is at `place`."""
+    (x, y), (w, h) = place, size
+    return (slice(max(0, y - margin), min(frame[1], y + h + margin)),
+            slice(max(0, x - margin), min(frame[0], x + w + margin)))
+
+
 class LieDetectorSpotter:
     """Works on full-size (unscaled) RGB frames of the game's client area."""
 
     def __init__(self):
         self.template = yellow(np.asarray(Image.open(TITLE).convert("RGB")))
+        self.template_yellow = cv2.countNonZero(self.template)
         self.half = {name: (cv2.cvtColor(np.asarray(Image.open(png).convert("RGB")), cv2.COLOR_RGB2GRAY), t)
                      for name, (png, t) in HALF_SIZE.items()}
 
     def scores(self, frame: np.ndarray) -> dict[str, float]:
         """How well each form of the Lie Detector matches, as a fraction of its threshold (>= 1: seen). A frame that
         the game's own size (NATIVE_FRAME) is stretched to TEMPLATE_FRAME first."""
-        if frame.shape[:2] == NATIVE_FRAME[::-1]:
-            frame = cv2.resize(np.ascontiguousarray(frame), TEMPLATE_FRAME, interpolation=cv2.INTER_LINEAR)
+        frame = self._stretched(frame)
         out = {"countdown": self._yellow_title(frame) / THRESHOLD}
-        h, w = frame.shape[:2]
-        gray = cv2.cvtColor(cv2.resize(np.ascontiguousarray(frame), (w // 2, h // 2), interpolation=cv2.INTER_AREA),
-                            cv2.COLOR_RGB2GRAY)
+        gray = self._halved(frame)
         for name, (template, threshold) in self.half.items():
             if gray.shape[0] >= template.shape[0] and gray.shape[1] >= template.shape[1]:
                 score = float(cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED).max())
                 out[name] = score / threshold
         return out
+
+    def near(self, frame: np.ndarray) -> dict[str, float]:
+        """`scores`, each form matched only within NEAR_MARGIN of its PLACES (one elsewhere scores low here: the whole
+        frame's look, `scores`, sees it). A frame of another size than NATIVE_FRAME and TEMPLATE_FRAME, where the
+        places aren't known, is matched whole (`scores`)."""
+        if (frame.shape[1], frame.shape[0]) not in (NATIVE_FRAME, TEMPLATE_FRAME):
+            return self.scores(frame)
+        frame = self._stretched(frame)
+        th, tw = self.template.shape
+        best = 0.0
+        for place in PLACES["countdown"]:
+            rows, cols = _box(place, (tw, th), TEMPLATE_FRAME, NEAR_MARGIN)
+            best = max(best, self._yellow_title(frame[rows, cols]))
+        out = {"countdown": best / THRESHOLD}
+        gray = self._halved(frame)
+        half = (TEMPLATE_FRAME[0] // 2, TEMPLATE_FRAME[1] // 2)
+        for name, (template, threshold) in self.half.items():
+            best = 0.0
+            for x, y in PLACES[name]:
+                rows, cols = _box((x // 2, y // 2), template.shape[::-1], half, NEAR_MARGIN // 2)
+                best = max(best, float(cv2.matchTemplate(gray[rows, cols], template, cv2.TM_CCOEFF_NORMED).max()))
+            out[name] = best / threshold
+        return out
+
+    @staticmethod
+    def _stretched(frame: np.ndarray) -> np.ndarray:
+        """A frame of the game's own size (NATIVE_FRAME) stretched to TEMPLATE_FRAME; any other as it is."""
+        if frame.shape[:2] == NATIVE_FRAME[::-1]:
+            return cv2.resize(np.ascontiguousarray(frame), TEMPLATE_FRAME, interpolation=cv2.INTER_LINEAR)
+        return frame
+
+    @staticmethod
+    def _halved(frame: np.ndarray) -> np.ndarray:
+        """The frame at half size, grey: what the half-size templates are matched on."""
+        h, w = frame.shape[:2]
+        return cv2.cvtColor(cv2.resize(np.ascontiguousarray(frame), (w // 2, h // 2), interpolation=cv2.INTER_AREA),
+                            cv2.COLOR_RGB2GRAY)
 
     def score(self, frame: np.ndarray) -> float:
         """The best match over all forms, scaled so that THRESHOLD means seen."""
@@ -110,9 +177,9 @@ class LieDetectorSpotter:
 
     def _yellow_title(self, frame: np.ndarray) -> float:
         """How well the yellow letters of the countdown window's title match (0 when there's too little yellow)."""
-        mask = yellow(frame)
-        if mask.sum() < 0.5 * self.template.sum():  # not even enough yellow for the title
-            return 0.0
+        mask = yellow(np.ascontiguousarray(frame))
+        if cv2.countNonZero(mask) < 0.5 * self.template_yellow:  # not even enough yellow for the title (counted:
+            return 0.0                                            # 0.26 ms at 1920x1080, the sum 1.3)
         return float(cv2.matchTemplate(mask, self.template, cv2.TM_CCOEFF_NORMED).max())
 
     def seen(self, frame: np.ndarray) -> bool:

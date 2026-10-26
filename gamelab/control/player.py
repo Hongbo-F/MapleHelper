@@ -178,6 +178,15 @@ def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: l
     return None
 
 
+# The key thread waits for a key's time in 15 ms steps (the cancel file and a retreat's window looked at between), each
+# slept on the alarm (`halt.wait`: it ends at once when the alarm goes off), and the last FINAL_S before the key as ever
+# (_sleep_until: time.sleep's precise steps, the last 4 ms spun). Every step was _sleep_until's, spun at its end: 0.12
+# cores while plans ran back to back, about 0.02 so (D:/MapleHelper-scratch/cpu/apply/keywait.py). FINAL_S is more
+# than an alarm wait's lateness (1-2 ms with the 1 ms timer serve asks for, up to a tick of 15.6 ms without).
+WAIT_STEP_S = 0.015
+FINAL_S = 0.02
+
+
 def _sleep_until(t: float, stop: threading.Event | None = None) -> bool:
     """Sleep until perf_counter() reaches t. Returns False early if `stop` gets set."""
     while (left := t - time.perf_counter()) > 0:
@@ -313,8 +322,12 @@ class ShadowWorker(threading.Thread):
             self._say(f"the YOLO shadow couldn't be loaded ({type(e).__name__}: {e}): it's off, the Lie Detector "
                       "watched and recorded as ever")
             return
-        self._say(f"the YOLO shadow is ready: loaded and a first check in {time.monotonic() - started:.1f} s, off the "
-                  "watch")
+        # The device it checks on, said (lie_detector_yolo's `device`: 0, the GPU, or "cpu"): on the CPU a cycle's
+        # checks took 6.4-6.7 cores against 0.09-0.10 on the GPU (D:/MapleHelper-scratch/cpu/ldwatch/yolo_bench.py).
+        device = getattr(self.shadow, "device", None)
+        on = "" if device is None else " on the CPU" if device == "cpu" else f" on GPU {device}"
+        self._say(f"the YOLO shadow is ready{on}: loaded and a first check in {time.monotonic() - started:.1f} s, off "
+                  "the watch")
 
     def _say(self, msg: str) -> None:
         try:
@@ -354,6 +367,13 @@ class Watchdog(threading.Thread):
     again, paged too, so gamelab's commands go on refusing. An alarm file that never got written (the disk full)
     can't be cleared: then the player stays up, locked, until it's stopped.
 
+    A look matches each form only around the places it has always shown (the spotter's `near`), and every
+    lie_detector.WHOLE_EVERY-th look (the first too) the whole frame (`scores`): a form shown anywhere else is seen
+    within that many looks, 2 s. The whole frame is looked at every time while a cycle is in progress (what it records
+    is as it ever was) and while the game's client is of another size than 1366x768 or 1920x1080 (the places aren't
+    known there). At 4 looks a second, 0.14 cores against 0.61 (D:/MapleHelper-scratch/cpu/ldwatch/roi_eval.py). A
+    spotter without `near` (the tests' own) is asked for `scores` every time.
+
     `grab` (for tests) stands in for grabbing the game: it returns a frame (RGB), (a frame, "covered"), or why
     there's none ("no window", "minimized"; None is "no window"). Nothing that goes wrong in a look, the recording or
     the log stops the watching: it's logged and the next look comes."""
@@ -362,13 +382,16 @@ class Watchdog(threading.Thread):
                  interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None,
                  shadow=False):
         super().__init__(name="lie-detector-watch", daemon=True)
-        from ..perception.lie_detector import LieDetectorSpotter
+        from ..perception.lie_detector import WHOLE_EVERY, LieDetectorSpotter
         from ..perception.lie_detector_yolo import FORM, YoloPatternShadow
         from . import lie_recorder
         from .alarm import raise_alarm
         self.title = game_title
         self.alarm = alarm
         self.spotter = spotter or LieDetectorSpotter()
+        self.whole_every = WHOLE_EVERY
+        self.looks = 0                        # looks with a frame so far (every whole_every-th of the whole frame)
+        self.client_size: tuple[int, int] | None = None  # the game's client as last grabbed (None: `grab`'s frames)
         self.shadow = (YoloPatternShadow() if shadow is True else shadow) or None
         self.shadow_form = FORM
         self.grab = grab
@@ -400,6 +423,9 @@ class Watchdog(threading.Thread):
             self.shadow_worker.start()
 
     def run(self) -> None:
+        # OpenCV on this thread alone (its 24 threads cost 0.27 cores more at 4 looks a second, for no less time a look:
+        # the player had it only from ultralytics' import, the shadow's, setting it to 0, seconds after the start)
+        cv2.setNumThreads(1)
         with mss.MSS() as sct:
             due = time.monotonic()
             while not self.stopped.is_set():
@@ -428,7 +454,7 @@ class Watchdog(threading.Thread):
         scores = None
         if frame is not None:
             try:
-                scores = self.spotter.scores(frame)
+                scores = self._scores(frame)
             except Exception as e:  # (a frame it can't take, such as one smaller than its templates)
                 self._trouble("the Lie Detector check failed", e)
                 frame, why = None, "check failed"
@@ -477,6 +503,18 @@ class Watchdog(threading.Thread):
                 self._say(f"the Lie Detector alarm was cleared and none has been on screen for {self.end_s:g} s: "
                           "the player stops (it takes plans again once it's started again: `python -m gamelab "
                           "player --elevate`)")
+
+    def _scores(self, frame) -> dict[str, float]:
+        """The spotter's scores of a look's frame: near the forms' places (`near`), or of the whole frame (`scores`) on
+        every whole_every-th look, the first too, while a cycle is in progress, and with the game's client of a size
+        whose places aren't known (see the top)."""
+        from ..perception.lie_detector import NATIVE_FRAME, TEMPLATE_FRAME
+        self.looks += 1
+        near = getattr(self.spotter, "near", None)
+        if (near is None or self.looks % self.whole_every == 1 % self.whole_every or self.cycle_t0 is not None
+                or self.client_size not in (None, NATIVE_FRAME, TEMPLATE_FRAME)):
+            return self.spotter.scores(frame)
+        return near(frame)
 
     def gone_for(self, now: float) -> bool:
         """Whether the game has shown no Lie Detector for end_s, every look of it showing the game."""
@@ -548,6 +586,7 @@ class Watchdog(threading.Thread):
         client_area = window.client_rect(hwnd)
         if client_area["width"] <= 0 or client_area["height"] <= 0:
             return "minimized"
+        self.client_size = (client_area["width"], client_area["height"])
         # A screen capture sees whatever is on top (window.shows: the middle and near each corner). Still checked for
         # the Lie Detector, as it always was (it may show round the window over it), but not saved, nor counted as
         # the Lie Detector gone: a terminal opened over the game had gone to disk as frames of it, and after a
@@ -673,8 +712,13 @@ class Player:
                 if cutoff is not None and time.perf_counter() >= cutoff:
                     problems.append(RETREAT_OVER)
                     return False
-                step = min(due, time.perf_counter() + 0.015, cutoff if cutoff is not None else due)  # 15 ms steps
-                if not _sleep_until(step, halt):
+                end = min(due, cutoff) if cutoff is not None else due
+                left = end - time.perf_counter()
+                if left > FINAL_S:  # slept (no spin), WAIT_STEP_S at most: the checks above between
+                    stopped = halt.wait(min(WAIT_STEP_S, left - FINAL_S))
+                else:               # the last FINAL_S: to the key's time as ever
+                    stopped = not _sleep_until(end, halt)
+                if stopped:
                     problems.append(LIE_DETECTOR_ERROR)
                     return False
                 if time.perf_counter() >= due:
