@@ -180,6 +180,28 @@ def test_one_she_threw_at_that_vanished_as_her_exp_went_up_was_hers():
     assert tracker.tracks[1].state == DEAD and tracker.tracks[1].cause == "hers"
 
 
+def test_one_her_waiting_gain_would_go_on_out_of_sight_is_owed_not_about():
+    """While her EXP gain waits for its monster to go (FADE_S + MISSING_S), the likeliest of its monsters, out of sight
+    already, is `owed` (localization.unseen doesn't take it for one about: review of 2026-10-26, a just-killed monster
+    taken for one hidden under her body kept piles waiting and throws going at it); not while the likeliest is still
+    seen fading (`dying`), nor once the gain has gone on it (dead)."""
+    tracker = MonsterTracker()
+    t0 = 100.0
+    standing = [([sighting(1200, pose="stand", bar=0.4), sighting(1350, pose="stand")], view()) for k in range(30)]
+    run(tracker, standing, start=t0)
+    tracker.throw(t0 + 1.0, "right")
+    tracker.gain(t0 + 1.4)
+    fading = [([sighting(1200, pose="", bar=0.4), sighting(1350, pose="stand")], view())] * 24
+    owed, states = [], []
+    for k, frame in enumerate(fading + [([sighting(1350, pose="stand")], view())] * 60):
+        _, st = run(tracker, [frame], start=t0 + 1.4 + k / FPS)
+        states += st
+        owed.append({tr.id for tr in tracker.tracks.values() if tr.owed})
+    assert states[5][1] == DYING and owed[5] == set()  # fading: not owed
+    assert states[24 + 12][1] == HIDDEN and owed[24 + 12] == {1}  # out of sight 0.4 s, the gain waiting: owed
+    assert tracker.tracks[1].state == DEAD and owed[-1] == set() and 2 not in set().union(*owed)
+
+
 def test_a_throw_aims_at_the_monsters_a_star_can_pick_and_none_beyond():
     # A star picks a body whose near side is within 400 (attack.reach.STAR_RANGE): a pig's middle up to 434
     # (STAR_REACH). The tracker allows 40 more for what moves before the pick (THROW_REACH, a number: localization

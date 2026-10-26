@@ -49,6 +49,7 @@ from ..localization.monsters import (DEFAULT_SPEED, MONSTER_HEIGHT, Monster, Mon
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..localization.tracking import HIDDEN, HIDE_S, LIVE
+from ..localization.unseen import hidden
 from ..motion import bodies as her_body
 from ..motion import route
 from ..motion.flow import END_LINGER, MAX_LEGS, Body, Flow, Leg, Span, chain_record, ms
@@ -776,20 +777,22 @@ class Navigator:
         return out
 
     def hidden_tracks(self, s: Scene, platforms, tracks: list[MonsterTrack], came=None) -> list[MonsterTrack]:
-        """The monsters the feed follows out of sight on screen as of look `s` (Scene.tracks, HIDDEN, last seen within
-        tracking.HIDE_S) on `platforms`, and `came` (the feed's track of the monster the last chain was cut for, kept
-        for this one: TripState.came) wherever the feed has it, as tracks walking as followed (_track_of), of the kinds
-        the chain keeps clear of; none that one of `tracks` (the look's and her memory's, by kind and platform within
-        what it can have walked since: memory.MATCH_SLACK) is."""
+        """The monsters the feed follows out of sight on screen as of look `s` that count as about (localization.unseen.
+        hidden: last seen within its TRACK_S, none that a kill of hers is on: her memory's `kills`, the ledger's) on
+        `platforms`, and `came` (the feed's track of the monster the last chain was cut for, kept for this one:
+        TripState.came; seen within tracking.HIDE_S) wherever the feed has it, as tracks walking as followed
+        (_track_of), of the kinds the chain keeps clear of; none that one of `tracks` (the look's and her memory's, by
+        kind and platform within what it can have walked since: memory.MATCH_SLACK) is."""
         out: list[MonsterTrack] = []
         if not UNSEEN_TRIPS:
             return out
         now = time.monotonic()
-        cands = [tr for tr in getattr(s, "tracks", ()) or () if tr.state == HIDDEN]
-        if came is not None and not any(tr.id == came.id for tr in cands):
+        kills = getattr(self.memory, "kills", None)
+        cands = hidden(s, kills() if kills is not None else (), platforms)
+        if came is not None and not any(tr.id == came.id for tr in cands) and 0 <= s.t - came.last_seen <= HIDE_S:
             cands.append(came)
         for tr in cands:
-            if tr.platform is None or tr.platform not in platforms or not 0 <= s.t - tr.last_seen <= HIDE_S \
+            if tr.platform is None or tr.platform not in platforms \
                     or (self.escort is not None and not self.escort.threat(tr.kind)):
                 continue
             speed = self.tracker.walking.get(tr.kind, DEFAULT_SPEED)

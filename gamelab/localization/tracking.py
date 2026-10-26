@@ -40,7 +40,8 @@ to go out of sight: one she threw at (a throw toward it in the STAR_WINDOW befor
 one that stood still where it was from the gain until it went (a killed monster fades where it died), then one that
 went after the gain (else one already out of sight when it came: killed while it hid), then (PLAYERS_LAST) one
 with no other player by it, then the least HP left, then the nearest her: `dead`, cause "hers". Meanwhile the
-likeliest one still seen is `dying`. A monster's HP bar going down is a `bar_hit`, by her when a throw of hers went
+likeliest one still seen is `dying`, and the likeliest of all, if out of sight already, `owed` (localization.unseen
+doesn't take it for a monster about). A monster's HP bar going down is a `bar_hit`, by her when a throw of hers went
 its way ("other" otherwise; None with her throws unknown).
 
 A track seen in fewer than MIN_SEEN frames that goes is dropped without a death: a match on scenery for a
@@ -183,6 +184,8 @@ class Track:
     crowded: bool = False    # it went out of sight beside another of its kind, or a new one was seen where it was
     still_x: float | None = None  # where it has stood since `still_since` (within FADE_MOVE)
     still_since: float = 0.0
+    owed: bool = False       # out of sight, the one a gain of hers still waiting would go on now (_resolve): likely
+                             # dead, not about (localization.unseen)
 
     def record(self) -> dict:
         """As telemetry data ('tracks')."""
@@ -523,6 +526,7 @@ class MonsterTracker:
         """Her EXP gains put on the monsters they were (see the top); while the likeliest is still seen, fading,
         it's `dying`."""
         for tr in self.tracks.values():
+            tr.owed = False
             if tr.state == DYING:
                 tr.state = LIVE if t - tr.last_seen < MISSING_S else HIDDEN
         left = []
@@ -535,6 +539,9 @@ class MonsterTracker:
                 live = [tr for tr in cands if tr.state == LIVE]
                 if live:
                     min(live, key=lambda tr: self._likely(tr, g)).state = DYING
+                best = min((tr for tr in cands if not tr.owed), key=lambda tr: self._likely(tr, g), default=None)
+                if best is not None and best.state == HIDDEN:  # the likeliest is out of sight already: it goes on it
+                    best.owed = True
             elif gone:
                 self._dies(min(gone, key=lambda tr: self._likely(tr, g)), g, "hers", events, t)
             else:

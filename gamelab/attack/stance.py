@@ -231,15 +231,22 @@ def end_drop(model: MapModel, platform: Platform, side: int) -> float:
 
 def drop_limits(model: MapModel, platform: Platform) -> tuple[float, float]:
     """The stretch of `platform` her steps away and jumps back keep to (stance's `edges`): DROP_ROOM in from an end with
-    a long drop under it (end_drop LONG_DROP or more), the end itself at another; worked out once a platform."""
+    a long drop under it (end_drop LONG_DROP or more), the end itself at another; worked out once a platform. On one
+    too narrow for that, as far from the long drops as it goes: its middle between two (a step only toward it; review
+    of 2026-10-26: Tree Dungeon's 18, 27 and 30, 187-188 units wide, drop 125-254 units at both ends, and the stretch
+    was the whole platform), the other end with one."""
     key = (id(model), platform.id)
     got = _DROPS.get(key)
     if got is None or got[0] is not model:
-        lo = platform.left + (DROP_ROOM if end_drop(model, platform, -1) >= LONG_DROP else 0.0)
-        hi = platform.right - (DROP_ROOM if end_drop(model, platform, 1) >= LONG_DROP else 0.0)
+        left, right = end_drop(model, platform, -1) >= LONG_DROP, end_drop(model, platform, 1) >= LONG_DROP
+        lo = platform.left + (DROP_ROOM if left else 0.0)
+        hi = platform.right - (DROP_ROOM if right else 0.0)
+        if lo > hi:
+            lo = hi = (platform.left + platform.right) / 2 if left and right else platform.right if left \
+                else platform.left
         if len(_DROPS) > 4096:
             _DROPS.clear()
-        got = _DROPS[key] = (model, (lo, hi) if lo <= hi else (platform.left, platform.right))
+        got = _DROPS[key] = (model, (lo, hi))
     return got[1]
 
 

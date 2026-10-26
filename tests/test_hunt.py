@@ -620,13 +620,13 @@ def _remembered(kind, pid, x, age, model):
     return SimpleNamespace(kind=kind, platform=pid, x=x, seen=time.monotonic() - age, monster=m)
 
 
-def test_a_pile_by_a_monster_that_counts_seen_remembered_or_due_back_waits_until_it_is_clear():
+def test_a_pile_by_a_monster_that_counts_seen_remembered_or_due_back_waits_until_it_is_clear(monkeypatch):
     """Live on 2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off Tree Dungeon's 23 came on stays
     there for drops (hunt.PILE_CLEAR). A pile on the ground at x 750, from her spot (landing at 880): gone for with
     nothing about; not with a Horny Mushroom her memory has 15 units from it 1.5 s ago (the looks missed it), nor one
-    between where she'd land and it, nor while the spawn point's monster is due back (her kill there 6 s ago); a kill
-    there 1 s ago leaves her the time to pick it up, one 14 s ago is past DUE_TO. Not where nothing counts (the first
-    map)."""
+    between where she'd land and it, nor, with DUE_BACK (off: its numbers there), while the spawn point's monster is
+    due back (her kill there 6 s ago); a kill there 1 s ago leaves her the time to pick it up, one 14 s ago is past
+    DUE_TO. Not where nothing counts (the first map)."""
     from gamelab.behavior.ledger import Kill
     m, ground, spot = _ground()
     pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True)
@@ -641,6 +641,9 @@ def test_a_pile_by_a_monster_that_counts_seen_remembered_or_due_back_waits_until
     assert _priced(m, [Pile(560.0, 500.0, ground, time.monotonic(), True)])._pile_block(
         _on(spot, 1000.0, m, [seen]), Pile(560.0, 500.0, ground, time.monotonic(), True)) is not None
     now = time.monotonic()
+    assert not hunt.DUE_BACK and _priced(m, [pile], kills=[Kill(now - 6.0, "horny-mushroom", ground, 790.0, 500.0,
+                                                               ground)])._pile_block(s, pile) is None
+    monkeypatch.setattr(hunt, "DUE_BACK", True)
     for ago, blocked in ((6.0, True), (1.0, False), (14.0, False)):
         k = Kill(now - ago, "horny-mushroom", ground, 790.0, 500.0, ground)
         why = _priced(m, [pile], kills=[k])._pile_block(s, pile)
@@ -688,3 +691,36 @@ def test_exp_before_loot_prices_a_pile_by_the_hp_it_would_cost():
                                   * hunt.HP_EXP)
     assert price > cheap.value * hunt.MESO_EXP and not h._loot_first(s, cheap, [])
     assert _priced(m, [cheap], land=560.0)._loot_first(_on(spot, 1000.0, m), cheap, [])  # nothing about: it goes
+
+
+def test_her_own_kills_ghost_and_a_track_out_of_sight_too_long_keep_no_pile_waiting_and_take_no_throw():
+    """Review of 2026-10-26: the feed keeps a killed monster's track out of sight (HIDDEN) while her EXP gain waits for it
+    (1.8 s), and one someone else killed up to 3.5 s; taken for a monster about (localization.unseen), it kept her own
+    fresh drop waiting and drew throws at nothing. A Horny Mushroom she killed at 752 half a second ago, its track out
+    of sight 0.4 s: the pile it dropped at 750 doesn't wait for it, nor is it a target, with the kill in her ledger
+    (unseen._hers) or the feed's own word that her gain goes on it (Track.owed); one out of sight past unseen.TRACK_S
+    keeps nothing waiting either; one out of sight 0.4 s that no kill is on does (the look missed it)."""
+    from gamelab.behavior.ledger import Kill
+    from gamelab.localization.tracking import HIDDEN, Track
+    from gamelab.localization.unseen import TRACK_S
+    from gamelab.perception.mobs import Mob
+    m, ground, spot = _ground()
+    now = time.monotonic()
+    pile = Pile(750.0, 500.0, ground, now - 0.5, True)
+
+    def track(age, owed=False):
+        return Track(7, "horny-mushroom", ground, 752.0, 500.0, Mob("horny-mushroom", 0, 0, 30, 30, 0.9), now - 9.0,
+                     now - age, state=HIDDEN, owed=owed)
+
+    def check(tr, kills=()):
+        h = _priced(m, [pile], kills=kills, land=700.0)
+        s = _on(ground, 700.0, m)
+        s.tracks, s.t = [tr], now
+        targets, _, hidden = h._with_unseen(s, [], [], [])
+        return h._pile_block(s, pile), targets, hidden
+    why, targets, hidden = check(track(0.4), [Kill(now - 0.5, "horny-mushroom", ground, 750.0, 500.0, ground)])
+    assert why is None and targets == [] and hidden == []
+    assert check(track(0.4, owed=True))[:2] == (None, [])
+    assert check(track(TRACK_S + 0.3))[:2] == (None, [])
+    why, targets, _ = check(track(0.4))
+    assert why == "a horny-mushroom unseen 2 units from her way to it" and [t.x for t in targets] == [752.0]

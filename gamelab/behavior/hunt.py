@@ -56,8 +56,8 @@ valuable pile rule had her off to one (20 of those deciding it or on the way).
 
 Her drops are priced by the HP getting them would cost (`_pile_block`, `_pile_price`; from 2026-10-26): no pile is
 gone for, walked to or stood on with a monster that counts as a danger within PILE_CLEAR of where she'd land, walk and
-pick up (seen, about though the look missed it: localization.unseen, or just due back at its spawn point after a kill
-of hers there: DUE_FROM to DUE_TO s); the pile waits, still known, and a trip for one is called off at the chain that
+pick up (seen, or about though the look missed it: localization.unseen; with DUE_BACK, one just due back at its spawn
+point after a kill of hers there too); the pile waits, still known, and a trip for one is called off at the chain that
 sees it so. What's left of the danger there is the pile's price against what it's worth (EXP before loot: HP_EXP a
 bar). Live on 2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off 23 came on stays on 23 for drops.
 And what her fights go by takes those about her that the look didn't find (`_unseen`: the feed's hidden tracks, her
@@ -204,21 +204,31 @@ PICK_S = 0.6           # s standing on a pile (4 presses)
 # fall), or one just back at its spawn point (2 of them on top of her), and there she killed no faster (9.4 a minute)
 # than from her spot on 24 (11.2). So she doesn't land on a pile's platform for it, walk to it or stand on it with a
 # monster that counts as a danger (attack.danger) within PILE_CLEAR of that stretch: one the look found there, one about
-# that it didn't (localization.unseen: the feed's hidden tracks, her memory's of the last UNSEEN_S), or a spawn point's
-# monster due back. The pile waits, still known, for a look that clears it; a trip for it is called off at the chain
-# that sees it not clear (`_call_off`). 100 units, not the analysis's "~150" (a Horny Mushroom walking at her 100 units
-# a second is on her in about a second at 150): in the simulator (Tree Dungeon, crowd, `--world zero-walls --world
+# that it didn't (localization.unseen: the feed's hidden tracks, her memory's of the last UNSEEN_S), or (DUE_BACK) a
+# spawn point's monster due back. The pile waits, still known, for a look that clears it; a trip for it is called off
+# at the chain that sees it not clear (`_call_off`). 100 units, not the analysis's "~150" (a Horny Mushroom walking at
+# her 100 units a second is on her in about a second at 150): in the simulator (Tree Dungeon, crowd, `--world zero-walls --world
 # near-misses`, `--attack choice`, 8 seeds of 5 minutes) with 150 she lost 0.92 bars of HP a minute alive, drank 13.6
 # potions a run and picked up 115 mesos' worth a minute; with 100 0.87, 12.9 and 130 (EXP a minute 297.7 and 307.4);
 # without it (and HP_EXP) 1.13, 16.9 and 170. Replayed on the live hunt of 2026-10-25 (78 times she went for a pile),
 # 150 has 47 of them wait, 100 44: the stays of both carried 7 of her touches and 1.04 bars of HP, of the 3.4 she lost
-# (D:/MapleHelper-scratch/hunt-ab/B/scripts/b1_replay.py).
+# (D:/MapleHelper-scratch/hunt-ab/B/scripts/b1_replay.py). With the feed's tracks of the dead left out (localization.
+# unseen.hidden) and no due-back block (DUE_BACK), 17 of the 78 wait at 100 (18 at 150): 79 s of stays that carried 5
+# touches and 0.81 bars, 0.61 bars a minute, against 0.24 a minute on the 61 let through, for 20% of the piles' worth
+# (D:/MapleHelper-scratch/hunt-ab/B/fix/b1_replay2.py; with ghosts and due-back 0.34 against 0.31: review of 2026-10-26).
 PILE_CLEAR = 100.0
 # A spawn point's monster is due back from DUE_FROM to DUE_TO s after a kill of hers of its kind on its platform (the
 # point of that kind nearest where it died). A spawn point's cooldown is 5 s by MeowDB (and its 7.56 s tick); live on
 # 2026-10-25 a monster new to her memory was back on Tree Dungeon's 23 (two Horny Mushroom points) a median 7.2 s after
 # her kill there, on 24 11.1 s, 20 15.7 s (exp-time-skeptic refill.py: upper bounds); the user's analysis's "~5-12 s".
 # Only her own kills (others' aren't placed). Before DUE_FROM the point is empty: the time to pick up a kill's drops.
+# Off (DUE_BACK; review of 2026-10-26): replayed on the live hunt of 2026-10-25 (above) the 20 stays it alone would have
+# held carried 1 touch and 0.16 bars in 71 s, 0.14 bars a minute, the safest of all (the 61 let through 0.24, the 17
+# the rest holds 0.61), for 980 mesos' worth; in the simulator (the four worlds of the README's table, 8 seeds of 5
+# minutes) it made no difference to her HP past the seeds' spread (+10%, -7%, +3%, +14% without it, none 1.3
+# standard errors), and grinding she picked up 28% and 10% more without it (D:/MapleHelper-scratch/hunt-ab/B/fix/out/
+# round3.txt).
+DUE_BACK = False
 DUE_FROM = 5.0
 DUE_TO = 12.0
 # What a bar of her HP is worth in EXP, for a pile's price (EXP before loot, `_loot_first`): her pet drinks Orange
@@ -227,9 +237,14 @@ DUE_TO = 12.0
 # MESO_EXP; the knocks off a platform a touch can bring aren't counted (attack.stance keeps her off a long drop's end).
 # The user is short of money for potions.
 HP_EXP = 250.0
-# Whether her fights, her drops' price and guards and her throws' attack go by the monsters about her that a look didn't
-# find (`_unseen`: localization.unseen); off, by the look's alone (and the fight's own hidden ones), as before. With her
-# trips' (control.navigator.UNSEEN_TRIPS: the numbers there).
+# Whether her fights, her drops' price and guards go by the monsters about her that a look didn't find (`_unseen`:
+# localization.unseen); off, by the look's alone (and the fight's own hidden ones), as before. With her trips'
+# (control.navigator.UNSEEN_TRIPS: the numbers there). Not her throws' attack (behavior.attacks: Lucky Seven at what's
+# in the look's way, the regular attack at "nothing in its way"): taken by those too (review of 2026-10-26), in the
+# simulator a quarter of her casts at one of them hit nothing, and her MP items went up 6% a run, her casts a kill 6%
+# (Tree Dungeon, crowd, near-misses, the hunt loop, 8 seeds of 5 minutes, the dead ones' tracks left out already:
+# localization.unseen.hidden; D:/MapleHelper-scratch/hunt-ab/B/fix/out/round1.txt), where live 9 of 325 throws went
+# out as "nothing in its way" on 2026-10-25, the regular attack, and her MP is short.
 UNSEEN_FIGHTS = True
 # Rule 6a: a pile with a drop in it worth this many mesos on its own (looting.Worth, the game data's prices: Pile.
 # dearest) is gone for at once, ahead of shooting: of the first map's drops a Slime Bubble (50) and a White Potion (35),
@@ -437,13 +452,11 @@ class Hunt:
         self._gone = self.h.drops.gone_tried
         self._progress = start
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
-        looter, attacks = self.h.looter, getattr(self.h, "attacks", None)
+        looter = self.h.looter
         yield_to, about = looter.yield_to, looter.unseen
         if EXP_FIRST:
             looter.yield_to = self._yields  # picking up stops for what's in reach
         looter.unseen = self._unseen  # ... and the monsters about that a look missed guard drops too
-        if attacks is not None:  # ... and a throw's attack goes by those on her platform (behavior.attacks)
-            attacks.unseen = self._unseen_here
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         regains = self.h.senses.regains
@@ -469,8 +482,6 @@ class Hunt:
             self._leave_ground()
         finally:
             looter.yield_to, looter.unseen = yield_to, about
-            if attacks is not None:
-                attacks.unseen = None
             self.h.senses.regains = regains
         self.report.seconds = time.monotonic() - start
         self._log_memory()
@@ -752,21 +763,15 @@ class Hunt:
         mine = [m for m in more if m.platform == here and d.share(m.kind) > 0 and not any(_same(m, t) for t in targets)]
         return targets + mine, visible, hidden + more
 
-    def _unseen_here(self, s: Scene) -> list[Monster]:
-        """Those of `_unseen` on her platform in look `s` whose kind counts as a danger (her throws' attack goes by them:
-        behavior.attacks), where something does."""
-        d = getattr(self.h, "danger", None)
-        if s.platform is None or d is None or not d.any:
-            return []
-        return [m for m in self._unseen(s) if m.platform == s.platform.id and d.share(m.kind) > 0]
-
     def _unseen(self, s: Scene) -> list[Monster]:
-        """The monsters about that look `s` didn't find (localization.unseen: the feed's hidden tracks, her memory's seen
-        within UNSEEN_S), worked out once a look."""
+        """The monsters about that look `s` didn't find (localization.unseen: the feed's hidden tracks that count, none
+        a kill of hers in the ledger is on, her memory's seen within UNSEEN_S), worked out once a look."""
         if not UNSEEN_FIGHTS:
             return []
         if getattr(self, "_unseen_for", None) is not s:
-            self._unseen_for, self._unseen_list = s, unseen(s, getattr(self.h, "memory", None), self.model, UNSEEN_S)
+            ledger = getattr(self.h, "ledger", None)
+            self._unseen_for, self._unseen_list = s, unseen(s, getattr(self.h, "memory", None), self.model, UNSEEN_S,
+                                                            kills=ledger.kills if ledger is not None else ())
         return self._unseen_list
 
     @property
@@ -1180,8 +1185,8 @@ class Hunt:
     def _touchers(self, s: Scene, pid: int, at: float, stay: float) -> list[tuple[str, float, str]]:
         """The monsters that count as a danger (attack.danger) about platform `pid` as of look `s`, for her there from
         `at` s on for `stay` s: as (kind, map x, why), those the look found on it ('seen'), those about it that it
-        didn't ('unseen': `_unseen`), and its spawn points whose monster is due back then ('due back': DUE_FROM to
-        DUE_TO s after a kill of hers of its kind on it, the point nearest the kill)."""
+        didn't ('unseen': `_unseen`), and with DUE_BACK its spawn points whose monster is due back then ('due back':
+        DUE_FROM to DUE_TO s after a kill of hers of its kind on it, the point nearest the kill)."""
         d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
         if d is None or not d.any:
             return []
@@ -1189,7 +1194,7 @@ class Hunt:
                if m.platform == pid and d.share(m.kind) > 0]
         out += [(m.kind, m.x, "unseen") for m in self._unseen(s) if m.platform == pid and d.share(m.kind) > 0]
         now = time.monotonic()
-        for k in reversed(self.h.ledger.kills):
+        for k in reversed(self.h.ledger.kills if DUE_BACK else ()):
             if k.t < now - DUE_TO:
                 break
             if not k.placed or k.platform != pid or d.share(k.kind) <= 0:
@@ -1202,9 +1207,9 @@ class Hunt:
 
     def _pile_block(self, s: Scene, p: Pile) -> str | None:
         """Why pile `p` isn't to be gone for from look `s` now, or None: a monster that counts as a danger (`_touchers`:
-        seen, about unseen, or due back at its spawn point by the time she'd be there) within PILE_CLEAR of the stretch
-        of its platform from where she'd land (`_landing`), or stands on it, to the pile (see PILE_CLEAR). Said in her
-        log when it changes for a pile. Never where nothing counts as a danger (the first map)."""
+        seen, about unseen, or with DUE_BACK due back at its spawn point by the time she'd be there) within PILE_CLEAR
+        of the stretch of its platform from where she'd land (`_landing`), or stands on it, to the pile (see
+        PILE_CLEAR). Said in her log when it changes for a pile. Never where nothing counts as a danger (the first map)."""
         d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
         if d is None or not d.any or p.platform is None or s.where is None or s.platform is None:
             return None

@@ -31,8 +31,8 @@ def _seen(kind, x, pid, model):
     return Monster(_mob(kind), x, model.platform(pid).y_at(x), pid)
 
 
-def _track(i, x, pid, last_seen, vx=0.0, state=HIDDEN, kind="horny-mushroom"):
-    return Track(i, kind, pid, x, 500.0, _mob(kind), last_seen - 5.0, last_seen, vx=vx, state=state)
+def _track(i, x, pid, last_seen, vx=0.0, state=HIDDEN, kind="horny-mushroom", owed=False):
+    return Track(i, kind, pid, x, 500.0, _mob(kind), last_seen - 5.0, last_seen, vx=vx, state=state, owed=owed)
 
 
 def _entry(x, pid, seen, model, kind="horny-mushroom"):
@@ -51,7 +51,7 @@ def test_unseen_are_the_feeds_hidden_tracks_walked_on_and_her_memorys_last_momen
     assert m.platform(her).y_at(500) == 500
     t = 100.0
     tracks = [_track(1, 300.0, her, t - 1.0, vx=-50.0),  # hidden a second: walked on 50 units left
-              _track(2, 600.0, her, t - unseen_mod.HIDE_S - 0.5),  # hidden too long: forgotten
+              _track(2, 600.0, her, t - unseen_mod.TRACK_S - 0.5),  # out of sight too long: not counted
               _track(3, 700.0, her, t - 0.2, state=LIVE), _track(4, 650.0, her, t - 0.2, state=DYING)]
     memory = SimpleNamespace(alive=lambda at, p: [_entry(900.0, her, t - 1.5, m), _entry(950.0, her, t - UNSEEN_S - 0.5, m),
                                                   _entry(310.0, her, t - 0.5, m), _entry(200.0, up, t - 1.0, m)])
@@ -64,6 +64,33 @@ def test_unseen_are_the_feeds_hidden_tracks_walked_on_and_her_memorys_last_momen
     assert [round(g.x) for g in unseen(s, memory, m, platforms={up})] == [200]
     assert unseen(s, None, m) == got[:1]
     assert got[1].pose == ""  # (its walking not known)
+
+
+def test_a_track_her_kill_is_on_isnt_about_one_kill_one_track():
+    """unseen.hidden: of the feed's tracks out of sight, not the one a kill of hers in the ledger is on (of its kind on
+    its platform, the nearest where it was placed within KILL_NEAR, seen about when it was killed; one not seen live
+    first), nor one the feed says her waiting gain goes on (Track.owed), nor one out of sight past TRACK_S; a second
+    one beside it stays (one kill, one track), and so does one seen there well after the kill (another one)."""
+    m = _map()
+    her = 1
+    t = 100.0
+    kill = SimpleNamespace(t=t - 0.6, kind="horny-mushroom", platform=her, x=400.0)
+    tracks = [_track(1, 430.0, her, t - 0.3), _track(2, 470.0, her, t - 0.4),  # the kill's, and one beside it
+              _track(3, 410.0, her, t - 1.2, kind="green-mushroom"),  # another kind
+              _track(4, 300.0, her, t - 0.5, owed=True)]  # the feed's: her gain waits on it
+    s = _scene(t, 500.0, her, tracks=tracks)
+    assert [tr.id for tr in unseen_mod.hidden(s, [kill])] == [2, 3]
+    assert [tr.id for tr in unseen_mod.hidden(s)] == [1, 2, 3]
+    live = _track(5, 405.0, her, t - 0.05, state=LIVE)  # seen now beside where it died: not the one dead
+    s.tracks = tracks + [live]
+    assert [tr.id for tr in unseen_mod.hidden(s, [kill])] == [2, 3]
+    earlier = SimpleNamespace(t=t - 3.0, kind="horny-mushroom", platform=her, x=470.0)
+    s.tracks = [_track(6, 470.0, her, t - 1.0)]  # seen 2 s after that kill there: another one, walking in
+    assert [tr.id for tr in unseen_mod.hidden(s, [earlier])] == [6]
+    gone = SimpleNamespace(t=t - 9.0, kind="horny-mushroom", platform=her, x=430.0)  # long ago: no matter
+    s.tracks = tracks
+    assert [tr.id for tr in unseen_mod.hidden(s, [gone, kill])] == [2, 3]
+    assert [round(g.x) for g in unseen(s, None, m, kills=[kill])] == [470, 410]
 
 
 def _hunt(model, unseen_list, targets=()):

@@ -376,6 +376,30 @@ def test_her_steps_away_keep_drop_room_from_an_end_with_a_long_drop_and_none_fro
     assert horny.platform == p.id
 
 
+def test_on_a_platform_too_narrow_for_the_drop_room_her_steps_go_only_toward_its_middle():
+    """stance.drop_limits on a platform too narrow to keep DROP_ROOM from both its ends, each with a long drop under it
+    (Tree Dungeon's 18, 27 and 30: 187-188 units, drops of 125-254 units; review of 2026-10-26): its middle, so a step
+    away goes only toward the middle, never toward either end (the whole platform before: a step left from x 120 on a
+    180-unit one went to 50, 50 units from its end); with one long end, the other end."""
+    model = build([(0, 500, 180, 500), (600, 500, 680, 500), (680, 540, 900, 540)], [("19", 90, 500)])
+    d, p = Danger(model, HER), model.platform_under(90, 500)
+    assert stance.end_drop(model, p, -1) == math.inf and stance.end_drop(model, p, 1) == math.inf
+    assert stance.drop_limits(model, p) == (90.0, 90.0)
+    for x, monster in ((120.0, 165.0), (60.0, 15.0), (100.0, 150.0), (80.0, 30.0)):
+        mine = seen("horny-mushroom", monster, 500, p.id)
+        act = stance.stance(x, 500, p, [mine], around=[mine], danger=d, edges=stance.drop_limits(model, p))
+        if act[0] == "back":
+            end = x + (act[2] if act[1] == "right" else -act[2])
+            assert abs(end - 90.0) <= abs(x - 90.0) + 1e-6, (x, act)  # toward the middle, if at all
+        assert act[0] != "jump_back" or abs(x - 90.0) >= stance.JUMP_BACK_SPAN, (x, act)
+        old = stance.stance(x, 500, p, [mine], around=[mine], danger=d, edges=(p.left, p.right))
+        to = x - old[2] if old[0] == "back" and old[1] == "left" else x + old[2] if old[0] == "back" else x
+        assert min(to - p.left, p.right - to) < min(x - p.left, p.right - x) <= stance.DROP_ROOM, (x, old)  # nearer
+    short = model.platform_under(640, 500)  # 80 wide, its left end a long drop, its right 40 down to the next
+    assert stance.end_drop(model, short, -1) == math.inf and stance.end_drop(model, short, 1) == 40
+    assert stance.drop_limits(model, short) == (680.0, 680.0)
+
+
 def test_under_a_platform_overhead_an_escape_can_be_the_jump_up_onto_it():
     """stance._escape's `up` (overhead): on her platform under another one within her jump height, a jump (back, or in
     place) lands her up on it; the jump up, throwing back as she rises, is an escape by the danger where she'd land
