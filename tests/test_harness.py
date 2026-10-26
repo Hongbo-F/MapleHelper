@@ -45,6 +45,36 @@ def test_a_hit_monster_hides_for_a_while_and_a_look_can_miss_one(model):
     assert Hunter(FakeEyes(w, clock, model), KEYS, model, log=lambda m: None).look().monsters == []
 
 
+def test_near_her_on_her_platform_a_look_finds_a_monster_as_seldom_as_live(model):
+    """`--world near-misses` (Noise.near_seen, world.NEAR_SEEN, the live hunt of 2026-10-25): a monster on her platform
+    within 25 units of her is never found, within 50 found by 7% of looks, within 100 by 34%, within 150 by 55%;
+    farther, and on another platform, as the preset's detect_miss has it."""
+    c = plat(model, 500, 400)
+    clock = Clock()
+
+    def found(x: float, pid: int = c.id, looks: int = 400) -> float:
+        w = still(World(model, KEYS, (c.id, 100.0), monsters=[("Snail", pid, x)], origin=clock.now,
+                        noise=Noise(near_seen=world_mod.NEAR_SEEN)))
+        w.invulnerable_ms = 10 ** 9
+        eyes = FakeEyes(w, clock, model)
+        h = Hunter(eyes, KEYS, model, log=lambda m: None)
+        n = 0
+        for _ in range(looks):
+            n += bool(h.look(wide=True).monsters)
+            clock.advance_to(clock.now + 0.05)
+        return n / looks
+    assert found(115.0) == 0.0  # 15 units off: under her
+    assert found(140.0) == pytest.approx(0.07, abs=0.04)
+    assert found(180.0) == pytest.approx(0.34, abs=0.07)
+    assert found(230.0) == pytest.approx(0.55, abs=0.07)
+    assert found(400.0) == 1.0  # past the bands (no detect_miss here)
+    b = plat(model, 360, 300)
+    assert found(300.0, b.id) == 1.0  # on another platform
+    assert harness.WORLDS["near-misses"] == {"near_seen": world_mod.NEAR_SEEN} and "near_seen" in harness.NOISE_FIELDS
+    assert harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=("near-misses",)).noise.near_seen \
+        == world_mod.NEAR_SEEN
+
+
 def test_a_monsters_pose_can_read_wrong_in_spells_as_the_templates_do_in_game(model):
     b = plat(model, 360, 300)
 
@@ -315,6 +345,43 @@ def test_waiting_and_the_touches_then_are_counted_from_the_hunt_loop_s_rules(mod
     w.died_at = 20.0  # cut at her death
     out = harness.outcomes(w, records, 60.0)
     assert out["alive_s"] == 20.0 and out["wait_s"] == pytest.approx(5.0) and out["wait_hp_lost"] == pytest.approx(0.05)
+
+
+def test_her_stays_for_drops_and_the_touches_then_are_counted_from_the_hunt_loop_s_rules(model):
+    """pile_s, pile_hurt, pile_hp_lost: while a loot rule decides (harness.PILE_RULES) or her objective is a pile (its
+    trip there too); stand_hurt and stand_hp_lost: the touches off her trips."""
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0))
+    w.touch_log = [(5.0, 0.1), (12.0, 0.05), (13.0, 0.0), (21.0, 0.02), (30.0, 0.04)]
+    t0 = 1000.0
+    records = [{"topic": "session", "t": t0}, {"topic": "hunt", "rule": "shoot", "t": t0 + 1.0},
+               {"topic": "hunt", "rule": "urgent pile", "objective": "pile on 23 at x 104", "t": t0 + 10.0},
+               {"topic": "chain", "t": t0 + 10.5}, {"topic": "moved", "t": t0 + 12.5},
+               {"topic": "hunt", "rule": "travel", "objective": "pile on 23 at x 104", "t": t0 + 11.0},
+               {"topic": "hunt", "rule": "shoot", "objective": None, "t": t0 + 15.0},
+               {"topic": "hunt", "rule": "pile here", "t": t0 + 20.0}, {"topic": "hunt", "rule": "wait", "t": t0 + 22.0}]
+    out = harness.outcomes(w, records, 60.0)
+    assert out["pile_s"] == pytest.approx(5.0 + 2.0) and out["pile_hurt"] == 2
+    assert out["pile_hp_lost"] == pytest.approx(0.07)
+    assert out["trip_hurt"] == 1 and out["stand_hurt"] == 3 and out["stand_hp_lost"] == pytest.approx(0.16)
+
+
+def test_a_knock_onto_a_lower_platform_is_counted_as_a_knock_off(model):
+    """World.knock_log (sim.harness: knock_falls): a touch whose knock lands her on another platform more than
+    KNOCK_FALL_DY lower; one that leaves her on hers isn't one."""
+    b = plat(model, 360, 300)
+    w = world(model, b.id, 385.0, monsters=[("Snail", b.id, 360.0)])
+    w.monsters[0].speed = 0.0
+    w.advance(2.0)
+    assert w.touches >= 1 and w.plat is not None and w.plat.id != b.id
+    assert len(w.knock_log) == 1 and w.knock_log[0][1:3] == (b.id, w.plat.id) and w.knock_log[0][3] > 100
+    out = harness.outcomes(w, [], 60.0)
+    assert out["knock_falls"] == 1 and out["knock_fall_dy"] == w.knock_log[0][3]
+    c = plat(model, 500, 400)
+    w = world(model, c.id, 385.0, monsters=[("Snail", c.id, 360.0)])
+    w.monsters[0].speed = 0.0
+    w.advance(2.0)
+    assert w.touches >= 1 and w.knock_log == []  # knocked along the floor
 
 
 def test_a_run_can_hunt_only_some_grounds():

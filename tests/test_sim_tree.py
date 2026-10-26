@@ -152,10 +152,13 @@ def test_she_is_level_25_there_with_her_pet_her_new_keys_and_her_stars_as_measur
     from gamelab.control.timeline import SIM_KEYS_PET
     from gamelab.sim.world import DEFENCE, LEVEL_24, LEVEL_25
     assert scenarios.her_on(TREE) == (SIM_KEYS_PET, LEVEL_25)
-    assert (LEVEL_25.max_hp, LEVEL_25.level, LEVEL_25.defence, LEVEL_25.pet, LEVEL_25.mp) == (774, 25, DEFENCE, 0.45, 623)
+    assert (LEVEL_25.max_hp, LEVEL_25.level, LEVEL_25.defence, LEVEL_25.mp) == (774, 25, DEFENCE, 623)
     assert LEVEL_25.star == choice.STAR and LEVEL_25.skill_star == choice.SKILL_STAR  # (the stack reckons as drawn)
     assert LEVEL_25.cast_mp == choice.cast_mp(choice.SKILL_LEVEL) == 14 and LEVEL_25.mp_potion == 100
     assert (LEVEL_24.max_hp, LEVEL_24.level, LEVEL_24.mp, LEVEL_24.star) == (752, 24, 601, None)
+    # Her pet drinks an Orange Potion (250 HP) under 70%, as live on 2026-10-25 (world.PET_HP, HP_POTION)
+    for her in (LEVEL_24, LEVEL_25):
+        assert (her.pet, her.potion) == (0.70, 250.0)
 
 
 def test_a_horny_mushrooms_touch_takes_111_to_131_hp_by_the_formula_and_75_give_or_take_70_percent_by_a_share():

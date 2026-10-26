@@ -348,6 +348,8 @@ POTION_HP = 0.30         # of her HP a potion heals where what it heals isn't kn
 # drinks right after a touch that leaves her under the warning (when after it isn't known: at once), one potion a
 # touch, never sooner than PET_GAP after the last; with none left it drinks nothing, nor too hungry (below).
 PET_GAP = 0.2
+KNOCK_FALL_DY = 30.0     # units: a knock that lands her this much lower than where it came from, on another platform,
+                         # knocked her off it (World.knock_log); a step down between two platforms of a run is less
 # Her pet's fullness (with a pet: Her.pet), as behavior.pet follows it: HUNGRY lost every TICK_S (the game data's 1
 # for her Snail pets; 70-74 s a point live on 2026-10-24), FOOD (30) for a Pet Food, sent home at PACKED_AT or under
 # (then it drinks nothing). At a run's start PET_FULLNESS, not known: under pet.FEED_BELOW (70), so the pet care's
@@ -481,6 +483,15 @@ class SimFellOut(SimDied):
 
 
 TAP_LOST_MS = 50         # an arrow tap this short (as sent) can be lost (Noise.tap_lost)
+# The detector's misses near her (Noise.near_seen), live on 2026-10-25 on Tree Dungeon (23:43-23:54, the perception
+# service's 10 fps records, lab/telemetry/20261025-210747-perceive.jsonl; D:/MapleHelper-scratch/analysis-1025/
+# damage-skeptic occl.py): of the frames in which it followed a monster on her platform, the share that found it, with
+# her not attacking in the 1.5 s before (a monster her stars hit hides under its damage numbers: Noise.hit_hidden), was
+# 7% within 50 units, 34% at 50-100 and 55% at 100-150 (attacking: 12%, 20%, 44%; 63% at 125-150 either way); and of
+# the hunter's 1317 searched looks none found one within 25 units of her (nor at 00:31, 3029, nor in the user's own
+# play, 1753): her body drawn over it, 22 units either side of her and 28 of a mushroom. Not only her body: 34% at
+# 50-100. The preset's detect_miss (10%) holds farther off.
+NEAR_SEEN = ((25.0, 0.0), (50.0, 0.07), (100.0, 0.34), (150.0, 0.55))
 
 
 @dataclass(frozen=True)
@@ -526,6 +537,10 @@ class Noise:
                                  # others (on a rope it never can: FakeEyes)
     turned: tuple = ()           # ((at, side), ...): s since the start when something that isn't her keys turns her
                                  # (her player's own arrow, ...): her frame shows it, her keys don't know
+    near_seen: tuple = ()        # ((up to units, chance), ...): a monster on the platform she's on (or last stood on)
+                                 # this near her, middle to middle, is found by a look only with that chance (drawn
+                                 # per monster and look, as detect_miss), the first band that holds it; farther, as
+                                 # detect_miss has it. NEAR_SEEN: as live; () off
     heading_wrong: tuple = ()    # (share, score, margin, runs): that share of frames read her facing the wrong way,
                                  # matching `score`, `margin` ahead; `runs` True: drawn per pose of hers for each
                                  # HEADING_SPELL_S (a pose her pictures don't know), False: per frame. Of the frames
@@ -636,15 +651,23 @@ LEVEL_23 = Her(max_hp=730.0, level=23, exp=31_736, defence=DEFENCE, pet=0.45)
 # 15-17% of hers (the study's 113-134 at DEF 64), a Green (54) 49-59, a Slime 7-9; by a share of PADamage as fitted
 # on the first map (`defence` None: the harness's `--touch share`) 75, 37 and 9, give or take 70%. Which holds isn't
 # known: one Horny touch's px on her HP bar (17 px of 104 by the formula, 10 by the share, at 1366x768) tells.
-# Which potion she carries on the new maps isn't known: POTION_HP's 30% is 219 HP at 730 and 226 at 752, between a Red
-# Potion's 100 and an Orange Potion's 250 (the game data; the Tree Dungeon study's monsters_drops.md); the harness's
-# `--world red-potion` has her drink Red Potions.
-LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=0.45, mp=601.0, pet_mp=PET_MP)
+# Her potions there, as the live hunt of 2026-10-25 had them (23:43-23:54, the perception service's 10 fps HP readings,
+# lab/telemetry/20261025-210747-perceive.jsonl; D:/MapleHelper-scratch/analysis-1025/damage-skeptic threshold.py): her pet
+# drank an HP potion only when a touch left her under 70% (every reading under 0.70 was followed by a rise within 0.12-
+# 0.16 s, none over it: 0.712-0.721 held 1.5 s, 0.769 for 52 s), 6 times in 10.95 minutes, each 230-250 HP (one ended
+# uncapped at 0.971 from 0.65: 250 HP of her 774, an Orange Potion's: PET_HP, HP_POTION). Before, the pet's warning was
+# 0.45 (where the stack had her drink herself) and a potion POTION_HP's 30%, 226 HP: the simulator drank later and
+# less a potion. (The 15 smaller rises of that run, about 100 HP each, came 0.4-0.6 s before an MP refill from an
+# empty bar: the MP item's, not modelled.) The harness's `--world red-potion` has her drink Red Potions (100 HP).
+PET_HP = 0.70
+HP_POTION = 250.0
+LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=601.0, pet_mp=PET_MP, potion=HP_POTION)
 # ... and from 2026-10-25 at level 25: HP 774 and MP 623 (her bars' numbers), her stars as read off the monsters' bars
 # then (attack.choice.STAR and SKILL_STAR: the regular star 20-140, Lucky Seven's two of 96-192), drawn so with `spread`
-# (harness.ATTACK_HER), her Lucky Seven at level 16 (14 MP) and her pet's MP potions Blue Potions (100).
-LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=0.45, mp=623.0, pet_mp=PET_MP, star=(20, 140),
-               skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0)
+# (harness.ATTACK_HER), her Lucky Seven at level 16 (14 MP), her pet's MP potions Blue Potions (100) and its HP
+# potions as above.
+LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=623.0, pet_mp=PET_MP, potion=HP_POTION,
+               star=(20, 140), skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0)
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -1009,6 +1032,12 @@ class World:
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.fresh_log: list[tuple[float, float]] = []  # ... of those, the touches by a monster within FRESH_S of its
                                                         # respawn (from its spawn point)
+        # Her knocks off a platform (a touch's flight landing her on another one more than KNOCK_FALL_DY lower than the
+        # one she was knocked from, or out of the map): (t of the touch, from, onto (None: out of the map), how far
+        # down). Live on 2026-10-25 three knocks off Tree Dungeon's 23 dropped her 389 units to 29, 43 s of the hunt
+        # back up (sim.harness: `knock_falls`).
+        self.knock_log: list[tuple[float, int, int | None, float]] = []
+        self._knocked_from: tuple[float, int, float] | None = None  # the touch's (t, platform, her y) while it flies
         self.actions = _actions(keys)
         self.held: dict[str, float] = {}  # action -> the clock time it went down (as sent)
         self._events: list[tuple[int, int, Event]] = []
@@ -1539,6 +1568,9 @@ class World:
         (self.x, self.y), (self.vx, self.vy) = f.path[k], f.speeds[k]
         if f.platform is None and self.y > self.bottom:  # below the map's lowest floor, with none to land on
             self.fell_out_at = self.t
+            if self.knocked and self._knocked_from is not None:
+                t0, src, y0 = self._knocked_from
+                self.knock_log.append((t0, src, None, round(self.y - y0, 1)))
             self.held.clear()
             self.seen.clear()
             self.note(f"falls out of the map at x {self.x:.0f} (below its lowest floor)")
@@ -1555,6 +1587,11 @@ class World:
         jump-backs and jump-throws landing during their attack slid 1.4-2.9 units, where braking alone
         has 7.6-11.7 (research: 60 fps recordings). Between the game's steps she stands where she lands until
         the next (body.LANDING_ENDS_STEP)."""
+        if self.knocked and self._knocked_from is not None:
+            t0, src, y0 = self._knocked_from
+            if q.id != src and q.y_at(x) - y0 > KNOCK_FALL_DY:
+                self.knock_log.append((t0, src, q.id, round(q.y_at(x) - y0, 1)))
+        self._knocked_from = None
         self.mode, self.plat, self.flight, self.last_plat, self.group, self.knocked = "ground", q, None, q, q.group, False
         self.x, self.y = x, q.y_at(x)
         start, end = self.attack_ms
@@ -1666,6 +1703,8 @@ class World:
             self._leave_rope()
         if self.realism.knock_turns:
             self.turn(LEFT if away > 0 else RIGHT, f"knocked by {m.kind} #{m.idx}")
+        if not self.knocked or self._knocked_from is None:  # (a touch in a knock's flight: from where the first was)
+            self._knocked_from = (self.t, self.last_plat.id, self.last_plat.y_at(self.last_plat.clamp(self.x)))
         self.knocked = True
         self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
 

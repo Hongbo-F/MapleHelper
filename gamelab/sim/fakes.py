@@ -561,14 +561,26 @@ class FakeEyes(Eyes):
 
     def _unseen(self, m, alive: bool) -> bool:
         """Whether this look misses monster `m` though it shows: hit and hiding under its damage numbers
-        (Noise.hit_hidden), or just not found (Noise.detect_miss). Both are drawn per monster from the
-        world's seeded chances, the hiding once per hit."""
+        (Noise.hit_hidden), on her platform near her (Noise.near_seen: her body over it, as live), or just not found
+        (Noise.detect_miss). All are drawn per monster from the world's seeded chances, the hiding once per hit."""
         noise, w = self.noise, self.world
         if alive and noise.hit_hidden and m.hit_at is not None:
             lo, hi = noise.hit_hidden
             if w.t < m.hit_at + lo + (hi - lo) * w.chance(f"hide:{m.idx}", int(round(m.hit_at * 1000))):
                 return True
+        if alive and noise.near_seen and (seen := self._near_seen(m)) is not None:
+            return w.chance(f"see:{m.idx}") >= seen
         return bool(noise.detect_miss) and w.chance(f"see:{m.idx}") < noise.detect_miss
+
+    def _near_seen(self, m) -> float | None:
+        """The chance a look finds monster `m` on the platform she's on (or last stood on, in the air) by how near her it
+        is (Noise.near_seen's first band that holds it, middle to middle); None off her platform or past its bands."""
+        w = self.world
+        her = w.plat or w.last_plat
+        if her is None or m.platform.id != her.id:
+            return None
+        dx = abs(m.at(w.t) - w.x)
+        return next((seen for upto, seen in self.noise.near_seen if dx < upto), None)
 
     def _ropes(self, her: tuple[int, int], x: float, y: float) -> list[ScreenRope]:
         """Ropes in view as terrain.find_ropes reports them: full-size px, at least 90 px of them showing."""
