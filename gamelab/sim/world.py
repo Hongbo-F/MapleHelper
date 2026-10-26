@@ -569,6 +569,10 @@ class Realism:
     bars_empty: bool = False     # a hurt monster's HP bar read empty, whatever it has left (sim.fakes.FakeEyes.bar): as
                                  # the stack read them at 1366x768 until 2026-10-25 (perception.hud.hp_bar: 83 of 87
                                  # bars seen in a run read 0; harness `--world bars-empty`)
+    damage_ms: int | None = None  # ms after an attack's key that its damage is applied (None: the server's,
+                                  # actions.DAMAGE_SHOWS_MS; actions.STAR_DELAY_MS: at the star's release, as the
+                                  # world had it until 2026-10-26 and the probes' scenarios still do: their scorer,
+                                  # probe.BEFORE_HIT_S, is built on it)
 
 
 @dataclass(frozen=True)
@@ -1826,7 +1830,8 @@ class World:
         up = None if picked is None else self.y - picked.y(picked.at(self.t))  # its feet above hers, + above
         how = (key_ms / 1000, tag.rsplit("_", 1)[0], self.mode, round(rise, 1),
                None if picked is None else picked.kind, None if up is None else round(up, 1))
-        self._push(key_ms + DAMAGE_SHOWS_MS, "star", (facing, target, swipe, stop, skill, how, key_ms))
+        damage = DAMAGE_SHOWS_MS if self.realism.damage_ms is None else self.realism.damage_ms
+        self._push(key_ms + damage, "star", (facing, target, swipe, stop, skill, how, key_ms))
 
     def _attack(self, facing: str, m: SimMonster | None, swipe: bool, stop: tuple | None = None,
                 skill: bool = False, how: tuple | None = None, key_ms: int | None = None) -> None:

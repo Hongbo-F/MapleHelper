@@ -36,6 +36,7 @@ from ..behavior import probe
 from ..behavior.hunter import Hunter
 from ..behavior.looting import DropSpot
 from ..localization.mapdata import MapModel
+from ..control.actions import STAR_DELAY_MS
 from ..control.navigator import Navigator
 from ..control.timeline import SIM_KEYS, SIM_KEYS_PET
 from ..behavior.tour import Tour
@@ -683,7 +684,7 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=4,
+@scenario((12, -300.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down to 13), and
@@ -702,7 +703,9 @@ def nav_fight_across(sim):
     weighed and her jump throws turn in the air (2026-10-25): on seed 4 no chain was cut short any more. Over 16 seeds
     15 arrive, 6 showing all of it: 6, 7, 12, 13, 14 and 15.) (Seed 4 since every look is perception's newest frame
     after her keys' effect (Senses.fresh_after, the feed in every scenario): on seed 6 nothing knocked her off 12; of
-    seeds 1-16, 2, 4, 12 and 15 meet all of this.)"""
+    seeds 1-16, 2, 4, 12 and 15 meet all of this.) (Seed 2 since 2026-10-26: her throws at the dying gone, a throw's
+    last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the world's damage
+    at the server's time: on seed 4 nothing knocked her off 12; of seeds 1-16, 2, 5, 9, 13 and 14 meet all of this.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -999,7 +1002,7 @@ def hunt_kill_far(sim):
     return _kill_far(sim)
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=8, noise=Noise(miss=0.35),
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=3, noise=Noise(miss=0.35),
           expects=(ends("killed", key="ended"), happens("star misses"),
                    wrote("shots2.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
 def hunt_kill_misses(sim):
@@ -1008,7 +1011,10 @@ def hunt_kill_misses(sim):
     (a pig 125 units/s, not 70): on seed 4 no star missed it. That alone moved it to seed 16, where with the physics and
     attack tracks the pig walks out of reach and she loses it. Over 16 seeds 8 meet all of this.) (Seed 8 since every
     look is perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every scenario): on seed 5
-    no star missed; of seeds 1-16, 5 meet all of this.)"""
+    no star missed; of seeds 1-16, 5 meet all of this.) (Seed 3 since 2026-10-26: her throws at the dying gone, a
+    throw's last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the world's
+    damage at the server's time: on seed 8 no throw was scored a miss in the shot log (which still goes by the star's
+    release: fight.LANDS_FROM_S); of seeds 1-16, 3 and 5 meet all of this.)"""
     return _kill_far(sim)
 
 
@@ -1092,7 +1098,7 @@ def fight_snail_stab(sim):
 
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
-                                ("Orange Mushroom", 2, 200.0)], seed=8, limit=60,
+                                ("Orange Mushroom", 2, 200.0)], seed=3, limit=60,
           expects=(check("no throw from the ground from platform 4",
                          lambda tr: not any(p[1] == "throw" for p in tr["plans"])),
                    check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
@@ -1107,7 +1113,10 @@ def fight_step_wall(sim):
     v83 line's row (28 over her feet) clears the step's 60, and the three die. Unmeasured in game: `probe run step-up
     --style jump_throw` (the README's Probes); until then she moved on, nothing in reach. (Seed 8 since every look is
     perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every scenario): on seed 1 her
-    jump throws over the step didn't kill them; of seeds 1-16, 8, 13 and 15 meet all of this.)"""
+    jump throws over the step didn't kill them; of seeds 1-16, 8, 13 and 15 meet all of this.) (Seed 3 since 2026-10-26:
+    her throws at the dying gone, a throw's last look before its key, her stats at level 25, the air turn's attack 60 ms
+    after its arrow and the world's damage at the server's time: on seed 8 her jump throws over the step didn't kill
+    them; of seeds 1-16, 3, 4 and 11 meet all of this.)"""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1137,7 +1146,13 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
                               for r in rows)
 
 
-@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400,
+# The probes' scenarios check their scorer (probe.BEFORE_HIT_S and the evidence after a star is due), built on a throw's
+# damage showing at the star's release: so their world applies it then (world.Realism.damage_ms), not at the server's
+# time the world has from 2026-10-26 (actions.DAMAGE_SHOWS_MS, as measured live). To redo with the server's time.
+_AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS)
+
+
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400, realism=_AT_RELEASE,
           expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
@@ -1160,7 +1175,7 @@ def probe_top(sim):
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
 
-@scenario((4, 260.0), monsters=[("Orange Mushroom", 2, -50.0)], seed=1, limit=400,
+@scenario((4, 260.0), monsters=[("Orange Mushroom", 2, -50.0)], seed=1, limit=400, realism=_AT_RELEASE,
           expects=(check("from the ground, no star gets past the step",
                          lambda tr: len(_shown(tr, "throw")) == 6 and all(s is False for _, s in _shown(tr, "throw"))),
                    check("jumping back, every star does",
@@ -1183,7 +1198,7 @@ def probe_step_up(sim):
     return {"ground": str(ground), "jump_back": str(back)}
 
 
-@scenario((22, 30.0), monsters=[("Snail", 22, 70.0)], seed=1, limit=400,
+@scenario((22, 30.0), monsters=[("Snail", 22, 70.0)], seed=1, limit=400, realism=_AT_RELEASE,
           expects=(check("12 jump throws logged", lambda tr: len(_shown(tr, "jump_throw")) == 12),
                    check("every one kills the snail", lambda tr: all(s for _, s in _shown(tr))
                          and all(r["exp"] == 1 for r in _probe_rows(tr))),
@@ -1295,7 +1310,7 @@ def _hunt_17_pigs(sim):
     return tour.hunt(17, {"pig"}, kills=2, seconds=90)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1320.0)], seed=16, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1280.0)], seed=1, limit=400,
           expects=(logs("out of reach here: over to platform"),))
 def tour_hunt_other_spot(sim):
     """Tour.hunt of two pigs on 17 from 14: one dies, the other is out of reach, so over to a spot that reaches it
@@ -1308,7 +1323,11 @@ def tour_hunt_other_spot(sim):
     no seed of 1-16 shows it, the other pig walking into reach first; from 1220, 1260 and 1280 seed 6 does.) (Seed 16
     since every look is perception's newest frame after her keys' effect (Senses.fresh_after, the feed in every
     scenario): the other pig starts at 1320: from 1260, 1240, 1280, 1300 and 1340 no seed of 1-16 showed it, the other
-    walking into reach or shot from 14 first; from 1320 seed 16 does.)"""
+    walking into reach or shot from 14 first; from 1320 seed 16 does.) (Seed 1 since 2026-10-26: her throws at the dying
+    gone, a throw's last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the
+    world's damage at the server's time: on seed 16 she shot both from 14, the other pig from 1320; from 1240, 1260,
+    1300, 1320, 1340 and 1360 no seed of 1-16 showed it, from 1280 only seed 1; of seeds 1-16, 1 (the other pig from
+    1280) meet all of this.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -1564,7 +1583,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=1, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1591,7 +1610,9 @@ def loop_lull_loot(sim):
     size names (or none, behavior.ledger.KIND_ANY): on seed 4 no lull came. Over 16 seeds 11 meet all of this.
     Seed 2 since EXP before loot (hunt._loot_first; picking up stops for what's in reach, Looter.yield_to): on seed
     1 she shot on and picked up 7 drops, for 40 kills against 35. Over seeds 1-8 6 meet all of this, 8 before, for
-    3839 EXP against 3519 and 264 drops picked up against 283.)"""
+    3839 EXP against 3519 and 264 drops picked up against 283.) (Seed 1 since 2026-10-26: her throws at the dying gone,
+    a throw's last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the
+    world's damage at the server's time: on seed 2 no lull came; of seeds 1-16, 1, 3-7 and 9-15 meet all of this.)"""
     return _loop_on_12(sim)
 
 
@@ -2322,7 +2343,7 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=4, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
@@ -2349,11 +2370,14 @@ def loop_tree_lie_detector(sim):
     33, its safest place within reach.) (Seed 2 since a look asks for what the next frame would have stale
     (feed.to_ask), a frame shown before a throw without a tap tells her heading (Actions.heading), a cast takes its MP
     off at its throw (Attacks.on_throw) and a trip stops only for what the pass shoots (Hunt._interrupt): on seed 4 she
-    went up the rope at -192 from 31; of seeds 1-16, 12 meet all of this.)"""
+    went up the rope at -192 from 31; of seeds 1-16, 12 meet all of this.) (Seed 4 since 2026-10-26: her throws at the
+    dying gone, a throw's last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow
+    and the world's damage at the server's time: on seed 2 she went up the rope at 146 from 32, no safe platform near;
+    of seeds 1-16, 4, 5, 7, 10, 11, 13, 14 and 15 meet all of this.)"""
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=12, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2367,7 +2391,9 @@ def loop_tree_lie_detector_28(sim):
     look asks for what the next frame would have stale (feed.to_ask), a frame shown before a throw without a tap tells
     her heading (Actions.heading), a cast takes its MP off at its throw (Attacks.on_throw) and a trip stops only for
     what the pass shoots (Hunt._interrupt): on seed 10 she went up the rope at 146 from 32, a rope as safe; of seeds
-    1-16 only 12 goes back onto 28.)"""
+    1-16 only 12 goes back onto 28.) (Seed 1 since 2026-10-26: her throws at the dying gone, a throw's last look before
+    its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the world's damage at the server's
+    time: on seed 12 she didn't go back onto 28; of seeds 1-16, 1 and 11 meet all of this.)"""
     return lie_detector(40.0)(sim)
 
 
