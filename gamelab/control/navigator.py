@@ -85,6 +85,12 @@ WAIT_AHEAD = 2.4     # with an escort, she waits only for a monster that, walkin
 # a Green again, and each look again gave the Slimes in her way another fight (loop_tree_walls, seeds 1, 3, 5 and 10
 # of 1-10, against none before her chains kept clear).
 MEET_S = 8.0
+# _meet takes a look with the monsters before going past one regardless, and shoots it if a star reaches it
+# (_last_shot); off, as before. In the simulator it made no difference past the seeds' spread: 297.7 EXP a minute
+# against 307.4 without, 0.92 bars of HP a minute either way, touches on her trips 2.38 a minute against 2.08, falls 2.1
+# a run against 1.5 (Tree Dungeon, crowd, zero-walls, near-misses, 8 seeds of 5 minutes, standard errors about 5% of
+# EXP). On because the live run's two touches after a pass regardless came from a Green Mushroom she had seen; to watch.
+LAST_SHOT = True
 SETTLE_S = 0.35      # right after a plan she may still be sliding or landing this long
 ARRIVE_TOLERANCE = 20  # map units: close enough to the x she's sent to
 # Chains follow on from each other without a stop (follow): late in one, a look around decides whether
@@ -879,6 +885,8 @@ class Navigator:
             self.log(f"  waiting for the {kind} to move off ({st.waited})")
             time.sleep(WAIT_S)
             return True
+        if LAST_SHOT and mo is not None and self._last_shot(st, s, mo, planned_at):
+            return True  # look again after the shot
         return self._regardless(st, s, path, monsters, looked, mo,
                                 f"WAIT_LOOKS: {move.kind} -> {move.dst} past a {kind} regardless" if st.waited >= WAIT_LOOKS
                                 else f"NO_WAIT: {move.kind} -> {move.dst} past a {kind} regardless")
@@ -899,6 +907,33 @@ class Navigator:
         if seen is None:
             return False
         kills = self.escort.clear_for(s, seen, finish=st.mode != TRANSIT)
+        if kills is None:
+            return False
+        st.shots += 1
+        st.trip.kills += kills
+        return True
+
+    def _last_shot(self, st: TripState, s: Scene, mo: MonsterTrack, planned_at: float) -> bool:
+        """_meet's shot before going past monster `mo` regardless: a look with the monsters (the pass's may have had
+        none: after a cut, a quick look's `st.sighted` is empty, and one her memory or the feed's hidden tracks have is in
+        none), and if it has `mo` (one of its kind on its platform where it can be by now, MATCH_SLACK on: MonsterTrack.
+        reach) and a star from where she stands reaches it, she shoots it (Escort.clear_for; MAX_FIGHTS shots in a row
+        at most, as _meet's). True if she did. Live on 2026-10-25 28 passes regardless (NO_WAIT, WAIT_LOOKS) were
+        followed by 4 touches within 3 s, two into a Green Mushroom she had seen (24's, from 25: 23:49:42.7, 23:50:05.7;
+        D:/MapleHelper-scratch/analysis-1025/damage-skeptic): the shot needed it in the pass's own sightings."""
+        if st.shots >= MAX_FIGHTS or self.escort is None or mo.platform is None or not mo.kind:
+            return False
+        look = self.mover.locate(mobs=True, wide=not self.fight)
+        if look.where is None or look.where.platform is None or look.where.platform.id != s.where.platform.id:
+            return False
+        p = self.model.platform(mo.platform)
+        lo, hi = mo.reach(time.monotonic() - planned_at, p)
+        near = [m for m in look.monsters if m.kind == mo.kind and m.platform == mo.platform
+                and lo - MATCH_SLACK <= m.x <= hi + MATCH_SLACK]
+        if not near:
+            return False
+        m = min(near, key=lambda m: abs(m.x - (lo + hi) / 2))
+        kills = self.escort.clear_for(look, m, finish=st.mode != TRANSIT)
         if kills is None:
             return False
         st.shots += 1

@@ -1597,6 +1597,7 @@ def _meeting(model, monkeypatch, escort, monster_at, mode="transit", detour=Fals
               where=Where(200, 500, c, (0, 0)), searched=True, wide=True, monsters=[seen])
     path = Planner(model).plan(c.id, 200, d.id)
     monsters, _ = nav._chain_monsters(st, s, path)
+    nav.mover.locate = lambda mobs=False, wide=False: s  # (_meet's look before going regardless: _last_shot)
     return nav, st, s, path, monsters
 
 
@@ -1832,6 +1833,32 @@ def test_a_fighting_trip_keeps_clear_of_the_monsters_her_memory_has_where_its_ch
     assert len(nav._chain_monsters(st, s, path)[0]) == 2  # missed in view: kept
     nav.memory = None
     assert len(nav._chain_monsters(st, s, path)[0]) == 1
+
+
+def test_before_going_past_a_monster_regardless_she_looks_with_the_monsters_and_shoots_it_if_a_star_reaches(
+        model, monkeypatch):
+    """Navigator._last_shot (LAST_SHOT): with nothing chained for a monster that could touch her, no way around, no hop
+    and no point waiting (seen walking), she doesn't go on regardless at once: a look with the monsters, and if it has
+    that one where a star from here reaches it, she shoots it (the pass's own look may have had none: after a cut, a
+    quick look's). Live on 2026-10-25 28 passes regardless were followed by 4 touches within 3 s, two into a Green
+    Mushroom she had seen."""
+    from dataclasses import replace
+
+    from gamelab.control import navigator as nv
+    d = by_y(model, 300, 700)
+    escort = _escort(shots=1)
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (d.id, 700))
+    walking = [replace(monsters[0], vx=100.0)]  # no point waiting for it
+    legs, keys, why = nav._chain(st, s, path, walking, 0.0)
+    st.sighted = []  # as after a quick look: the pass's shot has nothing to aim at
+    assert nav._meet(st, s, path, walking, legs, why, 0.0, 0.0) is True and st.avoid  # around first
+    asked = len(escort.asked)
+    assert nav._meet(st, s, path, walking, legs, why, 0.0, 0.0) is True  # then the look, and the shot
+    assert len(escort.asked) == asked + 1 and escort.asked[-1][0] is s.monsters[0] and st.shots == 1
+    monkeypatch.setattr(nv, "LAST_SHOT", False)
+    st.shots = 0
+    regardless = nav._meet(st, s, path, walking, legs, why, 0.0, 0.0)  # as before: on regardless
+    assert isinstance(regardless, tuple) and len(escort.asked) == asked + 1
 
 
 def test_a_fighting_trip_keeps_clear_of_the_feeds_hidden_monsters_and_of_the_one_its_last_cut_was_for(
