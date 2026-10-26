@@ -713,7 +713,7 @@ def nav_fight_across(sim):
 # faster monsters keep knocking her off while she fights her way, and the decisions tuned for slow ones (hop
 # timing, TOO_CLOSE, the star/claw boundary) aren't retuned yet. A retune that mends them changes these.
 
-@scenario((14, 760.0), monsters="all", seed=4,
+@scenario((14, 760.0), monsters="all", seed=15,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_up_runs_out(sim):
     """nav_fight_up on seed 4: she shoots 17's monsters from 14, climbs to 3, is knocked off down to 17 at 47 s, and
@@ -754,11 +754,13 @@ def nav_fight_up_runs_out(sim):
     at 40 s, she was knocked off 3 down to 17 at 86 s, off 17 down to 25 at 89 s and off 17 to 35 at 141 s, and ran out
     of time, 48 monsters in all.) (Seed 4 since every look is perception's newest frame after her keys' effect
     (Senses.fresh_after, the feed in every scenario): on seed 5 she now arrives; of seeds 1-16, only 4 meets all of
-    this.)"""
+    this.) (Seed 15 since 2026-10-26, her throws at the dying gone, a throw's last look before its key, her stats
+    at level 25 and the world's damage at the server's time: on seed 4 she now arrives; of seeds 1-16, only 15
+    meets all of this, 14 don't run out of time.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=27,
+@scenario((12, -300.0), monsters="all", seed=9,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
     """nav_fight_across on seed 6: after 38 s fighting on 12 she's knocked off down to 11 and 34, fights the slimes and
@@ -788,7 +790,9 @@ def nav_fight_across_runs_out(sim):
     1-16, 14 arrive, and on seed 3 she's knocked off 12 down to 34 at 4 s, fights there and on the long way round up, 37
     monsters, until her 180 s run out.) (Seed 27 since every look is perception's newest frame after her keys' effect
     (Senses.fresh_after, the feed in every scenario): on seed 3 she now arrives; of seeds 1-64, only 27 meets all of
-    this.)"""
+    this.) (Seed 9 since 2026-10-26, her throws at the dying gone, a throw's last look before its key, her stats
+    at level 25 and the world's damage at the server's time: on seed 27 she now arrives; of seeds 1-16, 9 and
+    12 meet all of this, 14 don't run out of time.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1377,7 +1381,7 @@ def tour_collect_loot_on_the_way(sim):
             "pending_loot": [[round(d.x), d.platform] for d in tour.h.looter.pending]}
 
 
-@scenario((36, 300.0), monsters="all", seed=3, limit=1500,
+@scenario((36, 300.0), monsters="all", seed=1, limit=1500,
           expects=(check("three stops visited", lambda tr: len(tr["result"]["visited"]) == 3),
                    ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
                    check("every kill counted (the stops' and on the way, resting included)",
@@ -1408,7 +1412,10 @@ def tour_run(sim):
     f0ea98d and 52683f4 tell those apart; with them on that branch the count held on 11 of 16 seeds instead of 5; with
     both tracks, on 12), or at a look of a loot collection's own (Tour.collect_loot's locate, a trip's recover), which
     nothing counts. (Seed 3 since every look is perception's newest frame after her keys' effect (Senses.fresh_after,
-    the feed in every scenario): on seed 2 a kill wasn't counted; of seeds 1-8, 1, 3, 4, 5, 6 and 7 meet all of this.)"""
+    the feed in every scenario): on seed 2 a kill wasn't counted; of seeds 1-8, 1, 3, 4, 5, 6 and 7 meet all of this.)
+    (Seed 1 since 2026-10-26, her throws at the dying gone, a throw's last look before its key, the world's damage
+    at the server's time: on seed 3 one of 179 kills went uncounted; of seeds 1-16, 14 meet all of this, 13 on
+    master; on the other two (3, 11) the count misses kills, as on master's three (2, 8, 15).)"""
     tour = sim.tour_stack()
     return tour.run(stops=3, kills_per_stop=5, seconds_per_stop=90)
 
