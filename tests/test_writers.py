@@ -133,7 +133,7 @@ def test_the_collections_are_counted_and_timed_for_each_reader():
     assert stats.line("test").startswith("GC ")
     frozen, took = gcstats.freeze()
     try:
-        assert frozen == gc.get_freeze_count() > 0 and took >= 0
+        assert frozen > 0 and gc.get_freeze_count() > 0 and took >= 0  # (frozen ones freed since are let go)
     finally:
         gc.unfreeze()
     assert gcstats.STATS.callback in gc.callbacks and gc.callbacks.count(gcstats.STATS.callback) == 1
