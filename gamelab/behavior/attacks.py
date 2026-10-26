@@ -107,7 +107,7 @@ class Attacks:
     'regular'), with MP `max_mp` when full and Lucky Seven at skill `level` (None if she has no Lucky Seven key).
     `kills`: her kills so far (the ledger's), which end the marks they're placed on."""
 
-    def __init__(self, model: MapModel, keys, mode: str = "choice", max_mp: float = 601.0, level: float = 10.0,
+    def __init__(self, model: MapModel, keys, mode: str = "choice", max_mp: float = 623.0, level: float = 16.0,
                  log: Callable[[str], None] = print, kills: Callable[[], list] | None = None):
         if mode not in MODES:
             raise ValueError(f"no such attack mode: {mode!r} (one of {', '.join(MODES)})")

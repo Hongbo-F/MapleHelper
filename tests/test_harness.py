@@ -493,3 +493,18 @@ def test_a_world_drops_what_its_maps_monsters_drop(model):
     w = world(model, plat(model, 360, 300).id, 240.0, realism=Realism(drops=MAP_DROPS))
     assert w._drop_table == tuple(r for r in GAME_DROPS if r[0] == "snail")
     assert harness.PRESETS["game-drops"][1].drops == MAP_DROPS
+
+
+def test_her_stars_and_casts_can_be_her_own_as_measured_on_a_map(model):
+    """world.Her.star, skill_star, cast_mp, mp_potion (LEVEL_25: her stars as read off the bars at level 25, Lucky
+    Seven at level 16): with `spread`, a regular star does 20-140 before defence and a cast two of 96-192, its MP 14; her
+    pet's MP potion gives 100."""
+    keys = dataclasses.replace(KEYS, lucky_seven=K("g"))
+    her = world_mod.Her(mp=623.0, skill=world_mod.LUCKY_SEVEN, spread=True, star=(20, 140), skill_star=(96, 192),
+                        cast_mp=14.0, mp_potion=100.0, pet_mp=0.05)
+    c = plat(model, 500, 400)
+    w = still(World(model, keys, (c.id, 100.0), monsters=[("Pig", c.id, 400.0)], facing="right", character=her))
+    assert 20 <= w._damage(1.0, False) * world_mod.STAR_MEAN <= 140
+    assert 192 <= w._damage(world_mod.LUCKY_SEVEN, False) * world_mod.STAR_MEAN <= 384
+    w.mp = 20 / 623
+    assert w._cast() and w.mp_used == 14.0 and w.mp * 623 == pytest.approx(6 + 100, abs=0.01)  # (the pet drank)

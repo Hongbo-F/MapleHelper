@@ -272,6 +272,10 @@ LUCKY_SEVEN = 3.0
 # - MP_POTION: the median rise of her bar over 97 of the pet's drinks (in two clusters, 127-145 and 173-203);
 # - PET_MP: a warning in System Options' 5% steps; the reading before each drink was 0.058-0.067 of her bar (35-40 MP),
 #   a cast after it under 5%.
+# At level 25 (from 2026-10-25: LEVEL_25) her own: her Lucky Seven's level 16, 14 MP a cast (Her.cast_mp, as
+# attack.choice.cast_mp has it; her bar fell 14.05 MP a cast over 364 one-cast stretches of the hunts of 2026-10-25 23:43
+# to 01:03), and her pet's MP potions the 100-MP Blue Potions she carried then (Her.mp_potion: the first 20 drinks of the
+# hunt of 23:43 each 16.4-16.8 px of 104 of her 601-623 MP, 95-100; analysis-1025/mp-attack-check/drinksize.py).
 SKILL_STARS = 2
 CAST_MP = 11.0
 MP_REGEN = 0.32
@@ -601,6 +605,11 @@ class Her:
                                  # leaves her under this share of her MP; None: it doesn't
     spread: bool = False         # each of her stars' damage drawn (STAR_DAMAGE, a whole number as likely each, less the
                                  # monster's defence) against its HP in the game data, not a star's worth each
+    star: tuple[int, int] | None = None  # with `spread`, her regular attack's star before defence (None: STAR_DAMAGE)
+    skill_star: tuple[int, int] | None = None  # ... and each of Lucky Seven's SKILL_STARS stars (None: `skill` /
+                                               # SKILL_STARS of the regular star)
+    cast_mp: float = CAST_MP     # MP a Lucky Seven cast takes
+    mp_potion: float = MP_POTION  # MP an MP potion her pet drinks gives
 
 
 LEVEL_19 = Her()
@@ -618,6 +627,11 @@ LEVEL_23 = Her(max_hp=730.0, level=23, exp=31_736, defence=DEFENCE, pet=0.45)
 # Potion's 100 and an Orange Potion's 250 (the game data; the Tree Dungeon study's monsters_drops.md); the harness's
 # `--world red-potion` has her drink Red Potions.
 LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=0.45, mp=601.0, pet_mp=PET_MP)
+# ... and from 2026-10-25 at level 25: HP 774 and MP 623 (her bars' numbers), her stars as read off the monsters' bars
+# then (attack.choice.STAR and SKILL_STAR: the regular star 20-140, Lucky Seven's two of 96-192), drawn so with `spread`
+# (harness.ATTACK_HER), her Lucky Seven at level 16 (14 MP) and her pet's MP potions Blue Potions (100).
+LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=0.45, mp=623.0, pet_mp=PET_MP, star=(20, 140),
+               skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0)
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -1865,8 +1879,11 @@ class World:
         """An attack's damage drawn (Her.spread), in average stars (STAR_MEAN): a claw swipe's (CLAW_DAMAGE), one star's
         (STAR_DAMAGE), or SKILL_STARS stars of `stars` / SKILL_STARS of one each; every star a whole number from its
         least to its most, as likely each, seeded by the tick."""
-        lo, hi = CLAW_DAMAGE if swipe else STAR_DAMAGE
+        her = self.character
+        lo, hi = CLAW_DAMAGE if swipe else (her.star or STAR_DAMAGE)
         n, each = (1, 1.0) if swipe or stars == 1.0 else (SKILL_STARS, stars / SKILL_STARS)
+        if not swipe and stars != 1.0 and her.skill_star is not None:
+            (lo, hi), each = her.skill_star, 1.0
         lo, hi = round(lo * each), round(hi * each)
         total = sum(lo + int(self.chance(f"damage:{k}") * (hi - lo + 1)) for k in range(n))
         return total / STAR_MEAN
@@ -1875,15 +1892,15 @@ class World:
         """A Lucky Seven cast's MP (CAST_MP) taken, if she has it (Her.mp): then her pet may drink for her (Her.pet_mp).
         False with too little: nothing is thrown."""
         her = self.character
-        if self.mp * her.mp < CAST_MP - 1e-9:
+        if self.mp * her.mp < her.cast_mp - 1e-9:
             self.no_mp += 1
             self.note(f"Lucky Seven with {self.mp * her.mp:.0f} MP: not enough, nothing thrown")
             return False
-        self.mp -= CAST_MP / her.mp
+        self.mp -= her.cast_mp / her.mp
         self.casts += 1
-        self.mp_used += CAST_MP
+        self.mp_used += her.cast_mp
         if her.pet_mp is not None and self.mp < her.pet_mp and self.pet_fullness() > pet_care.PACKED_AT:
-            self.mp = min(1.0, self.mp + MP_POTION / her.mp)
+            self.mp = min(1.0, self.mp + her.mp_potion / her.mp)
             self.mp_potions += 1
             self.note(f"her pet drinks an MP potion for her: MP {self.mp:.1%}")
         return True

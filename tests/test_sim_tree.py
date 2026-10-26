@@ -145,13 +145,17 @@ def test_jumping_for_the_rope_from_30_at_the_clients_reach_she_misses_and_lands_
         assert w.plat is lands and w.mode == "ground", (realism, w.plat)
 
 
-# --- her at level 24, and the map's monsters -----------------------------------------------------------------------
+# --- her at level 25 (24 until 2026-10-26), and the map's monsters ---------------------------------------------------
 
-def test_she_is_level_24_there_with_her_pet_and_her_new_keys():
+def test_she_is_level_25_there_with_her_pet_her_new_keys_and_her_stars_as_measured():
+    from gamelab.attack import choice
     from gamelab.control.timeline import SIM_KEYS_PET
-    from gamelab.sim.world import DEFENCE, LEVEL_24
-    assert scenarios.her_on(TREE) == (SIM_KEYS_PET, LEVEL_24)
-    assert (LEVEL_24.max_hp, LEVEL_24.level, LEVEL_24.defence, LEVEL_24.pet) == (752, 24, DEFENCE, 0.45)
+    from gamelab.sim.world import DEFENCE, LEVEL_24, LEVEL_25
+    assert scenarios.her_on(TREE) == (SIM_KEYS_PET, LEVEL_25)
+    assert (LEVEL_25.max_hp, LEVEL_25.level, LEVEL_25.defence, LEVEL_25.pet, LEVEL_25.mp) == (774, 25, DEFENCE, 0.45, 623)
+    assert LEVEL_25.star == choice.STAR and LEVEL_25.skill_star == choice.SKILL_STAR  # (the stack reckons as drawn)
+    assert LEVEL_25.cast_mp == choice.cast_mp(choice.SKILL_LEVEL) == 14 and LEVEL_25.mp_potion == 100
+    assert (LEVEL_24.max_hp, LEVEL_24.level, LEVEL_24.mp, LEVEL_24.star) == (752, 24, 601, None)
 
 
 def test_a_horny_mushrooms_touch_takes_111_to_131_hp_by_the_formula_and_75_give_or_take_70_percent_by_a_share():
@@ -409,7 +413,7 @@ def test_knocked_off_the_rope_by_the_towers_left_wall_she_falls_out_unless_group
 def test_the_harness_runs_tree_dungeon_with_its_crowd_and_the_unknowns_switched_on():
     import dataclasses
     from gamelab.sim import harness
-    from gamelab.sim.world import LEVEL_24
+    from gamelab.sim.world import LEVEL_25
     sc = harness.scenario("loop", 1, "crowd", map_id=TREE, world=("zero-walls", "touch-share"))
     assert sc.start == harness.TREE_START_AT[1] and sc.name == "loop:crowd:1:10002073:zero-walls:touch-share"
     assert sc.realism.camps == harness.TREE_CAMPS and sc.realism.respawn == 8.8 and sc.realism.zero_walls
@@ -417,10 +421,10 @@ def test_the_harness_runs_tree_dungeon_with_its_crowd_and_the_unknowns_switched_
     for preset, respawn in (("crowd-17", 17.0), ("crowd-slow", 30.0)):  # the live median on 23, the first map's refill
         other = harness.scenario("loop", 1, preset, map_id=TREE)
         assert other.realism.respawn == respawn and other.realism.camps == harness.TREE_CAMPS
-    assert sc.her == dataclasses.replace(LEVEL_24, defence=None)
+    assert sc.her == dataclasses.replace(LEVEL_25, defence=None)
     assert harness.scenario("loop", 1, "game", map_id=TREE).her is None  # as she is there (scenarios.HER)
     assert harness.scenario("tour", 2, map_id=TREE, world=("client-reach",)).realism.rope_reach == ROPE_REACH_CLIENT
-    assert harness.scenario("loop", 1, map_id=TREE, world=("red-potion",)).her == dataclasses.replace(LEVEL_24,
+    assert harness.scenario("loop", 1, map_id=TREE, world=("red-potion",)).her == dataclasses.replace(LEVEL_25,
                                                                                                     potion=100.0)
     with pytest.raises(ValueError, match="10002073's alone"):
         harness.scenario("loop", 1, "crowd")  # the camps stand on Tree Dungeon's platforms

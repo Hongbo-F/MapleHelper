@@ -170,7 +170,8 @@ WORLDS["heading-wrong"] = {"heading_wrong": (0.01, 0.31, 0.24, True)}
 WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 NOISE_FIELDS = ("heading_wrong",)  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
-# live (world.LUCKY_SEVEN), CAST_MP a cast of her MP (world.Her.mp: LEVEL_24's 601) and nothing with less, her attack
+# live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
+# MP (Her.cast_mp: LEVEL_25's 14 of 623) and nothing with less, her attack
 # key's the regular star; each star's damage drawn against the monster's HP in the game data (world.Her.spread), so a
 # monster's HP left is as the stack reckons it (attack.choice: its finishing throws).
 ATTACK_HER = {"skill": LUCKY_SEVEN, "spread": True}

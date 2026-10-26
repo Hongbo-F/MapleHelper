@@ -56,10 +56,11 @@ recap = 3000
 [character]
 speed = 119.2
 jump = 100
-hp = 752
-level = 24
-mp = 601            # her MP when full: what her MP bar's share is of (Lucky Seven only with MP for a cast)
-lucky_seven = 10    # her Lucky Seven's skill level: its MP a cast in the game data (11 at 10 and 11)
+hp = 774            # (her HP bar's number at level 25, 2026-10-25)
+level = 25
+mp = 623            # her MP when full: what her MP bar's share is of (Lucky Seven only with MP for a cast)
+lucky_seven = 16    # her Lucky Seven's skill level: its MP a cast in the game data (14 at 16 and 17: her bar fell
+                    # 14.05 MP a cast live on 2026-10-25; 17 costs the same, her skill window tells)
 
 # How gamelab captures the game: "dxgi" (desktop duplication: each frame as the screen shows it, about 2 ms
 # for the game's window) or "mss" (a GDI copy that waits for the screen's next frame: 17 ms and more).

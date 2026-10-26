@@ -65,11 +65,14 @@ class Character:
     (gamelab.attack.choice: Lucky Seven or the regular attack)."""
     speed: float = 119.2    # measured: she walks 148-151 units/s (149 = 125 x 1.192)
     jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
-    hp: float = 752.0       # her HP when full (her HP bar, level 24, 2026-10-24)
-    level: float = 24.0
-    mp: float = 601.0       # her MP when full (her MP bar's number, level 24, 2026-10-24)
-    lucky_seven: float = 10.0  # her Lucky Seven's skill level: 11 MP a cast in the game data (at 10 and 11); her MP
-                               # bar fell a median 11.4 MP a cast over 99 casts live on 2026-10-24
+    hp: float = 774.0       # her HP when full (her HP bar's number, level 25, 2026-10-25; 752 at level 24)
+    level: float = 25.0
+    mp: float = 623.0       # her MP when full (her MP bar's number, level 25, 2026-10-25; 601 at level 24)
+    lucky_seven: float = 16.0  # her Lucky Seven's skill level: 14 MP a cast in the game data (at 16 and 17); her MP
+                               # bar fell 2.345 px of 104 a cast (+- 0.03) over 364 one-cast stretches of the live hunts
+                               # of 2026-10-25 23:43 to 01:03, 14.05 MP at 623 (13 at 14 and 15 would be 2.17 px, 15 at
+                               # 18 and 19 2.50: D:/MapleHelper-scratch/hunt-ab/a/scripts/castcost_all.py); 11 at level
+                               # 10, 11.4 measured on 2026-10-24
 
 
 @dataclass(frozen=True)

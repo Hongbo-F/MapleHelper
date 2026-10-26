@@ -42,16 +42,17 @@ from ..behavior.tour import Tour
 from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
                     Trace, detector_kinds, patched)
 from . import harness
-from .world import LEVEL_19, LEVEL_23, LEVEL_24, LUCKY_SEVEN, ROPE_REACH_CLIENT, Her, Noise, Realism, SimDied, World
+from .world import LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, ROPE_REACH_CLIENT, Her, Noise, Realism, SimDied, World
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
 TREE = 10002073    # Victoria Road: Tree Dungeon, Forest Up North II, the third (from 2026-10-24)
 # Her keys and her (world.Her) on each map: on the first map as the golden traces were recorded with (level 19, her
 # potions on a key); on West Rocky Mountain II as she plays there (level 23, HP 730, her pet drinking her potions, her
-# bindings from 2026-10-23); on Tree Dungeon, Forest Up North II at level 24 (HP 752), the same keys and pet. Any other
-# map (the tests' synthetic ones): the first map's.
-HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23), TREE: (SIM_KEYS_PET, LEVEL_24)}
+# bindings from 2026-10-23); on Tree Dungeon, Forest Up North II at level 25 (HP 774, MP 623, her stars as read there
+# on 2026-10-25: world.LEVEL_25; level 24 until 2026-10-26), the same keys and pet. Any other map (the tests' synthetic
+# ones): the first map's.
+HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23), TREE: (SIM_KEYS_PET, LEVEL_25)}
 _MODEL: dict[int, MapModel] = {}
 
 
@@ -2078,7 +2079,7 @@ def loop_tree_crowd(sim):
 
 
 _CROWD, _SLOW = harness.PRESETS["crowd"], harness.PRESETS["crowd-slow"]
-_LUCKY = dataclasses.replace(LEVEL_24, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
+_LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
 @tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
@@ -2199,9 +2200,9 @@ def _lucky_seven_again(tr: dict) -> bool:
 
 
 @tree((24, 231.0), monsters={22, 23}, seed=1, limit=300, may_die=True, noise=_CROWD[0], attack="choice",
-      her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER, pet_mp=None),
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER, pet_mp=None),
       realism=Realism(respawn=17.0, zero_walls=True),
-      expects=(logs("Lucky Seven: horny-mushroom"), logs("< a cast's 11"),
+      expects=(logs("Lucky Seven: horny-mushroom"), logs("< a cast's 14"),
                check("Lucky Seven again once her MP came back", _lucky_seven_again),
                check("never Lucky Seven with too little MP", lambda tr: not any(
                    "not enough, nothing thrown" in line for line in tr["world_log"]))))
@@ -2386,7 +2387,7 @@ def loop_tree_lie_detector_23(sim):
 # star's damage drawn (harness.ATTACK_HER), the bars over hurt monsters read as they show; group 0's walls
 # stopping her (in the default world a touch knocked her out of the map past the tower's wall on 3 of seeds 1-12 of
 # loop_tree_lie_detector_grind, and 2 of loop_tree_lie_detector's twin as live ran it, a simulator effect).
-_LIVE = dict(attack="choice", her=dataclasses.replace(LEVEL_24, **harness.ATTACK_HER),
+_LIVE = dict(attack="choice", her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
              realism=Realism(zero_walls=True))
 
 

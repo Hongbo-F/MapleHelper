@@ -12,8 +12,9 @@ throw is
 - the regular attack at a monster whose HP left it takes about as fast as Lucky Seven would (`finishes`: its expected
   throws within FINISH_SLACK of Lucky Seven's), where Lucky Seven would be overkill: its MP and its stars spent for
   nothing;
-- Lucky Seven otherwise: three times the regular attack's damage a throw (SKILL), so a Horny Mushroom dies in about 4
-  throws, not 12, and she wins a bigger share of a monster others hit too (EXP is split by damage).
+- Lucky Seven otherwise: two stars of SKILL_STAR a cast, 3.6 times the regular attack's damage a throw (STAR) as
+  measured live at level 25, so a Green Mushroom dies to one cast nine times in ten and a Horny Mushroom to two, and
+  she wins a bigger share of a monster others hit too (EXP is split by damage).
 
 `Attack` is one attack's damage: its stars a throw, each a whole number of damage from `lo` to `hi` as likely each,
 less the monster's defence (x 100 / (PDDamage + 100), meowdb's formula, as the simulator's stars: sim.world), and its
@@ -34,17 +35,26 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Her regular attack's star: what it does before the monster's defence. What hers did on the first map at level 19
-# (sim.world.STAR_DAMAGE, 30-70 as read off the monsters' bars there); at level 24 on Tree Dungeon not measured: the HP
-# bars over the monsters read empty there until 2026-10-25 (perception.hud.hp_bar: of the 87 bars seen in the 20:57 run
-# of 2026-10-24, 83 read 0, walking on after, 4 a share), and her damage hasn't been read off them since. A guess, the
-# simulator's.
-STAR = (30, 70)
-# Lucky Seven's damage, in regular stars (two stars a cast, each SKILL / 2 of the regular one's): sim.world.LUCKY_SEVEN,
-# fitted to her live hunts with it on Tree Dungeon (tour --loop --skill, 2026-10-24: 3.85 throws a Horny Mushroom's
-# kill, 2.95 a Green's; the simulator's 3 stars a cast 4.1 and 2.8 with the game preset's misses).
-SKILL = 3.0
+# Her regular attack's star: what it does before the monster's defence, at level 25 on Tree Dungeon, read off the
+# monsters' HP bars (readable since 2026-10-25) in the live hunts of 23:43, 00:11, 00:53 and 01:03: the first bar after
+# one regular star, the bar's drop between two looks with one regular star between them, and the regular-only stretch
+# of 23:51:34-48 (a Green at 0.37 after two stars, a Horny at 0.63: 73 and 82 a star before defence), with no other
+# player within 200 units: 18 hits of 26-137 (and one 182), 80 on average (D:/MapleHelper-scratch/hunt-ab/a/scripts
+# damage_fit.py, svc_bars.py). As wide as the claw's star is by its formula at her first job's 10% mastery (the least
+# about a sixth of the most: (LUK x 3.6 x 0.9 x 0.1 + STR + DEX) against (LUK x 3.6 + STR + DEX), x WATK / 100). Until
+# 2026-10-26 30-70, the first map's at level 19 (sim.world.STAR_DAMAGE), a guess here: 'finish' fired 5 times in 325
+# throws live (at 36-40 HP left), 3 of them at a corpse.
+STAR = (20, 140)
+# Lucky Seven's star (two a cast, SKILL_STARS), before the monster's defence, at SKILL_LEVEL: from the first bar 144
+# Horny Mushrooms showed after one cast of hers with nobody by them (the perception service's tracks, the same hunts):
+# 231-346 dealt (5% to 95%), 288 at the median, the sum of two stars of 96-192 to the unit (the most twice the least,
+# as Lucky Seven's formula has it: LUK x 2.5 to LUK x 5.0, x WATK / 100, x its damage), and a Green Mushroom (233 HP)
+# killed by one cast 91% of the time (live 45 of 53 Green kills opened with Lucky Seven took one cast, misses in the
+# rest; 127 of the 182 Greens she killed never showed a bar). Until 2026-10-26 two of 45-105 (SKILL 3.0 of the old
+# regular star's), fitted to throws a kill, which had misses and wasted throws in them: no cast could kill a Green.
+SKILL_STAR = (96, 192)
 SKILL_STARS = 2
+SKILL_LEVEL = 16  # her Lucky Seven's level when SKILL_STAR was measured (its MP a cast, 14: config.toml [character])
 # Of her throws, the share that do nothing (a star that misses, or a monster gone from where it was thrown at): the
 # simulator's game preset (Noise.miss), whose Lucky Seven fits her live throws a kill (above). A guess: the chance a
 # throw of hers took nothing off a monster as she reckons it (Left.after), never what an attack is chosen by.
@@ -52,14 +62,17 @@ MISS = 0.275
 # Throws (expected, misses aside) the regular attack may take more than Lucky Seven at a monster for it to be the
 # regular attack (`finishes`): a quarter of a throw, about 0.2 s of hers (THROW_S), against a cast's MP. A guess. At 0
 # it would be the regular attack only where it's as sure a kill as Lucky Seven; at it, a Green Mushroom (233 HP, no
-# defence) is finished with it from 40 HP left (76% one throw), a Horny Mushroom (403, DEF 10) from 36.
+# defence) is finished with it from 49 HP left (76% one throw), a Horny Mushroom (403, DEF 10) from 44 (40 and 36 with
+# the regular star of 30-70 before 2026-10-26).
 FINISH_SLACK = 0.25
 THROW_S = 0.84   # s between her throws: her attack's lock and its margin (0.79-0.85 s live; behavior.patrol.THROW_S)
-# MP a Lucky Seven cast costs at each of its skill levels, 1-20 (the game data: Skill 4001003, mpCon; a test checks it
-# against the copy). Hers is config.toml [character] lucky_seven.
+# MP a Lucky Seven cast costs at each of its skill levels, 1-20, and its damage (%) there (the game data: Skill 4001003,
+# mpCon and damage; a test checks them against the copy). Hers is config.toml [character] lucky_seven; its stars scale
+# with the damage from SKILL_LEVEL's (her LUK and WATK as at level 25).
 LUCKY_SEVEN_MP = (8, 8, 8, 8, 9, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16)
+LUCKY_SEVEN_DAMAGE = (60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112, 116, 120, 124, 128, 132, 140)
 # The steps her MP bar's share is read in: its px at the game's own 1366x768 (perception.hud: blue from x 611 to 715), so
-# to 1/104 of her MP (5.8 of 601), as the game draws it. She casts only with a step of MP more than a cast reads (the
+# to 1/104 of her MP (6.0 of 623), as the game draws it. She casts only with a step of MP more than a cast reads (the
 # bar may be drawn rounded up), so a cast is never pressed with too little MP: at most a cast's worth is left unused.
 MP_STEPS = 104
 
@@ -168,16 +181,21 @@ class Left:
         return float(self.p @ attack.table(top)[:top + 1])
 
 
-def lucky_seven(level: float, skill: float = SKILL) -> Attack:
-    """Lucky Seven at skill `level` (its MP a cast: LUCKY_SEVEN_MP), `skill` regular stars of damage a cast."""
-    lo, hi = STAR
-    each = skill / SKILL_STARS
-    return Attack("lucky_seven", SKILL_STARS, round(lo * each), round(hi * each), cast_mp(level))
+def lucky_seven(level: float, star: tuple[int, int] = SKILL_STAR) -> Attack:
+    """Lucky Seven at skill `level`: its MP a cast (LUCKY_SEVEN_MP), SKILL_STARS stars of `star` a cast as measured at
+    SKILL_LEVEL, scaled by its damage at `level` (LUCKY_SEVEN_DAMAGE)."""
+    k = _skill_damage(level) / _skill_damage(SKILL_LEVEL)
+    return Attack("lucky_seven", SKILL_STARS, round(star[0] * k), round(star[1] * k), cast_mp(level))
 
 
 def cast_mp(level: float) -> float:
     """MP a Lucky Seven cast costs at skill `level` (LUCKY_SEVEN_MP; past its ends, its nearest)."""
     return float(LUCKY_SEVEN_MP[min(max(int(level), 1), len(LUCKY_SEVEN_MP)) - 1])
+
+
+def _skill_damage(level: float) -> float:
+    """Lucky Seven's damage (%) at skill `level` (LUCKY_SEVEN_DAMAGE; past its ends, its nearest)."""
+    return float(LUCKY_SEVEN_DAMAGE[min(max(int(level), 1), len(LUCKY_SEVEN_DAMAGE)) - 1])
 
 
 def mp_points(share: float, max_mp: float) -> float:
@@ -193,7 +211,7 @@ def can_cast(share: float, max_mp: float, cost: float) -> bool:
 def finishes(hp: "float | Left", pdd: float = 0.0, regular: Attack = REGULAR, skill: Attack | None = None) -> bool:
     """Whether the regular attack takes what a monster of defence `pdd` has left (`hp` HP, or as reckoned: Left)
     about as fast as `skill` would: its expected throws within FINISH_SLACK of the skill's."""
-    skill = skill or lucky_seven(1)
+    skill = skill or lucky_seven(SKILL_LEVEL)
     left = hp if isinstance(hp, Left) else Left.of(hp, pdd)
     return left.throws(regular) <= left.throws(skill) + FINISH_SLACK
 

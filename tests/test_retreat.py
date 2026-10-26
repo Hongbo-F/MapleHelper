@@ -266,7 +266,8 @@ def test_hanging_on_a_rope_as_safe_as_a_safe_place_she_stays_on_it():
 
 
 def test_hanging_on_a_rope_within_a_monsters_reach_she_gets_off_it_for_a_safe_place():
-    """At y 22 on the same rope the Horny Mushrooms of 30, just above, reach her (danger 0.059): not a safe place. Off it
+    """At y 22 on the same rope the Horny Mushrooms of 30, just above, reach her (danger 0.058 at her 774 HP of level 25,
+    config.Character; 0.059 at 752): not a safe place. Off it
     at once, once her dot has shown her hanging (the navigator's look until she stands still, 2 s on a rope, skipped),
     onto 28 by 10 s."""
     m = tree_map()
@@ -274,7 +275,7 @@ def test_hanging_on_a_rope_within_a_monsters_reach_she_gets_off_it_for_a_safe_pl
     assert d.on_rope(next(r for r in m.ropes if r.x == 146), 22.0, None) > retreat.SAFE_DANGER
     out = _hanging_at(22.0)
     assert out["retreat"]["why"] != "here: a safe rope", out["log"]
-    assert "on the rope at x 146 (danger 0.059 there): getting off" in out["log"]
+    assert "on the rope at x 146 (danger 0.058 there): getting off" in out["log"]
     getting_off = next(line for line in out["log"].splitlines() if "getting off" in line)
     assert float(getting_off.split()[0]) < 1.0
     assert out["played"] and out["then"]["safe"], out["log"]

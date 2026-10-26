@@ -21,26 +21,38 @@ from gamelab.perception.mobs import Mob
 
 from test_sim import KEYS
 
-L7 = lucky_seven(10)
+L7 = lucky_seven(10)  # (11 MP a cast: the MP tests' numbers, at her 601 of level 24)
 MAX_MP = 601.0
 
 
-def test_lucky_seven_is_three_regular_stars_and_kills_a_horny_mushroom_in_about_three_and_a_half_throws():
-    assert (L7.stars, L7.lo, L7.hi, L7.mp) == (2, 45, 105, 11.0)
-    assert L7.mean() == pytest.approx(3 * REGULAR.mean())
-    assert REGULAR.throws(233) == pytest.approx(5.18, abs=0.01) and L7.throws(233) == pytest.approx(2.03, abs=0.01)
-    assert REGULAR.throws(403, 10) == pytest.approx(9.40, abs=0.01) and L7.throws(403, 10) == pytest.approx(3.44, abs=0.01)
-    assert REGULAR.throws(30) == 1.0 and REGULAR.one_throw(30) == 1.0 and REGULAR.one_throw(71) == 0.0
+def test_lucky_seven_is_two_stars_of_its_measured_damage_at_her_level_and_kills_a_green_mushroom_nine_times_in_ten():
+    """Her stars as read off the monsters' bars live at level 25 (attack.choice.STAR, SKILL_STAR): Lucky Seven two of
+    96-192 at its level 16 (14 MP), 3.6 regular stars of 20-140, scaled by its damage in the game data at another
+    level (96% at 10 against 120%): one cast kills a Green Mushroom 91% of the time, a Horny Mushroom takes two."""
+    l16 = lucky_seven(16)
+    assert (l16.stars, l16.lo, l16.hi, l16.mp) == (2, 96, 192, 14.0) and (L7.lo, L7.hi, L7.mp) == (77, 154, 11.0)
+    assert l16.mean() == pytest.approx(3.6 * REGULAR.mean()) and l16.one_throw(233) == pytest.approx(0.91, abs=0.005)
+    assert REGULAR.throws(233) == pytest.approx(3.50, abs=0.01) and l16.throws(233) == pytest.approx(1.09, abs=0.01)
+    assert REGULAR.throws(403, 10) == pytest.approx(6.14, abs=0.01) and l16.throws(403, 10) == pytest.approx(2.01, abs=0.01)
+    assert REGULAR.throws(20) == 1.0 and REGULAR.one_throw(20) == 1.0 and REGULAR.one_throw(141) == 0.0
     assert REGULAR.throws(0) == 0.0
 
 
+def test_lucky_sevens_damage_by_level_is_the_game_datas():
+    path = TABLES / "skills.json"
+    if not path.is_file():
+        pytest.skip("no game data tables (python -m gamedata tables)")
+    levels = json.loads(path.read_text(encoding="utf-8"))["4001003"]["levels"]
+    assert choice.LUCKY_SEVEN_DAMAGE == tuple(levels[str(k)]["damage"] for k in range(1, len(levels) + 1))
+
+
 def test_the_regular_attack_finishes_what_it_takes_about_as_fast_as_lucky_seven():
-    # A Green Mushroom (no defence) from 40 HP left: a regular star kills it 76% of the time, 1.24 throws against
-    # Lucky Seven's 1; from 41 it's 1.27, more than FINISH_SLACK over.
-    assert finishes(40, 0, REGULAR, L7) and not finishes(41, 0, REGULAR, L7)
-    assert finishes(36, 10, REGULAR, L7) and not finishes(37, 10, REGULAR, L7)  # a Horny Mushroom: DEF 10
-    assert not finishes(233, 0, REGULAR, L7)
-    assert REGULAR.one_throw(40) == pytest.approx(31 / 41)
+    # A Green Mushroom (no defence) from 49 HP left: a regular star kills it 76% of the time, 1.24 throws against
+    # Lucky Seven's 1; from 50 it's more than FINISH_SLACK over (40 with the regular star of 30-70 before 2026-10-26).
+    assert finishes(49, 0, REGULAR, L7) and not finishes(50, 0, REGULAR, L7)
+    assert finishes(44, 10, REGULAR, L7) and not finishes(45, 10, REGULAR, L7)  # a Horny Mushroom: DEF 10
+    assert not finishes(233, 0, REGULAR, L7) and not finishes(80, 0)  # (her Lucky Seven at SKILL_LEVEL by default)
+    assert REGULAR.one_throw(49) == pytest.approx(92 / 121)
 
 
 def test_a_cast_only_with_a_px_of_mp_more_than_it_costs():
@@ -101,34 +113,34 @@ def test_she_casts_at_a_fresh_monster_and_finishes_it_with_the_regular_attack(mo
     for _ in range(3):
         keys.append(a.key("right"))
         a.on_look(_look([("green-mushroom", 250.0, None)]))
-    # 233 HP: a cast (150 on average) leaves 83, too much for a regular star; after a second it's dead 97% of the
-    # time, and if it isn't, it has 11 left on average: a regular star's
-    assert keys[:2] == [KEYS7.lucky_seven.name] * 2 and keys[2] == KEYS7.attack.name
-    assert a.counts["lucky_seven"] == 2 and a.counts["finish"] == 1
+    # 233 HP: a cast (231 on average at level 10) kills it 48% of the time, and if it doesn't, it has 27 left on
+    # average: a regular star's
+    assert keys[0] == KEYS7.lucky_seven.name and keys[1:] == [KEYS7.attack.name] * 2
+    assert a.counts["lucky_seven"] == 1 and a.counts["finish"] == 2
     assert "Lucky Seven: green-mushroom ~233/233 HP (MP 595)" in said[0]
-    assert "the regular attack: green-mushroom ~11/233 HP if alive (97% dead); finishing it" in said[2]
+    assert "the regular attack: green-mushroom ~27/233 HP if alive (48% dead); finishing it" in said[1]
 
 
 def test_seen_alive_after_her_throws_landed_what_would_have_killed_it_is_ruled_out():
     """With misses (choice.MISS), a Green Mushroom seen walking after two casts landed most likely took one of them,
-    not both: about 100 HP left, a cast's work, where her throws' average damage alone left 16."""
+    not both: about 82 HP left, a cast's work."""
     a, said = _attacks()
     t0 = time.monotonic()
     a.on_look(_look([("green-mushroom", 250.0, None)], t=t0))
     a.key("right")
     a.key("right")
     m = a._last.monsters[0]
-    assert a.reckon(m).dead == pytest.approx(0.51, abs=0.01)  # not seen since: maybe dead ...
-    assert a.left(m) == pytest.approx(104, abs=1)  # ... and if it isn't, a cast's work left
+    assert a.reckon(m).dead == pytest.approx(0.72, abs=0.01)  # not seen since: likely dead ...
+    assert a.left(m) == pytest.approx(82, abs=1)  # ... and if it isn't, a cast's work left
     a.on_look(_look([("green-mushroom", 250.0, None)], t=t0 + 1.0 + LANDS_S))  # alive after both
     left = a.reckon(a._last.monsters[0])
-    assert left.dead == 0.0 and left.hp == pytest.approx(104, abs=1)
+    assert left.dead == 0.0 and left.hp == pytest.approx(82, abs=1)
     assert a.key("right") == KEYS7.lucky_seven.name and a.counts["finish"] == 0
 
 
 def test_a_bar_up_though_read_empty_says_not_all_her_throws_missed():
     """On Tree Dungeon at 1366x768 a hurt monster's bar reads empty, but it's up: her damage shows. Seen walking with it
-    after two casts landed, the Green took one or both (about 80 HP left, not 104 with the chance both missed, 15%);
+    after two casts landed, the Green took one or both (about 27 HP left, not 82 with the chance both missed, 8%);
     with a third cast out that may have shown by then and not landed, the bar may be that one's, and says nothing."""
     a, _ = _attacks()
     t0 = time.monotonic()
@@ -137,7 +149,7 @@ def test_a_bar_up_though_read_empty_says_not_all_her_throws_missed():
     a.key("right")
     a.on_look(_look([("green-mushroom", 250.0, 0.0)], t=t0 + 1.0 + LANDS_S))  # alive after both, its bar up
     left = a.reckon(a._last.monsters[0])
-    assert left.dead == 0.0 and left.p[-1] == 0.0 and left.hp == pytest.approx(80, abs=1)
+    assert left.dead == 0.0 and left.p[-1] == 0.0 and left.hp == pytest.approx(27, abs=1)
     assert choice.Left.of(233).hit() is None  # (no throw reckoned in it: nothing to go by)
     b, _ = _attacks()
     b.on_look(_look([("green-mushroom", 250.0, None)], t=t0))
@@ -169,7 +181,7 @@ def test_a_bar_read_between_empty_and_full_sets_what_is_left(monkeypatch):
     a2, _ = _attacks()
     a2.on_look(_look([("horny-mushroom", 200.0, 0.0)]))  # read empty (as at 1366x768 until 2026-10-25): its whole HP
     assert a2.key("right") == KEYS7.lucky_seven.name
-    assert a2.left(a2._last.monsters[0]) > 400 - 0.725 * 150 * 100 / 110 - 1
+    assert a2.left(a2._last.monsters[0]) > 400 - 0.725 * L7.mean() * 100 / 110 - 1
 
 
 def test_the_regular_attack_with_mp_under_a_cast_and_with_nothing_in_the_way():
