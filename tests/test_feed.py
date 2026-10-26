@@ -409,6 +409,31 @@ def test_senses_look_and_glance_through_the_feed_and_stand_still_while_it_has_no
     assert senses.failed["lost"] == 1
 
 
+def test_a_command_standing_still_has_the_game_brought_forward_after_lost_s_too(sync, monkeypatch):
+    # Every look without a state to act on has the feed bring the game forward (the service's client does it once a second
+    # at most, and never for what only the user sets right), after LOST_S too: a hunt standing still on "the game isn't in
+    # front" (Senses.regain) brings it forward again. Before, LookLost was raised first: once looks had failed for LOST_S,
+    # none did.
+    from gamelab.perception.framecheck import LookLost, Problem
+    f, clock, eyes = sync
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    senses.log = lambda m: None
+    behind = Problem("window", "the game isn't in front")
+    fronted = []
+    monkeypatch.setattr(f, "latest", lambda want, timeout=feed.FEED_WAIT_S: (clock.sleep(timeout), None)[1])
+    monkeypatch.setattr(f, "problem", lambda: behind)
+    monkeypatch.setattr(f, "bring_forward", fronted.append)
+    with pytest.raises(LookLost):
+        senses.look()
+    first = len(fronted)
+    assert first >= 3 and set(fronted) == {behind} and first == senses.failed["looks"]  # every look that failed
+    with pytest.raises(LookLost):
+        senses.look()  # at once now: the game brought forward first all the same
+    assert len(fronted) == first + 1
+    assert senses.regain(LookLost(behind), clock.now + 3.0) is None
+    assert len(fronted) == senses.failed["looks"] >= first + 3  # (each of regain's looks, PAUSE_POLL_S apart)
+
+
 def test_a_look_is_the_newest_frame_newer_than_the_last_looks_and_after_her_keys_effect(sync, monkeypatch):
     # Senses.fresh_after: (a) never the last look's frame again, (b) shown KEY_EFFECT_S after her last key at the
     # soonest, (c) at most MAX_AGE_S old: a look after a pause takes the newest frame in, without waiting for another.

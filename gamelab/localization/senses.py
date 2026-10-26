@@ -147,8 +147,10 @@ class Senses:
             if s is not None:
                 break
             problem = self.feed.problem() or Problem("perception", "no state from perception in time")
-            self._failed(problem)  # (raises LookLost after LOST_S)
+            # The game brought forward first (once a second at most): after LOST_S every look raises at once, and a hunt
+            # standing still on a game not in front (`regain`) would never bring it forward again otherwise.
             self.feed.bring_forward(problem)
+            self._failed(problem)  # (raises LookLost after LOST_S)
             time.sleep(RETRY_GAP_S)
         self._passed()
         self.counts["looks"] += 1
