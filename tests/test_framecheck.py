@@ -833,6 +833,22 @@ def test_her_name_tag_is_looked_for_within_a_frame_s_move_first_then_near_then_i
     assert tag.find(moved) == (585, 528) and boxes == [None]
 
 
+def test_her_name_tags_whole_play_area_is_matched_in_bands_as_it_was_at_once(tmp_path, monkeypatch):
+    from gamelab.perception import nametag
+    tag = NameTag(np.load(TAG), tmp_path / "tag_full.npy", NATIVE)
+    assert tag.find(ROCKY[0]) == (685, 528)
+    for full in ROCKY:
+        gray = cv2.cvtColor(full[:int(full.shape[0] * nametag.PLAY_BOTTOM)], cv2.COLOR_RGB2GRAY)
+        at_once, banded = cv2.matchTemplate(gray, tag.full, cv2.TM_CCOEFF_NORMED), nametag._banded(gray, tag.full)
+        assert banded.shape == at_once.shape and np.abs(banded - at_once).max() < 2e-3
+        assert cv2.minMaxLoc(banded)[3] == cv2.minMaxLoc(at_once)[3]
+    found = [tag.search(full) for full in ROCKY]
+    monkeypatch.setattr(nametag, "BANDS", 1)
+    assert [tag.search(full) for full in ROCKY] == found
+    th, tw = tag.full.shape
+    assert nametag._banded(gray[:40], tag.full).shape == (40 - th + 1, gray.shape[1] - tw + 1)  # (too few: at once)
+
+
 def test_a_minimap_picture_that_failed_to_load_is_tried_again(monkeypatch):
     import gamedata.canvas
     calls = []

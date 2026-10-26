@@ -5,13 +5,15 @@ which pixels the downscale keeps, and her name in the minimap scored ~0.6 too. T
 cut from the screen the first time, where the half-size one from calibration finds her, and kept.
 
 A look searches near where she was found last first (1.6 ms within NEAR_FRAME, 3.6 within NEAR; the whole play area
-takes 35): the camera keeps her at one spot on screen except near the map's edges, so her tag is seldom far from where
-it was.
+takes 35, matched in row bands at once: BANDS): the camera keeps her at one spot on screen except near the map's
+edges, so her tag is seldom far from where it was.
 
 Her tag is drawn at the game's size: its templates are made for one client size (screen.Geometry; the files told
 apart by its `suffix`), and the px below were measured on the 1920x1080 window and go by the geometry.
 """
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -44,6 +46,16 @@ FULL_EVERY = 30        # ... and every this many looks the whole play area anywa
 # either, nothing changes. In the tours on Tree Dungeon on 2026-10-24 (7,646 looks, 1.8 a second) her tag was hidden 14
 # looks in a row at the most.
 RECUT_AFTER = 50
+# The whole play area's match (`search` with no box: every FULL_EVERY-th look, and when she isn't near where she was)
+# in this many row bands at once, on threads of its own (OpenCV lets go of Python's lock), each band its rows and the
+# template's height less one more, the results stacked. OpenCV takes as long for it on one thread as on 12. On the
+# 3,050 saved frames of 2026-10-26 01:01 (D:/MapleHelper-scratch/pconst/plan, tag_split.py: one at a time, the machine
+# busy with other work) 12.5 ms against 24.3 (the median of the first 1,500; 9.9 against 17.0 of the rest), the same
+# answers on every frame; matched in pieces OpenCV's scores (its correlation goes through Fourier transforms) differ by
+# up to 1.6e-3, in windows near flat.
+BANDS = 4
+_pool: list = []  # its threads, made on the first whole search (any process's)
+_pool_made = threading.Lock()
 
 
 def _hide_minimap(res: np.ndarray, shape: tuple[int, ...], x0: int = 0, y0: int = 0) -> None:
@@ -125,7 +137,7 @@ class NameTag:
         if x1 - x0 < tw or y1 - y0 < th:
             return None
         gray = cv2.cvtColor(full[y0:y1, x0:x1], cv2.COLOR_RGB2GRAY)
-        res = cv2.matchTemplate(gray, self.full, cv2.TM_CCOEFF_NORMED)
+        res = _banded(gray, self.full) if box is None else cv2.matchTemplate(gray, self.full, cv2.TM_CCOEFF_NORMED)
         _hide_minimap(res, full.shape, x0, y0)
         k = self.geo.look_scale
         ref = self._last or (w // 2 // k, int(h * START_HEIGHT) // k)
@@ -162,3 +174,19 @@ class NameTag:
         tag = cv2.cvtColor(np.ascontiguousarray(full[best[2]:best[2] + th, best[1]:best[1] + tw]), cv2.COLOR_RGB2GRAY)
         np.save(self.path, tag)
         return tag
+
+
+def _banded(gray: np.ndarray, template: np.ndarray) -> np.ndarray:
+    """cv2.matchTemplate(gray, template, TM_CCOEFF_NORMED) worked out in BANDS row bands at once (each band's rows of
+    the result from its rows and the template's height less one more), stacked; at once on too few rows."""
+    th = template.shape[0]
+    rows = gray.shape[0] - th + 1
+    if BANDS < 2 or rows < BANDS * th:
+        return cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
+    if not _pool:
+        with _pool_made:
+            if not _pool:
+                _pool.append(ThreadPoolExecutor(BANDS, "tag-bands"))
+    cuts = np.linspace(0, rows, BANDS + 1).astype(int)
+    return np.vstack(list(_pool[0].map(
+        lambda i: cv2.matchTemplate(gray[cuts[i]:cuts[i + 1] + th - 1], template, cv2.TM_CCOEFF_NORMED), range(BANDS))))
