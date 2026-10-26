@@ -198,6 +198,11 @@ class Actions:
             self.arrows_at = max(self.arrows_at, now)
 
     @property
+    def attack_at(self) -> float:
+        """When the last attack key of her plans went down, or goes (time.monotonic; a throw's, as it's sent)."""
+        return self._attack_at
+
+    @property
     def sent_at(self) -> float:
         """When the last key plan was sent (a look older than that may be out of date)."""
         return self._sent_at

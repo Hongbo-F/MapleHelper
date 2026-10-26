@@ -39,6 +39,15 @@ FLINCH_S = 0.6       # s a monster flinches after a hit (its hit1 frame's delay,
 # fades it out).
 MONSTER_DIE_S = {"pig": 0.66, "orange-mushroom": 0.66, "slime": 0.84, "snail": 1.26}
 TURN_SLACK = 25      # units a monster seen walking one way may still come back (they turn now and then)
+# A kill's EXP gain shows this long after the attack key of the throw that made it (s): live on 2026-10-25 (the hunt of
+# 23:43, the perception service's gains) 0.15-0.46 s after it, the median 0.29-0.33 s, whatever the distance (37 gains
+# with a single throw of hers in the 2.5 s before them, every one so: D:/MapleHelper-scratch/analysis-1025/
+# jumps-perception-skeptic/gain_delay.py): the server's, before her star even leaves (control.actions.STAR_DELAY_MS,
+# 520). So the monster it killed is still drawn then, dying (its death animation: a mushroom's 0.66 s), and a gain that
+# soon after a throw is that throw's kill (dead_one, behavior.ledger), seen or not: until 2026-10-26 one gone from view
+# came first, and of the run's 72 kills 15 were placed more than 60 units from where the service saw the victim die, 10
+# piles on the wrong monster, and the true corpse stayed a target (killplace.py, corpse.py).
+GAIN_AFTER_KEY = (0.1, 0.6)
 
 PLATFORM_SLACK = 25  # map units past a platform's ends a monster seen on screen may still be on it
 # Monsters do leave the platforms they spawn on (after_rest.png: a pig on platform 26, which spawns nothing;
@@ -177,9 +186,19 @@ def seen_again(m: Monster, now: list[Monster]) -> Monster | None:
     return min(near, key=lambda o: abs(o.x - m.x)) if near else None
 
 
-def dead_one(aimed: list[Monster], now: list[Monster], her_x: float, kind: str | None = None) -> Monster | None:
-    """Which of the monsters she was throwing at died: of `kind`, when her EXP's gain named it (None: any), one no
-    longer seen (nearest her), else the nearest (it may still be seen fading out)."""
+def dead_one(aimed: list[Monster], now: list[Monster], her_x: float, kind: str | None = None,
+             keyed: list[tuple[float, list[Monster]]] = (), gained: float | None = None) -> Monster | None:
+    """Which of the monsters she was throwing at died: of `kind`, when her EXP's gain named it (None: any). With the
+    gain's time (`gained`) and her throws (`keyed`: when each one's attack key went down, and its path then, the
+    likeliest first), the first of that kind in the path of the latest throw keyed GAIN_AFTER_KEY before the gain, seen
+    or not (as `aimed` has it, if it's there: followed since); else one no longer seen (nearest her), else the nearest
+    (it may still be seen fading out)."""
+    if gained is not None:
+        for t, path in sorted(keyed, key=lambda k: -k[0]):
+            if GAIN_AFTER_KEY[0] <= gained - t <= GAIN_AFTER_KEY[1]:
+                first = next((m for m in path if kind is None or m.kind == kind), None)
+                if first is not None:
+                    return next((a for a in aimed if a is first), None) or seen_again(first, aimed) or first
     if kind is not None:
         aimed = [t for t in aimed if t.kind == kind]
     gone = [t for t in aimed if not any(same(o, t) for o in now)]

@@ -6,10 +6,13 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   explains it: a monster of the kind named (when one was) that can have taken the attack of a throw made in the
   last STAR_WINDOW s (or, with none, that long before the look before, as the gain came after it; any of them:
   which of the claw's stances an attack takes is drawn, and the client's order within a band of the star's search
-  can't be seen), preferring one that's gone from view (and of those, one with another player by it last:
+  can't be seen): a gain that shows GAIN_AFTER_KEY (0.1-0.6 s) after a throw's key is that throw's, the first of its
+  kind in its path, seen or not (the server's kill shows before her star leaves, its monster drawn dying for a while
+  after); else preferring one that's gone from view (and of those, one with another player by it last:
   PLAYER_KILLS), the newest throw's and the likeliest first; where that monster was seen last (a throw's path is
   followed from look to look). A kill no throw explains (a kill seen only from a look without monsters) still
-  counts, credited to where she is, by the kind its gain named, but has no place and so no drops.
+  counts, credited to where she is, by the kind its gain named, but has no place and so no drops. A monster of its
+  kind seen by where a kill was placed in the last DYING_S is the one dying there (`dying`).
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
   first seen), when it was last seen, whether a kill of hers explains it, what the last look that saw it saw
   in it and what that's worth (the map's looting.Worth: the game data's prices, mesos by what the map's monsters
@@ -31,14 +34,23 @@ from dataclasses import dataclass, field
 from maplehelper.engine import RIGHT
 
 from ..attack import reach
-from ..localization.monsters import TRACK_SLACK, Monster, same, seen_again
+from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, same, seen_again
 from ..localization.players import near_rival
 from ..localization.scene import Loot, Scene
 from . import looting
 from .looting import COINS, EMPTY_LOOKS, FIRST, LOOT_REACH, SETTLE, Worth, standing
 
-STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be its kill: 520 ms to the
-                   # release, up to 0.65 s of flight (434 units at 690 a second), and up to a look later
+STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be its kill, as the looks see it: the
+                   # gain shows 0.15-0.46 s after the key live (the server's: localization.monsters.GAIN_AFTER_KEY),
+                   # but a look may come seconds later (a sweep's walks and pick-ups take none)
+# A kill of hers placed this recently (Kill.t: the look that saw its gain), and a monster of its kind on its platform
+# this near where it was placed (map units), are taken for the monster dying there (`dying`): not a throw's target
+# (behavior.attacks), not fought (behavior.fight._targets). Live on 2026-10-25 (the hunt of 23:43) the dying monster
+# stayed drawn 0.6-1.3 s after its gain, 14-25 units from where the kill was placed, and was taken from the path again,
+# whole: 18 casts of Lucky Seven and 4 regular throws went at one in 11 minutes, a tenth of her MP potions
+# (D:/MapleHelper-scratch/analysis-1025/mp-attack-check/atdead.py).
+DYING_S = 1.5
+DYING_DX = 40.0
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
 # s a pile seen gone stays in the store before it's dropped. Nothing reads a gone pile but the hunt loop's
 # count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
@@ -119,9 +131,10 @@ class Ledger:
         return [k for k in self.kills if k.placed]
 
     def on_throw(self, when: float, side: str) -> None:
-        """A throw (Actions.throw_listeners): what's in its path, from the last look with monsters."""
+        """A throw (Actions.throw_listeners): what's in its path, from the last look with monsters (none dying where a
+        kill was placed: `dying`, a star passes it)."""
         s = self._last
-        path = [] if s is None or s.where is None or s.platform is None else in_path(s, side, s.monsters)
+        path = [] if s is None or s.where is None or s.platform is None else             in_path(s, side, [m for m in s.monsters if not dying(self.kills, m, when)])
         self._throws.append(_Throw(when, side, path))
 
     def on_look(self, s: Scene) -> None:
@@ -131,8 +144,9 @@ class Ledger:
         self._looked = s.t
         self._throws = [th for th in self._throws if since - th.t <= STAR_WINDOW]
         new, self._accounted = self.h.exp_gains - self._accounted, self.h.exp_gains
-        for kind in self.h.kinds_told(new):
-            self.kills.append(self._place(s, kind))
+        told = self.h.gains_told(new) if hasattr(self.h, "gains_told") else [(None, k) for k in self.h.kinds_told(new)]
+        for gained, kind in told:
+            self.kills.append(self._place(s, kind, gained))
         if s.searched:
             self._last = s
             # What can have taken a throw's attack is followed from look to look (as Wounds follows them), so a
@@ -142,8 +156,10 @@ class Ledger:
             for th in self._throws:
                 th.path = [seen_again(m, s.monsters) or m for m in th.path]
 
-    def _place(self, s: Scene, kind: str | None = None) -> Kill:
-        """The kill a gain seen in look `s` was (of `kind`, when its size named one): a monster of that kind that
+    def _place(self, s: Scene, kind: str | None = None, gained: float | None = None) -> Kill:
+        """The kill a gain seen in look `s` was (of `kind`, when its size named one; `gained`: when it showed, if
+        known): the first of that kind in the path of the latest throw keyed GAIN_AFTER_KEY before the gain, seen or not
+        (its monster is drawn dying then); else a monster of that kind that
         can have taken the attack of a throw made in the last STAR_WINDOW s (its path), preferring one not seen any
         more (the newest throw first, the likeliest of its path first); with none, of a throw made up to STAR_WINDOW
         s before the look before, which the gain came after; else unplaced (or, with KIND_ANY, of any kind). A
@@ -154,7 +170,11 @@ class Ledger:
         firsts = self._candidates(s.t, kind)
         if not firsts and kind is not None and KIND_ANY:
             firsts = self._candidates(s.t, None)
-        if s.searched:
+        soon = [] if gained is None else [(th, m) for th, m in firsts
+                                          if GAIN_AFTER_KEY[0] <= gained - th.t <= GAIN_AFTER_KEY[1]]
+        if soon:  # (firsts: the newest throw's first, each path's likeliest first)
+            firsts = soon[:1]
+        elif s.searched:
             gone = [(th, m) for th, m in firsts if not any(same(o, m) for o in s.monsters)]
             if PLAYER_KILLS and s.players:  # (a stable sort: the newest throw's and the likeliest first as before)
                 gone.sort(key=lambda tm: near_rival(s.players, tm[1].x, tm[1].y) is not None)
@@ -203,7 +223,8 @@ class Wounds:
         """A throw (Actions.throw_listeners): what's in its path, from the last look with monsters (in_path)."""
         s = self._last
         if s is not None and s.where is not None and s.platform is not None:
-            self._paths.append((when, in_path(s, side, s.monsters)))
+            self._paths.append((when, in_path(s, side, [m for m in s.monsters
+                                                        if not dying(self.ledger.kills, m, when)])))
 
     def on_look(self, s: Scene) -> None:
         """After every look (after the ledger's): a monster in a recent throw's path with its bar new or changed
@@ -237,6 +258,12 @@ class Wounds:
     def seen_within(self, now: float, seconds: float, hurt_by: float | None = None) -> list[Monster]:
         """Her wounds as last seen, those seen within `seconds` of `now` (and first hurt by `hurt_by`, if given)."""
         return [w.m for w in self.open if now - w.seen <= seconds and (hurt_by is None or w.since <= hurt_by)]
+
+
+def dying(kills: list[Kill], m: Monster, t: float) -> bool:
+    """Whether monster `m`, seen at t, is taken for one dying where a kill of hers was placed (DYING_S, DYING_DX)."""
+    return any(k.placed and 0.0 <= t - k.t < DYING_S and k.kind == m.kind and k.platform == m.platform
+               and abs(k.x - m.x) < DYING_DX for k in kills[-8:])
 
 
 def in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:

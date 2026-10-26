@@ -239,6 +239,12 @@ class Hunter:
         last = list(self.told)[-n:] if n > 0 else []
         return [None] * (n - len(last)) + [k for _, k in last]
 
+    def gains_told(self, n: int) -> list[tuple[float | None, str | None]]:
+        """The last `n` kills her EXP told of, the oldest first: when each showed (None where not known) and its kind
+        (None where not known)."""
+        last = list(self.told)[-n:] if n > 0 else []
+        return [(None, None)] * (n - len(last)) + last
+
     # --- after every look ---------------------------------------------------------------------
 
     def _vitals(self, s: Scene) -> None:

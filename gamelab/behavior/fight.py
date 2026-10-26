@@ -32,6 +32,7 @@ from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
 from ..localization.monsters import (DEFAULT_SPEED, MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster,
                                      MonsterTrack, bodies, dead_one, seen_again, speeds)
+from .ledger import dying
 from ..localization.scene import Scene
 from ..motion import physics
 from .looting import DropSpot
@@ -83,6 +84,7 @@ FINISH_WALK = 150
 LANDS_FROM_S = (STAR_DELAY_MS - 50) / 1000
 SETTLED_S = 0.3    # (as probe.SETTLED_S) a target seen this long after its star was due, its bar as before: missed
 HURT = 0.02        # a bar this much lower than before is a hit
+KEYED_KEEP_S = 2.5  # s her throws are kept with their paths for the kills their gains tell of (FightState.keyed)
 
 
 def kills_text(kills: dict[str, int]) -> str:
@@ -134,6 +136,9 @@ class FightState:
     thrown: list[list] = field(default_factory=list)  # [monster, when last seen]: thrown at, kept while hidden
     dying: list[tuple[Monster, float]] = field(default_factory=list)  # kills, and when: seen fading out a moment
     aimed: list[Monster] = field(default_factory=list)  # in the star's path at the last throw
+    # Her throws of the last KEYED_KEEP_S: when each one's attack key went down, and its path (`aimed` then): a gain
+    # GAIN_AFTER_KEY after one is its kill (localization.monsters.dead_one)
+    keyed: list[tuple[float, list[Monster]]] = field(default_factory=list)
     flinching: list[Monster] = field(default_factory=list)  # hit lately, so maybe still flinching (just_hit)
     kill_spots: list[DropSpot] = field(default_factory=list)  # where kills on her platform died: swept after
     exp_counted: int = 0  # her EXP gains (Report.exp_kills) already told apart as kills
@@ -180,9 +185,12 @@ class FightState:
         their damage numbers."""
         return [e[0] for e in self.thrown if e[1] != now]
 
-    def note_throw(self, now: float) -> None:
-        """A throw at the monsters in its path (`aimed`): each is kept (once) among those thrown at, seen `now`."""
+    def note_throw(self, now: float, keyed_at: float | None = None) -> None:
+        """A throw at the monsters in its path (`aimed`): each is kept (once) among those thrown at, seen `now`; and
+        the throw, its attack key down at `keyed_at` (Actions.attack_at), with its path (`keyed`)."""
         self.thrown += [[m, now] for m in self.aimed if not any(e[0] is m for e in self.thrown)]
+        if keyed_at is not None:
+            self.keyed = [k for k in self.keyed if keyed_at - k[0] <= KEYED_KEEP_S] + [(keyed_at, list(self.aimed))]
 
 
 def fade_s(kind: str, body: dict[str, MobBody] | None = None) -> float:
@@ -309,13 +317,16 @@ def _place_and_check(h: "Hunter", st: FightState, s: Scene) -> str | None:
 
 def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | None, far: bool,
              now: float) -> tuple[list[Monster], list[Monster], list[Monster]]:
-    """What's there to fight: the monsters wanted and seen (not fading out where a kill died), less
+    """What's there to fight: the monsters wanted and seen (not fading out where a kill died: this fight's, or one
+    the ledger placed, ledger.dying), less
     the kills her EXP tells of; plus those she threw at that are hidden now. Returns those, the
     monsters seen (but those fading out), and the hidden ones. Those hit lately (st.flinching: their HP
     bar new or lower, or hidden under their damage numbers) may still flinch when her next attack picks."""
     wanted = _wanted(s, kinds, ground, far)
     st.forget_faded(now, bodies(h.model))
     fading = st.fading(s.monsters)
+    if (ledger := getattr(h, "ledger", None)) is not None:  # and those by a kill the ledger placed (ledger.dying)
+        fading += [m for m in s.monsters if m not in fading and dying(ledger.kills, m, now)]
     wanted = [m for m in wanted if m not in fading]
     visible = [m for m in s.monsters if m not in fading]
     hit = st.just_hit(visible)
@@ -505,8 +516,8 @@ def _carry_out(h: "Hunter", st: FightState, s: Scene, act: tuple, fight: list[Mo
     nothing to do, see _idle. Returns what _idle does (None after a throw or a walk)."""
     if act[0] in THROWS:
         st.calm_since = None
-        st.note_throw(now)
         throw_act(h, s, act)
+        st.note_throw(now, h.actions.attack_at)
         h.report.throws += 1
         return None
     if act[0] in ("back", "approach"):
@@ -606,9 +617,10 @@ def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], g
     fight (on her platform) or to the tour (unless not `drops`). A kill of a kind she wasn't throwing at still counts
     by its kind, with no place and no drops. Returns `wanted` without the dead."""
     here = s.platform.id
-    for kind in h.kinds_told(gains):
+    told = h.gains_told(gains) if hasattr(h, "gains_told") else [(None, k) for k in h.kinds_told(gains)]
+    for gained, kind in told:
         dead = dead_one(st.aimed + [e[0] for e in st.thrown if not any(e[0] is a for a in st.aimed)],
-                        s.monsters, s.where.x, kind)
+                        s.monsters, s.where.x, kind, st.keyed, gained)
         if dead is None and kind is not None:
             h.report.count_kill(kind)
             h.log(f"  {kind} down (by her EXP), not one she was throwing at: its drops are left")

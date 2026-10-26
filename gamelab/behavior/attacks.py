@@ -6,8 +6,14 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
 - The monster a throw takes: the likeliest in its way from where she stands in the last look that searched for
   monsters (ledger.in_path: the claw's stance, else the star's search's first band) that isn't likelier dead than
   alive by her throws (DEAD_LIKELY: one is, and the star takes the next), else the one she last threw at that way
-  within fight.HIDDEN_FOR (hit, it hides under its damage numbers), else none: then nothing seen is in its way, and
-  it's the regular attack (no MP thrown at nothing).
+  within fight.HIDDEN_FOR (hit, it hides under its damage numbers) and isn't likely dead either, else none: then
+  nothing seen is in its way, and it's the regular attack (no MP thrown at nothing). Never one dying where a kill of
+  hers was placed (ledger.dying: of its kind on its platform, DYING_DX from it, DYING_S after): it's still drawn, and
+  no throw at it makes a mark. Live on 2026-10-25 (the hunt of 23:43) the kill was placed and its mark dropped, but
+  the dying monster stayed drawn 0.6-1.3 s, was taken from the path again with its bar's HP or its whole (a dying
+  monster's bar reads None), got a new mark, and once it was gone the hidden fallback followed that mark for 1.8 s
+  with no DEAD_LIKELY check: 18 casts of Lucky Seven and 4 regular throws went at the dead in 11 minutes, a tenth of
+  her MP potions (D:/MapleHelper-scratch/analysis-1025/mp-attack-check/atdead.py).
 - What it has left (`reckon`: attack.choice.Left, a chance of each amount): its HP in the game data (MapModel.mob_hp),
   less her throws at it. Her throws at a monster are kept with it (`Mark`, followed look to look: monsters.seen_again),
   each taking off its attack's damage as drawn, or nothing (choice.MISS); a look that sees it alive LANDS_S or more
@@ -53,7 +59,7 @@ from ..localization.mapdata import MapModel
 from ..localization.monsters import TRACK_SLACK, Monster, seen_again
 from ..localization.scene import Scene
 from ..perception.kinds import kind_of
-from .ledger import in_path
+from .ledger import dying, in_path
 
 HIDDEN_FOR = 1.8   # s a monster she threw at is still taken to be in a throw's way unseen (fight.HIDDEN_FOR)
 LANDS_S = 0.85     # s after a throw's attack key that its damage can show on its target's bar: the star leaves 0.52 s
@@ -160,15 +166,16 @@ class Attacks:
     def key(self, side: str) -> str:
         """The attack key a throw that way goes out with now (Actions' attack key asks this): its choice logged. Its
         target: `aimed`, if set (and then cleared), else what a throw that way takes (target)."""
-        target, self.aimed = (self.aimed if self.aimed is not None else self.target(side)), None
+        now = time.monotonic()
+        aimed, self.aimed = self.aimed, None
+        target = aimed if aimed is not None and not self._dying(aimed, now) else self.target(side)
         hp, pdd = self.stats.get(target.kind, (0.0, 0.0)) if target is not None else (0.0, 0.0)
         left = None if target is None else self.reckon(target)
         alive = None if left is None else left.alive() or left  # as it is if it's alive when the throw lands
         what = None if target is None else float("inf") if alive is None else alive
         attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
-        now = time.monotonic()
-        if target is not None and target.kind in self.stats:
+        if target is not None and target.kind in self.stats and not self._dying(target, now):
             mk = self._mark_of(target)
             if mk is None:
                 mk = Mark(target, now, left, whole=not _believable(target.bar))
@@ -192,15 +199,18 @@ class Attacks:
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look that isn't
         likely dead by her throws (DEAD_LIKELY; the likeliest if all are), else the one she last threw at that way
-        within HIDDEN_FOR (unseen: under its damage numbers), else None."""
+        within HIDDEN_FOR (unseen: under its damage numbers) that isn't likely dead either, else None; never one dying
+        where a kill of hers was placed (ledger.dying)."""
         s = self._last
         if s is not None and s.where is not None and s.platform is not None:
-            path = in_path(s, side, s.monsters)
+            now = time.monotonic()
+            path = in_path(s, side, [m for m in s.monsters if not self._dying(m, now)])  # (the dying take no star)
             if path:
                 return next((m for m in path if (left := self.reckon(m)) is None or left.dead < DEAD_LIKELY), path[0])
             x = s.where.x
-            now = time.monotonic()
-            recent = [mk for mk in self.marks if now - mk.thrown < HIDDEN_FOR and (mk.m.x > x) == (side == RIGHT)]
+            recent = [mk for mk in self.marks if now - mk.thrown < HIDDEN_FOR and (mk.m.x > x) == (side == RIGHT)
+                      and not self._dying(mk.m, now) and ((left := self.reckon(mk.m)) is None
+                                                          or left.dead < DEAD_LIKELY)]
             if recent:
                 return max(recent, key=lambda mk: mk.thrown).m
         return None
@@ -248,9 +258,13 @@ class Attacks:
                          if c[k])
         return f"Lucky Seven {c['lucky_seven']}, the regular attack {c['attack']}" + (f" ({whys})" if whys else "")
 
+    def _dying(self, m: Monster, t: float) -> bool:
+        """Whether `m` is taken for one dying where a kill of hers was placed (ledger.dying), at t."""
+        return dying(self._kills(), m, t)
+
     def _mp_read(self, s: Scene) -> float | None:
-        """Her MP bar's share as look `s` read it, or None: not read, or a 0 under her pet's warning (within WARNING_S of
-        a read of WARNING_STEPS px or less), counted ('MP 0 under the warning')."""
+        """Her MP bar's share as look `s` read it, or None: not read, or a 0 under her pet's warning (within WARNING_S
+        of a read of WARNING_STEPS px or less), counted ('MP 0 under the warning')."""
         if s.mp is None:
             return None
         if s.mp > 0.0:

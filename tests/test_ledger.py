@@ -346,6 +346,33 @@ def test_a_gain_goes_on_a_monster_gone_by_another_player_only_when_none_else_has
         assert [k.kind for k in ledger.kills] == [kind], players
 
 
+def test_a_gain_soon_after_a_throw_is_its_first_targets_seen_or_not():
+    """A kill's EXP gain shows 0.15-0.46 s after the key of the throw that made it, before her star leaves
+    (localization.monsters.GAIN_AFTER_KEY): the monster is still drawn, dying. So it's that throw's first of the kind in
+    its path, though another of the kind in a recent throw's path is gone from view (until 2026-10-26 the gone one came
+    first: 10 of 72 piles live went to the wrong monster). Without the gain's time, or later than that, as before."""
+    from gamelab.behavior.ledger import DYING_DX, DYING_S, _Throw, dying
+
+    class Told(_Hunter):
+        at: float | None = None
+
+        def gains_told(self, n):
+            return [(self.at, k) for k in self.kinds_told(n)]
+
+    for at, x in ((10.3, 300.0), (10.9, 450.0), (None, 450.0)):
+        h = Told()
+        h.at, h.named = at, ["pig"]
+        ledger = Ledger(h)
+        ledger._throws += [_Throw(9.4, "right", [_mon("pig", 450.0)]), _Throw(10.0, "right", [_mon("pig", 300.0)])]
+        h.exp_gains = 1
+        ledger.on_look(_seen_at(10.95, [_mon("pig", 302.0)]))  # the first throw's pig is gone, the second's still drawn
+        assert [(k.kind, k.x) for k in ledger.kills] == [("pig", x)], at
+    k = Kill(10.0, "pig", 0, 300.0, 500.0, 0)
+    assert dying([k], _mon("pig", 300.0 + DYING_DX - 1), 10.0 + DYING_S - 0.01)
+    assert not dying([k], _mon("pig", 300.0 + DYING_DX + 1), 10.5) and not dying([k], _mon("slime", 300.0), 10.5)
+    assert not dying([k], _mon("pig", 300.0), 10.0 + DYING_S + 0.01)
+
+
 def test_on_another_map_a_pile_is_worth_its_drops_there():
     # Tree Dungeon's monsters drop 25-53 mesos: a bronze coin there stands for 33.4 (looting.coins_for), a pile not
     # seen yet too; its items are worth their shop prices, as on every map.

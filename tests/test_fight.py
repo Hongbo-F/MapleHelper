@@ -322,6 +322,33 @@ def test_with_far_on_she_shoots_monsters_on_any_platform_in_reach(monkeypatch):
     assert not throws
 
 
+def test_a_kill_whose_gain_came_soon_after_a_throw_is_that_throws_first_target_though_still_seen():
+    """localization.monsters.dead_one: a gain 0.1-0.6 s after a throw's key (GAIN_AFTER_KEY: live 0.15-0.46) is its
+    kill, the first of the kind named in its path, even with it still drawn (dying) and another of the kind she threw
+    at gone from view; later than that, the one gone first, as before."""
+    from gamelab.localization.monsters import dead_one
+    near, far = target(560), target(760)
+    keyed = [(9.0, [far]), (10.0, [near, far])]
+    assert dead_one([near, far], [near], 500.0, "pig", keyed, 10.3) is near
+    assert dead_one([near, far], [near], 500.0, "pig", keyed, 10.9) is far  # (too long after: the one gone)
+    assert dead_one([near, far], [near], 500.0, "pig") is far
+    assert dead_one([near, far], [near], 500.0, "slime", keyed, 10.3) is None  # (none of the kind named)
+
+
+def test_a_monster_by_a_kill_the_ledger_placed_isnt_fought_while_it_fades_out(monkeypatch):
+    """fight._targets: a monster of a kill's kind on its platform by where the ledger placed it, DYING_S after, is
+    taken for the one dying there (ledger.dying), whatever fight it was placed in: not a target, not in `visible`."""
+    from gamelab.behavior.fight import FightState, _targets
+    from gamelab.behavior.ledger import Kill
+    pig, other = target(650), target(800)
+    s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT, monsters=[pig, other], hp=1.0)
+    h, _ = _fighter(monkeypatch, [])
+    now = time.monotonic()
+    h.ledger.kills.append(Kill(now - 0.5, "pig", PLAT.id, 660.0, 500.0, PLAT.id))
+    fight, visible, hidden = _targets(h, FightState(exp_counted=h.report.exp_kills), s, None, None, False, now)
+    assert fight == [other] and visible == [other]
+
+
 def test_a_kill_is_matched_to_the_first_monster_in_the_star_path(monkeypatch):
     # A snail (not hunted) stands between her and the pig she throws at: the star hits the snail,
     # and the EXP that comes in is the snail's, not the pig's.

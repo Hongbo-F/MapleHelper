@@ -250,6 +250,34 @@ def test_a_ground_throws_cast_is_taken_off_at_its_own_key():
     assert a.mp == pytest.approx(1.0 - 11 / MAX_MP) and a._cast is None and a._cast_at == act._attack_at
 
 
+def test_a_monster_dying_where_a_kill_was_placed_is_no_throws_target_nor_marked():
+    """Live on 2026-10-25 the dying monster stayed drawn 0.6-1.3 s after its kill was placed (its bar None, or as it
+    was), and was taken from the path again whole: 18 casts and 4 regular throws at the dead in 11 minutes. One of a
+    placed kill's kind on its platform within DYING_DX of it (ledger.dying) isn't the target: the next in the path is,
+    or none (the regular attack: nothing in its way), and no mark is made on it; nor is it the target once it's gone
+    (the hidden fallback), and the fallback skips a mark likely dead (DEAD_LIKELY) as the path does."""
+    from gamelab.behavior.ledger import Kill
+    kills = []
+    a, said = _attacks(kills=lambda: kills)
+    now = time.monotonic()
+    a.on_look(_look([("green-mushroom", 250.0, None)], t=now - 0.4))
+    a.key("right")  # a cast at it: a mark
+    kills.append(Kill(now - 0.1, "green-mushroom", 1, 245.0, 0.0, 1))  # its kill placed 5 units off
+    a.on_look(_look([("green-mushroom", 262.0, None), ("horny-mushroom", 330.0, None)], t=now))  # still drawn
+    assert a.marks == []  # (the kill dropped its mark)
+    assert a.target("right").kind == "horny-mushroom"
+    a.on_look(_look([("green-mushroom", 262.0, None)], t=now))  # alone in the path, dying
+    assert a.key("right") == KEYS7.attack.name and a.counts["nothing in its way"] == 1 and a.marks == []
+    a.aimed = a._last.monsters[0]  # a jump's own target: dying too
+    assert a.key("right") == KEYS7.attack.name and a.marks == []
+    b, _ = _attacks()
+    b.on_look(_look([("green-mushroom", 250.0, None)]))
+    for _ in range(3):  # three casts: likely dead
+        b.key("right")
+    b.on_look(_look([]))  # unseen
+    assert b.target("right") is None and b.key("right") == KEYS7.attack.name
+
+
 def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_target():
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)]))

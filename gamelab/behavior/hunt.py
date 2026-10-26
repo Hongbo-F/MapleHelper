@@ -645,8 +645,13 @@ class Hunt:
         if gone > self._gone:
             self._gone, self._progress = gone, time.monotonic()
         key = (s.platform.id, id(self.obj))
-        if key != self._fs_key:  # a new place or objective: what she was throwing at there is forgotten
-            self.fs, self._fs_key = FightState(exp_counted=self.h.report.exp_kills), key
+        if key != self._fs_key:  # a new place or objective: what she was throwing at there is forgotten, but not the
+            # kills dying there and her throws' paths (a kill's pile becomes the objective while its monster is still
+            # drawn, and that was shot at whole, then its "hidden" ghost: 16 of the 29 throws at the dead live on
+            # 2026-10-25 that came after she had the kill, analysis-1025/jumps-perception-skeptic/wasted2.py)
+            old = self.fs
+            self.fs = FightState(exp_counted=self.h.report.exp_kills, dying=old.dying, keyed=old.keyed)
+            self._fs_key = key
 
     def _log_memory(self) -> None:
         """What her memory of the monsters did over the hunt (the end of the run's log)."""
@@ -839,8 +844,8 @@ class Hunt:
         if fight.knocked_move(self.h, s, act):
             return None
         if act[0] in THROWS:
-            self.fs.note_throw(now)
             fight.throw_act(self.h, s, act)
+            self.fs.note_throw(now, self.h.actions.attack_at)
             self.h.report.throws += 1
             self.report.throws += 1
             if self.visit is not None:
@@ -904,8 +909,8 @@ class Hunt:
         if fight.knocked_move(self.h, s, act):
             return None
         if act[0] in THROWS:
-            self.fs.note_throw(now)
             fight.throw_act(self.h, s, act)
+            self.fs.note_throw(now, self.h.actions.attack_at)
             self.h.report.throws += 1
             self.report.throws += 1
         elif (step := self._pass_step(s, [*targets, *others])) is not None:  # out from under one: a star picks it
