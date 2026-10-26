@@ -117,6 +117,71 @@ def test_the_minimap_closed_and_an_end_of_the_hud_covered_isnt_taken_for_an_offs
     assert framecheck.find_offset(shifted(covered, 26, 26)) == (26, 26)
 
 
+DRAWN = frame(FIXTURES / "capture" / "tree_234040_drawn.png")
+
+
+def test_the_frame_of_23_40_is_the_game_drawing_off_its_client_not_the_capture_off():
+    """2026-10-25 23:40: the client the right size, the game's picture at its window's corner, 18 px left and 85 up.
+    Neither anchor in its place and the HUD's border past OFFSET_REACH: "the capture doesn't show the game where its
+    window is" on every look, and a hunt stood still for ever. The border is found whole further up: "drawn", which
+    Alt+Enter twice mends (control.window_size), not "offset" (the capture's fault, reopened). With the window's frame
+    known (the service's frames, perception.frames), the same."""
+    p = framecheck.frame_problem(DRAWN, NATIVE)
+    assert p.kind == "drawn" and "(-18, -85)" in p.why and "row 615" in p.why
+    assert framecheck.drawn_problem(DRAWN, NATIVE, (18, 85)).kind == "drawn"
+    assert framecheck.drawn_problem(DRAWN, NATIVE, lambda: (8, 31)).kind == "drawn"  # (further up: whatever the frame)
+    assert framecheck.find_offset(DRAWN) is None  # (as it was: neither in place)
+    assert framecheck.hud_seen(DRAWN)[1] == (-18, -85)
+
+
+def test_the_good_frames_are_never_drawn_off_whatever_the_windows_frame():
+    """On the 19,977 saved 1366x768 frames (the lab's shots, recordings, the Lie Detector's and the rolling recorder's
+    frames, the scratch folders, these fixtures) none is "drawn", with no frame given or at (18, 85), (8, 31) or
+    (11, 45) (D:/MapleHelper-scratch/winfix/build/drawn_fp.py); here the fixtures, and shifted copies."""
+    for good in [GOOD, OFFSET] + ROCKY:
+        for inset in (None, (18, 85), (8, 31), (11, 45), (0, 0)):
+            assert framecheck.drawn_problem(good, NATIVE, inset) is None
+    # A capture lagging a drag is off within OFFSET_REACH: drawn only at the window's own frame, to the px.
+    lag = shifted(GOOD, -26, -26, fill=0)
+    assert framecheck.frame_problem(lag, NATIVE).kind == "offset"
+    assert framecheck.drawn_problem(lag, NATIVE, (18, 85)) is None
+    assert framecheck.drawn_problem(lag, NATIVE, (26, 26)).kind == "drawn"  # (a window whose frame is 26, 26)
+    assert framecheck.drawn_problem(lag, NATIVE, (27, 25)).kind == "drawn"  # (DRAWN_SLACK)
+    assert framecheck.drawn_problem(lag, NATIVE, (30, 26)) is None
+    # At 100%: the frame 8 across and 31 down, within OFFSET_REACH: drawn only with the window's frame known.
+    small = shifted(GOOD, -8, -31, fill=0)
+    assert framecheck.frame_problem(small, NATIVE).kind == "offset"
+    assert framecheck.drawn_problem(small, NATIVE, (8, 31)).kind == "drawn"
+    # Up past OFFSET_REACH, to DRAWN_REACH: drawn whatever the frame; past it, not the game.
+    assert framecheck.frame_problem(shifted(GOOD, -30, -120, fill=0), NATIVE).kind == "drawn"
+    assert "doesn't show the game" in framecheck.frame_problem(shifted(GOOD, 0, -200, fill=0), NATIVE).why
+    # Something dark over white, not the HUD's border (its ends wrong at the shift), far up: not drawn.
+    stripe = GOOD.copy()
+    stripe[0:230, 0:270] = GOOD[300:530, 500:770]  # (the minimap closed)
+    stripe[650:768] = GOOD[300:418]  # (the play area over the HUD)
+    stripe[600, 100:1300], stripe[601, 100:1300] = (5, 5, 5), (250, 250, 250)
+    assert framecheck.frame_problem(stripe, NATIVE).kind == "offset"
+
+
+@pytest.mark.parametrize("size", [(3840, 2160), (2560, 1440), (1600, 900), (1396, 1952), (1350, 700), (1280, 720)])
+def test_the_hud_is_seen_on_a_client_of_another_size_where_its_border_is_lost(size):
+    """The pet's look for the game in play while the client is another size (behavior.pet.PetWait): its border's 1-px
+    rows don't survive the game's stretch and the service's bringing it to 1920x1080 (perception.frames.glimpse), its
+    buttons do: 0.77 or more on the 69 good frames at these sizes, the Lie Detector's notice over them the lowest; not
+    the game, 0.52 at most (D:/MapleHelper-scratch/winfix/build/hud_template.py)."""
+    for good in [GOOD] + ROCKY:
+        shown = cv2.resize(good, size, interpolation=cv2.INTER_LINEAR)
+        to = cv2.INTER_AREA if size[0] >= 1920 and size[1] >= 1080 else cv2.INTER_LANCZOS4
+        picture = cv2.resize(shown, (1920, 1080), interpolation=to)
+        assert framecheck.hud_share(cv2.resize(picture, (1366, 768), interpolation=cv2.INTER_AREA)) < 0.5
+        seen, at = framecheck.hud_seen(picture)
+        assert seen >= framecheck.HUD_SEEN and abs(at[0]) <= 2 and abs(at[1]) <= 2
+    covered = GOOD.copy()
+    covered[300:768] = GOOD[0:468]  # (the play area over the HUD: no HUD)
+    assert framecheck.hud_seen(covered)[0] < framecheck.HUD_SEEN
+    assert framecheck.hud_seen(np.zeros((1080, 1920, 3), np.uint8))[0] < framecheck.HUD_SEEN
+
+
 def test_frames_of_the_stretched_window_arent_checked():
     assert framecheck.frame_problem(np.zeros((1080, 1920, 3), np.uint8), STRETCHED) is None
 

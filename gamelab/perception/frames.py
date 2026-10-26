@@ -7,7 +7,10 @@ over part of it, the game minimized or not the client size the feed's eyes are f
 running) is marked not visible, and nothing is read from it: the feed waits for the game to come back rather than
 bring it forward (nothing here ever does). Nor is a frame the window moved under while it was captured, or one the
 capture held for STALE_S or more: their pictures aren't where the window is (Eyes' own checks once, now the frames':
-perception.framecheck). Each says why in words and as a framecheck.Problem (`problem`), which the feed's state carries.
+perception.framecheck); nor one the game drew off its client area (framecheck.drawn_problem, with the window's own
+frame known here: 2026-10-25 23:40), nor a capture that failed outright (kind "capture": a full-screen switch can make
+the screen's copy fail for a moment; the frame loop goes on, where it ended the service). Each says why in words and as
+a framecheck.Problem (`problem`), which the feed's state carries.
 """
 
 import time
@@ -67,13 +70,18 @@ class ScreenFrames:
             return Frame.unfit(now, Problem("gone", f"the game isn't running ({e})"))
         if wrong is not None:
             return Frame.unfit(now, wrong)
-        shot = self.grabber.shot(area, after=after)
-        full = shot.crop(0, 0, area["width"], area["height"], rgb_of)
+        try:
+            shot = self.grabber.shot(area, after=after)
+            full = shot.crop(0, 0, area["width"], area["height"], rgb_of)
+        except Exception as e:  # (mss's GetDIBits refused, a duplication that couldn't be made: not the loop's end)
+            return Frame.unfit(time.monotonic(), Problem("capture", f"the screen couldn't be captured "
+                                                                    f"({type(e).__name__}: {e})"))
         try:
             moved = framecheck.moved_problem(area, window.client_rect(hwnd))  # (a window dragged moves between the two)
         except RuntimeError as e:
             return Frame.unfit(time.monotonic(), Problem("gone", f"the game isn't running ({e})"))
-        if bad := moved or framecheck.stale_problem(shot.t, time.monotonic()):
+        if bad := moved or framecheck.stale_problem(shot.t, time.monotonic()) or framecheck.drawn_problem(
+                full, self.geo, lambda: window.inset(hwnd, area)):
             return Frame.unfit(time.monotonic(), bad)
         if self.area is not None and area != self.area:
             text = f"the game window moved: ({self.area['left']}, {self.area['top']}) -> ({area['left']}, {area['top']})"
@@ -85,6 +93,33 @@ class ScreenFrames:
         self._last = shown
         # A frame shown before `after` is the screen as it still was when the grabber gave up waiting.
         return Frame(full, shown if shown >= after else time.monotonic(), True, new)
+
+
+def glimpse(title: str, grabber: capture.Grabber | None = None) -> np.ndarray | None:
+    """The game's client as the screen shows it now, whatever its size (RGB), unchecked: 1366x768 and 1920x1080 as they
+    are, any other size brought to 1920x1080 (shrunk by area, stretched with Lanczos): the size the Lie Detector's
+    templates are of (control.window_size.lie_detector_seen), and the HUD's buttons are found at it once shrunk
+    (framecheck.hud_seen). None with no window, the game minimized, or no shot. The perception service's answer to a
+    `full` ask for any size while its frames aren't fit to read for a fault Alt+Enter mends (framecheck.FIX_KINDS): the
+    size fix's look for the Lie Detector before an Alt+Enter, the pet's for the HUD. Never brings the game forward. The
+    process's grabber (capture.shared), as ScreenFrames'. A 3840x2160 picture takes 12 ms to convert and shrink
+    (offline), its copy off the graphics card besides; 6.2 MB pickled down the pipe."""
+    import cv2
+
+    from .lie_detector import NATIVE_FRAME, TEMPLATE_FRAME
+    try:
+        hwnd = window.find_game(title)
+        if window.minimized(hwnd):
+            return None
+        area = window.client_rect(hwnd)
+        full = (grabber or capture.shared()).shot(area).crop(0, 0, area["width"], area["height"], rgb_of)
+    except Exception:  # (no window, no shot: a capture refused mid-switch)
+        return None
+    size = (full.shape[1], full.shape[0])
+    if size in (NATIVE_FRAME, TEMPLATE_FRAME):
+        return full
+    shrink = size[0] >= TEMPLATE_FRAME[0] and size[1] >= TEMPLATE_FRAME[1]
+    return cv2.resize(full, TEMPLATE_FRAME, interpolation=cv2.INTER_AREA if shrink else cv2.INTER_LANCZOS4)
 
 
 class ListFrames:

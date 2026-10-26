@@ -1,4 +1,5 @@
-"""Finding the game window, its client area, and bringing it to the front; moving the mouse pointer.
+"""Finding the game window, its client area, whether it's full screen, and bringing it to the front; moving the mouse
+pointer.
 
 The elevated key player imports this: keep its imports to the standard library and maplehelper.win32.
 """
@@ -42,6 +43,17 @@ user32.MonitorFromPoint.argtypes = (wintypes.POINT, wintypes.DWORD)
 user32.MonitorFromPoint.restype = wintypes.HMONITOR
 MONITOR_DEFAULTTONULL = 0  # MonitorFromPoint: no monitor (None) for a point on none
 user32.WindowFromPoint.restype = wintypes.HWND
+user32.MonitorFromWindow.argtypes = (wintypes.HWND, wintypes.DWORD)
+user32.MonitorFromWindow.restype = wintypes.HMONITOR
+MONITOR_DEFAULTTONEAREST = 2  # MonitorFromWindow: the monitor nearest a window on none
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD)]
+
+
+user32.GetMonitorInfoW.argtypes = (wintypes.HMONITOR, ctypes.POINTER(MONITORINFO))
 user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
 user32.GetAncestor.restype = wintypes.HWND
 GA_ROOT = 2  # GetAncestor: the top-level window
@@ -96,6 +108,39 @@ def client_rect(hwnd: int) -> dict:
 
 def minimized(hwnd: int) -> bool:
     return bool(user32.IsIconic(hwnd))
+
+
+def window_rect(hwnd: int) -> dict:
+    """The game window's box as Windows keeps it (GetWindowRect: its title bar and frame, the invisible borders Windows
+    10 puts round it to grab included), in screen pixels, as client_rect gives a box. On 2026-10-25 at 23:40 the game
+    drew its picture at this box's corner, not its client area's (perception.framecheck.drawn_offset)."""
+    r = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    return {"left": r.left, "top": r.top, "width": r.right - r.left, "height": r.bottom - r.top}
+
+
+def inset(hwnd: int, area: dict) -> tuple[int, int]:
+    """Where a client area's corner is from its window's (window_rect): (18, 85) at 300% on 2026-10-25."""
+    box = window_rect(hwnd)
+    return area["left"] - box["left"], area["top"] - box["top"]
+
+
+def monitor_of(hwnd: int) -> dict | None:
+    """The monitor a window is on (the one most of it is on), in desktop px, as a client area is: left, top, width,
+    height; None if Windows can't say."""
+    info = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+    monitor = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+    if not monitor or not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        return None
+    r = info.rcMonitor
+    return {"left": r.left, "top": r.top, "width": r.right - r.left, "height": r.bottom - r.top}
+
+
+def full_screen(hwnd: int, area: dict) -> bool:
+    """Whether a client area (client_rect's) is the whole of the monitor its window is on: the game full screen,
+    whether its own mode set the monitor to its size or it covers the monitor as it is (2026-10-25 23:41: 3840x2160 at
+    0,0). Windowed, its title bar is on the monitor too, so the client can't be all of it."""
+    return area == monitor_of(hwnd)
 
 
 def dpi_awareness() -> int | None:
