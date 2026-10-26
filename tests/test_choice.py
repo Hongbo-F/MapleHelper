@@ -267,7 +267,8 @@ def test_a_monster_dying_where_a_kill_was_placed_is_no_throws_target_nor_marked(
     was), and was taken from the path again whole: 18 casts and 4 regular throws at the dead in 11 minutes. One of a
     placed kill's kind on its platform within DYING_DX of it (ledger.dying) isn't the target: the next in the path is,
     or none (the regular attack: nothing in its way), and no mark is made on it; nor is it the target once it's gone
-    (the hidden fallback), and the fallback skips a mark likely dead (DEAD_LIKELY) as the path does."""
+    (the hidden fallback), and the fallback takes a mark not likely dead (DEAD_LIKELY) first, the likeliest if all are,
+    as the path does."""
     from gamelab.behavior.ledger import Kill
     kills = []
     a, said = _attacks(kills=lambda: kills)
@@ -282,12 +283,18 @@ def test_a_monster_dying_where_a_kill_was_placed_is_no_throws_target_nor_marked(
     assert a.key("right") == KEYS7.attack.name and a.counts["nothing in its way"] == 1 and a.marks == []
     a.aimed = a._last.monsters[0]  # a jump's own target: dying too
     assert a.key("right") == KEYS7.attack.name and a.marks == []
-    b, _ = _attacks()
-    b.on_look(_look([("green-mushroom", 250.0, None)]))
-    for _ in range(3):  # three casts: likely dead
+    b, said = _attacks()
+    b.on_look(_look([("horny-mushroom", 240.0, None)]))
+    b.key("right")  # a cast at the Horny
+    b.on_look(_look([("green-mushroom", 250.0, None)]))  # the Horny unseen: hidden
+    for _ in range(3):  # three casts at the Green: likely dead
         b.key("right")
-    b.on_look(_look([]))  # unseen
-    assert b.target("right") is None and b.key("right") == KEYS7.attack.name
+    b.on_look(_look([]))  # both unseen
+    assert b.target("right").kind == "horny-mushroom"  # not likely dead: first
+    b.marks = [mk for mk in b.marks if mk.m.kind == "green-mushroom"]
+    assert b.target("right").kind == "green-mushroom"  # all likely dead: the likeliest ...
+    b.key("right")
+    assert "if alive" in said[-1]  # ... its attack by what it has if alive
 
 
 def test_a_throw_takes_a_last_look_before_its_key_and_a_kill_come_in_of_a_kind_in_its_way_drops_it():

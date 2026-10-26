@@ -360,12 +360,12 @@ class Actions:
         low; the macro's F1 combo times it at 100 ms, and an attack starting that high in the jump went over a snail;
         later in the jump it starts higher, for a monster on a platform above her: attack.reach.shots says when).
         `way` 0 jumps in place: turning first, she taps the arrow in the air (AIR_TURN_MS after the jump key) and the
-        attack comes `turn_key` after the jump key at the soonest (AIR_TURN_ATTACK_MS, AIR_TURN_LEAD_MS after the arrow; sooner
-        for a monster too short to pick then: reach.turn_key_ms); with `air_turn` False (an attack that must come sooner,
-        at a monster too short for a later one), the tap goes first and the jump waits for its walk to stop
-        (JUMP_THROW_TURN_MS). `way` +1/-1 jumps forward that way (the arrow held: FORWARD_JUMP_MS before the jump, let go
-        FORWARD_HOLD_MS after it), which faces her that way: a throw that way. False: dropped once her lock was waited
-        out (`still`), no key sent."""
+        attack comes `turn_key` after the jump key at the soonest (AIR_TURN_ATTACK_MS, AIR_TURN_LEAD_MS after the
+        arrow; sooner for a monster too short to pick then: reach.turn_key_ms); with `air_turn` False (an attack that
+        must come sooner, at a monster too short for a later one), the tap goes first and the jump waits for its walk to
+        stop (JUMP_THROW_TURN_MS). `way` +1/-1 jumps forward that way (the arrow held: FORWARD_JUMP_MS before the jump,
+        let go FORWARD_HOLD_MS after it), which faces her that way: a throw that way. False: dropped once her lock was
+        waited out (`still`), no key sent."""
         self.wait_lock()
         if not self._still(direction):
             return False

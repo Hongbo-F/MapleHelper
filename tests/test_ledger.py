@@ -352,7 +352,8 @@ def test_a_gain_soon_after_a_throw_is_its_first_targets_seen_or_not():
     (localization.monsters.GAIN_AFTER_KEY): the monster is still drawn, dying. So it's that throw's first of the kind in
     its path, though another of the kind in a recent throw's path is gone from view (until 2026-10-26 the gone one came
     first: 10 of 72 piles live went to the wrong monster). Without the gain's time, or later than that, as before."""
-    from gamelab.behavior.ledger import DYING_DX, DYING_S, _Throw, dying
+    from gamelab.behavior.ledger import DIE_S, DYING_DX, _Throw, dying
+    DYING_S = DIE_S  # (a kind with no death animation in the game data)
 
     class Told(_Hunter):
         at: float | None = None
@@ -372,6 +373,10 @@ def test_a_gain_soon_after_a_throw_is_its_first_targets_seen_or_not():
     assert dying([k], _mon("pig", 300.0 + DYING_DX - 1), 10.0 + DYING_S - 0.01)
     assert not dying([k], _mon("pig", 300.0 + DYING_DX + 1), 10.5) and not dying([k], _mon("slime", 300.0), 10.5)
     assert not dying([k], _mon("pig", 300.0), 10.0 + DYING_S + 0.01)
+    assert dying([k], _mon("pig", 300.0), 10.0 + 1.2, die={"pig": 1.26})  # (a snail's 1.26, say: longer)
+    # Of two of its kind by the kill, only the nearer is the one dying: the other is a live one beside it.
+    near, beside = _mon("pig", 305.0), _mon("pig", 330.0)
+    assert dying([k], near, 10.5, [near, beside]) and not dying([k], beside, 10.5, [near, beside])
 
 
 def test_on_another_map_a_pile_is_worth_its_drops_there():

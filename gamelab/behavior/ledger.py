@@ -12,7 +12,7 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   PLAYER_KILLS), the newest throw's and the likeliest first; where that monster was seen last (a throw's path is
   followed from look to look). A kill no throw explains (a kill seen only from a look without monsters) still
   counts, credited to where she is, by the kind its gain named, but has no place and so no drops. A monster of its
-  kind seen by where a kill was placed in the last DYING_S is the one dying there (`dying`).
+  kind seen by where a kill was placed, while its death animation shows, is the one dying there (`dying`).
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
   first seen), when it was last seen, whether a kill of hers explains it, what the last look that saw it saw
   in it and what that's worth (the map's looting.Worth: the game data's prices, mesos by what the map's monsters
@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from maplehelper.engine import RIGHT
 
 from ..attack import reach
-from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, same, seen_again
+from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, bodies, same, seen_again
 from ..localization.players import near_rival
 from ..localization.scene import Loot, Scene
 from . import looting
@@ -48,8 +48,14 @@ STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be 
 # (behavior.attacks), not fought (behavior.fight._targets). Live on 2026-10-25 (the hunt of 23:43) the dying monster
 # stayed drawn 0.6-1.3 s after its gain, 14-25 units from where the kill was placed, and was taken from the path again,
 # whole: 18 casts of Lucky Seven and 4 regular throws went at one in 11 minutes, a tenth of her MP potions
-# (D:/MapleHelper-scratch/analysis-1025/mp-attack-check/atdead.py).
-DYING_S = 1.5
+# (D:/MapleHelper-scratch/analysis-1025/mp-attack-check/atdead.py). How recently: its kind's death animation (its die1
+# frames in the game data, MobBody.die_s: a Horny or Green Mushroom 0.84 s; DIE_S for a kind it lacks), from the look
+# that placed it, which comes after the gain, as the animation begins. 1.5 s at first, and every one within DYING_DX:
+# then, once the dead one was gone, a live one by where it died went unshot for most of a second, and grinding, finding
+# nothing to shoot, went on (simulator, Tree Dungeon's crowd, grinding, 8 seeds of 10 minutes: 320 EXP a minute; the
+# nearest only, 317; the animation and 0.15 s more, 351; the animation alone, 390, as at 0.8 s; master's stack in the
+# branch's world 361).
+DIE_S = 0.66
 DYING_DX = 40.0
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
 # s a pile seen gone stays in the store before it's dropped. Nothing reads a gone pile but the hunt loop's
@@ -125,6 +131,8 @@ class Ledger:
         self._throws: list[_Throw] = []
         self._last: Scene | None = None     # the last look that searched for monsters
         self._looked: float | None = None   # when the last look of all was
+        model = getattr(hunter, "model", None)  # each kind's death animation (`dying`), the map's game data
+        self.die = {k: b.die_s for k, b in bodies(model).items()} if hasattr(model, "mob_bodies") else {}
 
     @property
     def placed(self) -> list[Kill]:
@@ -134,7 +142,8 @@ class Ledger:
         """A throw (Actions.throw_listeners): what's in its path, from the last look with monsters (none dying where a
         kill was placed: `dying`, a star passes it)."""
         s = self._last
-        path = [] if s is None or s.where is None or s.platform is None else             in_path(s, side, [m for m in s.monsters if not dying(self.kills, m, when)])
+        path = [] if s is None or s.where is None or s.platform is None else \
+            in_path(s, side, [m for m in s.monsters if not dying(self.kills, m, when, s.monsters, self.die)])
         self._throws.append(_Throw(when, side, path))
 
     def on_look(self, s: Scene) -> None:
@@ -224,7 +233,8 @@ class Wounds:
         s = self._last
         if s is not None and s.where is not None and s.platform is not None:
             self._paths.append((when, in_path(s, side, [m for m in s.monsters
-                                                        if not dying(self.ledger.kills, m, when)])))
+                                                        if not dying(self.ledger.kills, m, when, s.monsters,
+                                                                     self.ledger.die)])))
 
     def on_look(self, s: Scene) -> None:
         """After every look (after the ledger's): a monster in a recent throw's path with its bar new or changed
@@ -260,10 +270,19 @@ class Wounds:
         return [w.m for w in self.open if now - w.seen <= seconds and (hurt_by is None or w.since <= hurt_by)]
 
 
-def dying(kills: list[Kill], m: Monster, t: float) -> bool:
-    """Whether monster `m`, seen at t, is taken for one dying where a kill of hers was placed (DYING_S, DYING_DX)."""
-    return any(k.placed and 0.0 <= t - k.t < DYING_S and k.kind == m.kind and k.platform == m.platform
-               and abs(k.x - m.x) < DYING_DX for k in kills[-8:])
+def dying(kills: list[Kill], m: Monster, t: float, seen: list[Monster] = (),
+          die: dict[str, float] | None = None) -> bool:
+    """Whether monster `m`, seen at t, is taken for one dying where a kill of hers was placed: within its kind's death
+    animation (`die`: kind -> MobBody.die_s, the map's game data; DIE_S without) of the look that placed it, and of the
+    monsters of its kind on its platform seen with it (`seen`), the nearest the kill, within DYING_DX: one only, not a
+    live one beside it."""
+    window = (die or {}).get(m.kind, DIE_S)
+    near = [k for k in kills[-8:] if k.placed and 0.0 <= t - k.t < window and k.kind == m.kind
+            and k.platform == m.platform and abs(k.x - m.x) < DYING_DX]
+    if not near:
+        return False
+    others = [o for o in seen if o is not m and o.kind == m.kind and o.platform == m.platform]
+    return any(all(abs(o.x - k.x) >= abs(m.x - k.x) for o in others) for k in near)
 
 
 def in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:

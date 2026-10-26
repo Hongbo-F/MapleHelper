@@ -323,10 +323,12 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     monsters seen (but those fading out), and the hidden ones. Those hit lately (st.flinching: their HP
     bar new or lower, or hidden under their damage numbers) may still flinch when her next attack picks."""
     wanted = _wanted(s, kinds, ground, far)
-    st.forget_faded(now, bodies(h.model))
+    body = bodies(h.model)
+    st.forget_faded(now, body)
     fading = st.fading(s.monsters)
     if (ledger := getattr(h, "ledger", None)) is not None:  # and those by a kill the ledger placed (ledger.dying)
-        fading += [m for m in s.monsters if m not in fading and dying(ledger.kills, m, now)]
+        die = {k: b.die_s for k, b in body.items()}
+        fading += [m for m in s.monsters if m not in fading and dying(ledger.kills, m, now, s.monsters, die)]
     wanted = [m for m in wanted if m not in fading]
     visible = [m for m in s.monsters if m not in fading]
     hit = st.just_hit(visible)
@@ -796,7 +798,8 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
     elif st.had_bar and st.dying_since is None:
         st.dying_since = time.monotonic()  # its bar gone: it died, and fades out where it died
     _score_shots(st.flying, bar, st.dying_since is not None, s.t)
-    if (ledger := getattr(h, "ledger", None)) is not None and dying(ledger.kills, t, time.monotonic()):
+    if (ledger := getattr(h, "ledger", None)) is not None and dying(ledger.kills, t, time.monotonic(), s.monsters,
+                                                                   ledger.die):
         time.sleep(0.1)  # a kill of hers placed on it: dying, it fades out (then her EXP ends the kill: _target_gone)
         return None
     threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]

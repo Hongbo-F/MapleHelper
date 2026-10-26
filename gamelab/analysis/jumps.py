@@ -84,7 +84,8 @@ def kills_of(gains: list[dict], keys: list[tuple[float, str | None]]) -> dict[fl
 
 def outcomes(rows: list[dict], gains: list[dict] | None = None) -> list[dict]:
     """Each 'jump' record of a run with what came of it (see the module's docstring): its fields, `key` (when its attack
-    key went down) and `outcome`. `gains`: the EXP gains to go by (the service's 'exp' records), by default the run's."""
+    key went down) and `outcome`. `gains`: the EXP gains to go by (the service's 'exp' records), by default the
+    run's."""
     scenes = [r for r in rows if r.get("topic") == "scene" and r.get("her")]
     if gains is None:
         gains = [r for r in rows if r.get("topic") == "exp" and any(r.get("kinds") or ())]

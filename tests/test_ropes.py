@@ -196,14 +196,16 @@ def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypa
     12), and on 3 she now never waits on the rope. Seed 1. Seed 3 since every look is perception's newest frame after
     her keys' effect, Senses.fresh_after, the feed in every run: of seeds 1-12 it's met on 3 and 8 (she waits on the rope
     on 3, 5 and 8), on 1 she never waits on it; with a look asking for what the next frame would have stale,
-    feed.to_ask, and the fixes with it, on 3, 8 and 10, the only ones she waits on the rope on.)"""
+    feed.to_ask, and the fixes with it, on 3, 8 and 10, the only ones she waits on the rope on. Seed 2 since
+    2026-10-26, a monster by a kill placed taken for the one dying there while its death animation plays,
+    ledger.dying: of seeds 1-12 it's met on 2, 4-7, 10 and 11, and on 3 she never waits on the rope.)"""
     from gamelab.sim import harness, scenarios, world
     from gamelab.sim.world import Realism
     model = build([FLOOR, OVER], LIVES, [ROPE])
     if world.mob_info(19) is None:
         pytest.skip("needs the Horny Mushroom's game data (gamedata/data)")
     g = on(model, 100, 500)
-    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=3,
+    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=2,
                             limit=400, realism=Realism(respawn=17.0), may_die=True)
     trace = scenarios.run_scenario(sc, model)
     log = "\n".join(trace["log"])

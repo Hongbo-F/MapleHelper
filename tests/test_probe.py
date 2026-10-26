@@ -23,6 +23,15 @@ from gamelab.sim.world import Noise
 
 from test_attack import PLAT, step_map, target
 
+
+@pytest.fixture(autouse=True)
+def _damage_at_release(monkeypatch):
+    """The probes' scorer is built on a throw's damage showing at the star's release (probe.BEFORE_HIT_S): their worlds
+    apply it then, as the probe scenarios' do (scenarios._AT_RELEASE), not at the server's time (actions.DAMAGE_SHOWS_MS,
+    the world's from 2026-10-26)."""
+    from gamelab.control.actions import STAR_DELAY_MS
+    monkeypatch.setattr(world_mod, "DAMAGE_SHOWS_MS", STAR_DELAY_MS)
+
 REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
 
 # Only with --slow (tests/conftest.py): the probes' answers are in the code since 2026-10-21, so these matter after a

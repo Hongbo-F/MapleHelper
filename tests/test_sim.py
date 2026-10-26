@@ -1472,7 +1472,7 @@ def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_mov
     # before the kill came in is dropped at its last look before the key, hunter.LAST_LOOK: the walk-off then comes
     # 1.2 s after her last key, and lands)
     monkeypatch.setattr(hunter, "LAST_LOOK", False)
-    monkeypatch.setattr(fight, "dying", lambda kills, m, t: False)
+    monkeypatch.setattr(fight, "dying", lambda kills, m, t, *a, **k: False)
     trace = scenarios.run("nav_walk_off_after_kill")
     assert set(scenarios.unmet(trace)) == {"the walk-off right after the kill lands",
                                            "no log line says 'instead of platform 4'"}

@@ -245,9 +245,10 @@ def test_a_hunt_with_the_feed_records_the_deaths_of_others_kills():
     which the report reads as others' kills; hers stay the 'kill' events alone (not counted twice). loop_rival for
     2 minutes: another player kills a monster every 20 s, and the feed sees one of those die. (75 s, not 45, since a
     throw's tap goes by her facing off the frame, perception.heading: in 45 s the feed saw none die; 2 minutes since
-    the feed is every scenario's, feed_loop_rival folded into loop_rival on its seed 3, where in 75 s it sees none.)"""
+    the feed is every scenario's, feed_loop_rival folded into loop_rival on its seed 3, where in 75 s it sees none; 2.5
+    since 2026-10-26, her throws at the dying gone and the world's damage at the server's time: in 2 it saw none.)"""
     import dataclasses
-    sc = dataclasses.replace(scenarios.SCENARIOS["loop_rival"], fn=scenarios._loop(2.0), expects=())
+    sc = dataclasses.replace(scenarios.SCENARIOS["loop_rival"], fn=scenarios._loop(2.5), expects=())
     with telemetry.captured() as records:
         trace = scenarios.run_scenario(sc)
     died = [r for r in records if r["topic"] == "event" and r["kind"] == "died"]

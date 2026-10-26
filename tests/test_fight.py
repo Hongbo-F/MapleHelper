@@ -69,7 +69,8 @@ def _fighter(monkeypatch, looks, on_look=None):
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(time, "sleep", lambda s: None)
     h.look, h.health_check = look, lambda s: None
-    h.actions.throw = h.actions.jump_throw = h.actions.jump_back =         lambda side, *a, **k: throws.append((round(clock[0], 1), side))
+    h.actions.throw = h.actions.jump_throw = h.actions.jump_back = \
+        lambda side, *a, **k: throws.append((round(clock[0], 1), side))
     h.looter.sweep_through = lambda s, deaths: None
     h.looter.mop_up = lambda stood=None: None  # looking for loot is tested on its own (test_loot.py)
     return h, throws
@@ -336,8 +337,9 @@ def test_a_kill_whose_gain_came_soon_after_a_throw_is_that_throws_first_target_t
 
 
 def test_a_monster_by_a_kill_the_ledger_placed_isnt_fought_while_it_fades_out(monkeypatch):
-    """fight._targets: a monster of a kill's kind on its platform by where the ledger placed it, DYING_S after, is
-    taken for the one dying there (ledger.dying), whatever fight it was placed in: not a target, not in `visible`."""
+    """fight._targets: a monster of a kill's kind on its platform by where the ledger placed it, while its death
+    shows, is taken for the one dying there (ledger.dying), whatever fight it was placed in: not a target, not in
+    `visible`."""
     from gamelab.behavior.fight import FightState, _targets
     from gamelab.behavior.ledger import Kill
     pig, other = target(650), target(800)
