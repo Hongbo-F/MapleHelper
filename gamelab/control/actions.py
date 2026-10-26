@@ -318,8 +318,9 @@ class Actions:
         her off the end of a platform after nine throws the same way."""
         self.wait_lock()
         events, t = self._turn(direction)
+        key = self._attack_key(direction)  # (chosen first, as jump_throw's: its cast's MP goes with its own key)
         self._thrown(t, direction)
-        self.play(events + tap(t, self._attack_key(direction)), "throw")
+        self.play(events + tap(t, key), "throw")
         self._turned(events, direction, t)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000

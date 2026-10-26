@@ -187,10 +187,11 @@ def test_the_regular_attack_with_mp_under_a_cast_and_with_nothing_in_the_way():
 def test_a_casts_mp_is_off_at_its_throw_and_a_frame_shown_before_it_showed_reads_no_more():
     """A look that doesn't wait for her keys' effect (senses.KEYS_WAIT "moves" or "none") can be of a frame shown
     before a throw's key, right after it: its bar still reads the MP the cast took. The cast's MP is taken off at its
-    throw (Attacks.on_throw), and such a bar is believed only where it's lower; one shown KEY_EFFECT_S after the
-    cast's key is her MP again (her pet's potion, say). (With KEYS_WAIT "moves", in loop_tree_mp_runs_out she cast
-    with 5 MP, nothing thrown: the look after her last cast, shown before its key, read the 12 it took.)"""
-    from gamelab.localization.senses import KEY_EFFECT_S
+    throw (Attacks.on_throw), and such a bar is believed only where it's lower, as is one shown before MP_SHOWS_S after
+    it (live a cast's MP first showed 0.21-0.53 s after its key); one shown then is her MP again (her pet's potion,
+    say). (With KEYS_WAIT "moves", in loop_tree_mp_runs_out she cast with 5 MP, nothing thrown: the look after her
+    last cast, shown before its key, read the 12 it took.)"""
+    from gamelab.behavior.attacks import MP_SHOWS_S
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)], mp=20 / MAX_MP))
     assert a.key("right") == KEYS7.lucky_seven.name
@@ -202,8 +203,51 @@ def test_a_casts_mp_is_off_at_its_throw_and_a_frame_shown_before_it_showed_reads
     assert a.key("right") == KEYS7.attack.name and a.counts["MP"] == 1
     a.on_throw(at + 1.0, "right")  # (the regular attack: no MP)
     assert a.mp == pytest.approx(9 / MAX_MP)
-    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + KEY_EFFECT_S))
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + 0.3))  # too soon for the cast's MP to show
+    assert a.mp == pytest.approx(9 / MAX_MP)
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.5, t=at + MP_SHOWS_S))
     assert a.mp == 0.5 and a.key("right") == KEYS7.lucky_seven.name
+
+
+def test_a_zero_read_under_her_pets_mp_warning_is_her_mp_as_reckoned():
+    """Live on 2026-10-25 her MP bar read 0 for up to 0.6 s after a cast took her under her pet's 5% warning, from 6-9
+    px (of 104), while she had about 20-35 MP: 11 regular throws went out for 'MP 0'. Such a 0 (within WARNING_S of a
+    read of WARNING_STEPS or less) is her last read less her casts since: from 7 px (40 MP at 601) and a cast (11), 29
+    MP, a cast's; from 3 px (17), 6: the regular attack. A 0 after a read of more, or read longer, is believed."""
+    from gamelab.behavior.attacks import MP_SHOWS_S, WARNING_S
+    t0 = time.monotonic()
+    for px, key in ((7, KEYS7.lucky_seven.name), (3, KEYS7.attack.name)):
+        a, said = _attacks()
+        a.on_look(_look([("horny-mushroom", 250.0, None)], mp=px / 104, t=t0))
+        a.key("right")
+        a.on_throw(t0 + 0.05, "right")
+        a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.0, t=t0 + 0.05 + MP_SHOWS_S))  # the warning's 0
+        assert a.mp == pytest.approx(px / 104 - 11 / MAX_MP) and a.key("right") == key, px
+        assert a.counts["MP 0 under the warning"] == 1 and not any("MP 0 <" in line for line in said)
+    a, _ = _attacks()
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=7 / 104, t=t0))
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.0, t=t0 + WARNING_S + 0.1))  # too long since: believed
+    assert a.mp == 0.0 and a.key("right") == KEYS7.attack.name
+    b, _ = _attacks()
+    b.on_look(_look([("horny-mushroom", 250.0, None)], mp=20 / 104, t=t0))
+    b.on_look(_look([("horny-mushroom", 250.0, None)], mp=0.0, t=t0 + 0.5))  # from 20 px: not the warning's
+    assert b.mp == 0.0 and b.counts["MP 0 under the warning"] == 0
+
+
+def test_a_ground_throws_cast_is_taken_off_at_its_own_key():
+    """Actions.throw asks its attack key before it tells the throw listeners (as jump_throw does): the cast's MP goes
+    off at its own key, not at the next throw's (with that one's key time)."""
+    a, _ = _attacks()
+    sent = []
+    act = Actions(KEYS7, skill=True)
+    act.choose = a.key
+    act.throw_listeners.append(a.on_throw)
+    act.play = lambda events, name, kind=None: sent.append((name, events))
+    a.on_look(_look([("horny-mushroom", 250.0, None)], mp=1.0))
+    act.facing = "right"
+    act.throw("right")
+    assert sent[0][1][0][1] == KEYS7.lucky_seven.name
+    assert a.mp == pytest.approx(1.0 - 11 / MAX_MP) and a._cast is None and a._cast_at == act._attack_at
 
 
 def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_target():
