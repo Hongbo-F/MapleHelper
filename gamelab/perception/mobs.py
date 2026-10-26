@@ -422,11 +422,12 @@ class MobDetector:
         px) is where its picture should be, searched REFIND_PAD px around (within `bounds`, by default the
         frame). First the picture that matched it last (`template`, `facing`: Mob.template and Mob.facing; a
         cut-out that doesn't know its facing, both ways), one masked match over the window; on a frame finer than
-        step 1's, where that scores under REFIND_GOOD, the frames its animation most likely went to, in turn
-        (`_next_frames`); if none reaches THRESHOLD (and `fallback`), every template of its kind there, as `detect`
-        does. On a frame finer than step 1's, a learned kind that shares its body with others (`twins`: Horny and
-        Green Mushroom; a Stump, a Dark Stump and an Axe Stump) is re-found only where its picture is the monster's,
-        told apart from theirs side by side at its feet as a search tells them (`_its_kind`): the other kind's picture
+        step 1's, where that scores under REFIND_GOOD (and `fallback`), the frames its animation most likely went to,
+        in turn (`_next_frames`); if none reaches THRESHOLD (and `fallback`), every template of its kind there, as
+        `detect` does. Without `fallback` (a hidden track's re-find) that first match is all. On a frame finer than
+        step 1's, a learned kind that shares its body with others (`twins`: Horny and Green Mushroom; a Stump, a Dark
+        Stump and an Axe Stump) is re-found only where its picture is the monster's, told apart from theirs side by
+        side at its feet as a search tells them (`_its_kind`): the other kind's picture
         of a frame scores 0.79-0.92 on a mushroom and up to 1.00 on a stump, so a track would otherwise go on on
         another kind's monster walking past or standing where it died. The one found nearest the box's centre, or
         None. On the caller's thread: a window is small, and the pool's hand-offs cost more."""
@@ -450,7 +451,11 @@ class MobDetector:
             _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, t.rgb, t.mask3))
             if score >= THRESHOLD and (best is None or score > best.score):
                 best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
-        if self.search != 1 and last is not None and (best is None or best.score < REFIND_GOOD):
+        # Without `fallback` (a track hidden: tracking.HIDDEN), its last template only, as Eyes.refind says: its next
+        # frames were 4 more masked matches of about 2 ms each, a frame, and found it 3% of the time (a search brings
+        # it back). On the saved frames of 2026-10-26 01:01, 6.4 ms off a frame's step, 24.8 with a crowd
+        # (D:/MapleHelper-scratch/cpu/perception/ab_lockstep.py).
+        if fallback and self.search != 1 and last is not None and (best is None or best.score < REFIND_GOOD):
             for t in _next_frames(self.templates[kind], last):  # (finer than step 1's: its frames differ)
                 th, tw = t.rgb.shape[:2]
                 if window.shape[0] < th or window.shape[1] < tw:

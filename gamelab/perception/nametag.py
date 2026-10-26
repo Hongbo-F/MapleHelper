@@ -4,8 +4,9 @@ The tag is matched at full resolution: at half size the score swings between ~0.
 which pixels the downscale keeps, and her name in the minimap scored ~0.6 too. The full-size template is
 cut from the screen the first time, where the half-size one from calibration finds her, and kept.
 
-A look searches near where she was found last first (3.4 ms; the whole play area takes 35): the camera
-keeps her at one spot on screen except near the map's edges, so her tag is seldom far from where it was.
+A look searches near where she was found last first (1.6 ms within NEAR_FRAME, 3.6 within NEAR; the whole play area
+takes 35): the camera keeps her at one spot on screen except near the map's edges, so her tag is seldom far from where
+it was.
 
 Her tag is drawn at the game's size: its templates are made for one client size (screen.Geometry; the files told
 apart by its `suffix`), and the px below were measured on the 1920x1080 window and go by the geometry.
@@ -30,8 +31,13 @@ SAME_NAME = (20, 60)   # full-size px around a match (rows, columns) where other
 # Full-size px across and down from where she was found last that a look searches first. Where the camera
 # stops at the map's edges she moves on screen: 7 px a frame walking, up to about 31 falling. When she isn't
 # in there (a warp, a long walk by an edge, the tag hidden), the whole play area is searched.
+# First within NEAR_FRAME of it (about a frame's move), then within NEAR. On the saved frames of 2026-10-26 01:01
+# (3,000 finds) the answers were the same as with NEAR alone, 1.60 ms a find against 3.63
+# (D:/MapleHelper-scratch/cpu/perception/tag_ab.py).
 NEAR = (240, 120)
-FULL_EVERY = 30        # ... and every this many looks the whole play area anyway, so a wrong match can't stick
+NEAR_FRAME = (80, 40)
+FULL_EVERY = 150       # ... and every this many looks the whole play area anyway, so a wrong match can't stick (5 s at
+                       # 30 frames a second; every 30 looks, at 35 ms each, it was 1.2 ms a frame)
 # After this many looks in a row without her tag, the full-size template is cut again from calibration's half-size one
 # (`_cut`, about 35 ms), in case it no longer matches her (kept from another day); if the half-size one doesn't find her
 # either, nothing changes. In the tours on Tree Dungeon on 2026-10-24 (7,646 looks, 1.8 a second) her tag was hidden 14
@@ -68,14 +74,16 @@ class NameTag:
         """Centre of her name tag in a full-size frame, in look-frame pixels (None: not on screen).
         Her name also shows in the minimap, the bottom bar and the party list, so of the good matches in
         the play area, the one nearest where she was (or the screen centre, which the camera keeps her
-        near) wins. It's looked for within NEAR of where she was first, and in the whole play area if
-        it isn't there (and every FULL_EVERY looks)."""
+        near) wins. It's looked for within NEAR_FRAME of where she was first, then within NEAR, and in the whole
+        play area if it isn't there (and every FULL_EVERY looks)."""
         if self.full is None:
             self.full = self._cut(full)
         self.looks += 1
         found = None
         if self._last is not None and self.looks % FULL_EVERY:
-            found = self.search(full, self._near(full.shape))
+            found = self.search(full, self._near(full.shape, NEAR_FRAME))
+            if found is None:
+                found = self.search(full, self._near(full.shape))
             self.missed += found is None
         if found is None:
             found = self.search(full)
@@ -97,13 +105,13 @@ class NameTag:
         self.recuts += 1
         return self.search(full)
 
-    def _near(self, shape: tuple[int, ...]) -> tuple[int, int, int, int]:
-        """The box of the play area (x0, y0, x1, y1; full-size px) a tag within NEAR of where she was
-        found last lies in."""
+    def _near(self, shape: tuple[int, ...], near: tuple[int, int] = NEAR) -> tuple[int, int, int, int]:
+        """The box of the play area (x0, y0, x1, y1; full-size px) a tag within `near` (base px: NEAR by default) of
+        where she was found last lies in."""
         th, tw = self.full.shape
         k = self.geo.look_scale
         x, y = k * self._last[0] - tw // 2, k * self._last[1] - th // 2  # its top-left corner then
-        nx, ny = self.geo.ipx(NEAR[0]), self.geo.ipx(NEAR[1])
+        nx, ny = self.geo.ipx(near[0]), self.geo.ipx(near[1])
         return (max(0, x - nx), max(0, y - ny),
                 min(shape[1], x + nx + tw), min(int(shape[0] * PLAY_BOTTOM), y + ny + th))
 

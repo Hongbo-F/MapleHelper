@@ -816,6 +816,23 @@ def test_a_name_tag_template_that_no_longer_matches_is_cut_again(tmp_path):
     assert tag.find(full) == (685, 528)
 
 
+def test_her_name_tag_is_looked_for_within_a_frame_s_move_first_then_near_then_in_the_whole_play_area(tmp_path):
+    from gamelab.perception import nametag
+    full = ROCKY[0]
+    tag = NameTag(np.load(TAG), tmp_path / "tag_full.npy", NATIVE)
+    boxes, search = [], tag.search
+    tag.search = lambda frame, box=None: boxes.append(box) or search(frame, box)
+    assert tag.find(full) == (685, 528) and boxes == [None]  # where she was not known yet: the whole play area
+    first, then = tag._near(full.shape, nametag.NEAR_FRAME), tag._near(full.shape, nametag.NEAR)
+    assert tag.find(full) == (685, 528) and boxes[1:] == [first]
+    del boxes[:]
+    moved = np.roll(full, -100, axis=1)  # 100 px off where she was (the camera stopped at the map's edge)
+    assert tag.find(moved) == (585, 528) and boxes == [first, then]
+    del boxes[:]
+    tag.looks = nametag.FULL_EVERY - 1  # every FULL_EVERY looks the whole play area, wherever she was
+    assert tag.find(moved) == (585, 528) and boxes == [None]
+
+
 def test_a_minimap_picture_that_failed_to_load_is_tried_again(monkeypatch):
     import gamedata.canvas
     calls = []
