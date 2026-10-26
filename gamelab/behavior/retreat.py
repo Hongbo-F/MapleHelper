@@ -36,7 +36,8 @@ and it's 15 of 32 (28 of 29 with the sweep off; 39 of 47 over seeds 1-12 at mast
 rest knocked back on the way up to the rope at 146 or to 28): tests/test_retreat.py;
 D:/MapleHelper-scratch/ldpet/sweep.py, D:/MapleHelper-scratch/integ3/rebase/ldsweep.py. Since her jumps' attacks are
 weighed (2026-10-25): with the feed 28 of 32, without it 26 of 32, shooting 23 from 24 32 of 32
-(D:/MapleHelper-scratch/ov-jump/sweep_count.py).
+(D:/MapleHelper-scratch/ov-jump/sweep_count.py). Since every look is the perception service's (2026-10-25: no
+`--no-feed`), 27 of 31, and 32 of 32 shooting 23 from 24 (D:/MapleHelper-scratch/perceive/build/ld_halves.py).
 """
 
 import math

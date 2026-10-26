@@ -74,11 +74,11 @@ FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
 # README, The perception service) every look so had her touched on her trips 16.4 times a run (their HP 1.45 bars)
 # against 20.1 (1.66) for the mover's alone and 22.9 (1.85) for none, falling 33 times against 44 and 55, 75.4
 # touches in all against 85.6 and 90.0, 0.73 bars of HP lost a minute against 0.83 and 0.88, her plans cut by a hit
-# 30.2 times a run against 40.4 and 39.1, her EXP a minute level (225.3, 228.0, 235.4; +2.3% and -3.7% seed by seed,
-# standard errors 7.8% and 6.1%), her decisions later (a plan's end to the next, 135 ms at the median against 65), and
-# the Lie Detector's retreat on a safe place 10 s after the sighting on 27 of 31 runs with her moves alone on every
-# one (the mover's alone 28 of 31, a run with more than her moves; none 29 of 30, one so). Measured first with what
-# reads a look right after her keys taking a frame from before them for one after (feed.to_ask, Actions.heading,
+# 30.2 times a run against 40.4 and 39.1, her EXP a minute level (225.3, 228.0, 235.4: the others +5.5% and +9.0% seed
+# by seed, standard errors 7.1% and 7.9%), her decisions later (a plan's end to the next, 135 ms at the median against
+# 65), and the Lie Detector's retreat on a safe place 10 s after the sighting on 27 of 31 runs with her moves alone on
+# every one (the mover's alone 28 of 31, a run with more than her moves; none 29 of 30, one so). Measured first with
+# what reads a look right after her keys taking a frame from before them for one after (feed.to_ask, Actions.heading,
 # Attacks.on_throw), the mover's alone had looked safest (13.2 touches on her trips against 21.8, 8 seeds).
 KEY_EFFECT_S = 0.068
 MAX_AGE_S = 0.1
