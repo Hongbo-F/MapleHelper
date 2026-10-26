@@ -256,6 +256,26 @@ def test_her_mp_follows_her_pets_drink_and_presses_that_took_none_while_she_cast
         t += 0.85
 
 
+def test_her_mp_off_the_newest_frame_before_a_key_shows_her_pets_drink_since_the_look():
+    """Attacks.glance (Hunter._still, before a throw's key): her pet's drink shows about 0.3 s after the cast that
+    brought it, and the look a throw is decided on 0.2-0.34 s after the key before; a drink shown between the look and
+    the key is read off the feed's newest frame: Lucky Seven, not the regular attack for 'MP' (the harness: 1.25 a run
+    so, her MP back)."""
+    mon = [("horny-mushroom", 250.0, None)]
+    a = Attacks(MODEL, KEYS7, "choice", max_mp=623.0, level=16, log=lambda line: None)
+    t = time.monotonic()
+    a.on_look(_look(mon, mp=4 / 104, t=t))  # 24 MP
+    a.key("right")
+    a.on_throw(t + 0.05, "right")  # 10 MP left: under the pet's warning, it drinks
+    a.on_look(_look(mon, mp=4 / 104, t=t + 0.2))  # the look before the next key: the cast not shown yet
+    assert a.mp == pytest.approx(4 / 104 - 14 / 623)
+    a.glance(t + 0.5, 21 / 104)  # the drink shown, with the cast (126 MP: 112 as reckoned, the cast maybe not shown)
+    assert a.mp == pytest.approx(21 / 104 - 14 / 623)
+    assert a.key("right") == KEYS7.lucky_seven.name and a.counts["MP"] == 0
+    a.glance(t + 0.7, None)  # (not read: nothing changes)
+    assert a.mp == pytest.approx(21 / 104 - 14 / 623)
+
+
 def test_a_bar_read_lower_than_her_reckoning_is_believed_at_once():
     """A cast her reckoning missed (or MP taken otherwise) shows as a bar lower than she reckons: believed, less the
     casts it can't show yet, whatever the casts it may."""

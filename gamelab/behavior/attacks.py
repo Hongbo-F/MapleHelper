@@ -98,6 +98,13 @@ WARNING_STEPS = 9
 WARNING_S = 2.0
 
 
+@dataclass(frozen=True)
+class _Read:
+    """A frame's MP bar as `Attacks._mp_read` takes it (a look's Scene has the same)."""
+    t: float
+    mp: float | None
+
+
 @dataclass
 class Mark:
     """A monster she has thrown at: as a look last saw it, when, what it has left as of the throws looks have seen
@@ -176,6 +183,15 @@ class Attacks:
             if again.bar is not None and mk.whole and not any(t <= s.t - SHOWS_S for t, _ in mk.pending):
                 mk.left = mk.left.hit() or mk.left  # her damage shows: not all of her throws reckoned in it missed
         self.marks = [mk for mk in self.marks if s.t - mk.seen < LOST_S and s.t - mk.thrown < FORGET_S]
+
+    def glance(self, t: float, mp: float | None) -> None:
+        """Her MP bar's share `mp` off a frame shown at `t` newer than the latest look (None: not read), as on_look
+        reads it: the glance before a throw's key (behavior.hunter.Hunter._still). Her pet's drink shows about 0.3 s
+        after the cast that brings it, and the look a throw is decided on comes 0.2-0.34 s after the key before (live,
+        2026-10-25): without it, a drink shown between the look and the key went unseen, and the throw went the regular
+        attack for 'MP' (the harness: 1.25 a run with her MP back)."""
+        if (read := self._mp_read(_Read(t, mp))) is not None:
+            self.mp = self._believed(read, t)
 
     # --- at every throw --------------------------------------------------------------------------
 

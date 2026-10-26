@@ -262,11 +262,13 @@ class Hunter:
         state, if of a frame after her keys' effect (Senses.fresh_after; none, the throw goes: nothing is asked of the
         feed, which takes its frames as it would): its events not drained yet (the next look's), their
         EXP readings told apart as the hunter's meter would (a copy of it: the kinds each gain names; one it can't
-        read names none, any kind then). Dropped, it's logged and sent as a telemetry event 'dropped'."""
+        read names none, any kind then). Dropped, it's logged and sent as a telemetry event 'dropped'. Its MP bar goes
+        to the attack choice first (Attacks.glance: a pet's drink shown since the look)."""
         feed = self.senses.feed
         st = feed.newest(self.senses.fresh_after())
         if st is None:
             return True
+        self.attacks.glance(st.t, getattr(st, "mp", None))  # (her MP too: a drink shown since the look)
         events = [e for e in feed.pending_events(st.t) if e.kind in ("exp_gain", "exp_read")]
         if not any(e.kind == "exp_gain" for e in events):
             return True
