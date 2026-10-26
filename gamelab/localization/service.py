@@ -8,7 +8,7 @@ of their own, localization.worldstate) on the screen (perception.frames.ScreenFr
 duplication: capture.shared). It never sends a key and never brings the game forward; it waits for the game window
 when there's none. Only one runs on the PC (a named mutex, MUTEX). Its rate and searches follow who's attached
 (`Clients`): with a command that hunts, ACTIVE_HZ and the feed's schedule (her band every 0.2 s, the whole screen every
-second); with none, IDLE_HZ and IDLE (her band every second, the screen every 4 s, the drops only when asked).
+second); with none, IDLE_HZ and IDLE (her band every 0.5 s, the screen every 2 s, the drops at `watch`'s old rates).
 Her throws are known to the tracker while a command that tells them is attached. Its telemetry is `watch`'s was (a
 scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl.
 
@@ -56,7 +56,8 @@ from ..screen import Geometry, geometry
 from . import feed
 from .feed import Feed, Ring, Runner, frame_shape, newest_fresh, newest_frame, to_ask, adds
 from .tracking import Event
-from .worldstate import Asks, Schedule, SearchThread, WorldState, WorldStep, to_scene
+from .worldstate import (LOOT_EVERY_S, LOOT_WIDE_EVERY_S, Asks, Schedule, SearchThread, WorldState, WorldStep,
+                         to_scene)
 
 ADDRESS = r"\\.\pipe\gamelab-perceive"
 MUTEX = "Local\\gamelab-perceive"
@@ -77,12 +78,12 @@ FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a lo
 # README, CPU). At 20 a glance (63 ms after the last) asked a frame of its own just after the regular one, and waited
 # behind its step.
 ACTIVE_HZ = 30.0
-IDLE_HZ = 5.0         # ... and with none: the pet's babysitter's wait, the mini-map and the web page. With IDLE, 0.20
-                      # cores on the saved frames against 0.83 at 10 a second, her band every 0.5 s, the screen every
-                      # 2 s and the drops at `watch`'s rates (every platform in view every 2 s: 0.28 cores of it),
-                      # which only the mini-map showed (prof_service.py, as above)
+# ... and with none: the pet's babysitter's wait, the mini-map and the web page. Not 5 with fewer searches (tried on
+# 2026-10-26: 0.20 cores on the saved frames against 0.83, prof_service.py as above): the user, the same day, "Don't
+# reduce perception fps please".
+IDLE_HZ = 10.0
 ACTIVE = Schedule()   # the feed's: her band every 0.2 s, the whole screen every second, the drops when asked
-IDLE = Schedule(band_s=1.0, wide_s=4.0)  # (the drops only when asked)
+IDLE = Schedule(band_s=0.5, wide_s=2.0, loot_s=LOOT_EVERY_S, loot_wide_s=LOOT_WIDE_EVERY_S)  # `watch`'s
 QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at ACTIVE_HZ): older ones are dropped, a gap said
 KEEP = 8              # states a client keeps (feed.KEEP)
 EVENTS_KEPT = 10_000  # events a client keeps for its next drain at most

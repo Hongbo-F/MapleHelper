@@ -78,8 +78,9 @@ def test_the_hunts_pace_and_her_throws_follow_the_commands_attached():
         assert {watch.id, pet.id} == set(svc.clients)
     finally:
         svc.runner.step.close()
-    # The idle schedule searches her band and the screen less often, and the drops only when asked
-    assert (IDLE.band_s, IDLE.wide_s, IDLE.loot_s, IDLE.loot_wide_s) == (1.0, 4.0, None, None)
+    # The idle schedule is `watch`'s: her band every 0.5 s, the screen every 2 s, the drops at its rates
+    assert (IDLE.band_s, IDLE.wide_s, IDLE.loot_s, IDLE.loot_wide_s) == (0.5, 2.0, 0.5, 2.0)
+    assert service.IDLE_HZ == 10.0
     assert (ACTIVE.band_s, ACTIVE.wide_s, ACTIVE.loot_s) == (0.2, 1.0, None)
 
 
