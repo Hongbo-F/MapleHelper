@@ -48,6 +48,22 @@ def scene(*monsters, x=500.0, y=500.0, platform=PLAT):
 
 # --- what a probe throws at ----------------------------------------------------------------------------
 
+def test_a_probe_throw_dropped_at_its_last_look_is_no_probe_throw():
+    """A throw her last look before the key drops (Actions.still: a kill of a kind in its way come in since the look it
+    was decided on) sends no key: probe._throw has no star to gather evidence for (None) and counts no throw (until the
+    review of 2026-10-26 it scored one all the same)."""
+    pig = target(650, 560, platform=1)
+    said = []
+    for went, flying in ((False, None), (True, "flying")):
+        h = SimpleNamespace(model=SimpleNamespace(id=0, platform=lambda pid: None),
+                            actions=SimpleNamespace(throw_listeners=[], throw=lambda side: went),
+                            report=SimpleNamespace(throws=0), exp_gains=0, log=said.append)
+        got = probe._throw(h, scene(pig), TOY, pig)
+        assert (got is None) == (flying is None) and h.report.throws == (0 if flying is None else 1)
+        assert h.actions.throw_listeners == []
+    assert "dropped at its last look" in said[0]
+
+
 def test_a_probe_throws_only_at_a_lone_monster_in_range():
     pig = target(650, 560, platform=1)  # 150 off, 60 below
     assert choose(scene(pig), TOY) is pig

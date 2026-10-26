@@ -295,8 +295,8 @@ class Attacks:
 
     def _mp_read(self, s: Scene) -> float | None:
         """Her MP bar's share as look `s` read it, or None: not read, or a 0 under her pet's warning (within WARNING_S
-        of a read above 0, it or her MP as reckoned WARNING_STEPS px or less), counted once a run of them ('MP 0 under the
-        warning': live the bar read 0 on up to 6 looks in a row, 10 a second)."""
+        of a read above 0, it or her MP as reckoned WARNING_STEPS px or less), counted once a run of them ('MP 0 under
+        the warning': live the bar read 0 on up to 6 looks in a row, 10 a second)."""
         if s.mp is None:
             return None
         if s.mp > 0.0:

@@ -338,8 +338,9 @@ def test_a_kill_whose_gain_came_soon_after_a_throw_is_that_throws_first_target_t
 
 def test_a_monster_by_a_kill_the_ledger_placed_isnt_fought_while_it_fades_out(monkeypatch):
     """fight._targets: a monster of a kill's kind on its platform by where the ledger placed it, while its death
-    shows, is taken for the one dying there (ledger.dying), whatever fight it was placed in: not a target, not in
-    `visible`."""
+    shows, is taken for the one dying there (ledger.dying), whatever fight it was placed in: not a target, but still
+    among those seen (`visible`: the stance's monsters about her, its danger): taken so by where it is, it's a live one
+    beside the dead one when that isn't seen (review of 2026-10-26: it left `visible` too)."""
     from gamelab.behavior.fight import FightState, _targets
     from gamelab.behavior.ledger import Kill
     pig, other = target(650), target(800)
@@ -348,7 +349,7 @@ def test_a_monster_by_a_kill_the_ledger_placed_isnt_fought_while_it_fades_out(mo
     now = time.monotonic()
     h.ledger.kills.append(Kill(now - 0.5, "pig", PLAT.id, 660.0, 500.0, PLAT.id))
     fight, visible, hidden = _targets(h, FightState(exp_counted=h.report.exp_kills), s, None, None, False, now)
-    assert fight == [other] and visible == [other]
+    assert fight == [other] and visible == [pig, other]
 
 
 def test_a_kill_is_matched_to_the_first_monster_in_the_star_path(monkeypatch):

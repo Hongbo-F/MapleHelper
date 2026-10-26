@@ -291,3 +291,27 @@ def test_a_jump_that_turns_her_in_the_air_has_its_attack_60_ms_after_the_arrow_w
     assert _turn_key(h, s, ("jump_back", RIGHT)) == reach.turn_key_ms(38)  # the pig on her right
     s.monsters = [target(560, kind="orange-mushroom")]
     assert _turn_key(h, s, ("jump_throw", RIGHT)) == AIR_TURN_ATTACK_MS and _turn_key(h, s, ("throw", RIGHT)) == 120
+
+
+def test_a_jump_backs_path_and_a_planned_turning_shot_go_by_the_attack_key_as_pressed():
+    """fight.attack_gap: the path a throw's kill is credited by (FightState.aimed: a gain soon after its key) is worked
+    out where the attack picks; a jump back without a plan has its attack at the turn key (fight._turn_key: 120, a
+    pig's 105), as Actions.jump_back keys it (until the review of 2026-10-26 at 85, 35 ms lower in the jump). A plan's
+    shot planned turning (reach.Shot.turn) goes at its own key, which reach.shots worked out for its kind (a pig's 105):
+    not pushed to 120."""
+    from gamelab.attack import reach
+    from gamelab.attack.stance import JumpPlan
+    from gamelab.behavior.fight import _throw, attack_gap
+    from gamelab.motion.physics import AIR_TURN_ATTACK_MS
+    acts = SimpleNamespace(faces=lambda side: False)
+    assert attack_gap(acts, ("jump_back", RIGHT)) == AIR_TURN_ATTACK_MS
+    assert attack_gap(acts, ("jump_back", RIGHT), 105) == 105
+    plan = JumpPlan(105, 0, True, "reach", reach.Shot(1, None, key_ms=105, turn=True))
+    assert attack_gap(acts, ("jump_throw", RIGHT, plan), AIR_TURN_ATTACK_MS) == 105
+    unplanned = JumpPlan(60, 0, True, "reach", reach.Shot(1, None, key_ms=60, turn=False))
+    assert attack_gap(acts, ("jump_throw", RIGHT, unplanned), AIR_TURN_ATTACK_MS) == AIR_TURN_ATTACK_MS
+    sent = []
+    acts.jump_throw = lambda side, *a, **k: sent.append((a, k))
+    _throw(acts, ("jump_throw", RIGHT, plan), plan, AIR_TURN_ATTACK_MS)
+    _throw(acts, ("jump_throw", RIGHT, unplanned), unplanned, AIR_TURN_ATTACK_MS)
+    assert sent == [((105, 0, True), {"turn_key": 105}), ((60, 0, True), {})]

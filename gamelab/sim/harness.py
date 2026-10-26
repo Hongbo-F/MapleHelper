@@ -30,10 +30,11 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    mp_potions, the MP potions her pet drank for her (world.Her.pet_mp); no_mp, casts pressed with too
                    little MP (nothing thrown); attacks, her attacks with either key; finishes, the regular attack
                    thrown to finish a monster her throws or its bar make low (`--attack choice`: its 'attack'
-                   records), and mp_throws, thrown for her MP (as she reckons it, under a cast); mp_per_kill, the MP a kill of hers, and mp_potions_per_min; at_dead, her attacks chosen at
-                   a monster dead by then (DEAD_BEFORE_S, DEAD_NEAR: its 'attack' record's target against the world's
-                   deaths), casts_at_dead those of them Lucky Seven; dropped, the throws dropped at their last look
-                   before the key for a kill come in (behavior.hunter: 'dropped' events)
+                   records), and mp_throws, thrown for her MP (as she reckons it, under a cast); mp_per_kill, the
+                   MP a kill of hers, and mp_potions_per_min; at_dead, her attacks chosen at a monster dead by then
+                   (DEAD_BEFORE_S, DEAD_NEAR: its 'attack' record's target against the world's deaths), casts_at_dead
+                   those of them Lucky Seven; dropped, the throws dropped at their last look before the key for a
+                   kill come in (behavior.hunter: 'dropped' events)
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
                    counts against the bar as a death does; left_map_at, the same for up held at a portal
                    (world.SimLeftMap)

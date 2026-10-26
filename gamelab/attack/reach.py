@@ -89,7 +89,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..localization.mapdata import MobBody, Platform, Segment
-from ..localization.monsters import MONSTER_HALF, MONSTER_HEIGHT, Monster
+from ..localization.monsters import MONSTER_HALF, MONSTER_HEIGHT, MONSTER_TOP, Monster
 from ..motion import physics
 
 # How far a star reaches: 200 for her claw (Lucky Seven's text: "within 200 range in front", skill data)
@@ -976,11 +976,14 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
     jumps: one Shot per target and way of attacking, from the ground and for each of `kinds` of jump
     (physics.jump_of) each way she can throw from it ('up' either way, with and without a turn in the air; 'forward'
     toward the throw; 'back' away from it, turning in the air), with the soonest attack key from KEY_FIRST_MS (with a
-    turn, TURN_KEY_MS) that picks the target surely keyed KEY_SLACK_MS sooner or later too, and how much later it still
-    would (Shot.window). From the ground: can_hit (in reach, nothing stopping its star or that of one the attack takes
-    first; of `others`, every monster around her, `monsters` by default). From a jump: the attack's pick (the area
-    about her feet, or the search's widening windows: air_takes) from where her feet are when the attack starts (physics.pose; _air_pick, AIR_MARGIN into it, at both ends of
-    ATTACK_DECIDE_LAG_MS), of all of `others`, and its line not stopped (wall_in_way, from her feet then: stopped, the
+    turn, turn_key_ms of the target's kind: TURN_KEY_MS, sooner for one too short to pick then, a pig 105 ms) that picks
+    the target surely keyed KEY_SLACK_MS sooner or later too, and how much later it still would (Shot.window). (From
+    2026-10-26 to the review of that day every kind's turning shots started at TURN_KEY_MS, 120: a pig or a slime on her
+    platform, picked only to 105 and 110 ms, had none.) From the ground: can_hit (in reach, nothing stopping its star
+    or that of one the attack takes first; of `others`, every monster around her, `monsters` by default). From a
+    jump: the attack's pick (the area about her feet, or the search's widening windows: air_takes) from where her feet
+    are when the attack starts (physics.pose; _air_pick, AIR_MARGIN into it, at both ends of ATTACK_DECIDE_LAG_MS), of
+    all of `others`, and its line not stopped (wall_in_way, from her feet then: stopped, the
     attack hits nothing); the monsters where `where` says they'll be (default: where they are). `sizes`: the kinds'
     bodies (localization.monsters.bodies: the map's game data; body_of's tables by default). Map units, y down."""
     others = monsters if others is None else others
@@ -1008,6 +1011,9 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
     still = placed(0.0) if where is None else None
     lag, decide = physics.JUMP_LAG, physics.ATTACK_DECIDE_LAG_MS / 1000
     step = KEY_STEP_MS // 2
+    turns = {m.kind: turn_key_ms(sizes[m.kind].top if sizes and m.kind in sizes else MONSTER_TOP.get(m.kind, PIG[0]))
+             for m in near if id(m) in wanted}  # each kind's soonest attack key turning in the air
+    turn0 = min(turns.values(), default=TURN_KEY_MS)
     for side in (-1, 1):
         if not any(id(m) in wanted and (m.x - x) * side >= -60 for m in near):
             continue  # (a jump forward can carry her past one 60 behind at most before its attack starts)
@@ -1038,8 +1044,9 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
                     picks[k] = (m, p0)
                 return picks[k]
 
-            starts = (KEY_FIRST_MS, TURN_KEY_MS) if kind == "up" else (TURN_KEY_MS if kind == "back" else KEY_FIRST_MS,)
-            for start in starts:
+            starts = (((KEY_FIRST_MS, False), (turn0, True)) if kind == "up"
+                      else ((turn0, True),) if kind == "back" else ((KEY_FIRST_MS, False),))
+            for start, turning in starts:
                 seen: set[int] = set()
                 k = start
                 while k <= KEY_LAST_MS:
@@ -1047,6 +1054,7 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
                     if not p0[2]:
                         break  # landed by then: the attack would start on the ground
                     if (m is not None and id(m) in wanted and id(m) not in seen
+                            and (not turning or k >= turns.get(m.kind, TURN_KEY_MS))
                             and all(pick(k + d)[0] is m for d in (-KEY_SLACK_MS, KEY_SLACK_MS))):
                         hi = k
                         while (hi + step <= KEY_LAST_MS and pick(hi + step)[0] is m
@@ -1054,7 +1062,7 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
                             hi += step
                         seen.add(id(m))
                         out.append(Shot(side, m, j, k, (k, hi), p0[0], y - p0[1], landing[0], landing[1], landing[2],
-                                        turn=kind == "back" or start == TURN_KEY_MS, alts=alts))
+                                        turn=turning, alts=alts))
                     k += step
     return out
 

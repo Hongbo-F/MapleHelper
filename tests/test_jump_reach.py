@@ -3,6 +3,8 @@ arc over time for each kind of jump (motion.physics), the attack's pick from whe
 about her feet, and the star's search's windows widening with the distance: reach.air_takes), and the world's
 attack from a jump going by the same model (sim.world.AIR_PICK 'widening')."""
 
+from pathlib import Path
+
 import pytest
 
 from gamelab.attack import reach
@@ -159,6 +161,23 @@ def test_too_high_for_the_widest_window_and_the_jump_is_out_of_reach():
     assert cover(reachable, floor, 100, [m]).hits(m, ("up",))
 
 
+def test_a_turning_jumps_attack_at_one_on_her_platform_starts_at_its_kinds_turn_key(monkeypatch):
+    """reach.shots' jumps that turn her in the air ('up' turning, 'back') start at reach.turn_key_ms of the target's
+    kind: a pig (38 tall at least) at 105 ms, the latest that still picks it, its arrow 45 ms before; never sooner than
+    that for any kind. With 120 for every kind (from 2026-10-26 to the review of that day, TURN_KEY_MS), a pig on her
+    platform had no turning shot until her way down, 430 ms in."""
+    from gamelab.localization.monsters import MONSTER_TOP
+    p = plat(LEDGE, 500, 200)
+    for dx in (40, 100):
+        target = pig(200.0 + dx, 500.0, p.id)
+        turning = [s for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn]
+        assert turning and min(s.key_ms for s in turning) == reach.turn_key_ms(MONSTER_TOP["pig"]) == 105, dx
+        assert all(s.key_ms >= 105 for s in turning)
+        monkeypatch.setattr(reach, "turn_key_ms", lambda top: 120)
+        assert min(s.key_ms for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn) > 400, dx
+        monkeypatch.undo()
+
+
 def test_a_jump_forward_reaches_one_past_a_gap():
     # She stands at her platform's end; a pig across a gap is 440 off, past a star's reach (its near side 406 off):
     # from the ground and in place, out of reach; a jump forward over the gap carries her on as the attack starts.
@@ -275,6 +294,23 @@ def test_a_jumps_kill_is_a_gain_soon_after_its_attack_key_not_one_after_a_later_
     assert [j["outcome"] for j in got] == ["kill", "nothing seen"] and got[0]["key"] == pytest.approx(10.1)
     assert jumps.kills_of([gain(21.3)], jumps.keys_of(rows)) == {20.9: 21.3}  # the ground throw's
     assert jumps.outcomes(rows, gains=[gain(10.05)])[0]["outcome"] == "nothing seen"  # (too soon: not its)
+
+
+def test_the_jumps_of_the_hunt_of_2026_10_25_2343_as_the_perception_services_records_have_them():
+    """analysis.jumps on the supervised hunt of 2026-10-25 23:43 (its six jump records and the records about them, the
+    hunter's and the perception service's: tests/fixtures/jumps_2026-10-25), as the analysis of that night checked them
+    jump by jump (D:/MapleHelper-scratch/analysis-1025/checked.txt): 'reach' nothing (the turn failed); 'above' a hit
+    (#119's bar 0.22 1.0 s on), nothing (#119 dying already) and a hit (#156's bar 0.46 0.8 s on, in the service's
+    scenes only: by the hunter's looks 'nothing seen', and a kill by master's tool, a ground throw's gain 1.4 s on);
+    'passing' two kills (gains 0.37 and 0.34 s after their keys)."""
+    from gamelab.analysis import jumps
+    path = Path(__file__).parent / "fixtures" / "jumps_2026-10-25" / "20261025-234327-tour.jsonl"
+    rows = jumps._rows(path)
+    gains, scenes = jumps.service_records(path, rows)
+    got = [(j["kind"], j["outcome"]) for j in jumps.outcomes(rows, gains, scenes)]
+    assert got == [("reach", "nothing seen"), ("above", "hit"), ("above", "nothing seen"), ("above", "hit"),
+                   ("passing", "kill"), ("passing", "kill")]
+    assert [j["outcome"] for j in jumps.outcomes(rows, gains)][3] == "nothing seen"  # (the hunter's looks)
 
 
 # --- the stance takes them -------------------------------------------------------------------------------------------

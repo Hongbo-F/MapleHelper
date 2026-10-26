@@ -493,6 +493,8 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
             time.sleep(WAIT_S)
             continue
         flying = _throw(h, s, probe, target)
+        if flying is None:  # dropped at its last look before the key: looked at again
+            continue
         report.throws += 1
         guard.fought = 0.0
     if flying is not None:  # stopped while its evidence came in: kept as far as it got
@@ -662,8 +664,10 @@ def choose(s: Scene, probe: Probe, crowd: int = 0, model: MapModel | None = None
     return min(fits, key=lambda m: abs(m.x - x))
 
 
-def _throw(h: "Hunter", s: Scene, probe: Probe, target: Monster) -> "_Flying":
-    """Throw at `target` as the probe does, and start gathering the evidence."""
+def _throw(h: "Hunter", s: Scene, probe: Probe, target: Monster) -> "_Flying | None":
+    """Throw at `target` as the probe does, and start gathering the evidence; None if the throw was dropped at its last
+    look before the key (Actions.still: a kill of a kind in its way come in since `s`), no key sent: no throw of the
+    probe's (until the review of 2026-10-26 one was scored all the same, for a star never thrown)."""
     row = _row(h, s, probe, target)
     exp0, keyed = h.exp_gains, []
 
@@ -674,9 +678,13 @@ def _throw(h: "Hunter", s: Scene, probe: Probe, target: Monster) -> "_Flying":
                        aimed=[{"kind": target.kind, "x": round(target.x, 1), "y": round(target.y, 1)}])
     h.actions.throw_listeners.append(on_throw)
     try:
-        getattr(h.actions, probe.style)(probe.side)
+        went = getattr(h.actions, probe.style)(probe.side)
     finally:
         h.actions.throw_listeners.remove(on_throw)
+    if went is False:
+        h.log(f"  {probe.style} {probe.side} at {target.kind}: dropped at its last look (a kill came in), "
+              f"looking again")
+        return None
     h.report.throws += 1
     key = keyed[0] if keyed else time.monotonic()
     flight = abs(target.x - s.where.x) + (JUMP_BACK_SPAN if probe.style == "jump_back" else 0)

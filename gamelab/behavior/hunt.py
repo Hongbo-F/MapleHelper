@@ -509,7 +509,7 @@ class Hunt:
         # only stepped from, never thrown at, and not one seen fading out where a kill died (this look's kill is
         # among `visible`, which was taken before it was counted): thrown at, a kill took a star, and then its
         # "hidden" ghost more (fight.HIDDEN_FOR), 4 of them after each kill in loop_finishes_what_she_hurt.
-        fading = self.fs.fading(visible)
+        fading = self.fs.fading(visible) + fight.dying_seen(self.h, s, now)  # (the ledger's dying are among visible)
         others = [m for m in visible if (self.kinds is None or m.kind in self.kinds)
                   and not any(m is t for t in targets) and not any(m is f for f in fading)]
         if self._can_pass_shoot(s, targets, others):

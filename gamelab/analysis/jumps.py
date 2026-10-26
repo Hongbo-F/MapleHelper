@@ -11,7 +11,9 @@ of it otherwise, 'passing', a jump forward along her way on a trip; `jump` the j
   perception service's own records when a *-perceive.jsonl in the same folder covers the run (the hunter's lag
   them: by more than 0.5 s for 38% of kills live), else the hunter's 'exp' records;
 - 'hit': a look within HIT_S of its key saw a monster of its kind on its platform within NEAR of where it was with an
-  HP bar lower than the last look before the key had it (or newly shown);
+  HP bar lower than the last look before the key had it (or newly shown): the perception service's own scenes when its
+  records cover the run (10 a second; the hunter's looks between her keys missed the 23:48:51 'above' jump's hit, its
+  target's bar 0.46 0.8 s after the key in the service's), else the hunter's looks;
 - 'nothing seen': neither (a miss, a star stopped, the hit hidden under the damage numbers, or a monster dead by then).
 
     python -m gamelab.analysis.jumps [FILES ...]     (default: the newest telemetry file)
@@ -82,11 +84,13 @@ def kills_of(gains: list[dict], keys: list[tuple[float, str | None]]) -> dict[fl
     return out
 
 
-def outcomes(rows: list[dict], gains: list[dict] | None = None) -> list[dict]:
+def outcomes(rows: list[dict], gains: list[dict] | None = None, scenes: list[dict] | None = None) -> list[dict]:
     """Each 'jump' record of a run with what came of it (see the module's docstring): its fields, `key` (when its attack
     key went down) and `outcome`. `gains`: the EXP gains to go by (the service's 'exp' records), by default the
-    run's."""
-    scenes = [r for r in rows if r.get("topic") == "scene" and r.get("her")]
+    run's; `scenes`, the looks to see hits by (the service's 'scene' records), by default the run's."""
+    if scenes is None:
+        scenes = [r for r in rows if r.get("topic") == "scene" and r.get("her")]
+    scenes = [r for r in scenes if r.get("monsters") is not None]
     if gains is None:
         gains = [r for r in rows if r.get("topic") == "exp" and any(r.get("kinds") or ())]
     keys = keys_of(rows)
@@ -124,6 +128,13 @@ def outcomes(rows: list[dict], gains: list[dict] | None = None) -> list[dict]:
 def service_gains(path: Path, rows: list[dict]) -> list[dict] | None:
     """The perception service's EXP gains over a run's time (its 'exp' records with a gain), from a *-perceive.jsonl in
     the run's folder whose records cover it; None if there's none."""
+    got = service_records(path, rows)
+    return None if got is None else got[0]
+
+
+def service_records(path: Path, rows: list[dict]) -> tuple[list[dict], list[dict]] | None:
+    """The perception service's EXP gains (its 'exp' records with a gain) and scenes placing her over a run's time, from
+    a *-perceive.jsonl in the run's folder whose records cover it; None if there's none."""
     times = [r["t"] for r in rows if "t" in r]
     if not times:
         return None
@@ -131,15 +142,17 @@ def service_gains(path: Path, rows: list[dict]) -> list[dict] | None:
     for other in sorted(path.parent.glob("*-perceive.jsonl")):
         if other == path:
             continue
-        gains, covers = [], False
+        gains, scenes, covers = [], [], False
         for r in _rows(other):
             if r.get("t", 0) < t0 - 5 or r.get("t", 0) > t1 + 5:
                 continue
             covers = True
             if r.get("topic") == "exp" and r.get("gain"):
                 gains.append(r)
+            elif r.get("topic") == "scene" and r.get("her"):
+                scenes.append(r)
         if covers:
-            return gains
+            return gains, scenes
     return None
 
 
@@ -167,11 +180,12 @@ def main(argv: list[str] | None = None) -> int:
         rows = _rows(path)
         times = [r["t"] for r in rows if "t" in r]
         minutes = (max(times) - min(times)) / 60 if len(times) > 1 else None
-        gains = service_gains(path, rows)
-        jumps = outcomes(rows, gains)
+        got = service_records(path, rows)
+        gains, scenes = got if got is not None else (None, None)
+        jumps = outcomes(rows, gains, scenes)
         print(f"{path.name}: {len(jumps)} jump throws chosen for their reach"
               + (f" in {minutes:.1f} min" if minutes else "")
-              + ("; kills by the perception service's EXP gains" if gains is not None else ""))
+              + ("; kills and hits by the perception service's EXP gains and scenes" if gains is not None else ""))
         if jumps:
             print(table(jumps, minutes))
     return 0

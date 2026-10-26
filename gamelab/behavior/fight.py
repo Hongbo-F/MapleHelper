@@ -320,25 +320,36 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     """What's there to fight: the monsters wanted and seen (not fading out where a kill died: this fight's, or one
     the ledger placed, ledger.dying), less
     the kills her EXP tells of; plus those she threw at that are hidden now. Returns those, the
-    monsters seen (but those fading out), and the hidden ones. Those hit lately (st.flinching: their HP
-    bar new or lower, or hidden under their damage numbers) may still flinch when her next attack picks."""
+    monsters seen (but those fading out where this fight's kills died), and the hidden ones. Those hit lately
+    (st.flinching: their HP bar new or lower, or hidden under their damage numbers) may still flinch when her next
+    attack picks. One the ledger takes for dying stays among those seen, which are about her (the stance's danger, its
+    jumps' arcs): it's taken so by where it is (the nearest of its kind to where a kill was placed), and with the
+    dead one unseen, a live one beside it is (review of 2026-10-26)."""
     wanted = _wanted(s, kinds, ground, far)
     body = bodies(h.model)
     st.forget_faded(now, body)
     fading = st.fading(s.monsters)
-    if (ledger := getattr(h, "ledger", None)) is not None:  # and those by a kill the ledger placed (ledger.dying)
-        die = {k: b.die_s for k, b in body.items()}
-        fading += [m for m in s.monsters if m not in fading and dying(ledger.kills, m, now, s.monsters, die)]
-    wanted = [m for m in wanted if m not in fading]
+    gone = fading + [m for m in dying_seen(h, s, now, body) if m not in fading]  # (and by a kill the ledger placed)
+    wanted = [m for m in wanted if m not in gone]
+    seen = [m for m in s.monsters if m not in gone]  # (her throws' monsters followed among the live ones)
+    hit = st.just_hit(seen)
+    st.follow(seen, now)
     visible = [m for m in s.monsters if m not in fading]
-    hit = st.just_hit(visible)
-    st.follow(visible, now)
     wanted = _count_kills(h, st, s, wanted, h.report.exp_kills - st.exp_counted, now)
     st.exp_counted = h.report.exp_kills
     st.forget_hidden(now)  # only after _count_kills: this look's kill may still be one of these
     hidden = st.hidden(now)
     st.flinching = hit + hidden
     return wanted + hidden, visible, hidden
+
+
+def dying_seen(h: "Hunter", s: Scene, now: float, body: dict[str, MobBody] | None = None) -> list[Monster]:
+    """The monsters of look `s` taken for one dying where a kill the hunter's ledger placed died (ledger.dying, by
+    their kinds' death animations: `body`, the map's game data), at `now`: no target."""
+    if (ledger := getattr(h, "ledger", None)) is None:
+        return []
+    die = {k: b.die_s for k, b in (body or bodies(getattr(h, "model", None))).items()}
+    return [m for m in s.monsters if dying(ledger.kills, m, now, s.monsters, die)]
 
 
 def body_sizes(model: MapModel | None) -> tuple[dict[str, float], dict[str, float]]:
@@ -408,7 +419,8 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     if throwing:
         plan = plan_of(act)
         at = s if plan is None or plan.shot is None else _moved(s, plan.shot.x)
-        st.aimed = _in_path(at, act[1], around, attack_gap(h.actions, act), body, st.flinching)
+        st.aimed = _in_path(at, act[1], around, attack_gap(h.actions, act, _turn_key(h, s, act)), body,
+                            st.flinching)
     if telemetry.recording():
         telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden),
                        aimed=[{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1)} for m in st.aimed]
@@ -416,17 +428,32 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     return act
 
 
-def attack_gap(actions, act: tuple) -> float | None:
+def attack_gap(actions, act: tuple, turn: int = physics.AIR_TURN_ATTACK_MS) -> float | None:
     """How long after its jump key the attack key of a throwing stance `act` goes as her actions will press it
-    (attack.stance.air_gap; None from the ground): a jump throw in place that turns her in the air has it
-    AIR_TURN_ATTACK_MS after the jump key at the soonest (control.actions.Actions.jump_throw, AIR_TURN), whatever the
-    stance's own timing, so she's higher when it picks."""
+    (attack.stance.air_gap; None from the ground), `turn` the attack key of a jump that turns her in the air
+    (_turn_key): a jump throw in place that turns her has it `turn` after the jump key at the soonest
+    (control.actions.Actions.jump_throw, AIR_TURN), whatever the stance's own timing, so she's higher when it picks
+    (_turn_of: a plan's turning shot keyed as planned); a jump back without a plan, `turn` (Actions.jump_back, as
+    _throw keys it). Its path (`FightState.aimed`) is worked out there: until the review of 2026-10-26 a jump back's
+    at physics.JUMP_BACK_ATTACK_MS (85), where Actions.jump_back keyed it at 120, and that path credits the kill of a
+    gain soon after the key (FightState.keyed)."""
     gap = air_gap(act)
     plan = plan_of(act)
+    if act[0] == "jump_back" and plan is None:
+        return max(turn, physics.JUMP_BACK_ATTACK_MS)
     if (act[0] == "jump_throw" and gap is not None and actions_mod.AIR_TURN
             and (plan is None or (not plan.way and plan.air_turn)) and not actions.faces(act[1])):
-        return max(gap, physics.AIR_TURN_ATTACK_MS)
+        return max(gap, _turn_of(plan, turn))
     return gap
+
+
+def _turn_of(plan, turn: int) -> int:
+    """The soonest attack key of a jump throw turning her in the air with JumpPlan `plan` (None: no plan), `turn` that
+    of its kind (_turn_key): a plan's shot planned turning (reach.Shot.turn) goes at its own key, which the plan's
+    shots worked out for its target's kind (reach.shots: reach.turn_key_ms of its height, a pig's 105 ms), not later."""
+    if plan is not None and plan.shot is not None and plan.shot.turn:
+        return min(turn, plan.key_ms)
+    return turn
 
 
 def _moved(s: Scene, x: float) -> Scene:
@@ -486,7 +513,10 @@ def _throw(actions, act: tuple, plan, turn: int = physics.AIR_TURN_ATTACK_MS) ->
             if turn == physics.AIR_TURN_ATTACK_MS:  # (as callers that don't know of it: the tests' fakes)
                 return actions.jump_throw(act[1])
             return actions.jump_throw(act[1], turn_key=turn)
-        return actions.jump_throw(act[1], plan.key_ms, plan.way, plan.air_turn)
+        turn = _turn_of(plan, turn)
+        if turn == physics.AIR_TURN_ATTACK_MS:  # (as callers that don't know of it: the tests' fakes)
+            return actions.jump_throw(act[1], plan.key_ms, plan.way, plan.air_turn)
+        return actions.jump_throw(act[1], plan.key_ms, plan.way, plan.air_turn, turn_key=turn)
     if act[0] == "jump_back":
         if plan is None:
             return actions.jump_back(act[1]) if turn == physics.AIR_TURN_ATTACK_MS else actions.jump_back(act[1], turn)
