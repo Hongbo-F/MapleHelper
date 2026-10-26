@@ -202,6 +202,11 @@ class Looter:
         # Whether a look's monsters call her off picking up (collect, mop_up), leaving the drops for later: the hunt
         # loop's EXP before loot (behavior.hunt: a wanted monster in reach); None: never
         self.yield_to: Callable[[Scene], bool] | None = None
+        # The monsters about her that a look didn't find, which guard drops as the look's own do (collect, mop_up): the
+        # hunt loop's (Hunt._unseen: the feed's hidden tracks, her memory's of the last moments); None: the look's
+        # alone. Live on 2026-10-25 her pickup walk on Tree Dungeon's 23 went through a Horny Mushroom two looks had
+        # missed (localization.unseen).
+        self.unseen: Callable[[Scene], list[Monster]] | None = None
 
     def wanted(self, loot: list[Loot]) -> list[Loot]:
         """The drops worth going for: not ones she failed to pick up, and only mesos with her inventory full."""
@@ -261,7 +266,7 @@ class Looter:
             self.h.log("  something in reach first: the drops later")
             self.pending.append(drops)
             return False
-        if _guarded(drops.x, drops.platform, s.monsters):
+        if _guarded(drops.x, drops.platform, s.monsters + self._about(s)):
             self.h.log("  drops guarded by a monster: later")
             self.pending.append(drops)
             return False
@@ -358,7 +363,8 @@ class Looter:
             if stuck:
                 self.cant_pick(stuck)
                 left = [d for d in left if d not in stuck]
-            guarded = [d for d in left if _guarded(d.x, here, s.monsters)]
+            about = s.monsters + self._about(s)
+            guarded = [d for d in left if _guarded(d.x, here, about)]
             if guarded:
                 self.h.log(f"  {len(guarded)} drop(s) by a monster: later")
                 self.note(guarded)
@@ -368,6 +374,10 @@ class Looter:
             self.h.log(f"  {_summary(left)} still on platform {here}: back for them")
             tried = [d for d in left if not d.mesos]
             stood += self.walk_piles(s, [DropSpot(d.x, d.y, here, s.t) for d in left], margin=0)
+
+    def _about(self, s: Scene) -> list[Monster]:
+        """The monsters about her that look `s` didn't find (`unseen`), [] without that."""
+        return [] if self.unseen is None else list(self.unseen(s))
 
     def cant_pick(self, stuck: list[Loot]) -> None:
         """Drops she stood on twice, pressing pick-up, that are still there: left alone for a while. Mesos

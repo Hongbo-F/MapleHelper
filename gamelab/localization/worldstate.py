@@ -594,7 +594,7 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
     where = None if st.where is None else Where(st.where[0], st.where[1], p, st.where[3])
     s = Scene(t=st.t, frame=st.frame if frame is None else frame, tag=st.tag, hp=st.hp, mp=st.mp, ground=st.ground,
               dot=st.dot, others=list(st.others), ropes=list(st.ropes), exp=st.exp_pixels(), where=where, how=st.how,
-              tag_seen=st.tag_seen, players=list(st.players), geo=st.geo)
+              tag_seen=st.tag_seen, players=list(st.players), geo=st.geo, tracks=list(st.tracks))
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

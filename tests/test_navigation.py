@@ -1798,10 +1798,12 @@ def test_a_fighting_trip_searches_for_monsters_where_its_chain_goes(model):
 
 def test_a_fighting_trip_keeps_clear_of_the_monsters_her_memory_has_where_its_chain_goes(model, monkeypatch):
     """Navigator.remembered: with her memory (a hunter's: Hunter.navigator), the monsters it has on the platforms the
-    chain goes from and onto that the look couldn't have found (off its view: this look's frame is a pixel wide), seen
-    within TRIP_MEMORY_S, are kept clear of too, as of their last sighting and their walking not known (wherever they
-    can have walked since); not one the look found (as the memory matches a sighting), one seen too long ago, one where
-    the chain doesn't go, or one in the look's view; nothing without a memory. The tracker's tracks stay the looks'."""
+    chain goes from and onto that the look didn't find, seen within TRIP_MEMORY_S, are kept clear of too, as of their
+    last sighting and their walking not known (wherever they can have walked since): off its view (this look's frame is
+    a pixel wide) and, since 2026-10-26, in it too (live on 2026-10-25 a Horny Mushroom the looks missed on 23, in view,
+    was dropped from the plan of her jump onto 23 beside it); not one the look found (as the memory matches a sighting),
+    one seen too long ago or one where the chain doesn't go; nothing without a memory. The tracker's tracks stay the
+    looks'."""
     import time
     from types import SimpleNamespace
 
@@ -1827,6 +1829,40 @@ def test_a_fighting_trip_keeps_clear_of_the_monsters_her_memory_has_where_its_ch
     assert m.reach(m.seen_at + 1.0, d) == pytest.approx((max(d.left, 600.0 - m.speed), min(d.right, 600.0 + m.speed)))
     assert len(nav.tracker.last[1]) == 1  # the tracker's: the look's alone
     s.frame = np.zeros((1, 2000, 3), np.uint8)  # a view 2000 px wide around her: D's in it, where the look searched
-    assert len(nav._chain_monsters(st, s, path)[0]) == 1
+    assert len(nav._chain_monsters(st, s, path)[0]) == 2  # missed in view: kept
     nav.memory = None
     assert len(nav._chain_monsters(st, s, path)[0]) == 1
+
+
+def test_a_fighting_trip_keeps_clear_of_the_feeds_hidden_monsters_and_of_the_one_its_last_cut_was_for(
+        model, monkeypatch):
+    """Navigator.hidden_tracks (UNSEEN_TRIPS): the feed's tracks out of sight on screen (HIDDEN, seen within HIDE_S) on
+    the chain's platforms, walking as followed, are kept clear of too, but not one the look found nor one of a kind that
+    doesn't count; and after a chain cut for a monster coming into its way, that monster's track (TripState.came) for
+    the next chain, wherever the feed has it."""
+    import time
+    from types import SimpleNamespace
+
+    from gamelab.control import navigator as nv
+    from gamelab.localization.tracking import HIDDEN, LIVE, Track
+    from gamelab.perception.mobs import Mob
+    c, d = by_y(model, 500, 400), by_y(model, 300, 700)
+    escort = _escort()
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450))
+    now = time.monotonic()
+    s.t = now
+
+    def track(i, x, pid, state=HIDDEN, vx=0.0, kind="horny-mushroom"):
+        return Track(i, kind, pid, x, 300.0, Mob(kind, 0, 0, 30, 30, 0.9), now - 5, now - 1.0, vx=vx, state=state)
+    s.tracks = [track(1, 650.0, d.id, vx=-50.0), track(2, 460.0, c.id), track(3, 750.0, d.id, state=LIVE)]
+    got = nav.hidden_tracks(s, {c.id, d.id}, monsters)
+    assert [(mo.platform, mo.x, mo.vx) for mo in got] == [(d.id, 650.0, -50.0)]  # (#2 is the look's, #3 is live)
+    st.came = track(4, 790.0, d.id, state=LIVE, kind="green-mushroom")
+    kept, _ = nav._chain_monsters(st, s, path)
+    assert sorted((mo.platform, mo.x) for mo in kept) == sorted([(c.id, 450.0), (d.id, 650.0), (d.id, 790.0)])
+    assert st.came is None  # for one chain
+    escort.threat = lambda kind: kind != "horny-mushroom"
+    assert nav.hidden_tracks(s, {c.id, d.id}, []) == []
+    monkeypatch.setattr(nv, "UNSEEN_TRIPS", False)
+    escort.threat = lambda kind: True
+    assert nav.hidden_tracks(s, {c.id, d.id}, []) == [] and SimpleNamespace

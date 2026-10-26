@@ -54,6 +54,16 @@ before: it has URGENT_MARGIN to spare.) In the live hunts of 2026-10-24 (1474 lo
 reach on another platform than hers), she didn't throw within 1.5 s on 184: on 78 she was picking up a pile, on 43 the
 valuable pile rule had her off to one (20 of those deciding it or on the way).
 
+Her drops are priced by the HP getting them would cost (`_pile_block`, `_pile_price`; from 2026-10-26): no pile is
+gone for, walked to or stood on with a monster that counts as a danger within PILE_CLEAR of where she'd land, walk and
+pick up (seen, about though the look missed it: localization.unseen, or just due back at its spawn point after a kill
+of hers there: DUE_FROM to DUE_TO s); the pile waits, still known, and a trip for one is called off at the chain that
+sees it so. What's left of the danger there is the pile's price against what it's worth (EXP before loot: HP_EXP a
+bar). Live on 2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off 23 came on stays on 23 for drops.
+And what her fights go by takes those about her that the look didn't find (`_unseen`: the feed's hidden tracks, her
+memory's of the last UNSEEN_S): around her for the stance's danger and its moves, and those on her platform that
+count as a danger as targets too (`_with_unseen`).
+
 She leaves a ground by the rate rule (`_leaving`): her EXP rate there falls clearly below what the best
 other ground would give, travel included, or nothing is left there and nothing is due back. Not for the ground she'd
 pick again at once (the only one: `--grounds 23`, or a value map with one): then it's waiting (`_elsewhere`). Objectives
@@ -88,6 +98,7 @@ from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
 from ..localization.players import near_rival
 from ..localization.scene import Scene
+from ..localization.unseen import UNSEEN_S, unseen
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
@@ -185,6 +196,41 @@ OBJECTIVE_S = 60.0     # backstop: s on one objective, suspensions included
 GROUND_S = 600.0       # backstop: s at one ground
 STUCK_S = 120.0        # backstop: s without a kill, a pick-up or a new ground before she stands by
 PICK_S = 0.6           # s standing on a pile (4 presses)
+# Her drops, priced by the HP getting them would cost (`_pile_block`, `_pile_price`). Live on 2026-10-25 (Tree Dungeon,
+# tour --loop 23:43-23:54, 340 EXP a minute; D:/MapleHelper-scratch/analysis-1025/damage-skeptic on23.py, ctx10.py) all
+# 12 of the Horny Mushrooms' touches (1.90 of the 3.4 bars of HP she lost) and all 3 knocks off 23 down to 29 (43 s back
+# up) came on 6 stays on 23 whose objective was a pile (on 23, 22 or 20: on the way, lull loot, urgent pile, a trip
+# there): she landed or walked beside a Horny seen or remembered there (the service's track 130 alone: 6 touches and a
+# fall), or one just back at its spawn point (2 of them on top of her), and there she killed no faster (9.4 a minute)
+# than from her spot on 24 (11.2). So she doesn't land on a pile's platform for it, walk to it or stand on it with a
+# monster that counts as a danger (attack.danger) within PILE_CLEAR of that stretch: one the look found there, one about
+# that it didn't (localization.unseen: the feed's hidden tracks, her memory's of the last UNSEEN_S), or a spawn point's
+# monster due back. The pile waits, still known, for a look that clears it; a trip for it is called off at the chain
+# that sees it not clear (`_call_off`). 100 units, not the analysis's "~150" (a Horny Mushroom walking at her 100 units
+# a second is on her in about a second at 150): in the simulator (Tree Dungeon, crowd, `--world zero-walls --world
+# near-misses`, `--attack choice`, 8 seeds of 5 minutes) with 150 she lost 0.92 bars of HP a minute alive, drank 13.6
+# potions a run and picked up 115 mesos' worth a minute; with 100 0.87, 12.9 and 130 (EXP a minute 297.7 and 307.4);
+# without it (and HP_EXP) 1.13, 16.9 and 170. Replayed on the live hunt of 2026-10-25 (78 times she went for a pile),
+# 150 has 47 of them wait, 100 44: the stays of both carried 7 of her touches and 1.04 bars of HP, of the 3.4 she lost
+# (D:/MapleHelper-scratch/hunt-ab/B/scripts/b1_replay.py).
+PILE_CLEAR = 100.0
+# A spawn point's monster is due back from DUE_FROM to DUE_TO s after a kill of hers of its kind on its platform (the
+# point of that kind nearest where it died). A spawn point's cooldown is 5 s by MeowDB (and its 7.56 s tick); live on
+# 2026-10-25 a monster new to her memory was back on Tree Dungeon's 23 (two Horny Mushroom points) a median 7.2 s after
+# her kill there, on 24 11.1 s, 20 15.7 s (exp-time-skeptic refill.py: upper bounds); the user's analysis's "~5-12 s".
+# Only her own kills (others' aren't placed). Before DUE_FROM the point is empty: the time to pick up a kill's drops.
+DUE_FROM = 5.0
+DUE_TO = 12.0
+# What a bar of her HP is worth in EXP, for a pile's price (EXP before loot, `_loot_first`): her pet drinks Orange
+# Potions of 250 HP at its 70% warning (sim.world.HP_POTION, PET_HP: 6 in the 10.95 minutes live on 2026-10-25), about
+# 160 mesos each at a shop (a guess: v83's price), so a bar of her 774 HP is 3.1 of them, 500 mesos, 250 EXP at
+# MESO_EXP; the knocks off a platform a touch can bring aren't counted (attack.stance keeps her off a long drop's end).
+# The user is short of money for potions.
+HP_EXP = 250.0
+# Whether her fights, her drops' price and guards and her throws' attack go by the monsters about her that a look didn't
+# find (`_unseen`: localization.unseen); off, by the look's alone (and the fight's own hidden ones), as before. With her
+# trips' (control.navigator.UNSEEN_TRIPS: the numbers there).
+UNSEEN_FIGHTS = True
 # Rule 6a: a pile with a drop in it worth this many mesos on its own (looting.Worth, the game data's prices: Pile.
 # dearest) is gone for at once, ahead of shooting: of the first map's drops a Slime Bubble (50) and a White Potion (35),
 # 2-8 times a pile's coins (15) or its other items (the user, watching her hunt on 2026-10-21: "Expensive items
@@ -374,6 +420,9 @@ class Hunt:
         self._published = None
         self._end = float("inf")  # when the running hunt ends (run)
         self._loot_said: dict[int, bool] = {}  # pile (its id) -> whether it went first when she last said (_loot_first)
+        self._unseen_for, self._unseen_list = None, []  # the look `_unseen` was worked out for, and its answer
+        self._landings: tuple = (None, {})  # the look `_landing` was worked out for, and platform -> where she'd land
+        self._block_said: dict[int, bool] = {}  # pile (its id) -> whether it waited when she last said (_pile_block)
 
     # --- the loop ------------------------------------------------------------------------------------
 
@@ -388,10 +437,13 @@ class Hunt:
         self._gone = self.h.drops.gone_tried
         self._progress = start
         telemetry.emit("tour", order=[], safe=self.tour.safe, grounds=self.tour.hunting_grounds(self._visit_s))
-        looter = self.h.looter
-        yield_to = looter.yield_to
+        looter, attacks = self.h.looter, getattr(self.h, "attacks", None)
+        yield_to, about = looter.yield_to, looter.unseen
         if EXP_FIRST:
             looter.yield_to = self._yields  # picking up stops for what's in reach
+        looter.unseen = self._unseen  # ... and the monsters about that a look missed guard drops too
+        if attacks is not None:  # ... and a throw's attack goes by those on her platform (behavior.attacks)
+            attacks.unseen = self._unseen_here
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         regains = self.h.senses.regains
@@ -416,7 +468,9 @@ class Hunt:
                         break
             self._leave_ground()
         finally:
-            looter.yield_to = yield_to
+            looter.yield_to, looter.unseen = yield_to, about
+            if attacks is not None:
+                attacks.unseen = None
             self.h.senses.regains = regains
         self.report.seconds = time.monotonic() - start
         self._log_memory()
@@ -480,6 +534,8 @@ class Hunt:
             # Seen gone, or the inventory filled up on the way: not worth the rest of the trip.
             self.obj = self.stack.pop() if self.stack else None
             return None
+        if o is not None and o.kind == "pile" and o.pile is not None and (why := self._pile_block(s, o.pile)):
+            return self._call_off(o, why)  # not clear (PILE_CLEAR): it waits, still known
         if o is not None and o.kind == "spot" and o.platform == o.ground == s.platform.id:
             # A ground no standable spot reaches is hunted on itself: anywhere on it she's there (stance
             # closes in). Waiting to reach the spot's x, she was interrupted by close monsters for good.
@@ -676,7 +732,42 @@ class Hunt:
         ground = {self.visit.ground} if self.visit is not None else None
         targets, visible, hidden = fight._targets(self.h, self.fs, s, self.kinds, ground, True, now)
         self.h.looter.pending.clear()  # drops are the drop store's here (behavior.ledger)
-        return targets, visible, hidden
+        return self._with_unseen(s, targets, visible, hidden)
+
+    def _with_unseen(self, s: Scene, targets, visible, hidden):
+        """Her targets, the monsters seen and the hidden ones (fight._targets'), with the monsters about her that look `s`
+        didn't find (`_unseen`: the feed's hidden tracks, her memory's of the last UNSEEN_S, none she threw at already):
+        among the hidden ones, so the stance's danger and moves go by them (its `around`), and those on her platform of
+        a kind that counts as a danger among the targets too, so a fight keeps off them and shoots them (rule 1 and
+        stance: one on her platform that can touch her first). Not those on other platforms: thrown at where they were
+        last seen, they'd be the throws at what's dead or gone that the live hunt of 2026-10-25 wasted 52 of 325 on
+        (jumps-perception-skeptic). Where nothing counts as a danger (the first map), as they were."""
+        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
+        if s.platform is None or s.where is None or d is None or not d.any:
+            return targets, visible, hidden
+        more = [m for m in self._unseen(s) if not any(_same(m, h) for h in [*hidden, *visible])]
+        if not more:
+            return targets, visible, hidden
+        here = s.platform.id
+        mine = [m for m in more if m.platform == here and d.share(m.kind) > 0 and not any(_same(m, t) for t in targets)]
+        return targets + mine, visible, hidden + more
+
+    def _unseen_here(self, s: Scene) -> list[Monster]:
+        """Those of `_unseen` on her platform in look `s` whose kind counts as a danger (her throws' attack goes by them:
+        behavior.attacks), where something does."""
+        d = getattr(self.h, "danger", None)
+        if s.platform is None or d is None or not d.any:
+            return []
+        return [m for m in self._unseen(s) if m.platform == s.platform.id and d.share(m.kind) > 0]
+
+    def _unseen(self, s: Scene) -> list[Monster]:
+        """The monsters about that look `s` didn't find (localization.unseen: the feed's hidden tracks, her memory's seen
+        within UNSEEN_S), worked out once a look."""
+        if not UNSEEN_FIGHTS:
+            return []
+        if getattr(self, "_unseen_for", None) is not s:
+            self._unseen_for, self._unseen_list = s, unseen(s, getattr(self.h, "memory", None), self.model, UNSEEN_S)
+        return self._unseen_list
 
     @property
     def danger(self):
@@ -959,7 +1050,7 @@ class Hunt:
             if any(abs(m.x - d.x) < PILE_GUARD for m in mine):
                 continue
             pile = next((p for p in self.h.drops.known if p.platform == here and abs(p.x - d.x) <= 60), None)
-            if pile is not None and self._fresh(pile):
+            if pile is not None and self._fresh(pile) and not self._pile_block(s, pile):
                 return pile
         return None
 
@@ -991,7 +1082,7 @@ class Hunt:
             travel = self._travel_to_pile(s, p)
             need = travel + PICK_S + URGENT_MARGIN
             if travel <= URGENT_TRAVEL and need >= left and need - URGENT_MARGIN < left \
-                    and (best is None or left < best[0]):
+                    and (best is None or left < best[0]) and not self._pile_block(s, p):
                 best = (left, p)
         return None if best is None else best[1]
 
@@ -1012,7 +1103,8 @@ class Hunt:
             if not self._fresh(p):
                 continue
             t = self._travel_to_pile(s, p) + PICK_S
-            if t <= budget and (not near_only or t < 20) and (best is None or p.value / t > best[0]):
+            if t <= budget and (not near_only or t < 20) and (best is None or p.value / t > best[0]) \
+                    and not self._pile_block(s, p):
                 best = (p.value / t, p)
         return None if best is None else best[1]
 
@@ -1027,36 +1119,114 @@ class Hunt:
             if p.dearest is None or p.dearest < self.valuable or p.rushed >= VALUABLE_TRIES or not self._fresh(p):
                 continue
             t = self._travel_to_pile(s, p) + PICK_S
-            if t <= VALUABLE_TRAVEL + PICK_S and (best is None or p.worth / t > best[0]):
+            if t <= VALUABLE_TRAVEL + PICK_S and (best is None or p.worth / t > best[0]) and not self._pile_block(s, p):
                 best = (p.worth / t, p)
         return None if best is None else best[1]
 
     def _loot_first(self, s: Scene, p: Pile, monsters, say: bool = True) -> bool:
         """EXP before loot: whether pile `p` goes ahead of shooting what's in reach of `monsters` from where she stands
-        in look `s` (_shoot_rate). With nothing in reach, it does. Else only if what waiting would likely lose of it
-        (its worth x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso) is more than the EXP she'd
-        make from what's in reach over the trip there and back (and PICK_S on it). Said in her log when the answer for
-        a pile changes (`say`)."""
+        in look `s` (_shoot_rate). With nothing in reach, it does, unless what getting it would cost her in HP
+        (`_pile_price`) is more than it's worth (at MESO_EXP an meso). Else only if what waiting would likely lose of it
+        (its worth x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso), less that price, is more
+        than the EXP she'd make from what's in reach over the trip there and back (and PICK_S on it). Said in her log
+        when the answer for a pile changes (`say`)."""
         if not EXP_FIRST:
             return True
+        price = self._pile_price(s, p)
         rate, busy = self._shoot_rate(s, monsters)
         if rate <= 0.0:
-            return True
+            return price <= p.value * MESO_EXP
         risk = self._at_risk(s, p, busy)
         to = self._travel_to_pile(s, p)
         trip = 2 * to + PICK_S
-        first = risk * p.value * MESO_EXP > rate * trip
+        first = risk * p.value * MESO_EXP - price > rate * trip
         if say and self._loot_said.get(id(p)) != first:
             self._loot_said[id(p)] = first
             what = (f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f} (worth {p.value:.0f}, at risk "
-                    f"{risk:.0%}) against {rate:.1f} EXP a second in reach for {busy:.0f} s, "
-                    f"{trip:.1f} s there and back")
+                    f"{risk:.0%}" + (f", its HP {price:.0f} EXP" if price else "") + f") against {rate:.1f} EXP a "
+                    f"second in reach for {busy:.0f} s, {trip:.1f} s there and back")
             self.log(what + (": the pile first" if first else ": shooting first"))
             if telemetry.recording():
                 telemetry.emit("event", kind="loot_first", first=first, worth=round(p.value, 1), risk=round(risk, 2),
                                rate=round(rate, 2), busy=round(busy, 1), trip=round(trip, 1), platform=p.platform,
-                               x=round(p.x))
+                               x=round(p.x), price=round(price, 1))
         return first
+
+    def _landing(self, s: Scene, p: Pile) -> float:
+        """Where on pile `p`'s platform she'd be when she gets there from look `s`: where she stands, on it; else where
+        the quickest route there lands her (its last move's: route.Move.land_x; the trip's own may land elsewhere),
+        the pile itself if there's none. Worked out once a look for each platform."""
+        here = s.platform
+        if here is not None and here.id == p.platform:
+            return s.where.x
+        if self._landings[0] is not s:
+            self._landings = (s, {})
+        got = self._landings[1]
+        if p.platform not in got:
+            path = None if here is None else self.nav.planner.plan(here.id, s.where.x, p.platform)
+            got[p.platform] = path[-1].land_x if path else p.x
+        return got[p.platform]
+
+    def _touchers(self, s: Scene, pid: int, at: float, stay: float) -> list[tuple[str, float, str]]:
+        """The monsters that count as a danger (attack.danger) about platform `pid` as of look `s`, for her there from
+        `at` s on for `stay` s: as (kind, map x, why), those the look found on it ('seen'), those about it that it
+        didn't ('unseen': `_unseen`), and its spawn points whose monster is due back then ('due back': DUE_FROM to
+        DUE_TO s after a kill of hers of its kind on it, the point nearest the kill)."""
+        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
+        if d is None or not d.any:
+            return []
+        out = [(m.kind, m.x, "seen") for m in [*s.monsters, *getattr(s, "swept", ())]
+               if m.platform == pid and d.share(m.kind) > 0]
+        out += [(m.kind, m.x, "unseen") for m in self._unseen(s) if m.platform == pid and d.share(m.kind) > 0]
+        now = time.monotonic()
+        for k in reversed(self.h.ledger.kills):
+            if k.t < now - DUE_TO:
+                break
+            if not k.placed or k.platform != pid or d.share(k.kind) <= 0:
+                continue
+            if k.t + DUE_FROM <= now + at + stay and now + at <= k.t + DUE_TO:
+                xs = [x for q, x, kind in d.points if q == pid and kind == k.kind]
+                if xs:
+                    out.append((k.kind, min(xs, key=lambda x: abs(x - k.x)), "due back"))
+        return out
+
+    def _pile_block(self, s: Scene, p: Pile) -> str | None:
+        """Why pile `p` isn't to be gone for from look `s` now, or None: a monster that counts as a danger (`_touchers`:
+        seen, about unseen, or due back at its spawn point by the time she'd be there) within PILE_CLEAR of the stretch
+        of its platform from where she'd land (`_landing`), or stands on it, to the pile (see PILE_CLEAR). Said in her
+        log when it changes for a pile. Never where nothing counts as a danger (the first map)."""
+        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
+        if d is None or not d.any or p.platform is None or s.where is None or s.platform is None:
+            return None
+        land = self._landing(s, p)
+        on_it = s.platform.id == p.platform
+        lo, hi = sorted((land, p.x))
+        at = 0.0 if on_it else self._travel_to_pile(s, p)
+        why = None
+        for kind, x, how in self._touchers(s, p.platform, at, PICK_S + (hi - lo) / WALK_SPEED):
+            gap = max(lo - x, x - hi, 0.0)
+            if gap < PILE_CLEAR:
+                why = f"a {kind} {how} {gap:.0f} units from {'her way to it' if hi > lo else 'it'}"
+                break
+        if self._block_said.get(id(p)) != (why is not None):  # (said when it starts waiting, not as the gap moves)
+            self._block_said[id(p)] = why is not None
+            if why is not None:
+                self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, {why}")
+        return why
+
+    def _pile_price(self, s: Scene, p: Pile) -> float:
+        """What getting pile `p` would cost her in HP as of look `s`, in EXP (HP_EXP a bar): for each monster that counts
+        about its platform (`_touchers`), its danger (Danger.of: its touch's share of her HP, by how soon it can be on
+        her) where she'd land or at the pile, the worse; 0 where nothing counts as a danger."""
+        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
+        if d is None or not d.any or p.platform is None or s.where is None or s.platform is None:
+            return 0.0
+        q = self.model.platform(p.platform)
+        land = self._landing(s, p)
+        at = 0.0 if s.platform.id == p.platform else self._travel_to_pile(s, p)
+        hp = sum(max(d.of(kind, q, x, q, land), d.of(kind, q, x, q, p.x))
+                 for kind, x, _ in self._touchers(s, p.platform, at, PICK_S))
+        return hp * HP_EXP
 
     def _shoot_rate(self, s: Scene, monsters) -> tuple[float, float]:
         """EXP a second she'd make shooting the wanted ones of `monsters` in reach from where she stands in look `s` (as
@@ -1088,13 +1258,15 @@ class Hunt:
             risk = max(risk, RIVAL_TAKES)
         return risk
 
-    def _call_off(self, o: Objective) -> None:
-        """Her trip for a pile that went first ends where she is (something in reach goes first now): the pile stays
-        known, not counted as tried nor rushed, and the objective under it, if any, is hers again."""
+    def _call_off(self, o: Objective, why: str | None = None) -> None:
+        """Her trip for a pile ends where she is (something in reach goes first now, or `why`: it isn't clear,
+        `_pile_block`, which said so): the pile stays known, not counted as tried nor rushed, and the objective under
+        it, if any, is hers again."""
         p = o.pile
         if o.why == "valuable pile":
             p.rushed = max(0, p.rushed - 1)
-        self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, shooting what's in reach first")
+        if why is None:
+            self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, shooting what's in reach first")
         self.obj = self.stack.pop() if self.stack else None
         return None
 
@@ -1123,7 +1295,7 @@ class Hunt:
             return None
         now, best = time.monotonic(), None
         for p in self.h.drops.known:
-            if p is o.pile or not self._fresh(p) or self._guarded(s, p):
+            if p is o.pile or not self._fresh(p) or self._guarded(s, p) or self._pile_block(s, p):
                 continue
             to, on = plan.arrive(here, x, p.platform, p.x), plan.arrive(p.platform, p.x, o.platform, o.x, keep_off=keep)
             if to is None or on is None or to > DETOUR_REACH:
@@ -1416,6 +1588,8 @@ class Hunt:
         o = self.obj
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):
             return True  # not worth it any more (`_pass` drops it)
+        if o is not None and o.kind == "pile" and o.pile is not None and self._pile_block(s, o.pile):
+            return True  # not clear any more (`_pass` calls it off)
         wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
         if o is not None and o.why == "valuable pile":
             # At once: nothing else stops her, but something in reach that goes first now (`_loot_first`)
@@ -1679,6 +1853,11 @@ class Hunt:
         telemetry.emit("hunt", mode="hunt", rule=self._rule, objective=key[1], ground=key[2],
                        rate_here=None if v is None or v.arrived is None else round(self._rate_here(), 3),
                        rate_to_beat=None if best is None else [round(best[0], 3), best[1]], piles=piles)
+
+
+def _same(a: Monster, b: Monster) -> bool:
+    """Whether monsters `a` and `b` are one: of a kind, on a platform, within memory.MATCH_SLACK."""
+    return a.kind == b.kind and a.platform == b.platform and abs(a.x - b.x) <= 40.0
 
 
 def _safe_share(sp: Spot) -> float:

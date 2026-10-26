@@ -581,3 +581,110 @@ def test_a_pile_by_another_player_is_left_to_them_unless_it_is_valuable_or_hers(
         assert h._fresh(theirs) != left and h._fresh(dear) and h._fresh(mine)
     h._seen = SimpleNamespace(players=[Player(1, "stranger", 600.0, 0.0, 2, (0.0, 0.0), 0.0, 1.0, seen=2)])
     assert h._fresh(theirs)  # 500 units off it
+
+
+# --- her drops priced by the HP they'd cost (PILE_CLEAR, DUE_FROM, DUE_TO, HP_EXP) --------------------------------------
+
+def _ground():
+    """Tree Dungeon's 23 and 24, made up (test_danger's kinds): the ground (500..900, y 500) with a Horny Mushroom's spawn
+    point at 800, and her spot's platform beside it (900..1100, y 480)."""
+    from test_danger import build
+    m = build([(500, 500, 900, 500), (900, 480, 1100, 480)], [("19", 800, 500)])
+    ground, spot = (m.platform_under(700, 500).id, m.platform_under(1000, 480).id)
+    return m, ground, spot
+
+
+def _priced(model, piles, memory=(), kills=(), land=880.0, travel=1.0):
+    """_shooter with the map's danger for her (test_danger's HER), her memory's monsters (`memory`, as the memory's
+    entries), her kills (`kills`: ledger.Kill), a route onto any platform landing at map x `land` taking `travel` s."""
+    from gamelab.attack.danger import Danger
+    from test_danger import HER
+    h = _shooter(piles, travel=travel)
+    h.h.danger, h.model = Danger(model, HER), model
+    h.h.memory = SimpleNamespace(alive=lambda t, min_p=0.0: list(memory), there=lambda *a, **k: [])
+    h.h.ledger = SimpleNamespace(kills=list(kills))
+    h.nav.planner.plan = lambda src, x, dst: [SimpleNamespace(land_x=land)]
+    h._unseen_for, h._unseen_list, h._landings, h._block_said = None, [], (None, {}), {}
+    return h
+
+
+def _on(pid, x, model, monsters=()):
+    return SimpleNamespace(platform=model.platform(pid), where=SimpleNamespace(x=x, y=model.platform(pid).y_at(x)),
+                           monsters=list(monsters), swept=[], tracks=[], t=time.monotonic(), players=[])
+
+
+def _remembered(kind, pid, x, age, model):
+    from gamelab.localization.monsters import Monster
+    from gamelab.perception.mobs import Mob
+    m = Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, model.platform(pid).y_at(x), pid)
+    return SimpleNamespace(kind=kind, platform=pid, x=x, seen=time.monotonic() - age, monster=m)
+
+
+def test_a_pile_by_a_monster_that_counts_seen_remembered_or_due_back_waits_until_it_is_clear():
+    """Live on 2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off Tree Dungeon's 23 came on stays
+    there for drops (hunt.PILE_CLEAR). A pile on the ground at x 750, from her spot (landing at 880): gone for with
+    nothing about; not with a Horny Mushroom her memory has 15 units from it 1.5 s ago (the looks missed it), nor one
+    between where she'd land and it, nor while the spawn point's monster is due back (her kill there 6 s ago); a kill
+    there 1 s ago leaves her the time to pick it up, one 14 s ago is past DUE_TO. Not where nothing counts (the first
+    map)."""
+    from gamelab.behavior.ledger import Kill
+    m, ground, spot = _ground()
+    pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True)
+    s = _on(spot, 1000.0, m)
+    assert _priced(m, [pile])._pile_block(s, pile) is None
+    h = _priced(m, [pile], memory=[_remembered("horny-mushroom", ground, 765.0, 1.5, m)])
+    assert h._pile_block(s, pile) == "a horny-mushroom unseen 0 units from her way to it"
+    assert h._best_pile(s, near_only=True) is None  # (lull loot, loot elsewhere)
+    assert h.said == [f"  drops on platform {ground} at x 750: later, a horny-mushroom unseen 0 units from her way to it"]
+    seen = _horny(ground)
+    seen.x = 860.0  # where she'd land
+    assert _priced(m, [Pile(560.0, 500.0, ground, time.monotonic(), True)])._pile_block(
+        _on(spot, 1000.0, m, [seen]), Pile(560.0, 500.0, ground, time.monotonic(), True)) is not None
+    now = time.monotonic()
+    for ago, blocked in ((6.0, True), (1.0, False), (14.0, False)):
+        k = Kill(now - ago, "horny-mushroom", ground, 790.0, 500.0, ground)
+        why = _priced(m, [pile], kills=[k])._pile_block(s, pile)
+        assert (why == "a horny-mushroom due back 0 units from her way to it") if blocked else why is None, (ago, why)
+    first = _priced(m, [pile], memory=[_remembered("horny-mushroom", ground, 765.0, 1.5, m)])
+    first.h.danger = None
+    assert first._pile_block(s, pile) is None
+
+
+def test_on_her_own_platform_a_pile_by_one_the_look_missed_waits_and_a_trip_for_one_is_called_off():
+    m, ground, spot = _ground()
+    pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True)
+    lurking = _remembered("horny-mushroom", ground, 640.0, 1.0, m)
+    h = _priced(m, [pile], memory=[lurking])
+    s = _on(ground, 600.0, m)
+    s.loot = [SimpleNamespace(platform=ground, x=750.0)]
+    h._standable = lambda pid: True
+    assert h._pile_block(s, pile) == "a horny-mushroom unseen 0 units from her way to it"
+    assert h._pile_here(s) is None
+    spot_obj = Objective("spot", spot, 1000.0, ground=ground)
+    h.stack, h.obj = [spot_obj], Objective("pile", ground, 750.0, pile=pile, why="on the way")
+    h.h.low_hp, h._tops, h._halves = 0.3, {}, {}
+    s.hp = 1.0
+    assert h._interrupt(s)  # not clear any more: the trip stops ...
+    h._call_off(h.obj, h._pile_block(s, pile))  # ... and `_pass` calls it off: the pile still known, not tried
+    assert h.obj is spot_obj and pile in h.h.drops.known and pile.tries == 0
+    h.h.memory = SimpleNamespace(alive=lambda t, min_p=0.0: [], there=lambda *a, **k: [])
+    h._unseen_for = None
+    assert h._pile_here(s) is pile  # clear: picked up
+
+
+def test_exp_before_loot_prices_a_pile_by_the_hp_it_would_cost():
+    """hunt.HP_EXP: with nothing in reach a pile goes unless what its HP would cost (the danger where she'd land and
+    pick up, by the monsters about there) is more than it's worth; with something in reach that price comes off what
+    waiting would lose of it."""
+    m, ground, spot = _ground()
+    cheap = Pile(560.0, 500.0, ground, time.monotonic() - 3.0, True)  # a bronze coin's 15 mesos: 7.5 EXP
+    seen = _horny(ground)
+    seen.x = 770.0  # 210 units from the pile, where she'd land too: past PILE_CLEAR
+    h = _priced(m, [cheap], land=560.0)
+    s = _on(spot, 1000.0, m, [seen])
+    assert h._pile_block(s, cheap) is None  # 210 units off: clear
+    price = h._pile_price(s, cheap)
+    assert price == pytest.approx(h.h.danger.of("horny-mushroom", m.platform(ground), 770.0, m.platform(ground), 560.0)
+                                  * hunt.HP_EXP)
+    assert price > cheap.value * hunt.MESO_EXP and not h._loot_first(s, cheap, [])
+    assert _priced(m, [cheap], land=560.0)._loot_first(_on(spot, 1000.0, m), cheap, [])  # nothing about: it goes

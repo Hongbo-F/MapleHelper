@@ -150,6 +150,11 @@ class Attacks:
         # The monster the next throw is at, if the stack knows better than a throw from the ground would (a jump's
         # attack at one on a platform above: behavior.fight.throw_act), taken by that throw's key alone
         self.aimed: Monster | None = None
+        # The monsters about her that a look didn't find, which a throw takes as the look's own (target): the hunt
+        # loop's (Hunt._unseen, those on her platform); None: the look's alone. With a monster under her body unfound (live on
+        # 2026-10-25, 7-12% of frames found one within 50 units: localization.unseen), a throw at it was 'nothing in
+        # its way' and went out as the regular attack.
+        self.unseen: Callable[[Scene], list[Monster]] | None = None
 
     # --- after every look ------------------------------------------------------------------------
 
@@ -231,14 +236,15 @@ class Attacks:
         self._cast = None
 
     def target(self, side: str) -> Monster | None:
-        """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look that isn't
-        likely dead by her throws (DEAD_LIKELY; the likeliest if all are), else the one she last threw at that way
-        within HIDDEN_FOR (unseen: under its damage numbers), one not likely dead first, else None; never one dying
-        where a kill of hers was placed (ledger.dying)."""
+        """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look (and those
+        about that it didn't find: `unseen`) that isn't likely dead by her throws (DEAD_LIKELY; the likeliest if all
+        are), else the one she last threw at that way within HIDDEN_FOR (unseen: under its damage numbers), one not
+        likely dead first, else None; never one dying where a kill of hers was placed (ledger.dying, by all of them)."""
         s = self._last
         if s is not None and s.where is not None and s.platform is not None:
             now = time.monotonic()
-            path = in_path(s, side, [m for m in s.monsters if not self._dying(m, now, s.monsters)])  # (no star: dying)
+            about = s.monsters + ([] if self.unseen is None else list(self.unseen(s)))
+            path = in_path(s, side, [m for m in about if not self._dying(m, now, about)])  # (no star: dying)
             if path:
                 return next((m for m in path if (left := self.reckon(m)) is None or left.dead < DEAD_LIKELY), path[0])
             x = s.where.x

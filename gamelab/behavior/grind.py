@@ -140,7 +140,7 @@ class Grind(Hunt):
         ground = self._covered() if self.stop is not None else None
         targets, visible, hidden = fight._targets(self.h, self.fs, s, self.kinds, ground, True, now)
         self.h.looter.pending.clear()
-        return targets, visible, hidden
+        return self._with_unseen(s, targets, visible, hidden)
 
     # --- at a stop ---------------------------------------------------------------------------------------------
 

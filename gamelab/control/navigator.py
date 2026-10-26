@@ -48,7 +48,7 @@ from ..localization.monsters import (DEFAULT_SPEED, MONSTER_HEIGHT, Monster, Mon
                                      tracks_record)
 from ..localization.scene import Scene
 from ..localization.senses import Senses
-from ..localization.tracking import HIDDEN, LIVE
+from ..localization.tracking import HIDDEN, HIDE_S, LIVE
 from ..motion import bodies as her_body
 from ..motion import route
 from ..motion.flow import END_LINGER, MAX_LEGS, Body, Flow, Leg, Span, chain_record, ms
@@ -144,17 +144,26 @@ FALL_LOOKS = 2
 # (review, 2026-10-24: from 20 at x -78 walking off onto 21, one on 22 at x -64 reached her 1.8 s on).
 TRIP_LOOK_BELOW = 15
 SAME_SIGHTING = 5  # map units: a monster found again on the same frame within this of one found before is it
-# A fighting trip's chains keep clear too of the monsters her memory has where the chain's legs go that the look
-# couldn't have found, last seen off its view across (Navigator.remembered: Hunter.memory, localization.memory; at
-# memory.SURE), seen within this long: where one can be by now is wherever it can have walked since at its kind's speed,
-# either way (its walking not known), 200 units at 2 s. Longer shuts most of a platform to her chains for little (a
-# guess). Taking every monster it had there that the look didn't find, those in view too (hidden under damage numbers,
-# or gone), the hunt loop on Tree Dungeon (crowd, zero-walls, the regular attack, 8 seeds of 10 minutes) was hurt on
-# its trips 29.5 times a run against 28.3 without, lost as much HP on them (2.42 bars), and spent 12% longer on them
-# (MEET_S fired 25 times against 9). Off its view only, those runs were the same as without, seed for seed: in the
-# simulator a chain's platforms are in view when a trip's looks are taken (live, the client's narrower 1366x768 view
-# leaves more off it; not measured).
+# A fighting trip's chains keep clear too of the monsters her memory has where the chain's legs go that the look didn't
+# find (Navigator.remembered: Hunter.memory, localization.memory; at memory.SURE), seen within this long: where one can
+# be by now is wherever it can have walked since at its kind's speed, either way (its walking not known), 200 units at
+# 2 s. Longer shuts most of a platform to her chains for little (a guess). Those in view too, since 2026-10-26: live on
+# 2026-10-25 a Horny Mushroom the looks had missed on 23 for 1.3 s (at 120-150 units, while she stood on 24) was dropped
+# from the plan of her jump onto 23 because 23 was in view and searched, and she landed beside it (6 touches and a fall
+# to 29 followed: the service's track 130; the detector finds a monster on her platform in 7-12% of frames within 50
+# units, 44-55% beyond 100: localization.unseen). Before, with a look missing a monster 10% of the time wherever it
+# was, the simulator had them in view too a cost: on Tree Dungeon (crowd, zero-walls, the regular attack, 8 seeds of
+# 10 minutes) she was hurt on her trips 29.5 times a run against 28.3 without, lost as much HP on them (2.42 bars),
+# and spent 12% longer on them (MEET_S fired 25 times against 9). Kept also: the feed's tracks out of sight (HIDDEN,
+# their walking known: Navigator.hidden_tracks), and after a chain cut for a monster coming into its way, that
+# monster's track for the next chain (TripState.came: the look after the cut can miss it as the one before did). With
+# the detector's misses near her as live (sim.world.NEAR_SEEN), these and the hunt loop's fights by what the looks
+# missed (behavior.hunt.UNSEEN_FIGHTS) made 297.7 EXP a minute against 270.9 without, lost 0.92 bars of HP a minute
+# against 1.04, and her trips were touched 2.38 times a minute against 3.25, their plans cut by a hit or a monster coming
+# 8.9 times a run against 27.8 (in the simulator: Tree Dungeon, crowd, zero-walls, near-misses, `--attack choice`, 8
+# seeds of 5 minutes; D:/MapleHelper-scratch/hunt-ab/B/ablate-a1-table.txt).
 TRIP_MEMORY_S = 2.0
+UNSEEN_TRIPS = True  # those in view, the feed's hidden tracks and the cut's track (above); off, as before
 # With a continuous feed (Senses.glanced) her glances while a chain runs carry the monsters it follows, re-found in
 # every frame with which way and how fast they walk (localization.tracking). A monster one of the chain's legs ahead of
 # her now meets (flow.danger over the rest of the plan, REACT_LEAD_S on at the soonest), of the kinds the chain keeps
@@ -301,6 +310,7 @@ class TripState:
                                                                               # monsters it saw, each with the sighting
     cannot: set = field(default_factory=set)  # moves the mover couldn't do from where she stood (CANNOT_S)
     stopped: bool = False  # the last chain was cut short for a monster coming into its way (REACT): not a miss
+    came: object | None = None  # ... the feed's track of that monster (tracking.Track), kept for the next chain
     thought_to: float = 0.0  # up to when thinking is counted (Trip.time: _chain, called again for a pass's replans)
 
     def end(self, result: str) -> Trip:
@@ -360,6 +370,7 @@ class Navigator:
         self._threat_kinds: frozenset | None = None  # the map's kinds whose touch counts (_threats), once worked out
         self._tallest_box: float | None = None       # the map's tallest monster box (_tallest), once worked out
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
+        self._came = None  # the feed's track of the monster the last cut was for (REACT: _coming), for TripState.came
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
 
     @property
@@ -672,18 +683,22 @@ class Navigator:
         whether the next chain follows on (_queue_next) are judged against every one, by her box (motion.bodies)."""
         if self.fight and not self._threats():
             return [], None
+        platforms = _platforms(path)
         if st.quick:  # the last look's monsters, moved on by the time since
             looked, seen_then = self.tracker.last
             tracks = [replace(mo, seen_at=looked - time.monotonic()) for mo in seen_then]
             st.sighted = []
         else:
-            seen = self.trip_monsters(s, _platforms(path)) if self.fight else s.monsters
+            seen = self.trip_monsters(s, platforms) if self.fight else s.monsters
             tracks = self.tracker.update(s.t, seen, seen_at=s.t - time.monotonic())
             st.sighted = list(zip(tracks, [m for m in seen if m.platform is not None]))  # (as the tracker keeps them)
-            if self.fight:  # and those her memory has there off the look's view (not into the tracker's)
-                tracks = tracks + self.remembered(s, _platforms(path), seen, s.t - time.monotonic())
-            if telemetry.recording():
-                telemetry.emit("monsters", **tracks_record(tracks, self.model))
+            if self.fight:  # and those her memory has there that the look didn't find (not into the tracker's)
+                tracks = tracks + self.remembered(s, platforms, seen, s.t - time.monotonic())
+        if self.fight:  # and the feed's out of sight, and the one the last cut was for (not into the tracker's)
+            tracks = tracks + self.hidden_tracks(s, platforms, tracks, st.came)
+        st.came = None
+        if not st.quick and telemetry.recording():
+            telemetry.emit("monsters", **tracks_record(tracks, self.model))
         if not self.fight:
             return tracks, tracks
         return [t for t in tracks if self.escort.threat(t.kind)], tracks
@@ -728,17 +743,16 @@ class Navigator:
 
     def remembered(self, s: Scene, platforms, seen: list[Monster], seen_at: float) -> list[MonsterTrack]:
         """The monsters her memory has (`memory`, at memory.SURE) on `platforms` (where a fighting trip's chain goes)
-        that look `s` couldn't have found: last seen with their body not wholly inside its view across (memory.EDGE in
-        from the screen's sides, as the memory's covers have it; trip_monsters searches the chain's platforms over the
-        rest), within TRIP_MEMORY_S before it, and not found by it (`seen`: one of a kind on the same platform within
-        what it can have walked since, as the memory matches a sighting, is it). As tracks as of their last sighting
+        that look `s` didn't find (`seen`: one of a kind on the same platform within what it can have walked since, as
+        the memory matches a sighting, is it), seen within TRIP_MEMORY_S before it: off its view, and in it too (the
+        detector misses one near her more often than not: TRIP_MEMORY_S). As tracks as of their last sighting
         (`seen_at`: the look's time in the plan's, less their age), their walking not known: wherever they can have
         walked since at their kind's speed. None without a memory."""
         if self.memory is None or s.where is None:
             return []
         view = None
-        if s.tag is not None and getattr(s.frame, "shape", None) is not None:
-            view = s.map_x(0) + EDGE, s.map_x(s.frame.shape[1]) - EDGE
+        if not UNSEEN_TRIPS and s.tag is not None and getattr(s.frame, "shape", None) is not None:
+            view = s.map_x(0) + EDGE, s.map_x(s.frame.shape[1]) - EDGE  # (as before: off its view only)
         out = []
         for e in self.memory.alive(s.t, SURE):
             age = s.t - e.seen
@@ -746,13 +760,40 @@ class Navigator:
                 continue
             half, top = touch_box(e.kind, self.tracker.body.get(e.kind))
             if view is not None and view[0] <= e.x - half and e.x + half <= view[1]:
-                continue  # in view, where the look and trip_monsters searched
+                continue
             speed = self.tracker.walking.get(e.kind, DEFAULT_SPEED)
             slack = MATCH_SLACK + MATCH_SPEED * speed * min(age, MATCH_WALK_S)
             if any(m.kind == e.kind and m.platform == e.platform and abs(m.x - e.x) <= slack for m in seen):
                 continue
             out.append(MonsterTrack(e.platform, e.x, speed, 0, half, None, seen_at - age,
                                     MONSTER_HEIGHT.get(e.kind, top), 0, e.kind, top))
+        return out
+
+    def hidden_tracks(self, s: Scene, platforms, tracks: list[MonsterTrack], came=None) -> list[MonsterTrack]:
+        """The monsters the feed follows out of sight on screen as of look `s` (Scene.tracks, HIDDEN, last seen within
+        tracking.HIDE_S) on `platforms`, and `came` (the feed's track of the monster the last chain was cut for, kept
+        for this one: TripState.came) wherever the feed has it, as tracks walking as followed (_track_of), of the kinds
+        the chain keeps clear of; none that one of `tracks` (the look's and her memory's, by kind and platform within
+        what it can have walked since: memory.MATCH_SLACK) is."""
+        out: list[MonsterTrack] = []
+        if not UNSEEN_TRIPS:
+            return out
+        now = time.monotonic()
+        cands = [tr for tr in getattr(s, "tracks", ()) or () if tr.state == HIDDEN]
+        if came is not None and not any(tr.id == came.id for tr in cands):
+            cands.append(came)
+        for tr in cands:
+            if tr.platform is None or tr.platform not in platforms or not 0 <= s.t - tr.last_seen <= HIDE_S \
+                    or (self.escort is not None and not self.escort.threat(tr.kind)):
+                continue
+            speed = self.tracker.walking.get(tr.kind, DEFAULT_SPEED)
+            age = now - tr.last_seen
+            slack = MATCH_SLACK + MATCH_SPEED * speed * min(age, MATCH_WALK_S)
+            p = self.model.platform(tr.platform)
+            if any(mo.kind == tr.kind and mo.platform == tr.platform and abs(mo.at(0.0, p) - tr.x) <= slack
+                   for mo in tracks + out):
+                continue
+            out.append(self._track_of(tr, now))
         return out
 
     def _tallest(self) -> float:
@@ -954,7 +995,8 @@ class Navigator:
         # there instead (a look with monsters) kept her fighting wherever she was knocked to: in the
         # simulator a 12 s trip from 12 across to 17 (nav_fight_across) ran out its 180 s.
         st.stopped = cut.startswith(COMING)
-        st.quick = bool(cut) and not st.stopped  # (cut for a monster coming: the next look has it)
+        st.quick = bool(cut) and not st.stopped  # (cut for a monster coming: the next look has it, or TripState.came)
+        st.came, self._came = (self._came if st.stopped else None), None
         return [leg.move for leg in legs], legs[-1].end.platform, after
 
     def _carry_out_move(self, st: TripState, s: Scene, path: list[Move]) -> tuple[list[Move], Platform, Scene]:
@@ -1214,7 +1256,7 @@ class Navigator:
         t = now - running.start
         if not self._room_to_stop(running, t):
             return None
-        tracks, ids, seen = [], [], state.t - running.start
+        tracks, ids, raw, seen = [], [], [], state.t - running.start
         for tr in state.tracks:
             if tr.state not in (LIVE, HIDDEN) or tr.platform is None or state.t - tr.last_seen > REACT_AGAIN_S \
                     or now - self._reacted.get(tr.id, -1e18) < REACT_AGAIN_S:
@@ -1223,13 +1265,16 @@ class Navigator:
                 continue
             tracks.append(self._track_of(tr, running.start))
             ids.append(tr.id)
+            raw.append(tr)
         if not tracks:
             return None
         for leg in running.legs:
             if leg.end.t < t + REACT_LEAD_S:
                 continue
             if (hit := self.flow.danger(leg, tracks, after=t + REACT_LEAD_S)) is not None:
-                return hit[0], hit[1], ids[next(i for i, mo in enumerate(tracks) if mo is hit[0])]
+                i = next(i for i, mo in enumerate(tracks) if mo is hit[0])
+                self._came = raw[i]  # (the next chain keeps clear of it: TripState.came)
+                return hit[0], hit[1], ids[i]
         return None
 
     def _room_to_stop(self, running: _Running, t: float) -> bool:
