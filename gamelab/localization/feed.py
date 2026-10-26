@@ -465,6 +465,21 @@ class Costs:
 
 
 COSTS = Costs()
+# The feed's costs as measured on 2026-10-26 with the masked match in C and a frame's re-finds at once (README,
+# Perception's hot paths in C): the service's frame loop replayed on Tree Dungeon's 1366x768 frames
+# (D:/MapleHelper-scratch/pconst/pnative, costs_fit.py: 4 runs of 60 s, 7,252 frames of 2026-10-26 01:01, its crowd
+# [700:1300] and its quiet start [0:600], 30 a second asked, the fake tour attached, the machine 73-80% busy with other
+# work), each frame's step fitted as look + refind x re-finds + fallback x fallbacks + beside, the searches' medians on
+# their thread: her place and the step but its re-finds 8.0 ms (a frame with none followed 6.4, median), a re-find
+# 0.66 (9.0 a frame, at once on 4 threads), a fallback 1.85 more (2.0 a frame: the recording's 10 frames a second played
+# at 30, so more than live), a step with a search out 6.4 more (28% of the frames), her band 23.8 (957 searches), the
+# whole screen 69.8 (226), a strip of drops 8.5 (least squares over the 241 searches with drops, their monsters' part
+# taken off). The capture as COSTS has it (the replay's stand-in, a BGRA -> RGB conversion, 1.05 ms, isn't the read off
+# the card). Master's code on the same frames: a re-find 6.8 ms, a fallback 7.7 more, beside 14.0, the whole screen
+# 100.8, a strip 11.3 (its frame loop out of CPU at 11-12 frames a second in the crowd). Not COSTS: every scenario's
+# feed takes COSTS, and with these 4 scenarios no longer show what they're there for on their seeds, 2 tests' timings
+# go otherwise and all 22 of Tree Dungeon's golden traces change; the harness takes them with `--costs measured-1366`.
+COSTS_1366 = Costs(look=0.008, refind=0.0007, fallback=0.0019, beside=0.0064, band=0.024, wide=0.070, loot_strip=0.0085)
 GAME_HZ = 60.0  # frames a second the game shows
 
 
@@ -514,9 +529,11 @@ class SyncFeed(Feed):
     on, or at once if it's idle; each such frame's late state is ready then. Waiting goes through time.sleep,
     the simulator's own."""
 
-    def __init__(self, step: WorldStep, look: Callable[[bool], Observation], costs: Costs = COSTS, hz: float = HZ,
-                 guard: Callable[[], None] | None = None):
-        """`guard`: called at every ask; it raises when the fakes aren't in place (sim.scenarios.Sim.guard)."""
+    def __init__(self, step: WorldStep, look: Callable[[bool], Observation], costs: Costs | None = None,
+                 hz: float = HZ, guard: Callable[[], None] | None = None):
+        """`costs`: by default COSTS as it is when the feed is made (the harness's `--costs` may set it for a run);
+        `guard`: called at every ask; it raises when the fakes aren't in place (sim.scenarios.Sim.guard)."""
+        costs = COSTS if costs is None else costs
         self.step, self._look, self.costs, self.hz, self.guard = step, look, costs, hz, guard
         self.searches = step.searches = TimedSearches(step.senses, costs)
         self.states: deque[tuple[float, WorldState]] = deque(maxlen=KEEP)  # (ready at, state)

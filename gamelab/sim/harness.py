@@ -1,7 +1,7 @@
 """Results of simulated hunts, and A/B comparisons of hunting policies on the same seeds.
 
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
-                                             [--costs coded|measured] [--ways N] [--map 10004021]
+                                             [--costs coded|measured|measured-1366] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
                                              [--attack choice|skill|regular]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
@@ -202,10 +202,13 @@ ATTACK_HER = {"skill": LUCKY_SEVEN, "spread": True}
 # 0.008. Glances keep their pace (Eyes.GLANCE_EVERY_S). Her looks and glances come from the feed (SyncFeed), whose
 # own costs are localization.feed.COSTS: these are what a look taken by the fakes costs (Hunter's on FakeEyes
 # without a feed, the tests'), and the pick-up log's OCR (fakes.MESSAGES_S).
+# `measured-1366`: those, and the feed's own as measured on Tree Dungeon's 1366x768 frames with the masked match in C
+# and a frame's re-finds at once (localization.feed.COSTS_1366, its "feed" here: COSTS stays the scenarios').
 COSTS = {
     "coded": {},
     "measured": {"LOOK_S": 0.020, "LOOK_LAG": 0.006, "DETECT_S": 0.024, "DETECT_WIDE_S": 0.084, "LOOT_S": 0.008},
 }
+COSTS["measured-1366"] = {**COSTS["measured"], "feed": "COSTS_1366"}
 
 
 # --- policies ------------------------------------------------------------------------------------------
@@ -310,13 +313,17 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on;
     `attack`: the stack's attack a throw (scenario)."""
     from .. import telemetry
+    from ..localization import feed
     from ..motion import route
     from . import fakes, scenarios
-    before = {name: getattr(fakes, name) for name in COSTS[costs]}
-    routes = route.ROUTES
+    fakes_costs = {name: value for name, value in COSTS[costs].items() if name != "feed"}
+    before = {name: getattr(fakes, name) for name in fakes_costs}
+    routes, feed_costs = route.ROUTES, feed.COSTS
     try:
-        for name, value in COSTS[costs].items():
+        for name, value in fakes_costs.items():
             setattr(fakes, name, value)
+        if "feed" in COSTS[costs]:  # (the feed made for the run takes COSTS as it is then)
+            feed.COSTS = getattr(feed, COSTS[costs]["feed"])
         if ways is not None:
             route.ROUTES = ways
         with telemetry.captured() as records:
@@ -325,7 +332,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
-        route.ROUTES = routes
+        route.ROUTES, feed.COSTS = routes, feed_costs
     out = outcomes(sim.world, records, minutes * 60)
     out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=True, costs=costs,
                ways=routes if ways is None else ways, map=map_id, result=str(trace["result"])[:120])
@@ -901,7 +908,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="name to save the results under (default: POLICY-PRESET, then -COSTS and -waysN)")
     r.add_argument("--ways", type=int, help="the ways her trips choose among (route.ROUTES; default: route's own)")
     r.add_argument("--costs", choices=sorted(COSTS), default="coded",
-                   help="what the simulator's looks take: coded (the fakes' own), measured (today's)")
+                   help="what the simulator's looks take: coded (the fakes' own), measured (today's), measured-1366 "
+                        "(and the feed's as measured on Tree Dungeon's 1366x768 frames: feed.COSTS_1366)")
     r.add_argument("--map", type=int, choices=sorted(STARTS), default=FIRST_MAP,
                    help="the map (default: the first, Thicket Around the Beach II; 10004021: West Rocky Mountain II; "
                         "10002073: Tree Dungeon, Forest Up North II)")

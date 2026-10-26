@@ -510,6 +510,27 @@ def test_a_harness_run_takes_her_looks_from_the_feed_with_todays_look_costs():
     assert out["nav"]["glances"] == rec["senses"]["glances"] > 0
 
 
+def test_the_feeds_costs_as_measured_at_1366x768_are_the_runs_alone(monkeypatch):
+    # --costs measured-1366: the fakes' look costs as `measured`'s, and the feed made for the run takes
+    # feed.COSTS_1366 (SyncFeed's costs are COSTS as it is when it's made); both put back after the run.
+    if not scenarios.available():
+        pytest.skip("needs the real map's data")
+    from gamelab.localization import feed
+    from gamelab.sim import fakes
+    seen = []
+    monkeypatch.setattr(scenarios, "run_sim", lambda sc: seen.append((feed.COSTS, fakes.LOOK_S)) or 1 / 0)
+    coded, look = feed.COSTS, fakes.LOOK_S
+    with pytest.raises(ZeroDivisionError):
+        harness.run_one("loop", 1, "game", minutes=0.5, costs="measured-1366")
+    assert seen == [(feed.COSTS_1366, harness.COSTS["measured"]["LOOK_S"])]
+    assert feed.COSTS is coded and fakes.LOOK_S == look
+    assert feed.COSTS_1366.refind == feed.COSTS.refind and feed.COSTS_1366.wide < feed.COSTS.wide
+    made = feed.SyncFeed.__new__(feed.SyncFeed)
+    monkeypatch.setattr(feed, "COSTS", feed.COSTS_1366)
+    made.__init__(type("Step", (), {"senses": None})(), lambda ropes: None)
+    assert made.costs is feed.COSTS_1366 and made.searches.costs is feed.COSTS_1366
+
+
 def test_the_stacks_computing_is_timed_between_its_calls_and_the_run_is_as_it_was():
     """sim.latency times the stack's own computing between two calls to the game, by the call that ended
     it, without charging it to the fake clock: the run is the harness's own."""
