@@ -327,7 +327,7 @@ def _shooter(piles, kill_s=4.0, exp=40.0, travel=2.0, players=()):
     h = _hunt(piles, travel=travel)
     h.kinds, h.tour = None, SimpleNamespace(exp={"horny-mushroom": exp})
     h.h.attacks = SimpleNamespace(kill_s=lambda m: kill_s)
-    h._hits = lambda s, m: True
+    h._hits = h._star_hits = lambda s, m: True
     h._loot_said, h.said = {}, []
     h.log = h.said.append
     h._seen = SimpleNamespace(players=list(players))
@@ -419,6 +419,32 @@ def test_a_trip_stops_for_a_valuable_or_urgent_pile_only_where_it_goes_ahead_of_
     assert h._urgent_pile(s) is urgent and not h._loot_first(s, urgent, [horny], say=False)
     assert not h._interrupt(s)
     s.monsters = []
+    assert h._interrupt(s)
+
+
+def test_a_trip_stops_for_what_is_in_reach_only_where_the_pass_would_shoot_it():
+    """In reach from a jump alone, a monster off the ground and off her platform isn't one of the pass's targets
+    (fight._wanted: a star from where she stands must hit it): it stopped every trip on its first look, and the pass
+    sent her on again, 2,373 times in 107 s in loop_tree_walls (found offline, 2026-10-25). On the ground, on her
+    platform, or in a star's reach, it stops the trip as before."""
+    h = _shooter([])
+    h.h.low_hp, h.model, h._tops, h._halves = 0.3, None, {}, {}
+    h._close_quarters = lambda s, monsters: False
+    h._owed = lambda s, monsters: None
+    h._standable = lambda pid: False
+    h._detour = lambda s, slack=0.0: None
+    h._pass_step = lambda s, targets: None
+    h._star_hits = lambda s, m: False  # a jump's attack reaches it, a star from the ground doesn't
+    h.obj = Objective("spot", 19, 36.0)  # her time in passing not spent
+    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=5), where=SimpleNamespace(x=0.0, y=0.0),
+                        monsters=[_horny(3)], players=[])
+    assert not h._interrupt(s)
+    s.monsters = [_horny(1)]  # on the ground she hunts (the visit's, 1)
+    assert h._interrupt(s)
+    s.monsters = [_horny(5)]  # on her platform
+    assert h._interrupt(s)
+    h._star_hits = lambda s, m: True
+    s.monsters = [_horny(3)]
     assert h._interrupt(s)
 
 

@@ -673,7 +673,11 @@ class Hunt:
         """Whether an attack from where she stands in look `s` hits `m`: a star from the ground (reach.can_hit: in
         reach, and nothing stops its star, nor that of a monster of the look the attack takes first), or one from a
         jump that lands her back on her platform (_jump_hits)."""
-        return reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters) or self._jump_hits(s, m)
+        return self._star_hits(s, m) or self._jump_hits(s, m)
+
+    def _star_hits(self, s: Scene, m: Monster) -> bool:
+        """Whether a star from the ground where she stands in look `s` hits `m` (reach.can_hit)."""
+        return reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters)
 
     def _jump_hits(self, s: Scene, m: Monster) -> bool:
         """Whether the attack from one of her jumps from where she stands in look `s` surely hits `m` (attack.reach's
@@ -1384,7 +1388,11 @@ class Hunt:
         asks it): one that waits stopped the trip "in position" on its first look, no move made, and the next pass
         sent her off on it again, again and again, neither shooting nor moving once her time in passing there was spent
         (review, 2026-10-25: 1-4 such trips a run in loop_tree_ore_waits, one followed by 2.9 s without a throw in the
-        harness's crowd)."""
+        harness's crowd). In reach, so too: only what the pass would shoot (fight._wanted, as its targets are: on the
+        ground, on her platform, or in a star's reach from where she stands). A monster off both that only a jump
+        reaches isn't one of its targets, and stopped every trip on its first look: in loop_tree_walls a green mushroom
+        on the spot's platform, above her, held her 107 s, the pass deciding 2,373 times and never moving (found
+        offline, 2026-10-25)."""
         if s.hp < self.h.low_hp:
             return True
         here = s.platform.id
@@ -1401,7 +1409,9 @@ class Hunt:
             return True
         if self._owed(s, s.monsters) is not None:
             return True
-        in_reach = [m for m in wanted if self._hits(s, m)]
+        ground = None if self.visit is None else self.visit.ground
+        in_reach = [m for m in wanted if self._hits(s, m)
+                    and (ground is None or m.platform in (ground, here) or self._star_hits(s, m))]
         if (in_reach or self._pass_step(s, wanted) is not None) and o is not None \
                 and o.passing.get(here, 0.0) < PASSING_S:
             return True
