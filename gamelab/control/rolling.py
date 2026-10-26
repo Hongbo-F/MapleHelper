@@ -105,6 +105,9 @@ JPEG_PARAMS = lie_recorder.JPEG_PARAMS  # the Lie Detector recordings' settings:
 # pngbench.py).
 PNG_PARAMS = [cv2.IMWRITE_PNG_COMPRESSION, 1, cv2.IMWRITE_PNG_FILTER, cv2.IMWRITE_PNG_FILTER_NONE]
 ENCODERS = 4       # threads encoding a part's frames as it's written (OpenCV and zstd let go of the GIL)
+# The saver's and its writers' thread priority by default (Windows' SetThreadPriority; the perception service's
+# recording sets its own lower: control.recording.WRITER_PRIORITY).
+WRITER_PRIORITY = -1  # THREAD_PRIORITY_BELOW_NORMAL
 # The frames kept take at most this much memory: past it the oldest go, younger than SECONDS or not (counted as
 # `trimmed` in the status). 5 minutes at 1366x768 always fit (3.4 GB at the busiest); at 1920x1080, twice the pixels,
 # about 4 (1 GB, 5 minutes of JPEG, until 2026-10-25). The PC has 32 GB.
@@ -384,9 +387,10 @@ def pack(frame: np.ndarray) -> bytes:
 def pack_diff(frame: np.ndarray, before: np.ndarray) -> bytes:
     """A frame (3 channels, as the perception service shows it: RGB) kept as its difference from the frame before it,
     uint8 wrapping round (`decode` adds it back: exactly the frame), compressed as `pack` does. Much of a game frame is
-    as it was 67 ms before (the map, the HUD), so the difference is mostly zeros: on 150 consecutive 1366x768 frames of
-    2026-10-26 01:02 (D:/MapleHelper-scratch/pconst/hunt-recorder/rec_bench.py) 332 KB a frame against `pack`'s 482,
-    in 7.6 ms against 8.9. The difference is the thread's own picture, made again only when the size changes."""
+    as it was a frame before (the map, the HUD), so the difference is mostly zeros: on 150 consecutive 1366x768 frames
+    of 2026-10-26 01:02, 10 a second (D:/MapleHelper-scratch/pconst/hunt-recorder/rec_bench.py), 332 KB a frame against
+    `pack`'s 482, in 7.6 ms against 8.9. The difference is the thread's own picture, made again only when the size
+    changes."""
     diff = getattr(_packing, "diff", None)
     if diff is None or diff.shape != frame.shape:
         diff = _packing.diff = np.empty(frame.shape, np.uint8)
@@ -428,7 +432,7 @@ class Recorder:
                  recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES,
                  clips_keep: int = CLIPS_KEEP_BYTES, encoders: int | Callable[[], int] = ENCODERS,
                  cpu: Callable[[], float] = time.process_time, source: str = "its own grabs (mss)",
-                 extra: Callable[[], dict] | None = None):
+                 extra: Callable[[], dict] | None = None, writer_priority: int = WRITER_PRIORITY):
         self.game, self.grab, self.ring = game, grab, ring or Ring()
         box = Path(box or paths.RECORDER)
         self.inbox, self.outbox, self.status_path = box / "inbox", box / "outbox", box / "status.json"
@@ -439,6 +443,7 @@ class Recorder:
         self.folder_wait, self.recent_keep, self.lie_keep = folder_wait, recent_keep, lie_keep
         self.clips_keep = clips_keep
         self.encoders, self.cpu, self.source, self.extra = encoders, cpu, source, extra
+        self.writer_priority = writer_priority
         self._lock = threading.RLock()  # what a moment changes (the clips, the counts), `add` coming from another thread
         self.pending_clips: list[Clip] = []  # alarms whose clip's last moment isn't past yet
         self.started = self.clock()
@@ -639,7 +644,7 @@ class Recorder:
         return max(1, int(self.encoders() if callable(self.encoders) else self.encoders))
 
     def _save_loop(self) -> None:
-        below_normal()  # (in the perception service, beside its frame loop: the frames come first)
+        low_priority(self.writer_priority)  # (in the perception service, beside its frame loop: the frames first)
         while True:
             job = self.jobs.get()
             try:
@@ -659,7 +664,8 @@ class Recorder:
                           f"{self.recent_keep / 1024 ** 3:g} GB")
             folder = new_folder(self.recent, name)
             summary = write_part(folder, snapshot, {"kind": "save-recent", "name": name or None,
-                                                    "asked_s": seconds}, self.fps, encoders=self.writers())
+                                                    "asked_s": seconds}, self.fps, encoders=self.writers(),
+                                 priority=self.writer_priority)
             answer = {"folder": str(folder),
                       **{k: summary[k] for k in ("seconds", "frames", "bytes", "gaps", "window")}}
             self._saved(folder, summary)
@@ -682,7 +688,8 @@ class Recorder:
         summary = write_part(dest, items, {
             "kind": "before the Lie Detector", "alarm": info, "alarm_at": day_time(seen),
             "alarm_t": None if not items else round(seen - items[0].t, 3),
-            "player_recording": None if folder is None else str(folder)}, self.fps, encoders=self.writers())
+            "player_recording": None if folder is None else str(folder)}, self.fps, encoders=self.writers(),
+            priority=self.writer_priority)
         self._saved(dest, summary)
         if folder is None:
             self._say(f"recorder: no recording of the player's began within {self.folder_wait:g} s of the alarm "
@@ -698,7 +705,7 @@ class Recorder:
             "kind": "the alarm's clip", "alarm": clip.info, "alarm_at": day_time(clip.seen),
             "alarm_t": None if not items else round(clip.seen - items[0].t, 3),
             "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, self.fps, png=True,
-            encoders=self.writers())
+            encoders=self.writers(), priority=self.writer_priority)
         self._saved(dest, summary)
 
     def _prune_lie(self, spare: Path) -> None:
@@ -839,7 +846,7 @@ NO_KEY = "no whole frame"  # a gap's why: a difference whose chain's whole frame
 
 
 def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, png: bool = False,
-               encoders: int = ENCODERS) -> dict:
+               encoders: int = ENCODERS, priority: int = WRITER_PRIORITY) -> dict:
     """Write moments into `folder` (made here; raises if it's there already): the frames, as JPEG (or `png`), on
     `encoders` threads below normal priority, a chain at a time each (a whole frame and its differences: `chains`,
     `decode`), a batch of chains at once; index.jsonl and summary.json (`info`'s fields first, then the counts: the
@@ -878,7 +885,7 @@ def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, pn
     groups = [g for g in groups if g[0].key]
     # Chains a batch: about 4 frames a thread (16 whole frames, as before chains), at least a chain a thread.
     per = max(encoders, 4 * encoders // max(1, round(sum(map(len, groups)) / max(1, len(groups)))))
-    with ThreadPoolExecutor(encoders, "rolling-writer", below_normal) as pool:
+    with ThreadPoolExecutor(encoders, "rolling-writer", low_priority, (priority,)) as pool:
         for k in range(0, len(groups), per):  # (a batch at a time: the frames' pixels aren't all out at once)
             batch = groups[k:k + per]
             for group, datas in zip(batch, pool.map(encoded, batch)):
@@ -895,14 +902,14 @@ def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, pn
     return summary
 
 
-def below_normal() -> None:
-    """The calling thread below normal priority (Windows; elsewhere nothing): a save's writers in the perception
-    service, beside its frame loop."""
+def low_priority(priority: int = WRITER_PRIORITY) -> None:
+    """The calling thread at `priority` (Windows' thread priority; elsewhere nothing): a save's saver and writers, in
+    the perception service beside its frame loop."""
     if sys.platform == "win32":
         k = ctypes.windll.kernel32
         k.GetCurrentThread.restype = ctypes.c_void_p
         k.SetThreadPriority.argtypes = (ctypes.c_void_p, ctypes.c_int)
-        k.SetThreadPriority(k.GetCurrentThread(), -1)  # THREAD_PRIORITY_BELOW_NORMAL
+        k.SetThreadPriority(k.GetCurrentThread(), priority)
 
 
 def new_folder(root: Path, name: str = "") -> Path:

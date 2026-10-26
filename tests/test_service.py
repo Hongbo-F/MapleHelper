@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from gamelab.localization import service
-from gamelab.localization.service import SCHEDULE, Hello, Service, ServiceClient, Writer
+from gamelab.localization.service import HUNTING, SCHEDULE, Hello, Service, ServiceClient, Writer
 from gamelab.localization.worldstate import Asks, SearchThread, WorldStep
 from gamelab.localization.senses import Senses
 from gamelab.perception.frames import ListFrames
@@ -59,18 +59,19 @@ def test_asks_from_every_client_are_merged_and_mesos_only_if_each_asked_only_for
     assert svc._fulls[-1] == (a, 8, 10.6, True)
 
 
-def test_one_pace_and_schedule_whoever_is_attached_and_her_throws_follow_the_commands():
+def test_one_pace_and_searches_whoever_is_attached_the_drops_asked_for_by_a_hunt_and_her_throws_follow_it():
     # The user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is
     # running as a constant thing and hunt is only a consumer of it." Until then a command that hunts had the frames at
-    # 30 a second and the hunt's schedule while it was attached, and 10 a second with watch's searches otherwise.
+    # 30 a second and the hunt's schedule while it was attached, and 10 a second with watch's slower searches otherwise.
+    # The drops are searched on schedule only while no command hunts: a hunt asks for those it wants on its frames.
     svc = _svc()
     svc.runner = drawn_runner()
-    svc.runner.step.schedule = SCHEDULE  # (as screen_world makes it)
     try:
         for name, kw in (("watch", {}), ("pet", {"acts": True}), ("tour", {"acts": True, "throws": True, "fast": True})):
             _attach(svc, name=name, **kw)
             svc._tune()
-            assert svc.rate() == service.HZ == 30.0 and svc.runner.step.schedule is SCHEDULE
+            assert svc.rate() == service.HZ == 30.0
+            assert svc.runner.step.schedule is (HUNTING if name == "tour" else SCHEDULE)
             assert svc.runner.step.tracker.throws_known == (name == "tour")  # (the one that tells her throws)
         del svc.clients[max(svc.clients)]
         svc._tune()
@@ -78,8 +79,9 @@ def test_one_pace_and_schedule_whoever_is_attached_and_her_throws_follow_the_com
         assert svc.status()["hz"] == 30.0
     finally:
         svc.runner.step.close()
-    # The hunt's schedule (her band every 0.2 s, the screen every second) and the drops at watch's rates
+    # Her band every 0.2 s and the screen every second either way; the drops at watch's rates, or when asked
     assert (SCHEDULE.band_s, SCHEDULE.wide_s, SCHEDULE.loot_s, SCHEDULE.loot_wide_s) == (0.2, 1.0, 0.5, 2.0)
+    assert (HUNTING.band_s, HUNTING.wide_s, HUNTING.loot_s, HUNTING.loot_wide_s) == (0.2, 1.0, None, None)
     assert not hasattr(service, "IDLE_HZ") and not hasattr(service, "ACTIVE")
 
 

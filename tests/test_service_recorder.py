@@ -300,8 +300,8 @@ def test_the_service_hands_its_frames_to_the_recording_with_their_numbers(tmp_pa
     items = list(rec.recorder.ring.items)
     frames = [it for it in items if it.data is not None and it.rgb]
     assert 25 <= len(frames) <= 46 and rec.dropped == 0  # about 15 a second once the run is made
-    seqs = [it.seq for it in frames]
-    assert seqs == sorted(seqs) and all(b - a >= 2 for a, b in zip(seqs, seqs[1:]))  # every other frame at most
+    seqs, ts = [it.seq for it in frames], np.array([it.t for it in frames])
+    assert seqs == sorted(set(seqs)) and np.diff(ts).mean() >= 1 / 15 - 0.005  # 15 a second at most, in order
     assert {it.run for it in frames} == {1}
     status = json.loads((tmp_path / "recorder" / "status.json").read_text(encoding="utf-8"))
     assert status["stopped"] and status["source"] == recording.SOURCE and status["pid"] == os.getpid()

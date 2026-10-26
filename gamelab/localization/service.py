@@ -8,9 +8,10 @@ of their own, localization.worldstate) on the screen (perception.frames.ScreenFr
 duplication: capture.shared). It never sends a key and never brings the game forward; it waits for the game window
 when there's none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoever is attached (the
 user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is running as a
-constant thing and hunt is only a consumer of it"): HZ frames a second and one schedule, SCHEDULE (her band every 0.2 s,
-the whole screen every second, the drops at `watch`'s rates); what a command asks is searched on the next frame besides,
-and changes neither. Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
+constant thing and hunt is only a consumer of it"): HZ frames a second, her band searched every 0.2 s and the whole
+screen every second (SCHEDULE); what a command asks is searched on the next frame besides, and changes neither. The
+drops are searched at `watch`'s rates while no command that hunts is attached (a hunt asks for those it wants on its
+frames: HUNTING). Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
 `watch`'s was (a scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl.
 It keeps the rolling recording too (control.recording, handed to it by `perceive`: its own frames, every other one,
 the last 5 minutes in memory; `perceive --no-record` without), which `gamelab recorder` kept with a capture of its own
@@ -92,11 +93,16 @@ FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a lo
 # replay.py, no client): 10 a second with `watch`'s searches took 1.00 core; 30 with the hunt's, 1.42 cores, the frame
 # loop saturated at 14.5 a second (README, Perception at one pace).
 HZ = 30.0
-# What's searched without being asked, whoever is attached: the hunt's schedule (her band every 0.2 s, the whole screen
-# every second) and the drops at `watch`'s rates (her platform's every 0.5 s, every platform in view every 2 s), so the
-# mini-map has them in hunts too. A hunt's looks ask for the drops they want on the frame they take: a scheduled search
-# only comes before an asked one now and then (README, Perception at one pace).
+# What's searched without being asked: her band every 0.2 s and the whole screen every second whoever is attached (the
+# hunt's schedule, until 2026-10-26 only while a command that hunts was), and the drops at `watch`'s rates (her
+# platform's every 0.5 s, every platform in view every 2 s: SCHEDULE) for the mini-map while none hunts. While one does,
+# the drops only when asked (HUNTING): the hunt asks for those it wants on the frames it takes (55% of the tours' looks),
+# published as any. Searched on schedule beside them (worldstate.WATCH whoever is attached, as first built), the
+# service took 0.20 cores more (1.86 against 1.67) and a look with her drops waited 31 ms longer (median: 177 against
+# 146; her band's 11 longer): the crowd's saved frames with a hunting client, 3 runs of each alternated, the machine
+# 73-89% busy (D:/MapleHelper-scratch/pconst/build1/replay, pooled.py; README, Perception at one pace).
 SCHEDULE = WATCH
+HUNTING = Schedule()  # the hunt's: her band every 0.2 s, the whole screen every second, the drops when asked
 QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at HZ): older ones are dropped, a gap said
 KEEP = 8              # states a client keeps (feed.KEEP)
 EVENTS_KEPT = 10_000  # events a client keeps for its next drain at most
@@ -654,9 +660,13 @@ class Service:
         return True
 
     def _tune(self) -> None:
-        """The step as the clients attached want it: her throws known while one tells them. Its schedule is SCHEDULE
-        whoever is attached (until 2026-10-26 the hunt's while one hunted, `watch`'s otherwise)."""
-        self.runner.step.tracker.throws_known = any(h.throws for h in self.attached())
+        """The step as the clients attached want it: the drops searched on schedule while no command hunts (SCHEDULE;
+        HUNTING while one does: her band and the screen alike, whoever is attached), her throws known while one tells
+        them. (Until 2026-10-26 the hunt's band and screen while one hunted, `watch`'s slower ones otherwise.)"""
+        attached = self.attached()
+        step = self.runner.step
+        step.schedule = HUNTING if any(h.fast for h in attached) else SCHEDULE
+        step.tracker.throws_known = any(h.throws for h in attached)
 
     def _not_visible(self) -> None:
         """No run to look with: a state saying why, to every client, the full asks in answered with it, then a wait

@@ -23,8 +23,8 @@ have a rolling window copy of things in memory, match fps or fps/2." So:
   moments itself, as `gamelab recorder` does (rolling.Recorder.tick: the window looked at, grabbed with mss, else a gap
   and why), FPS a second: what that recorder kept, at any client size, this keeps too.
 - Its ticks, on a thread of their own FPS times a second: those moments, and rolling.Recorder.poll (the inbox, the
-  alarm, the clips, the status file). A save is written on WRITERS threads below normal priority, WRITERS_HUNTING while
-  a command that hunts is attached.
+  alarm, the clips, the status file). A save is written on WRITERS threads at the lowest priority (WRITER_PRIORITY),
+  WRITERS_HUNTING while a command that hunts is attached.
 - One recorder at a time on the PC (rolling.MUTEX): while `gamelab recorder` holds it the service doesn't record, tries
   again every MUTEX_RETRY_S and says it's waiting (WAITING in lab/recorder: the babysitter stops the old recorder when
   it sees it).
@@ -63,6 +63,13 @@ OWN_AFTER_S = 0.5
 MUTEX_RETRY_S = 10.0  # s between tries for the recorder's mutex while `gamelab recorder` holds it
 WRITERS = 4           # threads a save is encoded on (rolling.ENCODERS) ...
 WRITERS_HUNTING = 2   # ... while a command that hunts is attached
+# The saver's and the writers' thread priority: THREAD_PRIORITY_LOWEST, two below the frame loop's (in the service at
+# normal priority, still above the background jobs at Idle). A save of 120 s during a hunt replayed (the crowd's
+# frames, the fake tour, D:/MapleHelper-scratch/pconst/build1/replay, verify_save.py): below normal (-1), the frame
+# loop's step median 91 ms during it against 76 outside, 10.5 frames a second against 12.4 (and on a 300 s save, the
+# machine 73% busy, p99 232 ms against 183, 7.3 a second against 9.7); at the lowest (-2), 72 against 86 and 13.5
+# against 11.3, as outside within the machine's swing (70-98% busy), written in 11.7 s (1 writer: 18.9 s).
+WRITER_PRIORITY = -2
 GAP_KINDS = ("offset",)  # a frame the frame loop read but whose picture may not be the window's: not kept
 WAITING = "waiting.json"  # in lab/recorder: the service waiting for the recorder's mutex (pid, since, updated)
 SOURCE = "the perception service's frames"
@@ -216,7 +223,8 @@ class Recording:
         kw.setdefault("ring", rolling.Ring(max_items=int(2 * rolling.SECONDS * self.fps)))
         self.recorder = rolling.Recorder(
             self._game or rolling.GameWindow(self.title), self._grab or rolling.ScreenGrab(), fps=self.fps,
-            log=self.log, encoders=self.writers, cpu=lambda: self._cpu, source=SOURCE, extra=self.counts, **kw)
+            log=self.log, encoders=self.writers, cpu=lambda: self._cpu, source=SOURCE, extra=self.counts,
+            writer_priority=WRITER_PRIORITY, **kw)
         self.recorder._say(f"recorder: in the perception service (pid {os.getpid()}): its frames {self.fps:g} times a "
                            f"second, the last {self.recorder.ring.seconds / 60:g} minutes kept in memory; `python -m "
                            f"gamelab save-recent` saves them; status: {self.recorder.status_path}")
