@@ -206,7 +206,7 @@ def test_the_hunt_policies_reach_every_platform_monsters_spawn_on_within_five_se
     seeds 1-5 never got onto 12: of seeds 1-10, 5 runs of 20 do (the tour on 6, 8 and 9, the loop on 8 and 9; 35 on 3),
     so the five seeds are 6-10, where every platform is reached at least once (35 once)."""
     spawn = set(scenarios.real_map().spawn_platforms)
-    args = [(p, k, "game-sparse", REACH_MINUTES, 0.0, False, "coded")
+    args = [(p, k, "game-sparse", REACH_MINUTES, 0.0, "coded")
             for p in ("tour", "loop") for k in range(REACH_FIRST, REACH_FIRST + REACH_SEEDS)]
     with ProcessPoolExecutor(max_workers=min(len(args) // 2, os.cpu_count() or 1)) as pool:
         runs = list(pool.map(harness._run_one_args, args))

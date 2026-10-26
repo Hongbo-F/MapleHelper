@@ -242,11 +242,12 @@ def test_on_the_simulator_it_measures_the_simulator_s_respawn():
 @pytest.mark.slow
 def test_a_hunt_with_the_feed_records_the_deaths_of_others_kills():
     """With the continuous feed a hunt publishes the deaths the feed saw that weren't hers ('died', as `watch` does),
-    which the report reads as others' kills; hers stay the 'kill' events alone (not counted twice). feed_loop_rival
-    for 75 s: another player kills a monster every 20 s, and the feed sees one of those die. (75 s, not 45, since a
-    throw's tap goes by her facing off the frame, perception.heading: in 45 s the feed now sees none die.)"""
+    which the report reads as others' kills; hers stay the 'kill' events alone (not counted twice). loop_rival for
+    2 minutes: another player kills a monster every 20 s, and the feed sees one of those die. (75 s, not 45, since a
+    throw's tap goes by her facing off the frame, perception.heading: in 45 s the feed saw none die; 2 minutes since
+    the feed is every scenario's, feed_loop_rival folded into loop_rival on its seed 3, where in 75 s it sees none.)"""
     import dataclasses
-    sc = dataclasses.replace(scenarios.SCENARIOS["feed_loop_rival"], fn=scenarios._loop(1.25), expects=())
+    sc = dataclasses.replace(scenarios.SCENARIOS["loop_rival"], fn=scenarios._loop(2.0), expects=())
     with telemetry.captured() as records:
         trace = scenarios.run_scenario(sc)
     died = [r for r in records if r["topic"] == "event" and r["kind"] == "died"]

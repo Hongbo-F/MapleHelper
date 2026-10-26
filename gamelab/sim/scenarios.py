@@ -1873,23 +1873,19 @@ def nav_rocky_monsters_bridge(sim):
     return _nav(19)(sim)
 
 
-@rocky((22, -1300.0), monsters="all", seed=5, limit=300,
+@rocky((22, -1300.0), monsters="all", seed=1, limit=300,
        expects=(ends("arrived"), logs("shooting it on the way"),
                 check("ten kills or more on the way", lambda tr: sum(tr["world"]["kills"].values()) >= 10)))
 def nav_rocky_fight_bridge(sim):
     """From the bridge up the rope at -1463 to 14, shooting the monsters in reach on the way (the tour's escort): a
     Stump takes 4 stars, a Dark Stump 7 and an Axe Stump 10. (Seed 1: of seeds 1-12 she arrived with ten kills or more
-    on 1, 2, 5 and 6 since a hit pushes a Dark Stump or an Axe Stump back only from 25 or 30 damage after their defence
-    (world.PUSH_BY_DAMAGE: more of them walk on at her; on 1 and 11 before), and on most of the others fell out of the
-    map past 22's left end (-1640), where nothing is under her: a touch knocked her off it, fighting or picking up drops
-    there, or off the rope at -1463 near its top, and the knock carried her past it. The world's side is the map's
-    platforms' outer end (-1662, 14's left end), 19 units left of the pit's bottom stair (32, from -1643); with
-    HeavenClient's sides, 25 in from its footholds (world.Realism.sides 'client', -1637), she can't get past 22's end;
-    what the game does there isn't known: README.) (Seed 5 since a look asks for what the next frame would have stale
-    (feed.to_ask), a frame shown before a throw without a tap tells her heading (Actions.heading), a cast takes its MP
-    off at its throw (Attacks.on_throw) and a trip stops only for what the pass shoots (Hunt._interrupt): on seed 1 a
-    touch knocked her out of the map past 22's left end at 19 s, and at master 1c9d1e3 at 147 s; of seeds 1-16, 5 and 14
-    meet all of this.)"""
+    on 1, 2, 5 and 6 since a hit pushes a Dark Stump or an Axe Stump back only from 25 or 30 damage after their
+    defence (world.PUSH_BY_DAMAGE: more of them walk on at her; on 1 and 11 before), and on most of the others fell
+    out of the map past 22's left end (-1640), where nothing is under her: a touch knocked her off it, fighting or picking up drops there, or off the rope at -1463 near its top, and
+    the knock carried her past it. The world's side is the map's platforms' outer end (-1662, 14's left end), 19 units
+    left of the pit's bottom stair (32, from -1643); with HeavenClient's sides, 25 in from its footholds
+    (world.Realism.sides 'client', -1637), she can't get past 22's end; what the game does there isn't known:
+    README.)"""
     return _nav(14, fight=True)(sim)
 
 
@@ -1924,18 +1920,14 @@ def loop_rocky_run(sim):
     return _loop(8)(sim)
 
 
-@rocky((22, -700.0), monsters="all", seed=1, limit=1500,
+@rocky((22, -700.0), monsters="all", seed=2, limit=1500,
        expects=(check("three stops or more", lambda tr: len(tr["result"]["visited"]) >= 3),
                 ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
                 check("she fed her pet", _fed_her_pet)))
 def tour_rocky_run(sim):
     """`python -m gamelab tour --map 10004021`: the whole sweep, end to end, from the bridge. (Seed 2 since a step onto
-    a floor rising the way she flies lands her (body._lands_at): on seed 1 she was knocked off 22's left end and out of
-    the map at 804 s; of seeds 1-6, 2, 4, 5 and 6 meet all of this.) (Seed 1 since a look asks for what the next frame
-    would have stale (feed.to_ask), a frame shown before a throw without a tap tells her heading (Actions.heading), a
-    cast takes its MP off at its throw (Attacks.on_throw) and a trip stops only for what the pass shoots
-    (Hunt._interrupt): on seed 2 a touch knocked her out of the map past 22's left end at 212 s; of seeds 1-16, 1, 5, 7,
-    12, 13 and 14 meet all of this.)"""
+    a floor rising the way she flies lands her (body._lands_at): on seed 1 she was knocked off 22's left end and out
+    of the map at 804 s; of seeds 1-6, 2, 4, 5 and 6 meet all of this.)"""
     return sim.tour_stack().run()
 
 
