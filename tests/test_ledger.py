@@ -5,7 +5,7 @@ from them yet (step 4 of docs/hunt-modes.md), so they're checked against the sim
 import numpy as np
 import pytest
 
-from gamelab.behavior.ledger import GONE_KEEP_S, DropStore, Kill, Ledger
+from gamelab.behavior.ledger import DROP_LANDS, GONE_KEEP_S, DropStore, Kill, Ledger
 from gamelab.behavior.looting import EMPTY_LOOKS, SETTLE
 from gamelab.localization import mapdata
 from gamelab.localization.scene import Loot, Scene
@@ -29,6 +29,7 @@ def _shoot_a_snail(sim):
         h.actions.throw("right")
     for _ in range(3):
         h.look()
+    sim.clock.sleep(DROP_LANDS)  # (a throw after the kill came in is dropped before its key: no lock waited out)
     h.look(loot=True)
     return {"kills": [(k.kind, k.platform) for k in h.ledger.kills], "piles": len(h.drops.known),
             "hers": [p.hers for p in h.drops.known], "status": [p.status for p in h.drops.known]}

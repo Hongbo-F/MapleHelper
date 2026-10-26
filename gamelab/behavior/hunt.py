@@ -844,7 +844,8 @@ class Hunt:
         if fight.knocked_move(self.h, s, act):
             return None
         if act[0] in THROWS:
-            fight.throw_act(self.h, s, act)
+            if not fight.throw_act(self.h, s, act):  # dropped at its last look before the key: the next pass decides
+                return None
             self.fs.note_throw(now, self.h.actions.attack_at)
             self.h.report.throws += 1
             self.report.throws += 1
@@ -909,10 +910,10 @@ class Hunt:
         if fight.knocked_move(self.h, s, act):
             return None
         if act[0] in THROWS:
-            fight.throw_act(self.h, s, act)
-            self.fs.note_throw(now, self.h.actions.attack_at)
-            self.h.report.throws += 1
-            self.report.throws += 1
+            if fight.throw_act(self.h, s, act):  # (dropped at its last look before the key: the next pass decides)
+                self.fs.note_throw(now, self.h.actions.attack_at)
+                self.h.report.throws += 1
+                self.report.throws += 1
         elif (step := self._pass_step(s, [*targets, *others])) is not None:  # out from under one: a star picks it
             if step != act:
                 self.h.log(f"  {act_text(step, [*targets, *others], s.where.x, hidden)} (HP {s.hp:.0%})")

@@ -299,7 +299,10 @@ def fresh(st: WorldState, want: Asks) -> bool:
     without, the search it asked for, on a frame shown at `want.after` or later, as a blocking look searches its own
     frame). One where she isn't placed is as good as a look would be; one that failed its checks (`bad`) is never
     fresh."""
-    if not st.usable or st.t < want.after:
+    # (within 1e-9 s, as WorldStep hands a frame what was asked of it: shown at 5.5 s, a frame took a look's ask for
+    # 5.50000001 s, after her last key's effect, and wasn't fresh for it, and the look waited out FEED_WAIT_S, nothing
+    # asked again: simulator, 2026-10-26)
+    if not st.usable or st.t < want.after - 1e-9:
         return False
     if not st.placed:
         return True
@@ -370,6 +373,19 @@ class Feed:
         """Every event not drained yet of a frame shown at `upto` or before (None: all), each once; the later
         ones wait for the next drain."""
         raise NotImplementedError
+
+    def pending_events(self, upto: float | None = None) -> list[Event]:
+        """The events not drained yet of frames shown at `upto` or before (None: all), left for the next drain: what
+        has happened since the last look, for a glance between looks (behavior.hunter: a throw's last look before its
+        key)."""
+        return [e for e in list(getattr(self, "events", ())) if upto is None or e.t <= upto + 1e-9]
+
+    def newest(self, after: float) -> WorldState | None:
+        """The newest state there is, if it's usable and of a frame shown at `after` or later; else None. Nothing is
+        asked of the next frame, nor waited for: a glance at the world as perception has it now (behavior.hunter's last
+        look before a key), which changes nothing of what the feed looks at and when."""
+        st = newest_frame(list(self._states()))
+        return st if st is not None and st.usable and st.t >= after else None
 
     def throw(self, t: float, side: str) -> None:
         """She threw toward `side` at t (Actions.throw_listeners)."""
@@ -622,7 +638,7 @@ class InlineFeed(Feed):
         self.eyes = eyes
         self.step = WorldStep(Senses(eyes, model, band), schedule=Schedule(band_s=None, wide_s=None))
         self.events: deque[Event] = deque(maxlen=EVENTS_KEPT)
-        self.newest: WorldState | None = None
+        self.state: WorldState | None = None  # the last frame's state
 
     def latest(self, want: Asks, timeout: float = FEED_WAIT_S) -> WorldState | None:
         st = self._frame(want)
@@ -642,11 +658,15 @@ class InlineFeed(Feed):
         late = self.step.came_back()
         for done in [st] + late:
             self.events.extend(done.events)
-        self.newest = late[-1] if late else st
-        return self.newest
+        self.state = late[-1] if late else st
+        return self.state
 
     def _states(self):
-        return () if self.newest is None else (self.newest,)
+        return () if self.state is None else (self.state,)
+
+    def newest(self, after: float) -> WorldState | None:
+        """The state of the last frame stepped, if usable: no frame of its own (each look takes one)."""
+        return self.state if self.state is not None and self.state.usable else None
 
     def frame_of(self, st: WorldState) -> np.ndarray:
         return st.frame

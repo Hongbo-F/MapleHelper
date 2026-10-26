@@ -1441,8 +1441,15 @@ def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_mov
     """nav_walk_off_after_kill with no wait for her attack to stop swallowing arrows (actions.ARROW_LOCK_MS 0):
     the walk-off goes 0.34 s after her last throw's key, she stays on 3 as in game, and only the walk-off sent
     again once she's seen there lands."""
+    from gamelab.behavior import fight, hunter
     from gamelab.control import actions
     monkeypatch.setattr(actions, "ARROW_LOCK_MS", 0)
+    # (her throw at the mushroom dying, keyed as decided, as until 2026-10-26: what put the walk-off right after a
+    # throw's key here. Now no throw goes at one a kill was placed on, fight._shoot_at by ledger.dying, and one decided
+    # before the kill came in is dropped at its last look before the key, hunter.LAST_LOOK: the walk-off then comes
+    # 1.2 s after her last key, and lands)
+    monkeypatch.setattr(hunter, "LAST_LOOK", False)
+    monkeypatch.setattr(fight, "dying", lambda kills, m, t: False)
     trace = scenarios.run("nav_walk_off_after_kill")
     assert set(scenarios.unmet(trace)) == {"the walk-off right after the kill lands",
                                            "no log line says 'instead of platform 4'"}
@@ -1452,9 +1459,11 @@ def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_mov
 def _after_kill_landings(monkeypatch) -> dict[int, list[str]]:
     """nav_jump_after_kill on seeds 1-8, the chain's first arrow held back to 0.6 and to 0.8 s after her last
     throw's key (actions.ARROW_LOCK_MS): where each trip that killed the pig ended up ('6': arrived)."""
+    from gamelab.behavior import hunter
     from gamelab.control import actions
     sc = scenarios.SCENARIOS["nav_jump_after_kill"]
     landed = {600: [], 800: []}
+    monkeypatch.setattr(hunter, "LAST_LOOK", False)  # (as in nav_walk_off_after_kill's: a throw right before the chain)
     for lock in landed:
         monkeypatch.setattr(actions, "ARROW_LOCK_MS", lock)
         for seed in range(1, 9):

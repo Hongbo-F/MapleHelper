@@ -148,7 +148,8 @@ def test_the_sync_feed_hands_a_look_the_frame_after_it_asked_its_cost_later(sync
     for _ in range(20):
         asked = clock.now
         st = f.latest(Asks(asked, band=True))
-        assert st is not None and st.t >= asked and fresh(st, Asks(asked, band=True))
+        # (a frame shown when asked counts, to 1e-9 s: the clock's 100.49999999999997 is 100.5's frame)
+        assert st is not None and st.t >= asked - 1e-9 and fresh(st, Asks(asked, band=True))
         assert st.band_at >= asked  # her band searched on a frame shown after the look asked: its own search
         # ready only once worked out: the searched frame's step, then the search on its thread
         assert clock.now >= st.band_at + c.capture + c.look + c.band - 1e-9
@@ -167,7 +168,8 @@ def test_a_look_reads_the_feeds_world_state_without_waiting_for_a_search_of_its_
     for _ in range(20):
         asked = clock.now
         st = f.latest(Asks(asked, band=True))
-        assert st is not None and st.t >= asked and fresh(st, Asks(asked, band=True))
+        # (a frame shown when asked counts, to 1e-9 s: the clock's 100.49999999999997 is 100.5's frame)
+        assert st is not None and st.t >= asked - 1e-9 and fresh(st, Asks(asked, band=True))
         assert [m.kind for m in st.monsters] == ["pig"] and st.t - st.band_at <= feed.MOBS_FRESH_S + 1e-9
         waits.append(clock.now - asked)
         searched += st.band_at >= asked

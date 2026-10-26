@@ -19,6 +19,7 @@ memory of them (localization.memory: what she has seen anywhere, kept across loo
 were.
 """
 
+import copy
 import json
 import random
 import time
@@ -71,6 +72,14 @@ KNOCK_S = 0.45
 ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
                  # only her back shows and her facing isn't read
 HEADING_SHOTS_MAX = 200  # crops of her kept in lab/heading where the frame and her last arrow disagreed, at most
+# A throw's last look before its key (`_still`: Actions.still), once her lock has been waited out: an EXP gain naming a
+# kind in its way shown since the look it was decided on drops it, and the next look decides again. Live on 2026-10-25
+# (the hunt of 23:43) she decided each throw on a look taken 0.2-0.34 s after the key before (190 of 229 back-to-back
+# pairs had one look between them), then waited out her lock blind: the look a throw was decided on was a median 0.57
+# s old at its key, a kill's gain shows 0.15-0.46 s after the key that made it, and 17 throws went out after a gain
+# that showed before their key, 6 more before the hunter had read it (21 casts of Lucky Seven: analysis-1025/
+# jumps-perception-skeptic/pair.py, looks_between.py, wasted2.py). False: every throw goes as decided.
+LAST_LOOK = True
 
 
 class Hunter:
@@ -129,6 +138,8 @@ class Hunter:
                                kills=lambda: self.ledger.kills)
         if mode != "regular":
             self.actions.choose = self.attacks.key
+        if LAST_LOOK:
+            self.actions.still = self._still
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
         self.facing_seen = Reading(None, why="no look")  # which way the last look's frame showed her facing
         # Her facing off the frames: looks, told or not (and why), what her keys made of each (Actions.saw), and those
@@ -244,6 +255,33 @@ class Hunter:
         (None where not known)."""
         last = list(self.told)[-n:] if n > 0 else []
         return [(None, None)] * (n - len(last)) + last
+
+    def _still(self, side: str) -> bool:
+        """Whether a throw that way still goes, asked by her Actions once her lock has been waited out (LAST_LOOK): not
+        if her EXP has gained a kill of a kind in its way since the look it was decided on. Read off the feed's newest
+        state, if of a frame after her keys' effect (Senses.fresh_after; none, the throw goes: nothing is asked of the
+        feed, which takes its frames as it would): its events not drained yet (the next look's), their
+        EXP readings told apart as the hunter's meter would (a copy of it: the kinds each gain names; one it can't
+        read names none, any kind then). Dropped, it's logged and sent as a telemetry event 'dropped'."""
+        feed = self.senses.feed
+        st = feed.newest(self.senses.fresh_after())
+        if st is None:
+            return True
+        events = [e for e in feed.pending_events(st.t) if e.kind in ("exp_gain", "exp_read")]
+        if not any(e.kind == "exp_gain" for e in events):
+            return True
+        meter, kinds = copy.deepcopy(self.meter), set()
+        for e in events:
+            for g in meter.update(e.t, reading_of(e.data), e.kind == "exp_gain"):
+                kinds.update(g.kinds)
+        if not kinds and meter.unread > self.meter.unread:  # a change it couldn't read: a kill of a kind not known
+            kinds = {None}
+        if (kind := self.attacks.in_way(side, kinds)) is None:
+            return True
+        text = f"a kill came in before the key ({kind}): the throw {side} is dropped, decided again"
+        self.log(f"    {text}")
+        telemetry.emit("event", kind="dropped", text=text)
+        return False
 
     # --- after every look ---------------------------------------------------------------------
 

@@ -521,7 +521,8 @@ def test_frames_read_the_wrong_way_but_not_strongly_never_take_a_tap_away(monkey
     right, _ = _kill_on_23(**away)
     weak, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.31, 0.24, False)), **away)
     assert weak["ended"] == right["ended"] == "killed" and weak["wrong way"] == right["wrong way"] == 0, (weak, right)
-    assert weak["taps"] == right["taps"] == 1 and weak["counts"]["against"] == 1  # (said, as live)
+    # (said, as live: once an arrow, and her loot walk after the kill presses another, 2026-10-26)
+    assert weak["taps"] == right["taps"] == 1 and weak["counts"]["against"] >= 1
     sure, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.6, 0.4, False)), **away)
     assert sure["taps"] == 0 and sure["wrong way"] == sure["throws"] >= 8, sure
     monkeypatch.setattr(Actions, "faces", lambda self, direction: self.heading == direction)

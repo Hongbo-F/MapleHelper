@@ -1209,6 +1209,17 @@ class ServiceClient(Feed):
         with self._cond:
             return feed._drain(self.events, upto)
 
+    def pending_events(self, upto: float | None = None) -> list[Event]:
+        with self._cond:
+            return super().pending_events(upto)
+
+    def newest(self, after: float) -> WorldState | None:
+        with self._cond:
+            if not self.alive or not self.on_map():
+                return None
+            st = newest_frame(self.states)
+        return st if st is not None and st.usable and st.t >= after else None
+
     def throw(self, t: float, side: str) -> None:
         if self.hello.throws:
             self._send("throw", t, side)

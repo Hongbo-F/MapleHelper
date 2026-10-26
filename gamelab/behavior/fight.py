@@ -453,12 +453,13 @@ def log_jump(h: "Hunter", s: Scene, act: tuple) -> None:
                        platform=t.platform, x=round(x, 1), land_x=round(sh.land_x, 1), way=plan.way)
 
 
-def throw_act(h: "Hunter", s: Scene, act: tuple) -> None:
+def throw_act(h: "Hunter", s: Scene, act: tuple) -> bool:
     """Carry out a throwing stance `act` (THROWS) decided from look `s` with her actions (control.actions.Actions): a
     throw from the ground, a jump throw (in place or forward, its attack timed as its JumpPlan says:
     attack.stance.plan_of), a jump back. One whose plan has its shot is logged (log_jump), and its target goes to the
     attack choice as the throw's (behavior.attacks.Attacks.aimed: its own pick goes by a throw from the ground, which
-    has no monster on a platform above in its way)."""
+    has no monster on a platform above in its way). False: dropped at its last look before the key (Actions.still: a
+    kill come in since `s`), nothing sent: the caller looks again."""
     plan = plan_of(act)
     attacks = getattr(h, "attacks", None)
     if plan is not None and plan.shot is not None:
@@ -466,28 +467,26 @@ def throw_act(h: "Hunter", s: Scene, act: tuple) -> None:
         if attacks is not None:
             attacks.aimed = plan.shot.target
     try:
-        _throw(h.actions, act, plan)
+        return _throw(h.actions, act, plan) is not False
     finally:
         if attacks is not None:
             attacks.aimed = None  # (its key took it, or no choice was asked: no Lucky Seven key)
 
 
-def _throw(actions, act: tuple, plan) -> None:
-    """throw_act's keys: the Actions method for `act`, with its JumpPlan's timing (`plan`), if any."""
+def _throw(actions, act: tuple, plan) -> bool | None:
+    """throw_act's keys: the Actions method for `act`, with its JumpPlan's timing (`plan`), if any; what it returns
+    (False: dropped)."""
     if act[0] == "throw":
-        actions.throw(act[1])
-    elif act[0] == "jump_throw":
+        return actions.throw(act[1])
+    if act[0] == "jump_throw":
         if plan is None:
-            actions.jump_throw(act[1])
-        else:
-            actions.jump_throw(act[1], plan.key_ms, plan.way, plan.air_turn)
-    elif act[0] == "jump_back":
+            return actions.jump_throw(act[1])
+        return actions.jump_throw(act[1], plan.key_ms, plan.way, plan.air_turn)
+    if act[0] == "jump_back":
         if plan is None:
-            actions.jump_back(act[1])
-        else:
-            actions.jump_back(act[1], plan.key_ms)
-    else:
-        raise ValueError(f"not a throw: {act!r}")
+            return actions.jump_back(act[1])
+        return actions.jump_back(act[1], plan.key_ms)
+    raise ValueError(f"not a throw: {act!r}")
 
 
 def knocked_move(h: "Hunter", s: Scene, act: tuple) -> bool:
@@ -516,9 +515,9 @@ def _carry_out(h: "Hunter", st: FightState, s: Scene, act: tuple, fight: list[Mo
     nothing to do, see _idle. Returns what _idle does (None after a throw or a walk)."""
     if act[0] in THROWS:
         st.calm_since = None
-        throw_act(h, s, act)
-        st.note_throw(now, h.actions.attack_at)
-        h.report.throws += 1
+        if throw_act(h, s, act):  # (dropped at its last look: look again)
+            st.note_throw(now, h.actions.attack_at)
+            h.report.throws += 1
         return None
     if act[0] in ("back", "approach"):
         st.calm_since = None
@@ -779,6 +778,9 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
     elif st.had_bar and st.dying_since is None:
         st.dying_since = time.monotonic()  # its bar gone: it died, and fades out where it died
     _score_shots(st.flying, bar, st.dying_since is not None, s.t)
+    if (ledger := getattr(h, "ledger", None)) is not None and dying(ledger.kills, t, time.monotonic()):
+        time.sleep(0.1)  # a kill of hers placed on it: dying, it fades out (then her EXP ends the kill: _target_gone)
+        return None
     threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]
     act = decide(s.where.x, s.where.y, s.platform, t, threats, body_sizes(h.model)[1], around=s.monsters)
     h.log(f"  {st.kind} {t.x - s.where.x:+.0f},{t.y - s.where.y:+.0f} (bar {pct(bar)}), "
@@ -796,9 +798,11 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
             keyed.append(when)
         h.actions.throw_listeners.append(on_throw)
         try:
-            h.actions.throw(act[1])
+            thrown = h.actions.throw(act[1]) is not False
         finally:
             h.actions.throw_listeners.remove(on_throw)
+        if not thrown:  # dropped at its last look before the key (Actions.still): look again
+            return None
         if shot is not None:
             if keyed:  # its star is due that long after the key
                 shot["due"] += keyed[0] - shot["at"]

@@ -130,6 +130,10 @@ class Actions:
         # hunter's choice of attack a throw (behavior.attacks: Lucky Seven, or the regular attack to finish a monster
         # and while her MP is under a cast)
         self.choose: Callable[[str], str] | None = None
+        # Whether a throw that way still goes (the way -> False to drop it), asked once her lock has been waited out,
+        # before its keys: the hunter's last look before the key (behavior.hunter: a kill shown since the look it was
+        # decided on drops it). None: every throw goes.
+        self.still: Callable[[str], bool] | None = None
         self.kind = kind    # what its plans are to the player with the Lie Detector alarm up (alarm.RETREAT: her
                             # retreat's moves); None: refused then
         # Which way she faces (None: unknown). `facing`: by her keys, the way her last plan turned her or threw
@@ -316,12 +320,15 @@ class Actions:
 
     # --- attacks ------------------------------------------------------------------------------
 
-    def throw(self, direction: str) -> None:
+    def throw(self, direction: str) -> bool:
         """Face `direction` (the arrow tapped first unless she surely faces it already: `faces`, by her keys or a strong
         frame), then throw (regular attack; with `skill`, Lucky Seven or as `choose` says, a throw at a time).
         Turning taps the arrow, which also walks her a few units: tapping before every throw walked
-        her off the end of a platform after nine throws the same way."""
+        her off the end of a platform after nine throws the same way. False: dropped once her lock was waited out
+        (`still`), no key sent."""
         self.wait_lock()
+        if not self._still(direction):
+            return False
         events, t = self._turn(direction)
         key = self._attack_key(direction)  # (chosen first, as jump_throw's: its cast's MP goes with its own key)
         self._thrown(t, direction)
@@ -329,8 +336,9 @@ class Actions:
         self._turned(events, direction, t)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
+        return True
 
-    def jump_throw(self, direction: str, key_ms: int | None = None, way: int = 0, air_turn: bool = True) -> None:
+    def jump_throw(self, direction: str, key_ms: int | None = None, way: int = 0, air_turn: bool = True) -> bool:
         """Face `direction`, jump and attack in mid-air: in the air the attack throws a star even at point-blank range,
         where on the ground the claw only swipes (9-11 damage against 30-70 for a star, seen with slimes crowding her in
         the basin). The attack key comes `key_ms` after the jump key (JUMP_ATTACK_MS, 40, by default: while she's still
@@ -340,8 +348,11 @@ class Actions:
         attack comes JUMP_BACK_ATTACK_MS after it at the soonest; with `air_turn` False (an attack that must come sooner,
         at a monster too short for a later one), the tap goes first and the jump waits for its walk to stop
         (JUMP_THROW_TURN_MS). `way` +1/-1 jumps forward that way (the arrow held: FORWARD_JUMP_MS before the jump, let go
-        FORWARD_HOLD_MS after it), which faces her that way: a throw that way."""
+        FORWARD_HOLD_MS after it), which faces her that way: a throw that way. False: dropped once her lock was waited
+        out (`still`), no key sent."""
         self.wait_lock()
+        if not self._still(direction):
+            return False
         key_ms = JUMP_ATTACK_MS if key_ms is None else key_ms
         key, jump = self._attack_key(direction), self.keys.jump.name
         turn, added = [], 0  # the arrow that turns her, and how much later it has her attack come
@@ -369,8 +380,9 @@ class Actions:
             self._turned(turn, direction, added)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
+        return True
 
-    def jump_back(self, direction: str, key_ms: int | None = None) -> None:
+    def jump_back(self, direction: str, key_ms: int | None = None) -> bool:
         """At a monster too close to throw at (on `direction`'s side): jump away from it, turn toward it
         in mid-air, and throw so the star leaves just before she lands. Thrown at point-blank range, from
         the ground or straight up, stars often missed; just before landing she's the whole jump away
@@ -396,6 +408,11 @@ class Actions:
         # (review, 2026-10-25).
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
+        return True  # (a jump back is her way out from a monster too close: never dropped)
+
+    def _still(self, direction: str) -> bool:
+        """Whether a throw that way still goes (`still`), once her lock has been waited out."""
+        return self.still is None or self.still(direction)
 
     def _thrown(self, key_ms: int, direction: str) -> None:
         """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent."""

@@ -278,6 +278,53 @@ def test_a_monster_dying_where_a_kill_was_placed_is_no_throws_target_nor_marked(
     assert b.target("right") is None and b.key("right") == KEYS7.attack.name
 
 
+def test_a_throw_takes_a_last_look_before_its_key_and_a_kill_come_in_of_a_kind_in_its_way_drops_it():
+    """Hunter._still (Actions.still): once her lock is waited out, before any key of a throw, the feed's newest state
+    after her keys' effect, and its events not drained yet (the next look's): an EXP gain named (by a copy of her
+    meter) for a kind in the throw's way drops it: no key sent, a 'dropped' line; one of a kind not in its way, none,
+    or nothing in its way lets it go. Live on 2026-10-25 17 throws went out after a gain that showed before their key
+    (the look they were decided on a median 0.57 s old at it)."""
+    from gamelab.behavior.hunter import Hunter
+    from gamelab.localization import mapdata
+    from gamelab.localization.gains import ExpMeter
+    from gamelab.localization.tracking import Event
+    from gamelab.perception.exp_number import ExpReading
+    from test_fight import EMPTY_MAP, _Eyes
+
+    class Feed:
+        def __init__(self, events):
+            self.events = events
+
+        def newest(self, after, timeout=0.0):
+            return SimpleNamespace(t=time.monotonic())
+
+        def pending_events(self, upto=None):
+            return list(self.events)
+
+    def hunter(gain, kind_in_way):
+        said = []
+        h = Hunter(_Eyes([]), KEYS7, mapdata.parse(1, EMPTY_MAP, "Test", {}), log=said.append, attack="choice")
+        h.meter = ExpMeter({"Green Mushroom": 26, "Horny Mushroom": 41})
+        t = time.monotonic()
+        h.meter.update(t - 5.0, ExpReading(1000, None, (25,)), False)  # her EXP as read before
+        h.senses._feed = Feed([] if gain is None else
+                              [Event("exp_gain", t - 0.1, None, {"exp": 1000 + gain, "levels": [25]})])
+        h.attacks.on_look(_look([] if kind_in_way is None else [(kind_in_way, 250.0, None)]))
+        sent = []
+        h.actions.play = lambda events, name, kind=None: sent.append(name)
+        h.actions.facing = "right"
+        return h, said, sent
+
+    for gain, kind, goes in ((41, "horny-mushroom", False), (41, "green-mushroom", True), (None, "horny-mushroom", True),
+                             (41, None, True), (26, "green-mushroom", False)):
+        h, said, sent = hunter(gain, kind)
+        assert h.actions.throw("right") is goes and (sent == ["throw"]) is goes, (gain, kind)
+        assert any("a kill came in before the key" in line for line in said) is not goes
+    h, said, sent = hunter(41, "horny-mushroom")
+    h.attacks.aimed = None
+    assert h.actions.jump_throw("right") is False and sent == []
+
+
 def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_target():
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)]))

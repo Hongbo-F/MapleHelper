@@ -215,6 +215,18 @@ class Attacks:
                 return max(recent, key=lambda mk: mk.thrown).m
         return None
 
+    def in_way(self, side: str, kinds: set) -> str | None:
+        """The kind of a monster a throw that way would take (`aimed`, its target, its path in the last look) that
+        `kinds` names (None in it: any kind), or None: what drops a throw at its last look before the key (a kill of
+        that kind come in since: Hunter._still)."""
+        if not kinds:
+            return None
+        s = self._last
+        ways = [m for m in (self.aimed, self.target(side)) if m is not None]
+        if s is not None and s.where is not None and s.platform is not None:
+            ways += in_path(s, side, s.monsters)
+        return next((m.kind for m in ways if None in kinds or m.kind in kinds), None)
+
     def reckon(self, m: Monster) -> Left | None:
         """What monster `m` has left as she reckons it (see the module's docstring), her throws at it that no look
         has seen land yet taken off; None for a kind whose HP isn't known."""
