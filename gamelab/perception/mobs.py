@@ -88,6 +88,10 @@ GATE_TRIES = 2
 OPAQUE = 128                 # a game picture's pixel is drawn from this alpha up (sprites.build's threshold)
 WIDE_BAND, WIDE_STEP = 120, 90  # detect_wide: rows per band, and rows from one band's top to the next
 THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the whole screen 250 -> 117 (8 are no faster)
+# ... but her band's on BAND_THREADS: on 100 saved frames of 2026-10-26 01:01, 66 ms of CPU against 6's 84, in 31 ms
+# against 26, the same monsters found; the whole screen's bands took as much CPU on 3 (262 ms against 251) in 118 ms
+# against 73, and stay on THREADS (D:/MapleHelper-scratch/cpu/apply/perc/thread_sweep.py).
+BAND_THREADS = 3
 # A monster seen in the last frame is looked for again this far (px) around where it should be (`refind`):
 # at 30 frames a second a pig walking 125 units/s moves 3 px a frame, and where her minimap dot puts her
 # (which places the monsters on the map) can step by a minimap pixel, 11.4 units or 8 px, as she walks.
@@ -305,7 +309,8 @@ class MobDetector:
     """Templates come from `folder` (or a list of folders): PNGs named <kind>_<anything>.png, RGBA at full
     screen size. gamelab/assets/mobs has cut-outs from screenshots; sprites.py makes them from the game data.
     What the folders say about their templates (INDEX, CUTOUTS) comes along, and `meta` (by file name) on top.
-    `threads`: how many matches run at once (1: all on the caller's thread). `frame_scale`: the frames' px per game px
+    `threads`: how many matches run at once (1: all on the caller's thread; her band's, `detect`, on `band_threads` at
+    most: BAND_THREADS). `frame_scale`: the frames' px per game px
     (screen.Geometry.frame_scale; by default the 1920x1080 window's at half size), which each folder's pictures are
     brought to from theirs (`picture_scale`): a folder drawn at the frames' own scale is used as it is.
     `search_scale`: step 1's frame, px per game px (SEARCH_SCALE; a frame no finer than it is searched as it is).
@@ -318,7 +323,8 @@ class MobDetector:
 
     def __init__(self, folder: Path | list[Path] = ASSETS, threads: int = THREADS, meta: dict | None = None,
                  frame_scale: float = STRETCHED.frame_scale, search_scale: float = SEARCH_SCALE, kinds=None,
-                 background: np.ndarray | None = None, learned=None, fog_alphas=FOG_ALPHAS):
+                 background: np.ndarray | None = None, learned=None, fog_alphas=FOG_ALPHAS,
+                 band_threads: int = BAND_THREADS):
         self.templates: dict[str, list[MobTemplate]] = {}
         folders = folder if isinstance(folder, list) else [folder]
         meta = {**read_meta(folders), **(meta or {})}
@@ -398,12 +404,16 @@ class MobDetector:
                         if a.frame and a.frame == b.frame and a.facing == b.facing and a.origin and b.origin}
         self.apart = {k: others for k, v in self.twins.items() if (others := tuple(t for t in v if t not in unit[k]))}
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
+        band_threads = min(band_threads, threads)
+        self._band_pool = (self._pool if band_threads == threads else
+                           ThreadPoolExecutor(band_threads, "monster-search-band", _one_opencv_thread)
+                           if band_threads > 1 else None)
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         """Monsters in `frame` (RGB, a look frame at `frame_scale`). `rows` limits the search to a band."""
-        return self._picked(frame, rows, self._detect(frame, rows, self._map))
+        return self._picked(frame, rows, self._detect(frame, rows, self._band_map))
 
     def detect_wide(self, frame: np.ndarray, rows: tuple[int, int]) -> list[Mob]:
         """Monsters over a tall stretch of the frame, band by band. Over the whole screen, green
@@ -509,6 +519,10 @@ class MobDetector:
     def _map(self, fn, items) -> list:
         """fn of each item, in order: on the pool, or here with one thread."""
         return list(self._pool.map(fn, items)) if self._pool else [fn(item) for item in items]
+
+    def _band_map(self, fn, items) -> list:
+        """_map on her band's pool (BAND_THREADS)."""
+        return list(self._band_pool.map(fn, items)) if self._band_pool else [fn(item) for item in items]
 
     def _detect(self, frame: np.ndarray, rows: tuple[int, int] | None, run, only=None) -> list[Mob]:
         """detect, with `run(fn, items)` doing the matches (on the pool, or one after another); `only`: these

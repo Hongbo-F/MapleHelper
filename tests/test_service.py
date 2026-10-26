@@ -78,9 +78,21 @@ def test_the_hunts_pace_and_her_throws_follow_the_commands_attached():
         assert {watch.id, pet.id} == set(svc.clients)
     finally:
         svc.runner.step.close()
-    # The idle schedule searches her band and the screen less often, and the drops at watch's rates
-    assert (IDLE.band_s, IDLE.wide_s, IDLE.loot_s, IDLE.loot_wide_s) == (0.5, 2.0, 0.5, 2.0)
+    # The idle schedule searches her band and the screen less often, and the drops only when asked
+    assert (IDLE.band_s, IDLE.wide_s, IDLE.loot_s, IDLE.loot_wide_s) == (1.0, 4.0, None, None)
     assert (ACTIVE.band_s, ACTIVE.wide_s, ACTIVE.loot_s) == (0.2, 1.0, None)
+
+
+def test_a_command_that_hunts_attaching_wakes_the_frame_loop_and_a_viewer_doesnt():
+    """Its rate and schedule are the hunt's from the next frame on, not after IDLE_HZ's period (feed.run brings the next
+    frame's due forward once it's woken)."""
+    svc = _svc()
+    svc.map_id = 5
+    said = []
+    svc._hello(_joining(svc, 1, said), Hello(name="map", map=5))
+    assert not svc._woken
+    svc._hello(_joining(svc, 2, said), Hello(name="tour", acts=True, throws=True, fast=True, map=5))
+    assert svc._woken and [m[1] for m in said] == ["welcome", "welcome"]
 
 
 def test_a_clients_queue_keeps_its_newest_drops_the_oldest_and_says_a_gap():
@@ -565,6 +577,8 @@ def test_the_service_publishes_what_it_sees_as_watch_did(tmp_path, monkeypatch):
     def make(map_id, geo):
         step = WorldStep(Senses(eyes, model, band=(100, 100)), throws=False, schedule=IDLE)
         return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)]), Gaining(eyes), step)
+    # The drops searched at watch's rates, to see them published (the service's IDLE searches them only when asked)
+    monkeypatch.setattr(service, "IDLE", worldstate.WATCH)
     telemetry.record_to("perceive", tmp_path)
     address = rf"\\.\pipe\gamelab-perceive-test-pub-{os.getpid()}-{time.monotonic_ns()}"
     svc = Service(make, 1, lambda: (STRETCHED, None), address=address, log=lambda m: None,

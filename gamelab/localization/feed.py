@@ -194,10 +194,13 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
     frames searched, as their searches come back (with no frame: theirs is in the past). The poll should end
     early when the searches' answer is in (the step's `searches.wake`). `shown(frame)`, if given, sees each
     frame showing the game as soon as it's taken, before the step. Ends on stop, at `until`
-    (time.monotonic), or when the frames run out."""
-    due, pending = time.monotonic(), None
+    (time.monotonic), or when the frames run out. A rate gone up takes from the next frame (its due brought forward to
+    a period after the last frame's): the service's from IDLE_HZ to ACTIVE_HZ as a command that hunts attaches."""
+    due, pending, taken = time.monotonic(), None, None
     while True:
         period = 1.0 / (hz() if callable(hz) else hz)
+        if taken is not None:
+            due = min(due, taken + period)
         for st in runner.step.came_back():  # searches back while it waited
             emit(st, None)
         now = time.monotonic()
@@ -211,6 +214,7 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
         asked = pending is not None and now >= pending.after
         if not asked and now < due:
             continue
+        taken = time.monotonic()
         frame = runner.frames.next(pending.after if asked else due)
         if frame is None:
             return
@@ -218,7 +222,7 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
             st = runner.step.step(None, frame.t, False, why=frame.why, bad=frame.problem)
             emit(st, frame)
             runner.recover(st.bad)
-            due, pending = time.monotonic() + NOT_VISIBLE_S, None  # whoever asked takes the look itself
+            due, pending, taken = time.monotonic() + NOT_VISIBLE_S, None, None  # whoever asked takes the look itself
             continue
         use = pending if asked and frame.t >= pending.after else None
         if shown is not None:

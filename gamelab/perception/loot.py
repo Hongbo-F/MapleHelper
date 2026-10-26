@@ -67,8 +67,11 @@ MESO_KINDS = {0: "bronze", 1: "gold"}
 THRESHOLD = 0.6      # masked colour match (the drops in the saved frames: 0.63-0.87)
 PIXEL_SLACK = 24     # mean difference from the template, per pixel and channel under its mask (in saved
                      # frames: drops 12-19; scenery and UI that matched a shape 27-57)
-THREADS = 8          # templates matched at once: her platform's strips 22 -> 14 ms against 4 threads, every
-                     # platform's in view 120 -> 88 (back to back on the 17 bench frames, the CPU busy); 12: 13 and 88
+THREADS = 3          # templates matched at once. 8 made her platform's strips 22 -> 14 ms against 4 threads, every
+                     # platform's in view 120 -> 88 (back to back on the 17 bench frames, the CPU busy); 12: 13 and 88.
+                     # On 100 saved frames of 2026-10-26 01:01, 3 took 294 ms of CPU for every platform in view
+                     # against 8's 431, in 111 ms against 115, her platform's 21 against 27 (8.6 ms against 8.2), the
+                     # same drops found (D:/MapleHelper-scratch/cpu/apply/perc/thread_sweep.py)
 ABOVE = 30           # half-size px above a platform's top searched (items are up to 22 tall, and bob)
 BELOW = 6            # ... and below it
 HALF_COVER = 0.5     # a template's mask: where the picture covers at least this much of a pixel

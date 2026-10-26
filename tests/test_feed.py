@@ -256,6 +256,33 @@ def test_the_loop_does_what_was_asked_on_the_first_frame_at_its_time():
     assert out.index(late[0]) < out.index(next(s for s in out if s.seq == 4))  # back before the next frame's
 
 
+def test_a_rate_gone_up_takes_from_the_next_frame():
+    """The perception service's frame loop at its idle rate when a command that hunts attaches (Service._hello wakes its
+    poll): the next frame comes the hunt's period after the last, not the idle one's; a rate gone down takes after the
+    frame due."""
+    model = small_map()
+    eyes = Drawn(model)
+    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(band_s=None, wide_s=None))
+
+    class Eyes2:
+        def look_at(self, full, t, ropes):
+            return eyes.frame(t, ropes)
+    runner = feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)] * 7, loop=False), Eyes2(), step)
+    out, rate = [], {"hz": 2.0}
+
+    def emit(st, fr):
+        out.append(st.t)
+        rate["hz"] = {2: 20.0, 5: 4.0}.get(len(out), rate["hz"])  # a hunt attached after the 2nd frame, gone after the 5th
+
+    def poll(wait):  # woken every 10 ms, as the service's poll is by a hello
+        time.sleep(min(wait, 0.01))
+        return None, False
+    run(runner, lambda: rate["hz"], poll, emit)
+    gaps = np.diff(out)
+    assert len(out) == 7 and gaps[0] >= 0.45 and all(g < 0.15 for g in gaps[1:5]), gaps
+    assert gaps[5] >= 0.2 and gaps[4] < 0.15, gaps  # (gone down: the frame due at the old rate first)
+
+
 def test_frames_the_game_isnt_showing_say_so_and_are_not_read():
     model = small_map()
     step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))

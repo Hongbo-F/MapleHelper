@@ -8,7 +8,7 @@ of their own, localization.worldstate) on the screen (perception.frames.ScreenFr
 duplication: capture.shared). It never sends a key and never brings the game forward; it waits for the game window
 when there's none. Only one runs on the PC (a named mutex, MUTEX). Its rate and searches follow who's attached
 (`Clients`): with a command that hunts, ACTIVE_HZ and the feed's schedule (her band every 0.2 s, the whole screen every
-second); with none, IDLE_HZ and IDLE (her band every 0.5 s, the screen every 2 s, the drops at `watch`'s old rates).
+second); with none, IDLE_HZ and IDLE (her band every second, the screen every 4 s, the drops only when asked).
 Her throws are known to the tracker while a command that tells them is attached. Its telemetry is `watch`'s was (a
 scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl.
 
@@ -56,7 +56,7 @@ from ..screen import Geometry, geometry
 from . import feed
 from .feed import Feed, Ring, Runner, frame_shape, newest_fresh, newest_frame, to_ask, adds
 from .tracking import Event
-from .worldstate import (LOOT_EVERY_S, LOOT_WIDE_EVERY_S, Asks, Schedule, SearchThread, WorldState, WorldStep, to_scene)
+from .worldstate import Asks, Schedule, SearchThread, WorldState, WorldStep, to_scene
 
 ADDRESS = r"\\.\pipe\gamelab-perceive"
 MUTEX = "Local\\gamelab-perceive"
@@ -69,10 +69,12 @@ WHICH = "GAMELAB_PERCEIVE"
 RING_SLOTS = 8        # look frames kept in shared memory: at 30 Hz the newest 267 ms (25 MB at 1366x768)
 FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a look frame is half size)
 ACTIVE_HZ = 30.0      # frames a second with a command that hunts attached ...
-IDLE_HZ = 10.0        # ... and with none (`watch`'s rate in the babysitter: 1.21 cores on the saved frames, the
-                      # searches the most of it)
+IDLE_HZ = 5.0         # ... and with none: the pet's babysitter's wait, the mini-map and the web page. With IDLE, 0.20
+                      # cores on the saved frames against 0.83 at 10 a second, her band every 0.5 s, the screen every
+                      # 2 s and the drops at `watch`'s rates (every platform in view every 2 s: 0.28 cores of it),
+                      # which only the mini-map showed (D:/MapleHelper-scratch/cpu/apply/perc/prof_service.py)
 ACTIVE = Schedule()   # the feed's: her band every 0.2 s, the whole screen every second, the drops when asked
-IDLE = Schedule(band_s=0.5, wide_s=2.0, loot_s=LOOT_EVERY_S, loot_wide_s=LOOT_WIDE_EVERY_S)
+IDLE = Schedule(band_s=1.0, wide_s=4.0)  # (the drops only when asked)
 QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at 30 Hz): older ones are dropped, a gap said
 KEEP = 8              # states a client keeps (feed.KEEP)
 EVENTS_KEPT = 10_000  # events a client keeps for its next drain at most
@@ -86,7 +88,7 @@ STATUS_S = 10.0       # s between the service's lines on the console
 # babysitter start another. With the process and its pipe up and the loop hung, every look found nothing to act on and a
 # hunt stood still to its end, nothing restarting it. The loop goes round at least every 1/IDLE_HZ s, and every
 # NOT_VISIBLE_S without the game; a search takes 0.03-0.3 s. A client that hears nothing for SILENT_S (a state comes
-# every 0.1 s at the least, every 0.25 s without the game) drops its connection and reconnects.
+# every 1/IDLE_HZ s at the least, every 0.25 s without the game) drops its connection and reconnects.
 STUCK_S = 10.0
 BUILD_STUCK_S = 60.0
 EXIT_STUCK = 3
@@ -454,6 +456,9 @@ class Service:
                     self._cond.notify_all()
             c.hello = hello
             c.send("welcome", self._welcome())
+            if hello.fast:  # the frame loop's next frame at the hunt's pace, not IDLE_HZ's (feed.run)
+                self._woken = True
+                self._cond.notify_all()
         self.log(f"perception: {hello.name} (pid {hello.pid}) attached" + (", sends keys" if hello.acts else "")
                  + (f", map {hello.map}" if hello.map is not None else ""))
 
