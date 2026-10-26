@@ -66,16 +66,24 @@ MUTEX = "Local\\gamelab-perceive"
 SAVED_ADDRESS = ADDRESS + "-saved"
 SAVED_MUTEX = MUTEX + "-saved"
 WHICH = "GAMELAB_PERCEIVE"
-RING_SLOTS = 8        # look frames kept in shared memory: at 30 Hz the newest 267 ms (25 MB at 1366x768)
+RING_SLOTS = 8        # look frames kept in shared memory: at ACTIVE_HZ the newest 400 ms (25 MB at 1366x768)
 FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a look frame is half size)
-ACTIVE_HZ = 30.0      # frames a second with a command that hunts attached ...
+# Frames a second with a command that hunts attached (its looks' frames come at once, whatever the rate) ... Live, 30
+# asked made 15.1 a second (2026-10-25 21:07 to 23:25: the frame loop saturated, 48 ms of CPU a frame). On the saved
+# frames with a hunt's asks (D:/MapleHelper-scratch/cpu/apply/perc/prof_service.py, a minute each), with the re-finds
+# and name tag made cheaper: 1.20 cores at 20 against 1.45 at 30 (1.13 at 15). In the harness (Tree Dungeon, the hunt
+# loop, crowd, zero-walls, the attack choice, costs measured, 8 seeds of 5 minutes, the simulator's feed at the rate:
+# D:/MapleHelper-scratch/cpu/apply/hz/hzvariants.py): at 20, EXP a minute 238.4 against 252.4 at 30 (+5.0% seed by
+# seed, standard error 17.2%), HP lost 0.80 bars a minute against 0.78, touches that hurt 38.2 a run against 38.9,
+# potions 10.0 against 10.1; at 15 she was hurt more (HP 1.03 a minute, touches 47.1, potions 14.1), EXP 255.1.
+ACTIVE_HZ = 20.0
 IDLE_HZ = 5.0         # ... and with none: the pet's babysitter's wait, the mini-map and the web page. With IDLE, 0.20
                       # cores on the saved frames against 0.83 at 10 a second, her band every 0.5 s, the screen every
                       # 2 s and the drops at `watch`'s rates (every platform in view every 2 s: 0.28 cores of it),
-                      # which only the mini-map showed (D:/MapleHelper-scratch/cpu/apply/perc/prof_service.py)
+                      # which only the mini-map showed (prof_service.py, as above)
 ACTIVE = Schedule()   # the feed's: her band every 0.2 s, the whole screen every second, the drops when asked
 IDLE = Schedule(band_s=1.0, wide_s=4.0)  # (the drops only when asked)
-QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at 30 Hz): older ones are dropped, a gap said
+QUEUE_KEEP = 64       # states a client's writer holds at most (3.2 s at ACTIVE_HZ): older ones are dropped, a gap said
 KEEP = 8              # states a client keeps (feed.KEEP)
 EVENTS_KEPT = 10_000  # events a client keeps for its next drain at most
 RECONNECT_S = 0.5     # s between a client's tries to reach the service

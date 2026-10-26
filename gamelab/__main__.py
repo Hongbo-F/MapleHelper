@@ -1549,8 +1549,8 @@ def cmd_watch(args) -> int:
     for the game. With --lie-detector it also checks the screen for the Lie Detector, the service's frame at full size
     every WATCH_LIE_DETECTOR_S, and pages whoever is at the PC (the player keeps its own watchdog regardless); with
     --heading it reads which way she faces off every frame (perception.heading, her pictures in lab or the seed) and
-    says each change: turn her with the arrows and watch. (--hz: the service's rate is its own now: 30 a second while a
-    command hunts, 10 otherwise.)"""
+    says each change: turn her with the arrows and watch. (--hz: the service's rate is its own now: service.ACTIVE_HZ
+    while a command hunts, IDLE_HZ otherwise.)"""
     from .localization import mapdata
     from .perception.drops import unknown_note
     from .perception.lie_detector import LieDetectorSpotter
