@@ -67,7 +67,12 @@ MUTEX = "Local\\gamelab-perceive"
 SAVED_ADDRESS = ADDRESS + "-saved"
 SAVED_MUTEX = MUTEX + "-saved"
 WHICH = "GAMELAB_PERCEIVE"
-RING_SLOTS = 8        # look frames kept in shared memory: at ACTIVE_HZ the newest 267 ms (25 MB at 1366x768)
+# Look frames kept in shared memory: at ACTIVE_HZ the newest 533 ms (50 MB at 1366x768). A look's frame is copied out as
+# its state is taken, and one overwritten since comes out black (ServiceClient.frame_of: counted, `lost`). 8 until
+# 2026-10-26, 533 ms at the 15 frames a second live made then; at the 30 the native hot paths make, 267 ms, and on the
+# crowd's replays a look's frame was then overwritten 86-88 ms after the look had its state at the soonest (whole-screen
+# looks, their frames 254-268 ms old then: D:/MapleHelper-scratch/pconst/review-native-correct; master's 153-324 ms).
+RING_SLOTS = 16
 FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a look frame is half size)
 # Frames a second with a command that hunts attached (its looks' frames come at once, whatever the rate) ... Not 20
 # (tried on 2026-10-26): on the saved frames with a hunt's asks, 1.05-1.20 cores against 1.35-1.45 at 30
@@ -831,10 +836,14 @@ class Publisher:
         self.runner: Runner | None = None
         self.model = None
         self.w = {"scene": -1e9, "tracks": -1e9, "visible": None, "loot": [], "looked": []}
+        self.native, self.slow = "", False  # native.state() as the run started, and whether the C's not all in use
 
     def started(self, runner: Runner, map_id: int) -> None:
+        from .. import native  # (whether its C is in use: a DLL that couldn't be built shows only as fewer frames)
         self.runner, self.model = runner, runner.step.model
-        telemetry.emit("session", map=map_id, command="perceive", mode="watch")
+        self.native, self.slow = native.state(), not native.masked_in_c()
+        telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native)
+        self.log(f"perception: gamelab's C pieces {self.native}")
 
     def state(self, st: WorldState) -> None:
         if self.runner is None:
@@ -878,7 +887,8 @@ class Publisher:
                                total=meter.total, per_minute=None if rate is None else round(rate, 1))
 
     def status(self, now: float) -> str:
-        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute."""
+        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute; and gamelab's C
+        pieces while they're not all in use (native.state: perception slower)."""
         if self.runner is None:
             return ""
         step = self.runner.step
@@ -891,7 +901,7 @@ class Publisher:
         exp = "" if meter.at is None else f"; EXP {meter.at[1]:,}" + (
             "" if per_minute is None else f", {per_minute:.0f} a minute")
         return (f"; {len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'"
-                f"{exp}")
+                f"{exp}" + (f"; gamelab's C pieces {self.native}" if self.slow else ""))
 
     def close(self) -> None:
         telemetry.stop()
@@ -923,6 +933,7 @@ class ServiceClient(Feed):
         self.gaps = 0              # states the service dropped for this client (it read too slowly)
         self.served = self.refused = 0
         self.stale = 0             # states of a run before the one it was welcomed to, left out
+        self.lost = 0              # looks' frames overwritten in the ring before they were copied out (black: frame_of)
         self.on_state: Callable[[WorldState], None] | None = None
         self.alive, self.why = False, "not connected yet"
         self.welcome: dict | None = None
@@ -1154,10 +1165,13 @@ class ServiceClient(Feed):
             pass
 
     def frame_of(self, st: WorldState) -> np.ndarray:
+        """The state's look frame, copied out of the ring; black if it's no longer there (counted: `lost`; her
+        heading's pictures never learn a black box: perception.heading.Heading.add)."""
         ring = self.ring
         frame = None if ring is None or st.slot is None or st.epoch != self.epoch else ring.get(st.slot, st.seq)
         if frame is not None:
             return frame
+        self.lost += 1
         w, h = st.geo.frame_size
         return np.zeros((h, w, 3), np.uint8)
 

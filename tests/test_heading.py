@@ -179,6 +179,16 @@ def test_her_pictures_learn_from_looks_whose_keys_leave_no_doubt_and_are_kept(tm
     assert not Heading(STRETCHED, path).ready  # pictures of another window size aren't hers there
 
 
+def test_a_black_box_isnt_learnt():
+    """A look whose frame had left the perception service's ring comes out black (ServiceClient.frame_of): its box
+    isn't her, and isn't learnt, whatever the keys say."""
+    items = crops("native")
+    bank = Heading(NATIVE, None, background=False)
+    frame, tag = placed(items[0][0], "native")
+    assert not bank.learn(np.zeros_like(frame), tag, items[0][1], 100.0) and not bank.pool
+    assert bank.learn(frame, tag, items[0][1], 100.0) and len(bank.pool) == 1
+
+
 def test_a_file_of_her_pictures_cut_off_or_of_another_box_is_set_aside_for_the_seed_and_written_anew(tmp_path):
     """Her pictures in lab that can't be read (a file cut off) or are of another box (her box's size changed since)
     don't stop a look: the seed stands in, it's said, and the next save writes the file whole again."""

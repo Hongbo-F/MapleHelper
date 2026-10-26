@@ -3,8 +3,8 @@ monster search, its re-finds and the drops' search match on frames of the game w
 the game draws them (analysis.pasted), at the game's own 1366x768 and stretched to 1920x1080 (half size): the best place
 the same, the score within 3e-5 of OpenCV's wherever either scores 0.5 or more (more apart only in windows about flat,
 where OpenCV's float32 sums lose digits); flat and constant pictures, ties, a template too big for the int32 sums at
-once, AVX2 against plain C; the re-finds' answers the same with the C off, and the matches of a re-find handed over in
-one call only as far as they're looked at."""
+once, AVX2 against plain C (and OpenCV's without AVX2); the re-finds' answers the same with the C off, and the matches
+of a re-find handed over in one call only as far as they're looked at."""
 
 import dataclasses
 
@@ -202,12 +202,31 @@ def test_avx2_and_plain_c_give_the_same_scores():
         for cn in (3, 1):
             image, template, mask = scene_and_picture(3, (70, 90), (33, 41), cn)
             f.mm_simd(1)
-            a = match.masked_match(image, template, mask)
+            ready = native.prepare_masked(template, mask)  # (made ready while AVX2 is on: without it, OpenCV's)
+            a = native.masked_match(image, ready)
             f.mm_simd(0)
-            b = match.masked_match(image, template, mask)
-            assert np.array_equal(a, b)
+            b = native.masked_match(image, ready)
+            assert np.array_equal(a, b) and native.best_matches(image, [ready])[0][0] == a.max()
     finally:
         f.mm_simd(on)
+
+
+def test_without_avx2_the_masked_match_is_opencvs_its_plain_c_being_slower():
+    """On a CPU without AVX2 the C's masked match would be plain C, 3.4-3.7 times OpenCV's time (native.prepare_masked):
+    nothing is made ready for it then, and OpenCV matches."""
+    f = native.lib()
+    on = f.mm_simd(-1)
+    image, template, mask = scene_and_picture(5)
+    try:
+        f.mm_simd(0)
+        match._PREPARED.clear()
+        assert native.prepare_masked(template, mask) is None and match.prepared(template, mask) is None
+        assert np.array_equal(match.masked_match(image, template, mask), opencv(image, template, mask))
+        assert "not the masked match" in native.state()
+    finally:
+        f.mm_simd(on)
+        match._PREPARED.clear()
+    assert match.prepared(template, mask) is not None and native.state() == "in use, the masked match on AVX2"
 
 
 def test_a_window_a_view_of_the_frame_is_read_as_it_is_and_one_the_c_cant_read_goes_to_opencv():

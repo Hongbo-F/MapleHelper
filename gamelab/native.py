@@ -5,7 +5,8 @@ engine (motion.body.fly, as motion.physics.flight flies her); and where OpenCV w
 Called through ctypes, which lets go of the lock for the call. Each but the masked match does what the Python it
 stands in for does, to the bit, and each caller does it in Python (or OpenCV) when the DLL isn't there (tests compare
 the two; OpenCV's masked scores were within 1e-6 of the C's in colour and 3e-5 on brightness on a crowd's frames, a
-little more where a window is about flat: native.c).
+little more where a window is about flat: native.c). The masked match is the C's only where the CPU has AVX2: without
+it, its plain C took 3.4-3.7 times OpenCV's time over the frame loop's masked matches (`prepare_masked`).
 
 The DLL is built from native.c with MSVC 2022 (the Build Tools) the first time it's needed, into build/ next to
 this file (git-ignored), named for the source's hash: an edited source gets a DLL of its own, and a DLL another
@@ -134,6 +135,21 @@ def peaks(res: np.ndarray, integral: np.ndarray, th: int, tw: int, cover: float,
     return ys[:n], xs[:n], vs[:n]
 
 
+def masked_in_c() -> bool:
+    """Whether the masked match is the C's: the DLL in use, on a CPU with AVX2 (prepare_masked)."""
+    f = lib()
+    return f is not None and bool(f.mm_simd(-1))
+
+
+def state() -> str:
+    """Whether the C is in use, and the masked match with it (for the perception service's console: a DLL that
+    couldn't be built leaves everything to Python and OpenCV, slower, and nothing else would show it)."""
+    if lib() is None:
+        return f"off ({why or 'not built'}): Python and OpenCV instead, slower"
+    return "in use, " + ("the masked match on AVX2" if masked_in_c() else
+                         "but not the masked match (no AVX2 on this CPU: OpenCV's, faster than the plain C)")
+
+
 class Masked:
     """A template and its mask made ready for the masked match in C (native.c, mm_prepare: its sums, its mask's runs,
     its rows as int16), in bytes of its own; `shape` is the template's height, width and channels."""
@@ -146,10 +162,15 @@ class Masked:
 def prepare_masked(template: np.ndarray, mask: np.ndarray) -> Masked | None:
     """A template (uint8, one channel or three) and its mask (uint8, nonzero where it's matched: one channel, or one per
     channel alike, as perception.match's mask3) made ready for `masked_match` and `best_matches`. None without the
-    DLL, or for one it doesn't take (another dtype or channel count, a mask whose channels differ, a template row
-    too wide for its sums): OpenCV matches those."""
+    DLL, on a CPU without AVX2 (mm_simd), or for one it doesn't take (another dtype or channel count, a mask whose
+    channels differ, a template row too wide for its sums): OpenCV matches those.
+    Without AVX2 the C's dot products are plain C, the same scores but slower than OpenCV's: over the frame loop's
+    masked matches of 60 frames of a crowd (01:01 [700:760], 1,293 of them, and 1,601 with the drops'; one thread, best
+    of 3, the machine idle), 5.4 s against OpenCV's 1.6 and 5.2 against 1.4, a re-find's window 7.3 ms against 1.8
+    (its step-2 checks 0.31 against 0.53, the one kind it was faster at): D:/MapleHelper-scratch/pconst/pnative-finish/
+    simd_bench.py. (The tests compare the plain C with AVX2 on templates made ready while it was on.)"""
     f = lib()
-    if f is None or template.dtype != np.uint8 or mask.dtype != np.uint8:
+    if not masked_in_c() or template.dtype != np.uint8 or mask.dtype != np.uint8:
         return None
     cn = 1 if template.ndim == 2 else template.shape[2] if template.ndim == 3 else 0
     if cn not in (1, 3) or mask.shape[:2] != template.shape[:2] or mask.ndim not in (2, 3):
@@ -274,9 +295,7 @@ def main() -> int:
     except RuntimeError as e:
         print(f"couldn't build gamelab's native pieces: {e}")
         return 1
-    f = lib()
-    if f is not None:
-        print(f"the masked match's dot product: {'AVX2' if f.mm_simd(-1) else 'plain C (no AVX2 on this CPU)'}")
+    print(f"gamelab's C pieces: {state()}")
     return 0
 
 

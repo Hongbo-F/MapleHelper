@@ -1,13 +1,15 @@
 """Template matching shared by the monster and loot detectors (mobs.py, loot.py): the masked colour
 match, and keeping the best of overlapping detections.
 
-The masked match is in C where it's built (native.py, native.c's mm_*: OpenCV's score worked out exactly, in
-integers, within 1e-6 of OpenCV's own in colour and 3e-5 on brightness), else OpenCV's. In C each template is made
-ready once (`prepared`: its sums, its mask's runs), and a few templates over one window (a monster re-found) go in one
-call (`best_matches`). On the masked matches of 60 frames of a crowd (2026-10-26 01:01, the frame loop's and its
-searches': D:/MapleHelper-scratch/pconst/pnative/cmp_calls.py, one thread, best of 5) a re-find's window took 0.45 ms
-against OpenCV's 1.57, a step-2 check 0.05 against 0.58, a drop's strip 0.28 against 0.68 (4.5x over all of them), the
-best place and the 0.55, 0.6 and 0.9 thresholds' decisions the same on all 2,894 calls.
+The masked match is in C where it's built and the CPU has AVX2 (native.py, native.c's mm_*: OpenCV's score worked
+out exactly, in integers, within 1e-6 of OpenCV's own in colour and 3e-5 on brightness), else OpenCV's. In C each
+template is made ready once (`prepared`: its sums, its mask's runs), and a few templates over one window (a monster
+re-found) go in one call (`best_matches`). On the masked matches of 60 frames of a crowd (2026-10-26 01:01, the frame
+loop's and its searches': D:/MapleHelper-scratch/pconst/pnative/cmp_calls.py, one thread, best of 5) a re-find's window
+took 0.45 ms against OpenCV's 1.57, a step-2 check 0.05 against 0.58, a drop's strip 0.28 against 0.68, the best place
+and the 0.55, 0.6 and 0.9 thresholds' decisions the same on all 2,894 calls; about 4 times as fast over all of them
+(4.2-4.7x on the crowd's 1,293, 3.5-3.7x on the 1,601 with the drops': the review's re-measures, and
+pconst/pnative-finish/simd_bench.py's on an idle machine).
 """
 
 import math
@@ -30,8 +32,8 @@ _PREPARED: dict[tuple[int, int], tuple] = {}
 
 def prepared(template: np.ndarray, mask3: np.ndarray) -> "native.Masked | None":
     """`template` and its mask made ready for the masked match in C (native.prepare_masked), once for each pair of
-    arrays while they're kept (a detector's templates: made ready as it loads them); None without the C, or for one it
-    doesn't take."""
+    arrays while they're kept (a detector's templates: made ready as it loads them); None without the C or AVX2, or
+    for one it doesn't take."""
     if native.lib() is None:
         return None
     key = (id(template), id(mask3))

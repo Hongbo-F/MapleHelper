@@ -456,6 +456,41 @@ def test_perceive_on_saved_frames_has_a_pipe_mutex_and_info_file_of_its_own(tmp_
     assert (c.address, c.info.name) == (service.ADDRESS, "perceive.json")
 
 
+def test_a_looks_frame_gone_from_the_ring_comes_out_black_and_is_counted():
+    """A look's frame is copied out of the service's ring as its state is taken: one overwritten since (by the frame
+    RING_SLOTS later) comes out black, counted (`lost`, said as the command ends); her heading never learns from it
+    (test_heading). The ring holds 16 since the native hot paths made 30 frames a second: 533 ms, as 8 did at 15."""
+    from gamelab.localization.feed import Ring
+    from gamelab.localization.worldstate import WorldState
+    assert service.RING_SLOTS * 1000 / service.ACTIVE_HZ >= 500
+    w, h = STRETCHED.frame_size
+    ring = Ring(slots=2, shape=(h, w, 3))
+    c = ServiceClient("tour", start=False, ensure=None)
+    try:
+        c.ring, c.epoch = ring, 1
+        states = [WorldState(k, float(k), True, geo=STRETCHED, epoch=1,
+                             slot=ring.put(k, float(k), np.full((h, w, 3), k + 1, np.uint8))) for k in range(3)]
+        assert (c.frame_of(states[2]) == 3).all() and (c.frame_of(states[1]) == 2).all() and c.lost == 0
+        gone = c.frame_of(states[0])  # (frame 2 went into its slot)
+        assert gone.shape == (h, w, 3) and not gone.any() and c.lost == 1
+    finally:
+        c.ring = None
+        ring.close(unlink=True)
+
+
+def test_the_service_says_whether_gamelabs_c_is_in_use():
+    """A DLL that couldn't be built leaves perception to Python and OpenCV, slower: the service's console says which
+    as each run starts (and the session record has it), and every 10 s line while the C isn't all in use."""
+    from gamelab import native
+    said = []
+    pub = service.Publisher((100, 100), log=said.append)
+    runner = drawn_runner()
+    pub.started(runner, 1)
+    assert said == [f"perception: gamelab's C pieces {native.state()}"] and ("C pieces" in pub.status(0.0)) == pub.slow
+    assert pub.slow == (native.lib() is None or not native.masked_in_c())
+    runner.step.close()
+
+
 def _client_process(address: str, info: str) -> None:
     c = ServiceClient("doomed", address=address, info=Path(info), ensure=None, log=lambda m: None)
     c.ready(30.0)

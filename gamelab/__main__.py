@@ -662,8 +662,10 @@ def _close_perception() -> None:
         perception = _PERCEPTION.pop()
         down = "" if perception.alive else perception.why  # it went down before the command ended
         perception.close()
+        lost = getattr(perception, "lost", 0)  # looks whose frame had left the service's ring (frame_of)
         print(f"perception: {perception.served} states handed out, {perception.refused} times none in time, "
               f"{perception.connects} connections, {perception.gaps} states dropped for reading too slowly"
+              + (f", {lost} looks' frames gone from the ring (black)" if lost else "")
               + (f"; {down}" if down and down != "closed" else ""))
 
 

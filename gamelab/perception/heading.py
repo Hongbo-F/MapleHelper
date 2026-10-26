@@ -258,9 +258,11 @@ class Heading:
 
     def add(self, frame: np.ndarray, tag: tuple[int, int], side: str) -> bool:
         """Her box in a look frame where she faces `side` joins the pool, as it is (the pictures are made again by
-        `rebuild`); not where it's off the frame or under the minimap. True if it joined."""
+        `rebuild`); not where it's off the frame or under the minimap, nor a black box (a look whose frame had left
+        the perception service's ring by the time it was copied out: localization.service.ServiceClient.frame_of).
+        True if it joined."""
         box = cut(frame, tag, self.geo)
-        if box is None or under_minimap(her_box(tag, self.geo), self.geo):
+        if box is None or under_minimap(her_box(tag, self.geo), self.geo) or not box.any():
             return False
         self.pool.append(canonical(box, side).copy())
         self._new += 1
