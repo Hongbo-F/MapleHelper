@@ -30,7 +30,10 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    mp_potions, the MP potions her pet drank for her (world.Her.pet_mp); no_mp, casts pressed with too
                    little MP (nothing thrown); attacks, her attacks with either key; finishes, the regular attack
                    thrown to finish a monster her throws or its bar make low (`--attack choice`: its 'attack'
-                   records)
+                   records); mp_per_kill, the MP a kill of hers, and mp_potions_per_min; at_dead, her attacks chosen at
+                   a monster dead by then (DEAD_BEFORE_S, DEAD_NEAR: its 'attack' record's target against the world's
+                   deaths), casts_at_dead those of them Lucky Seven; dropped, the throws dropped at their last look
+                   before the key for a kill come in (behavior.hunter: 'dropped' events)
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
                    counts against the bar as a death does; left_map_at, the same for up held at a portal
                    (world.SimLeftMap)
@@ -454,6 +457,10 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "no_mp": world.no_mp,
         "attacks": world.attacks,
         "finishes": sum(1 for r in records if r.get("topic") == "attack" and r.get("why") == "finish"),
+        **_at_dead(world, records),
+        "mp_per_kill": round(world.mp_used / len(mine), 2) if mine else None,
+        "mp_potions_per_min": round(world.mp_potions / (end / 60), 3) if end else None,
+        "dropped": sum(1 for r in events if r.get("kind") == "dropped"),
         "died_at": world.died_at,
         "fell_out_at": world.fell_out_at,
         "left_map_at": world.left_map_at,
@@ -476,6 +483,32 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "ropes": sum(1 for r in events if r.get("kind") == "rope"),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
+
+
+DEAD_BEFORE_S = 2.5  # (_at_dead) an attack decided this soon after a death where its target was seen ...
+DEAD_NEAR = 40.0     # ... this near it (map units, the same kind on the same platform): at a dead monster. The live
+                     # count's (D:/MapleHelper-scratch/analysis-1025/mp-attack-check/atdead.py, the hunt of 2026-10-25
+                     # 23:43: 18 casts of Lucky Seven and 4 regular throws so in 11 minutes, the dying monster drawn 14-25
+                     # units from where its kill was placed)
+
+
+def _at_dead(world, records: list[dict]) -> dict:
+    """at_dead and casts_at_dead (see the top): her attacks whose target as the stack chose it (its 'attack' record:
+    behavior.attacks, the kind, platform and x it was seen at) had died DEAD_BEFORE_S or less before the choice, within
+    DEAD_NEAR of where it was seen (world.death_log: by her or another player). The world's own pick may take another
+    monster in its path then; what's counted is the choice made at one dead."""
+    from .fakes import EPOCH
+    deaths = getattr(world, "death_log", [])
+    n = casts = 0
+    for r in records:
+        if r.get("topic") != "attack" or r.get("x") is None:
+            continue
+        t = r["t"] - EPOCH
+        if any(t - DEAD_BEFORE_S <= dt <= t and kind == r.get("kind") and plat == r.get("platform")
+               and abs(x - r["x"]) <= DEAD_NEAR for dt, kind, plat, x in deaths):
+            n += 1
+            casts += r.get("key") == "lucky_seven"
+    return {"at_dead": n, "casts_at_dead": casts}
 
 
 def _travelling(world, records: list[dict], end: float) -> dict:
@@ -570,7 +603,7 @@ def _run_one_args(a: tuple) -> dict:
 
 
 COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "mp_per_min", "mp_potions",
-           "finishes", "died_at", "fell_out_at",
+           "mp_per_kill", "casts_at_dead", "at_dead", "finishes", "died_at", "fell_out_at",
            "left_map_at",
            "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost",
            "alive_s", "hurt", "fresh_hurt", "wait_s", "wait_hp_lost")

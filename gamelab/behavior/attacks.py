@@ -247,11 +247,13 @@ class Attacks:
                   "nothing in its way": ""}.get(why, why)
         self.log(f"    {attack.name}: {what}" + (f"; {reason}" if reason else "")
                  + ("" if mp is None or why == "MP" else f" (MP {mp:.0f})"))
-        if telemetry.recording():
+        if telemetry.recording():  # (where its target was seen too: sim.harness counts the throws at the dead)
             telemetry.emit("attack", key=attack.key, why=why, kind=None if target is None else target.kind,
                            left=None if alive is None else round(alive.hp),
                            dead=None if left is None else round(left.dead, 3), hp=hp,
-                           mp=None if mp is None else round(mp))
+                           mp=None if mp is None else round(mp),
+                           platform=None if target is None else target.platform,
+                           x=None if target is None else round(target.x, 1))
 
 
 def _believable(bar: float | None) -> bool:

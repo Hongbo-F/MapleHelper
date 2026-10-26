@@ -209,6 +209,28 @@ def test_outcomes_are_read_from_the_world(model):
     assert harness.outcomes(w, [], DROP_LIFE + 1)["drops_share"] == 0.0
 
 
+def test_attacks_chosen_at_a_monster_dead_by_then_are_counted_from_their_records(model):
+    """at_dead, casts_at_dead (harness._at_dead): an 'attack' record whose target (its kind, platform and x) had died
+    within DEAD_BEFORE_S before it, within DEAD_NEAR of where it was seen; mp_per_kill; dropped, the 'dropped'
+    events."""
+    from gamelab.sim.fakes import EPOCH
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 300.0)], facing="right"))
+    tap(w, 0.0, "f", 0.04)  # one star kills a snail
+    w.advance(2.0)
+    (died,) = w.death_log
+    t, kind, pid, x = died
+    assert kind == "snail" and pid == c.id and x == pytest.approx(300.0, abs=30)
+
+    def attack(dt, key="lucky_seven", dx=10.0, on=c.id):
+        return {"topic": "attack", "t": EPOCH + t + dt, "key": key, "kind": "snail", "platform": on, "x": x + dx}
+    records = [attack(0.4), attack(0.9, "attack"), attack(0.5, dx=60.0), attack(0.5, on=None), attack(3.0),
+               attack(-0.2), {"topic": "event", "kind": "dropped"}]
+    out = harness.outcomes(w, records, 60.0)
+    assert (out["at_dead"], out["casts_at_dead"], out["dropped"]) == (2, 1, 1)
+    assert out["mp_per_kill"] == 0.0 and out["mp_potions_per_min"] == 0.0
+
+
 def test_lucky_seven_does_three_stars_a_cast(model):
     """`--world lucky-seven` (world.Her.stars): a pig, 3 of the regular attack's stars (HITS), dies to one cast."""
     c = plat(model, 500, 400)

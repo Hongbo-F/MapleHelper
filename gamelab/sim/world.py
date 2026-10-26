@@ -969,6 +969,7 @@ class World:
         self.pet_since = 0.0
         self.hp_low = hp                # her lowest HP so far
         self.kill_log: list[tuple[float, str, int, str]] = []  # (t, kind, platform, "her" or "rival")
+        self.death_log: list[tuple[float, str, int, float]] = []  # ... and where each died: (t, kind, platform, x)
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.fresh_log: list[tuple[float, float]] = []  # ... of those, the touches by a monster within FRESH_S of its
                                                         # respawn (from its spawn point)
@@ -1879,6 +1880,7 @@ class World:
         m.alive, m.died_at, m.died_x = False, t, mx
         self.kills[m.kind] = self.kills.get(m.kind, 0) + 1
         self.kill_log.append((t, m.kind, m.platform.id, "her"))
+        self.death_log.append((t, m.kind, m.platform.id, mx))
         self.exp += self.model.mob_exp.get(m.name, 1)
         self.note(f"{what} kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
         p = m.platform
@@ -1973,6 +1975,7 @@ class World:
         t, mx = self.t, m.at(self.t)
         m.alive, m.died_at, m.died_x = False, t, mx
         self.kill_log.append((t, m.kind, m.platform.id, "rival"))
+        self.death_log.append((t, m.kind, m.platform.id, mx))
         self.note(f"another player kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
         if self.realism.shared_exp and m.hp < m.hp_max:
             share = round(self.model.mob_exp.get(m.name, 1) * (m.hp_max - m.hp) / m.hp_max)
