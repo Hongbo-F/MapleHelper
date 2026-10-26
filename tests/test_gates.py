@@ -16,7 +16,7 @@ from PIL import Image
 
 from gamelab.__main__ import main
 from gamelab.analysis import pasted
-from gamelab.perception import gates, mobs, sprites
+from gamelab.perception import gates, match, mobs, sprites
 from gamelab.perception.mobs import INDEX, SCALE_FILE, MobDetector
 from gamelab.screen import NATIVE, STRETCHED
 
@@ -222,10 +222,10 @@ def test_one_places_score_is_the_masked_matchs():
     tpl, patch = (rng.integers(0, 256, (40, 44, 3), np.uint8) for _ in range(2))
     mask = rng.random((40, 44)) > 0.4
     patch[mask] = np.clip(0.6 * tpl[mask] + 0.4 * patch[mask], 0, 255).astype(np.uint8)
-    cv = float(mobs.masked_match(patch, tpl, np.dstack([mask.astype(np.uint8)] * 3))[0, 0])
+    cv = float(match.masked_match(patch, tpl, np.dstack([mask.astype(np.uint8)] * 3))[0, 0])
     assert abs(mobs._score(patch, tpl, mask) - cv) < 1e-6 and cv > 0.5
     flat = np.full_like(patch, 90)
-    assert mobs._score(flat, tpl, mask) == -1.0 == float(mobs.masked_match(flat, tpl, np.dstack([mask] * 3)
+    assert mobs._score(flat, tpl, mask) == -1.0 == float(match.masked_match(flat, tpl, np.dstack([mask] * 3)
                                                                              .astype(np.uint8))[0, 0])
 
 

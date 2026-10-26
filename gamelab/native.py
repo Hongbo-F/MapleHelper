@@ -1,8 +1,11 @@
 """gamelab's pieces in C (native.c), where Python itself was the cost: the monster search's step-1 bookkeeping,
 which numpy did holding Python's lock (perception.mobs), and her flight, stepped 5 ms at a time by the movement
-engine (motion.body.fly, as motion.physics.flight flies her).
-Called through ctypes, which lets go of the lock for the call. Each does what the Python it stands in for does,
-to the bit, and each caller does it in Python when the DLL isn't there (tests compare the two).
+engine (motion.body.fly, as motion.physics.flight flies her); and where OpenCV was: the masked colour match
+(perception.match: the monsters' re-finds and step-2 checks, the drops), OpenCV's score worked out exactly.
+Called through ctypes, which lets go of the lock for the call. Each but the masked match does what the Python it
+stands in for does, to the bit, and each caller does it in Python (or OpenCV) when the DLL isn't there (tests compare
+the two; OpenCV's masked scores were within 1e-6 of the C's in colour and 3e-5 on brightness on a crowd's frames, a
+little more where a window is about flat: native.c).
 
 The DLL is built from native.c with MSVC 2022 (the Build Tools) the first time it's needed, into build/ next to
 this file (git-ignored), named for the source's hash: an edited source gets a DLL of its own, and a DLL another
@@ -36,10 +39,15 @@ _tried = False
 _lock = threading.Lock()  # the monster search's threads all ask at once
 why = ""  # why the DLL isn't in use, if it isn't
 
-_P, _I, _D, _F = ctypes.c_void_p, ctypes.c_int, ctypes.c_double, ctypes.c_float
+_P, _I, _D, _F, _L = ctypes.c_void_p, ctypes.c_int, ctypes.c_double, ctypes.c_float, ctypes.c_longlong
 SIGNATURES = {  # each function's (return type, argument types)
     "silhouette_peaks": (_I, [_P, _I, _I, _P, _I, _I, _D, _D, _F, _P, _P, _P, _I]),
     "fly": (_I, [_D, _D, _D, _D, _I, _D, _D, _P, _I, _P, _P, _P, _I, _I, _P, _P, _P, _P, _P, _P, _P]),
+    "mm_simd": (_I, [_I]),
+    "mm_prepare_size": (_L, [_I, _I, _I]),
+    "mm_prepare": (_I, [_P, _L, _P, _L, _I, _I, _I, _I, _P, _L]),
+    "mm_match": (_I, [_P, _I, _I, _L, _I, _P, _P]),
+    "mm_best": (_I, [_P, _I, _I, _L, _I, _P, _I, _D, _P, _P, _P]),
 }
 
 
@@ -126,6 +134,86 @@ def peaks(res: np.ndarray, integral: np.ndarray, th: int, tw: int, cover: float,
     return ys[:n], xs[:n], vs[:n]
 
 
+class Masked:
+    """A template and its mask made ready for the masked match in C (native.c, mm_prepare: its sums, its mask's runs,
+    its rows as int16), in bytes of its own; `shape` is the template's height, width and channels."""
+    __slots__ = ("buf", "address", "shape")
+
+    def __init__(self, buf: np.ndarray, shape: tuple[int, int, int]):
+        self.buf, self.address, self.shape = buf, buf.ctypes.data, shape
+
+
+def prepare_masked(template: np.ndarray, mask: np.ndarray) -> Masked | None:
+    """A template (uint8, one channel or three) and its mask (uint8, nonzero where it's matched: one channel, or one per
+    channel alike, as perception.match's mask3) made ready for `masked_match` and `best_matches`. None without the
+    DLL, or for one it doesn't take (another dtype or channel count, a mask whose channels differ, a template row
+    too wide for its sums): OpenCV matches those."""
+    f = lib()
+    if f is None or template.dtype != np.uint8 or mask.dtype != np.uint8:
+        return None
+    cn = 1 if template.ndim == 2 else template.shape[2] if template.ndim == 3 else 0
+    if cn not in (1, 3) or mask.shape[:2] != template.shape[:2] or mask.ndim not in (2, 3):
+        return None
+    if mask.ndim == 3:
+        if mask.shape[2] not in (1, cn) or (mask.shape[2] > 1 and not (mask == mask[..., :1]).all()):
+            return None
+        mask = mask[..., 0]
+    t, m = np.ascontiguousarray(template), np.ascontiguousarray(mask)
+    th, tw = t.shape[:2]
+    size = f.mm_prepare_size(th, tw, cn)
+    buf = np.empty(size, np.uint8)
+    if f.mm_prepare(t.ctypes.data, t.strides[0], m.ctypes.data, m.strides[0], m.strides[1], th, tw, cn,
+                    buf.ctypes.data, size) != 0:
+        return None
+    return Masked(buf, (th, tw, cn))
+
+
+def _takes(image: np.ndarray, cn: int) -> bool:
+    """Whether the C reads `image` as it is: uint8, `cn` channels, each row's pixels side by side (a view of a frame's
+    box is; a flipped one isn't)."""
+    if image.dtype != np.uint8 or image.strides[0] <= 0:
+        return False
+    if image.ndim == 2:
+        return cn == 1 and image.strides[1] == 1
+    return image.ndim == 3 and image.shape[2] == cn and image.strides[1] == cn and image.strides[2] == 1
+
+
+def masked_match(image: np.ndarray, template: Masked) -> np.ndarray | None:
+    """The masked, normalised match (OpenCV's TM_CCOEFF_NORMED with a mask, worked out exactly: native.c) of a
+    prepared template at every place in `image`: float32 scores, -1 where it's undefined (a flat window). None if the
+    image isn't one the C takes (`_takes`), or is smaller than the template."""
+    f = lib()
+    th, tw, cn = template.shape
+    if f is None or not _takes(image, cn) or image.shape[0] < th or image.shape[1] < tw:
+        return None
+    ih, iw = image.shape[:2]
+    out = np.empty((ih - th + 1, iw - tw + 1), np.float32)
+    if f.mm_match(image.ctypes.data, ih, iw, image.strides[0], cn, template.address, out.ctypes.data) != 0:
+        return None
+    return out
+
+
+def best_matches(image: np.ndarray, templates: list[Masked],
+                 stop: float = float("inf")) -> list[tuple[float, int, int]] | None:
+    """Each prepared template's best score over `image` and where (x, y), as cv2.minMaxLoc gives them of
+    `masked_match` (the first highest, row by row), in turn: up to the first whose best is `stop` or more. All in one
+    call, the image loaded once. None as for `masked_match`."""
+    f = lib()
+    n = len(templates)
+    if f is None or not n:
+        return None
+    cn = templates[0].shape[2]
+    if not _takes(image, cn):
+        return None
+    ih, iw = image.shape[:2]
+    pointers = (ctypes.c_void_p * n)(*[t.address for t in templates])
+    scores, xs, ys = (ctypes.c_float * n)(), (ctypes.c_int * n)(), (ctypes.c_int * n)()
+    k = f.mm_best(image.ctypes.data, ih, iw, image.strides[0], cn, pointers, n, stop, scores, xs, ys)
+    if k < 0:
+        return None
+    return [(scores[i], xs[i], ys[i]) for i in range(k)]
+
+
 class Map:
     """A map's platforms laid out for `fly`: each one's ends, the y of its lower end and its segments (x1, y1, x2,
     y2), in the map's order. Arrays of its own, kept with it while it's in use (motion.physics keeps one per map)."""
@@ -186,6 +274,9 @@ def main() -> int:
     except RuntimeError as e:
         print(f"couldn't build gamelab's native pieces: {e}")
         return 1
+    f = lib()
+    if f is not None:
+        print(f"the masked match's dot product: {'AVX2' if f.mm_simd(-1) else 'plain C (no AVX2 on this CPU)'}")
     return 0
 
 

@@ -48,7 +48,7 @@ from PIL import Image
 from gamedata.paths import COPY, OUT
 
 from ..screen import STRETCHED, Geometry
-from . import drops
+from . import drops, match
 from .kinds import kind_of
 from .match import masked_match, suppress_overlaps
 from .mobs import SCALE_FILE, frame_size, picture_scale
@@ -367,7 +367,9 @@ class LootDetector:
         held = {t.kind for t in self.templates}
         self.templates = [t._replace(twins=_twins(folder, t, held, shrink)) for t in self.templates]
         self.height = max(t.rgb.shape[0] for t in self.templates)
-        self._pool = ThreadPoolExecutor(THREADS)  # OpenCV lets go of the GIL while matching
+        self._pool = ThreadPoolExecutor(THREADS)  # OpenCV and the C let go of the GIL while matching
+        for t in self.templates:  # made ready for the C's masked match (match.prepared) now, not in the first search
+            match.prepared(*(t.gray if t.gray is not None else (t.rgb, t.mask3)))
 
     def detect(self, frame: np.ndarray, box: tuple[int, int, int, int] | None = None,
                mesos_only: bool = False) -> list[Item]:

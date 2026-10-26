@@ -47,8 +47,9 @@ from PIL import Image
 
 from .. import native, paths
 from ..screen import STRETCHED
+from . import match
 from .gates import FOG_ALPHAS, Gates, kind_histograms, learn
-from .match import masked_match, suppress_overlaps
+from .match import best_match, best_matches, suppress_overlaps
 
 
 ASSETS = paths.ASSETS / "mobs"
@@ -402,6 +403,10 @@ class MobDetector:
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind)
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
+        for t in (t for ts in self.templates.values() for t in ts):  # made ready for the C's masked match now too
+            match.prepared(t.rgb, t.mask3)
+            if t.step1 is not None:
+                match.prepared(*t.step1)
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         """Monsters in `frame` (RGB, a look frame at `frame_scale`). `rows` limits the search to a band."""
@@ -441,28 +446,35 @@ class MobDetector:
             return None
         window = frame[y0:y1, x0:x1]
         cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+
+        def fits(t: MobTemplate) -> bool:
+            return window.shape[0] >= t.rgb.shape[0] and window.shape[1] >= t.rgb.shape[1]
+
         best, last = None, None
+        first = []  # (its last template, or both ways a cut-out that doesn't know its facing)
         for t in self.templates[kind]:
             if not template or t.name != template or (facing and t.facing and t.facing != facing):
                 continue
             last = last or t
-            th, tw = t.rgb.shape[:2]
-            if window.shape[0] < th or window.shape[1] < tw:
-                continue
-            _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, t.rgb, t.mask3))
+            if fits(t):
+                first.append(t)
+        # Each list's matches in one call where the masked match is in C (match.best_matches: the window loaded once),
+        # their answers taken in turn as before.
+        for t, (score, (x, y)) in zip(first, best_matches(window, [(t.rgb, t.mask3) for t in first])):
             if score >= THRESHOLD and (best is None or score > best.score):
+                th, tw = t.rgb.shape[:2]
                 best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
         # A hidden track's (without `fallback`) too. Tried with its last template only (2026-10-26: 6.4 ms a frame less
         # on the saved frames of 01:01), a crowd's tracks went otherwise: on 600 frames of 00:25, 142 frames' states
         # differed and 2 kills more were hers, given to tracks left hidden 10-20 s at one x (D:/MapleHelper-scratch/
         # cpu/review-safety/perc; README, CPU).
         if self.search != 1 and last is not None and (best is None or best.score < REFIND_GOOD):
-            for t in _next_frames(self.templates[kind], last):  # (finer than step 1's: its frames differ)
-                th, tw = t.rgb.shape[:2]
-                if window.shape[0] < th or window.shape[1] < tw:
-                    continue
-                _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, t.rgb, t.mask3))
+            # (finer than step 1's: its frames differ)
+            after = [t for t in _next_frames(self.templates[kind], last) if fits(t)]
+            pictures = [(t.rgb, t.mask3) for t in after]
+            for t, (score, (x, y)) in zip(after, best_matches(window, pictures, stop=REFIND_GOOD)):
                 if score >= THRESHOLD and (best is None or score > best.score):
+                    th, tw = t.rgb.shape[:2]
                     best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
                     if score >= REFIND_GOOD:
                         break
@@ -896,5 +908,5 @@ def _match_at(frame: np.ndarray, tpl: np.ndarray, mask: np.ndarray, cx: int, cy:
     window = frame[y0:y0 + th + 2 * slack, x0:x0 + tw + 2 * slack]
     if window.shape[0] < th or window.shape[1] < tw:
         return None
-    _, score, _, (x, y) = cv2.minMaxLoc(masked_match(window, tpl, mask))
+    score, (x, y) = best_match(window, tpl, mask)
     return float(score), x0 + x + tw // 2, y0 + y + th // 2, tw, th
