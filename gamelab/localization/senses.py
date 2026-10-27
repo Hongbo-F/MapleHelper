@@ -91,8 +91,11 @@ MAX_AGE_S = 0.1
 # A look for monsters (the next throw is decided on it) is of a frame shown when her last throw at a monster's kill has
 # shown, if it killed (`shows`: behavior.attacks.KILL_SHOWN_S after its key), where that's at most this far off: she's
 # locked until 0.79 s after the key (0.89 after a jump throw), arrows swallowed until 0.8, and a throw's decision took
-# 13-21 ms after its look live (p99 79-95 ms, 2,737 throws of 2026-10-26), so a look 0.4 s after the key costs her
-# nothing, and has the kill: the throw after it goes at the next monster at once. Live (the grinds of 2026-10-26 21:04
+# 13-21 ms after its look live (p99 79-95 ms, 2,737 throws of 2026-10-26), so a look 0.4 s after the key costs her no
+# throwing time, and has the kill: the throw after it goes at the next monster at once. The hunt loop's look decides her
+# trips too (Hunt._look: its pass throws from it), so it waits as well: live a trip chain after a throw would go out a
+# median 0.15 s later where her lock didn't hold it anyway (145 of 230 in 74 minutes: 0.31 s a minute at most, against
+# the drops' re-decisions' 0.46; D:/MapleHelper-scratch/akill/review-behaviour/trip_delay.py). Live (the grinds of 2026-10-26 21:04
 # and 21:18) the look came a median 0.27 s after the key (its record), where the perception service had a kill's gain a
 # median 0.22 s after the killing key, 97.4% of 237 by 0.43 s (D:/MapleHelper-scratch/akill/diag): 86 throws were
 # dropped at their key for a kill come in since (4.4 a minute, Hunter._still) and decided again after the lock, and 36

@@ -492,16 +492,40 @@ def test_a_throw_whose_kill_would_have_shown_by_a_frame_with_no_gain_since_didnt
     assert b.reckon(m).dead == pytest.approx(0.72, abs=0.01)  # (unheard: as before)
     b.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, frozenset({"horny-mushroom"}))])  # a gain named another kind
     assert b.reckon(m).dead == 0.0
-    for kinds in (frozenset({"green-mushroom"}), None):  # one that can be its kill (or any: a share, unread)
+    for kinds in (frozenset({"green-mushroom"}), None):  # one that can be its kill (or any: a share, unread) ...
         c, m = two_casts()
         c.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, kinds)])
-        assert c.reckon(m).dead > 0.6, kinds
+        # ... the second cast's (0.3 s after its key), not the first's (1.15 s): as heard at t0 + 1.0, alive after it
+        assert c.reckon(m).dead == pytest.approx(left.dead) and c.left(m) == pytest.approx(82, abs=1), kinds
     kills = []
     d, m = two_casts(kills)
     d.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, frozenset({"green-mushroom"}))])
     kills.append(Kill(t0 + 1.35, "green-mushroom", 1, -200.0, 0.0, 1, "green-mushroom", t0 + 1.2))  # placed elsewhere
     d.on_look(_look([], t=t0 + 1.35))
     assert d.reckon(m).dead == 0.0  # (its gain was that one's)
+
+
+def test_a_gain_can_be_a_throws_kill_only_as_soon_after_its_key_as_a_kill_shows():
+    """Attacks._unkilled (review, 2026-10-27): a gain can be a throw's kill only GAIN_AFTER_KEY (0.1-0.6 s) after its
+    key, when its kill's would show: one of no kind known 0.7 s after a cast, or 0.05 s after (the throw before's),
+    rules that cast's kill out all the same; one 0.3 s after doesn't. Any gain since counted at first, and replayed
+    through the grind of 2026-10-26 21:34, a gain of no kind known 0.66 s after a cast kept the one before it 72% dead:
+    the next five throws at that Horny Mushroom, alive, went out the regular attack (live it took 4 casts)."""
+    from gamelab.localization.monsters import GAIN_AFTER_KEY
+    t0 = time.monotonic()
+
+    def one_cast(after):
+        a, _ = _attacks()
+        a.on_look(_look([("green-mushroom", 250.0, None)], t=t0))
+        assert a.key("right") == KEYS7.lucky_seven.name
+        a.on_throw(t0 + 0.05, "right")
+        a.on_look(_look([], t=t0 + 0.2))  # unseen since: under its damage numbers
+        a.heard(t0 + 1.05, [] if after is None else [(t0 + 0.05 + after, None)])  # (None: a share, or not read yet)
+        return a.reckon(a.marks[0].m).dead
+
+    assert one_cast(None) == 0.0
+    assert one_cast(0.3) == pytest.approx(0.35, abs=0.02)  # (a cast at level 10 kills a Green Mushroom so, its misses in)
+    assert one_cast(GAIN_AFTER_KEY[1] + 0.1) == 0.0 and one_cast(GAIN_AFTER_KEY[0] - 0.05) == 0.0
 
 
 def test_a_throws_pending_time_is_its_attack_keys_and_the_next_look_waits_for_its_kill_to_show():

@@ -25,9 +25,9 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
   last look and not landed by LANDS_S (SHOWS_S). Before (review, 2026-10-25) such a bar counted for nothing, and in
   the simulator with the bars drawn empty she reckoned a target's HP 86-98 off (median), throwing no regular attack
   to finish one in 518 throws. Her EXP says it sooner: a look or glance of a frame KILL_SHOWN_S after a throw's key,
-  with no gain since that can be its target's kill (`heard`: of its kind, a share of one, or one not read; not one a
-  kill of hers was placed on elsewhere), rules out what that throw would have killed it with too, seen or not (its
-  damage still taken off as drawn). A throw is chosen by what the monster has left with the chance it's dead
+  with no gain GAIN_AFTER_KEY after it that can be its target's kill (`heard`: of its kind, a share of one, or one not
+  read; not one a kill of hers was placed on elsewhere), rules out what that throw would have killed it with too, seen
+  or not (its damage still taken off as drawn). A throw is chosen by what the monster has left with the chance it's dead
   (DEAD_CHOICE: Lucky Seven's throws saved count only if it's alive). A monster she hasn't thrown at, whose bar no
   look reads, has its whole HP. Others' damage to it isn't known: a monster's bar shows its damage to whoever dealt
   it, and the bars on monsters she hadn't thrown at in the live hunts of 2026-10-24 didn't go with other players by
@@ -66,7 +66,7 @@ from .. import telemetry
 from ..attack import choice
 from ..attack.choice import Attack, Left
 from ..localization.mapdata import MapModel
-from ..localization.monsters import TRACK_SLACK, Monster, bodies, seen_again
+from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, bodies, seen_again
 from ..localization.scene import Scene
 from ..perception.kinds import kind_of
 from .ledger import dying, in_path
@@ -79,18 +79,20 @@ LANDS_S = 0.6      # s after a throw's attack key by which its damage has shown 
 SHOWS_S = 0.15     # s after a throw's attack key that its damage may first show: a kill's gain live from 0.15 s on, a
                    # bar's drop from 0.21 (0.47 until 2026-10-26, about when the star leaves)
 # s after a throw's attack key by which a frame shows its kill's EXP gain, if it killed: a look or glance of a frame this
-# late with no EXP gain since the key (`heard`) rules out what that throw would have killed its target with (Left.alive),
-# its damage still taken off as drawn (LANDS_S says when that shows). Live on 2026-10-26 (the grinds of 21:04 and 21:18,
+# late with no EXP gain GAIN_AFTER_KEY after the key (`heard`, `_unkilled`) rules out what that throw would have killed
+# its target with (Left.alive), its damage still taken off as drawn (LANDS_S says when that shows). Live on 2026-10-26 (the grinds of 21:04 and 21:18,
 # the service at 30 frames a second) the perception service had the gain of 97.4% of 237 kills by 0.43 s after the
 # killing key (its frame about 0.03 s before), 98.4% by 0.5, the median 0.22 (D:/MapleHelper-scratch/akill/diag
 # kills.py); last night's service, at about 15 a second, 50-96% by 0.43. Until then a kill was ruled out only by a look
 # LANDS_S after its throw that saw its target, and the look a throw was decided on came 0.2-0.34 s after the key before:
 # 232 of 652 throws at a target went out reckoned 50% dead or more, 224 of them alive at the key (diag/deadcasts.py),
 # and an unseen one's reckoning only grew with her throws (66% -> 89% -> 96% dead, at a Green Mushroom alive). Replayed
-# through this code (D:/MapleHelper-scratch/akill/work/replay.py: the grinds of 21:04-22:28, 2,525 throws at a target
-# with the truth known): reckoned 50% dead or more at the key on 89 (30 at a monster dead by then, 15 that killed it, 44
-# alive), where the rule before had 853 (33, 250, 570); the hunts of 23:43-01:28 (2,123, the service slower) 259 (158,
-# 21, 80) against 737 (162, 169, 406): those left mostly had a gain since the throw that could be its kill.
+# through this code (D:/MapleHelper-scratch/akill/fix/replay.py: the grinds of 21:04-22:28, 2,525 throws at a target
+# with the truth known): reckoned 50% dead or more at the key on 72 (28 at a monster dead by then, 11 that killed it, 33
+# alive), where master's reckoning replayed had 853 (33, 250, 570), within 0.02 of the live records' on 2,377 of 2,525;
+# the hunts of 23:43-01:28 (2,123, the service slower) 253 (158, 19, 76) against 737 (162, 169, 406), master's replayed
+# matching live's on 1,352 of 2,120 only (the code that ran then flagged 285): those left mostly had a gain that could be
+# its kill when it would show.
 KILL_SHOWN_S: float | None = 0.4  # (None: no throw's kill ruled out so, as until 2026-10-26)
 GAINS_KEPT_S = 5.0  # s her EXP gains are kept for `heard` (her throws' marks have a pending throw this long at most)
 GAIN_SAME_S = 0.02  # s: a placed kill's gain (ledger.Kill.gained) is the one `heard` has within this
@@ -102,8 +104,9 @@ DEAD_LIKELY = 0.5  # a monster in a throw's way this likely dead by her throws (
 # Lucky Seven saves counts only if it's alive), not by what it has left if alive alone (False: as until 2026-10-26).
 # Only with KILL_SHOWN_S: on the stale chances before it, replayed through the live grinds of 2026-10-26 21:04-22:28
 # (74 minutes, 2,657 throws) it turned 274 casts at monsters alive at the key into regular stars, 54 of them casts that
-# killed, against 11 at monsters dead by then; with it, 18 (3 that killed) against 9, and through the hunts of
-# 2026-10-25/26 23:43-01:28 (71 minutes) 12 (4) against 18 (D:/MapleHelper-scratch/akill/work/replay.py, calib.py).
+# killed, against 11 at monsters dead by then; with it, 3 (1 that killed) against 2, and through the hunts of
+# 2026-10-25/26 23:43-01:28 (71 minutes) 9 (4) against 17 (D:/MapleHelper-scratch/akill/fix/replay.py; 18 (3) against 9
+# and 12 (4) against 18 before `_unkilled` took a gain only GAIN_AFTER_KEY after its throw's key).
 DEAD_CHOICE = True
 # s after a cast's attack key that its MP may first show on her bar (MP_FIRST_S), and by when it has (MP_SHOWS_S): live
 # on 2026-10-25 (the hunt of 23:43, 1366x768) a cast that went out first showed 0.21-0.53 s after its key, the bar
@@ -245,8 +248,8 @@ class Attacks:
         changes of her EXP number; Hunter._still, the feed's gains not drained yet at a throw's key): `gains`, the frames
         her EXP went up in since the last, each with the kinds of kill its size names (None: any; a gain no kill of the
         map's explains, a share of one another player hurt too, may be any: hunter.kinds_of). A throw keyed KILL_SHOWN_S
-        or more before the newest such frame, with no gain since its key that can be its target's kill, didn't kill
-        (`reckon`); a gain a kill of hers was placed on (ledger.Kill.gained) is that monster's, no other's (on_look)."""
+        or more before the newest such frame, with no gain GAIN_AFTER_KEY after its key that can be its target's kill,
+        didn't kill (`reckon`); a gain a kill of hers was placed on (ledger.Kill.gained) is that monster's, no other's (on_look)."""
         self._gains = {g: k for g, k in self._gains.items() if t - g < GAINS_KEPT_S}
         self._gains.update((g, k) for g, k in gains if t - g < GAINS_KEPT_S)  # (a look's after a glance's: its meter's)
         self._heard = max(self._heard, t)
@@ -258,9 +261,16 @@ class Attacks:
 
     def _unkilled(self, t: float, kind: str) -> bool:
         """Whether a throw keyed at `t` at a monster of `kind` is known not to have killed it: a frame KILL_SHOWN_S after
-        it has shown her EXP, with no gain since that can be its kill (`heard`)."""
+        it has shown her EXP, with no gain that can be its kill (`heard`) GAIN_AFTER_KEY after its key, when its kill's
+        would show. Any gain since counted at first (review, 2026-10-27): replayed through the grind of 21:34, a gain of
+        no kind known 0.66 s after a cast kept the one before it, keyed 0.94 s earlier, 72% dead, and the next five
+        throws at that Horny Mushroom, alive, went out the regular attack 'finishing it' (4 casts killed it live);
+        bounded, over the grinds of 21:04-22:28 and the hunts of 23:43-01:28, 12 casts turned regular at a monster alive
+        at the key where there were 30, and 19 at the dead where there were 27 (D:/MapleHelper-scratch/akill/fix/
+        replay.py; review-behaviour/cmp_win.py)."""
+        lo, hi = GAIN_AFTER_KEY
         return KILL_SHOWN_S is not None and self._heard >= t + KILL_SHOWN_S and not any(
-            g > t and (kinds is None or kind in kinds) for g, kinds in self._gains.items())
+            t + lo <= g <= t + hi and (kinds is None or kind in kinds) for g, kinds in self._gains.items())
 
     # --- at every throw --------------------------------------------------------------------------
 
@@ -351,7 +361,8 @@ class Attacks:
     def reckon(self, m: Monster) -> Left | None:
         """What monster `m` has left as she reckons it (see the module's docstring), her throws at it that no look
         has seen land yet taken off, and of those, what the ones whose kill would have shown by now (KILL_SHOWN_S, with
-        no EXP gain since) would have killed it with ruled out; None for a kind whose HP isn't known."""
+        no EXP gain GAIN_AFTER_KEY after its key) would have killed it with ruled out; None for a kind whose HP isn't
+        known."""
         stats = self.stats.get(m.kind)
         if stats is None:
             return None
