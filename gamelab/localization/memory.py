@@ -56,6 +56,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from .. import telemetry
+from ..character import THIEF_SHAPE, Shape
 from ..perception.mobs import Mob
 from ..perception.minimap import MINIMAP_BOX, minimap_box
 from ..screen import STRETCHED
@@ -170,10 +171,12 @@ def cover_of(s: Scene) -> Cover | None:
 
 class Memory:
     """The monsters she has seen, kept across looks (see the top). `kills`: the ledger's kills so far (behavior.ledger:
-    each with t, kind, platform and x), read at every look for the new ones; None: none told."""
+    each with t, kind, platform and x), read at every look for the new ones; None: none told. `shape`: what her attacks
+    are to it (gamelab.character.Shape; the thief's: tracking's HIDE_S, HIT_AFTER_S, THROW_REACH, THROW_DY)."""
 
-    def __init__(self, model: MapModel, kills: Callable[[], list] | None = None):
+    def __init__(self, model: MapModel, kills: Callable[[], list] | None = None, shape: Shape = THIEF_SHAPE):
         self.model = model
+        self.shape = shape
         self.kills = kills
         self.entries: list[Remembered] = []
         self.events: deque[tuple[str, float, Remembered]] = deque(maxlen=EVENTS)  # (what, when, the monster)
@@ -231,7 +234,7 @@ class Memory:
             self._recorded = s.t
             telemetry.emit("memory", **self.record(s.t))
 
-    def on_throw(self, when: float, side: str) -> None:
+    def on_throw(self, when: float, side: str, attack: str | None = None) -> None:
         """An Actions throw listener: where she threw from and which way, for the monsters that may be hiding under her
         damage numbers (HIDE_S)."""
         if self._her is not None:
@@ -372,10 +375,11 @@ class Memory:
         """Whether a throw of hers in the last HIDE_S (her star leaving up to HIT_AFTER_S after its key) went monster
         `e`'s way, within a star's reach of her (tracking.THROW_REACH, THROW_DY), and it was seen since: it may be
         hiding under her damage numbers."""
-        if t - e.seen >= HIDE_S + HIT_AFTER_S:
+        s = self.shape
+        if t - e.seen >= s.hide_s + s.hit_after_s:
             return False
         for when, side, x, y in self._throws:
-            if t - (when + HIT_AFTER_S) < HIDE_S and 0 <= (e.x - x) * side <= THROW_REACH and abs(e.y - y) <= THROW_DY:
+            if t - (when + s.hit_after_s) < s.hide_s and 0 <= (e.x - x) * side <= s.ahead and abs(e.y - y) <= s.dy:
                 return True
         return False
 

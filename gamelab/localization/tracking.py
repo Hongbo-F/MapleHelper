@@ -53,6 +53,7 @@ from dataclasses import dataclass, field, replace
 
 from maplehelper.engine import RIGHT
 
+from ..character import THIEF_SHAPE, Shape
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from .mapdata import MapModel
@@ -230,15 +231,19 @@ class _Throw:
     side: str
     aimed: set[int]  # the tracks a star thrown then could meet
     her: tuple[float, float] | None = None  # where she was then (in the last frame placed)
+    attack: str | None = None  # which of her attacks it was (gamelab.character.AttackSpec's id; None: not told)
 
 
 class MonsterTracker:
     """Tracks of the monsters on screen, kept up frame by frame (`update`), and what happened to them.
     `throws`: whether her throws are told (`throw`): then a kill or a hit is hers only after a throw her way;
-    without (`watch`, played by hand) an EXP gain is hers anyway, put on a monster in a star's reach."""
+    without (`watch`, played by hand) an EXP gain is hers anyway, put on a monster in a star's reach. `shape`: what her
+    attacks are to it (gamelab.character.Shape: which monsters a use went at, and its windows); THIEF_SHAPE, the thief's,
+    is the constants above (THROW_REACH, THROW_DY, HIT_AFTER_S, STAR_WINDOW, HIDE_S)."""
 
-    def __init__(self, model: MapModel | None = None, throws: bool = True):
+    def __init__(self, model: MapModel | None = None, throws: bool = True, shape: Shape = THIEF_SHAPE):
         self.model = model
+        self.shape = shape
         self.walking = speeds(model)
         self.spawns = [] if model is None else [
             (kind_of(s.name), model.platform_under(s.x, s.y, reach=60), s.x) for s in model.spawns if s.name]
@@ -265,10 +270,10 @@ class MonsterTracker:
         not known). A gain of several kills is told once for each."""
         self.gains.append((t, kind))
 
-    def throw(self, t: float, side: str) -> None:
-        """She threw toward `side` at t (Actions.throw_listeners): the monsters a star could meet from where
-        she was in the last frame."""
-        th = _Throw(t, side, set(), self.her)
+    def throw(self, t: float, side: str, attack: str | None = None) -> None:
+        """She threw toward `side` at t (Actions.throw_listeners), with `attack` (its id, if told): the monsters a
+        star could meet from where she was in the last frame."""
+        th = _Throw(t, side, set(), self.her, attack)
         th.aimed = {tr.id for tr in self.tracks.values() if tr.state not in (DEAD, OFFSCREEN) and self._in_path(th, tr)}
         self.throws.append(th)
 
@@ -312,7 +317,7 @@ class MonsterTracker:
             if tr.id not in seen:
                 self._unseen(tr, t, view, events)
         self._resolve(t, events)
-        self.throws = [th for th in self.throws if t - th.t <= STAR_WINDOW + HIDE_S]
+        self.throws = [th for th in self.throws if t - th.t <= self.shape.window_s + self.shape.hide_s]
         self._last_t = t
         return events
 
@@ -407,12 +412,13 @@ class MonsterTracker:
 
     def _in_path(self, th: _Throw, tr: Track) -> bool:
         """Whether a star of throw `th` could meet track `tr`: where it should be at the throw's key, ahead of
-        where she was then by THROW_REACH at most, THROW_DY above or below her feet."""
+        where she was then by THROW_REACH at most (10 behind), THROW_DY above or below her feet (her Shape's)."""
         if th.her is None:
             return False
         sign = 1 if th.side == RIGHT else -1
-        return (-10 <= sign * (self.predicted(tr, th.t) - th.her[0]) <= THROW_REACH
-                and abs(tr.y - th.her[1]) <= THROW_DY)
+        s = self.shape
+        return (-s.behind <= sign * (self.predicted(tr, th.t) - th.her[0]) <= s.ahead
+                and abs(tr.y - th.her[1]) <= s.dy)
 
     def _aimed_since(self, tr: Track, t: float) -> None:
         """A track a late search made (or brought back) as of t, put in the throws since t whose path it was in:
@@ -480,7 +486,8 @@ class MonsterTracker:
         """Who hit it, as far as her throws tell."""
         if not self.throws_known:
             return None
-        return "hers" if any(0 <= t - th.t <= STAR_WINDOW and tr.id in th.aimed for th in self.throws) else "other"
+        return "hers" if any(0 <= t - th.t <= self.shape.window_s and tr.id in th.aimed for th in self.throws) \
+            else "other"
 
     def _unseen(self, tr: Track, t: float, view: View, events: list[Event]) -> None:
         dt = t - tr.last_seen
@@ -508,7 +515,7 @@ class MonsterTracker:
             tr.crowded = tr.crowded or any(
                 o.kind == tr.kind and o.id != tr.id and o.state in (LIVE, DYING) and beside(o.mob, tr.mob)
                 for o in self.tracks.values())
-        due = max(tr.last_seen, self._last_hit(tr)) + HIDE_S
+        due = max(tr.last_seen, self._last_hit(tr)) + self.shape.hide_s
         if tr.state == HIDDEN and t > due:
             if self.searching is not None and tr.last_seen < self.searching <= due + LATE_SEARCH_S:
                 return  # a search out may have seen it before it was due: judged once its answer is merged
@@ -532,7 +539,8 @@ class MonsterTracker:
         left = []
         for g, kind in self.gains:  # the oldest first: each has first pick before the gains after it
             cands = [tr for tr in self.tracks.values() if tr.state in (LIVE, HIDDEN, DYING)
-                     and tr.last_seen >= g - HIDE_S and self._aimed(tr, g) and (kind is None or tr.kind == kind)]
+                     and tr.last_seen >= g - self.shape.hide_s and self._aimed(tr, g)
+                     and (kind is None or tr.kind == kind)]
             gone = [tr for tr in cands if tr.state == HIDDEN]
             if t - g <= FADE_S + MISSING_S:
                 left.append((g, kind))  # wait for the fade (a newer gain's monster may be an older one's)
@@ -550,13 +558,13 @@ class MonsterTracker:
 
     def _last_hit(self, tr: Track) -> float:
         """When her last attack its way could have hit it (none: never)."""
-        return max((th.t + HIT_AFTER_S for th in self.throws if tr.id in th.aimed), default=-1e18)
+        return max((th.t + self.shape.hit_after_s for th in self.throws if tr.id in th.aimed), default=-1e18)
 
     def _aimed(self, tr: Track, g: float) -> bool:
         if self.throws_known:
-            return any(0 <= g - th.t <= STAR_WINDOW and tr.id in th.aimed for th in self.throws)
-        her = self.her
-        return her is not None and abs(tr.x - her[0]) <= THROW_REACH and abs(tr.y - her[1]) <= THROW_DY
+            return any(0 <= g - th.t <= self.shape.window_s and tr.id in th.aimed for th in self.throws)
+        her, s = self.her, self.shape
+        return her is not None and abs(tr.x - her[0]) <= s.ahead and abs(tr.y - her[1]) <= s.dy
 
     def _likely(self, tr: Track, g: float) -> tuple:
         """Which of the monsters gain `g` may be comes first (see the top)."""

@@ -412,3 +412,70 @@ def test_a_maps_monsters_defence_against_magic_avoid_and_level():
     assert tree.mob_level == {"Horny Mushroom": 22.0, "Green Mushroom": 14.0, "Slime": 6.0}
     assert tree.mob_pdd == {"Horny Mushroom": 10.0, "Green Mushroom": 0.0, "Slime": 10.0}  # as cached
     assert os.stat(cache).st_mtime_ns == before  # (one cache, several checkouts: not written)
+
+
+# --- what localization takes of her attacks (S0f) ----------------------------------------------------------------
+
+def _tracker_with_one(shape=None, x=400.0, dy=0.0):
+    """A tracker with her at x 0 (y 0) and one live track standing `x` ahead of her, `dy` above."""
+    from types import SimpleNamespace
+    from gamelab.localization import tracking
+    tr = tracking.MonsterTracker(None) if shape is None else tracking.MonsterTracker(None, shape=shape)
+    tr.her = (0.0, 0.0)
+    tr.tracks = {1: SimpleNamespace(id=1, state=tracking.LIVE, x=x, y=-dy)}
+    tr.predicted = lambda track, at: track.x  # (standing where it is)
+    return tr
+
+
+def test_the_trackers_take_the_thiefs_shape_by_default():
+    from types import SimpleNamespace
+    from gamelab.localization import memory, senses, tracking, worldstate
+    from gamelab.localization.monsters import GAIN_AFTER_KEY, dead_one
+    assert tracking.MonsterTracker(None).shape is character.THIEF_SHAPE
+    assert memory.Memory.__init__.__defaults__[-1] is character.THIEF_SHAPE
+    assert senses.Senses.__init__.__defaults__[-1] is character.THIEF_SHAPE
+    assert dead_one.__defaults__[-1] == GAIN_AFTER_KEY
+    mage = character.load("magician").shape
+    model = SimpleNamespace(mob_exp={}, spawns=[], mob_speeds={})
+    assert worldstate.WorldStep(SimpleNamespace(eyes=None, model=model, shape=mage)).tracker.shape is mage
+    assert worldstate.WorldStep(SimpleNamespace(eyes=None, model=model)).tracker.shape is character.THIEF_SHAPE
+
+
+def test_which_monsters_a_throw_went_at_by_her_shape():
+    mage = character.load("magician").shape
+    for x, dy, thief, magician in ((400.0, 0.0, True, False),   # the star's 474 ahead; her box's 374
+                                   (-30.0, 0.0, False, True),   # 10 behind the thief; 44 behind her (the box's -10)
+                                   (100.0, 65.0, True, False)):  # 70 above for the thief; 60 for her
+        tr = _tracker_with_one(x=x, dy=dy)
+        tr.throw(1.0, "right")
+        assert (1 in tr.throws[-1].aimed) is thief and tr.throws[-1].attack is None, (x, dy)
+        tr = _tracker_with_one(mage, x=x, dy=dy)
+        tr.throw(1.0, "right", "magic_claw")
+        assert (1 in tr.throws[-1].aimed) is magician and tr.throws[-1].attack == "magic_claw", (x, dy)
+    tr = _tracker_with_one(mage, x=100.0)
+    tr.throw(2.0, "right", "magic_claw")
+    assert tr._last_hit(tr.tracks[1]) == pytest.approx(2.0 + mage.hit_after_s)  # no star's flight: 0.72 s
+    tr = _tracker_with_one(x=100.0)
+    tr.throw(2.0, "right")
+    assert tr._last_hit(tr.tracks[1]) == pytest.approx(2.0 + 1.2)  # tracking.HIT_AFTER_S
+
+
+def test_the_attack_id_goes_through_the_feed_and_the_service():
+    from types import SimpleNamespace
+    from gamelab.localization import service
+    from gamelab.localization.feed import InlineFeed, SyncFeed
+    told = []
+    step = SimpleNamespace(throw=lambda *a: told.append(a))
+    InlineFeed.throw(SimpleNamespace(step=step), 1.0, "left")
+    SyncFeed.throw(SimpleNamespace(step=step, _settle=lambda now: None), 2.0, "right", "magic_claw")
+    assert told == [(1.0, "left", None), (2.0, "right", "magic_claw")]
+    sent = []
+    client = SimpleNamespace(hello=SimpleNamespace(throws=True), _send=lambda *a: sent.append(a))
+    service.ServiceClient.throw(client, 1.0, "left")
+    service.ServiceClient.throw(client, 2.0, "right", "magic_claw")
+    assert sent == [("throw", 1.0, "left"), ("throw", 2.0, "right", "magic_claw")]  # the thief's message as before
+    told.clear()
+    me = SimpleNamespace(runner=SimpleNamespace(step=step))
+    for msg in sent:
+        service.Service._take(me, None, msg, None)
+    assert told == [(1.0, "left", None), (2.0, "right", "magic_claw")]

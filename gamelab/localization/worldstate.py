@@ -34,6 +34,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from ..character import THIEF_SHAPE
 from ..perception import exp_number
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
@@ -48,7 +49,7 @@ from .monsters import DEFAULT_SPEED, Monster
 from .pose import Where
 from .scene import Loot, Scene, find_loot
 from .senses import Senses
-from .tracking import (DYING, EDGE_PX, HIDDEN, LIVE, SPEED_CLAMP, STAR_WINDOW, Event, MonsterTracker, Track, View,
+from .tracking import (DYING, EDGE_PX, HIDDEN, LIVE, SPEED_CLAMP, Event, MonsterTracker, Track, View,
                        overlap, same, snapshot)
 
 # Ropes are searched every frame: placed by a rope in one frame and by her dot alone in the next, her x (and
@@ -378,7 +379,7 @@ class WorldStep:
         # detector (the simulator's fakes re-find as always).
         real = isinstance(getattr(self.eyes, "detector", None), MobDetector)
         self._memos: dict[int, dict] | None = {} if real else None
-        self.tracker = MonsterTracker(self.model, throws)
+        self.tracker = MonsterTracker(self.model, throws, getattr(senses, "shape", THIEF_SHAPE))  # (her Shape)
         self.schedule = schedule
         self.searches = searches if searches is not None else InlineSearches(senses)
         self.seq = 0
@@ -400,9 +401,9 @@ class WorldStep:
                        "band": 0, "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "exp read": 0, "hits": 0,
                        "searches": 0}
 
-    def throw(self, t: float, side: str) -> None:
-        """She threw toward `side` at t."""
-        self.tracker.throw(t, side)
+    def throw(self, t: float, side: str, attack: str | None = None) -> None:
+        """She threw toward `side` at t (with `attack`: its id, if told)."""
+        self.tracker.throw(t, side, attack)
 
     def step(self, look: Callable[[bool], Observation], t: float, visible: bool = True, asks: Asks | None = None,
              why: str = "", by: float | None = None, bad: Problem | None = None) -> WorldState:
@@ -643,7 +644,7 @@ class WorldStep:
             return True
         if tr.state == HIDDEN or t - tr.last_seen >= BAR_UNSEEN_S:  # (seen again)
             return True
-        if any(0 <= t - th.t <= STAR_WINDOW and tr.id in th.aimed for th in self.tracker.throws):
+        if any(0 <= t - th.t <= self.tracker.shape.window_s and tr.id in th.aimed for th in self.tracker.throws):
             return True
         return (self.seq + tr.id) % BAR_EVERY == 0
 

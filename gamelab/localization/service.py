@@ -735,8 +735,8 @@ class Service:
                 return ask
             merged = asks.merge(ask)
             return replace(merged, mesos_only=asks.mesos_only and ask.mesos_only)
-        if kind == "throw" and self.runner is not None:
-            self.runner.step.throw(msg[1], msg[2])
+        if kind == "throw" and self.runner is not None:  # (t, side, and her attack's id if told)
+            self.runner.step.throw(msg[1], msg[2], msg[3] if len(msg) > 3 else None)
         elif kind == "full":
             self._fulls.append((c, msg[1], msg[2], len(msg) > 3 and bool(msg[3])))  # (its last: any size will do)
             ask = Asks(msg[2])
@@ -1270,9 +1270,9 @@ class ServiceClient(Feed):
             st = newest_frame(self.states)
         return st if st is not None and st.usable and st.t >= after else None
 
-    def throw(self, t: float, side: str) -> None:
-        if self.hello.throws:
-            self._send("throw", t, side)
+    def throw(self, t: float, side: str, attack: str | None = None) -> None:
+        if self.hello.throws:  # (her attack's id only when told: a service started before takes the message as ever)
+            self._send("throw", t, side, *(() if attack is None else (attack,)))
 
     def close(self) -> None:
         self._closing = True

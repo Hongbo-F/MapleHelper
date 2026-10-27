@@ -38,6 +38,7 @@ import time
 from collections.abc import Callable
 
 from .. import telemetry
+from ..character import THIEF_SHAPE, Shape
 from ..perception.drops import items_for
 from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, band_rows, tag_below_feet
 from ..perception.framecheck import FIX_KINDS, LookLost, Problem
@@ -119,13 +120,15 @@ GLANCE_LOST_S = 0.3
 
 
 class Senses:
-    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None):
+    def __init__(self, eyes: Eyes, model: MapModel, band: tuple[float, float], feed=None, shape: Shape = THIEF_SHAPE):
         """`band`: how far above and below her feet (map units) a look searches for monsters. `feed`: what its looks
         and glances come from (localization.feed.Feed: a command's the perception service's, localization.service;
         the simulator's SyncFeed); None: the world step run on the eyes' own frame when a look asks (feed.InlineFeed:
         saved frames and tests; made on the first look, so a world step's own Senses, which only places and searches,
-        makes none)."""
+        makes none). `shape`: what her attacks are to localization (gamelab.character.Shape: its trackers', and how long
+        a look for monsters waits for a kill to show, SHOWS_WAIT_S the thief's)."""
         self.eyes, self.model, self.band = eyes, model, band
+        self.shape = shape
         self._feed = feed
         self.localizer = Localizer(model, geo=getattr(eyes, "geo", STRETCHED))  # (the simulator's: 1920x1080)
         self.camera = Camera(model.bounds)
@@ -180,7 +183,7 @@ class Senses:
         while there still is none, after that)."""
         while True:
             at = self.fresh_after() if after is None else max(after, self.settled)
-            if after is None and mobs and at < (shows := self.shows()) <= time.monotonic() + SHOWS_WAIT_S:
+            if after is None and mobs and at < (shows := self.shows()) <= time.monotonic() + self.shape.shows_wait_s:
                 at = shows  # (a look for monsters, the next throw decided on it: her last one's kill shown, if any)
                 if (wait := at - time.monotonic() - SHOWS_LEAD_S) > 0:
                     time.sleep(wait)  # (asked then: the feed's FEED_WAIT_S from about its frame, a search too)

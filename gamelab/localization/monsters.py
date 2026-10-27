@@ -187,15 +187,17 @@ def seen_again(m: Monster, now: list[Monster]) -> Monster | None:
 
 
 def dead_one(aimed: list[Monster], now: list[Monster], her_x: float, kind: str | None = None,
-             keyed: list[tuple[float, list[Monster]]] = (), gained: float | None = None) -> Monster | None:
+             keyed: list[tuple[float, list[Monster]]] = (), gained: float | None = None,
+             gain_after_key: tuple[float, float] = GAIN_AFTER_KEY) -> Monster | None:
     """Which of the monsters she was throwing at died: of `kind`, when her EXP's gain named it (None: any). With the
     gain's time (`gained`) and her throws (`keyed`: when each one's attack key went down, and its path then, the
     likeliest first), the first of that kind in the path of the latest throw keyed GAIN_AFTER_KEY before the gain, seen
     or not (as `aimed` has it, if it's there: followed since); else one no longer seen (nearest her), else the nearest
-    (it may still be seen fading out)."""
+    (it may still be seen fading out). `gain_after_key`: her attack's (gamelab.character.Shape's; the thief's
+    GAIN_AFTER_KEY)."""
     if gained is not None:
         for t, path in sorted(keyed, key=lambda k: -k[0]):
-            if GAIN_AFTER_KEY[0] <= gained - t <= GAIN_AFTER_KEY[1]:
+            if gain_after_key[0] <= gained - t <= gain_after_key[1]:
                 first = next((m for m in path if kind is None or m.kind == kind), None)
                 if first is not None:
                     return next((a for a in aimed if a is first), None) or seen_again(first, aimed) or first
