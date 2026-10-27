@@ -485,7 +485,8 @@ def test_pet_every_at_full_screen_waits_instead_of_ending_and_goes_on_when_its_r
     def hunter(args, throws=True, fit=None, **kw):
         fit(Perception())  # (before the eyes: their calibration is for the client's size)
         made.append(dict(win.area))
-        return SimpleNamespace(pet=Care(), eyes=SimpleNamespace(geo=NATIVE), senses=SimpleNamespace(feed=Perception()))
+        # (her eyes through her senses, as `pet` reads them since bf0a1ba: Hunter keeps no `eyes`)
+        return SimpleNamespace(pet=Care(), senses=SimpleNamespace(feed=Perception(), eyes=SimpleNamespace(geo=NATIVE)))
 
     class Done(Exception):
         pass
@@ -572,7 +573,7 @@ def _pet_every(monkeypatch, win, perception, eyes=NATIVE, stop_after=12, on_slee
 
     def hunter(args, throws=True, fit=None, **kw):
         fit(perception)
-        return SimpleNamespace(pet=Care(), eyes=SimpleNamespace(geo=eyes), senses=SimpleNamespace(feed=perception))
+        return SimpleNamespace(pet=Care(), senses=SimpleNamespace(feed=perception, eyes=SimpleNamespace(geo=eyes)))
 
     class Done(Exception):
         pass
