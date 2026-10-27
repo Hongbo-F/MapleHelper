@@ -234,6 +234,10 @@ class MapModel:
     mob_hp: dict[str, float] = field(default_factory=dict)        # monster name -> its HP (maxHP) ...
     mob_pdd: dict[str, float] = field(default_factory=dict)       # ... and its defence against her stars (PDDamage):
                                                                   # what her throws must take (attack.choice)
+    mob_mdd: dict[str, float] = field(default_factory=dict)       # ... against magic (MDDamage: a magician's Magic Claw;
+                                                                  # a Green Mushroom 30, a Horny Mushroom 0) ...
+    mob_eva: dict[str, float] = field(default_factory=dict)       # ... its avoid (eva) and level: what a miss is
+    mob_level: dict[str, float] = field(default_factory=dict)     # reckoned from (nothing reads these three yet)
 
     # --- one place: twins -----------------------------------------------------------------------
 
@@ -419,12 +423,14 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
           mob_exp: dict | None = None, mob_bodies: dict | None = None, mob_die_s: dict | None = None,
           mob_speeds: dict | None = None, mob_damage: dict | None = None, mob_hops: dict | None = None,
           mob_flies: dict | None = None, mob_tall: dict | None = None, mob_hp: dict | None = None,
-          mob_pdd: dict | None = None) -> MapModel:
+          mob_pdd: dict | None = None, mob_mdd: dict | None = None, mob_eva: dict | None = None,
+          mob_level: dict | None = None) -> MapModel:
     """A map's model from its image in the game data (`tree`, as JSON). `mob_names`, `mob_exp`,
     `mob_bodies` (as _mob_bodies gives them), `mob_die_s` (_mob_die_s), `mob_speeds` (speed stats, as
     _mob_speeds gives them), `mob_damage` (touch damage), `mob_hops` (whether it hops), `mob_flies` (whether it
-    flies) and `mob_tall` (how high its body reaches: _mob_touch gives these four), `mob_hp` and `mob_pdd` (its HP and
-    defence: _mob_hp) are keyed by monster id (_mob_id); the model keys them by name."""
+    flies) and `mob_tall` (how high its body reaches: _mob_touch gives these four), `mob_hp`, `mob_pdd` and `mob_mdd`
+    (its HP and defences), `mob_eva` and `mob_level` (_mob_hp) are keyed by monster id (_mob_id); the model keys them by
+    name."""
     info = tree.get("info", {})
     platforms, walls = _platforms(_footholds(tree))
     ropes = [Rope(r["x"], r["y1"], r["y2"], bool(r.get("l")), bool(r.get("uf")))
@@ -451,7 +457,10 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         mob_flies={mob_names.get(i, i): bool(v) for i, v in (mob_flies or {}).items()},
         mob_tall={mob_names.get(i, i): float(v) for i, v in (mob_tall or {}).items()},
         mob_hp={mob_names.get(i, i): float(v) for i, v in (mob_hp or {}).items()},
-        mob_pdd={mob_names.get(i, i): float(v) for i, v in (mob_pdd or {}).items()})
+        mob_pdd={mob_names.get(i, i): float(v) for i, v in (mob_pdd or {}).items()},
+        mob_mdd={mob_names.get(i, i): float(v) for i, v in (mob_mdd or {}).items()},
+        mob_eva={mob_names.get(i, i): float(v) for i, v in (mob_eva or {}).items()},
+        mob_level={mob_names.get(i, i): float(v) for i, v in (mob_level or {}).items()})
     floors, peers = tuple(s for p in model.platforms for s in p.segments), tuple(model.platforms)
     for p in model.platforms:
         p.walls, p.floors, p.peers = tuple(model.walls_of(p.group)), floors, peers
@@ -536,15 +545,16 @@ def load(map_id: int) -> MapModel:
                 print(f"map {map_id}: no touch damage for its monsters ({type(e).__name__}: {e}): every place counts "
                       f"as safe (attack.danger)", file=sys.stderr)
     hp = {k: raw[k] for k in HP_KEYS if k in raw}
-    if len(hp) < len(HP_KEYS):  # cached before the monsters' HP and defence were kept: read as the touch keys are
+    if len(hp) < len(HP_KEYS):  # cached before the monsters' HP and defences were kept (or their magic defence, avoid
+        # and level, from 2026-10-27): read as the touch keys are, what the cache has kept as it has it
         try:
-            hp = _mob_hp({_mob_id(s) for s in _monster_lives(raw["tree"])})
+            hp = {**_mob_hp({_mob_id(s) for s in _monster_lives(raw["tree"])}), **hp}
         except (OSError, KeyError, ValueError):  # no copy of the game data: attack.choice goes by her throws alone
-            hp = {}
+            pass
     return parse(raw["id"], raw["tree"], raw["name"], raw["physics"], raw["mob_names"], raw["mob_exp"],
                  raw["mob_bodies"], raw["mob_die_s"], raw.get("mob_speeds"), touch.get("mob_damage"),
                  touch.get("mob_hops"), touch.get("mob_flies"), touch.get("mob_tall"), hp.get("mob_hp"),
-                 hp.get("mob_pdd"))
+                 hp.get("mob_pdd"), hp.get("mob_mdd"), hp.get("mob_eva"), hp.get("mob_level"))
 
 
 def _add_speeds(cache: Path, raw: dict) -> None:
@@ -566,16 +576,18 @@ def _add_speeds(cache: Path, raw: dict) -> None:
 def _mob_hp(ids: set[str]) -> dict[str, dict]:
     """Monster id -> its HP (info/maxHP) as "mob_hp" and its defence against her stars (info/PDDamage) as "mob_pdd",
     from the game data (its own info, or the one it links to where it has none): a Horny Mushroom 403 and 10, a
-    Green Mushroom 233 and 0."""
+    Green Mushroom 233 and 0. And its defence against magic (MDDamage: 0 and 30) as "mob_mdd", its avoid (eva: 13 and
+    8) as "mob_eva" and its level (22 and 14) as "mob_level": a magician's Magic Claw goes by these."""
     from gamedata.canvas import _mob_pack
     pack = _mob_pack()
-    hp, pdd = {}, {}
+    hp, pdd, mdd, eva, level = {}, {}, {}, {}, {}
     for i in ids:
         info = pack.image(f"Mob/{int(i):07d}.img").get("info") or {}
         if not info.get("maxHP") and info.get("link"):
             info = pack.image(f"Mob/{int(info['link']):07d}.img").get("info") or {}
         hp[i], pdd[i] = float(info.get("maxHP") or 0), float(info.get("PDDamage") or 0)
-    return {"mob_hp": hp, "mob_pdd": pdd}
+        mdd[i], eva[i], level[i] = (float(info.get(k) or 0) for k in ("MDDamage", "eva", "level"))
+    return {"mob_hp": hp, "mob_pdd": pdd, "mob_mdd": mdd, "mob_eva": eva, "mob_level": level}
 
 
 def _mob_names(ids: set[str]) -> dict[str, str]:
@@ -631,7 +643,8 @@ DIE_ACTION = "die1"               # ... and while it dies (no boxes: only their 
 JUMP_ACTION = "jump"              # a monster with frames for this hops (_mob_touch) ...
 FLY_ACTION = "fly"                # ... and one with frames for this flies
 TOUCH_KEYS = ("mob_damage", "mob_hops", "mob_flies", "mob_tall")  # what _mob_touch gives, kept with a map's cache
-HP_KEYS = ("mob_hp", "mob_pdd")   # ... and what _mob_hp gives
+HP_KEYS = ("mob_hp", "mob_pdd", "mob_mdd", "mob_eva", "mob_level")   # ... and what _mob_hp gives (the last three
+                                  # from 2026-10-27: a map cached before is read for them, its cache left as it is)
 FRAME_DELAY = 100                 # ms a frame lasts when the data gives it no delay (the client's default)
 
 

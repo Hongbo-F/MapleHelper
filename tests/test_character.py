@@ -390,3 +390,25 @@ def test_magic_claws_row_in_the_game_data():
     assert (bolt["range"], bolt["desc_range"], bolt["ball"]) == (350, 350, True)
     assert l7["desc_range"] == 200  # Lucky Seven's "within 200" (the claw's; Keen Eyes adds the rest: reach.STAR_RANGE)
     assert tuple(claw["levels"][k]["mpCon"] for k in range(1, 21)) == magician.MAGIC_CLAW_MP
+
+
+def test_a_maps_monsters_defence_against_magic_avoid_and_level():
+    """MapModel's mob_mdd, mob_eva and mob_level (mapdata._mob_hp: MDDamage, eva, level), what a magician's Magic Claw
+    goes by; a map cached before them is read for them from the game data, its cache left as it is."""
+    import os
+    from gamelab.localization import mapdata
+    model = mapdata.parse(1, {"info": {}}, "a map", {}, {"100": "Horny Mushroom"}, mob_hp={"100": 403}, mob_pdd={"100": 10},
+                          mob_mdd={"100": 0}, mob_eva={"100": 13}, mob_level={"100": 22})
+    assert (model.mob_mdd, model.mob_eva, model.mob_level) == ({"Horny Mushroom": 0.0}, {"Horny Mushroom": 13.0},
+                                                               {"Horny Mushroom": 22.0})
+    assert mapdata.parse(1, {"info": {}}, "a map", {}).mob_mdd == {}
+    cache = mapdata.CACHE / "10002073.json"
+    if not cache.is_file() or not (mapdata.COPY / "Packs" / "Mob_00000.ms").is_file():
+        pytest.skip("no Tree Dungeon cache or game data copy here")
+    before = os.stat(cache).st_mtime_ns
+    tree = mapdata.load(10002073)
+    assert tree.mob_mdd == {"Horny Mushroom": 0.0, "Green Mushroom": 30.0, "Slime": 20.0}
+    assert tree.mob_eva == {"Horny Mushroom": 13.0, "Green Mushroom": 8.0, "Slime": 0.0}
+    assert tree.mob_level == {"Horny Mushroom": 22.0, "Green Mushroom": 14.0, "Slime": 6.0}
+    assert tree.mob_pdd == {"Horny Mushroom": 10.0, "Green Mushroom": 0.0, "Slime": 10.0}  # as cached
+    assert os.stat(cache).st_mtime_ns == before  # (one cache, several checkouts: not written)
