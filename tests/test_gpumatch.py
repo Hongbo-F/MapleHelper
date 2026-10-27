@@ -3,8 +3,9 @@ place's integer sums on the GPU, the answers the CPU's to the bit. The one call'
 one, the memo, the stages) against the CPU's context's, every field of every answer; each picture's best over a
 window (gm_bests) against mm_best's, among them those the GPU hands back to the CPU (a flat window: every place a
 candidate; a flat picture; one past 128 px); ties; the approximate scores within the band's half. A late answer, a
-device lost (as a driver reset) and a device that can't be made: the CPU's answers at once. Skipped without a
-Direct3D 11 hardware device (never WARP: that's the CPU again)."""
+device lost (as a driver reset: between calls, or while a call is on it), an error sending a call and a device that
+can't be made (rf_gpu_fault): the CPU's answers at once, that very call. Skipped without a Direct3D 11 hardware device
+(never WARP: that's the CPU again)."""
 
 import ctypes
 import time
@@ -201,8 +202,14 @@ def test_the_gpus_approximate_scores_are_well_within_the_band(detector, on_gpu):
         assert np.abs(out[:exact.size].reshape(exact.shape).astype(np.float64) - exact).max() < 2e-6
 
 
-@pytest.mark.parametrize("fault, state", [(1, "on"), (2, "off")])  # late; lost (as a driver reset)
-def test_a_late_answer_or_a_lost_device_leaves_the_call_to_the_cpu_at_once(detector, fault, state):  # noqa: F811
+@pytest.mark.parametrize("fault, state, why, sent", [
+    (1, "on", 0, 1),   # late
+    (2, "off", 7, 0),  # lost between calls (as a driver reset): seen at the next call, before it's sent
+    (4, "off", 7, 1),  # lost while the call is on it: that very call the CPU's
+    (5, "off", 8, 1),  # an error sending it
+])
+def test_a_late_answer_or_a_lost_device_leaves_the_call_to_the_cpu_at_once(detector, fault, state, why,  # noqa: F811
+                                                                             sent):
     rf = gpu_refinds(ready_of(detector))
     need(rf)
     cpu = native.Refinds(ready_of(detector), 4)
@@ -217,7 +224,8 @@ def test_a_late_answer_or_a_lost_device_leaves_the_call_to_the_cpu_at_once(detec
     assert bytes(a)[:OUT_FIELDS] == bytes(b)[:OUT_FIELDS] and all(
         bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(b)[64 * i:64 * i + OUT_FIELDS] for i in range(len(jobs)))
     st, stats = rf.gpu_state()
-    assert st == state and (stats["late"] >= 1 if fault == 1 else stats["why"] == 7)
+    assert st == state and stats["why"] == why and stats["calls"] == sent and stats["answered"] == 0
+    assert stats["late"] == (fault == 1)
     assert took < 0.5  # (no waiting on it)
     rf._lib.rf_gpu_fault(rf.ctx, 0)
     c = rf.run(frame_, jobs, detector._rf_lists, 0.6, 0.9, False, 0.95)  # (late: the next on the GPU again)

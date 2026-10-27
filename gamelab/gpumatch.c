@@ -191,7 +191,7 @@ static void gm_free_device(GmCtx *g)
 }
 
 /* Off for good (`why`: 1 no hardware adapter, 2 no device, 3 no fence, 4 the shader, 5 the buffers, 6 no
- * d3d11/dxgi/d3dcompiler, 7 removed (a driver reset, or rf_gpu_fault's 2), 8 an error at a call). */
+ * d3d11/dxgi/d3dcompiler, 7 removed (a driver reset, or rf_gpu_fault's 2 and 4), 8 an error at a call (or its 5)). */
 static int gm_off(GmCtx *g, int why)
 {
     g->why = why;
@@ -540,7 +540,8 @@ static int gm_send(GmCtx *g)
     }
     ID3D11DeviceContext *x = g->ctx;
     D3D11_MAPPED_SUBRESOURCE m;
-    if (FAILED(ID3D11DeviceContext_Map(x, (ID3D11Resource *)g->raw, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
+    if (g->fault == 5 || FAILED(ID3D11DeviceContext_Map(x, (ID3D11Resource *)g->raw, 0, D3D11_MAP_WRITE_DISCARD, 0,
+                                                        &m)))  /* (5: the tests') */
         return gm_off(g, 8);
     GmWinGpu *ws = g->wgpu;
     unsigned raw = 0, px = 0, pre = 0;
@@ -628,13 +629,10 @@ static int gm_ready(GmCtx *g, int cn)
     if (!g || g->state != GM_READY)
         return 0;
 #ifdef _WIN32
-    if (g->fault == 2) {  /* (the tests': as a driver reset) */
-        gm_free_device(g);
-        gm_off(g, 7);
-        return 0;
-    }
     UINT64 done = ID3D11Fence_GetCompletedValue(g->fence);
-    if (done == (UINT64)-1 || ID3D11Device_GetDeviceRemovedReason(g->dev) != S_OK) {
+    if (g->fault == 2 || done == (UINT64)-1 || ID3D11Device_GetDeviceRemovedReason(g->dev) != S_OK) {
+        /* (2: the tests', as a driver reset between calls. The device is let go at rf_close, not here: its release
+         * took 25 ms on the frame's thread, 2026-10-27, gpu/integ/fault) */
         gm_off(g, 7);
         return 0;
     }
@@ -655,8 +653,10 @@ static int gm_wait(GmCtx *g)
 #ifdef _WIN32
     LARGE_INTEGER due;
     due.QuadPart = -(LONGLONG)gm_wait_most * 10;  /* (relative, in 100 ns) */
+    int lost = g->fault == 4;  /* (the tests': removed while the call is on it, as a driver reset mid-call; the
+                                * fence then reads UINT64_MAX at once) */
     int late = g->fault == 1 || !SetWaitableTimer(g->timer, &due, 0, 0, 0, FALSE);
-    while (!late && ID3D11Fence_GetCompletedValue(g->fence) < g->fv) {
+    while (!late && !lost && ID3D11Fence_GetCompletedValue(g->fence) < g->fv) {
         HANDLE hs[2] = {g->done, g->timer};
         DWORD w = WaitForMultipleObjects(2, hs, FALSE, (DWORD)(gm_wait_most / 1000 + 50));
         if (w != WAIT_OBJECT_0)
@@ -667,7 +667,7 @@ static int gm_wait(GmCtx *g)
     g->stats[GS_WAIT_US] += (long long)us;
     if ((long long)us > g->stats[GS_WAIT_MAX_US])
         g->stats[GS_WAIT_MAX_US] = (long long)us;
-    if (ID3D11Device_GetDeviceRemovedReason(g->dev) != S_OK)
+    if (lost || ID3D11Device_GetDeviceRemovedReason(g->dev) != S_OK)
         return gm_off(g, 7);
     if (late) {
         g->stats[GS_LATE]++;
@@ -872,7 +872,8 @@ EXPORT int rf_gpu(void *ctx, long long *stats)
 }
 
 /* The tests': `what` 1, ctx's next waits come back late (the CPU's); 2, its device lost at the next call (as a driver
- * reset); 0, none. With ctx NULL and 3: the next contexts' device can't be made. */
+ * reset between calls); 4, lost while the next call is on it (a reset mid-call: the wait sees it at once); 5, an
+ * error sending the next call; 0, none. With ctx NULL and 3: the next contexts' device can't be made. */
 EXPORT void rf_gpu_fault(void *ctx, int what)
 {
     RfCtx *c = (RfCtx *)ctx;
