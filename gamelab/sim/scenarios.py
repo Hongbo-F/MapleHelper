@@ -836,7 +836,11 @@ def nav_fight_across_runs_out(sim):
     12 meet all of this, 14 don't run out of time.) (Seed 3 since 2026-10-27, an attack from a jump picking by the
     star's search alone (reach.AIR_MODEL, the world's AIR_PICK) and her stance going by where each monster will be when
     her attack starts (attack.stance.Pace, PACE_STOP, WALK_AT): on seed 9 she now arrives; of seeds 1-24, 3 and 6 meet
-    all of this, 21 don't run out of time.)"""
+    all of this, 21 don't run out of time.)
+    (Not met since 2026-10-27 on its own branch, her kill credited to the monster her attack took
+    (localization.tracking's binding) and the dead out of her targets by their tracks: of seeds 1-16 she arrives on
+    every one, on seed 9 in 59 s with 9 kills, on 1 in 42 s, on 4 in 57 s, where master's stack ran out of its 180 s on
+    9: xfail in tests/test_sim.py, AFTER_KILL_PLACE.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1196,8 +1200,9 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 
 # The probes' scenarios check their scorer (probe.BEFORE_HIT_S and the evidence after a star is due), built on a throw's
 # damage showing at the star's release: so their world applies it then (world.Realism.damage_ms), not at the server's
-# time the world has from 2026-10-26 (actions.DAMAGE_SHOWS_MS, as measured live). To redo with the server's time.
-_AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS)
+# time the world has from 2026-10-26 (actions.DAMAGE_SHOWS_MS, as measured live), and draws its kill dying from then
+# (not alive until her star lands: Realism.dies_late, the world's from 2026-10-27). To redo with the server's time.
+_AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS, dies_late=False)
 
 
 @scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400, realism=_AT_RELEASE,

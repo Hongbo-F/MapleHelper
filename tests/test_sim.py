@@ -1308,7 +1308,7 @@ SLOW_SCENARIOS = {"tour_run", "loop_run", "tour_rocky_run", "loop_rocky_run", "t
 NOT_YET = {"nav_rocky_fight_bridge", "loop_rocky_run", "tour_rocky_run"}
 # What these showed came of a kill put on the wrong monster: with her kill on the one her attack took (the README: Her
 # kill's monster, 2026-10-27), no seed or layout tried shows it (each one's docstring says what was tried)
-AFTER_KILL_PLACE = {"tour_hunt_other_spot"}
+AFTER_KILL_PLACE = {"tour_hunt_other_spot", "nav_fight_across_runs_out"}
 
 
 @pytest.mark.parametrize("name", [pytest.param(name, marks=[pytest.mark.skipif(
@@ -1316,7 +1316,7 @@ AFTER_KILL_PLACE = {"tour_hunt_other_spot"}
     + ([pytest.mark.slow] if name in SLOW_SCENARIOS else [])
     + ([pytest.mark.xfail(reason="escorted trips keep clear of the Axe Stump: not tuned on West Rocky Mountain II "
                                  "yet")] if name in NOT_YET else [])
-    + ([pytest.mark.xfail(reason="the other pig was out of reach only for a kill put by it: the fight reaches it")]
+    + ([pytest.mark.xfail(reason="no seed shows it with her kills on the monsters her attacks took (its docstring)")]
        if name in AFTER_KILL_PLACE else []))
     for name, sc in scenarios.SCENARIOS.items()])
 def test_real_map_scenarios_show_what_they_are_there_for(name):

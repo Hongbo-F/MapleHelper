@@ -38,7 +38,8 @@ monster died; her attack took it as its key went down, and the gain shows GAIN_A
 while the monster is still drawn alive, walking with its bar up, until her star lands (live on 2026-10-26, by eye:
 its first damage numbers 0.5 s after the gain, its death frames from 0.6 s, gone at 1.2 s). So a gain that soon after
 a throw's key is the kill of the first of its kind that attack takes from where she was then, by where the tracks are
-at the gain (`_picks`: the nearest ahead of her within VICTIM_DY, out-of-sight ones where they should be): that track
+at the gain (`_picks`: the nearest ahead of her from VICTIM_UP above her feet to VICTIM_DOWN below, those seen lately
+first, out-of-sight ones where they should be): that track
 is bound to the gain at once (`gain`), `dying`, followed as it walks on, its id in every state since (Monster.track),
 so whoever reads the state knows which monster is dead, where it walks, until it goes; `dead`, cause "hers", once out
 of sight CONFIRM_S after the gain, or at once when its death is seen (perception.deaths, `seen_dying`). One re-found
@@ -130,8 +131,9 @@ CONFIRM_S = 1.5
 # Whether a share of a kill (another player's, of a monster her stars hurt: a gain no kill explains) is bound to the hurt
 # one her throws went at with the lowest bar (`_bind_share`). Emulated on the telemetry of the grinds of 2026-10-26
 # 21:04-22:28 (D:/MapleHelper-scratch/kplace/build/idsim.py --ids), it took 4 more throws at the dead off their target
-# but 42 more at monsters whose track was seen again later; the death watch (perception.deaths) sees most of those
-# deaths anyway (in the recordings 4 of the 5 throws at another player's kill left out without it): off.
+# but 42 more at monsters alive by the service's deaths, 14 of them seen alive again 1.5 s on; the death watch
+# (perception.deaths) sees most of those deaths anyway (in the recordings 4 of the 6 throws at another player's kill
+# left out without it): off.
 SHARES = False
 BAR_STEP = 0.03     # a bar this much lower than its lowest seen before: a hit
 # The velocity filter (alpha-beta on x, map units), for sightings whose pose isn't known. Simulated at 30 Hz
