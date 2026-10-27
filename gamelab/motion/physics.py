@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from maplehelper import config
 
 from . import body
-from .. import native
+from .. import character, native
 from ..localization.mapdata import MapModel, Platform
 from ..paths import CONFIG
 
@@ -24,13 +24,16 @@ from ..paths import CONFIG
 # measured defaults (config.Character()) whatever the file says: the tests set it (tests/conftest.py), and
 # the simulator's golden traces and harness restart themselves with it, so editing [character] for her gear
 # changes neither what they check nor what they compare. (`python -m gamelab sim`, for watching, takes the
-# file's, as the hunt does.)
+# file's, as the hunt does.) Hers are the character's this process plays (gamelab.character: the thief unless
+# --character, GAMELAB_CHARACTER, `gamelab character use` or [characters] default names another; under FIXED_STATS
+# only GAMELAB_CHARACTER, and that character's class's fixed copy).
 FIXED_STATS = "GAMELAB_FIXED_STATS"
 
 
 def stats(path=CONFIG, environ=os.environ) -> config.Character:
-    """Her stats: config.toml's [character], or the measured defaults when FIXED_STATS is set."""
-    return config.Character() if environ.get(FIXED_STATS) else config.character(path)
+    """Her stats: config.toml's [character], or the measured defaults when FIXED_STATS is set (the thief's; another
+    character's own, gamelab.character.stats)."""
+    return character.stats(path, environ)
 
 
 CHARACTER = stats()

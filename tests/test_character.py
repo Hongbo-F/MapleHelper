@@ -252,3 +252,70 @@ def test_the_magicians_skill_tables_are_the_game_datas():
     assert set(column("2001003", "attackCount")) == {magician.MAGIC_CLAW.hits}
     assert set(column("2001003", "mobCount")) == {magician.CAST.mob_count}
 
+
+
+# --- the command line and physics (S0b) -------------------------------------------------------------------------
+
+def test_physics_takes_the_stats_of_who_plays(tmp_path):
+    from gamelab.motion import physics
+    path = _toml(tmp_path, "[character]\nspeed = 125\njump = 110\n[characters.magician.stats]\nhp = 380\n")
+    assert physics.CHARACTER == config.Character()  # the tests: FIXED_STATS, the thief
+    assert physics.stats(path, environ={}) == config.Character(speed=125, jump=110)  # the thief's [character], as before
+    assert physics.stats(path, environ={physics.FIXED_STATS: "1"}) == config.Character()
+    mage = physics.stats(path, environ={character.ENV: "magician"})
+    assert (mage.hp, mage.speed) == (380.0, magician.FIXED_STATS.speed)
+    assert physics.stats(path, environ={character.ENV: "magician", physics.FIXED_STATS: "1"}) == magician.FIXED_STATS
+
+
+def test_the_character_flag_plays_her_in_the_process_and_its_children():
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in __import__("os").environ.items() if k != character.ENV}
+    out = subprocess.run([sys.executable, "-m", "gamelab", "--character", "magician", "character"], cwd=root, env=env,
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0 and out.stdout.startswith("plays: magician (by GAMELAB_CHARACTER"), out.stdout
+    code = ("import os, sys; from gamelab.__main__ import main; main(['--character', 'magician', 'character']); "
+            "from gamelab.motion import physics; print(os.environ['GAMELAB_CHARACTER'], physics.CHARACTER.hp)")
+    out = subprocess.run([sys.executable, "-c", code], cwd=root, env=env, capture_output=True, text=True, timeout=120)
+    assert out.stdout.splitlines()[-1] == f"magician {magician.FIXED_STATS.hp}", out.stdout + out.stderr
+
+
+def test_the_flag_checks_who_and_when(monkeypatch):
+    from gamelab import __main__ as cli
+    monkeypatch.setenv(character.ENV, "thief")  # (restored after the test)
+    assert "no character 'bishop'" in cli._play_as("bishop")
+    assert "comes too late" in cli._play_as("magician")  # her physics is the thief's here already
+    assert cli._play_as("thief") is None
+    assert cli.main(["--character", "bishop", "character"]) == 2
+
+
+def test_the_character_command(monkeypatch, capsys, tmp_path):
+    from gamelab import __main__ as cli
+    monkeypatch.delenv(character.ENV, raising=False)
+    assert cli.main(["character"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("plays: thief") and "* thief (thief)" in out and "magician (magician)" in out
+    assert "placeholders still" in out
+    assert cli.main(["character", "use", "magician"]) == 0
+    assert json.loads(character.CHOSEN.read_text()) == {"character": "magician"}  # (the test's own: conftest)
+    assert cli.main(["character", "use", "bishop"]) == 2 and cli.main(["character", "use"]) == 2
+    assert cli.main(["character", "check"]) == 2  # nothing is read yet (the game isn't looked at: conftest refuses)
+    assert "nothing was looked at" in capsys.readouterr().out
+
+
+def test_only_the_thief_attacks_in_the_game(monkeypatch):
+    from gamelab import __main__ as cli
+    parser = cli.build_parser()
+    monkeypatch.delenv(character.ENV, raising=False)
+    for argv in (["hunt", "kill"], ["tour"], ["lock"], ["probe", "run", "claw-edge"]):
+        try:
+            args = parser.parse_args(argv)
+        except SystemExit:  # (a command's own arguments aside: only its name counts)
+            continue
+        assert cli._refused_as(args) is None
+    monkeypatch.setenv(character.ENV, "magician")
+    assert "only the thief hunts so far" in cli._refused_as(parser.parse_args(["tour"]))
+    assert cli._refused_as(parser.parse_args(["probe", "list"])) is None  # offline
+    assert cli._refused_as(parser.parse_args(["character"])) is None
+    assert cli.main(["tour"]) == 2

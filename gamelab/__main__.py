@@ -7,6 +7,7 @@ the shared modules) is imported up here; the other layers are imported by the co
 
 import argparse
 import ctypes
+import os
 import random
 import sys
 import time
@@ -41,6 +42,9 @@ WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
 # subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
 GAME_COMMANDS = {"player", "calibrate", "window", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
+# Commands that attack in the game (`probe` only with `run`): refused for a character whose attacks aren't built yet
+# (the magician's, until her profile reaches the attack layer: _refused_as)
+ATTACKING = {"lock", "combo", "hunt", "nav", "tour", "probe"}
 LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command (the safety stop's: behavior.safety.EXIT,
                         # out of darts': behavior.darts.EXIT)
 
@@ -144,6 +148,74 @@ def cmd_clear_alarm(args) -> int:
               f"for {lie_recorder.END_S:g} s): gamelab's commands need it started again, `python -m gamelab player "
               "--elevate`. The game flagged automated play once; keep sessions short and supervised.")
     return 0
+
+
+def cmd_character(args) -> int:
+    """Who plays (gamelab.character): her profiles, the one a command plays and why; `use <id>`: the one played when
+    neither --character nor GAMELAB_CHARACTER names one (lab/character.json); `check`: what the game's bottom bar shows,
+    which isn't read yet (perception.whoami, to come): nothing is looked at."""
+    from maplehelper.config import ConfigError
+
+    from . import character
+    try:
+        if args.action == "use":
+            if not args.id:
+                print(f"use which? one of {', '.join(character.known())}")
+                return 2
+            path = character.choose(args.id)
+            print(f"{args.id} plays from now on when nothing names another ({path}; --character and "
+                  f"{character.ENV} still come first)")
+            return 0
+        if args.action == "check":
+            print("her bottom bar (job above name) isn't read yet (perception.whoami, to come): nothing was looked at; "
+                  f"this process plays {character.active_id()}")
+            return 2
+        which = character.active_id()
+        print(f"plays: {which} (by {character.how_chosen()})")
+        for cid in character.known():
+            for i, line in enumerate(character.describe(character.load(cid))):
+                print(("* " if cid == which and i == 0 else "  ") + line)
+    except ConfigError as e:
+        print(f"error: {e}")
+        return 2
+    print("what the game shows: not read (`character check` is to come)")
+    return 0
+
+
+def _play_as(which: str) -> str | None:
+    """--character: `which` plays in this process and its children (gamelab.character.ENV), set before any command
+    loads motion.physics (her walk and jumps are worked out once, at its import). What's wrong with it, or None."""
+    from maplehelper.config import ConfigError
+
+    from . import character
+    try:
+        known = character.known()
+    except ConfigError as e:
+        return f"error: {e}"
+    if which not in known:
+        return f"error: no character {which!r} (--character): known {', '.join(known)}"
+    if "gamelab.motion.physics" in sys.modules and character.active_id() != which:
+        return f"error: her physics was loaded as {character.active_id()} already: --character {which} comes too late"
+    os.environ[character.ENV] = which
+    return None
+
+
+def _refused_as(args) -> str | None:
+    """A command that attacks in the game, played by a character whose attacks aren't built yet (a magician's: README,
+    Characters): why it doesn't run. None for the thief, and for everything else."""
+    if args.cmd not in ATTACKING or (args.cmd == "probe" and not getattr(args, "game", False)):
+        return None
+    from maplehelper.config import ConfigError
+
+    from . import character
+    try:
+        c = character.load(character.active_id())
+    except ConfigError as e:
+        return f"error: {e}"
+    if c.klass == "thief":
+        return None
+    return (f"{args.cmd} plays {c.id} ({c.klass}), whose attacks aren't built yet (gamelab README, Characters): only "
+            f"the thief hunts so far; `python -m gamelab character` says who plays")
 
 
 def cmd_spot(args) -> int:
@@ -1993,6 +2065,9 @@ def _attack(args) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m gamelab", description="Drive the real game with exact key timelines and measure what happened.")
+    p.add_argument("--character", metavar="ID", help="the character this command plays (thief, magician, or a "
+                   "config.toml [characters.<id>]'s): before GAMELAB_CHARACTER, `character use` and [characters] "
+                   "default; the thief by default")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("player", help="run the key player (use --elevate: the game runs as admin)")
@@ -2002,6 +2077,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("clear-alarm", help="after you've answered a Lie Detector and its recording has ended: let "
                                        "gamelab run again (start the player again after it)"
                    ).set_defaults(func=cmd_clear_alarm)
+    s = sub.add_parser("character", help="who plays: her profiles, the one a command plays and why; `use ID` plays ID "
+                                         "when nothing names another (lab/character.json); `check`: her bottom bar "
+                                         "(not read yet). Offline: no game, no keys")
+    s.add_argument("action", nargs="?", choices=["use", "check"])
+    s.add_argument("id", nargs="?", help="with `use`: the character (thief, magician, or a [characters.<id>]'s)")
+    s.set_defaults(func=cmd_character)
     s = sub.add_parser("spot", help="check the game (or an image) for the Lie Detector; sends no keys")
     s.add_argument("--image", help="check this screenshot instead of the game")
     s.set_defaults(func=cmd_spot)
@@ -2372,6 +2453,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    # Who plays, before any command loads her physics (gamelab.character); a command that attacks only as the thief.
+    if args.character and (refused := _play_as(args.character)):
+        print(refused)
+        return 2
+    if refused := _refused_as(args):
+        print(refused)
+        return 2
     # Real pixels for window positions and screen captures, whatever the display scaling is set to.
     from maplehelper.win32 import enable_dpi_awareness
     enable_dpi_awareness()
