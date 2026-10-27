@@ -88,6 +88,20 @@ FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
 # Attacks.on_throw), the mover's alone had looked safest (13.2 touches on her trips against 21.8, 8 seeds).
 KEY_EFFECT_S = 0.068
 MAX_AGE_S = 0.1
+# A look for monsters (the next throw is decided on it) is of a frame shown when her last throw at a monster's kill has
+# shown, if it killed (`shows`: behavior.attacks.KILL_SHOWN_S after its key), where that's at most this far off: she's
+# locked until 0.79 s after the key (0.89 after a jump throw), arrows swallowed until 0.8, and a throw's decision took
+# 13-21 ms after its look live (p99 79-95 ms, 2,737 throws of 2026-10-26), so a look 0.4 s after the key costs her
+# nothing, and has the kill: the throw after it goes at the next monster at once. Live (the grinds of 2026-10-26 21:04
+# and 21:18) the look came a median 0.27 s after the key (its record), where the perception service had a kill's gain a
+# median 0.22 s after the killing key, 97.4% of 237 by 0.43 s (D:/MapleHelper-scratch/akill/diag): 86 throws were
+# dropped at their key for a kill come in since (4.4 a minute, Hunter._still) and decided again after the lock, and 36
+# went at a monster dead by then. 0: none waits (looks as before).
+SHOWS_WAIT_S = 0.45
+# ... and such a look is asked this long before that frame at the soonest: asked at once, 0.33 s ahead, a look with a
+# search of the whole screen outwaited the feed's FEED_WAIT_S now and then (the harness, the hunt loop: 5 looks "no state
+# from perception in time" in 4 runs of 5 minutes, master none), each 0.2 s lost (RETRY_GAP_S)
+SHOWS_LEAD_S = 0.05
 KEYS_WAIT = "all"  # which looks wait for her keys' effect: "all", "moves" (the mover's), "none"
 # Looks that fail their checks are taken again this long apart (each a capture: 5-30 ms), for up to LOST_S; then
 # LookLost. The window dragged at 16:48:44 on 2026-10-24 gave four bad looks in 4.1 s (16:48:44.0-48.1); a look that
@@ -127,6 +141,9 @@ class Senses:
         self.log: Callable[[str], None] = print  # where what failed is said (the hunter gives its own)
         self._failing: tuple[float, str] | None = None  # since when looks have failed in a row, and the last why said
         self.keyed: Callable[[], float] = lambda: -1e18  # when her last key went (the hunter's: Actions.last_key)
+        # When a frame shows what her last throw at a monster did to it, if it killed it (the hunter's:
+        # behavior.attacks.Attacks.shown_by, KILL_SHOWN_S after its key): a look for monsters waits for it (SHOWS_WAIT)
+        self.shows: Callable[[], float] = lambda: -1e18
         self._looked = -1e18  # the frame time of the last look
         self._usable = -1e18  # when the last state to act on came (a look's or a glance's: GLANCE_LOST_S)
         self._hp = 1.0        # the last HP a state read (a glance without one keeps it)
@@ -154,12 +171,17 @@ class Senses:
         dot and the camera when the tag is hidden; (if `mobs`) the monsters she could shoot, or (if
         `wide`) every monster on screen; and (if `loot`) the drops on her platform, or (if `wide`) on
         every platform in view (only mesos if `mesos_only`): the newest state of a frame as fresh as `fresh_after`
-        says, or with `after`, of a frame shown then or later (one a glance saw her standing still in once the keys were
+        says (a look for monsters, of the frame `shows` gives too, where that's SHOWS_WAIT_S off at most: her last
+        throw at one's kill shown, if it killed), or with `after`, of a frame shown then or later (one a glance saw her standing still in once the keys were
         let go of, say: Navigator.recover). Raises LookLost once there has been none to act on for LOST_S (at once
         while there still is none, after that)."""
         while True:
-            s = self.feed.look(self, mobs, wide, loot, mesos_only,
-                               self.fresh_after() if after is None else max(after, self.settled))
+            at = self.fresh_after() if after is None else max(after, self.settled)
+            if after is None and mobs and at < (shows := self.shows()) <= time.monotonic() + SHOWS_WAIT_S:
+                at = shows  # (a look for monsters, the next throw decided on it: her last one's kill shown, if any)
+                if (wait := at - time.monotonic() - SHOWS_LEAD_S) > 0:
+                    time.sleep(wait)  # (asked then: the feed's FEED_WAIT_S from about its frame, a search too)
+            s = self.feed.look(self, mobs, wide, loot, mesos_only, at)
             if s is not None:
                 break
             problem = self.feed.problem() or Problem("perception", "no state from perception in time")

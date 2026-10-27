@@ -259,7 +259,7 @@ def test_her_casts_and_her_bar_reach_the_watch_through_her_attack_choice():
     from gamelab.behavior.attacks import Attacks
     a = object.__new__(Attacks)
     a.darts, a._cast, a.mp, a._casts, a._read, a._warned = DartWatch(), 0.02, 0.5, [], None, False
-    a.counts = Counter()
+    a.counts, a._keyed = Counter(), None  # (no throw at a target chosen: Attacks.on_throw's pending time)
     a.on_throw(1.0, "left")
     assert a.darts.keys == [1.0]
     a.on_throw(2.0, "left")  # the regular attack (no cast chosen): not a press of Lucky Seven

@@ -85,6 +85,15 @@ HEADING_SHOTS_MAX = 200  # crops of her kept in lab/heading where the frame and 
 LAST_LOOK = True
 
 
+def kinds_of(gains: list[Gain]) -> frozenset | None:
+    """The kinds of kill a change of her EXP number can be, by the gains it was (localization.gains): those their sizes
+    named, or None (any) where one named none, the number couldn't be read yet (no gain), or no kill of the map's
+    explains it (a share of a kill another player hurt too: her throw's target's maybe)."""
+    if not gains or any(g.odd or None in g.kinds for g in gains):
+        return None
+    return frozenset(k for g in gains for k in g.kinds)
+
+
 class Hunter:
     """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
@@ -146,6 +155,7 @@ class Hunter:
                                kills=lambda: self.ledger.kills)
         if mode != "regular":
             self.actions.choose = self.attacks.key
+            self.senses.shows = self.attacks.shown_by  # (the look a throw is decided on has the last one's kill)
         # Out of darts (behavior.darts): her Lucky Seven presses and MP bar (the attack choice's), her kills (_gained)
         self.darts = DartWatch(presses_for(model.mob_hp, getattr(model, "mob_pdd", {})))
         self.attacks.darts = self.darts
@@ -302,11 +312,16 @@ class Hunter:
         self.attacks.glance(st.t, getattr(st, "mp", None))  # (her MP too: a drink shown since the look)
         events = [e for e in feed.pending_events(st.t) if e.kind in ("exp_gain", "exp_read")]
         if not any(e.kind == "exp_gain" for e in events):
+            self.attacks.heard(st.t, [])  # (and her EXP: no kill since the look, Attacks.heard)
             return True
-        meter, kinds = copy.deepcopy(self.meter), set()
+        meter, kinds, heard = copy.deepcopy(self.meter), set(), []
         for e in events:
-            for g in meter.update(e.t, reading_of(e.data), e.kind == "exp_gain"):
+            gains = meter.update(e.t, reading_of(e.data), e.kind == "exp_gain")
+            for g in gains:
                 kinds.update(g.kinds)
+            if e.kind == "exp_gain":
+                heard.append((e.t, kinds_of(gains)))
+        self.attacks.heard(st.t, heard)
         if not kinds and meter.unread > self.meter.unread:  # a change it couldn't read: a kill of a kind not known
             kinds = {None}
         if (kind := self.attacks.in_way(side, kinds)) is None:
@@ -335,9 +350,14 @@ class Hunter:
             reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in s.events
                      if e.kind in ("exp_gain", "exp_read")]
             lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
+        heard = []  # her EXP's changes, and the kills each can be: what her throws didn't kill (Attacks.heard)
         for t, reading, changed in reads:
-            for g in self.meter.update(t, reading, changed):
+            gains = self.meter.update(t, reading, changed)
+            for g in gains:
                 self._gained(g, s)
+            if changed:
+                heard.append((t, kinds_of(gains)))
+        self.attacks.heard(s.t, heard)
         for g in self.meter.due(s.t):  # changes it couldn't read that no reading has explained: a kill each
             self._gained(g, s)
         for note in self.meter.notes:

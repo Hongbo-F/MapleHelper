@@ -510,6 +510,27 @@ def test_a_look_is_the_newest_frame_newer_than_the_last_looks_and_after_her_keys
     assert senses.fresh_after(keys=True) >= keyed + senses_mod.KEY_EFFECT_S  # (the mover's still does: Mover.locate)
 
 
+def test_a_look_for_monsters_after_a_throw_at_one_is_of_the_frame_that_shows_its_kill(sync, monkeypatch):
+    # Senses.shows (the hunter's: Attacks.shown_by, KILL_SHOWN_S after her last throw at a monster's key): a look for
+    # monsters, the next throw decided on it, is of a frame shown then, where that's SHOWS_WAIT_S off at most (she's
+    # locked until 0.79 s after the key); a look without monsters, or one asked for a frame of its own (`after`), isn't.
+    f, clock, eyes = sync
+    monkeypatch.setattr(senses_mod, "time", clock)
+    senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
+    clock.sleep(1.0)
+    keyed = clock.now
+    senses.keyed = lambda: keyed
+    senses.shows = lambda: keyed + 0.4  # a throw at a monster keyed just now
+    assert senses.look(mobs=False).t < keyed + 0.4  # (her HP: no wait)
+    s = senses.look()
+    assert s.t >= keyed + 0.4 - 1e-9 and clock.now - keyed < 0.4 + 2 / feed.HZ  # its frame, no later
+    keyed = clock.now  # another throw
+    assert senses.look(after=keyed).t < keyed + 2 / feed.HZ  # (a look asked of a frame of its own: as asked)
+    keyed = clock.now
+    senses.shows = lambda: keyed + senses_mod.SHOWS_WAIT_S + 0.1  # too far off: not waited for
+    assert senses.look().t < keyed + senses_mod.KEY_EFFECT_S + 2 / feed.HZ
+
+
 def test_the_movers_look_after_a_move_sees_what_her_keys_did(sync, monkeypatch):
     # Mover.locate (placing her after a move) is of a frame shown KEY_EFFECT_S after her last key, KEYS_WAIT "moves" too.
     from types import SimpleNamespace

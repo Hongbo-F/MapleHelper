@@ -458,3 +458,147 @@ def test_actions_ask_the_choice_for_each_throws_key():
     act.choose = None
     assert act._attack_key("left") == KEYS7.lucky_seven.name
     assert Actions(KEYS7)._attack_key("left") == KEYS7.attack.name  # no skill: the regular attack, whatever
+
+
+# --- what she knows of a kill as soon as a frame can show it (2026-10-26) ----------------------------------------------
+
+def test_a_throw_whose_kill_would_have_shown_by_a_frame_with_no_gain_since_didnt_kill():
+    """Attacks.heard (Hunter._vitals at every look, Hunter._still at a throw's key): a frame shown KILL_SHOWN_S after a
+    throw's attack key, with no EXP gain since that can be its target's kill, rules out what the throw would have killed
+    it with, seen or not; its damage stays taken off. Live on 2026-10-26 the look a throw was decided on came 0.2-0.34 s
+    after the key before, a kill ruled out only by a look LANDS_S after its throw that saw its target: 232 of 652 throws
+    went out reckoned 50% dead or more, 224 of them at monsters alive at the key, and at one unseen under its damage
+    numbers the reckoning only grew with her throws (66% -> 89% -> 96%)."""
+    from gamelab.behavior.attacks import KILL_SHOWN_S
+    from gamelab.behavior.ledger import Kill
+    t0 = time.monotonic()
+
+    def two_casts(kills=None):
+        a, said = _attacks(kills=(lambda: kills) if kills is not None else None)
+        a.on_look(_look([("green-mushroom", 250.0, None)], t=t0))
+        for k in range(2):
+            assert a.key("right") == KEYS7.lucky_seven.name
+            a.on_throw(t0 + 0.05 + 0.85 * k, "right")
+        a.on_look(_look([], t=t0 + 1.0))  # unseen since: under its damage numbers
+        return a, a.marks[0].m
+
+    a, m = two_casts()
+    a.heard(t0 + 1.0, [])  # the second cast's kill can't have shown yet: the first's surely has, and didn't
+    left = a.reckon(m)
+    assert 0.0 < left.dead < 0.6 and a.left(m) == pytest.approx(82, abs=1)  # (unheard 72%: the first's ruled out)
+    a.heard(t0 + 0.9 + KILL_SHOWN_S, [])  # nor the second's
+    assert a.reckon(m).dead == 0.0 and a.left(m) == pytest.approx(82, abs=1)  # (what it has if alive: as it was)
+    b, m = two_casts()
+    assert b.reckon(m).dead == pytest.approx(0.72, abs=0.01)  # (unheard: as before)
+    b.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, frozenset({"horny-mushroom"}))])  # a gain named another kind
+    assert b.reckon(m).dead == 0.0
+    for kinds in (frozenset({"green-mushroom"}), None):  # one that can be its kill (or any: a share, unread)
+        c, m = two_casts()
+        c.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, kinds)])
+        assert c.reckon(m).dead > 0.6, kinds
+    kills = []
+    d, m = two_casts(kills)
+    d.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, frozenset({"green-mushroom"}))])
+    kills.append(Kill(t0 + 1.35, "green-mushroom", 1, -200.0, 0.0, 1, "green-mushroom", t0 + 1.2))  # placed elsewhere
+    d.on_look(_look([], t=t0 + 1.35))
+    assert d.reckon(m).dead == 0.0  # (its gain was that one's)
+
+
+def test_a_throws_pending_time_is_its_attack_keys_and_the_next_look_waits_for_its_kill_to_show():
+    """Attacks.on_throw: the throw `key` chose for a target is pending at its attack key's time (a jump throw's 40-460 ms
+    after the choice), and `shown_by` is KILL_SHOWN_S after it (Senses.shows: the look the next throw is decided on is
+    of that frame); a throw at nothing changes neither."""
+    from gamelab.behavior.attacks import KILL_SHOWN_S
+    a, _ = _attacks()
+    t = time.monotonic()
+    a.on_look(_look([("horny-mushroom", 250.0, None)], t=t))
+    assert a.shown_by() < t
+    a.key("right")
+    a.on_throw(t + 0.3, "right")  # (a jump throw's attack key, 0.3 s after its key was chosen)
+    mk = a.marks[0]
+    assert mk.pending[-1][0] == mk.last == t + 0.3 and a.shown_by() == t + 0.3 + KILL_SHOWN_S
+    a.key("left")  # nothing that way
+    a.on_throw(t + 1.2, "left")
+    assert a.shown_by() == t + 0.3 + KILL_SHOWN_S and len(mk.pending) == 1
+
+
+def test_the_attack_is_chosen_with_the_chance_its_target_is_dead():
+    """Attacks.key, DEAD_CHOICE: choice.finishes on the whole reckoning (what Lucky Seven saves counts only if it's
+    alive): at a Green Mushroom 85% dead after three casts, unseen since, the regular attack; by what it has if alive
+    alone (as until 2026-10-26), Lucky Seven. Heard alive, Lucky Seven either way."""
+    import copy
+
+    from gamelab.behavior import attacks as attacks_mod
+    from gamelab.behavior.attacks import KILL_SHOWN_S
+    a, said = _attacks()
+    t0 = time.monotonic()
+    a.on_look(_look([("green-mushroom", 250.0, None)], t=t0))
+    for k in range(3):
+        a.aimed = a.marks[0].m if a.marks else a._last.monsters[0]
+        a.key("right")
+        a.on_throw(t0 + 0.05 + 0.85 * k, "right")
+    a.on_look(_look([], t=t0 + 2.0))
+    m = a.marks[0].m
+    assert a.reckon(m).dead > 0.5
+    b = copy.deepcopy(a)
+    assert a.key("right") == KEYS7.attack.name and "finishing it" in said[-1] and "dead)" in said[-1]
+    try:
+        attacks_mod.DEAD_CHOICE = False
+        assert b.key("right") == KEYS7.lucky_seven.name
+    finally:
+        attacks_mod.DEAD_CHOICE = True
+    c = copy.deepcopy(b)
+    c.heard(t0 + 2.0 + KILL_SHOWN_S, [])
+    assert c.reckon(m).dead == 0.0 and c.key("right") == KEYS7.lucky_seven.name
+
+
+def test_the_kinds_a_change_of_her_exp_can_be():
+    """hunter.kinds_of: a change's gains' kinds (Attacks.heard: what can be a throw's kill), or any (None) where one
+    named none, it couldn't be read yet (no gain), or no kill of the map's explains it (a share of one another player
+    hurt too: maybe her target's)."""
+    from gamelab.behavior.hunter import kinds_of
+    from gamelab.localization.gains import Gain
+    assert kinds_of([Gain(1.0, 26, ("green-mushroom",))]) == frozenset({"green-mushroom"})
+    assert kinds_of([Gain(1.0, 67, ("green-mushroom", "horny-mushroom"))]) == {"green-mushroom", "horny-mushroom"}
+    assert kinds_of([]) is None and kinds_of([Gain(1.0, 8, ())]) is None and kinds_of([Gain(1.0, None, (None,))]) is None
+
+
+def test_the_hunter_tells_the_attack_choice_her_exp_at_every_look_and_at_a_throws_key():
+    """Hunter: its looks' EXP changes (Hunter._vitals) and the feed's gains not drained yet at a throw's key
+    (Hunter._still) go to Attacks.heard with the kinds each can be; with the attack choice, the look a throw is decided
+    on waits for the last throw's kill to show (Senses.shows: Attacks.shown_by)."""
+    from gamelab.behavior.hunter import Hunter
+    from gamelab.localization import mapdata
+    from gamelab.localization.gains import ExpMeter
+    from gamelab.localization.tracking import Event
+    from gamelab.perception.exp_number import ExpReading
+    from test_fight import EMPTY_MAP, _Eyes
+
+    t = time.monotonic()
+
+    class Feed:
+        events = [Event("exp_gain", t - 0.1, None, {"exp": 1041, "levels": [25]})]
+
+        def newest(self, after, timeout=0.0):
+            return SimpleNamespace(t=t)
+
+        def pending_events(self, upto=None):
+            return list(self.events)
+
+    h = Hunter(_Eyes([]), KEYS7, mapdata.parse(1, EMPTY_MAP, "Test", {}), log=lambda line: None, attack="choice")
+    assert h.senses.shows == h.attacks.shown_by
+    assert Hunter(_Eyes([]), KEYS7, mapdata.parse(1, EMPTY_MAP, "Test", {}), log=lambda line: None,
+                  attack="regular").senses.shows() < t  # (no choice: no marks, no wait)
+    h.meter = ExpMeter({"Green Mushroom": 26, "Horny Mushroom": 41})
+    h.meter.update(t - 5.0, ExpReading(1000, None, (25,)), False)
+    h.senses._feed = Feed()
+    h.attacks.on_look(_look([("green-mushroom", 250.0, None)]))  # a Green in the way: a Horny's kill doesn't drop it
+    h.actions.play = lambda events, name, kind=None: None
+    h.actions.facing = "right"
+    assert h.actions.throw("right") is True
+    assert h.attacks._heard == t and h.attacks._gains == {t - 0.1: frozenset({"horny-mushroom"})}
+    s = _look([], t=t + 0.5)
+    s.events = Feed.events + [Event("exp_gain", t + 0.4, None, {"exp": 1067, "levels": [25]})]
+    s.hp, s.exp, s.exp_box = 1.0, None, None
+    h._vitals(s)
+    assert h.attacks._heard == t + 0.5 and h.attacks._gains[t + 0.4] == frozenset({"green-mushroom"})

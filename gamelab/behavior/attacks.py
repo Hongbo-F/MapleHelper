@@ -24,11 +24,15 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
   her damage shows: not all her throws at it missed (Left.hit), once none is out that could have shown since the
   last look and not landed by LANDS_S (SHOWS_S). Before (review, 2026-10-25) such a bar counted for nothing, and in
   the simulator with the bars drawn empty she reckoned a target's HP 86-98 off (median), throwing no regular attack
-  to finish one in 518 throws. A throw is chosen by what the monster has left if it's still alive when the throw
-  lands. A monster she hasn't thrown at, whose bar no look reads, has its whole HP. Others' damage to it isn't
-  known: a monster's bar shows its damage to whoever dealt it, and the bars on monsters she hadn't thrown at in the
-  live hunts of 2026-10-24 didn't go with other players by them (7.2% of sightings with a player on its platform,
-  9.7% without: her stars that hit another in their path than the one she aimed at, and misreads).
+  to finish one in 518 throws. Her EXP says it sooner: a look or glance of a frame KILL_SHOWN_S after a throw's key,
+  with no gain since that can be its target's kill (`heard`: of its kind, a share of one, or one not read; not one a
+  kill of hers was placed on elsewhere), rules out what that throw would have killed it with too, seen or not (its
+  damage still taken off as drawn). A throw is chosen by what the monster has left with the chance it's dead
+  (DEAD_CHOICE: Lucky Seven's throws saved count only if it's alive). A monster she hasn't thrown at, whose bar no
+  look reads, has its whole HP. Others' damage to it isn't known: a monster's bar shows its damage to whoever dealt
+  it, and the bars on monsters she hadn't thrown at in the live hunts of 2026-10-24 didn't go with other players by
+  them (7.2% of sightings with a player on its platform, 9.7% without: her stars that hit another in their path than
+  the one she aimed at, and misreads).
 - Her MP: the latest look's bar share (Scene.mp) of her MP when full (config.toml [character] mp), less her casts
   that look's frame can't show yet. A cast's MP is taken off as its throw goes out (`on_throw`, told by Actions after
   its key is chosen, at the key's own time); live a cast's MP first showed 0.21-0.53 s after its key, so a bar read
@@ -74,10 +78,33 @@ LANDS_S = 0.6      # s after a throw's attack key by which its damage has shown 
                    # taken for when it showed (its release 0.52 s after the key and up to 0.6 s in the air)
 SHOWS_S = 0.15     # s after a throw's attack key that its damage may first show: a kill's gain live from 0.15 s on, a
                    # bar's drop from 0.21 (0.47 until 2026-10-26, about when the star leaves)
+# s after a throw's attack key by which a frame shows its kill's EXP gain, if it killed: a look or glance of a frame this
+# late with no EXP gain since the key (`heard`) rules out what that throw would have killed its target with (Left.alive),
+# its damage still taken off as drawn (LANDS_S says when that shows). Live on 2026-10-26 (the grinds of 21:04 and 21:18,
+# the service at 30 frames a second) the perception service had the gain of 97.4% of 237 kills by 0.43 s after the
+# killing key (its frame about 0.03 s before), 98.4% by 0.5, the median 0.22 (D:/MapleHelper-scratch/akill/diag
+# kills.py); last night's service, at about 15 a second, 50-96% by 0.43. Until then a kill was ruled out only by a look
+# LANDS_S after its throw that saw its target, and the look a throw was decided on came 0.2-0.34 s after the key before:
+# 232 of 652 throws at a target went out reckoned 50% dead or more, 224 of them alive at the key (diag/deadcasts.py),
+# and an unseen one's reckoning only grew with her throws (66% -> 89% -> 96% dead, at a Green Mushroom alive). Replayed
+# through this code (D:/MapleHelper-scratch/akill/work/replay.py: the grinds of 21:04-22:28, 2,525 throws at a target
+# with the truth known): reckoned 50% dead or more at the key on 89 (30 at a monster dead by then, 15 that killed it, 44
+# alive), where the rule before had 853 (33, 250, 570); the hunts of 23:43-01:28 (2,123, the service slower) 259 (158,
+# 21, 80) against 737 (162, 169, 406): those left mostly had a gain since the throw that could be its kill.
+KILL_SHOWN_S: float | None = 0.4  # (None: no throw's kill ruled out so, as until 2026-10-26)
+GAINS_KEPT_S = 5.0  # s her EXP gains are kept for `heard` (her throws' marks have a pending throw this long at most)
+GAIN_SAME_S = 0.02  # s: a placed kill's gain (ledger.Kill.gained) is the one `heard` has within this
 LOST_S = 3.0       # s unseen before a monster she threw at is forgotten (ledger.WOUND_LOST_S) ...
 FORGET_S = 15.0    # ... and s since her last throw at it (ledger.WOUND_S)
 MODES = ("choice", "skill", "regular")  # attack.choice.pick's modes: `tour --attack` (choice by default)
 DEAD_LIKELY = 0.5  # a monster in a throw's way this likely dead by her throws (Left.dead) isn't its target: the next is
+# Whether a throw's attack is chosen with the chance its target is dead (choice.finishes on the whole reckoning: what
+# Lucky Seven saves counts only if it's alive), not by what it has left if alive alone (False: as until 2026-10-26).
+# Only with KILL_SHOWN_S: on the stale chances before it, replayed through the live grinds of 2026-10-26 21:04-22:28
+# (74 minutes, 2,657 throws) it turned 274 casts at monsters alive at the key into regular stars, 54 of them casts that
+# killed, against 11 at monsters dead by then; with it, 18 (3 that killed) against 9, and through the hunts of
+# 2026-10-25/26 23:43-01:28 (71 minutes) 12 (4) against 18 (D:/MapleHelper-scratch/akill/work/replay.py, calib.py).
+DEAD_CHOICE = True
 # s after a cast's attack key that its MP may first show on her bar (MP_FIRST_S), and by when it has (MP_SHOWS_S): live
 # on 2026-10-25 (the hunt of 23:43, 1366x768) a cast that went out first showed 0.21-0.53 s after its key, the bar
 # falling over 0.1-0.2 s more (isolated casts: D:/MapleHelper-scratch/analysis-1025/mp-attack-check/nodrop.py,
@@ -144,6 +171,12 @@ class Attacks:
         self._read: tuple[float, float] | None = None  # the last bar share read above 0, and when (WARNING_STEPS)
         self._warned = False  # the last bar read was a 0 under her pet's warning (counted once a run of them)
         self.counts: Counter = Counter()  # throws by attack (its key) and by why
+        self._heard = -1e18  # the newest frame a look or glance has shown her EXP up to (`heard`) ...
+        # ... and her EXP's gains up to then, the last GAINS_KEPT_S: each one's frame time and the kinds of kill it can
+        # be (None: any), those a kill of hers was placed on gone
+        self._gains: dict[float, frozenset | None] = {}
+        self._keyed: tuple[Mark, int] | None = None  # the pending throw `key` just made, until its throw says when
+        self._shows = -1e18  # when a frame shows her last throw at a target's kill, if it killed (`shown_by`)
         self._last: Scene | None = None  # the latest look that searched for monsters, placed
         self._kills = kills or (lambda: [])
         self._killed = 0
@@ -171,6 +204,9 @@ class Attacks:
             if getattr(k, "placed", False):
                 self.marks = [mk for mk in self.marks if not (mk.m.kind == k.kind and mk.m.platform == k.platform
                                                               and abs(mk.m.x - k.x) < TRACK_SLACK)]
+                if (gained := getattr(k, "gained", None)) is not None:  # its gain was that monster's: no other's kill
+                    for g in [g for g in self._gains if abs(g - gained) < GAIN_SAME_S][:1]:
+                        del self._gains[g]
         self._killed = len(kills)
         if not s.searched or s.where is None or s.platform is None:
             return
@@ -204,6 +240,28 @@ class Attacks:
         if self.darts is not None:
             self.darts.see(t, mp)
 
+    def heard(self, t: float, gains: list[tuple[float, frozenset | None]]) -> None:
+        """Her EXP as a look or glance of a frame shown at `t` has it (behavior.hunter: Hunter._vitals, every look's
+        changes of her EXP number; Hunter._still, the feed's gains not drained yet at a throw's key): `gains`, the frames
+        her EXP went up in since the last, each with the kinds of kill its size names (None: any; a gain no kill of the
+        map's explains, a share of one another player hurt too, may be any: hunter.kinds_of). A throw keyed KILL_SHOWN_S
+        or more before the newest such frame, with no gain since its key that can be its target's kill, didn't kill
+        (`reckon`); a gain a kill of hers was placed on (ledger.Kill.gained) is that monster's, no other's (on_look)."""
+        self._gains = {g: k for g, k in self._gains.items() if t - g < GAINS_KEPT_S}
+        self._gains.update((g, k) for g, k in gains if t - g < GAINS_KEPT_S)  # (a look's after a glance's: its meter's)
+        self._heard = max(self._heard, t)
+
+    def shown_by(self) -> float:
+        """When a frame shows what her last throw at a target did to it, if it killed it: KILL_SHOWN_S after its key
+        (Senses.shows: the look a throw after it is decided on waits for that frame), or long ago."""
+        return self._shows
+
+    def _unkilled(self, t: float, kind: str) -> bool:
+        """Whether a throw keyed at `t` at a monster of `kind` is known not to have killed it: a frame KILL_SHOWN_S after
+        it has shown her EXP, with no gain since that can be its kill (`heard`)."""
+        return KILL_SHOWN_S is not None and self._heard >= t + KILL_SHOWN_S and not any(
+            g > t and (kinds is None or kind in kinds) for g, kinds in self._gains.items())
+
     # --- at every throw --------------------------------------------------------------------------
 
     def key(self, side: str) -> str:
@@ -216,9 +274,13 @@ class Attacks:
         hp, pdd = self.stats.get(target.kind, (0.0, 0.0)) if target is not None else (0.0, 0.0)
         left = None if target is None else self.reckon(target)
         alive = None if left is None else left.alive() or left  # as it is if it's alive when the throw lands
-        what = None if target is None else float("inf") if alive is None else alive
+        # Chosen by what it has left with the chance it's dead (choice.finishes on the whole reckoning: Lucky Seven's
+        # throws saved count only if it's alive), not by what it has if alive alone: at one likely dead a cast's MP goes
+        # for little. Until 2026-10-26 by the latter, the dead chance then mostly stale (KILL_SHOWN_S).
+        what = None if target is None else float("inf") if left is None else left if DEAD_CHOICE else alive
         attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
+        self._keyed = None
         if target is not None and target.kind in self.stats and not self._dying(target, now, seen):
             mk = self._mark_of(target)
             if mk is None:
@@ -226,14 +288,24 @@ class Attacks:
                 self.marks.append(mk)
             mk.pending.append((now, attack))
             mk.last = now
+            self._keyed = (mk, len(mk.pending) - 1)  # (its time its key's, once the throw says: on_throw)
         self.counts[attack.key] += 1
         self.counts[why] += 1
         self._say(attack, why, target, left, alive, hp)
         return getattr(self.keys, attack.key).name
 
     def on_throw(self, at: float, side: str) -> None:
-        """A throw (Actions.throw_listeners), its attack key going down at `at`: a cast `key` chose takes its MP off
-        now (looks shown before it could show still read it: on_look)."""
+        """A throw (Actions.throw_listeners), its attack key going down at `at`: the throw `key` chose for a target is
+        pending at its key's time (a jump throw's attack key goes 40-460 ms after `key` is asked: KILL_SHOWN_S and
+        LANDS_S count from it), and the look the next is decided on waits for its kill to show (`shown_by`); a cast
+        `key` chose takes its MP off now (looks shown before it could show still read it: on_look)."""
+        if self._keyed is not None:
+            mk, i = self._keyed
+            self._keyed = None
+            if i < len(mk.pending):
+                mk.pending[i] = (at, mk.pending[i][1])
+                mk.last = at
+                self._shows = at + (KILL_SHOWN_S or 0.0)
         if self._cast is None:
             return
         if self.mp is not None:
@@ -278,7 +350,8 @@ class Attacks:
 
     def reckon(self, m: Monster) -> Left | None:
         """What monster `m` has left as she reckons it (see the module's docstring), her throws at it that no look
-        has seen land yet taken off; None for a kind whose HP isn't known."""
+        has seen land yet taken off, and of those, what the ones whose kill would have shown by now (KILL_SHOWN_S, with
+        no EXP gain since) would have killed it with ruled out; None for a kind whose HP isn't known."""
         stats = self.stats.get(m.kind)
         if stats is None:
             return None
@@ -286,8 +359,10 @@ class Attacks:
         if mk is None:
             return Left.of(m.bar * stats[0] if _believable(m.bar) else stats[0], stats[1])
         left = mk.left
-        for _, a in mk.pending:
+        for t, a in mk.pending:
             left = left.after(a, choice.MISS)
+            if self._unkilled(t, m.kind):
+                left = left.alive() or left  # (none alive: her throws did less than reckoned, taken as nothing)
         return left
 
     def left(self, m: Monster) -> float:

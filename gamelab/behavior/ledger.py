@@ -106,6 +106,7 @@ class Kill:
     y: float
     ground: int | None        # ... and the platform the kill is credited to (hers, when unplaced)
     named: str | None = None  # the kind her EXP gain's size named (None: not known)
+    gained: float | None = None  # when its gain showed (its frame's time; None: not known)
 
     @property
     def placed(self) -> bool:
@@ -191,10 +192,11 @@ class Ledger:
         here = None if s.platform is None else s.platform.id
         if not firsts:
             x, y = (s.where.x, s.where.y) if s.where is not None else (0.0, 0.0)
-            return Kill(s.t, None, None, x, y, here, kind)
+            return Kill(s.t, None, None, x, y, here, kind, gained)
         th, m = firsts[0]
         self._throws.remove(th)  # one star, one kill
-        kill = Kill(s.t, m.kind, m.platform, m.x, m.y, m.platform if m.platform is not None else here, kind)
+        kill = Kill(s.t, m.kind, m.platform, m.x, m.y, m.platform if m.platform is not None else here, kind,
+                    gained)
         if self.store is not None:
             self.store.on_kill(kill)
         return kill
