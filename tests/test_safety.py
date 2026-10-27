@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from gamelab.behavior import retreat
+from gamelab.behavior.darts import DartWatch
 from gamelab.behavior.hunter import Hunter
 from gamelab.behavior.safety import EXIT, SAFETY_HP, SAFETY_LOOKS, SAFETY_S, HpWatch, SafetyStop
 
@@ -75,7 +76,7 @@ def test_her_health_check_drinks_and_raises_the_stop_once():
     h = object.__new__(Hunter)
     drunk = []
     h.drink_if_low = drunk.append
-    h.hp_watch = HpWatch()
+    h.hp_watch, h.darts = HpWatch(), DartWatch()
     looks = [SimpleNamespace(t=t / 2, hp=0.3) for t in range(6)]
     for s in looks[:4]:
         h.hp_watch.see(s.t, s.hp)

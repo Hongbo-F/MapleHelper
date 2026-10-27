@@ -41,7 +41,8 @@ WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
 # subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
 GAME_COMMANDS = {"player", "calibrate", "window", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
-LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command (the safety stop's: behavior.safety.EXIT)
+LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command (the safety stop's: behavior.safety.EXIT,
+                        # out of darts': behavior.darts.EXIT)
 
 SW_SHOWMINNOACTIVE = 7  # ShellExecute: start the player minimized, not activated
 SHELL_ERRORS = {5: "the UAC prompt was declined", 2: "python not found", 3: "folder not found"}
@@ -2377,12 +2378,11 @@ def main(argv=None) -> int:
         print(f"error: {e}")
         return 1
     except Exception as e:
-        from .behavior.safety import EXIT, SafetyStop
-        if not isinstance(e, SafetyStop):
+        from .behavior.safety import HuntStop
+        if not isinstance(e, HuntStop):  # (the safety stop, out of darts: behavior.safety, behavior.darts)
             raise
-        print(f"SAFETY STOP: {e}. The hunt ended; she went to a safe place (the log says where). Check her HP potions "
-              "and her pet (fed, out, its potions) in the game before hunting again.")
-        return EXIT
+        print(f"{e.label}: {e}. The hunt ended; she went to a safe place (the log says where). {e.advice}")
+        return e.exit_code
     finally:
         _close_perception()
 

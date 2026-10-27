@@ -645,6 +645,7 @@ class FakePlayer:
         self.fed: dict[str, float] = {}     # pet food plans it took with the alarm up -> when they started
         self.played: dict[str, tuple] = {}  # plan id -> (its kind, its key and mouse events at clock times) as played
         self.pages: list[list] = []          # whoever is at the PC paged (control.alarm.page): [s, title, text]
+        self.kept: list[list] = []           # the recording's saves asked (control.alarm.keep_recent): [s, s, name]
 
     # --- the Lie Detector (client.check_alarm, alarm_up, alarm_age) -------------------------------------------------
 
@@ -661,6 +662,12 @@ class FakePlayer:
     def page(self, title: str, text: str) -> None:
         """control.alarm.page in a simulated run (the safety stop's: behavior.retreat.on_alarm): kept, nobody paged."""
         self.pages.append([self.trace.at(self.clock.now), title, text])
+
+    def keep_recent(self, seconds: float, name: str) -> str:
+        """control.alarm.keep_recent in a simulated run (out of darts': behavior.retreat.on_alarm): kept, nothing
+        saved."""
+        self.kept.append([self.trace.at(self.clock.now), seconds, name])
+        return f"the recording's last {seconds:g} s saved (simulated: nothing written)"
 
     # --- plans ---------------------------------------------------------------------------------------------------
 
@@ -832,6 +839,7 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
             put(client, name, getattr(player, name))
         from ..control import alarm
         put(alarm, "page", player.page)
+        put(alarm, "keep_recent", player.keep_recent)
         mods = [m for n, m in list(sys.modules.items()) if n.startswith("gamelab") and not n.startswith("gamelab.sim")]
         for mod in mods:
             for name, value in list(vars(mod).items()):

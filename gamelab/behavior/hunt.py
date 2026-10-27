@@ -736,6 +736,8 @@ class Hunt:
                  f"{c['aged']} by age")
         if said := self.h.attacks.summary():  # her throws by attack (behavior.attacks)
             self.log(f"  attacks: {said}")
+        if (darts := getattr(self.h, "darts", None)) is not None and (said := darts.summary()):
+            self.log(f"  {said}")  # her presses that took no MP, the most in a row (behavior.darts)
 
     def _remembered(self, s: Scene, platform: int | None) -> list[Monster]:
         """The wanted monsters her memory has on `platform` (None: anywhere) as of look `s`, sure enough to count

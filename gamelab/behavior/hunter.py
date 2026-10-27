@@ -52,6 +52,7 @@ from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from . import fight
 from .attacks import Attacks
+from .darts import DartWatch, presses_for
 from .fight import Report
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
@@ -143,6 +144,9 @@ class Hunter:
                                kills=lambda: self.ledger.kills)
         if mode != "regular":
             self.actions.choose = self.attacks.key
+        # Out of darts (behavior.darts): her Lucky Seven presses and MP bar (the attack choice's), her kills (_gained)
+        self.darts = DartWatch(presses_for(model.mob_hp, getattr(model, "mob_pdd", {})))
+        self.attacks.darts = self.darts
         if LAST_LOOK:
             self.actions.still = self._still
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
@@ -189,10 +193,30 @@ class Hunter:
         """Asked at every look of a fight, a trip and a pass of the hunt loop: her potions and her pet's food
         (drink_if_low), and the safety stop: her HP under its threshold SAFETY_S over SAFETY_LOOKS looks (`hp_watch`,
         which every look feeds) raises behavior.safety.SafetyStop, once. Until 2026-10-26 under `low_hp` (30% in a tour)
-        it stopped the fight at once, "HP low", and the tour or the hunt loop sent her to rest on the chair."""
+        it stopped the fight at once, "HP low", and the tour or the hunt loop sent her to rest on the chair. Then out of
+        darts (behavior.darts: `darts`, which her attack choice feeds): her Lucky Seven presses taking no MP and
+        killing nothing for long raise OutOfDarts, once, with what the pickup log says then; a stretch of them long
+        enough has the log read (DartWatch.asks: if the game says she's out, the stop comes sooner)."""
         self.drink_if_low(s)
         if (stop := self.hp_watch.due()) is not None:
             raise stop
+        if self.darts.asks():
+            said = self._messages()
+            self.darts.hear(said)
+            lines = " / ".join(line for line in said.splitlines() if line.strip()) or "nothing"
+            self.log(f"  {self.darts.shown} Lucky Seven presses in a row took no MP: the pickup log reads {lines}")
+        if (stop := self.darts.due(time.monotonic())) is not None:
+            if stop.said is None:
+                stop.heard(self._messages())
+            raise stop
+
+    def _messages(self) -> str:
+        """The pickup log as the eyes read it now (Eyes.messages, OCR: "" without it, or if the read fails)."""
+        try:
+            return self.senses.eyes.messages()
+        except Exception as e:  # (the game window gone, the service not answering)
+            self.log(f"  the pickup log not read ({type(e).__name__}: {e})")
+            return ""
 
     def _doubt_hp(self, s: Scene) -> None:
         """An HP of HP_ZERO or less a look after HP_DOUBT_AFTER or more isn't believed until the next look reads it too:
@@ -373,6 +397,7 @@ class Hunter:
         """A gain of her EXP: its kills counted (exp_events, told, the report), each at its time, or, if no kill
         explains it, logged; with her EXP as read, for the mini-map and the run's record (telemetry 'exp')."""
         for i, kind in enumerate(g.kinds):
+            self.darts.kill(g.when(i))  # (her presses did something: out of darts' stretch starts again)
             self.exp_events.append((g.when(i), kind))
             self.told.append((g.when(i), kind))
             self.report.exp_kills += 1

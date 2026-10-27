@@ -115,6 +115,21 @@ def page(title: str, text: str) -> None:
         pass
 
 
+def keep_recent(seconds: float, name: str) -> str:
+    """Have the rolling recorder save its last `seconds` (control.rolling.ask: lab/recent/<time>-<name>/), as
+    `save-recent` does, for a stop whose screen nobody has seen yet (behavior.retreat.on_alarm): what came of it, said
+    for the log (its folder, or why nothing was saved). Never raises. (Imported only when it's asked: the player loads
+    this module.)"""
+    try:
+        from . import rolling
+        out = rolling.ask(seconds, name)
+    except Exception as e:  # (no recorder running, or it didn't answer)
+        return f"the recording not saved ({type(e).__name__}: {e})"
+    if "error" in out:
+        return f"the recording not saved: {out['error']}"
+    return f"the recording's last {out.get('seconds', seconds):g} s saved: {out.get('folder')}"
+
+
 def _write(info: dict) -> None:
     ALARM.write_text(json.dumps(info, indent=1), encoding="utf-8")
 

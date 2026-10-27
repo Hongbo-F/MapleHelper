@@ -155,6 +155,8 @@ class Attacks:
         # the look's alone. With a monster under her body unfound (live on 2026-10-25, 7-12% of frames found one within
         # 50 units: localization.unseen), a throw at it was 'nothing in its way' and went out as the regular attack.
         self.unseen: Callable[[Scene], list[Monster]] | None = None
+        # Out of darts' watch (behavior.darts.DartWatch: the Hunter's), told of her MP bar's every read and every cast
+        self.darts = None
 
     # --- after every look ------------------------------------------------------------------------
 
@@ -162,6 +164,8 @@ class Attacks:
         """Her MP; the marks followed, their bars read, forgotten when unseen LOST_S, untouched FORGET_S or killed."""
         if (read := self._mp_read(s)) is not None:
             self.mp = self._believed(read, s.t)
+        if self.darts is not None:
+            self.darts.see(s.t, s.mp)
         kills = self._kills()
         for k in kills[self._killed:]:
             if getattr(k, "placed", False):
@@ -197,6 +201,8 @@ class Attacks:
         attack for 'MP' (the harness: 1.25 a run with her MP back)."""
         if (read := self._mp_read(_Read(t, mp))) is not None:
             self.mp = self._believed(read, t)
+        if self.darts is not None:
+            self.darts.see(t, mp)
 
     # --- at every throw --------------------------------------------------------------------------
 
@@ -234,6 +240,8 @@ class Attacks:
             self.mp = max(0.0, self.mp - self._cast)
         self._casts.append((at, self._cast))
         self._cast = None
+        if self.darts is not None:
+            self.darts.cast(at)
 
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look (and those

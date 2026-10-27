@@ -108,6 +108,25 @@ def says_full(text: str) -> bool:
     return bool(FULL_MESSAGE.search(text))
 
 
+# What the game says when she presses an attack with no throwing stars left: not known (no frame of it was kept when
+# she ran out, 2026-10-26 01:28), so this matches the usual wordings, every one saying there are none or not enough:
+# "not enough throwing stars", "you don't have any stars", "no more darts", "out of throwing stars", "stars are used
+# up". A line telling of stars got ("Subi Throwing Stars x1 earned. (Use)") says none of that. On the pickup log of the
+# live frames the Lie Detector recordings kept (1,413 frames a second apart, 2026-10-24 to 26, her darts with her: 739
+# lines read) it matched nothing (tests/test_darts.py). behavior.darts reads the log when her presses have taken no MP
+# for long.
+AMMO = r"(?:throwing\W*)?(?:stars?|darts?|shurikens?|ammo|ammunition|projectiles?)\b"
+NO_DARTS_MESSAGE = re.compile(
+    r"(?:\bnot\W*enough|\bno\W*more|\bno\b|(?:\bdo\W*not|n'?t)\W*(?:have|got)\W*(?:any|enough)?|\bout\W*of"
+    r"|\bran\W*out\W*of|\brun\W*out\W*of|\bwithout|\bneeds?|\brequires?)\W*(?:\w+\W+){0,2}?" + AMMO
+    + r"|" + AMMO + r"\W*(?:\w+\W+){0,2}?(?:out|empty|depleted|exhausted|used\W*up|gone)\b", re.I)
+
+
+def says_no_darts(text: str) -> bool:
+    """Whether the pickup log's text says she has no throwing stars left (NO_DARTS_MESSAGE)."""
+    return bool(NO_DARTS_MESSAGE.search(text))
+
+
 @dataclass(frozen=True)
 class Item:
     """An item or mesos seen on the ground, in frame pixels (half size)."""

@@ -1,7 +1,9 @@
 """On the Lie Detector, away to a safe place within 10 s. The user, 2026-10-24, after one failed over Chrome Remote
 Desktop's lag while a hunt went on around her: "just stop any in-progress hunt when this happens", then "On a lie
-detector you should move to a safe place, within 10s". And at the safety stop (behavior.safety: her HP stayed low, her
-pet's potions not keeping her up), the same way, from the stop; then whoever is at the PC is paged (`on_alarm`).
+detector you should move to a safe place, within 10s". And at the stops that end a hunt for whoever is at the PC to put
+right (behavior.safety.HuntStop: the safety stop, her HP staying low, her pet's potions not keeping her up; out of
+darts, behavior.darts), the same way, from the stop; then whoever is at the PC is paged, and out of darts the rolling
+recording's last minutes are saved (`on_alarm`).
 
 Who does it: a running hunt (`hunt kill`, `hunt clear`, `nav`, `tour`, `tour --loop`, `probe run`: `on_alarm` around
 it), which has the map, the danger model and the navigator. From the sighting the player refuses its plans, so its next
@@ -59,7 +61,7 @@ from ..localization.mapdata import Rope
 from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
-from .safety import SafetyStop
+from .safety import HuntStop, SafetyStop
 
 SAFE_DANGER = 0.01  # a place whose danger (attack.danger: the share of her HP a touch takes, by how likely and soon) is
                     # at most this is safe enough: 1% of her HP, a Horny Mushroom's walk of 4.7 s off (16% a touch)
@@ -119,8 +121,9 @@ class Retreat:
 
 
 class Watch:
-    """What `on_alarm` saw: the retreat, if the alarm or the safety stop came (None: neither did, or the retreat
-    failed)."""
+    """What `on_alarm` saw: the retreat, if the alarm or a stop came (None: neither did, or the retreat failed), and
+    what came of saving the recording after a stop that keeps it (`kept`: what the log said of it; None: none)."""
+    kept: str | None = None
     retreat: Retreat | None = None
 
 
@@ -133,16 +136,22 @@ class Why:
 
 
 LIE_DETECTOR = Why("LIE DETECTOR", "Lie Detector", "after it was seen")
-SAFETY = Why("SAFETY STOP", "Safety stop", "after the stop")
+SAFETY = Why(SafetyStop.label, SafetyStop.title, "after the stop")
+
+
+def why_of(stop: HuntStop) -> Why:
+    """A stop's retreat's words (SAFETY for the safety stop's)."""
+    return Why(stop.label, stop.title, "after the stop")
 
 
 @contextmanager
 def on_alarm(h, log: Callable[[str], None] | None = None, rng: random.Random | None = None):
     """Run a hunt (the `with` block); on the Lie Detector alarm (client.LieDetectorAlarm), her retreat, then the alarm
-    goes on (the command stops as before). Nothing that goes wrong in the retreat hides the alarm: it's logged. On the
-    safety stop (behavior.safety.SafetyStop: her HP stayed low), the same retreat from the stop, said in capitals, and
-    whoever is at the PC paged (control.alarm.page, once her retreat is over: her moves come first); then the stop goes
-    on (the command stops)."""
+    goes on (the command stops as before). Nothing that goes wrong in the retreat hides the alarm: it's logged. On a
+    stop (behavior.safety.HuntStop: the safety stop, her HP staying low; out of darts, behavior.darts), the same retreat
+    from the stop, said in capitals, and whoever is at the PC paged (control.alarm.page, once her retreat is over: her
+    moves come first); a stop that keeps the recording (`keep_s`) has its last minutes saved then
+    (control.alarm.keep_recent), and the log says where; then the stop goes on (the command stops)."""
     watch = Watch()
     try:
         yield watch
@@ -152,16 +161,19 @@ def on_alarm(h, log: Callable[[str], None] | None = None, rng: random.Random | N
         except Exception as e:  # the alarm is what the command stops on
             (log or h.log)(f"retreat: failed ({type(e).__name__}: {e})")
         raise
-    except SafetyStop as stop:
+    except HuntStop as stop:
         say = log or h.log
-        say(f"SAFETY STOP: {stop}. The hunt ends: to a safe place (no sitting, no waiting for HP)")
-        telemetry.emit("event", kind="safety_stop", text=str(stop))
+        say(f"{stop.label}: {stop}. The hunt ends: {stop.ends}")
+        telemetry.emit("event", kind=stop.event, text=str(stop))
         try:
-            watch.retreat = away(h, time.monotonic(), SAFETY, log, rng)
+            watch.retreat = away(h, time.monotonic(), why_of(stop), log, rng)
         except Exception as e:  # the stop is what the command stops on
             say(f"retreat: failed ({type(e).__name__}: {e})")
         finally:
             alarm.page(*stop.page())
+            if stop.keep_s:
+                watch.kept = alarm.keep_recent(stop.keep_s, stop.event.replace("_", "-"))
+                say(f"{stop.label}: {watch.kept}")
         raise
 
 

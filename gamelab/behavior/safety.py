@@ -19,7 +19,10 @@ Hunter._doubt_hp) can't stop the hunt, and the hunt's looks (a few a second) see
 
 It's watched on every look (Hunter._vitals: whoever took it) and raised where every fight, trip and pass already asks
 after her health, every look (Hunter.health_check), once: what follows it (her way to the safe place, the stand-by) goes
-on. With `--low-hp` the threshold is another (`hunt`, `probe run`, `tour`)."""
+on. With `--low-hp` the threshold is another (`hunt`, `probe run`, `tour`).
+
+Out of darts (behavior.darts) ends a hunt the same way: both are a HuntStop, which retreat.on_alarm, the command line
+and the simulator take as one."""
 
 from dataclasses import dataclass
 
@@ -29,10 +32,37 @@ SAFETY_LOOKS = 3    # ... over this many looks at least, stops the hunt
 EXIT = 4            # the command's exit code after it (the Lie Detector's is 3)
 
 
-class SafetyStop(Exception):
+class HuntStop(Exception):
+    """What ends a hunt for whoever is at the PC to put right, raised by Hunter.health_check: the safety stop, and out
+    of darts (behavior.darts.OutOfDarts). Around every hunting command (behavior.retreat.on_alarm) she goes to a safe
+    place as on the Lie Detector, the log says why in capitals (`label`: "<label>: <the stop>. The hunt ends: <ends>"),
+    a telemetry event says so (`event`), whoever is at the PC is paged (`page`: a title and a line), the rolling
+    recording's last `keep_s` s are saved (0: none), and the command exits with `exit_code`, printing `advice`
+    (gamelab.__main__). `title`: its retreat's telemetry events' word (behavior.retreat.Why)."""
+    label = "STOP"
+    title = "Stop"
+    event = "stop"
+    exit_code = 1
+    keep_s = 0.0
+    ends = "to a safe place"
+    advice = ""
+    at = 0.0
+
+    def page(self) -> tuple[str, str]:
+        """What's paged (control.alarm.page): a title and a line."""
+        return ("MapleStory: the hunt stopped", str(self))
+
+
+class SafetyStop(HuntStop):
     """Her HP stayed under the safety stop's threshold: the hunt ends (raised by Hunter.health_check). `hp`: her HP at
     the look that ended it; `seconds`: how long it had been under; `looks`: the looks of it; `threshold`; `at`: that
     look's time (time.monotonic)."""
+    label = "SAFETY STOP"
+    title = "Safety stop"
+    event = "safety_stop"
+    exit_code = EXIT
+    ends = "to a safe place (no sitting, no waiting for HP)"
+    advice = "Check her HP potions and her pet (fed, out, its potions) in the game before hunting again."
 
     def __init__(self, hp: float, seconds: float, looks: int, threshold: float, at: float = 0.0):
         self.hp, self.seconds, self.looks, self.threshold, self.at = hp, seconds, looks, threshold, at

@@ -572,6 +572,10 @@ class Realism:
     rival_takes: float = 20.0    # s after landing that a rival picks up its own drops
     rival_stay: float = 90.0     # s a rival hunts one place before it walks to another, on average (RIVAL_REACH)
     potions: int | None = None   # potions she has (None: endless)
+    darts: int | None = None     # throwing stars she has (None: endless): a Lucky Seven cast takes SKILL_STARS, a
+                                 # regular throw one (a claw swipe none); with too few the Lucky Seven key does
+                                 # nothing (no MP, no attack, no lock: as live on 2026-10-26 01:28, behavior.darts) and
+                                 # the attack key only swipes (the stab, if a monster is in its box: else nothing)
     drops: tuple | str = ()      # what a kill drops: (monster kind, drop kind, chance) (GAME_DROPS), drawn per
                                  # kill from a generator of their own, or MAP_DROPS: the world's map's (game_drops);
                                  # (): mesos, and a pig's leather (ITEM_OF)
@@ -1011,6 +1015,9 @@ class World:
         # What a kill drops (Realism.drops; with MAP_DROPS, the map's)
         self._drop_table = game_drops(model) if self.realism.drops == MAP_DROPS else tuple(self.realism.drops)
         self.potions_left = self.realism.potions
+        self.darts_left = self.realism.darts  # her throwing stars (Realism.darts; None: endless) ...
+        self.no_darts = 0                     # ... and her attacks keyed with too few of them
+        self.darts_out_at: float | None = None  # ... the first of those (world s)
         self.potions_used = 0           # potions drunk, by her key or by her pet
         self.pet_potions = 0            # ... of them her pet's (Her.pet)
         self.casts = 0                  # Lucky Seven casts (Her.mp kept), the MP they took, the MP potions her pet
@@ -1410,8 +1417,15 @@ class World:
             if self.ms < self.attack_lock_ms or self.mode == "rope":
                 return
             skill = action == "skill" and self.character.skill is not None
+            if skill and self.darts_left is not None and self.darts_left < SKILL_STARS:
+                self.no_darts += 1
+                self.darts_out_at = self.t if self.darts_out_at is None else self.darts_out_at
+                self.note("Lucky Seven with no throwing stars left: nothing")
+                return  # (no MP taken, nothing thrown, no lock)
             if skill and self.character.mp > 0 and not self._cast():
                 return  # too little MP: nothing thrown, no lock
+            if skill and self.darts_left is not None:
+                self.darts_left -= SKILL_STARS
             self.attack_lock_ms = self.ms + int(ATTACK_LOCK * 1000)
             self.attack_key_at = at
             self.attacks += 1
@@ -1847,11 +1861,12 @@ class World:
             if facing != due[-1]:
                 self.wrong_way += 1
                 self.note(f"attack meant {due[-1]} goes {facing}")
+        starless = not skill and self.darts_left is not None and self.darts_left < 1  # (Realism.darts: none left)
         if self.mode == "ground" or (AIR_PICK == "v83" and self.mode == "air"):
             stances = reach.CLAW.stances
             target = self.swiped(facing, stances[int(self.chance("stance") * len(stances))])
             swipe = target is not None
-            if target is None:
+            if target is None and not starless:
                 target = self.search_pick(facing)
         else:
             target = (self.air_pick(facing) if AIR_PICK == "widening"
@@ -1861,6 +1876,12 @@ class World:
                 near, take = self.noise.air_snail
                 if abs(target.at(self.t) - self.x) < near and self.chance("air_snail", key_ms) >= take:
                     target = None  # over it (Noise.air_snail): the star hits nothing
+        if starless and not swipe:
+            target = None  # no star to throw: the claw's swing alone
+            self.no_darts += 1
+            self.darts_out_at = self.t if self.darts_out_at is None else self.darts_out_at
+        elif not skill and not swipe and self.darts_left is not None:
+            self.darts_left -= 1
         stop = None if target is None or swipe else self.sight_stop(target)
         if stop is not None:
             target, stop = None, (target, stop)
@@ -2162,6 +2183,7 @@ class World:
                 **({"left_map_at": round(self.left_map_at, 3)} if self.left_map_at is not None else {}),
                 **({"pet_potions": self.pet_potions} if self.pet_potions else {}),
                 **({"casts": self.casts, "mp_potions": self.mp_potions} if self.casts else {}),
+                **({"darts": self.darts_left, "no_darts": self.no_darts} if self.darts_left is not None else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
 

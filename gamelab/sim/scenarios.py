@@ -35,7 +35,7 @@ from ..attack import danger
 from ..behavior import probe
 from ..behavior.hunter import Hunter
 from ..behavior.looting import DropSpot
-from ..behavior.safety import SafetyStop
+from ..behavior.safety import HuntStop, SafetyStop
 from ..localization.mapdata import MapModel
 from ..control.actions import STAR_DELAY_MS
 from ..control.navigator import Navigator
@@ -293,8 +293,8 @@ def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = No
             raise
         except (SimDied, SimTimeout, client.PlayerError, RuntimeError, ValueError) as e:
             outcome = f"error: {type(e).__name__}: {e}"
-        except SafetyStop as e:  # her HP stayed low (behavior.safety): the hunt ended
-            outcome = f"safety stop: {e}"
+        except HuntStop as e:  # her HP stayed low (behavior.safety), out of darts (behavior.darts): the hunt ended
+            outcome = f"{e.label.lower()}: {e}"
     trace = {"scenario": sc.name, "doc": sc.doc, "seconds": round(sim.clock.elapsed, 3), "result": outcome,
              "plans": sim.trace.plans, "cancels": sim.trace.cancels, "log": sim.trace.log,
              "world": sim.world.summary(), "world_log": sim.world.log, "eyes": dict(sim.eyes.counts),
@@ -2429,3 +2429,65 @@ def loop_tree_safety_stop(sim):
     hunt stops (behavior.safety), she goes to a safe place as on the Lie Detector, her moves alone (behavior.retreat),
     and whoever is at the PC is paged; no chair, no waiting for her HP."""
     return safety_stop(5)(sim)
+
+
+# --- out of darts: her presses take no MP and kill nothing, the hunt ends, she goes to a safe place, paged ----------
+# (behavior.darts). The user, 2026-10-26 01:28, the grind of 01:04: "stop, you run out of darts"; the bot kept pressing
+# for nothing. Realism.darts runs her out: the Lucky Seven key does nothing then (no MP), the attack key only swipes.
+
+def darts_stop(minutes: float = 5, grind: bool = False):
+    """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; with `grind`, grinding), her throwing stars
+    running out (Realism.darts). The result: how it stopped (`stopped`: the stop's message, its presses and seconds,
+    whether the game's pickup log said so), when (`at`, s into the run), when she ran out (`out_at`: the world's first
+    press with too few stars), her presses the stop's count needs (`needs`: behavior.darts.presses_for), her retreat,
+    whether she's on a safe place after it, what was paged, the recording's saves asked (`kept`: [s, seconds, name]),
+    every key and mouse event played from the stop on (`after`), and her stars left."""
+    def run(sim):
+        from ..behavior.darts import OutOfDarts, presses_for
+        from ..behavior.grind import Grind
+        from ..behavior.hunt import Hunt
+        from ..behavior.retreat import on_alarm
+        tour = sim.tour_stack()
+        watch, stopped, at = None, None, None
+        try:
+            with on_alarm(tour.h, rng=random.Random(sim.scenario.seed)) as watch:
+                (Grind if grind else Hunt)(tour, log=sim.log).run(minutes=minutes)
+        except OutOfDarts as e:
+            stopped = {"text": str(e), "presses": e.presses, "seconds": round(e.seconds, 3), "told": e.told}
+            at = e.at
+        sim.world.advance(sim.clock.now)
+        played = [] if at is None else sorted([round(t - at, 3), kind, *event] for kind, events
+                                              in sim.player.played.values() for t, *event in events if t >= at)
+        out = next((line for line in sim.world.log if "no throwing stars left" in line), None)
+        retreat = None if watch is None or watch.retreat is None else watch.retreat.record()
+        return {"stopped": stopped, "at": None if at is None else sim.trace.at(at),
+                "out_at": None if out is None else float(out.split()[0]),
+                "needs": presses_for(sim.model.mob_hp, sim.model.mob_pdd), "retreat": retreat, "safe": safe_there(sim),
+                "pages": sim.player.pages, "kept": sim.player.kept, "after": played, "darts": sim.world.darts_left}
+    return run
+
+
+DARTS_EXPECTS = (
+    check("the hunt stopped out of darts", lambda tr: "took no MP and killed nothing" in (
+        tr["result"]["stopped"] or {}).get("text", "")),
+    check("after as many presses as a monster on her takes of her swipes, and more",
+          lambda tr: tr["result"]["stopped"]["presses"] >= tr["result"]["needs"]),
+    check("only once her stars ran out", lambda tr: tr["result"]["out_at"] is not None
+          and tr["result"]["at"] > tr["result"]["out_at"]),
+    logs("OUT OF DARTS: "), logs("OUT OF DARTS: retreat"),
+    check("on a safe place once her retreat is over", lambda tr: tr["result"]["safe"]),
+    check("paged once, about her darts", lambda tr: len(tr["result"]["pages"]) == 1
+          and "out of darts" in tr["result"]["pages"][0][1]),
+    check("the recording's last minutes kept, once", lambda tr: len(tr["result"]["kept"]) == 1),
+    check("her moves alone after the stop, no attack and no mouse", _moves_alone))
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
+      expects=DARTS_EXPECTS)
+def loop_tree_out_of_darts(sim):
+    """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
+    30 casts of Lucky Seven and they're gone; from then her presses take no MP and kill nothing (the Lucky Seven key
+    does nothing, as live at 01:28 on 2026-10-26), and once there are more of them than a Horny Mushroom standing on
+    her takes of her claw's swipes (behavior.darts.presses_for: 32 on this map) the hunt stops, she goes to a safe
+    place (behavior.retreat), whoever is at the PC is paged, and the recording's last minutes are saved."""
+    return darts_stop(5)(sim)

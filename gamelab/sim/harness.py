@@ -52,7 +52,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
   safety_stops     the safety stop (behavior.safety: her HP under 40% for 2 s, her pet's potions not keeping her up):
                    1 if it ended the run (her retreat to a safe place, then nothing: the hunt ends, as live), and
                    safety_at, when (s; the 'safety_stop' event). Until 2026-10-26 the runs counted her rests on the
-                   chair (rests) and the HP lost on her trips to rest (rest_hp_lost, rest_trips)
+                   chair (rests) and the HP lost on her trips to rest (rest_hp_lost, rest_trips); darts_stops and
+                   darts_at, out of darts' (behavior.darts: her Lucky Seven presses taking no MP and killing nothing),
+                   and darts_out_at, when she ran out (world.Realism.darts: her stars; None: endless, or not out)
   alive_s          the seconds of the horizon she was hunting (to her death, fall or portal): rates a minute alive
   fresh_hurt       touches that hurt her by a monster within world.FRESH_S of its respawn (from its spawn point),
                    and fresh_hp_lost, the HP they took
@@ -220,11 +222,11 @@ def _safely(h, hunt: Callable[[], None]) -> None:
     """`hunt()` as the command line runs it, in behavior.retreat.on_alarm: at the safety stop (behavior.safety) she goes
     to a safe place, and the run's hunt ends there, as live (nothing hunts after it)."""
     from ..behavior.retreat import on_alarm
-    from ..behavior.safety import SafetyStop
+    from ..behavior.safety import HuntStop
     try:
         with on_alarm(h, rng=random.Random(POLICY_SEED)):
             hunt()
-    except SafetyStop:
+    except HuntStop:  # (the safety stop, out of darts)
         pass
 
 
@@ -480,6 +482,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     waits = _waits(records)
     start = next((r["t"] for r in records if r.get("topic") == "session"), None)
     stops = [r for r in events if r.get("kind") == "safety_stop"]
+    darts = [r for r in events if r.get("kind") == "out_of_darts"]
     return {
         "exp": world.exp,
         "exp_per_min": round(world.exp / (horizon / 60), 2),
@@ -515,6 +518,9 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "stuck_s": round(sum(max(0.0, g - IDLE_GRACE) for g in gaps), 1),
         "safety_stops": len(stops),
         "safety_at": round(stops[0]["t"] - start, 1) if stops and start is not None else None,
+        "darts_stops": len(darts),
+        "darts_at": round(darts[0]["t"] - start, 1) if darts and start is not None else None,
+        "darts_out_at": None if world.darts_out_at is None else round(world.darts_out_at, 1),
         "alive_s": round(end, 1),
         "fresh_hurt": sum(1 for t, hp in world.fresh_log if hp > 0 and t <= end),
         "fresh_hp_lost": round(sum(hp for t, hp in world.fresh_log if t <= end), 3),
@@ -670,6 +676,7 @@ COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potion
            "mp_potions", "mp_per_kill", "casts_at_dead", "at_dead", "finishes", "died_at", "fell_out_at",
            "left_map_at",
            "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "safety_stops", "safety_at",
+           "darts_stops",
            "alive_s", "hurt", "trip_hurt", "pile_hurt", "stand_hurt", "knock_falls", "fresh_hurt", "wait_s",
            "wait_hp_lost")
 
