@@ -1545,8 +1545,9 @@ def cmd_heading(args) -> int:
     if any(of_frame(f) != geo for f in fulls):
         print("the frames aren't all of one size")
         return 1
-    template, full_path = _calibration(geo).template, paths.calibrated(paths.TAG_FULL, geo.suffix)
-    lab, seed = paths.calibrated(paths.HEADING, geo.suffix), paths.calibrated(paths.HEADING_SEED, geo.suffix)
+    mine = paths.of()  # (hers)
+    template, full_path = _calibration(geo).template, paths.calibrated(mine.tag_full, geo.suffix)
+    lab, seed = paths.calibrated(mine.heading, geo.suffix), paths.calibrated(mine.heading_seed, geo.suffix)
     bank = Heading(geo, seed if args.seed else lab, None if args.seed else seed, background=False, log=print)
     placed = ({Path(o["file"]).name: tuple(o["tag"]) for o in json.loads(Path(args.tags).read_text())}
               if args.tags else {})

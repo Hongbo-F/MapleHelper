@@ -479,20 +479,21 @@ def _path_seconds(path: list[Move]) -> float:
 def _load_grounds(map_id: int) -> dict:
     """What visits to this map's hunting grounds gave (lab/grounds.json): {platform id: {visits, exp}}."""
     try:
-        return json.loads(paths.GROUNDS.read_text(encoding="utf-8")).get(str(map_id), {})
+        return json.loads(paths.of().grounds.read_text(encoding="utf-8")).get(str(map_id), {})
     except (OSError, ValueError):
         return {}
 
 
 def _save_grounds(map_id: int, stats: dict) -> None:
     """Keep this map's hunting-ground stats in lab/grounds.json, next to other maps'."""
+    path = paths.of().grounds  # (hers: her kill rate)
     try:
-        everything = json.loads(paths.GROUNDS.read_text(encoding="utf-8")) if paths.GROUNDS.exists() else {}
+        everything = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except (OSError, ValueError):
         everything = {}
     everything[str(map_id)] = stats
     try:
-        paths.GROUNDS.parent.mkdir(parents=True, exist_ok=True)
-        paths.GROUNDS.write_text(json.dumps(everything, indent=1), encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(everything, indent=1), encoding="utf-8")
     except OSError:
         pass

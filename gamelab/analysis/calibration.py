@@ -41,8 +41,9 @@ class Calibration:
 def files(geo: Geometry = STRETCHED) -> tuple:
     """The calibration's files for a client of this geometry: its crop (json), her name tag at the recordings'
     scale, and her name tag at full size (perception.nametag cuts that one on its first look)."""
-    return (paths.calibrated(paths.CALIBRATION, geo.suffix), paths.calibrated(paths.TAG_TEMPLATE, geo.suffix),
-            paths.calibrated(paths.TAG_FULL, geo.suffix))
+    mine = paths.of()  # (hers: the thief's as always, another character's under lab/characters/)
+    return (paths.calibrated(mine.calibration, geo.suffix), paths.calibrated(mine.tag_template, geo.suffix),
+            paths.calibrated(mine.tag_full, geo.suffix))
 
 
 def pictures(geo: Geometry = STRETCHED) -> tuple[Path, Path]:

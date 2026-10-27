@@ -157,7 +157,7 @@ class Eyes:
         self._fixes, self._fixed_at = 0, -1e18  # what `recover` did about the capture since a frame last passed, when
         self.log: Callable[[str], None] = print  # what the eyes say (the window moved; the capture reopened)
         self.glances_failed = 0            # glances that failed their checks (no dot from them)
-        self.name_tag = NameTag(tag_template, paths.calibrated(paths.TAG_FULL, geo.suffix), geo)
+        self.name_tag = NameTag(tag_template, paths.calibrated(paths.of().tag_full, geo.suffix), geo)
         self._heading: Heading | None = None  # her pictures (heading_bank: made on first use)
         self.want_ropes = False  # Senses turns this on
         self.minimap = MinimapPicture(minimap_picture, geo) if minimap_picture is not None else None
@@ -469,8 +469,9 @@ class Eyes:
         """Her pictures for these eyes' window size (perception.heading: kept in lab, the seed in assets until then, or
         where lab's can't be read, which the eyes' log says)."""
         if getattr(self, "_heading", None) is None:
-            self._heading = Heading(self.geo, paths.calibrated(paths.HEADING, self.geo.suffix),
-                                    paths.calibrated(paths.HEADING_SEED, self.geo.suffix),
+            mine = paths.of()  # (hers)
+            self._heading = Heading(self.geo, paths.calibrated(mine.heading, self.geo.suffix),
+                                    paths.calibrated(mine.heading_seed, self.geo.suffix),
                                     log=lambda text: getattr(self, "log", print)(text))
         return self._heading
 

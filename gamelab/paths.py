@@ -39,6 +39,44 @@ TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-m
 WINDOW_TRIES = LAB / "window_tries.json"  # when Alt+Enter was tried on the client (control.window_size), by any process
 
 
+# Her own files (`of`): each character's name tag, pictures, pet, grounds and logs. The thief's are the names above,
+# as they always were; another character's the same names under lab/characters/<her files>/ (gamelab.character's
+# Perception.files: "magician"), her heading seed assets/heading_<her files>.npz.
+CHARACTERS = "characters"
+MINE = {"calibration": "CALIBRATION", "tag_template": "TAG_TEMPLATE", "tag_full": "TAG_FULL", "heading": "HEADING",
+        "heading_seed": "HEADING_SEED", "heading_shots": "HEADING_SHOTS", "shot_log": "SHOT_LOG",
+        "probe_log": "PROBE_LOG", "hit_log": "HIT_LOG", "pet": "PET", "grounds": "GROUNDS"}
+
+
+class Files:
+    """A character's own files (`of`, MINE's names in lower case): `folder` "" the thief's, this module's names as they
+    are when asked (a test puts its own in their place); another's under lab/characters/<folder>/."""
+
+    def __init__(self, folder: str = ""):
+        self.folder = folder
+
+    def __getattr__(self, name: str) -> Path:
+        if name not in MINE:
+            raise AttributeError(name)
+        path = globals()[MINE[name]]
+        if not self.folder:
+            return path
+        if name == "heading_seed":
+            return path.with_name(f"{path.stem}_{self.folder}{path.suffix}")
+        return globals()["LAB"] / CHARACTERS / self.folder / path.name
+
+    def __repr__(self) -> str:
+        return f"Files({self.folder!r})"
+
+
+def of(character=None) -> Files:
+    """Her own files: `character`'s (a gamelab.character.Character; None: the one this process plays)."""
+    if character is None:
+        from . import character as profiles  # (a module beside this one: loaded when first asked)
+        character = profiles.active()
+    return Files(character.perception.files)
+
+
 def calibrated(path: Path, suffix: str) -> Path:
     """One of the calibration's files (CALIBRATION, TAG_TEMPLATE, TAG_FULL; her pictures HEADING and HEADING_SEED) for a
     game window of another client size than 1920x1080 (screen.Geometry.suffix: "_1366x768"); `suffix` "" is the file

@@ -149,14 +149,15 @@ def follow(state: dict, now: float, present: bool = True) -> None:
 
 def _state() -> dict:
     try:
-        return json.loads(paths.PET.read_text(encoding="utf-8"))
+        return json.loads(paths.of().pet.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
 def _save(state: dict) -> None:
-    paths.PET.parent.mkdir(parents=True, exist_ok=True)
-    paths.PET.write_text(json.dumps(state), encoding="utf-8")
+    path = paths.of().pet  # (hers)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state), encoding="utf-8")
 
 
 class PetCare:

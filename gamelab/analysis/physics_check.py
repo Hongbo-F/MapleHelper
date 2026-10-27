@@ -31,7 +31,7 @@ import numpy as np
 
 from .. import paths
 from ..motion import body, physics
-from ..paths import RECORDINGS, REPO, TAG_TEMPLATE
+from ..paths import RECORDINGS, REPO
 from . import recordings, scroll, track
 
 FIXTURES = REPO / "tests" / "fixtures" / "tracks"
@@ -87,7 +87,7 @@ def tracked(name: str, key_names: dict[str, str] | None = None) -> Track:
     lab's name tag template for the recording's client size), plus the camera's movement (scroll.camera), in map
     units (at the recording's geometry: recordings.Recording.geo)."""
     rec = recordings.load(name)
-    template = np.load(paths.calibrated(TAG_TEMPLATE, rec.geo.suffix))
+    template = np.load(paths.calibrated(paths.of().tag_template, rec.geo.suffix))
     rows = np.array([track.fine_match(f, template) for f in rec.frames])
     cam = scroll.camera(rec.frames, [(r[0] + template.shape[1] / 2, r[1]) for r in rows], rec.geo)
     per_px = rec.geo.units_per_px

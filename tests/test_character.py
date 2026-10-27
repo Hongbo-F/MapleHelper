@@ -319,3 +319,53 @@ def test_only_the_thief_attacks_in_the_game(monkeypatch):
     assert cli._refused_as(parser.parse_args(["probe", "list"])) is None  # offline
     assert cli._refused_as(parser.parse_args(["character"])) is None
     assert cli.main(["tour"]) == 2
+
+
+# --- her files (S0c) ------------------------------------------------------------------------------------------
+
+def test_the_thiefs_files_are_paths_names_as_they_are(monkeypatch, tmp_path):
+    from gamelab import paths
+    mine = paths.of(character.load("thief"))
+    for attr, name in paths.MINE.items():
+        assert getattr(mine, attr) == getattr(paths, name)
+    monkeypatch.setattr(paths, "PET", tmp_path / "pet.json")  # a test's own, as before: read when asked
+    assert paths.of().pet == tmp_path / "pet.json"
+    with pytest.raises(AttributeError):
+        mine.telemetry  # (not hers: everyone's)
+
+
+def test_a_magicians_files_are_her_own(monkeypatch, tmp_path):
+    from gamelab import paths
+    mage = character.load("magician")
+    mine = paths.of(mage)
+    assert mine.pet == paths.LAB / "characters" / "magician" / "pet.json"
+    assert mine.heading_shots == paths.LAB / "characters" / "magician" / "heading"
+    assert mine.heading_seed == paths.ASSETS / "heading_magician.npz"
+    assert paths.calibrated(mine.tag_template, "_1366x768") == (
+        paths.LAB / "characters" / "magician" / "tag_template_1366x768.npy")
+    assert paths.calibrated(mine.heading_seed, "_1366x768") == paths.ASSETS / "heading_magician_1366x768.npz"
+    monkeypatch.setattr(paths, "LAB", tmp_path)
+    assert paths.of(mage).grounds == tmp_path / "characters" / "magician" / "grounds.json"
+
+
+def test_the_stack_opens_her_files(monkeypatch, tmp_path):
+    from gamelab import paths
+    from gamelab.analysis import calibration
+    from gamelab.behavior import pet, tour
+    from gamelab.screen import geometry
+    monkeypatch.setattr(paths, "LAB", tmp_path)
+    monkeypatch.setattr(paths, "GROUNDS", tmp_path / "grounds.json")  # (the thief's: a test's own)
+    mage = character.load("magician")
+    with character.using(mage):
+        cal, small, full = calibration.files(geometry(1366, 768))
+        assert cal == tmp_path / "characters" / "magician" / "calibration_1366x768.json"
+        assert (small.name, full.name) == ("tag_template_1366x768.npy", "tag_template_full_1366x768.npy")
+        pet._save({"level": 50.0, "at": 1.0})
+        assert json.loads((tmp_path / "characters" / "magician" / "pet.json").read_text())["level"] == 50.0
+        assert pet._state()["level"] == 50.0
+        tour._save_grounds(10002073, {"23": {"visits": 1, "exp": 40}})
+        assert tour._load_grounds(10002073) == {"23": {"visits": 1, "exp": 40}}
+        assert (tmp_path / "characters" / "magician" / "grounds.json").is_file()
+    assert tour._load_grounds(10002073) == {} and not paths.GROUNDS.exists()  # the thief's: not hers
+    assert calibration.files(geometry(1366, 768))[0] == paths.calibrated(paths.CALIBRATION, "_1366x768")
+
