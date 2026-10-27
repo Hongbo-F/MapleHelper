@@ -402,6 +402,19 @@ class Eyes:
         return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing,
                                     (0, 0, w, int(h * obs.geo.hud_top)), fallback, **more)
 
+    def refind_all(self, obs: Observation, asks: list[tuple], threads: int = 1, pool=None) -> list[Mob | None] | None:
+        """`refind` of each monster asked, (mob, box, fallback, near, memo, id: the caller's for it from frame to frame),
+        all in one call in C on `threads` threads (MobDetector.refind_all; `pool`: an Executor for the fallbacks); None
+        where that can't be (no C, or a detector without it: the simulator's fakes), and the caller asks `refind` of
+        each."""
+        many = getattr(self.detector, "refind_all", None)
+        if many is None:
+            return None
+        h, w = obs.frame.shape[:2]
+        return many(obs.frame, [(box, mob.kind, mob.template, mob.facing, fallback, near, memo, tid)
+                                for mob, box, fallback, near, memo, tid in asks],
+                    (0, 0, w, int(h * obs.geo.hud_top)), threads, pool)
+
     def heading(self, obs: Observation) -> Reading:
         """Which way she faces in a look's frame (perception.heading), by her picture above her name tag: not told
         where the tag wasn't seen (`tag_seen` False: where the camera puts her), nor before she has pictures."""

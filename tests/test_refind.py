@@ -1,10 +1,13 @@
 """A monster followed, re-found (MobDetector.refind): first only as far around where it should be as it can have got
 since it was last seen (`near`, mobs.near_pad), the REFIND_PAD window only where that finds no picture at REFIND_GOOD;
 a window at the same place, looked at with the same pictures, whose pixels are the very same as at the last re-find,
-gives the last answer without matching again (`memo`), its kind's whole set's too. Made-up game pictures (a pig and its
-next frame, test_pasted's) drawn on a frame of the game at its own 1366x768."""
+gives the last answer without matching again (`memo`), its kind's whole set's too; and a frame's re-finds all in one call
+in C (`refind_all`, native.c's rf_run), the same answers. Made-up game pictures (a pig and its next frame, test_pasted's)
+drawn on a frame of the game at its own 1366x768."""
 
 import json
+import math
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -148,3 +151,87 @@ def test_found_outside_the_near_window_the_next_goes_to_the_whole_window_at_once
     windows.clear()
     assert detector.refind(again, box, "pig", "pig_move0", -1, BOUNDS, near=near, memo=memo) is not None
     assert windows == [(box[2] - box[0] + 2 * near, box[3] - box[1] + 2 * near)]
+
+
+def asks_of(frame_, box):
+    """Re-finds of the pig drawn at `box` to ask, one a way it can be asked: (box, kind, template, facing, fallback,
+    near, its id)."""
+    near = NEAR_MARGIN + 8
+    out = []
+    for dx in (0, 5, 18, 40):  # where it should be, near it, outside the near window, outside the whole one
+        moved = (box[0] - dx, box[1], box[2] - dx, box[3])
+        for template, near_ in (("pig_move0", near), ("pig_move0", None), ("pig_move1", near), ("", near),
+                                ("pig_nothing", near)):
+            for fallback in (True, False):
+                out.append((moved, "pig", template, -1, fallback, near_))
+    out.append(((0, 0, 30, 30), "pig", "pig_move0", -1, True, near))  # (at the frame's corner: a window cut small)
+    out.append(((1300, 500, 1400, 600), "pig", "pig_move0", -1, True, near))  # (partly off it)
+    out.append(((600, 300, 700, 380), "slime", "pig_move0", -1, True, near))  # (a kind it doesn't know)
+    return [(*a, i) for i, a in enumerate(out)]
+
+
+@pytest.mark.parametrize("threads, pooled", [(1, False), (4, False), (4, True)])
+def test_all_in_one_call_the_same_answers_as_each_on_its_own(detector, threads, pooled):
+    pool = ThreadPoolExecutor(2) if pooled else None  # (the fallbacks on it)
+    for name in ("pig_move0", "pig_move1"):
+        frame_, box = scene(name)
+        asks = asks_of(frame_, box)
+        alone, memos = [], [{} for _ in asks]
+        for (b, kind, template, facing, fallback, near, _), memo in zip(asks, memos):
+            alone.append(detector.refind(frame_, b, kind, template, facing, BOUNDS, fallback, near, memo))
+        c_memos = [{} for _ in asks]
+        fallbacks = detector.fallbacks
+        together = detector.refind_all(frame_, [(*a[:6], memo, a[6]) for a, memo in zip(asks, c_memos)], BOUNDS,
+                                       threads, pool)
+        assert together == alone and any(m is not None for m in together) and any(m is None for m in together)
+        assert detector.fallbacks > fallbacks
+        assert [m.get("far") for m in c_memos] == [m.get("far") for m in memos]  # (the next re-finds' window too)
+
+
+def test_all_in_one_call_a_window_the_very_same_as_last_time_gives_the_last_answer(detector):
+    frame_, box = scene()
+    asks = [(box, "pig", "pig_move0", -1, True, NEAR_MARGIN + 8, {}, 7),
+            ((box[0] - 18, box[1], box[2] - 18, box[3]), "pig", "pig_move0", -1, True, NEAR_MARGIN + 8, {}, 8)]
+    first = detector.refind_all(frame_, asks, BOUNDS, 4)
+    recalled = detector.recalled
+    assert detector.refind_all(frame_.copy(), asks, BOUNDS, 4) == first and detector.recalled == recalled + 2
+    changed = frame_.copy()
+    changed[box[1] + 10, box[0] + 10] ^= 1  # one pixel of it: both windows matched again
+    assert detector.refind_all(changed, asks, BOUNDS, 4) == [detector.refind(changed, a[0], *a[1:4], BOUNDS, *a[4:6])
+                                                            for a in asks]
+    assert detector.recalled == recalled + 2
+    recalled = detector.recalled
+    detector.refind_all(changed, asks[1:], BOUNDS, 4)  # (7 not asked: its memo goes)
+    assert detector.recalled == recalled + 1
+    detector.refind_all(changed, asks, BOUNDS, 4)
+    assert detector.recalled == recalled + 2  # (8's again; 7's matched anew)
+
+
+def test_all_in_one_call_another_kinds_monster_near_is_looked_for_in_the_whole_window(detector, monkeypatch):
+    # (`_its_kind` turning down what the near window found: as `refind`, the whole window then, in a second call)
+    frame_, box = scene()
+    near = NEAR_MARGIN + 8
+    asks = [(box, "pig", "pig_move0", -1, fallback, near, {}, i) for i, fallback in enumerate((True, False))]
+    for no in (lambda m: True, lambda m: m.w > 0 and (m.x, m.y) != (box[0] + m.w // 2, box[1] + m.h // 2)):
+        monkeypatch.setattr(detector, "_its_kind", lambda frame, m, no=no: not no(m))
+        alone = [detector.refind(frame_, a[0], *a[1:4], BOUNDS, *a[4:6], {}) for a in asks]
+        assert detector.refind_all(frame_, [(*a[:6], {}, a[7]) for a in asks], BOUNDS, 4) == alone
+
+
+def test_all_in_one_call_not_where_the_c_cant(detector):
+    frame_, box = scene()
+    flipped = frame_[:, ::-1]  # (a view the C doesn't read as it is: each re-find on its own, as before)
+    assert detector.refind_all(flipped, [(box, "pig", "pig_move0", -1, True, None, {}, 1)], BOUNDS, 2) is None
+
+
+def test_the_cs_rounding_is_pythons():
+    # R(s) (native.c: a Mob's score, compared with REFIND_GOOD and the best so far) on float32 scores: ties (j/16, odd j)
+    # to even, the neighbours of every 3-decimal boundary, and random ones
+    rng = np.random.default_rng(3)
+    tries = [j / 16 for j in range(-16, 17)] + list(rng.uniform(-1, 1, 20000))
+    for k in range(-1000, 1001):
+        b = np.float32((k + 0.5) / 1000)
+        tries += [float(np.nextafter(b, np.float32(-2))), float(b), float(np.nextafter(b, np.float32(2)))]
+    for s in np.array(tries, np.float32):
+        assert native.lib().rf_rounded(float(s)) == round(float(s), 3), float(s)
+    assert math.copysign(1, native.lib().rf_rounded(-0.0001)) == math.copysign(1, round(-0.0001, 3))

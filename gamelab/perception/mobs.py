@@ -36,9 +36,13 @@ shares its body with others isn't re-found where another's picture is the monste
 
 A monster followed is re-found first only as far around where it should be as it can have got since it was last seen
 (`near_pad`), and a window whose pixels are the very same as at its last re-find gives the last answer (`refind`'s
-`memo`): fewer matches a frame for the same answers (README, Fewer re-find matches).
+`memo`): fewer matches a frame for the same answers (README, Fewer re-find matches). A frame's re-finds go to the C
+together (`refind_all`: every window's matches in one call on threads of its own, the rest here as each comes back),
+and a twin kind's check side by side keeps what its pictures alone give (`_pick_here`): the same answers, in less time
+(README, One call for the re-finds).
 """
 
+import ctypes
 import json
 import math
 import threading
@@ -432,6 +436,15 @@ class MobDetector:
             match.prepared(t.rgb, t.mask3)
             if t.step1 is not None:
                 match.prepared(*t.step1)
+        # The re-finds in one call in C (`refind_all`): every picture by its index here, the pictures of each re-find
+        # (`_lists_of`: kind, template, facing) as runs of indices in one array, the C's context by thread count.
+        self._rf_table = [t for ts in self.templates.values() for t in ts]
+        self._rf_at = {id(t): i for i, t in enumerate(self._rf_table)}
+        self._rf_index: dict[tuple, tuple[int, int, int, int, int]] = {}
+        self._rf_flat: list[int] = []
+        self._rf_lists = np.zeros(1, np.int32)
+        self._rf: dict[int, native.Refinds | None] = {}
+        self._picking: dict = {}  # what `_its_kind` works out of the pictures alone, kept (`_pick_here`)
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
         """Monsters in `frame` (RGB, a look frame at `frame_scale`). `rows` limits the search to a band."""
@@ -498,7 +511,15 @@ class MobDetector:
             return best
         with self._counting:
             self.fallbacks += 1
+        return self._fallback(frame, full, kind, box, bounds, memo)
+
+    def _fallback(self, frame: np.ndarray, full: tuple[int, int, int, int], kind: str, box: tuple[int, int, int, int],
+                  bounds: tuple[int, int, int, int], memo: dict | None) -> Mob | None:
+        """A re-find's last resort (`refind`): every template of its kind over the whole window `full`, as `detect`
+        does; of those found that are its kind, the one nearest the box's centre, or None."""
         x0, y0, x1, y1 = full
+        bx1, by1 = bounds[2], bounds[3]
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
         known, found = _recall(memo, "whole", full, kind, frame)
         if known:
             self._recalled()
@@ -507,6 +528,145 @@ class MobDetector:
             _keep(memo, "whole", full, kind, frame, found)
         found = [m for m in found if m.kind == kind and self._its_kind(frame[:by1, :bx1], m)]
         return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
+
+    def refind_all(self, frame: np.ndarray, asks: list[tuple], bounds: tuple[int, int, int, int] | None = None,
+                   threads: int = 1, pool=None) -> list[Mob | None] | None:
+        """`refind` of each monster asked, (box, kind, template, facing, fallback, near, memo, id) as there (`id`: the
+        caller's for it, from frame to frame: its windows' memos, one a monster), with the same answers: every window's
+        matches (`_matched`'s, near and full) in one call in C on `threads` threads (native.Refinds, rf_start: Python's
+        lock let go; the contract in native.c), the rest here as in `refind`, each monster's as the C hands it over,
+        while it goes on with the others (`_its_kind`; `_note_far`; the fallback, on `pool`, an Executor, if one is
+        given; the near window's answer passing REFIND_GOOD but not its kind, its whole window in a second call after).
+        None where the C can't (not built, a picture it doesn't take, a frame it doesn't read as it is): the caller
+        re-finds each with `refind`."""
+        rf = self._in_c(threads)
+        if rf is None:
+            return None
+        h, w = frame.shape[:2]
+        bounds = bounds or (0, 0, w, h)
+        bx1, by1 = bounds[2], bounds[3]
+        pad = round(REFIND_PAD * self.px)
+        n = len(asks)
+        jobs = (native.RfJob * n)()
+        plans: list = [None] * n  # (its full window, whether looked for nearer first) of those with one
+        for i, (box, kind, template, facing, fallback, near, memo, tid) in enumerate(asks):
+            job = jobs[i]
+            job.id = tid
+            full = _window(box, pad, bounds)
+            if full is None or kind not in self.templates:
+                continue  # (nothing: its memo kept)
+            job.key, job.first_at, job.first_n, job.next_at, job.next_n = self._lists_of(kind, template, facing)
+            job.wfull[:] = full
+            nearer = near is not None and near < pad
+            if nearer and not _far(memo):
+                small = _window(box, near, bounds)
+                if small is not None:
+                    job.wnear[:] = small
+            plans[i] = (full, nearer)
+        outs = rf.start(frame, jobs, self._rf_lists, THRESHOLD, REFIND_GOOD)
+        if outs is None:
+            return None
+        found: list[Mob | None] = [None] * n
+        again, alone, last = [], [], []  # (to look at in their whole windows yet; the C couldn't; to the fallback)
+        futures = {}
+        recalled = 0
+
+        def whole(i: int, o) -> None:  # (its whole window's answer, as `refind` takes it)
+            box, kind, _, _, fallback, near, memo, _ = asks[i]
+            best = self._rf_mob(kind, o, 1) if o.tpl[1] >= 0 else None
+            if best is not None and not self._its_kind(frame[:by1, :bx1], best):
+                best = None  # another kind's monster: not this one
+            if plans[i][1]:
+                _note_far(memo, best is None or not _inside(best, box, near))
+            if best is not None or not fallback:
+                found[i] = best
+            elif pool is not None:
+                futures[i] = pool.submit(self._fallback, frame, plans[i][0], kind, box, bounds, memo)
+            else:
+                last.append(i)
+
+        try:
+            while (i := rf.next()) >= 0:
+                o = outs[i]
+                if plans[i] is None:
+                    continue
+                recalled += bool(o.looked & 2) + bool(o.looked & 8)
+                if o.looked & 16:
+                    alone.append(i)
+                elif o.found == 1:
+                    best = self._rf_mob(asks[i][1], o, 0)
+                    if self._its_kind(frame[:by1, :bx1], best):
+                        found[i] = best
+                    else:
+                        again.append(i)  # (another kind's monster near: its whole window, as `refind` goes on to)
+                else:
+                    whole(i, o)
+        finally:
+            rf.end()
+        if again:
+            more = (native.RfJob * len(again))()
+            for k, i in enumerate(again):
+                ctypes.memmove(ctypes.byref(more[k]), ctypes.byref(jobs[i]), ctypes.sizeof(native.RfJob))
+                more[k].wnear[:] = (0, 0, 0, 0)
+            outs2 = rf.run(frame, more, self._rf_lists, THRESHOLD, REFIND_GOOD, keep=True)
+            for k, i in enumerate(again):
+                if outs2 is None or outs2[k].looked & 16:
+                    alone.append(i)
+                else:
+                    recalled += bool(outs2[k].looked & 8)
+                    whole(i, outs2[k])
+        with self._counting:
+            self.recalled += recalled
+            self.fallbacks += len(last) + len(futures)
+        for i in alone:  # (the C couldn't: these as before; never so far)
+            box, kind, template, facing, fallback, near, memo, _ = asks[i]
+            found[i] = self.refind(frame, box, kind, template, facing, bounds, fallback, near, memo)
+        for i in last:
+            box, kind, _, _, _, _, memo, _ = asks[i]
+            found[i] = self._fallback(frame, plans[i][0], kind, box, bounds, memo)
+        for i, f in futures.items():
+            found[i] = f.result()
+        return found
+
+    def _in_c(self, threads: int) -> "native.Refinds | None":
+        """The C's re-finds on `threads` threads (`refind_all`), made the first time (each picture's index: its place
+        in `_rf_table`); None where it can't be: the DLL or AVX2 not there, a picture the C doesn't take."""
+        rf = self._rf.get(threads)
+        if rf is None and threads not in self._rf:
+            ready = [match.prepared(t.rgb, t.mask3) for t in self._rf_table]
+            rf = native.Refinds(ready, threads) if ready and all(r is not None for r in ready) else None
+            if rf is not None and rf.ctx is None:
+                rf = None
+            self._rf[threads] = rf
+        return rf
+
+    def _lists_of(self, kind: str, template: str, facing: int) -> tuple[int, int, int, int, int]:
+        """A re-find's pictures for the C (`refind_all`; `_matched`'s, as indices into `_rf_table`, in `_rf_lists`):
+        (their number, the first pictures' start and count, the next frames' start and count). Made once each."""
+        key = (kind, template, facing)
+        got = self._rf_index.get(key)
+        if got is None:
+            first, last = [], None
+            for t in self.templates[kind]:
+                if not template or t.name != template or (facing and t.facing and t.facing != facing):
+                    continue
+                last = last or t
+                first.append(self._rf_at[id(t)])
+            after = [] if self.search == 1 or last is None else [
+                self._rf_at[id(t)] for t in _next_frames(self.templates[kind], last)]
+            at = len(self._rf_flat)
+            self._rf_flat += first + after
+            got = (len(self._rf_index), at, len(first), at + len(first), len(after))
+            self._rf_index[key] = got
+            self._rf_lists = np.array(self._rf_flat or [0], np.int32)
+        return got
+
+    def _rf_mob(self, kind: str, o, side: int) -> Mob:
+        """The monster a window's best picture in the C's answer `o` (native.RfOut; `side` 0 near, 1 full) is, as
+        `_matched` makes it."""
+        t = self._rf_table[o.tpl[side]]
+        th, tw = t.rgb.shape[:2]
+        return _seen(kind, t, o.x[side] + tw // 2, o.y[side] + th // 2, tw, th, round(float(o.score[side]), 3))
 
     def _looked(self, frame: np.ndarray, win: tuple[int, int, int, int], seen: tuple, memo: dict | None,
                 slot: str) -> Mob | None:
@@ -576,7 +736,7 @@ class MobDetector:
         which were then lost, and the game isn't run at that size any more. Any other kind is its kind."""
         if m.kind not in self.twins or self.search == 1:
             return True
-        return _pick_kind(frame, m, self.twins[m.kind], self.templates, 0, self.aligned).kind == m.kind
+        return _pick_kind(frame, m, self.twins[m.kind], self.templates, 0, self.aligned, self._picking).kind == m.kind
 
     def _silhouette(self, kinds: tuple[str, ...], picture: np.ndarray, mask3: np.ndarray) -> np.ndarray:
         """A learned kind's template's silhouette at 1/COARSE of step 1's scale (MobTemplate.silhouette), by the gates
@@ -756,14 +916,17 @@ def _aligned(a: MobTemplate, b: MobTemplate) -> tuple[int, int]:
 
 
 def _pick_kind(frame: np.ndarray, m: Mob, twins: tuple[str, ...], templates: dict[str, list[MobTemplate]],
-               slack: int, aligned: dict | None = None) -> Mob:
+               slack: int, aligned: dict | None = None, cache: dict | None = None) -> Mob:
     """Monster `m` as the kind, of its own and `twins`, whose picture of its frame (facing its way, set on its feet,
     matched `slack` px around; with no slack, there alone, shifted to where it lies on `m`'s picture by `aligned`:
     MobDetector.aligned) it is. A picture with parts of its own (OWN_PARTS: an Axe Stump's axe) is the monster's
     only where those parts match too (OWN_MATCH), and then it is, over the pictures it holds (a Stump's); otherwise
-    the one that scores best (Horny or Green Mushroom, Stump or Dark Stump: their colours)."""
+    the one that scores best (Horny or Green Mushroom, Stump or Dark Stump: their colours). With no slack and a
+    `cache` (a dict kept with the templates), the same answer by `_pick_here`."""
     if not m.frame or m.ox is None:
         return m
+    if not slack and cache is not None:
+        return _pick_here(frame, m, twins, templates, aligned, cache)
     own = next((t for t in templates.get(m.kind, ()) if t.name == m.template and t.facing == m.facing), None)
     if own is None:
         return m
@@ -800,6 +963,97 @@ def _pick_kind(frame: np.ndarray, m: Mob, twins: tuple[str, ...], templates: dic
         if patch.shape[:2] == mask.shape and _score(patch, t.rgb, parts) >= OWN_MATCH:
             bigger.append(seen)
     return max(bigger or kept or [m], key=lambda c: c.score)
+
+
+PICKING_MOST = 20000  # entries `_pick_here` keeps (a few hundred on a map's pictures; past this, it starts again)
+
+
+def _pick_here(frame: np.ndarray, m: Mob, twins: tuple[str, ...], templates: dict[str, list[MobTemplate]],
+               aligned: dict | None, cache: dict) -> Mob:
+    """`_pick_kind` with no slack (`_its_kind`'s, every re-find of a twin kind's), the same answer to the bit: what
+    depends on the pictures alone worked out once and kept in `cache` (the pictures to set beside `m`'s, by its kind,
+    picture and facing; each picture's mask and its side of `_score`, its colours there less their mean and their sum
+    of squares; for each layout of the pictures found, relative to each other, each one's own parts and its side of
+    `_score` over them), the frame's side of each score worked out as there."""
+    if len(cache) > PICKING_MOST:
+        cache.clear()
+    key = ("plan", m.kind, m.template, m.facing, m.frame, twins)
+    plan = cache.get(key)
+    if plan is None:
+        own = next((t for t in templates.get(m.kind, ()) if t.name == m.template and t.facing == m.facing), None)
+        beside = []  # (kind, picture, its shift: `aligned`)
+        if own is not None:
+            for kind in twins:
+                for t in templates.get(kind, ()):
+                    if t.frame != m.frame or t.facing != m.facing or t.origin is None:
+                        continue
+                    beside.append((kind, t, *(aligned or {}).get((own.name, own.facing, t.name), (0, 0))))
+        plan = cache[key] = (own, beside)
+    own, beside = plan
+    if own is None:
+        return m
+    th, tw = own.rgb.shape[:2]
+    cands = [(m, own, int(m.x) - tw // 2, int(m.y) - th // 2)]  # (as that kind, its picture, its top-left)
+    for kind, t, dx, dy in beside:
+        th, tw = t.rgb.shape[:2]
+        cx, cy = int(round(m.ox - t.origin[0])) + tw // 2 + dx, int(round(m.feet - t.origin[1])) + th // 2 + dy
+        x0, y0 = cx - tw // 2, cy - th // 2
+        if x0 < 0 or y0 < 0 or y0 + th > frame.shape[0] or x0 + tw > frame.shape[1]:
+            continue  # (`_match_here`: not wholly in the frame)
+        mask, side = _picture_side(t, cache)
+        score = _score_with(frame[y0:y0 + th, x0:x0 + tw], mask, side)
+        cands.append((_seen(kind, t, cx, cy, tw, th, round(score, 3)), t, x0, y0))
+    if len(cands) == 1:
+        return m
+    layout = ("layout",) + tuple((id(t), x0 - cands[0][2], y0 - cands[0][3]) for _, t, x0, y0 in cands)
+    parts_of = cache.get(layout)
+    if parts_of is None:
+        parts_of = []
+        for i, (_, t, x0, y0) in enumerate(cands):
+            mask = _picture_side(t, cache)[0]
+            others = np.zeros(mask.shape, np.uint8)
+            for j, (_, o, ox0, oy0) in enumerate(cands):
+                if j != i:
+                    _stamp(others, _picture_side(o, cache)[0], ox0 - x0, oy0 - y0)
+            parts = mask & (cv2.dilate(others, np.ones((3, 3), np.uint8)) == 0)
+            parts_of.append(None if parts.sum() < OWN_PARTS * mask.sum() else (parts, _side(t.rgb, parts)))
+        cache[layout] = parts_of
+    kept, bigger = [], []
+    for (seen, t, x0, y0), own_parts in zip(cands, parts_of):
+        if own_parts is None:
+            kept.append(seen)
+            continue
+        parts, side = own_parts
+        patch = frame[y0:y0 + parts.shape[0], x0:x0 + parts.shape[1]]
+        if patch.shape[:2] == parts.shape and _score_with(patch, parts, side) >= OWN_MATCH:
+            bigger.append(seen)
+    return max(bigger or kept or [m], key=lambda c: c.score)
+
+
+def _picture_side(t: MobTemplate, cache: dict) -> tuple[np.ndarray, tuple[np.ndarray, float]]:
+    """Picture t's mask (one channel, bool) and its side of `_score` over it (`_side`), kept in `cache`."""
+    key = ("picture", id(t))
+    got = cache.get(key)
+    if got is None or got[0] is not t:
+        mask = t.mask3[..., 0] > 0
+        got = cache[key] = (t, mask, _side(t.rgb, mask))
+    return got[1], got[2]
+
+
+def _side(tpl: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, float]:
+    """A picture's side of `_score` over `mask`: its colours there less their mean (float64), their sum of squares."""
+    t = tpl[mask].astype(np.float64)
+    t -= t.mean(0)
+    return t, float((t * t).sum())
+
+
+def _score_with(patch: np.ndarray, mask: np.ndarray, side: tuple[np.ndarray, float]) -> float:
+    """`_score` of a picture on `patch` over `mask`, its side worked out already (`_side`): the same, to the bit."""
+    t, tt = side
+    i = patch[mask].astype(np.float64)
+    i -= i.mean(0)
+    den = float(np.sqrt(tt * float((i * i).sum())))
+    return float((t * i).sum()) / den if den > 0 else -1.0
 
 
 def _match_here(frame: np.ndarray, tpl: np.ndarray, mask: np.ndarray, cx: int, cy: int):

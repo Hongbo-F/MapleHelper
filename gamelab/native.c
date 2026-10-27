@@ -2,7 +2,8 @@
  * there). Called through ctypes, which lets go of Python's lock for the call. Each but the masked match does exactly
  * what the Python it stands in for does, in the same order and with the same IEEE double and float arithmetic (built
  * with /fp:precise: no fused multiply-adds, no reordering), so the answers are the same to the bit. The masked match
- * works out OpenCV's score exactly, in integers, where OpenCV rounds its float sums (see there).
+ * works out OpenCV's score exactly, in integers, where OpenCV rounds its float sums (see there); a frame's re-finds in
+ * one call (rf_*) give what the re-finds' Python gave with it, to the bit (their contract there).
  */
 
 #include <math.h>
@@ -1029,20 +1030,25 @@ static void match_loaded(Picture *im, const Masked *p, float *out)
     }
 }
 
+/* Whether template p would go by transform over an ih x iw image (match_loaded's test, before the image is loaded). */
+static int ntt_wanted(const Masked *p, int ih, int iw)
+{
+#if MM_AVX2
+    return simd && ih <= NTT_N && iw <= NTT_N && p->spec_off &&
+           (long long)(ih - p->th + 1) * (iw - p->tw + 1) * p->chunks >= ntt_least;
+#else
+    (void)p; (void)ih; (void)iw;
+    return 0;
+#endif
+}
+
 /* Whether any of the n templates would go by transform over an ih x iw image (load's room for it). */
 static int wants_ntt(const void *const *tpls, int n, int ih, int iw)
 {
-#if MM_AVX2
-    if (!simd || ih > NTT_N || iw > NTT_N)
-        return 0;
     for (int i = 0; i < n; i++) {
-        const Masked *p = (const Masked *)tpls[i];
-        if (p->spec_off && (long long)(ih - p->th + 1) * (iw - p->tw + 1) * p->chunks >= ntt_least)
+        if (ntt_wanted((const Masked *)tpls[i], ih, iw))
             return 1;
     }
-#else
-    (void)tpls; (void)n; (void)ih; (void)iw;
-#endif
     return 0;
 }
 
@@ -1097,4 +1103,625 @@ EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int
             return i + 1;
     }
     return n;
+}
+
+
+/* --- a frame's re-finds in one call (perception/mobs.py, MobDetector.refind_all) --------------------------------------
+ * The frame loop's re-finds (localization/worldstate.py: every monster followed, every frame), their masked matches all
+ * in one call, on threads of its own, Python's lock let go once for them all: they were a Python thread's each, the
+ * matches a call a picture list, with numpy's slices and copies and the pool's hand-offs between (README, One call for
+ * the re-finds).
+ *
+ * THE CONTRACT: this CPU backend's, and any other's behind the same calls (a Direct3D 11 compute shader's is being built
+ * apart, to slot in later). A backend gives these answers to the bit; how it gets them is its own.
+ *   rf_open(tpls, n, threads): a context, or NULL if it can't make one. `tpls[0..n)`: the detector's pictures, each a
+ *     template and its mask as mm_prepare made them ready (Masked), the same for the context's life; a picture is named
+ *     in a job by its index there (a backend may copy them: a GPU's, uploaded once, here). `threads`: how many threads
+ *     work at a call, the caller's own among them (a pool made here, once: none made a call).
+ *   rf_run(ctx, frame, fh, fw, frow, cn, jobs, njobs, lists, thr, good, keep, outs): 0, or -1 if it did nothing (the
+ *     caller then does it all its own way). The frame: pixel (y, x) channel c at frame[y * frow + x * cn + c], uint8,
+ *     cn the pictures' channels. Each job (RfJob), a monster followed:
+ *       its windows, x0, y0, x1, y1 in frame px, within the frame: `wnear` (empty, x1 <= x0 or y1 <= y0: none) and
+ *       `wfull` (empty: nothing to do but keep its memo);
+ *       its pictures, indices into tpls: `first_n` from lists[first_at] (the picture that matched it last; both ways
+ *       for a cut-out that doesn't know its facing) and `next_n` from lists[next_at] (the frames its animation most
+ *       likely went to: mobs._next_frames; none where the look frame is step 1's own).
+ *     In a window W looked at, its best is what mobs.MobDetector._matched finds there:
+ *       a picture is matched only if it fits W (its height and width at most W's); its best is the first highest
+ *       score of the masked match over W, row by row (mm_best's: the score a float32, worked out exactly, mm_match);
+ *       the first pictures in turn: one becomes the best if its score is at least `thr` (THRESHOLD) and above the
+ *       best's so far as rounded, R(s) (s rounded to 3 decimals as Python's round(s, 3): the double nearest that
+ *       decimal, ties to even; the score a Mob keeps);
+ *       then, if it has next pictures and there's no best yet or the best's R is under `good` (REFIND_GOOD), those in
+ *       turn the same way, stopping after the first that scores `good` or more (whether it became the best or not).
+ *     The near window first, if the job has one: where its best's R is over `good` (strictly) the job is done there
+ *     (found 1); else the full window (found 2, or 0 where it has no best either).
+ *     The memo: a window at the same place, looked at with the same pictures (`key`: the caller's number for them), its
+ *     pixels the very same as at the last call with that job `id` (byte for byte), may be answered as then without
+ *     matching. A backend may keep none: the answers are the same. The memos of ids not in a call go after it, unless
+ *     `keep` (a call for some of the last call's jobs again).
+ *   Each job's answer in outs[i] (RfOut): for each window looked at ([0] near, [1] full) the best picture's index (-1:
+ *     none scored `thr`), its score (the float32) and its top-left in the frame; `found`; what was done (`looked`'s
+ *     bits, the matches, their places x picture pixels, the job's own time).
+ *   rf_start(the same as rf_run), rf_next(ctx), rf_end(ctx): rf_run in three, so the caller does its own part of each
+ *     job (below) while the others are matched. rf_start: 0, or -1 as rf_run (then no rf_end); rf_next: the index of a
+ *     job whose answer is in, each once, in any order, waiting (or, here, doing one) until one is; -1 once all have
+ *     been handed over; rf_end: after rf_start's 0, always, once the caller is done asking (it may stop early): every
+ *     job done and nothing of the backend's still reading the call's memory when it returns. One call at a time per
+ *     context: rf_start again only after rf_end.
+ *   rf_close(ctx): its threads ended, its memory freed.
+ * The caller's own: whether the picture found is the monster's kind (mobs._its_kind: twins told apart side by side),
+ * the kind's whole set where these find nothing (the fallback), the HP bars, the tracks.
+ *
+ * Here: each job on one thread, the jobs taken in turn from a counter (largest first) by the pool's threads and by the
+ * caller's in rf_next when none is in yet; each window loaded once (`load`) for its pictures; the matches through
+ * `rf_best`, the one place this calls the matcher. A GPU backend would match every job's windows in one dispatch
+ * (pictures uploaded at rf_open, the frame's windows at rf_start; each place's score, then each picture's first best
+ * place and the stages' order above on the CPU, or on the GPU in one more pass), rf_next handing the jobs over as they
+ * come back. */
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
+typedef struct {
+    long long id;       /* the track's: its memo */
+    long long key;      /* the caller's number for its pictures (its lists): the memo's */
+    int wnear[4];       /* the near window: x0, y0, x1, y1 */
+    int wfull[4];       /* the full window */
+    int first_at, first_n, next_at, next_n;
+} RfJob;
+
+typedef struct {
+    int tpl[2];         /* [0] the near window's best picture, [1] the full window's: its index, -1 none */
+    float score[2];
+    int x[2], y[2];     /* its top-left, frame px */
+    int looked;         /* 1 near matched, 2 near from the memo, 4 full matched, 8 full from the memo, 16 failed */
+    int found;          /* 0 none, 1 near, 2 full */
+    int matches;        /* pictures matched */
+    int unused;
+    long long work;     /* their places x picture pixels */
+    double us;          /* the job's own time, microseconds */
+} RfOut;
+
+typedef struct {
+    int win[4];
+    long long key;
+    int tpl, x, y, valid;
+    float score;
+    size_t cap;
+    unsigned char *px;  /* the window's pixels then, rows (x1 - x0) * cn bytes */
+} RfMemo;
+
+typedef struct {
+    long long id;
+    int seen;
+    RfMemo m[2];        /* near, full */
+} RfEntry;
+
+#define RF_MAX_JOBS 1024
+
+typedef struct {
+    const unsigned char *frame;
+    long long frow;
+    int cn;
+    const RfJob *jobs;
+    const int *lists;
+    RfOut *outs;
+    int count;
+    double thr, good;
+    volatile long next;               /* the next of `order` to take */
+    int nfinished, reported;          /* jobs done (in `finished`, in the order they were), and handed to the caller */
+    RfEntry *memo[RF_MAX_JOBS];       /* each job's */
+    int order[RF_MAX_JOBS];           /* the jobs, largest first */
+    double cost[RF_MAX_JOBS];
+    int finished[RF_MAX_JOBS];
+} RfBatch;
+
+typedef struct {
+    const Masked **tpls;
+    int ntpl, threads, running;
+    RfEntry *memo;
+    int nmemo, capmemo;
+    double tick_us;
+    RfBatch b;          /* the call's (one at a time) */
+#ifdef _WIN32
+    HANDLE *workers;
+    int nworkers;
+    SRWLOCK lock;
+    CONDITION_VARIABLE wake, idle;
+    long long batch;    /* the batch number: the pool's threads wake for a new one */
+    int open, inside, quit;
+#endif
+} RfCtx;
+
+static double rf_round3(float s)  /* Python's round(s, 3) (s * 1000 is exact in double; rint ties to even) */
+{
+    return rint((double)s * 1000.0) / 1000.0;
+}
+
+/* R(s), for the tests (Python's round(s, 3) of every float32 they try). */
+EXPORT double rf_rounded(float s)
+{
+    return rf_round3(s);
+}
+
+/* The best place of picture p over the loaded window: the first highest score, row by row, as mm_best has it. The one
+ * place the re-find step calls the matcher: match_loaded's, by transform where that's cheaper (ntt_least), else place
+ * by place, the same scores to the bit either way. */
+static void rf_best(Picture *im, const Masked *p, float *score, int *x, int *y)
+{
+    int rh = im->ih - p->th + 1, rw = im->iw - p->tw + 1;
+    match_loaded(im, p, im->out);
+    long long at = 0, size = (long long)rh * rw;
+    float best = im->out[0];
+    for (long long k = 1; k < size; k++) {
+        if (im->out[k] > best) {
+            best = im->out[k];
+            at = k;
+        }
+    }
+    *score = best;
+    *x = (int)(at % rw);
+    *y = (int)(at / rw);
+}
+
+static int rf_empty(const int *w) { return w[2] <= w[0] || w[3] <= w[1]; }
+
+static int rf_recall(const RfBatch *b, const RfJob *j, const int *w, const RfMemo *m)
+{
+    if (!m->valid || m->key != j->key || memcmp(m->win, w, sizeof(m->win)) != 0)
+        return 0;
+    size_t row = (size_t)(w[2] - w[0]) * b->cn;
+    const unsigned char *at = b->frame + (long long)w[1] * b->frow + (long long)w[0] * b->cn;
+    for (int y = 0; y < w[3] - w[1]; y++) {
+        if (memcmp(m->px + row * y, at + (long long)y * b->frow, row) != 0)
+            return 0;
+    }
+    return 1;
+}
+
+static void rf_keep(const RfBatch *b, const RfJob *j, const int *w, RfMemo *m, int tpl, float score, int x, int y)
+{
+    size_t row = (size_t)(w[2] - w[0]) * b->cn, need = row * (size_t)(w[3] - w[1]);
+    m->valid = 0;
+    if (need > m->cap) {
+        free(m->px);
+        m->px = (unsigned char *)malloc(need + need / 4);
+        m->cap = m->px ? need + need / 4 : 0;
+        if (!m->px)
+            return;
+    }
+    const unsigned char *at = b->frame + (long long)w[1] * b->frow + (long long)w[0] * b->cn;
+    for (int r = 0; r < w[3] - w[1]; r++)
+        memcpy(m->px + row * r, at + (long long)r * b->frow, row);
+    memcpy(m->win, w, sizeof(m->win));
+    m->key = j->key;
+    m->tpl = tpl;
+    m->score = score;
+    m->x = x;
+    m->y = y;
+    m->valid = 1;
+}
+
+/* Whether any of job j's pictures (both stages') that fit a wh x ww window would go by transform there: the window is
+ * loaded once for both stages, its transform (if made) shared by them. Which way a picture goes changes no answer. */
+static int rf_wants_ntt(const RfCtx *c, const RfBatch *b, const RfJob *j, int wh, int ww)
+{
+    for (int stage = 0; stage < 2; stage++) {
+        const int *list = b->lists + (stage ? j->next_at : j->first_at);
+        int n = stage ? j->next_n : j->first_n;
+        for (int k = 0; k < n; k++) {
+            const Masked *p = c->tpls[list[k]];
+            if (wh >= p->th && ww >= p->tw && ntt_wanted(p, wh, ww))
+                return 1;
+        }
+    }
+    return 0;
+}
+
+/* Window `w` of job j (`side` 0 near, 1 full): its best (above) into o's [side]. 0, or -1 if it couldn't be loaded. */
+static int rf_window(const RfCtx *c, const RfBatch *b, const RfJob *j, const int *w, int side, RfMemo *m, RfOut *o)
+{
+    if (m && rf_recall(b, j, w, m)) {
+        o->tpl[side] = m->tpl;
+        o->score[side] = m->score;
+        o->x[side] = m->x;
+        o->y[side] = m->y;
+        o->looked |= side ? 8 : 2;
+        return 0;
+    }
+    int ww = w[2] - w[0], wh = w[3] - w[1], loaded = 0, best = -1, bx = 0, by = 0;
+    float bs = 0.0f;
+    double br = 0.0;
+    Picture im;
+    const unsigned char *at = b->frame + (long long)w[1] * b->frow + (long long)w[0] * b->cn;
+    for (int stage = 0; stage < 2; stage++) {
+        const int *list = b->lists + (stage ? j->next_at : j->first_at);
+        int n = stage ? j->next_n : j->first_n;
+        if (stage && !(n > 0 && (best < 0 || br < b->good)))
+            break;
+        for (int k = 0; k < n; k++) {
+            const Masked *p = c->tpls[list[k]];
+            if (wh < p->th || ww < p->tw)
+                continue;  /* (doesn't fit) */
+            if (!loaded) {  /* once for both stages: room for the transform if any of its pictures that fit wants it */
+                if (load(&im, at, wh, ww, b->frow, b->cn, rf_wants_ntt(c, b, j, wh, ww)) != 0)
+                    return -1;
+                loaded = 1;
+            }
+            float s;
+            int px, py;
+            rf_best(&im, p, &s, &px, &py);
+            o->matches++;
+            o->work += (long long)(wh - p->th + 1) * (ww - p->tw + 1) * p->th * p->tw;
+            if ((double)s >= b->thr && (best < 0 || (double)s > br)) {
+                best = list[k];
+                bs = s;
+                br = rf_round3(s);
+                bx = px;
+                by = py;
+            }
+            if (stage && (double)s >= b->good)
+                break;
+        }
+    }
+    o->tpl[side] = best;
+    o->score[side] = bs;
+    o->x[side] = w[0] + bx;
+    o->y[side] = w[1] + by;
+    o->looked |= side ? 4 : 1;
+    if (m)
+        rf_keep(b, j, w, m, best, bs, w[0] + bx, w[1] + by);
+    return 0;
+}
+
+static double rf_now_us(const RfCtx *c)
+{
+#ifdef _WIN32
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return (double)t.QuadPart * c->tick_us;
+#else
+    (void)c;
+    return 0.0;
+#endif
+}
+
+static void rf_job(const RfCtx *c, const RfBatch *b, int i)
+{
+    const RfJob *j = b->jobs + i;
+    RfOut *o = b->outs + i;
+    RfEntry *e = b->memo[i];
+    double t0 = rf_now_us(c);
+    memset(o, 0, sizeof(*o));
+    o->tpl[0] = o->tpl[1] = -1;
+    if (!rf_empty(j->wfull)) {
+        if (!rf_empty(j->wnear)) {
+            if (rf_window(c, b, j, j->wnear, 0, e ? &e->m[0] : 0, o) != 0)
+                o->looked |= 16;
+            else if (o->tpl[0] >= 0 && rf_round3(o->score[0]) > b->good)
+                o->found = 1;
+        }
+        if (!o->found && !(o->looked & 16)) {
+            if (rf_window(c, b, j, j->wfull, 1, e ? &e->m[1] : 0, o) != 0)
+                o->looked |= 16;
+            else
+                o->found = o->tpl[1] >= 0 ? 2 : 0;
+        }
+    }
+    o->us = rf_now_us(c) - t0;
+}
+
+static int rf_take(RfBatch *b)  /* the next job to do, or -1 if every one is taken */
+{
+#ifdef _WIN32
+    long k = InterlockedIncrement(&b->next) - 1;
+#else
+    long k = b->next++;
+#endif
+    return k < b->count ? b->order[k] : -1;
+}
+
+static void rf_lock(RfCtx *c)
+{
+#ifdef _WIN32
+    AcquireSRWLockExclusive(&c->lock);
+#else
+    (void)c;
+#endif
+}
+
+static void rf_unlock(RfCtx *c)
+{
+#ifdef _WIN32
+    ReleaseSRWLockExclusive(&c->lock);
+#else
+    (void)c;
+#endif
+}
+
+static void rf_done(RfCtx *c, int i)  /* job i done: handed over by the next rf_next */
+{
+    rf_lock(c);
+    c->b.finished[c->b.nfinished++] = i;
+#ifdef _WIN32
+    WakeAllConditionVariable(&c->idle);
+#endif
+    rf_unlock(c);
+}
+
+#ifdef _WIN32
+static DWORD WINAPI rf_worker(void *arg)
+{
+    RfCtx *c = (RfCtx *)arg;
+    long long seen = 0;
+    AcquireSRWLockExclusive(&c->lock);
+    for (;;) {
+        while (!c->quit && (c->batch == seen || !c->open))
+            SleepConditionVariableSRW(&c->wake, &c->lock, INFINITE, 0);
+        if (c->quit)
+            break;
+        seen = c->batch;
+        c->inside++;
+        ReleaseSRWLockExclusive(&c->lock);
+        for (int i; (i = rf_take(&c->b)) >= 0;) {
+            rf_job(c, &c->b, i);
+            rf_done(c, i);
+        }
+        AcquireSRWLockExclusive(&c->lock);
+        c->inside--;
+        WakeAllConditionVariable(&c->idle);
+    }
+    ReleaseSRWLockExclusive(&c->lock);
+    return 0;
+}
+#endif
+
+EXPORT void rf_close(void *ctx)
+{
+    RfCtx *c = (RfCtx *)ctx;
+    if (!c)
+        return;
+#ifdef _WIN32
+    if (c->workers) {
+        AcquireSRWLockExclusive(&c->lock);
+        c->quit = 1;
+        WakeAllConditionVariable(&c->wake);
+        ReleaseSRWLockExclusive(&c->lock);
+        for (int i = 0; i < c->nworkers; i++) {
+            WaitForSingleObject(c->workers[i], INFINITE);
+            CloseHandle(c->workers[i]);
+        }
+        free(c->workers);
+    }
+#endif
+    for (int i = 0; i < c->nmemo; i++) {
+        free(c->memo[i].m[0].px);
+        free(c->memo[i].m[1].px);
+    }
+    free(c->memo);
+    free((void *)c->tpls);
+    free(c);
+}
+
+EXPORT void *rf_open(const void *const *tpls, int n, int threads)
+{
+    if (n <= 0 || threads <= 0)
+        return 0;
+    if (simd < 0)
+        mm_simd(1);
+    RfCtx *c = (RfCtx *)calloc(1, sizeof(RfCtx));
+    if (!c)
+        return 0;
+    c->tpls = (const Masked **)malloc(sizeof(Masked *) * (size_t)n);
+    if (!c->tpls) {
+        free(c);
+        return 0;
+    }
+    for (int i = 0; i < n; i++)
+        c->tpls[i] = (const Masked *)tpls[i];
+    c->ntpl = n;
+    c->threads = threads;
+#ifdef _WIN32
+    LARGE_INTEGER f;
+    QueryPerformanceFrequency(&f);
+    c->tick_us = 1e6 / (double)f.QuadPart;
+    InitializeSRWLock(&c->lock);
+    InitializeConditionVariable(&c->wake);
+    InitializeConditionVariable(&c->idle);
+    if (threads > 1) {
+        c->workers = (HANDLE *)calloc((size_t)threads - 1, sizeof(HANDLE));
+        if (!c->workers) {
+            rf_close(c);
+            return 0;
+        }
+        for (int i = 0; i < threads - 1; i++) {
+            c->workers[i] = CreateThread(0, 0, rf_worker, c, 0, 0);
+            if (!c->workers[i]) {
+                rf_close(c);
+                return 0;
+            }
+            c->nworkers++;
+        }
+    }
+#endif
+    return c;
+}
+
+/* Job id's memo entry (made if it has none); NULL without memory. */
+static RfEntry *rf_entry(RfCtx *c, long long id)
+{
+    for (int i = 0; i < c->nmemo; i++) {
+        if (c->memo[i].id == id)
+            return &c->memo[i];
+    }
+    if (c->nmemo == c->capmemo) {
+        int cap = c->capmemo ? 2 * c->capmemo : 32;
+        RfEntry *more = (RfEntry *)realloc(c->memo, sizeof(RfEntry) * (size_t)cap);
+        if (!more)
+            return 0;
+        c->memo = more;
+        c->capmemo = cap;
+    }
+    RfEntry *e = &c->memo[c->nmemo++];
+    memset(e, 0, sizeof(*e));
+    e->id = id;
+    return e;
+}
+
+/* rf_run in three: rf_start hands the jobs to the pool's threads (0, or -1 if it did nothing: a call already running,
+ * a window outside the frame, a picture not the context's); rf_next hands the jobs over one at a time as they're done,
+ * the caller's thread doing one itself where none is done yet and some aren't taken (its index, or -1 when every job
+ * has been handed over), so the caller can do its own part of each meanwhile; rf_end waits for the pool's threads to
+ * be out of the call (always called after rf_start's 0, whatever was handed over). rf_run: all three at once. */
+EXPORT int rf_start(void *ctx, const unsigned char *frame, int fh, int fw, long long frow, int cn, const RfJob *jobs,
+                    int njobs, const int *lists, double thr, double good, int keep, RfOut *outs)
+{
+    RfCtx *c = (RfCtx *)ctx;
+    if (!c || c->running || njobs < 0 || njobs > RF_MAX_JOBS)
+        return -1;
+    for (int i = 0; i < njobs; i++) {  /* every window within the frame, every picture one of the context's */
+        const RfJob *j = jobs + i;
+        for (int side = 0; side < 2; side++) {
+            const int *w = side ? j->wfull : j->wnear;
+            if (!rf_empty(w) && (w[0] < 0 || w[1] < 0 || w[2] > fw || w[3] > fh))
+                return -1;
+        }
+        for (int k = 0; k < j->first_n + j->next_n; k++) {
+            int t = k < j->first_n ? lists[j->first_at + k] : lists[j->next_at + k - j->first_n];
+            if (t < 0 || t >= c->ntpl || c->tpls[t]->cn != cn)
+                return -1;
+        }
+    }
+    RfBatch *b = &c->b;
+    /* the memos: each job's entry (all made first: the array moves as it grows), the others' gone (unless `keep`) */
+    for (int i = 0; i < c->nmemo; i++)
+        c->memo[i].seen = 0;
+    for (int i = 0; i < njobs; i++) {
+        RfEntry *e = rf_entry(c, jobs[i].id);
+        if (e)
+            e->seen = 1;
+    }
+    if (!keep) {
+        int kept = 0;
+        for (int i = 0; i < c->nmemo; i++) {
+            if (c->memo[i].seen)
+                c->memo[kept++] = c->memo[i];
+            else {
+                free(c->memo[i].m[0].px);
+                free(c->memo[i].m[1].px);
+            }
+        }
+        c->nmemo = kept;
+    }
+    for (int i = 0; i < njobs; i++) {
+        b->memo[i] = 0;
+        for (int k = 0; k < c->nmemo; k++) {
+            if (c->memo[k].id == jobs[i].id) {
+                b->memo[i] = &c->memo[k];
+                break;
+            }
+        }
+        const int *w = rf_empty(jobs[i].wnear) ? jobs[i].wfull : jobs[i].wnear;
+        b->cost[i] = rf_empty(jobs[i].wfull) ? 0.0 : (double)(w[2] - w[0]) * (w[3] - w[1]) * (jobs[i].first_n + 1);
+        b->order[i] = i;
+    }
+    for (int i = 1; i < njobs; i++) {  /* largest first (an insertion sort: a dozen jobs) */
+        int v = b->order[i], k = i;
+        while (k > 0 && b->cost[b->order[k - 1]] < b->cost[v]) {
+            b->order[k] = b->order[k - 1];
+            k--;
+        }
+        b->order[k] = v;
+    }
+    b->frame = frame;
+    b->frow = frow;
+    b->cn = cn;
+    b->jobs = jobs;
+    b->lists = lists;
+    b->outs = outs;
+    b->count = njobs;
+    b->thr = thr;
+    b->good = good;
+    b->next = 0;
+    b->nfinished = 0;
+    b->reported = 0;
+    c->running = 1;
+#ifdef _WIN32
+    if (c->nworkers > 0 && njobs > 1) {
+        AcquireSRWLockExclusive(&c->lock);
+        c->open = 1;
+        c->batch++;
+        WakeAllConditionVariable(&c->wake);
+        ReleaseSRWLockExclusive(&c->lock);
+    }
+#endif
+    return 0;
+}
+
+EXPORT int rf_next(void *ctx)
+{
+    RfCtx *c = (RfCtx *)ctx;
+    if (!c || !c->running)
+        return -1;
+    RfBatch *b = &c->b;
+    for (;;) {
+        rf_lock(c);
+        if (b->reported < b->nfinished) {
+            int i = b->finished[b->reported++];
+            rf_unlock(c);
+            return i;
+        }
+        if (b->reported >= b->count) {
+            rf_unlock(c);
+            return -1;
+        }
+        rf_unlock(c);
+        int i = rf_take(b);
+        if (i >= 0) {  /* none done yet, one not taken: this thread does it */
+            rf_job(c, b, i);
+            rf_done(c, i);
+            continue;
+        }
+#ifdef _WIN32
+        AcquireSRWLockExclusive(&c->lock);
+        while (b->reported >= b->nfinished && b->reported < b->count)
+            SleepConditionVariableSRW(&c->idle, &c->lock, INFINITE, 0);
+        ReleaseSRWLockExclusive(&c->lock);
+#endif
+    }
+}
+
+EXPORT void rf_end(void *ctx)
+{
+    RfCtx *c = (RfCtx *)ctx;
+    if (!c || !c->running)
+        return;
+    RfBatch *b = &c->b;
+    for (int i; (i = rf_take(b)) >= 0;)  /* (the jobs not taken yet, if the caller stopped asking) */
+    {
+        rf_job(c, b, i);
+        rf_done(c, i);
+    }
+#ifdef _WIN32
+    AcquireSRWLockExclusive(&c->lock);
+    while (c->inside > 0 || b->nfinished < b->count)
+        SleepConditionVariableSRW(&c->idle, &c->lock, INFINITE, 0);
+    c->open = 0;
+    ReleaseSRWLockExclusive(&c->lock);
+#endif
+    c->running = 0;
+}
+
+EXPORT int rf_run(void *ctx, const unsigned char *frame, int fh, int fw, long long frow, int cn, const RfJob *jobs,
+                  int njobs, const int *lists, double thr, double good, int keep, RfOut *outs)
+{
+    if (rf_start(ctx, frame, fh, fw, frow, cn, jobs, njobs, lists, thr, good, keep, outs) != 0)
+        return -1;
+    while (rf_next(ctx) >= 0)
+        ;
+    rf_end(ctx);
+    return 0;
 }

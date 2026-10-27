@@ -3663,6 +3663,44 @@ The user, 2026-10-26 21:00, on perception at 30 frames a second, which "still do
 
 **Not done.** The likely animation frame first (a track's picture shown its frame's delay, 100-180 ms for these, its next frame tried before it): at 30 frames a second its last picture is the right one 3-5 frames in 4-6, and it would change the answer wherever both score REFIND_GOOD; the turned frames before the kind's whole set (of the 2,139 fallbacks on 01:01's live tracks, 632 found the monster, 618 of them facing the other way, and 1,507 found nothing, 4.5-6 ms each): a change of answers, for the next step to measure; hidden tracks near first (hidden 0.1 s or more, the near window is REFIND_PAD's already).
 
+## One call for the re-finds: a frame's matches in C, its Python as each comes back (2026-10-26)
+
+The user, 2026-10-26 21:00, beside fewer re-find matches (above) and a cheaper kernel (another branch): "One C call for the whole re-find step", the matching moving later to a Direct3D 11 shader (being built apart, behind the same call). The frame rate stays 30; each frame's re-finds take less, for the same answers.
+
+**What changed:**
+- *The matches in one call* (`MobDetector.refind_all`, `Eyes.refind_all`, `worldstate.ONE_CALL`; `native.Refinds`, native.c's `rf_*`): each frame the step hands every track's windows (its near one and its REFIND_PAD one: Fewer re-find matches) and pictures (its last, both ways for a cut-out; its next frames, `_next_frames`, as indices into the detector's pictures, made ready once and made a list once for each kind, picture and facing: `_lists_of`) to the C at once, Python's lock let go: there each job is matched on one of REFIND_THREADS threads of the C's own (a pool made once with the detector's context), each window loaded once, its stages as `_matched` takes them (the first pictures, then the next ones till one scores REFIND_GOOD; THRESHOLD and the best so far as rounded: R(s), Python's round(s, 3) worked out in C, `rf_rounded`, every float32 tried the same), the near window first, the whole one where its best doesn't pass REFIND_GOOD. A window's last answer (the memo) is the C's now, per track and window, kept the same way (its place, its pictures, its pixels byte for byte). Before, each re-find was a task of the step's pool, its Python (windows, slices, list building, `_next_frames` every time, the memo's copies) taking turns at Python's lock with the others', a C call a picture list.
+- *Its Python as each comes back* (rf_start, rf_next, rf_end): the C hands the jobs over as they're done, and the step's thread does each one's own part meanwhile, while the others are matched: whether the picture found is its kind (`_its_kind`), the back-off's note (`_note_far`), and where nothing scores, the kind's whole set (the fallback) handed to the step's pool at once. A job not done yet and none to hand over: the step's thread matches one itself. The near window's answer passing REFIND_GOOD but not its kind goes to its whole window in a second call (on the crowd's frames, never), a job the C couldn't do to the Python as before (never).
+- *The twins' check, its pictures' side kept* (`_pick_here`, exact): `_its_kind` (every twin kind's re-find: Horny and Green Mushrooms here, 5.6-5.9 a crowd's frame) worked out each time what depends on the pictures alone: which pictures go beside the monster's, each one's mask, its colours there less their mean and their sum of squares, and for the pictures found at their places relative to each other, each one's own parts (a dilation and a stamp each). They're kept now (`_picking`, a dict with the detector), the frame's side of each score worked out as before, so every score is the same to the bit: 2.3 ms a crowd's frame on one thread -> 1.0.
+- What stays Python's: the fallback (rare: 1.1-1.5 a crowd's frame), `_its_kind` (in C it would be numpy's float64 sums to the bit), the HP bars, the tracks. Without the DLL, or a frame the C doesn't read as it is, or a detector without `refind_all` (the simulator's fakes), each re-find goes as before.
+
+**The call's contract** is in native.c (rf_open, rf_run, rf_start / rf_next / rf_end, rf_close), for a backend to give the same answers its own way: the jobs (an id, its pictures' key, two windows, two picture lists), each window's best as `_matched` has it, the near window's REFIND_GOOD, the memo optional. The matches go through one function (`rf_best`), where a faster kernel slots in.
+
+**Measured** (offline, 2026-10-26, `D:/MapleHelper-scratch/pfast/pfr3`: item 1's commit, faf0459, read only as `ref1`; the branch as `snap2`; every job at Idle priority on CPUs 12-23, one at a time, the game up, CPUs 12-23 4-51% busy):
+- *The states* (`pfast/tools/ident.py`): every state master's on both Lie Detectors' `before/` as saved, the drops searched and not (0 of 12,192 differ: there the near window is REFIND_PAD's, so item 1's are master's), and item 1's with each frame held 3 times, the drops searched (0 of 18,288 differ: the near window, the memo's hits, the back-off), the re-finds on REFIND_THREADS as the service runs them.
+- *The re-find step* (`pfr3/tools/rfstats.py`: the step's `_refind_all`, ms a frame, mean / p90 / p99; the crowd's [700:1300] of 01:01, stepped one at a time as `ident` does, 4 threads):
+
+| | item 1 | the branch |
+|---|---|---|
+| held 3 times (1,800 frames), round 1 | 6.54 / 9.98 / 15.0 | 5.11 / 9.00 / 14.6 |
+| ... round 2 | 7.21 / 11.03 / 16.4 | 5.56 / 9.66 / 15.2 |
+| as saved (600 frames) | 9.00 / 13.10 / 18.1 | 8.09 / 12.28 / 18.1 |
+| held 3 times, on one thread | 12.54 / 23.53 / 36.2 | 10.92 / 21.61 / 32.0 |
+
+  So 1.4-1.7 ms a frame less held (22%), 0.9 as saved (10%), 1.6 on one thread (13%). Of the branch's 5.1-5.6 ms held: the call, start to end, 3.5-3.7 (its jobs' own time 7.2-7.7 ms on its 4 threads, 2.1 at once; the twins' checks 1.2 inside it, as the jobs come back), then 1.7 more: the bars (0.6-0.7), the fallbacks' wait, the jobs made. The matches as item 1's (20.1 pictures a frame over 94.7 M places x picture px held, 25.8 and 164 M as saved). On one thread its Python glue is gone: of 10.9 ms, the matches 7.3, `_its_kind` 1.0, the fallbacks 1.7, the bars 0.7.
+- *Python's own code* (`pfast/tools/prof.py`: one thread, the crowd as saved, stamped 30 a second, the service's schedule between hunts): a frame's step 33.5 -> 30.5 ms (median; 42.0 -> 38.2 mean); under cProfile Python's own 10.3 -> 8.2 ms a frame, numpy's 3.2 -> 2.7, the masked matches' C 17.0 -> 16.2 (the re-finds' 17.8 calls a frame now one, its rf_next once a job).
+- *The service's frame loop replayed* (`pfast/tools/replay.py`: the crowd's [700:1300] round and round, 60 s after 12 s, 30 asked, the fake tour attached, the recording on; item 1 and the branch alternately):
+
+| | frames a second | cores | step ms, median / p90 / p99 / max | frame period ms, median / p90 / p99 / max | a look's wait ms, median / p90 / p99 | CPUs 12-23 busy (others') |
+|---|---|---|---|---|---|---|
+| held 3 times (live's motion on the whole): item 1, rounds 1-2 | 30.4, 30.4 | 1.25, 1.24 | 14 / 23 / 33 / 42; 13 / 23 / 34 / 52 | 33 / 35 / 37 / 44; 33 / 35 / 37 / 57 | 21 / 101 / 194; 20 / 122 / 214 | 36% (25%), 38% (28%) |
+| the branch, the same rounds | 30.4, 30.4 | 1.12, 1.13 | 11 / 20 / 31 / 46; 12 / 21 / 31 / 41 | 33 / 35 / 37 / 47; 33 / 35 / 36 / 42 | 16 / 115 / 162; 19 / 95 / 153 | 37% (28%), 39% (29%) |
+| as saved (their 0.1 s of motion every 1/30 s: 3 times live's): item 1, rounds 1-3 | 30.3, 29.9, 30.3 | 1.77, 1.97, 1.72 | 19 / 30 / 41 / 52; 21 / 33 / 47 / 68; 18 / 29 / 43 / 61 | 33 / 35 / 43 / 55; 33 / 37 / 50 / 71; 33 / 35 / 45 / 64 | 28 / 123 / 214; 33 / 140 / 252; 27 / 116 / 194 | 41% (26%), 50% (34%), 36% (22%) |
+| the branch, the same rounds | 30.5, 30.3, 30.4 | 1.85, 1.69, 1.62 | 18 / 28 / 42 / 65; 17 / 27 / 40 / 57; 16 / 26 / 36 / 49 | 33 / 35 / 44 / 69; 33 / 35 / 42 / 59; 33 / 35 / 38 / 51 | 26 / 114 / 215; 24 / 96 / 185; 22 / 130 / 200 | 51% (35%), 42% (28%), 40% (26%) |
+
+  So where the motion a frame is live's on the whole, the frame loop takes 0.11-0.14 cores less (9-11%) at 30 frames a second, its step 1.4-2.5 ms shorter at the median and 2 at p90; As saved, 1.62-1.85 cores against 1.72-1.97 (0.1 less on the three rounds' mean; in round 1, the one the branch lost, others' work took 35% of CPUs 12-23 beside it and 26% beside item 1), the step 0.2-4.2 ms shorter at the median. No frame period over 100 ms in any run.
+
+**Not done.** `_its_kind` in C (numpy's float64 sums would have to be worked out its way, to the bit); the fallback in C (the kind's whole set: step 1's gates and silhouettes); the GPU backend (another session, behind rf_*).
+
 ## Memory and disk
 
 A hunt runs for hours, and perception is to run all the time, so what the stack keeps has to stay bounded.

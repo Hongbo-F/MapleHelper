@@ -7,7 +7,8 @@ dot, ropes, the other players' dots), her EXP gains and HP drops (events, each a
 her EXP number as read then, perception.exp_number, the kills its size was going to the tracker by kind,
 localization.gains), and each monster tracked re-found around where it should be (Eyes.refind: the template that
 matched it last, else its kind's; first only as far around as it can have got since it was last seen, and a window
-the very same as at its last re-find answered as then: NEAR_FIRST, `_memos`).
+the very same as at its last re-find answered as then: NEAR_FIRST, `_memos`; all of a frame's re-finds' matches in
+one call in C, ONE_CALL: Eyes.refind_all).
 
 The searches run off that frame loop (`Searches`: in the feed, a thread of its own, `SearchThread`), one at a
 time, on the newest frame placed when one is due: monsters not tracked yet in her band every BAND_EVERY_S,
@@ -88,6 +89,13 @@ REFIND_THREADS = 4
 # less, and as saved (0.1 s apart: the near window is REFIND_PAD's) 2-3%; every state and every re-find's answer as
 # before, 30,013 states (D:/MapleHelper-scratch/pfast/pfr, 2026-10-26; README, Fewer re-find matches).
 NEAR_FIRST = True
+# A frame's re-finds, all of their masked matches, in one call in C on REFIND_THREADS threads of its own (Eyes.refind_all,
+# native.c's rf_*), Python's lock let go, each one's Python done as the C hands it back, where each was a task of the
+# pool's, a C call a picture list, numpy's slices and copies between: the same answers (0 of 30,480 states differ on
+# both Lie Detectors' before/, as saved and held 3 times); on the crowd's [700:1300] of 01:01 held 3 times, the re-finds
+# 5.1-5.6 ms a frame against 6.5-7.2, and the frame loop replayed 0.11-0.14 cores less at 30 frames a second
+# (D:/MapleHelper-scratch/pfast/pfr3, 2026-10-26; README, One call for the re-finds). Without the C, as before.
+ONE_CALL = True
 
 
 @dataclass(frozen=True)
@@ -365,6 +373,7 @@ class WorldStep:
             refind_threads = REFIND_THREADS if isinstance(getattr(self.eyes, "detector", None), MobDetector) else 1
         self._refinds = (ThreadPoolExecutor(refind_threads, "refinds", _one_opencv_thread) if refind_threads > 1
                          else None)
+        self._refind_threads = refind_threads
         # Each track's re-find windows and what they gave (MobDetector.refind's `memo`), by its id: with a real monster
         # detector (the simulator's fakes re-find as always).
         real = isinstance(getattr(self.eyes, "detector", None), MobDetector)
@@ -497,8 +506,15 @@ class WorldStep:
                     t: float) -> list[tuple[Mob | None, bool, float | None]]:
         """Each track of `todo` re-found in the frame of look `s` (shown at t) where its picture should be, with its HP
         bar if that's due (`_bar_due`): (the monster found or None, whether its bar was read, the bar), in `todo`'s
-        order. More than one at once on the pool (REFIND_THREADS); meanwhile nothing else touches the tracker, as the
-        frame loop waits for them."""
+        order. Their matches all in one call in C on REFIND_THREADS threads (ONE_CALL: Eyes.refind_all; the fallbacks on
+        the pool), else more than one at once on the pool; meanwhile nothing else touches the tracker, as the frame loop
+        waits for them."""
+        many = getattr(self.eyes, "refind_all", None) if self._memos is not None and ONE_CALL and todo else None
+        if many is not None:  # (all in one call in C)
+            asks = [(tr.mob, box, tr.state != HIDDEN, self._near(s, tr, t), self._memos[tr.id], tr.id) for tr, box in todo]
+            found = many(s, asks, self._refind_threads, self._refinds)
+            if found is not None:
+                return [self._bar_of(s, tr, m, t) for (tr, _), m in zip(todo, found)]
         if self._refinds is None or len(todo) < 2:
             return [self._refind(s, tr, box, t) for tr, box in todo]
         return list(self._refinds.map(lambda job: self._refind(s, job[0], job[1], t), todo))
@@ -510,6 +526,10 @@ class WorldStep:
         else:
             m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN, near=self._near(s, tr, t),
                                  memo=self._memos[tr.id])
+        return self._bar_of(s, tr, m, t)
+
+    def _bar_of(self, s: Scene, tr: Track, m: Mob | None, t: float) -> tuple[Mob | None, bool, float | None]:
+        """Track `tr` re-found as `m` (or not: None), with its HP bar if that's due (`_bar_due`)."""
         if m is None:
             return None, False, None
         read = self._bar_due(tr, t)

@@ -208,6 +208,34 @@ def test_a_track_is_re_found_on_a_monster_of_its_own_kind_alone(tmp_path):
     assert refound(det, without, "stub-axe", 400, 200) is None
 
 
+def test_told_apart_with_the_pictures_side_kept_the_same_as_worked_out_each_time(tmp_path):
+    # (_pick_here: `_its_kind`'s _pick_kind with no slack, what the pictures alone give kept from call to call)
+    caps = {"violet-cap": (170, 60, 190), "pink-cap": (200, 60, 150)}
+    sets = [{"stub_move0": body(cap=(120, 80, 40)), "stub-axe_move0": body(cap=(120, 80, 40), axe=True)},
+            {f"{k}_move0": body(cap=c) for k, c in caps.items()}]
+    told = 0
+    for i, pictures in enumerate(sets):
+        (tmp_path / str(i)).mkdir()
+        det = detector(tmp_path / str(i), pictures)
+        cache = {}
+        for pic in pictures.values():
+            for left, top, flip in ((400, 200, False), (403, 197, True), (2, 0, False), (1320, 600, False)):
+                scene = drawn(pic, left, top, flip)[:700]
+                for kind in det.twins:
+                    for t in det.templates[kind]:
+                        th, tw = t.rgb.shape[:2]
+                        for dx, dy in ((0, 0), (1, 0), (0, -1), (-3, 2)):
+                            m = mobs._seen(kind, t, left + dx + tw // 2, top + dy + th // 2, tw, th, 0.912)
+                            alone = mobs._pick_kind(scene, m, det.twins[kind], det.templates, 0, det.aligned)
+                            for _ in range(2):  # (worked out, then kept)
+                                kept = mobs._pick_kind(scene, m, det.twins[kind], det.templates, 0, det.aligned,
+                                                       cache)
+                                assert kept == alone, (kind, t.name, left, top, dx, dy)
+                            told += alone.kind != kind
+        assert any(k[0] == "layout" for k in cache)
+    assert told  # (some told as the other kind)
+
+
 def test_a_twins_picture_is_checked_where_it_lies_on_the_monsters():
     pic = np.zeros((20, 20, 3), np.uint8)
     pic[5:15, 4:12] = 1

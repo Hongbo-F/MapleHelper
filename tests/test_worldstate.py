@@ -446,8 +446,11 @@ def test_a_frames_refinds_on_the_pool_give_the_states_of_one_thread():
 def test_with_a_real_detector_each_track_is_looked_for_near_first_with_a_memo_of_its_own(monkeypatch):
     # MobDetector.refind's `near` (mobs.near_pad: its kind's fastest walk, the tracker's clamp, over the time since it
     # was last seen) and `memo` (one dict a track, kept from frame to frame while it's followed); the simulator's fakes
-    # get neither, and re-find as they always did.
+    # get neither, and re-find as they always did. (Each re-find asked on its own: ONE_CALL's, all in one call in C, are
+    # tests/test_refind.py's.)
     from gamelab.perception.mobs import MobDetector, near_pad
+
+    monkeypatch.setattr(worldstate, "ONE_CALL", False)
 
     class Real(FakeDetector, MobDetector):  # (a real detector as the step tells them, re-finding as the fake does)
         def refind(self, frame, box, kind, template="", facing=0, bounds=None, fallback=True, near=None, memo=None):

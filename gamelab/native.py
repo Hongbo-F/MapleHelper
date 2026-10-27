@@ -2,8 +2,10 @@
 which numpy did holding Python's lock (perception.mobs), and her flight, stepped 5 ms at a time by the movement
 engine (motion.body.fly, as motion.physics.flight flies her); and where OpenCV was: the masked colour match
 (perception.match: the monsters' re-finds and step-2 checks, the drops), OpenCV's score worked out exactly, a
-re-find's window's dot products all at once by number-theoretic transform (native.c's ntt_*: exact, the same scores).
-Called through ctypes, which lets go of the lock for the call. Each but the masked match does what the Python it
+re-find's window's dot products all at once by number-theoretic transform (native.c's ntt_*: exact, the same scores);
+and a frame's re-finds, all their masked matches in one call on threads of the C's own (`Refinds`: rf_*, its contract
+in native.c), where each re-find was a Python thread's, a call a picture list. Called through ctypes, which lets go of
+the lock for the call. Each but the masked match does what the Python it
 stands in for does, to the bit, and each caller does it in Python (or OpenCV) when the DLL isn't there (tests compare
 the two; OpenCV's masked scores were within 1e-6 of the C's in colour and 3e-5 on brightness on a crowd's frames, a
 little more where a window is about flat: native.c). The masked match is the C's only where the CPU has AVX2: without
@@ -52,6 +54,13 @@ SIGNATURES = {  # each function's (return type, argument types)
     "mm_best": (_I, [_P, _I, _I, _L, _I, _P, _I, _D, _P, _P, _P]),
     "mm_ntt": (_L, [_L]),
     "mm_transformed": (_I, [_P]),
+    "rf_open": (_P, [_P, _I, _I]),
+    "rf_run": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _I, _P]),
+    "rf_start": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _I, _P]),
+    "rf_next": (_I, [_P]),
+    "rf_end": (None, [_P]),
+    "rf_close": (None, [_P]),
+    "rf_rounded": (_D, [_F]),
 }
 
 
@@ -239,6 +248,96 @@ def best_matches(image: np.ndarray, templates: list[Masked],
     if k < 0:
         return None
     return [(scores[i], xs[i], ys[i]) for i in range(k)]
+
+
+def takes(image: np.ndarray, cn: int) -> bool:
+    """Whether the masked match in C reads `image` as it is (`_takes`)."""
+    return _takes(image, cn)
+
+
+class RfJob(ctypes.Structure):
+    """A monster to re-find in rf_run (native.c's RfJob: its contract there)."""
+    _fields_ = [("id", ctypes.c_longlong), ("key", ctypes.c_longlong), ("wnear", ctypes.c_int * 4),
+                ("wfull", ctypes.c_int * 4), ("first_at", ctypes.c_int), ("first_n", ctypes.c_int),
+                ("next_at", ctypes.c_int), ("next_n", ctypes.c_int)]
+
+
+class RfOut(ctypes.Structure):
+    """What rf_run found of one (native.c's RfOut)."""
+    _fields_ = [("tpl", ctypes.c_int * 2), ("score", ctypes.c_float * 2), ("x", ctypes.c_int * 2),
+                ("y", ctypes.c_int * 2), ("looked", ctypes.c_int), ("found", ctypes.c_int), ("matches", ctypes.c_int),
+                ("unused", ctypes.c_int), ("work", ctypes.c_longlong), ("us", ctypes.c_double)]
+
+
+class Refinds:
+    """A frame's re-finds in one call in C (native.c's rf_open, rf_start / rf_next / rf_end, rf_close: the contract
+    there): a detector's prepared pictures (`Masked`, kept with it), its threads (the caller's among them, a pool made
+    once), the memos of the windows it looked at. One call at a time (a lock, held from `start` to `end`)."""
+
+    def __init__(self, pictures: list[Masked], threads: int):
+        self._lib = lib()
+        self.pictures = list(pictures)  # (their bytes stay while the C holds their addresses)
+        self.threads = threads
+        self._lock = threading.Lock()
+        self._held = None  # what the C reads during a call
+        self.ctx = None
+        if self._lib is not None and self.pictures:
+            n = len(self.pictures)
+            self.ctx = self._lib.rf_open((ctypes.c_void_p * n)(*[p.address for p in self.pictures]), n, threads) or None
+
+    def start(self, frame: np.ndarray, jobs: ctypes.Array, lists: np.ndarray, thr: float, good: float,
+              keep: bool = False) -> ctypes.Array | None:
+        """rf_start over `frame` (uint8, its rows' pixels side by side: `takes`) for `jobs` (an RfJob array), `lists` the
+        jobs' picture indices (int32, contiguous): an RfOut each, filled in as `next` hands each job over (until -1);
+        `end` after it, always. None if the C does nothing (no `end` then)."""
+        if self.ctx is None or not _takes(frame, self.pictures[0].shape[2]) or lists.dtype != np.int32 \
+                or not lists.flags.c_contiguous:
+            return None
+        n = len(jobs)
+        outs = (RfOut * n)()
+        h, w = frame.shape[:2]
+        self._lock.acquire()
+        if self._lib.rf_start(self.ctx, frame.ctypes.data, h, w, frame.strides[0], self.pictures[0].shape[2], jobs, n,
+                              lists.ctypes.data, thr, good, int(keep), outs) != 0:
+            self._lock.release()
+            return None
+        self._held = (frame, jobs, lists, outs)
+        return outs
+
+    def next(self) -> int:
+        """The next job done (its index; -1: none left), Python's lock let go while it waits or does one itself."""
+        return self._lib.rf_next(self.ctx)
+
+    def end(self) -> None:
+        try:
+            self._lib.rf_end(self.ctx)
+        finally:
+            self._held = None
+            self._lock.release()
+
+    def run(self, frame: np.ndarray, jobs: ctypes.Array, lists: np.ndarray, thr: float, good: float,
+            keep: bool = False) -> ctypes.Array | None:
+        """All of `start`, `next` and `end` at once: an RfOut each, or None if the C did nothing."""
+        outs = self.start(frame, jobs, lists, thr, good, keep)
+        if outs is not None:
+            try:
+                while self.next() >= 0:
+                    pass
+            finally:
+                self.end()
+        return outs
+
+    def close(self) -> None:
+        with self._lock:
+            if self.ctx is not None:
+                self._lib.rf_close(self.ctx)
+                self.ctx = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:  # (at the interpreter's exit)
+            pass
 
 
 class Map:
