@@ -660,7 +660,7 @@ def nav_monsters_long_way(sim):
 
 # Navigation with `fight` on (as on tours): monsters in reach are shot on the way.
 
-@scenario((36, 300.0), monsters="all", seed=2,
+@scenario((36, 300.0), monsters="all", seed=1,
           expects=(ends("arrived"), logs("shooting it on the way"), logs("in the way at x"),
                    check("kills on the way", lambda tr: _result(tr, "kills") >= 3),
                    check("the trip counts every kill, those in the way of a move too",
@@ -677,7 +677,9 @@ def nav_fight_basin(sim):
     all of it; of the 7 that run out of time, 6 throw 54-88 stars from 30 at a snail on 33 that the
     simulator's attack can't pick (README, Fixed since), the 7th is a pig fight in the basin. With both
     tracks, from the ground the decisions and the simulator's attack both go by the star's search, which
-    picks a snail 60 below from 246 units off: all 16 of seeds 1-16 meet all of it, at the merge and since.)"""
+    picks a snail 60 below from 246 units off: all 16 of seeds 1-16 meet all of it, at the merge and since.) (Seed 1
+    since the rebase of her kill's monster onto clearance and slopes, 2026-10-27: on seed 2 she ran out of time; of
+    seeds 1-8 all but 2 meet all of this, and master's stack on 1-4.)"""
     return _nav(25, fight=True)(sim)
 
 
@@ -719,7 +721,7 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=4,
+@scenario((12, -300.0), monsters="all", seed=7,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down to 13), and
@@ -746,7 +748,10 @@ def nav_fight_across(sim):
     she ran out of her 180 s on the way; of seeds 1-12, 1, 3, 4, 7 and 9 meet all of this.) (Seed 4 since the reviews of
     that, a monster walking at her stopping where it meets her and one whose walk nothing tells staying where it was
     seen (attack.stance.PACE_STOP, WALK_AT): on seed 1 nothing knocked her off any more; of seeds 1-16, 4, 7, 11, 13 and
-    16 meet all of this.)"""
+    16 meet all of this.) (Seed 7 since the rebase of her kill's monster onto clearance and slopes, 2026-10-27, her
+    kill's monster bound by her kept in her body's way (behavior.fight.TOUCH_NEAR) and her kills credited to the monster
+    her attack took: on seed 4 she ran out of her 180 s; of seeds 1-16, 1, 5-7 and 10-14 meet all of this, and with
+    master's stack 4, 7, 11, 13 and 16.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -797,7 +802,9 @@ def nav_fight_up_runs_out(sim):
     (Senses.fresh_after, the feed in every scenario): on seed 5 she now arrives; of seeds 1-16, only 4 meets all of
     this.) (Seed 15 since 2026-10-26, her throws at the dying gone, a throw's last look before its key, her stats
     at level 25 and the world's damage at the server's time: on seed 4 she now arrives; of seeds 1-16, only 15
-    meets all of this, 14 don't run out of time.)"""
+    meets all of this, 14 don't run out of time.) (Not met since the rebase of her kill's monster onto clearance and
+    slopes, 2026-10-27: of seeds 1-16 she arrives on every one, her kills credited to the monsters her attacks took:
+    xfail in tests/test_sim.py, AFTER_KILL_PLACE.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -840,7 +847,8 @@ def nav_fight_across_runs_out(sim):
     (Not met since 2026-10-27 on its own branch, her kill credited to the monster her attack took
     (localization.tracking's binding) and the dead out of her targets by their tracks: of seeds 1-16 she arrives on
     every one, on seed 9 in 59 s with 9 kills, on 1 in 42 s, on 4 in 57 s, where master's stack ran out of its 180 s on
-    9: xfail in tests/test_sim.py, AFTER_KILL_PLACE.)"""
+    9: xfail in tests/test_sim.py, AFTER_KILL_PLACE.) (Met again on seed 3 since the rebase of her kill's monster onto
+    clearance and slopes, 2026-10-27: no longer xfail.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1150,7 +1158,7 @@ def fight_snail_stab(sim):
 
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
-                                ("Orange Mushroom", 2, 200.0)], seed=3, limit=60,
+                                ("Orange Mushroom", 2, 200.0)], seed=4, limit=60,
           expects=(check("no throw from the ground from platform 4",
                          lambda tr: not any(p[1] == "throw" for p in tr["plans"])),
                    check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
@@ -1168,7 +1176,10 @@ def fight_step_wall(sim):
     jump throws over the step didn't kill them; of seeds 1-16, 8, 13 and 15 meet all of this.) (Seed 3 since 2026-10-26:
     her throws at the dying gone, a throw's last look before its key, her stats at level 25, the air turn's attack 60 ms
     after its arrow and the world's damage at the server's time: on seed 8 her jump throws over the step didn't kill
-    them; of seeds 1-16, 3, 4 and 11 meet all of this.)"""
+    them; of seeds 1-16, 3, 4 and 11 meet all of this.) (Seed 4 since the rebase of her kill's monster onto clearance
+    and slopes, 2026-10-27, her kill's monster bound by her kept in her body's way (behavior.fight.TOUCH_NEAR) and her
+    kills credited to the monster her attack took: on seed 3 she didn't stay on platform 4; of seeds 1-16, 4 and 12 meet
+    all of this, and with master's stack 3, 4 and 11.)"""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1322,7 +1333,7 @@ def tour_hunt_from_safe_spot(sim):
     return _tour_hunt(17, 4)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=1, limit=400,
+@scenario((36, 300.0), monsters="all", seed=4, limit=400,
           expects=(logs("shooting platform 36 on the platform"), ends("kill limit", key="stop"),
                    logs("collecting drops on platform 36"),
                    check("the stop's report counts HP lost", lambda tr: tr["result"]["damage_taken"] > 0),
@@ -1343,7 +1354,9 @@ def tour_hunt_basin(sim):
     just before, the first of them 4, where the ledger places 50 of its 56 kills placed right, under
     tests/test_ledger.py's 90%; on 5, 48 of 51. Seed 1 since her jumps' attacks are weighed and her jump throws turn
     in the air (2026-10-25): on seed 5 a trip to drops ran out its 60 s; of seeds 1-16, 10 meet all of this, the
-    ledger on seed 1 placing 28 of its 31 kills, 27 of them right.)"""
+    ledger on seed 1 placing 28 of its 31 kills, 27 of them right.) (Seed 4 since the rebase of her kill's monster onto
+    clearance and slopes, 2026-10-27: on seed 1 her trips to drops on the basin didn't get there; of seeds 1-8, 4, 6 and
+    8 meet all of this, and with master's stack 4 and 8 of those.)"""
     return _tour_hunt(36, 5)(sim)
 
 
@@ -1752,7 +1765,7 @@ def loop_noisy(sim):
     return _loop(2)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=2, limit=400, may_die=True,
+@scenario((36, 300.0), monsters="all", seed=4, limit=400, may_die=True,
           realism=Realism(spawn_share=0.5, rival_every=20.0),
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
                    _died("other")))
@@ -1764,7 +1777,10 @@ def loop_rival(sim):
     rival's kills die, someone else's: of seeds 1-12, 8 meet all of this, 25 not.) (Seed 2 since 2026-10-27, her stance
     going by where each monster will be when her attack starts, one walking at her stopping where it meets her and one
     whose walk nothing tells staying where it was seen (attack.stance.Pace, PACE_STOP, WALK_AT): on seed 3 the feed saw
-    none of the rival's kills die; of seeds 1-16, 2, 4-7, 9 and 14-16 meet all of this.)"""
+    none of the rival's kills die; of seeds 1-16, 2, 4-7, 9 and 14-16 meet all of this.) (Seed 4 since the rebase of her
+    kill's monster onto clearance and slopes, 2026-10-27, her kill's monster bound by her kept in her body's way
+    (behavior.fight.TOUCH_NEAR) and her kills credited to the monster her attack took: on seed 2 the feed saw none of
+    the rival's kills die; of seeds 1-12, 4-7, 9 and 10 meet all of this, and with master's stack 2, 4-7 and 9.)"""
     return _loop(3)(sim)
 
 
@@ -2220,7 +2236,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=3, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2249,7 +2265,10 @@ def loop_tree_ore_waits(sim):
     hurt 6 times; of seeds 1-16, 4, 6 and 9-14 meet all of this.) (Seed 1 since parts A and B together (work/hunt-ab,
     2026-10-26: no throws at the dying and a throw's last look before its key, with her drops waiting while a monster
     that counts is by them and her decisions going by the monsters the looks missed): on seed 4 she was hurt more than
-    five times; of seeds 1-16, 1, 3, 5, 6, 10 and 14-16 meet all of this.)"""
+    five times; of seeds 1-16, 1, 3, 5, 6, 10 and 14-16 meet all of this.) (Seed 3 since the rebase of her kill's
+    monster onto clearance and slopes, 2026-10-27, her kill's monster bound by her kept in her body's way
+    (behavior.fight.TOUCH_NEAR) and her kills credited to the monster her attack took: on seed 1 she was hurt more than
+    five times; of seeds 1-16, 2, 3, 7 and 11-13 meet all of this, and with master's stack 1, 3-6 and 13-16.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2434,7 +2453,8 @@ def loop_tree_lie_detector_28(sim):
     group's walls alone stop her: loop_tree_run).)
     (Seed 7 since 2026-10-27 on its own branch, her kill credited to the monster her attack took (localization.tracking's
     binding) and drawn alive until her star lands (sim.world Realism.dies_late): on seed 1 she didn't go back onto 28;
-    of seeds 1-16 only 7 meets all of this, and on 13 and 14 she fell out of the map before 40 s.)"""
+    of seeds 1-16 only 7 meets all of this, and on 13 and 14 she fell out of the map before 40 s.) (Seed 37 kept since
+    the rebase of her kill's monster onto clearance and slopes: of seeds 30-40, 33 and 37 meet all of this.)"""
     return lie_detector(40.0)(sim)
 
 

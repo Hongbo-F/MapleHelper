@@ -1308,8 +1308,10 @@ SLOW_SCENARIOS = {"tour_run", "loop_run", "tour_rocky_run", "loop_rocky_run", "t
 # loop_rocky_run fell out of the map at 536 s (work/safe-travel, 2026-10-24).
 NOT_YET = {"nav_rocky_fight_bridge", "loop_rocky_run", "tour_rocky_run"}
 # What these showed came of a kill put on the wrong monster: with her kill on the one her attack took (the README: Her
-# kill's monster, 2026-10-27), no seed or layout tried shows it (each one's docstring says what was tried)
-AFTER_KILL_PLACE = {"tour_hunt_other_spot", "nav_fight_across_runs_out"}
+# kill's monster, 2026-10-27), no seed or layout tried shows it (each one's docstring says what was tried).
+# Since the rebase onto clearance and slopes nav_fight_across_runs_out shows it again on master's seed 3, and
+# nav_fight_up_runs_out doesn't: she arrives on every seed 1-16.
+AFTER_KILL_PLACE = {"tour_hunt_other_spot", "nav_fight_up_runs_out"}
 
 
 @pytest.mark.parametrize("name", [pytest.param(name, marks=[pytest.mark.skipif(

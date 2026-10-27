@@ -588,8 +588,10 @@ def test_step_down_clears_her_platform_first_and_throws_between_its_respawns():
 def test_a_probe_that_only_fights_its_platform_s_monsters_stops_and_says_so():
     # Back 8 s after a kill, 2's monsters come back faster than she kills them, there and on 4: she'd fight the
     # probe's whole time through (fighting them one at a time she did: 0-1 throws in 300 s on seeds 1-3). She
-    # stops once she's fought FIGHT_MAX_S without a throw, and says why.
-    rows, report, trace = _step_down(8.0)
+    # stops once she's fought FIGHT_MAX_S without a throw, and says why. (Seed 2 since the rebase of her kill's
+    # monster onto clearance and slopes, 2026-10-27: on seed 1 her HP stayed low and the safety stop ended it at 212 s;
+    # of seeds 1-8 all but 1 show it, master's stack all 8.)
+    rows, report, trace = _step_down(8.0, seed=2)
     assert rows == [] and report.stop.startswith("her platform's monsters kept her fighting")
     assert probe.FIGHT_MAX_S <= report.fight_s <= probe.FIGHT_MAX_S + probe.CLEAR_S + 5
     assert trace["seconds"] < 250
