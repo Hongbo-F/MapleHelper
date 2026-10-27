@@ -2,6 +2,8 @@
 
 Status: steps 0-5 and 7 built in the simulator on 2026-10-19 (see "As built" below); step 6, the game trials, is still to do. It starts from commit 1e6ae23.
 
+Since 2026-10-26 she doesn't rest (the user: "Just remove the sit recover hp functionality, it's no longer needed"; README: No resting: the safety stop): her pet drinks her potions, and her HP under 40% for 2 s ends the hunt, she goes to a safe place as on the Lie Detector, and whoever is at the PC is paged. What below is about resting (the trip to rest, `--rest-below`, `--low-hp`'s switch to transit, the chair, potions running out, step 7's `--rest-avoid` and `transit-avoid`) is the design as it was; transit is the hunt loop's trips and the stand-by.
+
 ## In short
 
 The hunter gets two explicit modes instead of six kinds of trip:
@@ -9,7 +11,7 @@ The hunter gets two explicit modes instead of six kinds of trip:
 | Your words | In this design |
 |---|---|
 | attack mode: follow the motion plan and look for monsters to kill along the way; the plan changes as monsters respawn | **hunt**: one loop that decides what to do after every look (rules below), so a respawn changes the next step within a second or two |
-| non-attack mode: follow the motion plan and avoid getting hit | **transit**: going to rest or to stand by. She doesn't stop to hunt, and only shoots what blocks her path or comes too close |
+| non-attack mode: follow the motion plan and avoid getting hit | **transit**: going to stand by (and to rest, until 2026-10-26). She doesn't stop to hunt, and only shoots what blocks her path or comes too close |
 | loot picked up on the way | pick-up pressed on every walk and every chain of moves, and a stop on piles she passes on her platform (rule 5) |
 | loot gone after once all monsters are killed | the lull rule (rule 8): in the gap before respawns, she collects piles she can reach in time |
 | loot gone after when it's about to expire | the urgent rule (rule 6), placed above moving to a better spot and above waiting |
@@ -50,7 +52,7 @@ Tried and dropped, because they were worse in the A/B runs: no shooting at all o
 
 **Results** (preset `game`, 20 simulated minutes a seed; the README has the table): the loop makes 114.2 EXP a minute against the fixed tour's 84.8 on 10 seeds (117.7 against 85.7 on 20), better on 19 of 20 seeds, with the same share of its drops picked up (95.8% against 95.6% on 20 seeds; 250 drops a run against 185), less HP lost and no deaths. The one point of the bar it misses is seed 7, 35% worse: knocked off the spot on 16 again and again, it spends its time climbing back. With `--think 1` it passes the whole bar (116.8 against 80.8). In the crowded `plain` world it makes 208 EXP a minute against 133, but picks up only 69% of its drops. Seed 7 and the drops share move a lot between near-identical variants, so differences of a few points are noise.
 
-**Step 7:** with `--rest-avoid` (navigator mode `transit-avoid`), 40 trips to rest at 28% HP lost 1.6% HP a trip instead of 6.2%, in 6.1 s instead of 28.5 s, and nobody died (`python -m gamelab.sim.harness rests`). It passes its bar and stays an option until checked in game.
+**Step 7:** with `--rest-avoid` (navigator mode `transit-avoid`), 40 trips to rest at 28% HP lost 1.6% HP a trip instead of 6.2%, in 6.1 s instead of 28.5 s, and nobody died (`python -m gamelab.sim.harness rests`). It passed its bar and stayed an option, never checked in game, until the rests went on 2026-10-26 (with it the flag, the mode and the harness's `rests`).
 
 ## Terms
 
@@ -120,13 +122,11 @@ Control may not import attack (`tests/test_architecture.py`). So the navigator a
 Checked after every look, before the mode's own decision.
 
 - **Lie Detector:** unchanged. The key player stops everything by itself.
-- **HP:**
-  - Below `--potion-hp` (0.45) she drinks, at most every 3 s.
-  - Below `--rest-below` (0.5) she goes to rest at the next calm moment: nothing wanted in reach and no pile being picked up.
-  - Below `--low-hp` (0.3) she switches to transit at once.
-  - The goal is the nearest safe platform at least 120 units wide. Low HP is never a reason to stop that trip (the bug fixed in 1e6ae23).
-  - She sits until 90% or 120 s, then goes back to hunting.
-- **Potions running out:** a drink that brings no HP back within 2 s means none are left. She stops drinking, logs it, and from then on rests as soon as HP is below `--rest-below`, without waiting for a calm moment. Today this isn't noticed, because `Actions.drink` reports success whenever the key is bound.
+- **HP** (since 2026-10-26; `behavior/safety.py`):
+  - Her pet drinks her potions (at 70%); below `--potion-hp` (0.45) she drinks herself, at most every 3 s, if a potion key is bound (none is since 2026-10-23).
+  - Below `--low-hp` (0.4) for 2 s, over 3 looks at least, the hunt ends (the safety stop): she goes to a safe place as on the Lie Detector, says why, and whoever is at the PC is paged. No sitting, no waiting for HP.
+  - Until then (the design as built): below `--rest-below` (0.5) she went to rest at the next calm moment, below `--low-hp` (0.3) at once, to the nearest safe platform at least 120 units wide (low HP never a reason to stop that trip: the bug fixed in 1e6ae23), and sat until 90% or 120 s.
+- **Potions running out** (until 2026-10-26): a drink that brought no HP back meant none were left; from then on she rested as soon as HP was below `--rest-below`. Now her HP staying low is the sign: the safety stop.
 - **MP:** none is used with the regular attack, which tours use. With `--skill` (about 7 MP a throw) an MP check would be needed; tours don't offer it.
 - **Knocked off, falling, on a rope, dot hidden:** the navigator and mover deal with it as today. In hunt mode being knocked onto another platform ends nothing: the next decision starts from where she is, and rule 2 takes her back up if she's below her spot.
 - **After a hit cuts a plan short:**
@@ -136,7 +136,7 @@ Checked after every look, before the mode's own decision.
 
 ## Transit
 
-The goal is a platform and an x: a safe platform to rest on, or to stand by on.
+The goal is a platform and an x: a safe platform to stand by on (or, until 2026-10-26, to rest on).
 
 Through step 6 of the plan, transit is exactly today's trip to rest:
 - the quickest route, by the trip's random weights;
