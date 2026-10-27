@@ -67,3 +67,5 @@ lucky_seven = 16    # her Lucky Seven's skill level: its MP a cast in the game d
 # DXGI falls back to mss by itself whenever it can't be used.
 [capture]
 method = "dxgi"
+fence = true        # DXGI: a frame's copy off the graphics card waited for on a fence's event, not by Map's spin
+                    # (4 ms of CPU a frame less: gamelab/capture.py's COPY_WAIT_MS); false: Map's wait, as before

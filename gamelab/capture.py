@@ -26,7 +26,7 @@ import tomllib
 import uuid
 import weakref
 from collections.abc import Callable
-from ctypes import POINTER, byref, c_int64, c_uint, c_ulong, c_void_p, wintypes
+from ctypes import POINTER, byref, c_int64, c_uint, c_uint64, c_ulong, c_void_p, wintypes
 
 import mss
 import numpy as np
@@ -50,6 +50,14 @@ FRESH_WAIT_S = 0.020
 # the black one, even with nothing on screen changing).
 FIRST_FRAME_S = 0.25
 RETRY_S = 10.0  # after DXGI failed: mss for this long, then DXGI again
+# A box's copy off the graphics card is waited for on a fence's event (ID3D11Fence, Windows 10 1703's D3D11.4) before
+# Map, this long at most (then Map waits as it would): Map's own wait spun an NVIDIA driver thread all the while. On a
+# texture holding a saved frame, nothing captured (D:/MapleHelper-scratch/gsmooth/cap/copybench.py: Dxgi.read of the
+# 1366x768 box of a 3840x2160 "monitor" a 1/30 s, four rounds alternated): the process's CPU 4.96-5.17 ms a frame with
+# Map's wait, 1.04-1.07 on the event (0.12 cores fewer at 30 a second), read() 0.15-0.2 ms later at the median, the
+# pixels the same (scope/probe/copyoff2.c, the same calls in C: 4.6-5.6 against 0.6-1.75). `[capture] fence = false`
+# in config.toml leaves it to Map, as before.
+COPY_WAIT_MS = 100
 
 # HRESULTs (as unsigned 32-bit numbers)
 S_OK = 0
@@ -78,6 +86,20 @@ def configured_method(path=CONFIG) -> str:
     if method not in METHODS:
         raise ValueError(f"{path}: [capture] method must be one of {', '.join(map(repr, METHODS))}, got {method!r}")
     return method
+
+
+def configured_fence(path=CONFIG) -> bool:
+    """config.toml's `[capture] fence`: whether a box's copy off the graphics card is waited for on a fence's event
+    (true, the default) or by Map (false, as before 2026-10-27)."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        return True
+    fence = data.get("capture", {}).get("fence", True)
+    if not isinstance(fence, bool):
+        raise ValueError(f"{path}: [capture] fence must be true or false, got {fence!r}")
+    return fence
 
 
 # --- shots: one moment of the screen -----------------------------------------------------------------
@@ -349,6 +371,9 @@ def _guid(text: str) -> _GUID:
 IID_IDXGIFactory1 = _guid("770aae78-f26f-4dba-a829-253c83d1b387")
 IID_IDXGIOutput1 = _guid("00cddea8-939b-4b83-a340-a685226666cc")
 IID_ID3D11Texture2D = _guid("6f15aaf2-d208-4e89-9ab4-489535d34f9c")
+IID_ID3D11Device5 = _guid("8ffde202-a0e7-45df-9e01-e837801b5ea0")
+IID_ID3D11DeviceContext4 = _guid("917600da-f58c-4c33-98d8-3e15b390fa24")
+IID_ID3D11Fence = _guid("affde9d1-1df7-4bb7-8a34-0f46251dab80")
 
 # Each method's place in its interface's table (declaration order, IUnknown's three first).
 QUERY_INTERFACE, RELEASE = 0, 2
@@ -360,6 +385,9 @@ DUPL_GET_DESC, DUPL_ACQUIRE_NEXT_FRAME, DUPL_RELEASE_FRAME = 7, 8, 14
 DEVICE_CREATE_TEXTURE2D = 5
 CONTEXT_MAP, CONTEXT_UNMAP, CONTEXT_COPY_SUBRESOURCE_REGION, CONTEXT_COPY_RESOURCE = 14, 15, 46, 47
 TEXTURE2D_GET_DESC = 10
+# (the SDK's d3d11_4.h vtables, as D:/MapleHelper-scratch/gsmooth/cap/probe/vtidx.c prints them)
+CONTEXT_FLUSH, CONTEXT4_SIGNAL, DEVICE5_CREATE_FENCE = 111, 147, 68
+FENCE_SET_EVENT_ON_COMPLETION = 9
 
 D3D_DRIVER_TYPE_UNKNOWN = 0         # the device is made on the adapter given
 D3D11_CREATE_DEVICE_BGRA_SUPPORT = 0x20
@@ -430,6 +458,19 @@ def _release_all(held: list[c_void_p]) -> None:
         _release(held.pop())
 
 
+_kernel = None
+
+
+def _wait_for(event: int, ms: int) -> None:
+    """WaitForSingleObject on `event`, `ms` at most (Python's lock let go meanwhile)."""
+    global _kernel
+    if _kernel is None:
+        _kernel = ctypes.WinDLL("kernel32")
+        _kernel.WaitForSingleObject.restype = wintypes.DWORD
+        _kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    _kernel.WaitForSingleObject(event, ms)
+
+
 def qpc() -> int:
     """QueryPerformanceCounter's ticks now."""
     ticks = c_int64()
@@ -461,6 +502,8 @@ class Dxgi:
         self._held: list[c_void_p] = []  # every COM pointer this holds, released in reverse
         self._finalizer = weakref.finalize(self, _release_all, self._held)
         self._format_checked = False
+        self._fence: tuple[c_void_p, c_void_p] | None = None  # (the context's ID3D11DeviceContext4, the fence)
+        self._fenced = 0  # the fence's last value signalled
         try:
             self._open(point)
         except BaseException:
@@ -497,6 +540,7 @@ class Dxgi:
         self._device, self._context, self._dupl = device, context, dupl
         self._last = self._texture(USAGE_DEFAULT, 0)
         self._staging = self._texture(USAGE_STAGING, CPU_ACCESS_READ)
+        self._fence = self._fence_of(device, context) if configured_fence() else None
         self._freq = qpc_frequency()
         self._offset = qpc_offset(self._freq)
 
@@ -534,6 +578,47 @@ class Dxgi:
             finally:
                 _release(adapter)
             i += 1
+
+    def _fence_of(self, device: c_void_p, context: c_void_p) -> tuple[c_void_p, c_void_p] | None:
+        """The device's context as an ID3D11DeviceContext4 and a fence on the device, with an event of its own
+        (`_event`), for `read` to wait on its copies (COPY_WAIT_MS); None where the runtime has none (before Windows 10
+        1703): Map waits then, as before."""
+        dev5, ctx4, fence = c_void_p(), c_void_p(), c_void_p()
+        if _call(device, QUERY_INTERFACE, byref(IID_ID3D11Device5), byref(dev5), argtypes=(c_void_p, c_void_p)) & MASK:
+            return None
+        self._keep(dev5)
+        if _call(context, QUERY_INTERFACE, byref(IID_ID3D11DeviceContext4), byref(ctx4),
+                 argtypes=(c_void_p, c_void_p)) & MASK:
+            return None
+        self._keep(ctx4)
+        if _call(dev5, DEVICE5_CREATE_FENCE, c_uint64(0), 0, byref(IID_ID3D11Fence), byref(fence),
+                 argtypes=(c_uint64, c_uint, c_void_p, c_void_p)) & MASK:
+            return None
+        self._keep(fence)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateEventW.restype = wintypes.HANDLE
+        kernel.CreateEventW.argtypes = (c_void_p, wintypes.BOOL, wintypes.BOOL, c_void_p)
+        event = kernel.CreateEventW(None, False, False, None)
+        if not event:
+            return None
+        self._event = event
+        self._event_closer = weakref.finalize(self, kernel.CloseHandle, wintypes.HANDLE(event))
+        return ctx4, fence
+
+    def _copied(self) -> None:
+        """The copies queued off the card done, waited for on the fence's event (COPY_WAIT_MS at most), so that Map
+        doesn't wait by spinning; without a fence, nothing (Map waits)."""
+        if self._fence is None:
+            return
+        ctx4, fence = self._fence
+        self._fenced += 1
+        if _call(fence, FENCE_SET_EVENT_ON_COMPLETION, c_uint64(self._fenced), c_void_p(self._event),
+                 argtypes=(c_uint64, c_void_p)) & MASK:
+            return
+        if _call(ctx4, CONTEXT4_SIGNAL, fence, c_uint64(self._fenced), argtypes=(c_void_p, c_uint64)) & MASK:
+            return
+        _call(self._context, CONTEXT_FLUSH, restype=None)
+        _wait_for(self._event, COPY_WAIT_MS)
 
     def _texture(self, usage: int, cpu_access: int) -> c_void_p:
         """A texture the monitor's size, as its frames are."""
@@ -587,6 +672,7 @@ class Dxgi:
             _call(self._context, CONTEXT_COPY_SUBRESOURCE_REGION, self._staging, 0, x0, y0, 0, self._last, 0,
                   byref(_D3DBox(x0, y0, 0, x1, y1, 1)),
                   argtypes=(c_void_p, c_uint, c_uint, c_uint, c_uint, c_void_p, c_uint, c_void_p), restype=None)
+        self._copied()
         mapped = _Mapped()
         _check(_call(self._context, CONTEXT_MAP, self._staging, 0, MAP_READ, 0, byref(mapped),
                      argtypes=(c_void_p, c_uint, c_uint, c_uint, c_void_p)), "Map")
@@ -599,3 +685,6 @@ class Dxgi:
 
     def close(self) -> None:
         self._finalizer()
+        closer = getattr(self, "_event_closer", None)
+        if closer is not None:
+            closer()

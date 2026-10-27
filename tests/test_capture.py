@@ -1,9 +1,13 @@
 """Capturing the screen (gamelab.capture) without the screen: desktop duplication's COM calls are faked, so
 what's tested is what's made of their answers: the black first frame, frames shown after a look began, a
 duplication lost and started again, and the fall back to mss. And Eyes taking a glance's two boxes from one
-frame, at the old pace."""
+frame, at the old pace. And a box's copy off the graphics card waited for on a fence (Dxgi._copied), on a texture
+holding a picture: Direct3D's calls, but no duplication."""
 
+import ctypes
+import sys
 import time
+import weakref
 
 import numpy as np
 import pytest
@@ -356,6 +360,18 @@ def test_a_bad_method_in_config_is_refused(tmp_path):
 
 def test_the_repos_config_says_dxgi():
     assert capture.configured_method() == "dxgi"
+    assert capture.configured_fence()
+
+
+@pytest.mark.parametrize("text,fence", [("", True), ("[capture]\n", True), ("[capture]\nfence = false\n", False),
+                                        ("[capture]\nfence = true\n", True)])
+def test_the_fence_wait_comes_from_config(tmp_path, text, fence):
+    path = tmp_path / "config.toml"
+    path.write_text(text)
+    assert capture.configured_fence(path) is fence
+    path.write_text('[capture]\nfence = "yes"\n')
+    with pytest.raises(ValueError):
+        capture.configured_fence(path)
 
 
 # --- Eyes on a grabber ---------------------------------------------------------------------------------
@@ -436,3 +452,58 @@ def test_bench_capture_times_both_ways_and_compares_their_pixels():
     assert timer.counts == {"looks": 1, "... DXGI and mss the same on every pixel": 1,
                             "... pixels that differed (in all)": 0}
     assert {"dxgi: a look's capture (RGB)", "mss: a glance (two grabs)"} <= set(timer.samples)
+
+
+_DXGI = capture.Dxgi  # (the class itself, as imported: the tests' conftest refuses it, for duplicating the screen)
+
+
+class _SubData(ctypes.Structure):
+    _fields_ = [("pSysMem", ctypes.c_void_p), ("SysMemPitch", ctypes.c_uint), ("SysMemSlicePitch", ctypes.c_uint)]
+
+
+def _textured(fence: bool, picture: np.ndarray):
+    """A Dxgi without its duplication (nothing captured): its device on the default hardware adapter, its textures the
+    picture's size, the picture copied into its frame's (`_last`) as acquire's copy puts a frame there."""
+    from ctypes import byref, c_uint, c_void_p
+    d = _DXGI.__new__(_DXGI)  # (its _open, the duplication, never called)
+    d._held = []
+    d._finalizer = weakref.finalize(d, capture._release_all, d._held)
+    d._format_checked, d._fence, d._fenced = True, None, 0
+    device, context, level = d._keep(c_void_p()), d._keep(c_void_p()), c_uint()
+    if ctypes.WinDLL("d3d11").D3D11CreateDevice(None, 1, None, capture.D3D11_CREATE_DEVICE_BGRA_SUPPORT, None, 0,
+                                                capture.D3D11_SDK_VERSION, byref(device), byref(level),
+                                                byref(context)) & capture.MASK:
+        d.close()
+        pytest.skip("no Direct3D 11 hardware device")
+    h, w = picture.shape[:2]
+    d.size, d.desktop, d._device, d._context = (w, h), (0, 0, w, h), device, context
+    d._last = d._texture(capture.USAGE_DEFAULT, 0)
+    d._staging = d._texture(capture.USAGE_STAGING, capture.CPU_ACCESS_READ)
+    if fence:
+        d._fence = d._fence_of(device, context)
+    desc = capture._TextureDesc(w, h, 1, 1, capture.DXGI_FORMAT_B8G8R8A8_UNORM, 1, 0, capture.USAGE_DEFAULT, 0, 0, 0)
+    sd = _SubData(picture.ctypes.data, w * 4, w * h * 4)
+    src = d._keep(c_void_p())
+    capture._check(capture._call(d._device, capture.DEVICE_CREATE_TEXTURE2D, byref(desc), byref(sd), byref(src),
+                                 argtypes=(c_void_p, c_void_p, c_void_p)), "CreateTexture2D")
+    capture._call(d._context, capture.CONTEXT_COPY_RESOURCE, d._last, src, argtypes=(c_void_p, c_void_p), restype=None)
+    return d
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Direct3D 11")
+def test_a_boxs_copy_off_the_card_is_waited_for_on_a_fence_and_its_pixels_are_the_frames():
+    # (Dxgi._copied: the fence's event before Map, which waited by spinning a driver thread; without a fence, Map's)
+    rng = np.random.default_rng(4)
+    picture = rng.integers(0, 256, (300, 500, 4), dtype=np.uint8)
+    boxes = [(10, 20, 210, 120), (300, 0, 500, 300)]
+    want = [picture[y0:y1, x0:x1] for x0, y0, x1, y1 in boxes]
+    for fence in (True, False):
+        d = _textured(fence, picture)
+        assert (d._fence is not None) == fence  # (Windows 10 1703 and later: ID3D11Device5's fences)
+        for _ in range(3):
+            got = d.read(boxes)
+            assert all(np.array_equal(g, w) for g, w in zip(got, want))
+            rgb = d.read(boxes[:1], eyes_module.rgb_of)[0]
+            assert np.array_equal(rgb, want[0][:, :, 2::-1])
+        assert d._fenced == (6 if fence else 0)
+        d.close()
