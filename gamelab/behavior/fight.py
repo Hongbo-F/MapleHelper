@@ -475,8 +475,8 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     """What to do about the monsters to `fight` (attack.stance, by each kind's size, with what her jumps' attacks
     reach: jump_cover, or `jumps` if given), walking up to them only if `approach`; `toward`: she's travelling that
     way, to map x `goal` on her platform if given; `edges`, `up`, `limits`: stance's, and her moves away since her last
-    throw (st.moves: MAX_MOVES). For a throw, everything in the star's path
-    is kept (st.aimed): a kill is matched against it. A jump throw that a stance chose for where its attack reaches is
+    throw (st.moves: MAX_MOVES). For a throw, everything in the star's path is kept (st.aimed): a kill is matched against
+    it. A jump throw that a stance chose for where its attack reaches is
     logged with its numbers and sent as a telemetry 'jump' record when it's carried out (throw_act: log_jump)."""
     here = s.platform
     body = bodies(h.model)  # each kind's body (game data)

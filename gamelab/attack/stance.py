@@ -244,6 +244,12 @@ MEET_PRICE_S = 2.5     # ... more where one walks into her before her first atta
 WALL_ROOM = HER_HALF + 3.0  # units a move away keeps from a wall end of her platform (a knock can't take her off it):
                             # her half width and the slack of her dot
 MAX_MOVES = 2          # moves away in a row without a throw between (her decisions are made again at each look)
+# From a monster that hits hard (_escape), the steps tried: STEP_AWAY or the room there is, as before, and (ESCAPE_STEPS)
+# every ESCAPE_STEP from STEP_ROOM up, the safest end first: with the room a wall end leaves her (move_limits) the full
+# step could end by another monster or a spawn point where a shorter one is safe (loop_tree_grind at 1.0 s: from a Horny
+# Mushroom 18 off master's stack stepped 63, the room it had; with the room to 120 the branch threw from where she stood).
+ESCAPE_STEPS = True
+ESCAPE_STEP = 20
 
 
 @dataclass(frozen=True)
@@ -274,7 +280,8 @@ class Pace:
             v = (self.speeds or {}).get(m.kind, DEFAULT_SPEED) * (1.0 if m.x < x else -1.0)
         walked = t
         if self.hold is not None and (held := self.hold(m)) is not None:  # her attack's hit stands it a while
-            walked = min(t, max(0.0, held[0])) + max(0.0, t - max(held[0], held[1]))
+            stops = max(0.0, held[0])
+            walked = min(t, stops) + max(0.0, t - max(stops, held[1]))
         px = m.x + v * walked
         if PACE_STOP and v and (m.x - x) * v < 0:  # walking at her: no nearer than where it meets her, if not yet
             s = 1.0 if m.x > x else -1.0
@@ -789,7 +796,7 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     (Danger.keep_off) is escaped as _escape has it (`up`: the platform overhead, stance's). `y`: her feet (map y; her
     platform's y_at at x by default). With `danger`, a step never ends on a spawn point of her platform the monsters
     `around` her don't account for (Danger.free_points: a respawn there lands on her), and after `moves` moves away in a
-    row without a throw (MAX_MOVES) she throws from where she is, the step left out of an escape too."""
+    row without a throw (MAX_MOVES) no step, an escape's neither (a jump back, which throws, still)."""
     at = pace.lead + GROUND_PICK_S  # where each will be when a throw from the ground would start (its side, how near)
     where = {id(t): pace.at(t, x, at, platform) for t in close}
 
@@ -966,16 +973,20 @@ def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float],
     under 22, a jump back or a jump throw in place lands her on 22, so the old rule left her a step toward the drop at
     23's left end or a throw (all three of the live knocks off it, 2026-10-25, began there: DROP_ROOM). `room`: the
     room behind her within where her steps keep to (stance's `edges`, or `limits`). Not `stepping` (MAX_MOVES moves
-    away in a row), no step."""
+    away in a row), no step. With ESCAPE_STEPS the step's every ESCAPE_STEP from STEP_ROOM up are weighed too, the
+    safest end first (of equal danger the shortest)."""
     away = directions.opposite(side)
     back = directions.sign(away)
     options = []  # (danger there, order, act)
     jump = x + back * JUMP_BACK_SPAN
     if room >= JUMP_BACK_ROOM and can_jump(x, jump) and not _into(x, jump, platform, around, halves):
         options.append((danger.at(platform.id, jump, around), 0, ("jump_back", side)))
-    step = min(STEP_AWAY, room)
-    if stepping and room >= STEP_ROOM and not _into(x, x + back * step, platform, around, halves):
-        options.append((danger.at(platform.id, x + back * step, around) + ESCAPE_THROW, 1, ("back", away, step)))
+    most = min(STEP_AWAY, room)
+    steps = sorted({most} | ({float(v) for v in range(int(STEP_ROOM), int(most), int(ESCAPE_STEP))} if ESCAPE_STEPS
+                             else set()))
+    for step in (steps if stepping and room >= STEP_ROOM else ()):  # (the safest end of a step, ESCAPE_STEPS)
+        if not _into(x, x + back * step, platform, around, halves):
+            options.append((danger.at(platform.id, x + back * step, around) + ESCAPE_THROW, 1, ("back", away, step)))
     options.append((danger.at(platform.id, x, around) + (0.0 if here.sure else ESCAPE_THROW), 2, here.act))
     if ESCAPE_UP and up is not None and (q := up(x)) is not None:
         options.append((danger.at(q.id, x, around), 3, ("jump_throw", side, JumpPlan(why=f"up onto {q.id}"))))

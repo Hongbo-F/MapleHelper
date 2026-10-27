@@ -183,9 +183,9 @@ def test_grind_stops_stand_clear_of_their_platforms_spawn_points(tree_map, monke
 
     def clear(pid, x):
         return min((abs(x - q.x) for q in points if q.platform == pid), default=1e9)
+    before = stops()  # (off by default: in the harness it cost grinding 4.3% of its EXP, patrol.STOP_SLACK)
+    monkeypatch.setattr(patrol, "STOP_SLACK", 0.05)
     now = stops()
-    monkeypatch.setattr(patrol, "STOP_SLACK", 0.0)
-    before = stops()
     # 24's stop from 221 (51 from its Green's point at 272) to 201 (71); none nearer its own points than before.
     assert before[24] == 221 and now[24] == 201
     assert all(clear(pid, now[pid]) >= clear(pid, before[pid]) - 1e-6 for pid in now)

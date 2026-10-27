@@ -523,19 +523,18 @@ def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch)
 
 
 def test_a_stop_is_the_safest_place_that_reaches_as_much(monkeypatch):
-    # One platform with two Horny Mushroom points (250, 350): she gets at both wherever she stands on it, so with the
-    # default danger hook (the positioning model's) its stop stands clear of them, past where her attack from the ground
-    # surely takes a respawn there (patrol.STOP_SLACK, reach.ground_sure: 105 for a mushroom), as near its middle as that
-    # goes (465); without that, as before, its middle (the default hook's danger is no lower anywhere else that reaches
-    # as much: its points on it count whole). With a danger hook highest at 250 (the positioning model's shape:
-    # Danger.at), the safest place reaching as much, its far end.
+    # One platform with two Horny Mushroom points (250, 350): she gets at both wherever she stands on it, so with no
+    # danger along it (the default's is the platform's) its stop is its middle; standing clear of its points
+    # (patrol.STOP_SLACK, off by default), past where her attack from the ground surely takes a respawn there
+    # (reach.ground_sure: 105 for a mushroom), as near its middle as that goes (465). With a danger hook highest at 250
+    # (the positioning model's shape: Danger.at), the safest place reaching as much, its far end.
     model = _map([(0, 600, 0), (2000, 2600, 0)], [(250, 0, "h"), (350, 0, "h"), (2300, 0, "h")])
     a = _pid(model, 300, 0)
     flat = _patrol(model, lambda a, b: 5.0)
-    x = flat.stops[flat.stop_on(a)].x
+    assert flat.stops[flat.stop_on(a)].x == pytest.approx(300.0, abs=patrol.STAND_STEP)
+    monkeypatch.setattr(patrol, "STOP_SLACK", 0.05)
+    x = _patrol(model, lambda a, b: 5.0).stops[flat.stop_on(a)].x
     assert x - 350 >= reach.ground_sure(28.0)[0] and x == pytest.approx(465.0)
-    monkeypatch.setattr(patrol, "STOP_SLACK", 0.0)
-    assert _patrol(model, lambda a, b: 5.0).stops[flat.stop_on(a)].x == pytest.approx(300.0, abs=patrol.STAND_STEP)
     monkeypatch.undo()
     p = patrol.Patrol(model, {HORNY}, {HORNY: 41.0}, flat.travel,
                       danger=lambda pid, x: 0.3 * math.exp(-abs(x - 250) / 100) if pid == a else 0.0)

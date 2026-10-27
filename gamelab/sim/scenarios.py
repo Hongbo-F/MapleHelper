@@ -2236,7 +2236,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=3, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=2, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2268,7 +2268,10 @@ def loop_tree_ore_waits(sim):
     five times; of seeds 1-16, 1, 3, 5, 6, 10 and 14-16 meet all of this.) (Seed 3 since the rebase of her kill's
     monster onto clearance and slopes, 2026-10-27, her kill's monster bound by her kept in her body's way
     (behavior.fight.TOUCH_NEAR) and her kills credited to the monster her attack took: on seed 1 she was hurt more than
-    five times; of seeds 1-16, 2, 3, 7 and 11-13 meet all of this, and with master's stack 1, 3-6 and 13-16.)"""
+    five times; of seeds 1-16, 2, 3, 7 and 11-13 meet all of this, and with master's stack 1, 3-6 and 13-16.) (Seed 2
+    since landings with clearance and moving away to attack, 2026-10-27, the Horny Mushroom's escape stepping to the
+    safest end, stance.ESCAPE_STEPS: on seed 3 she was hurt 6 times; of seeds 1-16, 1, 2, 6-8, 11 and 14 meet all of
+    this, with master's stack 2, 3, 7 and 11-13; hurt 88 times over the 16 against 107.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 

@@ -150,8 +150,12 @@ STAND_STEP = 20.0      # units between the places along a platform tried as a st
 # then the nearest its middle. Live the grind stops sat on spawn points (7's 1 unit off its point at -95, 19's 1 off 150, 14's 6, 10's 11,
 # 13's, 16's and 32's 13, 8's and 15's 15: D:/MapleHelper-scratch/land/diag-landings), where a respawn comes onto her and
 # no attack from there is sure, and in 92% of her close landings on a trip's own platform the stop's x itself was within
-# 105 of a monster. Only where the danger hook counts them (not on the first map). Off (0): as before, the most EXP alone.
-STOP_SLACK = 0.05
+# 105 of a monster. Only where the danger hook counts them (not on the first map). With 5% (24's stop 221 -> 201, 71 from its
+# Green's point; 13 of Tree Dungeon's 26 stops moved, none nearer its points), grinding made 4.3% less EXP a minute
+# (se 2.4%) in the harness's `walkers` world (24 seeds of 5 minutes, the rest of the branch the same), its time within 60
+# of a monster 8.6% more: its loops changed ([14, 10, 8, 12] for [10, 7] at loop_tree_grind's start) and the stops
+# farther from where the respawns come stood farther from what they shoot. Off (0), as before: the most EXP alone.
+STOP_SLACK = 0.0
 CAUGHT_TERMS = 400     # rounds summed at most for what she catches at a point (caught; a resolution)
 LOOP_GAIN = 0.15       # guess: a new round replaces hers only this much better by the same belief ...
 LOOP_MIN_S = 60.0      # guess: ... and not within this long of the last change
