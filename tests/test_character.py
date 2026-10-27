@@ -186,6 +186,19 @@ def test_using_puts_a_profile_in_place():
 
 # --- the profiles -------------------------------------------------------------------------------------------------
 
+def test_the_thiefs_lucky_seven_at_her_level(tmp_path):
+    """The review's: her profile kept Lucky Seven at level 16 and 14 MP whatever [character] lucky_seven said, where the
+    stack casts at hers (Attacks(level=c.lucky_seven): choice.lucky_seven)."""
+    from gamelab.attack import choice
+    path = _toml(tmp_path, "[character]\nlucky_seven = 18\n")
+    l7 = character.load("thief", path, {}).attacks["skill"]
+    want = choice.lucky_seven(18)
+    assert (l7.level, l7.mp, l7.lo, l7.hi) == (18, 15.0, want.lo, want.hi) and l7.mp == choice.cast_mp(18)
+    assert character.load("thief", path, {}).skills == {"lucky_seven": 18}
+    assert "Lucky Seven (lucky_seven;" in character.describe(character.load("thief", path, {}))[1]
+    assert "15 MP" in character.describe(character.load("thief", path, {}))[1]
+
+
 def test_the_thiefs_stats_are_physics_as_before(tmp_path):
     path = _toml(tmp_path, "[character]\nspeed = 130\njump = 110\n")
     assert character.stats(path, {}) == config.Character(130, 110) == config.character(path)
@@ -226,17 +239,31 @@ def test_a_magicians_profile_from_her_tables(tmp_path, config_data):
     assert m.stops == ("out_of_mp",) and m.ammo is None and m.files == "magician"
 
 
-def test_the_magicians_placeholders_are_the_designs():
+def test_magic_claw_is_the_clients_search():
+    """Magic Claw as the client picks (range/magic-claw-range.md 1.2-1.3, which supersedes design.md 4.1's box: the
+    review's): the aimed spell's search, 50 to 300 ahead in bands 20 wide, band k's window 28 -/+ (50 + 20 k) // 4 over
+    her feet, the first band picking; nothing stops it and it's cast from the ground only (the user's, settled)."""
+    from gamelab.localization import monsters
     m = character.load("magician")
-    box = m.attacks["skill"].geometry.box
-    assert (box.near, box.far, box.down, box.up) == (-10, 300, 50, 50)  # design.md 4.1
     g = m.attacks["skill"].geometry
-    assert (g.kind, g.line, g.air, g.order, g.mob_count) == ("box", None, None, "nearest", 1)
+    assert (g.kind, g.line, g.air, g.point_blank, g.order, g.mob_count) == ("search", None, None, None, "band", 1)
+    s = g.search
+    assert (s.start, s.range, s.step, s.spread, s.row, s.bands) == (50, 300, 20, 4, 28, 13)
+    assert [s.window(k) for k in range(s.bands)] == [  # the range doc's table 1.3
+        (16, 40), (11, 45), (6, 50), (1, 55), (-4, 60), (-9, 65), (-14, 70), (-19, 75), (-24, 80), (-29, 85),
+        (-34, 90), (-39, 95), (-44, 100)]
+    assert (s.floor, s.roof) == (-44, 100) and m.attacks["skill"].air is False
+    # Her Shape from it: from 6 ahead (never behind her) to 374, feet 110 over hers to 119 under
+    sh = m.shape
+    assert (sh.near, sh.ahead, sh.up, sh.down, sh.order) == (6.0, 374.0, 110.0, 119.0, "band")
+    assert sh.look_band == (180, 124) and sh.hit_after_s == pytest.approx(0.715) and sh.pick_s == 0.065
+    assert magician.WIDEST_HALF == max(monsters.MONSTER_HALF.values())
+    assert magician.TALLEST_TOP == max(monsters.MONSTER_FLINCH_TOP.values())
     assert m.attacks["skill"].lock_ms == 730 and m.attacks["skill"].cycle_s == 0.79
-    s = m.shape
-    assert (s.ahead, s.behind, s.dy, s.look_band, s.order) == (374.0, 44.0, 60.0, (130, 65), "nearest")
     assert m.policy.default_mode == "skill" and m.policy.unseen == "none" and m.policy.close_quarters == "touch"
-    assert m.placeholders and "the box's edges" in m.placeholders
+    assert "lock and delays" in m.placeholders and not {"air", "walls", "the box's edges"} & set(m.placeholders)
+    assert "from the ground only" in "\n".join(character.describe(m)) and "nothing stops it" in "\n".join(
+        character.describe(m))
 
 
 def test_the_thiefs_profile_is_todays_constants():
@@ -264,8 +291,21 @@ def test_the_thiefs_profile_is_todays_constants():
         assert a.cycle_s == patrol.THROW_S and a.hidden_s == fight.HIDDEN_FOR == attacks.HIDDEN_FOR
     assert star.geometry.point_blank == "claw" and l7.geometry.point_blank is None
     s = t.shape
-    assert (s.ahead, s.dy, s.hit_after_s, s.window_s, s.hide_s) == (
-        tracking.THROW_REACH, tracking.THROW_DY, tracking.HIT_AFTER_S, tracking.STAR_WINDOW, tracking.HIDE_S)
+    assert (s.near, s.ahead, s.up, s.down, s.hit_after_s, s.window_s, s.hide_s) == (
+        -10, tracking.THROW_REACH, tracking.THROW_DY, tracking.THROW_DY, tracking.HIT_AFTER_S, tracking.STAR_WINDOW,
+        tracking.HIDE_S)
+    from gamelab.motion import physics
+    assert s.pick_s == physics.JUMP_LAG
+    g = l7.geometry.search
+    assert (g.start, g.range, g.step, g.spread, g.row) == (reach.SEARCH_START, reach.STAR_RANGE, reach.SEARCH_STEP,
+                                                           reach.SEARCH_SPREAD, reach.SHOT_H)
+    assert star.geometry.search == g and l7.geometry.kind == "star_search"
+    from gamelab.classes import thief
+    assert (thief.LUCKY_SEVEN_MP, thief.LUCKY_SEVEN_DAMAGE) == (choice.LUCKY_SEVEN_MP, choice.LUCKY_SEVEN_DAMAGE)
+    for level in range(0, 23):  # (past the tables' ends too: their nearest)
+        a, b = thief.lucky_seven(level), choice.lucky_seven(level)
+        assert (a.hits, a.lo, a.hi, a.mp) == (b.stars, b.lo, b.hi, b.mp), level
+    assert thief.lucky_seven(choice.SKILL_LEVEL) == l7
     assert s.gain_after_key == monsters.GAIN_AFTER_KEY and s.shows_wait_s == senses.SHOWS_WAIT_S
     assert s.look_band == (reach.LOOK_UP, reach.LOOK_DOWN) and s is character.THIEF_SHAPE
     p = t.perception
@@ -523,7 +563,7 @@ def test_magic_claws_row_in_the_game_data():
     rows = tables.skills({p: pack.image(p) for p in ("Skill/200.img", "Skill/400.img")}, strings)
     claw, bolt, l7 = rows["2001003"], rows["2001002"], rows["4001003"]
     assert claw["info"] == {"type": 1, "magicDamage": 1} and claw["req"] == {"2001002": 1}
-    assert claw["desc_range"] == magician.BOX.far == 300 and "ball" not in claw and "range" not in claw
+    assert claw["desc_range"] == magician.SEARCH.range == 300 and "ball" not in claw and "range" not in claw
     assert (bolt["range"], bolt["desc_range"], bolt["ball"]) == (350, 350, True)
     assert l7["desc_range"] == 200  # Lucky Seven's "within 200" (the claw's; Keen Eyes adds the rest: reach.STAR_RANGE)
     assert tuple(claw["levels"][k]["mpCon"] for k in range(1, 21)) == magician.MAGIC_CLAW_MP
@@ -580,9 +620,12 @@ def test_the_trackers_take_the_thiefs_shape_by_default():
 
 def test_which_monsters_a_throw_went_at_by_her_shape():
     mage = character.load("magician").shape
-    for x, dy, thief, magician in ((400.0, 0.0, True, False),   # the star's 474 ahead; her box's 374
-                                   (-30.0, 0.0, False, True),   # 10 behind the thief; 44 behind her (the box's -10)
-                                   (100.0, 65.0, True, False)):  # 70 above for the thief; 60 for her
+    for x, dy, thief, magician in ((400.0, 0.0, True, False),     # the star's 474 ahead; her search's 374
+                                   (-5.0, 0.0, True, False),      # 10 behind the thief; never behind her (from 6 ahead)
+                                   (100.0, 65.0, True, True),     # 70 above for the thief; 110 for her
+                                   (100.0, 100.0, False, True),   # her windows widen up to 100 over her feet
+                                   (100.0, -90.0, False, True),   # ... and down to 44 under them, a body's top in it
+                                   (100.0, -125.0, False, False)):
         tr = _tracker_with_one(x=x, dy=dy)
         tr.throw(1.0, "right")
         assert (1 in tr.throws[-1].aimed) is thief and tr.throws[-1].attack is None, (x, dy)
@@ -591,7 +634,7 @@ def test_which_monsters_a_throw_went_at_by_her_shape():
         assert (1 in tr.throws[-1].aimed) is magician and tr.throws[-1].attack == "magic_claw", (x, dy)
     tr = _tracker_with_one(mage, x=100.0)
     tr.throw(2.0, "right", "magic_claw")
-    assert tr._last_hit(tr.tracks[1]) == pytest.approx(2.0 + mage.hit_after_s)  # no star's flight: 0.72 s
+    assert tr._last_hit(tr.tracks[1]) == pytest.approx(2.0 + mage.hit_after_s)  # no star's flight: 0.715 s
     tr = _tracker_with_one(x=100.0)
     tr.throw(2.0, "right")
     assert tr._last_hit(tr.tracks[1]) == pytest.approx(2.0 + 1.2)  # tracking.HIT_AFTER_S

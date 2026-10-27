@@ -50,15 +50,55 @@ class Box:
 
 
 @dataclass(frozen=True)
+class Search:
+    """A forward target search as the client runs it (RustMS ShotPath.h:311-339, search_steps and in_step; Combat.cpp:
+    1843-1875, find_shot_target; meowdb's {aimHeight 28, divisor 4, step 20, starts: magic 50, ranged 65}): bands
+    `step` wide from `start` ahead of her out to `range`, band k's window reaching (start + step k) // spread above and
+    below `row` over her feet, mirrored facing left, overlap strict; the first band any body overlaps picks. Nothing
+    behind her, nor anything whose far side is within `start` of her (D:/MapleHelper-scratch/mage/range/
+    magic-claw-range.md, 1.2-1.3). Data: the attack layer picks by it (the design's S5; the thief's is attack.reach's
+    own, which this describes)."""
+    start: int       # the first band's near edge, ahead of her
+    range: int       # the last band's far edge (a body's near side must be short of it)
+    step: int = 20   # ShotPath.h:29 STEP
+    spread: int = 4  # ShotPath.h:26 SPREAD_DIVISOR
+    row: int = 28    # ShotPath.h:20 HEIGHT (attack.reach.SHOT_H)
+
+    @property
+    def bands(self) -> int:
+        return math.ceil((self.range - self.start) / self.step)
+
+    def window(self, k: int) -> tuple[int, int]:
+        """Band k's window, (floor, roof) above her feet (a floor under 0 is under them)."""
+        s = (self.start + self.step * k) // self.spread
+        return self.row - s, self.row + s
+
+    @property
+    def floor(self) -> int:
+        """The lowest any band's window reaches, above her feet: the last band's."""
+        return self.window(self.bands - 1)[0]
+
+    @property
+    def roof(self) -> int:
+        """... and the highest."""
+        return self.window(self.bands - 1)[1]
+
+
+@dataclass(frozen=True)
 class Geometry:
     """What an attack picks and what stops it (the attack layer makes the functions of it: S1's aim). "star_search"
-    is the thief's: attack.reach exactly (its bands, its line, the claw up close, its air search)."""
-    kind: str                       # "star_search" | "box" (Magic Claw) | "melee" (a wand's swing)
-    box: Box | None = None          # box, melee: the pick's area
-    air: str | None = "same"        # from a jump: "search" (reach's), "same" (the box at her pose then), None (not)
+    is the thief's: attack.reach exactly (its bands, its line, the claw up close, its air search; `search` describes
+    its bands). "search": the client's search alone (`search`: an aimed spell's, Magic Claw's). "melee": a box (a
+    wand's swing)."""
+    kind: str                       # "star_search" | "search" (Magic Claw) | "melee" (a wand's swing)
+    search: Search | None = None    # star_search, search: the bands it picks in
+    box: Box | None = None          # melee: the pick's area
+    air: str | None = None          # from a jump: "search" (reach's), "same" (as on the ground, from her pose then),
+                                    # None (never keyed in the air)
     line: str | None = None         # what stops it: "v83" (reach.LINE: walls and floors), None (nothing)
     point_blank: str | None = None  # "claw": reach.CLAW swipes up close instead (the thief's regular attack)
-    order: str = "nearest"          # "band" (reach's first band, uniform in it) | "nearest" (feet to feet)
+    order: str = "band"             # "band" (the first band any body overlaps, any in it alike) | "nearest" (feet to
+                                    # feet)
     mob_count: int = 1
 
 
@@ -95,15 +135,20 @@ class AttackSpec:
 class Shape:
     """What localization takes of her attacks (their union): which monsters a use of one went at, and how long
     after its key what it did can show. Passed into the trackers (MonsterTracker, Memory, Senses); THIEF_SHAPE is
-    their constants (tracking, monsters, senses)."""
-    ahead: float                        # units ahead of her middle a monster's middle it picks can be
-    behind: float                       # ... and behind
-    dy: float                           # ... above or below her feet
+    their constants (tracking, monsters, senses). The nearest it picks is signed (the thief's 10 behind her; Magic
+    Claw's search never behind her, nor in its first 50 ahead), and up and down go apart (its windows widen upward:
+    100 over her feet to 44 under them at its far end)."""
+    near: float                         # units ahead of her middle a monster's middle it picks can be, at the least
+                                        # (negative: behind her) ...
+    ahead: float                        # ... and at the most
+    up: float                           # ... its feet over hers, at the most
+    down: float                         # ... and under them
     hit_after_s: float                  # s after the key it may hit at the latest
     window_s: float                     # s after the key a kill or a hit can be its
     hide_s: float                       # s a monster may stay out of sight under its hit and still be the same one
     gain_after_key: tuple[float, float]  # s after the key its kill's EXP gain shows
-    order: str                          # "line": the first in a star's way | "nearest"
+    pick_s: float                       # s after the key it picks its monster, from where she is then
+    order: str                          # "line": the first in a star's way | "band": the first band, any in it
     look_band: tuple[float, float]      # how far above and below her feet a look searches (attack.reach.LOOK_*)
     shows_wait_s: float                 # a look for the next attack waits for a kill to show this long at most
 
@@ -267,9 +312,9 @@ def load(which: str | None = None, path=CONFIG, environ=os.environ) -> Character
             f" (under {FIXED_STATS} a character is her class)" if fixed else " (config.toml [characters.<id>] names "
                                                                               "more)"))
     c = classes[klass].profile(which)
-    if klass == config.THIEF:
+    if klass == config.THIEF:  # (her stats and Lucky Seven's level: [character], as the stack has them)
         stats = config.Character() if fixed else config.character(path)
-        c = replace(c, stats=stats, skills={**c.skills, "lucky_seven": int(stats.lucky_seven)})
+        c = classes[klass].leveled(replace(c, stats=stats), stats.lucky_seven)
     elif table is not None:
         c = replace(c, stats=replace(c.fixed_stats, **table.stats))
     if table is not None:
@@ -340,9 +385,16 @@ def describe(c: Character) -> list[str]:
     lines = [f"{c.id} ({c.klass}): {c.job or '?'} {c.name or '(name not given)'}; level {s.level:g}, HP {s.hp:g}, "
              f"MP {s.mp:g}, SPEED {s.speed:g}, JUMP {s.jump:g}"]
     for slot, a in c.attacks.items():
-        g = a.geometry
-        where = (f"box {g.box.near:g}..{g.box.far:g} ahead, {g.box.down:g} down to {g.box.up:g} up" if g.box
-                 else "attack.reach's star search")
+        g, s = a.geometry, a.geometry.search
+        if g.kind == "star_search":
+            where = f"attack.reach's star search, {s.start}..{s.range} ahead" if s else "attack.reach's star search"
+        elif s is not None:
+            where = (f"the client's search, {s.start}..{s.range} ahead in bands {s.step} wide, {-s.floor} under her "
+                     f"feet to {s.roof} over them at its far end; " + ("nothing stops it" if g.line is None else
+                                                                      f"line {g.line}")
+                     + ("" if a.air else "; from the ground only"))
+        else:
+            where = f"box {g.box.near:g}..{g.box.far:g} ahead, {g.box.down:g} down to {g.box.up:g} up"
         lines.append(f"  {slot}: {a.name} ({a.key}; {where}; {a.hits} hit(s), {a.mp:g} MP, lock {a.lock_ms} ms)")
     files = "lab/, as before" if not c.files else f"lab/characters/{c.files}/"
     keys = ("the flat [keys]" if c.klass == config.THIEF else "not given yet" if c.keys is None

@@ -7,17 +7,23 @@ monster (mobCount), mad 45-65 and mpCon 10-20 (MAGIC_CLAW_MP); its tooltip "Cons
 for 570 ms; it needs Energy Bolt at level 1 (req). Magic Guard (2001000) moves x % of a touch to MP (MAGIC_GUARD_X), a
 toggle ("Press the key again to deactivate"); Magic Armor (2001001) lasts 300-600 s (MAGIC_ARMOR_S).
 
+What the client does with it (D:/MapleHelper-scratch/mage/range/magic-claw-range.md, from the v83 port RustMS and two
+readings of this game's client, meowdb and ohmi69; it supersedes design.md 4.1's box): the client's search for an
+aimed spell (SEARCH), from 50 ahead of her to 300 in bands 20 wide, the nearest band any monster's body overlaps
+picking, never behind her nor in its first 50 ahead; nothing stops it, walls nor floors; from the ground only. The
+user, 2026-10-27: walls and platforms don't block it, and it can't be cast mid-jump (settled, not to measure). L1
+(a supervised attack window) only confirms the search.
+
 Everything else is a PLACEHOLDER, each marked with what replaces it: the user's answer (her stat and skill windows,
 her Key Config, her name, her pet, her MP policy: design.md section 7) or a live measurement (L0: her walk, jump, climb,
-calibration and pet; L1, a supervised attack window: her lock, delays, MP a cast and the box's edges; design.md 6.1).
-Until then her profile is the design's priors (design.md 4.1-4.6), and nothing hunts with it yet.
+calibration and pet; L1: her lock, delays, MP a cast; design.md 6.1). Until then nothing hunts with her profile.
 """
 
 from dataclasses import replace
 
 from maplehelper import config
 
-from ..character import AttackSpec, Box, Buff, Character, Geometry, Perception, Pet, Policy, Priors, Shape
+from ..character import AttackSpec, Box, Buff, Character, Geometry, Perception, Pet, Policy, Priors, Search, Shape
 
 # [data] skills.json's tables, by skill level from 1 (tests/test_character.py checks them against it)
 MAGIC_CLAW_MP = (10, 10, 10, 10, 11, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17, 18, 19, 20)   # 2001003 mpCon
@@ -44,38 +50,41 @@ SKILLS = {"magic_claw": 20,   # PLACEHOLDER (its Master Level): her skill window
           "magic_guard": 0,   # PLACEHOLDER (not learned): her skill window
           "magic_armor": 0}   # PLACEHOLDER (not learned): her skill window
 
-# Magic Claw picks the nearest monster whose body overlaps a box in front of her [GK: HeavenClient's find_closest; the
-# data has no ball, unlike Energy Bolt's], hit twice; no star flies, no claw swipes up close.
-BOX = Box(near=-10.0,   # PLACEHOLDER [GK]: point blank and a body over her are hit -- L1's near-edge probe
-          far=300.0,    # its tooltip's 300 [data]; whether to her middle or the body's near edge -- L1's far-edge probe
-          down=50.0,    # PLACEHOLDER (Thunder Bolt's lt/rb (-150,-50)-(150,50), the one magician box in this data):
-          up=50.0)      # ... how far under and over her feet -- L1's probes at the platforms below and above
-CAST = Geometry("box", box=BOX,
-                air=None,     # PLACEHOLDER: the prior is "same" (the box at her pose at the pick, design.md 4.3); no
-                              # jump casts until L1's (keyed 40, 100 and 200 ms after the jump key) show it
-                line=None,    # PLACEHOLDER [GK]: walls and floors stop nothing (magicDamage, no ball) -- L1's casts
-                              # across a tower wall and onto the platform under her ("v83" if they stop it)
-                order="nearest", mob_count=1)
+# Magic Claw (an aimed spell: RustMS ShotPath.h:36-65, its test tests/shot_path.cpp:76 "so is Magic Claw"; no lt/rb,
+# range or ball of its own [data]): the client's search with a spell's start. 13 bands, the last 290-300; band k's window
+# 28 -/+ (50 + 20 k) // 4 above her feet: 16..40 at 50-70 ahead, -44..100 at 290-300 (range doc 1.3). The order inside
+# a band isn't settled (map-entry order in the port): any in the first band alike, as reach.take_chances has stars.
+SEARCH = Search(start=50,   # ShotPath.h:33 SPELL_REACH; meowdb starts.magic 50 ("STARTS 50 PX AHEAD")
+                range=300)  # ShotPath.h:34 SPELL_RANGE; meowdb rc 300 "Game default"; ohmi69 client_default 300; the
+                            # String tooltip's "within 300 range in front" [data]
+CAST = Geometry("search", search=SEARCH,
+                air=None,     # from the ground only: settled by the user, 2026-10-27 (meowdb "Cast position: Ground
+                              # only"); never keyed in the air
+                line=None,    # nothing stops it, walls nor floors: settled by the user, 2026-10-27 (no ball: the port
+                              # checks a line only for a bullet, Combat.cpp:1382; meowdb "Ignored")
+                order="band", mob_count=1)
 # Her regular attack swings her wand up close [GK]: a box from her weapon's afterimage (Character/Afterimage/
-# <info.afterImage>.img, swingO1-O3's lt/rb, as attack.reach.CLAW_BOXES came from swordOL.img) once her weapon is known.
+# <info.afterImage>.img, swingO1-O3's lt/rb, as attack.reach.CLAW_BOXES came from swordOL.img) once her weapon is known
+# (mace.img's swingO1-O3 go 94 ahead at most: range doc 1.1).
 WAND_BOX = Box(near=0.0, far=65.0, down=10.0, up=60.0)  # PLACEHOLDER: her weapon (the user's answer), its afterimage
-_TIMES = dict(lock_ms=730,              # PLACEHOLDER (the thief's measured 730: the same swingO1-3 frames [data]) --
-                                        # L1's `lock magic_claw`
+_TIMES = dict(lock_ms=730,              # PLACEHOLDER (the thief's measured 730 with the same swingO1-3 frames [data];
+                                        # the port's 800, meowdb's 810 shown) -- L1's `lock magic_claw`
               lock_extra_ms=(60, 160),  # PLACEHOLDER (the thief's margins, control.actions) -- L1
               arrow_lock_ms=800,        # PLACEHOLDER (the thief's ARROW_LOCK_MS) -- L1's walk-off after a cast
-              release_ms=530,           # PLACEHOLDER (the thief's: when her claw swings) -- L1's 60 fps recording
+              release_ms=515,           # PLACEHOLDER: no flight, so the hit itself (lands_ms) -- L1's 60 fps recording
               damage_ms=290,            # PLACEHOLDER (the server's, likely the same [GK]) -- perceive's EXP gain and
                                         # bar drop against the key (gain_delay.py, bar_delay.py)
-              lands_ms=520,             # PLACEHOLDER (about the thief's, no flight after it): key to the hit on the
-                                        # target -- L1's 60 fps recording
+              lands_ms=515,             # PLACEHOLDER (the port's rule: its damage 450 ms after the attack starts, at
+                                        # mace.img's frame '2', and the attack about 65 ms after the key, as stars;
+                                        # range doc 5): key to the hit on the target -- L1's 60 fps recording
               speed=None,               # no flight (no ball [data])
               cycle_s=0.79,             # PLACEHOLDER: the lock and its 60 ms margin -- L1's lock
               miss=0.275,               # PLACEHOLDER (the thief's star miss): her accuracy against each kind's eva and
                                         # level (mobs.json) -- L1/L2's casts with no bar drop
               hidden_s=1.8,             # PLACEHOLDER (the thief's): under her bigger hit (83x94, 570 ms) -- L1
-              air=False)                # PLACEHOLDER: as CAST.air
+              air=False)                # from the ground only (CAST.air: settled)
 MAGIC_CLAW = AttackSpec("magic_claw", "magic_claw", "Magic Claw", "casting", 2001003, level=SKILLS["magic_claw"],
-                        hits=2,                 # attackCount [data]
+                        hits=2,                 # attackCount [data]: both on the one monster, together
                         lo=None, hi=None,       # PLACEHOLDER (not known): by the magic formula from her INT and magic
                                                 # attack (the user's answer) and mad (45-65 [data]); fit on L1's HP bars
                         defence="mdd",          # magicDamage [data]: against the monster's MDDamage
@@ -86,32 +95,45 @@ WAND = AttackSpec("wand", "attack", "the regular attack", "swinging", None, leve
                   defence="pdd", mp=0.0, ammo=0,
                   geometry=Geometry("melee", box=WAND_BOX, air=None, line=None, order="nearest"), **_TIMES)
 
-WIDEST_HALF = 34.0  # localization.monsters.MONSTER_HALF's widest (a pig's): a body's middle past the box's edge
-SHAPE = Shape(ahead=BOX.far + WIDEST_HALF + 40.0,       # 374: the box, the widest body's half, and the thief's 40 for
-                                                       # what she and it move between the frame and the pick
-              behind=-BOX.near + WIDEST_HALF,           # 44
-              dy=max(BOX.up, BOX.down) + 10.0,          # 60: tracking.THROW_DY's 10 of slack over the box
-              hit_after_s=MAGIC_CLAW.lands_ms / 1000 + 0.2,  # PLACEHOLDER 0.72 (no flight; 0.2 of slack) -- L1
-              window_s=1.5,                             # PLACEHOLDER (design.md: about 1-1.5 s, no flight) -- L1
-              hide_s=3.5,                               # PLACEHOLDER (the thief's) -- L1: the detector under her hit
-              gain_after_key=(0.1, 0.6),                # PLACEHOLDER (the server's, likely the same) -- perceive's gains
-              order="nearest",
-              look_band=(BOX.up + 80, BOX.down + 15),   # (130, 65): attack.reach.LOOK_UP/DOWN's slack over the box
-              shows_wait_s=0.45)                        # PLACEHOLDER (the thief's: the same lock prior) -- L1's lock
+# Her Shape (what localization takes of her attacks), from the search's outer bound with the thief's slack: a monster's
+# middle from 6 ahead of hers (its far side past 50, the widest body's half 34 back from it, and the thief's 10 behind for
+# what the tracker gets wrong) to 374 (its near side short of 300, the half, and the thief's 40 ahead); its feet up to 110
+# over hers (short of the windows' 100 roof, strict, and 10 of slack: tracking.THROW_DY's over the star's 60) and 119
+# under them (its top over the 44 floor: the tallest body's 65, an Orange Mushroom flinching, and the 10).
+WIDEST_HALF = 34.0  # localization.monsters.MONSTER_HALF's widest (a pig's)
+TALLEST_TOP = 65.0  # monsters.MONSTER_FLINCH_TOP's tallest (an Orange Mushroom hit): what reaches up into the floor
+SHAPE = Shape(near=SEARCH.start - WIDEST_HALF - 10.0,           # 6
+              ahead=SEARCH.range + WIDEST_HALF + 40.0,           # 374
+              up=SEARCH.roof + 10.0,                             # 110
+              down=-SEARCH.floor + TALLEST_TOP + 10.0,           # 119
+              hit_after_s=MAGIC_CLAW.lands_ms / 1000 + 0.2,      # PLACEHOLDER 0.715 (no flight; 0.2 of slack) -- L1
+              window_s=1.5,                                      # PLACEHOLDER (design.md: about 1-1.5 s) -- L1
+              hide_s=3.5,                                        # PLACEHOLDER (the thief's) -- L1: the detector under
+                                                                 # her hit
+              gain_after_key=(0.1, 0.6),                         # PLACEHOLDER (the server's, likely the same) --
+                                                                 # perceive's gains
+              pick_s=0.065,                                      # PLACEHOLDER (the stars' key-to-pick, the same input
+                                                                 # path: range doc 5) -- L1
+              order="band",
+              look_band=(SEARCH.roof + 80, -SEARCH.floor + TALLEST_TOP + 15),  # (180, 124): attack.reach.LOOK_UP's 80
+                                                                 # and LOOK_DOWN's 15 over the feet it picks
+              shows_wait_s=0.45)                                 # PLACEHOLDER (the thief's: the same lock prior) --
+                                                                 # L1's lock
 POLICY = Policy(default_mode="skill",     # Magic Claw whenever her MP pays for a cast (design.md 4.6)
                 finish_with_regular=False,  # her regular attack is a swing up close [GK], not a star at range
                 regular_needs_box=True,   # PLACEHOLDER: the wand only at a monster in its box -- the user's answer
                                           # (ever, only at a monster on her, or never)
                 unseen="none",            # nothing cast at nothing: her MP is her attack
-                close_quarters="touch",   # no point-blank failure: the danger's escape only (design.md 4.1)
+                close_quarters="touch",   # no point-blank failure: one too close isn't picked (the search's first 50),
+                                          # the danger's escape only (range doc 7)
                 mp_floor=0.0)             # PLACEHOLDER: the MP she keeps back, and what under it -- the user's MP policy
 PET = Pet(hp_warning=0.70, mp_warning=0.05, hp_heal=250.0, mp_heal=185.0)  # PLACEHOLDER (the thief's pet): her pet,
                                           # its auto-potion thresholds and potions -- the user's answer; `pet --read` (L0)
 PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=100.0, ground_danger=2.0, hp_exp=250.0,
                 seen_share=0.3, threat_s=1.7, keep_danger=0.08, meet_s=8.0)  # PLACEHOLDER (the thief's): re-tuned in
                                           # the simulator with her HP and DEF (S7), then her live kill times (L2)
-PLACEHOLDERS = ("stats", "skill levels", "keys", "name", "the box's edges", "air", "walls", "lock and delays",
-                "damage", "miss", "pet", "MP policy", "priors")
+PLACEHOLDERS = ("stats", "skill levels", "keys", "name", "lock and delays", "damage", "miss", "the wand", "pet",
+                "MP policy", "priors")
 
 
 def _at(table: tuple, level: int) -> float:

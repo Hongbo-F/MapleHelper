@@ -379,7 +379,8 @@ class Memory:
         if t - e.seen >= s.hide_s + s.hit_after_s:
             return False
         for when, side, x, y in self._throws:
-            if t - (when + s.hit_after_s) < s.hide_s and 0 <= (e.x - x) * side <= s.ahead and abs(e.y - y) <= s.dy:
+            if (t - (when + s.hit_after_s) < s.hide_s and max(0.0, s.near) <= (e.x - x) * side <= s.ahead
+                    and -s.up <= e.y - y <= s.down):  # (ahead of her only: the thief's 0, not her claw's 10 behind)
                 return True
         return False
 

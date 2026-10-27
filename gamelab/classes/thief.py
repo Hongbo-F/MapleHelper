@@ -10,14 +10,17 @@ from dataclasses import replace
 
 from maplehelper import config
 
-from ..character import AttackSpec, Character, Geometry, Perception, Pet, Policy, Priors, Shape
+from ..character import AttackSpec, Character, Geometry, Perception, Pet, Policy, Priors, Search, Shape
 
 FIXED_STATS = config.Character()  # her stats as measured (config.Character's defaults), what FIXED_STATS pins
 
 # Her star search, as attack.reach has it: its bands (order), the v83 line (reach.LINE: walls and floors stop it), its
 # air search (reach.AIR_MODEL); the regular attack swipes with the claw up close (reach.CLAW), Lucky Seven always throws
 # (maplehelper.game.COMBAT.melee_when_close).
-STAR_SEARCH = Geometry("star_search", air="search", line="v83", order="band")
+STAR_SEARCH = Geometry("star_search",
+                       search=Search(start=65,    # attack.reach.SEARCH_START (its step, spread and row SEARCH_STEP,
+                                     range=400),  # SEARCH_SPREAD, SHOT_H); STAR_RANGE
+                       air="search", line="v83", order="band")
 _TIMES = dict(lock_ms=730,                  # maplehelper.game.COMBAT.attack_lock_ms
               lock_extra_ms=(60, 160),      # control.actions.THROW_LOCK_EXTRA_MS, JUMP_THROW_LOCK_EXTRA_MS
               arrow_lock_ms=800,            # control.actions.ARROW_LOCK_MS
@@ -36,17 +39,24 @@ LUCKY_SEVEN = AttackSpec("lucky_seven", "lucky_seven", "Lucky Seven", "throwing"
                          defence="pdd",
                          mp=14.0,           # choice.cast_mp(16) (LUCKY_SEVEN_MP: skills.json's 4001003)
                          ammo=2, geometry=STAR_SEARCH, **_TIMES)
+# [data] skills.json's 4001003 by level from 1 (attack.choice.LUCKY_SEVEN_MP, LUCKY_SEVEN_DAMAGE): its MP a cast, and its
+# damage (%), which scales the stars measured at level 16 (choice.lucky_seven)
+LUCKY_SEVEN_MP = (8, 8, 8, 8, 9, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16)
+LUCKY_SEVEN_DAMAGE = (60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112, 116, 120, 124, 128, 132, 140)
 STAR = AttackSpec("star", "attack", "the regular attack", "throwing", None, level=None,
                   hits=1, lo=20, hi=140,    # choice.STAR (choice.REGULAR)
                   defence="pdd", mp=0.0, ammo=1, geometry=replace(STAR_SEARCH, point_blank="claw"), **_TIMES)
 
-SHAPE = Shape(ahead=434.0 + 40.0,          # localization.tracking.THROW_REACH
-              behind=10.0,                  # tracking.MonsterTracker._in_path's -10
-              dy=70.0,                      # tracking.THROW_DY
+SHAPE = Shape(near=-10.0,                  # tracking.MonsterTracker._in_path's -10 (memory's 0)
+              ahead=434.0 + 40.0,           # localization.tracking.THROW_REACH
+              up=70.0,                      # tracking.THROW_DY, above her feet ...
+              down=70.0,                    # ... and below
               hit_after_s=1.2,              # tracking.HIT_AFTER_S
               window_s=2.5,                 # tracking.STAR_WINDOW (behavior.ledger.STAR_WINDOW)
               hide_s=3.5,                   # tracking.HIDE_S
               gain_after_key=(0.1, 0.6),    # localization.monsters.GAIN_AFTER_KEY
+              pick_s=0.065,                 # motion.physics.JUMP_LAG (an attack picks when it starts, about that after
+                                            # its key)
               order="line",
               look_band=(140, 75),          # attack.reach.LOOK_UP, LOOK_DOWN
               shows_wait_s=0.45)            # localization.senses.SHOWS_WAIT_S
@@ -83,6 +93,23 @@ def profile(cid: str = config.THIEF) -> Character:
                      ammo="throwing stars", stops=("out_of_darts",), buffs=(), magic_guard=0.0,
                      attacks={"skill": LUCKY_SEVEN, "regular": STAR}, pet=PET, policy=POLICY, priors=PRIORS,
                      shape=SHAPE, perception=PERCEPTION)
+
+
+def _at(table: tuple, level: float) -> float:
+    return float(table[min(max(int(level), 1), len(table)) - 1])
+
+
+def lucky_seven(level: float) -> AttackSpec:
+    """Lucky Seven at skill `level` as attack.choice.lucky_seven has it: its MP a cast there, and its stars as measured
+    at LUCKY_SEVEN.level (SKILL_STAR at SKILL_LEVEL) scaled by its damage there (past the tables' ends, their nearest)."""
+    k = _at(LUCKY_SEVEN_DAMAGE, level) / _at(LUCKY_SEVEN_DAMAGE, LUCKY_SEVEN.level)
+    return replace(LUCKY_SEVEN, level=int(level), lo=round(LUCKY_SEVEN.lo * k), hi=round(LUCKY_SEVEN.hi * k),
+                   mp=_at(LUCKY_SEVEN_MP, level))
+
+
+def leveled(c: Character, level: float) -> Character:
+    """The thief with Lucky Seven at `level` (config.toml [character] lucky_seven, the stack's Attacks(level=...))."""
+    return replace(c, skills={**c.skills, "lucky_seven": int(level)}, attacks={**c.attacks, "skill": lucky_seven(level)})
 
 
 def configured(c: Character, table: config.CharacterConfig) -> Character:

@@ -412,13 +412,14 @@ class MonsterTracker:
 
     def _in_path(self, th: _Throw, tr: Track) -> bool:
         """Whether a star of throw `th` could meet track `tr`: where it should be at the throw's key, ahead of
-        where she was then by THROW_REACH at most (10 behind), THROW_DY above or below her feet (her Shape's)."""
+        where she was then by THROW_REACH at most (10 behind), THROW_DY above or below her feet (her Shape's near,
+        ahead, up and down)."""
         if th.her is None:
             return False
         sign = 1 if th.side == RIGHT else -1
         s = self.shape
-        return (-s.behind <= sign * (self.predicted(tr, th.t) - th.her[0]) <= s.ahead
-                and abs(tr.y - th.her[1]) <= s.dy)
+        return (s.near <= sign * (self.predicted(tr, th.t) - th.her[0]) <= s.ahead
+                and -s.up <= tr.y - th.her[1] <= s.down)
 
     def _aimed_since(self, tr: Track, t: float) -> None:
         """A track a late search made (or brought back) as of t, put in the throws since t whose path it was in:
@@ -564,7 +565,7 @@ class MonsterTracker:
         if self.throws_known:
             return any(0 <= g - th.t <= self.shape.window_s and tr.id in th.aimed for th in self.throws)
         her, s = self.her, self.shape
-        return her is not None and abs(tr.x - her[0]) <= s.ahead and abs(tr.y - her[1]) <= s.dy
+        return her is not None and abs(tr.x - her[0]) <= s.ahead and -s.up <= tr.y - her[1] <= s.down
 
     def _likely(self, tr: Track, g: float) -> tuple:
         """Which of the monsters gain `g` may be comes first (see the top)."""
