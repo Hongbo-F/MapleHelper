@@ -1158,8 +1158,9 @@ EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int
  *
  * Here: each job on one thread, the jobs taken in turn from a counter (largest first) by the pool's threads and by the
  * caller's in rf_next when none is in yet; each window loaded once (`load`) for its pictures; the matches through
- * `rf_best`, the one place this calls the matcher. A GPU backend would match every job's windows in one dispatch
- * (pictures uploaded at rf_open, the frame's windows at rf_start), rf_next handing the jobs over as they come back.
+ * `rf_best`, the one place this calls the matcher. The GPU backend (gpumatch.c, included below; contexts opened while
+ * gm_on is on, native.GPU) sends every job's windows and pictures in one submission at rf_start (the pictures uploaded
+ * at rf_open) and answers rf_window's matches from what comes back (gm_rf_best), the CPU's way where it can't.
  * What a GPU can give to the bit (2026-10-27, the review of this contract): Direct3D 11's shader model 5 has no 64-bit
  * integers and no double square root (doubles are optional, their division only with the extended-doubles feature).
  * So its exact part is each place's integer sums, as mm_match's place-by-place code has them: the dot products of the
@@ -1224,6 +1225,7 @@ typedef struct {
     double thr, good, ngood;
     volatile long next;               /* the next of `order` to take */
     int nfinished, reported;          /* jobs done (in `finished`, in the order they were), and handed to the caller */
+    int gpu;                          /* 0 the CPU's threads; 1 sent to the GPU (gpumatch.c), not in yet; 2 its answers in */
     RfEntry *memo[RF_MAX_JOBS];       /* each job's */
     int order[RF_MAX_JOBS];           /* the jobs, largest first */
     double cost[RF_MAX_JOBS];
@@ -1237,6 +1239,7 @@ typedef struct {
     int nmemo, capmemo;
     double tick_us;
     RfBatch b;          /* the call's (one at a time) */
+    struct GmCtx *gpu;  /* the GPU's backend (gpumatch.c), or 0 */
 #ifdef _WIN32
     HANDLE *workers;
     int nworkers;
@@ -1279,6 +1282,8 @@ static void rf_best(Picture *im, const Masked *p, float *score, int *x, int *y)
 }
 
 static int rf_empty(const int *w) { return w[2] <= w[0] || w[3] <= w[1]; }
+
+#include "gpumatch.c"  /* the GPU's backend: each place's sums on the GPU, the answers the CPU's (gm_rf_best) */
 
 static int rf_recall(const RfBatch *b, const RfJob *j, const int *w, const RfMemo *m)
 {
@@ -1357,14 +1362,16 @@ static int rf_window(const RfCtx *c, const RfBatch *b, const RfJob *j, const int
             const Masked *p = c->tpls[list[k]];
             if (wh < p->th || ww < p->tw)
                 continue;  /* (doesn't fit) */
-            if (!loaded) {  /* once for both stages: room for the transform if any of its pictures that fit wants it */
-                if (load(&im, at, wh, ww, b->frow, b->cn, rf_wants_ntt(c, b, j, wh, ww)) != 0)
-                    return -1;
-                loaded = 1;
-            }
             float s;
             int px, py;
-            rf_best(&im, p, &s, &px, &py);
+            if (b->gpu != 2 || !gm_rf_best(c->gpu, b, (int)(j - b->jobs), side, list[k], &s, &px, &py)) {
+                if (!loaded) {  /* once for both stages: room for the transform if any of its pictures that fit wants it */
+                    if (load(&im, at, wh, ww, b->frow, b->cn, rf_wants_ntt(c, b, j, wh, ww)) != 0)
+                        return -1;
+                    loaded = 1;
+                }
+                rf_best(&im, p, &s, &px, &py);
+            }
             o->matches++;
             o->work += (long long)(wh - p->th + 1) * (ww - p->tw + 1) * p->th * p->tw;
             if ((double)s >= b->thr && (best < 0 || (double)s > br)) {
@@ -1453,6 +1460,31 @@ static void rf_unlock(RfCtx *c)
 #endif
 }
 
+static void rf_wake(RfCtx *c)  /* the pool's threads to the call's jobs */
+{
+#ifdef _WIN32
+    if (c->nworkers > 0 && c->b.count > 1) {
+        AcquireSRWLockExclusive(&c->lock);
+        c->open = 1;
+        c->batch++;
+        WakeAllConditionVariable(&c->wake);
+        ReleaseSRWLockExclusive(&c->lock);
+    }
+#else
+    (void)c;
+#endif
+}
+
+static void rf_gpu_in(RfCtx *c)  /* the GPU's answers for the call (b.gpu 2), or the call to the CPU's threads (0) */
+{
+    if (gm_wait(c->gpu) == 0) {
+        c->b.gpu = 2;
+    } else {
+        c->b.gpu = 0;
+        rf_wake(c);
+    }
+}
+
 static void rf_done(RfCtx *c, int i)  /* job i done: handed over by the next rf_next */
 {
     rf_lock(c);
@@ -1495,6 +1527,7 @@ EXPORT void rf_close(void *ctx)
     RfCtx *c = (RfCtx *)ctx;
     if (!c)
         return;
+    gm_close(c->gpu);
 #ifdef _WIN32
     if (c->workers) {
         AcquireSRWLockExclusive(&c->lock);
@@ -1535,6 +1568,8 @@ EXPORT void *rf_open(const void *const *tpls, int n, int threads)
         c->tpls[i] = (const Masked *)tpls[i];
     c->ntpl = n;
     c->threads = threads;
+    if (gm_use)
+        c->gpu = gm_open(c->tpls, n, gm_fault_open);
 #ifdef _WIN32
     LARGE_INTEGER f;
     QueryPerformanceFrequency(&f);
@@ -1665,15 +1700,9 @@ EXPORT int rf_start(void *ctx, const unsigned char *frame, int fh, int fw, long 
     b->nfinished = 0;
     b->reported = 0;
     c->running = 1;
-#ifdef _WIN32
-    if (c->nworkers > 0 && njobs > 1) {
-        AcquireSRWLockExclusive(&c->lock);
-        c->open = 1;
-        c->batch++;
-        WakeAllConditionVariable(&c->wake);
-        ReleaseSRWLockExclusive(&c->lock);
-    }
-#endif
+    b->gpu = c->gpu && gm_rf_send(c->gpu, b) == 0;  /* on the GPU, else the pool's threads at once */
+    if (!b->gpu)
+        rf_wake(c);
     return 0;
 }
 
@@ -1683,6 +1712,8 @@ EXPORT int rf_next(void *ctx)
     if (!c || !c->running)
         return -1;
     RfBatch *b = &c->b;
+    if (b->gpu == 1)
+        rf_gpu_in(c);
     for (;;) {
         rf_lock(c);
         if (b->reported < b->nfinished) {
@@ -1716,6 +1747,8 @@ EXPORT void rf_end(void *ctx)
     if (!c || !c->running)
         return;
     RfBatch *b = &c->b;
+    if (b->gpu == 1)
+        rf_gpu_in(c);
     for (int i; (i = rf_take(b)) >= 0;)  /* (the jobs not taken yet, if the caller stopped asking) */
     {
         rf_job(c, b, i);
@@ -1728,6 +1761,9 @@ EXPORT void rf_end(void *ctx)
     c->open = 0;
     ReleaseSRWLockExclusive(&c->lock);
 #endif
+    if (b->gpu == 2)
+        gm_done(c->gpu);
+    b->gpu = 0;
     c->running = 0;
 }
 

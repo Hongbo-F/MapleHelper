@@ -4,8 +4,9 @@ engine (motion.body.fly, as motion.physics.flight flies her); and where OpenCV w
 (perception.match: the monsters' re-finds and step-2 checks, the drops), OpenCV's score worked out exactly, a
 re-find's window's dot products all at once by number-theoretic transform (native.c's ntt_*: exact, the same scores);
 and a frame's re-finds, all their masked matches in one call on threads of the C's own (`Refinds`: rf_*, its contract
-in native.c), where each re-find was a Python thread's, a call a picture list. Called through ctypes, which lets go of
-the lock for the call. Each but the masked match does what the Python it
+in native.c), where each re-find was a Python thread's, a call a picture list; or on the GPU (gpumatch.c and
+gpumatch.hlsl, Direct3D 11, in the same DLL: `GPU`, off by default), the same answers. Called through ctypes, which lets
+go of the lock for the call. Each but the masked match does what the Python it
 stands in for does, to the bit, and each caller does it in Python (or OpenCV) when the DLL isn't there (tests compare
 the two; OpenCV's masked scores were within 1e-6 of the C's in colour and 3e-5 on brightness on a crowd's frames, a
 little more where a window is about flat: native.c). The masked match is the C's only where the CPU has AVX2: without
@@ -16,9 +17,10 @@ silhouettes' scores where the cover test keeps a window, the peaks and the place
 same way, loaded only where the CPU has AVX2 (its intrinsics); without it the search's step 1 is numpy's and OpenCV's
 as before (perception.mobs).
 
-The DLLs are built from their sources with MSVC 2022 (the Build Tools) the first time they're needed, into build/
-next to this file (git-ignored), each named for its source's hash: an edited source gets a DLL of its own, and a DLL
-another process has loaded is never written over. Without a compiler, or with USE off, `lib` and `search_lib` are None.
+The DLLs are built from their sources (native.c's with gpumatch.c and gpumatch.hlsl in it) with MSVC 2022 (the Build
+Tools) the first time they're needed, into build/ next to this file (git-ignored), each named for its sources' hash: an
+edited source gets a DLL of its own, and a DLL another process has loaded is never written over. Without a compiler, or
+with USE off, `lib` and `search_lib` are None.
 
     python -m gamelab.native    builds them now, and says where they are or why they couldn't be
 """
@@ -35,8 +37,13 @@ from pathlib import Path
 import numpy as np
 
 USE = True  # False: Python only, as before
+# The re-finds' matches on the GPU (gpumatch.c, gpumatch.hlsl: Direct3D 11, behind rf_*; the answers the CPU's to the
+# bit), for the contexts `Refinds` opens while it's on: off unless GAMELAB_GPU=1, as on this machine it doesn't pay
+# (README, The re-finds' matches on the GPU).
+GPU = os.environ.get("GAMELAB_GPU", "") == "1"
 SOURCE = Path(__file__).with_name("native.c")
 SEARCH_SOURCE = Path(__file__).with_name("search.c")  # the monster search's step 1 (`search_lib`)
+GPU_SOURCES = (Path(__file__).with_name("gpumatch.c"), Path(__file__).with_name("gpumatch.hlsl"))  # (in the DLL)
 BUILD = Path(__file__).with_name("build")
 VCVARS = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / \
     "Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat"
@@ -70,13 +77,20 @@ SIGNATURES = {  # each function's (return type, argument types)
     "rf_end": (None, [_P]),
     "rf_close": (None, [_P]),
     "rf_rounded": (_D, [_F]),
+    "gm_on": (_I, [_I]),
+    "rf_gpu": (_I, [_P, _P]),
+    "rf_gpu_fault": (None, [_P, _I]),
+    "gm_bests": (_I, [_P, _I, _P, _P, _P, _P, _I, _I, _P, _P, _P, _P, _P, _P]),
+    "gm_approx": (_I, [_P, _P, _I, _I, _L, _I, _I, _P]),
+    "gm_waits": (None, [_L, _L, _P]),
 }
 
 
 def dll_path(source: Path | None = None) -> Path:
-    """Where the DLL built from the current source (native.c, or `source`) is."""
+    """Where the DLL built from the current source (native.c, with GPU_SOURCES in it; or `source`) is."""
     source = source or SOURCE
-    digest = hashlib.sha1(source.read_bytes() + " ".join(FLAGS).encode()).hexdigest()[:12]
+    extra = b"".join(p.read_bytes() for p in GPU_SOURCES) if source == SOURCE else b""
+    digest = hashlib.sha1(source.read_bytes() + extra + " ".join(FLAGS).encode()).hexdigest()[:12]
     return BUILD / f"{source.stem}-{digest}.dll"
 
 
@@ -94,7 +108,11 @@ def build(source: Path | None = None) -> Path:
     BUILD.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="native-", dir=BUILD) as tmp:
         dll = Path(tmp) / out.name
-        command = f'call "{VCVARS}" >nul && cl {" ".join(FLAGS)} "{source}" /Fe:"{dll}" /Fo:{source.stem}.obj'
+        # gpumatch.hlsl as a C string (gpumatch.c's GM_HLSL), compiled at run time by d3dcompiler_47; native.c's only.
+        (Path(tmp) / "gpumatch_hlsl.h").write_text(_c_string("GM_HLSL", GPU_SOURCES[1].read_text(encoding="utf-8")),
+                                                   encoding="utf-8")
+        command = (f'call "{VCVARS}" >nul && cl {" ".join(FLAGS)} /I"{tmp}" "{source}" /Fe:"{dll}" '
+                   f'/Fo:{source.stem}.obj')
         # One string, as cmd reads it (/s: the outer quotes go, the rest as written); a list would escape the
         # quotes in it the C runtime's way, which cmd doesn't read.
         done = subprocess.run(f'cmd /d /s /c "{command}"', capture_output=True, text=True, cwd=tmp,
@@ -115,6 +133,12 @@ def build(source: Path | None = None) -> Path:
     return out
 
 
+def _c_string(name: str, text: str) -> str:
+    """`text` as a C header defining `name`, a string literal (a line a piece)."""
+    lines = [line.replace("\\", "\\\\").replace('"', '\\"') for line in text.splitlines()]
+    return f"#define {name} \\\n" + "".join(f'    "{line}\\n" \\\n' for line in lines) + '    ""\n'
+
+
 def lib() -> ctypes.CDLL | None:
     """The DLL, built and loaded on first use; None if it can't be (`why` says why) or USE is off."""
     global _lib, _tried, why
@@ -131,6 +155,7 @@ def lib() -> ctypes.CDLL | None:
             for name, (restype, argtypes) in SIGNATURES.items():
                 f = getattr(dll, name)
                 f.restype, f.argtypes = restype, argtypes
+            dll.gm_on(1 if GPU else 0)
             _lib, why = dll, ""
         except (OSError, RuntimeError, subprocess.SubprocessError, AttributeError) as e:
             why = str(e).splitlines()[0] if str(e) else type(e).__name__
@@ -243,8 +268,23 @@ def state() -> str:
     couldn't be built leaves everything to Python and OpenCV, slower, and nothing else would show it)."""
     if lib() is None:
         return f"off ({why or 'not built'}): Python and OpenCV instead, slower"
+    on = ", the re-finds' matches on the GPU where it answers in time" if gpu() else ""
     return "in use, " + ("the masked match on AVX2" if masked_in_c() else
-                         "but not the masked match (no AVX2 on this CPU: OpenCV's, faster than the plain C)")
+                         "but not the masked match (no AVX2 on this CPU: OpenCV's, faster than the plain C)") + on
+
+
+def gpu(on: bool | None = None) -> bool:
+    """Whether the `Refinds` made from now on have the GPU backend (native.c's gm_on; GPU at the start); `on` sets
+    it. False without the DLL."""
+    f = lib()
+    if f is None:
+        return False
+    return bool(f.gm_on(-1 if on is None else int(bool(on))))
+
+
+GPU_STATS = ("calls", "answered", "late", "busy", "full", "pairs", "cpu_pairs", "wait_us", "wait_max_us", "tasks",
+             "places", "why", "gpu_us", "gpu_max_us", "many", "none", "prep_us", "match_us", "choose_us",
+             "copy_us")  # gpumatch.c's GS_* (rf_gpu's stats)
 
 
 class Masked:
@@ -413,6 +453,15 @@ class Refinds:
             finally:
                 self.end()
         return outs
+
+    def gpu_state(self) -> tuple[str, dict[str, int]]:
+        """Its GPU backend's state ("none": made with the GPU off; "starting", "on", "off": couldn't be made, or lost)
+        and what it did (GPU_STATS: calls asked of it, answered in time, late, ...)."""
+        if self.ctx is None:
+            return "none", {}
+        stats = (ctypes.c_longlong * len(GPU_STATS))()
+        state = self._lib.rf_gpu(self.ctx, stats)
+        return ("none", "starting", "on", "off")[state], dict(zip(GPU_STATS, stats))
 
     def close(self) -> None:
         with self._lock:
