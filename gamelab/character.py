@@ -240,35 +240,37 @@ def how_chosen(environ=os.environ, path=CONFIG, chosen: Path | None = None) -> s
 
 def load(which: str | None = None, path=CONFIG, environ=os.environ) -> Character:
     """Character `which` (None: the one this process plays) as her class has her, with what config.toml gives of her:
-    the thief's stats are its flat [character] (her class's fixed copy under FIXED_STATS), another's her
-    [characters.<id>] tables over her class's."""
+    the thief's stats are its flat [character], another's her [characters.<id>] tables over her class's. Under
+    FIXED_STATS (the tests, goldens and harness) she is her class's alone, config.toml not read, as physics' stats
+    weren't: `which` names a class then."""
     which = active_id(environ, path) if which is None else which
-    default, tables = config.characters(path)
-    table = tables.get(which)
+    fixed = bool(environ.get(FIXED_STATS))
+    table = None if fixed else config.characters(path)[1].get(which)
     klass = table.klass if table is not None else which
     classes = _classes()
     if klass not in classes:
-        raise config.ConfigError(f"no character {which!r}: known {known(path)} (config.toml [characters.<id>] "
-                                 f"names more)")
+        known_ = sorted(classes) if fixed else known(path)
+        raise config.ConfigError(f"no character {which!r}: known {known_}" + (
+            f" (under {FIXED_STATS} a character is her class)" if fixed else " (config.toml [characters.<id>] names "
+                                                                              "more)"))
     c = classes[klass].profile(which)
     if klass == config.THIEF:
-        stats = config.Character() if environ.get(FIXED_STATS) else config.character(path)
+        stats = config.Character() if fixed else config.character(path)
         c = replace(c, stats=stats, skills={**c.skills, "lucky_seven": int(stats.lucky_seven)})
-    elif not environ.get(FIXED_STATS) and table is not None:
+    elif table is not None:
         c = replace(c, stats=replace(c.fixed_stats, **table.stats))
     if table is not None:
         c = classes[klass].configured(c, table)
     return c
 
 
-def fixed_stats(which: str, path=CONFIG) -> config.Character:
-    """Character `which`'s stats as FIXED_STATS pins them: her class's copy (the thief's config.Character())."""
-    _, tables = config.characters(path)
-    klass = tables[which].klass if which in tables else which
+def fixed_stats(which: str) -> config.Character:
+    """Character `which`'s stats as FIXED_STATS pins them: her class's copy (the thief's config.Character()), whatever
+    config.toml says (not read)."""
     classes = _classes()
-    if klass not in classes:
-        raise config.ConfigError(f"no character {which!r}: known {known(path)}")
-    return classes[klass].FIXED_STATS
+    if which not in classes:
+        raise config.ConfigError(f"under {FIXED_STATS} {ENV} names a class ({sorted(classes)}), got {which!r}")
+    return classes[which].FIXED_STATS
 
 
 def stats(path=CONFIG, environ=os.environ) -> config.Character:
@@ -276,7 +278,7 @@ def stats(path=CONFIG, environ=os.environ) -> config.Character:
     the thief's config.toml [character] (exactly as before); another's her own tables over her class's."""
     which = active_id(environ, path)
     if environ.get(FIXED_STATS):
-        return fixed_stats(which, path)
+        return fixed_stats(which)
     if which == DEFAULT:
         return config.character(path)
     return load(which, path, environ).stats

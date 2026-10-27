@@ -134,9 +134,14 @@ def test_choose_writes_the_lab_file(tmp_path):
 def test_known_characters(tmp_path):
     path = _toml(tmp_path, '[characters.mage]\nclass = "magician"\n')
     assert character.known(path) == ["mage", "magician", "thief"]
-    assert character.load("mage", path).files == "mage"  # her own files' folder (paths.of)
+    assert character.load("mage", path, {}).files == "mage"  # her own files' folder (paths.of)
     with pytest.raises(config.ConfigError, match="no character"):
-        character.load("bishop", path)
+        character.load("bishop", path, {})
+    # Under FIXED_STATS (these tests'), a character is her class's, config.toml not read
+    with pytest.raises(config.ConfigError, match="a character is her class"):
+        character.load("mage", path)
+    with pytest.raises(config.ConfigError, match="names a class"):
+        character.stats(path, {character.ENV: "mage", character.FIXED_STATS: "1"})
 
 
 def test_using_puts_a_profile_in_place():
@@ -154,6 +159,16 @@ def test_the_thiefs_stats_are_physics_as_before(tmp_path):
     assert character.stats(path, {character.FIXED_STATS: "1"}) == config.Character()
     assert character.load("thief", path, {}).stats == config.Character(130, 110)
     assert character.load("thief", path, {}).skills == {"lucky_seven": 16}
+
+
+def test_under_fixed_stats_config_toml_isnt_read(tmp_path):
+    broken = _toml(tmp_path, "[characters = not toml")
+    fixed = {character.FIXED_STATS: "1"}
+    assert character.stats(broken, fixed) == config.Character()  # (physics', as before: the goldens' and the tests')
+    assert character.load(None, broken, fixed).id == "thief"
+    assert character.load("magician", broken, {**fixed, character.ENV: "magician"}).stats == magician.FIXED_STATS
+    with pytest.raises(config.ConfigError):
+        character.stats(broken, {})
 
 
 def test_a_magicians_stats_hers_over_her_class(tmp_path):
