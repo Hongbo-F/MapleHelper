@@ -55,6 +55,8 @@ PORTAL_UP_MS = 100
 HANG_TOLERANCE = 15
 ON_ROPE_X = 25
 ROPE_JUMP_KEY_MS = 40
+STILL = 0.6               # minimap px: her dot within this of where a move began, on both axes, hasn't moved
+                          # (control.navigator.STILL's)
 
 
 def grab_lead(gap: float) -> float | None:
@@ -75,6 +77,9 @@ class Mover:
 
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, log=print):
         self.senses, self.actions, self.model, self.log = senses, actions, model, log
+        # Whether her dot stood where the last move (`do`) began on every look of it (None: no move yet): keys that
+        # moved her nowhere (a jump or an arrow on a rope does nothing: control.navigator's rope-top check)
+        self.still: bool | None = None
 
     # --- looking ----------------------------------------------------------------------------
 
@@ -93,17 +98,23 @@ class Mover:
             time.sleep(0.25)
         raise RuntimeError("can't find her minimap dot")
 
-    def settle(self, seconds: float = 2.0) -> Scene:
-        """Look until she's standing still on a platform (or give up and return the last look)."""
+    def settle(self, seconds: float = 2.0, since: tuple[float, float] | None = None) -> Scene:
+        """Look until she's standing still on a platform (or give up and return the last look). With `since` (her dot
+        where a move began), `still` says whether every look had her dot there (STILL)."""
         end = time.monotonic() + seconds
         last = self.locate()
+        still = since is not None and not _apart(last.where.dot, since)
         while time.monotonic() < end:
             time.sleep(0.08)
             s = self.locate()
+            still = still and not _apart(s.where.dot, since)
             if s.where.platform is not None and last.where.platform is s.where.platform \
                     and math.dist(last.where.dot, s.where.dot) < 0.6:
-                return s
+                last = s
+                break
             last = s
+        if since is not None:
+            self.still = still
         return last
 
     # --- walking ----------------------------------------------------------------------------
@@ -171,8 +182,9 @@ class Mover:
                    "rope_jump": self._rope_jump}
         if m.kind not in by_kind:
             raise ValueError(f"unknown move {m.kind}")
+        self.still = None
         by_kind[m.kind](m, s)
-        return self.settle()
+        return self.settle(since=s.where.dot)
 
     def _climb_down(self, m: Move, s: Scene) -> None:
         """Stand on top of the rope (lining up looks again), then hold down all the way."""
@@ -382,15 +394,18 @@ class Mover:
             self._send([[0, k.down.name, "down"], [climb_ms(max(0.0, rope.bottom - y)), k.down.name, "up"]], "unhang")
         return self.settle(2.0)
 
-    def off_rope(self, s: Scene) -> Scene:
+    def off_rope(self, s: Scene, rope: Rope | None = None, at: tuple[float, float] | None = None) -> Scene:
         """She's on a rope (no platform under her dot): climb up onto the platform if she's near its
         top, else jump off it sideways (towards the side a fall lands on a platform). Off a rope that
         takes her onto no platform at its top (959's, under 17's block) she climbs down and lets go
-        at its bottom, onto what's under it (up there did nothing: the trip ended lost)."""
+        at its bottom, onto what's under it (up there did nothing: the trip ended lost). `rope` and `at` (her map
+        place): where look `s` has her elsewhere, her dot snapped onto the platform at the rope's top
+        (control.navigator's rope-top check; behavior.hunter, the game saying she's on a rope)."""
         k = self.actions.keys
-        x, y = s.where.x, s.where.y
+        x, y = at if at is not None else (s.where.x, s.where.y)
         # The rope she's on: the nearest one reaching her height.
-        rope = min(self.model.ropes, key=lambda r: abs(r.x - x) + (0 if r.top - 10 <= y <= r.bottom + 10 else 1000))
+        rope = rope or min(self.model.ropes,
+                           key=lambda r: abs(r.x - x) + (0 if r.top - 10 <= y <= r.bottom + 10 else 1000))
         topped = rope.from_platform and hung_from(self.model, rope) is not None
         if y - rope.top < 70 and topped:
             self._send([[0, k.up.name, "down"], [900, k.up.name, "up"]], "off_rope")
@@ -404,6 +419,11 @@ class Mover:
             self._send([[0, arrow, "down"], [30, k.jump.name, "down"], [80, k.jump.name, "up"], [400, arrow, "up"]],
                        "off_rope")
         return self.settle(2.5)
+
+
+def _apart(dot: tuple[float, float] | None, since: tuple[float, float]) -> bool:
+    """Whether her dot `dot` is elsewhere than `since` (STILL on either axis; none: not known, taken as moved)."""
+    return dot is None or abs(dot[0] - since[0]) > STILL or abs(dot[1] - since[1]) > STILL
 
 
 def _rope(model: MapModel, m: Move) -> Rope:

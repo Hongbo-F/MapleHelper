@@ -41,24 +41,25 @@ from dataclasses import dataclass, field, replace
 from typing import NamedTuple, Protocol
 
 from .. import telemetry
-from ..localization.mapdata import MapModel, Platform
+from ..localization.mapdata import MapModel, Platform, Rope
 from ..localization.memory import EDGE, MATCH_SLACK, MATCH_SPEED, MATCH_WALK_S, SURE
 from ..localization.monsters import (DEFAULT_SPEED, MONSTER_HEIGHT, Monster, MonsterTrack, Tracker, bodies, touch_box,
                                      tracks_record)
+from ..localization.pose import ROPE_TOP_X
 from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..localization.tracking import HIDDEN, HIDE_S, LIVE
 from ..localization.unseen import hidden
 from ..motion import bodies as her_body
 from ..motion import route
-from ..motion.flow import END_LINGER, MAX_LEGS, Body, Flow, Leg, Span, chain_record, ms
+from ..motion.flow import END_LINGER, MAX_LEGS, UP_EXTRA, Body, Flow, Leg, Span, chain_record, ms
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..motion.route import Move, Planner, keeping_off, route_record
 from . import client
 from .actions import Actions
-from .mover import Mover, platform_text
+from .mover import Mover, climb_ms, platform_text
 
 ON_WAY_TRIES = 5    # monsters engaged per platform while passing through (respawns could keep her forever)
 MAX_FIGHTS = 3      # fights in a row clearing the way, without a move between: then she moves on regardless
@@ -135,6 +136,23 @@ RECOVER_STILL_S = 0.046  # s her dot stands still for `recover` to take it she's
 # by up to 15 units early on; her dot is read to whole minimap pixels.)
 OFF_SPAN = 30
 HIT = 0.004          # HP lost (fraction) that counts as a hit
+# A hit while she climbs a rope of a chain (_climbing) cuts the plan as any hit does, every key let go, up too, and the
+# game doesn't knock her off a rope (live on 2026-10-26 she stayed on after 11 of 11 hits on ropes, the dot by the rope
+# and still after each): she hung where it caught her. At 22:58:08.596 (Tree Dungeon, the rope at x 111 from 19 up to
+# 18) a Green Mushroom walking on 18 touched her 47 under its top, 0.22 s before the plan had her there, and she hung
+# about 30 under 18's surface for 25 s (lab/recent/20261026-225844-out-of-darts), her dot snapped onto 18 and her Lucky
+# Seven presses refused there; that night 9 of the 56 climbs up that rope were cut by a hit, 5 of them left so, and
+# 4 of the 27 up the rope at -8 (2). With CLIMB_ON up goes down again at once, held to the top and over it (_climb_on);
+# off, as before. CLIMB_ON_X: map units her dot may be off the rope's x, and past its ends.
+CLIMB_ON = True
+CLIMB_ON_X = 20
+# A chain whose glances had her dot where the first had it for STUCK_S or more (a jump or a run there moves it a minimap
+# px within 0.1-0.25 s), or a move whose looks all had it where it began (Mover.still), from the top of a rope hanging
+# from her platform: she's on the rope, not the platform (_rope_top). Of the chains the tour's telemetry has with 8
+# glances or more where her dot never moved, 9 of 10 were at a rope's top on 18 (the other a drop at 00:19:07 on
+# 10-26). ROPE_TOP off: as before (the hunt replanned from 18 there: 10 moves in 15.4 s at 22:19:38).
+STUCK_S = 0.4
+ROPE_TOP = True
 # Looks at most, each after waiting up to 2 s for her to land and stand still (Mover.settle), for one that puts
 # her on a platform, when a look shows her in the air: a slime's touch as she walked off platform 3 onto 4
 # knocked her back into the 12-unit gap between the blocks at x 669-681, down which she fell to the basin for
@@ -372,6 +390,9 @@ class Navigator:
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
         self._came = None  # the feed's track of the monster the last cut was for (REACT: _coming), for TripState.came
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
+        # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
+        # (None: it moved, or no glance had it): _rope_top
+        self.chain_still: tuple[tuple[float, float], float] | None = None
 
     @property
     def fight(self) -> bool:
@@ -508,12 +529,17 @@ class Navigator:
             if near is None:
                 near = self.tracker.update(s.t, s.monsters, seen_at=s.t - time.monotonic())
             st.path = path
+            self.chain_still = None
             moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, st.dst, near)
+            still = self.chain_still is not None and self.chain_still[1] >= STUCK_S
         else:
             st.stopped = False
             moved, planned, after = self._carry_out_move(st, s, path)
             if not moved:
                 return None  # one the mover can't do: another way (st.cannot)
+            still = self.mover.still is True
+        if still and ROPE_TOP:
+            after = self._rope_top(st, s, after)
         self._made(st, moved, after.where.platform is not None and after.where.platform.id == planned.id)
         if self._note_landing(st.trip, moved, planned, after, hp, st.stopped):  # a miss
             st.trip.misses += 1
@@ -1058,6 +1084,27 @@ class Navigator:
             s = self.mover.off_rope(s)
         return s
 
+    def _rope_top(self, st: TripState, s: Scene, after: Scene) -> Scene:
+        """After a chain or a move from look `s` whose keys never moved her dot (`_pass`: the chain's glances for
+        STUCK_S, or every look of the mover's), with `s` placing her at the top of a rope hanging from her platform
+        (rope_at_top) and `after` her dot where it was: she's on that rope under its top, not on the platform (a jump
+        or an arrow there does nothing; her dot snaps onto the platform from up to 33 under it, and from 17 under it by
+        a rope since: localization.pose.ROPE_TOP_GAP), as at 22:19:38 on 2026-10-26, when 10 moves from rope 4's top
+        "ended on platform 18 instead" over 15.4 s, her dot 14.8 under 18 at every chain start (Tree Dungeon; the
+        2,046 chain starts' standing gaps: at most 14.0, none near a rope's top over 14). Off it (Mover.off_rope: up,
+        onto the platform), and a look once she's there; else `after`."""
+        rope = None if s.where is None else rope_at_top(self.model, s.where)
+        if rope is None or after.where is None or after.where.dot is None or s.where.dot is None \
+                or abs(after.where.dot[0] - s.where.dot[0]) > STILL or abs(after.where.dot[1] - s.where.dot[1]) > STILL:
+            return after
+        x, y = self.senses.localizer.to_map(after.where.dot)
+        text = (f"her dot never moved: on the rope at x {rope.x:.0f}, {y - rope.top:.0f} under its top, not on "
+                f"platform {s.where.platform.id}")
+        self.log(f"    {text}: getting off")
+        telemetry.emit("event", kind="rope_top", text=text)
+        st.fresh = None  # (the look after the chain, for the next pass: she's moved since)
+        return self.mover.off_rope(after, rope, at=(x, y))
+
     def _safe_to_stand(self, x: float, here: Platform, move: Move, monsters) -> bool:
         """Whether no monster can reach her standing at x for the next second (as a leg that stays put)."""
         return not self.flow.danger(
@@ -1169,6 +1216,9 @@ class Navigator:
                                           # had her where the leg doesn't go
         ahead = None  # the look around for what follows the running chain, once taken
         over = False  # the running chain's plan has ended (its result read)
+        self.chain_still = None  # her dot where the first glance had it all along, and for how long (_rope_top)
+        first, moved, first_at, last_at = None, False, 0.0, 0.0
+        dot = None
         while True:
             # The look around goes late in the chain: from where she starts, where she's going can be
             # off screen (from platform 34 the basin's slimes were under the status bar).
@@ -1216,6 +1266,12 @@ class Navigator:
             dot, now_hp = self.senses.glance()
             seen_at = self.senses.glanced_at
             stood = _stood(stood, seen_at, dot)
+            if dot is not None:
+                if first is None:
+                    first, first_at = dot, seen_at
+                elif abs(dot[0] - first[0]) > STILL or abs(dot[1] - first[1]) > STILL:
+                    moved = True
+                last_at = seen_at
             if dot is not None and telemetry.recording():
                 gx, gy = self.senses.localizer.to_map(dot)
                 telemetry.emit("glance", x=round(gx, 1), y=round(gy, 1), hp=round(now_hp, 3))
@@ -1239,18 +1295,50 @@ class Navigator:
                 self._reacted[tid] = time.monotonic()
                 cut = f"{COMING} ({mo.kind} on {mo.platform}, {t - (time.monotonic() - current.start):.2f} s ahead)"
             if cut:
+                climbing = self._climbing(current, dot) if cut.startswith("hit") and CLIMB_ON else None
                 for pid in [current.plan_id] + ([queued.plan_id] if queued else []):
                     if not client.cancel(pid):
                         client.wait(pid)
                 self._ended(current.plan_id, cut=True)
                 if queued:
                     sent = sent[:len(sent) - len(queued.legs)]
+                if climbing is not None:
+                    self._climb_on(*climbing)
                 break
             if client.done(current.plan_id):
                 client.wait(current.plan_id)
                 self._ended(current.plan_id)
                 over = True  # the queued chain takes over, or the next one is still to come (see above)
+        if first is not None and not moved:
+            self.chain_still = (first, last_at - first_at)
         return cut, sent
+
+    def _climbing(self, running: _Running, dot) -> tuple[float, float] | None:
+        """Whether she's climbing a rope of the running plan now (its Climb from the grab to UP_EXTRA past the top, and
+        her last glance's dot by the rope, or no dot): the rope's top and her height on it (her dot's, else the plan's);
+        None if not."""
+        t = time.monotonic() - running.start
+        for leg in running.legs:
+            for c in leg.rope:
+                if not c.t0 <= t <= c.t1 + UP_EXTRA:
+                    continue
+                if dot is None:
+                    return c.y1, c.at(t)[1]
+                mx, my = self.senses.localizer.to_map(dot)
+                if abs(mx - c.x) <= CLIMB_ON_X and c.y1 - CLIMB_ON_X <= my <= c.y0 + CLIMB_ON_X:
+                    return c.y1, my
+        return None
+
+    def _climb_on(self, top: float, y: float) -> None:
+        """A hit while she climbs a rope (_climbing): the cut let go of every key, up too, and the game keeps her on the
+        rope when she's touched there (live on 2026-10-26, 11 of 11 hits on a rope), where she'd hang below its top
+        (see CLIMB_ON); up again, to the top and onto the platform there (mover.climb_ms: the climb from her height,
+        and CLIMB_EXTRA_MS), waited for, so the next pass looks once she's there."""
+        k = self.actions.keys.up.name
+        hold = climb_ms(max(0.0, y - top))
+        self.log(f"    hit on the rope {y - top:.0f} under its top: up again ({hold} ms)")
+        telemetry.emit("event", kind="climb_on", text=f"hit on the rope {y - top:.0f} under its top: up again")
+        self.actions.play([[0, k, "down"], [hold, k, "up"]], "climb_on")
 
     def _ended(self, plan_id: str | None, cut: bool = False) -> None:
         """A chain's plan is over, its result read: its last key went its run on past it before now (send's), or now,
@@ -1507,6 +1595,16 @@ class Navigator:
                 return s
             if time.monotonic() >= until:
                 return None
+
+
+def rope_at_top(model: MapModel, where) -> Rope | None:
+    """The rope hanging from the platform `where` has her on (route.hung_from) within localization.pose.ROPE_TOP_X of
+    her x (hanging at the rope at x 111 her name tag placed her at 113.3, her dot alone at 101.6), if any."""
+    p = where.platform
+    if p is None:
+        return None
+    near = [r for r in model.ropes if abs(r.x - where.x) <= ROPE_TOP_X and route.hung_from(model, r) is p]
+    return min(near, key=lambda r: abs(r.x - where.x)) if near else None
 
 
 def standing(s: Scene) -> bool:

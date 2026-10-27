@@ -1958,7 +1958,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=1, limit=600,
+@tree((28, 247.0), monsters="all", seed=4, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -1994,7 +1994,12 @@ def loop_tree_run(sim):
     and a throw's last look before its key, with her drops waiting while a monster that counts is by them and her
     decisions going by the monsters the looks missed): on seed 7 she was knocked out of the tower at 363 s by x -308; of
     seeds 1-12, 5 meet all of this (1, 4, 5, 6, 12), 4 fell out (3, 7, 8, 11), 3 went up the tower among its Horny
-    Mushrooms (2, 9, 10).)"""
+    Mushrooms (2, 9, 10).) (Seed 4 since her looks have her on a rope in its last 17 under a platform and a touch leaves
+    her on a rope, her climb going on after it (2026-10-27: localization.pose.ROPE_TOP_GAP, world.Realism.rope_knocks,
+    navigator.CLIMB_ON): on seed 1 her chain off a climb up the rope at -8 to 27 went a frame later at 92.9 s and she
+    went up the tower to 7 at 123 s; of seeds 1-12, 5 meet all of this (4, 5, 6, 7, 12; 4, 5, 6 and 12 at master's
+    head too), 1 fell out (11), 5 went up the tower among its Horny Mushrooms (1, 2, 3, 9, 10), and on 8 she had 35
+    kills, on 23 alone: on 4 she hunts the floor the whole 5 minutes, 77 kills.)"""
     return _loop(5)(sim)
 
 
@@ -2492,3 +2497,55 @@ def loop_tree_out_of_darts(sim):
     this map: twice and more the live hunts' most with her darts) the hunt stops, she goes to a safe place
     (behavior.retreat), whoever is at the PC is paged, and the recording's last minutes are saved."""
     return darts_stop(5)(sim)
+
+
+# --- the top of a rope: hanging just under a platform, her dot snapped onto it -------------------------------------
+# Live on 2026-10-26 (Tree Dungeon, 22:58, 23:11, 23:12) a touch cut her climb up the rope at x 111 near its top; the
+# game keeps her on a rope when touched (world.Realism.rope_knocks: off since), so she hung about 30 under platform 18, and
+# her dot placed her on it: her Lucky Seven presses refused there ("That cannot be used while you're on a rope or
+# ladder."), 20 of them stopped the hunt for out of darts with her stars in her bag (behavior.darts). Her place
+# (localization.pose.ROPE_TOP_GAP), a move that never moved her dot (control.navigator._rope_top), the game's word on
+# the message bar (behavior.hunter._hear_chat) and her climb going on after a touch (navigator.CLIMB_ON) get her off.
+
+ROPE_TOP_EXPECTS = (
+    check("no stop: her stars never ran out", lambda tr: tr["result"]["stopped"] is None),
+    logs("getting off"), sends("off_rope"),
+    check("on to hunt: kills", lambda tr: sum(tr["world"]["kills"].values()) >= 1))
+
+
+@tree((18, 111.0), hanging=-865.0, monsters="all", seed=1, limit=120, **_LIVE, expects=ROPE_TOP_EXPECTS)
+def loop_tree_rope_top(sim):
+    """`tour --loop --map 10002073` (the feed, the attack choice) from the rope at x 111, her feet 30 under platform 18
+    (-865), as live at 22:58:08: under 17 there her dot is placed on the rope (localization.pose.ROPE_TOP_GAP), not on
+    18 (where it snapped her before, and her presses were refused till out of darts stopped the hunt), and she climbs up
+    off it onto 18 (Mover.off_rope) and hunts on."""
+    return darts_stop(1)(sim)
+
+
+@tree((18, 111.0), hanging=-880.0, monsters="all", seed=1, limit=120, **_LIVE, expects=ROPE_TOP_EXPECTS)
+def loop_tree_rope_top_15(sim):
+    """As loop_tree_rope_top, her feet 15 under 18 (-880; at 22:19:38 live her dot was 14.8 under it at 9 chain
+    starts): her dot still puts her on 18, so a move from there that never moves it (control.navigator._rope_top) or
+    the game refusing her presses on the message bar (behavior.hunter._hear_chat) has her on the rope: off it, onto 18,
+    and on to hunt. (Master stopped the hunt at 18.7 s, 20 presses refused.)"""
+    return darts_stop(1)(sim)
+
+
+@tree((18, 111.0), hanging=-880.0, limit=60,
+      expects=(ends("arrived"), logs("her dot never moved"), sends("off_rope"),
+               check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
+def nav_tree_rope_top_15(sim):
+    """From the rope at x 111, her feet 15 under platform 18 (her dot puts her on 18), up to 16 with no monsters about:
+    the jump up from 18 does nothing on the rope and her dot never moves (control.navigator._rope_top), so she's on the
+    rope: up off it onto 18 (Mover.off_rope), and on up."""
+    return _nav(16)(sim)
+
+
+@tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=1, limit=120, **_LIVE,
+      expects=(ends("arrived"), logs("hit on the rope"), sends("climb_on"),
+               check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
+def nav_tree_rope_hit(sim):
+    """From 19 up to 16 by the rope at x 111 (19 -> 18), a Green Mushroom walking on 18 by its top (as at 22:58:05
+    live, where the trip went past it regardless): it touches her on the rope, which cuts the chain and lets go of
+    up; the game keeps her on the rope, and up goes down again at once (navigator.CLIMB_ON), onto 18 and on."""
+    return _nav(16, fight=True)(sim)

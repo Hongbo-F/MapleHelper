@@ -39,6 +39,7 @@ from .framecheck import BadLook, Problem
 from .heading import Heading, Reading, her_box
 from .hud import BAR_ROW, HP_BAR, bars, exp_number_box, hp_bar, hp_fill
 from .loot import Item, LootDetector
+from .messages import ChatLine, ChatReader, log_rows
 from .minimap import PICTURE_MATCH, Marker, MinimapPicture, dot_in_box, her_dot, minimap_box, other_dots
 from .mobs import Mob, MobDetector
 from .nametag import NameTag
@@ -269,7 +270,10 @@ class Eyes:
 
     def messages(self) -> str:
         """The pickup log at the bottom right, read by OCR (~0.4 s): "Leather x1 earned. (Etc)", and what
-        the game says when a pick-up fails. Empty if the OCR packages (environment.yml) aren't installed."""
+        the game says when a pick-up fails. Empty if the OCR packages (environment.yml) aren't installed. Its rows
+        only (perception.messages.log_rows: right-aligned against the window's edge), not the party window's over
+        it: at 22:58:23 on 2026-10-26 it read her party's names ("7BugBaby", the leader's star as a 7, and "RideBaby"),
+        and no pickup line."""
         try:
             from maplehelper.ocr import LOOT, shared
         except ImportError:
@@ -277,14 +281,31 @@ class Eyes:
         begun = time.monotonic()
         if getattr(self, "full_frames", None) is not None:  # (a command's: the perception service's frame)
             full = self.full_frames(begun)
-            x, y, w, h = LOOT.region.box((0, 0, full.shape[1], full.shape[0]))
+            width = full.shape[1]
+            x, y, w, h = LOOT.region.box((0, 0, width, full.shape[0]))
             shot = full[y:y + h, x:x + w, ::-1]  # RGB -> BGR
         else:
             area = self._client_area()
-            x, y, w, h = LOOT.region.box((0, 0, area["width"], area["height"]))
+            width = area["width"]
+            x, y, w, h = LOOT.region.box((0, 0, width, area["height"]))
             shot = self.screen.shot(area, after=begun).crop(x, y, w, h)
         rows = shared().read(np.ascontiguousarray(shot[:, :, :3]), min_height=LOOT.min_height) or []  # BGR
-        return "\n".join(r.text for r in rows)
+        return "\n".join(r.text for r in log_rows(rows, width, x))
+
+    def chat_line(self) -> ChatLine:
+        """The message bar (the chat's one line above the HUD) as shown now: the game's own line on it, read by OCR
+        when it's one not read before (perception.messages.ChatReader: its pink px tell it in under a millisecond, the
+        OCR ~0.28 s), where the game says why it refused a key ("That cannot be used while you're on a rope or
+        ladder."). No game line (or no OCR packages): its text is ""."""
+        begun = time.monotonic()
+        if getattr(self, "full_frames", None) is not None:  # (a command's: the perception service's frame)
+            full = self.full_frames(begun)
+        else:
+            area = self._client_area()
+            full = self.screen.shot(area, after=begun).crop(0, 0, area["width"], area["height"], rgb_of)
+        if getattr(self, "chat", None) is None:
+            self.chat = ChatReader()
+        return self.chat.read(full, begun)
 
     # --- capturing the game window ------------------------------------------------------------------
 

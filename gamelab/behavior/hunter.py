@@ -36,7 +36,8 @@ from ..attack import danger
 from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control import client
 from ..control.actions import Actions
-from ..control.navigator import Navigator
+from ..control.mover import Mover
+from ..control.navigator import Navigator, rope_at_top
 from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
 from ..localization.memory import Memory
@@ -208,10 +209,14 @@ class Hunter:
         it stopped the fight at once, "HP low", and the tour or the hunt loop sent her to rest on the chair. Then out of
         darts (behavior.darts: `darts`, which her attack choice feeds): her Lucky Seven presses taking no MP and
         killing nothing for long raise OutOfDarts, once, with what the pickup log says then; a stretch of them long
-        enough has the log read (DartWatch.asks: if the game says she's out, the stop comes sooner)."""
+        enough has the log read (DartWatch.asks: if the game says she's out, the stop comes sooner). A stretch of 3
+        and more has the message bar read (DartWatch.asks_chat), and the game's refusal there starts it again
+        (_hear_chat): on a rope, she's got off it."""
         self.drink_if_low(s)
         if (stop := self.hp_watch.due()) is not None:
             raise stop
+        if self.darts.asks_chat():
+            self._hear_chat(s)
         if self.darts.asks():
             said = self._messages()
             self.darts.hear(said)
@@ -221,6 +226,51 @@ class Hunter:
             if stop.said is None:
                 stop.heard(self._messages())
             raise stop
+
+    def _hear_chat(self, s: Scene) -> None:
+        """The message bar read for out of darts (DartWatch.asks_chat): the game's refusal of her presses on it starts
+        the stretch again (DartWatch.hear_chat), logged and sent as a telemetry event 'refused'; on a rope ("That
+        cannot be used while you're on a rope or ladder."), she's got off it (_off_rope)."""
+        n = self.darts.shown
+        if (line := self._chat_line()) is None:
+            return
+        if (why := self.darts.hear_chat(line, line.t or time.monotonic())) is None:
+            return
+        text = f"the game refused her presses: \"{line.text}\" ({n} in a row that took no MP: not counted)"
+        self.log(f"  {text}")
+        telemetry.emit("event", kind="refused", text=text)
+        if why == "rope":
+            self._off_rope(s)
+
+    def _chat_line(self):
+        """The message bar as the eyes read it now (Eyes.chat_line); None without it (eyes that don't read it), or if
+        the read fails (said)."""
+        read = getattr(self.senses.eyes, "chat_line", None)
+        if read is None:
+            return None
+        try:
+            return read()
+        except Exception as e:  # (the game window gone, the service not answering)
+            self.log(f"  the message bar not read ({type(e).__name__}: {e})")
+            return None
+
+    def _off_rope(self, s: Scene) -> None:
+        """The game says she's on a rope: off it (control.mover.Mover.off_rope), the rope at the top of which look `s`
+        has her standing (her dot snapped onto the platform: control.navigator.rope_at_top), or the one she's on
+        (`s` on no platform). Placed on a platform away from any rope's top: nothing (a line left up from before)."""
+        if s is None or s.where is None:
+            return
+        rope, at = None, None
+        if s.where.platform is not None:
+            rope = rope_at_top(self.model, s.where)
+            if rope is None:
+                self.log(f"  ... but she's on platform {s.where.platform.id} at x {s.where.x:.0f}, by no rope's top: "
+                         "not acted on")
+                return
+            if s.where.dot is not None:
+                at = self.senses.localizer.to_map(s.where.dot)
+        self.log(f"  on a rope at x {(rope.x if rope else s.where.x):.0f} by the game's word: getting off")
+        Mover(self.senses, self.actions, self.model, log=self.log).off_rope(s, rope, at)
 
     def _messages(self) -> str:
         """The pickup log as the eyes read it now (Eyes.messages, OCR: "" without it, or if the read fails)."""
@@ -340,6 +390,7 @@ class Hunter:
         gains between two looks are two gains, and the HP lost is every drop's, a potion drunk between them or not."""
         self._doubt_hp(s)
         self.hp_watch.see(s.t, s.hp)
+        self.darts.roped = self.on_rope(s)  # (presses keyed on a rope, which the game refuses, aren't counted)
         if s.events is None:
             reads = []
             changed = exp_changed(self._exp, s.exp)
@@ -383,9 +434,7 @@ class Hunter:
         a, eyes = self.actions, self.senses.eyes
         if not hasattr(eyes, "heading"):  # (eyes that don't read her picture: the facing is her keys')
             return
-        rope = s.where is not None and s.where.platform is None and any(
-            abs(r.x - s.where.x) <= ROPE_SLACK and r.top - ROPE_SLACK <= s.where.y <= r.bottom + ROPE_SLACK
-            for r in self.model.ropes)
+        rope = self.on_rope(s)
         reading = Reading(None, why="rope") if rope else eyes.heading(s)
         self.facing_seen = reading
         c = self.heading_counts
@@ -414,6 +463,12 @@ class Hunter:
         telemetry.emit("event", kind="heading", text=text, seen=reading.record(), keys=against,
                        since_arrow=round(since_arrow, 2), since_hit=None if since_hit is None else round(since_hit, 2),
                        **({"shot": shot.name} if shot is not None else {}))
+
+    def on_rope(self, s: Scene) -> bool:
+        """Whether look `s` has her on a rope: off the platforms, within ROPE_SLACK of a rope's x, between its ends."""
+        return s.where is not None and s.where.platform is None and any(
+            abs(r.x - s.where.x) <= ROPE_SLACK and r.top - ROPE_SLACK <= s.where.y <= r.bottom + ROPE_SLACK
+            for r in self.model.ropes)
 
     def _gained(self, g: Gain, s: Scene) -> None:
         """A gain of her EXP: its kills counted (exp_events, told, the report), each at its time, or, if no kill

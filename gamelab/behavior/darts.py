@@ -50,13 +50,30 @@ The game's own word, if it has one: a stretch READ_EVERY presses long (and each 
 stars left (perception.loot.says_no_darts: the usual wordings, as the game's isn't known), the stop comes then. On the
 pickup log of the live frames kept (1,413 frames a second apart) the wordings matched nothing. The stop's log line has
 what the log said then, and the recording's last KEEP_S s are saved (control.alarm.keep_recent:
-lab/recent/<time>-out-of-darts), so the next time what the game shows can be seen."""
+lab/recent/<time>-out-of-darts), so the next time what the game shows can be seen.
+
+Presses the game refused don't count. On 2026-10-26 the stop came three times with her stars in her bag (22:58:32,
+23:11:49, 23:12:42, Tree Dungeon), each time after 20-21 presses at the top of the rope at x 111, where a touch had cut
+her climb and left her hanging about 30 under platform 18, her dot snapped onto it (localization.pose.ROPE_TOP_GAP
+since):
+the game refused every one, "That cannot be used while you're on a rope or ladder." on the message bar (the chat's
+line above the HUD, 0.19 s after the first press), and her MP stayed put. Its 12-press read of the pickup log read the
+party window over it ("7BugBaby / RideBaby": perception.messages.log_rows since). Every stretch of 20 presses or more
+that night was such a hang (D:/MapleHelper-scratch/rope/diag: the watch replayed over the logs). So a stretch READ_FIRST
+presses long, and each CHAT_EVERY more, and the stop's own, has the message bar read (Eyes.chat_line: its pink px tell
+the game's own line in under a millisecond, the OCR of a new one 0.28 s), and the game's refusal on it, new since the
+last that started a stretch again (or with another line read between: a line left up and one redrawn are the same px),
+starts it again (`hear_chat`): its presses don't count, and on a rope the hunter gets her off it
+(behavior.hunter.Hunter.health_check). "You don't have enough MP to use this skill." (36 reads on 10-25 at 00:53) is a
+refusal too. And no press keyed while her look has her on a rope counts (`roped`). The stop's line has the bar's
+text."""
 
 import math
 from dataclasses import dataclass, field
 
 from ..attack.choice import MP_STEPS
 from ..perception.loot import says_no_darts
+from ..perception.messages import ChatLine
 from .safety import HuntStop
 
 EXIT = 5               # the command's exit code after it (the safety stop's is 4, the Lie Detector's 3)
@@ -76,6 +93,9 @@ PRESS_DAMAGE = 21.0    # a press's damage at a monster standing on her, her claw
 HORNY = (403.0, 10.0)  # Tree Dungeon's toughest monster, a Horny Mushroom (HP, PDDamage): 21.1 presses of her swipes;
                        # a map whose toughest takes more has PRESSES that many times more
 READ_EVERY = 12        # a stretch this many presses long, and each as many more: the pickup log read
+READ_FIRST = 3         # a stretch this many presses long, each CHAT_EVERY more, and at the stop: the message bar read
+CHAT_EVERY = 3         # (at 22:58 the refusal was up at the 3rd press, 2.4 s into the hang; replaced by a megaphone
+                       # 4 times in 23 s for 0.6-8.0 s)
 KEEP_S = 90.0          # s of the rolling recording saved after the stop (control.alarm.keep_recent)
 REPORT_FROM = 4        # a hunt's longest stretch this long or longer is said at its end (DartWatch.summary)
 
@@ -107,16 +127,19 @@ class OutOfDarts(HuntStop):
     advice = "Give her throwing stars (her Use tab) before hunting again."
 
     def __init__(self, presses: int, seconds: float, mp: float, said: str | None = None, told: bool = False,
-                 at: float = 0.0):
+                 at: float = 0.0, bar: str | None = None):
         self.presses, self.seconds, self.mp, self.said, self.told, self.at = presses, seconds, mp, said, told, at
+        self.bar = bar  # the message bar's game line at the stop ("" none; None: not read)
         super().__init__(self._text())
 
     def _text(self) -> str:
         why = (f"{self.presses} Lucky Seven presses over {self.seconds:.0f} s took no MP and killed nothing "
                f"(her MP {self.mp:.0%})")
+        bar = f"; the message bar then: {self.bar or 'no line of the game'}" if self.bar is not None else ""
         if self.told:
-            return f"the game says she's out of throwing stars ({self.lines()}); {why}"
-        return f"{why}: she's out of throwing stars" + (f"; the pickup log then: {self.lines()}" if self.said else "")
+            return f"the game says she's out of throwing stars ({self.lines()}); {why}{bar}"
+        return (f"{why}: she's out of throwing stars" + (f"; the pickup log then: {self.lines()}" if self.said else "")
+                + bar)
 
     def lines(self) -> str:
         """The pickup log's text as one line."""
@@ -149,9 +172,20 @@ class DartWatch:
     told: str | None = None         # the pickup log's text that said she's out (says_no_darts), this stretch
     longest: tuple[int, float] = (0, 0.0)  # the longest stretch shown (presses, s)
     fired: bool = False
+    chat_read: int = 0              # its presses shown when the message bar was last read for it (`asks_chat`)
+    bar: ChatLine | None = None     # the message bar's last read
+    refusal: ChatLine | None = None  # the last refusal of the game's that started a stretch again (`hear_chat`) ...
+    other: bool = False             # ... and whether a read since showed another line
+    refused: int = 0                # stretches started again so, and the presses in them (for the run's report)
+    refused_presses: int = 0
+    roped: bool = False             # her latest look has her on a rope: presses keyed now don't count
+    roped_presses: int = 0
 
     def cast(self, t: float) -> None:
-        """A Lucky Seven press, its key at `t`."""
+        """A Lucky Seven press, its key at `t` (not counted while she's on a rope, `roped`: the game refuses it)."""
+        if self.roped:
+            self.roped_presses += 1
+            return
         self.keys.append(t)
 
     def kill(self, t: float) -> None:
@@ -192,21 +226,52 @@ class DartWatch:
         if says_no_darts(said):
             self.told = said
 
+    def asks_chat(self) -> bool:
+        """Whether the message bar is to be read now (`hear_chat` what it says): a stretch READ_FIRST presses long, each
+        CHAT_EVERY more, and the stop's (`presses`), until the stop."""
+        n = self.shown
+        return not self.fired and n >= READ_FIRST and (n >= self.chat_read + CHAT_EVERY
+                                                       or n >= self.presses > self.chat_read)
+
+    def hear_chat(self, line: ChatLine, t: float) -> str | None:
+        """The message bar as read at `t` (`asks_chat`): a refusal of the game's on it (perception.messages.refusal),
+        not the one that last started a stretch again still up (the same px, with no other line read between), starts
+        it again: the presses keyed by then don't count. Returns why ('rope': she's on a rope or a ladder; 'refused'),
+        or None."""
+        self.chat_read, self.bar = self.shown, line
+        why = line.refusal
+        if why is None:
+            self.other = self.other or self.refusal is not None and not line.same(self.refusal)
+            return None
+        if line.same(self.refusal) and not self.other:
+            return None
+        self.refusal, self.other = line, False
+        self.refused += 1
+        self.refused_presses += self.shown
+        self._restart(t)
+        return why
+
     def due(self, now: float = 0.0) -> OutOfDarts | None:
         """The stop, the first time a stretch has `presses` presses shown, or READ_EVERY and the pickup log said she's
         out; else None."""
         if self.fired or not (self.shown >= self.presses or (self.told is not None and self.shown >= READ_EVERY)):
             return None
         self.fired = True
-        return OutOfDarts(self.shown, self.span, self.share, said=self.told, told=self.told is not None, at=now)
+        return OutOfDarts(self.shown, self.span, self.share, said=self.told, told=self.told is not None, at=now,
+                          bar=None if self.bar is None or self.chat_read != self.shown else self.bar.text)
 
     def summary(self) -> str:
-        """The longest stretch, for the end of a run's log ("" under REPORT_FROM presses)."""
+        """The longest stretch, for the end of a run's log ("" under REPORT_FROM presses), and the presses refused."""
         n, s = self.longest
-        return (f"her Lucky Seven presses: {n} in a row over {s:.1f} s took no MP at the most (out of darts stops the "
+        said = (f"her Lucky Seven presses: {n} in a row over {s:.1f} s took no MP at the most (out of darts stops the "
                 f"hunt at {self.presses})") if n >= REPORT_FROM else ""
+        if self.refused or self.roped_presses:
+            said += ("; " if said else "her Lucky Seven presses: ") + (
+                f"{self.refused} stretches ({self.refused_presses} presses) the game refused, "
+                f"{self.roped_presses} pressed on a rope: not counted")
+        return said
 
     def _restart(self, after: float) -> None:
         """A new stretch: the presses keyed after `after` (their MP not shown yet) go on into it."""
         self.keys = [k for k in self.keys if k > after]
-        self.shown, self.span, self.read, self.told = 0, 0.0, 0, None
+        self.shown, self.span, self.read, self.told, self.chat_read = 0, 0.0, 0, None, 0

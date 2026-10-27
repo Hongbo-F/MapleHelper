@@ -73,6 +73,10 @@ What a run gave is read from the simulated world, not from the bot's own reports
   pet_potions      of her HP potions (potions), those her pet drank (Her.pet: under its warning, world.PET_HP on Tree
                    Dungeon); her MP items are mp_potions
   ropes            how often the hunt loop went to wait on a rope (its rule 9: telemetry events kind 'rope')
+  rope_top         at a rope's top: her presses the game refused there that started out of darts' stretch again
+                   ('refused'), moves her dot never moved on ('rope_top': control.navigator._rope_top) and her climbs
+                   on after a touch ('climb_on': navigator.CLIMB_ON), telemetry events of those kinds; refused, her
+                   attacks the world refused on a rope
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances
@@ -184,6 +188,9 @@ WORLDS["client-body"] = {"her_box": HER_BOX_CLIENT}
 # as the stack read them live at 1366x768 until 2026-10-25 (perception.hud.hp_bar took the bar's black frame for its
 # fill: 488 of 567 bars read 0), so what a monster has left was her throws' reckoning alone (behavior.attacks).
 WORLDS["bars-empty"] = {"bars_empty": True}
+# ... and a touch knocking her off a rope (`rope-knocks`: Realism.rope_knocks), as the simulator had it until
+# 2026-10-27; the game keeps her on it (11 of 11 hits live on 2026-10-26), and so does the world since.
+WORLDS["rope-knocks"] = {"rope_knocks": True}
 # ... and her facing read the wrong way off 1% of her frames, in runs of one pose (world.Noise.heading_wrong): as weakly
 # as every frame read the wrong way on 2026-10-24 (0.31, 0.24 ahead: never strong, which her throws' taps go by), and,
 # the worst case, as surely as she's read right (0.6, 0.4 ahead: strong).
@@ -537,6 +544,9 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "knock_fall_dy": round(sum(k[3] for k in world.knock_log if k[0] <= end), 1),
         "pet_potions": world.pet_potions,
         "ropes": sum(1 for r in events if r.get("kind") == "rope"),
+        # (a rope's top: the game refusing her presses, a move her dot never moved on, her climb on after a touch)
+        "rope_top": {k: sum(1 for r in events if r.get("kind") == k) for k in ("refused", "rope_top", "climb_on")},
+        "refused": getattr(world, "refused", 0),  # her attacks refused on a rope (world.ROPE_REFUSAL)
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
 

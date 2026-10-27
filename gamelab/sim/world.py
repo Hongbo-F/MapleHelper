@@ -388,6 +388,9 @@ SIDE_INSET = 25.0
 ROPE_REACH_CLIENT = GRAB_SURE
 MESSAGE_FOR = 5.0        # s a pickup message stays in the log on screen
 FULL_MESSAGE = "You can't get anymore items."
+# The message bar's line when the game refuses an attack on a rope (live on 2026-10-26: perception.messages); it stays
+# up until another line replaces it (none does in the simulator)
+ROPE_REFUSAL = "That cannot be used while you're on a rope or ladder."
 ITEM_OF = {"pig": "leather"}  # (the first map's pigs; a kind not in it drops mesos alone)
 # What a kill drops in a world closer to the game's (Realism.drops; the harness's preset `game-drops`): for each
 # monster kind, each drop and the chance a kill drops it, as seen where her kills died on the first map in the hunts of
@@ -595,6 +598,9 @@ class Realism:
                                     # (ROPE_REACH_CLIENT: HeavenClient's)
     her_box: tuple[float, float] | None = None  # her body for touches, (half its width, its height): None, HER_HALF
                                                 # and HER_HEIGHT; HER_BOX_CLIENT, the client's (motion.bodies)
+    rope_knocks: bool = False    # a touch knocks her off a rope (as the simulator had it until 2026-10-27); False: she
+                                 # stays on it, her HP taken and her keys still held (up climbing on), as live on
+                                 # 2026-10-26: 11 of 11 hits on a rope left her on it (behavior.darts' false stops)
     knock_turns: bool = False    # a touch's knock turns her to face the monster: HeavenClient's Player::damage doesn't
                                  # (it never calls set_direction), and in the old recordings she never turned without
                                  # an arrow, but no recording has a knock with no arrow held (README, Her heading)
@@ -1104,6 +1110,8 @@ class World:
         self.wrong_way = 0
         self.picked: dict[str, int] = {}
         self.messages: list[tuple[float, str]] = []
+        self.chat: tuple[float, str] | None = None  # the message bar's game line, and since when (ROPE_REFUSAL)
+        self.refused = 0  # her attacks refused on a rope
         self.portals = [pt for pt in model.portals if pt.kind == PORTAL_EXIT]
         self.sides = _sides(model, self.realism.sides)
         self.arms = self.realism.rope_reach - JUMP_HEIGHT  # she grabs a rope this far above her feet (ARMS)
@@ -1414,7 +1422,11 @@ class World:
             # (_liftoff); with JUMP_TAKEN_LATE, one pressed just before she lands jumps her once she has.
             self._push(self._acts(at, self._lag("jump", LAGS.jump, LAGS.sd_jump)), "liftoff", self.mode)
         elif action in ("attack", "skill"):
-            if self.ms < self.attack_lock_ms or self.mode == "rope":
+            if self.mode == "rope":  # the game refuses it, and says so on the message bar
+                self.refused += 1
+                self.chat = (self.t, ROPE_REFUSAL)
+                return
+            if self.ms < self.attack_lock_ms:
                 return
             skill = action == "skill" and self.character.skill is not None
             if skill and self.darts_left is not None and self.darts_left < SKILL_STARS:
@@ -1704,6 +1716,8 @@ class World:
             self.note("HP 0: she died")
             return
         self._pet_drinks()
+        if self.mode == "rope" and not self.realism.rope_knocks:
+            return  # (on the rope still: no knock, her keys held)
         if self.mode == "rope":
             self._leave_rope()
         if self.realism.knock_turns:

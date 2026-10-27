@@ -52,6 +52,7 @@ from ..perception.eyes import Eyes, Observation
 from ..perception.heading import Reading
 from ..perception.hud import bar_box, draw_hp_bar
 from ..perception.loot import Item
+from ..perception.messages import ChatLine
 from ..perception.match import suppress_overlaps
 from ..perception.minimap import OTHER_SHIFT, PICTURE_BASE, Marker
 from ..perception.mobs import REFIND_PAD, Mob
@@ -99,6 +100,9 @@ DETECT_WIDE_S = 0.25            # ... on the whole screen: a wide look takes ~0.
 LOOT_S = 0.02             # per strip searched
 GLANCE_S = 0.035          # with Navigator.follow's 30 ms sleep, ~15 glances a second (as Navigator.follow says)
 MESSAGES_S = 0.4
+# The message bar (Eyes.chat_line): a frame from the feed and its pink px (a frame's wait, about), and the OCR of a line
+# not read before (perception.messages: 0.28 s CPU a read live)
+CHAT_S, CHAT_OCR_S = 0.035, 0.28
 EXP_START = (LEVEL_19.level, LEVEL_19.exp)  # her level and EXP when a run starts on the first map (World.character's)
 START_LATENCY = 0.01      # a plan starts this long after it's handed over (the player polls its inbox)
 RESULT_LATENCY = 0.01     # ... and its result is seen this long after it ends
@@ -472,6 +476,16 @@ class FakeEyes(Eyes):
         left = (hx + (p.left - w.x) * SCREEN_SCALE - GRASS_OVERHANG) / SCALE
         right = (hx + (p.right - w.x) * SCREEN_SCALE + GRASS_OVERHANG) / SCALE
         return max(0, min(her[0], round(left))), min(FRAME[1] - 1, max(her[0], round(right)))
+
+    def chat_line(self) -> ChatLine:
+        """The message bar's game line (World.chat: a refusal of hers on a rope), as Eyes.chat_line reads it: its text
+        read anew (CHAT_OCR_S) only when it's another line than the last read."""
+        self._now()
+        line = ChatLine(self.world.chat[1] if self.world.chat is not None else "", None, self.clock.now)
+        new = bool(line.text) and line.text != getattr(self, "_chat_read", "")
+        self._chat_read = line.text or getattr(self, "_chat_read", "")
+        self.clock.sleep(CHAT_S + (CHAT_OCR_S if new else 0.0))
+        return line
 
     def messages(self) -> str:
         self._now()

@@ -31,6 +31,23 @@ DOT_ORIGIN = (65.1, 91.3)
 # DOT_SNAP_LIFT above the dot's map position, within DOT_SNAP_REACH.
 DOT_SNAP_LIFT = 25
 DOT_SNAP_REACH = 50
+# ... but not by a rope that reaches up to that platform (hanging from it, ROPE_TOP_DY: motion.route's): there her dot
+# more than ROPE_TOP_GAP under its surface, within ROPE_TOP_X of the rope, is her on the rope (no platform), unless it's
+# where she'd stand on another platform. Snapped, the top 30-31 units of every rope hanging from a platform on the three
+# maps read her standing on it (D:/MapleHelper-scratch/rope/diag/snap_zones.py). Live on 2026-10-26 (Tree Dungeon,
+# Forest Up North II, 1366x768) a touch near the top of the rope at x 111 (19 -> 18) cut her climb and let go of up;
+# the game keeps her on a rope when touched (11 of 11 hits there), so she hung about 30 under 18's surface, her dot at
+# (101.3, -861.1), 31 under it, and was placed on 18 at x 113.3: her Lucky Seven presses refused there ("That cannot be
+# used while you're on a rope or ladder.") ended the hunt for out of darts three times that night (22:58:32, 23:11:49,
+# 23:12:42; behavior.darts). Over 2,046 chain starts of the tour's telemetry (10-24 to 10-26) her dot was a median 4.7
+# and at most 14.0 under the platform she stood on (8 between 12.5 and 14.0), never more by a rope's top; at a rope's
+# top she hung at 14.8 (22:19, 9 chain starts), 19.3, 22.2 and 30.8: so this catches 5 of the 6 hangs
+# (control.navigator's check of a move her dot never moved on is for the rest). Her dot's x read 101.6 hanging at x
+# 111 (one minimap px is 16 units at 1366x768).
+ROPE_TOP_X = 16      # map units
+ROPE_TOP_GAP = 17    # map units
+ROPE_TOP_DY = 20     # map units (motion.route.ROPE_TOP_DY)
+STAND_ABOVE = 8      # a platform this far under her dot (mapdata.FEET_BELOW) or ROPE_TOP_GAP over it she stands on
 
 # Map units on screen: the game lays out the same view at any window size (1366 x 768 at 1366x768; by the height's
 # stretch, which the camera's numbers were fitted with, 1365.3 x 768 at 1920x1080).
@@ -92,10 +109,24 @@ class Localizer:
         x, y = self.to_map(dot)
         # The dot is only good to ~1 px (11 map units); snap to the platform she's most likely on.
         platform = self.model.platform_under(x, y - DOT_SNAP_LIFT, reach=DOT_SNAP_REACH)
+        if platform is not None and self.on_rope_under(platform, x, y):
+            return Where(x, y, None, dot)  # (on the rope: as anywhere off the platforms, the dot's own place)
         if platform is not None:
             x = platform.clamp(x)
             y = platform.y_at(x)
         return Where(x, y, platform, dot)
+
+    def on_rope_under(self, p: Platform, x: float, y: float) -> bool:
+        """Whether her dot at map (x, y), which snaps onto platform `p`, has her on a rope under it instead: more than
+        ROPE_TOP_GAP under its surface, within ROPE_TOP_X of a rope reaching up to it (its top at most ROPE_TOP_DY under
+        the surface) and down past her, and not where she'd stand on another platform (STAND_ABOVE)."""
+        if y - p.y_at(p.clamp(x)) <= ROPE_TOP_GAP:
+            return False
+        if not any(abs(r.x - x) <= ROPE_TOP_X and p.covers(r.x, 4) and r.top <= p.y_at(r.x) + ROPE_TOP_DY
+                   and y <= r.bottom for r in self.model.ropes):
+            return False
+        return not any(q is not p and q.covers(x, 15) and -ROPE_TOP_GAP <= q.y_at(x) - y <= STAND_ABOVE
+                       for q in self.model.places)
 
     def anchor(self, dot: tuple[float, float], x: float, y: float) -> None:
         """Refit the origin from a dot seen while her feet were at a known map point."""
