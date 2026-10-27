@@ -302,13 +302,27 @@ EXPORT int fly(double x, double y, double vx, double vy, int arrow, double dt, d
  * West Rocky Mountain II, at scores of 0.24-0.32: tests/test_native_match.py). A monster's re-find window took 0.45 ms
  * against OpenCV's 1.57 (a 102 x 97 window, a 56 x 52 picture), a step-2 check 0.05 against 0.58, a drop's strip 0.28
  * against 0.68 (D:/MapleHelper-scratch/pconst/pnative/cmp_calls.py: one thread, best of 5).
- * The dot product goes 16 int16 products at a time (AVX2's madd), 8 places at once sharing each load of the template,
- * and only over each template row's 16-wide chunks the mask is in (its rows' `k0`, `k1`), where the CPU has AVX2
- * (checked at run time: the flags stay /fp:precise's, without /arch:AVX2, so the pieces above are compiled as ever);
- * else in plain C, the same integers. Its int32 lanes hold `flush` template rows of tw x cn products of at most 255^2
- * (each group then added in int64): every row at once for a 3-channel template up to about 105 x 105. The mask's sums
- * come from each image row's prefix sums, a run of mask pixels at a time (`runs`: row, from, to). The image and those
- * sums go into memory of the calling thread's own, kept from call to call (`scratch`): no allocation per match. */
+ * The dot products are worked out one of two ways, both exact integers, so the scores are the same to the bit:
+ *  - place by place (`dots_avx2`): 16 int16 products at a time (AVX2's madd), 8 places at once sharing each load of the
+ *    template, and only over each template row's 16-wide chunks the mask is in (its rows' `k0`, `k1`), where the CPU
+ *    has AVX2 (checked at run time: the flags stay /fp:precise's, without /arch:AVX2, so the pieces above are compiled
+ *    as ever); else in plain C (`dots_c`), the same integers. Its int32 lanes hold `flush` template rows of tw x cn
+ *    products of at most 255^2 (each group then added in int64): every row at once for a 3-channel template up to
+ *    about 105 x 105. This runs at the madd's own pace (0.42 ns a madd in registers, 0.49-0.56 with the loads, on
+ *    CPUs 12-23 of the Ryzen 9 5900X, half of them busy: D:/MapleHelper-scratch/pfast/kernel/peak.c), so it can only be
+ *    made cheaper by doing fewer: two result rows sharing each image load (7% faster, 2026-10-26) and a Cauchy-Schwarz
+ *    bound on the rows not yet summed (on 150 of the crowd's re-find matches, numpy: 68% of the products left with the
+ *    best known in advance; prune_sim.py) were measured and left out.
+ *  - every place at once (`ntt_*`), where it's cheaper (`ntt_least`: a re-find's window): as the correlation of the
+ *    window's channels with the template's, the products of their number-theoretic transforms (below). On the 10,698
+ *    re-find calls of the crowd's 600 frames (2026-10-26 01:01 [700:1300], recorded from master's step with
+ *    D:/MapleHelper-scratch/pfast/kernel/record_calls.py), through native.best_matches, ctypes and all (time_py.py: one
+ *    thread, best of 3, two rounds alternated with master's DLL, CPUs 12-23 57-67% busy), a call took 0.31-0.32 ms
+ *    against 0.61-0.62 (median), 0.60-0.66 against 1.89-1.94 (p90), 0.76-0.83 against 2.45-2.47 (p99), a frame's
+ *    re-finds 6.2-6.5 ms against 17.3-17.6 (mean), every answer the same to the bit (README, A cheaper masked match).
+ * The mask's sums come from each image row's prefix sums (each channel's apart), a run of mask pixels at a time (`runs`:
+ * row, from, to), 24 places at once in AVX2's registers. The image, those sums and the transforms' planes go into
+ * memory of the calling thread's own, kept from call to call (`scratch`): no allocation per match. */
 
 #if defined(_MSC_VER)
 #include <immintrin.h>
@@ -330,10 +344,13 @@ typedef struct {
     int flush;           /* template rows summed in the int32 lanes before going to int64 */
     int wide;            /* 1: the image's sum of squares under the mask needs int64 */
     int t_off;           /* where the template's rows are, in bytes from the start of this */
+    long long spec_off;  /* where its transform is (cn planes of NTT_PLANE values), or 0: none */
+    long long chunks;    /* the 16-wide chunks its rows' dot products take a place (dots_avx2's work) */
     long long n, A;      /* the mask's pixels; sum_c (n STT_c - ST_c^2) */
     long long ST[3];
     long long STT[3];
-    /* then: runs (3 ints each), k0 and k1 (an int each a row), the template's rows at t_off (int16, tpad each) */
+    /* then: runs (3 ints each), k0 and k1 (an int each a row), the template's rows at t_off (int16, tpad each), its
+     * transform at spec_off (64-byte aligned) */
 } Masked;
 
 static int *masked_runs(const Masked *p) { return (int *)(p + 1); }
@@ -371,18 +388,227 @@ EXPORT int mm_simd(int use)
     return simd;
 }
 
-/* The bytes mm_prepare needs for a th x tw template of cn channels. */
+/* --- the dot products by number-theoretic transform (AVX2) ---
+ * A window's dot products with a template at every place at once: the correlation of the window's channels with the
+ * template's, as the products of their transforms modulo the prime NTT_P (119 * 2^23 + 1: its multiplicative group has
+ * the 2^23rd roots of unity), on NTT_N x NTT_N planes, each channel zero-padded, the template's picture its cyclic
+ * reversal (so a place's products never wrap round: y + r < ih <= NTT_N). All in integers, so the sums are exact: a dot
+ * product is of non-negative values, at most 255 x the template's sum over its mask and channels, which mm_prepare
+ * checks is under NTT_P (else the template has no transform and is matched place by place). The forward transform
+ * decimates in frequency (natural order in, bit-reversed out), the inverse in time (bit-reversed in, natural out), so
+ * there's no reordering pass: the products are taken in the bit-reversed order both sides share. Each direction goes
+ * down a plane's columns, 8 at a time in AVX2's lanes, with a transpose between the two. Values are kept in
+ * [0, NTT_P); a product is Montgomery's (R = 2^32), the twiddles and the template's transform in Montgomery form, the
+ * template's scaled by NTT_N^-2 (the inverse's factor) as mm_prepare makes it. The window's transform is made once a
+ * call, for all its templates; each template then takes its products and one inverse, only the columns of its places.
+ * On the crowd's re-finds (above; pfast/kernel/bench.c with PROF, before the scores went 4 at a time): the window's
+ * transform 0.39 M cycles a call, a template's products and inverse 0.13 M, its sums and scores 0.24 M. */
+
+#define NTT_LOG 7
+#define NTT_N (1 << NTT_LOG)          /* a plane's side: windows up to this each way */
+#define NTT_PLANE (NTT_N * NTT_N)     /* its values (unsigned 32-bit) */
+#define NTT_G (NTT_N / 8)             /* its column groups of 8 */
+#define NTT_P 998244353u              /* 119 * 2^23 + 1; 3 generates its group */
+/* A template's dot products go by transform where its places x its 16-wide chunks (dots_avx2's work) come to this
+ * many. On the crowd's 10,698 re-find calls, their windows as recorded and cropped by 8, 16 and 20 px each side (42,530
+ * calls; pfast/kernel/bench2.c, both ways on each, best of 2): at a work of 200,000-300,000 the transform was faster
+ * in 24% of the calls, at 300,000-400,000 in 97%, past 600,000 in all; with the windows as they are (REFIND_PAD 16:
+ * 98 x 102, a 52 x 56 picture: 2,209 places, 413 chunks) 0.25 ms a call against 0.46 (median). */
+#define NTT_LEAST 300000LL
+
+static long long ntt_least = NTT_LEAST;           /* mm_ntt */
+static unsigned ntt_pinv;                         /* -NTT_P^-1 mod 2^32 */
+static unsigned ntt_fw[NTT_N], ntt_iw[NTT_N];     /* [half + i]: w^i, w^-i, w of order 2 half, in Montgomery form */
+static unsigned ntt_scale;                        /* NTT_N^-2 R^2 mod p: a template's transform into form, scaled */
+static volatile long ntt_ready;
+
+/* The least work (a template's places x its chunks) whose dot products go by transform: 0 wherever it can, a huge
+ * number never (the tests compare the two ways), -1 leaves it. Returns what's in use. */
+EXPORT long long mm_ntt(long long least)
+{
+    if (least >= 0)
+        ntt_least = least;
+    return ntt_least;
+}
+
+/* Whether template `tpl` (mm_prepare's) has its transform (the tests'). */
+EXPORT int mm_transformed(const void *tpl) { return ((const Masked *)tpl)->spec_off != 0; }
+
+static unsigned ntt_mul(unsigned a, unsigned b) { return (unsigned)((unsigned long long)a * b % NTT_P); }
+
+static unsigned ntt_pow(unsigned b, unsigned e)
+{
+    unsigned r = 1;
+    for (; e; e >>= 1, b = ntt_mul(b, b))
+        if (e & 1)
+            r = ntt_mul(r, b);
+    return r;
+}
+
+static unsigned ntt_form(unsigned a) { return (unsigned)(((unsigned long long)a << 32) % NTT_P); }  /* a R mod p */
+
+/* The tables, once (threads that race here write the same values, and x86 keeps the stores in order). */
+static void ntt_init(void)
+{
+    if (ntt_ready)
+        return;
+    unsigned inv = NTT_P;  /* NTT_P^-1 mod 2^32 by Newton's steps (3 bits right to start, twice as many each) */
+    for (int i = 0; i < 5; i++)
+        inv *= 2u - NTT_P * inv;
+    ntt_pinv = 0u - inv;
+    for (int half = 1; half < NTT_N; half <<= 1) {
+        unsigned w = ntt_pow(3, (NTT_P - 1) / (2 * half)), wi = ntt_pow(w, NTT_P - 2), a = 1, b = 1;
+        for (int i = 0; i < half; i++) {
+            ntt_fw[half + i] = ntt_form(a);
+            ntt_iw[half + i] = ntt_form(b);
+            a = ntt_mul(a, w);
+            b = ntt_mul(b, wi);
+        }
+    }
+    ntt_scale = ntt_form(ntt_form(ntt_pow(ntt_mul(NTT_N, NTT_N), NTT_P - 2)));
+#if defined(_MSC_VER)
+    _ReadWriteBarrier();
+#endif
+    ntt_ready = 1;
+}
+
+#if MM_AVX2
+/* a b R^-1 mod p in 8 lanes, for a b < 2^32 p (`bodd`: b's odd lanes in the even ones; b itself if all lanes alike). */
+static __forceinline __m256i ntt_mont(__m256i a, __m256i b, __m256i bodd, __m256i P, __m256i PINV)
+{
+    __m256i t0 = _mm256_mul_epu32(a, b);
+    __m256i t1 = _mm256_mul_epu32(_mm256_srli_epi64(a, 32), bodd);
+    __m256i u0 = _mm256_add_epi64(t0, _mm256_mul_epu32(_mm256_mul_epu32(t0, PINV), P));
+    __m256i u1 = _mm256_add_epi64(t1, _mm256_mul_epu32(_mm256_mul_epu32(t1, PINV), P));
+    __m256i r = _mm256_blend_epi32(_mm256_srli_epi64(u0, 32), u1, 0xAA);  /* in [0, 2p) */
+    return _mm256_min_epu32(r, _mm256_sub_epi32(r, P));
+}
+
+static __forceinline __m256i ntt_less(__m256i s, __m256i P) { return _mm256_min_epu32(s, _mm256_sub_epi32(s, P)); }
+
+#define NTT_LD(q) _mm256_loadu_si256((const __m256i *)(q))
+#define NTT_ST(q, v) _mm256_storeu_si256((__m256i *)(q), v)
+
+/* The forward transform down the columns of plane X (rows NTT_N apart) of column groups [g0, g1). A butterfly whose
+ * twiddle is 1 (the first of each block: 127 of 448) takes no product. */
+static void ntt_cols(unsigned *X, int g0, int g1)
+{
+    const __m256i P = _mm256_set1_epi32((int)NTT_P), PINV = _mm256_set1_epi32((int)ntt_pinv);
+    for (int half = NTT_N / 2; half >= 1; half >>= 1)
+        for (int j = 0; j < NTT_N; j += 2 * half)
+            for (int i = 0; i < half; i++) {
+                __m256i w = _mm256_set1_epi32((int)ntt_fw[half + i]);
+                unsigned *a = X + (long long)(j + i) * NTT_N, *b = a + (long long)half * NTT_N;
+                for (int g = g0; g < g1; g++) {
+                    __m256i u = NTT_LD(a + 8 * g), v = NTT_LD(b + 8 * g);
+                    __m256i d = _mm256_add_epi32(_mm256_sub_epi32(u, v), P);  /* in (0, 2p) */
+                    NTT_ST(a + 8 * g, ntt_less(_mm256_add_epi32(u, v), P));
+                    NTT_ST(b + 8 * g, i ? ntt_mont(d, w, w, P, PINV) : ntt_less(d, P));
+                }
+            }
+}
+
+/* The inverse (unscaled) down the columns of X of column groups [g0, g1). */
+static void ntt_icols(unsigned *X, int g0, int g1)
+{
+    const __m256i P = _mm256_set1_epi32((int)NTT_P), PINV = _mm256_set1_epi32((int)ntt_pinv);
+    for (int half = 1; half < NTT_N; half <<= 1)
+        for (int j = 0; j < NTT_N; j += 2 * half)
+            for (int i = 0; i < half; i++) {
+                __m256i w = _mm256_set1_epi32((int)ntt_iw[half + i]);
+                unsigned *a = X + (long long)(j + i) * NTT_N, *b = a + (long long)half * NTT_N;
+                for (int g = g0; g < g1; g++) {
+                    __m256i u = NTT_LD(a + 8 * g), v = NTT_LD(b + 8 * g);
+                    if (i)
+                        v = ntt_mont(v, w, w, P, PINV);
+                    NTT_ST(a + 8 * g, ntt_less(_mm256_add_epi32(u, v), P));
+                    NTT_ST(b + 8 * g, ntt_less(_mm256_add_epi32(_mm256_sub_epi32(u, v), P), P));
+                }
+            }
+}
+
+/* Rows [8 r0, 8 r1) of plane S into columns [8 r0, 8 r1) of plane D, 8 x 8 at a time. */
+static void ntt_transpose(const unsigned *S, unsigned *D, int r0, int r1)
+{
+    for (int bi = r0; bi < r1; bi++)
+        for (int bj = 0; bj < NTT_G; bj++) {
+            const unsigned *s = S + (long long)8 * bi * NTT_N + 8 * bj;
+            __m256i r[8], t[8], u[8];
+            for (int k = 0; k < 8; k++)
+                r[k] = NTT_LD(s + (long long)k * NTT_N);
+            for (int k = 0; k < 8; k += 2) {
+                t[k] = _mm256_unpacklo_epi32(r[k], r[k + 1]);
+                t[k + 1] = _mm256_unpackhi_epi32(r[k], r[k + 1]);
+            }
+            for (int k = 0; k < 8; k += 4) {
+                u[k] = _mm256_unpacklo_epi64(t[k], t[k + 2]);
+                u[k + 1] = _mm256_unpackhi_epi64(t[k], t[k + 2]);
+                u[k + 2] = _mm256_unpacklo_epi64(t[k + 1], t[k + 3]);
+                u[k + 3] = _mm256_unpackhi_epi64(t[k + 1], t[k + 3]);
+            }
+            unsigned *d = D + (long long)8 * bj * NTT_N + 8 * bi;
+            for (int k = 0; k < 4; k++) {
+                NTT_ST(d + (long long)k * NTT_N, _mm256_permute2x128_si256(u[k], u[k + 4], 0x20));
+                NTT_ST(d + (long long)(k + 4) * NTT_N, _mm256_permute2x128_si256(u[k], u[k + 4], 0x31));
+            }
+        }
+}
+
+/* Plane X's 2-D transform into W (X is used up): down its columns of groups [0, g) (the rest are zero), then across. */
+static void ntt_forward(unsigned *X, unsigned *W, int g)
+{
+    ntt_cols(X, 0, g);
+    ntt_transpose(X, W, 0, NTT_G);
+    ntt_cols(W, 0, NTT_G);
+}
+
+/* ntt_forward's undone from Z into W (Z is used up), only W's columns of groups [0, g). */
+static void ntt_inverse(unsigned *Z, unsigned *W, int g)
+{
+    ntt_icols(Z, 0, NTT_G);
+    ntt_transpose(Z, W, 0, g);
+    ntt_icols(W, 0, g);
+}
+
+/* Z = sum over the cn channels of F_c G_c R^-1 mod p (each a plane, one after another). */
+static void ntt_products(const unsigned *F, const unsigned *G, int cn, unsigned *Z)
+{
+    const __m256i P = _mm256_set1_epi32((int)NTT_P), PINV = _mm256_set1_epi32((int)ntt_pinv);
+    for (long long k = 0; k < NTT_PLANE; k += 8) {
+        __m256i acc = _mm256_setzero_si256();
+        for (int c = 0; c < cn; c++) {
+            __m256i f = NTT_LD(F + c * (long long)NTT_PLANE + k), g = NTT_LD(G + c * (long long)NTT_PLANE + k);
+            acc = ntt_less(_mm256_add_epi32(acc, ntt_mont(f, g, _mm256_srli_epi64(g, 32), P, PINV)), P);
+        }
+        NTT_ST(Z + k, acc);
+    }
+}
+
+/* Plane V times NTT_N^-2 R: a template's transform scaled, in Montgomery form. */
+static void ntt_scaled(unsigned *V)
+{
+    const __m256i P = _mm256_set1_epi32((int)NTT_P), PINV = _mm256_set1_epi32((int)ntt_pinv);
+    const __m256i s = _mm256_set1_epi32((int)ntt_scale);
+    for (long long k = 0; k < NTT_PLANE; k += 8)
+        NTT_ST(V + k, ntt_mont(NTT_LD(V + k), s, s, P, PINV));
+}
+#endif
+
+/* The bytes mm_prepare needs for a th x tw template of cn channels (with room for its transform if it fits a plane). */
 EXPORT long long mm_prepare_size(int th, int tw, int cn)
 {
     long long tpad = ((long long)tw * cn + 15) / 16 * 16;
     long long ints = 3LL * th * (tw / 2 + 1) + 2LL * th;
-    return (long long)sizeof(Masked) + 4 * ints + 32 + 2 * tpad * th;
+    long long spec = th <= NTT_N && tw <= NTT_N ? 4LL * cn * NTT_PLANE + 64 : 0;
+    return (long long)sizeof(Masked) + 4 * ints + 32 + 2 * tpad * th + spec;
 }
 
 /* A template made ready for mm_match and mm_best, into `buf` (`size` bytes: mm_prepare_size): its colours `tpl`
- * (pixel (y, x) channel c at tpl[y * trow + x * cn + c]) and its mask (mask[y * mrow + x * mpix], nonzero: in).
- * Returns 0, or -1 for what it doesn't take (another channel count; a template row too wide for the int32 lanes),
- * -2 if `size` is too small. */
+ * (pixel (y, x) channel c at tpl[y * trow + x * cn + c]) and its mask (mask[y * mrow + x * mpix], nonzero: in); and,
+ * where the CPU has AVX2 and the template fits a plane with its dot products under NTT_P, its transform (3 transforms
+ * of a plane, 0.1 ms). `buf` mustn't move afterwards (the transform is 64-byte aligned where it lies). Returns 0, or -1
+ * for what it doesn't take (another channel count; a template row too wide for the int32 lanes), -2 if `size` is too
+ * small. */
 EXPORT int mm_prepare(const unsigned char *tpl, long long trow, const unsigned char *mask, long long mrow, int mpix,
                       int th, int tw, int cn, void *buf, long long size)
 {
@@ -432,6 +658,7 @@ EXPORT int mm_prepare(const unsigned char *tpl, long long trow, const unsigned c
         }
         k0[y] = lo < 0 ? 0 : lo * cn / 16;          /* the 16-wide chunks of the row the mask is in */
         k1[y] = lo < 0 ? 0 : (hi * cn + 15) / 16;
+        p->chunks += k1[y] - k0[y];
     }
     p->nruns = nruns;
     for (int c = 0; c < cn; c++)
@@ -440,6 +667,33 @@ EXPORT int mm_prepare(const unsigned char *tpl, long long trow, const unsigned c
     long long rows = INT32_LIMIT / per_row;
     p->flush = rows >= th ? th : (int)rows;
     p->wide = p->n * cn * SQ255 > INT32_LIMIT;
+    p->spec_off = 0;
+#if MM_AVX2
+    long long most = 0;  /* the most a dot product can be: 255 x the template's sum */
+    for (int c = 0; c < cn; c++)
+        most += 255 * p->ST[c];
+    if (th <= NTT_N && tw <= NTT_N && most < NTT_P && has_avx2()) {
+        unsigned *X = (unsigned *)malloc(4 * (size_t)NTT_PLANE);
+        if (X) {
+            ntt_init();
+            long long at = (long long)p->t_off + 2LL * p->tpad * th;
+            unsigned char *base = (unsigned char *)p + at;
+            long long skip = (long long)((64 - (size_t)base % 64) % 64);
+            unsigned *G = (unsigned *)(base + skip);
+            for (int c = 0; c < cn; c++) {
+                memset(X, 0, 4 * (size_t)NTT_PLANE);
+                for (int y = 0; y < th; y++)  /* the picture's cyclic reversal: (y, x) at (-y, -x) */
+                    for (int x = 0; x < tw; x++)
+                        X[((NTT_N - y) & (NTT_N - 1)) * NTT_N + ((NTT_N - x) & (NTT_N - 1))] =
+                            (unsigned)T[(long long)y * p->tpad + x * cn + c];
+                ntt_forward(X, G + (long long)c * NTT_PLANE, NTT_G);
+                ntt_scaled(G + (long long)c * NTT_PLANE);
+            }
+            free(X);
+            p->spec_off = at + skip;
+        }
+    }
+#endif
     return 0;
 }
 
@@ -472,46 +726,70 @@ int __stdcall DllMain(void *instance, unsigned long reason, void *reserved)
 }
 #endif
 
-#define BLOCK 8  /* places a dot-product pass does at once */
+#define BLOCK 8      /* places a dot-product pass does at once */
+#define LANES 24     /* places the mask's sums do at once (3 AVX2 registers), and the room past a row they read */
+#define MAX_RUNS 512 /* runs the AVX2 sums take (more: in plain C) */
 
 typedef struct {
     int ih, iw, cn, ipad;
+    const unsigned char *img;
+    long long irow;
     short *I;           /* the image, int16, rows ipad apart, zeros past each row's end */
-    int *P1;            /* each row's prefix sums of each channel: P1[(row * (iw + 1) + x) * cn + c] */
+    int *P1;            /* each row's prefix sums of each channel: P1[(c * ih + row) * (iw + 1) + x] */
     int *P2;            /* ... and of the squares, the channels summed: P2[row * (iw + 1) + x] */
-    int *S1;            /* a result row's sums under the mask: S1[x * cn + c] */
+    int *S1;            /* a result row's sums under the mask: S1[c * s1s + x] */
+    int s1s;
     long long *S2;      /* ... of the squares (int32 in its first half unless the template is `wide`) */
     long long *DOT;     /* ... its dot products */
     float *out;         /* a result, for mm_best */
+    int ntt, spec;      /* room for the transforms; the image's (F) made */
+    unsigned *F;        /* the image's transform: a plane a channel */
+    unsigned *X, *Z, *W;/* planes to work in */
 } Picture;
 
 static size_t align64(size_t n) { return (n + 63) / 64 * 64; }
 
 /* The image (pixel (y, x) channel c at img[y * irow + x * cn + c]) loaded into the thread's scratch: its rows as
- * int16 and their prefix sums. 0, or -1 if it can't be (a row too wide for the int32 sums, no memory). */
-static int load(Picture *im, const unsigned char *img, int ih, int iw, long long irow, int cn)
+ * int16 and their prefix sums; with `ntt`, room for its transform and the planes to work in. 0, or -1 if it can't be
+ * (a row too wide for the int32 sums, no memory). */
+static int load(Picture *im, const unsigned char *img, int ih, int iw, long long irow, int cn, int ntt)
 {
     if ((long long)iw * cn * SQ255 > INT32_LIMIT || ih <= 0 || iw <= 0)
         return -1;
-    int ipad = iw * cn + BLOCK * cn + 32;
-    size_t sI = align64(sizeof(short) * (size_t)ipad * ih), sP1 = align64(sizeof(int) * (size_t)(iw + 1) * cn * ih);
-    size_t sP2 = align64(sizeof(int) * (size_t)(iw + 1) * ih), sS1 = align64(sizeof(int) * (size_t)iw * cn);
-    size_t sS2 = align64(sizeof(long long) * (size_t)(iw + BLOCK)), sOut = align64(sizeof(float) * (size_t)iw * ih);
-    unsigned char *s = scratch(sI + sP1 + sP2 + sS1 + 2 * sS2 + sOut);
+    int ipad = iw * cn + BLOCK * cn + 32, s1s = iw + LANES;
+    size_t sI = align64(sizeof(short) * (size_t)ipad * ih);
+    size_t sP1 = align64(sizeof(int) * ((size_t)(iw + 1) * cn * ih + LANES));
+    size_t sP2 = align64(sizeof(int) * ((size_t)(iw + 1) * ih + LANES)), sS1 = align64(sizeof(int) * (size_t)s1s * cn);
+    size_t sS2 = align64(sizeof(long long) * (size_t)(iw + LANES)), sOut = align64(sizeof(float) * (size_t)iw * ih);
+    size_t sPl = ntt ? 4 * (size_t)NTT_PLANE * (cn + 3) + 64 : 0;
+    unsigned char *s = scratch(sI + sP1 + sP2 + sS1 + 2 * sS2 + sOut + sPl);
     if (!s)
         return -1;
     im->ih = ih;
     im->iw = iw;
     im->cn = cn;
     im->ipad = ipad;
+    im->img = img;
+    im->irow = irow;
     im->I = (short *)s;
     im->P1 = (int *)(s + sI);
     im->P2 = (int *)(s + sI + sP1);
     im->S1 = (int *)(s + sI + sP1 + sP2);
+    im->s1s = s1s;
     im->S2 = (long long *)(s + sI + sP1 + sP2 + sS1);
     im->DOT = (long long *)(s + sI + sP1 + sP2 + sS1 + sS2);
     im->out = (float *)(s + sI + sP1 + sP2 + sS1 + 2 * sS2);
+    im->ntt = ntt;
+    im->spec = 0;
+    if (ntt) {
+        unsigned char *pl = s + sI + sP1 + sP2 + sS1 + 2 * sS2 + sOut;
+        im->F = (unsigned *)(pl + (64 - (size_t)pl % 64) % 64);
+        im->X = im->F + (size_t)NTT_PLANE * cn;
+        im->Z = im->X + NTT_PLANE;
+        im->W = im->Z + NTT_PLANE;
+    }
     int irow_n = iw * cn;
+    long long cs = (long long)ih * (iw + 1);  /* a channel's prefix sums */
     for (int y = 0; y < ih; y++) {
         const unsigned char *src = img + y * irow;
         short *dst = im->I + (long long)y * ipad;
@@ -519,15 +797,15 @@ static int load(Picture *im, const unsigned char *img, int ih, int iw, long long
             dst[k] = src[k];
         for (int k = irow_n; k < ipad; k++)
             dst[k] = 0;
-        int *p1 = im->P1 + (long long)y * (iw + 1) * cn, *p2 = im->P2 + (long long)y * (iw + 1);
+        int *p1 = im->P1 + (long long)y * (iw + 1), *p2 = im->P2 + (long long)y * (iw + 1);
         for (int c = 0; c < cn; c++)
-            p1[c] = 0;
+            p1[c * cs] = 0;
         p2[0] = 0;
         for (int x = 0; x < iw; x++) {
             int sq = 0;
             for (int c = 0; c < cn; c++) {
                 int v = src[x * cn + c];
-                p1[(x + 1) * cn + c] = p1[x * cn + c] + v;
+                p1[c * cs + x + 1] = p1[c * cs + x] + v;
                 sq += v * v;
             }
             p2[x + 1] = p2[x] + sq;
@@ -596,52 +874,176 @@ static void dots_c(const Picture *im, const Masked *p, int y, int rw, long long 
     }
 }
 
-/* The scores of template `p` at every place of the loaded image, into `out` (rh x rw). */
-static void match_loaded(const Picture *im, const Masked *p, float *out)
+/* Result row y's sums under the mask: S1 (each channel's) and S2 (int32, or int64 for a `wide` template). */
+static void sums(const Picture *im, const Masked *p, int y, int rw)
 {
-    int cn = p->cn, iw = im->iw, rh = im->ih - p->th + 1, rw = iw - p->tw + 1;
+    int cn = p->cn, iw = im->iw, s1s = im->s1s;
+    long long cs = (long long)im->ih * (iw + 1);
     const int *runs = masked_runs(p);
     int *S1 = im->S1;
-    long long *S2 = im->S2, *DOT = im->DOT;
+    long long *S2 = im->S2;
     int *S2i = (int *)S2;
-    for (int y = 0; y < rh; y++) {
-        memset(S1, 0, sizeof(int) * (size_t)rw * cn);
-        memset(S2, 0, sizeof(long long) * (size_t)rw);
-        for (int q = 0; q < p->nruns; q++) {
-            int ry = runs[3 * q], a = runs[3 * q + 1], b = runs[3 * q + 2];
-            const int *p1 = im->P1 + (long long)(y + ry) * (iw + 1) * cn;
-            const int *pa = p1 + (long long)a * cn, *pb = p1 + (long long)b * cn;
-            int m = rw * cn;
-            for (int k = 0; k < m; k++)
-                S1[k] += pb[k] - pa[k];
-            const int *p2 = im->P2 + (long long)(y + ry) * (iw + 1);
-            const int *qa = p2 + a, *qb = p2 + b;
-            if (p->wide) {
-                for (int x = 0; x < rw; x++)
-                    S2[x] += qb[x] - qa[x];
-            } else {
-                for (int x = 0; x < rw; x++)
-                    S2i[x] += qb[x] - qa[x];
-            }
-        }
 #if MM_AVX2
-        if (simd)
-            dots_avx2(im, p, y, rw, DOT);
-        else
+    if (simd && !p->wide && p->nruns <= MAX_RUNS) {  /* LANES sums at a time in registers, over all the runs */
+        const int *pa[MAX_RUNS], *pb[MAX_RUNS], *qa[MAX_RUNS], *qb[MAX_RUNS];
+        int nr = p->nruns;
+        for (int q = 0; q < nr; q++) {
+            int ry = runs[3 * q], a = runs[3 * q + 1], b = runs[3 * q + 2];
+            const int *p1 = im->P1 + (long long)(y + ry) * (iw + 1), *p2 = im->P2 + (long long)(y + ry) * (iw + 1);
+            pa[q] = p1 + a;
+            pb[q] = p1 + b;
+            qa[q] = p2 + a;
+            qb[q] = p2 + b;
+        }
+#define DIFF(u, v, k) _mm256_sub_epi32(_mm256_loadu_si256((const __m256i *)((u) + (k))), \
+                                       _mm256_loadu_si256((const __m256i *)((v) + (k))))
+#define RUNS(hi, lo, off, to) \
+        for (int x = 0; x < rw; x += LANES) { \
+            __m256i a0 = _mm256_setzero_si256(), a1 = a0, a2 = a0; \
+            for (int q = 0; q < nr; q++) { \
+                a0 = _mm256_add_epi32(a0, DIFF(hi[q] + (off), lo[q] + (off), x)); \
+                a1 = _mm256_add_epi32(a1, DIFF(hi[q] + (off), lo[q] + (off), x + 8)); \
+                a2 = _mm256_add_epi32(a2, DIFF(hi[q] + (off), lo[q] + (off), x + 16)); \
+            } \
+            _mm256_storeu_si256((__m256i *)((to) + x), a0); \
+            _mm256_storeu_si256((__m256i *)((to) + x + 8), a1); \
+            _mm256_storeu_si256((__m256i *)((to) + x + 16), a2); \
+        }
+        for (int c = 0; c < cn; c++)
+            RUNS(pb, pa, c * cs, S1 + (long long)c * s1s)
+        RUNS(qb, qa, 0, S2i)
+#undef RUNS
+#undef DIFF
+        _mm256_zeroupper();
+        return;
+    }
 #endif
-            dots_c(im, p, y, rw, DOT);
-        float *o = out + (long long)y * rw;
-        for (int x = 0; x < rw; x++) {
-            long long N = p->n * DOT[x], B = p->n * (p->wide ? S2[x] : (long long)S2i[x]);
-            for (int c = 0; c < cn; c++) {
-                long long s1 = S1[(long long)x * cn + c];
-                N -= p->ST[c] * s1;
-                B -= s1 * s1;
-            }
-            double den = (double)p->A * (double)B;
-            o[x] = den > 0 ? (float)((double)N / sqrt(den)) : -1.0f;
+    for (int c = 0; c < cn; c++)
+        memset(S1 + (long long)c * s1s, 0, sizeof(int) * (size_t)rw);
+    memset(S2, 0, sizeof(long long) * (size_t)rw);
+    for (int q = 0; q < p->nruns; q++) {
+        int ry = runs[3 * q], a = runs[3 * q + 1], b = runs[3 * q + 2];
+        for (int c = 0; c < cn; c++) {
+            const int *p1 = im->P1 + c * cs + (long long)(y + ry) * (iw + 1);
+            int *s1 = S1 + (long long)c * s1s;
+            for (int x = 0; x < rw; x++)
+                s1[x] += p1[b + x] - p1[a + x];
+        }
+        const int *p2 = im->P2 + (long long)(y + ry) * (iw + 1);
+        const int *qa = p2 + a, *qb = p2 + b;
+        if (p->wide) {
+            for (int x = 0; x < rw; x++)
+                S2[x] += qb[x] - qa[x];
+        } else {
+            for (int x = 0; x < rw; x++)
+                S2i[x] += qb[x] - qa[x];
         }
     }
+}
+
+/* Place x's score from its dot product and the row's sums (sums'). */
+static float score_at(const Picture *im, const Masked *p, int x, long long dot)
+{
+    long long N = p->n * dot, B = p->n * (p->wide ? im->S2[x] : (long long)((const int *)im->S2)[x]);
+    for (int c = 0; c < p->cn; c++) {
+        long long s1 = im->S1[(long long)c * im->s1s + x];
+        N -= p->ST[c] * s1;
+        B -= s1 * s1;
+    }
+    double den = (double)p->A * (double)B;
+    return den > 0 ? (float)((double)N / sqrt(den)) : -1.0f;
+}
+
+/* Result row y's scores into `o` from its dot products: DOT (int64), or D32 (the transform's, which are under NTT_P).
+ * With D32 and a template that isn't `wide`, 4 places at a time in double, the same arithmetic to the bit: N, B and A
+ * are integers under 2^53 there (n <= NTT_N^2, a dot product under NTT_P, each S1_c at most 255 n and S2 under 2^31,
+ * A at most n x 255 x the template's sum < n x 255 x NTT_P / 255), so each is the int64's exactly, and A B, the square
+ * root, the quotient and the float are each rounded once, as score_at's (IEEE, round to nearest). */
+static void row_scores(const Picture *im, const Masked *p, int y, int rw, const long long *DOT,
+                       const unsigned *D32, float *o)
+{
+    sums(im, p, y, rw);
+    int x = 0;
+#if MM_AVX2
+    if (D32 && simd && !p->wide) {
+        const int *S2i = (const int *)im->S2;
+        __m256d n = _mm256_set1_pd((double)p->n), A = _mm256_set1_pd((double)p->A), none = _mm256_set1_pd(-1.0);
+        __m256d zero = _mm256_setzero_pd(), one = _mm256_set1_pd(1.0);
+        for (; x + 4 <= rw; x += 4) {
+            __m256d dot = _mm256_cvtepi32_pd(_mm_loadu_si128((const __m128i *)(D32 + x)));  /* (under 2^31) */
+            __m256d N = _mm256_mul_pd(n, dot);
+            __m256d B = _mm256_mul_pd(n, _mm256_cvtepi32_pd(_mm_loadu_si128((const __m128i *)(S2i + x))));
+            for (int c = 0; c < p->cn; c++) {
+                __m256d s1 = _mm256_cvtepi32_pd(_mm_loadu_si128((const __m128i *)(im->S1 + (long long)c * im->s1s + x)));
+                N = _mm256_sub_pd(N, _mm256_mul_pd(_mm256_set1_pd((double)p->ST[c]), s1));
+                B = _mm256_sub_pd(B, _mm256_mul_pd(s1, s1));
+            }
+            __m256d den = _mm256_mul_pd(A, B), some = _mm256_cmp_pd(den, zero, _CMP_GT_OQ);
+            __m256d r = _mm256_div_pd(N, _mm256_sqrt_pd(_mm256_blendv_pd(one, den, some)));  /* (no 0/0 where it's -1) */
+            r = _mm256_blendv_pd(none, r, some);
+            _mm_storeu_ps(o + x, _mm256_cvtpd_ps(r));
+        }
+        _mm256_zeroupper();
+    }
+#endif
+    for (; x < rw; x++)
+        o[x] = score_at(im, p, x, D32 ? (long long)D32[x] : DOT[x]);
+}
+
+/* The scores of template `p` at every place of the loaded image, into `out` (rh x rw): by transform where it's cheaper
+ * (ntt_least) and there's room for it, else place by place. */
+static void match_loaded(Picture *im, const Masked *p, float *out)
+{
+    int rh = im->ih - p->th + 1, rw = im->iw - p->tw + 1;
+#if MM_AVX2
+    if (simd && im->ntt && p->spec_off && (long long)rh * rw * p->chunks >= ntt_least) {
+        int cn = im->cn;
+        if (!im->spec) {  /* the window's transform, once for the call's templates */
+            for (int c = 0; c < cn; c++) {
+                memset(im->X, 0, 4 * (size_t)NTT_PLANE);
+                for (int y = 0; y < im->ih; y++) {
+                    const unsigned char *src = im->img + y * im->irow + c;
+                    unsigned *dst = im->X + (long long)y * NTT_N;
+                    for (int x = 0; x < im->iw; x++)
+                        dst[x] = src[x * cn];
+                }
+                ntt_forward(im->X, im->F + (long long)c * NTT_PLANE, (im->iw + 7) / 8);
+            }
+            im->spec = 1;
+        }
+        ntt_products(im->F, (const unsigned *)((const char *)p + p->spec_off), cn, im->Z);
+        ntt_inverse(im->Z, im->W, (rw + 7) / 8);
+        for (int y = 0; y < rh; y++)
+            row_scores(im, p, y, rw, 0, im->W + (long long)y * NTT_N, out + (long long)y * rw);
+        return;
+    }
+#endif
+    for (int y = 0; y < rh; y++) {
+#if MM_AVX2
+        if (simd)
+            dots_avx2(im, p, y, rw, im->DOT);
+        else
+#endif
+            dots_c(im, p, y, rw, im->DOT);
+        row_scores(im, p, y, rw, im->DOT, 0, out + (long long)y * rw);
+    }
+}
+
+/* Whether any of the n templates would go by transform over an ih x iw image (load's room for it). */
+static int wants_ntt(const void *const *tpls, int n, int ih, int iw)
+{
+#if MM_AVX2
+    if (!simd || ih > NTT_N || iw > NTT_N)
+        return 0;
+    for (int i = 0; i < n; i++) {
+        const Masked *p = (const Masked *)tpls[i];
+        if (p->spec_off && (long long)(ih - p->th + 1) * (iw - p->tw + 1) * p->chunks >= ntt_least)
+            return 1;
+    }
+#else
+    (void)tpls; (void)n; (void)ih; (void)iw;
+#endif
+    return 0;
 }
 
 /* Template `tpl` (mm_prepare's) matched at every place of the image (pixel (y, x) channel c at img[y * irow + x * cn +
@@ -653,7 +1055,7 @@ EXPORT int mm_match(const unsigned char *img, int ih, int iw, long long irow, in
     Picture im;
     if (simd < 0)
         mm_simd(1);
-    if (cn != p->cn || ih < p->th || iw < p->tw || load(&im, img, ih, iw, irow, cn) != 0)
+    if (cn != p->cn || ih < p->th || iw < p->tw || load(&im, img, ih, iw, irow, cn, wants_ntt(&tpl, 1, ih, iw)) != 0)
         return -1;
     match_loaded(&im, p, out);
     return 0;
@@ -662,7 +1064,7 @@ EXPORT int mm_match(const unsigned char *img, int ih, int iw, long long irow, in
 /* Each of `n` templates in turn (mm_prepare's) matched over the image (as mm_match's), and its best score and place
  * as cv2.minMaxLoc gives them: the first highest in row-major order, into scores, xs and ys; after the first whose
  * best is `stop` or more, no more. Returns how many were matched, or -1 if one can't be (as mm_match). The image is
- * loaded once for them all. */
+ * loaded once for them all, and its transform made once if any goes by transform. */
 EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int cn, const void *const *tpls, int n,
                    double stop, float *scores, int *xs, int *ys)
 {
@@ -674,7 +1076,7 @@ EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int
         if (cn != p->cn || ih < p->th || iw < p->tw)
             return -1;
     }
-    if (load(&im, img, ih, iw, irow, cn) != 0)
+    if (load(&im, img, ih, iw, irow, cn, wants_ntt(tpls, n, ih, iw)) != 0)
         return -1;
     for (int i = 0; i < n; i++) {
         const Masked *p = (const Masked *)tpls[i];

@@ -265,3 +265,137 @@ def test_a_refinds_pictures_are_matched_in_one_call_as_far_as_theyre_looked_at(m
     assert list(found) == each[2:] and calls == [4, 2]               # the rest only if the caller goes on
     calls.clear()
     assert list(match.best_matches(image, pictures)) == each and calls == [4]
+
+
+# --- the dot products by transform (native.c, ntt_*) ----------------------------------------------------------------
+
+BY_TRANSFORM, PLACE_BY_PLACE = 0, 1 << 62  # native.c's mm_ntt: the least work that goes by transform
+
+
+@pytest.fixture
+def ways():
+    """Each of the C's ways to the same scores, by name: by transform wherever it can, place by place (AVX2's madd,
+    as before the transform), and plain C; the C left as it was after."""
+    f = native.lib()
+    on, least = f.mm_simd(-1), f.mm_ntt(-1)
+
+    def run(way: str, call):
+        f.mm_simd(0 if way == "plain C" else 1)
+        f.mm_ntt(BY_TRANSFORM if way == "transform" else PLACE_BY_PLACE)
+        try:
+            return call()
+        finally:
+            f.mm_simd(on)
+            f.mm_ntt(least)
+    yield run
+    f.mm_simd(on)
+    f.mm_ntt(least)
+
+
+def bits(found):
+    """mm_best's answers with each score as its float32's bits (an exact comparison, -0.0 and NaN told apart)."""
+    return [(np.float32(s).tobytes(), x, y) for s, x, y in found]
+
+
+def cut_out(seed: int, size, tsize, cn: int, at, empty=()):
+    """A random scene, the picture cut from it at `at` (y, x) and a random mask, `empty` of its rows left out."""
+    rng = np.random.default_rng(seed)
+    image = rng.integers(0, 256, (*size, cn) if cn == 3 else size, np.uint8)
+    template = image[at[0]:at[0] + tsize[0], at[1]:at[1] + tsize[1]].copy()
+    mask = (rng.random(tsize) > 0.3).astype(np.uint8)
+    mask[list(empty)] = 0
+    return image, template, np.dstack([mask] * 3) if cn == 3 else mask
+
+
+@pytest.mark.parametrize("size, tsize, cn, at, empty", [
+    ((98, 102), (52, 56), 3, (20, 30), ()),       # a re-find's window and picture (REFIND_PAD 16 around 66 x 70)
+    ((98, 102), (52, 56), 1, (20, 30), ()),       # on brightness
+    ((52, 56), (52, 56), 3, (0, 0), ()),          # the window the template's size: one place
+    ((60, 128), (40, 128), 3, (11, 0), (0, 1, 39)),  # a picture as wide as a plane, its first two and last rows empty
+    ((128, 128), (30, 26), 3, (90, 100), range(5, 12)),  # the window a whole plane, seven rows of the mask empty
+    ((70, 90), (1, 1), 3, (11, 17), ()),          # one pixel (flat: -1 everywhere, as OpenCV's NaN)
+    ((90, 70), (90, 9), 1, (0, 17), ()),          # as tall as the window
+])
+def test_by_transform_place_by_place_and_in_plain_c_the_scores_are_the_same_to_the_bit(ways, size, tsize, cn, at,
+                                                                                       empty):
+    image, template, mask = cut_out(11, size, tsize, cn, at, empty)
+    f = native.lib()
+    ready = ways("transform", lambda: native.prepare_masked(template, mask))
+    assert ready is not None and f.mm_transformed(ready.address) == 1
+    out = {w: ways(w, lambda: native.masked_match(image, ready)) for w in ("transform", "place by place", "plain C")}
+    best = {w: ways(w, lambda: native.best_matches(image, [ready])) for w in out}
+    assert np.array_equal(out["transform"].view(np.uint32), out["place by place"].view(np.uint32))
+    assert np.array_equal(out["transform"].view(np.uint32), out["plain C"].view(np.uint32))
+    assert bits(best["transform"]) == bits(best["place by place"]) == bits(best["plain C"])
+    ref = opencv(image, template, mask)
+    assert np.abs(out["transform"].astype(np.float64) - ref).max() < 3e-5
+    assert best["transform"][0][1:] == cv2.minMaxLoc(ref)[3]
+
+
+def test_a_dark_template_too_big_for_the_int32_sums_of_squares_goes_by_transform_with_int64_sums(ways):
+    # (`wide`: 110 x 110 x 3 mask pixels' squares can pass 2^31; its dot products stay under NTT_P, its colours at most 30)
+    rng = np.random.default_rng(12)
+    image = rng.integers(0, 256, (120, 124, 3), np.uint8)
+    template = (image[4:114, 9:119] // 9).astype(np.uint8)
+    image[4:114, 9:119] = template
+    mask = np.dstack([(rng.random((110, 110)) > 0.02).astype(np.uint8)] * 3)
+    ready = native.prepare_masked(template, mask)
+    assert ready is not None and native.lib().mm_transformed(ready.address) == 1
+    out = {w: ways(w, lambda: native.masked_match(image, ready)) for w in ("transform", "place by place")}
+    assert np.array_equal(out["transform"].view(np.uint32), out["place by place"].view(np.uint32))
+    assert out["transform"][4, 9] == 1.0 and cv2.minMaxLoc(out["transform"])[3] == (9, 4)
+
+
+def test_a_template_whose_dot_products_could_reach_the_prime_or_a_window_past_a_plane_goes_place_by_place(ways):
+    rng = np.random.default_rng(13)
+    bright = np.full((100, 100, 3), 250, np.uint8)
+    bright[::3] = 10  # 255 x its sum: 1.3e9, over NTT_P
+    mask = np.ones((100, 100, 3), np.uint8)
+    image = rng.integers(0, 256, (120, 120, 3), np.uint8)
+    image[7:107, 3:103] = bright
+    ready = native.prepare_masked(bright, mask)
+    assert ready is not None and native.lib().mm_transformed(ready.address) == 0
+    out = ways("transform", lambda: native.masked_match(image, ready))
+    assert np.abs(out.astype(np.float64) - opencv(image, bright, mask)).max() < 3e-5 and out[7, 3] == 1.0
+    big, template, small = scene_and_picture(14, (140, 130), (40, 44))  # 140 rows: past a plane's 128
+    r = native.prepare_masked(template, small)
+    assert native.lib().mm_transformed(r.address) == 1
+    a, b = (ways(w, lambda: native.masked_match(big, r)) for w in ("transform", "place by place"))
+    assert np.array_equal(a.view(np.uint32), b.view(np.uint32)) and a[11, 17] == 1.0
+
+
+def test_by_transform_a_call_stops_at_the_first_picture_reaching_stop_and_ties_go_to_the_first_row_by_row(ways):
+    rng = np.random.default_rng(15)
+    template = rng.integers(0, 256, (30, 34, 3), np.uint8)
+    mask = np.dstack([(rng.random((30, 34)) > 0.2).astype(np.uint8)] * 3)
+    image = rng.integers(0, 256, (100, 110, 3), np.uint8)
+    for x, y in ((60, 10), (5, 40), (40, 40)):  # three times: 1.0 at each, the first row by row at (60, 10)
+        image[y:y + 30, x:x + 34] = template
+    other = np.ascontiguousarray(template[::-1])
+    ready = [native.prepare_masked(t, mask) for t in (template, other, template)]
+    for w in ("transform", "place by place", "plain C"):
+        found = ways(w, lambda: native.best_matches(image, ready, stop=0.9))
+        assert bits(found) == [(np.float32(1.0).tobytes(), 60, 10)]  # the first reached it: no more
+        everything = ways(w, lambda: native.best_matches(image, ready))
+        assert len(everything) == 3 and everything[0] == everything[2] == (1.0, 60, 10) and everything[1][0] < 0.9
+    flat = np.zeros_like(image)  # every place -1: the first
+    assert ways("transform", lambda: native.best_matches(flat, ready[:1])) == [(-1.0, 0, 0)]
+
+
+def test_the_refinds_matches_by_transform_are_place_by_places_and_plain_cs_to_the_bit(first_map, monkeypatch,  # noqa: F811
+                                                                                     ways):
+    needs_game_data()
+    rec = Recorder(monkeypatch)
+    det = sprites.detector_for(first_map, NATIVE)
+    ways("transform", lambda: pasted.refinds([frame(n) for n in FRAMES], {"native": (det, NATIVE)},
+                                             sprites.folder_for(1.0), (140, 75), seed=6, kinds={"pig"}))
+    transformed = 0
+    for i, (kind, image, ready, out) in enumerate(list(rec.calls)):
+        if kind != "best":
+            continue
+        transformed += any(native.lib().mm_transformed(r.address) for r in ready)
+        again = ways("place by place", lambda: native.best_matches(image, ready))
+        assert bits(out) == bits(again[:len(out)]), i
+        if i % 10 == 0:  # (plain C is slow)
+            assert bits(out) == bits(ways("plain C", lambda: native.best_matches(image, ready))[:len(out)]), i
+    assert transformed > 100

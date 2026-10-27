@@ -1,7 +1,8 @@
 """gamelab's pieces in C (native.c), where Python itself was the cost: the monster search's step-1 bookkeeping,
 which numpy did holding Python's lock (perception.mobs), and her flight, stepped 5 ms at a time by the movement
 engine (motion.body.fly, as motion.physics.flight flies her); and where OpenCV was: the masked colour match
-(perception.match: the monsters' re-finds and step-2 checks, the drops), OpenCV's score worked out exactly.
+(perception.match: the monsters' re-finds and step-2 checks, the drops), OpenCV's score worked out exactly, a
+re-find's window's dot products all at once by number-theoretic transform (native.c's ntt_*: exact, the same scores).
 Called through ctypes, which lets go of the lock for the call. Each but the masked match does what the Python it
 stands in for does, to the bit, and each caller does it in Python (or OpenCV) when the DLL isn't there (tests compare
 the two; OpenCV's masked scores were within 1e-6 of the C's in colour and 3e-5 on brightness on a crowd's frames, a
@@ -49,6 +50,8 @@ SIGNATURES = {  # each function's (return type, argument types)
     "mm_prepare": (_I, [_P, _L, _P, _L, _I, _I, _I, _I, _P, _L]),
     "mm_match": (_I, [_P, _I, _I, _L, _I, _P, _P]),
     "mm_best": (_I, [_P, _I, _I, _L, _I, _P, _I, _D, _P, _P, _P]),
+    "mm_ntt": (_L, [_L]),
+    "mm_transformed": (_I, [_P]),
 }
 
 
@@ -168,7 +171,10 @@ def prepare_masked(template: np.ndarray, mask: np.ndarray) -> Masked | None:
     masked matches of 60 frames of a crowd (01:01 [700:760], 1,293 of them, and 1,601 with the drops'; one thread, best
     of 3, the machine idle), 5.4 s against OpenCV's 1.6 and 5.2 against 1.4, a re-find's window 7.3 ms against 1.8
     (its step-2 checks 0.31 against 0.53, the one kind it was faster at): D:/MapleHelper-scratch/pconst/pnative-finish/
-    simd_bench.py. (The tests compare the plain C with AVX2 on templates made ready while it was on.)"""
+    simd_bench.py. (The tests compare the plain C with AVX2 on templates made ready while it was on.)
+    A template that fits the transform's plane (128 x 128) and whose dot products stay under its prime (255 x its sum)
+    is made ready with its transform too, for the windows with many places (a re-find's): 64 KB a channel, 192 KB a
+    colour template, three transforms of a plane at making (about 0.1 ms; native.c, mm_prepare)."""
     f = lib()
     if not masked_in_c() or template.dtype != np.uint8 or mask.dtype != np.uint8:
         return None
