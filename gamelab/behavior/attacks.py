@@ -7,9 +7,11 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
   monsters (ledger.in_path: the claw's stance, else the star's search's first band) that isn't likelier dead than
   alive by her throws (DEAD_LIKELY: one is, and the star takes the next), else the one she last threw at that way
   within fight.HIDDEN_FOR (hit, it hides under its damage numbers), one not likely dead first, else none: then
-  nothing seen is in its way, and it's the regular attack (no MP thrown at nothing). Never one dying where a kill of
-  hers was placed (ledger.dying: of its kind on its platform, the nearest it within DYING_DX, while its death animation
-  plays): it's still drawn, and no throw at it makes a mark. Live on 2026-10-25 (the hunt of 23:43) the kill was
+  nothing seen is in its way, and it's the regular attack (no MP thrown at nothing). Never one dead or dying
+  (ledger.dying: with the feed, its track one a kill or a share of hers is bound to, or found dead, Ledger.dead;
+  without, of a placed kill's kind on its platform, the nearest it within DYING_DX, while its death animation plays):
+  it's still drawn, and no throw at it makes a mark; a mark on one is closed at once (`on_look`). Live on 2026-10-25
+  (the hunt of 23:43) the kill was
   placed and its mark dropped, but the dying monster stayed drawn 0.6-1.3 s, was taken from the path again with its
   bar's HP or its whole (a dying monster's bar reads None), got a new mark, and once it was gone the hidden fallback
   followed that mark for 1.8 s with no DEAD_LIKELY check: 18 casts of Lucky Seven and 4 regular throws went at the
@@ -66,10 +68,10 @@ from .. import telemetry
 from ..attack import choice, reach
 from ..attack.choice import Attack, Left
 from ..localization.mapdata import MapModel
-from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, bodies, seen_again
+from ..localization.monsters import GAIN_AFTER_KEY, Monster, bodies, seen_again
 from ..localization.scene import Scene
 from ..perception.kinds import kind_of
-from .ledger import dying, in_path
+from .ledger import dying, in_path, is_kill
 
 HIDDEN_FOR = 1.8   # s a monster she threw at is still taken to be in a throw's way unseen (fight.HIDDEN_FOR)
 LANDS_S = 0.6      # s after a throw's attack key by which its damage has shown on its target's bar, if it hit: the
@@ -154,10 +156,12 @@ class Mark:
 class Attacks:
     """Her attack a throw on map `model` with keys `keys`: in `mode` (attack.choice.pick: 'choice', 'skill' or
     'regular'), with MP `max_mp` when full and Lucky Seven at skill `level` (None if she has no Lucky Seven key).
-    `kills`: her kills so far (the ledger's), which end the marks they're placed on."""
+    `kills`: her kills so far (the ledger's), which end the marks they're placed on; `dead`: the feed's tracks taken for
+    dead (Ledger.dead), whose marks end too."""
 
     def __init__(self, model: MapModel, keys, mode: str = "choice", max_mp: float = 623.0, level: float = 16.0,
-                 log: Callable[[str], None] = print, kills: Callable[[], list] | None = None):
+                 log: Callable[[str], None] = print, kills: Callable[[], list] | None = None,
+                 dead: Callable[[], object] | None = None):
         if mode not in MODES:
             raise ValueError(f"no such attack mode: {mode!r} (one of {', '.join(MODES)})")
         self.keys, self.mode, self.max_mp, self.log = keys, mode, max_mp, log
@@ -182,6 +186,7 @@ class Attacks:
         self._shows = -1e18  # when a frame shows her last throw at a target's kill, if it killed (`shown_by`)
         self._last: Scene | None = None  # the latest look that searched for monsters, placed
         self._kills = kills or (lambda: [])
+        self._dead = dead or (lambda: ())
         self._killed = 0
         # The monster the next throw is at, if the stack knows better than a throw from the ground would (a jump's
         # attack at one on a platform above: behavior.fight.throw_act), taken by that throw's key alone
@@ -210,12 +215,13 @@ class Attacks:
         kills = self._kills()
         for k in kills[self._killed:]:
             if getattr(k, "placed", False):
-                self.marks = [mk for mk in self.marks if not (mk.m.kind == k.kind and mk.m.platform == k.platform
-                                                              and abs(mk.m.x - k.x) < TRACK_SLACK)]
+                self.marks = [mk for mk in self.marks if not is_kill(mk.m, k)]
                 if (gained := getattr(k, "gained", None)) is not None:  # its gain was that monster's: no other's kill
                     for g in [g for g in self._gains if abs(g - gained) < GAIN_SAME_S][:1]:
                         del self._gains[g]
         self._killed = len(kills)
+        dead = self._dead()  # (a mark on one dead or dying: no sighting or bar of it says it's alive)
+        self.marks = [mk for mk in self.marks if getattr(mk.m, "track", None) is None or mk.m.track not in dead]
         if not s.searched or s.where is None or s.platform is None:
             return
         self._last = s
@@ -427,8 +433,9 @@ class Attacks:
                 + (f"; her MP bar's 0 under her pet's warning not believed {warned} times" if warned else ""))
 
     def _dying(self, m: Monster, t: float, seen: list[Monster] = ()) -> bool:
-        """Whether `m` is taken for one dying where a kill of hers was placed (ledger.dying), at t, seen with `seen`."""
-        return dying(self._kills(), m, t, seen, self._die)
+        """Whether `m` is taken for dead or dying (ledger.dying: its track, or where a kill of hers was placed), at t,
+        seen with `seen`."""
+        return dying(self._kills(), m, t, seen, self._die, self._dead())
 
     def _mp_read(self, s: Scene) -> float | None:
         """Her MP bar's share as look `s` read it, or None: not read, or a 0 under her pet's warning (within WARNING_S

@@ -349,6 +349,21 @@ CLOSE_DX = 60.0          # (World.close_ms) a monster this near her, middle to m
 RESPAWN = 8.0
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
                          # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
+# A monster her attack killed is drawn alive, walking on with its bar up, until her star lands (Realism.dies_late): its
+# death animation began DIE_LANDS_S after the killing key and as her distance to it over DIE_FLIGHT units a second
+# more (live on 2026-10-26, the Lie Detector's recording of 23:10: 23 of 26 kills within 0.15 s of that; a median 0.89
+# s after the key, 0.60 after its gain: D:/MapleHelper-scratch/kplace/diag-signs), then it stops where it got to and
+# plays it; the frames' detector has no die1 pictures, and lost it DIE_LOST_S after it stopped (the service's last
+# sighting of it 0.07 s before die1 began, seen 0.85 s in at the median on the 52 of 142 deaths re-found in die1/0: a
+# tenth of a second or two) where the game's death animation still shows it.
+DIE_LANDS_S = 0.75
+DIE_FLIGHT = 1490.0
+DIE_LOST_S = 0.17
+# The death watch in the world (FakeEyes.deaths, perception.deaths' stand-in): a death drawn is seen DEATH_SEEN_AFTER s
+# after it began, on DEATH_SEEN of them (drawn once a death): live, 118 of 142 deaths on a track (83%), a median 0.14 s
+# after die1 began.
+DEATH_SEEN = 0.83
+DEATH_SEEN_AFTER = 0.14
 POSE_SPELL_S = 1.0       # s a monster's pose reads right or wrong at a time (Noise.pose_wrong)
 HEADING_SPELL_S = 1.0    # s one pose of hers reads the wrong way at a time (Noise.heading_wrong in runs): a pose her
                          # pictures read wrong reads so on every frame while she holds it
@@ -660,6 +675,10 @@ class Realism:
                                   # actions.DAMAGE_SHOWS_MS; actions.STAR_DELAY_MS: at the star's release, as the
                                   # world had it until 2026-10-26 and the probes' scenarios still do: their scorer,
                                   # probe.BEFORE_HIT_S, is built on it)
+    dies_late: bool = True       # a monster her attack killed is drawn alive until her star lands (DIE_LANDS_S,
+                                 # DIE_FLIGHT), then dying where it got to, and her frames lose it DIE_LOST_S on, as
+                                 # live on 2026-10-26; False: drawn dying where it was at the kill (the server's time),
+                                 # its bar gone, from then (as until 2026-10-27)
 
 
 @dataclass(frozen=True)
@@ -918,6 +937,9 @@ class SimMonster:
     flinch_at: float | None = None  # ... and pushed it back: it flinches (PUSH_BY_DAMAGE)
     flinch_top: float = 54.0   # how tall it is while it flinches
     fade: float = FADE         # s it's still seen once killed, fading out where it died
+    drawn_alive: float | None = None  # killed (Realism.dies_late): drawn alive until then, its bar `bar_drawn` ...
+    bar_drawn: float = 1.0
+    killed_by: str = ""        # ... and who killed it ("her", "rival")
     info: MobInfo | None = None  # its touch damage, accuracy and frames (game data), if known
     # current motion segment: from t0 at x0, heading d (-1, 0, +1) until t1
     t0: float = 0.0
@@ -1104,6 +1126,11 @@ class World:
         self.hp_low = hp                # her lowest HP so far
         self.kill_log: list[tuple[float, str, int, str]] = []  # (t, kind, platform, "her" or "rival")
         self.death_log: list[tuple[float, str, int, float]] = []  # ... and where each died: (t, kind, platform, x)
+        # Her stack's throws' targets as it chose them, by the world's monster (aimed_at: t, attack key, its index,
+        # 'alive', 'her' or 'rival' for one dead by then, 'none'), and the feed's tracks her stack took for dead that
+        # were of a monster alive then (live_taken: t, its index), from the Sim's hooks (sim.scenarios: Sim.hunter)
+        self.aim_log: list[tuple[float, str, int | None, str]] = []
+        self.live_taken: list[tuple[float, int]] = []
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.fresh_log: list[tuple[float, float]] = []  # ... of those, the touches by a monster within FRESH_S of its
                                                         # respawn (from its spawn point)
@@ -1394,6 +1421,7 @@ class World:
         elif e.kind == "respawn":
             m = e.data
             m.alive, m.hp, m.died_at, m.hit_at, m.flinch_at = True, m.hp_max, None, None, None
+            m.drawn_alive, m.bar_drawn, m.killed_by = None, 1.0, ""
             m.life += 1
             m.born = self.t
             m.start(self.t, m.home)
@@ -2097,6 +2125,7 @@ class World:
             damage = self._damage(stars, swipe and stars == 1.0)
         else:
             damage = stars if stars != 1.0 else CLAW if swipe else 1.0
+        before = m.hp
         m.hp = round(m.hp - damage, 6)
         self._logged(how, "swipe" if swipe and m.hp > 1e-9 else "hit" if m.hp > 1e-9 else "kill")
         if m.hp > 1e-9:
@@ -2104,7 +2133,7 @@ class World:
             lands = self.ms if key_ms is None else max(self.ms, key_ms + int(STAR_DELAY * 1000))
             self._push(lands, "struck", (m, swipe, what))
             return
-        self._kill(m, mx, what)
+        self._kill(m, mx, what, key_ms, min(1.0, max(0.0, before / m.hp_max)))
 
     def _struck(self, m: SimMonster, swipe: bool, what: str) -> None:
         """A hit's star lands on monster `m` (STAR_DELAY after its key, its damage the server's already: _attack): its
@@ -2186,9 +2215,15 @@ class World:
         p = push_chance(m.info.pushed, m.info.pdd, swipe)
         return p >= 1.0 or (p > 0.0 and self.chance(f"push:{m.idx}") < p)
 
-    def _kill(self, m: SimMonster, mx: float, what: str) -> None:
+    def _kill(self, m: SimMonster, mx: float, what: str, key_ms: int | None = None, bar: float = 1.0) -> None:
         t = self.t
-        m.alive, m.died_at, m.died_x = False, t, mx
+        m.alive, m.died_at, m.died_x, m.killed_by = False, t, mx, "her"
+        if self.realism.dies_late and key_ms is not None:  # drawn alive, walking on, until her star lands
+            lands = key_ms / 1000 + DIE_LANDS_S + abs(mx - self.x) / DIE_FLIGHT
+            if lands > t:
+                m.drawn_alive, m.bar_drawn = lands, bar
+                m.died_at, m.died_x = lands, m.at(lands)
+        mx = m.died_x  # (drawn alive until her star lands, Realism.dies_late: it dies, and its drops pop out, there)
         self.kills[m.kind] = self.kills.get(m.kind, 0) + 1
         self.kill_log.append((t, m.kind, m.platform.id, "her"))
         self.death_log.append((t, m.kind, m.platform.id, mx))
@@ -2284,7 +2319,7 @@ class World:
         Realism.shared_exp), drops drawn from `rng` that she can't pick up for Realism.rival_owns s and that it takes
         `takes` s after they land, and the monster's respawn."""
         t, mx = self.t, m.at(self.t)
-        m.alive, m.died_at, m.died_x = False, t, mx
+        m.alive, m.died_at, m.died_x, m.killed_by = False, t, mx, "rival"
         self.kill_log.append((t, m.kind, m.platform.id, "rival"))
         self.death_log.append((t, m.kind, m.platform.id, mx))
         self.note(f"another player kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
@@ -2346,15 +2381,44 @@ class World:
         return [d for d in self.drops if not d.gone and d.since <= t < d.since + DROP_LIFE]
 
     def visible_monsters(self) -> list[tuple[SimMonster, float, float, bool]]:
-        """Every monster that shows: (monster, x, y, alive); killed ones fade out where they died."""
+        """Every monster that shows: (monster, x, y, alive as drawn); killed ones fade out where they died, those her
+        attack killed drawn alive until her star lands (Realism.dies_late: SimMonster.drawn_alive)."""
         t, out = self.t, []
         for m in self.monsters:
-            if m.alive:
+            if m.alive or (m.drawn_alive is not None and t < m.drawn_alive):
                 x = m.at(t)
                 out.append((m, x, m.y(x), True))
-            elif m.died_at is not None and t - m.died_at < m.fade:
+            elif m.died_at is not None and 0.0 <= t - m.died_at < m.fade:
                 out.append((m, m.died_x, m.y(m.died_x), False))
         return out
+
+    def drawn_bar(self, m: SimMonster) -> float | None:
+        """The HP bar monster `m` is drawn with (its share left; None: none drawn, unhurt): a killed one drawn alive
+        (Realism.dies_late) as it was before the killing hit."""
+        if not m.alive:
+            return m.bar_drawn if m.bar_drawn < 1.0 else None
+        return m.hp / m.hp_max if m.hp < m.hp_max else None
+
+    def dying_at(self, kind: str, x: float, y: float, near: float = 20.0) -> "SimMonster | None":
+        """The killed monster of `kind` drawn dying now within `near` of (x, y) (its death begun DEATH_SEEN_AFTER ago
+        at least, still drawn), if any: what the death watch (FakeEyes.deaths) can see."""
+        t = self.t
+        for m in self.monsters:
+            if (not m.alive and m.kind == kind and m.died_at is not None and DEATH_SEEN_AFTER <= t - m.died_at < m.fade
+                    and abs(m.died_x - x) <= near and abs(m.y(m.died_x) - y) <= near):
+                return m
+        return None
+
+    def aimed_at(self, kind: str, platform: int | None, x: float, key: str) -> None:
+        """Her stack chose a throw's target (behavior.attacks' record): the monster of that kind on that platform drawn
+        nearest x then, within 40 units (alive, drawn alive though killed, or dying), into `aim_log`: (t, key, its
+        index, 'alive', 'hers' or 'rival' for one dead by then; 'none' where none is)."""
+        best, d = None, 40.0
+        for m, mx, my, _ in self.visible_monsters():
+            if m.kind == kind and (platform is None or m.platform.id == platform) and abs(mx - x) <= d:
+                best, d = m, abs(mx - x)
+        state = "none" if best is None else "alive" if best.alive else best.killed_by or "rival"
+        self.aim_log.append((round(self.t, 3), key, None if best is None else best.idx, state))
 
     def recent_messages(self) -> list[str]:
         t = self.t

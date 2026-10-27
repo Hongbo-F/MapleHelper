@@ -8,7 +8,8 @@ her EXP number as read then, perception.exp_number, the kills its size was going
 localization.gains), and each monster tracked re-found around where it should be (Eyes.refind: the template that
 matched it last, else its kind's; first only as far around as it can have got since it was last seen, and a window
 the very same as at its last re-find answered as then: NEAR_FIRST, `_memos`; all of a frame's re-finds' matches in
-one call in C, ONE_CALL: Eyes.refind_all).
+one call in C, ONE_CALL: Eyes.refind_all), each sighting with its track's id (Monster.track); and those re-found under
+or lost lately looked at for their death (DEATHS: perception.deaths, the game data's die1 frames where each was).
 
 The searches run off that frame loop (`Searches`: in the feed, a thread of its own, `SearchThread`), one at a
 time, on the newest frame placed when one is due: monsters not tracked yet in her band every BAND_EVERY_S,
@@ -35,7 +36,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from ..character import THIEF_SHAPE
-from ..perception import exp_number
+from ..perception import deaths, exp_number
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
@@ -97,6 +98,13 @@ NEAR_FIRST = True
 # 5.1-5.6 ms a frame against 6.5-7.2, and the frame loop replayed 0.11-0.14 cores less at 30 frames a second
 # (D:/MapleHelper-scratch/pfast/pfr3, 2026-10-26; README, One call for the re-finds). Without the C, as before.
 ONE_CALL = True
+# Whether the frame step looks for the deaths of the monsters it follows (perception.deaths: every EVERY-th frame a
+# track re-found under REFOUND_UNDER or lost RECENT_S or less ago, its die1 frames where it was), and tells the tracker
+# of each seen (tracking.seen_dying: her kill's monster put right, another player's dead at once). With real eyes, the
+# die1 frames from the game data, read as the step is made (0.5 s); the simulator's eyes have their own (`deaths`,
+# sim.fakes.FakeDeaths), or none. 0.5 ms a frame on the re-finds' pool, replayed on the 23:10 recording (0.72 ms on one
+# thread; perception.deaths).
+DEATHS = True
 
 
 @dataclass(frozen=True)
@@ -380,6 +388,10 @@ class WorldStep:
         real = isinstance(getattr(self.eyes, "detector", None), MobDetector)
         self._memos: dict[int, dict] | None = {} if real else None
         self.tracker = MonsterTracker(self.model, throws, getattr(senses, "shape", THIEF_SHAPE))  # (her Shape)
+        self._real = real
+        self._watch_of: tuple[float, deaths.DeathWatch | None] | None = None  # (its look frame's scale, the watch)
+        if real and DEATHS and (geo := getattr(self.eyes, "geo", None)) is not None:
+            self._watch_of = (geo.frame_scale, self._death_watch(geo.frame_scale))  # (made now: 0.5 s, not mid-hunt)
         self.schedule = schedule
         self.searches = searches if searches is not None else InlineSearches(senses)
         self.seq = 0
@@ -456,13 +468,15 @@ class WorldStep:
                 self._memos = {tr.id: self._memos.get(tr.id, {}) for tr, _ in todo}
             for (tr, _), (m, read, bar) in zip(todo, self._refind_all(s, todo, t)):
                 if m is not None:
-                    refound[tr.id] = s.place(m, self.model, bar)
+                    refound[tr.id] = replace(s.place(m, self.model, bar), track=tr.id)
                     if not read:
                         unread.add(tr.id)
             work["fallbacks"] = getattr(getattr(self.eyes, "detector", None), "fallbacks", 0) - fallbacks
             self.counts["re-finds"] += work["re-finds"]
             self.counts["re-found"] += len(refound)
             self.counts["fallbacks"] += work["fallbacks"]
+            if DEATHS:
+                self._deaths(s, t, refound, work)
         her = (s.where.x, s.where.y) if placed else None
         events += self.tracker.update(t, refound, [], view, her, s.players)
         seen: list[Monster] = []  # re-found (two tracks may have found one)
@@ -589,6 +603,7 @@ class WorldStep:
             known = list(job.known.values())
             fresh = [m for m in found.monsters if not any(m.kind == k.kind and overlap(m.mob, k.mob) for k in known)]
             events = self.tracker.merge(job.t, fresh, set(job.known), job.view, now, t_now)
+            fresh = [m if tid is None else replace(m, track=tid) for m, tid in zip(fresh, self.tracker.merged)]
             again = list(seen)
             seen += [m for m in fresh if not any(m.kind == k.kind and overlap(m.mob, k.mob) for k in again)]
             self.band_at = band_at = job.t if self.band_at is None else max(self.band_at, job.t)
@@ -637,6 +652,63 @@ class WorldStep:
             self.gains.append(g)
             for i, kind in enumerate(g.kinds):
                 self.tracker.gain(g.when(i), kind)
+            if g.odd and g.exp is not None and g.exp > 0:  # a share of a kill: another player's, a monster she hurt
+                self.tracker.share(g.t)
+
+    def _deaths(self, s: Scene, t: float, refound: dict[int, Monster], work: dict) -> None:
+        """The tracks that may be dying looked at for it in the frame of look `s` (shown at t; perception.deaths:
+        re-found under REFOUND_UNDER, `refound`, or lost RECENT_S or less ago, each every EVERY-th frame, its die1
+        frames where its feet are, or were when last seen), on the re-finds' pool; those seen dying told to the tracker.
+        `work` gets how many were looked at and how long it took (real clock)."""
+        watch = self._watch(s)
+        if watch is None:
+            return
+        began = time.perf_counter()
+        asks = []
+        for tr in self.tracker.live():
+            if tr.state not in (LIVE, HIDDEN, DYING) or tr.died_seen is not None or tr.kind not in watch.pictures \
+                    or (self.seq + tr.id) % deaths.EVERY:
+                continue
+            m = refound.get(tr.id)
+            score = None if m is None else m.mob.score
+            if not deaths.wants(score, t - tr.last_seen):
+                continue
+            if m is not None:
+                fx, fy = m.mob.foot_x, m.mob.feet_y
+            else:  # where its feet were, the camera's moves since taken out
+                fx, fy = s.screen_x(tr.seen_x if tr.seen_x is not None else tr.x), s.screen_y(tr.y)
+            asks.append((tr.id, tr.kind, fx, fy, score))
+        if not asks:
+            return
+
+        def look(a):
+            return watch.dying(s, a[1], a[2], a[3], a[4])
+        found = list(self._refinds.map(look, asks)) if self._refinds is not None and len(asks) > 1 else \
+            [look(a) for a in asks]
+        for a, dead in zip(asks, found):
+            if dead:
+                self.tracker.seen_dying(a[0], t)
+        work["deaths"], work["deaths_s"] = len(asks), time.perf_counter() - began
+        self.counts["death looks"] = self.counts.get("death looks", 0) + len(asks)
+
+    def _watch(self, s: Scene):
+        """The death watch for look `s`'s frames: with real eyes, the map's monsters' die1 frames drawn at its frame's
+        scale (made once, perception.deaths.DeathWatch.of); else the eyes' own (`deaths`), if they have one."""
+        if not self._real:
+            return getattr(self.eyes, "deaths", None)
+        scale = s.geo.frame_scale
+        if self._watch_of is None or self._watch_of[0] != scale:
+            self._watch_of = (scale, self._death_watch(scale))
+        return self._watch_of[1]
+
+    def _death_watch(self, scale: float):
+        """The map's monsters' die1 frames drawn at `scale` (perception.deaths.DeathWatch.of); None without the game
+        data. About 0.5 s, once."""
+        names = {sp.mob_id: sp.name for sp in getattr(self.model, "spawns", ()) if sp.name}
+        try:
+            return deaths.DeathWatch.of(names, scale)
+        except (ImportError, FileNotFoundError, OSError):  # (no game data here)
+            return None
 
     def _bar_due(self, tr: Track, t: float) -> bool:
         """Whether track `tr`'s HP bar is read in the frame shown at t (BAR_EVERY, BAR_SHOWN_S, BAR_UNSEEN_S)."""

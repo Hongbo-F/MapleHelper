@@ -181,15 +181,16 @@ def test_one_she_threw_at_that_vanished_as_her_exp_went_up_was_hers():
 
 
 def test_one_her_waiting_gain_would_go_on_out_of_sight_is_owed_not_about():
-    """While her EXP gain waits for its monster to go (FADE_S + MISSING_S), the likeliest of its monsters, out of sight
-    already, is `owed` (localization.unseen doesn't take it for one about: review of 2026-10-26, a just-killed monster
-    taken for one hidden under her body kept piles waiting and throws going at it); not while the likeliest is still
-    seen fading (`dying`), nor once the gain has gone on it (dead)."""
+    """A gain no throw's key explains (none GAIN_AFTER_KEY before it: here the throw was 0.9 s before) waits for its
+    monster to go (FADE_S + MISSING_S); meanwhile the likeliest of its monsters, out of sight already, is `owed`
+    (localization.unseen doesn't take it for one about: review of 2026-10-26, a just-killed monster taken for one hidden
+    under her body kept piles waiting and throws going at it); not while the likeliest is still seen fading (`dying`),
+    nor once the gain has gone on it (dead)."""
     tracker = MonsterTracker()
     t0 = 100.0
     standing = [([sighting(1200, pose="stand", bar=0.4), sighting(1350, pose="stand")], view()) for k in range(30)]
     run(tracker, standing, start=t0)
-    tracker.throw(t0 + 1.0, "right")
+    tracker.throw(t0 + 0.5, "right")
     tracker.gain(t0 + 1.4)
     fading = [([sighting(1200, pose="", bar=0.4), sighting(1350, pose="stand")], view())] * 24
     owed, states = [], []
@@ -416,16 +417,122 @@ def test_one_gone_by_another_player_is_theirs_and_one_gone_with_nobody_by_it_is_
 
 
 def test_her_gain_goes_on_one_gone_with_nobody_else_by_it():
-    """Two monsters her throws went toward go at once, one by another player (350 units off it, 500 off the other):
-    her EXP gain is the other one, and the one by them is theirs (PLAYERS_LAST). With nobody else about, the nearer
-    her is hers."""
+    """Two monsters her throws went toward go at once, one by another player (350 units off it, 500 off the other), her
+    gain no throw's kill by its time (the throw 0.9 s before it): her EXP gain is the other one, and the one by them is
+    theirs (PLAYERS_LAST). With nobody else about, the nearer her is hers. (A throw keyed GAIN_AFTER_KEY before the gain
+    puts it on what its attack took, whoever is by it: test_her_kill_is_what_her_attack_took_at_the_key.)"""
     t0 = 100.0
     for players, hers in (([], 1), ([_player(800, pid=3)], 2)):
         tracker = MonsterTracker()
         tracker.update(t0 - 1.0, {}, [], view(), HER, players)
         run(tracker, [([sighting(1150, pose="stand"), sighting(1300, pose="stand")], view())] * 10, start=t0)
-        tracker.throw(t0 + 0.3, "right")
+        tracker.throw(t0 - 0.5, "right")
         tracker.gain(t0 + 0.4)
         events, _ = run(tracker, [(None, view())] * (5 * FPS), start=t0 + 0.4)
         died = {e.track: (e.data["cause"], e.data.get("by")) for e in events if e.kind == "died"}
         assert died[hers] == ("hers", None) and died.get(3 - hers) == (("other", 3) if players else None)
+
+
+# --- her kill bound to what her attack took (tracking._bind) -------------------------------------------------------
+
+def _two(t0: float, near: float = 1150.0, far: float = 1300.0, **kw):
+    """A tracker with two pigs standing ahead of her (right), seen for 10 frames."""
+    tracker = MonsterTracker(**kw)
+    run(tracker, [([sighting(near, pose="stand"), sighting(far, pose="stand")], view())] * 10, start=t0)
+    return tracker
+
+
+def test_her_kill_is_what_her_attack_took_at_the_key():
+    """A gain GAIN_AFTER_KEY after a throw's key is the kill of the nearest of its kind ahead of her as its attack
+    picked, at once (`victim`), whoever is by it, though both go out of sight: the one bound is dying from its gain's
+    frame (Track.killed), dead once out of sight from CONFIRM_S on, its gain's frame its death's time; the other,
+    hidden, is judged as before (someone else's, by another player)."""
+    t0 = 100.0
+    tracker = _two(t0)
+    tracker.update(t0 + 0.3, {}, [], view(), HER, [_player(1100, pid=3)])  # (by both: PLAYERS_LAST changes nothing)
+    tracker.throw(t0 + 0.35, "right")
+    tracker.gain(t0 + 0.6)
+    events, states = run(tracker, [(None, view())] * (5 * FPS), start=t0 + 0.6)
+    assert [(e.kind, e.track) for e in events if e.kind == "victim"] == [("victim", 1)]
+    assert states[0][1] == DYING and states[0][2] == LIVE
+    died = {e.track: (e.data["cause"], e.t - (t0 + 0.6)) for e in events if e.kind == "died"}
+    assert died[1][0] == "hers" and tracking.CONFIRM_S <= died[1][1] < tracking.CONFIRM_S + 0.1
+    assert died[2][0] == "other"
+    assert [e.data["at"] for e in events if e.kind == "died" and e.track == 1] == [round(t0 + 0.6, 3)]
+    assert tracker.counts["kills bound"] == 1
+
+
+def test_her_kill_bound_walks_on_with_its_id_until_her_star_lands():
+    """The monster bound walks on (it's drawn alive until her star lands, 0.6-0.9 s after the gain): its track follows
+    it frame by frame, dying all along, and it's dead once it's gone."""
+    t0 = 100.0
+    tracker = _two(t0)
+    tracker.throw(t0 + 0.3, "right")
+    tracker.gain(t0 + 0.55)
+    walking = [([sighting(1150 + 100 * k / FPS, bar=0.5), sighting(1300, pose="stand")], view()) for k in range(20)]
+    _, states = run(tracker, walking, start=t0 + 0.55)
+    tr = tracker.tracks[1]
+    assert all(st[1] == DYING for st in states) and tr.x > 1190 and tr.gain == t0 + 0.55 and tr.killed
+    run(tracker, [([sighting(1300, pose="stand")], view())] * 60, start=t0 + 0.55 + 20 / FPS)
+    assert tracker.tracks[1].state == DEAD and tracker.tracks[1].cause == "hers" and tracker.tracks[2].state == LIVE
+
+
+def test_one_seen_lately_comes_before_one_out_of_sight_where_it_should_be():
+    """Of the two of its kind ahead of her, one out of sight longer than FRESH_S at the gain comes after one seen in
+    its frame, nearer or not (out of sight it's where it should be, and often isn't: hit and hidden, or gone)."""
+    t0 = 100.0
+    tracker = _two(t0)
+    run(tracker, [([sighting(1300, pose="stand")], view())] * 12, start=t0 + 10 / FPS)  # the near one hides
+    tracker.throw(t0 + 0.4, "right")
+    tracker.gain(t0 + 0.7)
+    events, _ = run(tracker, [([sighting(1300, pose="stand")], view())], start=t0 + 0.7)
+    assert [e.track for e in events if e.kind == "victim"] == [2]
+
+
+def test_her_kill_is_one_ahead_of_her_within_her_attacks_reach_up_and_down():
+    """Behind her, or more than VICTIM_UP above her feet (VICTIM_DOWN below), it isn't her attack's: the nearer ahead
+    within them is."""
+    t0 = 100.0
+    tracker = MonsterTracker()
+    seen = [sighting(960, pose="stand"), sighting(1100, pose="stand", y=HER[1] - 130, platform=2),
+            sighting(1250, pose="stand", y=HER[1] - 90, platform=3)]
+    run(tracker, [(seen, view())] * 10, start=t0)
+    tracker.throw(t0 + 0.4, "right")
+    tracker.gain(t0 + 0.7)
+    events, _ = run(tracker, [(seen, view())], start=t0 + 0.7)
+    assert [e.data["x"] for e in events if e.kind == "victim"] == [1250]
+
+
+def test_one_bound_seen_again_rebind_s_on_was_another_and_the_gain_goes_on_the_next_gone():
+    """The one bound re-found REBIND_S after its gain is alive: let go (`let_go`), and the gain goes on the next its
+    attack took that's out of sight then (her star took that one), dead once it's been gone from CONFIRM_S on."""
+    t0 = 100.0
+    tracker = _two(t0)
+    tracker.throw(t0 + 0.3, "right")
+    tracker.gain(t0 + 0.55)
+    frames = [([sighting(1150, pose="stand")], view())] * (2 * FPS)  # the near one stays; the far one is gone
+    events, _ = run(tracker, frames, start=t0 + 0.55)
+    assert [(e.kind, e.track) for e in events if e.kind in ("victim", "let_go")] == [
+        ("victim", 1), ("let_go", 1), ("victim", 2)]
+    assert tracker.tracks[1].state == LIVE and tracker.tracks[1].gain is None
+    assert [(e.track, e.data["cause"]) for e in events if e.kind == "died"] == [(2, "hers")]
+
+
+def test_a_death_seen_is_dead_at_once_and_puts_her_kill_right():
+    """A death seen (`seen_dying`: perception.deaths) on the one bound makes it dead at once; on another her attack
+    could have taken, the gain goes on that one (the one bound let go); on one no gain of hers can be, someone else's,
+    at once (not HIDE_S later)."""
+    t0 = 100.0
+    for seen in (1, 2):
+        tracker = _two(t0)
+        tracker.throw(t0 + 0.3, "right")
+        tracker.gain(t0 + 0.55)
+        run(tracker, [([sighting(1150, pose="stand"), sighting(1300, pose="stand")], view())] * 10, start=t0 + 0.55)
+        tracker.seen_dying(seen, t0 + 0.9)
+        events, _ = run(tracker, [([sighting(1150 if seen == 2 else 1300, pose="stand")], view())], start=t0 + 0.9)
+        assert [(e.track, e.data["cause"]) for e in events if e.kind == "died"] == [(seen, "hers")]
+        assert tracker.tracks[3 - seen].state == LIVE and tracker.tracks[3 - seen].gain is None
+    tracker = _two(t0)
+    tracker.seen_dying(2, t0 + 0.4)
+    events, _ = run(tracker, [([sighting(1150, pose="stand")], view())], start=t0 + 0.4)
+    assert [(e.track, e.data["cause"], e.data["seen"]) for e in events if e.kind == "died"] == [(2, "other", True)]

@@ -150,10 +150,10 @@ class Hunter:
         self.wounds = Wounds(self.ledger)
         # The monsters she has seen anywhere, kept across looks (localization.memory), her kills (the ledger's) marking
         # the ones they were: after the ledger, so a look's kills are in it.
-        self.memory = Memory(model, kills=lambda: self.ledger.kills)
+        self.memory = Memory(model, kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead)
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'.
         self.attacks = Attacks(model, keys, mode, max_mp=c.mp, level=c.lucky_seven, log=log,
-                               kills=lambda: self.ledger.kills)
+                               kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead)
         if mode != "regular":
             self.actions.choose = self.attacks.key
             self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)

@@ -1,0 +1,42 @@
+{
+ "horny_dying.png": {
+  "kind": "horny-mushroom",
+  "feet": [
+   120,
+   150
+  ],
+  "frame": "00116.jpg",
+  "recording": "lie_detector/20261026-231501/before",
+  "t": 1793081407.548
+ },
+ "horny_alive.png": {
+  "kind": "horny-mushroom",
+  "feet": [
+   120,
+   150
+  ],
+  "frame": "00104.jpg",
+  "recording": "lie_detector/20261026-231501/before",
+  "t": 1793081406.729
+ },
+ "green_dying.png": {
+  "kind": "green-mushroom",
+  "feet": [
+   120,
+   150
+  ],
+  "frame": "00126.jpg",
+  "recording": "lie_detector/20261026-231501/before",
+  "t": 1793081408.197
+ },
+ "green_alive.png": {
+  "kind": "green-mushroom",
+  "feet": [
+   120,
+   150
+  ],
+  "frame": "00113.jpg",
+  "recording": "lie_detector/20261026-231501/before",
+  "t": 1793081407.346
+ }
+}

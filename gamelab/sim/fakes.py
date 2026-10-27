@@ -61,7 +61,7 @@ from ..screen import SCALE
 from ..screen import UNITS_PER_HALF_PX
 from ..screen import SCREEN_SCALE, STRETCHED
 from ..perception.kinds import kind_of
-from .world import HEADING_SPELL_S, LEVEL_19, POSE_SPELL_S, Noise, World, exp_pixels
+from .world import DEATH_SEEN, DIE_LOST_S, HEADING_SPELL_S, LEVEL_19, POSE_SPELL_S, Noise, World, exp_pixels
 
 START = 10_000.0          # the fake clock's start (monotonic() is never near 0 in real runs)
 EPOCH = 1_800_000_000.0   # what time.time() reads at the start (a fixed date, for strftime)
@@ -306,6 +306,26 @@ def shown_exp(start: tuple[int, int], gained: int) -> tuple[int, int]:
     return level, exp
 
 
+class FakeDeaths:
+    """The death watch on the world (perception.deaths.DeathWatch's stand-in, the frame step's `deaths` from FakeEyes):
+    a killed monster drawn dying where a track's feet are (world.dying_at: its death begun DEATH_SEEN_AFTER ago) is seen
+    on DEATH_SEEN of the deaths (drawn once a death, seeded), every kind."""
+
+    def __init__(self, world: World):
+        self.world = world
+        self.pictures = _AnyKind()
+
+    def dying(self, look, kind: str, fx: float, fy: float, refound: float | None) -> bool:
+        w = self.world
+        m = w.dying_at(kind, look.map_x(fx), look.map_y(fy), 25.0)
+        return m is not None and w.chance(f"death:{m.idx}", int(round(m.died_at * 1000))) < DEATH_SEEN
+
+
+class _AnyKind:
+    def __contains__(self, kind) -> bool:
+        return True
+
+
 class FakeEyes(Eyes):
     def __init__(self, world: World, clock: Clock, model: MapModel, guard: Callable[[], None] | None = None):
         """`guard`: called before every look; it raises when the fakes aren't in place (sim.scenarios.Sim)."""
@@ -321,6 +341,7 @@ class FakeEyes(Eyes):
         self.frame_counts = {"frames": 0, "tag hidden": 0, "dot hidden": 0}  # the feed's frames (observe)
         self._exp_drawn: tuple[int, np.ndarray] | None = None  # her EXP number's box, for the EXP she has gained
         self._bars: dict[tuple, float | None] = {}  # what a bar's box read (`bar`), by its px
+        self.deaths = FakeDeaths(world)  # the death watch on the world (perception.deaths' stand-in)
 
     @property
     def noise(self) -> Noise:
@@ -515,8 +536,8 @@ class FakeEyes(Eyes):
                     and 0 <= mob.y - h // 2 and mob.y + h // 2 <= PLAY_BOTTOM):
                 continue
             screen.mobs.append(mob)
-            if alive and m.hp < m.hp_max:  # (read empty with Realism.bars_empty: `bar`)
-                draw_hp_bar(frame, cx, mob.y - h // 2, m.hp / m.hp_max, STRETCHED.frame_scale)
+            if alive and (bar := self.world.drawn_bar(m)) is not None:  # (read empty with Realism.bars_empty: `bar`)
+                draw_hp_bar(frame, cx, mob.y - h // 2, bar, STRETCHED.frame_scale)
         for d in self.world.live_drops():
             iw, ih = ITEM_SIZE.get(d.kind, (18, 18))
             cx, bottom = round(her[0] + (d.x - x) / u), round(floor + (d.y - y) / u)
@@ -577,6 +598,8 @@ class FakeEyes(Eyes):
         another (Noise.off_seen), or just not found (Noise.detect_miss). All are drawn per monster from the world's
         seeded chances, the hiding once per hit."""
         noise, w = self.noise, self.world
+        if not alive and w.realism.dies_late and m.died_at is not None and w.t - m.died_at > DIE_LOST_S:
+            return True  # (its death animation isn't among the detector's pictures: lost once it plays)
         if alive and noise.hit_hidden and m.hit_at is not None:
             lo, hi = noise.hit_hidden
             if w.t < m.hit_at + lo + (hi - lo) * w.chance(f"hide:{m.idx}", int(round(m.hit_at * 1000))):

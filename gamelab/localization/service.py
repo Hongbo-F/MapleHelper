@@ -125,7 +125,9 @@ SILENT_S = 10.0
 # tracks ~850: about 20 MB an hour, which telemetry's 2 GB hold 4 days of)
 SCENE_S = 0.1
 TRACKS_S = 0.5
-EVENTS = ("died", "exp_gain")  # tracker events published as telemetry 'event' records (and hits, new ones)
+# tracker events published as telemetry 'event' records (and hits, new ones): deaths, gains, and her kills' monsters as
+# the tracker binds them to her gains and lets them go (tracking: 'victim', 'let_go')
+EVENTS = ("died", "exp_gain", "victim", "let_go")
 
 
 def saved(which: str | None = None) -> bool:
@@ -907,7 +909,13 @@ class Publisher:
                     by = e.data.get("by")
                     self.log(f"  {e.data['kind']} #{e.track} died on platform {e.data['platform']}: "
                              + ("hers" if e.data["cause"] == "hers" else "someone else's"
-                                + (f" (another player's, #{by})" if by is not None else "")))
+                                + (f" (another player's, #{by})" if by is not None else ""))
+                             + (" (its death seen)" if e.data.get("seen") else ""))
+                elif e.kind == "victim":
+                    self.log(f"  her kill: {e.data['kind']} #{e.track} at x {e.data['x']} on platform "
+                             f"{e.data['platform']}")
+                elif e.kind == "let_go":
+                    self.log(f"  {e.data['kind']} #{e.track} seen alive: not her kill")
             if st.loot is not None:
                 w["loot"], w["looked"] = st.loot, st.looked
             if now - w["scene"] >= SCENE_S:

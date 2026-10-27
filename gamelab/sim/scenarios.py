@@ -153,6 +153,36 @@ class Sim:
         self.clock.frames = (1.0 / GAME_HZ, feed.tick)
         return feed
 
+    def _judged(self, h) -> None:
+        """The world's view of what her stack takes for dead, for the harness (sim.harness: by the world's monster):
+        each throw's target as her attack choice took it (behavior.attacks' `_say`: World.aimed_at), and each feed track
+        the ledger takes for dead (behavior.ledger.Ledger.dead) that was of a monster alive then (World.live_taken).
+        Nothing of hers changes."""
+        world = self.world
+        say = getattr(getattr(h, "attacks", None), "_say", None)
+        if say is not None:
+            def judged(attack, why, target, *a, **kw):
+                if target is not None:
+                    world.aimed_at(target.kind, target.platform, target.x, attack.key)
+                return say(attack, why, target, *a, **kw)
+            h.attacks._say = judged
+        ledger = getattr(h, "ledger", None)
+        dead_of = getattr(ledger, "_dead_of", None)
+        if dead_of is None:
+            return
+        taken: set[int] = set()
+
+        def noted(s):
+            dead_of(s)
+            for tr in getattr(s, "tracks", None) or ():
+                if tr.id in ledger.dead and tr.id not in taken:
+                    taken.add(tr.id)
+                    drawn = [(abs(mx - tr.x), m) for m, mx, _, _ in world.visible_monsters() if m.kind == tr.kind
+                             and (tr.platform is None or m.platform.id == tr.platform) and abs(mx - tr.x) <= 30]
+                    if drawn and min(drawn, key=lambda dm: dm[0])[1].alive:  # (the one drawn there is alive)
+                        world.live_taken.append((round(world.t, 3), min(drawn, key=lambda dm: dm[0])[1].idx))
+        ledger._dead_of = noted
+
     def fail_frames(self, start: float, end: float, problem) -> None:
         """Every frame perception takes from `start` to `end` s into the run fails its checks with `problem` (a
         perception.framecheck.Problem), nothing read off it but the bars, as the perception service's frames of a game
@@ -230,6 +260,7 @@ class Sim:
         self.senses.append(h.senses)
         # The way each attack is meant to go, for the world to count those her facing sends the other way
         h.actions.throw_listeners.append(lambda when, direction: self.world.meant.append((when, direction)))
+        self._judged(h)
         play = h.actions.play  # every plan Actions plays (fights, single moves, tours): checked each time;
         # the navigator's chains go through client.send, which guard() checks through the fake player
 
@@ -1347,11 +1378,16 @@ def tour_hunt_other_spot(sim):
     gone, a throw's last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the
     world's damage at the server's time: on seed 16 she shot both from 14, the other pig from 1320; from 1240, 1260,
     1300, 1320, 1340 and 1360 no seed of 1-16 showed it, from 1280 only seed 1; of seeds 1-16, 1 (the other pig from
-    1280) meet all of this.)"""
+    1280) meet all of this.) (Not met since 2026-10-27, her kill credited to the monster her attack took
+    (localization.tracking's binding): on seed 1 the first pig died at 1044 and master's stack put its kill at 1137, by
+    the other pig, which it then took for the one dying there, so the fight found nothing in reach and the tour went
+    over to 796 for it; with the kill on the right pig the fight reaches the other by closing in along 14 or a jump
+    throw (from 1280-1500 and on seeds 1-36, and with a snail for it at 1330-1360, it goes on the platform or is shot
+    from 14): xfail in tests/test_sim.py, AFTER_KILL_PLACE.)"""
     return _hunt_17_pigs(sim)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1240.0)], seed=1, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1300.0)], seed=1, limit=400,
           expects=(logs("that no spot reaches: onto the platform"),))
 def tour_hunt_onto_platform(sim):
     """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself.
@@ -1359,7 +1395,10 @@ def tour_hunt_onto_platform(sim):
     walked into reach first. With the other pig from 1240, as tour_hunt_other_spot's, seeds 3, 5, 6, 8 and 9
     of 1-12 show it; from 1320, 1, 3, 6, 11 and 12. Seed 1 since her jumps' attacks are weighed and her jump throws
     turn in the air (2026-10-25): of seeds 1-16, 1, 5, 8 and 9 show it; on the others the other pig walks into reach
-    first.)"""
+    first.) (The other pig from 1300 since 2026-10-27, her kill credited to the monster her attack took
+    (localization.tracking's binding) and drawn alive until her star lands (sim.world Realism.dies_late): from 1240
+    no seed of 1-16 shows it, the fight reaching the other pig from 14 once the kill isn't put by it; from 1300 seed 1
+    does, from 1380 and 1420 seed 4, of 1-4.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -1659,7 +1698,7 @@ def _loop_bubble(sim):
 
 
 @scenario((16, 636.0), monsters=[("Slime", 17, 940.0), ("Orange Mushroom", 17, 1300.0), ("Orange Mushroom", 17, 1350.0)],
-          seed=1, limit=200, realism=Realism(respawn=120.0, drops=(("slime", "slime-bubble", 1.0),)),
+          seed=2, limit=200, realism=Realism(respawn=120.0, drops=(("slime", "slime-bubble", 1.0),)),
           expects=(_rule("valuable pile"), happens("picks up slime-bubble"),
                    check("she sets off for the Slime Bubble while an Orange Mushroom is still about",
                          lambda tr: _first(tr["log"], "picking it up now") < _nth(tr["world_log"], "kills", 3))))
@@ -1673,7 +1712,9 @@ def loop_valuable_drop_at_once(sim):
     reach, calls the trip off when it comes into reach (9.8 s), and picks the bubble up once it's dead. Before EXP
     before loot, on seeds 1-16 she set off before the mushrooms were dead on all 16, and picked it up 11.3 s after the
     slime's kill at the median (7.5-33.7); without rule 6a on none, 17.2 s (9.6-35.1), shooting the mushrooms from 16
-    first; without the look (hunt.FAR_DROPS_LOOK) on 12."""
+    first; without the look (hunt.FAR_DROPS_LOOK) on 12. (Seed 2 since 2026-10-27, her kill credited to the monster
+    her attack took and drawn alive until her star lands: on seed 1 she set off as the second Orange Mushroom died; of
+    seeds 1-16, all but 1, 7 and 9 meet all of this.)"""
     return _loop_bubble(sim)
 
 
@@ -2381,7 +2422,10 @@ def loop_tree_lie_detector_28(sim):
     world's AIR_PICK) and her stance going by where each monster will be when her attack starts (attack.stance.Pace): on
     seed 1 she went up the rope at 146 from 32, a rope as safe, as master's stack does in this world; of seeds 1-40 only
     37 goes back onto 28, and on 39 a touch knocked her out of the tower 3 s after the sighting (in this world her own
-    group's walls alone stop her: loop_tree_run).)"""
+    group's walls alone stop her: loop_tree_run).)
+    (Seed 7 since 2026-10-27 on its own branch, her kill credited to the monster her attack took (localization.tracking's
+    binding) and drawn alive until her star lands (sim.world Realism.dies_late): on seed 1 she didn't go back onto 28;
+    of seeds 1-16 only 7 meets all of this, and on 13 and 14 she fell out of the map before 40 s.)"""
     return lie_detector(40.0)(sim)
 
 

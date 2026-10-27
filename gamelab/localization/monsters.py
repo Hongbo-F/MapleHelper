@@ -98,6 +98,8 @@ class Monster:
     bar: float | None = None  # its HP bar (fraction left), shown once it has been hit; None: unhurt
     facing: int = 0       # which way it faces: 1 right, -1 left, 0 not known (Mob.facing)
     pose: str = ""        # "stand", "move" (walking) or "hit1" (flinching); "": not known (Mob.pose)
+    track: int | None = None  # the perception service's track it is (localization.tracking: its id), when the feed's
+                              # state placed it (worldstate); None: a look of its own, a memory's, not known
 
     @property
     def kind(self) -> str:
@@ -181,9 +183,21 @@ def seen_again(m: Monster, now: list[Monster]) -> Monster | None:
     faced, as the tracker does: these are the monsters she threw at (fight.FightState), and a monster hit
     flinches and is knocked back rather than walking on. Matched to the way it faced, for up to the 1.8 s
     one stays hidden under its damage numbers, the hunt loop in the simulator lost 6.4% of its EXP a minute
-    (20 seeds; better on 7), though the tour gained 4.0%."""
+    (20 seeds; better on 7), though the tour gained 4.0%. Where the feed says which track each is (Monster.track),
+    the one of `m`'s track is `m`, wherever it walked, and one of another track never is: two of a kind side by side
+    are two, and a dying one's live neighbour isn't it (localization.tracking follows each from frame to frame)."""
+    if (track := getattr(m, "track", None)) is not None:
+        if mine := [o for o in now if getattr(o, "track", None) == track]:
+            return mine[0]
+        now = [o for o in now if getattr(o, "track", None) is None]
     near = [o for o in now if same(o, m)]
     return min(near, key=lambda o: abs(o.x - m.x)) if near else None
+
+
+def is_one(a: Monster, b: Monster) -> bool:
+    """Whether sighting `b` can be monster `a` seen again (seen_again): the same track where the feed says which each
+    is (Monster.track), else `same` (its kind, near the same spot)."""
+    return seen_again(a, [b]) is b
 
 
 def dead_one(aimed: list[Monster], now: list[Monster], her_x: float, kind: str | None = None,

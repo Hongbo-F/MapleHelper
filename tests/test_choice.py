@@ -626,3 +626,30 @@ def test_the_hunter_tells_the_attack_choice_her_exp_at_every_look_and_at_a_throw
     s.hp, s.exp, s.exp_box = 1.0, None, None
     h._vitals(s)
     assert h.attacks._heard == t + 0.5 and h.attacks._gains[t + 0.4] == frozenset({"green-mushroom"})
+
+
+def test_with_the_feed_the_dead_are_known_by_their_tracks_and_a_live_neighbour_keeps_its_mark():
+    """With the feed's ids (Monster.track): a kill placed on a track (ledger.Kill.track) closes that one's mark, not the
+    mark of the one beside it however near (its damage kept: not "~404 HP" again); a track the ledger takes for dead
+    (Ledger.dead: another player's kill seen, say) is no target, and its mark is closed at once, sightings or not."""
+    from gamelab.behavior.ledger import Kill
+
+    def look(monsters, t=None):
+        s = _look([(k, x, bar) for k, x, bar, _ in monsters], t=t)
+        s.monsters = [dataclasses.replace(m, track=tid) for m, (_, _, _, tid) in zip(s.monsters, monsters)]
+        return s
+
+    kills, dead = [], set()
+    a, _ = _attacks(kills=lambda: kills, dead=lambda: dead)
+    now = time.monotonic()
+    a.on_look(look([("green-mushroom", 250.0, None, 1), ("green-mushroom", 262.0, None, 2)], t=now - 0.9))
+    a.key("right")                                    # a mark on 1 ...
+    a.aimed = a._last.monsters[1]
+    a.key("right")                                    # ... and one on 2
+    assert sorted(mk.m.track for mk in a.marks) == [1, 2]
+    kills.append(Kill(now - 0.1, "green-mushroom", 1, 262.0, 0.0, 1, track=1))  # its place by 2's: still 1's
+    a.on_look(look([("green-mushroom", 251.0, None, 1), ("green-mushroom", 262.0, None, 2)], t=now))
+    assert [mk.m.track for mk in a.marks] == [2] and a.target("right").track == 2
+    dead.add(2)  # 2 found dead (another player's kill seen): no target, its mark closed, seen as it is
+    a.on_look(look([("green-mushroom", 251.0, None, 1), ("green-mushroom", 262.0, None, 2)], t=now + 0.1))
+    assert a.marks == [] and a.target("right") is None

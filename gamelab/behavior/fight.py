@@ -336,6 +336,8 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     wanted = _count_kills(h, st, s, wanted, h.report.exp_kills - st.exp_counted, now)
     st.exp_counted = h.report.exp_kills
     st.forget_hidden(now)  # only after _count_kills: this look's kill may still be one of these
+    dead = getattr(getattr(h, "ledger", None), "dead", ())  # (a track taken for dead: thrown at no more, hidden or not)
+    st.thrown = [e for e in st.thrown if getattr(e[0], "track", None) is None or e[0].track not in dead]
     hidden = st.hidden(now)
     st.flinching = hit + hidden
     return wanted + hidden, visible, hidden
@@ -347,7 +349,7 @@ def dying_seen(h: "Hunter", s: Scene, now: float, body: dict[str, MobBody] | Non
     if (ledger := getattr(h, "ledger", None)) is None:
         return []
     die = {k: b.die_s for k, b in (body or bodies(getattr(h, "model", None))).items()}
-    return [m for m in s.monsters if dying(ledger.kills, m, now, s.monsters, die)]
+    return [m for m in s.monsters if dying(ledger.kills, m, now, s.monsters, die, getattr(ledger, "dead", ()))]
 
 
 def body_sizes(model: MapModel | None) -> tuple[dict[str, float], dict[str, float]]:
@@ -697,14 +699,17 @@ def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], g
                  now: float, drops: bool = True) -> list[Monster]:
     """Her EXP told of `gains` kills since the last look: those are among what she was throwing at (the last
     throw's path, and what she's thrown at lately: a kill can come in after she's turned to the next one), each of
-    the kind its gain's size named when it named one (Hunter.kinds_told). Each kill's drops go to the sweep after the
-    fight (on her platform) or to the tour (unless not `drops`). A kill of a kind she wasn't throwing at still counts
-    by its kind, with no place and no drops. Returns `wanted` without the dead."""
+    the kind its gain's size named when it named one (Hunter.kinds_told); with the feed, the monster the ledger has it
+    on (its track: behavior.ledger, the tracker's), the same answer as every other part's. Each kill's drops go to the
+    sweep after the fight (on her platform) or to the tour (unless not `drops`). A kill of a kind she wasn't throwing at
+    still counts by its kind, with no place and no drops. Returns `wanted` without the dead."""
     here = s.platform.id
     told = h.gains_told(gains) if hasattr(h, "gains_told") else [(None, k) for k in h.kinds_told(gains)]
     for gained, kind in told:
-        dead = dead_one(st.aimed + [e[0] for e in st.thrown if not any(e[0] is a for a in st.aimed)],
-                        s.monsters, s.where.x, kind, st.keyed, gained)
+        dead = _tracked_kill(h, st, s, gained)
+        if dead is None:
+            dead = dead_one(st.aimed + [e[0] for e in st.thrown if not any(e[0] is a for a in st.aimed)],
+                            s.monsters, s.where.x, kind, st.keyed, gained)
         if dead is None and kind is not None:
             h.report.count_kill(kind)
             h.log(f"  {kind} down (by her EXP), not one she was throwing at: its drops are left")
@@ -725,6 +730,25 @@ def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], g
         telemetry.emit("event", kind="kill", text=f"{dead.kind} down on platform {dead.platform}",
                        x=round(dead.x, 1), y=round(dead.y, 1))
     return wanted
+
+
+def _tracked_kill(h: "Hunter", st: FightState, s: Scene, gained: float | None) -> Monster | None:
+    """The monster the hunter's ledger has her kill whose gain showed at `gained` on, by its track (ledger.Kill.track:
+    the tracker's): as this fight last saw it (in its path or thrown at), or as look `s` has it, or where its track is;
+    None without one."""
+    ledger = getattr(h, "ledger", None)
+    if gained is None or ledger is None:
+        return None
+    k = next((k for k in reversed(ledger.kills[-8:]) if k.gained is not None and abs(k.gained - gained) < 0.02), None)
+    if k is None or not k.track:
+        return None
+    seen = [*st.aimed, *(e[0] for e in st.thrown), *s.monsters]
+    if (m := next((m for m in seen if getattr(m, "track", None) == k.track), None)) is not None:
+        return m
+    tr = next((tr for tr in getattr(s, "tracks", None) or () if tr.id == k.track), None)
+    if tr is None:
+        return None
+    return Monster(tr.mob, tr.x, tr.y, tr.platform, tr.bar, tr.facing, "", tr.id)
 
 
 def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None = None,
@@ -864,7 +888,7 @@ def _shoot_at(h: "Hunter", st: KillState, s: Scene, found: list[Monster]) -> str
         st.dying_since = time.monotonic()  # its bar gone: it died, and fades out where it died
     _score_shots(st.flying, bar, st.dying_since is not None, s.t)
     if (ledger := getattr(h, "ledger", None)) is not None and dying(ledger.kills, t, time.monotonic(), s.monsters,
-                                                                   ledger.die):
+                                                                   ledger.die, getattr(ledger, "dead", ())):
         time.sleep(0.1)  # a kill of hers placed on it: dying, it fades out (then her EXP ends the kill: _target_gone)
         return None
     threats = [o for o in s.monsters if o.platform == s.platform.id and o is not t]

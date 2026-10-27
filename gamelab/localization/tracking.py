@@ -33,22 +33,34 @@ A track not seen in a frame:
   other player on the minimap is by it, nobody who could have killed it (`nobody by it`).
 
 Her EXP gains (worldstate, from the EXP number each frame) are kills of hers: each kill a gain's size was, of the
-kind it names when it names one (localization.gains; a gain no kill explains isn't one). A killed monster is still
-seen fading where it died for about a second, so a gain waits that long (FADE_S + MISSING_S) for the monster it was
-to go out of sight: one she threw at (a throw toward it in the STAR_WINDOW before; with her throws unknown, as in
-`watch`, any monster within a star's reach of her), of the kind named, out of sight by then. The likeliest first:
-one that stood still where it was from the gain until it went (a killed monster fades where it died), then one that
-went after the gain (else one already out of sight when it came: killed while it hid), then (PLAYERS_LAST) one
-with no other player by it, then the least HP left, then the nearest her: `dead`, cause "hers". Meanwhile the
-likeliest one still seen is `dying`, and the likeliest of all, if out of sight already, `owed` (localization.unseen
-doesn't take it for a monster about). A monster's HP bar going down is a `bar_hit`, by her when a throw of hers went
-its way ("other" otherwise; None with her throws unknown).
+kind it names when it names one (localization.gains; a gain no kill explains isn't one). The game never says which
+monster died; her attack took it as its key went down, and the gain shows GAIN_AFTER_KEY (0.1-0.6 s) after that key,
+while the monster is still drawn alive, walking with its bar up, until her star lands (live on 2026-10-26, by eye:
+its first damage numbers 0.5 s after the gain, its death frames from 0.6 s, gone at 1.2 s). So a gain that soon after
+a throw's key is the kill of the first of its kind that attack takes from where she was then, by where the tracks are
+at the gain (`_picks`: the nearest ahead of her within VICTIM_DY, out-of-sight ones where they should be): that track
+is bound to the gain at once (`gain`), `dying`, followed as it walks on, its id in every state since (Monster.track),
+so whoever reads the state knows which monster is dead, where it walks, until it goes; `dead`, cause "hers", once out
+of sight CONFIRM_S after the gain, or at once when its death is seen (perception.deaths, `seen_dying`). One re-found
+still REBIND_S after the gain was another: let go, and the gain goes on the next its attack took that's gone, or one
+seen dying. A gain no throw explains so (none keyed in the window before it; `watch`, her throws unknown) waits as
+before, FADE_S + MISSING_S, for the monster it was to go out of sight: one she threw at (a throw toward it in the
+STAR_WINDOW before; with her throws unknown any monster within a star's reach of her), of the kind named, out of sight
+by then, the likeliest first: one that stood still where it was from the gain until it went, then one that went after
+the gain (else one already out of sight when it came: killed while it hid), then (PLAYERS_LAST) one with no other
+player by it, then the least HP left, then the nearest her: `dead`, cause "hers"; meanwhile the likeliest one still
+seen is `dying`, and the likeliest of all, if out of sight already, `owed` (localization.unseen doesn't take it for a
+monster about). A share of a kill (a gain no kill explains: another player's kill of a monster her stars hurt) can go
+on the monster hurt that her throws went at (`share`, SHARES: off), dying and dead as a kill of hers is, its cause
+"other". A monster's HP bar going down is a `bar_hit`, by her when a throw of hers went its way ("other" otherwise;
+None with her throws unknown).
 
 A track seen in fewer than MIN_SEEN frames that goes is dropped without a death: a match on scenery for a
 frame or two isn't a monster someone killed. Nothing grows without bound: dead tracks go DEAD_KEEP_S after
 their death, offscreen ones after OFFSCREEN_S, gains and throws after their windows.
 """
 
+from collections import deque
 from dataclasses import dataclass, field, replace
 
 from maplehelper.engine import RIGHT
@@ -57,7 +69,7 @@ from ..character import THIEF_SHAPE, Shape
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from .mapdata import MapModel
-from .monsters import DEFAULT_SPEED, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds
+from .monsters import DEFAULT_SPEED, GAIN_AFTER_KEY, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds
 from .players import Player, near_rival
 
 LIVE, HIDDEN, OFFSCREEN, DYING, DEAD = "live", "hidden", "offscreen", "dying", "dead"
@@ -90,6 +102,37 @@ HIT_AFTER_S = 1.2   # s after a throw's key that its star may hit at the latest 
 # when a star was taken to reach 460 to a body's edge: a kill could be put on a monster 500-540 off.
 THROW_REACH = 434.0 + 40.0
 THROW_DY = 70.0     # ... and above or below her feet (60 measured, and a little slack)
+# Her kill's monster (`_picks`, `_bind`): the attack of the throw keyed GAIN_AFTER_KEY before her gain took it, as it
+# picked PICK_S after the key (attack.reach: about 65 ms) from where she was then (her place in the frames, mid-jump
+# for a jump throw), the nearest ahead of her of the gain's kind, VICTIM_BEHIND behind her middle at most (the claw's
+# boxes start 12-20 ahead and a body reaches back half its width), VICTIM_UP above her feet then to VICTIM_DOWN below
+# (the star's search windows open upward, to 124 above at the far bands: attack.reach), where each track is at the
+# gain's frame, one seen in the last FRESH_S first (out of sight longer, it's where it should be, and often isn't:
+# hit, hidden under her damage numbers, or gone). Against 85 of her kills on the Lie Detector's and the rolling
+# recording's frames of 2026-10-25/26, labelled by eye (D:/MapleHelper-scratch/kplace/truth; the service's frame step
+# replayed on them, her throws and the live gains' kinds told: kplace/build/variants.py), the truth's track was on 76
+# so (89%), 9 another; the nearest within 75 up or down, 63 and 15 (7 none); within 110 up and down 68 and 17; the
+# fresh first from 0.25 s 74, 0.35 s 73, 0.5 s 72; 100 up as 110, 120 up 70, 150 up 69; by the client's search
+# (attack.reach.ground_pick's order) 72. Master's ledger had 52 right of the 85, the tracker's dying mark 62 (truth).
+PICK_S = 0.065
+VICTIM_BEHIND = 20.0
+VICTIM_UP = 110.0
+VICTIM_DOWN = 75.0
+FRESH_S = 0.2
+BIND_S = 0.3        # s after a gain its monster may still be bound (a late search's track is as of its own frame)
+# A track bound to a gain is drawn alive until her star lands (0.6-0.9 s after the gain), then dying, last drawn about
+# 1.2 s after the gain (by eye, 1.02-1.53 at p10-p90), and the frames' detector, which has no die1 pictures, loses it a
+# median 0.5 s after the gain (p90 0.81: D:/MapleHelper-scratch/kplace/truth). So one re-found REBIND_S after its gain
+# was another: let go, and the gain goes on the next her attack took that's gone (on the labels' 85 kills, of the 5
+# rebinds 2 put a wrong kill right, 1 a right one wrong); one out of sight MISSING_S from CONFIRM_S on is dead.
+REBIND_S = 1.2
+CONFIRM_S = 1.5
+# Whether a share of a kill (another player's, of a monster her stars hurt: a gain no kill explains) is bound to the hurt
+# one her throws went at with the lowest bar (`_bind_share`). Emulated on the telemetry of the grinds of 2026-10-26
+# 21:04-22:28 (D:/MapleHelper-scratch/kplace/build/idsim.py --ids), it took 4 more throws at the dead off their target
+# but 42 more at monsters whose track was seen again later; the death watch (perception.deaths) sees most of those
+# deaths anyway (in the recordings 4 of the 5 throws at another player's kill left out without it): off.
+SHARES = False
 BAR_STEP = 0.03     # a bar this much lower than its lowest seen before: a hit
 # The velocity filter (alpha-beta on x, map units), for sightings whose pose isn't known. Simulated at 30 Hz
 # on a monster walking 125 units/s with 1.5 units of jitter and her dot stepping a minimap pixel (11.4 units)
@@ -187,13 +230,26 @@ class Track:
     still_since: float = 0.0
     owed: bool = False       # out of sight, the one a gain of hers still waiting would go on now (_resolve): likely
                              # dead, not about (localization.unseen)
+    gain: float | None = None  # the gain of hers (its frame's time) this monster is the kill of (`_bind`), or the
+                               # share (`share`): dying from then, dead once gone
+    share: bool = False      # ... a share: another player's kill of a monster she hurt
+    seen_x: float | None = None  # where its last sighting put it (map x, unfiltered: perception.deaths looks there)
+    died_seen: float | None = None  # when its death was seen (perception.deaths: its die1 frames where it was)
 
     def record(self) -> dict:
         """As telemetry data ('tracks')."""
         return {"id": self.id, "kind": self.kind, "state": self.state, "x": round(self.x, 1), "y": round(self.y, 1),
                 "vx": round(self.vx, 1), "facing": self.facing, "platform": self.platform,
                 "bar": None if self.bar is None else round(self.bar, 2), "hits": self.hits, "seen": self.seen,
-                **({"cause": self.cause} if self.cause else {})}
+                **({"cause": self.cause} if self.cause else {}),
+                **({"gain": round(self.gain, 3)} if self.gain is not None else {}),
+                **({"share": True} if self.share else {})}
+
+    @property
+    def killed(self) -> bool:
+        """Whether it's dead or dying as far as the tracker knows: found dead, or the monster a gain of hers (or a
+        share) is on."""
+        return self.state == DEAD or (self.state == DYING and self.gain is not None)
 
 
 @dataclass(frozen=True)
@@ -253,8 +309,14 @@ class MonsterTracker:
         self.gains: list[tuple[float, str | None]] = []  # her kills her EXP told of, not yet put on a monster: when,
                                                          # and the kind the gain's size named (None: not known)
         self.throws: list[_Throw] = []
+        self.shares: list[float] = []  # shares of kills her EXP told of (`share`), not yet put on a monster
+        # Each bound gain's (or share's) monsters her attack took in turn (`_picks`, ids), for when the one it went on
+        # was another (`_judge`): kept STAR_WINDOW + HIDE_S
+        self.picked: dict[float, list[int]] = {}
+        self.merged: list[int | None] = []  # the tracks the last merge's sightings were taken for (`merge`)
         self.her: tuple[float, float] | None = None  # where she was in the last frame placed
         self._last_t = -1e18                          # ... and when that was
+        self._path: deque[tuple[float, float, float]] = deque(maxlen=150)  # where she was, frame by frame (5 s)
         # The frame time of a search for monsters out (localization.worldstate: its answer comes back a few frames
         # later), or None (LATE_SEARCH_S).
         self.searching: float | None = None
@@ -262,6 +324,7 @@ class MonsterTracker:
         self.players: list[Player] | None = None     # the other players on the map in the last frame (None: not told)
         self.counts = {"tracks": 0, "died hers": 0, "died other": 0, "lost in a crowd": 0, "flickers": 0,
                        "gains unexplained": 0, "late sightings of the dead": 0, "nobody by it": 0}
+        # (and, once they happen, "kills bound", "shares bound", "let go", "deaths seen": `_count`)
 
     # --- told from outside -----------------------------------------------------------------------
 
@@ -269,6 +332,17 @@ class MonsterTracker:
         """Her EXP went up in the frame shown at t, by a kill of `kind` (by the gain's size: localization.gains; None:
         not known). A gain of several kills is told once for each."""
         self.gains.append((t, kind))
+
+    def share(self, t: float) -> None:
+        """Her EXP went up in the frame shown at t by a share of a kill (a gain no kill of the map's explains:
+        localization.gains, Gain.odd): another player's kill of a monster her stars hurt."""
+        self.shares.append(t)
+
+    def seen_dying(self, tid: int, t: float) -> None:
+        """Track `tid`'s death was seen in the frame shown at t (perception.deaths: its die1 frames where it was)."""
+        tr = self.tracks.get(tid)
+        if tr is not None and tr.state != DEAD and tr.died_seen is None:
+            tr.died_seen = t
 
     def throw(self, t: float, side: str, attack: str | None = None) -> None:
         """She threw toward `side` at t (Actions.throw_listeners), with `attack` (its id, if told): the monsters a
@@ -291,11 +365,15 @@ class MonsterTracker:
         if view is None:
             return events
         self.her = her
+        if her is not None:
+            self._path.append((t, her[0], her[1]))
         seen: set[int] = set()
-        # Two tracks may re-find one monster: a track seen in the last frame has first claim, then the nearer.
+        # Two tracks may re-find one monster: a track seen in the last frame has first claim, then the nearer. One a
+        # gain of hers is bound to walks on until her star lands (`_bind`): followed as it walks.
         for tid, m in sorted(refound.items(), key=lambda kv: self._claim(kv[0], kv[1], t)):
             tr = self.tracks.get(tid)
-            if tr is None or tr.state == DEAD or (tr.state == DYING and abs(m.x - tr.x) > FADE_MOVE):
+            if tr is None or tr.state == DEAD or (tr.state == DYING and tr.gain is None
+                                                  and abs(m.x - tr.x) > FADE_MOVE):
                 continue
             if any(same(m.mob, self.tracks[i].mob) for i in seen):
                 continue  # (two overlapping are two monsters, each found by its own track's window)
@@ -329,11 +407,15 @@ class MonsterTracker:
         reach); `view`, what that frame showed. One no track explains is new, as of t. A track seen since t
         learns nothing from it; one found dead since t isn't brought back, nor made anew; one off screen now
         (where it should be at `t_now`, in the newest view `now`) stays off, else it's `back`. The events are
-        of the frame at t. A new one (or one back) is put in the throws since t whose path it was in."""
+        of the frame at t. A new one (or one back) is put in the throws since t whose path it was in. Which track each
+        sighting was taken for (None: one found dead since) is left in `merged`, in `found`'s order."""
         events: list[Event] = []
+        self.merged = []
         for m, tr in self._match(t, found, known, late=True):
+            self.merged.append(None if tr is None else tr.id)  # (one found dead since: its corpse, its id)
             if tr is None:
                 tr = self._new(t, m, view)
+                self.merged[-1] = tr.id
                 events.append(Event(tr.how, t, tr.id, {"kind": m.kind, "x": round(m.x), "platform": m.platform}))
                 self._aimed_since(tr, t)
             elif tr.state == DEAD:
@@ -435,7 +517,7 @@ class MonsterTracker:
             if o.state == HIDDEN and o.kind == m.kind and abs(o.x - m.x) <= 2 * (MATCH_BASE + MATCH_KNOCKBACK):
                 o.crowded = True
         tr = Track(self.next_id, m.kind, m.platform, m.x, m.y, m.mob, t, t, facing=m.facing, pose=m.pose,
-                   bar=m.bar, bar_at=t if m.bar is not None else None, how=how)
+                   bar=m.bar, bar_at=t if m.bar is not None else None, how=how, seen_x=m.x)
         self.next_id += 1
         self.counts["tracks"] += 1
         self.tracks[tr.id] = tr
@@ -472,7 +554,7 @@ class MonsterTracker:
         if m.facing:
             tr.facing = m.facing
         tr.pose = m.pose
-        tr.last_seen, tr.seen, tr.crowded = t, tr.seen + 1, False
+        tr.last_seen, tr.seen, tr.crowded, tr.seen_x = t, tr.seen + 1, False, m.x
         if tr.still_x is None or abs(m.x - tr.still_x) > FADE_MOVE:
             tr.still_x, tr.still_since = m.x, t
         if tr.state in (HIDDEN, OFFSCREEN):
@@ -531,15 +613,20 @@ class MonsterTracker:
             self._dies(tr, tr.last_seen, "other", events, t)
 
     def _resolve(self, t: float, events: list[Event]) -> None:
-        """Her EXP gains put on the monsters they were (see the top); while the likeliest is still seen, fading,
-        it's `dying`."""
+        """Her EXP gains put on the monsters they were (see the top): bound to the one her attack took, at once, else
+        waiting for one to go; while the likeliest of those is still seen, fading, it's `dying`. Her shares too, and
+        the deaths seen (`seen_dying`)."""
         for tr in self.tracks.values():
             tr.owed = False
-            if tr.state == DYING:
+            if tr.state == DYING and tr.gain is None:
                 tr.state = LIVE if t - tr.last_seen < MISSING_S else HIDDEN
+        self._judge(t, events)
+        self._deaths_seen(t, events)
         left = []
         for g, kind in self.gains:  # the oldest first: each has first pick before the gains after it
-            cands = [tr for tr in self.tracks.values() if tr.state in (LIVE, HIDDEN, DYING)
+            if self.throws_known and t - g <= BIND_S and self._bind(g, kind, t, events):
+                continue
+            cands = [tr for tr in self.tracks.values() if tr.state in (LIVE, HIDDEN, DYING) and tr.gain is None
                      and tr.last_seen >= g - self.shape.hide_s and self._aimed(tr, g)
                      and (kind is None or tr.kind == kind)]
             gone = [tr for tr in cands if tr.state == HIDDEN]
@@ -556,6 +643,127 @@ class MonsterTracker:
             else:
                 self.counts["gains unexplained"] += 1
         self.gains = left
+        self.shares = [g for g in self.shares if SHARES and t - g <= BIND_S and not self._bind_share(g, t, events)]
+        self.picked = {g: ids for g, ids in self.picked.items() if t - g <= STAR_WINDOW + HIDE_S}
+
+    # --- her kills' monsters, bound (see the top) ------------------------------------------------------------
+
+    def _bind(self, g: float, kind: str | None, t: float, events: list[Event]) -> bool:
+        """Gain `g` (of `kind`, None: not known) bound to the monster the attack of the throw keyed GAIN_AFTER_KEY
+        before it took (`_picks`), if a throw was and one is there: True."""
+        lo, hi = GAIN_AFTER_KEY
+        th = max((th for th in self.throws if lo <= g - th.t <= hi), key=lambda th: th.t, default=None)
+        picks = [] if th is None else self._picks(th, kind, g)
+        if not picks:
+            return False
+        self.picked[g] = [tr.id for tr in picks]
+        self._victim(picks[0], g, t, events)
+        return True
+
+    def _picks(self, th: _Throw, kind: str | None, g: float) -> list[Track]:
+        """The monsters of `kind` (None: any) throw `th`'s attack can have taken, the likeliest first: as it picked
+        (PICK_S after its key) from where she was then (her place in the frames; else where she was when the throw was
+        told), each where its track was at the gain `g`, ahead of her (VICTIM_BEHIND behind her middle at most,
+        THROW_REACH ahead) from VICTIM_UP above her feet to VICTIM_DOWN below, those seen within FRESH_S of it first,
+        the nearest ahead first. None bound to another gain."""
+        her = self._her_at(th.t + PICK_S) or th.her
+        if her is None:
+            return []
+        sign = 1 if th.side == RIGHT else -1
+        out = []
+        for tr in self.tracks.values():
+            if tr.state not in (LIVE, HIDDEN, DYING) or tr.gain is not None or tr.last_seen < g - HIDE_S:
+                continue
+            if kind is not None and tr.kind != kind:
+                continue
+            ahead = sign * (self._at(tr, g) - her[0])
+            if -VICTIM_BEHIND <= ahead <= THROW_REACH and -VICTIM_UP <= tr.y - her[1] <= VICTIM_DOWN:
+                out.append((g - tr.last_seen > FRESH_S, abs(ahead), tr.id, tr))
+        return [a[-1] for a in sorted(out, key=lambda a: a[:3])]
+
+    def _her_at(self, t: float) -> tuple[float, float] | None:
+        """Where she was in the frame nearest t (within 0.15 s), as placed; None if no frame was."""
+        best = min(self._path, key=lambda p: abs(p[0] - t), default=None)
+        return None if best is None or abs(best[0] - t) > 0.15 else (best[1], best[2])
+
+    def _victim(self, tr: Track, g: float, t: float, events: list[Event], share: bool = False) -> None:
+        """Track `tr` the monster gain (or share) `g` was: dying from now, its id kept as it walks on."""
+        tr.state, tr.gain, tr.share = DYING, g, share
+        self._count("shares bound" if share else "kills bound")
+        events.append(Event("victim", t, tr.id, {"kind": tr.kind, "x": round(tr.x), "platform": tr.platform,
+                                                 "gain": round(g, 3), **({"share": True} if share else {})}))
+
+    def _bind_share(self, g: float, t: float, events: list[Event]) -> bool:
+        """Share `g` bound to the monster hurt by her that it was: of the tracks with a bar (a monster's bar shows to
+        whoever hurt it) that her throws kept went at, the lowest bar, then the nearest her. True if one was."""
+        her_x = self.her[0] if self.her is not None else 0.0
+        cands = [tr for tr in self.tracks.values() if tr.state in (LIVE, HIDDEN) and tr.gain is None
+                 and tr.bar is not None and any(th.t <= g and tr.id in th.aimed for th in self.throws)]
+        if not cands:
+            return False
+        cands.sort(key=lambda tr: (tr.bar, abs(tr.x - her_x), tr.id))
+        self.picked[g] = [tr.id for tr in cands]
+        self._victim(cands[0], g, t, events, share=True)
+        return True
+
+    def _judge(self, t: float, events: list[Event]) -> None:
+        """The tracks bound to a gain or share: dead once their death is seen, or once out of sight MISSING_S from
+        CONFIRM_S after it; let go if re-found REBIND_S after it (it was another: `_let_go`)."""
+        for tr in list(self.tracks.values()):
+            if tr.gain is None or tr.state != DYING:
+                continue
+            cause = "other" if tr.share else "hers"
+            if tr.died_seen is not None:
+                self._dies(tr, tr.gain, cause, events, t)
+            elif t - tr.gain >= REBIND_S and tr.last_seen >= t - 1e-9:
+                self._let_go(tr, t, events)
+            elif t - tr.gain >= CONFIRM_S and t - tr.last_seen >= MISSING_S:
+                self._dies(tr, tr.gain, cause, events, t)
+
+    def _let_go(self, tr: Track, t: float, events: list[Event]) -> None:
+        """Track `tr`, bound to a gain, seen alive since: not its monster. The gain goes on the next its attack took
+        that's out of sight now (`picked`), if one is."""
+        g, share = tr.gain, tr.share
+        tr.gain, tr.share, tr.state = None, False, LIVE
+        self._count("let go")
+        events.append(Event("let_go", t, tr.id, {"kind": tr.kind, "gain": round(g, 3)}))
+        nxt = [self.tracks[i] for i in self.picked.get(g, ()) if i in self.tracks and i != tr.id]
+        nxt = [o for o in nxt if o.gain is None and o.state in (LIVE, HIDDEN) and t - o.last_seen >= MISSING_S]
+        if nxt:
+            self._victim(nxt[0], g, t, events, share)
+        elif not share:
+            self.counts["gains unexplained"] += 1
+
+    def _deaths_seen(self, t: float, events: list[Event]) -> None:
+        """The tracks whose death was seen (`seen_dying`) not bound to a gain: one a gain of hers bound to another
+        could have been (`picked`), that one not seen dying, takes the gain (its own let go); else, with a gain waiting
+        that it can be, that gain; else someone else killed it."""
+        for tr in list(self.tracks.values()):
+            if tr.died_seen is None or tr.gain is not None or tr.state == DEAD:
+                continue
+            self._count("deaths seen")
+            other = next((o for g, ids in sorted(self.picked.items(), reverse=True) if tr.id in ids
+                          for o in self.tracks.values() if o.gain == g and o.state == DYING and o.died_seen is None),
+                         None)
+            if other is not None:
+                g, share = other.gain, other.share
+                other.gain, other.share, other.state = None, False, LIVE if t - other.last_seen < MISSING_S else HIDDEN
+                self._count("let go")
+                events.append(Event("let_go", t, other.id, {"kind": other.kind, "gain": round(g, 3)}))
+                self._victim(tr, g, t, events, share)
+                self._dies(tr, g, "other" if share else "hers", events, t)
+                continue
+            waiting = next(((g, kind) for g, kind in self.gains if (kind is None or kind == tr.kind)
+                            and self._aimed(tr, g)), None)
+            if waiting is not None:
+                self.gains.remove(waiting)
+                self._victim(tr, waiting[0], t, events)
+                self._dies(tr, waiting[0], "hers", events, t)
+                continue
+            self._dies(tr, tr.died_seen, "other", events, t)
+
+    def _count(self, what: str) -> None:
+        self.counts[what] = self.counts.get(what, 0) + 1
 
     def _last_hit(self, tr: Track) -> float:
         """When her last attack its way could have hit it (none: never)."""
@@ -581,7 +789,9 @@ class MonsterTracker:
         by = near_rival(self.players, tr.x, tr.y) if cause == "other" and self.players else None
         events.append(Event("died", t, tr.id, {"kind": tr.kind, "cause": cause, "x": round(tr.x),
                                                 "platform": tr.platform, "hurt": tr.bar is not None,
-                                                "at": round(when, 3), **({"by": by.id} if by is not None else {})}))
+                                                "at": round(when, 3), **({"by": by.id} if by is not None else {}),
+                                                **({"share": True} if tr.share else {}),
+                                                **({"seen": True} if tr.died_seen is not None else {})}))
 
 
 def overlap(a: Mob, b: Mob) -> bool:

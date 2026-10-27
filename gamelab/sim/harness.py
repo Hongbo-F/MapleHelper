@@ -34,7 +34,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    records), and mp_throws, thrown for her MP (as she reckons it, under a cast); mp_per_kill, the
                    MP a kill of hers, and mp_potions_per_min; at_dead, her attacks chosen at a monster dead by then
                    (DEAD_BEFORE_S, DEAD_NEAR: its 'attack' record's target against the world's deaths), casts_at_dead
-                   those of them Lucky Seven; dropped, the throws dropped at their last look before the key for a
+                   those of them Lucky Seven; by the world's own monster (_at_dead_ids): at_dead_hers,
+                   at_dead_others, casts_at_dead_id, and live_taken, the feed's tracks her ledger took for dead that
+                   were alive; dropped, the throws dropped at their last look before the key for a
                    kill come in (behavior.hunter: 'dropped' events)
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
                    counts against the bar as a death does; left_map_at, the same for up held at a portal
@@ -520,6 +522,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "finishes": sum(1 for r in records if r.get("topic") == "attack" and r.get("why") == "finish"),
         "mp_throws": sum(1 for r in records if r.get("topic") == "attack" and r.get("why") == "MP"),
         **_at_dead(world, records),
+        **_at_dead_ids(world),
         "mp_per_kill": round(world.mp_used / len(mine), 2) if mine else None,
         "mp_potions_per_min": round(world.mp_potions / (end / 60), 3) if end else None,
         "dropped": sum(1 for r in events if r.get("kind") == "dropped"),
@@ -617,6 +620,19 @@ def _at_dead(world, records: list[dict]) -> dict:
             n += 1
             casts += r.get("key") == "lucky_seven"
     return {"at_dead": n, "casts_at_dead": casts}
+
+
+def _at_dead_ids(world) -> dict:
+    """The throws at the dead by the world's own monsters (World.aim_log, from the Sim's hook on her attack choice: the
+    monster of the target's kind on its platform drawn nearest where the stack saw it, as it chose): at_dead_hers, at
+    one her attack had killed by then (drawn alive until her star lands: Realism.dies_late), at_dead_others, at another
+    player's; casts_at_dead_id, of those Lucky Seven; aims, the choices judged; live_taken, the feed's tracks the ledger
+    took for dead (behavior.ledger.Ledger.dead) whose monster drawn there was alive (World.live_taken)."""
+    log = getattr(world, "aim_log", [])
+    dead = [a for a in log if a[3] in ("her", "rival")]
+    return {"at_dead_hers": sum(a[3] == "her" for a in log), "at_dead_others": sum(a[3] == "rival" for a in log),
+            "casts_at_dead_id": sum(a[1] == "lucky_seven" for a in dead), "aims": len(log),
+            "live_taken": len(getattr(world, "live_taken", []))}
 
 
 def _travelling(world, records: list[dict], end: float) -> dict:

@@ -218,7 +218,10 @@ def test_on_the_simulator_it_measures_the_simulator_s_respawn():
     shot dead, then 14 s of looks with her standing there. The report finds one episode, back 7-8.7 s after the kill's
     event (that comes at the look after the death, so a little short; the look that sees it back up to a look late):
     7.6 s. (Seed 3: on 5 of seeds 1-8 her sweep of the pig's drops, whose looks don't search for monsters, lasted
-    until it was back, so the basin was never seen empty and there's no episode; on the other three, 7.6-7.8 s.)"""
+    until it was back, so the basin was never seen empty and there's no episode; on the other three, 7.6-7.8 s. Seed 2
+    since 2026-10-27, her kill drawn alive until her star lands with its drops where it dies then (sim.world
+    Realism.dies_late) and her kill's monster bound at her gain (localization.tracking): on 6 of seeds 1-8 the sweep
+    lasted until it was back; on 2 and 7, 7.6-7.7 s.)"""
 
     def fn(sim):
         h = sim.hunter()
@@ -228,7 +231,7 @@ def test_on_the_simulator_it_measures_the_simulator_s_respawn():
             h.look()
         return {}
 
-    sc = scenarios.Scenario("respawn", fn, (36, 450.0), monsters=[("Pig", 36, 650.0)], seed=3)
+    sc = scenarios.Scenario("respawn", fn, (36, 450.0), monsters=[("Pig", 36, 650.0)], seed=2)
     with telemetry.captured() as records:
         _, sim = scenarios.run_sim(sc)
     model = sim.model

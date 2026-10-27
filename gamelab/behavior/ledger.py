@@ -6,13 +6,17 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   explains it: a monster of the kind named (when one was) that can have taken the attack of a throw made in the
   last STAR_WINDOW s (or, with none, that long before the look before, as the gain came after it; any of them:
   which of the claw's stances an attack takes is drawn, and the client's order within a band of the star's search
-  can't be seen): a gain that shows GAIN_AFTER_KEY (0.1-0.6 s) after a throw's key is that throw's, the first of its
-  kind in its path, seen or not (the server's kill shows before her star leaves, its monster drawn dying for a while
-  after); else preferring one that's gone from view (and of those, one with another player by it last:
-  PLAYER_KILLS), the newest throw's and the likeliest first; where that monster was seen last (a throw's path is
-  followed from look to look). A kill no throw explains (a kill seen only from a look without monsters) still
-  counts, credited to where she is, by the kind its gain named, but has no place and so no drops. A monster of its
-  kind seen by where a kill was placed, while its death animation shows, is the one dying there (`dying`).
+  can't be seen): with the feed, the monster the perception service's tracker bound the gain to (localization.tracking:
+  the one her attack took from where she was at the key, by where the tracks were at the gain; `Kill.track`), followed
+  as its track walks on until her star lands, and put on another if the tracker lets it go; else a gain that shows
+  GAIN_AFTER_KEY (0.1-0.6 s) after a throw's key is that throw's, the first of its kind in its path, seen or not (the
+  server's kill shows before her star leaves); else preferring one that's gone from view (and of those, one with
+  another player by it last: PLAYER_KILLS), the newest throw's and the likeliest first; where that monster was seen
+  last (a throw's path is followed from look to look). A kill no throw explains (a kill seen only from a look without
+  monsters) still counts, credited to where she is, by the kind its gain named, but has no place and so no drops.
+  Which monsters are dead (`dead`, `dying`): the feed's tracks a kill or a share is bound to, or found dead, by their
+  ids, until long after they're gone (every throw's target, the fights, her marks, wounds and memory go by them);
+  without the feed's ids, a monster of a placed kill's kind by where it was placed, while its death animation shows.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
   first seen), when it was last seen, whether a kill of hers explains it, what the last look that saw it saw
   in it and what that's worth (the map's looting.Worth: the game data's prices, mesos by what the map's monsters
@@ -34,7 +38,7 @@ from dataclasses import dataclass, field
 from maplehelper.engine import RIGHT
 
 from ..attack import reach
-from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, bodies, same, seen_again
+from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, bodies, is_one, same, seen_again
 from ..localization.players import near_rival
 from ..localization.scene import Loot, Scene
 from . import looting
@@ -57,6 +61,13 @@ STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be 
 # branch's world 361).
 DIE_S = 0.66
 DYING_DX = 40.0
+# The feed's tracks taken for dead (`Ledger.dead`): those a look's tracks have bound to a kill or a share of hers, or
+# found dead (tracking.Track.killed), kept this long after a look last had them so (a track's id is never used again;
+# a dead one goes from the tracker DEAD_KEEP_S after its death, and her marks of it LOST_S after it was last seen)
+DEAD_KEEP_S = 15.0
+TRACK_GAIN_S = 0.02  # s: a track bound to a gain (tracking.Track.gain) is a kill's whose gain showed within this
+FOLLOW_S = 3.0      # s after a kill that its place follows its track (it walks on until her star lands, and the
+                    # tracker may put the gain on another until tracking.REBIND_S + CONFIRM_S)
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
 # s a pile seen gone stays in the store before it's dropped. Nothing reads a gone pile but the hunt loop's
 # count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
@@ -107,6 +118,9 @@ class Kill:
     ground: int | None        # ... and the platform the kill is credited to (hers, when unplaced)
     named: str | None = None  # the kind her EXP gain's size named (None: not known)
     gained: float | None = None  # when its gain showed (its frame's time; None: not known)
+    track: int | None = None  # the feed's track its monster is (tracking: the one the gain is bound to); None: no track
+                              # known (placed by its throws' paths), 0: the one it was on was let go, none known since
+    pile: "Pile | None" = field(default=None, repr=False, compare=False)  # its pile in the drop store, if any
 
     @property
     def placed(self) -> bool:
@@ -132,6 +146,7 @@ class Ledger:
         self._throws: list[_Throw] = []
         self._last: Scene | None = None     # the last look that searched for monsters
         self._looked: float | None = None   # when the last look of all was
+        self.dead: dict[int, float] = {}    # the feed's tracks taken for dead, by id: when a look last had them so
         model = getattr(hunter, "model", None)  # each kind's death animation (`dying`), the map's game data
         self.die = {k: b.die_s for k, b in bodies(model).items()} if hasattr(model, "mob_bodies") else {}
 
@@ -144,7 +159,7 @@ class Ledger:
         kill was placed: `dying`, a star passes it)."""
         s = self._last
         path = [] if s is None or s.where is None or s.platform is None else \
-            in_path(s, side, [m for m in s.monsters if not dying(self.kills, m, when, s.monsters, self.die)])
+            in_path(s, side, [m for m in s.monsters if not dying(self.kills, m, when, s.monsters, self.die, self.dead)])
         self._throws.append(_Throw(when, side, path))
 
     def on_look(self, s: Scene) -> None:
@@ -153,10 +168,12 @@ class Ledger:
         since = s.t if self._looked is None else min(s.t, self._looked)
         self._looked = s.t
         self._throws = [th for th in self._throws if since - th.t <= STAR_WINDOW]
+        self._dead_of(s)
         new, self._accounted = self.h.exp_gains - self._accounted, self.h.exp_gains
         told = self.h.gains_told(new) if hasattr(self.h, "gains_told") else [(None, k) for k in self.h.kinds_told(new)]
         for gained, kind in told:
             self.kills.append(self._place(s, kind, gained))
+        self._follow(s)
         if s.searched:
             self._last = s
             # What can have taken a throw's attack is followed from look to look (as Wounds follows them), so a
@@ -177,6 +194,16 @@ class Ledger:
         look for up to 7 s: in the simulator, 2 of tour_hunt_basin's 61 kills went unplaced that way, and 9 of 58 once
         its monsters walked as fast as in the game. Going back that far for every gain placed more kills on the
         wrong monster (458 of 612 right in 10 scenarios, against 437 of 628)."""
+        if (bound := _bound(s, gained)) is not None:  # the tracker's: the one her attack took (Kill.track)
+            lo, hi = GAIN_AFTER_KEY
+            for th in [th for th in reversed(self._throws) if lo <= gained - th.t <= hi][:1]:
+                self._throws.remove(th)  # one star, one kill
+            here = None if s.platform is None else s.platform.id
+            kill = Kill(s.t, bound.kind, bound.platform, bound.x, bound.y,
+                        bound.platform if bound.platform is not None else here, kind, gained, bound.id)
+            if self.store is not None:
+                kill.pile = self.store.on_kill(kill)
+            return kill
         firsts = self._candidates(s.t, kind)
         if not firsts and kind is not None and KIND_ANY:
             firsts = self._candidates(s.t, None)
@@ -198,8 +225,40 @@ class Ledger:
         kill = Kill(s.t, m.kind, m.platform, m.x, m.y, m.platform if m.platform is not None else here, kind,
                     gained)
         if self.store is not None:
-            self.store.on_kill(kill)
+            kill.pile = self.store.on_kill(kill)
         return kill
+
+    def _dead_of(self, s: Scene) -> None:
+        """The feed's tracks look `s` has dead or dying (tracking.Track.killed: a kill or a share bound to it, or found
+        dead) into `dead`; one it has alive is out of it (let go: another was the kill); none kept DEAD_KEEP_S after."""
+        for tr in getattr(s, "tracks", None) or ():
+            if getattr(tr, "killed", False):
+                self.dead[tr.id] = s.t
+            else:
+                self.dead.pop(tr.id, None)
+        self.dead = {i: t for i, t in self.dead.items() if s.t - t <= DEAD_KEEP_S}
+
+    def _follow(self, s: Scene) -> None:
+        """The kills of the last FOLLOW_S bound to a track (Kill.track): where it is now (it walks on until her star
+        lands), its pile with it; one the tracker put on another, on that one (its gain's track), or on none (0)."""
+        tracks = getattr(s, "tracks", None) or ()
+        if not tracks:
+            return
+        for k in reversed(self.kills):
+            if s.t - k.t > FOLLOW_S:
+                break
+            if not k.track:
+                continue
+            tr = _bound(s, k.gained)
+            if tr is None:
+                if any(o.id == k.track for o in tracks):  # (let go: alive. Gone from the tracker: where it was last)
+                    k.track = 0
+                continue
+            k.track, k.kind, k.platform, k.x, k.y = tr.id, tr.kind, tr.platform, tr.x, tr.y
+            if tr.platform is not None:
+                k.ground = tr.platform
+            if (p := k.pile) is not None and p.status == "expected" and tr.platform is not None:
+                p.x, p.y, p.platform = tr.x, tr.y, tr.platform
 
     def _candidates(self, t: float, kind: str | None) -> list[tuple[_Throw, Monster]]:
         """What a gain seen at t can have been (of `kind`, if not None): the monsters in the paths of the throws of
@@ -236,17 +295,18 @@ class Wounds:
         if s is not None and s.where is not None and s.platform is not None:
             self._paths.append((when, in_path(s, side, [m for m in s.monsters
                                                         if not dying(self.ledger.kills, m, when, s.monsters,
-                                                                     self.ledger.die)])))
+                                                                     self.ledger.die, self.ledger.dead)])))
 
     def on_look(self, s: Scene) -> None:
         """After every look (after the ledger's): a monster in a recent throw's path with its bar new or changed
-        is hers; her wounds are followed; a kill placed on one closes it, and so do WOUND_LOST_S out of sight
-        and WOUND_S since it was first hurt."""
+        is hers; her wounds are followed; a kill placed on one closes it (`is_kill`), its track taken for dead does
+        (Ledger.dead), and so do WOUND_LOST_S out of sight and WOUND_S since it was first hurt."""
         for k in self.ledger.kills[self._kills:]:
             if k.placed:
-                self.open = [w for w in self.open if not (w.m.kind == k.kind and w.m.platform == k.platform
-                                                          and abs(w.m.x - k.x) < TRACK_SLACK)]
+                self.open = [w for w in self.open if not is_kill(w.m, k)]
         self._kills = len(self.ledger.kills)
+        dead = self.ledger.dead
+        self.open = [w for w in self.open if getattr(w.m, "track", None) is None or w.m.track not in dead]
         if not s.searched or s.where is None:
             return
         self._last = s
@@ -258,7 +318,7 @@ class Wounds:
                 # Its bar new, or other than it was (two of a kind near each other can be taken for each other
                 # from look to look: a higher one is still one in her star's path that she has hurt)
                 if again.bar is not None and (m.bar is None or abs(again.bar - m.bar) > WOUND_HURT) \
-                        and not any(seen_again(w.m, [again]) is again for w in self.open):
+                        and not any(is_one(w.m, again) for w in self.open):
                     self.open.append(Wound(again, s.t, s.t))
                 path[i] = again
         hurt = [o for o in s.monsters if o.bar is not None]  # a hurt one shows its bar: those first
@@ -272,15 +332,36 @@ class Wounds:
         return [w.m for w in self.open if now - w.seen <= seconds and (hurt_by is None or w.since <= hurt_by)]
 
 
+def is_kill(m: Monster, k: Kill) -> bool:
+    """Whether placed kill `k` is monster `m`'s: its track (Kill.track) where the feed says both (a kill let go, on none,
+    is nobody's), else of its kind on its platform within TRACK_SLACK of where it was placed (as a look follows one)."""
+    if k.track is not None and getattr(m, "track", None) is not None:
+        return k.track == m.track
+    return m.kind == k.kind and m.platform == k.platform and abs(m.x - k.x) < TRACK_SLACK
+
+
+def _bound(s: Scene, gained: float | None):
+    """The track of look `s` its tracker bound to her gain shown at `gained` (tracking.Track.gain; not a share), or
+    None."""
+    if gained is None:
+        return None
+    return next((tr for tr in getattr(s, "tracks", None) or () if getattr(tr, "gain", None) is not None
+                 and abs(tr.gain - gained) < TRACK_GAIN_S and not tr.share), None)
+
+
 def dying(kills: list[Kill], m: Monster, t: float, seen: list[Monster] = (),
-          die: dict[str, float] | None = None) -> bool:
-    """Whether monster `m`, seen at t, is taken for one dying where a kill of hers was placed: within its kind's death
-    animation (`die`: kind -> MobBody.die_s, the map's game data; DIE_S without) of the look that placed it, and of the
-    monsters of its kind on its platform seen with it (`seen`), the nearest the kill, within DYING_DX: one only, not a
-    live one beside it."""
+          die: dict[str, float] | None = None, dead=()) -> bool:
+    """Whether monster `m`, seen at t, is taken for dead or dying: its track (Monster.track) one the feed has dead or
+    dying (`dead`: Ledger.dead) or a kill of hers is on (Kill.track); else, by where a kill of hers with no track was
+    placed (or for a monster with none): within its kind's death animation (`die`: kind -> MobBody.die_s, the map's game
+    data; DIE_S without) of the look that placed it, and of the monsters of its kind on its platform seen with it
+    (`seen`), the nearest the kill, within DYING_DX: one only, not a live one beside it."""
+    track = getattr(m, "track", None)
+    if track is not None and (track in dead or any(k.track == track for k in kills[-8:])):
+        return True
     window = (die or {}).get(m.kind, DIE_S)
-    near = [k for k in kills[-8:] if k.placed and 0.0 <= t - k.t < window and k.kind == m.kind
-            and k.platform == m.platform and abs(k.x - m.x) < DYING_DX]
+    near = [k for k in kills[-8:] if k.placed and (k.track is None or track is None) and 0.0 <= t - k.t < window
+            and k.kind == m.kind and k.platform == m.platform and abs(k.x - m.x) < DYING_DX]
     if not near:
         return False
     others = [o for o in seen if o is not m and o.kind == m.kind and o.platform == m.platform]
@@ -347,9 +428,12 @@ class DropStore:
             self.gone_tried += 1
         p.tries += 1
 
-    def on_kill(self, kill: Kill) -> None:
-        if kill.platform is not None:
-            self.piles.append(Pile(kill.x, kill.y, kill.platform, kill.t, hers=True, unseen=self.value.coins["bronze"]))
+    def on_kill(self, kill: Kill) -> "Pile | None":
+        """A kill of hers placed: its pile expected where it died (returned; None: no place)."""
+        if kill.platform is None:
+            return None
+        self.piles.append(Pile(kill.x, kill.y, kill.platform, kill.t, hers=True, unseen=self.value.coins["bronze"]))
+        return self.piles[-1]
 
     def on_look(self, s: Scene) -> None:
         """A look that searched for loot: drops seen confirm a pile (or start one); a pile in view that two

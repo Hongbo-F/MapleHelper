@@ -171,13 +171,17 @@ def cover_of(s: Scene) -> Cover | None:
 
 class Memory:
     """The monsters she has seen, kept across looks (see the top). `kills`: the ledger's kills so far (behavior.ledger:
-    each with t, kind, platform and x), read at every look for the new ones; None: none told. `shape`: what her attacks
-    are to it (gamelab.character.Shape; the thief's: tracking's HIDE_S, HIT_AFTER_S, THROW_REACH, THROW_DY)."""
+    each with t, kind, platform and x, and its track if the feed's tracker said which), read at every look for the new
+    ones; None: none told. `dead`: the feed's tracks taken for dead (behavior.ledger.Ledger.dead), whose monsters are
+    killed (one a kill of hers isn't on, by someone else). `shape`: what her attacks are to it
+    (gamelab.character.Shape; the thief's: tracking's HIDE_S, HIT_AFTER_S, THROW_REACH, THROW_DY)."""
 
-    def __init__(self, model: MapModel, kills: Callable[[], list] | None = None, shape: Shape = THIEF_SHAPE):
+    def __init__(self, model: MapModel, kills: Callable[[], list] | None = None,
+                 dead: Callable[[], object] | None = None, shape: Shape = THIEF_SHAPE):
         self.model = model
         self.shape = shape
         self.kills = kills
+        self.dead = dead
         self.entries: list[Remembered] = []
         self.events: deque[tuple[str, float, Remembered]] = deque(maxlen=EVENTS)  # (what, when, the monster)
         self.covered: dict[int, float] = {}  # platform -> the latest look that covered all of it
@@ -309,8 +313,10 @@ class Memory:
         self._end_old(t)
 
     def _take_kills(self, t: float) -> list:
-        """Her new kills (the ledger's): each one placed marks the nearest monster remembered on its platform, of its
-        kind, within KILL_DX of where it was placed, killed. The ones no throw of hers explains (unplaced) are given
+        """Her new kills (the ledger's): each one placed marks the monster remembered of its track (its last sighting's:
+        Monster.track) killed, else (no track known) the nearest remembered on its platform, of its kind, within KILL_DX
+        of where it was placed; and the feed's tracks taken for dead (`dead`) mark theirs. The ones no throw of hers
+        explains (unplaced) are given
         back: `update` marks the likeliest monster she threw at (of the kind her EXP gain named, if it named one), one
         this look didn't see first (one it saw may be fading out where it died), nearest her. Left alone, a monster
         she killed so stayed remembered for the 4.7 s that throws her way keep its looks from counting, and then till
@@ -325,10 +331,20 @@ class Memory:
             if getattr(k, "platform", None) is None or getattr(k, "kind", None) is None:
                 unplaced.append(k)
                 continue
+            if (track := getattr(k, "track", None)) is not None:
+                for e in [e for e in self.entries if e.live and getattr(e.monster, "track", None) == track][:1]:
+                    self._killed(e, t, k.x)
+                continue
             near = [e for e in self.entries if e.live and e.platform == k.platform and e.kind == k.kind
                     and abs(e.x - k.x) <= KILL_DX]
             if near:
                 self._killed(min(near, key=lambda q: abs(q.x - k.x)), t, k.x)
+        dead = self.dead() if self.dead is not None else ()
+        for e in [e for e in self.entries if e.live and getattr(e.monster, "track", None) is not None
+                  and e.monster.track in dead]:
+            e.state, e.ended, e.died_x = "killed", t, e.x  # (by her, with no kill of hers on it yet, or another player)
+            self.events.append(("killed", t, e))
+            self.counts["dead"] = self.counts.get("dead", 0) + 1
         return unplaced
 
     def _killed(self, e: Remembered, t: float, x: float | None) -> None:

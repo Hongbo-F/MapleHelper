@@ -72,7 +72,7 @@ def unseen(s: Scene, memory, model: MapModel, within: float = UNSEEN_S, platform
         b = body.get(tr.kind)
         vx = max(-speed, min(speed, tr.vx)) if abs(tr.vx) > STILL_VX else 0.0
         x = MonsterTrack(tr.platform, tr.x, speed, half=b.half if b else 28.0, vx=vx).at(age, p)
-        out.append(Monster(tr.mob, x, p.y_at(x), tr.platform, tr.bar, tr.facing, ""))
+        out.append(Monster(tr.mob, x, p.y_at(x), tr.platform, tr.bar, tr.facing, "", tr.id))
     if memory is None:
         return out
     for e in memory.alive(s.t, SURE):
@@ -101,15 +101,19 @@ def hidden(s: Scene, kills=(), platforms=None) -> list:
 
 def _hers(tracks, kills, t: float) -> set[int]:
     """The ids of `tracks` that kills of hers are on: for each one placed (`kills`, the newest last) recently enough for
-    its track to count still (STAR_WINDOW, FADE_S + MISSING_S and TRACK_S before `t`), the track of its kind on its
-    platform nearest where it was placed, within KILL_NEAR, seen about when it was killed (from STAR_WINDOW before the
-    look that saw her EXP go up to FADE_S + MISSING_S after it: it fades where it died), one not seen live first
-    (fading, out of sight, or found dead). One kill, one track."""
+    its track to count still (STAR_WINDOW, FADE_S + MISSING_S and TRACK_S before `t`), its own (behavior.ledger.Kill.
+    track: the tracker's), else the track of its kind on its platform nearest where it was placed, within KILL_NEAR,
+    seen about when it was killed (from STAR_WINDOW before the look that saw her EXP go up to FADE_S + MISSING_S after
+    it: it fades where it died), one not seen live first (fading, out of sight, or found dead). One kill, one track."""
     out: set[int] = set()
     since = t - (STAR_WINDOW + FADE_S + MISSING_S + TRACK_S)
     for k in reversed(kills or ()):
         if k.t < since:
             break
+        if (own := getattr(k, "track", None)) is not None:
+            if own:
+                out.add(own)
+            continue
         if k.kind is None or k.platform is None:
             continue
         near = [tr for tr in tracks if tr.id not in out and tr.kind == k.kind and tr.platform == k.platform

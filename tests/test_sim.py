@@ -1306,13 +1306,18 @@ SLOW_SCENARIOS = {"tour_run", "loop_run", "tour_rocky_run", "loop_rocky_run", "t
 # Dungeon only until the work is taken to other maps: on West Rocky Mountain II the Axe Stump (75) counts, and
 # loop_rocky_run fell out of the map at 536 s (work/safe-travel, 2026-10-24).
 NOT_YET = {"nav_rocky_fight_bridge", "loop_rocky_run", "tour_rocky_run"}
+# What these showed came of a kill put on the wrong monster: with her kill on the one her attack took (the README: Her
+# kill's monster, 2026-10-27), no seed or layout tried shows it (each one's docstring says what was tried)
+AFTER_KILL_PLACE = {"tour_hunt_other_spot"}
 
 
 @pytest.mark.parametrize("name", [pytest.param(name, marks=[pytest.mark.skipif(
     not scenarios.available(sc.map_id), reason=f"needs map {sc.map_id}'s game data (gamedata/data)")]
     + ([pytest.mark.slow] if name in SLOW_SCENARIOS else [])
     + ([pytest.mark.xfail(reason="escorted trips keep clear of the Axe Stump: not tuned on West Rocky Mountain II "
-                                 "yet")] if name in NOT_YET else []))
+                                 "yet")] if name in NOT_YET else [])
+    + ([pytest.mark.xfail(reason="the other pig was out of reach only for a kill put by it: the fight reaches it")]
+       if name in AFTER_KILL_PLACE else []))
     for name, sc in scenarios.SCENARIOS.items()])
 def test_real_map_scenarios_show_what_they_are_there_for(name):
     trace = scenarios.run(name)
@@ -1664,3 +1669,45 @@ def test_a_simulated_monster_faces_the_way_it_last_walked():
             stood += 1
         last = x
     assert walked > 300 and stood > 300
+
+
+def test_her_kill_is_drawn_alive_until_her_star_lands_then_dying_where_it_got_to(model):
+    """Realism.dies_late (live on 2026-10-26: the victim walks on, its bar up, until her star lands, then plays its
+    death where it got to, which the frames' detector has no pictures of): the server's kill at the key's
+    DAMAGE_SHOWS_MS (her EXP then), the monster drawn alive until DIE_LANDS_S after the key and her distance over
+    DIE_FLIGHT, its bar as before the killing hit; drawn dying from then for its death animation (where its drops pop
+    out), lost by her eyes DIE_LOST_S into it, and the death watch (FakeEyes.deaths) sees it then on DEATH_SEEN of the
+    deaths."""
+    from gamelab.sim import world as W
+    c = plat(model, 500, 400)
+    w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right")
+    m = w.monsters[0]
+    tap(w, 0.0, "f", 0.04)
+    w.advance(0.35)
+    assert not m.alive and w.exp == 2  # the server's kill
+    lands = W.DIE_LANDS_S + abs(m.died_x - 100.0) / W.DIE_FLIGHT  # (its x then: the drawn one's at the landing)
+    assert m.drawn_alive is not None and abs(m.drawn_alive - lands) < 0.05
+    assert [(v[0] is m, v[3]) for v in w.visible_monsters()] == [(True, True)]  # drawn alive, walking on
+    w.advance(m.drawn_alive + 0.05)
+    assert [(v[0] is m, v[1], v[3]) for v in w.visible_monsters()] == [(True, m.died_x, False)]  # dying, there
+    assert w.dying_at("snail", m.died_x, m.y(m.died_x)) is None  # (not yet DEATH_SEEN_AFTER into it)
+    w.advance(m.drawn_alive + W.DEATH_SEEN_AFTER + 0.05)
+    assert w.dying_at("snail", m.died_x + 10, m.y(m.died_x)) is m and w.dying_at("pig", m.died_x, 500.0) is None
+    w.advance(4.0)
+    (d,) = w.live_drops()
+    assert abs(d.x - m.died_x) <= 10
+
+
+def test_the_world_judges_her_throws_targets_and_the_tracks_taken_for_dead_by_its_own_monsters(model):
+    """World.aimed_at (sim.scenarios' hook on her attack choice): the monster drawn nearest the target, alive, or killed
+    by her (drawn alive still), into aim_log; none within 40 units, 'none'."""
+    c = plat(model, 500, 400)
+    w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0), ("Snail", c.id, 600.0)], facing="right")
+    tap(w, 0.0, "f", 0.04)
+    w.advance(0.35)
+    a, b = w.monsters
+    w.aimed_at("snail", c.id, a.at(w.t) + 5, "attack")
+    w.aimed_at("snail", c.id, b.at(w.t) - 5, "lucky_seven")
+    w.aimed_at("snail", c.id, 900.0, "attack")
+    assert [(k, i, state) for _, k, i, state in w.aim_log] == [
+        ("attack", a.idx, "her"), ("lucky_seven", b.idx, "alive"), ("attack", None, "none")]

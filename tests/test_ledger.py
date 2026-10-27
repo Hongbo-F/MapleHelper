@@ -394,3 +394,54 @@ def test_on_another_map_a_pile_is_worth_its_drops_there():
     store.on_look(_look(SETTLE + 1, loot=[Loot(Item("mesos", 0, 0, 13, 13, 0.9), 900.0, 300.0, 3)],
                         looked=[(3, 300.0, 1000.0)]))
     assert store.known[-1].worth == 33.4 and store.known[-1].unseen == 33.4  # someone else's, seen
+
+
+def test_with_the_feed_a_kill_is_on_the_track_its_gain_is_bound_to_followed_and_its_pile_with_it():
+    """With the feed's tracks (Scene.tracks), a gain is put on the track the tracker bound it to (Track.gain:
+    localization.tracking, the monster her attack took at the key), not a live one beside it; its place and its pile
+    follow that track as it walks on (it's drawn alive until her star lands); that track is dead for every throw
+    (`dying`, Ledger.dead) by its id, the one beside it isn't, however near; and a gain the tracker puts on another (the
+    first let go: seen alive since) goes with it."""
+    from dataclasses import replace
+
+    from gamelab.behavior.ledger import dying
+    from gamelab.localization.monsters import Monster
+    from gamelab.localization.tracking import DYING, LIVE, Track
+    from gamelab.perception.mobs import Mob
+
+    mob = Mob("pig", 0, 0, 30, 30, 0.9)
+
+    def track(tid, x, state=LIVE, gain=None):
+        return Track(tid, "pig", 3, x, 500.0, mob, 0.0, 10.0, state=state, gain=gain)
+
+    class H(_Hunter):
+        def gains_told(self, n):
+            return [(10.2, "pig")] * n
+
+    h, store = H(), DropStore()
+    ledger = Ledger(h, store)
+    h.exp_gains = 1
+    s = _look(10.4)
+    s.tracks = [track(5, 400.0, DYING, 10.2), track(6, 420.0)]
+    s.monsters, s.searched = [Monster(mob, 400.0, 500.0, 3, track=5), Monster(mob, 420.0, 500.0, 3, track=6)], True
+    ledger.on_look(s)
+    (k,) = ledger.kills
+    assert (k.kind, k.x, k.track) == ("pig", 400.0, 5) and [p.x for p in store.piles] == [400.0]
+    assert set(ledger.dead) == {5}
+    near, dead = s.monsters[1], s.monsters[0]
+    assert dying(ledger.kills, dead, 10.5, s.monsters, None, ledger.dead)
+    assert not dying(ledger.kills, near, 10.5, s.monsters, None, ledger.dead)  # 20 units off, alive: not by space
+    s2 = _look(10.8)
+    s2.tracks = [track(5, 450.0, DYING, 10.2), track(6, 420.0)]
+    ledger.on_look(s2)
+    assert (k.x, store.piles[0].x) == (450.0, 450.0)  # walked on: followed, its pile with it
+    s3 = _look(11.6)
+    s3.tracks = [track(5, 470.0), track(6, 420.0, DYING, 10.2)]  # the tracker let 5 go and put the gain on 6
+    ledger.on_look(s3)
+    assert (k.track, k.x) == (6, 420.0) and set(ledger.dead) == {6}
+    s4 = _look(11.9)
+    s4.tracks = [replace(t) for t in s3.tracks]
+    s4.tracks[1].gain = None  # let go too, the gain on nobody: the kill on no track (0), not by space either
+    ledger.on_look(s4)
+    assert k.track == 0 and not ledger.dead
+    assert not dying(ledger.kills, Monster(mob, 425.0, 500.0, 3, track=9), 12.0, [], None, ledger.dead)
