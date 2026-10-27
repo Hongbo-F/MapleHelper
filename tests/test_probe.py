@@ -284,6 +284,10 @@ WORLDS = {
     "no walls": lambda mp: mp.setattr(world_mod, "reach", _reach_with(wall_between=lambda *a, **k: None)),
     "every wall": lambda mp: mp.setattr(world_mod, "reach", _reach_with(wall_between=_every_wall)),
     "the v83 air": lambda mp: mp.setattr(world_mod, "AIR_PICK", "v83"),
+    # reach's answer to in_area as the probe asks it (the area fixed to her feet, 'widening'): the world's own pick from
+    # a jump is the star's search alone from 2026-10-27 (world.AIR_PICK 'search', reach.AIR_MODEL), an answer the air
+    # probe's question doesn't have (probe_air runs in the area's world too: Realism.air_pick)
+    "the area": lambda mp: mp.setattr(world_mod, "AIR_PICK", "widening"),
 }
 _RUNS: dict = {}
 
@@ -320,7 +324,7 @@ RECOVERS = [
     ("hanging-wall", None, "LINE", 0), ("hanging-wall", "the level line", "LINE", 1),
     ("step-up", None, "WALLS", 0), ("step-up", "no walls", "WALLS", 1),
     ("other-wall", None, "OTHER_WALLS", 0), ("other-wall", "every wall", "OTHER_WALLS", 1),
-    ("air", None, "in_area", 0), ("air", "the v83 air", "in_area", 1),
+    ("air", "the area", "in_area", 0), ("air", "the v83 air", "in_area", 1),
 ]
 # Seeds other than 1, and why: since every look is perception's (the perception service, 2026-10-25), air in the v83
 # air's world is undecided on seed 1 (-8.8 for the area, -6.5 for the v83 client's, 20 throws that differ); seeds 2-8

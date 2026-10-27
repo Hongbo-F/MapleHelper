@@ -631,8 +631,8 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
                     y: float | None = None, pace: Pace = NO_PACE) -> tuple:
     """A monster on her platform too close for a throw from the ground (`close`, as it will be when her next attack
     starts: too_close; `mine`: all on her platform), the nearest one then deciding (on the side she faces, if any will
-    be there: a monster walking under her is on her other side by then). The
-    throw from where she stands (_from_here, `pace`: where each will be when its attack starts) if its attack surely
+    be there: one walking at her stops where it meets her, on its side, Pace's PACE_STOP). The throw from where she
+    stands (_from_here, `pace`: where each will be when its attack starts) if its attack surely
     takes it: from the ground past the claw's reach, else a jump in place keyed so that it does (reach.air_sure: her feet
     then, its body on the slope as it stands then), at once if she faces it, else turning in the air where that picks
     it, or tapping the arrow on the ground first and jumping keyed early (JumpPlan air_turn False). Else a step away to

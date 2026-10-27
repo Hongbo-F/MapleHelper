@@ -770,7 +770,7 @@ def nav_fight_up_runs_out(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=9,
+@scenario((12, -300.0), monsters="all", seed=3,
           expects=(ends("timeout"), logs("shooting it on the way"), logs("knocked off?")))
 def nav_fight_across_runs_out(sim):
     """nav_fight_across on seed 6: after 38 s fighting on 12 she's knocked off down to 11 and 34, fights the slimes and
@@ -802,7 +802,10 @@ def nav_fight_across_runs_out(sim):
     (Senses.fresh_after, the feed in every scenario): on seed 3 she now arrives; of seeds 1-64, only 27 meets all of
     this.) (Seed 9 since 2026-10-26, her throws at the dying gone, a throw's last look before its key, her stats
     at level 25 and the world's damage at the server's time: on seed 27 she now arrives; of seeds 1-16, 9 and
-    12 meet all of this, 14 don't run out of time.)"""
+    12 meet all of this, 14 don't run out of time.) (Seed 3 since 2026-10-27, an attack from a jump picking by the
+    star's search alone (reach.AIR_MODEL, the world's AIR_PICK) and her stance going by where each monster will be when
+    her attack starts (attack.stance.Pace, PACE_STOP, WALK_AT): on seed 9 she now arrives; of seeds 1-24, 3 and 6 meet
+    all of this, 21 don't run out of time.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
