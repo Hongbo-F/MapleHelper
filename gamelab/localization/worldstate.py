@@ -6,7 +6,8 @@ Every frame: her place (the same look as Senses.look takes: her name tag, HP and
 dot, ropes, the other players' dots), her EXP gains and HP drops (events, each at the frame it showed: a gain with
 her EXP number as read then, perception.exp_number, the kills its size was going to the tracker by kind,
 localization.gains), and each monster tracked re-found around where it should be (Eyes.refind: the template that
-matched it last, else its kind's).
+matched it last, else its kind's; first only as far around as it can have got since it was last seen, and a window
+the very same as at its last re-find answered as then: NEAR_FIRST, `_memos`).
 
 The searches run off that frame loop (`Searches`: in the feed, a thread of its own, `SearchThread`), one at a
 time, on the newest frame placed when one is due: monsters not tracked yet in her band every BAND_EVERY_S,
@@ -38,16 +39,16 @@ from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
 from ..perception.hud import exp_changed
 from ..perception.minimap import minimap_box
-from ..perception.mobs import Mob, MobDetector, _one_opencv_thread
+from ..perception.mobs import Mob, MobDetector, _one_opencv_thread, near_pad
 from ..screen import STRETCHED, Geometry
 from .gains import ExpMeter, Gain
 from .mapdata import MapModel
-from .monsters import Monster
+from .monsters import DEFAULT_SPEED, Monster
 from .pose import Where
 from .scene import Loot, Scene, find_loot
 from .senses import Senses
-from .tracking import (DYING, EDGE_PX, HIDDEN, LIVE, STAR_WINDOW, Event, MonsterTracker, Track, View, overlap, same,
-                       snapshot)
+from .tracking import (DYING, EDGE_PX, HIDDEN, LIVE, SPEED_CLAMP, STAR_WINDOW, Event, MonsterTracker, Track, View,
+                       overlap, same, snapshot)
 
 # Ropes are searched every frame: placed by a rope in one frame and by her dot alone in the next, her x (and
 # with it every monster's) would step by up to a minimap pixel (11.4 units) from frame to frame, which the
@@ -81,6 +82,12 @@ HIT_MERGE_S = 0.2     # a drop this soon after the last is the same hit, if the 
 # second asked, the machine 70-80% busy): a frame's 11 re-finds 13.4-14.8 ms on 4 threads (3 runs), 30 frames a second,
 # the step 19.8-21.5 ms (median; p90 30.6-33.0); on 3 threads the step 23.0 (34.2), on 6 19.2 (29.2) for more CPU.
 REFIND_THREADS = 4
+# Each track is looked for first only as far around where it should be as it can have got since it was last seen
+# (mobs.near_pad, MobDetector.refind's `near`), and its windows' answers are kept from frame to frame (`_memos`, refind's
+# `memo`): on both Lie Detectors' saved frames, each held 3 times (1/30 s apart), the masked matches' work a frame 39-40%
+# less, and as saved (0.1 s apart: the near window is REFIND_PAD's) 2-3%; every state and every re-find's answer as
+# before, 30,013 states (D:/MapleHelper-scratch/pfast/pfr, 2026-10-26; README, Fewer re-find matches).
+NEAR_FIRST = True
 
 
 @dataclass(frozen=True)
@@ -358,6 +365,10 @@ class WorldStep:
             refind_threads = REFIND_THREADS if isinstance(getattr(self.eyes, "detector", None), MobDetector) else 1
         self._refinds = (ThreadPoolExecutor(refind_threads, "refinds", _one_opencv_thread) if refind_threads > 1
                          else None)
+        # Each track's re-find windows and what they gave (MobDetector.refind's `memo`), by its id: with a real monster
+        # detector (the simulator's fakes re-find as always).
+        real = isinstance(getattr(self.eyes, "detector", None), MobDetector)
+        self._memos: dict[int, dict] | None = {} if real else None
         self.tracker = MonsterTracker(self.model, throws)
         self.schedule = schedule
         self.searches = searches if searches is not None else InlineSearches(senses)
@@ -431,6 +442,8 @@ class WorldStep:
                     continue
                 work["re-finds"] += 1
                 todo.append((tr, box))
+            if self._memos is not None:  # (made here, on this thread: the pool's threads only use them)
+                self._memos = {tr.id: self._memos.get(tr.id, {}) for tr, _ in todo}
             for (tr, _), (m, read, bar) in zip(todo, self._refind_all(s, todo, t)):
                 if m is not None:
                     refound[tr.id] = s.place(m, self.model, bar)
@@ -492,11 +505,24 @@ class WorldStep:
 
     def _refind(self, s: Scene, tr: Track, box: tuple[int, int, int, int],
                 t: float) -> tuple[Mob | None, bool, float | None]:
-        m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN)
+        if self._memos is None:  # (the simulator's fakes: REFIND_PAD around, as always)
+            m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN)
+        else:
+            m = self.eyes.refind(s, tr.mob, box, fallback=tr.state != HIDDEN, near=self._near(s, tr, t),
+                                 memo=self._memos[tr.id])
         if m is None:
             return None, False, None
         read = self._bar_due(tr, t)
         return m, read, self.eyes.bar(s, m) if read else None
+
+    def _near(self, s: Scene, tr: Track, t: float) -> int | None:
+        """How far (look-frame px) around its box track `tr` is looked for first (mobs.near_pad): its kind's fastest
+        walk as the tracker has it (SPEED_CLAMP x its speed) over the time since it was last seen; None: not first
+        nearer (NEAR_FIRST off)."""
+        if not NEAR_FIRST:
+            return None
+        speed = SPEED_CLAMP * self.tracker.walking.get(tr.kind, DEFAULT_SPEED) / s.geo.units_per_px
+        return near_pad(speed, t - tr.last_seen)
 
     def _hand_over(self) -> None:
         """The searches due (asked, or by the schedule), handed to the worker on the newest frame placed, if it's

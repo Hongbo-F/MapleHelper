@@ -391,13 +391,16 @@ class Eyes:
         """Every monster on screen (above the bottom bar)."""
         return self.detector.detect_wide(obs.frame, (0, int(obs.frame.shape[0] * obs.geo.hud_top)))
 
-    def refind(self, obs: Observation, mob: Mob, box: tuple[int, int, int, int], fallback: bool = True) -> Mob | None:
+    def refind(self, obs: Observation, mob: Mob, box: tuple[int, int, int, int], fallback: bool = True,
+               near: int | None = None, memo: dict | None = None) -> Mob | None:
         """Monster `mob`, seen in an earlier frame, looked for again where its picture should be now (`box`:
         x0, y0, x1, y1), above the bottom bar (MobDetector.refind; without `fallback`, only with the template
-        that matched it last and its animation's next frames, not its kind's whole set)."""
+        that matched it last and its animation's next frames, not its kind's whole set; `near` and `memo` as
+        there, given only to a detector that takes them: the simulator's fakes don't)."""
         h, w = obs.frame.shape[:2]
+        more = {} if near is None and memo is None else {"near": near, "memo": memo}
         return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing,
-                                    (0, 0, w, int(h * obs.geo.hud_top)), fallback)
+                                    (0, 0, w, int(h * obs.geo.hud_top)), fallback, **more)
 
     def heading(self, obs: Observation) -> Reading:
         """Which way she faces in a look's frame (perception.heading), by her picture above her name tag: not told

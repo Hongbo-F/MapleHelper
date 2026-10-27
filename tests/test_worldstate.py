@@ -441,3 +441,33 @@ def test_a_frames_refinds_on_the_pool_give_the_states_of_one_thread():
     real = Drawn(model)
     real.detector = MobDetector.__new__(MobDetector)
     assert WorldStep(Senses(real, model, band=(100, 100)))._refinds._max_workers == worldstate.REFIND_THREADS
+
+
+def test_with_a_real_detector_each_track_is_looked_for_near_first_with_a_memo_of_its_own(monkeypatch):
+    # MobDetector.refind's `near` (mobs.near_pad: its kind's fastest walk, the tracker's clamp, over the time since it
+    # was last seen) and `memo` (one dict a track, kept from frame to frame while it's followed); the simulator's fakes
+    # get neither, and re-find as they always did.
+    from gamelab.perception.mobs import MobDetector, near_pad
+
+    class Real(FakeDetector, MobDetector):  # (a real detector as the step tells them, re-finding as the fake does)
+        def refind(self, frame, box, kind, template="", facing=0, bounds=None, fallback=True, near=None, memo=None):
+            self.asked.append((kind, near, memo))
+            return FakeDetector.refind(self, frame, box, kind, template, facing, bounds, fallback)
+
+    model = small_map()
+    assert WorldStep(Senses(Drawn(model), model, band=(100, 100)))._memos is None
+    eyes = Drawn(model)
+    eyes.detector = Real()
+    eyes.detector.asked = []
+    step = WorldStep(Senses(eyes, model, band=(100, 100)), refind_threads=1)
+    eyes.mobs = [pig(700), pig(1250)]
+    frames(step, 3)
+    asked = eyes.detector.asked
+    speed = tracking.SPEED_CLAMP * step.tracker.walking["pig"] / Drawn(model).geo.units_per_px
+    assert len(asked) == 4 and all(near == near_pad(speed, 1 / FPS) for _, near, _ in asked)
+    assert asked[0][2] is asked[2][2] and asked[1][2] is asked[3][2] and asked[0][2] is not asked[1][2]
+    assert set(step._memos) == {tr.id for tr in step.tracker.live()}
+    monkeypatch.setattr(worldstate, "NEAR_FIRST", False)
+    asked.clear()
+    frames(step, 1, start=101.0)
+    assert asked and all(near is None and memo is not None for _, near, memo in asked)

@@ -33,9 +33,14 @@ Mushroom, Stump and Dark Stump) are searched as one (`units`), each kind's pictu
 monster found as a kind that shares its body with one searched apart (`twins`: a Stump, a Dark Stump and an Axe Stump)
 is given the kind whose picture it is (`_pick_kind`); and at the game's own size a monster re-found as a kind that
 shares its body with others isn't re-found where another's picture is the monster's (`refind`).
+
+A monster followed is re-found first only as far around where it should be as it can have got since it was last seen
+(`near_pad`), and a window whose pixels are the very same as at its last re-find gives the last answer (`refind`'s
+`memo`): fewer matches a frame for the same answers (README, Fewer re-find matches).
 """
 
 import json
+import math
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -112,6 +117,23 @@ REFIND_PAD = 16
 # every frame.
 REFIND_GOOD = 0.9
 REFIND_NEXT = 4
+# A monster followed is looked for first only as far around where it should be as it can have got since it was last
+# seen (`near_pad`: turned at once at its kind's fastest walk, twice that walk over the time, and NEAR_MARGIN px more),
+# and in the REFIND_PAD window only where that finds no picture at REFIND_GOOD, or another kind's monster: there, the
+# same pictures in the same order, it's the whole window's answer as before (README, Fewer re-find matches). Not
+# THRESHOLD: a picture cut by the near window's edge, the monster further off, can score 0.6-0.9. Where master's
+# re-finds found them on 01:01's before/ (2026-10-26, D:/MapleHelper-scratch/pfast/pfr: ident.py --stats, ana.py), a
+# monster's feet were 4 px from where they should be (median), 16-17 at 90% and 22 at 99%, its frames 0.1 s apart as
+# saved or each held 3 times (15 and 22 at 1/30 s: the motion of 0.1 s comes on every third): the tracker walks it on
+# as it was, these mushrooms hop and turn, and her minimap dot's steps move them all on screen. At 0.1 s since its last
+# sighting the near window is no smaller than REFIND_PAD's (4 + 24 px against 23 at 1366x768: nothing changes there);
+# at 1/30 s it's 12 px against 23, 625 places against 2,209. Of 0-10 px tried on the held frames, a margin of 4 found
+# 65% of the live re-finds there (57-78%), its windows' places about 0.66 of today's (0.59-0.84). Where a track's last
+# re-find found it only outside its near window (or not at all), the next goes to the whole window at once (`_far`): on
+# the service's frame loop replayed on the saved frames stamped 1/30 s apart, their motion 0.1 s's (3 times live's a
+# frame), near first without it took 2.28 cores for 28.9 frames a second against master's 2.08 for 29.8; with it 1.89
+# for 30.2 against 1.95 for 30.2 (pfast/tools/replay.py, the crowd's [700:1300] of 01:01; README).
+NEAR_MARGIN = 4
 # What a folder of templates may say about them, by file name: where the monster's feet are in each picture
 # ("origin", in the picture's own px, of its size "w" x "h"), which way it faces ("faces_right"; the game's
 # sprites face left), its frame in the game data ("frame": "move/2") and that frame's body box ("lt", "rb").
@@ -403,6 +425,7 @@ class MobDetector:
         self.apart = {k: others for k, v in self.twins.items() if (others := tuple(t for t in v if t not in unit[k]))}
         self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind) ...
+        self.recalled = 0   # ... and windows whose answer was the last one's (refind's `memo`) ...
         self._counting = threading.Lock()  # ... counted by re-finds on several threads at once (worldstate's pool)
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
         for t in (t for ts in self.templates.values() for t in ts):  # made ready for the C's masked match now too
@@ -426,7 +449,8 @@ class MobDetector:
         return self._picked(frame, rows, suppress_overlaps([hit for band in bands for hit in band]))
 
     def refind(self, frame: np.ndarray, box: tuple[int, int, int, int], kind: str, template: str = "",
-               facing: int = 0, bounds: tuple[int, int, int, int] | None = None, fallback: bool = True) -> Mob | None:
+               facing: int = 0, bounds: tuple[int, int, int, int] | None = None, fallback: bool = True,
+               near: int | None = None, memo: dict | None = None) -> Mob | None:
         """A monster seen before, looked for again around where it should be: `box` (x0, y0, x1, y1, frame
         px) is where its picture should be, searched REFIND_PAD px around (within `bounds`, by default the
         frame). First the picture that matched it last (`template`, `facing`: Mob.template and Mob.facing; a
@@ -439,16 +463,75 @@ class MobDetector:
         of a frame scores 0.79-0.92 on a mushroom and up to 1.00 on a stump, so a track would otherwise go on on
         another kind's monster walking past or standing where it died. The one found nearest the box's centre, or
         None. On the caller's thread: a window is small, and the pool's hand-offs cost more (the feed's step runs a
-        frame's re-finds at once, each on a thread of its own pool: localization.worldstate, REFIND_THREADS)."""
+        frame's re-finds at once, each on a thread of its own pool: localization.worldstate, REFIND_THREADS).
+        `near` (px): looked for first only that far around the box (`near_pad`: as far as it can have got since it was
+        last seen), the same way; the REFIND_PAD window as above only where that finds no picture at REFIND_GOOD, or
+        another kind's monster. `memo`: a dict the caller keeps for this monster from one re-find to the next (one a
+        track): a window at the same place, looked at with the same pictures, whose pixels are the very same as last
+        time gives what it gave then (`_recall`) without matching again; and where the last re-find found it only
+        outside its near window, or not at all, this one goes to the whole window at once (`_far`)."""
         h, w = frame.shape[:2]
-        bx0, by0, bx1, by1 = bounds or (0, 0, w, h)
+        bounds = bounds or (0, 0, w, h)
+        bx1, by1 = bounds[2], bounds[3]
         pad = round(REFIND_PAD * self.px)
-        x0, y0 = max(bx0, int(box[0]) - pad), max(by0, int(box[1]) - pad)
-        x1, y1 = min(bx1, int(box[2]) + pad), min(by1, int(box[3]) + pad)
-        if x1 <= x0 or y1 <= y0 or kind not in self.templates:
+        full = _window(box, pad, bounds)
+        if full is None or kind not in self.templates:
             return None
-        window = frame[y0:y1, x0:x1]
         cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        seen = (kind, template, facing)  # what the windows are looked at with (`_recall`)
+        nearer = near is not None and near < pad
+        if nearer and not _far(memo):  # first only as far around as it can have got (`near_pad`)
+            small = _window(box, near, bounds)
+            if small is not None:
+                best = self._looked(frame, small, seen, memo, "near")
+                # (over REFIND_GOOD as rounded: a score that rounds to 0.9 may be under it, and the matches went on to
+                # the next pictures. Taken at 0.9, a held frame of 01:01 kept one at 0.900 at the near window's edge,
+                # where its next picture, a px taller, scored 0.99 in the whole window.)
+                if best is not None and best.score > REFIND_GOOD and self._its_kind(frame[:by1, :bx1], best):
+                    return best
+        best = self._looked(frame, full, seen, memo, "full")
+        if best is not None and not self._its_kind(frame[:by1, :bx1], best):
+            best = None  # another kind's monster: not this one
+        if nearer:
+            _note_far(memo, best is None or not _inside(best, box, near))
+        if best is not None or not fallback:
+            return best
+        with self._counting:
+            self.fallbacks += 1
+        x0, y0, x1, y1 = full
+        known, found = _recall(memo, "whole", full, kind, frame)
+        if known:
+            self._recalled()
+        else:
+            found = [_moved(m, x0, y0) for m in self._detect(frame[y0:y1, x0:x1], None, _serial, (kind,))]
+            _keep(memo, "whole", full, kind, frame, found)
+        found = [m for m in found if m.kind == kind and self._its_kind(frame[:by1, :bx1], m)]
+        return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
+
+    def _looked(self, frame: np.ndarray, win: tuple[int, int, int, int], seen: tuple, memo: dict | None,
+                slot: str) -> Mob | None:
+        """`_matched` in window `win`, or what it gave the last time (`memo[slot]`: the same window, the same
+        pictures, the very same pixels)."""
+        known, best = _recall(memo, slot, win, seen, frame)
+        if known:
+            self._recalled()
+            return best
+        best = self._matched(frame, win, *seen)
+        _keep(memo, slot, win, seen, frame, best)
+        return best
+
+    def _recalled(self) -> None:
+        with self._counting:
+            self.recalled += 1
+
+    def _matched(self, frame: np.ndarray, win: tuple[int, int, int, int], kind: str, template: str,
+                 facing: int) -> Mob | None:
+        """A re-find's matches in window `win` (x0, y0, x1, y1) of `frame` (`refind`): the picture that matched it
+        last (`template`, `facing`; both ways a cut-out that doesn't know its facing), and on a frame finer than step
+        1's, where that scores under REFIND_GOOD, the frames its animation most likely went to, in turn until one
+        scores REFIND_GOOD (`_next_frames`). The best that scores THRESHOLD, or None."""
+        x0, y0, x1, y1 = win
+        window = frame[y0:y1, x0:x1]
 
         def fits(t: MobTemplate) -> bool:
             return window.shape[0] >= t.rgb.shape[0] and window.shape[1] >= t.rgb.shape[1]
@@ -481,15 +564,7 @@ class MobDetector:
                     best = _seen(kind, t, x0 + x + tw // 2, y0 + y + th // 2, tw, th, round(float(score), 3))
                     if score >= REFIND_GOOD:
                         break
-        if best is not None and not self._its_kind(frame[:by1, :bx1], best):
-            best = None  # another kind's monster: not this one
-        if best is not None or not fallback:
-            return best
-        with self._counting:
-            self.fallbacks += 1
-        found = [_moved(m, x0, y0) for m in self._detect(window, None, _serial, (kind,))]
-        found = [m for m in found if m.kind == kind and self._its_kind(frame[:by1, :bx1], m)]
-        return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
+        return best
 
     def _its_kind(self, frame: np.ndarray, m: Mob) -> bool:
         """Whether monster `m`, re-found as its kind (a learned one that shares its body with others: `twins`), is
@@ -762,6 +837,60 @@ def _moved(m: Mob, dx: int, dy: int) -> Mob:
     """A monster found in a window of the frame, in the frame's px (the window's top-left at dx, dy)."""
     return replace(m, x=m.x + dx, y=m.y + dy, ox=None if m.ox is None else round(m.ox + dx, 2),
                    feet=None if m.feet is None else round(m.feet + dy, 2))
+
+
+def near_pad(speed: float, dt: float) -> int:
+    """How far (look-frame px) around where its picture should be a monster followed is looked for first (`refind`'s
+    `near`): as far as it can have gone the wrong way since it was last seen `dt` s ago, walking at most `speed`
+    (look-frame px/s; the tracker's prediction walks it on as it was: turned at once, it's twice that far off), and
+    NEAR_MARGIN px more."""
+    return NEAR_MARGIN + int(math.ceil(2 * speed * max(0.0, dt)))
+
+
+def _window(box: tuple[int, int, int, int], pad: int, bounds: tuple[int, int, int, int]):
+    """`box` (x0, y0, x1, y1) `pad` px larger each way, within `bounds`: (x0, y0, x1, y1), or None if that's empty."""
+    x0, y0 = max(bounds[0], int(box[0]) - pad), max(bounds[1], int(box[1]) - pad)
+    x1, y1 = min(bounds[2], int(box[2]) + pad), min(bounds[3], int(box[3]) + pad)
+    return None if x1 <= x0 or y1 <= y0 else (x0, y0, x1, y1)
+
+
+def _inside(m: Mob, box: tuple[int, int, int, int], pad: int) -> bool:
+    """Whether monster `m`'s picture lies inside `box` `pad` px larger each way (where a window that size finds it)."""
+    x0, y0 = m.x - m.w // 2, m.y - m.h // 2
+    return (x0 >= int(box[0]) - pad and y0 >= int(box[1]) - pad and x0 + m.w <= int(box[2]) + pad
+            and y0 + m.h <= int(box[3]) + pad)
+
+
+def _far(memo: dict | None) -> bool:
+    """Whether the last re-find (`memo`) went on to the whole window and found the monster outside the near one, or not
+    at all: then the next goes to the whole window at once (`_note_far`)."""
+    return memo is not None and memo.get("far", False)
+
+
+def _note_far(memo: dict | None, far: bool) -> None:
+    if memo is not None:
+        memo["far"] = far
+
+
+def _recall(memo: dict | None, slot: str, win: tuple[int, int, int, int], key, frame: np.ndarray) -> tuple[bool, object]:
+    """What `memo[slot]` kept (`_keep`) if it was of the same window `win` of a frame, looked at with the same `key`,
+    and `frame` there has the very same pixels: (True, it); else (False, None)."""
+    if memo is None:
+        return False, None
+    kept = memo.get(slot)
+    if kept is None or kept[0] != win or kept[1] != key:
+        return False, None
+    x0, y0, x1, y1 = win
+    if not np.array_equal(kept[2], frame[y0:y1, x0:x1]):
+        return False, None
+    return True, kept[3]
+
+
+def _keep(memo: dict | None, slot: str, win: tuple[int, int, int, int], key, frame: np.ndarray, answer) -> None:
+    """What window `win` of `frame`, looked at with `key`, gave (`answer`), kept in `memo[slot]` with its pixels."""
+    if memo is not None:
+        x0, y0, x1, y1 = win
+        memo[slot] = (win, key, frame[y0:y1, x0:x1].copy(), answer)
 
 
 def _next_frames(templates: list[MobTemplate], last: MobTemplate, most: int | None = None) -> list[MobTemplate]:
