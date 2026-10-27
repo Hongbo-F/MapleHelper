@@ -36,7 +36,8 @@ shares its body with others isn't re-found where another's picture is the monste
 
 A monster followed is re-found first only as far around where it should be as it can have got since it was last seen
 (`near_pad`), and a window whose pixels are the very same as at its last re-find gives the last answer (`refind`'s
-`memo`): fewer matches a frame for the same answers (README, Fewer re-find matches). A frame's re-finds go to the C
+`memo`): fewer matches a frame, master's answers on every frame compared (the memo exactly; near first wherever no
+place outside its window outscores one at NEAR_GOOD inside it: README, Fewer re-find matches). A frame's re-finds go to the C
 together (`refind_all`: every window's matches in one call on threads of its own, the rest here as each comes back),
 and a twin kind's check side by side keeps what its pictures alone give (`_pick_here`): the same answers, in less time
 (README, One call for the re-finds).
