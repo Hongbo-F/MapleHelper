@@ -354,6 +354,25 @@ def test_skills_per_level():
     assert out["4001001"]["action"] == ["alert2"]
 
 
+def test_skills_keep_what_an_attack_needs():
+    """Its type and magic damage (info), common/range, req, whether it draws a ball, and the range its tooltip names:
+    a magician's Magic Claw and Energy Bolt as the game data has them (Skill/200.img; String Skill.img)."""
+    job = {"skill": {
+        "2001003": {"info": {"type": 1, "magicDamage": 1}, "req": {"2001002": 1}, "processtype": 2,
+                    "level": {"1": {"hs": "h1", "mpCon": 10, "mad": 45, "mobCount": 1, "attackCount": 2}}},
+        "2001002": {"info": {"type": 2}, "common": {"bulletCount": "1", "range": "350"}, "ball": {"0": {}},
+                    "level": {"1": {"mpCon": 8, "mad": 90}}}}}
+    strings = {"2001003": {"name": "Magic Claw", "desc": "[Master Level: 20]\nConsumes MP to attack a single enemy "
+                                                         "within 300 range in front twice."},
+               "2001002": {"name": "Energy Bolt", "desc": "Consumes MP to attack a single enemy within 350 range."}}
+    out = tables.skills({"Skill/200.img": job}, strings)
+    assert out["2001003"] == {"name": "Magic Claw", "action": None, "weapon": None,
+                              "levels": {1: {"mpCon": 10, "mad": 45, "mobCount": 1, "attackCount": 2}},
+                              "info": {"type": 1, "magicDamage": 1}, "req": {"2001002": 1}, "desc_range": 300}
+    assert out["2001002"]["range"] == 350 and out["2001002"]["ball"] is True and out["2001002"]["desc_range"] == 350
+    assert "ball" not in out["2001003"] and "range" not in out["2001003"]
+
+
 def test_actions_in_frame_order():
     body = {"info": {}, "swingO1": {"0": {"delay": 300}, "2": {"delay": 350}, "1": {"delay": 150}}, "prone": {"0": {}}}
     assert tables.actions(body) == {"swingO1": [300, 150, 350], "prone": []}

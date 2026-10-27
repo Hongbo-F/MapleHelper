@@ -85,9 +85,18 @@ def maps(trees: dict[str, dict], string_map: dict, mob_name: dict[int, str]) -> 
     return sorted(rows, key=lambda r: r["id"])
 
 
+# "Consumes MP to attack a single enemy within 300 range in front twice" (Magic Claw's String desc): the range a
+# skill's tooltip names, where its data has none (no lt/rb, no common/range: Magic Claw's, Lucky Seven's "200")
+DESC_RANGE = re.compile(r"within (\d+) range")
+
+
 def skills(job_trees: dict[str, dict], string_skill: dict) -> dict[str, dict]:
     """Skills by ID from the job images ("Skill/400.img"): name, animation(s), required weapon type and each
-    level's numbers (MP cost, damage, duration...)."""
+    level's numbers (MP cost, damage, duration...). And, where the data has them: `info` (its type, whether its
+    damage is magic: Magic Claw's type 1, magicDamage 1), `range` (common/range: Energy Bolt's 350), `req` (the skills
+    it needs, by level: Magic Claw's {"2001002": 1}), `ball` (true: a projectile drawn, as Energy Bolt's; Magic Claw has
+    none) and `desc_range` (the range its tooltip names: Magic Claw's 300, Lucky Seven's 200). Each is left out where
+    there is none, so a row is as it was for a skill with none of them."""
     out = {}
     for tree in job_trees.values():
         for skill_id, skill in (tree.get("skill") or {}).items():
@@ -96,13 +105,41 @@ def skills(job_trees: dict[str, dict], string_skill: dict) -> dict[str, dict]:
                 levels[int(level)] = {k: jsonable(v) for k, v in stats.items()
                                       if k != "hs" and isinstance(v, (int, float, str, Vector))}
             action = skill.get("action")
-            out[skill_id] = {
-                "name": (string_skill.get(skill_id) or {}).get("name"),
+            strings = string_skill.get(skill_id) or {}
+            row = {
+                "name": strings.get("name"),
                 "action": list(action.values()) if isinstance(action, dict) else action,
                 "weapon": skill.get("weapon"),
                 "levels": dict(sorted(levels.items())),
             }
+            info = {k: jsonable(v) for k, v in (skill.get("info") or {}).items() if isinstance(v, (int, float, str))}
+            if info:
+                row["info"] = info
+            if (rng := _number((skill.get("common") or {}).get("range"))) is not None:
+                row["range"] = rng
+            if isinstance(skill.get("req"), dict) and skill["req"]:
+                row["req"] = {k: _number(v) for k, v in skill["req"].items()}
+            if skill.get("ball"):
+                row["ball"] = True
+            if found := DESC_RANGE.search(strings.get("desc") or ""):
+                row["desc_range"] = int(found.group(1))
+            out[skill_id] = row
     return dict(sorted(out.items()))
+
+
+def _number(value):
+    """A number the data may keep as text (common/range is "350"); None for none."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
 
 def actions(body: dict) -> dict[str, list[int]]:

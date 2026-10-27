@@ -7,6 +7,7 @@
   python -m gamedata export String/String_000.wz      # images as JSON, into gamedata/data/out
   python -m gamedata pictures UI/UI_000.wz LieDetector.img   # an image's pictures as PNG, into gamedata/data/out/pictures
   python -m gamedata tables                           # items, mobs, maps, skills, physics, animations
+  python -m gamedata tables --out D:/elsewhere        # ... into another folder
 """
 
 import argparse
@@ -133,9 +134,10 @@ def cmd_pictures(args) -> int:
 
 def cmd_tables(args) -> int:
     built = tables.build(COPY)
-    TABLES.mkdir(parents=True, exist_ok=True)
+    out = Path(args.out) if args.out else TABLES
+    out.mkdir(parents=True, exist_ok=True)
     for name, table in built.items():
-        path = TABLES / f"{name}.json"
+        path = out / f"{name}.json"
         path.write_text(json.dumps(table, ensure_ascii=False, indent=1), encoding="utf-8")
         count = (len(table["Etc"]) + len(table["Use"]) + sum(map(len, table["Equip"].values()))
                  if name == "items" else len(table))
@@ -169,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--out", help="the folder to write each image's folder into (default gamedata/data/out/pictures/<package folder>)")
     c.set_defaults(run=cmd_pictures)
     c = sub.add_parser("tables", help="build the summary tables")
+    c.add_argument("--out", help="the folder to write them into (default gamedata/data/out/tables): a checkout whose "
+                                 "gamedata/data is another's (a junction) builds its own elsewhere")
     c.set_defaults(run=cmd_tables)
     args = p.parse_args(argv)
     return args.run(args)

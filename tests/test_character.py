@@ -369,3 +369,24 @@ def test_the_stack_opens_her_files(monkeypatch, tmp_path):
     assert tour._load_grounds(10002073) == {} and not paths.GROUNDS.exists()  # the thief's: not hers
     assert calibration.files(geometry(1366, 768))[0] == paths.calibrated(paths.CALIBRATION, "_1366x768")
 
+
+# --- the game data her attacks come from (S0d, S0e) --------------------------------------------------------------
+
+def test_magic_claws_row_in_the_game_data():
+    """skills.json's rows as `python -m gamedata tables` now builds them (tables.skills), from the copy of the game's
+    data: what the magician's priors rest on [data] (gamelab.classes.magician)."""
+    from gamedata import tables
+    from gamedata.ms import MsPack
+    from gamedata.paths import COPY
+    from gamedata.wz import Package
+    if not (COPY / "Packs" / "Skill_00000.ms").is_file():
+        pytest.skip("no copy of the game's data (python -m gamedata copy)")
+    pack = MsPack(COPY / "Packs" / "Skill_00000.ms")
+    strings = Package(COPY / "String" / "String_000.wz").image("Skill.img")
+    rows = tables.skills({p: pack.image(p) for p in ("Skill/200.img", "Skill/400.img")}, strings)
+    claw, bolt, l7 = rows["2001003"], rows["2001002"], rows["4001003"]
+    assert claw["info"] == {"type": 1, "magicDamage": 1} and claw["req"] == {"2001002": 1}
+    assert claw["desc_range"] == magician.BOX.far == 300 and "ball" not in claw and "range" not in claw
+    assert (bolt["range"], bolt["desc_range"], bolt["ball"]) == (350, 350, True)
+    assert l7["desc_range"] == 200  # Lucky Seven's "within 200" (the claw's; Keen Eyes adds the rest: reach.STAR_RANGE)
+    assert tuple(claw["levels"][k]["mpCon"] for k in range(1, 21)) == magician.MAGIC_CLAW_MP
