@@ -576,7 +576,7 @@ def cmd_pet(args) -> int:
             time.sleep(WAIT_POLL_S)
 
     hunter = _hunter(args, throws=False, fit=fit if args.every else None)
-    eyes = hunter.eyes.geo.client if waits else None
+    eyes = hunter.senses.eyes.geo.client if waits else None
     if waits:  # (from here on, the size the eyes are for; Alt+Enter sets the game's own, PetWait's `want`)
         waits[0].unfit = lambda: _pet_unfit(title, hunter.senses.feed, eyes)
     _record("pet", args.map)
