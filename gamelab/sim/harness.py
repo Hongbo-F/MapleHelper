@@ -89,6 +89,13 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    where the stack threw them (world.World.wrong_way), and the frames that told the other way from
                    her last arrow (the hunter's 'heading' events): `--world knock-turns` has a knock turn her,
                    `heading-wrong` and `heading-wrong-sure` her frames read the wrong way
+  landings         her landings that moved her (onto another platform, or LANDING_MOVED along hers: World.land_log),
+                   by cause ('trip': her trips' legs and falls, 'knock', 'fight': an attack played in the flight), and
+                   of them those with a live monster on the platform she landed on within 105 and 60 of her, middle to
+                   middle ('near', 'close'), and within 105 walking at her ('at'): the live diagnosis's count; and
+                   landing_events, her trips' last landings with a price (control.navigator._clear_landing: the monster
+                   'shot first', 'waited' out, or 'went' past); moves_away, her stances up close that moved her away
+                   ('back': a step, 'jump_back'), once a run of looks deciding it
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -110,8 +117,8 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
-from .world import (DROP_LIFE, HER_BOX_CLIENT, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, TREE_AIR,
-                    Camp, Noise, Realism)
+from .world import (CHASE_TREE, DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
+                    OFF_SEEN, RESPAWN_LIVE, ROPE_REACH_CLIENT, TREE_AIR, Camp, Noise, Realism)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -207,6 +214,10 @@ WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 # farther; one on another platform 70% (the live hunt of 2026-10-25), where the presets find it 90% of the time wherever
 # it is.
 WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
+# ... and the monsters on her platform walking at her as live, and her invulnerability after a touch as live
+# (`walkers`: world.CHASE_TREE, INVULNERABLE_LIVE; Realism.chase, invulnerable), where the world's monsters walked as with
+# nobody there and a touch left her a second.
+WORLDS["walkers"] = {"chase": CHASE_TREE, "invulnerable": INVULNERABLE_LIVE, "respawn": RESPAWN_LIVE}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
@@ -560,8 +571,49 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "swiped_casts": getattr(world, "swiped_casts", 0),
         "air_turns_lost": getattr(world, "air_turns_lost", 0),
         "picks": picks(world),
+        "landings": landings(world, end),
+        # (her trips' last landings priced: the monster by one shot first, waited out, or gone past: telemetry events
+        # kind 'landing', control.navigator._clear_landing)
+        "landing_events": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "landing")),
+        "moves_away": _moves_away(records, end),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
+
+
+def _moves_away(records: list[dict], end: float) -> dict:
+    """Her stances up close that move her away (the fights' 'stance' records: a step away, 'back', and a jump back),
+    each counted once a run of looks deciding it (a look's record repeats the last one's while it's carried out)."""
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    out, last = Counter(), None
+    for r in records:
+        if r.get("topic") != "stance":
+            continue
+        if start is not None and r["t"] - start > end:
+            break
+        act = r.get("act")
+        if act in ("back", "jump_back") and act != last:
+            out[act] += 1
+        last = act
+    return dict(out)
+
+
+LANDING_MOVED = 30.0  # (landings) units along her platform a landing on it moved her at least, as the live diagnosis's
+LANDING_NEAR, LANDING_CLOSE = 105.0, 60.0  # ... and its distances: the claw's edge for a mushroom, and the close episodes'
+
+
+def landings(world, end: float) -> dict:
+    """Her landings that moved her up to `end` (World.land_log), by cause, with a live monster on the platform she
+    landed on within LANDING_NEAR and LANDING_CLOSE ('near', 'close'), and within LANDING_NEAR walking at her ('at')."""
+    out: dict = {}
+    for t, src, xa, dst, xb, cause, near, _, walk in getattr(world, "land_log", ()):
+        if t > end or (src == dst and xa is not None and abs(xa - xb) < LANDING_MOVED):
+            continue
+        c = out.setdefault(cause, {"n": 0, "near": 0, "close": 0, "at": 0})
+        c["n"] += 1
+        c["near"] += near is not None and near < LANDING_NEAR
+        c["close"] += near is not None and near < LANDING_CLOSE
+        c["at"] += near is not None and near < LANDING_NEAR and walk == 1
+    return out
 
 
 PICK_BINS = ((0.0, 40.0), (40.0, 60.0), (60.0, 130.0), (130.0, float("inf")))  # (picks) how far ahead, middle to middle

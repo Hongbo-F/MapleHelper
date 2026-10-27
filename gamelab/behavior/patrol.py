@@ -144,6 +144,14 @@ LOOP_MIN = 2           # ... and at least: one is camping (Patrol.camping), whic
 SEEDS = 8              # guess: rounds grown, from the stops worth the most on their own (best() about 0.1 s on Tree
                        # Dungeon)
 STAND_STEP = 20.0      # units between the places along a platform tried as a stop (a resolution)
+# A stop stands clear of its own platform's spawn points (from 2026-10-27, landings with clearance): of the places that
+# reach within STOP_SLACK of the most EXP, the one farthest from the nearest of them, up to where her attack from the
+# ground surely takes a respawn there (reach.ground_sure: past the claw's edge, 105 for a mushroom), then the most EXP,
+# then the nearest its middle. Live the grind stops sat on spawn points (7's 1 unit off its point at -95, 19's 1 off 150, 14's 6, 10's 11,
+# 13's, 16's and 32's 13, 8's and 15's 15: D:/MapleHelper-scratch/land/diag-landings), where a respawn comes onto her and
+# no attack from there is sure, and in 92% of her close landings on a trip's own platform the stop's x itself was within
+# 105 of a monster. Only where the danger hook counts them (not on the first map). Off (0): as before, the most EXP alone.
+STOP_SLACK = 0.05
 CAUGHT_TERMS = 400     # rounds summed at most for what she catches at a point (caught; a resolution)
 LOOP_GAIN = 0.15       # guess: a new round replaces hers only this much better by the same belief ...
 LOOP_MIN_S = 60.0      # guess: ... and not within this long of the last change
@@ -229,7 +237,9 @@ def stops_of(model: MapModel, points: list[Point], danger: Callable[[int, float]
         mid = (p.left + p.right) / 2
         xs = [mid] if hi < lo else [lo + i * STAND_STEP for i in range(int((hi - lo) // STAND_STEP) + 1)] + [hi]
         own = [(q.id, 1.0) for q in points if q.platform == p.id]
+        mine = [q for q in points if q.platform == p.id]
         best = None  # (EXP reached, -distance from the middle, x, cover)
+        tried = []   # (EXP reached, x, cover) of each place (STOP_SLACK)
         for x in xs:
             y = p.y_at(x)
             cov, kept = list(own), {}
@@ -246,6 +256,15 @@ def stops_of(model: MapModel, points: list[Point], danger: Callable[[int, float]
                 value *= max(0.0, 1.0 - STOP_DANGER * danger(p.id, x))
             if value > 0 and (best is None or (round(value, 6), -abs(x - mid)) > best[:2]):
                 best = (round(value, 6), -abs(x - mid), x, tuple(cov))
+            if value > 0:
+                tried.append((round(value, 6), x, tuple(cov)))
+        if best is not None and STOP_SLACK > 0 and mine and danger is not None \
+                and any(danger(p.id, q.x) > 0 for q in mine):
+            def clear(x: float) -> float:
+                return round(min(min(abs(x - q.x), reach.ground_sure(reach.body_of(q.kind)[1])[0]) for q in mine), 1)
+            near_best = [t for t in tried if t[0] >= best[0] * (1.0 - STOP_SLACK)]
+            v, x, cov = max(near_best, key=lambda t: (clear(t[1]), t[0], -abs(t[1] - mid)))
+            best = (v, -abs(x - mid), x, cov)
         if best is not None:
             out.append(Stop(p.id, round(best[2], 1), best[3]))
     return out

@@ -229,6 +229,22 @@ class Danger:
             return None
         return (0.0 if a <= mx <= b else min(abs(mx - a), abs(mx - b))), 1.0
 
+    def free_points(self, pid: int, seen: list[Monster]) -> list[tuple[float, str]]:
+        """The spawn points of platform `pid` (of kinds that count) the monsters `seen` don't account for, as (map x,
+        kind): of each kind's there, as many as the look's monsters of that kind on it don't, the nearest to none of them
+        first (_sources' share, here whole points: where a respawn can land on her)."""
+        out = []
+        for kind in {k for q, _, k in self.points if q == pid}:
+            pts = [x for q, x, k in self.points if q == pid and k == kind]
+            mons = sorted(m.x for m in seen if m.platform == pid and m.kind == kind)
+            free = list(pts)
+            for mx in mons:  # each seen monster accounts for its nearest point
+                if not free:
+                    break
+                free.remove(min(free, key=lambda x: abs(x - mx)))
+            out += [(x, kind) for x in free]
+        return sorted(out)
+
     def _sources(self, seen: list[Monster] | None):
         """The monsters a place's danger comes from, as (kind, platform, x, weight): the ones `seen` (a look's, of
         kinds that count, each 1) and the spawn points they don't account for (of each kind's on a platform, as many as

@@ -29,6 +29,7 @@ All positions in map units, times in seconds from the start of the plan.
 """
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from maplehelper.engine import LEFT, RIGHT
@@ -511,9 +512,9 @@ class Flow:
         return self._landing(m, b, k, variant, t + ta, lx, land, d, v_land, [Span(a.id, b.t, t, b.x, edge)],
                              Arc(t, t + ta, edge + d, a.y_at(edge) - 1, lx, land.y_at(lx), 0.0))
 
-    def _jump_up(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
+    def _jump_up(self, m: Move, b: Body, k: Keys, variant: str, at: float | None = None) -> Leg | None:
         a, q = b.platform, self.model.platform(m.dst)
-        if variant != "stand":
+        if variant != "stand" and at is None:
             # A running jump on the way, if one lands on the platform above with room to spare. Takeoffs
             # every 5 units (up to 400 on): running, from where she is; from standing, towards the
             # move's spot, from 15 units on.
@@ -541,8 +542,9 @@ class Flow:
         # Stop anywhere under it and jump straight up.
         lo, hi = max(a.left, q.left) + LAND_MARGIN, min(a.right, q.right) - LAND_MARGIN
         near = min(max(b.x, lo), hi)
-        # With rng, from the nearest spot under it towards the far end of the overlap; else the planner's.
-        prefer = self.pick(near, hi if near - lo < hi - near else lo) if self.rng else m.x
+        # With rng, from the nearest spot under it towards the far end of the overlap; else the planner's (or `at`:
+        # where a landing with clearance is, _spread).
+        prefer = at if at is not None else self.pick(near, hi if near - lo < hi - near else lo) if self.rng else m.x
         stop = self._stop_within(b, lo, hi, prefer, k)
         if stop is None:
             return None
@@ -555,7 +557,7 @@ class Flow:
         return Leg(m, b, Body(t + ta, lx, q, landed=True, slack=b.slack + SLACK_PER_LEG), [Span(a.id, b.t, t, b.x, x)],
                    [Arc(t, t + ta, x, a.y_at(x), lx, q.y_at(lx), -JUMP_SPEED)], stands=[Span(a.id, stopped, t, x, x)])
 
-    def _drop(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
+    def _drop(self, m: Move, b: Body, k: Keys, variant: str, at: float | None = None) -> Leg | None:
         if variant != "run":
             return None
         a, below = b.platform, self.model.platform(m.dst)
@@ -564,8 +566,8 @@ class Flow:
         clear = drop_spots(self.model, a, below)
         if not clear:
             return None
-        prefer = min(clear, key=lambda x: (abs(x - b.x), abs(x - m.x)))
-        if self.rng is not None:  # not always the first spot: somewhere further over it now and then
+        prefer = min(clear, key=lambda x: (abs(x - b.x), abs(x - m.x)) if at is None else abs(x - at))
+        if self.rng is not None and at is None:  # not always the first spot: somewhere further over it now and then
             far = max(clear, key=lambda x: abs(x - b.x))
             # (pick draws again for every spot, around the nearest one)
             prefer = min(clear, key=lambda x: abs(x - self.pick(prefer, far)))
@@ -827,6 +829,72 @@ class Flow:
             return None
         return jump, after, hk
 
+    # --- landings with clearance (from 2026-10-27) -----------------------------------------------
+
+    SPREAD = 40.0       # units either way of a move's own takeoff (or spot) that _spread tries ...
+    SPREAD_STEP = 5.0   # ... this far apart
+
+    def _priced(self, m: Move, b: Body, k: Keys, order: tuple, options: list, monsters, linger: float,
+                price: Callable[[Leg], float], alts, goal: tuple[int, float] | None) -> list:
+        """The ways of doing the route's last move from body b, the cheapest first by when she lands, the landing's
+        `price` and her walk on from there to `goal` (WALK_SPEED): where the first of `options` (chain's, the ways
+        keeping clear of touches) lands with no price, `options` as they are; else they and, for `m` and the route's
+        other moves between the same platforms (`alts`), the ways from other takeoffs (_spread), each kept clear of
+        touches as chain's are (danger, `linger`)."""
+        def cost(leg: Leg) -> float:
+            walk = (abs(leg.end.x - goal[1]) / WALK_SPEED if goal is not None and goal[0] == leg.end.platform.id
+                    else 0.0)
+            return leg.end.t + price(leg) + walk
+        if price(options[0][0]) <= 0:
+            return options
+        found = list(options)
+        for mm in [m] + [a for a in (alts(m) if alts is not None else ()) if a is not m]:
+            for v in order:
+                for leg, trial in self._spread(mm, b, k, v):
+                    if not self.danger(leg, monsters, linger=linger):
+                        found.append((leg, trial))
+        return sorted(found, key=lambda o: cost(o[0]))
+
+    def _spread(self, m: Move, b: Body, k: Keys, variant: str) -> list[tuple[Leg, Keys]]:
+        """Move m done the `variant` way from takeoffs other than its own, each with its keys (added to a copy of k):
+        a running jump from SPREAD either way of its takeoff (from along the platform) or its end's (sure_takeoff, as
+        _jump's), a jump straight up from anywhere under the platform above, a drop from anywhere over the one below,
+        every SPREAD_STEP; none for the moves that have one way only (a walk-off, a climb)."""
+        a = b.platform
+        if a.id != m.src:
+            return []
+        out = []
+        if m.kind == "jump" and variant != "stand":
+            d = directions.sign(m.direction)
+            edge = a.right if d > 0 else a.left
+            base = m.takeoff if m.takeoff is not None else edge - d * (JUMP_FROM + JUMP_FROM_FAR) / 2
+            n = int(self.SPREAD // self.SPREAD_STEP)
+            for i in range(-n, n + 1):
+                x = base + i * self.SPREAD_STEP
+                if not a.covers(x, -EDGE_ROOM):
+                    continue
+                trial = k.copy()
+                leg = self._jump_from(m, b, trial, variant, x)
+                if leg is not None:
+                    out.append((leg, trial))
+        elif m.kind == "jump_up" and variant == "stand":
+            q = self.model.platform(m.dst)
+            lo, hi = max(a.left, q.left) + LAND_MARGIN, min(a.right, q.right) - LAND_MARGIN
+            x = lo
+            while x <= hi + 1e-6:
+                trial = k.copy()
+                leg = self._jump_up(m, b, trial, variant, at=x)
+                if leg is not None:
+                    out.append((leg, trial))
+                x += self.SPREAD_STEP * 2
+        elif m.kind == "drop" and variant == "run":
+            for x in drop_spots(self.model, a, self.model.platform(m.dst))[::5]:
+                trial = k.copy()
+                leg = self._drop(m, b, trial, variant, at=x)
+                if leg is not None:
+                    out.append((leg, trial))
+        return out
+
     # --- following a chain ---------------------------------------------------------------------
 
     @staticmethod
@@ -871,7 +939,9 @@ class Flow:
     # --- chains ----------------------------------------------------------------------------------
 
     def chain(self, moves: list[Move], start: Body, monsters=(), keep_going: bool = False,
-              hops: bool = True) -> tuple[list[Leg], Keys, str]:
+              hops: bool = True, price: Callable[[Leg], float] | None = None,
+              alts: Callable[[Move], list[Move]] | None = None,
+              goal: tuple[int, float] | None = None) -> tuple[list[Leg], Keys, str]:
         """As many of `moves` as can be done in one go from `start`: their legs, the keys, and why
         the chain stopped ('done', 'unpredictable', 'monster' or 'long'). Each move is done the way
         (variant) the next move can follow on from. A monster in the way of a run is hopped over
@@ -879,7 +949,11 @@ class Flow:
         can't predict. Stopped for a monster, it ends where none could reach her standing END_LINGER
         (she stands there for the next look and plan): short of a leg end that one could, as far back as
         it takes. With `keep_going`, a chain cut off for length doesn't stop her at its end: the next
-        chain carries on from there."""
+        chain carries on from there. With `price` (from 2026-10-27: the navigator's, attack.stance.landing's price of
+        where a leg lands, s), the route's last move is done where it lands the cheapest by its time and that price
+        (_priced: its other ways, `alts` (the route's other moves between the same platforms) and wider takeoffs; the
+        walk on to `goal`, (platform, map x) where she's going on it, counted), where the first way lands with a price;
+        else as before."""
         k, legs, b, why = Keys(self.key_names), [], start, "done"
         monsters = list(monsters)
         marks = []  # (legs so far, keys, body) as each move begins: where a chain stopped for a monster may end
@@ -899,6 +973,8 @@ class Flow:
                 leg = self.leg(m, b, trial, v)
                 if leg is not None and not self.danger(leg, monsters, linger=linger):
                     options.append((leg, trial))
+            if nxt is None and price is not None and options:
+                options = self._priced(m, b, k, order, options, monsters, linger, price, alts, goal)
             if not options:
                 hopped = None
                 if hops:  # a hop over the monster in the way, done the first way (variant) it works out

@@ -55,7 +55,9 @@ Topics (map units; producers build the records, ui.state folds them):
             by, share, seen; victim's kind, x, platform,       coming or going), died (the feed's deaths
             gain, share; let_go's kind, gain, why; retold's    not hers), backstop, follow, probe, retold (a
             key, side                                          throw told again the way the frame showed her
-                                                               facing); `watch` and the perception service:
+                                                               facing), landing (a trip's last landing priced:
+                                                               control.navigator); `watch` and the perception
+                                                               service:
                                                                died, exp_gain, hp_drop, victim (a gain bound to
                                                                the monster her attack took), let_go (not it:
                                                                why 'seen alive', 'retold' or 'another seen

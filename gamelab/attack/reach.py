@@ -477,6 +477,16 @@ def star_sure(half: float) -> float:
 STAR_SURE = star_sure(MONSTER_HALF["snail"])  # 99: a snail's (124 with the swings taken as 90 ahead)
 
 
+def ground_sure(half: float) -> tuple[float, float]:
+    """The nearest and farthest ahead of her (middle to middle) her attack from the ground surely takes a monster on her
+    level `half` wide either side, where it will be when the attack starts: as a star, not the claw's swipe, from its
+    claw's edge (claw_edge: a Green or Horny Mushroom 105) to SHOT_RANGE (410). What a landing's clearance and a move
+    away up close go by (attack.stance: landing, _clear_spot): the thief's. The magician's Magic Claw takes one from its
+    search's first band less half the body to its last band's end and half the body (classes.magician.SEARCH: 50 - half
+    to 300 + half, nothing nearer, never behind her), which the aim facade gives in her place (S1)."""
+    return claw_edge(half), float(SHOT_RANGE)
+
+
 # --- what an attack from the ground takes ------------------------------------------------------------------
 
 def ground_pick(ahead: float, dy: float, top: float, half: float) -> tuple | None:
