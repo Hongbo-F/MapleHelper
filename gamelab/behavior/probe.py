@@ -823,7 +823,7 @@ def _done(h: "Hunter", report: ProbeReport, flying: _Flying) -> None:
 
 def _log_row(row: dict) -> None:
     try:
-        with paths.PROBE_LOG.open("a", encoding="utf-8") as f:
+        with paths.of().probe_log.open("a", encoding="utf-8") as f:  # (hers)
             f.write(json.dumps(row) + "\n")
     except OSError:
         pass

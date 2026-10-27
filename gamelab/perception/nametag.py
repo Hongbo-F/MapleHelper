@@ -172,6 +172,8 @@ class NameTag:
         # Cut exactly where the half-size template matched, so a name next to hers can't get in.
         th, tw = (k * n for n in self.small.shape)
         tag = cv2.cvtColor(np.ascontiguousarray(full[best[2]:best[2] + th, best[1]:best[1] + tw]), cv2.COLOR_RGB2GRAY)
+        if not (folder := Path(self.path).parent).exists():  # (another character's, under lab/characters/: paths.of)
+            folder.mkdir(parents=True, exist_ok=True)
         np.save(self.path, tag)
         return tag
 

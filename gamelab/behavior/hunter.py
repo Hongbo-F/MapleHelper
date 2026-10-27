@@ -172,7 +172,8 @@ class Hunter:
         self.heading_counts: Counter[str] = Counter()
         # The jump throws her stances chose for what their attack reaches, by why and the jump's kind (fight.log_jump)
         self.jump_counts: Counter[str] = Counter()
-        self._shots = len(list(paths.HEADING_SHOTS.glob("*.png"))) if paths.HEADING_SHOTS.exists() else 0
+        shots = paths.of().heading_shots  # (hers)
+        self._shots = len(list(shots.glob("*.png"))) if shots.exists() else 0
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
                                   self.drops.on_look, self.wounds.on_look, self.memory.on_look, self.attacks.on_look]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
@@ -477,7 +478,7 @@ class Hunter:
         self.log(f"  {text}")
         shot = None
         if self._shots < HEADING_SHOTS_MAX:
-            shot = paths.HEADING_SHOTS / f"{time.strftime('%Y%m%d-%H%M%S')}-{c['against']}-keys-{against}.png"
+            shot = paths.of().heading_shots / f"{time.strftime('%Y%m%d-%H%M%S')}-{c['against']}-keys-{against}.png"
             if eyes.keep_heading(s, shot):
                 self._shots += 1
             else:
@@ -559,7 +560,7 @@ class Hunter:
         self.log(f"  hit standing still: pushed {pushed:+.0f} units" + ("" if same else
                  f", off platform {before.platform.id} onto {s.platform.id if s.platform else 'nothing'}"))
         try:
-            with paths.HIT_LOG.open("a", encoding="utf-8") as f:
+            with paths.of().hit_log.open("a", encoding="utf-8") as f:  # (hers)
                 f.write(json.dumps({"pushed": round(pushed, 1), "dy": round(s.where.y - before.y, 1),
                                     "hp": round(self._last_hp - s.hp, 4), "how": s.how,
                                     "platform": before.platform.id, "time": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")

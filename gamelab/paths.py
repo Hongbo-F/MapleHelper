@@ -65,6 +65,12 @@ class Files:
             return path.with_name(f"{path.stem}_{self.folder}{path.suffix}")
         return globals()["LAB"] / CHARACTERS / self.folder / path.name
 
+    @property
+    def lab(self) -> Path:
+        """Her own folder: lab/ for the thief; another's lab/characters/<folder>/, made by what saves there first
+        (calibrate, as L0 has it first: analysis.calibration)."""
+        return globals()["LAB"] if not self.folder else globals()["LAB"] / CHARACTERS / self.folder
+
     def __repr__(self) -> str:
         return f"Files({self.folder!r})"
 

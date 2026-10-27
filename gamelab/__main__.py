@@ -840,7 +840,7 @@ def _record(command: str, map_id: int) -> None:
 
 def cmd_hunt(args) -> int:
     if args.mode == "shots":
-        for path in (paths.OLD_SHOT_LOG, paths.SHOT_LOG):
+        for path in ((paths.OLD_SHOT_LOG,) if not paths.of().folder else ()) + (paths.of().shot_log,):  # (hers)
             _shot_summary(path)
         return 0
     if args.mode != "look":
@@ -985,7 +985,7 @@ def cmd_probe(args) -> int:
         print(probe.listing())
         return 0
     if args.action == "score":
-        path = Path(args.file) if args.file else paths.PROBE_LOG
+        path = Path(args.file) if args.file else paths.of().probe_log
         rows = probe.load(path)
         if not rows:
             print(f"no probe throws logged yet ({path})")
@@ -1011,7 +1011,7 @@ def cmd_probe(args) -> int:
     from .behavior.retreat import on_alarm
     with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
         report = probe.run(hunter, nav, p, seconds=args.seconds, crowd=args.crowd)
-    print(f"done: {report}. Logged to {paths.PROBE_LOG}: `python -m gamelab probe score` reads it")
+    print(f"done: {report}. Logged to {paths.of().probe_log}: `python -m gamelab probe score` reads it")
     return 0
 
 

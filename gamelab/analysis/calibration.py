@@ -49,8 +49,11 @@ def files(geo: Geometry = STRETCHED) -> tuple:
 def pictures(geo: Geometry = STRETCHED) -> tuple[Path, Path]:
     """What `calibrate` saves to be checked by eye, for a client of this geometry: the frame it looked at and the
     recording crop it picked (her name tag near its middle). lab/calibrate.png and calibrate_crop.png at 1920x1080,
-    calibrate_1366x768.png and calibrate_crop_1366x768.png at the game's own size."""
-    return LAB / f"calibrate{geo.suffix}.png", LAB / f"calibrate_crop{geo.suffix}.png"
+    calibrate_1366x768.png and calibrate_crop_1366x768.png at the game's own size; another character's than the
+    thief's in her own folder (paths.of: lab/characters/<id>/), so hers don't overwrite the thief's."""
+    mine = paths.of()
+    where = mine.lab if mine.folder else LAB
+    return where / f"calibrate{geo.suffix}.png", where / f"calibrate_crop{geo.suffix}.png"
 
 
 def calibrate(tag: tuple[int, int] | None = None, fresh: bool = False) -> Calibration:
@@ -62,6 +65,8 @@ def calibrate(tag: tuple[int, int] | None = None, fresh: bool = False) -> Calibr
     one the next look cuts from it.
     """
     LAB.mkdir(parents=True, exist_ok=True)
+    if (mine := paths.of()).folder:  # (another character's: her own folder, lab/characters/<id>/, which L0 makes here)
+        mine.lab.mkdir(parents=True, exist_ok=True)
     full = client.submit(fps=10, duration_ms=200, scale=1, lead_ms=0, name="calibrate")
     frame = full["frames"][-1]
     geo = geometry(full["client"]["width"], full["client"]["height"])

@@ -547,6 +547,29 @@ def test_the_stack_opens_her_files(monkeypatch, tmp_path):
     assert calibration.files(geometry(1366, 768))[0] == paths.calibrated(paths.CALIBRATION, "_1366x768")
 
 
+def test_calibrate_saves_hers_in_her_folder(monkeypatch, tmp_path):
+    """The review's: `--character magician calibrate --fresh` (L0's first step) captured the game and then failed
+    (FileNotFoundError: nothing made lab/characters/magician/), and her pictures to check went over the thief's."""
+    import numpy as np
+    from gamelab import paths
+    from gamelab.analysis import calibration
+    frame = np.zeros((768, 1366, 3), np.uint8)
+    monkeypatch.setattr(paths, "LAB", tmp_path)
+    monkeypatch.setattr(calibration, "LAB", tmp_path)
+    monkeypatch.setattr(calibration.client, "submit",
+                        lambda **kw: {"frames": [frame], "client": {"width": 1366, "height": 768}})
+    monkeypatch.setattr(calibration.recordings, "screenshot",
+                        lambda name, crop, scale: frame[crop[1]:crop[1] + crop[3], crop[0]:crop[0] + crop[2]])
+    monkeypatch.setattr(calibration.track, "make_template", lambda small, at, scale=1, geo=None: np.ones((8, 30)))
+    with character.using(character.load("magician")):
+        calibration.calibrate(tag=(683, 400), fresh=True)
+    mine = tmp_path / "characters" / "magician"
+    assert sorted(p.name for p in mine.iterdir()) == ["calibrate_1366x768.png", "calibrate_crop_1366x768.png",
+                                                      "calibration_1366x768.json", "tag_template_1366x768.npy"]
+    assert not (tmp_path / "calibrate_1366x768.png").exists()  # (the thief's: lab/, as before)
+    assert calibration.pictures(calibration.geometry(1366, 768))[0] == tmp_path / "calibrate_1366x768.png"
+
+
 # --- the game data her attacks come from (S0d, S0e) --------------------------------------------------------------
 
 def test_magic_claws_row_in_the_game_data():

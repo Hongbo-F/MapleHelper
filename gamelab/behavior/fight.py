@@ -1018,7 +1018,7 @@ def _log_shot(shot: dict, hit: bool | None) -> None:
     what an undecided one did."""
     key = shot.get("key", shot["due"])
     try:
-        with paths.SHOT_LOG.open("a", encoding="utf-8") as f:
+        with paths.of().shot_log.open("a", encoding="utf-8") as f:  # (hers)
             f.write(json.dumps({**{k: v for k, v in shot.items() if k not in SCORING},
                                 "key_t": round(key, 3), "due_s": round(shot["due"] - key, 3),
                                 "decided_s": round(shot.get("decided", key) - key, 3),
