@@ -64,9 +64,13 @@ presses long, and each CHAT_EVERY more, and the stop's own, has the message bar 
 the game's own line in under a millisecond, the OCR of a new one 0.28 s), and the game's refusal on it, new since the
 last that started a stretch again (or with another line read between: a line left up and one redrawn are the same px),
 starts it again (`hear_chat`): its presses don't count, and on a rope the hunter gets her off it
-(behavior.hunter.Hunter.health_check). "You don't have enough MP to use this skill." (36 reads on 10-25 at 00:53) is a
-refusal too. And no press keyed while her look has her on a rope counts (`roped`). The stop's line has the bar's
-text."""
+(behavior.hunter.Hunter.health_check). The rope's refusal still up with her dot where it was when it was heard (she
+hangs there yet: the one try to get her off didn't do it) starts it again at every read, and the hunter tries again,
+down the rope every second time (a hang at the same rope's top at 21:48:50, before the watch went live, had 45 presses
+in 38 s). "You don't have enough MP to use this skill." (36 reads on 10-25 at 00:53) is a refusal too; no other line
+is (the game's line for no stars isn't known, and may say "cannot be used"), and a line that says she has no stars
+(says_no_darts) has the stop come at READ_EVERY presses, as the pickup log's does. And no press keyed while her look
+has her on a rope counts (`roped`). The stop's line has the bar's text."""
 
 import math
 from dataclasses import dataclass, field
@@ -94,8 +98,8 @@ HORNY = (403.0, 10.0)  # Tree Dungeon's toughest monster, a Horny Mushroom (HP, 
                        # a map whose toughest takes more has PRESSES that many times more
 READ_EVERY = 12        # a stretch this many presses long, and each as many more: the pickup log read
 READ_FIRST = 3         # a stretch this many presses long, each CHAT_EVERY more, and at the stop: the message bar read
-CHAT_EVERY = 3         # (at 22:58 the refusal was up at the 3rd press, 2.4 s into the hang; replaced by a megaphone
-                       # 4 times in 23 s for 0.6-8.0 s)
+CHAT_EVERY = 3         # (at 22:58 the refusal was up at the 3rd press, 2.4 s after her first refused one; it was up
+                       # 8.0, 2.8, 4.1 and 3.8 s at a time between other lines, then 10.1 s; those up 0.6-1.3 s)
 KEEP_S = 90.0          # s of the rolling recording saved after the stop (control.alarm.keep_recent)
 REPORT_FROM = 4        # a hunt's longest stretch this long or longer is said at its end (DartWatch.summary)
 
@@ -233,17 +237,23 @@ class DartWatch:
         return not self.fired and n >= READ_FIRST and (n >= self.chat_read + CHAT_EVERY
                                                        or n >= self.presses > self.chat_read)
 
-    def hear_chat(self, line: ChatLine, t: float) -> str | None:
+    def hear_chat(self, line: ChatLine, t: float, still: bool = False) -> str | None:
         """The message bar as read at `t` (`asks_chat`): a refusal of the game's on it (perception.messages.refusal),
         not the one that last started a stretch again still up (the same px, with no other line read between), starts
-        it again: the presses keyed by then don't count. Returns why ('rope': she's on a rope or a ladder; 'refused'),
-        or None."""
+        it again: the presses keyed by then don't count. The rope's still up with her dot where it was when it last did
+        (`still`: she hangs there yet, behavior.hunter.Hunter._hear_chat) starts it again too, at every read. A line
+        that says she has no stars (perception.loot.says_no_darts, as the pickup log's: the game's own word for it
+        isn't known) has the stop due as the log's does (`told`: at READ_EVERY presses). Returns why ('rope': she's on
+        a rope or a ladder; 'refused': too little MP; 'darts': the game says she has no stars), or None."""
         self.chat_read, self.bar = self.shown, line
         why = line.refusal
         if why is None:
             self.other = self.other or self.refusal is not None and not line.same(self.refusal)
+            if says_no_darts(line.text):
+                self.told = line.text
+                return "darts"
             return None
-        if line.same(self.refusal) and not self.other:
+        if line.same(self.refusal) and not self.other and not (still and why == "rope"):
             return None
         self.refusal, self.other = line, False
         self.refused += 1

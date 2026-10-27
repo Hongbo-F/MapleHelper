@@ -52,14 +52,14 @@ from ..localization.tracking import HIDDEN, HIDE_S, LIVE
 from ..localization.unseen import hidden
 from ..motion import bodies as her_body
 from ..motion import route
-from ..motion.flow import END_LINGER, MAX_LEGS, UP_EXTRA, Body, Flow, Leg, Span, chain_record, ms
+from ..motion.flow import END_LINGER, MAX_LEGS, ROPE_SPEED, UP_EXTRA, Body, Flow, Leg, Span, chain_record, ms
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..motion.route import Move, Planner, keeping_off, route_record
 from . import client
 from .actions import Actions
-from .mover import Mover, climb_ms, platform_text
+from .mover import Mover, platform_text
 
 ON_WAY_TRIES = 5    # monsters engaged per platform while passing through (respawns could keep her forever)
 MAX_FIGHTS = 3      # fights in a row clearing the way, without a move between: then she moves on regardless
@@ -143,15 +143,24 @@ HIT = 0.004          # HP lost (fraction) that counts as a hit
 # about 30 under 18's surface for 25 s (lab/recent/20261026-225844-out-of-darts), her dot snapped onto 18 and her Lucky
 # Seven presses refused there; that night 9 of the 56 climbs up that rope were cut by a hit, 5 of them left so, and
 # 4 of the 27 up the rope at -8 (2). With CLIMB_ON up goes down again at once, held to the top and over it (_climb_on);
-# off, as before. CLIMB_ON_X: map units her dot may be off the rope's x, and past its ends.
+# off, as before. CLIMB_ON_X: map units her dot may be off the rope's x, and past its bottom; CLIMB_ON_UNDER: under its
+# top she must be at least (half a minimap px: on the review's grinding run it went "up again" at -2 and -12, she was
+# off the rope already, and the hold kept her by the mushroom on the platform).
 CLIMB_ON = True
 CLIMB_ON_X = 20
+CLIMB_ON_UNDER = 8
 # A chain whose glances had her dot where the first had it for STUCK_S or more (a jump or a run there moves it a minimap
 # px within 0.1-0.25 s), or a move whose looks all had it where it began (Mover.still), from the top of a rope hanging
 # from her platform: she's on the rope, not the platform (_rope_top). Of the chains the tour's telemetry has with 8
 # glances or more where her dot never moved, 9 of 10 were at a rope's top on 18 (the other a drop at 00:19:07 on
-# 10-26). ROPE_TOP off: as before (the hunt replanned from 18 there: 10 moves in 15.4 s at 22:19:38).
+# 10-26). ROPE_TOP off: as before (the hunt replanned from 18 there: 10 moves in 15.4 s at 22:19:38). STUCK_GAP: her dot
+# more than this under the platform's surface too (map units): of the 51,391 glances of the tour's Tree Dungeon
+# telemetry (10-24 13:49 to 10-26 23:47), those standing still 0.5 s or more within 16 of a rope's top read her dot
+# 9.2 under the platform at the most (119 glances at 5 spots), the hangs 14.8, 19.3, 22.2 and 30.8
+# (D:/MapleHelper-scratch/rope/review-numbers/glance_flips2.txt). A jump_up straight up from the rope's top that falls
+# back where it began has her dot never move on the mover's settling looks either: standing, that's not the rope.
 STUCK_S = 0.4
+STUCK_GAP = 12
 ROPE_TOP = True
 # Looks at most, each after waiting up to 2 s for her to land and stand still (Mover.settle), for one that puts
 # her on a platform, when a look shows her in the air: a slime's touch as she walked off platform 3 onto 4
@@ -1091,13 +1100,17 @@ class Navigator:
         or an arrow there does nothing; her dot snaps onto the platform from up to 33 under it, and from 17 under it by
         a rope since: localization.pose.ROPE_TOP_GAP), as at 22:19:38 on 2026-10-26, when 10 moves from rope 4's top
         "ended on platform 18 instead" over 15.4 s, her dot 14.8 under 18 at every chain start (Tree Dungeon; the
-        2,046 chain starts' standing gaps: at most 14.0, none near a rope's top over 14). Off it (Mover.off_rope: up,
-        onto the platform), and a look once she's there; else `after`."""
+        3,039 chain starts' standing gaps: at most 14.0, none by a rope's top over 12). Her dot more than STUCK_GAP
+        under the platform's surface only (standing by a rope's top, 9.2 at the most). Off it (Mover.off_rope: up, onto
+        the platform), and a look once she's there; else `after`."""
         rope = None if s.where is None else rope_at_top(self.model, s.where)
         if rope is None or after.where is None or after.where.dot is None or s.where.dot is None \
                 or abs(after.where.dot[0] - s.where.dot[0]) > STILL or abs(after.where.dot[1] - s.where.dot[1]) > STILL:
             return after
         x, y = self.senses.localizer.to_map(after.where.dot)
+        p = s.where.platform
+        if y - p.y_at(p.clamp(x)) <= STUCK_GAP:
+            return after
         text = (f"her dot never moved: on the rope at x {rope.x:.0f}, {y - rope.top:.0f} under its top, not on "
                 f"platform {s.where.platform.id}")
         self.log(f"    {text}: getting off")
@@ -1315,27 +1328,30 @@ class Navigator:
 
     def _climbing(self, running: _Running, dot) -> tuple[float, float] | None:
         """Whether she's climbing a rope of the running plan now (its Climb from the grab to UP_EXTRA past the top, and
-        her last glance's dot by the rope, or no dot): the rope's top and her height on it (her dot's, else the plan's);
-        None if not."""
+        her last glance's dot by the rope and CLIMB_ON_UNDER or more under its top, or no dot and the plan's height
+        so): the rope's top and her height on it (her dot's, else the plan's); None if not."""
         t = time.monotonic() - running.start
         for leg in running.legs:
             for c in leg.rope:
                 if not c.t0 <= t <= c.t1 + UP_EXTRA:
                     continue
                 if dot is None:
-                    return c.y1, c.at(t)[1]
+                    y = c.at(t)[1]
+                    return (c.y1, y) if y - c.y1 >= CLIMB_ON_UNDER else None
                 mx, my = self.senses.localizer.to_map(dot)
-                if abs(mx - c.x) <= CLIMB_ON_X and c.y1 - CLIMB_ON_X <= my <= c.y0 + CLIMB_ON_X:
+                if abs(mx - c.x) <= CLIMB_ON_X and c.y1 + CLIMB_ON_UNDER <= my <= c.y0 + CLIMB_ON_X:
                     return c.y1, my
         return None
 
     def _climb_on(self, top: float, y: float) -> None:
         """A hit while she climbs a rope (_climbing): the cut let go of every key, up too, and the game keeps her on the
         rope when she's touched there (live on 2026-10-26, 11 of 11 hits on a rope), where she'd hang below its top
-        (see CLIMB_ON); up again, to the top and onto the platform there (mover.climb_ms: the climb from her height,
-        and CLIMB_EXTRA_MS), waited for, so the next pass looks once she's there."""
+        (see CLIMB_ON); up again, to the top and onto the platform there, held as a chain's climb holds it (the climb
+        from her height at flow.ROPE_SPEED, the step onto the platform in it, and UP_EXTRA: 0.75 s from 52 under, where
+        mover.climb_ms's 0.945 s had the same mushroom touch her again on the platform 9 ms before it ended in
+        loop_tree_walls), waited for, so the next pass looks once she's there."""
         k = self.actions.keys.up.name
-        hold = climb_ms(max(0.0, y - top))
+        hold = ms(max(0.0, y - top) / ROPE_SPEED + UP_EXTRA)
         self.log(f"    hit on the rope {y - top:.0f} under its top: up again ({hold} ms)")
         telemetry.emit("event", kind="climb_on", text=f"hit on the rope {y - top:.0f} under its top: up again")
         self.actions.play([[0, k, "down"], [hold, k, "up"]], "climb_on")

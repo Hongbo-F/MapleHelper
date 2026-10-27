@@ -466,7 +466,8 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     hunts sets a client of the wrong size right with Alt+Enter twice (control.window_size.SizeFix): at its start if
     the eyes have no calibration at its size (_fit_start: it waits START_WAIT_S at most, where it stopped), and on its
     looks later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client
-    before the eyes are made (the pet's: PetWait)."""
+    before the eyes are made (the pet's: PetWait). A command that hunts has the OCR's models loaded at its start, on a
+    thread of their own (perception.messages.warm: the message bar's first read comes in a fight)."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
     from .screen import GAME_VIEW
@@ -481,6 +482,9 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     if fit is not None:
         fit(perception)
     eyes = _eyes(model, title, perception, restore=not viewer)
+    if throws and not viewer:  # (the OCR's models loaded now, not at the message bar's first read in a fight)
+        from .perception.messages import warm
+        warm()
     hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
     if fix is not None and eyes.geo.client == GAME_VIEW:  # (Alt+Enter sets the game's own size, not the stretched one)
         hunter.senses.window_fix = fix

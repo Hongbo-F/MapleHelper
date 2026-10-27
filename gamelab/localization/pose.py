@@ -39,9 +39,10 @@ DOT_SNAP_REACH = 50
 # the game keeps her on a rope when touched (11 of 11 hits there), so she hung about 30 under 18's surface, her dot at
 # (101.3, -861.1), 31 under it, and was placed on 18 at x 113.3: her Lucky Seven presses refused there ("That cannot be
 # used while you're on a rope or ladder.") ended the hunt for out of darts three times that night (22:58:32, 23:11:49,
-# 23:12:42; behavior.darts). Over 2,046 chain starts of the tour's telemetry (10-24 to 10-26) her dot was a median 4.7
-# and at most 14.0 under the platform she stood on (8 between 12.5 and 14.0), never more by a rope's top; at a rope's
-# top she hung at 14.8 (22:19, 9 chain starts), 19.3, 22.2 and 30.8: so this catches 5 of the 6 hangs
+# 23:12:42; behavior.darts). Over the 3,039 chain starts of the tour's Tree Dungeon telemetry (its 37 files, 10-24 13:49
+# to 10-26 23:47) her dot was a median 3.9 and at most 14.0 under the platform she stood on (16 between 12.5 and 14.0),
+# none of those over 12 by a rope's top; at a rope's top she hung at 14.8 (22:19, 9 chain starts), 19.3, 22.2 and 30.8
+# (D:/MapleHelper-scratch/rope/review-numbers/gaps.txt): so this catches 5 of the 6 hangs
 # (control.navigator's check of a move her dot never moved on is for the rest). Her dot's x read 101.6 hanging at x
 # 111 (one minimap px is 16 units at 1366x768).
 ROPE_TOP_X = 16      # map units

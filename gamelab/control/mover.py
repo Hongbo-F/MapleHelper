@@ -394,22 +394,25 @@ class Mover:
             self._send([[0, k.down.name, "down"], [climb_ms(max(0.0, rope.bottom - y)), k.down.name, "up"]], "unhang")
         return self.settle(2.0)
 
-    def off_rope(self, s: Scene, rope: Rope | None = None, at: tuple[float, float] | None = None) -> Scene:
+    def off_rope(self, s: Scene, rope: Rope | None = None, at: tuple[float, float] | None = None,
+                 down: bool = False) -> Scene:
         """She's on a rope (no platform under her dot): climb up onto the platform if she's near its
         top, else jump off it sideways (towards the side a fall lands on a platform). Off a rope that
         takes her onto no platform at its top (959's, under 17's block) she climbs down and lets go
         at its bottom, onto what's under it (up there did nothing: the trip ended lost). `rope` and `at` (her map
         place): where look `s` has her elsewhere, her dot snapped onto the platform at the rope's top
-        (control.navigator's rope-top check; behavior.hunter, the game saying she's on a rope)."""
+        (control.navigator's rope-top check; behavior.hunter, the game saying she's on a rope). `down`: not up (it did
+        nothing: the game still refusing her presses there, her dot where it was), down to its bottom as off a rope
+        with no platform at its top, or off it sideways."""
         k = self.actions.keys
         x, y = at if at is not None else (s.where.x, s.where.y)
         # The rope she's on: the nearest one reaching her height.
         rope = rope or min(self.model.ropes,
                            key=lambda r: abs(r.x - x) + (0 if r.top - 10 <= y <= r.bottom + 10 else 1000))
         topped = rope.from_platform and hung_from(self.model, rope) is not None
-        if y - rope.top < 70 and topped:
+        if y - rope.top < 70 and topped and not down:
             self._send([[0, k.up.name, "down"], [900, k.up.name, "up"]], "off_rope")
-        elif not topped and self.model.platform_below(rope.x, rope.bottom) is not None:
+        elif (down or not topped) and self.model.platform_below(rope.x, rope.bottom) is not None:
             self._send([[0, k.down.name, "down"], [climb_ms(max(0.0, rope.bottom - y)), k.down.name, "up"]], "off_rope")
         else:
             # Right if a jump off to the right (up, at walking speed) comes down on a platform.

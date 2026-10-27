@@ -2506,6 +2506,7 @@ def loop_tree_out_of_darts(sim):
 # ladder."), 20 of them stopped the hunt for out of darts with her stars in her bag (behavior.darts). Her place
 # (localization.pose.ROPE_TOP_GAP), a move that never moved her dot (control.navigator._rope_top), the game's word on
 # the message bar (behavior.hunter._hear_chat) and her climb going on after a touch (navigator.CLIMB_ON) get her off.
+# Grinding, as live, loop_tree_grind_rope_top is the one master's stack fails (the review's).
 
 ROPE_TOP_EXPECTS = (
     check("no stop: her stars never ran out", lambda tr: tr["result"]["stopped"] is None),
@@ -2518,8 +2519,20 @@ def loop_tree_rope_top(sim):
     """`tour --loop --map 10002073` (the feed, the attack choice) from the rope at x 111, her feet 30 under platform 18
     (-865), as live at 22:58:08: under 17 there her dot is placed on the rope (localization.pose.ROPE_TOP_GAP), not on
     18 (where it snapped her before, and her presses were refused till out of darts stopped the hunt), and she climbs up
-    off it onto 18 (Mover.off_rope) and hunts on."""
+    off it onto 18 (Mover.off_rope) and hunts on. (Master's stack in this world meets all of this too, off the rope at
+    9.6 s after a touch, before 20 refused presses: so it's not the check of the live case; loop_tree_grind_rope_top,
+    grinding as live, is.)"""
     return darts_stop(1)(sim)
+
+
+@tree((18, 111.0), hanging=-865.0, monsters="all", seed=2, limit=120, **_LIVE, expects=ROPE_TOP_EXPECTS)
+def loop_tree_grind_rope_top(sim):
+    """`tour --loop --grind --map 10002073` (the feed, the attack choice), as live at 22:58:08, from the rope at x 111,
+    her feet 30 under platform 18 (-865): on the rope at the first look (localization.pose.ROPE_TOP_GAP), up off it onto
+    18 (Mover.off_rope), and on to grind. Master's stack in this world stopped the hunt for out of darts at 17.7 s (on
+    seed 1 at 23.1 s; the -880 twin, 15 under, at 17.4-18.3 s on seeds 1-3; at 18.5 s with after-kill in, 7f6334e), no
+    kill, its presses refused on the rope, as live."""
+    return darts_stop(1, grind=True)(sim)
 
 
 @tree((18, 111.0), hanging=-880.0, monsters="all", seed=1, limit=120, **_LIVE, expects=ROPE_TOP_EXPECTS)

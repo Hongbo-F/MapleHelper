@@ -9,7 +9,8 @@ the bar read "That cannot be used while you're on a rope or ladder." 0.19 s afte
 bar is at game px x 290-830, y 703-727 at 1366x768 (CHAT, fractions of the window: the HUD scales with it; at 1920x1080
 computed only, no full-size frame of it kept). It shows the last chat line from anyone, the game's own lines, the
 server's notices, other players' megaphones and chat, and a line doesn't fade: it stays until the next replaces it (a
-megaphone after 8.0 s at 22:58:17.163, the refusal back 0.15 s after the next press; 4 times in 23 s, up 0.6-8.0 s).
+megaphone after 8.0 s at 22:58:17.163, the refusal back 0.15 s after the next press; in the hang's 25 s the refusal
+was up 8.0, 2.8, 4.1, 3.8 and 10.1 s at a time, the lines between it 0.6-1.3 s: 436 frames of it, 673 px on each).
 The game's own lines are pink: median RGB 244-248, 174-176, 185-188 on all 177 read on the saved frames (25,000+ frames
 of tonight's 4 recent recordings, the 5 Lie Detector "before" sets, the 10-24/25 recordings; 676 lines read only when
 the line changed: D:/MapleHelper-scratch/rope/diag/msgbar_scan.py), megaphones about (113, 6, 56), notices yellow, chat
@@ -33,9 +34,12 @@ whose names end at x 1266-1287 (BugBaby, RiceBaby: the leader's star read as "7"
 party window is and however big (it moves and grows with the party)."""
 
 import re
+import threading
 from dataclasses import dataclass
 
 import numpy as np
+
+from .loot import says_no_darts
 
 # The message bar: game px x 290-830, y 703-727 of the 1366x768 window (the HUD's border at row 700), as fractions of
 # the window (left, top, right, bottom)
@@ -50,17 +54,23 @@ SAME_SHARE = 0.9    # two reads whose pink px overlap this much (of their union)
 # the log's rows end 5-7 px from it, the party window's names 79-100)
 LOG_RIGHT = 10 / 1366
 
-# What the game says when it refuses a key: on a rope or a ladder (no attack, no skill there), or for want of MP
+# What the game says when it refuses a key, of the lines seen on the bar: on a rope or a ladder (no attack, no skill
+# there: "That cannot be used while you're on a rope or ladder."), or for want of MP ("You don't have enough MP to use
+# this skill."). Only those: until 2026-10-27 any "cannot be used" was one too, and the game's line for no stars, not
+# known yet, may well be worded so (as both refusals seen went to the bar in pink, it most likely goes there too): its
+# presses would have started the stretch again at every line read anew between (a megaphone every 5-10 s: the stop at
+# 71-249 s in a replay, master's at 17.7 s: D:/MapleHelper-scratch/rope/review-behaviour/nostars.py). A line naming
+# stars or darts (perception.loot.says_no_darts) is never a refusal: behavior.darts takes it for the game saying she has
+# none.
 ON_ROPE = re.compile(r"on\W*a\W*rope|rope\W*or\W*ladder|on\W*a\W*ladder", re.I)
-REFUSED = re.compile(r"(?:can\W?not|can\W?t|unable\W*to)\W*be\W*used|(?:do\W*not|don\W?t)\W*have\W*enough\W*MP"
-                     r"|not\W*enough\W*MP\W*to\W*use", re.I)
+REFUSED = re.compile(r"(?:do\W*not|don\W?t)\W*have\W*enough\W*MP|not\W*enough\W*MP\W*to\W*use", re.I)
 
 
 def refusal(text: str) -> str | None:
-    """Why a line of the game's says it refused her key: 'rope' (she's on a rope or a ladder), 'refused' (anything
-    else: "cannot be used", too little MP), or None (it doesn't). "You are lacking the MP Potion that your pet is
-    supposed to use." is none (her pet's)."""
-    if not text:
+    """Why a line of the game's says it refused her key: 'rope' (she's on a rope or a ladder), 'refused' (too little
+    MP), or None (it doesn't: any other line, one naming stars or darts too, perception.loot.says_no_darts). "You are
+    lacking the MP Potion that your pet is supposed to use." is none (her pet's)."""
+    if not text or says_no_darts(text):
         return None
     if ON_ROPE.search(text):
         return "rope"
@@ -139,6 +149,21 @@ def _shared_ocr(bgr: np.ndarray) -> str:
     except ImportError:
         return ""
     return " ".join(r.text for r in shared().read(bgr, min_height=0) or [])
+
+
+def warm() -> threading.Thread | None:
+    """maplehelper.ocr's shared engine's models loaded now, on a thread of their own, for a command that hunts at its
+    start (gamelab.__main__._hunter): the first read of the bar or the pickup log would load them (1.3 s) in the hunt's
+    own thread, and the bar's comes at a stretch's 3rd press, mostly a monster standing on her (14 such stretches of
+    5-9 presses in the 79 minutes of 2026-10-25/26, 11 and 14 presses that night). A read meanwhile waits for the load
+    (OcrEngine's lock). None without the OCR packages."""
+    try:
+        from maplehelper.ocr import shared
+    except ImportError:
+        return None
+    t = threading.Thread(target=shared().load, name="ocr-warm", daemon=True)
+    t.start()
+    return t
 
 
 def log_rows(rows, width: int, x0: int = 0) -> list:

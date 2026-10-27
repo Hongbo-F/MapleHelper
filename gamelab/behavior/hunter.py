@@ -36,7 +36,7 @@ from ..attack import danger
 from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control import client
 from ..control.actions import Actions
-from ..control.mover import Mover
+from ..control.mover import STILL, Mover
 from ..control.navigator import Navigator, rope_at_top
 from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
@@ -160,6 +160,8 @@ class Hunter:
         # Out of darts (behavior.darts): her Lucky Seven presses and MP bar (the attack choice's), her kills (_gained)
         self.darts = DartWatch(presses_for(model.mob_hp, getattr(model, "mob_pdd", {})))
         self.attacks.darts = self.darts
+        self.refused_dot = None  # her dot (minimap px) at the game's last refusal of her presses on a rope ...
+        self.off_tries = 0       # ... and the tries since to get her off it with her dot there
         if LAST_LOOK:
             self.actions.still = self._still
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
@@ -230,17 +232,30 @@ class Hunter:
     def _hear_chat(self, s: Scene) -> None:
         """The message bar read for out of darts (DartWatch.asks_chat): the game's refusal of her presses on it starts
         the stretch again (DartWatch.hear_chat), logged and sent as a telemetry event 'refused'; on a rope ("That
-        cannot be used while you're on a rope or ladder."), she's got off it (_off_rope)."""
+        cannot be used while you're on a rope or ladder."), she's got off it (_off_rope). Her dot where it was at the
+        rope's last (`refused_dot`, STILL: she hangs there yet) has it, still up, start the stretch again and her got
+        off again (`off_tries`: down the rope every second time, up the first). A line that says she has no stars:
+        logged ('no_darts_said'), the stop to come at READ_EVERY presses."""
         n = self.darts.shown
         if (line := self._chat_line()) is None:
             return
-        if (why := self.darts.hear_chat(line, line.t or time.monotonic())) is None:
+        dot, was = None if s is None or s.where is None else s.where.dot, self.refused_dot
+        still = dot is not None and was is not None and abs(dot[0] - was[0]) <= STILL and abs(dot[1] - was[1]) <= STILL
+        if (why := self.darts.hear_chat(line, line.t or time.monotonic(), still=still)) is None:
             return
-        text = f"the game refused her presses: \"{line.text}\" ({n} in a row that took no MP: not counted)"
+        if why == "darts":
+            text = f"the message bar says she's out of throwing stars: \"{line.text}\" ({n} in a row that took no MP)"
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="no_darts_said", text=text)
+            return
+        self.off_tries = self.off_tries + 1 if still and why == "rope" else 0
+        self.refused_dot = dot if why == "rope" else None
+        text = (f"the game refused her presses: \"{line.text}\" ({n} in a row that took no MP: not counted)"
+                + (f"; her dot where it was then: try {self.off_tries + 1}" if self.off_tries else ""))
         self.log(f"  {text}")
         telemetry.emit("event", kind="refused", text=text)
         if why == "rope":
-            self._off_rope(s)
+            self._off_rope(s, down=self.off_tries % 2 == 1)
 
     def _chat_line(self):
         """The message bar as the eyes read it now (Eyes.chat_line); None without it (eyes that don't read it), or if
@@ -254,10 +269,11 @@ class Hunter:
             self.log(f"  the message bar not read ({type(e).__name__}: {e})")
             return None
 
-    def _off_rope(self, s: Scene) -> None:
-        """The game says she's on a rope: off it (control.mover.Mover.off_rope), the rope at the top of which look `s`
-        has her standing (her dot snapped onto the platform: control.navigator.rope_at_top), or the one she's on
-        (`s` on no platform). Placed on a platform away from any rope's top: nothing (a line left up from before)."""
+    def _off_rope(self, s: Scene, down: bool = False) -> None:
+        """The game says she's on a rope: off it (control.mover.Mover.off_rope; `down`, down it, the way up having
+        done nothing), the rope at the top of which look `s` has her standing (her dot snapped onto the platform:
+        control.navigator.rope_at_top), or the one she's on (`s` on no platform). Placed on a platform away from any
+        rope's top: nothing (a line left up from before)."""
         if s is None or s.where is None:
             return
         rope, at = None, None
@@ -269,8 +285,9 @@ class Hunter:
                 return
             if s.where.dot is not None:
                 at = self.senses.localizer.to_map(s.where.dot)
-        self.log(f"  on a rope at x {(rope.x if rope else s.where.x):.0f} by the game's word: getting off")
-        Mover(self.senses, self.actions, self.model, log=self.log).off_rope(s, rope, at)
+        self.log(f"  on a rope at x {(rope.x if rope else s.where.x):.0f} by the game's word: getting off"
+                 + (" down it" if down else ""))
+        Mover(self.senses, self.actions, self.model, log=self.log).off_rope(s, rope, at, down=down)
 
     def _messages(self) -> str:
         """The pickup log as the eyes read it now (Eyes.messages, OCR: "" without it, or if the read fails)."""
