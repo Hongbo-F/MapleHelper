@@ -3,14 +3,18 @@
 Until 2026-10-27 gamelab hunted with one character, the thief (BugBaby, a Rogue: Lucky Seven and her claw's stars).
 That morning the user: "I have another character magician who will use magic claw to grind on this map ... I will
 switch back and forth between the magician and the thief, so the code needs to be generalized". Her attack is
-another kind (Magic Claw picks the nearest monster in a box in front of her, no star flying: D:/MapleHelper-scratch/
-mage/design.md), and so are her stats, keys, ammunition (her MP), files and what perception reads of her.
+another kind (Magic Claw: the client's stepped search for an aimed spell, from 50 ahead of her to 300, nothing stopping
+it, no star flying, from the ground only: D:/MapleHelper-scratch/mage/design.md and range/magic-claw-range.md), and so
+are her stats, keys, ammunition (her MP), files and what perception reads of her.
 
 One character per process (`active_id`, first match): `--character <id>` on `python -m gamelab` (it sets ENV before
 any command loads gamelab.motion.physics, which works her walk and jumps out once, at import; child processes inherit
 it), ENV, lab/character.json (`gamelab character use <id>`), config.toml's [characters] default, then the thief. With
 physics' FIXED_STATS set (the tests, the golden traces, the harness) only ENV counts, the thief by default, and each
-character's stats are her class's fixed copy (`fixed_stats`: the thief's config.Character(), as before).
+character's stats are her class's fixed copy (`fixed_stats`: the thief's config.Character(), as before). It's resolved
+once a process (`active`, which physics' stats are), so what lets a command run, her physics and her files are one
+character's. Until the game's bottom bar is read (the design's S0g), a command that looks at or acts in the game plays
+another character only when ENV names her (`named`: gamelab.__main__); the two files' choice is the offline commands'.
 
 The profile is data only: this module and gamelab.classes import nothing of gamelab but paths, so every layer may read
 it (localization takes its `Shape`). The thief's values are today's module constants, kept where they are and read
@@ -21,6 +25,7 @@ README: Characters).
 
 import contextlib
 import json
+import math
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -202,8 +207,14 @@ def _classes() -> dict:
 
 
 def known(path=CONFIG) -> list[str]:
-    """Every character a process can play: each class by its name, and config.toml's [characters] tables."""
+    """Every character a process can play: each class by its name, and config.toml's [characters] tables (one whose
+    table doesn't parse too: `load` says why she can't)."""
     return sorted({*config.CLASS_SKILLS, *config.characters(path)[1]})
+
+
+def named(environ=os.environ) -> bool:
+    """Whether ENV names who plays (--character, or set by hand), not `character use`'s file or [characters] default."""
+    return bool(environ.get(ENV))
 
 
 def active_id(environ=os.environ, path=CONFIG, chosen: Path | None = None) -> str:
@@ -246,6 +257,8 @@ def load(which: str | None = None, path=CONFIG, environ=os.environ) -> Character
     which = active_id(environ, path) if which is None else which
     fixed = bool(environ.get(FIXED_STATS))
     table = None if fixed else config.characters(path)[1].get(which)
+    if table is not None and table.broken:
+        raise config.ConfigError(f"{which} can't play: {table.broken}")
     klass = table.klass if table is not None else which
     classes = _classes()
     if klass not in classes:
@@ -288,10 +301,16 @@ _ACTIVE: list[Character] = []
 
 
 def active() -> Character:
-    """The character this process plays (loaded once: the one physics' stats came from)."""
+    """The character this process plays, loaded once: physics' stats are hers (motion.physics.CHARACTER), and so are
+    her files (paths.of) and what lets a command run (gamelab.__main__), whatever names another later."""
     if not _ACTIVE:
         _ACTIVE.append(load())
     return _ACTIVE[0]
+
+
+def resolved() -> Character | None:
+    """The character this process plays if `active` has loaded her already (her physics among others), else None."""
+    return _ACTIVE[0] if _ACTIVE else None
 
 
 @contextlib.contextmanager

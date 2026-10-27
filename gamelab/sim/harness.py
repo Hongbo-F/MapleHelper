@@ -861,8 +861,23 @@ def check() -> int:
     return 1 if bad else 0
 
 
+def _thief_only() -> str | None:
+    """The scenarios are the thief's (a magician's come with the simulator's magic, the design's S6): a GAMELAB_CHARACTER
+    naming another, inherited by the run that restarts below, would play them with her stats (her class's fixed copy),
+    and `record` write that over the thief's traces. Why not, or None."""
+    from ..character import DEFAULT, ENV
+    who = os.environ.get(ENV)
+    if who and who != DEFAULT:
+        return (f"{ENV} names {who}: the simulator's scenarios are the thief's until hers come (the design's S6); "
+                f"run it with {ENV} unset")
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if refused := _thief_only():
+        print(refused)
+        return 2
     from ..motion.physics import FIXED_STATS
     # The same set order in every run, and her stats as measured, not as config.toml has them.
     if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1":

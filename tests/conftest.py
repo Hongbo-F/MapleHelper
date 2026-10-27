@@ -7,6 +7,7 @@ import pytest
 # Her stats as measured, not config.toml's [character] (gamelab.motion.physics.FIXED_STATS): set before
 # anything imports gamelab, which works out her walk and jumps from them once, when it's first imported.
 os.environ["GAMELAB_FIXED_STATS"] = "1"
+os.environ.pop("GAMELAB_CHARACTER", None)  # ... and the thief's, whoever the shell names (gamelab.character.ENV)
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")  # 3 GB a process otherwise (gamelab/__init__.py)
 
 # A fixed config for tests, so editing config.toml for her keys never breaks them.
@@ -90,9 +91,12 @@ def offline(monkeypatch, tmp_path):
     # Nor the recorders' mutex (the one `gamelab recorder` or the perception service's recording holds on the PC).
     from gamelab.control import rolling
     monkeypatch.setattr(rolling, "MUTEX", f"Local\\gamelab-rolling-recorder-test-{os.getpid()}-{tmp_path.name}")
-    # Nor `gamelab character use`'s choice of who plays (the tests play the thief unless they say otherwise).
+    # Nor `gamelab character use`'s choice of who plays (the tests play the thief unless they say otherwise), and
+    # who plays as a test resolves her is its own: the process's is the thief's, her physics loaded as hers first.
     from gamelab import character
+    from gamelab.motion import physics  # noqa: F401 (character.active: the thief, whatever a test plays later)
     monkeypatch.setattr(character, "CHOSEN", tmp_path / "character.json")
+    monkeypatch.setattr(character, "_ACTIVE", list(character._ACTIVE))
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 

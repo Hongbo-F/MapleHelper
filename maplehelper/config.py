@@ -5,7 +5,7 @@ has tables of her own under [characters] (`characters`; gamelab.character makes 
 import re
 import tomllib
 from collections.abc import Iterable
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
 from . import keys
@@ -117,6 +117,8 @@ class CharacterConfig:
     skills: dict[str, int] = field(default_factory=dict)    # skill -> level (CLASS_SKILL_LEVELS)
     pet: dict[str, float] = field(default_factory=dict)     # PET_SETTINGS
     buffs: dict[str, bool] = field(default_factory=dict)    # buff -> kept up (CLASS_BUFFS)
+    broken: str | None = None  # why her table doesn't parse (kept apart: the thief, the player and every other
+                               # character's commands go on without her; gamelab.character.load raises it for her)
 
 
 @dataclass(frozen=True)
@@ -161,9 +163,12 @@ def parse(data: dict, combo_names: Iterable[str]) -> Config:
 
     _check_collisions(game_keys, hotkeys, abort, slow_mode)
     default, others = _characters(_table(data, "characters"))
-    for c in others.values():  # each other character's keys against the control keys (the hotkeys are the thief's)
-        if c.keys is not None:
-            _check_collisions(c.keys, {}, abort, slow_mode, f"characters.{c.id}.keys")
+    for c in list(others.values()):  # each other character's keys against the control keys (the hotkeys are the
+        if c.keys is not None and c.broken is None:  # thief's): a clash is hers, kept apart as any of her mistakes
+            try:
+                _check_collisions(c.keys, {}, abort, slow_mode, f"characters.{c.id}.keys")
+            except ConfigError as e:
+                others[c.id] = replace(c, broken=str(e))
     return Config(title, game_keys, hotkeys, abort, slow_mode, _timing(_table(data, "timing")),
                   _character(_table(data, "character")), others, default)
 
@@ -232,49 +237,66 @@ SUBTABLES = ("keys", "timing", "stats", "skills", "pet", "buffs")
 
 def _characters(table: dict) -> tuple[str, dict[str, CharacterConfig]]:
     """[characters]: `default` (who plays when nothing names her: "thief" unless given) and each character's table.
-    A table's class is its `class`, or its id when that's a class's name ([characters.magician])."""
+    A table's class is its `class`, or its id when that's a class's name ([characters.magician]). A mistake in another
+    character's table is kept with her (CharacterConfig.broken), not raised: the thief's commands, and the player that
+    every command's keys go through, never stop for another character's table, as they didn't before there were any;
+    she can't play until it's put right (gamelab.character.load says why). The thief's own table and `default` are
+    everyone's: a mistake there is raised."""
     default = table.get("default", THIEF)
     out = {}
     for cid, sub in table.items():
         if cid == "default":
             continue
-        where = f"characters.{cid}"
-        if not isinstance(sub, dict):
-            raise ConfigError(f"[characters] {cid} must be a table ([{where}]), or `default`")
-        if not ID.fullmatch(cid):
-            raise ConfigError(f"[{where}]: a character's id is lower-case letters, digits, - and _ (got {cid!r})")
-        klass = sub.get("class", cid if cid in CLASS_SKILLS else None)
-        if klass not in CLASS_SKILLS:
-            raise ConfigError(f"[{where}] class must be one of {sorted(CLASS_SKILLS)}, got {klass!r}")
-        if klass == THIEF and cid != THIEF:
-            raise ConfigError(f"[{where}]: the thief is [characters.thief] and the flat tables, one of her")
-        if unknown := set(sub) - {"class", *LINES, *SUBTABLES}:
-            raise ConfigError(f"[{where}] has unknown setting(s) {sorted(unknown)}; known: "
-                              f"{sorted({'class', *LINES, *SUBTABLES})}")
-        for line in LINES:
-            if line in sub and (not isinstance(sub[line], str) or not sub[line].strip()):
-                raise ConfigError(f"{where}.{line} must be text, as her bottom bar shows it, got {sub[line]!r}")
-        if cid == THIEF:
-            if given := sorted(set(sub) & set(SUBTABLES)):
-                raise ConfigError(f"[{where}] has {given}: the thief's keys, timing and stats are the flat [keys], "
-                                  f"[timing] and [character]")
-            out[cid] = CharacterConfig(cid, klass, sub.get("name"), sub.get("job"))
-            continue
-        tables = {name: _table(sub, name) for name in SUBTABLES}
-        out[cid] = CharacterConfig(
-            cid, klass, sub.get("name"), sub.get("job"),
-            keys=_game_keys(tables["keys"], klass, f"{where}.keys") if tables["keys"] else None,
-            timing=_timing(tables["timing"]) if tables["timing"] else None,
-            stats=_stats(tables["stats"], f"{where}.stats"),
-            skills=_levels(tables["skills"], CLASS_SKILL_LEVELS[klass], f"{where}.skills"),
-            pet=_pet(tables["pet"], f"{where}.pet"),
-            buffs=_buffs(tables["buffs"], CLASS_BUFFS[klass], f"{where}.buffs"))
+        try:
+            out[cid] = _character_table(cid, sub)
+        except ConfigError as e:
+            if cid == THIEF:
+                raise
+            klass = sub.get("class", cid if cid in CLASS_SKILLS else None) if isinstance(sub, dict) else None
+            out[cid] = CharacterConfig(cid, klass if isinstance(klass, str) else "?", broken=str(e))
     if not isinstance(default, str) or default not in {THIEF, *out, *CLASS_SKILLS}:
         if default == "auto":  # (the design's: the profile whose name her bottom bar shows; nothing reads it yet)
             raise ConfigError("[characters] default = \"auto\" needs her bottom bar read, which isn't built yet: name "
                               "the character")
         raise ConfigError(f"[characters] default must name a character ({sorted({THIEF, *out})}), got {default!r}")
     return default, out
+
+
+def _character_table(cid: str, sub) -> CharacterConfig:
+    """One of [characters]' tables, [characters.<cid>], as config.toml has it."""
+    where = f"characters.{cid}"
+    if not isinstance(sub, dict):
+        raise ConfigError(f"[characters] {cid} must be a table ([{where}]), or `default`")
+    if not ID.fullmatch(cid):
+        raise ConfigError(f"[{where}]: a character's id is lower-case letters, digits, - and _ (got {cid!r})")
+    klass = sub.get("class", cid if cid in CLASS_SKILLS else None)
+    if klass not in CLASS_SKILLS:
+        raise ConfigError(f"[{where}] class must be one of {sorted(CLASS_SKILLS)}, got {klass!r}")
+    if klass == THIEF and cid != THIEF:
+        raise ConfigError(f"[{where}]: the thief is [characters.thief] and the flat tables, one of her")
+    if cid == THIEF and klass != THIEF:
+        raise ConfigError(f"[{where}] class must be \"thief\" (the flat tables are hers), got {klass!r}: another "
+                          f"character's table goes under an id of her own ([characters.magician])")
+    if unknown := set(sub) - {"class", *LINES, *SUBTABLES}:
+        raise ConfigError(f"[{where}] has unknown setting(s) {sorted(unknown)}; known: "
+                          f"{sorted({'class', *LINES, *SUBTABLES})}")
+    for line in LINES:
+        if line in sub and (not isinstance(sub[line], str) or not sub[line].strip()):
+            raise ConfigError(f"{where}.{line} must be text, as her bottom bar shows it, got {sub[line]!r}")
+    if cid == THIEF:
+        if given := sorted(set(sub) & set(SUBTABLES)):
+            raise ConfigError(f"[{where}] has {given}: the thief's keys, timing and stats are the flat [keys], "
+                              f"[timing] and [character]")
+        return CharacterConfig(cid, klass, sub.get("name"), sub.get("job"))
+    tables = {name: _table(sub, name) for name in SUBTABLES}
+    return CharacterConfig(
+        cid, klass, sub.get("name"), sub.get("job"),
+        keys=_game_keys(tables["keys"], klass, f"{where}.keys") if tables["keys"] else None,
+        timing=_timing(tables["timing"]) if tables["timing"] else None,
+        stats=_stats(tables["stats"], f"{where}.stats"),
+        skills=_levels(tables["skills"], CLASS_SKILL_LEVELS[klass], f"{where}.skills"),
+        pet=_pet(tables["pet"], f"{where}.pet"),
+        buffs=_buffs(tables["buffs"], CLASS_BUFFS[klass], f"{where}.buffs"))
 
 
 def _stats(table: dict, where: str) -> dict[str, float]:

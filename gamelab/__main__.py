@@ -45,6 +45,12 @@ GAME_COMMANDS = {"player", "calibrate", "window", "snap", "act", "do", "lock", "
 # Commands that attack in the game (`probe` only with `run`): refused for a character whose attacks aren't built yet
 # (the magician's, until her profile reaches the attack layer: _refused_as)
 ATTACKING = {"lock", "combo", "hunt", "nav", "tour", "probe"}
+# Commands that look at the game or act in it. Until her bottom bar is read (the design's S0g: nothing tells a running
+# perception service or pet feeder who plays) each plays another character than the thief only when she's named
+# (--character, or GAMELAB_CHARACTER): under `character use`'s file or [characters] default alone the thief plays it, and
+# says so (_unnamed), and one that attacks is refused (_refused_as). The perception service is the thief's whoever is
+# named (it serves every command, the thief's hunts too, and builds her name tag, pictures and Shape once).
+IN_GAME = GAME_COMMANDS | {"pet", "perceive", "watch", "recorder", "save-recent", "spot"}
 LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command (the safety stop's: behavior.safety.EXIT,
                         # out of darts': behavior.darts.EXIT)
 
@@ -165,6 +171,11 @@ def cmd_character(args) -> int:
             path = character.choose(args.id)
             print(f"{args.id} plays from now on when nothing names another ({path}; --character and "
                   f"{character.ENV} still come first)")
+            if character.load(args.id).klass != "thief":
+                print(f"  until her bottom bar is read (the design's S0g), a command that looks at or acts in the game "
+                      f"plays her only when named (`python -m gamelab --character {args.id} ...`): without it such a "
+                      f"command plays the thief and says so, and one that attacks refuses; and perceive and pet "
+                      f"processes running now keep the character they started as until they start again")
             return 0
         if args.action == "check":
             print("her bottom bar (job above name) isn't read yet (perception.whoami, to come): nothing was looked at; "
@@ -172,8 +183,15 @@ def cmd_character(args) -> int:
             return 2
         which = character.active_id()
         print(f"plays: {which} (by {character.how_chosen()})")
+        if which != character.DEFAULT and not character.named():
+            print(f"  (offline only: a command in the game plays her only with --character {which}, until her bottom "
+                  f"bar is read)")
         for cid in character.known():
-            for i, line in enumerate(character.describe(character.load(cid))):
+            try:
+                lines = character.describe(character.load(cid))
+            except ConfigError as e:  # (her table: the others play on)
+                lines = [f"{cid}: {e}"]
+            for i, line in enumerate(lines):
                 print(("* " if cid == which and i == 0 else "  ") + line)
     except ConfigError as e:
         print(f"error: {e}")
@@ -194,28 +212,58 @@ def _play_as(which: str) -> str | None:
         return f"error: {e}"
     if which not in known:
         return f"error: no character {which!r} (--character): known {', '.join(known)}"
-    if "gamelab.motion.physics" in sys.modules and character.active_id() != which:
-        return f"error: her physics was loaded as {character.active_id()} already: --character {which} comes too late"
+    if (character.resolved() is not None or "gamelab.motion.physics" in sys.modules) and character.active().id != which:
+        return f"error: her physics was loaded as {character.active().id} already: --character {which} comes too late"
     os.environ[character.ENV] = which
     return None
 
 
+def _in_game(args) -> bool:
+    return args.cmd in IN_GAME or getattr(args, "game", False)
+
+
+def _unnamed(args) -> str | None:
+    """A command in the game (IN_GAME) with another character than the thief chosen only by `character use`'s file or
+    [characters] default, none named: the thief plays it (ENV set, for its children too) unless it attacks
+    (_refused_as says why not). What it says of that, or None."""
+    from maplehelper.config import ConfigError
+
+    from . import character
+    if not _in_game(args) or character.named() or args.cmd in ATTACKING:
+        return None
+    try:
+        which, how = character.active_id(), character.how_chosen()
+    except ConfigError:
+        return None  # (said where it's loaded)
+    if which == character.DEFAULT:
+        return None
+    os.environ[character.ENV] = character.DEFAULT
+    return (f"{args.cmd} plays the thief: {how} names {which}, but until her bottom bar is read (the design's S0g) a "
+            f"command in the game plays her only when named (--character {which})")
+
+
 def _refused_as(args) -> str | None:
     """A command that attacks in the game, played by a character whose attacks aren't built yet (a magician's: README,
-    Characters): why it doesn't run. None for the thief, and for everything else."""
-    if args.cmd not in ATTACKING or (args.cmd == "probe" and not getattr(args, "game", False)):
+    Characters), or the perception service played by another than the thief (IN_GAME): why it doesn't run, saying
+    what chose her. None for the thief, and for everything else."""
+    attacks = args.cmd in ATTACKING and (args.cmd != "probe" or getattr(args, "game", False))
+    if not attacks and args.cmd != "perceive":
         return None
     from maplehelper.config import ConfigError
 
     from . import character
     try:
-        c = character.load(character.active_id())
+        c, how = character.active(), character.how_chosen()
     except ConfigError as e:
         return f"error: {e}"
     if c.klass == "thief":
         return None
-    return (f"{args.cmd} plays {c.id} ({c.klass}), whose attacks aren't built yet (gamelab README, Characters): only "
-            f"the thief hunts so far; `python -m gamelab character` says who plays")
+    if not attacks:
+        return (f"perceive plays {c.id} ({c.klass}) by {how}: the perception service is the thief's until it learns "
+                f"who plays (the design's S0g), as it serves every command, the thief's hunts too: start it with no "
+                f"--character (her own commands use its frames)")
+    return (f"{args.cmd} plays {c.id} ({c.klass}) by {how}, whose attacks aren't built yet (gamelab README, "
+            f"Characters): only the thief hunts so far; `python -m gamelab character` says who plays")
 
 
 def cmd_spot(args) -> int:
@@ -2458,6 +2506,8 @@ def main(argv=None) -> int:
     if args.character and (refused := _play_as(args.character)):
         print(refused)
         return 2
+    if said := _unnamed(args):
+        print(said)
     if refused := _refused_as(args):
         print(refused)
         return 2

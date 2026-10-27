@@ -56,28 +56,14 @@ def test_a_class_named_table_needs_no_class(config_data):
     assert config.parse(config_data, NAMES).characters["magician"].klass == "magician"
 
 
+# Mistakes everyone's (the flat tables, the thief's own, `default`): raised
 @pytest.mark.parametrize("mutate, message", [
     (lambda d: d["keys"].update(magic_claw="q"), "['magic_claw'], not a thief's skill"),
-    (lambda d: d["characters"]["magician"]["keys"].update(lucky_seven="g"), "['lucky_seven'], not a magician's"),
-    (lambda d: d["characters"]["magician"]["keys"].update(haste="h"), "unknown action(s) ['haste']"),
-    (lambda d: d["characters"]["magician"]["keys"].pop("attack"), "[characters.magician.keys] is missing ['attack']"),
-    (lambda d: d["characters"]["magician"]["keys"].update(magic_armor="f12"), "already used by characters.magician"),
-    (lambda d: d["characters"]["magician"].update({"class": "bishop"}), "class must be one of"),
-    (lambda d: d["characters"].update(mage2={"name": "X"}), "class must be one of"),
-    (lambda d: d["characters"].update(bug={"class": "thief"}), "the thief is [characters.thief]"),
     (lambda d: d["characters"].update(thief={"keys": {"left": "left"}}), "the thief's keys, timing and stats"),
+    (lambda d: d["characters"].update(thief={"class": "magician"}), "class must be \"thief\" (the flat tables"),
+    (lambda d: d["characters"].update(thief={"name": ""}), "must be text"),
     (lambda d: d["characters"].update(default="bishop"), "default must name a character"),
     (lambda d: d["characters"].update(default="auto"), "needs her bottom bar read"),
-    (lambda d: d["characters"].update({"Mage": {"class": "magician"}}), "lower-case letters"),
-    (lambda d: d["characters"]["magician"].update(level=3), "unknown setting(s) ['level']"),
-    (lambda d: d["characters"]["magician"]["stats"].update(luk=4), "unknown stat(s) ['luk']"),
-    (lambda d: d["characters"]["magician"]["stats"].update(lucky_seven=4), "unknown stat(s) ['lucky_seven']"),
-    (lambda d: d["characters"]["magician"]["stats"].update(hp=0), "characters.magician.stats.hp must be"),
-    (lambda d: d["characters"]["magician"]["skills"].update(magic_claw=31), "must be her skill's level"),
-    (lambda d: d["characters"]["magician"]["skills"].update(lucky_seven=3), "unknown skill(s) ['lucky_seven']"),
-    (lambda d: d["characters"]["magician"]["pet"].update(hp_warning=70), "a share of her bar"),
-    (lambda d: d["characters"]["magician"]["buffs"].update(magic_guard="yes"), "must be true or false"),
-    (lambda d: d["characters"]["magician"].update(name=""), "must be text"),
 ])
 def test_bad_characters_are_explained(config_data, mutate, message):
     config_data["characters"] = {"magician": json.loads(json.dumps(MAGE))}
@@ -85,6 +71,53 @@ def test_bad_characters_are_explained(config_data, mutate, message):
     with pytest.raises(config.ConfigError) as err:
         config.parse(config_data, NAMES)
     assert message in str(err.value)
+
+
+# Mistakes in another character's table: hers, kept apart (CharacterConfig.broken), the thief's config as ever
+@pytest.mark.parametrize("mutate, who, message", [
+    (lambda d: d["characters"]["magician"]["keys"].update(lucky_seven="g"), "magician", "['lucky_seven'], not a magician's"),
+    (lambda d: d["characters"]["magician"]["keys"].update(haste="h"), "magician", "unknown action(s) ['haste']"),
+    (lambda d: d["characters"]["magician"]["keys"].pop("attack"), "magician", "[characters.magician.keys] is missing ['attack']"),
+    (lambda d: d["characters"]["magician"]["keys"].update(magic_armor="f12"), "magician", "already used by characters.magician"),
+    (lambda d: d["characters"]["magician"].update({"class": "bishop"}), "magician", "class must be one of"),
+    (lambda d: d["characters"].update(mage2={"name": "X"}), "mage2", "class must be one of"),
+    (lambda d: d["characters"].update(bug={"class": "thief"}), "bug", "the thief is [characters.thief]"),
+    (lambda d: d["characters"].update({"Mage": {"class": "magician"}}), "Mage", "lower-case letters"),
+    (lambda d: d["characters"].update(mage3=4), "mage3", "must be a table"),
+    (lambda d: d["characters"]["magician"].update(level=3), "magician", "unknown setting(s) ['level']"),
+    (lambda d: d["characters"]["magician"]["stats"].update(luk=4), "magician", "unknown stat(s) ['luk']"),
+    (lambda d: d["characters"]["magician"]["stats"].update(lucky_seven=4), "magician", "unknown stat(s) ['lucky_seven']"),
+    (lambda d: d["characters"]["magician"]["stats"].update(hp=0), "magician", "characters.magician.stats.hp must be"),
+    (lambda d: d["characters"]["magician"]["skills"].update(magic_claw=31), "magician", "must be her skill's level"),
+    (lambda d: d["characters"]["magician"]["skills"].update(lucky_seven=3), "magician", "unknown skill(s) ['lucky_seven']"),
+    (lambda d: d["characters"]["magician"]["pet"].update(hp_warning=70), "magician", "a share of her bar"),
+    (lambda d: d["characters"]["magician"]["buffs"].update(magic_guard="yes"), "magician", "must be true or false"),
+    (lambda d: d["characters"]["magician"].update(name=""), "magician", "must be text"),
+])
+def test_another_characters_mistakes_are_hers(config_data, mutate, who, message):
+    config_data["characters"] = {"magician": json.loads(json.dumps(MAGE))}
+    mutate(config_data)
+    cfg = config.parse(config_data, NAMES)  # (the player's and the thief's commands' load: it goes on)
+    assert message in cfg.characters[who].broken and cfg.keys.lucky_seven.name == "shift"
+    assert cfg.default_character == "thief"
+    others = {cid: c for cid, c in cfg.characters.items() if cid != who}
+    assert all(c.broken is None for c in others.values())
+
+
+def test_a_broken_table_never_stops_the_thief(tmp_path):
+    """The review's: a mistake in the magician's table (Lucky Seven's key under hers) stopped every thief command, the
+    player too (config.parse, physics' stats at import): now it's hers alone."""
+    path = _toml(tmp_path, '[character]\nspeed = 125\n[characters.magician.keys]\nleft = "left"\nright = "right"\n'
+                           'jump = "alt"\nattack = "ctrl"\nlucky_seven = "shift"\n')
+    chosen = tmp_path / "character.json"
+    assert character.active_id({}, path, chosen) == "thief"
+    assert character.stats(path, {}) == config.Character(speed=125)
+    assert character.load("thief", path, {}).stats.speed == 125.0
+    assert "magician" in character.known(path)
+    with pytest.raises(config.ConfigError, match=r"magician can't play: .*\['lucky_seven'\], not a magician's"):
+        character.load("magician", path, {})
+    with pytest.raises(config.ConfigError, match="can't play"):
+        character.stats(path, {character.ENV: "magician"})  # (named: she can't, and says why)
 
 
 def test_characters_alone_for_before_anything_loads(tmp_path):
@@ -298,6 +331,7 @@ def test_the_character_flag_plays_her_in_the_process_and_its_children():
 
 def test_the_flag_checks_who_and_when(monkeypatch):
     from gamelab import __main__ as cli
+    from gamelab.motion import physics  # noqa: F401 (loaded: who plays is resolved, the thief)
     monkeypatch.setenv(character.ENV, "thief")  # (restored after the test)
     assert "no character 'bishop'" in cli._play_as("bishop")
     assert "comes too late" in cli._play_as("magician")  # her physics is the thief's here already
@@ -314,6 +348,20 @@ def test_the_character_command(monkeypatch, capsys, tmp_path):
     assert "placeholders still" in out
     assert cli.main(["character", "use", "magician"]) == 0
     assert json.loads(character.CHOSEN.read_text()) == {"character": "magician"}  # (the test's own: conftest)
+    out = capsys.readouterr().out  # (the review's: what the choice doesn't do yet, and what keeps running)
+    assert "plays her only when named" in out and "perceive and pet processes running now keep" in out
+    monkeypatch.delenv(character.FIXED_STATS)  # (as a command has it: the file read; restored after the test)
+    assert cli.main(["character"]) == 0 and "(offline only: a command in the game plays her only with" in (
+        capsys.readouterr().out)
+    real = character.load
+    monkeypatch.setattr(character, "load", lambda cid, *a, **k: (_ for _ in ()).throw(config.ConfigError(
+        "magician can't play: [characters.magician.keys] is missing ['attack']")) if cid == "magician" else real(cid))
+    monkeypatch.setenv(character.FIXED_STATS, "1")
+    monkeypatch.setenv(character.ENV, "thief")
+    assert cli.main(["character"]) == 0  # (her table's mistake said; the thief's shown as ever)
+    out = capsys.readouterr().out
+    assert "magician: magician can't play" in out and "* thief (thief)" in out
+    monkeypatch.delenv(character.ENV)
     assert cli.main(["character", "use", "bishop"]) == 2 and cli.main(["character", "use"]) == 2
     assert cli.main(["character", "check"]) == 2  # nothing is read yet (the game isn't looked at: conftest refuses)
     assert "nothing was looked at" in capsys.readouterr().out
@@ -323,17 +371,91 @@ def test_only_the_thief_attacks_in_the_game(monkeypatch):
     from gamelab import __main__ as cli
     parser = cli.build_parser()
     monkeypatch.delenv(character.ENV, raising=False)
-    for argv in (["hunt", "kill"], ["tour"], ["lock"], ["probe", "run", "claw-edge"]):
+    monkeypatch.setattr(character, "_ACTIVE", [])  # (who plays resolved again, as a command's start does)
+    for argv in (["hunt", "kill"], ["tour"], ["lock"], ["probe", "run", "claw-edge"], ["perceive"]):
         try:
             args = parser.parse_args(argv)
         except SystemExit:  # (a command's own arguments aside: only its name counts)
             continue
         assert cli._refused_as(args) is None
     monkeypatch.setenv(character.ENV, "magician")
-    assert "only the thief hunts so far" in cli._refused_as(parser.parse_args(["tour"]))
+    monkeypatch.setattr(character, "_ACTIVE", [])
+    refused = cli._refused_as(parser.parse_args(["tour"]))
+    assert "only the thief hunts so far" in refused and "by GAMELAB_CHARACTER (--character)" in refused
     assert cli._refused_as(parser.parse_args(["probe", "list"])) is None  # offline
     assert cli._refused_as(parser.parse_args(["character"])) is None
+    assert cli._refused_as(parser.parse_args(["calibrate"])) is None  # (her own: L0's first step)
     assert cli.main(["tour"]) == 2
+
+
+def test_the_perception_service_is_the_thiefs(monkeypatch):
+    """The review's: a service built as the magician (her name tag, pictures and Shape) would serve the thief's hunts
+    after a switch, and nothing tells it who plays yet (S0g): perceive plays the thief only, and the service a command
+    starts is the thief's whoever it plays (its command line clears GAMELAB_CHARACTER; the thief's as before)."""
+    import sys
+    from gamelab import __main__ as cli
+    from gamelab.localization import service
+    monkeypatch.setenv(character.ENV, "magician")
+    monkeypatch.setattr(character, "_ACTIVE", [])
+    assert "the perception service is the thief's" in cli._refused_as(cli.build_parser().parse_args(["perceive"]))
+    started = []
+    monkeypatch.setattr(service, "_start_detached", lambda command, folder: started.append(command))
+    monkeypatch.setattr(service, "running", lambda *a: False)
+    monkeypatch.setattr(service, "saved", lambda *a: False)
+    master = (f'cmd.exe /c set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& "{sys.executable}" -u -X utf8 -m '
+              f'gamelab perceive --map 10002073 >> "{service.log_path()}" 2>&1')
+    for who, line in (("magician", "cmd.exe /c set GAMELAB_CHARACTER=&& " + master[len("cmd.exe /c "):]),
+                      ("thief", master), ("", master)):
+        monkeypatch.setenv(character.ENV, who)
+        monkeypatch.setattr(service, "_ENSURED", [-1e18])
+        assert service.ensure(10002073, log=lambda m: None) is True
+        assert started[-1] == line, who
+
+
+def test_a_choice_by_file_alone_plays_the_thief_in_the_game(monkeypatch, capsys):
+    """The review's: `character use magician` left behind switched the babysat pet feeder and perception service to
+    her files without a word. Until her bottom bar is read (S0g), a command in the game plays her only when named:
+    under the file (or [characters] default) alone it plays the thief and says so; one that attacks refuses."""
+    from gamelab import __main__ as cli
+    parser = cli.build_parser()
+    character.choose("magician")  # (the test's own file: conftest)
+    monkeypatch.delenv(character.FIXED_STATS)  # (as a command has it: the file read; restored after the test)
+    monkeypatch.setenv(character.ENV, "")  # (none named; restored after the test)
+    monkeypatch.setattr(character, "_ACTIVE", [])
+    said = cli._unnamed(parser.parse_args(["pet", "--every", "1"]))
+    assert said.startswith("pet plays the thief: ") and "names magician" in said and "--character magician" in said
+    assert character.named() and character.active_id() == "thief"  # (set for the command and its children)
+    monkeypatch.setenv(character.ENV, "")
+    assert cli._unnamed(parser.parse_args(["character"])) is None  # offline: the file's choice stands
+    assert character.active_id() == "magician"
+    assert cli._unnamed(parser.parse_args(["tour"])) is None  # it attacks: refused instead, saying why
+    refused = cli._refused_as(parser.parse_args(["tour"]))
+    assert "only the thief hunts so far" in refused and "`gamelab character use`" in refused
+    monkeypatch.setenv(character.ENV, "magician")
+    assert cli._unnamed(parser.parse_args(["pet", "--every", "1"])) is None  # named: hers (L0's `pet --read`)
+    monkeypatch.setenv(character.ENV, "")
+    character.choose("thief")
+    assert cli._unnamed(parser.parse_args(["pet", "--every", "1"])) is None and not character.named()
+
+
+def test_the_simulator_plays_the_thief_only(monkeypatch, capsys):
+    """The review's: golden and the harness restart themselves with the environment, GAMELAB_CHARACTER and all, so
+    `golden record` would have written the magician's placeholder physics over the thief's traces."""
+    from gamelab.sim import golden, harness
+    monkeypatch.setenv(character.ENV, "magician")
+    assert golden.main(["record"]) == 2 and harness.main(["run", "loop"]) == 2
+    assert capsys.readouterr().out.count("the simulator's scenarios are the thief's") == 2
+    monkeypatch.setenv(character.ENV, "thief")
+    assert golden._thief_only() is None and harness._thief_only() is None
+
+
+def test_who_plays_is_resolved_once():
+    """The review's: what let a command run, her physics and her files each resolved who plays again; now physics'
+    stats are `active`'s (the process's: the thief's in the tests), which the refusal and paths.of read too."""
+    from gamelab import paths
+    from gamelab.motion import physics
+    assert character.resolved() is not None and physics.CHARACTER == character.resolved().stats
+    assert paths.of().pet == paths.PET
 
 
 # --- her files (S0c) ------------------------------------------------------------------------------------------

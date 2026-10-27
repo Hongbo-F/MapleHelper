@@ -36,7 +36,7 @@ def stats(path=CONFIG, environ=os.environ) -> config.Character:
     return character.stats(path, environ)
 
 
-CHARACTER = stats()
+CHARACTER = character.active().stats  # (who plays, resolved once: stats() as the process has it, her profile's)
 SHOE = body.Shoe.from_physics(body.PHYSICS_IMG, CHARACTER.speed, CHARACTER.jump)
 LAGS = body.Lags()
 

@@ -55,7 +55,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .. import gcstats, paths, telemetry, window
+from .. import character, gcstats, paths, telemetry, window
 from ..perception.framecheck import BadLook, Problem
 from ..screen import Geometry, geometry
 from . import feed
@@ -199,8 +199,12 @@ def ensure(map_id: int | None = None, log: Callable[[str], None] = print) -> boo
     if saved() or now - _ENSURED[0] < ENSURE_EVERY_S or running():
         return False
     _ENSURED[0] = now
-    command = (f'cmd.exe /c set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& "{sys.executable}" -u -X utf8 -m '
-               f'gamelab perceive' + ("" if map_id is None else f" --map {int(map_id)}") + f' >> "{log_path()}" 2>&1')
+    # (the thief's whoever this command plays: it serves every command, and learns who plays only in the design's S0g;
+    # gamelab.__main__.IN_GAME)
+    who = os.environ.get(character.ENV)
+    unnamed = f"set {character.ENV}=&& " if who and who != character.DEFAULT else ""
+    command = (f'cmd.exe /c {unnamed}set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& "{sys.executable}" -u -X utf8 '
+               f'-m gamelab perceive' + ("" if map_id is None else f" --map {int(map_id)}") + f' >> "{log_path()}" 2>&1')
     try:
         _start_detached(command, str(paths.REPO))
     except (OSError, subprocess.SubprocessError) as e:
