@@ -445,3 +445,29 @@ def test_with_the_feed_a_kill_is_on_the_track_its_gain_is_bound_to_followed_and_
     ledger.on_look(s4)
     assert k.track == 0 and not ledger.dead
     assert not dying(ledger.kills, Monster(mob, 425.0, 500.0, 3, track=9), 12.0, [], None, ledger.dead)
+
+
+def test_with_the_feed_her_kills_unsure_until_seen_dead_and_another_players_kills_theirs():
+    """Ledger.dead's tracks told apart: one bound to her gain with no death seen or judged yet is `unsure` (it may be a
+    live one: fight.TOUCH_NEAR keeps it in her body's way), its death seen or judged makes it sure; one dead by another's
+    hand (the tracker's cause "other", or a share) is `theirs` (her memory's 'taken'), and no longer once it's hers
+    after all (tracking._taken_back)."""
+    from dataclasses import replace
+
+    from gamelab.localization.tracking import DEAD, DYING, Track
+    from gamelab.perception.mobs import Mob
+
+    mob = Mob("pig", 0, 0, 30, 30, 0.9)
+
+    def track(tid, x, state, gain=None, cause=None, seen=None):
+        return Track(tid, "pig", 3, x, 500.0, mob, 0.0, 10.0, state=state, gain=gain, cause=cause, died_seen=seen)
+
+    ledger = Ledger(_Hunter(), DropStore())
+    s = _look(10.4)
+    s.tracks = [track(5, 400.0, DYING, 10.2), track(7, 600.0, DEAD, cause="other", seen=10.3)]
+    ledger.on_look(s)
+    assert set(ledger.dead) == {5, 7} and ledger.unsure == {5} and ledger.theirs == {7}
+    s2 = _look(10.9)
+    s2.tracks = [replace(s.tracks[0], died_seen=10.8), replace(s.tracks[1], cause="hers", gain=10.2)]
+    ledger.on_look(s2)
+    assert set(ledger.dead) == {5, 7} and not ledger.unsure and not ledger.theirs

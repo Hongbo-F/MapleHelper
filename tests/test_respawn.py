@@ -249,9 +249,12 @@ def test_a_hunt_with_the_feed_records_the_deaths_of_others_kills():
     2 minutes: another player kills a monster every 20 s, and the feed sees one of those die. (75 s, not 45, since a
     throw's tap goes by her facing off the frame, perception.heading: in 45 s the feed saw none die; 2 minutes since
     the feed is every scenario's, feed_loop_rival folded into loop_rival on its seed 3, where in 75 s it sees none; 2.5
-    since 2026-10-26, her throws at the dying gone and the world's damage at the server's time: in 2 it saw none.)"""
+    since 2026-10-26, her throws at the dying gone and the world's damage at the server's time: in 2 it saw none; 3
+    since the reviews of her kill's monster, 2026-10-27: the simulator's death watch, as the service's, watches the
+    kinds measured only, Tree Dungeon's mushrooms (perception.deaths.MEASURED), and in 2.5 the feed judged none of this
+    map's dead, a snail's at 129 s out of view; in 3, 2.)"""
     import dataclasses
-    sc = dataclasses.replace(scenarios.SCENARIOS["loop_rival"], fn=scenarios._loop(2.5), expects=())
+    sc = dataclasses.replace(scenarios.SCENARIOS["loop_rival"], fn=scenarios._loop(3.0), expects=())
     with telemetry.captured() as records:
         trace = scenarios.run_scenario(sc)
     died = [r for r in records if r["topic"] == "event" and r["kind"] == "died"]

@@ -242,6 +242,8 @@ class Ledger:
                 self.dead[tr.id] = s.t
                 if getattr(tr, "cause", None) == "other" or getattr(tr, "share", False):
                     self.theirs.add(tr.id)
+                else:  # (hers, or hers after all: tracking._taken_back)
+                    self.theirs.discard(tr.id)
                 if tr.state == "dead" or getattr(tr, "died_seen", None) is not None:
                     self.unsure.discard(tr.id)
                 else:
