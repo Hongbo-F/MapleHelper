@@ -726,7 +726,7 @@ class MonsterTracker:
         self.gains = left
         self.shares = [g for g in self.shares if SHARES and t - g <= BIND_S and not self._bind_share(g, t, events)]
         self._deaths_seen(t, events)  # (after the binding: a death seen this soon is no gain's of this frame)
-        self.picked = {g: ids for g, ids in self.picked.items() if t - g <= STAR_WINDOW + HIDE_S}
+        self.picked = {g: ids for g, ids in self.picked.items() if t - g <= self.shape.window_s + self.shape.hide_s}
         self.keyed = {g: k for g, k in self.keyed.items() if g in self.picked}
 
     # --- her kills' monsters, bound (see the top) ------------------------------------------------------------
@@ -734,13 +734,13 @@ class MonsterTracker:
     def _bind(self, g: float, kind: str | None, t: float, events: list[Event]) -> bool:
         """Gain `g` (of `kind`, None: not known) bound to the monster the attack of the throw keyed GAIN_AFTER_KEY
         before it took (`_picks`), if a throw was and one is there: True."""
-        lo, hi = GAIN_AFTER_KEY
+        lo, hi = self.shape.gain_after_key
         th = max((th for th in self.throws if lo <= g - th.t <= hi), key=lambda th: th.t, default=None)
         picks = [] if th is None else self._picks(th, kind, g)
         if not picks:
             return False
         self.picked[g] = [tr.id for tr in picks]
-        her = self._her_at(th.t + PICK_S) or th.her
+        her = self._her_at(th.t + self.shape.pick_s) or th.her
         self.keyed[g] = (th.t, her[0], kind)
         self._victim(picks[0], g, t, events)
         return True
@@ -780,13 +780,13 @@ class MonsterTracker:
 
     def _picks(self, th: _Throw, kind: str | None, g: float, dead: bool = False) -> list[Track]:
         """The monsters of `kind` (None: any) throw `th`'s attack can have taken, the likeliest first: as it picked
-        (PICK_S after its key) from where she was then (her place in the frames; else where she was when the throw was
-        told), each where its track was at the gain `g`, ahead of her (VICTIM_BEHIND behind her middle at most,
-        THROW_REACH ahead) from VICTIM_UP above her feet to VICTIM_DOWN below, those seen within FRESH_S of it first,
-        the nearest ahead first. None bound to another gain, nor one seen dying already (DEATH_AFTER_GAIN_S: not by
-        this gain's star). With `dead`, only those found dead as someone else's by their death seen DEATH_AFTER_GAIN_S
-        after the gain or later (`_retold`)."""
-        her = self._her_at(th.t + PICK_S) or th.her
+        (PICK_S after its key: her Shape's pick_s) from where she was then (her place in the frames; else where she was
+        when the throw was told), each where its track was at the gain `g`, ahead of her (VICTIM_BEHIND behind her
+        middle at most, THROW_REACH ahead: her Shape's ahead) from VICTIM_UP above her feet to VICTIM_DOWN below, those
+        seen within FRESH_S of it first, the nearest ahead first. None bound to another gain, nor one seen dying already
+        (DEATH_AFTER_GAIN_S: not by this gain's star). With `dead`, only those found dead as someone else's by their
+        death seen DEATH_AFTER_GAIN_S after the gain or later (`_retold`)."""
+        her = self._her_at(th.t + self.shape.pick_s) or th.her
         if her is None:
             return []
         sign = 1 if th.side == RIGHT else -1
@@ -796,13 +796,13 @@ class MonsterTracker:
                 if tr.state != DEAD or tr.cause != "other" or tr.share or tr.gain is not None or tr.died_seen is None \
                         or tr.died_seen - g < DEATH_AFTER_GAIN_S:
                     continue
-            elif tr.state not in (LIVE, HIDDEN, DYING) or tr.gain is not None or tr.last_seen < g - HIDE_S \
+            elif tr.state not in (LIVE, HIDDEN, DYING) or tr.gain is not None or tr.last_seen < g - self.shape.hide_s \
                     or tr.died_seen is not None:
                 continue
             if kind is not None and tr.kind != kind:
                 continue
             ahead = sign * (self._at(tr, g) - her[0])
-            if -VICTIM_BEHIND <= ahead <= THROW_REACH and -VICTIM_UP <= tr.y - her[1] <= VICTIM_DOWN:
+            if -VICTIM_BEHIND <= ahead <= self.shape.ahead and -VICTIM_UP <= tr.y - her[1] <= VICTIM_DOWN:
                 hurt = kind is not None or not UNKNOWN_HURT_FIRST or tr.bar is not None
                 out.append((g - tr.last_seen > FRESH_S, not hurt, abs(ahead), tr.id, tr))
         return [a[-1] for a in sorted(out, key=lambda a: a[:4])]
