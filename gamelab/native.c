@@ -1160,7 +1160,8 @@ EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int
  * caller's in rf_next when none is in yet; each window loaded once (`load`) for its pictures; the matches through
  * `rf_best`, the one place this calls the matcher. The GPU backend (gpumatch.c, included below; contexts opened while
  * gm_on is on, native.GPU) sends every job's windows and pictures in one submission at rf_start (the pictures uploaded
- * at rf_open) and answers rf_window's matches from what comes back (gm_rf_best), the CPU's way where it can't.
+ * once; the windows the memo will answer left out) and answers rf_window's matches from what comes back (gm_rf_best),
+ * the CPU's way where it can't (the pool's threads woken for those, as for a call of theirs).
  * What a GPU can give to the bit (2026-10-27, the review of this contract): Direct3D 11's shader model 5 has no 64-bit
  * integers and no double square root (doubles are optional, their division only with the extended-doubles feature).
  * So its exact part is each place's integer sums, as mm_match's place-by-place code has them: the dot products of the
@@ -1475,10 +1476,16 @@ static void rf_wake(RfCtx *c)  /* the pool's threads to the call's jobs */
 #endif
 }
 
-static void rf_gpu_in(RfCtx *c)  /* the GPU's answers for the call (b.gpu 2), or the call to the CPU's threads (0) */
+/* The GPU's answers for the call (b.gpu 2: the pool's threads woken too where they leave pairs to the CPU), or the
+ * call to the CPU's threads (0). */
+static void rf_gpu_in(RfCtx *c)
 {
     if (gm_wait(c->gpu) == 0) {
         c->b.gpu = 2;
+        if (gm_rf_cpu_left(c->gpu)) {
+            c->gpu->stats[GS_WOKE]++;
+            rf_wake(c);
+        }
     } else {
         c->b.gpu = 0;
         rf_wake(c);

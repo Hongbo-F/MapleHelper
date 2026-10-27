@@ -4,8 +4,9 @@ one, the memo, the stages) against the CPU's context's, every field of every ans
 window (gm_bests) against mm_best's, among them those the GPU hands back to the CPU (a flat window: every place a
 candidate; a flat picture; one past 128 px); ties; the approximate scores within the band's half. A late answer, a
 device lost (as a driver reset: between calls, or while a call is on it), an error sending a call and a device that
-can't be made (rf_gpu_fault): the CPU's answers at once, that very call. Skipped without a Direct3D 11 hardware device
-(never WARP: that's the CPU again)."""
+can't be made (rf_gpu_fault): the CPU's answers at once, that very call. Windows the memo answers not sent; pairs left
+to the CPU on the pool's threads; rf_close never waiting for the device; the switch (GAMELAB_GPU, lab/GPU) and the
+status line's part. Skipped without a Direct3D 11 hardware device (never WARP: that's the CPU again)."""
 
 import ctypes
 import time
@@ -235,9 +236,104 @@ def test_a_late_answer_or_a_lost_device_leaves_the_call_to_the_cpu_at_once(detec
     cpu.close()
 
 
+def test_windows_the_memo_answers_arent_sent_to_the_gpu(detector, on_gpu):  # noqa: F811
+    # (gm_rf_send asks rf_recall as rf_window does: a call all memo the CPU's, 0.11 ms, not a GPU round trip)
+    cpu = native.Refinds(ready_of(detector), 4)
+    lists = [detector._lists_of("pig", t, -1) for t in ("pig_move0", "pig_move1")]
+    frame_, box = scene("pig_move1", 610, 305)
+    jobs = jobs_of(frame_, box, np.random.default_rng(13), 9, lambda i: lists[i % 2])
+    for i in range(len(jobs)):
+        jobs[i].id = 700 + i
+        jobs[i].wnear[:] = (0, 0, 0, 0)  # (the whole window only: the next call all memo)
+    for k in range(3):
+        before = on_gpu.gpu_state()[1]
+        a = cpu.run(frame_, jobs, detector._rf_lists, 0.6, 0.9, False, 0.95)
+        b = on_gpu.run(frame_, jobs, detector._rf_lists, 0.6, 0.9, False, 0.95)
+        assert all(bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(b)[64 * i:64 * i + OUT_FIELDS] for i in range(len(jobs)))
+        after = on_gpu.gpu_state()[1]
+        if k == 0:  # (matched: on the GPU)
+            assert all(o.looked == 4 for o in b) and after["answered"] == before["answered"] + 1
+        else:  # (each window the memo's: nothing sent)
+            assert all(o.looked == 8 for o in b) and after["memo"] == before["memo"] + len(jobs)
+            assert after["answered"] == before["answered"] and after["tasks"] == before["tasks"]
+    cpu.close()
+
+
+def test_pairs_the_gpu_leaves_to_the_cpu_are_matched_on_the_pools_threads():
+    # (pictures past 128 px the CPU's: the pool woken for them, `woke`, where the caller's thread alone took 2.5 times
+    # the C's 4 threads' time; the answers the same)
+    rng = np.random.default_rng(21)
+    pics = [p for _, _, p in random_pictures(rng, [(10, 10, 3), (132, 30, 3), (30, 132, 3), (24, 20, 3)])]
+    frame_ = rng.integers(0, 256, (400, 1000, 3), dtype=np.uint8)
+    rf = gpu_refinds(pics)
+    need(rf)
+    cpu = native.Refinds(pics, 4)
+    flat = np.array([0, 1, 2, 3], np.int32)
+    for k, (first, nxt) in enumerate((((0, 1), (1, 2)), ((3, 1), (0, 1)))):  # (past 128 px, then none: the GPU's)
+        jobs = (native.RfJob * 8)()
+        for i in range(8):
+            jobs[i].id = 10 * k + i
+            jobs[i].wfull[:] = (10 + 120 * i, 50, 10 + 120 * i + 140, 50 + 140)
+            jobs[i].first_at, jobs[i].first_n, jobs[i].next_at, jobs[i].next_n = first + nxt
+        before = rf.gpu_state()[1]
+        a = cpu.run(frame_, jobs, flat, 0.99, 0.999, False, 0.999)
+        b = rf.run(frame_, jobs, flat, 0.99, 0.999, False, 0.999)
+        assert all(bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(b)[64 * i:64 * i + OUT_FIELDS] for i in range(8))
+        after = rf.gpu_state()[1]
+        assert after["answered"] == before["answered"] + 1
+        assert after["woke"] == before["woke"] + (k == 0) and (after["cpu_pairs"] > before["cpu_pairs"]) == (k == 0)
+    rf.close()
+    cpu.close()
+
+
+def test_closing_never_waits_for_the_device_being_made(detector):  # noqa: F811
+    # (gm_close: the starter lets it go when it's done, 0.6-0.7 s here before; else a thread of its own the device's
+    # release, 19-29 ms on the caller's before)
+    f = native.lib()
+    was = native.gpu()
+    native.gpu(True)
+    try:
+        took = []
+        for _ in range(4):
+            rf = native.Refinds(ready_of(detector), 4)
+            t0 = time.perf_counter()
+            rf.close()
+            took.append(time.perf_counter() - t0)
+        rf = native.Refinds(ready_of(detector), 4)
+    finally:
+        native.gpu(was)
+    t0 = time.monotonic()
+    while rf.gpu_state()[0] == "starting" and time.monotonic() - t0 < 20:
+        time.sleep(0.01)
+    need(rf)
+    t0 = time.perf_counter()
+    rf.close()
+    took.append(time.perf_counter() - t0)
+    assert max(took) < 0.1, took
+    assert rf.gpu_state() == ("none", {}) and f.rf_gpu(None, None, 0) == 0
+
+
+def test_the_switch_and_the_status_line(tmp_path, detector, on_gpu):  # noqa: F811
+    on = tmp_path / "GPU"
+    assert not native.gpu_switch({}, on) and native.gpu_switch({"GAMELAB_GPU": "1"}, on)
+    on.write_text("")
+    assert native.gpu_switch({}, on) and not native.gpu_switch({"GAMELAB_GPU": "0"}, on)
+    assert native.gpu_switch({"GAMELAB_GPU": "yes"}, on)  # (only 0 and 1 are the variable's)
+    frame_, box = scene()
+    lists = detector._lists_of("pig", "pig_move0", -1)
+    on_gpu.run(frame_, jobs_of(frame_, box, np.random.default_rng(3), 4, lambda i: lists), detector._rf_lists, 0.6,
+               0.9, False, 0.95)
+    line = native.gpu_line()
+    assert "the re-finds' GPU on: " in line and " calls answered, " in line and " ms a call (" in line
+    off = gpu_refinds(ready_of(detector), fault=3)
+    assert "the re-finds' GPU off (no hardware adapter): 0 of 0 calls answered" in native.gpu_line()
+    off.close()
+    assert "GPU off" not in native.gpu_line()
+
+
 def test_a_device_that_cant_be_made_leaves_every_call_to_the_cpu(detector):  # noqa: F811
     rf = gpu_refinds(ready_of(detector), fault=3)
-    assert rf.gpu_state()[0] == "off" and rf.gpu_state()[1]["why"] == 1
+    assert rf.gpu_state()[0] == "off" and rf.gpu_state()[1]["why"] in (1, 6)  # (6: a DLL built without Direct3D's)
     frame_, box = scene()
     lists = detector._lists_of("pig", "pig_move0", -1)
     jobs = jobs_of(frame_, box, np.random.default_rng(2), 4, lambda i: lists)

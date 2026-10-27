@@ -15,6 +15,7 @@ SHOTS = LAB / "shots"            # the pictures commands save (snap, act, hunt l
 INBOX = LAB / "inbox"            # plans waiting for the player
 OUTBOX = LAB / "outbox"          # player results
 STOP = LAB / "STOP"              # create this file to stop the player
+GPU = LAB / "GPU"                # create this file for the re-finds' matches on the GPU (native.GPU; GAMELAB_GPU wins)
 ALARM = LAB / "ALARM.json"       # the Lie Detector was seen; nothing runs until it's cleared
 PLAYER_LOG = LAB / "player.log"
 RECORDINGS = LAB / "recordings"  # saved frames + key events, by name

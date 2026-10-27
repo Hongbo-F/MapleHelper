@@ -9,30 +9,40 @@
  *
  * Per call (rf_start): each job's full window with every picture of its two lists that fits it (both stages at once:
  * which of them the stages look at is decided on the CPU afterwards, as rf_window decides it), the near window as a
- * sub-rectangle of the full one's places (a place's sums are its pixels', whichever window it's counted in); the
- * windows' bytes copied into one upload buffer; three dispatches (gpumatch.hlsl's prep, match, choose) and the
- * candidates copied to a staging buffer, in one submission; rf_next waits for its fence (an event, no spinning), at
- * most GM_WAIT_US: past that, or on any error, the call goes to the CPU's threads as before, at once, and so do the
- * next ones for GM_REST_US and until the GPU has caught up; past a limit (GM_MAX_*), that call; a device removed (a
- * driver reset) turns the GPU off for the context's life.
+ * sub-rectangle of the full one's places (a place's sums are its pixels', whichever window it's counted in), a window
+ * the memo will answer left out (rf_recall, as rf_window asks it first: a call all memo stays the CPU's, 0.11 ms
+ * against a 1.2 ms round trip at P8); the windows' bytes copied into one upload buffer; three dispatches
+ * (gpumatch.hlsl's prep, match, choose) and the candidates copied to a staging buffer, in one submission; rf_next
+ * waits for its fence (an event, no spinning), at most GM_WAIT_US: past that, or on any error, the call goes to the
+ * CPU's threads as before, at once, and so do the next ones for GM_REST_US and until the GPU has caught up (nothing is
+ * sent while a late call is still on it); past a limit (GM_MAX_*), that call; a device removed (a driver reset) turns
+ * the GPU off for the context's life. Where the answers leave pairs to the CPU (a picture it doesn't take, more
+ * candidates than GM_CAND) the pool's threads are woken for them as for a CPU call (gm_rf_cpu_left).
  * The device is made on a thread of its own (rf_open doesn't wait: 0.7 s to on, the device 0.2-0.35 s of it, the
- * three shaders compiled at run time by d3dcompiler_47), the pictures uploaded once, every buffer made once (no
- * allocation per call; about 35 MB of video memory). Only a hardware adapter (never WARP, the Basic Render Driver:
- * that's the CPU again). d3d11, dxgi and d3dcompiler_47 are loaded at run time, so the DLL's imports are as before and
- * a machine without them just has no GPU path. Measured where the service runs (an RTX 3080, which idles at P8 between
- * the frame loop's calls, a crowd's frame of matches 5 ms there, against 2.1 on the C's 4 threads): off by default
- * (native.GPU), as it doesn't pay; D:/MapleHelper-scratch/gpu; README, The re-finds' matches on the GPU. */
+ * three shaders compiled at run time by d3dcompiler_47), the pictures packed at rf_open (the caller's memory: the
+ * starter never reads it) and uploaded once, every buffer made once (no allocation per call; about 35 MB of video
+ * memory); rf_close never waits for it (the last of the context's owner and its starter lets it go, on a thread of its
+ * own). Only a hardware adapter (never WARP, the Basic Render Driver: that's the CPU again). d3d11, dxgi and
+ * d3dcompiler_47 are loaded at run time, so the DLL's imports are as before and a machine without them just has no GPU
+ * path; built without the SDK's Direct3D headers (or with GM_NO_D3D) the backend is only off (why 6), the rest of the
+ * DLL as before. Measured where the service runs (an RTX 3080, which idles at P8 between the frame loop's calls, a
+ * crowd's frame of matches 5 ms there, against 2.1 on the C's 4 threads): off by default (native.GPU), as it doesn't
+ * pay; D:/MapleHelper-scratch/gpu; README, The re-finds' matches on the GPU. */
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GM_NO_D3D) && defined(__has_include)
+#if __has_include(<d3d11_4.h>) && __has_include(<dxgi1_2.h>) && __has_include(<d3dcompiler.h>)
+#define GM_D3D 1  /* the Direct3D 11 half below (the Windows SDK's headers; d3d11_4.h since 10.0.14393) */
+#endif
+#endif
+
+#ifdef GM_D3D
 #define COBJMACROS
 #include <initguid.h>
 #include <d3d11_4.h>
 #include <dxgi1_2.h>
 #include <d3dcompiler.h>
-#if defined(__has_include)
 #if __has_include("gpumatch_hlsl.h")
 #include "gpumatch_hlsl.h"  /* GM_HLSL: gpumatch.hlsl as a string (native.py writes it at the build) */
-#endif
 #endif
 #endif
 
@@ -61,16 +71,25 @@ typedef struct { const unsigned char *at; long long row; int ww, wh; } GmWin;  /
 
 /* What rf_gpu reports (stats[...]). */
 enum { GS_CALLS, GS_GPU, GS_LATE, GS_BUSY, GS_FULL, GS_PAIRS, GS_CPU_PAIRS, GS_WAIT_US, GS_WAIT_MAX_US, GS_TASKS,
-       GS_PLACES, GS_WHY, GS_GPU_US, GS_GPU_MAX_US, GS_MANY, GS_NONE, GS_PASS_US, GS_N = GS_PASS_US + 4 };
+       GS_PLACES, GS_WHY, GS_GPU_US, GS_GPU_MAX_US, GS_MANY, GS_NONE, GS_PASS_US, GS_MEMO = GS_PASS_US + 4, GS_WOKE,
+       GS_N };
 
 typedef struct GmCtx {
     volatile LONG state;
     int why;                       /* GS_WHY: what turned it off (gm_off's codes) */
     int fault;                     /* the tests' (rf_gpu_fault) */
-    const Masked **tpls;
+    const Masked **tpls;           /* (rf_open's: read at rf_open and during calls only, never by the starter) */
     int ntpl;
     unsigned char *takes;          /* each picture: whether the GPU matches it */
-#ifdef _WIN32
+    /* the pictures packed at gm_open for the starter's upload (freed once uploaded) */
+    GmPic *pk_pics;
+    unsigned *pk_runs;
+    float *pk_tpx;
+    size_t pk_nruns, pk_npx;
+    int cpu_left;                  /* the call's: a pair that fits left to the CPU (a picture the GPU doesn't take) */
+#ifdef GM_D3D
+    volatile LONG refs;            /* its owner (rf_*) and its starter while that runs: the last one lets it go */
+    volatile LONG closing;         /* rf_close was called: the starter stops making the device where it is */
     HANDLE starter;
     HMODULE d3d, dxgi, compiler;
     ID3D11Device *dev;
@@ -160,7 +179,97 @@ static float gm_score(const Masked *p, unsigned dot, const unsigned *s1, unsigne
 /* Whether the GPU takes picture p: up to 128 x 128 (its sums under 2^32, its runs' ends in a byte), not flat. */
 static int gm_takes(const Masked *p) { return p->th <= 128 && p->tw <= 128 && p->A > 0 && p->cn <= 3; }
 
+/* Off for good (`why`: 1 no hardware adapter, 2 no device, 3 no fence, 4 the shader, 5 the buffers, 6 no
+ * d3d11/dxgi/d3dcompiler, or the DLL built without their headers, 7 removed (a driver reset, or rf_gpu_fault's 2 and
+ * 4), 8 an error at a call (or its 5)). */
+static int gm_off(GmCtx *g, int why)
+{
+    g->why = why;
+    g->stats[GS_WHY] = why;
 #ifdef _WIN32
+    InterlockedExchange(&g->state, GM_OFF);
+#else
+    g->state = GM_OFF;
+#endif
+    return -1;
+}
+
+/* stats[k] one more: from the pool's threads too, as they answer a call's pairs from the GPU's (gm_answer). */
+static void gm_count(GmCtx *g, int k)
+{
+#ifdef _WIN32
+    InterlockedIncrement64((volatile LONG64 *)&g->stats[k]);
+#else
+    g->stats[k]++;
+#endif
+}
+
+/* The pictures the GPU takes, packed for the upload (on rf_open's thread: their memory is the caller's, which the
+ * starter, still running after an rf_close, must never read): each one's GmPic, its runs, its pixels as float4s. 0, or
+ * -1 without memory (the starter then turns it off: why 5). */
+static int gm_pack(GmCtx *g)
+{
+    size_t nruns = 0, npx = 0;
+    for (int i = 0; i < g->ntpl; i++) {
+        const Masked *p = g->tpls[i];
+        g->takes[i] = (unsigned char)gm_takes(p);
+        if (g->takes[i]) {
+            nruns += p->nruns;
+            npx += (size_t)p->th * p->tw;
+        }
+    }
+    GmPic *pics = (GmPic *)calloc((size_t)g->ntpl + 1, sizeof(GmPic));
+    unsigned *runs = (unsigned *)calloc(nruns + 1, sizeof(unsigned));
+    float *tpx = (float *)calloc(4 * (npx + 1), sizeof(float));
+    if (!pics || !runs || !tpx) {
+        free(pics);
+        free(runs);
+        free(tpx);
+        return -1;
+    }
+    for (int i = 0, r = 0, x = 0; i < g->ntpl; i++) {
+        const Masked *p = g->tpls[i];
+        if (!g->takes[i])
+            continue;
+        GmPic *q = pics + i;
+        q->th = (unsigned)p->th;
+        q->tw = (unsigned)p->tw;
+        q->nruns = (unsigned)p->nruns;
+        q->run_off = (unsigned)r;
+        q->px_off = (unsigned)x;
+        q->n = (unsigned)p->n;
+        q->st0 = (unsigned)p->ST[0];
+        q->st1 = p->cn > 1 ? (unsigned)p->ST[1] : 0;
+        q->st2 = p->cn > 2 ? (unsigned)p->ST[2] : 0;
+        q->af = (float)p->A;
+        const int *pr = masked_runs(p);
+        for (int k = 0; k < p->nruns; k++)
+            runs[r++] = (unsigned)pr[3 * k] | (unsigned)pr[3 * k + 1] << 8 | (unsigned)pr[3 * k + 2] << 16;
+        const short *T = masked_rows(p);
+        for (int y = 0; y < p->th; y++)
+            for (int xx = 0; xx < p->tw; xx++, x++)
+                for (int c = 0; c < p->cn; c++)
+                    tpx[4 * (size_t)x + c] = (float)T[(long long)y * p->tpad + xx * p->cn + c];
+    }
+    g->pk_pics = pics;
+    g->pk_runs = runs;
+    g->pk_tpx = tpx;
+    g->pk_nruns = nruns;
+    g->pk_npx = npx;
+    return 0;
+}
+
+static void gm_unpack(GmCtx *g)
+{
+    free(g->pk_pics);
+    free(g->pk_runs);
+    free(g->pk_tpx);
+    g->pk_pics = 0;
+    g->pk_runs = 0;
+    g->pk_tpx = 0;
+}
+
+#ifdef GM_D3D
 
 #define GM_RELEASE(x) do { if (x) { IUnknown_Release((IUnknown *)(x)); (x) = 0; } } while (0)
 
@@ -188,16 +297,6 @@ static void gm_free_device(GmCtx *g)
     }
     GM_RELEASE(g->ctx);
     GM_RELEASE(g->dev);
-}
-
-/* Off for good (`why`: 1 no hardware adapter, 2 no device, 3 no fence, 4 the shader, 5 the buffers, 6 no
- * d3d11/dxgi/d3dcompiler, 7 removed (a driver reset, or rf_gpu_fault's 2 and 4), 8 an error at a call (or its 5)). */
-static int gm_off(GmCtx *g, int why)
-{
-    g->why = why;
-    g->stats[GS_WHY] = why;
-    InterlockedExchange(&g->state, GM_OFF);
-    return -1;
 }
 
 static ID3D11Buffer *gm_buffer(GmCtx *g, size_t size, UINT stride, UINT bind, D3D11_USAGE usage, UINT cpu, UINT misc,
@@ -278,6 +377,8 @@ static int gm_make(GmCtx *g)
     IDXGIAdapter1_Release(pick);
     if (FAILED(hr))
         return gm_off(g, 2);
+    if (g->closing)  /* (rf_close meanwhile: nothing more made) */
+        return -1;
     if (FAILED(ID3D11Device_QueryInterface(g->dev, &IID_ID3D11Device5, (void **)&g->dev5)) ||
         FAILED(ID3D11DeviceContext_QueryInterface(g->ctx, &IID_ID3D11DeviceContext4, (void **)&g->ctx4)) ||
         FAILED(ID3D11Device5_CreateFence(g->dev5, 0, D3D11_FENCE_FLAG_NONE, &IID_ID3D11Fence, (void **)&g->fence)))
@@ -308,55 +409,19 @@ static int gm_make(GmCtx *g)
         if (FAILED(hr))
             return gm_off(g, 4);
     }
-    /* the pictures, once */
-    size_t nruns = 0, npx = 0;
-    for (int i = 0; i < g->ntpl; i++) {
-        const Masked *p = g->tpls[i];
-        g->takes[i] = (unsigned char)gm_takes(p);
-        if (g->takes[i]) {
-            nruns += p->nruns;
-            npx += (size_t)p->th * p->tw;
-        }
-    }
-    GmPic *pics = (GmPic *)calloc((size_t)g->ntpl + 1, sizeof(GmPic));
-    unsigned *runs = (unsigned *)calloc(nruns + 1, sizeof(unsigned));
-    float *tpx = (float *)calloc(4 * (npx + 1), sizeof(float));
-    int ok = pics && runs && tpx;
-    for (int i = 0, r = 0, x = 0; ok && i < g->ntpl; i++) {
-        const Masked *p = g->tpls[i];
-        if (!g->takes[i])
-            continue;
-        GmPic *q = pics + i;
-        q->th = (unsigned)p->th;
-        q->tw = (unsigned)p->tw;
-        q->nruns = (unsigned)p->nruns;
-        q->run_off = (unsigned)r;
-        q->px_off = (unsigned)x;
-        q->n = (unsigned)p->n;
-        q->st0 = (unsigned)p->ST[0];
-        q->st1 = p->cn > 1 ? (unsigned)p->ST[1] : 0;
-        q->st2 = p->cn > 2 ? (unsigned)p->ST[2] : 0;
-        q->af = (float)p->A;
-        const int *pr = masked_runs(p);
-        for (int k = 0; k < p->nruns; k++)
-            runs[r++] = (unsigned)pr[3 * k] | (unsigned)pr[3 * k + 1] << 8 | (unsigned)pr[3 * k + 2] << 16;
-        const short *T = masked_rows(p);
-        for (int y = 0; y < p->th; y++)
-            for (int xx = 0; xx < p->tw; xx++, x++)
-                for (int c = 0; c < p->cn; c++)
-                    tpx[4 * (size_t)x + c] = (float)T[(long long)y * p->tpad + xx * p->cn + c];
-    }
-    if (ok) {
+    if (g->closing)
+        return -1;
+    /* the pictures, once (packed at gm_open) */
+    if (g->pk_pics) {
         g->pics = gm_structured(g, (size_t)g->ntpl + 1, sizeof(GmPic), D3D11_USAGE_IMMUTABLE,
-                                D3D11_BIND_SHADER_RESOURCE, pics, &g->srv[0], 0);
-        g->runs = gm_structured(g, nruns + 1, 4, D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, runs, &g->srv[1],
-                                0);
-        g->tpx = gm_structured(g, npx + 1, 16, D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, tpx, &g->srv[2], 0);
+                                D3D11_BIND_SHADER_RESOURCE, g->pk_pics, &g->srv[0], 0);
+        g->runs = gm_structured(g, g->pk_nruns + 1, 4, D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, g->pk_runs,
+                                &g->srv[1], 0);
+        g->tpx = gm_structured(g, g->pk_npx + 1, 16, D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, g->pk_tpx,
+                               &g->srv[2], 0);
     }
-    free(pics);
-    free(runs);
-    free(tpx);
-    if (!ok || !g->srv[0] || !g->srv[1] || !g->srv[2])
+    gm_unpack(g);
+    if (!g->srv[0] || !g->srv[1] || !g->srv[2])
         return gm_off(g, 5);
     /* the calls' buffers, once */
     g->raw = gm_buffer(g, GM_MAX_RAW, 0, D3D11_BIND_SHADER_RESOURCE, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE,
@@ -413,17 +478,57 @@ static int gm_make(GmCtx *g)
 #endif
 }
 
+#endif /* GM_D3D */
+
+/* Everything of the backend let go: the device, its handles, the libraries, its memory. By the last of its owner
+ * (rf_close, through gm_close) and its starter. */
+static void gm_free(GmCtx *g)
+{
+#ifdef GM_D3D
+    if (g->got_rec && g->ctx) {
+        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_rec, 0);
+        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_cand, 0);
+    }
+    gm_free_device(g);
+    if (g->done)
+        CloseHandle(g->done);
+    if (g->timer)
+        CloseHandle(g->timer);
+    if (g->d3d)
+        FreeLibrary(g->d3d);
+    if (g->dxgi)
+        FreeLibrary(g->dxgi);
+    if (g->compiler)
+        FreeLibrary(g->compiler);
+#endif
+    gm_unpack(g);
+    free(g->takes);
+    free(g);
+}
+
+#ifdef GM_D3D
 static DWORD WINAPI gm_starter(void *arg)
 {
     GmCtx *g = (GmCtx *)arg;
-    if (gm_make(g) != 0)
+    if (gm_make(g) != 0) {
+        if (g->state != GM_OFF)  /* (closed meanwhile) */
+            gm_off(g, 2);
         gm_free_device(g);
+    }
+    if (InterlockedDecrement(&g->refs) == 0)  /* closed meanwhile: it's this thread's to let go */
+        gm_free(g);
     return 0;
 }
 
-#endif /* _WIN32 */
+static DWORD WINAPI gm_closer(void *arg)
+{
+    gm_free((GmCtx *)arg);
+    return 0;
+}
+#endif
 
-/* A GPU backend for the n pictures (rf_open's), made ready on a thread of its own; NULL without memory. */
+/* A GPU backend for the n pictures (rf_open's), made ready on a thread of its own (the pictures packed here first);
+ * NULL without memory. */
 static GmCtx *gm_open(const Masked **tpls, int n, int fault)
 {
     GmCtx *g = (GmCtx *)calloc(1, sizeof(GmCtx));
@@ -441,42 +546,42 @@ static GmCtx *gm_open(const Masked **tpls, int n, int fault)
     LARGE_INTEGER f;
     QueryPerformanceFrequency(&f);
     g->tick_us = 1e6 / (double)f.QuadPart;
+#endif
+#ifdef GM_D3D
+    gm_pack(g);  /* (without memory nothing packed: the starter turns it off, why 5) */
+    g->refs = 2;
     g->starter = CreateThread(0, 0, gm_starter, g, 0, 0);
-    if (!g->starter)
+    if (!g->starter) {
+        g->refs = 1;
         gm_off(g, 2);
+    }
 #else
-    g->state = GM_OFF;
+    gm_off(g, 6);  /* (built without Direct3D's headers) */
 #endif
     return g;
 }
 
+/* rf_close's: never waits. With the starter still making the device it lets everything go when it's done; else the
+ * device is released on a thread of its own (19-29 ms of releases on rf_close's caller, 2026-10-27: gpu/integ/fault),
+ * or here if no thread can be started. */
 static void gm_close(GmCtx *g)
 {
     if (!g)
         return;
-#ifdef _WIN32
-    if (g->starter) {
-        WaitForSingleObject(g->starter, INFINITE);
+#ifdef GM_D3D
+    InterlockedExchange(&g->closing, 1);
+    if (g->starter)
         CloseHandle(g->starter);
-    }
-    if (g->got_rec && g->ctx) {
-        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_rec, 0);
-        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_cand, 0);
-    }
-    gm_free_device(g);
-    if (g->done)
-        CloseHandle(g->done);
-    if (g->timer)
-        CloseHandle(g->timer);
-    if (g->d3d)
-        FreeLibrary(g->d3d);
-    if (g->dxgi)
-        FreeLibrary(g->dxgi);
-    if (g->compiler)
-        FreeLibrary(g->compiler);
+    if (InterlockedDecrement(&g->refs) > 0)
+        return;
+    HANDLE t = g->dev ? CreateThread(0, 0, gm_closer, g, 0, 0) : 0;
+    if (t)
+        CloseHandle(t);
+    else
+        gm_free(g);
+#else
+    gm_free(g);
 #endif
-    free(g->takes);
-    free(g);
 }
 
 /* A window for the call (its pixels at `at`, rows `row` bytes apart): its index, or -1 past the limits. */
@@ -524,7 +629,7 @@ static int gm_add_task(GmCtx *g, int win, int pic, int nx0, int ny0, int nx1, in
 /* The call's windows and tasks (gm_add_*) to the GPU, in one submission: 0, or -1 (nothing sent: the CPU's). */
 static int gm_send(GmCtx *g)
 {
-#ifdef _WIN32
+#ifdef GM_D3D
     if (g->ntask == 0)
         return -1;
     g->ngroup = 0;
@@ -628,7 +733,7 @@ static int gm_ready(GmCtx *g, int cn)
 {
     if (!g || g->state != GM_READY)
         return 0;
-#ifdef _WIN32
+#ifdef GM_D3D
     UINT64 done = ID3D11Fence_GetCompletedValue(g->fence);
     if (g->fault == 2 || done == (UINT64)-1 || ID3D11Device_GetDeviceRemovedReason(g->dev) != S_OK) {
         /* (2: the tests', as a driver reset between calls. The device is let go at rf_close, not here: its release
@@ -650,7 +755,7 @@ static int gm_ready(GmCtx *g, int cn)
  * GM_WAIT_US or the device failed (the call is then the CPU's). Never longer than that. */
 static int gm_wait(GmCtx *g)
 {
-#ifdef _WIN32
+#ifdef GM_D3D
     LARGE_INTEGER due;
     due.QuadPart = -(LONGLONG)gm_wait_most * 10;  /* (relative, in 100 ns) */
     int lost = g->fault == 4;  /* (the tests': removed while the call is on it, as a driver reset mid-call; the
@@ -716,7 +821,7 @@ static int gm_wait(GmCtx *g)
 /* After gm_wait's 0, once the answers have been read. */
 static void gm_done(GmCtx *g)
 {
-#ifdef _WIN32
+#ifdef GM_D3D
     if (g->got_rec) {
         ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_rec, 0);
         ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_cand, 0);
@@ -733,8 +838,8 @@ static int gm_answer(GmCtx *g, int k, int sub, float *score, int *x, int *y)
     const unsigned *r = g->got_rec + 4 * k;
     unsigned n = r[2 + sub];
     if (n == 0 || n > GM_CAND) {
-        g->stats[GS_CPU_PAIRS]++;
-        g->stats[n ? GS_MANY : GS_NONE]++;
+        gm_count(g, GS_CPU_PAIRS);
+        gm_count(g, n ? GS_MANY : GS_NONE);
         return 0;
     }
     const GmTaskGpu *t = g->task + k;
@@ -752,8 +857,26 @@ static int gm_answer(GmCtx *g, int k, int sub, float *score, int *x, int *y)
     *score = best;
     *x = (int)(at % t->rw);
     *y = (int)(at / t->rw);
-    g->stats[GS_PAIRS]++;
+    gm_count(g, GS_PAIRS);
     return 1;
+}
+
+/* Whether the call's answers leave a pair that fits to the CPU (a picture the GPU doesn't take, a region with no
+ * candidate or more than GM_CAND): then the pool's threads are woken for its jobs, as for a CPU call (rf_gpu_in), not
+ * only the caller's thread (that one alone took 39 ms where the 4 threads took 14-15, the correctness review's
+ * serial3.py: pictures past 128 px). The answers either way the same: each pair the GPU's exact one or rf_best's. */
+static int gm_rf_cpu_left(GmCtx *g)
+{
+    if (g->cpu_left)
+        return 1;
+    for (int k = 0; k < g->ntask; k++) {
+        const unsigned *r = g->got_rec + 4 * k;
+        if (r[2] == 0 || r[2] > GM_CAND)
+            return 1;
+        if (g->task[k].nx1 > g->task[k].nx0 && (r[3] == 0 || r[3] > GM_CAND))
+            return 1;
+    }
+    return 0;
 }
 
 /* --- rf_*'s use of it (native.c: rf_start, rf_window, rf_next, rf_end) */
@@ -772,36 +895,54 @@ static int gm_rf_window(GmCtx *g, const RfBatch *b, const int *w)
     return k;
 }
 
+static int rf_recall(const RfBatch *b, const RfJob *j, const int *w, const RfMemo *m);  /* (native.c's, below) */
+
 /* The call's jobs to the GPU (rf_start): each job's full window with every picture of its lists that fits it and the
  * GPU takes, its near window a sub-rectangle of those places where it lies inside the full one (else a window of its
- * own); a window only with a picture to match there, once a call for two jobs' alike. 0: sent; -1: the CPU's (not
- * ready, busy, past the limits). */
+ * own); a window only with a picture to match there, once a call for two jobs' alike; a window the memo will answer
+ * not at all (rf_window asks rf_recall first, as here: a job's memo is changed only by its own rf_window, after that,
+ * and the frame not at all, so the answer is the same then). 0: sent; -1: the CPU's (not ready, busy, past the
+ * limits, nothing to send). */
 static int gm_rf_send(GmCtx *g, const RfBatch *b)
 {
     if (!gm_ready(g, b->cn))
         return -1;
     g->stats[GS_CALLS]++;
+    g->cpu_left = 0;
     for (int i = 0; i < b->count; i++) {
         const RfJob *j = b->jobs + i;
+        RfEntry *e = b->memo[i];
         g->job_at[i] = g->ntask;
         g->job_n[i] = 0;
         g->job_sub[i] = 0;
         if (rf_empty(j->wfull))
             continue;
         const int *f = j->wfull, *nw = j->wnear;
-        int has_near = !rf_empty(nw);
-        int sub = has_near && nw[0] >= f[0] && nw[1] >= f[1] && nw[2] <= f[2] && nw[3] <= f[3];
+        int has_near = !rf_empty(nw), need_full = 1;
+        if (has_near && e && rf_recall(b, j, nw, &e->m[0])) {
+            has_near = 0;
+            g->stats[GS_MEMO]++;
+        }
+        if (e && rf_recall(b, j, f, &e->m[1])) {
+            need_full = 0;
+            g->stats[GS_MEMO]++;
+        }
+        int sub = need_full && has_near && nw[0] >= f[0] && nw[1] >= f[1] && nw[2] <= f[2] && nw[3] <= f[3];
         g->job_sub[i] = sub;
         for (int side = 1; side >= 0; side--) {  /* the full window's tasks, then a near window's own */
             const int *w = side ? f : nw;
-            if (!side && (!has_near || sub))
+            if (side ? !need_full : (!has_near || sub))
                 continue;
             int win = -1, ww = w[2] - w[0], wh = w[3] - w[1];  /* (the window added with its first task) */
             for (int k = 0; k < j->first_n + j->next_n; k++) {
                 int t = k < j->first_n ? b->lists[j->first_at + k] : b->lists[j->next_at + k - j->first_n];
                 const Masked *p = g->tpls[t];
-                if (!g->takes[t] || p->th > wh || p->tw > ww)
+                if (p->th > wh || p->tw > ww)
                     continue;
+                if (!g->takes[t]) {  /* (the CPU's: rf_best on the pool's threads) */
+                    g->cpu_left = 1;
+                    continue;
+                }
                 int seen = 0;
                 for (int q = g->job_at[i]; q < g->ntask && !seen; q++)
                     seen = (int)g->task[q].pic == t && g->task_side[q] == side;
@@ -849,7 +990,7 @@ static int gm_rf_best(GmCtx *g, const RfBatch *b, int i, int side, int pic, floa
         }
         return 1;
     }
-    g->stats[GS_CPU_PAIRS]++;
+    gm_count(g, GS_CPU_PAIRS);
     return 0;
 }
 
@@ -857,17 +998,19 @@ static int gm_rf_best(GmCtx *g, const RfBatch *b, int i, int side, int pic, floa
 
 
 /* Context ctx's GPU backend: 0 none (gm_on off when it was opened), 1 being made, 2 in use, 3 off (couldn't be made,
- * or lost: stats[GS_WHY] says why); `stats` (GS_N long longs, or NULL): calls asked, sent and answered by it, late
- * (past GM_WAIT_US: the CPU's), busy (one before still on it), past its limits, pairs answered, pairs the CPU matched,
- * the waits' total and longest us, tasks and places sent, why it's off. */
-EXPORT int rf_gpu(void *ctx, long long *stats)
+ * or lost: stats[GS_WHY] says why); `stats` (its first n of GS_N long longs, or NULL): calls asked, sent and
+ * answered by it, late (past GM_WAIT_US: the CPU's), busy (one before still on it), past its limits, pairs answered,
+ * pairs the CPU matched, the waits' total and longest us, tasks and places sent, why it's off, the GPU's own time (all,
+ * longest, each pass), windows left to the memo (not sent), calls answered whose pairs left to the CPU woke the pool.
+ * (n: a caller's array of an older GS_N is never written past.) */
+EXPORT int rf_gpu(void *ctx, long long *stats, int n)
 {
     RfCtx *c = (RfCtx *)ctx;
     GmCtx *g = c ? c->gpu : 0;
     if (!g)
         return 0;
-    if (stats)
-        memcpy(stats, g->stats, sizeof g->stats);
+    if (stats && n > 0)
+        memcpy(stats, g->stats, sizeof(long long) * (size_t)(n < GS_N ? n : GS_N));
     return g->state == GM_READY ? 2 : g->state == GM_OFF ? 3 : 1;
 }
 
@@ -929,7 +1072,7 @@ EXPORT int gm_bests(void *ctx, int nwin, const unsigned char *const *imgs, const
     return ok ? 0 : -1;
 }
 
-#ifdef _WIN32
+#ifdef GM_D3D
 /* The s~ of task k's places of the last submission (its sc), into out. */
 static int gm_read_sc(GmCtx *g, int k, float *out)
 {
@@ -960,7 +1103,7 @@ static int gm_read_sc(GmCtx *g, int k, float *out)
  * record (highest keys, candidates) into out after them. 0, or -1 if it couldn't. */
 EXPORT int gm_approx(void *ctx, const unsigned char *img, int ih, int iw, long long irow, int cn, int pic, float *out)
 {
-#ifdef _WIN32
+#ifdef GM_D3D
     RfCtx *c = (RfCtx *)ctx;
     GmCtx *g = c ? c->gpu : 0;
     if (!g || c->running)

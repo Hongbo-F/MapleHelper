@@ -32,15 +32,30 @@ import subprocess
 import sys
 import tempfile
 import threading
+import weakref
 from pathlib import Path
 
 import numpy as np
 
 USE = True  # False: Python only, as before
+
+
+def gpu_switch(environ=os.environ, path: Path | None = None) -> bool:
+    """Whether the GPU backend is asked for: GAMELAB_GPU's 1 or 0, else whether `path` (paths.GPU, lab/GPU) is there.
+    The file is the switch a perceive started through WMI sees (babysit3's, service.ensure's: a WMI process gets none
+    of its starter's environment, the correctness review's wmi_env.txt)."""
+    v = environ.get("GAMELAB_GPU", "")
+    if v in ("0", "1"):
+        return v == "1"
+    if path is None:
+        from .paths import GPU as path
+    return path.exists()
+
+
 # The re-finds' matches on the GPU (gpumatch.c, gpumatch.hlsl: Direct3D 11, behind rf_*; the answers the CPU's to the
-# bit), for the contexts `Refinds` opens while it's on: off unless GAMELAB_GPU=1, as on this machine it doesn't pay
-# (README, The re-finds' matches on the GPU).
-GPU = os.environ.get("GAMELAB_GPU", "") == "1"
+# bit), for the contexts `Refinds` opens while it's on: off unless switched on (`gpu_switch`), as on this machine it
+# doesn't pay (README, The re-finds' matches on the GPU).
+GPU = gpu_switch()
 SOURCE = Path(__file__).with_name("native.c")
 SEARCH_SOURCE = Path(__file__).with_name("search.c")  # the monster search's step 1 (`search_lib`)
 GPU_SOURCES = (Path(__file__).with_name("gpumatch.c"), Path(__file__).with_name("gpumatch.hlsl"))  # (in the DLL)
@@ -58,6 +73,8 @@ why = ""  # why the DLL isn't in use, if it isn't
 _search: ctypes.CDLL | None = None
 _search_tried = False
 search_why = ""  # why the search's DLL isn't in use, if it isn't
+_open: "weakref.WeakSet[Refinds]" = weakref.WeakSet()  # the Refinds with a context (gpu_line)
+_open_lock = threading.Lock()
 
 _P, _I, _D, _F, _L = ctypes.c_void_p, ctypes.c_int, ctypes.c_double, ctypes.c_float, ctypes.c_longlong
 SIGNATURES = {  # each function's (return type, argument types)
@@ -78,7 +95,7 @@ SIGNATURES = {  # each function's (return type, argument types)
     "rf_close": (None, [_P]),
     "rf_rounded": (_D, [_F]),
     "gm_on": (_I, [_I]),
-    "rf_gpu": (_I, [_P, _P]),
+    "rf_gpu": (_I, [_P, _P, _I]),
     "rf_gpu_fault": (None, [_P, _I]),
     "gm_bests": (_I, [_P, _I, _P, _P, _P, _P, _I, _I, _P, _P, _P, _P, _P, _P]),
     "gm_approx": (_I, [_P, _P, _I, _I, _L, _I, _I, _P]),
@@ -268,7 +285,8 @@ def state() -> str:
     couldn't be built leaves everything to Python and OpenCV, slower, and nothing else would show it)."""
     if lib() is None:
         return f"off ({why or 'not built'}): Python and OpenCV instead, slower"
-    on = ", the re-finds' matches on the GPU where it answers in time" if gpu() else ""
+    on = ("; the re-finds' matches switched to the GPU (its device made at a detector's first re-finds: whether it's"
+          " on, the status line's \"the re-finds' GPU\")") if gpu() else ""
     return "in use, " + ("the masked match on AVX2" if masked_in_c() else
                          "but not the masked match (no AVX2 on this CPU: OpenCV's, faster than the plain C)") + on
 
@@ -284,7 +302,35 @@ def gpu(on: bool | None = None) -> bool:
 
 GPU_STATS = ("calls", "answered", "late", "busy", "full", "pairs", "cpu_pairs", "wait_us", "wait_max_us", "tasks",
              "places", "why", "gpu_us", "gpu_max_us", "many", "none", "prep_us", "match_us", "choose_us",
-             "copy_us")  # gpumatch.c's GS_* (rf_gpu's stats)
+             "copy_us", "memo", "woke")  # gpumatch.c's GS_* (rf_gpu's stats)
+GPU_WHY = {1: "no hardware adapter", 2: "no device", 3: "no fence", 4: "its shader didn't compile",
+           5: "its buffers couldn't be made", 6: "no Direct3D 11 here, or the DLL built without its headers",
+           7: "the device removed: a driver reset?", 8: "an error sending a call"}  # gpumatch.c's gm_off
+
+
+def gpu_line() -> str:
+    """The perception service's status line's part on the GPU backend (localization.service.Publisher.status, every
+    STATUS_S), "" while no `Refinds` has one: each one's state and what it did since it was made (calls answered in
+    time of those asked, late, the CPU's meanwhile, windows left to the memo, its wait a call)."""
+    with _open_lock:
+        open_ = list(_open)
+    parts = []
+    for rf in open_:
+        state, st = rf.gpu_state()
+        if state == "none":
+            continue
+        sent = st["answered"] + st["late"]
+        did = (f"{st['answered']:,} of {st['calls']:,} calls answered, {st['late']} late, {st['busy']:,} the CPU's after"
+               f" a late one, {st['memo']:,} windows the memo's" + (
+                   f", its wait {st['wait_us'] / sent / 1000:.1f} ms a call ({st['wait_max_us'] / 1000:.1f} at most)"
+                   if sent else ""))
+        if state == "off":
+            parts.append(f"the re-finds' GPU off ({GPU_WHY.get(st['why'], st['why'])}): {did}")
+        elif state == "starting":
+            parts.append("the re-finds' GPU starting (its device being made)")
+        else:
+            parts.append(f"the re-finds' GPU on: {did}")
+    return "; ".join(parts)
 
 
 class Masked:
@@ -404,11 +450,15 @@ class Refinds:
         self.pictures = list(pictures)  # (their bytes stay while the C holds their addresses)
         self.threads = threads
         self._lock = threading.Lock()
+        self._ctx_lock = threading.Lock()  # (the context's life: `close`, and `gpu_state` from another thread)
         self._held = None  # what the C reads during a call
         self.ctx = None
         if self._lib is not None and self.pictures:
             n = len(self.pictures)
             self.ctx = self._lib.rf_open((ctypes.c_void_p * n)(*[p.address for p in self.pictures]), n, threads) or None
+        if self.ctx is not None:
+            with _open_lock:
+                _open.add(self)
 
     def start(self, frame: np.ndarray, jobs: ctypes.Array, lists: np.ndarray, thr: float, good: float,
               keep: bool = False, near_good: float | None = None) -> ctypes.Array | None:
@@ -457,16 +507,17 @@ class Refinds:
     def gpu_state(self) -> tuple[str, dict[str, int]]:
         """Its GPU backend's state ("none": made with the GPU off; "starting", "on", "off": couldn't be made, or lost)
         and what it did (GPU_STATS: calls asked of it, answered in time, late, ...)."""
-        if self.ctx is None:
-            return "none", {}
         stats = (ctypes.c_longlong * len(GPU_STATS))()
-        state = self._lib.rf_gpu(self.ctx, stats)
+        with self._ctx_lock:  # (not the call's lock: read from the status line's thread while a call runs)
+            if self.ctx is None:
+                return "none", {}
+            state = self._lib.rf_gpu(self.ctx, stats, len(stats))
         return ("none", "starting", "on", "off")[state], dict(zip(GPU_STATS, stats))
 
     def close(self) -> None:
-        with self._lock:
+        with self._lock, self._ctx_lock:
             if self.ctx is not None:
-                self._lib.rf_close(self.ctx)
+                self._lib.rf_close(self.ctx)  # (never waits for the GPU's device: gpumatch.c's gm_close)
                 self.ctx = None
 
     def __del__(self):

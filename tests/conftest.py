@@ -9,6 +9,7 @@ import pytest
 os.environ["GAMELAB_FIXED_STATS"] = "1"
 os.environ.pop("GAMELAB_CHARACTER", None)  # ... and the thief's, whoever the shell names (gamelab.character.ENV)
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")  # 3 GB a process otherwise (gamelab/__init__.py)
+os.environ.setdefault("GAMELAB_GPU", "0")  # the re-finds' GPU off unless a test turns it on, the lab's GPU file or not
 
 # A fixed config for tests, so editing config.toml for her keys never breaks them.
 BASE_CONFIG = {
