@@ -147,6 +147,8 @@ class Ledger:
         self._last: Scene | None = None     # the last look that searched for monsters
         self._looked: float | None = None   # when the last look of all was
         self.dead: dict[int, float] = {}    # the feed's tracks taken for dead, by id: when a look last had them so
+        self.theirs: set[int] = set()       # ... of those, another player's kills (a death not hers, or a share)
+        self.unsure: set[int] = set()       # ... and those bound to a gain with no death seen yet (`_dead_of`)
         model = getattr(hunter, "model", None)  # each kind's death animation (`dying`), the map's game data
         self.die = {k: b.die_s for k, b in bodies(model).items()} if hasattr(model, "mob_bodies") else {}
 
@@ -230,13 +232,26 @@ class Ledger:
 
     def _dead_of(self, s: Scene) -> None:
         """The feed's tracks look `s` has dead or dying (tracking.Track.killed: a kill or a share bound to it, or found
-        dead) into `dead`; one it has alive is out of it (let go: another was the kill); none kept DEAD_KEEP_S after."""
+        dead) into `dead`, another player's (`theirs`: dead by another's hand, tracking's cause "other", or a share)
+        and those bound to a gain of hers or a share whose death hasn't been seen or judged yet (`unsure`: drawn alive
+        until her star lands, and 12 of 103 bindings on the recordings' named gains were a live neighbour:
+        fight._targets keeps those by her in her danger); one it has alive is out of it (let go: another was the
+        kill); none kept DEAD_KEEP_S after."""
         for tr in getattr(s, "tracks", None) or ():
             if getattr(tr, "killed", False):
                 self.dead[tr.id] = s.t
+                if getattr(tr, "cause", None) == "other" or getattr(tr, "share", False):
+                    self.theirs.add(tr.id)
+                if tr.state == "dead" or getattr(tr, "died_seen", None) is not None:
+                    self.unsure.discard(tr.id)
+                else:
+                    self.unsure.add(tr.id)
             else:
                 self.dead.pop(tr.id, None)
+                self.unsure.discard(tr.id)
         self.dead = {i: t for i, t in self.dead.items() if s.t - t <= DEAD_KEEP_S}
+        self.theirs &= self.dead.keys()
+        self.unsure &= self.dead.keys()
 
     def _follow(self, s: Scene) -> None:
         """The kills of the last FOLLOW_S bound to a track (Kill.track): where it is now (it walks on until her star
@@ -333,8 +348,9 @@ class Wounds:
 
 
 def is_kill(m: Monster, k: Kill) -> bool:
-    """Whether placed kill `k` is monster `m`'s: its track (Kill.track) where the feed says both (a kill let go, on none,
-    is nobody's), else of its kind on its platform within TRACK_SLACK of where it was placed (as a look follows one)."""
+    """Whether placed kill `k` is monster `m`'s: its track (Kill.track) where the feed says both (a kill let go, on
+    none, is nobody's), else of its kind on its platform within TRACK_SLACK of where it was placed (as a look follows
+    one)."""
     if k.track is not None and getattr(m, "track", None) is not None:
         return k.track == m.track
     return m.kind == k.kind and m.platform == k.platform and abs(m.x - k.x) < TRACK_SLACK

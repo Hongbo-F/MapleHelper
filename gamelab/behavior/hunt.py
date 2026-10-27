@@ -909,7 +909,7 @@ class Hunt:
         return stance(s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
                       can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops,
                       halves=self._halves, around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward,
-                      goal=goal, edges=edges, up=up, pace=fight.pace_of(self.h, s))
+                      goal=goal, edges=edges, up=up, pace=fight.pace_of(self.h, s), touch=self.fs.touch)
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something

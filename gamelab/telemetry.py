@@ -30,8 +30,10 @@ Topics (map units; producers build the records, ui.state folds them):
             facing}], loot [{kind, x, y, platform}], searched, from 2026-10-21's evening also what it
             wide, looked [[platform, x0, x1]], view [x0, y0,   searched, for analysis.respawn; players only
             x1, y1], players [{id, kind, x, y, platform}]      when there are any: localization.players)
-  tracks    list [{id, kind, state, x, y, vx, facing,          `watch`, twice a second (localization.tracking)
-            platform, bar, hits, seen, cause}], frames
+  tracks    list [{id, kind, state, x, y, vx, facing,          `watch` and the perception service, twice a
+            platform, bar, hits, seen, cause, gain, share}],   second (localization.tracking; gain: the frame
+            frames                                             time of her gain the track is bound to, share:
+                                                               a share's; from 2026-10-27)
   exp       exp, level, gain, kinds, total, per_minute         each EXP gain (behavior.hunter; `watch`), her
                                                                number as read (localization.gains)
   drops     pending [{x, y, platform, mesos}], inventory_full  every look (behavior.hunter)
@@ -48,11 +50,16 @@ Topics (map units; producers build the records, ui.state folds them):
   tour      order, safe, grounds / stop, spot                  behavior.tour (stop, spot: also behavior.hunt)
   hunt      mode, rule, objective, ground, piles [{x, platform,   behavior.hunt, when the rule changes
             status, hers}]
-  event     kind, text; track (died, exp_gain, hp_drop)        behavior: kill, hit, potion, safety_stop,
-                                                               exp (what a gain's size said), player (one
-                                                               coming or going), died (the feed's deaths
-                                                               not hers), backstop, follow, probe; `watch`:
-                                                               died, exp_gain, hp_drop (the feed's events)
+  event     kind, text; track (died, exp_gain, hp_drop,        behavior: kill, hit, potion, safety_stop,
+            victim, let_go); died's data cause, at, hurt,      exp (what a gain's size said), player (one
+            by, share, seen; victim's kind, x, platform,       coming or going), died (the feed's deaths
+            gain, share; let_go's kind, gain, why; retold's    not hers), backstop, follow, probe, retold (a
+            key, side                                          throw told again the way the frame showed her
+                                                               facing); `watch` and the perception service:
+                                                               died, exp_gain, hp_drop, victim (a gain bound to
+                                                               the monster her attack took), let_go (not it:
+                                                               why 'seen alive', 'retold' or 'another seen
+                                                               dying'; from 2026-10-27; seen: its death seen)
   log       text                                               every log line
   gc        collections [gen 0, 1, 2], pause_ms, longest_ms,   once a minute (the perception service, the commands
             frozen, seconds                                    that record telemetry: gcstats)

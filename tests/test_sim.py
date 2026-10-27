@@ -6,6 +6,7 @@ fail (not skip) when it's there but doesn't load."""
 
 import dataclasses
 import os
+import random
 import sys
 import time
 import types
@@ -1696,6 +1697,29 @@ def test_her_kill_is_drawn_alive_until_her_star_lands_then_dying_where_it_got_to
     w.advance(4.0)
     (d,) = w.live_drops()
     assert abs(d.x - m.died_x) <= 10
+
+
+def test_her_kill_drawn_alive_walks_on_its_own_path_frame_by_frame(model):
+    """Where it dies (`died_x`, her star's landing) is worked out on a copy (SimMonster.ghost): the monster itself is
+    drawn walking on its own segments up to then, one turning or stopping between the kill and the landing too, and
+    dies where it got to. (Advanced to the landing itself, the frames between evaluated its newer segment backwards: on
+    18% of 2,000 such kills it was drawn off its path, a median 27 units: review of 2026-10-27, review-behaviour.)"""
+    c = plat(model, 500, 400)
+    w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right")
+    m = w.monsters[0]
+    m.t0, m.x0, m.d, m.t1 = 0.0, 400.0, -1, 0.45  # walking toward her, and after the kill ...
+    m.rng = random.Random(0)  # ... turning back (its next segment's draw: 0.84, walking right)
+    tap(w, 0.0, "f", 0.04)
+    xs, t = [], 0.0
+    while m.alive or t < m.drawn_alive:  # (frame by frame from the key, across the kill)
+        (v,) = [v for v in w.visible_monsters() if v[0] is m]
+        xs.append(v[1])
+        t += 1 / 30
+        w.advance(t)
+    assert m.drawn_alive > 0.5 and m.died_at == m.drawn_alive
+    step = m.speed / 30 + 0.5
+    assert len(xs) > 5 and all(abs(b - a) <= step for a, b in zip(xs, xs[1:]))
+    assert abs(m.died_x - xs[-1]) <= step
 
 
 def test_the_world_judges_her_throws_targets_and_the_tracks_taken_for_dead_by_its_own_monsters(model):

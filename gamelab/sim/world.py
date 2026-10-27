@@ -104,6 +104,7 @@ events, never on when or how often it was looked at.
 """
 
 import bisect
+import copy
 import functools
 import json
 import math
@@ -981,6 +982,16 @@ class SimMonster:
         u = (self.x0 - self.lo) + self.d * self.speed * (t - self.t0)
         m = u % (2 * span)
         return (self.lo + m, self.d) if m <= span else (self.lo + 2 * span - m, -self.d)
+
+    def ghost(self) -> "SimMonster":
+        """A copy to look ahead with (`at` a later time): its own rng copied, so the monster itself goes on drawing
+        the same segments, frame by frame. Advanced itself, a monster her attack killed was drawn off its own path from
+        the kill to her star's landing on 18% of 2,000 such kills (a median 27 units, the most 108: review of
+        2026-10-27, review-behaviour/simjump.py), the frames between evaluating the newer segment backwards."""
+        g = copy.copy(self)
+        g.rng = random.Random()
+        g.rng.setstate(self.rng.getstate())
+        return g
 
     def at(self, t: float) -> float:
         while t >= self.t1:
@@ -2220,9 +2231,9 @@ class World:
         m.alive, m.died_at, m.died_x, m.killed_by = False, t, mx, "her"
         if self.realism.dies_late and key_ms is not None:  # drawn alive, walking on, until her star lands
             lands = key_ms / 1000 + DIE_LANDS_S + abs(mx - self.x) / DIE_FLIGHT
-            if lands > t:
+            if lands > t:  # (where it gets to on a copy: its own segments go on as its frames are drawn)
                 m.drawn_alive, m.bar_drawn = lands, bar
-                m.died_at, m.died_x = lands, m.at(lands)
+                m.died_at, m.died_x = lands, m.ghost().at(lands)
         mx = m.died_x  # (drawn alive until her star lands, Realism.dies_late: it dies, and its drops pop out, there)
         self.kills[m.kind] = self.kills.get(m.kind, 0) + 1
         self.kill_log.append((t, m.kind, m.platform.id, "her"))

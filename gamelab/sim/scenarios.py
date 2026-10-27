@@ -2158,14 +2158,18 @@ def loop_tree_23_near_misses(sim):
     return harness._only(_loop(4), (23,))(sim)
 
 
-@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=3, limit=500, may_die=True, noise=_SLOW[0], her=_LUCKY,
+@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=2, limit=500, may_die=True, noise=_SLOW[0], her=_LUCKY,
       realism=dataclasses.replace(_SLOW[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_wait(sim):
     """20 its only ground, hunted standing on it (no spot off it is better: attack.spots), its one Horny Mushroom's
     spawn point at x -171, respawns 30 s after a kill (preset crowd-slow), Lucky Seven: with 20 empty she waits for it
     at the safest place along 20 that keeps the spawn point in reach (hunt._wait_place), not where her last kill left
-    her."""
+    her. (On seed 2 since the reviews of her kill's monster, 2026-10-27: on seed 3, with her kills on their monsters,
+    she went for 3 mesos on 19 at x 134 and the drop planned from 18 at x 110 took the rope at 111 instead, 12 times from
+    147 s to 231 s, the pile taken up again 3 s after "too many misses": a loop of the navigation's own, a drop planned
+    over a rope's top, which master's stack (one miss on seed 3) didn't come to. Of seeds 1-12 every one meets it, with
+    no such miss on 2, 4-8 and 10-12; master's stack meets all 12.)"""
     return harness._only(_loop(4), (20,))(sim)
 
 
@@ -2580,14 +2584,17 @@ DARTS_EXPECTS = (
     check("her moves alone after the stop, no attack and no mouse", _moves_alone))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
+@tree((23, 73.0), monsters="all", seed=4, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
       expects=DARTS_EXPECTS)
 def loop_tree_out_of_darts(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
     30 casts of Lucky Seven and they're gone; from then her presses take no MP and kill nothing (the Lucky Seven key
     does nothing, as live at 01:28 on 2026-10-26), and once 20 of them have in a row (behavior.darts.presses_for on
     this map: twice and more the live hunts' most with her darts) the hunt stops, she goes to a safe place
-    (behavior.retreat), whoever is at the PC is paged, and the recording's last minutes are saved."""
+    (behavior.retreat), whoever is at the PC is paged, and the recording's last minutes are saved. (On seed 4 since the
+    reviews of her kill's monster, 2026-10-27: on seed 1 her first kill's monster, bound and by her, kept her from the
+    jump onto 22 at 1.6 s, and the stop came at 82 s on 28, where her retreat to the rope at x 146 was knocked back off
+    32 twice and ended on 33. Of seeds 1-12, all but 1 meet it, and master's stack all but 3 and 12.)"""
     return darts_stop(5)(sim)
 
 

@@ -536,3 +536,120 @@ def test_a_death_seen_is_dead_at_once_and_puts_her_kill_right():
     tracker.seen_dying(2, t0 + 0.4)
     events, _ = run(tracker, [([sighting(1150, pose="stand")], view())], start=t0 + 0.4)
     assert [(e.track, e.data["cause"], e.data["seen"]) for e in events if e.kind == "died"] == [(2, "other", True)]
+
+
+def test_a_death_seen_sooner_than_her_star_can_land_isnt_her_kill():
+    """Another player's kill of the far one seen dying in her gain's frame, or a frame after it (DEATH_AFTER_GAIN_S:
+    her star hasn't landed by then), doesn't take her gain: it stays on the near one her attack took, and the far one is
+    someone else's. (The gains were bound after the deaths seen, with no time asked: the far one took the gain, and
+    the near one was a target again: review of 2026-10-27, review-behaviour/order.py.)"""
+    t0 = 100.0
+    both = [sighting(1150, pose="stand"), sighting(1300, pose="stand")]
+    for after in (0.0, 1 / FPS):
+        tracker = _two(t0)
+        tracker.throw(t0 + 0.4, "right")
+        run(tracker, [(both, view())] * 7, start=t0 + 10 / FPS)
+        g = t0 + 0.65
+        tracker.gain(g)
+        if not after:
+            tracker.seen_dying(2, g)
+        events, _ = run(tracker, [(both, view())], start=g)
+        if after:
+            tracker.seen_dying(2, g + after)
+            events += run(tracker, [([sighting(1150, pose="stand")], view())], start=g + after)[0]
+        assert [(e.kind, e.track) for e in events if e.kind in ("victim", "let_go")] == [("victim", 1)]
+        assert [(e.track, e.data["cause"]) for e in events if e.kind == "died"] == [(2, "other")]
+        assert tracker.tracks[1].killed
+
+
+def test_her_kill_bound_isnt_found_again_on_a_neighbour_once_her_star_has_landed():
+    """Her kill walks on until her star lands (STAR_LANDS_S after the key, and her distance over STAR_FLIGHT), then
+    stands there dying, and the detector loses it: lost (MISSING_S) after that (LANDS_SLACK_S), a sighting 70 units on,
+    which the track's window (grown with the time out of sight) would take, is another monster, a new track at once (no
+    search needed), and the one bound isn't let go for it but dead from CONFIRM_S on. One where it was lost is it still.
+    (On the recordings' replays a bound track was re-found 45-97 units from its last sighting 0.7-1.0 s on, and let go,
+    on 7 of 165 bindings: review of 2026-10-27, review-truth/binds.py.)"""
+    t0 = 100.0
+    tracker = MonsterTracker()
+    run(tracker, [([sighting(1150, pose="stand")], view())] * 10, start=t0)
+    tracker.throw(t0 + 0.3, "right")
+    g = t0 + 0.55
+    tracker.gain(g)
+    run(tracker, [([sighting(1150, pose="stand")], view())] * 18, start=g)  # drawn alive till her star lands
+    lands = t0 + 0.3 + tracking.STAR_LANDS_S + 150 / tracking.STAR_FLIGHT
+    assert tracker.tracks[1].lands == pytest.approx(lands)
+    there = sighting(1170, pose="stand")
+    assert not tracker._stray(tracker.tracks[1], there, g + 0.9)
+    assert not tracker._stray(tracker.tracks[1], sighting(1220, pose="stand"), lands + tracking.LANDS_SLACK_S - 0.01)
+    other = sighting(1220, pose="stand")
+    events = tracker.update(g + 0.9, {1: other}, [], view(), HER)  # (its window, grown out of sight, finds it)
+    assert tracker.tracks[1].last_seen < g + 0.9 and [e.kind for e in events] == ["appeared"]
+    for k in range(1, 2 * FPS):
+        events += tracker.update(g + 0.9 + k / FPS, {1: other, 2: other}, [], view(), HER)
+    assert not [e for e in events if e.kind == "let_go"]
+    assert tracker.tracks[1].state == DEAD and tracker.tracks[1].cause == "hers" and tracker.tracks[2].state == LIVE
+
+
+def test_a_gain_of_no_kind_known_goes_on_the_nearest_ahead_her_throws_hurt_first():
+    """Its kind not known (its size unread, or no kill's), the gain goes on the nearest ahead of her of any kind, one
+    showing its bar (her throws hurt it) before one unhurt (UNKNOWN_HURT_FIRST); a kind named, the nearest of it."""
+    t0 = 100.0
+    seen = [sighting(1100, pose="stand", kind="slime"), sighting(1250, pose="stand", bar=0.4)]
+    for kind, x in ((None, 1250), ("slime", 1100)):
+        tracker = MonsterTracker()
+        run(tracker, [(seen, view())] * 10, start=t0)
+        tracker.throw(t0 + 0.4, "right")
+        tracker.gain(t0 + 0.65, kind)
+        events, _ = run(tracker, [(seen, view())], start=t0 + 0.65)
+        assert [e.data["x"] for e in events if e.kind == "victim"] == [x]
+
+
+def test_a_throw_told_again_the_other_way_binds_its_kill_on_that_side():
+    """Her keys had her throw left (the stance's side), her look's frame showed her facing right (behavior.hunter:
+    told again, at its key, RETOLD_S): the gain bound already to the pig on her left is let go and bound to the one on
+    her right her attack took; told again before the gain, it's bound there at once. Told again the same way, or a
+    throw at another key, it changes nothing. (On the recording of 2026-10-26 00:20 two of 15 kills were bound so to a
+    live one on the side she didn't throw at: review of 2026-10-27, review-truth.)"""
+    t0 = 100.0
+    both = [sighting(850, pose="stand"), sighting(1150, pose="stand")]
+    for before in (False, True):
+        tracker = MonsterTracker()
+        run(tracker, [(both, view())] * 10, start=t0)
+        key = t0 + 0.4
+        tracker.throw(key, "left")
+        if before:
+            tracker.throw(key, "right")
+        g = t0 + 0.65
+        tracker.gain(g, "pig")
+        events, _ = run(tracker, [(both, view())], start=g)
+        tracker.throw(key, "right")
+        tracker.throw(key, "right")  # (once is enough)
+        events += run(tracker, [(both, view())] * 3, start=g + 1 / FPS)[0]
+        bound = [(e.kind, e.track, e.data.get("why")) for e in events if e.kind in ("victim", "let_go")]
+        assert bound == ([("victim", 2, None)] if before else [("victim", 1, None), ("let_go", 1, "retold"),
+                                                                ("victim", 2, None)])
+        assert tracker.tracks[2].killed and not tracker.tracks[1].killed and len(tracker.throws) == 1
+
+
+def test_told_again_after_her_victims_death_was_seen_it_is_hers_after_all():
+    """The throw told again only after the death of the pig on her right was seen (someone else's then: her gain was
+    bound to the one on her left), DEATH_AFTER_GAIN_S or more after the gain: the one on her left is let go, and the
+    one on her right is her kill after all (`_taken_back`), not someone else's. (Live at 2026-10-26 00:20:13, her
+    victim's death was seen 0.09 s before the frame that told the throw again.)"""
+    t0 = 100.0
+    both = [sighting(850, pose="stand"), sighting(1150, pose="stand")]
+    tracker = MonsterTracker()
+    run(tracker, [(both, view())] * 10, start=t0)
+    key, g = t0 + 0.4, t0 + 0.65
+    tracker.throw(key, "left")
+    tracker.gain(g, "pig")
+    events, _ = run(tracker, [(both, view())] * 12, start=g)
+    tracker.seen_dying(2, g + 12 / FPS)
+    events += run(tracker, [([both[0]], view())], start=g + 12 / FPS)[0]
+    assert [(e.track, e.data["cause"]) for e in events if e.kind == "died"] == [(2, "other")]
+    tracker.throw(key, "right")
+    events = run(tracker, [([both[0]], view())], start=g + 13 / FPS)[0]
+    assert [(e.kind, e.track) for e in events if e.kind in ("victim", "let_go", "died")] == [
+        ("let_go", 1), ("victim", 2), ("died", 2)]
+    assert tracker.tracks[2].cause == "hers" and tracker.tracks[2].gain == g and not tracker.tracks[1].killed
+    assert tracker.counts["died other"] == 0 and tracker.counts["died hers"] == 1

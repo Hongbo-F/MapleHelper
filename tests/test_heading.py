@@ -477,15 +477,17 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
     """Turned away from the Horny Mushroom twice while she shoots it (Noise.turned: her player's own arrow, say): the
     next look's frame tells, so the throw after it taps back first, and only the two throws decided before each turn
     (it came while they waited out her attack lock) go the wrong way; the second turn, against her last arrow, is
-    logged, and her scenes carry the heading, who it's by and the frame's reading. With eyes that can't read her
-    picture, her keys think she faces it: every star after the turn goes the wrong way (and the mushroom walks into
-    her)."""
+    logged, and her scenes carry the heading, who it's by and the frame's reading. Those two throws, and only those, are
+    told to the feed again the way she faced (Hunter._retell: after the last look that agreed with her keys; the
+    tracker binds their kills on that side). With eyes that can't read her picture, her keys think she faces it: every
+    star after the turn goes the wrong way (and the mushroom walks into her)."""
     turned = Noise(turned=((1.5, LEFT), (4.0, LEFT)))
     with telemetry.captured() as records:
         out, trace = _kill_on_23(turned)
     assert out["ended"] == "killed" and out["throws"] >= 8 and out["wrong way"] == 2, out
     assert out["counts"]["against"] == 1
     assert any("the frame shows her facing left, her last arrow right" in line for line in trace["log"])
+    assert [line.split("told again: ")[1][:11] for line in trace["log"] if "told again" in line] == ["toward left"] * 2
     hers = [r["her"] for r in records if r["topic"] == "scene" and r.get("her")]
     assert hers and {"facing", "facing_by", "facing_keys", "facing_seen", "facing_strong"} <= set(hers[0])
     assert any(h["facing_by"] == "frame" and h["facing_seen"] == LEFT and h["facing_strong"] for h in hers)

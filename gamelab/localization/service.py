@@ -915,7 +915,9 @@ class Publisher:
                     self.log(f"  her kill: {e.data['kind']} #{e.track} at x {e.data['x']} on platform "
                              f"{e.data['platform']}")
                 elif e.kind == "let_go":
-                    self.log(f"  {e.data['kind']} #{e.track} seen alive: not her kill")
+                    why = {"retold": "her throw went the other way", "another seen dying": "another seen dying"}
+                    self.log(f"  {e.data['kind']} #{e.track} not her kill: "
+                             + why.get(e.data.get("why"), "seen alive"))
             if st.loot is not None:
                 w["loot"], w["looked"] = st.loot, st.looked
             if now - w["scene"] >= SCENE_S:

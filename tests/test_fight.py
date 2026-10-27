@@ -2,6 +2,7 @@
 from her EXP, the kill count, far targets, the star's path, what the shot log keeps (and which throw a
 kill is credited to); and the hunter counting EXP gains."""
 
+import dataclasses
 import time
 from types import SimpleNamespace
 
@@ -613,3 +614,17 @@ def test_one_bar_drop_two_throws_that_may_have_made_it_are_undecided(monkeypatch
         if last is not None:
             assert [r["hit"] for r in _logged(log)] == [None, None]
     assert [r["hit"] for r in _logged(log)[2:]] == [False]
+
+
+def test_her_kills_monsters_not_seen_dead_yet_by_her_are_her_bodys_to_keep_clear_of():
+    """The monsters of a look her kills are bound to with no death seen yet (Ledger.unsure: a live one now and then),
+    within TOUCH_NEAR across and TOUCH_NEAR_DY up or down of her: the stance's `touch`; one farther off, or dead for
+    sure (seen dying: not in `unsure`), isn't."""
+    def mon(x, y, track):
+        return dataclasses.replace(target(x, y), track=track)
+    near, far, up, sure = mon(560, 500, 7), mon(500 + fight_mod.TOUCH_NEAR + 1, 500, 8), mon(520, 400, 9), \
+        mon(540, 500, 10)
+    h = SimpleNamespace(ledger=SimpleNamespace(unsure={7, 8, 9}))
+    s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), monsters=[near, far, up, sure])
+    assert fight_mod._unsure_by_her(h, s) == [near]
+    assert fight_mod._unsure_by_her(SimpleNamespace(), s) == []  # (a hunter with no ledger: none)

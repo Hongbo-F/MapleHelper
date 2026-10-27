@@ -173,20 +173,25 @@ class Memory:
     """The monsters she has seen, kept across looks (see the top). `kills`: the ledger's kills so far (behavior.ledger:
     each with t, kind, platform and x, and its track if the feed's tracker said which), read at every look for the new
     ones; None: none told. `dead`: the feed's tracks taken for dead (behavior.ledger.Ledger.dead), whose monsters are
-    killed (one a kill of hers isn't on, by someone else). `shape`: what her attacks are to it
-    (gamelab.character.Shape; the thief's: tracking's HIDE_S, HIT_AFTER_S, THROW_REACH, THROW_DY)."""
+    killed, and `theirs` those of them another player killed (Ledger.theirs): 'taken', not 'killed'. `shape`: what
+    her attacks are to it (gamelab.character.Shape; the thief's: tracking's HIDE_S, HIT_AFTER_S, THROW_REACH,
+    THROW_DY)."""
 
     def __init__(self, model: MapModel, kills: Callable[[], list] | None = None,
-                 dead: Callable[[], object] | None = None, shape: Shape = THIEF_SHAPE):
+                 dead: Callable[[], object] | None = None, theirs: Callable[[], object] | None = None,
+                 shape: Shape = THIEF_SHAPE):
         self.model = model
         self.shape = shape
         self.kills = kills
         self.dead = dead
+        self.theirs = theirs
         self.entries: list[Remembered] = []
         self.events: deque[tuple[str, float, Remembered]] = deque(maxlen=EVENTS)  # (what, when, the monster)
         self.covered: dict[int, float] = {}  # platform -> the latest look that covered all of it
         self.covers: deque[Cover] = deque(maxlen=COVERS)  # the latest looks' covers (behavior.patrol's points)
-        self.counts = {"looks": 0, "covered": 0, "new": 0, "killed": 0, "gone": 0, "aged": 0}
+        self.counts = {"looks": 0, "covered": 0, "new": 0, "killed": 0, "taken": 0, "gone": 0, "aged": 0}
+        # (every event appended is counted under new, killed, taken, gone or aged: behavior.patrol.Belief reads the
+        # events by that sum)
         self._bodies = bodies(model)
         self._speeds = speeds(model)
         self._next_id = 1
@@ -315,13 +320,17 @@ class Memory:
     def _take_kills(self, t: float) -> list:
         """Her new kills (the ledger's): each one placed marks the monster remembered of its track (its last sighting's:
         Monster.track) killed, else (no track known) the nearest remembered on its platform, of its kind, within KILL_DX
-        of where it was placed; and the feed's tracks taken for dead (`dead`) mark theirs. The ones no throw of hers
-        explains (unplaced) are given
-        back: `update` marks the likeliest monster she threw at (of the kind her EXP gain named, if it named one), one
-        this look didn't see first (one it saw may be fading out where it died), nearest her. Left alone, a monster
-        she killed so stayed remembered for the 4.7 s that throws her way keep its looks from counting, and then till
-        looks forgot it: on platform 12 in loop_lull_loot the ground wasn't empty in the lulls, and lull loot (rule 8)
-        never came."""
+        of where it was placed; and the feed's tracks taken for dead (`dead`) mark theirs: killed, or taken where
+        another player killed it (`theirs`: event 'taken', which behavior.patrol.Belief learns `take` from, as from a
+        monster by another player that looks forgot). Counted as 'dead' alone (2026-10-27), each such event pushed one
+        of her kills before it out of what Belief read, and another player's kills were hers there: in loop_tree_grind
+        the share Belief learnt another player takes of Green Mushrooms went from master's 0.8 to the prior 0.5 (review
+        of 2026-10-27, review-behaviour: memcount.py, runsc_fix.py). The ones no throw of hers explains (unplaced) are
+        given back: `update` marks the likeliest monster she threw at (of the kind her EXP gain named, if it named
+        one), one this look didn't see first (one it saw may be fading out where it died), nearest her. Left alone, a
+        monster she killed so stayed remembered for the 4.7 s that throws her way keep its looks from counting, and then
+        till looks forgot it: on platform 12 in loop_lull_loot the ground wasn't empty in the lulls, and lull loot (rule
+        8) never came."""
         if self.kills is None:
             return []
         kills = self.kills()
@@ -340,11 +349,15 @@ class Memory:
             if near:
                 self._killed(min(near, key=lambda q: abs(q.x - k.x)), t, k.x)
         dead = self.dead() if self.dead is not None else ()
+        theirs = self.theirs() if self.theirs is not None else ()
         for e in [e for e in self.entries if e.live and getattr(e.monster, "track", None) is not None
                   and e.monster.track in dead]:
-            e.state, e.ended, e.died_x = "killed", t, e.x  # (by her, with no kill of hers on it yet, or another player)
-            self.events.append(("killed", t, e))
-            self.counts["dead"] = self.counts.get("dead", 0) + 1
+            if e.monster.track in theirs:  # (another player's kill: fading where it died, as one of hers)
+                e.state, e.ended, e.died_x = "killed", t, e.x
+                self.events.append(("taken", t, e))
+                self.counts["taken"] += 1
+            else:  # (hers, with no kill of hers on it yet)
+                self._killed(e, t, e.x)
         return unplaced
 
     def _killed(self, e: Remembered, t: float, x: float | None) -> None:

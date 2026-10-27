@@ -14,6 +14,7 @@ from gamelab.behavior import grind, patrol
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.grind import Grind
 from gamelab.behavior.hunt import Objective
+from gamelab.behavior.ledger import Kill
 from gamelab.localization import mapdata
 from gamelab.localization.memory import Cover, Memory
 from gamelab.localization.monsters import Monster
@@ -579,3 +580,32 @@ def test_a_grind_stands_still_while_its_looks_fail_and_grinds_on_after():
     after = [line for line in log if float(line.split()[0]) >= window[1]]
     assert not any(f"{grind.STOP_MAX_S:.0f} s here" in line for line in after[:20]), after[:20]
     assert trace["result"]["hunt_stop"] == "time up"
+
+
+def test_her_kill_and_another_players_seen_dead_in_one_look_both_reach_the_belief():
+    """Her kill (the ledger's, on its track) and another player's the feed found dead (Ledger.dead, Ledger.theirs) in one
+    look: both points emptied, her kill's timing a refill (`killed`), the other's not; by another player, hers is one
+    left to her (kept_by), the other's one taken (gone_by). (Counted as 'dead', the other's event pushed hers out of
+    what the belief read, and was taken for hers: in loop_tree_grind the share another player takes of Green Mushrooms
+    went from master's 0.8 to the prior 0.5: review of 2026-10-27, review-behaviour/memcount.py.)"""
+    model = _map([(0, 400, 0)], [(100, 0, "h"), (300, 0, "h")])
+    pid = _pid(model, 200, 0)
+    p = _patrol(model, lambda a, b: 2.0)
+    kills, dead, theirs = [], {}, set()
+    m = Memory(model, kills=lambda: kills, dead=lambda: dead, theirs=lambda: theirs)
+    stranger = [Player(1, "stranger", 300.0, 0.0, pid, (0.0, 0.0), 1.0, 1.0)]
+    mob = Mob(HORNY, 0, 0, 0, 0, 1.0)
+    m.update(1.0, [Monster(mob, 100.0, 0.0, pid, None, 0, "", 11), Monster(mob, 300.0, 0.0, pid, None, 0, "", 12)],
+             None, stranger)
+    p.belief.update(1.0, m, stranger)
+    kills.append(Kill(1.5, HORNY, pid, 100.0, 0.0, pid, HORNY, 1.3, 11))
+    dead.update({11: 1.5, 12: 1.5})
+    theirs.add(12)
+    m.update(1.5, [], None, stranger)
+    p.belief.update(1.5, m, stranger)
+    hers, other = sorted((q for q in p.points), key=lambda q: q.x)
+    b = p.belief
+    assert [w for w, _, _ in m.events] == ["new", "new", "killed", "taken"]
+    assert b.empty_since[hers.id] == b.empty_since[other.id] == 1.5
+    assert hers.id in b.killed and other.id not in b.killed
+    assert b.kept_by[HORNY] == 1 and b.gone_by[HORNY] == 1

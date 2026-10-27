@@ -544,3 +544,15 @@ def test_the_hunt_counts_in_reach_from_a_jump_only_what_the_stance_would_jump_at
     h.model = LEDGE
     s = SimpleNamespace(where=SimpleNamespace(x=400.0, y=500.0), platform=floor, monsters=[m])
     assert h._jump_hits(s, m) == hits and h._hits(s, m) == hits
+
+
+def test_her_kill_not_seen_dead_by_her_counts_for_her_body_alone():
+    """A monster in the stance's `touch` (behavior.fight.TOUCH_NEAR: one her kill is bound to with no death seen yet,
+    live now and then, by her) is kept clear of as one `around` is: no jump forward that lands into it. But it's no
+    target, and doesn't take her stars: from the ground she throws at the one beyond it."""
+    from gamelab.attack.stance import stance
+    from maplehelper.engine import RIGHT
+    floor, m, c, sh = _passing()
+    by = pig(sh.land_x + 20, 500, floor.id)
+    assert stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c, toward=1)[0] == "jump_throw"
+    assert stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c, toward=1, touch=[by]) == ("throw", RIGHT)

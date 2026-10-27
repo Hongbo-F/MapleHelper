@@ -85,6 +85,15 @@ LANDS_FROM_S = (STAR_DELAY_MS - 50) / 1000
 SETTLED_S = 0.3    # (as probe.SETTLED_S) a target seen this long after its star was due, its bar as before: missed
 HURT = 0.02        # a bar this much lower than before is a hit
 KEYED_KEEP_S = 2.5  # s her throws are kept with their paths for the kills their gains tell of (FightState.keyed)
+# A monster her kill is bound to with no death seen yet (behavior.ledger.Ledger.unsure: drawn alive until her star
+# lands, and on the recordings 12 of the 103 bindings on named gains, 21 of 62 on gains of no kind known, were a live
+# one, re-found 0.53-1.55 s on) is no target, but one this near her (TOUCH_NEAR across, TOUCH_NEAR_DY up or down) stays
+# among the monsters her body keeps clear of (the stance's `touch`: its danger, her jumps' arcs and landings, an
+# escape's ways), not among those that take her stars (the drawn dead kept among all of them had her step and jump away
+# from them, and on loop_rocky_bridge she fell out of the map so: the review of 2026-10-26). Of those 33 let go, 17
+# were this near her when bound (review of 2026-10-27: review-truth binds.py).
+TOUCH_NEAR = 150.0
+TOUCH_NEAR_DY = 80.0
 
 
 def kills_text(kills: dict[str, int]) -> str:
@@ -136,6 +145,7 @@ class FightState:
     thrown: list[list] = field(default_factory=list)  # [monster, when last seen]: thrown at, kept while hidden
     dying: list[tuple[Monster, float]] = field(default_factory=list)  # kills, and when: seen fading out a moment
     aimed: list[Monster] = field(default_factory=list)  # in the star's path at the last throw
+    touch: list[Monster] = field(default_factory=list)  # her kills' monsters not seen dead yet by her (TOUCH_NEAR)
     # Her throws of the last KEYED_KEEP_S: when each one's attack key went down, and its path (`aimed` then): a gain
     # GAIN_AFTER_KEY after one is its kill (localization.monsters.dead_one)
     keyed: list[tuple[float, list[Monster]]] = field(default_factory=list)
@@ -340,7 +350,19 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     st.thrown = [e for e in st.thrown if getattr(e[0], "track", None) is None or e[0].track not in dead]
     hidden = st.hidden(now)
     st.flinching = hit + hidden
+    st.touch = _unsure_by_her(h, s)
     return wanted + hidden, visible, hidden
+
+
+def _unsure_by_her(h: "Hunter", s: Scene) -> list[Monster]:
+    """The monsters of look `s` her kills are bound to with no death seen yet (Ledger.unsure), within TOUCH_NEAR and
+    TOUCH_NEAR_DY of her: the stance's `touch`."""
+    unsure = getattr(getattr(h, "ledger", None), "unsure", ())
+    if not unsure or s.where is None:
+        return []
+    x, y = s.where.x, s.where.y
+    return [m for m in s.monsters if getattr(m, "track", None) in unsure
+            and abs(m.x - x) <= TOUCH_NEAR and abs(m.y - y) <= TOUCH_NEAR_DY]
 
 
 def dying_seen(h: "Hunter", s: Scene, now: float, body: dict[str, MobBody] | None = None) -> list[Monster]:
@@ -447,7 +469,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
-                 goal=goal, edges=edges, up=up, pace=pace_of(h, s))
+                 goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")

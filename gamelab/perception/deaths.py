@@ -45,6 +45,13 @@ REFOUND_UNDER = 0.9  # a track re-found this well (mobs.REFIND_GOOD) is alive: n
 RECENT_S = 0.6      # a track lost this recently is looked at
 PAD = 16         # look-frame px at 1366x768 (a game px each) around where its feet would be: 8 lost 8 of 106
 EVERY = 2           # a track is looked at every this many frames (by its id: half the tracks a frame)
+# The kinds watched: those whose margins were measured, Tree Dungeon's mushrooms. Replayed on six recordings (the four
+# labelled and two of 2026-10-25 with other players' skills, pets and crowds, 25 minutes, the tracker left untold of the
+# deaths: D:/MapleHelper-scratch/kplace/review-perception), the monsters re-found alive later peaked at 0.37-0.48 of
+# die1/1-3 (DIE_GOOD 0.7) and 0.45-0.53 of die1/0 (DIE0_GOOD 0.6). A live Slime there came to 0.58 of die1/0 (its die1
+# 205-376 px opaque where a mushroom's are 1,836-2,139, 95 looks and 2 deaths in those 25 minutes): not watched, nor any
+# other map's kinds until a recording of them has been replayed so (DeathWatch.of leaves them out).
+MEASURED = ("horny-mushroom", "green-mushroom")
 
 
 @dataclass(frozen=True)
@@ -98,14 +105,17 @@ class DeathWatch:
         self.pictures = {k: v for k, v in pictures.items() if v}
         self.scale = scale
         self.pad = max(4, round(PAD * scale))
+        self.counts = {"fires": 0, "another kind's": 0}  # (from the re-finds' pool: a count may be lost now and then)
 
     @classmethod
     def of(cls, names_by_id: dict[int, str], scale: float = 1.0) -> "DeathWatch":
         """The watch for these monsters (id -> name), their die1 frames read from the game data (none for a monster
-        the data doesn't have)."""
+        the data doesn't have), those of MEASURED only."""
         from gamedata.canvas import mob_frames
         pictures = {}
         for mob_id, name in names_by_id.items():
+            if kind_of(name) not in MEASURED:
+                continue
             try:
                 frames = mob_frames(mob_id, actions=("die1",))
             except (FileNotFoundError, KeyError, OSError):
@@ -143,12 +153,33 @@ class DeathWatch:
     def dying(self, look, kind: str, fx: float, fy: float, refound: float | None) -> bool:
         """Whether a monster of `kind` whose feet would be at (fx, fy) (look-frame px) in `look` (its `frame`: an
         Observation, a Scene) is seen dying there: its die1/1-3 at DIE_GOOD or more, or, not re-found in this frame
-        (`refound`: its re-find's score, None if it wasn't), die1/0 at DIE0_GOOD."""
+        (`refound`: its re-find's score, None if it wasn't), die1/0 at DIE0_GOOD; and no other kind watched matching
+        better in that window (`others`)."""
         got = self.best(look.frame, kind, fx, fy)
         if got is None:
             return False
         score, index = got
-        return score >= DIE_GOOD if index > 0 else (refound is None and score >= DIE0_GOOD)
+        if not (score >= DIE_GOOD if index > 0 else (refound is None and score >= DIE0_GOOD)):
+            return False
+        if self.others(look.frame, kind, fx, fy, score):
+            self.counts["another kind's"] += 1
+            return False
+        self.counts["fires"] += 1
+        return True
+
+    def others(self, frame: np.ndarray, kind: str, fx: float, fy: float, score: float) -> bool:
+        """Whether another kind watched (a Green Mushroom for a Horny Mushroom) has a die1 frame matching better than
+        `score` around those feet: its death, not this kind's (the track a neighbour's, or a search's twin on another's
+        body). The two mushrooms' die1/0-1 score nearly the same on either's death, die1/2-3 (the caps) apart: on 80
+        labelled deaths the other kind's die1 came to DIE_GOOD at the dying one's feet on 61, a median 0.734 against
+        0.971; at 2026-10-26 00:23:00 a walking Horny Mushroom's track, lost where a Green Mushroom died, fired on its
+        die1/1 at 0.819 where the green's scored 0.974, and the horny was re-found walking on 0.38 s later. Of the 549
+        fires on the six recordings, 11 were matched better so (review of 2026-10-27, review-perception: cross.py).
+        Only on a fire: about 0.2-0.3 a second."""
+        for other in self.pictures:
+            if other != kind and (got := self.best(frame, other, fx, fy)) is not None and got[0] > score:
+                return True
+        return False
 
 
 def wants(score: float | None, since: float) -> bool:

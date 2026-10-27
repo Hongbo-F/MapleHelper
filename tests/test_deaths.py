@@ -38,8 +38,9 @@ class _Look:
         self.frame = frame
 
 
-def test_the_die1_frames_are_the_game_datas_each_both_ways(watch):
-    assert set(watch.pictures) == {"horny-mushroom", "green-mushroom", "slime"}
+def test_the_die1_frames_are_the_game_datas_each_both_ways_of_the_kinds_measured_only(watch):
+    """Tree Dungeon's mushrooms (deaths.MEASURED), not its Slime: a live one came within 0.02 of DIE0_GOOD."""
+    assert set(watch.pictures) == {"horny-mushroom", "green-mushroom"} == set(deaths.MEASURED)
     assert sorted(p.index for p in watch.pictures["horny-mushroom"]) == [0, 0, 1, 1, 2, 2, 3, 3]
 
 
@@ -49,6 +50,18 @@ def test_a_dying_mushroom_is_seen_dying_where_its_feet_are(watch, name, index):
     score, got = watch.best(frame, kind, fx, fy)
     assert got == index and score >= 0.95
     assert watch.dying(_Look(frame), kind, fx, fy, None) and watch.dying(_Look(frame), kind, fx, fy, 0.7)
+
+
+@pytest.mark.parametrize("name, other", [("horny_dying.png", "green-mushroom"), ("green_dying.png", "horny-mushroom")])
+def test_a_mushrooms_death_isnt_the_other_kinds(watch, name, other):
+    """The other mushroom's die1 matches a dying one's feet at DIE_GOOD too (a Horny Mushroom's 0.77 on the Green
+    Mushroom's die1/2, the green's 0.74 on the horny's die1/3): a track of the other kind there (a neighbour's lost
+    where it died, a search's twin on its body) isn't seen dying, its own kind matching better."""
+    frame, kind, (fx, fy) = _crop(name)
+    assert watch.best(frame, other, fx, fy)[0] >= deaths.DIE_GOOD
+    vetoed = watch.counts["another kind's"]
+    assert not watch.dying(_Look(frame), other, fx, fy, None) and watch.counts["another kind's"] == vetoed + 1
+    assert watch.dying(_Look(frame), kind, fx, fy, None)
 
 
 @pytest.mark.parametrize("name", ["horny_alive.png", "green_alive.png"])

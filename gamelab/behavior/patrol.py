@@ -442,10 +442,11 @@ class Belief:
                 self.kept_by[e.kind] += 1
 
     def _take_events(self, t: float, memory) -> None:
-        """Her memory's new events since the last update: her kills empty their points; the monsters by another player
-        gone or killed teach `take`."""
+        """Her memory's new events since the last update: her kills empty their points, and so do another player's
+        that the feed saw (taken: localization.memory's `theirs`); the monsters by another player gone or killed teach
+        `take`, one she killed left to her, one another took or looks forgot taken."""
         c = memory.counts
-        total = c["new"] + c["killed"] + c["gone"] + c["aged"]
+        total = c["new"] + c["killed"] + c.get("taken", 0) + c["gone"] + c["aged"]
         new, self._events = min(total - self._events, len(memory.events)), total
         for what, when, e in list(memory.events)[len(memory.events) - new:] if new > 0 else ():
             if what == "killed":
@@ -458,6 +459,15 @@ class Belief:
                 if e.rival and e.id not in self._kept_ids:
                     self._kept_ids.add(e.id)
                     self.kept_by[e.kind] += 1
+            elif what == "taken":  # another player's kill: empty, not her kill to time a refill from
+                qs = self._by.get((e.platform, e.kind))
+                if qs:
+                    q = min(qs, key=lambda q: abs(q.x - e.x))
+                    self.empty_since[q.id] = self.empty_seen[q.id] = when
+                    self.killed.pop(q.id, None)
+                if e.rival and e.id not in self._kept_ids:
+                    self._kept_ids.add(e.id)
+                    self.gone_by[e.kind] += 1
             elif what == "gone" and e.rival and e.id not in self._kept_ids and e.missed is not None \
                     and e.ended - e.seen <= MEMORY_S:  # forgotten by looks; by age, she never looked again
                 self._kept_ids.add(e.id)

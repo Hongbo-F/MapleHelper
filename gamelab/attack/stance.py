@@ -414,7 +414,7 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
            around: list[Monster] | None = None, danger: Danger | None = None,
            jumps: Callable[[], reach.Coverage] | None = None, toward: int = 0, goal: float | None = None,
            edges: tuple[float, float] | None = None, up: Callable[[float], Platform | None] | None = None,
-           pace: Pace = NO_PACE) -> tuple:
+           pace: Pace = NO_PACE, touch: list[Monster] = ()) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units) to step away,
@@ -436,9 +436,13 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     ground (PASSING_JUMPS). `edges`: the stretch of her platform her steps away and jumps back keep to (drop_limits:
     DROP_ROOM from an end with a long drop under it); `up(x)`: the platform a jump from x lands her on (overhead), for
     an escape (_escape). `pace`: how soon her next attack picks and how the monsters walk meanwhile: who's too close
-    goes by where each will be then (too_close), and up close what each throw would take then (_from_here)."""
+    goes by where each will be then (too_close), and up close what each throw would take then (_from_here). `touch`:
+    monsters about her that count for her body alone (the danger where she'd stand, her jumps' arcs and landings, an
+    escape's ways), not as targets or as taking her stars (behavior.fight.TOUCH_NEAR: her kill's monster not seen dead
+    yet, which may be a live one)."""
     can_jump = can_jump or (lambda a, b: True)
     around = wanted if around is None else around
+    body = around + [m for m in touch if not any(m is o for o in around)]
     mine = [t for t in wanted if t.platform == platform.id]
     lo, hi = _stand_limits(platform, crowded=bool(mine))
     # a throw from the ground would be a claw swipe, or it hits too hard, as it will be when the attack starts
@@ -448,16 +452,16 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
         slo, shi = (lo, hi) if edges is None else (max(lo, edges[0]), min(hi, edges[1]))
         return _close_quarters(x, close, mine, facing, slo, shi, can_jump, tops or MONSTER_TOP, halves,
                                (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
-                               else None, danger, platform, around, up, y, pace)
+                               else None, danger, platform, body, up, y, pace)
     if in_reach:
         if toward and PASSING_JUMPS and jumps is not None:
-            jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, around, danger, halves, toward,
+            jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, body, danger, halves, toward,
                               kinds=("forward",), why="passing", goal=goal)
             if jump is not None:
                 return jump
         return ("throw", _throw_side(x, in_reach, facing, platform, danger))
     if jumps is not None:
-        jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, around, danger, halves, toward)
+        jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, body, danger, halves, toward)
         if jump is not None:
             return jump
     act = _step_from_under(x, y, platform, wanted, lo, hi, around)

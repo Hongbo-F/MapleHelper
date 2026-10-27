@@ -53,6 +53,7 @@ from ..perception.heading import Reading
 from ..perception.hud import bar_box, draw_hp_bar
 from ..perception.loot import Item
 from ..perception.messages import ChatLine
+from ..perception.deaths import MEASURED
 from ..perception.match import suppress_overlaps
 from ..perception.minimap import OTHER_SHIFT, PICTURE_BASE, Marker
 from ..perception.mobs import REFIND_PAD, Mob
@@ -309,21 +310,16 @@ def shown_exp(start: tuple[int, int], gained: int) -> tuple[int, int]:
 class FakeDeaths:
     """The death watch on the world (perception.deaths.DeathWatch's stand-in, the frame step's `deaths` from FakeEyes):
     a killed monster drawn dying where a track's feet are (world.dying_at: its death begun DEATH_SEEN_AFTER ago) is seen
-    on DEATH_SEEN of the deaths (drawn once a death, seeded), every kind."""
+    on DEATH_SEEN of the deaths (drawn once a death, seeded), of the kinds the real one watches (deaths.MEASURED)."""
 
     def __init__(self, world: World):
         self.world = world
-        self.pictures = _AnyKind()
+        self.pictures = dict.fromkeys(MEASURED)
 
     def dying(self, look, kind: str, fx: float, fy: float, refound: float | None) -> bool:
         w = self.world
         m = w.dying_at(kind, look.map_x(fx), look.map_y(fy), 25.0)
         return m is not None and w.chance(f"death:{m.idx}", int(round(m.died_at * 1000))) < DEATH_SEEN
-
-
-class _AnyKind:
-    def __contains__(self, kind) -> bool:
-        return True
 
 
 class FakeEyes(Eyes):

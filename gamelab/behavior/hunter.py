@@ -76,6 +76,19 @@ KNOCK_S = 0.45
 ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
                  # only her back shows and her facing isn't read
 HEADING_SHOTS_MAX = 200  # crops of her kept in lab/heading where the frame and her last arrow disagreed, at most
+# A throw's way is told to the feed as her keys made it (the stance's side: Actions.throw_listeners), and the feed's
+# tracker binds the kill its gain tells of to what her attack took that way (localization.tracking._bind). A look whose
+# frame shows her facing the other way from her keys, strongly (Actions.see: 'told otherwise'; heading.Reading.strong:
+# none of the frames read the wrong way on 2026-10-24 was, and the 5 below were) tells again that way the throws
+# keyed since her last arrow, her last hit and the last look whose frame agreed with her keys, RETELL_S back at most
+# (`_retell`): nothing has turned her since that anyone saw, and she threw them the way she faces now (her keys' tap
+# swallowed). A turn without her keys (her player's own arrow, the simulator's Noise.turned) comes after a look that
+# agreed, so the throws before it aren't told again. On the recording of 2026-10-26 00:20 two of 15 kills were bound to
+# a live monster on the side she hadn't thrown at so (review of 2026-10-27, D:/MapleHelper-scratch/kplace/review-truth);
+# over the four recordings of 2026-10-25/26, 5 of the 25 frames logged so ('heading') came after throws with no arrow
+# nor hit between them (the others after an arrow), 6 throws.
+RETELL_S = 2.5
+TOLD_KEEP = 12  # her last throws told to the feed, kept for `_retell`
 # A throw's last look before its key (`_still`: Actions.still), once her lock has been waited out: an EXP gain naming a
 # kind in its way shown since the look it was decided on drops it, and the next look decides again. Live on 2026-10-25
 # (the hunt of 23:43) she decided each throw on a look taken 0.2-0.34 s after the key before (190 of 229 back-to-back
@@ -150,7 +163,8 @@ class Hunter:
         self.wounds = Wounds(self.ledger)
         # The monsters she has seen anywhere, kept across looks (localization.memory), her kills (the ledger's) marking
         # the ones they were: after the ledger, so a look's kills are in it.
-        self.memory = Memory(model, kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead)
+        self.memory = Memory(model, kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
+                             theirs=lambda: self.ledger.theirs)
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'.
         self.attacks = Attacks(model, keys, mode, max_mp=c.mp, level=c.lucky_seven, log=log,
                                kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead)
@@ -167,6 +181,8 @@ class Hunter:
             self.actions.still = self._still
         self._players: dict[int, object] = {}  # the other players on the map as of the last look, by id
         self.facing_seen = Reading(None, why="no look")  # which way the last look's frame showed her facing
+        self.told_throws: deque[list] = deque(maxlen=TOLD_KEEP)  # her throws told to the feed: [key, way] (`_retell`)
+        self.facing_agreed = -1e18  # ... and the last look whose frame showed her facing as her keys had her
         # Her facing off the frames: looks, told or not (and why), what her keys made of each (Actions.saw), and those
         # that told the other way from her last arrow ('against')
         self.heading_counts: Counter[str] = Counter()
@@ -178,7 +194,8 @@ class Hunter:
                                   self.drops.on_look, self.wounds.on_look, self.memory.on_look, self.attacks.on_look]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
                                          self.attacks.on_throw,  # (a cast's MP)
-                                         self.senses.feed.throw]  # (the feed's: whose kills are whose, tracking)
+                                         self._tell_feed]  # (the feed's: whose kills are whose, tracking)
+        self._feed_throw = self.senses.feed.throw  # (the feed she was made with, as the listener was before)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:
         """A look (Senses.look); drops are looked for as her inventory allows (only mesos when it's full). Not with
@@ -467,6 +484,10 @@ class Hunter:
             eyes.learn_heading(s, sure, reading)
         against = a.see(reading.side, s.t, self.hit_at, reading.strong)
         c[a.saw] += 1
+        if a.saw == "told otherwise" and reading.strong:
+            self._retell(s, reading.side)
+        elif a.saw == "as it was":
+            self.facing_agreed = s.t
         if against is None:
             return
         c["against"] += 1
@@ -486,6 +507,27 @@ class Hunter:
         telemetry.emit("event", kind="heading", text=text, seen=reading.record(), keys=against,
                        since_arrow=round(since_arrow, 2), since_hit=None if since_hit is None else round(since_hit, 2),
                        **({"shot": shot.name} if shot is not None else {}))
+
+    def _tell_feed(self, when: float, side: str) -> None:
+        """A throw (Actions.throw_listeners) told to the feed (localization.tracking: whose kills are whose)."""
+        self.told_throws.append([when, side])
+        self._feed_throw(when, side)
+
+    def _retell(self, s: Scene, side: str) -> None:
+        """Look `s`'s frame shows her facing `side`, otherwise than her keys had her (Actions.see): the throws told
+        the other way keyed since her last arrow, her last hit and the last look that agreed with her keys (and RETELL_S
+        before the frame at most) are told to the feed again that way (localization.tracking: their kills bound on that
+        side)."""
+        since = max(self.actions.arrows_at, -1e18 if self.hit_at is None else self.hit_at, self.facing_agreed,
+                    s.t - RETELL_S)
+        for th in self.told_throws:
+            if since < th[0] <= s.t and th[1] != side:
+                th[1] = side
+                self._feed_throw(th[0], side)
+                self.log(f"  her throw of {s.t - th[0]:.2f} s before this look told again: toward {side}, as the "
+                         f"frame shows her")
+                telemetry.emit("event", kind="retold", text=f"throw told again toward {side}", key=round(th[0], 3),
+                               side=side)
 
     def on_rope(self, s: Scene) -> bool:
         """Whether look `s` has her on a rope: off the platforms, within ROPE_SLACK of a rope's x, between its ends."""
