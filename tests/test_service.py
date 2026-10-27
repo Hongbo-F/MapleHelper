@@ -462,7 +462,7 @@ def test_a_looks_frame_gone_from_the_ring_comes_out_black_and_is_counted():
     (test_heading). The ring holds 16 since the native hot paths made 30 frames a second: 533 ms, as 8 did at 15."""
     from gamelab.localization.feed import Ring
     from gamelab.localization.worldstate import WorldState
-    assert service.RING_SLOTS * 1000 / 30 >= 500  # (at 30 frames a second: ACTIVE_HZ here, Branch 1's HZ)
+    assert service.RING_SLOTS * 1000 / service.HZ >= 500  # (at the frames a second the service asks)
     w, h = STRETCHED.frame_size
     ring = Ring(slots=2, shape=(h, w, 3))
     c = ServiceClient("tour", start=False, ensure=None)
