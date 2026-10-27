@@ -235,3 +235,23 @@ def test_the_cs_rounding_is_pythons():
     for s in np.array(tries, np.float32):
         assert native.lib().rf_rounded(float(s)) == round(float(s), 3), float(s)
     assert math.copysign(1, native.lib().rf_rounded(-0.0001)) == math.copysign(1, round(-0.0001, 3))
+
+
+
+@pytest.mark.parametrize("least", [0, 1 << 62])  # native.c's mm_ntt: every window by transform, or none
+def test_all_in_one_call_by_transform_or_place_by_place_the_same_answers(detector, least):
+    # (rf_best is match_loaded's: the window loaded once for both stages, with room for the transform if any picture
+    # that fits wants it; which way a picture goes changes no answer)
+    f = native.lib()
+    was = f.mm_ntt(-1)
+    for name in ("pig_move0", "pig_move1"):
+        frame_, box = scene(name)
+        asks = asks_of(frame_, box)
+        alone = [detector.refind(frame_, b, kind, template, facing, BOUNDS, fallback, near, {})
+                 for b, kind, template, facing, fallback, near, _ in asks]  # (as the threshold has it)
+        f.mm_ntt(least)
+        try:
+            together = detector.refind_all(frame_, [(*a[:6], {}, a[6]) for a in asks], BOUNDS, 4)
+        finally:
+            f.mm_ntt(was)
+        assert together == alone and any(m is not None for m in together)
