@@ -6,6 +6,7 @@ config.toml's [characters.<id>] over it), FIXED_STATS (the stats FIXED_STATS pin
 else of gamelab.
 
 - `thief`: BugBaby (Rogue: Lucky Seven and her claw's stars), today's module constants, described.
-- `magician`: the second character (Magic Claw), every number a placeholder until the user's answers and the live
-  measurements (D:/MapleHelper-scratch/mage/design.md, sections 4 and 7; gamelab README: Characters).
+- `magician`: the second character (Magic Claw): its search the client's (D:/MapleHelper-scratch/mage/range/
+  magic-claw-range.md) and its tables the game data's, every other number a placeholder until the user's answers and
+  the live measurements (D:/MapleHelper-scratch/mage/design.md, sections 4 and 7; gamelab README: Characters).
 """

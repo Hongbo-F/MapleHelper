@@ -19,8 +19,8 @@ another character only when ENV names her (`named`: gamelab.__main__); the two f
 The profile is data only: this module and gamelab.classes import nothing of gamelab but paths, so every layer may read
 it (localization takes its `Shape`). The thief's values are today's module constants, kept where they are and read
 there by her code as before; here they describe her (tests/test_character.py checks each against the constant it
-names). The magician's are placeholders, each marked, until the user's answers and the live measurements (gamelab
-README: Characters).
+names). The magician's, but for Magic Claw's search (the client's) and the game data's tables, are placeholders, each
+marked, until the user's answers and the live measurements (gamelab README: Characters).
 """
 
 import contextlib
