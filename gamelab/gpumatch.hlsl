@@ -14,12 +14,15 @@
 // scores them as score_at and takes the first highest row by row.
 //
 // Three passes a frame, one dispatch each, in one submission:
-//   prep:   each window's rows as float4 pixels and uint4 prefix sums (its bytes as the CPU copied them); the tasks'
-//           records cleared.
+//   prep:   each window's rows as packed pixels (its bytes as the CPU copied them, a word at a time) and uint4 prefix
+//           sums, laid out in RUN planes (`planes`); the tasks' records cleared.
 //   match:  RUN places side by side a thread, GROUP threads a group (`groups`: a task and its first thread slot): their
 //           sums, s~, and the highest s~ of the task's places and of its near sub-rectangle (InterlockedMax on an
-//           orderable key).
+//           orderable key). Reads prep's buffers through views of their own (read-only, so cached on the way).
 //   choose: the same groups: each place within BAND of its region's highest goes to that region's candidates.
+// At the RTX 3080's idle clocks (P8: 210 MHz, the frame loop's pace) the crowd's 599 recorded calls took 5.15 ms of the
+// GPU's a call as first built (match 4.76), 2.37 with the planes, the packed pixels and the picture's four at a load
+// (match 2.08, prep 0.21; clocked up 0.34 against 0.74): D:/MapleHelper-scratch/gsmooth/hide/kern.
 
 #define GROUP 64  // (gpumatch.c's GM_GROUP)
 #define CHUNK 64  // a float32 partial sum's pixels at most
@@ -33,18 +36,20 @@ cbuffer Frame : register(b0)
 };
 
 struct Pic { uint th, tw, nruns, run_off, px_off, n, st0, st1, st2; float af; uint u0, u1; };
-struct Win { uint ww, wh, raw_off, px_off, pre_off, u0, u1, u2; };
+struct Win { uint ww, wh, raw_off, px_off, pre_off, rowa, u1, u2; };  // (rowa: a row's bytes in raw, a word's multiple)
 struct Task { uint win, pic, rw, rh, nx0, ny0, nx1, ny1, place_off, u0, u1, u2; };
 
 StructuredBuffer<Pic> pics : register(t0);
 StructuredBuffer<uint> runs : register(t1);      // row | from << 8 | to << 16
-StructuredBuffer<float4> tpx : register(t2);     // the pictures' pixels, rows tw apart
+ByteAddressBuffer tpx : register(t2);            // the pictures' pixels, rows tw apart: R | G << 8 | B << 16
 ByteAddressBuffer raw : register(t3);            // the windows' bytes, rows ww * cn apart
 StructuredBuffer<Win> wins : register(t4);
 StructuredBuffer<Task> tasks : register(t5);
 StructuredBuffer<uint2> groups : register(t6);   // (task, first place)
+StructuredBuffer<uint> pxr : register(t7);       // pxf and pre as match reads them (prep's, read-only: cached)
+StructuredBuffer<uint4> prer : register(t8);
 
-RWStructuredBuffer<float4> pxf : register(u0);   // the windows' pixels
+RWStructuredBuffer<uint> pxf : register(u0);     // the windows' pixels, R | G << 8 | B << 16
 RWStructuredBuffer<uint4> pre : register(u1);    // each window row's prefix sums: S1_0, S1_1, S1_2, S2; ww + 1 a row
 RWStructuredBuffer<uint4> sums : register(u2);   // a place's STI, S1_0, S1_1, S1_2
 RWStructuredBuffer<uint2> sc : register(u3);     // a place's S2, the key of its s~
@@ -52,6 +57,14 @@ RWByteAddressBuffer rec : register(u4);          // a task's: highest key (all, 
 RWStructuredBuffer<uint> cand : register(u5);    // a task's candidates: [2][kcand] of (place, STI, S1_0..2, S2)
 
 uint raw_byte(uint at) { return (raw.Load(at & ~3u) >> ((at & 3u) * 8u)) & 255u; }
+
+// A window row's pixels (pxf) and prefix sums (pre) in RUN (4) planes, column c at plane c % 4, c / 4 along it: a
+// warp's threads' places are 4 apart, so each column's loads are side by side, in a quarter of the cache lines a row
+// had them in. Q a plane's length: the columns 0..ww+2 (the places past rw read past it, theirs never kept). A pixel
+// packed R | G << 8 | B << 16 (a quarter of a float4's bytes), as the pictures' are.
+uint planes(uint ww) { return (ww + 6) >> 2; }
+float3 unpacked(uint p) { return float3(p & 255u, (p >> 8) & 255u, p >> 16); }  // (a picture pixel's channels)
+uint in_planes(uint c, uint Q) { return (c & 3u) * Q + (c >> 2); }
 
 [numthreads(128, 1, 1)]
 void prep(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)
@@ -63,16 +76,35 @@ void prep(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)
         return;
     }
     Win w = wins[g.x];
+    uint Q = planes(w.ww);
     for (uint y = l.x; y < w.wh; y += 128) {
-        uint at = w.raw_off + y * w.ww * cn, o = w.px_off + y * w.ww, p = w.pre_off + y * (w.ww + 1);
+        uint at = w.raw_off + y * w.rowa, o = w.px_off + y * 4 * Q, p = w.pre_off + y * 4 * Q;
         uint4 s = uint4(0, 0, 0, 0);
         pre[p] = s;
-        for (uint x = 0; x < w.ww; x++) {
+        uint x = 0;
+        if (cn == 3) {  // (4 pixels from 3 words)
+            for (; x + 4 <= w.ww; x += 4, at += 12) {
+                uint3 d = raw.Load3(at);
+                uint px[4] = {d.x & 0xffffffu, d.x >> 24 | (d.y & 0xffffu) << 8, d.y >> 16 | (d.z & 0xffu) << 16,
+                              d.z >> 8};
+                [unroll] for (uint k = 0; k < 4; k++) {
+                    uint c0 = px[k] & 255u, c1 = (px[k] >> 8) & 255u, c2 = px[k] >> 16;
+                    pxf[o + in_planes(x + k, Q)] = px[k];
+                    s += uint4(c0, c1, c2, c0 * c0 + c1 * c1 + c2 * c2);
+                    pre[p + in_planes(x + k + 1, Q)] = s;
+                }
+            }
+        }
+        for (; x < w.ww; x++, at += cn) {
             uint c0 = raw_byte(at), c1 = cn > 1 ? raw_byte(at + 1) : 0, c2 = cn > 2 ? raw_byte(at + 2) : 0;
-            at += cn;
-            pxf[o + x] = float4(c0, c1, c2, 0);
+            pxf[o + in_planes(x, Q)] = c0 | c1 << 8 | c2 << 16;
             s += uint4(c0, c1, c2, c0 * c0 + c1 * c1 + c2 * c2);
-            pre[p + x + 1] = s;
+            pre[p + in_planes(x + 1, Q)] = s;
+        }
+        for (uint x = w.ww; x < 4 * Q; x++) {  // (the columns past it the last places' slide reads: theirs aren't kept)
+            pxf[o + in_planes(x, Q)] = 0;
+            if (x > w.ww)
+                pre[p + in_planes(x, Q)] = s;
         }
     }
 }
@@ -109,8 +141,6 @@ void match(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)
         Win w = wins[t.win];
         uint sti[RUN];
         uint4 s[RUN];
-        float acc[RUN];
-        float3 v[RUN];
         [unroll] for (uint i = 0; i < RUN; i++) {
             sti[i] = 0;
             s[i] = uint4(0, 0, 0, 0);
@@ -118,26 +148,40 @@ void match(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)
         for (uint q = 0; q < P.nruns; q++) {
             uint rr = runs[P.run_off + q];
             uint r = rr & 255u, a = (rr >> 8) & 255u, b = rr >> 16;
-            uint wrow = w.px_off + (py + r) * w.ww + px0, trow = P.px_off + r * P.tw;
-            uint prow = w.pre_off + (py + r) * (w.ww + 1) + px0;
+            uint Q = planes(w.ww), j = px0 >> 2, trow = P.px_off + r * P.tw;
+            uint wrow = w.px_off + (py + r) * 4 * Q + j, prow = w.pre_off + (py + r) * 4 * Q + j;
             [unroll] for (uint i = 0; i < RUN; i++)
-                s[i] += pre[prow + i + b] - pre[prow + i + a];
-            [unroll] for (uint i = 0; i + 1 < RUN; i++)
-                v[i] = pxf[wrow + a + i].xyz;
+                s[i] += prer[prow + in_planes(i + b, Q)] - prer[prow + in_planes(i + a, Q)];
+            // The window's pixels under the RUN places at the picture's column x: w0..w3 (RUN 4), four columns a step
+            // (each a register's turn, no moves within it), the picture's pixels four at a time.
+            float3 w0 = unpacked(pxr[wrow + in_planes(a, Q)]), w1 = unpacked(pxr[wrow + in_planes(a + 1, Q)]);
+            float3 w2 = unpacked(pxr[wrow + in_planes(a + 2, Q)]), w3;
             for (uint x = a; x < b;) {
                 uint e = min(b, x + CHUNK);
-                [unroll] for (uint i = 0; i < RUN; i++)
-                    acc[i] = 0;
-                for (; x < e; x++) {
-                    float3 tv = tpx[trow + x].xyz;
-                    v[RUN - 1] = pxf[wrow + x + RUN - 1].xyz;
-                    [unroll] for (uint i = 0; i < RUN; i++)
-                        acc[i] += dot(tv, v[i]);
-                    [unroll] for (uint i = 0; i + 1 < RUN; i++)
-                        v[i] = v[i + 1];
+                float a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+                for (; x + 4 <= e; x += 4) {
+                    uint4 tp = tpx.Load4(4 * (trow + x));
+                    float3 t0 = unpacked(tp.x), t1 = unpacked(tp.y), t2 = unpacked(tp.z), t3 = unpacked(tp.w);
+                    w3 = unpacked(pxr[wrow + in_planes(x + 3, Q)]);
+                    float3 w4 = unpacked(pxr[wrow + in_planes(x + 4, Q)]);
+                    float3 w5 = unpacked(pxr[wrow + in_planes(x + 5, Q)]);
+                    float3 w6 = unpacked(pxr[wrow + in_planes(x + 6, Q)]);
+                    a0 += dot(t0, w0); a1 += dot(t0, w1); a2 += dot(t0, w2); a3 += dot(t0, w3);
+                    a0 += dot(t1, w1); a1 += dot(t1, w2); a2 += dot(t1, w3); a3 += dot(t1, w4);
+                    a0 += dot(t2, w2); a1 += dot(t2, w3); a2 += dot(t2, w4); a3 += dot(t2, w5);
+                    a0 += dot(t3, w3); a1 += dot(t3, w4); a2 += dot(t3, w5); a3 += dot(t3, w6);
+                    w0 = w4; w1 = w5; w2 = w6;
                 }
-                [unroll] for (uint i = 0; i < RUN; i++)
-                    sti[i] += (uint)acc[i];
+                for (; x < e; x++) {
+                    float3 tv = unpacked(tpx.Load(4 * (trow + x)));
+                    w3 = unpacked(pxr[wrow + in_planes(x + 3, Q)]);
+                    a0 += dot(tv, w0); a1 += dot(tv, w1); a2 += dot(tv, w2); a3 += dot(tv, w3);
+                    w0 = w1; w1 = w2; w2 = w3;
+                }
+                sti[0] += (uint)a0;
+                sti[1] += (uint)a1;
+                sti[2] += (uint)a2;
+                sti[3] += (uint)a3;
             }
         }
         [unroll] for (uint i = 0; i < RUN; i++) {

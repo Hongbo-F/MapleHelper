@@ -605,14 +605,42 @@ class MobDetector:
         found = [m for m in found if m.kind == kind and self._its_kind(frame[:by1, :bx1], m)]
         return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2) if found else None
 
+    def refind_ahead(self, frame: np.ndarray, asks: list[tuple], bounds: tuple[int, int, int, int], threads: int,
+                     token: int, more: tuple[int, int]) -> bool:
+        """The re-finds of `refind_all` sent to the GPU ahead of it (native.Refinds.ahead), before the frame has placed
+        her: each monster asked (box, kind, template, facing, id) where its picture should be by the frame before's
+        camera, its full window `more` px wider each side (x) and taller (y) than `refind_all`'s, so that it holds the
+        one `refind_all` will look in where the camera moved no more. `token`: the frame's, for `refind_all`'s
+        `ahead`. Whether they were sent: only with the GPU in use; the answers are the same either way."""
+        rf = self._in_c(threads)
+        if rf is None or not asks or not rf.gpu_ready():
+            return False
+        pad = round(REFIND_PAD * self.px)
+        jobs = (native.RfJob * len(asks))()
+        n = 0
+        for box, kind, template, facing, tid in asks:
+            if kind not in self.templates:
+                continue
+            x0, y0 = max(bounds[0], int(box[0]) - pad - more[0]), max(bounds[1], int(box[1]) - pad - more[1])
+            x1, y1 = min(bounds[2], int(box[2]) + pad + more[0]), min(bounds[3], int(box[3]) + pad + more[1])
+            if x1 <= x0 or y1 <= y0:
+                continue
+            job = jobs[n]
+            job.id = tid
+            job.key, job.first_at, job.first_n, job.next_at, job.next_n = self._lists_of(kind, template, facing)
+            job.wfull[:] = (x0, y0, x1, y1)
+            n += 1
+        return n > 0 and rf.ahead(frame, (native.RfJob * n).from_buffer(jobs), self._rf_lists, token)
+
     def refind_all(self, frame: np.ndarray, asks: list[tuple], bounds: tuple[int, int, int, int] | None = None,
-                   threads: int = 1, pool=None) -> list[Mob | None] | None:
+                   threads: int = 1, pool=None, ahead: int | None = None) -> list[Mob | None] | None:
         """`refind` of each monster asked, (box, kind, template, facing, fallback, near, memo, id) as there (`id`: the
         caller's for it, from frame to frame: its windows' memos, one a monster), with the same answers: every window's
         matches (`_matched`'s, near and full) in one call in C on `threads` threads (native.Refinds, rf_start: Python's
         lock let go; the contract in native.c), the rest here as in `refind`, each monster's as the C hands it over,
         while it goes on with the others (`_its_kind`; `_note_far`; the fallback, on `pool`, an Executor, if one is
         given; the near window's answer passing NEAR_GOOD but not its kind, its whole window in a second call after).
+        `ahead`: the frame's token, where its re-finds were sent ahead (`refind_ahead`).
         None where the C can't (not built, a picture it doesn't take, a frame it doesn't read as it is): the caller
         re-finds each with `refind`."""
         rf = self._in_c(threads)
@@ -639,7 +667,7 @@ class MobDetector:
                 if small is not None:
                     job.wnear[:] = small
             plans[i] = (full, nearer)
-        outs = rf.start(frame, jobs, self._rf_lists, THRESHOLD, REFIND_GOOD, near_good=NEAR_GOOD)
+        outs = rf.start(frame, jobs, self._rf_lists, THRESHOLD, REFIND_GOOD, near_good=NEAR_GOOD, ahead=ahead)
         if outs is None:
             return None
         found: list[Mob | None] = [None] * n

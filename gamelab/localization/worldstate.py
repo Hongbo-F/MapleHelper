@@ -35,6 +35,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from .. import native
 from ..character import THIEF_SHAPE
 from ..perception import deaths, exp_number
 from ..perception.eyes import Observation, band_rows
@@ -98,6 +99,14 @@ NEAR_FIRST = True
 # 5.1-5.6 ms a frame against 6.5-7.2, and the frame loop replayed 0.11-0.14 cores less at 30 frames a second
 # (D:/MapleHelper-scratch/pfast/pfr3, 2026-10-26; README, One call for the re-finds). Without the C, as before.
 ONE_CALL = True
+# A frame's re-finds sent to the GPU ahead of its look (native.AHEAD: the GPU switch's `ahead`;
+# MobDetector.refind_ahead): at the frame's start each followed monster's window where the frame before's camera puts
+# it, AHEAD_MORE px (x, y) wider each side than the re-find's own, so that the GPU's passes go on while the look places
+# her; the frame's call answers each window lying inside the one sent from it, the rest on the C's threads (native.c,
+# gpumatch.c's rf_ahead). The camera moved no more than that from frame to frame on 83-84% of the jobs of the two Lie
+# Detectors' saved frames (2 px across, 6 up or down; 4 and 4: 82%; D:/MapleHelper-scratch/gsmooth/hide/cover), for
+# 1.36 times the GPU's work on the windows themselves.
+AHEAD_MORE = (2, 6)
 # Whether the frame step looks for the deaths of the monsters it follows (perception.deaths: every EVERY-th frame a
 # track re-found under REFOUND_UNDER or lost RECENT_S or less ago, its die1 frames where it was), and tells the tracker
 # of each seen (tracking.seen_dying: her kill's monster put right, another player's dead at once). With real eyes, the
@@ -409,6 +418,8 @@ class WorldStep:
         self.gains: deque[Gain] = deque(maxlen=64)  # ... the newest of them, as told (for watch's 'exp' records)
         self._hp: float | None = None
         self._hit_at = -1e9
+        self._cam: tuple | None = None   # the last frame placed's camera (her tag x, feet y, map x, y): AHEAD's
+        self._ahead: int | None = None   # this frame's token, if its re-finds were sent ahead
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "fallbacks": 0,
                        "band": 0, "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "exp read": 0, "hits": 0,
                        "searches": 0}
@@ -436,6 +447,7 @@ class WorldStep:
         if asks is not None and (asks.band or asks.wide or asks.loot or asks.loot_wide):
             self.owed = asks if self.owed is None else self.owed.merge(asks)
         sch = self.schedule
+        self._ahead = self._send_ahead(look, t)
         obs = look(self.seq % sch.ropes_every == 0)
         s = self.senses.place(obs)
         events = self._vitals(s, t) if s.bad is None else []  # (a frame that failed its checks: its EXP and HP aren't
@@ -444,6 +456,7 @@ class WorldStep:
         view = self._view(s) if placed else None
         if placed:
             self._newest = (view, t)
+            self._cam = (s.tag[0], s.floor_y, s.where.x, s.where.y)
         self._merge(self.searches.take(by))  # before the re-finds: what they found anew is re-found in this frame
         job = None
         if placed:  # the searches due handed over now, beside the re-finds (they need only her place)
@@ -527,12 +540,40 @@ class WorldStep:
         many = getattr(self.eyes, "refind_all", None) if self._memos is not None and ONE_CALL and todo else None
         if many is not None:  # (all in one call in C)
             asks = [(tr.mob, box, tr.state != HIDDEN, self._near(s, tr, t), self._memos[tr.id], tr.id) for tr, box in todo]
-            found = many(s, asks, self._refind_threads, self._refinds)
+            found = many(s, asks, self._refind_threads, self._refinds, self._ahead)
             if found is not None:
                 return [self._bar_of(s, tr, m, t) for (tr, _), m in zip(todo, found)]
         if self._refinds is None or len(todo) < 2:
             return [self._refind(s, tr, box, t) for tr, box in todo]
         return list(self._refinds.map(lambda job: self._refind(s, job[0], job[1], t), todo))
+
+    def _send_ahead(self, look, t: float) -> int | None:
+        """The frame's re-finds sent to the GPU ahead of its look (AHEAD: native.AHEAD; Eyes.refind_ahead), from the
+        frame before's camera: its token (the step's seq), or None if they weren't (off, no GPU in use, no camera yet,
+        nothing followed, the look without its picture: the simulator's, a saved look's)."""
+        if not native.AHEAD or self._cam is None or self._memos is None or not ONE_CALL:
+            return None
+        full, many = getattr(look, "full", None), getattr(self.eyes, "refind_ahead", None)
+        if full is None or many is None:
+            return None
+        tag_x, feet_y, where_x, where_y = self._cam
+        geo = self.eyes.geo
+        upp, h, w = geo.units_per_px, full.shape[0], full.shape[1]
+        asks = []
+        for tr in self.tracker.live():
+            if tr.state not in (LIVE, HIDDEN, DYING):
+                continue
+            m = tr.mob  # (_box's, the camera the frame before's)
+            cx = tag_x + (self.tracker.predicted(tr, t) - where_x) / upp + (m.x - m.foot_x)
+            cy = feet_y + (tr.y - where_y) / upp + (m.y - m.feet_y)
+            box = (round(cx - m.w / 2), round(cy - m.h / 2), round(cx + m.w / 2), round(cy + m.h / 2))
+            if box[2] <= 0 or box[0] >= w or box[3] <= 0 or box[1] >= int(h * geo.hud_top):
+                continue
+            asks.append((box, m.kind, m.template, m.facing, tr.id))
+        if not asks or not many(full, asks, self._refind_threads, self.seq, AHEAD_MORE):
+            return None
+        self.counts["sent ahead"] = self.counts.get("sent ahead", 0) + 1
+        return self.seq
 
     def _refind(self, s: Scene, tr: Track, box: tuple[int, int, int, int],
                 t: float) -> tuple[Mob | None, bool, float | None]:

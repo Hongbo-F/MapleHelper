@@ -41,21 +41,36 @@ USE = True  # False: Python only, as before
 
 
 def gpu_switch(environ=os.environ, path: Path | None = None) -> bool:
-    """Whether the GPU backend is asked for: GAMELAB_GPU's 1 or 0, else whether `path` (paths.GPU, lab/GPU) is there.
-    The file is the switch a perceive started through WMI sees (babysit3's, service.ensure's: a WMI process gets none
-    of its starter's environment, the correctness review's wmi_env.txt)."""
+    """Whether the GPU backend is asked for: GAMELAB_GPU's 1, `ahead` or 0, else whether `path` (paths.GPU, lab/GPU) is
+    there. The file is the switch a perceive started through WMI sees (babysit3's, service.ensure's: a WMI process gets
+    none of its starter's environment, the correctness review's wmi_env.txt)."""
+    return gpu_mode(environ, path) != "off"
+
+
+def gpu_mode(environ=os.environ, path: Path | None = None) -> str:
+    """How the GPU backend is asked for: "off"; "start" (GAMELAB_GPU=1, or the file empty: each frame's re-finds sent
+    when the step's look has placed her, at rf_start, as first built); "ahead" (GAMELAB_GPU=ahead, or the file saying
+    `ahead`: sent at the frame's start from the frame before's camera, WorldStep's AHEAD; a call not sent ahead the
+    CPU's). GAMELAB_GPU's 0, 1 or ahead wins over the file."""
     v = environ.get("GAMELAB_GPU", "")
-    if v in ("0", "1"):
-        return v == "1"
+    if v in ("0", "1", "ahead"):
+        return {"0": "off", "1": "start", "ahead": "ahead"}[v]
     if path is None:
         from .paths import GPU as path
-    return path.exists()
+    if not path.exists():
+        return "off"
+    try:
+        said = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        said = ""
+    return "ahead" if said == "ahead" else "start"
 
 
 # The re-finds' matches on the GPU (gpumatch.c, gpumatch.hlsl: Direct3D 11, behind rf_*; the answers the CPU's to the
 # bit), for the contexts `Refinds` opens while it's on: off unless switched on (`gpu_switch`), as on this machine it
 # doesn't pay (README, The re-finds' matches on the GPU).
 GPU = gpu_switch()
+AHEAD = gpu_mode() == "ahead"  # (with GPU: each frame's re-finds sent ahead, at its start: gpu_mode)
 SOURCE = Path(__file__).with_name("native.c")
 SEARCH_SOURCE = Path(__file__).with_name("search.c")  # the monster search's step 1 (`search_lib`)
 GPU_SOURCES = (Path(__file__).with_name("gpumatch.c"), Path(__file__).with_name("gpumatch.hlsl"))  # (in the DLL)
@@ -100,6 +115,10 @@ SIGNATURES = {  # each function's (return type, argument types)
     "gm_bests": (_I, [_P, _I, _P, _P, _P, _P, _I, _I, _P, _P, _P, _P, _P, _P]),
     "gm_approx": (_I, [_P, _P, _I, _I, _L, _I, _I, _P]),
     "gm_waits": (None, [_L, _L, _P]),
+    "gm_priority": (_I, [_I]),
+    "gm_ahead": (_I, [_I, _L]),
+    "rf_ahead": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _L]),
+    "rf_ahead_use": (None, [_P, _L]),
 }
 
 
@@ -173,6 +192,7 @@ def lib() -> ctypes.CDLL | None:
                 f = getattr(dll, name)
                 f.restype, f.argtypes = restype, argtypes
             dll.gm_on(1 if GPU else 0)
+            dll.gm_ahead(1 if AHEAD else 0, -1)
             _lib, why = dll, ""
         except (OSError, RuntimeError, subprocess.SubprocessError, AttributeError) as e:
             why = str(e).splitlines()[0] if str(e) else type(e).__name__
@@ -302,7 +322,8 @@ def gpu(on: bool | None = None) -> bool:
 
 GPU_STATS = ("calls", "answered", "late", "busy", "full", "pairs", "cpu_pairs", "wait_us", "wait_max_us", "tasks",
              "places", "why", "gpu_us", "gpu_max_us", "many", "none", "prep_us", "match_us", "choose_us",
-             "copy_us", "memo", "woke")  # gpumatch.c's GS_* (rf_gpu's stats)
+             "copy_us", "memo", "woke", "priority", "ahead", "ahead_sent", "ahead_in", "ahead_late", "ahead_jobs",
+             "ahead_covered", "ahead_wait_us")  # gpumatch.c's GS_* (rf_gpu's stats)
 GPU_WHY = {1: "no hardware adapter", 2: "no device", 3: "no fence", 4: "its shader didn't compile",
            5: "its buffers couldn't be made", 6: "no Direct3D 11 here, or the DLL built without its headers",
            7: "the device removed: a driver reset?", 8: "an error sending a call"}  # gpumatch.c's gm_off
@@ -311,7 +332,8 @@ GPU_WHY = {1: "no hardware adapter", 2: "no device", 3: "no fence", 4: "its shad
 def gpu_line() -> str:
     """The perception service's status line's part on the GPU backend (localization.service.Publisher.status, every
     STATUS_S), "" while no `Refinds` has one: each one's state and what it did since it was made (calls answered in
-    time of those asked, late, the CPU's meanwhile, windows left to the memo, its wait a call)."""
+    time of those asked, late, the CPU's meanwhile, windows left to the memo, its wait a call; with AHEAD the frames
+    sent ahead, in for their calls, the windows inside the ones sent, the wait)."""
     with _open_lock:
         open_ = list(_open)
     parts = []
@@ -320,10 +342,16 @@ def gpu_line() -> str:
         if state == "none":
             continue
         sent = st["answered"] + st["late"]
-        did = (f"{st['answered']:,} of {st['calls']:,} calls answered, {st['late']} late, {st['busy']:,} the CPU's after"
-               f" a late one, {st['memo']:,} windows the memo's" + (
-                   f", its wait {st['wait_us'] / sent / 1000:.1f} ms a call ({st['wait_max_us'] / 1000:.1f} at most)"
-                   if sent else ""))
+        if st.get("ahead"):  # (AHEAD: the frames' re-finds sent ahead of their calls, rf_ahead)
+            did = (f"{st['ahead_sent']:,} of {st['ahead']:,} frames' re-finds sent ahead, {st['ahead_in']:,} in for "
+                   f"their calls ({st['ahead_late']:,} late), {st['ahead_covered']:,} of {st['ahead_jobs']:,} windows "
+                   f"inside the ones sent" + (f", the wait {st['ahead_wait_us'] / st['ahead_in'] / 1000:.2f} ms a call"
+                                              if st["ahead_in"] else ""))
+        else:
+            did = (f"{st['answered']:,} of {st['calls']:,} calls answered, {st['late']} late, {st['busy']:,} the CPU's "
+                   f"after a late one, {st['memo']:,} windows the memo's" + (
+                       f", its wait {st['wait_us'] / sent / 1000:.1f} ms a call ({st['wait_max_us'] / 1000:.1f} at "
+                       f"most)" if sent else ""))
         if state == "off":
             parts.append(f"the re-finds' GPU off ({GPU_WHY.get(st['why'], st['why'])}): {did}")
         elif state == "starting":
@@ -461,11 +489,12 @@ class Refinds:
                 _open.add(self)
 
     def start(self, frame: np.ndarray, jobs: ctypes.Array, lists: np.ndarray, thr: float, good: float,
-              keep: bool = False, near_good: float | None = None) -> ctypes.Array | None:
+              keep: bool = False, near_good: float | None = None, ahead: int | None = None) -> ctypes.Array | None:
         """rf_start over `frame` (uint8, its rows' pixels side by side: `takes`) for `jobs` (an RfJob array, each id
         once), `lists` the jobs' picture indices (int32, contiguous): an RfOut each, filled in as `next` hands each job
         over (until -1); `end` after it, always. `near_good`: the bar of a near window's answer (rf_start's `ngood`;
-        None: `good`'s alone). None if the C does nothing (no `end` then)."""
+        None: `good`'s alone). `ahead`: the token the frame's re-finds were sent ahead with (`ahead`), if they were.
+        None if the C does nothing (no `end` then)."""
         if self.ctx is None or not _takes(frame, self.pictures[0].shape[2]) or lists.dtype != np.int32 \
                 or not lists.flags.c_contiguous:
             return None
@@ -473,6 +502,8 @@ class Refinds:
         outs = (RfOut * n)()
         h, w = frame.shape[:2]
         self._lock.acquire()
+        if ahead is not None:
+            self._lib.rf_ahead_use(self.ctx, ahead)
         if self._lib.rf_start(self.ctx, frame.ctypes.data, h, w, frame.strides[0], self.pictures[0].shape[2], jobs, n,
                               lists.ctypes.data, thr, good, good if near_good is None else near_good, int(keep),
                               outs) != 0:
@@ -480,6 +511,23 @@ class Refinds:
             return None
         self._held = (frame, jobs, lists, outs)
         return outs
+
+    def ahead(self, frame: np.ndarray, jobs: ctypes.Array, lists: np.ndarray, token: int) -> bool:
+        """rf_ahead: a frame's re-finds sent to the GPU before its call (`start` with `ahead=token`), `jobs` each with
+        its full window only (where its call should look, wider); the windows' pixels copied before it returns. False
+        if they weren't sent (no GPU in use, the GPU still on the last ones, a call running): the call the CPU's."""
+        if self.ctx is None or not len(jobs) or not _takes(frame, self.pictures[0].shape[2]) \
+                or lists.dtype != np.int32 or not lists.flags.c_contiguous:
+            return False
+        h, w = frame.shape[:2]
+        with self._lock:
+            return self._lib.rf_ahead(self.ctx, frame.ctypes.data, h, w, frame.strides[0], self.pictures[0].shape[2],
+                                      jobs, len(jobs), lists.ctypes.data, token) == 0
+
+    def gpu_ready(self) -> bool:
+        """Whether its GPU backend is in use (rf_gpu's 2)."""
+        with self._ctx_lock:
+            return self.ctx is not None and self._lib.rf_gpu(self.ctx, None, 0) == 2
 
     def next(self) -> int:
         """The next job done (its index; -1: none left), Python's lock let go while it waits or does one itself."""

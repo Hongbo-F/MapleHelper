@@ -1226,7 +1226,8 @@ typedef struct {
     double thr, good, ngood;
     volatile long next;               /* the next of `order` to take */
     int nfinished, reported;          /* jobs done (in `finished`, in the order they were), and handed to the caller */
-    int gpu;                          /* 0 the CPU's threads; 1 sent to the GPU (gpumatch.c), not in yet; 2 its answers in */
+    int gpu;                          /* 0 the CPU's threads; 1 sent to the GPU (gpumatch.c), not in yet; 2 its answers
+                                       * in; 3 the call sent ahead's in (rf_ahead), the pool's threads on it */
     RfEntry *memo[RF_MAX_JOBS];       /* each job's */
     int order[RF_MAX_JOBS];           /* the jobs, largest first */
     double cost[RF_MAX_JOBS];
@@ -1365,7 +1366,9 @@ static int rf_window(const RfCtx *c, const RfBatch *b, const RfJob *j, const int
                 continue;  /* (doesn't fit) */
             float s;
             int px, py;
-            if (b->gpu != 2 || !gm_rf_best(c->gpu, b, (int)(j - b->jobs), side, list[k], &s, &px, &py)) {
+            int gpu = b->gpu == 2 ? gm_rf_best(c->gpu, b, (int)(j - b->jobs), side, list[k], &s, &px, &py) :
+                      b->gpu == 3 ? gm_ahead_best(c->gpu, b, (int)(j - b->jobs), side, list[k], &s, &px, &py) : 0;
+            if (!gpu) {
                 if (!loaded) {  /* once for both stages: room for the transform if any of its pictures that fit wants it */
                     if (load(&im, at, wh, ww, b->frow, b->cn, rf_wants_ntt(c, b, j, wh, ww)) != 0)
                         return -1;
@@ -1707,8 +1710,11 @@ EXPORT int rf_start(void *ctx, const unsigned char *frame, int fh, int fw, long 
     b->nfinished = 0;
     b->reported = 0;
     c->running = 1;
-    b->gpu = c->gpu && gm_rf_send(c->gpu, b) == 0;  /* on the GPU, else the pool's threads at once */
-    if (!b->gpu)
+    if (c->gpu && gm_rf_ahead_in(c->gpu, b))  /* sent ahead and in: answered on the pool's threads from it */
+        b->gpu = 3;
+    else  /* on the GPU, else the pool's threads at once */
+        b->gpu = c->gpu && !gm_ahead_only && gm_rf_send(c->gpu, b) == 0;
+    if (b->gpu != 1)
         rf_wake(c);
     return 0;
 }
@@ -1770,6 +1776,8 @@ EXPORT void rf_end(void *ctx)
 #endif
     if (b->gpu == 2)
         gm_done(c->gpu);
+    if (b->gpu == 3)
+        gm_ahead_done(c->gpu);
     b->gpu = 0;
     c->running = 0;
 }

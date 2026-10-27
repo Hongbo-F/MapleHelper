@@ -142,6 +142,22 @@ class Ring:
 
 # --- what the child runs ---------------------------------------------------------------------------------
 
+class Look:
+    """A frame's look, as the world step takes it (`look(ropes)`: Eyes.look_at), with the frame's picture (`full`)
+    for what the step sends ahead of the look (WorldStep's AHEAD)."""
+    __slots__ = ("eyes", "frame")
+
+    def __init__(self, eyes: Eyes, frame: Frame):
+        self.eyes, self.frame = eyes, frame
+
+    @property
+    def full(self) -> np.ndarray:
+        return self.frame.full
+
+    def __call__(self, ropes: bool) -> Observation:
+        return self.eyes.look_at(self.frame.full, self.frame.t, ropes)
+
+
 @dataclass
 class Runner:
     """What the feed looks with: its frames (perception.frames: the screen, or a list), the eyes that read
@@ -153,7 +169,7 @@ class Runner:
     recovered: float = -1e18       # when the eyes last recovered (`recover`)
 
     def look(self, frame: Frame) -> Callable[[bool], Observation]:
-        return lambda ropes: self.eyes.look_at(frame.full, frame.t, ropes)
+        return Look(self.eyes, frame)
 
     def recover(self, problem: Problem) -> None:
         """A frame that failed its checks (or the game not wholly on screen): the eyes do what they can before the next

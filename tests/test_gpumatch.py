@@ -343,3 +343,86 @@ def test_a_device_that_cant_be_made_leaves_every_call_to_the_cpu(detector):  # n
     assert all(bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(b)[64 * i:64 * i + OUT_FIELDS] for i in range(len(jobs)))
     rf.close()
     cpu.close()
+
+
+def test_its_device_is_at_the_lowest_gpu_thread_priority(detector, on_gpu):  # noqa: F811
+    # (gpumatch.c's GM_PRIORITY: a game's frames on the same GPU drawn before its passes; gm_priority for the benches)
+    f = native.lib()
+    assert on_gpu.gpu_state()[1]["priority"] == -7 and f.gm_priority(99) == -7
+    try:
+        assert f.gm_priority(0) == 0
+        rf = gpu_refinds(ready_of(detector))
+        need(rf)
+        assert rf.gpu_state()[1]["priority"] == 0
+        rf.close()
+    finally:
+        f.gm_priority(-7)
+
+
+def ahead_of(jobs, frame_, more: int, keep_out=()) -> ctypes.Array:
+    """`jobs` as sent ahead (rf_ahead): each full window `more` px wider each way, cut by the frame, no near window;
+    the ids in `keep_out` moved 30 px off, so that the call's window isn't inside it."""
+    h, w = frame_.shape[:2]
+    out = (native.RfJob * len(jobs))()
+    for i, j in enumerate(jobs):
+        ctypes.memmove(ctypes.byref(out[i]), ctypes.byref(j), ctypes.sizeof(native.RfJob))
+        x0, y0, x1, y1 = j.wfull
+        d = 30 if j.id in keep_out else 0
+        out[i].wfull[:] = (max(0, x0 - more + d), max(0, y0 - more), min(w, x1 + more + d), min(h, y1 + more))
+        out[i].wnear[:] = (0, 0, 0, 0)
+    return out
+
+
+def test_a_call_sent_ahead_gives_every_field_of_the_cpus_answers(detector, on_gpu):  # noqa: F811
+    # (rf_ahead at the frame's start from wider windows; rf_start's call answered from every place's sums where its
+    # window lies inside one sent, the rest the CPU's threads': the memos, the stages, near windows inside and past)
+    cpu = native.Refinds(ready_of(detector), 4)
+    lists = [detector._lists_of("pig", t, -1) for t in ("pig_move0", "pig_move1", "")]
+    rng = np.random.default_rng(9)
+    flat = detector._rf_lists
+    before = on_gpu.gpu_state()[1]
+    for step in range(6):
+        frame_, box = scene(("pig_move0", "pig_move1")[step % 2], 600 + 3 * step, 300 - step)
+        jobs = jobs_of(frame_, box, rng, 10, lambda i: lists[i % 3])
+        assert on_gpu.ahead(frame_, ahead_of(jobs, frame_, 4 + step, keep_out=(103,)), flat, 1000 + step)
+        a = cpu.run(frame_, jobs, flat, 0.6, 0.9, False, 0.95)
+        outs = on_gpu.start(frame_, jobs, flat, 0.6, 0.9, False, 0.95, ahead=1000 + step)
+        assert outs is not None
+        try:
+            while on_gpu.next() >= 0:
+                pass
+        finally:
+            on_gpu.end()
+        ab, bb = bytes(a), bytes(outs)
+        for i in range(len(jobs)):
+            assert ab[64 * i:64 * i + OUT_FIELDS] == bb[64 * i:64 * i + OUT_FIELDS], (step, i)
+    after = on_gpu.gpu_state()[1]
+    assert after["ahead_sent"] - before["ahead_sent"] == 6 and after["ahead_in"] - before["ahead_in"] == 6
+    # (each call's 10 jobs: the 3 with no picture (template "") weren't sent, job 103's window not inside its own)
+    assert after["ahead_jobs"] - before["ahead_jobs"] == 6 * 10
+    assert after["ahead_covered"] - before["ahead_covered"] == 6 * 6
+    assert after["pairs"] > before["pairs"]
+    # a token not the call's (another frame's, or none): the CPU's, the same answers
+    frame_, box = scene("pig_move0")
+    jobs = jobs_of(frame_, box, rng, 6, lambda i: lists[i % 3])
+    assert on_gpu.ahead(frame_, ahead_of(jobs, frame_, 4), flat, 7)
+    a = cpu.run(frame_, jobs, flat, 0.6, 0.9, False, 0.95)
+    outs = on_gpu.start(frame_, jobs, flat, 0.6, 0.9, False, 0.95, ahead=8)
+    try:
+        while on_gpu.next() >= 0:
+            pass
+    finally:
+        on_gpu.end()
+    assert all(bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(outs)[64 * i:64 * i + OUT_FIELDS] for i in range(6))
+    assert on_gpu.gpu_state()[1]["ahead_in"] == after["ahead_in"]
+    cpu.close()
+
+
+def test_the_switchs_mode(tmp_path):
+    on = tmp_path / "GPU"
+    assert native.gpu_mode({}, on) == "off" and native.gpu_mode({"GAMELAB_GPU": "ahead"}, on) == "ahead"
+    on.write_text("")
+    assert native.gpu_mode({}, on) == "start" and native.gpu_mode({"GAMELAB_GPU": "0"}, on) == "off"
+    on.write_text("ahead\n")
+    assert native.gpu_mode({}, on) == "ahead" and native.gpu_switch({}, on)
+    assert native.gpu_mode({"GAMELAB_GPU": "1"}, on) == "start"

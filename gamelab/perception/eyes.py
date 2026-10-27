@@ -423,18 +423,30 @@ class Eyes:
         return self.detector.refind(obs.frame, box, mob.kind, mob.template, mob.facing,
                                     (0, 0, w, int(h * obs.geo.hud_top)), fallback, **more)
 
-    def refind_all(self, obs: Observation, asks: list[tuple], threads: int = 1, pool=None) -> list[Mob | None] | None:
+    def refind_all(self, obs: Observation, asks: list[tuple], threads: int = 1, pool=None,
+                   ahead: int | None = None) -> list[Mob | None] | None:
         """`refind` of each monster asked, (mob, box, fallback, near, memo, id: the caller's for it from frame to frame),
-        all in one call in C on `threads` threads (MobDetector.refind_all; `pool`: an Executor for the fallbacks); None
-        where that can't be (no C, or a detector without it: the simulator's fakes), and the caller asks `refind` of
-        each."""
+        all in one call in C on `threads` threads (MobDetector.refind_all; `pool`: an Executor for the fallbacks;
+        `ahead`: the frame's token, where they were sent ahead: `refind_ahead`); None where that can't be (no C, or a
+        detector without it: the simulator's fakes), and the caller asks `refind` of each."""
         many = getattr(self.detector, "refind_all", None)
         if many is None:
             return None
         h, w = obs.frame.shape[:2]
         return many(obs.frame, [(box, mob.kind, mob.template, mob.facing, fallback, near, memo, tid)
                                 for mob, box, fallback, near, memo, tid in asks],
-                    (0, 0, w, int(h * obs.geo.hud_top)), threads, pool)
+                    (0, 0, w, int(h * obs.geo.hud_top)), threads, pool, ahead)
+
+    def refind_ahead(self, full: np.ndarray, asks: list[tuple], threads: int, token: int,
+                     more: tuple[int, int]) -> bool:
+        """The frame's re-finds (`refind_all`'s, by the frame before's camera: box, kind, template, facing, id) sent
+        to the GPU ahead of its look (MobDetector.refind_ahead), from its full-size picture: only at the game's own
+        size, where a look's frame is that picture (look_scale 1). Whether they were sent."""
+        many = getattr(self.detector, "refind_ahead", None)
+        if many is None or self.geo.look_scale != 1 or (full.shape[1], full.shape[0]) != self.geo.client:
+            return False
+        h, w = full.shape[:2]
+        return many(full, asks, (0, 0, w, int(h * self.geo.hud_top)), threads, token, more)
 
     def heading(self, obs: Observation) -> Reading:
         """Which way she faces in a look's frame (perception.heading), by her picture above her name tag: not told
