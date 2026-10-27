@@ -815,7 +815,7 @@ def _hunt_on(senses):
     h = SimpleNamespace(report=None, ledger=SimpleNamespace(kills=[]), drops=SimpleNamespace(gone_tried=0),
                         looter=looter, meter=SimpleNamespace(total=0, since=None), senses=senses)
     nav = SimpleNamespace(escort=None, mover=SimpleNamespace(settle=lambda: senses.look(mobs=False)))
-    tour = SimpleNamespace(safe=[], hunting_grounds=lambda v: [], rest_and_stand_by=lambda mode: None)
+    tour = SimpleNamespace(safe=[], hunting_grounds=lambda v: [], stand_by=lambda mode: None)
     return SimpleNamespace(h=h, nav=nav, tour=tour, kinds=None, _visit_s=60, _end=0, _yields=None, _unseen=None,
                            _next_ground=lambda s: None, _pass=lambda: "stop", _leave_ground=lambda: None,
                            report=SimpleNamespace(seconds=0.0, stop=None, exp_read=None), _log_memory=lambda: None)

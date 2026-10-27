@@ -35,6 +35,7 @@ from ..attack import danger
 from ..behavior import probe
 from ..behavior.hunter import Hunter
 from ..behavior.looting import DropSpot
+from ..behavior.safety import SafetyStop
 from ..localization.mapdata import MapModel
 from ..control.actions import STAR_DELAY_MS
 from ..control.navigator import Navigator
@@ -242,14 +243,14 @@ class Sim:
         self.guard()
         return hunter.navigator(fighting=fight, rng=random.Random(self.scenario.seed if seed is None else seed))
 
-    def tour(self, hunter: Hunter, nav: Navigator, seed: int | None = None, rest_below: float = 0.5) -> Tour:
+    def tour(self, hunter: Hunter, nav: Navigator, seed: int | None = None) -> Tour:
         self.guard()
-        return Tour(hunter, nav, log=self.log, rng=random.Random(self.scenario.seed if seed is None else seed),
-                    rest_below=rest_below)
+        return Tour(hunter, nav, log=self.log, rng=random.Random(self.scenario.seed if seed is None else seed))
 
     def tour_stack(self, **kw) -> Tour:
-        """`python -m gamelab tour`: a hunter with the tour's HP limits, a fighting navigator, the tour."""
-        h = self.hunter(low_hp=0.3, potion_hp=0.45)
+        """`python -m gamelab tour`: a hunter with the tour's potion HP (her potion key's; the safety stop's threshold
+        the default, behavior.safety), a fighting navigator, the tour."""
+        h = self.hunter(potion_hp=0.45)
         return self.tour(h, self.navigator(h, fight=True), **kw)
 
 
@@ -292,6 +293,8 @@ def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = No
             raise
         except (SimDied, SimTimeout, client.PlayerError, RuntimeError, ValueError) as e:
             outcome = f"error: {type(e).__name__}: {e}"
+        except SafetyStop as e:  # her HP stayed low (behavior.safety): the hunt ended
+            outcome = f"safety stop: {e}"
     trace = {"scenario": sc.name, "doc": sc.doc, "seconds": round(sim.clock.elapsed, 3), "result": outcome,
              "plans": sim.trace.plans, "cancels": sim.trace.cancels, "log": sim.trace.log,
              "world": sim.world.summary(), "world_log": sim.world.log, "eyes": dict(sim.eyes.counts),
@@ -1385,119 +1388,50 @@ def tour_collect_loot_on_the_way(sim):
 @scenario((36, 300.0), monsters="all", seed=1, limit=1500,
           expects=(check("three stops visited", lambda tr: len(tr["result"]["visited"]) == 3),
                    ends("standing by on a safe platform", key="stop"), logs("tour: sweep"),
-                   check("every kill counted (the stops' and on the way, resting included)",
+                   check("every kill counted (the stops' and on the way)",
                          lambda tr: sum(tr["result"]["kills"].values()) + tr["result"]["on_the_way"]
                          == sum(tr["world"]["kills"].values()))))
 def tour_run(sim):
-    """`python -m gamelab tour --stops 3`: the whole tour, end to end: three hunting grounds, rests when HP runs low,
-    and standing by on a safe platform at the end. (Seed 2 since the game moves her in 30 ms steps (body.STEP) and jumps
-    from standing wait 150 ms after the arrow: on seed 1 one of 181 kills went uncounted. Over seeds 1-16 12 meet all of
-    this, as just before. Seed 1 since the two tracks came together, her body moved by motion.body and her stars picked
-    by the star's search: on seed 6 one of 160 kills went uncounted. Over seeds 1-16, 12 meet all of this and 4 miss 1
-    or 2 of 136-237 kills in the count; none runs out of time, 560-1142 s. With no jump keyed from a knock, no chain
-    planned in mid-air and the drops clear of the basin's cliffs, still 12: 4 miss 1 or 2 of 122-184, in 587-984 s. Seed
-    6 since stars from the ground pick by the star's search: on seed 8 an EXP gain came in as the stop's fight ended,
-    unplaced, and two kills on the way came between two looks. Seed 8 had been since jump-throws come 40 ms after the
-    jump: on seed 25 two kills came between two looks once, and two kills raise her EXP number once. On the play track,
-    before the steps, seed 2 as well, since a kill is placed where its monster was seen last (behavior. ledger): on seed
-    1 one of its 225 kills went uncounted there; over seeds 1-16, 12 met all of it, 15 just before, the 4 others missing
-    1 of 185-227 kills in the count.) The basin's respawns make its length chaotic: on world seeds 1-16 it took 470-1190
-    s, before stars picked by the search and since. On the physics branch (her body by motion.body) it met all of this
-    on few seeds, and its seed moved from 8 to 9, 8, 9, 5, 9 and 1 there; looked into rather than moved again, it was
-    the limit and the kill count: - Time: that world gave more kills than the branch's base did (seeds 1-16: 165 a tour
-    on average against 149), at the same 2.9 s of loot collecting each (480 s a tour against 433), so tours took longer
-    (806 s against 769 on average, capped at 900 s; uncapped, the longest took 1,300). At 900 s, 7 of 16 ran out of
-    time; the limit is 1500 s now, a backstop. - The kill count: every one of her kills raises her EXP number at a look
-    (on seeds 3, 5 and 7, 116, 153 and 164 gains for as many kills, none two to a look), but a stop counts a kill by
-    kind only when its fight tells that gain apart, and some come as a fight ends or in the sweep after it (fight.py's
-    f0ea98d and 52683f4 tell those apart; with them on that branch the count held on 11 of 16 seeds instead of 5; with
-    both tracks, on 12), or at a look of a loot collection's own (Tour.collect_loot's locate, a trip's recover), which
-    nothing counts. (Seed 3 since every look is perception's newest frame after her keys' effect (Senses.fresh_after,
-    the feed in every scenario): on seed 2 a kill wasn't counted; of seeds 1-8, 1, 3, 4, 5, 6 and 7 meet all of this.)
-    (Seed 1 since 2026-10-26, her throws at the dying gone, a throw's last look before its key, the world's damage
-    at the server's time: on seed 3 one of 179 kills went uncounted; of seeds 1-16, 14 meet all of this, 13 on
-    master; on the other two (3, 11) the count misses kills, as on master's three (2, 8, 15).)"""
+    """`python -m gamelab tour --stops 3`: the whole tour, end to end: three hunting grounds, and standing by on a safe
+    platform at the end (until 2026-10-26, resting on the chair when HP ran low). (Seed 2 since the game moves her in 30
+    ms steps (body.STEP) and jumps from standing wait 150 ms after the arrow: on seed 1 one of 181 kills went uncounted.
+    Over seeds 1-16 12 meet all of this, as just before. Seed 1 since the two tracks came together, her body moved by
+    motion.body and her stars picked by the star's search: on seed 6 one of 160 kills went uncounted. Over seeds 1-16,
+    12 meet all of this and 4 miss 1 or 2 of 136-237 kills in the count; none runs out of time, 560-1142 s. With no jump
+    keyed from a knock, no chain planned in mid-air and the drops clear of the basin's cliffs, still 12: 4 miss 1 or 2
+    of 122-184, in 587-984 s. Seed 6 since stars from the ground pick by the star's search: on seed 8 an EXP gain came
+    in as the stop's fight ended, unplaced, and two kills on the way came between two looks. Seed 8 had been since
+    jump-throws come 40 ms after the jump: on seed 25 two kills came between two looks once, and two kills raise her EXP
+    number once. On the play track, before the steps, seed 2 as well, since a kill is placed where its monster was seen
+    last (behavior. ledger): on seed 1 one of its 225 kills went uncounted there; over seeds 1-16, 12 met all of it, 15
+    just before, the 4 others missing 1 of 185-227 kills in the count.) The basin's respawns make its length chaotic: on
+    world seeds 1-16 it took 470-1190 s, before stars picked by the search and since. On the physics branch (her body by
+    motion.body) it met all of this on few seeds, and its seed moved from 8 to 9, 8, 9, 5, 9 and 1 there; looked into
+    rather than moved again, it was the limit and the kill count: - Time: that world gave more kills than the branch's
+    base did (seeds 1-16: 165 a tour on average against 149), at the same 2.9 s of loot collecting each (480 s a tour
+    against 433), so tours took longer (806 s against 769 on average, capped at 900 s; uncapped, the longest took
+    1,300). At 900 s, 7 of 16 ran out of time; the limit is 1500 s now, a backstop. - The kill count: every one of her
+    kills raises her EXP number at a look (on seeds 3, 5 and 7, 116, 153 and 164 gains for as many kills, none two to a
+    look), but a stop counts a kill by kind only when its fight tells that gain apart, and some come as a fight ends or
+    in the sweep after it (fight.py's f0ea98d and 52683f4 tell those apart; with them on that branch the count held on
+    11 of 16 seeds instead of 5; with both tracks, on 12), or at a look of a loot collection's own (Tour.collect_loot's
+    locate, a trip's recover), which nothing counts. (Seed 3 since every look is perception's newest frame after her
+    keys' effect (Senses.fresh_after, the feed in every scenario): on seed 2 a kill wasn't counted; of seeds 1-8, 1, 3,
+    4, 5, 6 and 7 meet all of this.) (Seed 1 since 2026-10-26, her throws at the dying gone, a throw's last look before
+    its key, the world's damage at the server's time: on seed 3 one of 179 kills went uncounted; of seeds 1-16, 14 meet
+    all of this, 13 on master; on the other two (3, 11) the count misses kills, as on master's three (2, 8, 15).)"""
     tour = sim.tour_stack()
     return tour.run(stops=3, kills_per_stop=5, seconds_per_stop=90)
 
 
 @scenario((36, 300.0), seed=27,
-          expects=(ends("standing by on a safe platform", key="stop"), no_log("resting on platform"),
+          expects=(ends("standing by on a safe platform", key="stop"),
                    check("on a safe platform", lambda tr: tr["world"]["platform"] in tr["result"]["safe"])))
 def tour_stand_by(sim):
-    """The end of a tour with HP still high (Tour.rest_and_stand_by): no rest, just over to the nearest safe
-    platform to stand by."""
+    """The end of a tour (Tour.stand_by): over to the nearest safe platform to stand by."""
     tour = sim.tour_stack()
-    tour.rest_and_stand_by()
+    tour.stand_by()
     return {"stop": tour.report.stop, "safe": tour.safe}
-
-
-def _rest(sim):
-    tour = sim.tour_stack()
-    tour.rest()
-    return {"report": str(tour.report), "hp": round(tour.h.look(mobs=False).hp, 3)}
-
-
-@scenario((36, 300.0), monsters="all", seed=26, hp=0.32, limit=400,
-          expects=(logs("resting on platform 32"), no_log("couldn't reach a safe platform"),
-                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9),
-                   check("the kills on the way to rest are counted",
-                         lambda tr: f"plus {sum(tr['world']['kills'].values())} on the way" in tr["result"]["report"])))
-def tour_rest(sim):
-    """Low on HP in the basin (32%, above the tour's 30% stop): to the nearest safe platform (32), sit on
-    the chair until HP is back, stand up."""
-    return _rest(sim)
-
-
-@scenario((32, 600.0), monsters="all", seed=26, hp=0.32, limit=400,
-          expects=(logs("resting on platform 32"), sends("chair"),
-                   check("no trip: on a safe platform already",
-                         lambda tr: not any(p[1] == "flow" for p in tr["plans"]))))
-def tour_rest_on_safe(sim):
-    """Low on HP on a safe platform already (32): she sits down where she is."""
-    return _rest(sim)
-
-
-@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
-          expects=(logs("resting on platform 32"), logs("drinking a potion", "a potion on the way"),
-                   no_log("couldn't reach a safe platform", "low HP doesn't end the trip to rest"),
-                   check("rests on 32", lambda tr: tr["world"]["platform"] == 32),
-                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
-def tour_rest_hp_low(sim):
-    """Tour.rest as Tour.run calls it, after a hunt stopped for 'HP low' (under the tour's 30%): low HP is
-    why she's going, so it doesn't end the trip (it used to, at its first look, and she sat down in the
-    basin among the monsters and died there). She drinks a potion on the way, shoots what's in her way,
-    and rests on the safe platform 32."""
-    return _rest(sim)
-
-
-@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
-          expects=(logs("resting on platform 32"), logs("drinking a potion", "a potion on the way"),
-                   no_log("couldn't reach a safe platform", "low HP doesn't end the trip to rest"),
-                   check("rests on 32", lambda tr: tr["world"]["platform"] == 32),
-                   check("no monster shot: she keeps clear of them", lambda tr: not tr["world"]["kills"]),
-                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
-def tour_rest_avoid(sim):
-    """tour_rest_hp_low with `--rest-avoid` (navigator.TRANSIT_AVOID): the same trip to platform 32, keeping
-    clear of the monsters instead of shooting the ones in her way; low HP still doesn't end it."""
-    tour = sim.tour_stack()
-    tour.rest_avoid = True
-    tour.rest()
-    return {"report": str(tour.report), "hp": round(tour.h.look(mobs=False).hp, 3)}
-
-
-@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
-          expects=(logs("resting on platform 32"), no_log("couldn't reach a safe platform", "low HP doesn't end the trip"),
-                   check("rests on 32", lambda tr: tr["world"]["platform"] == 32),
-                   check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
-def tour_rest_no_escort(sim):
-    """tour_rest_hp_low without the fighting escort (a tour built on a navigator that avoids monsters): the
-    trip to rest avoids them and only drinks potions. It used to stop at its first look on low HP, and she
-    sat down in the basin."""
-    h = sim.hunter(low_hp=0.3, potion_hp=0.45)
-    tour = sim.tour(h, sim.navigator(h, fight=False))
-    tour.rest()
-    return {"report": str(tour.report), "hp": round(tour.h.look(mobs=False).hp, 3)}
 
 
 # What perception saw die (every scenario's looks and glances are the feed's: SyncFeed on the fake clock, as live's are
@@ -1528,21 +1462,14 @@ def _loop(minutes: float):
         tour = tour or sim.tour_stack()
         r = Hunt(tour, log=sim.log).run(minutes=minutes)
         return {"report": str(r), "grounds": r.grounds, "kills": r.kills, "exp_gains": r.exp_gains,
-                "ledger_kills": len(tour.h.ledger.kills), "rules": dict(sorted(r.rules.items())), "rests": r.rests,
-                "hunt_stop": r.stop, "stop": tour.report.stop, "damage_taken": tour.h.report.damage_taken,
-                "safe": tour.safe}
+                "ledger_kills": len(tour.h.ledger.kills), "rules": dict(sorted(r.rules.items())), "hunt_stop": r.stop,
+                "stop": tour.report.stop, "damage_taken": tour.h.report.damage_taken, "safe": tour.safe}
     return run
 
 
 def _every_kill(tr: dict) -> bool:
     """Every kill of hers is in the ledger (the simulator never shows two between looks)."""
     return tr["result"]["ledger_kills"] == sum(tr["world"]["kills"].values())
-
-
-def _back_after_rest(tr: dict) -> bool:
-    log = tr["log"]
-    rested = next((i for i, line in enumerate(log) if "resting on platform" in line), None)
-    return rested is not None and any("at platform 36's spot" in line for line in log[rested:])
 
 
 def _rule(name: str, at_least: int = 1):
@@ -1739,16 +1666,6 @@ def _nth(lines: list[str], text: str, n: int) -> float:
     """When the n-th of a trace's lines with `text` came (s; infinity if fewer did)."""
     at = [float(line.split()[0]) for line in lines if text in line]
     return at[n - 1] if len(at) >= n else float("inf")
-
-
-@scenario((36, 300.0), monsters="all", seed=26, hp=0.25, limit=400,
-          expects=(logs("rest: HP"), logs("resting on platform 32"),
-                   no_log("couldn't reach a safe platform", "low HP doesn't end the trip to rest"),
-                   check("back to the ground after resting", _back_after_rest)))
-def loop_rest_hp_low(sim):
-    """tour_rest_hp_low's twin: low on HP in the basin, the loop rests on the safe platform 32 (low HP
-    doesn't end the trip there) and goes back to the ground she was hunting."""
-    return _loop(2)(sim)
 
 
 @scenario((36, 300.0), monsters="all", seed=25, limit=800,
@@ -1959,17 +1876,6 @@ def tour_rocky_run(sim):
     a floor rising the way she flies lands her (body._lands_at): on seed 1 she was knocked off 22's left end and out
     of the map at 804 s; of seeds 1-6, 2, 4, 5 and 6 meet all of this.)"""
     return sim.tour_stack().run()
-
-
-@rocky((22, -700.0), monsters="all", hp=0.25, limit=400,
-       expects=(logs("resting on platform"), no_log("couldn't reach a safe platform"),
-                check("rests on a step under the bridge", lambda tr: tr["world"]["platform"] in (23, 24, 25)),
-                check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
-def tour_rocky_rest(sim):
-    """Low on HP on the bridge (25%, under the tour's 30%): down to a floating step under it to rest (every safe
-    platform 120 wide is under the bridge: the steps 23-25 and the pit's stairs, whose way out is 27 onto 25 at
-    0.90), and on the chair until HP is back."""
-    return _rest(sim)
 
 
 # Tree Dungeon, Forest Up North II (TREE: map 10002073, from 2026-10-24), with her at level 24 (HP 752, the keys and pet
@@ -2202,7 +2108,7 @@ def _grind(minutes: float):
         g = Grind(tour, log=sim.log)
         r = g.run(minutes=minutes)
         return {"report": str(r), "grounds": r.grounds, "kills": r.kills, "rules": dict(sorted(r.rules.items())),
-                "rests": r.rests, "hunt_stop": r.stop, "loops": g.patrol.loops, "stays": [round(x, 1) for x in g.stays],
+                "hunt_stop": r.stop, "loops": g.patrol.loops, "stays": [round(x, 1) for x in g.stays],
                 "credit": {str(k): v for k, v in sorted(g.credit.items(), key=lambda kv: str(kv[0]))}}
     return run
 
@@ -2220,7 +2126,7 @@ def loop_tree_grind(sim):
     by its EXP a minute (behavior.patrol: the top cluster's 10, 7), and what she sees pulling her off it to the stops
     around her (23, 24, 19, 20 on seed 1), what she meets on the way shot in passing, kills credited to the platforms
     they died on (19, 20, 21, 23, 24). In this world she's touched about five times as often as live (README:
-    Grinding): knocked off 23 down to 25-29 and back, then a rest at the end."""
+    Grinding): knocked off 23 down to 25-29 and back, then standing by at the end (resting there until 2026-10-26)."""
     return _grind(3)(sim)
 
 
@@ -2283,17 +2189,6 @@ def loop_tree_mp_runs_out(sim):
     run with the feed and the choice before."""
     sim.world.mp = 0.12
     return harness._only(_loop(4), (23,))(sim)
-
-
-@tree((23, 0.0), monsters="all", hp=0.25, limit=400,
-      expects=(logs("resting on platform"), no_log("couldn't reach a safe platform"),
-               check("rests on a floating platform below", lambda tr: tr["world"]["platform"] in (25, 26, 27)),
-               check("HP back", lambda tr: tr["result"]["hp"] >= 0.9)))
-def tour_tree_rest(sim):
-    """Low on HP among the Horny Mushrooms on 23 (25%, under the tour's 30%): down to the nearest safe platform (25,
-    26 and 27, the only ones with no monster in reach; the caps 0-5 above the VR are safe too, but narrower than a
-    rest wants, tour.MIN_REST_WIDTH) and on the chair until HP is back."""
-    return _rest(sim)
 
 
 # --- the Lie Detector during a hunt: she stops, and retreats to a safe place within 10 s (behavior.retreat) ---------
@@ -2476,5 +2371,61 @@ def loop_tree_lie_detector_grind(sim):
     loop_tree_grind, the Lie Detector seen 75 s in: grinding is the hunt loop going round the map (behavior.grind.Grind,
     a Hunt), so it stops as the hunt loop does, at the next look or plan, and she retreats to a safe place within 10 s,
     her moves alone: on seed 1 down onto 25, a safe platform, at 5.6 s. (Of seeds 1-12, all 12 are on a safe place at
-    10 s, 10 on 25 and 2 on 28; resting on 25 when it's seen, she stays, the rest's next look up to 5 s after it.)"""
+    10 s, 10 on 25 and 2 on 28; resting on 25 when it was seen, as she could until 2026-10-26, she stayed, the rest's
+    next look up to 5 s after it.)"""
     return lie_detector(75.0, grind=True)(sim)
+
+
+# --- the safety stop: her HP stays low, the hunt ends, she goes to a safe place, whoever is at the PC is paged --------
+# (behavior.safety). The user, 2026-10-26: "Just remove the sit recover hp functionality, it's no longer needed". Her
+# pet drinks her potions; with none left (Realism.potions 0) the touches that take her under 40% leave her there.
+
+def safety_stop(minutes: float = 5, grind: bool = False):
+    """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; with `grind`, grinding, as `tour --loop
+    --grind` does). The result: how the hunt stopped (`stopped`: the safety stop's message, her HP, how long and over
+    how many looks it was under), when (`at`: s into the run, the look that stopped it), her retreat (Retreat.record),
+    whether the world has her on a safe place once it's over (`safe`, as retreat counts one: safe_there), what was
+    paged (`pages`: [s, title, text]), every key and mouse event played from the stop on (`after`: [s after it, the
+    plan's kind, the event]) and her HP at the end."""
+    def run(sim):
+        from ..behavior.grind import Grind
+        from ..behavior.hunt import Hunt
+        from ..behavior.retreat import on_alarm
+        tour = sim.tour_stack()
+        watch, stopped, at = None, None, None
+        try:
+            with on_alarm(tour.h, rng=random.Random(sim.scenario.seed)) as watch:
+                (Grind if grind else Hunt)(tour, log=sim.log).run(minutes=minutes)
+        except SafetyStop as e:
+            stopped = {"text": str(e), "hp": e.hp, "seconds": e.seconds, "looks": e.looks}
+            at = e.at
+        sim.world.advance(sim.clock.now)
+        played = [] if at is None else sorted([round(t - at, 3), kind, *event] for kind, events
+                                              in sim.player.played.values() for t, *event in events if t >= at)
+        retreat = None if watch is None or watch.retreat is None else watch.retreat.record()
+        return {"stopped": stopped, "at": None if at is None else sim.trace.at(at), "retreat": retreat,
+                "safe": safe_there(sim), "pages": sim.player.pages, "after": played, "hp": round(sim.world.hp, 3)}
+    return run
+
+
+SAFETY_EXPECTS = (
+    check("the hunt stopped for her HP under 40%", lambda tr: "under 40%" in (tr["result"]["stopped"] or {}).get(
+        "text", "")),
+    check("it was under 40% 2 s over 3 looks at least", lambda tr: tr["result"]["stopped"]["seconds"] >= 2.0
+          and tr["result"]["stopped"]["looks"] >= 3),
+    logs("SAFETY STOP: HP"), logs("SAFETY STOP: retreat"),
+    check("on a safe place once her retreat is over", lambda tr: tr["result"]["safe"]),
+    check("paged once, about her HP", lambda tr: len(tr["result"]["pages"]) == 1
+          and "HP stayed low" in tr["result"]["pages"][0][1]),
+    check("her moves alone after the stop, no attack and no mouse", _moves_alone),
+    check("never the chair, no waiting for HP", lambda tr: not any(p[1] in ("chair", "stand") for p in tr["plans"])))
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, hp=0.6, **dict(_LIVE, realism=Realism(zero_walls=True, potions=0)),
+      expects=SAFETY_EXPECTS)
+def loop_tree_safety_stop(sim):
+    """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 at 60% HP, her pet with
+    no potion left to drink: the Horny Mushrooms' touches take her under 40% and leave her there; 2 s and 3 looks on the
+    hunt stops (behavior.safety), she goes to a safe place as on the Lie Detector, her moves alone (behavior.retreat),
+    and whoever is at the PC is paged; no chair, no waiting for her HP."""
+    return safety_stop(5)(sim)

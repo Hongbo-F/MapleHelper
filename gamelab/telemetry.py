@@ -48,7 +48,7 @@ Topics (map units; producers build the records, ui.state folds them):
   tour      order, safe, grounds / stop, spot                  behavior.tour (stop, spot: also behavior.hunt)
   hunt      mode, rule, objective, ground, piles [{x, platform,   behavior.hunt, when the rule changes
             status, hers}]
-  event     kind, text; track (died, exp_gain, hp_drop)        behavior: kill, hit, potion, rest, rest_trip,
+  event     kind, text; track (died, exp_gain, hp_drop)        behavior: kill, hit, potion, safety_stop,
                                                                exp (what a gain's size said), player (one
                                                                coming or going), died (the feed's deaths
                                                                not hers), backstop, follow, probe; `watch`:

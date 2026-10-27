@@ -4,9 +4,8 @@
                                              [--costs coded|measured|measured-1366] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
                                              [--attack choice|skill|regular]
-    python -m gamelab.sim.harness compare BASELINE CANDIDATE [--bar rest]   two saved runs, seed by seed, against the bar
+    python -m gamelab.sim.harness compare BASELINE CANDIDATE    two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
-    python -m gamelab.sim.harness rests [--trips 40]            trips to rest at low HP, transit vs --rest-avoid
 
 A run hunts for a fixed time (the horizon) from one of its map's START_AT, on a world seed, with the policy's own
 random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ. On the first
@@ -50,8 +49,10 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    value_per_min, the mesos' worth she picked up a minute
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
-  rest_hp_lost     HP lost to touches on the trips to rest (from 'rest_trip' to 'rest' events), and
-                   rest_trips: how many (the bar for `--rest-avoid`: compare --bar rest)
+  safety_stops     the safety stop (behavior.safety: her HP under 40% for 2 s, her pet's potions not keeping her up):
+                   1 if it ended the run (her retreat to a safe place, then nothing: the hunt ends, as live), and
+                   safety_at, when (s; the 'safety_stop' event). Until 2026-10-26 the runs counted her rests on the
+                   chair (rests) and the HP lost on her trips to rest (rest_hp_lost, rest_trips)
   alive_s          the seconds of the horizon she was hunting (to her death, fall or portal): rates a minute alive
   fresh_hurt       touches that hurt her by a monster within world.FRESH_S of its respawn (from its spawn point),
                    and fresh_hp_lost, the HP they took
@@ -86,11 +87,13 @@ import argparse
 import dataclasses
 import json
 import os
+import random
 import re
 import statistics
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 
 from ..analysis import coverage
@@ -213,47 +216,57 @@ COSTS["measured-1366"] = {**COSTS["measured"], "feed": "COSTS_1366"}
 
 # --- policies ------------------------------------------------------------------------------------------
 
+def _safely(h, hunt: Callable[[], None]) -> None:
+    """`hunt()` as the command line runs it, in behavior.retreat.on_alarm: at the safety stop (behavior.safety) she goes
+    to a safe place, and the run's hunt ends there, as live (nothing hunts after it)."""
+    from ..behavior.retreat import on_alarm
+    from ..behavior.safety import SafetyStop
+    try:
+        with on_alarm(h, rng=random.Random(POLICY_SEED)):
+            hunt()
+    except SafetyStop:
+        pass
+
+
 def _tour(sim) -> None:
     """Today's tour, as `python -m gamelab tour` runs it, started again whenever a sweep ends."""
-    h = sim.hunter(low_hp=0.3, potion_hp=0.45)
+    h = sim.hunter(potion_hp=0.45)
     tour = sim.tour(h, sim.navigator(h, fight=True, seed=POLICY_SEED), seed=POLICY_SEED)
-    while True:
-        tour.run()
+
+    def hunt():
+        while True:
+            tour.run()
+    _safely(h, hunt)
 
 
-def _loop(sim, rest_avoid: bool = False, low_hp: float = 0.3) -> None:
+def _loop(sim) -> None:
     """The hunt loop (`python -m gamelab tour --loop`), on the same hunter, navigator and map knowledge."""
     from ..behavior.hunt import Hunt
-    h = sim.hunter(low_hp=low_hp, potion_hp=0.45)
+    h = sim.hunter(potion_hp=0.45)
     tour = sim.tour(h, sim.navigator(h, fight=True, seed=POLICY_SEED), seed=POLICY_SEED)
-    tour.rest_avoid = rest_avoid
-    while True:
-        Hunt(tour, log=tour.log).run(minutes=600)
 
-
-def _loop_avoid(sim) -> None:
-    """The hunt loop with `--rest-avoid`: the trips to rest keep clear of monsters (navigator.TRANSIT_AVOID)."""
-    _loop(sim, rest_avoid=True)
-
-
-def _loop_hp50(sim) -> None:
-    """The hunt loop with `--low-hp 0.5`: it stops to rest under half her HP, not 30% (the Tree Dungeon study's advice:
-    at 30% two Horny Mushroom touches by meowdb's formula kill her)."""
-    _loop(sim, low_hp=0.5)
+    def hunt():
+        while True:
+            Hunt(tour, log=tour.log).run(minutes=600)
+    _safely(h, hunt)
 
 
 def _loop_grind(sim) -> None:
     """The hunt loop grinding round the map (`tour --loop --grind`: behavior.grind), on the same hunter, navigator and
     map knowledge as `loop`."""
     from ..behavior.grind import Grind
-    h = sim.hunter(low_hp=0.3, potion_hp=0.45)
+    h = sim.hunter(potion_hp=0.45)
     tour = sim.tour(h, sim.navigator(h, fight=True, seed=POLICY_SEED), seed=POLICY_SEED)
-    while True:
-        Grind(tour, log=tour.log).run(minutes=600)
+
+    def hunt():
+        while True:
+            Grind(tour, log=tour.log).run(minutes=600)
+    _safely(h, hunt)
 
 
-POLICIES = {"tour": _tour, "loop": _loop, "loop-avoid": _loop_avoid, "loop-hp50": _loop_hp50,
-            "loop-grind": _loop_grind}
+# (`loop-avoid`, the trips to rest keeping clear of monsters, and `loop-hp50`, resting under half her HP, went with the
+# rests on 2026-10-26.)
+POLICIES = {"tour": _tour, "loop": _loop, "loop-grind": _loop_grind}
 
 
 def _only(policy, grounds: tuple[int, ...]):
@@ -464,7 +477,9 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     times = sorted([0.0] + [k[0] for k in mine] + [d.taken_at for d in world.drops if d.taken_by == "her"] + [end])
     gaps = [b - a for a, b in zip(times, times[1:])]
     events = [r for r in records if r.get("topic") == "event"]
-    trips, waits = _rest_trips(records), _waits(records)
+    waits = _waits(records)
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    stops = [r for r in events if r.get("kind") == "safety_stop"]
     return {
         "exp": world.exp,
         "exp_per_min": round(world.exp / (horizon / 60), 2),
@@ -498,10 +513,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "value_per_min": round(sum(worth(d.kind) for d in drops if d.taken_by == "her") / (horizon / 60), 2),
         "longest_idle": round(max(gaps, default=0.0), 1),
         "stuck_s": round(sum(max(0.0, g - IDLE_GRACE) for g in gaps), 1),
-        "rests": sum(1 for r in events if r.get("kind") == "rest"),
-        "rest_trips": len(trips),
-        "rest_hp_lost": round(sum(hp for t, hp in world.touch_log
-                                  if t <= end and any(a <= t <= b for a, b in trips)), 3),
+        "safety_stops": len(stops),
+        "safety_at": round(stops[0]["t"] - start, 1) if stops and start is not None else None,
         "alive_s": round(end, 1),
         "fresh_hurt": sum(1 for t, hp in world.fresh_log if hp > 0 and t <= end),
         "fresh_hp_lost": round(sum(hp for t, hp in world.fresh_log if t <= end), 3),
@@ -604,26 +617,6 @@ def _on_piles(world, records: list[dict], end: float) -> dict:
             "stand_hurt": sum(1 for hp in off if hp > 0), "stand_hp_lost": round(sum(off), 3)}
 
 
-def _rest_trips(records: list[dict]) -> list[tuple[float, float]]:
-    """(start, end) of each trip to rest, in world time (s from the run's start): from a 'rest_trip' event
-    to the next 'rest' event (or the end)."""
-    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
-    if start is None:
-        return []
-    out, began = [], None
-    for r in records:
-        if r.get("topic") != "event":
-            continue
-        if r.get("kind") == "rest_trip":
-            began = r["t"] - start
-        elif r.get("kind") == "rest" and began is not None:
-            out.append((began, r["t"] - start))
-            began = None
-    if began is not None:
-        out.append((began, float("inf")))
-    return out
-
-
 WAITING = ("wait", "lull loot")  # the hunt loop's rules for waiting out respawns (behavior.hunt: 9 and 8)
 
 
@@ -676,7 +669,7 @@ def _run_one_args(a: tuple) -> dict:
 COLUMNS = ("seed", "exp_per_min", "kills", "rival", "hp_lost", "hp_low", "potions", "pet_potions", "mp_per_min",
            "mp_potions", "mp_per_kill", "casts_at_dead", "at_dead", "finishes", "died_at", "fell_out_at",
            "left_map_at",
-           "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "rests", "rest_hp_lost",
+           "drops_share", "value_share", "value_per_min", "longest_idle", "stuck_s", "safety_stops", "safety_at",
            "alive_s", "hurt", "trip_hurt", "pile_hurt", "stand_hurt", "knock_falls", "fresh_hurt", "wait_s",
            "wait_hp_lost")
 
@@ -695,8 +688,8 @@ def table(results: list[dict]) -> str:
 
 def _mean(results: list[dict], key: str):
     vals = [r[key] for r in results if isinstance(r.get(key), (int, float))]
-    if key in ("died_at", "fell_out_at", "left_map_at"):
-        return sum(1 for r in results if r.get(key) is not None)  # deaths, falls out of the map, portals taken
+    if key in ("died_at", "fell_out_at", "left_map_at", "safety_at"):
+        return sum(1 for r in results if r.get(key) is not None)  # deaths, falls out of the map, portals taken, stops
     return round(statistics.fmean(vals), 3) if vals else None
 
 
@@ -768,34 +761,6 @@ def _maps(base: list[dict], cand: list[dict]) -> str | None:
     return None if a == b and len(a) == 1 else f"the runs are on different maps ({sorted(a)} and {sorted(b)})"
 
 
-def compare_rest(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
-    """Step 7's bar (`--rest-avoid`) on 20-minute runs: no more HP lost on the trips to rest on average
-    (over the seeds both have, and with trips to rest on both sides), and no death. EXP a minute and the
-    drops share are shown, not judged. (`rests` measures the trips themselves, with far more of them.)"""
-    every = cand
-    if (maps := _maps(base, cand)) is not None:
-        return False, [maps, "does NOT pass the rest bar"]
-    base, cand = _paired(base, cand)
-    if len(cand) < MIN_PAIRS:
-        return False, [f"{len(cand)} seed(s) in both runs: the bar needs {MIN_PAIRS}", "does NOT pass the rest bar"]
-    lines, ok = [], True
-    a, b = _mean(base, "rest_hp_lost"), _mean(cand, "rest_hp_lost")
-    trips = (sum(r.get("rest_trips") or 0 for r in base), sum(r.get("rest_trips") or 0 for r in cand))
-    a = a if trips[0] else None  # no trip to rest measured on a side: nothing to judge
-    b = b if trips[1] else None
-    good = a is not None and b is not None and b <= a  # runs saved before rest_hp_lost existed don't count
-    lines.append(f"rest_hp_lost: {a} -> {b} ({'ok' if good else 'worse' if a is not None and b is not None else 'missing'}); rest trips "
-                 f"{_mean(base, 'rest_trips')} -> {_mean(cand, 'rest_trips')}")
-    ok &= good
-    deaths = sum(1 for r in every if r.get("died_at") is not None)
-    lines.append(f"deaths: {deaths}")
-    ok &= deaths == 0
-    for key in ("exp_per_min", "drops_share", "hp_lost"):
-        lines.append(f"{key}: {_mean(base, key)} -> {_mean(cand, key)} (shown only)")
-    lines.append("PASSES the rest bar" if ok else "does NOT pass the rest bar")
-    return ok, lines
-
-
 def save(name: str, results: list[dict]) -> None:
     FOLDER.mkdir(parents=True, exist_ok=True)
     (FOLDER / f"{name}.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
@@ -803,65 +768,6 @@ def save(name: str, results: list[dict]) -> None:
 
 def load(name: str) -> list[dict]:
     return json.loads((FOLDER / f"{name}.json").read_text(encoding="utf-8"))
-
-
-# --- trips to rest (step 7) ------------------------------------------------------------------------------
-
-REST_FROM = [(36, 300.0), (36, 800.0), (17, 1100.0), (4, 450.0), (12, -300.0), (2, 0.0), (18, 300.0),
-             (21, -300.0), (1, 1200.0), (34, -300.0)]  # hunting grounds, where a stop on "HP low" leaves her
-REST_HP = 0.28  # under the hunter's 30%: the trip a stop on low HP starts
-
-
-def rest_trip(avoid: bool, k: int) -> dict:
-    """One trip to rest from REST_FROM[k], at REST_HP, in world 100 + k of the game preset: the touches that
-    hurt her on the way (from the 'rest_trip' event to the 'rest' one: not while she sits) and the HP they
-    took, how long the trip took (None if it never ended), and whether she died."""
-    from .. import telemetry
-    from . import scenarios
-    noise, realism = PRESETS["game"]
-
-    def fn(sim):
-        tour = sim.tour_stack()
-        tour.rest_avoid = avoid
-        tour.rest(max_seconds=0.1)
-
-    sc = scenarios.Scenario("rest", fn, REST_FROM[k % len(REST_FROM)], monsters="all", seed=100 + k, hp=REST_HP,
-                            limit=300, noise=noise, realism=realism, may_die=True)
-    with telemetry.captured() as records:
-        _, sim = scenarios.run_sim(sc)
-    w = sim.world
-    a, b = (_rest_trips(records) or [(0.0, float("inf"))])[0]
-    return {"avoid": avoid, "k": k, "hurt": sum(1 for t, hp in w.touch_log if hp and a <= t <= b),
-            "hp_lost": sum(hp for t, hp in w.touch_log if a <= t <= b),
-            "dead": w.dead, "seconds": round(b - a, 1) if b != float("inf") else None,
-            "kills": sum(1 for t, _, _, who in w.kill_log if who == "her" and a <= t <= b)}
-
-
-def _rest_trip_args(a: tuple) -> dict:
-    return rest_trip(*a)
-
-
-def rest_trials(trips: int, jobs: int = 1) -> tuple[bool, list[str]]:
-    """`trips` trips to rest each way (transit, and transit with avoidance: `--rest-avoid`), paired by start
-    and world. Step 7's bar: less HP lost on the way on average, and no death."""
-    args = [(a, k) for a in (False, True) for k in range(trips)]
-    if jobs <= 1:
-        res = [rest_trip(*a) for a in args]
-    else:
-        from gamelab.sim import harness
-        with ProcessPoolExecutor(max_workers=jobs) as pool:
-            res = list(pool.map(harness._rest_trip_args, args))
-    lines, means = [], {}
-    for avoid in (False, True):
-        rs = [r for r in res if r["avoid"] == avoid]
-        done = [r["seconds"] for r in rs if r["seconds"] is not None]
-        means[avoid] = statistics.fmean(r["hp_lost"] for r in rs)
-        lines.append(f"{'avoid' if avoid else 'transit'}: HP lost {means[avoid]:.1%} a trip, "
-                     f"{statistics.fmean(done) if done else float('nan'):.1f} s, deaths {sum(r['dead'] for r in rs)}, "
-                     f"kills on the way {sum(r['kills'] for r in rs)}, not there in time {len(rs) - len(done)}")
-    ok = means[True] <= means[False] and not any(r["dead"] for r in res if r["avoid"])
-    lines.append("--rest-avoid PASSES the rest bar" if ok else "--rest-avoid does NOT pass the rest bar")
-    return ok, lines
 
 
 # --- checking the bookkeeping ----------------------------------------------------------------------------
@@ -925,12 +831,7 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("compare")
     c.add_argument("baseline")
     c.add_argument("candidate")
-    c.add_argument("--bar", choices=("hunt", "rest"), default="hunt",
-                   help="hunt: the loop's bar (default); rest: --rest-avoid's (HP lost on the trips to rest)")
     sub.add_parser("check")
-    t = sub.add_parser("rests")
-    t.add_argument("--trips", type=int, default=40)
-    t.add_argument("--jobs", type=int, default=1)
     args = p.parse_args(argv)
     from . import scenarios
     map_id = getattr(args, "map", FIRST_MAP)
@@ -939,12 +840,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd == "check":
         return check()
-    if args.cmd == "rests":
-        ok, lines = rest_trials(args.trips, args.jobs)
-        print("\n".join(lines))
-        return 0 if ok else 1
     if args.cmd == "compare":
-        ok, lines = (compare_rest if args.bar == "rest" else compare)(load(args.baseline), load(args.candidate))
+        ok, lines = compare(load(args.baseline), load(args.candidate))
         print("\n".join(lines))
         return 0 if ok else 1
     if args.map not in PRESET_MAPS.get(args.preset, (args.map,)):

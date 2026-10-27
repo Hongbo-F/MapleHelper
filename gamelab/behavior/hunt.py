@@ -384,7 +384,6 @@ class HuntReport:
     throws: int = 0
     piles: int = 0             # piles gone after (picked up, or tried)
     on_the_way: int = 0        # EXP gains while travelling to an objective
-    rests: int = 0
     rules: Counter = field(default_factory=Counter)  # passes each rule decided
     stop: str = ""
 
@@ -393,12 +392,12 @@ class HuntReport:
                 f"+{self.exp_read}" + (f", {self.exp_read * 60 / self.seconds:.1f} a minute" if self.seconds else ""))
         return (f"{self.seconds:.0f} s; grounds {self.grounds}; kills: {kills_text(self.kills)} "
                 f"(EXP gains {self.exp_gains}, EXP {self.exp:.0f}; off her EXP number {read}); throws {self.throws}; "
-                f"piles {self.piles}; rests {self.rests}; ended: {self.stop}")
+                f"piles {self.piles}; ended: {self.stop}")
 
 
 class Hunt:
     """Hunt mode over a Tour's knowledge of the map (its value map, kinds worth hunting, safe platforms,
-    spots and rest) and its hunter and navigator."""
+    spots and stand-by) and its hunter and navigator."""
     valuable: float = VALUABLE  # rule 6a's: what a drop must be worth on its own, on her map (looting.Worth.valuable)
 
     def __init__(self, tour, log=print, rng: random.Random | None = None):
@@ -428,8 +427,6 @@ class Hunt:
         self._hung_at = 0.0                  # ... since when
         self._rope_rest = 0.0                # no rope before this (ROPE_AGAIN_S)
         self._rule = ""
-        self._potions_out = False
-        self._potion_misses = 0              # potions in a row that brought no HP back
         # Leaving a ground: the piles to collect first (None: not leaving), the ones left when she decided
         # to go. Only those: going after the drops of monsters shot on the way to them too, every kill on
         # a trip made another trip, and she never left. The decision itself is made again at every pass
@@ -501,7 +498,7 @@ class Hunt:
         if meter.since is not None:
             self.report.exp_read = meter.total - (read or 0)
         self.report.stop = self.report.stop or "time up"
-        self.tour.rest_and_stand_by(mode=TRANSIT)
+        self.tour.stand_by(mode=TRANSIT)
         return self.report
 
     def _paused(self, seconds: float) -> None:
@@ -547,8 +544,7 @@ class Hunt:
         self._publish()
         if self._stuck():
             return "stop"
-        if self._safety(s):
-            return None
+        self.h.health_check(s)  # her potions, and the safety stop (behavior.safety: it raises)
         o = self.obj
         if o is not None and o.age() >= OBJECTIVE_S:
             telemetry.emit("event", kind="backstop", text=f"OBJECTIVE_S: {OBJECTIVE_S:.0f} s on {o.text()}")
@@ -846,51 +842,6 @@ class Hunt:
         a place better than hunting on the ground by the map's danger, or the ground itself where none is)."""
         v = self.visit
         return spots.spot_ok(self.model, pid, self.kinds) or (v is not None and pid == v.spot.platform)
-
-    # --- safety -------------------------------------------------------------------------------------
-
-    def _safety(self, s: Scene) -> bool:
-        """Potions, and a rest below --low-hp (at once) or --rest-below (at a calm moment, or at once once
-        potions have run out). True if it did something."""
-        potions = self.h.report.potions
-        stop = self.h.health_check(s)
-        if self.h.report.potions > potions:
-            self._check_potion(s.hp)
-        if stop or (s.hp < self.tour.rest_below and (self._potions_out or not s.monsters)):
-            self._rest(stop or f"HP {s.hp:.0%}")
-            return True
-        return False
-
-    def _check_potion(self, before: float) -> None:
-        """Two potions in a row that bring no HP back mean none are left: stop counting on them. (One isn't
-        enough: a hit in the same moment takes back what it gave.)"""
-        time.sleep(0.5)
-        if self.h.look(mobs=False).hp > before + 0.01:
-            self._potion_misses = 0
-            self._potions_out = False  # a false alarm after all
-            return
-        self._potion_misses += 1
-        if self._potion_misses >= 2 and not self._potions_out:
-            # She still presses the potion key when HP is low (it does nothing without potions): switched
-            # off for good, a false alarm would leave her without potions on the trips to rest.
-            self._potions_out = True
-            self.log("  two potions brought no HP back: none left; resting as soon as HP is low")
-
-    def _rest(self, why: str) -> None:
-        self.log(f"  rest: {why}")
-        self.report.rests += 1
-        self.stack.clear()
-        self.obj = None
-        self._leave_ground()  # the visit so far goes into the value map: a rest isn't hunting time
-        # (its trip stands still while its looks fail only up to the hunt's end, as a pass does: Navigator.go)
-        self.tour.rest(stand_until=self._end)
-        self._progress = time.monotonic()
-        self._exit_piles = self._exit_reason = None  # the new visit starts undecided
-        self._potion_misses = 0
-        if self.visit is not None:  # back to the same ground: a new visit, from its spot
-            v = self.visit
-            self.visit = Visit(v.ground, v.spot, changes=v.changes)
-            self._to_spot_obj(v.spot)
 
     def _stuck(self) -> bool:
         if time.monotonic() - self._progress < STUCK_S:
@@ -1607,7 +1558,7 @@ class Hunt:
 
     def _interrupt(self, s: Scene) -> bool:
         """Asked before every chain of a trip: whether a rule calls for her here (close quarters, a valuable pile,
-        one she has hurt to finish, a target in reach she may shoot, a pile on the way, an urgent pile, low HP). A
+        one she has hurt to finish, a target in reach she may shoot, a pile on the way, an urgent pile). A
         valuable or an urgent pile calls for her only where it goes ahead of what's in reach (`_loot_first`, as `_pass`
         asks it): one that waits stopped the trip "in position" on its first look, no move made, and the next pass
         sent her off on it again, again and again, neither shooting nor moving once her time in passing there was spent
@@ -1617,8 +1568,6 @@ class Hunt:
         reaches isn't one of its targets, and stopped every trip on its first look: in loop_tree_walls a green mushroom
         on the spot's platform, above her, held her 107 s, the pass deciding 2,373 times and never moving (found
         offline, 2026-10-25)."""
-        if s.hp < self.h.low_hp:
-            return True
         here = s.platform.id
         if self._close_quarters(s, s.monsters):
             return True
@@ -1795,7 +1744,8 @@ class Hunt:
 
     def _while_hanging(self, s: Scene) -> None:
         """A look while she waits on a rope (a whole-screen one: the ground's monsters): off it (control.mover.unhang)
-        when there's a reason to (_off_rope), else a moment more. Potions as anywhere (Hunter.health_check)."""
+        when there's a reason to (_off_rope), else a moment more. Potions and the safety stop as anywhere
+        (Hunter.health_check)."""
         self._note("wait")
         wide = self.h.look(mobs=True, wide=True, loot=False)
         if wide.where is not None and wide.platform is None:
@@ -1813,14 +1763,13 @@ class Hunt:
         return None
 
     def _off_rope(self, s: Scene) -> str | None:
-        """Why she gets off the rope she waits on now, or None: HP to rest at (Hunter.health_check, which drinks
-        meanwhile); the rope no safer than where she'd land; a monster she hunts on the ground (or in reach of where
+        """Why she gets off the rope she waits on now, or None (Hunter.health_check first: potions, the safety stop):
+        the rope no safer than where she'd land; a monster she hunts on the ground (or in reach of where
         she lands), with none where she lands so near that a throw at it would be the claw's swipe (stance.close_to:
         she lets it pass under her; waiting for a Horny Mushroom to walk out of its keep-off, then 162, she hung for
         minutes on 31 in the simulator); nothing due back and another ground to go to; or HANG_MAX_S up there."""
         r, d, now = self._hanging, self.danger, time.monotonic()
-        if (stop := self.h.health_check(s)) is not None:
-            return f"{stop}: to rest"
+        self.h.health_check(s)
         seen = s.monsters
         below = d.at(r.platform, r.x, seen)
         if d.on_rope(r.rope, s.where.y, seen) > below:

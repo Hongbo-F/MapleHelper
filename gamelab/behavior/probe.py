@@ -418,7 +418,8 @@ class _Guard:
 
 def run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float = 900, crowd: int | None = None) -> ProbeReport:
     """Run `probe` (see the module's docstring) until it has thrown probe.throws times, for at most
-    `seconds`, or until her HP is too low (h.health_check) or she can't be placed or get back to her place.
+    `seconds`, or until she can't be placed or get back to her place (her HP staying low raises the safety stop:
+    h.health_check).
     `crowd`: how many others may be in front at a throw (None: the probe's own, Probe.crowd).
     Every throw is logged to lab/probe_geometry.jsonl. The wall switch (reach.WALLS_BLOCK) is the probe's for
     the run, and put back after it, however it ends."""
@@ -460,9 +461,7 @@ def _run(h: "Hunter", nav: "Navigator", probe: Probe, seconds: float, crowd: int
                 time.sleep(0.2)
             continue
         unplaced = None
-        if stop := h.health_check(s):
-            report.stop = stop
-            break
+        h.health_check(s)
         if flying is not None:
             if not flying.over(s.t):
                 continue

@@ -109,7 +109,7 @@ class Grind(Hunt):
 
     def _learn_hp(self, s: Scene) -> None:
         """Her HP bar between two looks (HP_GAP_S apart at most), what went charged to the platform she was on
-        (Patrol.learn_hp): a rise (a potion, the chair) counts as none lost; a reading under 2% isn't taken (the bar
+        (Patrol.learn_hp): a rise (a potion) counts as none lost; a reading under 2% isn't taken (the bar
         flashes)."""
         if s.platform is None or s.hp is None or s.hp < 0.02:
             return
@@ -322,13 +322,6 @@ class Grind(Hunt):
         telemetry.emit("grind", what="next", **info)
         telemetry.emit("tour", order=list(self.report.grounds), stop=stop.platform,
                        spot={"platform": stop.platform, "x": round(stop.x, 1), "coverage": 1.0})
-
-    def _rest(self, why: str) -> None:
-        """A rest (the hunt loop's), then the next stop from where she rested, not back to the one she left."""
-        super()._rest(why)
-        if self.visit is not None:
-            self.stop = None
-            self._next_ground(self.nav.mover.settle())
 
     def _leave_ground(self) -> None:
         """A stop's stay is kept (`stays`); the value map isn't written (see the top)."""

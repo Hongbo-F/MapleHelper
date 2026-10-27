@@ -79,8 +79,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   died as long as its death animation runs (MobBody.die_s: a pig 0.66 s, a snail 1.26), and respawns 8 s
   later where it spawned;
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
-  HP potion key gives 30% HP, the chair key sits her down (+3% HP/s) until an arrow stands her up; her pet
-  (Her.pet), if she has one, drinks a potion for her right after a touch leaves her under its warning.
+  HP potion key gives 30% HP; her pet (Her.pet), if she has one, drinks a potion for her right after a touch leaves
+  her under its warning. (Until 2026-10-26 the chair key sat her down, +3% HP a second, until an arrow stood her up:
+  the stack rested on it.)
 
 Her HP, her level and EXP when a run starts, her evasion, her pet and what her attack does (her regular attack's star,
 or Lucky Seven as thrown live: LUCKY_SEVEN) are `Her`'s: LEVEL_19 on the first map, LEVEL_23 on West Rocky Mountain II,
@@ -356,8 +357,6 @@ KNOCK_FALL_DY = 30.0     # units: a knock that lands her this much lower than wh
 # first read feeds it once (60 -> 90), as she fed it at the start before it was read. The pet care reads it off the
 # world (sim.fakes.FakePetCare: no window, no OCR, no clicks).
 PET_FULLNESS = 60.0
-CHAIR_HP_PER_S = 0.03
-STAND_UP = 0.2           # s the arrow press that stands her up from the chair takes
 # What isn't known of the game's physics, which the simulator can run either way (Realism.sides, zero_walls,
 # rope_reach; the defaults are the simulator's own, as its golden traces were recorded with):
 # - The map's sides. The simulator's: its platforms' outermost ends, which stop her in the air only. HeavenClient's
@@ -1077,10 +1076,9 @@ class World:
         self.seen: dict[str, int] = {}  # the arrows the game sees held -> the order it saw them pressed in
         self._seen_count = 0
         self._seen_due: dict[str, int] = {}  # each arrow's latest change the game is yet to see (its tick)
-        self.still_ms = 0               # she can't move before this tick (climbing over a rope's top, standing up)
+        self.still_ms = 0               # she can't move before this tick (climbing over a rope's top)
         self.left_rope_ms = -10_000
         self.attack_ms = (-10_000, -10_000)  # the last attack's animation: from its start to its lock's end
-        self.sitting = False
         self.hp = hp
         self.mp = 1.0
         self.exp = 0
@@ -1240,16 +1238,15 @@ class World:
         if "up" in self.held:
             self._through_portal()
         self._touch()
-        if self.sitting:
-            self.hp = min(1.0, self.hp + CHAIR_HP_PER_S * dt)
         if self.character.mp > 0 and self.mp < 1.0:
             self.mp = min(1.0, self.mp + MP_REGEN * dt / self.character.mp)
         self.ms += TICK_MS
 
     def _through_portal(self) -> bool:
-        """Up held: in an exit's box (mapdata.PORTAL_BOX) while she isn't on a rope, sitting or attacking, she goes
-        through it and leaves the map (SimLeftMap), on the ground or in the air (HeavenClient's Stage::update)."""
-        if self.left_map_at is not None or self.mode == "rope" or self.sitting or self.ms < self.attack_lock_ms:
+        """Up held: in an exit's box (mapdata.PORTAL_BOX) while she isn't on a rope or attacking (or sitting: the
+        simulator has no chair), she goes through it and leaves the map (SimLeftMap), on the ground or in the air
+        (HeavenClient's Stage::update)."""
+        if self.left_map_at is not None or self.mode == "rope" or self.ms < self.attack_lock_ms:
             return False
         for pt in self.portals:
             if abs(pt.x - self.x) <= PORTAL_BOX[0] and pt.y - PORTAL_BOX[1] <= self.y <= pt.y + PORTAL_BOX[2]:
@@ -1368,8 +1365,8 @@ class World:
         self._push(ms, "seen", (action, down))
 
     def _seen(self, action: str, down: bool) -> None:
-        """The game sees an arrow go down (she turns that way, and it stands her up from the chair) or up. In the air
-        the step it turned her at, and the way she faced before, are kept (AIR_TURN_SAME_STEP)."""
+        """The game sees an arrow go down (she turns that way) or up. In the air the step it turned her at, and the way
+        she faced before, are kept (AIR_TURN_SAME_STEP)."""
         if self.dead:
             return
         if not down:
@@ -1381,9 +1378,6 @@ class World:
         if self.mode == "air" and side != self.facing:
             self._air_turn = (self.ms, self.facing)
         self.facing = side
-        if self.sitting:
-            self.sitting = False
-            self.still_ms = self.ms + int(STAND_UP * 1000)
 
     def turn(self, side: str, why: str = "turned from outside") -> None:
         """Something that isn't her keys turns her `side` (Noise.turned, Realism.knock_turns): her frame shows it."""
@@ -1403,10 +1397,6 @@ class World:
         elif action == "jump":
             if self.ms < self.attack_lock_ms:
                 return
-            if ground and self.sitting:
-                self.sitting = False
-                self.still_ms = self.ms + int(STAND_UP * 1000)
-                return
             if "down" in self.held and self.mode != "rope":  # on the ground: a drop; in the air: nothing
                 if ground:
                     self._push(self.ms + int(DROP_LAG * 1000), "drop", self.plat.id)
@@ -1424,7 +1414,6 @@ class World:
                 return  # too little MP: nothing thrown, no lock
             self.attack_lock_ms = self.ms + int(ATTACK_LOCK * 1000)
             self.attack_key_at = at
-            self.sitting = False
             self.attacks += 1
             step = self._acts(at, self._lag(action, LAGS.on, LAGS.sd_on))  # the step the game acts on it at
             self._push(self.ms_of(at + JUMP_LAG), "aim", (self.ms, skill, self._key_tag, step))  # it starts then
@@ -1452,10 +1441,6 @@ class World:
             self.pet_fed += 1
             self.pet_full, self.pet_since = min(100.0, self.pet_fullness() + pet_care.FOOD), self.t
             self.note("feeds her pet")
-        elif action == "chair":
-            if ground and abs(self.vx) < 1:
-                self.sitting = not self.sitting
-                self.note("sits on the chair" if self.sitting else "stands up from the chair")
 
     def _released(self, action: str, at: float, since: float) -> None:
         """Key `action`, down since clock time `since`, let go at clock time `at`."""
@@ -1481,7 +1466,7 @@ class World:
         if "down" in self.held and self._grab_from_top():
             return
         if self.ms == self.step_at(self.ms):  # the game's step: her speed for the step to come (body.replay)
-            lying = "down" in self.held or self.sitting
+            lying = "down" in self.held
             d = 0 if lying or self.ms < self.still_ms else self.arrow()
             self.step_arrow = d
             if not d and not self.vx:
@@ -1540,7 +1525,6 @@ class World:
         self.mode, self.plat, self.rope, self.flight, self.flight_ms = "air", None, None, f, from_ms
         self.flight_arrow, self.flight_skip = arrow, skip
         self.vx, self.vy = f.speeds[0]
-        self.sitting = False
 
     def _liftoff(self, pressed_on: str) -> None:
         """The game takes a jump key pressed while she was `pressed_on` ground, in the air or on a rope:
@@ -1631,7 +1615,6 @@ class World:
         self.mode, self.rope, self.plat, self.flight, self.group = "rope", r, None, None, body.ROPE_GROUP
         self.knocked = False
         self.x, self.y, self.vx, self.vy = r.x, min(max(self.y, r.top), r.bottom), 0.0, 0.0
-        self.sitting = False
         self.note(f"grabs the rope at x {r.x:.0f}")
 
     def _leave_rope(self) -> None:
@@ -2199,7 +2182,7 @@ def _actions(keys: GameKeys) -> dict[str, str]:
     out = {}
     for field_name, action in (("left", "left"), ("right", "right"), ("up", "up"), ("down", "down"),
                                ("jump", "jump"), ("attack", "attack"), ("lucky_seven", "skill"),
-                               ("pick_up", "pick"), ("chair", "chair"), ("hp_potion", "potion"),
+                               ("pick_up", "pick"), ("hp_potion", "potion"),
                                ("pet_food", "pet_food")):
         k = getattr(keys, field_name, None)
         if k is not None:

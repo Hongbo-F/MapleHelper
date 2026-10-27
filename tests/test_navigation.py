@@ -911,7 +911,7 @@ def test_tour_seed_seeds_the_route_choices_too(monkeypatch):
     rngs = {}
 
     class Tour:
-        def __init__(self, hunter, nav, log, rng, rest_below, rest_avoid=False):
+        def __init__(self, hunter, nav, log, rng):
             rngs["tour"] = rng
 
         def run(self, **kw):
@@ -1005,7 +1005,7 @@ def test_bring_to_front_says_whether_the_game_came_and_switches_to_it_half_way(m
 
 def test_a_trip_mode_needs_an_escort_unless_it_avoids_monsters(model):
     """go(mode=...): avoid (no escort), hunt (the escort's bursts and monsters in the way) or transit (the
-    trip to rest); hunting or transit without an escort, or an unknown mode, is refused before any key."""
+    hunt loop's trips); hunting or transit without an escort, or an unknown mode, is refused before any key."""
     from types import SimpleNamespace
 
     from gamelab.control.navigator import AVOID, HUNT, TRANSIT, Navigator
@@ -1022,40 +1022,46 @@ def test_a_trip_mode_needs_an_escort_unless_it_avoids_monsters(model):
         escorted.go(0, mode="sneak")
 
 
-def test_the_trips_to_rest_and_stand_by_keep_their_modes():
-    """Tour._calm_mode: to rest, transit with an escort and transit-avoid without one (low HP never ends
-    the trip either way: it did without an escort, and she sat down among the monsters); to stand by, the
-    navigator's own mode (the tour's), or avoid; with rest_avoid, transit-avoid both ways."""
+def test_the_trip_to_stand_by_goes_in_the_mode_asked_and_avoids_monsters_without_an_escort():
+    """Tour.stand_by: over to the nearest safe platform in the mode asked (the navigator's own by default: the tour's;
+    the hunt loop's transit), avoiding monsters without an escort, and there she stands: no chair, no waiting for her
+    HP (Tour.rest went on 2026-10-26: the user, "Just remove the sit recover hp functionality")."""
     from types import SimpleNamespace
 
-    from gamelab.behavior.tour import Tour
-    from gamelab.control.navigator import AVOID, TRANSIT, TRANSIT_AVOID
+    from gamelab.behavior.tour import Tour, TourReport
+    from gamelab.control.actions import Actions
+    from gamelab.control.navigator import AVOID, TRANSIT
+    went = []
     tour = object.__new__(Tour)
-    tour.rest_avoid = False
-    tour.nav = SimpleNamespace(escort=SimpleNamespace())
-    assert (tour._calm_mode(TRANSIT), tour._calm_mode(None)) == (TRANSIT, None)
-    tour.nav = SimpleNamespace(escort=None)
-    assert (tour._calm_mode(TRANSIT), tour._calm_mode(None)) == (TRANSIT_AVOID, AVOID)
-    tour.rest_avoid = True
-    assert tour._calm_mode(TRANSIT) == tour._calm_mode(None) == TRANSIT_AVOID
+    tour.report, tour.nearest_safe = TourReport(), lambda: 25
+    for escort, mode, want in ((SimpleNamespace(), None, None), (SimpleNamespace(), TRANSIT, TRANSIT),
+                               (None, None, AVOID), (None, TRANSIT, AVOID)):
+        tour.nav = SimpleNamespace(escort=escort, go=lambda pid, mode=None: went.append((pid, mode))
+                                   or SimpleNamespace(kills=1))
+        tour.stand_by(mode)
+        assert went[-1] == (25, want)
+    assert tour.report.stop == "standing by on a safe platform" and tour.report.on_the_way == 4
+    assert not any(hasattr(Tour, name) for name in ("rest", "rest_and_stand_by", "_calm_mode"))
+    assert not any(hasattr(Actions, name) for name in ("sit", "stand"))
 
 
-def test_transit_with_avoidance_keeps_clear_of_monsters_and_only_drinks_potions(model):
-    """TRANSIT_AVOID (`tour --rest-avoid`): no escort needed, no fighting on the way, and low HP doesn't end
-    the trip (potions only, as in transit)."""
+def test_every_trip_asks_after_her_health_at_every_pass_whatever_its_mode(model):
+    """Navigator.begin: the hunter's health_check (her potions, and the safety stop, which it raises: behavior.safety)
+    is every trip's, in every mode. Until 2026-10-26 a transit trip only drank (low HP was why she went to rest, no
+    reason to stop), and `tour --rest-avoid`'s transit-avoid with it."""
     from types import SimpleNamespace
 
-    from gamelab.control.navigator import TRANSIT_AVOID, Navigator
+    from gamelab.control import navigator
+    from gamelab.control.navigator import AVOID, HUNT, TRANSIT, Navigator
+    assert navigator.MODES == (AVOID, HUNT, TRANSIT)
     key = lambda name: SimpleNamespace(name=name)
     keys = SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), up=key("up"), down=key("down"),
                            pick_up=None)
-    health, potions = (lambda s: "HP low"), (lambda s: None)
-    for escort in (None, SimpleNamespace()):
-        nav = Navigator(None, SimpleNamespace(keys=keys), model, health=health, potions=potions, escort=escort)
-        st = nav.begin(0, mode=TRANSIT_AVOID)
-        assert st.mode == TRANSIT_AVOID and st.health is potions
-        nav._mode = st.mode
-        assert not nav.fight
+    health = lambda s: None
+    for escort, modes in ((None, (AVOID,)), (SimpleNamespace(threat=lambda kind: False), (AVOID, HUNT, TRANSIT))):
+        nav = Navigator(None, SimpleNamespace(keys=keys), model, health=health, escort=escort)
+        for mode in modes:
+            assert nav.begin(0, mode=mode).health is health
 
 
 def _navigator(model, escort=None):
@@ -1578,7 +1584,7 @@ def test_a_monsters_box_for_touches_is_its_widest_and_tallest_frame(model):
 
 # --- trips with an escort keep clear of the monsters whose touch counts (Navigator._meet) ---------------------
 
-def _meeting(model, monkeypatch, escort, monster_at, mode="transit", detour=False):
+def _meeting(model, monkeypatch, escort, monster_at, mode="transit"):
     """A trip with an escort from C at x 200 to D (up the rope at 700), and the look it plans from: one Horny Mushroom
     standing at `monster_at` (platform, x), tracked as the pass tracks it. Returns the navigator, the trip, the look,
     the route, and the chain's monsters."""
@@ -1590,7 +1596,7 @@ def _meeting(model, monkeypatch, escort, monster_at, mode="transit", detour=Fals
     c, d = by_y(model, 500, 400), by_y(model, 300, 700)
     nav = _navigator(model, escort=escort)
     monkeypatch.setattr(nv.time, "sleep", lambda s: None)
-    st = nav.begin(d.id, mode=mode, detour=detour)
+    st = nav.begin(d.id, mode=mode)
     st.moved_at = -1e9  # not just after a plan: nothing to settle
     seen = walker(monster_at[1], kind="horny-mushroom", pose="stand", platform=monster_at[0])
     s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0,
@@ -1728,21 +1734,6 @@ def test_past_meet_s_without_a_move_that_arrives_she_goes_on_regardless(model, m
     assert regardless[0] and [leg.move for leg in regardless[0]] == [leg.move for leg in blind[0]]
     nav._made(st, [path[0]])
     assert st.blocked is None
-
-
-def test_on_a_trip_to_rest_a_monster_on_the_way_is_gone_around_before_it_is_shot(model, monkeypatch):
-    """TripState.detour (Tour.rest's trips): low on HP, a way around a monster that could touch her on the way is
-    looked for first (getting there is what counts); with none, it's shot if a star reaches it, else she hops it."""
-    c = by_y(model, 500, 400)
-    escort = _escort(shots=1)
-    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450), detour=True)
-    legs, keys, why = nav._chain(st, s, path, monsters, 0.0)
-    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.avoid and not escort.asked
-    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and len(escort.asked) == 1  # no way around
-    nav, st, s, path, monsters = _meeting(model, monkeypatch, _escort(shots=None), (c.id, 450), detour=True)
-    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.avoid
-    hopped = nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0)  # no star reaches it: hopped
-    assert [leg.move.kind for leg in hopped[0]] == ["hop", "climb"]
 
 
 def test_where_no_kind_counts_an_escorts_chains_are_planned_as_before(model, monkeypatch):

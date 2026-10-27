@@ -441,7 +441,10 @@ def test_a_short_harness_run_on_tree_dungeon():
     assert out["map"] == TREE and out["world"] == ["zero-walls"] and "left_map_at" in out and out["coverage"]
 
 
-def test_the_harness_has_the_hunt_loop_with_low_hp_at_half_to_compare_against():
+def test_the_harness_builds_her_hunter_as_the_command_line_does():
+    """The harness's policies build the hunter as `tour` does: her potion key's 0.45, and the safety stop's threshold
+    its default (behavior.safety.SAFETY_HP: `--low-hp` not given). `loop-avoid` (the trips to rest keeping clear of
+    monsters) and `loop-hp50` (resting under half her HP) went with the rests on 2026-10-26."""
     from types import SimpleNamespace
     from gamelab.sim import harness
     made = []
@@ -449,14 +452,15 @@ def test_the_harness_has_the_hunt_loop_with_low_hp_at_half_to_compare_against():
     class Stop(Exception):
         pass
 
-    def hunter(low_hp, potion_hp):
-        made.append((low_hp, potion_hp))
+    def hunter(**kw):
+        made.append(kw)
         raise Stop
     sim = SimpleNamespace(hunter=hunter)
-    for policy, low in (("loop", 0.3), ("loop-hp50", 0.5)):
+    assert set(harness.POLICIES) == {"tour", "loop", "loop-grind"}
+    for policy in harness.POLICIES:
         with pytest.raises(Stop):
             harness.POLICIES[policy](sim)
-        assert made[-1] == (low, 0.45)
+        assert made[-1] == {"potion_hp": 0.45}
 
 
 def test_on_tree_dungeon_23s_left_end_is_a_long_drop_its_left_part_is_under_22_and_23_is_shot_from_24_off_its_green():

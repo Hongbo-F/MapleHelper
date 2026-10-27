@@ -140,7 +140,6 @@ def test_grounds_about_as_good_go_to_the_one_she_was_at_longest_ago(monkeypatch)
 def test_a_pile_objective_no_longer_worth_it_ends_the_trip_to_it():
     pile = _pile(10, status="gone")  # seen gone on the way
     h = _hunt([pile])
-    h.h.low_hp = 0.3
     h.obj = Objective("pile", 2, 100.0, pile=pile)
     s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=1), where=SimpleNamespace(x=0.0, y=0.0), monsters=[])
     assert h._interrupt(s)
@@ -164,20 +163,6 @@ def test_kills_count_for_the_visit_only_on_its_ground_or_from_it_and_its_spot():
                                         Kill(now, "slime", 17, 900.0, -335.0, 17)])  # on 17, while she's on 17
     h._book(SimpleNamespace(platform=SimpleNamespace(id=17)))
     assert h.visit.exp == 13 and len(h.visit.kills) == 1 and h.report.on_the_way == 1 and h.report.exp == 25
-
-
-def test_potions_are_out_only_after_two_in_a_row_bring_no_hp_back(monkeypatch):
-    monkeypatch.setattr(hunt.time, "sleep", lambda s: None)
-    h = _hunt([])
-    hp = iter([0.40, 0.70, 0.40, 0.40])  # a miss, a potion that worked, then two misses
-    h.h.look = lambda mobs=True: SimpleNamespace(hp=next(hp))
-    h.h.potion_hp = 0.45
-    h.log, h._potions_out, h._potion_misses = (lambda m: None), False, 0
-    for _ in range(3):
-        h._check_potion(0.40)
-    assert not h._potions_out
-    h._check_potion(0.40)
-    assert h._potions_out and h.h.potion_hp == 0.45  # she still presses the key: a false alarm costs nothing
 
 
 def test_the_ground_is_judged_empty_only_from_looks_that_cover_it_for_a_while():
@@ -274,7 +259,6 @@ def test_in_passing_she_steps_out_from_under_a_target_off_her_level(monkeypatch)
     h = _hunt([])
     h.model, h._tops, h._halves = None, {}, {}
     h.h.actions = SimpleNamespace(facing=None)
-    h.h.low_hp = 0.3
     h.kinds = None
     h._hits = lambda s, m: False
     h._close_quarters = lambda s, monsters: False
@@ -398,7 +382,7 @@ def test_a_trip_stops_for_a_valuable_or_urgent_pile_only_where_it_goes_ahead_of_
     # her time in passing there was spent (review, 2026-10-25).
     ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
     h = _shooter([ore])
-    h.h.low_hp, h.model, h._tops, h._halves = 0.3, None, {}, {}
+    h.model, h._tops, h._halves = None, {}, {}
     h._close_quarters = lambda s, monsters: False
     h._owed = lambda s, monsters: None
     h._standable = lambda pid: False
@@ -428,7 +412,7 @@ def test_a_trip_stops_for_what_is_in_reach_only_where_the_pass_would_shoot_it():
     sent her on again, 2,373 times in 107 s in loop_tree_walls (found offline, 2026-10-25). On the ground, on her
     platform, or in a star's reach, it stops the trip as before."""
     h = _shooter([])
-    h.h.low_hp, h.model, h._tops, h._halves = 0.3, None, {}, {}
+    h.model, h._tops, h._halves = None, {}, {}
     h._close_quarters = lambda s, monsters: False
     h._owed = lambda s, monsters: None
     h._standable = lambda pid: False
@@ -665,7 +649,7 @@ def test_on_her_own_platform_a_pile_by_one_the_look_missed_waits_and_a_trip_for_
     assert h._pile_here(s) is None
     spot_obj = Objective("spot", spot, 1000.0, ground=ground)
     h.stack, h.obj = [spot_obj], Objective("pile", ground, 750.0, pile=pile, why="on the way")
-    h.h.low_hp, h._tops, h._halves = 0.3, {}, {}
+    h._tops, h._halves = {}, {}
     s.hp = 1.0
     assert h._interrupt(s)  # not clear any more: the trip stops ...
     h._call_off(h.obj, h._pile_block(s, pile))  # ... and `_pass` calls it off: the pile still known, not tried

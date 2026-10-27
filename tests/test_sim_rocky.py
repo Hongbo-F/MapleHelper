@@ -50,7 +50,7 @@ def test_she_is_level_19_on_the_first_map_and_level_23_with_her_pet_on_west_rock
                                                mp_potion=None, pet_food=K("u"))
     assert world_mod._actions(SIM_KEYS_PET) == {"left": "left", "right": "right", "up": "up", "down": "down",
                                                 "alt": "jump", "ctrl": "attack", "shift": "skill", "z": "pick",
-                                                "d": "chair", "u": "pet_food"}
+                                                "u": "pet_food"}  # (the chair key does nothing: no rests)
 
 
 def test_a_scenario_runs_on_its_own_map_with_her_as_she_is_there():
@@ -245,7 +245,6 @@ def test_the_harness_runs_on_either_map_and_compares_runs_of_one_map_only():
     there = [dict(r, map=ROCKY) for r in better]
     ok, lines = harness.compare(base, there)
     assert not ok and lines[0] == "the runs are on different maps ([10000012] and [10004021])"
-    assert not harness.compare_rest(base, there)[0]
     assert harness.compare([dict(r, map=ROCKY) for r in base], there)[0]
 
 

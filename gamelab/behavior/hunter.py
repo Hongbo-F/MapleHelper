@@ -5,9 +5,10 @@ The decider (a person, or Claude) picks objectives; the hunter makes the small d
 look at the game, keep the target at the far end of a star's reach, face it, throw (the regular attack, or with
 `attack` 'choice' Lucky Seven but to finish a monster and while her MP is under a cast: behavior.attacks), step away
 from monsters that get close, loot each kill straight away when it fell on her platform (drops elsewhere are
-remembered for the tour to collect), drink a potion when HP gets low, and hand control back when HP is too low, the
-target is gone, nothing is left in reach, or the time is up. Every key goes through the gamelab player, so the Lie
-Detector watchdog stops everything the moment the game's anti-bot check appears.
+remembered for the tour to collect), drink a potion when HP gets low, and hand control back when the target is gone,
+nothing is left in reach, or the time is up. Her HP staying low (her pet's potions not keeping her up) ends the hunt:
+the safety stop (behavior.safety). Every key goes through the gamelab player, so the Lie Detector watchdog stops
+everything the moment the game's anti-bot check appears.
 
 It's made of the layers below: Senses (perception and localization: every look), Actions (control:
 her keys), a Looter (what she picks up and remembers), and the fight loops (behavior.fight). After every
@@ -55,6 +56,7 @@ from .fight import Report
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
+from .safety import SAFETY_HP, HpWatch
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
@@ -86,9 +88,11 @@ class Hunter:
     """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
-                 low_hp: float = 0.35, potion_hp: float = 0.5, skill: bool = False, feed=None,
+                 low_hp: float | None = None, potion_hp: float = 0.5, skill: bool = False, feed=None,
                  her: danger.Her | None = None, attack: str | None = None):
-        """`feed`: what her looks and glances come from (localization.feed.Feed: the perception service's client live,
+        """`low_hp`: the safety stop's threshold (behavior.safety: her HP under it for SAFETY_S ends the hunt; None:
+        SAFETY_HP); `potion_hp`: her potion key's (drink_if_low; none bound, her pet drinks them). `feed`: what her
+        looks and glances come from (localization.feed.Feed: the perception service's client live,
         localization.service; SyncFeed in the simulator; None: the step on the eyes' own frames, feed.InlineFeed), told
         of her throws. `her`: her HP and level, what a touch is measured against (attack.danger; config.toml [character]
         by default). `attack`: which attack each throw is (behavior.attacks.MODES: 'choice', Lucky Seven but
@@ -98,7 +102,8 @@ class Hunter:
         self.model, self.log = model, log
         c = physics.CHARACTER
         self.danger = danger.of_map(model, her or danger.Her(c.hp, c.level))  # where touches would cost her
-        self.low_hp, self.potion_hp = low_hp, potion_hp
+        self.potion_hp = potion_hp
+        self.hp_watch = HpWatch(SAFETY_HP if low_hp is None else low_hp)  # the safety stop's: every look's HP (_vitals)
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
         mode = attack or ("skill" if skill else "regular")
@@ -156,7 +161,7 @@ class Hunter:
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:
         """A look (Senses.look); drops are looked for as her inventory allows (only mesos when it's full). Not with
-        the Lie Detector alarm up (client.LieDetectorAlarm): a hunt that only looks for a while (waiting, resting)
+        the Lie Detector alarm up (client.LieDetectorAlarm): a hunt that only looks for a while (waiting, standing by)
         stops there too, as at its next key plan, and retreats (behavior.retreat)."""
         client.check_alarm()
         return self.senses.look(mobs, wide, loot, mesos_only=self.looter.inventory_full)
@@ -173,20 +178,21 @@ class Hunter:
         """A navigator for her: `fighting`, she shoots monsters on the way (hunting tours) instead of
         avoiding them; its fighting trips keep clear of the monsters her memory has too (Navigator.remembered)."""
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
-                         potions=self.drink_if_low, escort=fight.FightOnTheWay(self) if fighting else None,
-                         rng=rng, memory=self.memory)
+                         escort=fight.FightOnTheWay(self) if fighting else None, rng=rng, memory=self.memory)
 
     def knocked(self, s: Scene) -> bool:
         """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it)
         saw her HP drop."""
         return self.hit_at is not None and 0 <= s.t - self.hit_at < KNOCK_S
 
-    def health_check(self, s: Scene) -> str | None:
-        """Drink if HP is low; returns a reason to stop if it's too low."""
-        if s.hp < self.low_hp:
-            return f"HP low ({s.hp:.0%})"
+    def health_check(self, s: Scene) -> None:
+        """Asked at every look of a fight, a trip and a pass of the hunt loop: her potions and her pet's food
+        (drink_if_low), and the safety stop: her HP under its threshold SAFETY_S over SAFETY_LOOKS looks (`hp_watch`,
+        which every look feeds) raises behavior.safety.SafetyStop, once. Until 2026-10-26 under `low_hp` (30% in a tour)
+        it stopped the fight at once, "HP low", and the tour or the hunt loop sent her to rest on the chair."""
         self.drink_if_low(s)
-        return None
+        if (stop := self.hp_watch.due()) is not None:
+            raise stop
 
     def _doubt_hp(self, s: Scene) -> None:
         """An HP of HP_ZERO or less a look after HP_DOUBT_AFTER or more isn't believed until the next look reads it too:
@@ -212,10 +218,9 @@ class Hunter:
 
     def drink_if_low(self, s: Scene) -> None:
         """Drink an HP potion below `potion_hp` (one every POTION_EVERY s at most), and feed her pet when it's due
-        (feed_pet_if_due). The health check on the way to rest: low HP is why she's going, not a reason to stop. With
-        no potion key (her pet drinks them since 2026-10-23), nothing: it logged "drinking a potion" at every look
-        under `potion_hp` and drank none (in the simulator on West Rocky Mountain II, the hunt loop from 40% HP with
-        her pet out of potions: 83 times in 3 minutes)."""
+        (feed_pet_if_due). With no potion key (her pet drinks them since 2026-10-23), nothing: it logged "drinking a
+        potion" at every look under `potion_hp` and drank none (in the simulator on West Rocky Mountain II, the hunt
+        loop from 40% HP with her pet out of potions: 83 times in 3 minutes)."""
         self.feed_pet_if_due(s)
         if self.actions.keys.hp_potion is None:
             return
@@ -293,6 +298,7 @@ class Hunter:
         key was pressed). With a feed, from what it saw frame by frame (s.events, with the number as read then): two
         gains between two looks are two gains, and the HP lost is every drop's, a potion drunk between them or not."""
         self._doubt_hp(s)
+        self.hp_watch.see(s.t, s.hp)
         if s.events is None:
             reads = []
             changed = exp_changed(self._exp, s.exp)

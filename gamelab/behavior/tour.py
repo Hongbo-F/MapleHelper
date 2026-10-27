@@ -1,6 +1,7 @@
 """A hunting tour of a map: sweep the platforms monsters spawn on (nearest next, varied a little, the
-order then tidied to cut travel), shoot each one clear, collect the drops, rest on the chair at a safe
-platform when HP runs low, and finish standing by on a safe platform.
+order then tidied to cut travel), shoot each one clear, collect the drops, and finish standing by on a safe
+platform. Her pet drinks her potions; her HP staying low ends the tour (the safety stop: behavior.safety). Until
+2026-10-26 she rested on the chair at a safe platform when HP ran low (Tour.rest), and the hunt loop did too.
 
 A platform is safe when no monster can touch her there (MapModel.safe): none spawn on it (monsters
 stay on the platform they spawn on), and none walk a platform just underneath. Her stars reach other
@@ -22,7 +23,7 @@ from dataclasses import dataclass, field
 from .. import paths, telemetry
 from ..attack import reach, spots
 from ..attack.spots import Spot
-from ..control.navigator import AVOID, TRANSIT, TRANSIT_AVOID, Navigator
+from ..control.navigator import AVOID, Navigator
 from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..localization.scene import Scene
@@ -38,8 +39,7 @@ SEEN_SHARE = 0.3     # share of a platform's spawn EXP a visit gives (platform 3
 PRIOR = 2            # visits the spawn data counts for, against what visits really gave
 MIN_VALUE = 0.15     # grounds expected to give under this share of the best one's EXP per visit are skipped
                      # (the hunt loop's: per second of a visit, its visits being as long as they give)
-MIN_REST_WIDTH = 120  # narrower safe platforms aren't rested on
-REST_SECONDS = 120   # longest she sits on the chair waiting for her HP to come back
+STAND_WIDTH = 120    # narrower safe platforms aren't stood by on (the chair's, for resting, until 2026-10-26)
 GOES_PER_STOP = 5    # trips to a spot and fights there, at most, per stop
 DROP_FALL = 120      # a kill placed on no platform: its drops are fetched from a platform at most this far below
 LOOT_SECONDS = 180   # no loot trip starts this long or longer into a collection (the longest one in the
@@ -51,20 +51,19 @@ BLIND_SAMPLES = 9    # random orders of the stops whose median travel is logged,
 
 @dataclass
 class TourReport:
-    """What a tour did: the platforms visited, the kills there and on the way, rests and loot trips."""
+    """What a tour did: the platforms visited, the kills there and on the way, and loot trips."""
     visited: list[int] = field(default_factory=list)
     kills: dict[str, int] = field(default_factory=dict)
     throws: int = 0
     exp_gains: int = 0    # times her EXP went up while hunting at the stops (kills of hers)
-    on_the_way: int = 0   # monsters shot dead while travelling (to rest and to stand by too) or guarding drops
-    rests: int = 0
+    on_the_way: int = 0   # monsters shot dead while travelling (to stand by too) or guarding drops
     loot_trips: int = 0
     stop: str = ""
 
     def __str__(self):
         return (f"visited platforms {self.visited}; kills: {kills_text(self.kills)} (EXP gains: {self.exp_gains}), "
                 f"plus {self.on_the_way} on the way; throws: {self.throws}; "
-                f"loot trips: {self.loot_trips}; rests: {self.rests}; ended: {self.stop}")
+                f"loot trips: {self.loot_trips}; ended: {self.stop}")
 
     def add_stop(self, pid: int, r: Report) -> None:
         """Count a stop at platform `pid` in: its kills, throws and EXP gains."""
@@ -89,17 +88,12 @@ class _Stop:
 class Tour:
     """A hunting tour with a hunter and her (fighting) navigator; `run` sweeps the map."""
 
-    def __init__(self, hunter: Hunter, nav: Navigator, log=print, rng: random.Random | None = None,
-                 rest_below: float = 0.5, rest_to: float = 0.9, rest_avoid: bool = False):
-        """`rest_avoid`: the trips to rest and to stand by keep clear of monsters instead of shooting the
-        ones in the way (`tour --rest-avoid`; navigator.TRANSIT_AVOID)."""
+    def __init__(self, hunter: Hunter, nav: Navigator, log=print, rng: random.Random | None = None):
         self.h, self.nav, self.log = hunter, nav, log
-        self.rest_avoid = rest_avoid
         self.rng = rng or random.Random()
-        self.rest_below, self.rest_to = rest_below, rest_to
         self.report = TourReport()
         model = nav.model
-        self.safe = [p.id for p in model.places if model.safe(p.id) and p.right - p.left >= MIN_REST_WIDTH]
+        self.safe = [p.id for p in model.places if model.safe(p.id) and p.right - p.left >= STAND_WIDTH]
         self.exp = {kind_of(name): e for name, e in model.mob_exp.items()}  # kind -> EXP per kill
         best = max(self.exp.values(), default=0)
         self.worth = {k for k, e in self.exp.items() if e >= WORTH * best} or None  # kinds worth hunting
@@ -174,7 +168,7 @@ class Tour:
         from, which a trip to one keeps off it for (_go_to_spot)."""
         return lambda a, x, b: self.nav.planner.travel(a, x, b, keep_off=(pid,))
 
-    # --- resting -------------------------------------------------------------------------------
+    # --- standing by ----------------------------------------------------------------------------
 
     def nearest_safe(self) -> int:
         """The safe platform quickest to get to by route: the one she's on, if it's safe."""
@@ -193,55 +187,15 @@ class Tour:
             raise RuntimeError("no safe platform reachable")
         return best[1]
 
-    def rest(self, max_seconds: float = REST_SECONDS, stand_until: float | None = None) -> None:
-        """Go to the nearest safe platform, sit on the chair until HP is back (or for `max_seconds` at
-        most), and stand up. `stand_until`: the latest the trip there stands still to while its looks fail (the
-        hunt's end: Navigator.go)."""
+    def stand_by(self, mode: str | None = None) -> None:
+        """The tour's end (and the hunt loop's): over to the nearest safe platform, to stand by there. `mode`: the
+        trip's (the navigator's own by default: the tour's bursts; the hunt loop's is transit; without an escort,
+        avoid). Standing: she doesn't sit, nor wait for her HP (until 2026-10-26, under 90% she rested on the chair
+        first and stayed seated)."""
         pid = self.nearest_safe()
-        self.log(f"resting on platform {pid}")
-        # Low on HP: straight there, shooting only what's in the way. Low HP is why she's going, so it's no
-        # reason to stop on the way (potions are still drunk): it used to end the trip at its first look,
-        # and she sat down among the monsters. A monster whose touch counts that could touch her on the way: a way
-        # around it first, a shot at it only if there's none (navigator.TripState.detour).
-        telemetry.emit("event", kind="rest_trip", text=f"to platform {pid} to rest")
-        trip = self.nav.go(pid, mode=self._calm_mode(TRANSIT), vary=False, detour=True, stand_until=stand_until)
-        self.report.on_the_way += trip.kills
-        if trip.result != "arrived":
-            self.log(f"  couldn't reach a safe platform ({trip.result}); resting here")
-        self.report.rests += 1
-        telemetry.emit("event", kind="rest", text=f"resting on platform {pid}")
-        self.h.actions.sit()
-        end = time.monotonic() + max_seconds
-        while time.monotonic() < end:
-            time.sleep(5)
-            hp = self.h.look(mobs=False).hp
-            self.log(f"  HP {hp:.0%}")
-            if hp >= self.rest_to:
-                break
-        self.h.actions.stand()
-
-    def rest_and_stand_by(self, mode: str | None = None) -> None:
-        """The tour's end: over to the nearest safe platform, resting there first (and staying seated)
-        if her HP is under `rest_to`. `mode`: the trip's (the navigator's own by default: the tour's bursts;
-        the hunt loop's is transit)."""
-        if self.h.look(mobs=False).hp < self.rest_to:
-            self.rest()
-            self.h.actions.sit()  # stay seated while standing by
-        else:
-            pid = self.nearest_safe()
-            self.report.on_the_way += self.nav.go(pid, mode=self._calm_mode(mode)).kills
+        mode = AVOID if self.nav.escort is None else mode
+        self.report.on_the_way += self.nav.go(pid, mode=mode).kills
         self.report.stop = "standing by on a safe platform"
-
-    def _calm_mode(self, mode: str | None) -> str | None:
-        """The mode of a trip to rest (`mode` TRANSIT) or to stand by (`mode` None: the navigator's own, or
-        TRANSIT): TRANSIT_AVOID with `rest_avoid`. Without an escort there's no fighting: the trip to rest
-        is TRANSIT_AVOID (avoiding monsters, and potions only: low HP is why she's going), the trip to
-        stand by AVOID."""
-        if self.rest_avoid:
-            return TRANSIT_AVOID
-        if self.nav.escort is None:
-            return TRANSIT_AVOID if mode == TRANSIT else AVOID
-        return mode
 
     # --- a stop ----------------------------------------------------------------------------------
 
@@ -258,7 +212,7 @@ class Tour:
             if not self._go_to_spot(st):
                 break
             r = self._fight(st)
-            if r.stop.startswith("HP low") or time.monotonic() >= st.end:
+            if time.monotonic() >= st.end:
                 break
             if r.stop.startswith("left platform"):
                 continue  # knocked off: go back to the spot
@@ -490,21 +444,17 @@ class Tour:
         remaining = list(order)
         while remaining:
             pid = remaining.pop(0)
-            if self.h.look(mobs=False).hp < self.rest_below:
-                self.rest()
             self.log(f"heading to platform {pid}")
             result = self.hunt(pid, kinds, kills_per_stop, seconds_per_stop)
             self.report.add_stop(pid, result)
             self.log(f"  platform {pid}: {result}")
-            if result.stop.startswith("HP low"):
-                self.rest()
             # Far kills' drops can take her across the map: the rest of the sweep is planned again from
             # wherever she ended up.
             s = self.nav.mover.locate()
             if remaining and s.where.platform is not None:
                 remaining = self.sweep(remaining, len(remaining), (s.where.platform.id, s.where.x))[0]
                 telemetry.emit("tour", order=self.report.visited + remaining)
-        self.rest_and_stand_by()
+        self.stand_by()
         return self.report
 
     def _spot_at(self, pid: int) -> tuple[int, float]:

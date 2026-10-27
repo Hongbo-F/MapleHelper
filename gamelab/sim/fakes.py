@@ -529,13 +529,11 @@ class FakeEyes(Eyes):
         return Reading(w.facing, 0.6, 0.4)
 
     def _pose(self) -> str:
-        """Her pose as her picture shows it (for Noise.heading_wrong's runs): in the air, on the chair, attacking,
-        lying down, walking or standing."""
+        """Her pose as her picture shows it (for Noise.heading_wrong's runs): in the air, attacking, lying down,
+        walking or standing."""
         w = self.world
         if w.mode != "ground":
             return w.mode
-        if w.sitting:
-            return "chair"
         if w.attack_ms[0] <= w.ms < w.attack_ms[1]:
             return "attack"
         return "prone" if "down" in w.held else "walk" if w.vx else "stand"
@@ -646,6 +644,7 @@ class FakePlayer:
         self.alarm_at: float | None = None  # when the player sees the Lie Detector (the fake clock), if it does
         self.fed: dict[str, float] = {}     # pet food plans it took with the alarm up -> when they started
         self.played: dict[str, tuple] = {}  # plan id -> (its kind, its key and mouse events at clock times) as played
+        self.pages: list[list] = []          # whoever is at the PC paged (control.alarm.page): [s, title, text]
 
     # --- the Lie Detector (client.check_alarm, alarm_up, alarm_age) -------------------------------------------------
 
@@ -658,6 +657,10 @@ class FakePlayer:
 
     def alarm_age(self) -> float | None:
         return self.clock.now - self.alarm_at if self.alarm_up() else None
+
+    def page(self, title: str, text: str) -> None:
+        """control.alarm.page in a simulated run (the safety stop's: behavior.retreat.on_alarm): kept, nobody paged."""
+        self.pages.append([self.trace.at(self.clock.now), title, text])
 
     # --- plans ---------------------------------------------------------------------------------------------------
 
@@ -827,6 +830,8 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
             put(time, name, getattr(clock, "monotonic" if name == "perf_counter" else name))
         for name in ("submit", "send", "done", "wait", "cancel", "check_alarm", "alarm_up", "alarm_age"):
             put(client, name, getattr(player, name))
+        from ..control import alarm
+        put(alarm, "page", player.page)
         mods = [m for n, m in list(sys.modules.items()) if n.startswith("gamelab") and not n.startswith("gamelab.sim")]
         for mod in mods:
             for name, value in list(vars(mod).items()):

@@ -41,7 +41,7 @@ WATCH_LIE_DETECTOR_S = 0.5  # --lie-detector: s between checks of the screen for
 # Commands that bring the game to the front or send it input; refused while the alarm is set. So is any
 # subcommand whose parser sets `game` (`probe run`; `probe list` and `probe score` send nothing).
 GAME_COMMANDS = {"player", "calibrate", "window", "snap", "act", "do", "lock", "combo", "hunt", "nav", "tour"}
-LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command
+LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command (the safety stop's: behavior.safety.EXIT)
 
 SW_SHOWMINNOACTIVE = 7  # ShellExecute: start the player minimized, not activated
 SHELL_ERRORS = {5: "the UAC prompt was declined", 2: "python not found", 3: "folder not found"}
@@ -968,8 +968,7 @@ def cmd_tour(args) -> int:
     nav = hunter.navigator(fighting=True, rng=random.Random(args.seed))  # the route choices too, as the simulator does
     if not _to_game():
         return 1
-    tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed), rest_below=args.rest_below,
-                rest_avoid=args.rest_avoid)
+    tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed))
     kinds = set(args.kinds.split(",")) if args.kinds else None
     from .behavior.retreat import on_alarm
     if args.loop:  # the hunt loop (gamelab/docs/hunt-modes.md): one decision per look, for --minutes
@@ -1970,6 +1969,16 @@ def attack_arg(s) -> None:
     s.add_argument("--skill", action="store_true", help="the same as --attack skill")
 
 
+def safety_arg(s) -> None:
+    """`--low-hp`: the safety stop's threshold (behavior.safety; None: its SAFETY_HP, which the command line doesn't
+    import: the elevated player builds this parser). Until 2026-10-26 `tour`'s stopped the fight and sent her to rest
+    on the chair (30%), and `hunt`'s and `probe run`'s handed back at once (35%)."""
+    s.add_argument("--low-hp", type=float, default=None,
+                   help="the safety stop: her HP under this for a few seconds ends the hunt, she goes to a safe place "
+                        "and you're paged (default: behavior.safety.SAFETY_HP, 0.4; her pet drinks her potions at "
+                        "70%%)")
+
+
 def _attack(args) -> str:
     """The attack mode `--attack` (or `--skill`) asks for."""
     return "skill" if getattr(args, "skill", False) else getattr(args, "attack", "regular")
@@ -2044,7 +2053,7 @@ def build_parser() -> argparse.ArgumentParser:
     attack_arg(s)
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
-    s.add_argument("--low-hp", type=float, default=0.35, help="stop and hand back below this HP fraction")
+    safety_arg(s)
     s.set_defaults(func=cmd_hunt)
 
     s = sub.add_parser("probe", help="in-game probes of what a star hits: list them, run one, score their log")
@@ -2069,7 +2078,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--seconds", type=float, default=900, help="stop after this long")
     q.add_argument("--map", type=int, default=DEFAULT_MAP)
     q.add_argument("--potion-hp", type=float, default=0.5, help="drink an HP potion below this HP fraction")
-    q.add_argument("--low-hp", type=float, default=0.35, help="stop below this HP fraction")
+    safety_arg(q)
     q.set_defaults(game=True)
     q = probes.add_parser("score", help="settle the probes' questions from their log (sends no keys)")
     q.add_argument("file", nargs="?", help="the log (default: lab/probe_geometry.jsonl)")
@@ -2098,7 +2107,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_nav)
 
     s = sub.add_parser("tour", help="hunt the map: sweep the platforms worth hunting (nearest next, varied a "
-                                      "little), clear each, collect the drops, rest when low")
+                                      "little), clear each, collect the drops, then stand by on a safe platform")
     attack_arg(s)
     s.add_argument("--stops", type=int, default=None,
                    help="how many hunting platforms to visit (default: every one worth it)")
@@ -2106,12 +2115,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--seconds", type=float, default=90, help="time per stop")
     s.add_argument("--kinds", help="only these monsters, e.g. slime,pig")
     s.add_argument("--seed", type=int, help="random seed for the order and the route choices (default: random)")
-    s.add_argument("--rest-below", type=float, default=0.5, help="go rest when HP is below this between stops")
-    s.add_argument("--rest-avoid", action="store_true",
-                   help="on the trips to rest and to stand by, keep clear of monsters instead of shooting the ones "
-                        "in the way (simulator-tested only)")
     s.add_argument("--potion-hp", type=float, default=0.45, help="drink an HP potion below this while fighting")
-    s.add_argument("--low-hp", type=float, default=0.3, help="stop fighting and rest below this")
+    safety_arg(s)
     s.add_argument("--loop", action="store_true",
                    help="hunt with the hunt loop instead of the sweep's stops (gamelab/docs/hunt-modes.md)")
     s.add_argument("--minutes", type=float, default=20, help="with --loop: how long to hunt, then stand by")
@@ -2371,6 +2376,13 @@ def main(argv=None) -> int:
     except (client.PlayerError, RuntimeError) as e:
         print(f"error: {e}")
         return 1
+    except Exception as e:
+        from .behavior.safety import EXIT, SafetyStop
+        if not isinstance(e, SafetyStop):
+            raise
+        print(f"SAFETY STOP: {e}. The hunt ended; she went to a safe place (the log says where). Check her HP potions "
+              "and her pet (fed, out, its potions) in the game before hunting again.")
+        return EXIT
     finally:
         _close_perception()
 

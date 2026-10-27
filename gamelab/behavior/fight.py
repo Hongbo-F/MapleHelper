@@ -293,8 +293,8 @@ def _count_late(h: "Hunter", st: FightState, placed: Scene | None, drops: bool =
 
 def _place_and_check(h: "Hunter", st: FightState, s: Scene) -> str | None:
     """Whether the fight goes on with look `s`: _AGAIN (after a short wait) if it can't place her, and
-    _OVER (report.stop says why) once that's gone on for UNPLACED_LOOKS looks, at low HP
-    (h.health_check), or when she's left the platform she started on (knocked off). None: go on."""
+    _OVER (report.stop says why) once that's gone on for UNPLACED_LOOKS looks, or when she's left the platform she
+    started on (knocked off). None: go on. Her potions and the safety stop first (h.health_check: it raises)."""
     if s.where is None or s.platform is None:
         st.unseen += 1
         if st.unseen >= UNPLACED_LOOKS:
@@ -303,9 +303,7 @@ def _place_and_check(h: "Hunter", st: FightState, s: Scene) -> str | None:
         time.sleep(0.2)
         return _AGAIN
     st.unseen = 0
-    if stop := h.health_check(s):
-        h.report.stop = stop
-        return _OVER
+    h.health_check(s)
     if st.start_platform is None:
         st.start_platform = s.platform.id
     if s.platform.id != st.start_platform:
@@ -761,8 +759,8 @@ class KillState:
 
 def kill(h: "Hunter", target: Monster, seconds: float = 30) -> str:
     """Shoot `target` until it dies; then loot (or remember the drops if they're off her
-    platform). Returns how it ended: 'killed', 'lost', 'timeout', 'unreachable', or a reason
-    to stop (low HP)."""
+    platform). Returns how it ended: 'killed', 'lost', 'timeout' or 'unreachable' (her HP staying low raises the safety
+    stop: h.health_check)."""
     st = KillState(target.kind, (target.x, target.y), target.platform)
     deadline = time.monotonic() + seconds
     h.log(f"target: {st.kind} on platform {st.platform}")
@@ -774,8 +772,7 @@ def kill(h: "Hunter", target: Monster, seconds: float = 30) -> str:
                 return "lost track of her"
             time.sleep(0.15)
             continue
-        if stop := h.health_check(s):
-            return stop
+        h.health_check(s)
         found = st.seen(s.monsters)
         _note_pick(st.flying, s, st.nearest(found))  # seen or not: hit, it's often hidden under its damage numbers
         ended = _shoot_at(h, st, s, found) if found else _target_gone(h, st)
@@ -1033,9 +1030,9 @@ class FightOnTheWay:
     def clear_way(self, s: Scene, x: float, finish: bool = True) -> int | None:
         """Shoot the monster in her way to map x (in_way). Returns the kills, or None if nothing was in
         the way. `finish`: the fight finishes what she has hurt (clear's finish_wounds). Not in transit
-        (the navigator's TRANSIT: to rest at low HP, and the hunt loop's trips, whose rule 4b finishes what
-        she hurt within its FINISH_S): finishing there, a rest trip's fights in the basin, where respawns
-        never stop, ran to their GUARD_SECONDS twice as often as before it, and some trips ran out."""
+        (the navigator's TRANSIT: the hunt loop's trips, whose rule 4b finishes what she hurt within its FINISH_S, and
+        until 2026-10-26 the trips to rest at low HP): finishing there, a rest trip's fights in the basin, where
+        respawns never stop, ran to their GUARD_SECONDS twice as often as before it, and some trips ran out."""
         if (m := self.in_way(s, x)) is None:
             return None
         self.h.log(f"  {m.kind} in the way at x {m.x:.0f}: shooting it first")

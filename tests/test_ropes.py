@@ -12,6 +12,7 @@ import pytest
 
 from gamelab.attack import ropes
 from gamelab.attack.danger import HER_TALL, THREAT_S, Danger, Her
+from gamelab.behavior.safety import SafetyStop
 from gamelab.localization import mapdata
 from gamelab.motion.bodies import HER_HALF
 
@@ -119,8 +120,12 @@ def _hunt(model, ground, grounds=None, due=None, hp=1.0):
     h = object.__new__(Hunt)
     h.model, h.kinds, h._skip, h._rope_rest, h._hanging, h._hung_at = model, {"horny-mushroom"}, {}, 0.0, None, 0.0
     lows = []
-    h.h = SimpleNamespace(danger=Danger(model, HER), knocked=lambda s: False,
-                          health_check=lambda s: "HP low" if s.hp < 0.3 else lows.append(s.hp))
+
+    def health_check(s):  # her potions, and the safety stop (Hunter.health_check raises it)
+        if s.hp < 0.4:
+            raise SafetyStop(s.hp, 2.0, 3, 0.4)
+        lows.append(s.hp)
+    h.h = SimpleNamespace(danger=Danger(model, HER), knocked=lambda s: False, health_check=health_check)
     h.visit = Visit(ground, spots.Spot(ground, 400.0, 1.0, False))
     h.tour = SimpleNamespace(hunting_grounds=lambda visit_s=None: list(grounds or [ground]), stats={})
     h._due_back = lambda: due
@@ -178,7 +183,8 @@ def test_on_the_rope_she_lets_a_monster_pass_under_her_and_gets_off_to_shoot_one
     up.monsters = [seen("horny-mushroom", 500.0, 500.0, g)]  # walked off: down to shoot it
     assert h._off_rope(up) == OFF_TO_SHOOT
     up.monsters, up.hp = [], 0.2
-    assert h._off_rope(up) == "HP low: to rest"
+    with pytest.raises(SafetyStop):  # her HP stayed low: the hunt ends from the rope too (no getting off to rest)
+        h._off_rope(up)
     up.hp = 0.9
     h._hung_at -= HANG_MAX_S
     assert h._off_rope(up).endswith("s on it")

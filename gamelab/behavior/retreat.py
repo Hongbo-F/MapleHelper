@@ -1,6 +1,7 @@
 """On the Lie Detector, away to a safe place within 10 s. The user, 2026-10-24, after one failed over Chrome Remote
 Desktop's lag while a hunt went on around her: "just stop any in-progress hunt when this happens", then "On a lie
-detector you should move to a safe place, within 10s".
+detector you should move to a safe place, within 10s". And at the safety stop (behavior.safety: her HP stayed low, her
+pet's potions not keeping her up), the same way, from the stop; then whoever is at the PC is paged (`on_alarm`).
 
 Who does it: a running hunt (`hunt kill`, `hunt clear`, `nav`, `tour`, `tour --loop`, `probe run`: `on_alarm` around
 it), which has the map, the danger model and the navigator. From the sighting the player refuses its plans, so its next
@@ -50,7 +51,7 @@ from dataclasses import dataclass
 from .. import telemetry
 from ..attack import ropes
 from ..attack.ropes import Refuge
-from ..control import client
+from ..control import alarm, client
 from ..control.alarm import RETREAT_S, RETREAT_WINDOW_S
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import AVOID, Navigator
@@ -58,6 +59,7 @@ from ..localization.mapdata import Rope
 from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
+from .safety import SafetyStop
 
 SAFE_DANGER = 0.01  # a place whose danger (attack.danger: the share of her HP a touch takes, by how likely and soon) is
                     # at most this is safe enough: 1% of her HP, a Horny Mushroom's walk of 4.7 s off (16% a touch)
@@ -117,14 +119,30 @@ class Retreat:
 
 
 class Watch:
-    """What `on_alarm` saw: the retreat, if the alarm came (None: it didn't, or the retreat failed)."""
+    """What `on_alarm` saw: the retreat, if the alarm or the safety stop came (None: neither did, or the retreat
+    failed)."""
     retreat: Retreat | None = None
+
+
+@dataclass(frozen=True)
+class Why:
+    """What a retreat is for, as its log lines and telemetry events say it: the Lie Detector's, or the safety stop's."""
+    label: str  # the log's
+    event: str  # the telemetry's
+    after: str  # "N s <after>"
+
+
+LIE_DETECTOR = Why("LIE DETECTOR", "Lie Detector", "after it was seen")
+SAFETY = Why("SAFETY STOP", "Safety stop", "after the stop")
 
 
 @contextmanager
 def on_alarm(h, log: Callable[[str], None] | None = None, rng: random.Random | None = None):
     """Run a hunt (the `with` block); on the Lie Detector alarm (client.LieDetectorAlarm), her retreat, then the alarm
-    goes on (the command stops as before). Nothing that goes wrong in the retreat hides the alarm: it's logged."""
+    goes on (the command stops as before). Nothing that goes wrong in the retreat hides the alarm: it's logged. On the
+    safety stop (behavior.safety.SafetyStop: her HP stayed low), the same retreat from the stop, said in capitals, and
+    whoever is at the PC paged (control.alarm.page, once her retreat is over: her moves come first); then the stop goes
+    on (the command stops)."""
     watch = Watch()
     try:
         yield watch
@@ -134,21 +152,39 @@ def on_alarm(h, log: Callable[[str], None] | None = None, rng: random.Random | N
         except Exception as e:  # the alarm is what the command stops on
             (log or h.log)(f"retreat: failed ({type(e).__name__}: {e})")
         raise
+    except SafetyStop as stop:
+        say = log or h.log
+        say(f"SAFETY STOP: {stop}. The hunt ends: to a safe place (no sitting, no waiting for HP)")
+        telemetry.emit("event", kind="safety_stop", text=str(stop))
+        try:
+            watch.retreat = away(h, time.monotonic(), SAFETY, log, rng)
+        except Exception as e:  # the stop is what the command stops on
+            say(f"retreat: failed ({type(e).__name__}: {e})")
+        finally:
+            alarm.page(*stop.page())
+        raise
 
 
 def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | None = None) -> Retreat:
-    """Her retreat from the Lie Detector, hunter `h`'s (its senses, map and danger; its actions' keys and locks): where
-    to (`choose`), then there; and again from wherever she ends up if that wasn't it (a touch knocked her back, the
-    rope missed), TRIES goes at most while RETREAT_S has time for one, all within the player's window. Returns how it
-    went (also logged)."""
-    log = log or h.log
+    """Her retreat from the Lie Detector, from its sighting (the alarm's `at`): `away`."""
     age = client.alarm_age()
     seen = time.monotonic() - (age or 0.0)  # the sighting on this clock (the alarm's file not written yet: now)
+    return away(h, seen, LIE_DETECTOR, log, rng)
+
+
+def away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
+         rng: random.Random | None = None) -> Retreat:
+    """Her retreat, hunter `h`'s (its senses, map and danger; its actions' keys and locks), from `seen` (time.monotonic:
+    the Lie Detector's sighting, or the safety stop): where to (`choose`), then there; and again from wherever she ends
+    up if that wasn't it (a touch knocked her back, the rope missed), TRIES goes at most while RETREAT_S has time for
+    one, all within the player's window (the Lie Detector's RETREAT_WINDOW_S: the safety stop's trips are cut there
+    too). `why`: what it's for, in its log lines and events. Returns how it went (also logged)."""
+    log = log or h.log
     out = Retreat(time.monotonic() - seen)
     if out.began >= RETREAT_S:
         out.result = "too late"
-        log(f"LIE DETECTOR: seen {out.began:.1f} s ago, past the {RETREAT_S:g} s a retreat has: she stays where she is")
-        return _end(out, seen, log, None)
+        log(f"{why.label}: seen {out.began:.1f} s ago, past the {RETREAT_S:g} s a retreat has: she stays where she is")
+        return _end(out, seen, log, None, why=why)
     actions = h.actions.moves_only()
     nav = Navigator(h.senses, actions, h.model, log=log, variety=0, rng=rng)  # no escort: she keeps clear of monsters
     s = None
@@ -162,9 +198,9 @@ def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | No
                 if (p := safe_rope(h, rope, still.where.y, s.monsters)) is not None:
                     out.place, out.result = (p, "stayed") if go == 0 else (out.place, "on a safe rope")
                     if go == 0:
-                        log(f"LIE DETECTOR: retreat: she stays on {p.text()} ({p.why}; danger {p.danger:.3f}), "
-                            f"{time.monotonic() - seen:.1f} s after it was seen")
-                    return _end(out, seen, log, nav, still)
+                        log(f"{why.label}: retreat: she stays on {p.text()} ({p.why}; danger {p.danger:.3f}), "
+                            f"{time.monotonic() - seen:.1f} s {why.after}")
+                    return _end(out, seen, log, nav, still, why)
                 log(f"  on the rope at x {rope.x:.0f} (danger {rope_risk(h, rope, still.where.y, s.monsters):.3f} "
                     "there): getting off")
                 s = nav.mover.off_rope(still)
@@ -172,22 +208,22 @@ def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | No
                 s = nav._onto_platform(s)
             if s.where.platform is None:
                 out.result = "lost: not on any platform"
-                return _end(out, seen, log, nav)
+                return _end(out, seen, log, nav, why=why)
             left = RETREAT_S - (time.monotonic() - seen)
             p = choose(h, nav, s, left)
             if p.seconds <= 0:  # there (or nowhere better to be had in the time left)
                 out.place, out.result = (p, "stayed") if go == 0 else (out.place, out.result)
                 if go == 0:
-                    log(f"LIE DETECTOR: retreat: she stays ({p.why}; danger {p.danger:.3f}), "
-                        f"{time.monotonic() - seen:.1f} s after it was seen")
-                return _end(out, seen, log, nav, s)
+                    log(f"{why.label}: retreat: she stays ({p.why}; danger {p.danger:.3f}), "
+                        f"{time.monotonic() - seen:.1f} s {why.after}")
+                return _end(out, seen, log, nav, s, why)
             if go and trip_s(p.seconds) > left:
                 break
             out.place = p
-            log(f"LIE DETECTOR: retreat to {p.text()} ({p.why}; {p.seconds:.1f} s by route, danger {p.danger:.3f}), "
-                f"{time.monotonic() - seen:.1f} s after it was seen" + ("; her moves only, no mouse" if go == 0 else
-                                                                       f" (go {go + 1})"))
-            telemetry.emit("event", kind="retreat", text=f"Lie Detector: retreat to {p.text()} ({p.why})")
+            log(f"{why.label}: retreat to {p.text()} ({p.why}; {p.seconds:.1f} s by route, danger {p.danger:.3f}), "
+                f"{time.monotonic() - seen:.1f} s {why.after}" + ("; her moves only, no mouse" if go == 0 else
+                                                                  f" (go {go + 1})"))
+            telemetry.emit("event", kind="retreat", text=f"{why.event}: retreat to {p.text()} ({p.why})")
             deadline = seen + RETREAT_WINDOW_S
             seconds = min(deadline - time.monotonic(), trip_s(p.seconds) + GO_SLACK_S)  # longer: from where she is
             trip = nav.go(p.platform, x=p.rope.x if p.rope else p.x, seconds=max(0.1, seconds), mode=AVOID, scene=s,
@@ -199,7 +235,7 @@ def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | No
                     s = nav.mover.hang(p.rope.rope, p.rope.y, p.rope.from_top, s)
                 if s.where is not None and s.where.platform is None:
                     out.result = "on the rope"
-                    return _end(out, seen, log, nav, s)
+                    return _end(out, seen, log, nav, s, why)
                 out.result = f"not on the rope (on {platform_text(s)})"
             if RETREAT_S - (time.monotonic() - seen) <= TRIP_S:
                 break
@@ -207,7 +243,7 @@ def retreat(h, log: Callable[[str], None] | None = None, rng: random.Random | No
         out.result = f"stopped: {e}"
     except (client.PlayerError, RuntimeError, ValueError, LookLost) as e:  # no dot, a move the mover can't make from
         out.result = f"stopped: {type(e).__name__}: {e}"                  # where she is, a look failing, no game
-    return _end(out, seen, log, nav)
+    return _end(out, seen, log, nav, why=why)
 
 
 def platform_text(s: Scene) -> str:
@@ -320,8 +356,9 @@ def trip_s(route_s: float) -> float:
     return SLACK * route_s + TRIP_S
 
 
-def _end(out: Retreat, seen: float, log, nav: Navigator | None, s: Scene | None = None) -> Retreat:
-    """The retreat over: her last look (`s`, or one taken now), from the sighting to it (`took`), said."""
+def _end(out: Retreat, seen: float, log, nav: Navigator | None, s: Scene | None = None,
+         why: Why = LIE_DETECTOR) -> Retreat:
+    """The retreat over: her last look (`s`, or one taken now), from the sighting (or the stop) to it (`took`), said."""
     try:
         if nav is not None and s is None:
             s = nav.mover.locate(tries=LOCATE_TRIES)
@@ -333,8 +370,8 @@ def _end(out: Retreat, seen: float, log, nav: Navigator | None, s: Scene | None 
     where = ("where she is isn't known" if out.where is None else
              f"on platform {out.where[0]} at x {out.where[1]:.0f}" if out.where[0] is not None else
              f"off any platform at x {out.where[1]:.0f}")
-    log(f"LIE DETECTOR: retreat over ({out.result}): {where}, {out.took:.1f} s after it was seen"
+    log(f"{why.label}: retreat over ({out.result}): {where}, {out.took:.1f} s {why.after}"
         + ("" if out.took <= RETREAT_S else f" (past the {RETREAT_S:g} s)"))
-    telemetry.emit("event", kind="retreat", text=f"Lie Detector: retreat over ({out.result}), {where}, "
-                                                 f"{out.took:.1f} s after it was seen")
+    telemetry.emit("event", kind="retreat", text=f"{why.event}: retreat over ({out.result}), {where}, "
+                                                 f"{out.took:.1f} s {why.after}")
     return out

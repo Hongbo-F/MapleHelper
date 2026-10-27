@@ -1,7 +1,7 @@
 """Control: decisions turned into key plans for the elevated key player, and the closed loops
 that carry out moves and routes. Also the player itself and the Lie Detector alarm.
 
-  actions    her actions (throws, walking, picking up, potions, the chair) as key plans
+  actions    her actions (throws, walking, picking up, potions) as key plans
   mover      one route move at a time, with a look before and after
   navigator  getting to a platform: plan the route, chain its moves into one plan, replan
   client     handing plans to the player and getting the results (files in gamelab/lab)

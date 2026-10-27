@@ -19,13 +19,12 @@ she replans from wherever she was pushed to, without counting it as a missed mov
 
 With an escort (hunting tours: behavior.fight.FightOnTheWay), each trip has a mode (go(mode=...)):
 `hunt` (the default) shoots what's in reach before each chain and any monster in the way of a move along
-her platform; `transit` (the trip to rest, and the hunt loop's trips) only shoots what's in the way, and low HP
-is no reason to stop (potions are still drunk). Either way her chains keep clear of the monsters whose touch
-counts (the escort's `threat`: on Tree Dungeon the mushrooms, on the first map none) as they do without an
-escort: a chain stops short of a leg one could touch her on, and she shoots it first if a star reaches it from
-where she stands (the escort's `clear_for`), else the move costs extra so a way around is taken, else she hops
-it (one in the way of a run along her platform), else waits for it to move off, then goes anyway; on a trip to
-rest (`detour`) a way around comes before a shot. The monsters for that are searched where the chain's legs go
+her platform; `transit` (the hunt loop's trips) only shoots what's in the way. Either way her chains keep clear of
+the monsters whose touch counts (the escort's `threat`: on Tree Dungeon the mushrooms, on the first map none) as they
+do without an escort: a chain stops short of a leg one could touch her on, and she shoots it first if a star reaches
+it from where she stands (the escort's `clear_for`), else the move costs extra so a way around is taken, else she
+hops it (one in the way of a run along her platform), else waits for it to move off, then goes anyway. The monsters
+for that are searched where the chain's legs go
 (`trip_monsters`: her fights look at the band around her), and with her memory of the monsters (`memory`: a hunter's)
 the ones it has there that the look couldn't have found, last seen off its view, are kept clear of too (`remembered`).
 Without an escort the mode is `avoid`, as described above.
@@ -193,10 +192,8 @@ COMING = "a monster coming into its way"  # (the cut's reason starts so: Navigat
 # How a trip treats monsters (Navigator.go's `mode`).
 AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
 HUNT = "hunt"        # the escort shoots what's in reach before each chain, and what's in the way of a move
-TRANSIT = "transit"  # the escort shoots only what's in the way; low HP doesn't stop the trip (potions go on)
-TRANSIT_AVOID = "transit-avoid"  # as avoid (no escort, ways around monsters), and as transit, low HP doesn't
-                                 # stop the trip (`tour --rest-avoid`: the trips to rest and to stand by)
-MODES = (AVOID, HUNT, TRANSIT, TRANSIT_AVOID)
+TRANSIT = "transit"  # the escort shoots only what's in the way
+MODES = (AVOID, HUNT, TRANSIT)
 FIGHTING = (HUNT, TRANSIT)  # the modes the escort fights in
 
 
@@ -229,7 +226,7 @@ class Escort(Protocol):
 @dataclass
 class Trip:
     """How a trip (Navigator.go) went."""
-    result: str = ""      # 'arrived', 'in position', a reason to stop (low HP), or why she didn't get there
+    result: str = ""      # 'arrived', 'in position', or why she didn't get there
     moves: list[str] = field(default_factory=list)
     misses: int = 0       # moves that didn't land where planned (not counting hits)
     hits: int = 0         # moves during which a monster hit her
@@ -286,7 +283,7 @@ class TripState:
     deadline: float = 0.0  # time.monotonic() it times out at
     max_misses: int = 6
     until: Callable[[Scene], bool] | None = None
-    health: Callable[[Scene], str | None] = lambda s: None
+    health: Callable[[Scene], None] = lambda s: None
     mode: str = AVOID
     trip: Trip = field(default_factory=Trip)  # how it's going so far (returned at the end)
     weights: dict[tuple, float] = field(default_factory=dict)  # its random move weights, kept through its replans
@@ -304,10 +301,8 @@ class TripState:
     last: Scene | None = None   # the last pass's look (the one `until` said 'in position' to, if it did)
     keep_off: frozenset = frozenset()  # platforms its routes go onto only at a cost (route.KEEP_OFF_S): the hunting
                                        # ground a spot it goes to shoots
-    vary: bool = True  # it chooses among the planner's ways (route.ROUTES); not a trip with a deadline (drops, a rest):
-                       # that goes the quickest way, by its weights
-    detour: bool = False  # with an escort, a way around a monster that could touch her comes before a shot at it (the
-                          # trips to rest at low HP: Navigator._meet)
+    vary: bool = True  # it chooses among the planner's ways (route.ROUTES); not a trip with a deadline (drops, a
+                       # retreat): that goes the quickest way, by its weights
     shots: int = 0       # shots at a monster that could touch her on the way, in a row without a move between
                          # (MAX_FIGHTS at most: _meet)
     blocked: float | None = None  # since when its chains have stopped short of such a monster without a move between
@@ -342,18 +337,16 @@ class Navigator:
     """Gets her onto a platform: plans the route, chains its moves, and replans from wherever she ends up."""
 
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
-                 health: Callable[[Scene], str | None] | None = None,
-                 potions: Callable[[Scene], None] | None = None, escort: Escort | None = None,
+                 health: Callable[[Scene], None] | None = None, escort: Escort | None = None,
                  variety: float | None = None, rng: random.Random | None = None, memory=None):
-        """`health(scene)` returns a reason to stop (low HP), and may drink a potion; `potions(scene)` only
-        drinks (transit trips); `escort` fights on the way (without one she avoids monsters instead).
+        """`health(scene)`, asked at every pass's look: her potions, and the safety stop, which it raises (a hunter's
+        health_check: behavior.safety); `escort` fights on the way (without one she avoids monsters instead).
         `variety`: the moves' random weights (route.NOISE by default; 0 for none). `memory`: her memory of the
         monsters (localization.memory.Memory, a hunter's), whose monsters where a fighting trip's chain goes it keeps
         clear of too (`remembered`); None, only the looks'."""
         self.senses, self.actions, self.model, self.log = senses, actions, model, log
         self.memory = memory
         self.health = health or (lambda s: None)
-        self.potions = potions or (lambda s: None)
         self.escort = escort
         self.mode = HUNT if escort is not None else AVOID  # a trip's mode unless go() says otherwise
         self._mode = self.mode                             # the running trip's
@@ -398,20 +391,16 @@ class Navigator:
 
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-           scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False,
-           stand_until: float | None = None) -> Trip:
+           scene: Scene | None = None, keep_off=(), vary: bool = True, stand_until: float | None = None) -> Trip:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
         with a look that includes monsters (late in the chain before, when it follows on from that one):
         True ends the trip early ('in position'). `mode` (AVOID, HUNT or TRANSIT; the navigator's own by
         default) says how the trip treats monsters. `scene`: the caller's last look, used for the first
         pass instead of a new one if it's fresh (no keys sent since). `keep_off`: platforms its routes go onto
         only at a cost (TripState.keep_off). `vary`: it chooses among the planner's ways (route.ROUTES; TripState.
-        vary). `detour`: with an escort, a way around a monster that could touch her before a shot at it (a trip to
-        rest: TripState.detour). While its looks fail (LookLost) it stands still up to its deadline, or `stand_until`
-        (time.monotonic) if that's sooner: the hunt's end, for its trip to rest (Tour.rest), which then stops it as a
-        pass would (Hunt.run)."""
-        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary,
-                        detour=detour)
+        vary). While its looks fail (LookLost) it stands still up to its deadline, or `stand_until` (time.monotonic) if
+        that's sooner: a retreat's window (behavior.retreat)."""
+        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary)
         while not st.over:
             try:
                 self.step(st)
@@ -425,21 +414,19 @@ class Navigator:
 
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-              scene: Scene | None = None, keep_off=(), vary: bool = True, detour: bool = False) -> TripState:
+              scene: Scene | None = None, keep_off=(), vary: bool = True) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
         it lies on (mapdata.MapModel.twins): she's there on either."""
         dst = self.model.place_of(dst)
         mode = mode or self.mode
         if mode not in MODES or (mode in FIGHTING and self.escort is None):
             raise ValueError(f"no {mode!r} trip without an escort" if mode in MODES else f"unknown mode {mode!r}")
-        # Transit: low HP is why she's going (to rest), so potions only.
-        health = self.potions if mode in (TRANSIT, TRANSIT_AVOID) else self.health
         if mode in FIGHTING:  # the kinds whose touch counts, worked out now rather than between a look and its chain
             self._threats()   # (when the escort read the game data itself the first read took 535 ms on Tree
                               # Dungeon, a chain then planned from a look that old: review, 2026-10-24; Hunter.danger
                               # has it from the map's cache since)
-        st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, health, mode,
-                       keep_off=frozenset(keep_off), vary=vary, detour=detour)
+        st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, self.health, mode,
+                       keep_off=frozenset(keep_off), vary=vary)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -477,8 +464,9 @@ class Navigator:
         # Look, and deal with what's here.
         s, looked = self._look(st)
         st.last = s
-        if stop := self._reason_to_stop(s, st.until, st.health):
-            return st.end(stop)
+        st.health(s)  # her potions, and the safety stop (a hunter's health_check raises it: behavior.safety)
+        if st.until is not None and s.where.platform is not None and st.until(s):
+            return st.end("in position")
         s = self._onto_platform(s)
         if s.where.platform is None:
             return st.end("lost: not on any platform")
@@ -548,16 +536,6 @@ class Navigator:
         t1 = time.monotonic()
         st.trip.time["look"] += t1 - t0
         return s, t1
-
-    def _reason_to_stop(self, s: Scene, until: Callable[[Scene], bool] | None,
-                        health: Callable[[Scene], str | None]) -> str | None:
-        """Why the trip ends at this look, if it does: `health`'s reason (low HP), or 'in position' when
-        she's on a platform and `until` says so."""
-        if stop := health(s):
-            return stop
-        if until is not None and s.where.platform is not None and until(s):
-            return "in position"
-        return None
 
     def _shoot_on_the_way(self, st: TripState, s: Scene) -> bool:
         """In hunt mode: shoot a monster in reach from where she stands, ON_WAY_TRIES times at most per
@@ -843,10 +821,9 @@ class Navigator:
         a way around is taken if there is one (AVOID_SECONDS, as without an escort), else she hops it (one in the way of
         a run along her platform: flow's hop), else she waits for it to move off (WAIT_LOOKS looks at most, only where
         none can reach her meanwhile, and only while waiting can clear the way: _worth_waiting), else she goes anyway:
-        the chain planned as if that monster weren't there (the others still kept clear of). On a trip to rest
-        (`st.detour`) the way around comes first, the shot after it: low on HP, getting there is what counts. Her
-        chains stop short of such monsters MEET_S at most without a move that gets her where it was going (this one or
-        one on a later leg): then she goes regardless, the chain planned blind (_regardless). True to look again; a
+        the chain planned as if that monster weren't there (the others still kept clear of). Her chains stop short of
+        such monsters MEET_S at most without a move that gets her where it was going (this one or one on a later leg):
+        then she goes regardless, the chain planned blind (_regardless). True to look again; a
         chain (legs, keys, why) to carry out (a hop over it, or past it regardless); None to go on as planned."""
         if why != "monster":
             st.waited = 0
@@ -867,7 +844,7 @@ class Navigator:
         mo = hit[0] if hit is not None else None
         kind = mo.kind if mo is not None and mo.kind else "monster"
         seen = next((m for t, m in st.sighted if t is mo), None)  # as the look saw it (none after a quick look)
-        for step in ("around", "shoot") if st.detour else ("shoot", "around"):
+        for step in ("shoot", "around"):
             if step == "shoot" and seen is not None and st.shots < MAX_FIGHTS:
                 kills = self.escort.clear_for(s, seen, finish=st.mode != TRANSIT)
                 if kills is not None:

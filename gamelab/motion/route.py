@@ -179,7 +179,7 @@ KEEP_OFF_S = 8.0
 # the quickest first, none STRETCH or more dearer; a way is the platforms it goes through and the ropes it takes
 # between them), by a softmax over their times: a way dearer by TEMPERATURE of the quickest's time weighs 1/e of it
 # (chances). A way through a move she hasn't set off on for STALE_S (the navigator's memory, since it began) has FLOOR
-# at least, so the moves no trip makes quickest get tried now and then. A trip with a deadline (drops, a rest:
+# at least, so the moves no trip makes quickest get tried now and then. A trip with a deadline (drops, a retreat:
 # Navigator.go's `vary`) goes the quickest way. ROUTES 1 is the quickest by the weights alone, as before, and stays the
 # default: in the harness (preset game, 40 seeds of 20 minutes against ROUTES 1) 3 ways made as much EXP a minute (the
 # tour +1.5% +- 1.4%, the hunt loop -0.0% +- 1.4%) and widened her moves (distinct moves a run 23.9 -> 26.1 and 8.2 ->

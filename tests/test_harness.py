@@ -409,35 +409,32 @@ def test_a_run_can_hunt_only_some_grounds():
     assert sc.name == "loop:crowd:1:10002073:g23" and sc.fn is not harness.POLICIES["loop"]
 
 
-def test_hp_lost_on_the_trips_to_rest_is_counted_between_their_events(model):
+def test_the_safety_stop_is_counted_and_the_bar_compares_the_seeds_both_have(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0))
     w.touch_log = [(5.0, 0.014), (12.0, 0.02), (13.0, 0.0), (30.0, 0.01)]  # (t, the HP it took: 0 evaded)
     t0 = 1000.0
-    records = [{"topic": "session", "t": t0}, {"topic": "event", "kind": "rest_trip", "t": t0 + 10.0},
-               {"topic": "event", "kind": "rest", "t": t0 + 20.0}, {"topic": "event", "kind": "rest_trip", "t": t0 + 25.0}]
+    records = [{"topic": "session", "t": t0}]
     out = harness.outcomes(w, records, 60.0)
-    assert out["rest_trips"] == 2  # the last one still going at the end
-    assert out["rest_hp_lost"] == pytest.approx(0.03)  # at 12 s and 30 s; 13 s was evaded
+    assert (out["safety_stops"], out["safety_at"]) == (0, None)
     assert out["hp_lost"] == pytest.approx(0.044)
-    base = [dict(_result(k, 50.0), rest_hp_lost=0.05, rest_trips=2) for k in range(1, 11)]
-    assert harness.compare_rest(base, [dict(r, rest_hp_lost=0.02) for r in base])[0]
-    assert not harness.compare_rest(base, [dict(r, rest_hp_lost=0.08) for r in base])[0]
-    # Runs saved before the metric existed, or with no seed in common, never pass.
-    assert not harness.compare_rest([_result(k, 50.0) for k in range(1, 11)], base)[0]
+    records.append({"topic": "event", "kind": "safety_stop", "t": t0 + 20.0, "text": "HP 31%, under 40% for 2.0 s"})
+    out = harness.outcomes(w, records, 60.0)
+    assert (out["safety_stops"], out["safety_at"]) == (1, 20.0)
+    assert harness._mean([out, dict(out, safety_at=None)], "safety_at") == 1  # runs it stopped, as deaths are counted
+    assert not any(k.startswith("rest") for k in out)  # the rests went on 2026-10-26
+    base = [_result(k, 50.0) for k in range(1, 11)]
+    # With no seed in common, never a pass.
     assert not harness.compare([], [])[0] and not harness.compare(base, [_result(k, 60.0) for k in range(11, 21)])[0]
-    assert not harness.compare_rest(base, [dict(r, seed=r["seed"] + 10) for r in base])[0]
-    # No trip to rest on a side: nothing measured, nothing passed.
-    assert not harness.compare_rest(base, [dict(r, rest_hp_lost=0.0, rest_trips=0) for r in base])[0]
     # The bar is over the seeds both have: a 20-seed base against 10 seeds of a candidate compares those 10.
     harder = base + [dict(_result(k, 50.0, share=0.1, hp=1.0)) for k in range(11, 21)]
     assert not harness.compare(harder, [_result(k, 60.0, share=0.4, hp=0.2) for k in range(1, 11)])[0]
     # Fewer than 10 seeds in common never pass; a death counts on any seed, compared or not.
-    better = [dict(r, exp_per_min=60.0, rest_hp_lost=0.01) for r in base]
-    assert not harness.compare(base[:9], better[:9])[0] and not harness.compare_rest(base[:9], better[:9])[0]
-    assert harness.compare(base, better)[0] and harness.compare_rest(base, better)[0]
+    better = [dict(r, exp_per_min=60.0) for r in base]
+    assert not harness.compare(base[:9], better[:9])[0]
+    assert harness.compare(base, better)[0]
     died = better + [dict(better[0], seed=15, died_at=600.0)]
-    assert not harness.compare(base, died)[0] and not harness.compare_rest(base, died)[0]
+    assert not harness.compare(base, died)[0]
 
 
 def test_the_touches_on_her_trips_are_counted_from_a_chains_or_moves_start_to_its_end(model):
@@ -477,14 +474,6 @@ def test_her_box_can_be_the_clients_in_the_simulated_world(model):
             mo.speed = 0.0
         w.advance(0.5)
         assert w.touches == touched, box
-
-
-def test_a_trip_to_rest_is_measured_both_ways():
-    if not scenarios.available():
-        pytest.skip("needs the real map's data")
-    ok, lines = harness.rest_trials(1)
-    assert lines[0].startswith("transit: HP lost") and lines[1].startswith("avoid: HP lost") and "rest bar" in lines[2]
-    assert harness.rest_trip(True, 0)["kills"] == 0  # keeping clear, she shoots nothing
 
 
 def test_a_short_harness_run_on_the_real_map():

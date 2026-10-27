@@ -1,5 +1,5 @@
 """Her actions in the game as key plans for the player: throws (from the ground, jumping, jumping
-back), walking, picking up, potions and the chair. Actions keeps which way she faces and when her
+back), walking, picking up and potions. Actions keeps which way she faces and when her
 attack lock ends; it never decides anything (attack and behavior do).
 
 Every plan goes through `send`, blocking until the player has run it, except the navigator's chains
@@ -513,17 +513,6 @@ class Actions:
         self.wait_lock()
         self.play(tap(0, self.keys.pet_food.name), "pet_food", kind=PET_FOOD)
         return True
-
-    def sit(self) -> None:
-        """Sit on the chair (HP comes back faster)."""
-        if self.keys.chair is not None:
-            self.play(tap(0, self.keys.chair.name), "chair")
-
-    def stand(self) -> None:
-        """Stand up from the chair: tapping an arrow does it (she then faces right)."""
-        arrow = self.keys.right.name
-        self.play([[0, arrow, "down"], [50, arrow, "up"]], "stand")
-        self.facing = RIGHT
 
     def nudge_mouse(self, client: tuple[int, int] = STRETCHED_CLIENT) -> None:
         """Move the mouse inside the game (moves only, never clicks), in a client area that size (client px): a
