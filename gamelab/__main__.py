@@ -49,7 +49,8 @@ ATTACKING = {"lock", "combo", "hunt", "nav", "tour", "probe"}
 # perception service or pet feeder who plays) each plays another character than the thief only when she's named
 # (--character, or GAMELAB_CHARACTER): under `character use`'s file or [characters] default alone the thief plays it, and
 # says so (_unnamed), and one that attacks is refused (_refused_as). The perception service is the thief's whoever is
-# named (it serves every command, the thief's hunts too, and builds her name tag, pictures and Shape once).
+# named (it serves every command, the thief's hunts too, and builds her name tag, pictures and Shape once); on saved
+# frames (`perceive --frames`, its own pipe, offline) it's anyone's.
 IN_GAME = GAME_COMMANDS | {"pet", "perceive", "watch", "recorder", "save-recent", "spot"}
 LIE_DETECTOR_EXIT = 3   # exit code after the Lie Detector stopped a command (the safety stop's: behavior.safety.EXIT,
                         # out of darts': behavior.darts.EXIT)
@@ -168,10 +169,11 @@ def cmd_character(args) -> int:
             if not args.id:
                 print(f"use which? one of {', '.join(character.known())}")
                 return 2
+            klass = character.load(args.id).klass  # (one whose table doesn't parse isn't chosen: why is said)
             path = character.choose(args.id)
             print(f"{args.id} plays from now on when nothing names another ({path}; --character and "
                   f"{character.ENV} still come first)")
-            if character.load(args.id).klass != "thief":
+            if klass != "thief":
                 print(f"  until her bottom bar is read (the design's S0g), a command that looks at or acts in the game "
                       f"plays her only when named (`python -m gamelab --character {args.id} ...`): without it such a "
                       f"command plays the thief and says so, and one that attacks refuses; and perceive and pet "
@@ -219,7 +221,11 @@ def _play_as(which: str) -> str | None:
 
 
 def _in_game(args) -> bool:
-    return args.cmd in IN_GAME or getattr(args, "game", False)
+    return (args.cmd in IN_GAME and not _saved_frames(args)) or getattr(args, "game", False)
+
+
+def _saved_frames(args) -> bool:
+    return args.cmd == "perceive" and bool(getattr(args, "frames", None))
 
 
 def _unnamed(args) -> str | None:
@@ -247,7 +253,7 @@ def _refused_as(args) -> str | None:
     Characters), or the perception service played by another than the thief (IN_GAME): why it doesn't run, saying
     what chose her. None for the thief, and for everything else."""
     attacks = args.cmd in ATTACKING and (args.cmd != "probe" or getattr(args, "game", False))
-    if not attacks and args.cmd != "perceive":
+    if not attacks and (args.cmd != "perceive" or _saved_frames(args)):
         return None
     from maplehelper.config import ConfigError
 

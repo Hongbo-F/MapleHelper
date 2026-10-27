@@ -437,7 +437,9 @@ def test_the_perception_service_is_the_thiefs(monkeypatch):
     from gamelab.localization import service
     monkeypatch.setenv(character.ENV, "magician")
     monkeypatch.setattr(character, "_ACTIVE", [])
-    assert "the perception service is the thief's" in cli._refused_as(cli.build_parser().parse_args(["perceive"]))
+    parser = cli.build_parser()
+    assert "the perception service is the thief's" in cli._refused_as(parser.parse_args(["perceive"]))
+    assert cli._refused_as(parser.parse_args(["perceive", "--frames", "x"])) is None  # (saved frames: its own pipe)
     started = []
     monkeypatch.setattr(service, "_start_detached", lambda command, folder: started.append(command))
     monkeypatch.setattr(service, "running", lambda *a: False)
@@ -467,6 +469,7 @@ def test_a_choice_by_file_alone_plays_the_thief_in_the_game(monkeypatch, capsys)
     assert character.named() and character.active_id() == "thief"  # (set for the command and its children)
     monkeypatch.setenv(character.ENV, "")
     assert cli._unnamed(parser.parse_args(["character"])) is None  # offline: the file's choice stands
+    assert cli._unnamed(parser.parse_args(["perceive", "--frames", "x"])) is None  # (saved frames: offline)
     assert character.active_id() == "magician"
     assert cli._unnamed(parser.parse_args(["tour"])) is None  # it attacks: refused instead, saying why
     refused = cli._refused_as(parser.parse_args(["tour"]))
