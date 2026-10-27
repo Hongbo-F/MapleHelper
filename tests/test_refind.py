@@ -1,5 +1,5 @@
 """A monster followed, re-found (MobDetector.refind): first only as far around where it should be as it can have got
-since it was last seen (`near`, mobs.near_pad), the REFIND_PAD window only where that finds no picture at REFIND_GOOD;
+since it was last seen (`near`, mobs.near_pad), the REFIND_PAD window only where that finds no picture at NEAR_GOOD;
 a window at the same place, looked at with the same pictures, whose pixels are the very same as at the last re-find,
 gives the last answer without matching again (`memo`), its kind's whole set's too; and a frame's re-finds all in one call
 in C (`refind_all`, native.c's rf_run), the same answers. Made-up game pictures (a pig and its next frame, test_pasted's)
@@ -14,7 +14,7 @@ import pytest
 
 from gamelab import native
 from gamelab.analysis import pasted
-from gamelab.perception.mobs import INDEX, NEAR_MARGIN, REFIND_GOOD, REFIND_PAD, MobDetector, near_pad
+from gamelab.perception.mobs import INDEX, NEAR_GOOD, NEAR_MARGIN, REFIND_GOOD, REFIND_PAD, MobDetector, near_pad
 from gamelab.screen import HUD_TOP, NATIVE
 
 from test_pasted import frame, game_folder, pig
@@ -96,6 +96,41 @@ def test_where_near_finds_nothing_good_the_whole_window_is_looked_at(detector, w
     near = detector.refind(frame_, box, "pig", "pig_move0", -1, BOUNDS, near=NEAR_MARGIN + 8)
     assert near.template == "pig_move1" and near == whole
     assert len(windows) == 2 and windows[0] == windows[1]  # (both in the near window: its last, then its next)
+
+
+def noisy_scene(detector, lo: float, hi: float) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+    """`scene()` with noise over the pig, as much as makes its own picture score in (lo, hi) in the whole window."""
+    rng = np.random.default_rng(5)
+    for sigma in range(4, 80, 2):
+        frame_, box = scene()
+        x0, y0, x1, y1 = box
+        out = frame_.astype(np.int16)
+        out[y0:y1, x0:x1] += rng.normal(0, sigma, out[y0:y1, x0:x1].shape).round().astype(np.int16)
+        out = np.clip(out, 0, 255).astype(np.uint8)
+        found = detector.refind(out, box, "pig", "pig_move0", -1, BOUNDS)
+        if found is not None and found.template == "pig_move0" and lo < found.score < hi:
+            return out, box
+    raise AssertionError(f"no noise scores the pig in ({lo}, {hi})")
+
+
+
+def test_a_near_answer_under_near_good_goes_on_to_the_whole_window(detector, windows):
+    # (over REFIND_GOOD, under NEAR_GOOD: the REFIND_PAD window's answer, as without `near`, alone and in one call)
+    full_pad, near = round(REFIND_PAD * detector.px), NEAR_MARGIN + 8
+    frame_, box = noisy_scene(detector, REFIND_GOOD, NEAR_GOOD)
+    whole = detector.refind(frame_, box, "pig", "pig_move0", -1, BOUNDS)
+    windows.clear()
+    first = detector.refind(frame_, box, "pig", "pig_move0", -1, BOUNDS, near=near)
+    assert first == whole and REFIND_GOOD < first.score < NEAR_GOOD
+    assert windows == [(box[2] - box[0] + 2 * near, box[3] - box[1] + 2 * near),
+                       (box[2] - box[0] + 2 * full_pad, box[3] - box[1] + 2 * full_pad)]  # near, then the whole
+    asks = [(box, "pig", "pig_move0", -1, True, near, {}, 1)]
+    assert detector.refind_all(frame_, asks, BOUNDS, 4) == [whole]
+    frame_, box = noisy_scene(detector, NEAR_GOOD, 0.99)  # at NEAR_GOOD or more: the near window's answer
+    windows.clear()
+    first = detector.refind(frame_, box, "pig", "pig_move0", -1, BOUNDS, near=near)
+    assert first.score >= NEAR_GOOD and windows == [(box[2] - box[0] + 2 * near, box[3] - box[1] + 2 * near)]
+    assert detector.refind_all(frame_, [(box, "pig", "pig_move0", -1, True, near, {}, 1)], BOUNDS, 4) == [first]
 
 
 def test_a_window_the_very_same_as_last_time_gives_the_last_answer(detector, windows):
@@ -216,6 +251,15 @@ def test_all_in_one_call_another_kinds_monster_near_is_looked_for_in_the_whole_w
         monkeypatch.setattr(detector, "_its_kind", lambda frame, m, no=no: not no(m))
         alone = [detector.refind(frame_, a[0], *a[1:4], BOUNDS, *a[4:6], {}) for a in asks]
         assert detector.refind_all(frame_, [(*a[:6], {}, a[7]) for a in asks], BOUNDS, 4) == alone
+
+
+def test_all_in_one_call_two_asks_with_one_id_are_not_the_cs(detector):
+    # (native.c's rf_start: each job's id its own within a call, two on one memo would be two threads on it; the
+    # caller re-finds each on its own then)
+    frame_, box = scene()
+    ask = (box, "pig", "pig_move0", -1, True, NEAR_MARGIN + 8)
+    assert detector.refind_all(frame_, [(*ask, {}, 7), (*ask, {}, 7)], BOUNDS, 4) is None
+    assert detector.refind_all(frame_, [(*ask, {}, 7), (*ask, {}, 8)], BOUNDS, 4) ==         [detector.refind(frame_, box, "pig", "pig_move0", -1, BOUNDS, True, NEAR_MARGIN + 8)] * 2
 
 
 def test_all_in_one_call_not_where_the_c_cant(detector):

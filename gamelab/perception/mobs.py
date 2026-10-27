@@ -138,6 +138,19 @@ REFIND_NEXT = 4
 # frame), near first without it took 2.28 cores for 28.9 frames a second against master's 2.08 for 29.8; with it 1.89
 # for 30.2 against 1.95 for 30.2 (pfast/tools/replay.py, the crowd's [700:1300] of 01:01; README).
 NEAR_MARGIN = 4
+# A near window's answer is taken only at NEAR_GOOD or more (as rounded), else the REFIND_PAD window as before. Over
+# REFIND_GOOD alone, a monster further off than the near window could be answered otherwise than by the whole window:
+# there its last picture scored over REFIND_GOOD outside the near window, where in it the near window went on to a
+# frame it may have gone to. Drawn on a frame of 01:01 (2026-10-27, the review of perception-fast: D:/MapleHelper-
+# scratch/pfast/review-correct/near_edge2.py, Tree Dungeon's pictures and the frames they most likely went to set on
+# their feet from 2 px inside to 5 px past the near window, 8 ways), 37 scenes of 11,040 were answered otherwise, all
+# Horny Mushrooms 10 px or more off up or down: in 25 the near window took another frame at 0.902-0.919 where the
+# whole window found 0.977-1.0; in 12 the near window's was the better, 0.977-1.0 where the whole window's first
+# picture over REFIND_GOOD scored 0.906-0.919. At 0.95, 12 of the 11,040 (the 12 better ones): the 25 are the whole
+# window's answers. On the saved frames 0.18-0.34 near answers a frame scored under 0.95 (01:01's crowd stamped 1/30 s
+# apart, and each held 3 times; 00:25 stamped 1/30 s: 0.23) and go on to the whole window too; the states master's
+# on every one of both Lie Detectors' before/ either way (pfast/fix-reviews; README, Perception, faster re-finds).
+NEAR_GOOD = 0.95
 # What a folder of templates may say about them, by file name: where the monster's feet are in each picture
 # ("origin", in the picture's own px, of its size "w" x "h"), which way it faces ("faces_right"; the game's
 # sprites face left), its frame in the game data ("frame": "move/2") and that frame's body box ("lt", "rb").
@@ -444,6 +457,7 @@ class MobDetector:
         self._rf_flat: list[int] = []
         self._rf_lists = np.zeros(1, np.int32)
         self._rf: dict[int, native.Refinds | None] = {}
+        self._rf_making = threading.Lock()  # (the C's contexts and lists made by one re-find step at a time)
         self._picking: dict = {}  # what `_its_kind` works out of the pictures alone, kept (`_pick_here`)
 
     def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]:
@@ -478,7 +492,7 @@ class MobDetector:
         None. On the caller's thread: a window is small, and the pool's hand-offs cost more (the feed's step runs a
         frame's re-finds at once, each on a thread of its own pool: localization.worldstate, REFIND_THREADS).
         `near` (px): looked for first only that far around the box (`near_pad`: as far as it can have got since it was
-        last seen), the same way; the REFIND_PAD window as above only where that finds no picture at REFIND_GOOD, or
+        last seen), the same way; the REFIND_PAD window as above only where that finds no picture at NEAR_GOOD, or
         another kind's monster. `memo`: a dict the caller keeps for this monster from one re-find to the next (one a
         track): a window at the same place, looked at with the same pictures, whose pixels are the very same as last
         time gives what it gave then (`_recall`) without matching again; and where the last re-find found it only
@@ -499,8 +513,9 @@ class MobDetector:
                 best = self._looked(frame, small, seen, memo, "near")
                 # (over REFIND_GOOD as rounded: a score that rounds to 0.9 may be under it, and the matches went on to
                 # the next pictures. Taken at 0.9, a held frame of 01:01 kept one at 0.900 at the near window's edge,
-                # where its next picture, a px taller, scored 0.99 in the whole window.)
-                if best is not None and best.score > REFIND_GOOD and self._its_kind(frame[:by1, :bx1], best):
+                # where its next picture, a px taller, scored 0.99 in the whole window. And NEAR_GOOD or more.)
+                if best is not None and best.score > REFIND_GOOD and best.score >= NEAR_GOOD \
+                        and self._its_kind(frame[:by1, :bx1], best):
                     return best
         best = self._looked(frame, full, seen, memo, "full")
         if best is not None and not self._its_kind(frame[:by1, :bx1], best):
@@ -536,7 +551,7 @@ class MobDetector:
         matches (`_matched`'s, near and full) in one call in C on `threads` threads (native.Refinds, rf_start: Python's
         lock let go; the contract in native.c), the rest here as in `refind`, each monster's as the C hands it over,
         while it goes on with the others (`_its_kind`; `_note_far`; the fallback, on `pool`, an Executor, if one is
-        given; the near window's answer passing REFIND_GOOD but not its kind, its whole window in a second call after).
+        given; the near window's answer passing NEAR_GOOD but not its kind, its whole window in a second call after).
         None where the C can't (not built, a picture it doesn't take, a frame it doesn't read as it is): the caller
         re-finds each with `refind`."""
         rf = self._in_c(threads)
@@ -563,7 +578,7 @@ class MobDetector:
                 if small is not None:
                     job.wnear[:] = small
             plans[i] = (full, nearer)
-        outs = rf.start(frame, jobs, self._rf_lists, THRESHOLD, REFIND_GOOD)
+        outs = rf.start(frame, jobs, self._rf_lists, THRESHOLD, REFIND_GOOD, near_good=NEAR_GOOD)
         if outs is None:
             return None
         found: list[Mob | None] = [None] * n
@@ -608,7 +623,7 @@ class MobDetector:
             for k, i in enumerate(again):
                 ctypes.memmove(ctypes.byref(more[k]), ctypes.byref(jobs[i]), ctypes.sizeof(native.RfJob))
                 more[k].wnear[:] = (0, 0, 0, 0)
-            outs2 = rf.run(frame, more, self._rf_lists, THRESHOLD, REFIND_GOOD, keep=True)
+            outs2 = rf.run(frame, more, self._rf_lists, THRESHOLD, REFIND_GOOD, keep=True, near_good=NEAR_GOOD)
             for k, i in enumerate(again):
                 if outs2 is None or outs2[k].looked & 16:
                     alone.append(i)
@@ -633,17 +648,31 @@ class MobDetector:
         in `_rf_table`); None where it can't be: the DLL or AVX2 not there, a picture the C doesn't take."""
         rf = self._rf.get(threads)
         if rf is None and threads not in self._rf:
-            ready = [match.prepared(t.rgb, t.mask3) for t in self._rf_table]
-            rf = native.Refinds(ready, threads) if ready and all(r is not None for r in ready) else None
-            if rf is not None and rf.ctx is None:
-                rf = None
-            self._rf[threads] = rf
+            with self._rf_making:
+                if threads not in self._rf:
+                    ready = [match.prepared(t.rgb, t.mask3) for t in self._rf_table]
+                    rf = native.Refinds(ready, threads) if ready and all(r is not None for r in ready) else None
+                    if rf is not None and rf.ctx is None:
+                        rf = None
+                    self._rf[threads] = rf
+                rf = self._rf[threads]
         return rf
 
     def _lists_of(self, kind: str, template: str, facing: int) -> tuple[int, int, int, int, int]:
         """A re-find's pictures for the C (`refind_all`; `_matched`'s, as indices into `_rf_table`, in `_rf_lists`):
-        (their number, the first pictures' start and count, the next frames' start and count). Made once each."""
+        (their number, the first pictures' start and count, the next frames' start and count). Made once each (one
+        step at a time: `_rf_making`)."""
         key = (kind, template, facing)
+        got = self._rf_index.get(key)
+        if got is not None:
+            return got
+        with self._rf_making:
+            return self._listed(key)
+
+    def _listed(self, key: tuple) -> tuple[int, int, int, int, int]:
+        """`_lists_of`'s, made under `_rf_making` (the array before the index: a step that finds its key finds its
+        pictures in `_rf_lists`)."""
+        kind, template, facing = key
         got = self._rf_index.get(key)
         if got is None:
             first, last = [], None
@@ -657,8 +686,8 @@ class MobDetector:
             at = len(self._rf_flat)
             self._rf_flat += first + after
             got = (len(self._rf_index), at, len(first), at + len(first), len(after))
-            self._rf_index[key] = got
             self._rf_lists = np.array(self._rf_flat or [0], np.int32)
+            self._rf_index[key] = got
         return got
 
     def _rf_mob(self, kind: str, o, side: int) -> Mob:

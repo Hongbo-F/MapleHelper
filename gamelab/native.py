@@ -55,8 +55,8 @@ SIGNATURES = {  # each function's (return type, argument types)
     "mm_ntt": (_L, [_L]),
     "mm_transformed": (_I, [_P]),
     "rf_open": (_P, [_P, _I, _I]),
-    "rf_run": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _I, _P]),
-    "rf_start": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _I, _P]),
+    "rf_run": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _D, _I, _P]),
+    "rf_start": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _D, _I, _P]),
     "rf_next": (_I, [_P]),
     "rf_end": (None, [_P]),
     "rf_close": (None, [_P]),
@@ -286,10 +286,11 @@ class Refinds:
             self.ctx = self._lib.rf_open((ctypes.c_void_p * n)(*[p.address for p in self.pictures]), n, threads) or None
 
     def start(self, frame: np.ndarray, jobs: ctypes.Array, lists: np.ndarray, thr: float, good: float,
-              keep: bool = False) -> ctypes.Array | None:
-        """rf_start over `frame` (uint8, its rows' pixels side by side: `takes`) for `jobs` (an RfJob array), `lists` the
-        jobs' picture indices (int32, contiguous): an RfOut each, filled in as `next` hands each job over (until -1);
-        `end` after it, always. None if the C does nothing (no `end` then)."""
+              keep: bool = False, near_good: float | None = None) -> ctypes.Array | None:
+        """rf_start over `frame` (uint8, its rows' pixels side by side: `takes`) for `jobs` (an RfJob array, each id
+        once), `lists` the jobs' picture indices (int32, contiguous): an RfOut each, filled in as `next` hands each job
+        over (until -1); `end` after it, always. `near_good`: the bar of a near window's answer (rf_start's `ngood`;
+        None: `good`'s alone). None if the C does nothing (no `end` then)."""
         if self.ctx is None or not _takes(frame, self.pictures[0].shape[2]) or lists.dtype != np.int32 \
                 or not lists.flags.c_contiguous:
             return None
@@ -298,7 +299,8 @@ class Refinds:
         h, w = frame.shape[:2]
         self._lock.acquire()
         if self._lib.rf_start(self.ctx, frame.ctypes.data, h, w, frame.strides[0], self.pictures[0].shape[2], jobs, n,
-                              lists.ctypes.data, thr, good, int(keep), outs) != 0:
+                              lists.ctypes.data, thr, good, good if near_good is None else near_good, int(keep),
+                              outs) != 0:
             self._lock.release()
             return None
         self._held = (frame, jobs, lists, outs)
@@ -316,9 +318,9 @@ class Refinds:
             self._lock.release()
 
     def run(self, frame: np.ndarray, jobs: ctypes.Array, lists: np.ndarray, thr: float, good: float,
-            keep: bool = False) -> ctypes.Array | None:
+            keep: bool = False, near_good: float | None = None) -> ctypes.Array | None:
         """All of `start`, `next` and `end` at once: an RfOut each, or None if the C did nothing."""
-        outs = self.start(frame, jobs, lists, thr, good, keep)
+        outs = self.start(frame, jobs, lists, thr, good, keep, near_good)
         if outs is not None:
             try:
                 while self.next() >= 0:

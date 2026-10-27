@@ -1118,9 +1118,11 @@ EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int
  *     template and its mask as mm_prepare made them ready (Masked), the same for the context's life; a picture is named
  *     in a job by its index there (a backend may copy them: a GPU's, uploaded once, here). `threads`: how many threads
  *     work at a call, the caller's own among them (a pool made here, once: none made a call).
- *   rf_run(ctx, frame, fh, fw, frow, cn, jobs, njobs, lists, thr, good, keep, outs): 0, or -1 if it did nothing (the
- *     caller then does it all its own way). The frame: pixel (y, x) channel c at frame[y * frow + x * cn + c], uint8,
- *     cn the pictures' channels. Each job (RfJob), a monster followed:
+ *   rf_run(ctx, frame, fh, fw, frow, cn, jobs, njobs, lists, thr, good, ngood, keep, outs): 0, or -1 if it did nothing
+ *     (the caller then does it all its own way). The frame: pixel (y, x) channel c at frame[y * frow + x * cn + c],
+ *     uint8, cn the pictures' channels. Each job (RfJob), a monster followed:
+ *       its `id`, the caller's for it from call to call (its memo), each job's its own within a call (two the same:
+ *       -1, nothing done);
  *       its windows, x0, y0, x1, y1 in frame px, within the frame: `wnear` (empty, x1 <= x0 or y1 <= y0: none) and
  *       `wfull` (empty: nothing to do but keep its memo);
  *       its pictures, indices into tpls: `first_n` from lists[first_at] (the picture that matched it last; both ways
@@ -1134,8 +1136,9 @@ EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int
  *       decimal, ties to even; the score a Mob keeps);
  *       then, if it has next pictures and there's no best yet or the best's R is under `good` (REFIND_GOOD), those in
  *       turn the same way, stopping after the first that scores `good` or more (whether it became the best or not).
- *     The near window first, if the job has one: where its best's R is over `good` (strictly) the job is done there
- *     (found 1); else the full window (found 2, or 0 where it has no best either).
+ *     The near window first, if the job has one: where its best's R is over `good` (strictly) and at least `ngood`
+ *     (NEAR_GOOD: the bar of a near answer, mobs.py) the job is done there (found 1); else the full window (found 2, or
+ *     0 where it has no best either).
  *     The memo: a window at the same place, looked at with the same pictures (`key`: the caller's number for them), its
  *     pixels the very same as at the last call with that job `id` (byte for byte), may be answered as then without
  *     matching. A backend may keep none: the answers are the same. The memos of ids not in a call go after it, unless
@@ -1156,9 +1159,17 @@ EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int
  * Here: each job on one thread, the jobs taken in turn from a counter (largest first) by the pool's threads and by the
  * caller's in rf_next when none is in yet; each window loaded once (`load`) for its pictures; the matches through
  * `rf_best`, the one place this calls the matcher. A GPU backend would match every job's windows in one dispatch
- * (pictures uploaded at rf_open, the frame's windows at rf_start; each place's score, then each picture's first best
- * place and the stages' order above on the CPU, or on the GPU in one more pass), rf_next handing the jobs over as they
- * come back. */
+ * (pictures uploaded at rf_open, the frame's windows at rf_start), rf_next handing the jobs over as they come back.
+ * What a GPU can give to the bit (2026-10-27, the review of this contract): Direct3D 11's shader model 5 has no 64-bit
+ * integers and no double square root (doubles are optional, their division only with the extended-doubles feature).
+ * So its exact part is each place's integer sums, as mm_match's place-by-place code has them: the dot products of the
+ * window's channels with the template's (STI), and over the mask the window's sums S1_c and sum of squares S2, each
+ * under 2^32 for a picture up to 128 x 128 (STI and S2 at most 255 x 255 x 16,384 x 3 = 3.2e9, S1_c 255 x 16,384):
+ * uint32 arithmetic, wrapping nowhere. N and B (int64) from them, the score (float)((double)N / sqrt((double)A *
+ * (double)B)) (-1 where that product isn't over 0), and the first highest float32 row by row, are score_at's and
+ * rf_best's, on the CPU (or emulated exactly, every rounding IEEE's one rounding): the best is picked among
+ * float32-rounded scores, ties going to the first place, so a best picked by exact ratios or by float approximations
+ * of them can be another place even where the highest score is right. */
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1210,7 +1221,7 @@ typedef struct {
     const int *lists;
     RfOut *outs;
     int count;
-    double thr, good;
+    double thr, good, ngood;
     volatile long next;               /* the next of `order` to take */
     int nfinished, reported;          /* jobs done (in `finished`, in the order they were), and handed to the caller */
     RfEntry *memo[RF_MAX_JOBS];       /* each job's */
@@ -1401,7 +1412,7 @@ static void rf_job(const RfCtx *c, const RfBatch *b, int i)
         if (!rf_empty(j->wnear)) {
             if (rf_window(c, b, j, j->wnear, 0, e ? &e->m[0] : 0, o) != 0)
                 o->looked |= 16;
-            else if (o->tpl[0] >= 0 && rf_round3(o->score[0]) > b->good)
+            else if (o->tpl[0] >= 0 && rf_round3(o->score[0]) > b->good && rf_round3(o->score[0]) >= b->ngood)
                 o->found = 1;
         }
         if (!o->found && !(o->looked & 16)) {
@@ -1572,12 +1583,12 @@ static RfEntry *rf_entry(RfCtx *c, long long id)
 }
 
 /* rf_run in three: rf_start hands the jobs to the pool's threads (0, or -1 if it did nothing: a call already running,
- * a window outside the frame, a picture not the context's); rf_next hands the jobs over one at a time as they're done,
+ * a window outside the frame, a picture not the context's, two jobs with one id); rf_next hands the jobs over one at a time as they're done,
  * the caller's thread doing one itself where none is done yet and some aren't taken (its index, or -1 when every job
  * has been handed over), so the caller can do its own part of each meanwhile; rf_end waits for the pool's threads to
  * be out of the call (always called after rf_start's 0, whatever was handed over). rf_run: all three at once. */
 EXPORT int rf_start(void *ctx, const unsigned char *frame, int fh, int fw, long long frow, int cn, const RfJob *jobs,
-                    int njobs, const int *lists, double thr, double good, int keep, RfOut *outs)
+                    int njobs, const int *lists, double thr, double good, double ngood, int keep, RfOut *outs)
 {
     RfCtx *c = (RfCtx *)ctx;
     if (!c || c->running || njobs < 0 || njobs > RF_MAX_JOBS)
@@ -1592,6 +1603,10 @@ EXPORT int rf_start(void *ctx, const unsigned char *frame, int fh, int fw, long 
         for (int k = 0; k < j->first_n + j->next_n; k++) {
             int t = k < j->first_n ? lists[j->first_at + k] : lists[j->next_at + k - j->first_n];
             if (t < 0 || t >= c->ntpl || c->tpls[t]->cn != cn)
+                return -1;
+        }
+        for (int k = 0; k < i; k++) {  /* each id once: two jobs on one memo would be two threads on it */
+            if (jobs[k].id == j->id)
                 return -1;
         }
     }
@@ -1645,6 +1660,7 @@ EXPORT int rf_start(void *ctx, const unsigned char *frame, int fh, int fw, long 
     b->count = njobs;
     b->thr = thr;
     b->good = good;
+    b->ngood = ngood;
     b->next = 0;
     b->nfinished = 0;
     b->reported = 0;
@@ -1716,9 +1732,9 @@ EXPORT void rf_end(void *ctx)
 }
 
 EXPORT int rf_run(void *ctx, const unsigned char *frame, int fh, int fw, long long frow, int cn, const RfJob *jobs,
-                  int njobs, const int *lists, double thr, double good, int keep, RfOut *outs)
+                  int njobs, const int *lists, double thr, double good, double ngood, int keep, RfOut *outs)
 {
-    if (rf_start(ctx, frame, fh, fw, frow, cn, jobs, njobs, lists, thr, good, keep, outs) != 0)
+    if (rf_start(ctx, frame, fh, fw, frow, cn, jobs, njobs, lists, thr, good, ngood, keep, outs) != 0)
         return -1;
     while (rf_next(ctx) >= 0)
         ;
