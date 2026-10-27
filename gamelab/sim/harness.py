@@ -49,13 +49,16 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    value_per_min, the mesos' worth she picked up a minute
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
-  safety_stops     the safety stop (behavior.safety: her HP under 40% for 2 s, her pet's potions not keeping her up):
-                   1 if it ended the run (her retreat to a safe place, then nothing: the hunt ends, as live), and
+  safety_stops     the safety stop (behavior.safety: her HP under 65% for 2 s, or 25% two looks in a row, her pet's
+                   potions not keeping her up): 1 if it ended the run (her retreat to a safe place, then nothing: the
+                   hunt ends, as live; the run's time ends with her retreat, alive_s and the idle stretches with it,
+                   and it counts against the bar as a death does), and
                    safety_at, when (s; the 'safety_stop' event). Until 2026-10-26 the runs counted her rests on the
                    chair (rests) and the HP lost on her trips to rest (rest_hp_lost, rest_trips); darts_stops and
                    darts_at, out of darts' (behavior.darts: her Lucky Seven presses taking no MP and killing nothing),
                    and darts_out_at, when she ran out (world.Realism.darts: her stars; None: endless, or not out)
-  alive_s          the seconds of the horizon she was hunting (to her death, fall or portal): rates a minute alive
+  alive_s          the seconds of the horizon she was hunting (to her death, fall, portal or a stop): rates a minute
+                   alive
   fresh_hurt       touches that hurt her by a monster within world.FRESH_S of its respawn (from its spawn point),
                    and fresh_hp_lost, the HP they took
   wait_s           seconds the hunt loop spent waiting for respawns (its rules 'wait' and 'lull loot', from its 'hunt'
@@ -465,11 +468,16 @@ _MISSED = re.compile(r"ended on (?:platform (?P<landed>\d+) \(.*?\)|air/rope) in
 
 def outcomes(world, records: list[dict], horizon: float) -> dict:
     """What a run gave, from the simulated world (and the telemetry it recorded)."""
+    events = [r for r in records if r.get("topic") == "event"]
+    stops = [r for r in events if r.get("kind") == "safety_stop"]
+    darts = [r for r in events if r.get("kind") == "out_of_darts"]
     end = min(horizon, world.died_at) if world.died_at is not None else horizon
     if world.fell_out_at is not None:
         end = min(end, world.fell_out_at)
     if world.left_map_at is not None:
         end = min(end, world.left_map_at)
+    if stops or darts:  # (the hunt ended there, her retreat after the stop its last: nothing hunts on, as live)
+        end = min(end, world.t)
     mine = [k for k in world.kill_log if k[3] == "her"]
     drops = [d for d in world.drops if d.owner == "her" and d.since <= horizon]
     known = [d for d in drops if d.taken_by == "her" or d.since + DROP_LIFE <= horizon]
@@ -478,11 +486,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     worth_known, worth_picked = sum(worth(d.kind) for d in known), sum(worth(d.kind) for d in picked)
     times = sorted([0.0] + [k[0] for k in mine] + [d.taken_at for d in world.drops if d.taken_by == "her"] + [end])
     gaps = [b - a for a, b in zip(times, times[1:])]
-    events = [r for r in records if r.get("topic") == "event"]
     waits = _waits(records)
     start = next((r["t"] for r in records if r.get("topic") == "session"), None)
-    stops = [r for r in events if r.get("kind") == "safety_stop"]
-    darts = [r for r in events if r.get("kind") == "out_of_darts"]
     return {
         "exp": world.exp,
         "exp_per_min": round(world.exp / (horizon / 60), 2),
@@ -695,7 +700,7 @@ def table(results: list[dict]) -> str:
 
 def _mean(results: list[dict], key: str):
     vals = [r[key] for r in results if isinstance(r.get(key), (int, float))]
-    if key in ("died_at", "fell_out_at", "left_map_at", "safety_at"):
+    if key in ("died_at", "fell_out_at", "left_map_at", "safety_at", "darts_at"):
         return sum(1 for r in results if r.get(key) is not None)  # deaths, falls out of the map, portals taken, stops
     return round(statistics.fmean(vals), 3) if vals else None
 
@@ -719,7 +724,8 @@ def _paired(base: list[dict], cand: list[dict]) -> tuple[list[dict], list[dict]]
 def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     """Whether `cand` passes the bar against `base` (seed by seed, over the seeds both have: MIN_PAIRS at
     least), and why: better EXP a minute on at least 8 of 10 seeds and no seed more than 10% worse; at
-    least the drops share on average; no more HP lost on average; no death, and no fall out of the map."""
+    least the drops share on average; no more HP lost on average; no death, no fall out of the map, and no stop (the
+    safety stop, out of darts: the hunt ended)."""
     every = cand  # deaths count on every seed, compared or not: "no death" isn't a comparison
     if (maps := _maps(base, cand)) is not None:
         return False, [maps, "does NOT pass the bar"]
@@ -743,6 +749,10 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     deaths = sum(1 for r in every if r.get("died_at") is not None)
     lines.append(f"deaths: {deaths}")
     ok &= deaths == 0
+    stopped = [r["seed"] for r in every if r.get("safety_stops") or r.get("darts_stops")]
+    if stopped:
+        lines.append(f"the hunt stopped (the safety stop, out of darts): seed(s) {', '.join(map(str, stopped))}")
+    ok &= not stopped
     fell = [r["seed"] for r in every if r.get("fell_out_at") is not None]
     if fell:
         lines.append(f"fell out of the map: seed(s) {', '.join(map(str, fell))}")

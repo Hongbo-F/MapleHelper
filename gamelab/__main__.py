@@ -1966,18 +1966,20 @@ def attack_arg(s) -> None:
     s.add_argument("--attack", choices=["choice", "skill", "regular"], default="choice",
                    help="which attack a throw is (behavior.attacks): choice (the default), Lucky Seven but the regular "
                         "attack to finish a monster and while her MP is under a cast; skill, Lucky Seven while she has "
-                        "the MP for a cast; regular, the regular attack always")
+                        "the MP for a cast; regular, the regular attack always (out of darts, behavior.darts, is "
+                        "told by her Lucky Seven presses: not watched with regular)")
     s.add_argument("--skill", action="store_true", help="the same as --attack skill")
 
 
 def safety_arg(s) -> None:
-    """`--low-hp`: the safety stop's threshold (behavior.safety; None: its SAFETY_HP, which the command line doesn't
-    import: the elevated player builds this parser). Until 2026-10-26 `tour`'s stopped the fight and sent her to rest
-    on the chair (30%), and `hunt`'s and `probe run`'s handed back at once (35%)."""
+    """`--low-hp`: the safety stop's threshold (behavior.safety; None: its own, safety.threshold, which the command
+    line doesn't import: the elevated player builds this parser). Until 2026-10-26 `tour`'s stopped the fight and sent
+    her to rest on the chair (30%), and `hunt`'s and `probe run`'s handed back at once (35%)."""
     s.add_argument("--low-hp", type=float, default=None,
-                   help="the safety stop: her HP under this for a few seconds ends the hunt, she goes to a safe place "
-                        "and you're paged (default: behavior.safety.SAFETY_HP, 0.4; her pet drinks her potions at "
-                        "70%%)")
+                   help="the safety stop: her HP under this for 2 s ends the hunt, she goes to a safe place and you're "
+                        "paged (default: behavior.safety.SAFETY_HP, 0.65, five points under her pet's warning, 70%%; "
+                        "with an HP potion key of her own, five under --potion-hp if lower; 25%% two looks in a row "
+                        "stops it too)")
 
 
 def _attack(args) -> str:
@@ -2034,7 +2036,7 @@ def build_parser() -> argparse.ArgumentParser:
     from maplehelper.actions import ACTIONS
     s = sub.add_parser("do", help="run a maplehelper.actions move in the game (walk, climb_rope, pick_up, ...)")
     s.add_argument("action", choices=sorted(ACTIONS))
-    s.add_argument("args", nargs="*", help="e.g.  walk right 200   climb_rope 300   pick_up 2   rest 100")
+    s.add_argument("args", nargs="*", help="e.g.  walk right 200   climb_rope 300   pick_up 2   stand_up")
     s.add_argument("--facing", choices=[LEFT, RIGHT], default=RIGHT, help="which way she faces now (stand_up)")
     s.add_argument("--name", default="do", help="recording / screenshot name")
     s.add_argument("--every", type=int, default=4)

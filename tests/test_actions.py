@@ -7,7 +7,7 @@ import pytest
 from maplehelper import actions, keys
 from maplehelper.config import GameKeys, Timing
 from maplehelper.engine import LEFT, RIGHT, Ctx, _Silent
-from maplehelper.game import MOVEMENT, RECOVERY
+from maplehelper.game import MOVEMENT
 
 K = keys.parse
 HER_KEYS = GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("f"), lucky_seven=K("g"),
@@ -121,13 +121,13 @@ def test_pick_up_presses_once_per_item():
     assert len(c.held("z")) == 3
 
 
-def test_rest_sits_long_enough_then_stands_up_facing_the_same_way():
+def test_stand_up_taps_the_way_she_already_faces_and_no_move_sits_her_down_for_hp():
     c = Clock(facing=LEFT)
-    actions.rest(c, 120)
-    assert actions.rest_ms(120) == 30_000  # 50 HP per 10 s tick -> 3 ticks
-    assert c.held("d") and c.held("left") == [MOVEMENT.tap_turn_ms]  # tap the way she already faces
-    assert actions.rest_ms(0) == 0
-    assert RECOVERY.on_chair_hp_per_10s == 50
+    actions.stand_up(c)
+    assert c.held("left") == [MOVEMENT.tap_turn_ms] and not c.held("d")
+    # Sitting on the chair to get HP back went on 2026-10-26 (her pet drinks her potions).
+    assert not {"rest", "sit_on_chair"} & set(actions.ACTIONS)
+    assert not any(hasattr(actions, name) for name in ("rest", "rest_ms", "sit_on_chair"))
 
 
 def test_attacks_respect_the_attack_lock():

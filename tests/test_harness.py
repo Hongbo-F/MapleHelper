@@ -418,10 +418,15 @@ def test_the_safety_stop_is_counted_and_the_bar_compares_the_seeds_both_have(mod
     out = harness.outcomes(w, records, 60.0)
     assert (out["safety_stops"], out["safety_at"]) == (0, None)
     assert out["hp_lost"] == pytest.approx(0.044)
-    records.append({"topic": "event", "kind": "safety_stop", "t": t0 + 20.0, "text": "HP 31%, under 40% for 2.0 s"})
+    assert out["alive_s"] == 60.0
+    records.append({"topic": "event", "kind": "safety_stop", "t": t0 + 20.0, "text": "HP 31%, under 65% for 2.0 s"})
+    w.ms = 25_000  # (the world's time once the run's over: her retreat after the stop)
     out = harness.outcomes(w, records, 60.0)
     assert (out["safety_stops"], out["safety_at"]) == (1, 20.0)
+    # The run's time ends with the hunt (her retreat after the stop): not idle to the horizon. The touches to then.
+    assert out["alive_s"] == 25.0 and out["longest_idle"] <= 25.0 and out["stuck_s"] == 0.0
     assert harness._mean([out, dict(out, safety_at=None)], "safety_at") == 1  # runs it stopped, as deaths are counted
+    assert harness._mean([dict(out, darts_at=40.0), out], "darts_at") == 1
     assert not any(k.startswith("rest") for k in out)  # the rests went on 2026-10-26
     base = [_result(k, 50.0) for k in range(1, 11)]
     # With no seed in common, never a pass.
@@ -435,6 +440,10 @@ def test_the_safety_stop_is_counted_and_the_bar_compares_the_seeds_both_have(mod
     assert harness.compare(base, better)[0]
     died = better + [dict(better[0], seed=15, died_at=600.0)]
     assert not harness.compare(base, died)[0]
+    # A stop (the safety stop, out of darts) counts against it as a death does: the hunt ended.
+    for key in ("safety_stops", "darts_stops"):
+        ok, lines = harness.compare(base, [dict(r, **{key: 1}) if r["seed"] == 3 else r for r in better])
+        assert not ok and "the hunt stopped (the safety stop, out of darts): seed(s) 3" in lines
 
 
 def test_the_touches_on_her_trips_are_counted_from_a_chains_or_moves_start_to_its_end(model):

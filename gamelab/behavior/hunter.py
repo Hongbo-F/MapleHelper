@@ -57,7 +57,7 @@ from .fight import Report
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
-from .safety import SAFETY_HP, HpWatch
+from .safety import HpWatch, threshold
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
@@ -92,7 +92,8 @@ class Hunter:
                  low_hp: float | None = None, potion_hp: float = 0.5, skill: bool = False, feed=None,
                  her: danger.Her | None = None, attack: str | None = None):
         """`low_hp`: the safety stop's threshold (behavior.safety: her HP under it for SAFETY_S ends the hunt; None:
-        SAFETY_HP); `potion_hp`: her potion key's (drink_if_low; none bound, her pet drinks them). `feed`: what her
+        safety.threshold's, SAFETY_HP under her pet's warning, under `potion_hp` with a potion key of her own);
+        `potion_hp`: her potion key's (drink_if_low; none bound, her pet drinks them). `feed`: what her
         looks and glances come from (localization.feed.Feed: the perception service's client live,
         localization.service; SyncFeed in the simulator; None: the step on the eyes' own frames, feed.InlineFeed), told
         of her throws. `her`: her HP and level, what a touch is measured against (attack.danger; config.toml [character]
@@ -104,7 +105,8 @@ class Hunter:
         c = physics.CHARACTER
         self.danger = danger.of_map(model, her or danger.Her(c.hp, c.level))  # where touches would cost her
         self.potion_hp = potion_hp
-        self.hp_watch = HpWatch(SAFETY_HP if low_hp is None else low_hp)  # the safety stop's: every look's HP (_vitals)
+        own = potion_hp if keys.hp_potion is not None else None  # (her own potion key's: under it, the stop's lower)
+        self.hp_watch = HpWatch(threshold(own) if low_hp is None else low_hp)  # the safety stop's: every look's HP
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
         mode = attack or ("skill" if skill else "regular")

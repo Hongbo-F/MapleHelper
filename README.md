@@ -54,7 +54,7 @@ This opens a stand-in window titled "MapleStory Key Viewer". Focus it, press F1â
 - **Her key bindings and quick-slot items.**
 - **Monsters met so far,** and how to read the screen.
 
-[maplehelper/actions.py](maplehelper/actions.py) turns that into reusable moves: walk a distance, jump, climb a rope up or down, pick up loot, sit and rest, attack, Lucky Seven, potions. They're built on the same engine as the combos.
+[maplehelper/actions.py](maplehelper/actions.py) turns that into reusable moves: walk a distance, jump, climb a rope up or down, pick up loot, stand up, attack, Lucky Seven, potions (sitting on the chair to get HP back went on 2026-10-26: her pet drinks her potions). They're built on the same engine as the combos.
 
 ## Testing in the real game
 

@@ -743,8 +743,9 @@ def test_a_trip_stands_still_while_its_looks_fail_and_arrives_after():
 
 
 def test_a_trip_stands_still_no_later_than_its_caller_says():
-    """Navigator.go's `stand_until` bounds a pause sooner than the trip's deadline (the hunt's end, for its trip to rest:
-    Tour.rest): with every look failing from 4 s to 16 s of the same climb and `stand_until` 8 s in, the trip raises
+    """Navigator.go's `stand_until` bounds a pause sooner than the trip's deadline (her retreat's, from the Lie
+    Detector or a stop: retreat.away; the hunt's end, for its trip to rest, Tour.rest, until the rests went on
+    2026-10-26): with every look failing from 4 s to 16 s of the same climb and `stand_until` 8 s in, the trip raises
     LookLost at 8 s, as a pass of the hunt would at its end (Hunt.run), not standing on to its deadline (review,
     2026-10-24: a hunt could stand past its end by up to the trip's 180 s)."""
     import dataclasses

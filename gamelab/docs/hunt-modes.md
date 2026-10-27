@@ -2,7 +2,7 @@
 
 Status: steps 0-5 and 7 built in the simulator on 2026-10-19 (see "As built" below); step 6, the game trials, is still to do. It starts from commit 1e6ae23.
 
-Since 2026-10-26 she doesn't rest (the user: "Just remove the sit recover hp functionality, it's no longer needed"; README: No resting: the safety stop): her pet drinks her potions, and her HP under 40% for 2 s ends the hunt, she goes to a safe place as on the Lie Detector, and whoever is at the PC is paged. What below is about resting (the trip to rest, `--rest-below`, `--low-hp`'s switch to transit, the chair, potions running out, step 7's `--rest-avoid` and `transit-avoid`) is the design as it was; transit is the hunt loop's trips and the stand-by.
+Since 2026-10-26 she doesn't rest (the user: "Just remove the sit recover hp functionality, it's no longer needed"; README: No resting: the safety stop): her pet drinks her potions, and her HP under 65% for 2 s (or 25% two looks in a row) ends the hunt, she goes to a safe place as on the Lie Detector, and whoever is at the PC is paged. What below is about resting (the trip to rest, `--rest-below`, `--low-hp`'s switch to transit, the chair, potions running out, step 7's `--rest-avoid` and `transit-avoid`) is the design as it was; transit is the hunt loop's trips and the stand-by.
 
 ## In short
 
@@ -22,7 +22,7 @@ There is no separate "hunting trip". She stays at a hunting ground while it pays
 
 ## As built (2026-10-19)
 
-Steps 0-5 and 7 are in place, offline: `tour --loop --minutes N` (`behavior/hunt.py`), the ledger and drop store (`behavior/ledger.py`), the explicit trip modes and the stepped navigator, the results harness (`sim/harness.py`), 10 new scenarios (`loop_*`, `tour_rest_avoid`, `tour_rest_no_escort`), and `tour --rest-avoid`. Step 6 needs the game.
+Steps 0-5 and 7 are in place, offline: `tour --loop --minutes N` (`behavior/hunt.py`), the ledger and drop store (`behavior/ledger.py`), the explicit trip modes and the stepped navigator, the results harness (`sim/harness.py`), 10 new scenarios (`loop_*`, and `tour_rest_avoid` and `tour_rest_no_escort`, which went with the rests on 2026-10-26), and `tour --rest-avoid` (gone with them). Step 6 needs the game.
 
 Where the loop differs from the design below, each change was made because the simulator showed the design's version failing:
 - **Urgent piles (rule 6) come before shooting (rule 3)** at a ground, with a 30 s margin (not 10 s), and only for piles within 12 s of travel. Below shooting, where respawns never stop, a quarter of the drops lay until they vanished. Farther piles wait until she leaves. One 84 s round trip for a pile took a quarter of a run.

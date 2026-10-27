@@ -2378,7 +2378,7 @@ def loop_tree_lie_detector_grind(sim):
 
 # --- the safety stop: her HP stays low, the hunt ends, she goes to a safe place, whoever is at the PC is paged --------
 # (behavior.safety). The user, 2026-10-26: "Just remove the sit recover hp functionality, it's no longer needed". Her
-# pet drinks her potions; with none left (Realism.potions 0) the touches that take her under 40% leave her there.
+# pet drinks her potions; with none left (Realism.potions 0) the touches that take her under 65% leave her there.
 
 def safety_stop(minutes: float = 5, grind: bool = False):
     """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; with `grind`, grinding, as `tour --loop
@@ -2409,10 +2409,11 @@ def safety_stop(minutes: float = 5, grind: bool = False):
 
 
 SAFETY_EXPECTS = (
-    check("the hunt stopped for her HP under 40%", lambda tr: "under 40%" in (tr["result"]["stopped"] or {}).get(
+    check("the hunt stopped for her HP under 65%", lambda tr: "under 65%" in (tr["result"]["stopped"] or {}).get(
         "text", "")),
-    check("it was under 40% 2 s over 3 looks at least", lambda tr: tr["result"]["stopped"]["seconds"] >= 2.0
-          and tr["result"]["stopped"]["looks"] >= 3),
+    check("it was under 65% 2 s over 3 looks at least, or under 25% two looks in a row",
+          lambda tr: tr["result"]["stopped"]["seconds"] >= 2.0 and tr["result"]["stopped"]["looks"] >= 3
+          or "under 25% on 2 looks in a row" in tr["result"]["stopped"]["text"]),
     logs("SAFETY STOP: HP"), logs("SAFETY STOP: retreat"),
     check("on a safe place once her retreat is over", lambda tr: tr["result"]["safe"]),
     check("paged once, about her HP", lambda tr: len(tr["result"]["pages"]) == 1
@@ -2421,13 +2422,13 @@ SAFETY_EXPECTS = (
     check("never the chair, no waiting for HP", lambda tr: not any(p[1] in ("chair", "stand") for p in tr["plans"])))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, hp=0.6, **dict(_LIVE, realism=Realism(zero_walls=True, potions=0)),
+@tree((23, 73.0), monsters="all", seed=1, limit=400, hp=0.8, **dict(_LIVE, realism=Realism(zero_walls=True, potions=0)),
       expects=SAFETY_EXPECTS)
 def loop_tree_safety_stop(sim):
-    """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 at 60% HP, her pet with
-    no potion left to drink: the Horny Mushrooms' touches take her under 40% and leave her there; 2 s and 3 looks on the
-    hunt stops (behavior.safety), she goes to a safe place as on the Lie Detector, her moves alone (behavior.retreat),
-    and whoever is at the PC is paged; no chair, no waiting for her HP."""
+    """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 at 80% HP, her pet with
+    no potion left to drink: the Horny Mushrooms' touches take her under 65% (her pet's warning is 70%) and leave her
+    there; 2 s and 3 looks on the hunt stops (behavior.safety), she goes to a safe place as on the Lie Detector, her
+    moves alone (behavior.retreat), and whoever is at the PC is paged; no chair, no waiting for her HP."""
     return safety_stop(5)(sim)
 
 
@@ -2470,7 +2471,7 @@ def darts_stop(minutes: float = 5, grind: bool = False):
 DARTS_EXPECTS = (
     check("the hunt stopped out of darts", lambda tr: "took no MP and killed nothing" in (
         tr["result"]["stopped"] or {}).get("text", "")),
-    check("after as many presses as a monster on her takes of her swipes, and more",
+    check("after the map's presses in a row (presses_for), or more",
           lambda tr: tr["result"]["stopped"]["presses"] >= tr["result"]["needs"]),
     check("only once her stars ran out", lambda tr: tr["result"]["out_at"] is not None
           and tr["result"]["at"] > tr["result"]["out_at"]),
@@ -2487,7 +2488,7 @@ DARTS_EXPECTS = (
 def loop_tree_out_of_darts(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
     30 casts of Lucky Seven and they're gone; from then her presses take no MP and kill nothing (the Lucky Seven key
-    does nothing, as live at 01:28 on 2026-10-26), and once there are more of them than a Horny Mushroom standing on
-    her takes of her claw's swipes (behavior.darts.presses_for: 32 on this map) the hunt stops, she goes to a safe
-    place (behavior.retreat), whoever is at the PC is paged, and the recording's last minutes are saved."""
+    does nothing, as live at 01:28 on 2026-10-26), and once 20 of them have in a row (behavior.darts.presses_for on
+    this map: twice and more the live hunts' most with her darts) the hunt stops, she goes to a safe place
+    (behavior.retreat), whoever is at the PC is paged, and the recording's last minutes are saved."""
     return darts_stop(5)(sim)

@@ -14,7 +14,7 @@ import pytest
 
 from gamelab.attack.choice import MP_STEPS
 from gamelab.behavior import darts, retreat
-from gamelab.behavior.darts import EXIT, MIN_PRESSES, READ_EVERY, DartWatch, OutOfDarts, presses_for
+from gamelab.behavior.darts import EXIT, PRESSES, READ_EVERY, DartWatch, OutOfDarts, presses_for, swipes
 from gamelab.behavior.hunter import Hunter
 from gamelab.behavior.safety import HpWatch, HuntStop
 from gamelab.control import alarm
@@ -40,11 +40,14 @@ def _stretch(w: DartWatch, n: int, t0: float = 0.0, px: int = 40, every: float =
     return t + 0.6
 
 
-def test_presses_for_the_toughest_monster_standing_on_her():
-    # A Horny Mushroom (403 HP, defence 10) takes 21.1 presses of her swipes (21 a press, x 100/110): 1.5 times is 32
-    assert presses_for(TREE_HP, TREE_PDD) == 32
-    assert presses_for({"Snail": 15.0}, {}) == MIN_PRESSES == 16  # weak monsters: the least
-    assert presses_for({}, {}) == MIN_PRESSES
+def test_presses_for_the_map_tree_dungeon_s_20_more_where_its_toughest_monster_takes_more_swipes():
+    # Tree Dungeon's 20: twice and more the 9 in a row with her darts live. Its toughest, a Horny Mushroom (403 HP,
+    # defence 10), takes 21.1 presses of her swipes (21 a press, x 100/110), a Green Mushroom (233) 11.1.
+    assert presses_for(TREE_HP, TREE_PDD) == PRESSES == 20
+    assert swipes(403.0, 10.0) == pytest.approx(21.11, abs=0.01) and swipes(233.0) == pytest.approx(11.1, abs=0.01)
+    assert presses_for({"Snail": 15.0}, {}) == presses_for({}, {}) == PRESSES  # weak monsters: as many
+    # West Rocky Mountain II's Axe Stump (371 HP, defence 30) takes 23.0: 20 x 23.0 / 21.1, 22.
+    assert presses_for({"Axe Stump": 371.0, "Stump": 133.0}, {"Axe Stump": 30.0, "Stump": 30.0}) == 22
     assert (EXIT, READ_EVERY) == (5, 12) and issubclass(OutOfDarts, HuntStop)
 
 
@@ -185,26 +188,28 @@ def _replay(evs, presses, until=None):
 
 def test_the_live_hunts_never_stop_while_she_had_her_darts():
     """Five hunts, 79 minutes, 2,293 presses with her darts: 9 in a row at the most took no MP (her claw swiping a
-    Green Mushroom standing on her: the module's doc), so no stop at Tree Dungeon's 32, nor even at MIN_PRESSES."""
+    Green Mushroom standing on her: the module's doc), so no stop at Tree Dungeon's 20, nor at 12."""
     live = _live()
     evs, out = live["01:04"]
     assert sum(1 for evs, _ in live.values() for e in evs if e[1] == "c") == 2316
     assert sum(1 for e in evs if e[1] == "c" and e[0] > out) == 23  # (her presses after her last star)
     for name, (evs, out) in live.items():
-        for presses in (presses_for(TREE_HP, TREE_PDD), MIN_PRESSES):
+        for presses in (presses_for(TREE_HP, TREE_PDD), 12):
             stop, longest = _replay(evs, presses, until=out)
             assert stop is None and longest[0] <= 9, (name, presses, longest)
 
 
 def test_the_presses_after_her_last_star_at_01_28_are_counted():
     """The grind of 01:04: her last cast that took MP shown at 01:28:17; 22 presses after it took none over 20 s until
-    she went for her drops and the user stopped the hunt. At 32 no stop yet; at 22 the 22nd; at 16, 15 s after it."""
+    she went for her drops and the user stopped the hunt (01:28:47). At Tree Dungeon's 20 the stop comes 19.4 s after
+    it (01:28:36.4, 10 s before the user's stop); at 16, 15 s; at 24 or 32 none before she stopped pressing."""
     evs, out = _live()["01:04"]
     stop, longest = _replay(evs, presses_for(TREE_HP, TREE_PDD))
-    assert stop is None and longest[0] == 22 and longest[1] == pytest.approx(19.8, abs=0.1)
-    assert _replay(evs, 22)[0] == (round(out + 21.9, 1), 22)
-    stop, _ = _replay(evs, MIN_PRESSES)
-    assert stop[1] == 16 and stop[0] - out == pytest.approx(15.2, abs=0.1)
+    assert stop[1] == 20 and stop[0] - out == pytest.approx(19.4, abs=0.1)  # (01:28:36.4)
+    assert _replay(evs, 16)[0][0] - out == pytest.approx(15.2, abs=0.1)
+    for presses in (24, 32):
+        stop, longest = _replay(evs, presses)
+        assert stop is None and longest[0] == 22 and longest[1] == pytest.approx(19.8, abs=0.1)
 
 
 def _hunter(said="You received EXP (+26)"):

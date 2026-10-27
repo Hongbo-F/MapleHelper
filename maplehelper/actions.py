@@ -8,7 +8,7 @@ are game-window pixels at 1920x1080; see maplehelper/game.py for where the numbe
 import math
 
 from .engine import LEFT, Ctx
-from .game import MOVEMENT, RECOVERY
+from .game import MOVEMENT
 from .keys import Key
 
 PICK_UP_GAP_MS = 260  # between pick-up presses; one item per press
@@ -158,27 +158,12 @@ def pick_up(c: Ctx, items: int = 1) -> None:
         c.wait(PICK_UP_GAP_MS)
 
 
-def sit_on_chair(c: Ctx) -> None:
-    c.tap(_key(c, "chair"))
-    c.wait(3 * MOVEMENT.reaction_ms)
-
-
 def stand_up(c: Ctx) -> None:
-    """Get up from the chair without moving: tap the arrow she's already facing."""
+    """Get up from a chair (or from lying down) without moving: tap the arrow she's already facing. (Sitting on the
+    chair to get HP back, `sit_on_chair` and `rest`, went on 2026-10-26: "Just remove the sit recover hp
+    functionality, it's no longer needed"; her pet drinks her potions.)"""
     c.tap(c.front, MOVEMENT.tap_turn_ms)
     c.wait(MOVEMENT.reaction_ms)
-
-
-def rest_ms(missing_hp: int) -> int:
-    """How long to sit on the chair to get `missing_hp` back (it heals in 10-second ticks)."""
-    return math.ceil(max(0, missing_hp) / RECOVERY.on_chair_hp_per_10s) * 10_000
-
-
-def rest(c: Ctx, missing_hp: int) -> None:
-    """Sit on the chair until about `missing_hp` HP is back, then stand up. Find a safe spot first."""
-    sit_on_chair(c)
-    c.wait(rest_ms(missing_hp))
-    stand_up(c)
 
 
 def attack(c: Ctx, times: int = 1) -> None:
@@ -216,9 +201,7 @@ ACTIONS = {
     "climb_rope": (climb_rope, (float,)),
     "climb_down": (climb_down, (float,)),
     "pick_up": (pick_up, (int,)),
-    "sit_on_chair": (sit_on_chair, ()),
     "stand_up": (stand_up, ()),
-    "rest": (rest, (int,)),
     "attack": (attack, (int,)),
     "lucky_seven": (lucky_seven, (int,)),
     "drink_hp": (drink_hp, ()),

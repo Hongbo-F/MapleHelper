@@ -1,8 +1,8 @@
-"""Out of darts: her Lucky Seven presses taking no MP and killing nothing, more of them in a row than a monster standing
-on her could take of her claw's swipes, end the hunt as the safety stop does (behavior.safety.HuntStop: she goes to a
-safe place, the log says why in capitals, whoever is at the PC is paged, the command exits with its own code), and the
-rolling recording's last minutes are saved. The user, 2026-10-26 01:28, during the grind of 01:04: "stop, you run out of
-darts"; the bot kept pressing for nothing.
+"""Out of darts: her Lucky Seven presses taking no MP and killing nothing, 20 in a row on Tree Dungeon (twice and more
+the most the live hunts with her darts had), end the hunt as the safety stop does (behavior.safety.HuntStop: she goes to
+a safe place, the log says why in capitals, whoever is at the PC is paged, the command exits with its own code), and
+the rolling recording's last minutes are saved. The user, 2026-10-26 01:28, during the grind of 01:04: "stop, you run
+out of darts"; the bot kept pressing for nothing.
 
 What the game showed then (the grind's log, D:/MapleHelper-scratch/live/grind-0104.log, its telemetry and the perception
 service's): her last cast that took MP was keyed at 01:28:16.80 (her bar 37 -> 35 px of 104 at 17.11); every press after
@@ -28,11 +28,22 @@ hers (her EXP told of it: Hunter._gained; a party share names no kill and doesn'
 has had MP_SHOWS_S to show count, and not those keyed in a gap in the reads (GAP_S: looks failing, the game perhaps not
 in front and her keys not reaching it; a trip between fights, no press in it, goes on with the stretch). Every look's
 bar feeds it (Attacks.on_look and the glance before a key), whoever took the look. It stops the hunt
-(Hunter.health_check, raising OutOfDarts) once a stretch has `presses_for` the map: MARGIN times the presses the
-toughest of its monsters standing on her takes to die of her swipes (PRESS_DAMAGE a press, misses in, as the greens took
-them live; less its defence), MIN_PRESSES at least. On Tree Dungeon 32 (a Horny Mushroom's 21), against the 9 the hunts
-with darts had at the most; at 01:28 it had 22 when she stopped pressing (tests/test_darts.py replays the five hunts: no
-stop with her darts). Out of darts in the simulator (loop_tree_out_of_darts) it stops 30 s after her last star.
+(Hunter.health_check, raising OutOfDarts) once a stretch has `presses_for` the map: PRESSES on Tree Dungeon, twice and
+more the 9 the hunts with her darts had at the most (11 with the perception service's 10 reads a second merged in, the
+review's count); at 01:28 the 20th came at 01:28:36.4, 19.6 s after her last cast's key and 10 s before the user stopped
+the hunt (tests/test_darts.py replays the five hunts: no stop with her darts, at 20 nor at 12). Until the review it
+was 1.5 times a Horny Mushroom standing on her whole (32), which the 79 minutes never had, and at 01:28 it would not
+have come before the user's stop (22 presses when she stopped pressing). A whole Horny Mushroom standing on her
+unseen, from its full 403 HP (21.1 presses of her swipes, `swipes`), would now stop a hunt with her darts: never seen
+live (the two the stretches had were wounded). On a map whose toughest monster takes more swipes than a Horny
+Mushroom, PRESSES that many times more (West Rocky Mountain II's Axe Stump: 22). Out of darts in the simulator
+(loop_tree_out_of_darts) it stops 18.7 s after her last star (on seeds 2 and 3, 19 and 27 s).
+
+Not watched: the regular attack's presses (`--attack regular`, and `probe run`, which throws the regular attack
+always): they take no MP with her darts too, so nothing tells. With the attack choice its regular presses (to finish a
+monster whose bar or her throws make low, or her MP under a cast) aren't counted: a stretch stands still while she
+throws them. And a read under LOW_STEPS starts it again at every look: out of darts with her MP that low and her pet's
+MP potions gone too, it waits for her regen to pass LOW_STEPS (a step every 18 s or so: up to 90 s).
 
 The game's own word, if it has one: a stretch READ_EVERY presses long (and each as many more) has the pickup log read
 (Eyes.messages: OCR of where the game says what she got, and that her inventory is full), and if it says she has no
@@ -57,25 +68,30 @@ DRINK_STEPS = 4        # ... this many over it: a drink (her pet's MP potion: 16
                        # (her regen: a step every 18 s or so)
 LOW_STEPS = 5          # a read under this (her pet's MP warning, 5%: two casts) can't tell: the stretch ends
 GAP_S = 2.0            # no read for this long (looks failing): the presses keyed in it aren't counted
+PRESSES = 20           # a stretch this long stops the hunt on Tree Dungeon: twice and more the 9 in a row the live
+                       # hunts with her darts had at the most (11 with the perception service's reads in), and the
+                       # 20th came 19.6 s after her last cast's key at 01:28, 10 s before the user stopped the hunt
 PRESS_DAMAGE = 21.0    # a press's damage at a monster standing on her, her claw's swipes, misses in: a Green
                        # Mushroom's 233 HP (defence 0) in 9-11 presses live (2026-10-26 00:12:19, 00:23:19, 01:28:04)
-MARGIN = 1.5           # the presses: those the toughest monster of a map standing on her takes to die, times this
-MIN_PRESSES = 16       # ... and this many at least, whatever the map
+HORNY = (403.0, 10.0)  # Tree Dungeon's toughest monster, a Horny Mushroom (HP, PDDamage): 21.1 presses of her swipes;
+                       # a map whose toughest takes more has PRESSES that many times more
 READ_EVERY = 12        # a stretch this many presses long, and each as many more: the pickup log read
 KEEP_S = 90.0          # s of the rolling recording saved after the stop (control.alarm.keep_recent)
 REPORT_FROM = 4        # a hunt's longest stretch this long or longer is said at its end (DartWatch.summary)
 
 
+def swipes(hp: float, pdd: float = 0.0) -> float:
+    """The presses of her claw's swipes a monster of this HP and PDDamage standing on her takes to die (PRESS_DAMAGE a
+    press, less its defence as the game takes it off, x 100 / (PDDamage + 100))."""
+    return hp / (PRESS_DAMAGE * 100.0 / (pdd + 100.0))
+
+
 def presses_for(mob_hp: dict[str, float], mob_pdd: dict[str, float]) -> int:
-    """The presses of a stretch that end the hunt on a map with these monsters (their HP and PDDamage by name): MARGIN
-    times the presses the toughest of them standing on her takes to die of her claw's swipes (PRESS_DAMAGE, less its
-    defence as the game takes it off, x 100 / (PDDamage + 100)), MIN_PRESSES at least."""
-    most = MIN_PRESSES
-    for name, hp in mob_hp.items():
-        if hp > 0:
-            presses = hp / (PRESS_DAMAGE * 100.0 / (mob_pdd.get(name, 0.0) + 100.0))
-            most = max(most, math.ceil(MARGIN * presses))
-    return most
+    """The presses of a stretch that end the hunt on a map with these monsters (their HP and PDDamage by name):
+    PRESSES, as on Tree Dungeon, and as many times more as the toughest of them standing on her takes more of her
+    claw's swipes than a Horny Mushroom does (West Rocky Mountain II's Axe Stump: 23.0, 22 presses)."""
+    most = max((swipes(hp, mob_pdd.get(name, 0.0)) for name, hp in mob_hp.items() if hp > 0), default=0.0)
+    return max(PRESSES, math.ceil(PRESSES * most / swipes(*HORNY) - 1e-9))
 
 
 class OutOfDarts(HuntStop):
@@ -122,7 +138,7 @@ class DartWatch:
     """Her Lucky Seven presses and her MP bar, a look at a time, for out of darts (`due`): see the module's doc. The
     current stretch's presses (`keys`), those of them its last read had shown (`shown`, over `span` s), the longest
     shown (`longest`, for the run's report)."""
-    presses: int = MIN_PRESSES      # the presses of a stretch that stop the hunt (presses_for)
+    presses: int = PRESSES          # the presses of a stretch that stop the hunt (presses_for)
     keys: list[float] = field(default_factory=list)  # the stretch's presses (their keys' times)
     top: int | None = None          # her bar's highest read since the stretch began (steps of MP_STEPS)
     read_at: float | None = None    # the last read's time ...
