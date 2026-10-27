@@ -90,6 +90,9 @@ def offline(monkeypatch, tmp_path):
     # Nor the recorders' mutex (the one `gamelab recorder` or the perception service's recording holds on the PC).
     from gamelab.control import rolling
     monkeypatch.setattr(rolling, "MUTEX", f"Local\\gamelab-rolling-recorder-test-{os.getpid()}-{tmp_path.name}")
+    # Nor `gamelab character use`'s choice of who plays (the tests play the thief unless they say otherwise).
+    from gamelab import character
+    monkeypatch.setattr(character, "CHOSEN", tmp_path / "character.json")
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 

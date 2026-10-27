@@ -1,5 +1,8 @@
-"""Loads config.toml: her in-game keys, the buttons that trigger combos, timings, and her stats."""
+"""Loads config.toml: her in-game keys, the buttons that trigger combos, timings, and her stats. The flat tables
+([keys], [hotkeys], [timing], [character]) are the thief's; another character of hers (the magician, from 2026-10-27)
+has tables of her own under [characters] (`characters`; gamelab.character makes her profile of them)."""
 
+import re
 import tomllib
 from collections.abc import Iterable
 from dataclasses import dataclass, field, fields
@@ -30,6 +33,23 @@ class GameKeys:
     hp_potion: Key | None = None
     mp_potion: Key | None = None
     pet_food: Key | None = None  # feeds her pet (which drinks her potions for her)
+    # A magician's skills ([characters.<id>.keys], class "magician"; never the thief's: CLASS_SKILLS). Nothing presses
+    # them yet: the attack layer takes them with her attacks (gamelab README: Characters).
+    magic_claw: Key | None = None
+    magic_guard: Key | None = None
+    magic_armor: Key | None = None
+    energy_bolt: Key | None = None
+
+
+# Each class's skill keys (GameKeys' fields only one class binds): the flat [keys] are the thief's, so a magician's
+# skill there is an error, and Lucky Seven under a magician's [characters.<id>.keys].
+CLASS_SKILLS = {"thief": ("lucky_seven",), "magician": ("magic_claw", "magic_guard", "magic_armor", "energy_bolt")}
+# Each class's skill levels a [characters.<id>.skills] table may give (the thief's Lucky Seven is [character]'s).
+CLASS_SKILL_LEVELS = {"thief": (), "magician": ("magic_claw", "energy_bolt", "magic_guard", "magic_armor",
+                                                "mp_recovery", "max_mp")}
+CLASS_BUFFS = {"thief": (), "magician": ("magic_guard", "magic_armor")}
+PET_SETTINGS = ("hp_warning", "mp_warning", "hp_heal", "mp_heal")  # her pet's auto-potion: shares of HP/MP, HP/MP a potion
+THIEF = "thief"  # the character the flat tables are
 
 
 @dataclass(frozen=True)
@@ -73,6 +93,30 @@ class Character:
                                # of 2026-10-25 23:43 to 01:03, 14.05 MP at 623 (13 at 14 and 15 would be 2.17 px, 15 at
                                # 18 and 19 2.50: D:/MapleHelper-scratch/hunt-ab/a/scripts/castcost_all.py); 11 at level
                                # 10, 11.4 measured on 2026-10-24
+    # What a touch and her bars are reckoned with, as the stack has them for her (nothing reads these four yet: each
+    # module has its own copy, the thief's, until her profile is read there: gamelab README, Characters).
+    defence: float = 75.0      # attack.danger.DEFENCE: fit to the first map's touches at level 19 (her W.DEF unknown)
+    avoid: float = 27.0        # sim.world.EVADE_ACC: fit to 13 touches hopping over monsters (not her stat window's)
+    climb_speed: float = 117.0  # motion.physics.CLIMB_SPEED: units/s on a rope, measured
+    mp_regen: float = 0.32     # sim.world.MP_REGEN: MP a second, idle
+
+
+@dataclass(frozen=True)
+class CharacterConfig:
+    """One of [characters]' tables: another character than the thief, her class ("magician"), the lines her bottom bar
+    shows (`job` above `name`), and what of her the file gives: her Key Config, timing, stats (a partial table: the
+    rest is her class's, gamelab.classes), skill levels, her pet's auto-potion settings and the buffs kept up. The
+    thief's table ([characters.thief]) gives only her lines: her keys, timing and stats are the flat tables."""
+    id: str
+    klass: str
+    name: str | None = None
+    job: str | None = None
+    keys: GameKeys | None = None      # None: not given
+    timing: Timing | None = None
+    stats: dict[str, float] = field(default_factory=dict)   # Character's fields she gives (her stat window)
+    skills: dict[str, int] = field(default_factory=dict)    # skill -> level (CLASS_SKILL_LEVELS)
+    pet: dict[str, float] = field(default_factory=dict)     # PET_SETTINGS
+    buffs: dict[str, bool] = field(default_factory=dict)    # buff -> kept up (CLASS_BUFFS)
 
 
 @dataclass(frozen=True)
@@ -84,6 +128,8 @@ class Config:
     slow_mode: Key
     timing: Timing
     character: Character = field(default_factory=Character)
+    characters: dict[str, CharacterConfig] = field(default_factory=dict)  # [characters.<id>] (the thief's too, if given)
+    default_character: str = THIEF  # [characters] default: who plays when nothing names her (gamelab.character)
 
 
 def load(path: str | Path, combo_names: Iterable[str]) -> Config:
@@ -114,21 +160,36 @@ def parse(data: dict, combo_names: Iterable[str]) -> Config:
     slow_mode = _key("control.slow_mode", control.get("slow_mode", "f12"))
 
     _check_collisions(game_keys, hotkeys, abort, slow_mode)
+    default, others = _characters(_table(data, "characters"))
+    for c in others.values():  # each other character's keys against the control keys (the hotkeys are the thief's)
+        if c.keys is not None:
+            _check_collisions(c.keys, {}, abort, slow_mode, f"characters.{c.id}.keys")
     return Config(title, game_keys, hotkeys, abort, slow_mode, _timing(_table(data, "timing")),
-                  _character(_table(data, "character")))
+                  _character(_table(data, "character")), others, default)
 
 
 def character(path: str | Path) -> Character:
     """Just her stats ([character]), for gamelab's physics, which needs them before anything else is
     loaded: the defaults if the file isn't there."""
+    data = _read(path)
+    return Character() if data is None else _character(_table(data, "character"))
+
+
+def characters(path: str | Path) -> tuple[str, dict[str, CharacterConfig]]:
+    """Just [characters] (its `default`, and each character's table), for gamelab.character, which needs it before
+    anything else is loaded, as physics does [character]: ("thief", {}) if the file or the table isn't there."""
+    data = _read(path)
+    return (THIEF, {}) if data is None else _characters(_table(data, "characters"))
+
+
+def _read(path: str | Path) -> dict | None:
     try:
         with open(path, "rb") as f:
-            data = tomllib.load(f)
+            return tomllib.load(f)
     except FileNotFoundError:
-        return Character()
+        return None
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from None
-    return _character(_table(data, "character"))
 
 
 def _table(data: dict, name: str) -> dict:
@@ -147,15 +208,111 @@ def _key(where: str, value) -> Key:
         raise ConfigError(f"{where}: {e}") from None
 
 
-def _game_keys(table: dict) -> GameKeys:
-    known = {f.name for f in fields(GameKeys)}
-    if unknown := set(table) - known:
-        raise ConfigError(f"[keys] has unknown action(s) {sorted(unknown)}; known: {sorted(known)}")
+def _game_keys(table: dict, klass: str = THIEF, where: str = "keys") -> GameKeys:
+    """A Key Config (the flat [keys]: the thief's; or a [characters.<id>.keys] of `klass`): the actions any class
+    binds and the class's own skills (CLASS_SKILLS), not another class's."""
+    others = {k for c, skills in CLASS_SKILLS.items() if c != klass for k in skills} - set(CLASS_SKILLS[klass])
+    known = {f.name for f in fields(GameKeys)} - others
+    if unknown := set(table) - known - others:
+        raise ConfigError(f"[{where}] has unknown action(s) {sorted(unknown)}; known: {sorted(known)}")
+    if theirs := sorted(set(table) & others):
+        mine = "a magician's go in [characters.<id>.keys]" if klass == THIEF else f"her skills: {list(CLASS_SKILLS[klass])}"
+        raise ConfigError(f"[{where}] has {theirs}, not a {klass}'s skill(s) ({mine})")
     required = ("left", "right", "jump", "attack")
     if missing := [name for name in required if not table.get(name)]:
-        raise ConfigError(f"[keys] is missing {missing}")
+        raise ConfigError(f"[{where}] is missing {missing}")
     # An empty string means "not bound / not learned yet".
-    return GameKeys(**{name: _key(f"keys.{name}", value) for name, value in table.items() if value != ""})
+    return GameKeys(**{name: _key(f"{where}.{name}", value) for name, value in table.items() if value != ""})
+
+
+ID = re.compile(r"[a-z][a-z0-9_-]{0,31}")  # a character's id: what --character and `gamelab character use` name
+LINES = ("name", "job")                    # her bottom bar's lines, given as text
+SUBTABLES = ("keys", "timing", "stats", "skills", "pet", "buffs")
+
+
+def _characters(table: dict) -> tuple[str, dict[str, CharacterConfig]]:
+    """[characters]: `default` (who plays when nothing names her: "thief" unless given) and each character's table.
+    A table's class is its `class`, or its id when that's a class's name ([characters.magician])."""
+    default = table.get("default", THIEF)
+    out = {}
+    for cid, sub in table.items():
+        if cid == "default":
+            continue
+        where = f"characters.{cid}"
+        if not isinstance(sub, dict):
+            raise ConfigError(f"[characters] {cid} must be a table ([{where}]), or `default`")
+        if not ID.fullmatch(cid):
+            raise ConfigError(f"[{where}]: a character's id is lower-case letters, digits, - and _ (got {cid!r})")
+        klass = sub.get("class", cid if cid in CLASS_SKILLS else None)
+        if klass not in CLASS_SKILLS:
+            raise ConfigError(f"[{where}] class must be one of {sorted(CLASS_SKILLS)}, got {klass!r}")
+        if klass == THIEF and cid != THIEF:
+            raise ConfigError(f"[{where}]: the thief is [characters.thief] and the flat tables, one of her")
+        if unknown := set(sub) - {"class", *LINES, *SUBTABLES}:
+            raise ConfigError(f"[{where}] has unknown setting(s) {sorted(unknown)}; known: "
+                              f"{sorted({'class', *LINES, *SUBTABLES})}")
+        for line in LINES:
+            if line in sub and (not isinstance(sub[line], str) or not sub[line].strip()):
+                raise ConfigError(f"{where}.{line} must be text, as her bottom bar shows it, got {sub[line]!r}")
+        if cid == THIEF:
+            if given := sorted(set(sub) & set(SUBTABLES)):
+                raise ConfigError(f"[{where}] has {given}: the thief's keys, timing and stats are the flat [keys], "
+                                  f"[timing] and [character]")
+            out[cid] = CharacterConfig(cid, klass, sub.get("name"), sub.get("job"))
+            continue
+        tables = {name: _table(sub, name) for name in SUBTABLES}
+        out[cid] = CharacterConfig(
+            cid, klass, sub.get("name"), sub.get("job"),
+            keys=_game_keys(tables["keys"], klass, f"{where}.keys") if tables["keys"] else None,
+            timing=_timing(tables["timing"]) if tables["timing"] else None,
+            stats=_stats(tables["stats"], f"{where}.stats"),
+            skills=_levels(tables["skills"], CLASS_SKILL_LEVELS[klass], f"{where}.skills"),
+            pet=_pet(tables["pet"], f"{where}.pet"),
+            buffs=_buffs(tables["buffs"], CLASS_BUFFS[klass], f"{where}.buffs"))
+    if not isinstance(default, str) or default not in {THIEF, *out, *CLASS_SKILLS}:
+        if default == "auto":  # (the design's: the profile whose name her bottom bar shows; nothing reads it yet)
+            raise ConfigError("[characters] default = \"auto\" needs her bottom bar read, which isn't built yet: name "
+                              "the character")
+        raise ConfigError(f"[characters] default must name a character ({sorted({THIEF, *out})}), got {default!r}")
+    return default, out
+
+
+def _stats(table: dict, where: str) -> dict[str, float]:
+    known = {f.name for f in fields(Character)} - {"lucky_seven"}  # (a skill level: the thief's, in [character])
+    if unknown := set(table) - known:
+        raise ConfigError(f"[{where}] has unknown stat(s) {sorted(unknown)}; known: {sorted(known)}")
+    for name, value in table.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise ConfigError(f"{where}.{name} must be a number above 0, got {value!r}")
+    return {name: float(value) for name, value in table.items()}
+
+
+def _levels(table: dict, known: tuple[str, ...], where: str) -> dict[str, int]:
+    if unknown := set(table) - set(known):
+        raise ConfigError(f"[{where}] has unknown skill(s) {sorted(unknown)}; known: {sorted(known)}")
+    for name, value in table.items():
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 30:
+            raise ConfigError(f"{where}.{name} must be her skill's level (a whole number, 0-30), got {value!r}")
+    return dict(table)
+
+
+def _pet(table: dict, where: str) -> dict[str, float]:
+    if unknown := set(table) - set(PET_SETTINGS):
+        raise ConfigError(f"[{where}] has unknown setting(s) {sorted(unknown)}; known: {list(PET_SETTINGS)}")
+    for name, value in table.items():
+        share = name.endswith("_warning")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or (share and value >= 1):
+            what = "a share of her bar (0.70 for 70%)" if share else "the HP or MP a potion gives"
+            raise ConfigError(f"{where}.{name} must be {what}, got {value!r}")
+    return {name: float(value) for name, value in table.items()}
+
+
+def _buffs(table: dict, known: tuple[str, ...], where: str) -> dict[str, bool]:
+    if unknown := set(table) - set(known):
+        raise ConfigError(f"[{where}] has unknown buff(s) {sorted(unknown)}; known: {list(known)}")
+    if bad := [n for n, v in table.items() if not isinstance(v, bool)]:
+        raise ConfigError(f"{where}.{bad[0]} must be true or false (kept up or not)")
+    return dict(table)
 
 
 def _timing(table: dict) -> Timing:
@@ -179,11 +336,12 @@ def _character(table: dict) -> Character:
     return Character(**{name: float(value) for name, value in table.items()})
 
 
-def _check_collisions(game_keys: GameKeys, hotkeys: dict[str, Key], abort: Key, slow_mode: Key) -> None:
+def _check_collisions(game_keys: GameKeys, hotkeys: dict[str, Key], abort: Key, slow_mode: Key,
+                      where: str = "keys") -> None:
     # Combo buttons and the slow-mode button are hidden from the game, so they must not be keys she plays with.
     swallowed = {f"hotkeys.{name}": key for name, key in hotkeys.items()}
     swallowed["control.slow_mode"] = slow_mode
-    game = {f"keys.{f.name}": getattr(game_keys, f.name) for f in fields(GameKeys)}
+    game = {f"{where}.{f.name}": getattr(game_keys, f.name) for f in fields(GameKeys)}
     taken = {key.name: where for where, key in game.items() if key}
     taken.setdefault(abort.name, "control.abort")
     for where, key in swallowed.items():

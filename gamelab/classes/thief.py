@@ -1,0 +1,91 @@
+"""The thief: BugBaby, a Rogue, level 25 (2026-10-25), with Lucky Seven and her claw's throwing stars.
+
+Every value here is a module constant of the stack's, the place it's measured and used: her code reads it there, as it
+did before profiles. Here it describes her, and tests/test_character.py checks each against the constant named beside
+it, so the two can't drift (moving a constant into the profile is a later change of its own). SHAPE is the one the
+localization trackers take (THIEF_SHAPE, their default): equal to their constants, so they act as before.
+"""
+
+from dataclasses import replace
+
+from maplehelper import config
+
+from ..character import AttackSpec, Character, Geometry, Perception, Pet, Policy, Priors, Shape
+
+FIXED_STATS = config.Character()  # her stats as measured (config.Character's defaults), what FIXED_STATS pins
+
+# Her star search, as attack.reach has it: its bands (order), the v83 line (reach.LINE: walls and floors stop it), its
+# air search (reach.AIR_MODEL); the regular attack swipes with the claw up close (reach.CLAW), Lucky Seven always throws
+# (maplehelper.game.COMBAT.melee_when_close).
+STAR_SEARCH = Geometry("star_search", air="search", line="v83", order="band")
+_TIMES = dict(lock_ms=730,                  # maplehelper.game.COMBAT.attack_lock_ms
+              lock_extra_ms=(60, 160),      # control.actions.THROW_LOCK_EXTRA_MS, JUMP_THROW_LOCK_EXTRA_MS
+              arrow_lock_ms=800,            # control.actions.ARROW_LOCK_MS
+              release_ms=530,               # COMBAT.attack_release_ms
+              damage_ms=290,                # control.actions.DAMAGE_SHOWS_MS
+              lands_ms=520,                 # control.actions.STAR_DELAY_MS (the star leaves; it flies on)
+              speed=690.0,                  # attack.reach.STAR_SPEED
+              cycle_s=0.84,                 # attack.choice.THROW_S (behavior.patrol.THROW_S)
+              miss=0.275,                   # attack.choice.MISS
+              hidden_s=1.8,                 # behavior.fight.HIDDEN_FOR (behavior.attacks.HIDDEN_FOR)
+              air=True)
+LUCKY_SEVEN = AttackSpec("lucky_seven", "lucky_seven", "Lucky Seven", "throwing", 4001003,
+                         level=16,          # attack.choice.SKILL_LEVEL (config.toml [character] lucky_seven)
+                         hits=2,            # choice.SKILL_STARS
+                         lo=96, hi=192,     # choice.SKILL_STAR
+                         defence="pdd",
+                         mp=14.0,           # choice.cast_mp(16) (LUCKY_SEVEN_MP: skills.json's 4001003)
+                         ammo=2, geometry=STAR_SEARCH, **_TIMES)
+STAR = AttackSpec("star", "attack", "the regular attack", "throwing", None, level=None,
+                  hits=1, lo=20, hi=140,    # choice.STAR (choice.REGULAR)
+                  defence="pdd", mp=0.0, ammo=1, geometry=replace(STAR_SEARCH, point_blank="claw"), **_TIMES)
+
+SHAPE = Shape(ahead=434.0 + 40.0,          # localization.tracking.THROW_REACH
+              behind=10.0,                  # tracking.MonsterTracker._in_path's -10
+              dy=70.0,                      # tracking.THROW_DY
+              hit_after_s=1.2,              # tracking.HIT_AFTER_S
+              window_s=2.5,                 # tracking.STAR_WINDOW (behavior.ledger.STAR_WINDOW)
+              hide_s=3.5,                   # tracking.HIDE_S
+              gain_after_key=(0.1, 0.6),    # localization.monsters.GAIN_AFTER_KEY
+              order="line",
+              look_band=(140, 75),          # attack.reach.LOOK_UP, LOOK_DOWN
+              shows_wait_s=0.45)            # localization.senses.SHOWS_WAIT_S
+PERCEPTION = Perception(files="",          # paths' own names (paths.of)
+                        job="Rogue", name="BugBaby",  # her bottom bar (behavior.pet.NAME_BOX's comment)
+                        heading_box=(50, 8, 16),      # perception.heading.UP, DOWN, HALF
+                        attack_score=0.4, attack_margin=0.2,  # heading.ATTACK_SCORE, ATTACK_MARGIN
+                        hit_effect=(44, 42, None))    # Lucky Seven's hit over a monster, game px (its time not read)
+POLICY = Policy(default_mode="choice",      # behavior.hunter's: Lucky Seven or the regular attack (attack.choice)
+                finish_with_regular=True,   # the user's rule (memory: regular-attack-only)
+                regular_needs_box=False,
+                unseen="regular",           # behavior.hunt.UNSEEN_ATTACK
+                close_quarters="claw",      # attack.stance's claw-edge rules
+                mp_floor=0.0)               # a cast whenever it's paid for (attack.choice.can_cast)
+PET = Pet(hp_warning=0.70,                  # sim.world.PET_HP (behavior.safety: her pet at 70%)
+          mp_warning=0.05,                  # sim.world.PET_MP
+          hp_heal=250.0,                    # sim.world.HP_POTION
+          mp_heal=185.0)                    # sim.world.MP_POTION
+PRIORS = Priors(kill_s_per_exp=0.085,       # behavior.patrol.KILL_S_PER_EXP
+                danger_hp_s=0.0175,         # patrol.DANGER_HP_S
+                hp_price=100.0,             # patrol.HP_PRICE
+                ground_danger=2.0,          # behavior.hunt.GROUND_DANGER
+                hp_exp=250.0,               # hunt.HP_EXP
+                seen_share=0.3,             # behavior.tour.SEEN_SHARE
+                threat_s=1.7,               # attack.danger.THREAT_S
+                keep_danger=0.08,           # danger.KEEP_DANGER
+                meet_s=8.0)                 # control.navigator.MEET_S
+
+
+def profile(cid: str = config.THIEF) -> Character:
+    """The thief as the stack has her (her stats are config.toml's [character]: gamelab.character.load)."""
+    return Character(id=cid, klass="thief", stats=FIXED_STATS, fixed_stats=FIXED_STATS,
+                     skills={"lucky_seven": int(FIXED_STATS.lucky_seven)}, keys=None, timing=None,
+                     ammo="throwing stars", stops=("out_of_darts",), buffs=(), magic_guard=0.0,
+                     attacks={"skill": LUCKY_SEVEN, "regular": STAR}, pet=PET, policy=POLICY, priors=PRIORS,
+                     shape=SHAPE, perception=PERCEPTION)
+
+
+def configured(c: Character, table: config.CharacterConfig) -> Character:
+    """[characters.thief]: her bottom bar's lines, if given (the rest of her is the flat tables)."""
+    return replace(c, perception=replace(c.perception, job=table.job or c.perception.job,
+                                         name=table.name or c.perception.name))

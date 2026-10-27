@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 PKG = Path(__file__).resolve().parents[1] / "gamelab"
-SHARED = {"capture", "directions", "gcstats", "native", "paths", "screen", "telemetry", "window"}
+SHARED = {"capture", "character", "classes", "directions", "gcstats", "native", "paths", "screen", "telemetry",
+          "window"}
 # Each layer and the gamelab layers it may import (besides itself and SHARED).
 ALLOWED = {
     "perception": set(),
@@ -62,6 +63,14 @@ def test_layers_only_import_downwards(layer, path):
 def test_every_module_belongs_to_a_layer():
     top = {p.stem for p in PKG.glob("*.py")} - {"__init__", "__main__"}
     assert top <= SHARED, f"modules outside the layers: {sorted(top - SHARED)}"
+
+
+def test_her_profiles_are_data_only():
+    """gamelab.character and gamelab.classes (her profiles) import nothing of gamelab but paths and each other: every
+    layer may read them (localization's trackers take their Shape)."""
+    for path in [PKG / "character.py", *sorted((PKG / "classes").glob("*.py"))]:
+        used = gamelab_imports(path)
+        assert used <= {"paths", "character", "classes"}, f"{path.relative_to(PKG)} imports {sorted(used)}"
 
 
 def test_the_elevated_player_loads_only_what_it_needs():
