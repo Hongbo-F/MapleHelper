@@ -163,7 +163,7 @@ void match(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)
         }
     }
     // Each thread's own (a group's reduced in groupshared first lost a group's highest now and then, with RUN 4 and 8,
-    // not with 1: on the crowd's call set, 38 of 34,601 pairs then had more candidates than CANDIDATES; never fewer
+    // not with 1: on the crowd's call set, with 8, 142 of 34,601 pairs then had more candidates than kcand; never fewer
     // than the best, so never another answer. D:/MapleHelper-scratch/gpu/check/dbg_det.py)
     uint old;
     if (kall)
