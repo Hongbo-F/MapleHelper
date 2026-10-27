@@ -983,10 +983,10 @@ def cmd_tour(args) -> int:
         if args.ground_tie is not None:  # grounds about as good: the one she left longest ago (README: Route diversity)
             hunt.GROUND_TIE = args.ground_tie
         with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
-            if args.grind:  # going round the map as a player grinds (behavior.grind; README: Grinding)
+            if args.grind:  # going round the map as a player grinds (behavior.grind; README: Grinding; the default)
                 from .behavior.grind import Grind
                 report = Grind(tour, log=_log).run(minutes=args.minutes)
-            else:
+            else:  # --camp: one ground at a time, waiting there for its respawns
                 report = hunt.Hunt(tour, log=_log).run(minutes=args.minutes)
         print(f"hunt done: {report}")
         return 0
@@ -2127,17 +2127,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--loop", action="store_true",
                    help="hunt with the hunt loop instead of the sweep's stops (gamelab/docs/hunt-modes.md)")
     s.add_argument("--minutes", type=float, default=20, help="with --loop: how long to hunt, then stand by")
-    s.add_argument("--grind", action="store_true",
-                   help="with --loop: go round the map in a loop of stops chosen by EXP a minute, shooting what comes "
-                        "into reach on the way, instead of hunting one ground at a time (behavior.grind; README: "
-                        "Grinding; simulator-tested only)")
+    # Grinding is the default since 2026-10-27 (the user: "Yes make that the default"; live it made 318-408 EXP a
+    # minute on Tree Dungeon on 2026-10-26, camping 283 and 340 on 10-24 and 10-25); --grind is still taken.
+    mode = s.add_mutually_exclusive_group()
+    mode.add_argument("--grind", dest="grind", action="store_true", default=True,
+                      help="with --loop (the default): go round the map in a loop of stops chosen by EXP a minute, "
+                           "shooting what comes into reach on the way (behavior.grind; README: Grinding)")
+    mode.add_argument("--camp", dest="grind", action="store_false",
+                      help="with --loop: hunt one ground at a time instead, waiting there for its respawns and "
+                           "leaving by its rate (behavior.hunt; gamelab/docs/hunt-modes.md)")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--ways", type=int, metavar="N",
                    help="each trip chooses among the N best distinct ways by their times (route.ROUTES; default 1: "
                         "the quickest, varied by the moves' random weights; README: Route diversity)")
     s.add_argument("--ground-tie", type=float, metavar="F",
-                   help="with --loop: of the grounds within this share of the best's score, the one she left longest "
-                        "ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
+                   help="with --loop --camp: of the grounds within this share of the best's score, the one she left "
+                        "longest ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
     s.set_defaults(func=cmd_tour)
 
     s = sub.add_parser("pet", help="keep her pet fed: its fullness followed in time (read once off her Character Info) "

@@ -284,10 +284,11 @@ Other commands (`python -m gamelab -h` lists them all):
 | `nav 35`, `nav 35 --fight` | Go to platform 35; with `--fight`, shoot monsters on the way instead of avoiding them |
 | `nav 17 --avoid climb` | A kind of move the route takes only if nothing else gets there (each costs 20 times as much): from 23, the two rope hops instead of the climb past its end |
 | `nav 3 --ways 3`, `tour --loop --ways 3` | Each trip chooses among the 3 best distinct ways to where it's going, by a softmax over their times, not only the quickest (`route.ROUTES`; off by default: in the simulator as much EXP, and fewer of her drops picked up; see Route diversity; not tried in game) |
-| `tour --loop --ground-tie 0.1` | Of the grounds within 10% of the best's score, the one she left longest ago goes next (`hunt.GROUND_TIE`; off by default: nothing in the simulator measures it; see Route diversity; not tried in game) |
+| `tour --loop --camp --ground-tie 0.1` | Of the grounds within 10% of the best's score, the one she left longest ago goes next (`hunt.GROUND_TIE`; off by default: nothing in the simulator measures it; see Route diversity; not tried in game) |
 | `tour --stops 3 --kills 5` | A hunting sweep of the map, then standing by on a safe platform |
-| `tour --loop --minutes 20` | The hunt loop instead of the sweep's stops (`docs/hunt-modes.md`; simulator-tested only): one decision after every look, for 20 minutes, then standing by on a safe platform |
-| `tour --loop --grind` | The hunt loop going round the map in a loop of stops chosen by EXP a minute, pulled to the monsters she sees, shooting what comes into reach on the way and leaving a stop as soon as staying gives less than going on, instead of hunting one ground at a time (`behavior/grind.py`; see Grinding; simulator-tested only) |
+| `tour --loop --minutes 20` | The hunt loop instead of the sweep's stops, grinding (below) by default: one decision after every look, for 20 minutes, then standing by on a safe platform |
+| `tour --loop --camp` | The hunt loop hunting one ground at a time (`docs/hunt-modes.md`): the best of the value map, waiting there for its respawns and leaving by its rate; the default until 2026-10-27 |
+| `tour --loop --grind` | The hunt loop going round the map in a loop of stops chosen by EXP a minute, pulled to the monsters she sees, shooting what comes into reach on the way and leaving a stop as soon as staying gives less than going on, instead of hunting one ground at a time (`behavior/grind.py`; see Grinding; the default with `--loop` since 2026-10-27, `--grind` still taken) |
 | `patrol [FILE] [--map M]` | Grinding's view of a map (its stops, the loop it would take, camping's best), and with a recorded run, the next stop grinding would have taken every few seconds along it, and why; no game, no keys |
 | `memory FILE --out OUT` | Her memory of the monsters run again on a recorded run (its looks' monsters and what each searched, her kills from its 'kill' events): what it held, and a copy of the run with its 'memory' records for `minimap --replay OUT`; no game, no keys |
 | `tour --low-hp 0.5`, `hunt clear --low-hp 0.5` | The safety stop's threshold: her HP under it for 2 s ends the hunt, she goes to a safe place and you're paged (default 0.65, five points under her pet's warning; under 25% two looks in a row too; see No resting: the safety stop). `tour --rest-below` and `--rest-avoid` are gone, with the rests (2026-10-26). Out of darts ends a hunt the same way, by itself (exit code 5; see Out of darts) |
@@ -1410,7 +1411,7 @@ her throws, so a monster she shot at is missed by looks as any other there.
 
 ## Grinding
 
-`tour --loop --grind` (`behavior/grind.py`, `behavior/patrol.py`; simulator-tested only, off by default): the hunt loop
+`tour --loop --grind` (`behavior/grind.py`, `behavior/patrol.py`; the default with `--loop` since 2026-10-27): the hunt loop
 going round the map as an experienced player grinds, not hunting one ground and waiting there for its respawns. On
 2026-10-24 the user played 4.5 minutes on Tree Dungeon, Forest Up North II while `watch` recorded it
 (`lab/telemetry/20261024-170558-watch.jsonl`) and, set against her hunts of that day, said she should hunt their way:
@@ -1622,8 +1623,9 @@ reached as a share of its platform (a monster she has seen, by where it is); the
 simulator's runs (the first one stays 15% better or the belief doesn't change enough); the learned refill scale, kill
 time and takes start again each run (not saved across runs, as the value map is); grinding with the feed (the
 default since 2026-10-24) is measured only in the simulator (Continuous perception: The feed by default); `nav`/`hunt`
-don't grind; `tour --loop` without `--grind` still hunts one ground at a time, crediting a visit's every kill to its ground
-(on Tree Dungeon, 23 alone): which is the default is the user's call, after a supervised hunt.
+don't grind; `tour --loop --camp` hunts one ground at a time, crediting a visit's every kill to its ground
+(on Tree Dungeon, 23 alone). Grinding is the default since 2026-10-27, the user's call after the live grinds
+(318-408 EXP a minute on 2026-10-26, camping 283 on 10-24 and 340 on 10-25; not paired runs).
 
 ## Her EXP number
 

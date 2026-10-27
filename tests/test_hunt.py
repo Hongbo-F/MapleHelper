@@ -137,6 +137,39 @@ def test_grounds_about_as_good_go_to_the_one_she_was_at_longest_ago(monkeypatch)
     assert cli.build_parser().parse_args(["tour", "--loop"]).ground_tie is None
 
 
+def test_the_hunt_loop_grinds_by_default_and_camps_with_camp(monkeypatch):
+    # Since 2026-10-27 `tour --loop` grinds (behavior.grind); `--camp` hunts one ground at a time (Hunt); `--grind` is
+    # still taken, and not with `--camp`.
+    from gamelab import __main__ as cli
+    p = cli.build_parser()
+    assert p.parse_args(["tour", "--loop"]).grind and p.parse_args(["tour", "--loop", "--grind"]).grind
+    assert not p.parse_args(["tour", "--loop", "--camp"]).grind
+    with pytest.raises(SystemExit):
+        p.parse_args(["tour", "--loop", "--grind", "--camp"])
+    from contextlib import nullcontext
+
+    from gamelab.behavior import grind, retreat, tour as tour_mod
+    ran = []
+
+    class Ran:
+        def __init__(self, tour, log):
+            self.name = type(self).__name__
+
+        def run(self, minutes):
+            ran.append(self.name)
+            return "ok"
+    monkeypatch.setattr(grind, "Grind", type("Grind", (Ran,), {}))
+    monkeypatch.setattr(hunt, "Hunt", type("Hunt", (Ran,), {}))
+    monkeypatch.setattr(retreat, "on_alarm", lambda hunter: nullcontext())
+    monkeypatch.setattr(tour_mod, "Tour", lambda hunter, nav, log, rng: SimpleNamespace())
+    monkeypatch.setattr(cli, "_record", lambda *a: None)
+    monkeypatch.setattr(cli, "_to_game", lambda: True)
+    monkeypatch.setattr(cli, "_hunter", lambda args, **kw: SimpleNamespace(navigator=lambda **kw: None))
+    for argv in (["tour", "--loop"], ["tour", "--loop", "--camp"]):
+        assert cli.cmd_tour(p.parse_args(argv)) == 0
+    assert ran == ["Grind", "Hunt"]
+
+
 def test_a_pile_objective_no_longer_worth_it_ends_the_trip_to_it():
     pile = _pile(10, status="gone")  # seen gone on the way
     h = _hunt([pile])
