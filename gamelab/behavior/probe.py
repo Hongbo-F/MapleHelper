@@ -947,8 +947,9 @@ class Model:
     her own foothold group's, as reach has it; 'none'; or 'every' wall, any group's, across the level line),
     the line's height (`shot_h`: SHOT_H), whether none between her level and 60 below her is picked closer
     than the old ramp (`ramp`: reach.ramp_dx), and how an attack from a jump picks (`air`: 'area', the area
-    fixed to her feet, reach.in_area, as reach has it; or 'v83', as from the ground from as high as she is,
-    as the simulator's world.AIR_PICK has them). reach_model() is reach's, as it is now."""
+    fixed to her feet, reach.in_area's model 'widening', as reach had it until 2026-10-27; or 'v83', as from the
+    ground from as high as she is, as the simulator's world.AIR_PICK has them). reach_model() is reach's, as it is
+    now (from a jump, its AIR_MODEL 'search' is 'v83' without the claw: in the air the client never whacks)."""
     top0: float
     floor0: float
     claw: reach.Claw
@@ -1012,7 +1013,8 @@ def chances(row: dict, model: MapModel, body: dict[str, MobBody], m: Model) -> l
         if jump and m.air == "area":
             out = [(0.0, 0.0)] * len(entries)
             inside = [i for i, (e, (ahead, dy, top, half)) in enumerate(zip(entries, shapes))
-                      if reach.in_area(ahead, dy, body[e["kind"]].top if e["kind"] in body else top, rise, half)]
+                      if reach.in_area(ahead, dy, body[e["kind"]].top if e["kind"] in body else top, rise, half,
+                                       model="widening")]
             if inside:
                 out[min(inside, key=lambda i: abs(shapes[i][0]))] = (0.0, 1.0)
             return out

@@ -97,12 +97,22 @@ def test_she_throws_toward_the_side_with_more_monsters_in_reach():
     assert stance(500, 500, PLAT, group + [lone]) == ("throw", RIGHT)
 
 
-def test_one_too_close_gets_a_jump_back_throw_not_a_claw_swipe():
-    # Room behind her: jump away from it and throw back from the air.
-    assert stance(500, 500, PLAT, [target(560), target(700)]) == ("jump_back", RIGHT)
-    # Cornered at the left end, or another monster behind her: straight up. No crossing either way.
-    assert stance(60, 500, PLAT, [target(110)]) == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(560), target(400)]) == ("jump_throw", RIGHT)
+def test_one_too_close_she_steps_to_where_her_next_throw_takes_it():
+    # A pig 60 off: from the ground the claw swipes it, and from a jump in place nothing is picked until the body's far
+    # side is past the star's search's first band (reach.AIR_MODEL 'search'): a pig, its top 12 over her feet 40 ms into
+    # the jump, only from the search's third band, 78 ahead (88 with CLEAR_MARGIN: stance.jump_reach). Standing, it's
+    # stepped from to where her next throw surely takes it (a jump in place after a tap on the ground, 35 back), not
+    # jumped back from (the jump back's attack, after its turn in the air, picks one on her level only from about 145).
+    assert stance_mod.jump_reach(38, 34) == 88
+    assert stance(500, 500, PLAT, [target(560), target(700)]) == ("back", LEFT, 35)
+    # Cornered at the left end, or another monster behind her: straight up all the same, tapping the arrow on the ground
+    # first if she must turn (its attack 40 ms into the jump: an air turn's, 120 ms, starts 30 units higher), as by her
+    # keys she faces it at once; under CLAW_ONLY (15: on her) the claw from the ground. No crossing either way.
+    tap = ("jump_throw", RIGHT, stance_mod.JumpPlan(40, 0, False, "tap first"))
+    assert stance(60, 500, PLAT, [target(110)]) == tap
+    assert stance(60, 500, PLAT, [target(110)], facing=RIGHT) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(560), target(400)]) == tap
+    assert stance(60, 500, PLAT, [target(70)], facing=RIGHT) == ("throw", RIGHT)
 
 
 def test_she_keeps_working_the_side_she_faces():
@@ -126,8 +136,10 @@ def test_a_monster_right_under_her_makes_her_step_away_not_throw():
 
 
 def test_under_a_low_platform_she_does_not_jump_at_a_monster():
-    # A jump would carry her up onto the platform overhead: step away, or (cornered) throw from the ground.
-    assert stance(500, 500, PLAT, [target(560)], can_jump=lambda a, b: False) == ("back", LEFT, 120)
+    # A jump would carry her up onto the platform overhead: step away, to where a throw from the ground is a star (a
+    # pig standing 60 off: 55 back, 115 off, past its claw's edge, 114, and the 111 a tap first leaves it at), or
+    # (cornered) throw from the ground.
+    assert stance(500, 500, PLAT, [target(560)], can_jump=lambda a, b: False) == ("back", LEFT, 55)
     assert stance(60, 500, PLAT, [target(110)], can_jump=lambda a, b: False) == ("throw", RIGHT)
 
 
@@ -144,11 +156,13 @@ def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_mons
     assert reach.claw_chance(99, 0, 46, 34) == 1 and reach.claw_chance(100, 0, 46, 34) == 0
     assert reach.star_sure(19) == reach.STAR_SURE == 99 and reach.star_sure(34) == 114
     # A pig 105 away on her platform isn't a throw from the ground (the claw would swipe it, where by its
-    # middle she used to count on a star from 100): a jump back with room behind her, straight up with a
-    # monster there; one target (decide) she steps away from. From 115 it's a star.
+    # middle she used to count on a star from 100): a jump in place, whose attack surely picks it (from 88), tapping
+    # first as she doesn't surely face it; one target (decide) she steps away from. From 115 it's a star.
     pig = target(605)
-    assert stance(500, 500, PLAT, [pig]) == ("jump_back", RIGHT)
-    assert stance(500, 500, PLAT, [pig, target(350)]) == ("jump_throw", RIGHT)
+    tap = ("jump_throw", RIGHT, stance_mod.JumpPlan(40, 0, False, "tap first"))
+    assert stance(500, 500, PLAT, [pig]) == tap
+    assert stance(500, 500, PLAT, [pig, target(350)]) == tap
+    assert stance(500, 500, PLAT, [pig], facing=RIGHT) == ("jump_throw", RIGHT)
     assert decide(500, 500, PLAT, pig, []) == ("walk", LEFT, 120)
     assert stance(500, 500, PLAT, [target(615)]) == ("throw", RIGHT)
     assert decide(500, 500, PLAT, target(615), []) == ("throw", RIGHT)
@@ -159,7 +173,7 @@ def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_mons
     assert stance(500, 500, PLAT, [target(600, kind="snail")]) == ("throw", RIGHT)
     assert stance(500, 500, PLAT, [target(595.8, kind="snail")])[:2] == ("back", LEFT)
     assert stance(500, 500, PLAT, [target(595.8, kind="snail")], halves={"snail": 18.5}) == ("throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(600, kind="slime")]) == ("jump_back", RIGHT)
+    assert stance(500, 500, PLAT, [target(600, kind="slime")]) == tap
     assert stance(500, 500, PLAT, [target(610, kind="orange-mushroom")]) == ("throw", RIGHT)
 
 
@@ -307,10 +321,30 @@ def test_off_level_she_gives_a_star_the_room_its_kind_needs():
 
 # --- what an attack from a jump can hit ----------------------------------------------------------------
 
-def test_an_attack_keyed_late_in_a_jump_starts_too_high_for_a_snail():
-    # Keyed 100 ms after the jump key (the macro's F1 combo), she's 49 units up when the attack picks its
-    # target (plus the lags), so its area's floor is 30 up: a snail (24 at least) is under it, the others
-    # reach into it. In game the star went over the snail. The jump back's attack (85 ms) too.
+def test_from_a_jump_the_star_search_alone_picks_from_her_feet_then():
+    # reach.AIR_MODEL 'search' (2026-10-27): an attack starting in the air picks as the star's search from her feet
+    # then, no claw and no area: a Green or Horny Mushroom (51 tall, 28 wide either side) on her level only once its
+    # far side is past the first band's 65 ahead, by AIR_MARGIN: from 44 ahead keyed 40 ms after the jump key (her feet
+    # 21-26 up); 10 below her takeoff (a slope) from 64, 15 below from 84; keyed 120 ms (an air turn's: 52-56 up) only
+    # from 144 on her level, from 104 where it's 10 above her.
+    def first(dy, key):
+        return next(a for a in range(400) if reach.air_sure(a, dy, 51, 28, key))
+    assert [first(dy, 40) for dy in (-10, 0, 10, 15)] == [44, 44, 64, 84]
+    assert [first(dy, 120) for dy in (-10, 0)] == [104, 144]
+    assert not reach.air_takes(20, 26, 51, 28) and reach.air_takes(50, 26, 51, 28)
+    # Of the kinds on her level, keyed 40 ms after the jump the first band takes a mushroom only (air_hits); a turning
+    # jump's attack goes 120 ms after the jump key whatever the kind (turn_key_ms).
+    tops = monsters.MONSTER_TOP
+    assert reach.air_hits(51, 40) and not any(reach.air_hits(tops[k], 40) for k in ("pig", "slime", "snail"))
+    assert reach.turn_key_ms(38) == reach.turn_key_ms(24) == physics.AIR_TURN_ATTACK_MS
+
+
+def test_an_attack_keyed_late_in_a_jump_starts_too_high_for_a_snail(monkeypatch):
+    # With the area ('widening', from 2026-10-25 to 10-27): keyed 100 ms after the jump key (the macro's F1 combo),
+    # she's 49 units up when the attack picks its target (plus the lags), so its area's floor is 30 up: a snail (24 at
+    # least) is under it, the others reach into it. In game the star went over the snail. The jump back's attack (85
+    # ms) too.
+    monkeypatch.setattr(reach, "AIR_MODEL", "widening")
     assert reach.air_floor(100) == pytest.approx(30.3, abs=0.1)
     assert reach.air_floor(physics.JUMP_BACK_ATTACK_MS) == pytest.approx(25.1, abs=0.1)
     tops = monsters.MONSTER_TOP
@@ -332,18 +366,21 @@ def test_with_the_attack_keyed_late_a_cornered_snail_is_shot_from_the_ground(mon
     assert stance(60, 500, PLAT, [snail]) == ("throw", RIGHT)
     assert stance(60, 500, PLAT, [snail], can_jump=lambda a, b: False) == ("throw", RIGHT)
     # With room behind her: never a jump back (its attack starts too high too), but a step back to where a
-    # throw from the ground is a star (and as far as the snail walks at her meanwhile), and then the star.
+    # throw from the ground is a star (reach.star_sure, 99: in CLEAR_STEP steps, 45 to 105 off; and as far as the snail
+    # walks at her meanwhile, with a pace: stance.Pace), and then the star.
     act = stance(500, 500, PLAT, [target(560, kind="snail")])
-    need = reach.star_sure(monsters.MONSTER_HALF["snail"]) - 60
-    walk = monsters.MONSTER_SPEED["snail"] * (need / physics.WALK_SPEED + stance_mod.SMALL_STEP_REACT_S)
-    assert act == ("back", LEFT, pytest.approx(need + walk)) and 30 < walk < 40
+    assert act == ("back", LEFT, 45) and 560 - (500 - act[2]) >= reach.star_sure(monsters.MONSTER_HALF["snail"])
     assert stance(500 - act[2], 500, PLAT, [target(560, kind="snail")]) == ("throw", RIGHT)
+    pace = stance_mod.Pace(0.3, lambda m: None, {"snail": monsters.MONSTER_SPEED["snail"]})
+    walked = stance(500, 500, PLAT, [target(560, kind="snail")], pace=pace)
+    assert walked[:2] == ("back", LEFT) and walked[2] > act[2]
     # Another monster behind her: no step back either.
     assert stance(500, 500, PLAT, [target(560, kind="snail"), target(400)]) == ("throw", RIGHT)
-    # Pigs, slimes and Orange Mushrooms as before.
+    # Pigs, slimes and Orange Mushrooms standing: a step to where her next throw takes each (a jump in place's attack
+    # keyed this late picks none of them up close), cornered the claw within CLAW_ONLY, else the jump in place.
     for kind in ("pig", "slime", "orange-mushroom"):
-        assert stance(500, 500, PLAT, [target(560, kind=kind)]) == ("jump_back", RIGHT)
-        assert stance(60, 500, PLAT, [target(110, kind=kind)]) == ("jump_throw", RIGHT)
+        assert stance(500, 500, PLAT, [target(560, kind=kind)])[:2] == ("back", LEFT)
+        assert stance(60, 500, PLAT, [target(80, kind=kind)]) == ("throw", RIGHT)
 
 
 def test_a_snail_too_close_is_never_jump_thrown_at_but_stepped_back_from_or_stabbed(monkeypatch):
@@ -353,7 +390,7 @@ def test_a_snail_too_close_is_never_jump_thrown_at_but_stepped_back_from_or_stab
     assert stance(60, 500, PLAT, [target(110, kind="snail")]) == ("throw", RIGHT)
     # With room behind her: a step back past where a throw from the ground is a star, then the star.
     assert stance(500, 500, PLAT, [target(560, kind="snail")])[:2] == ("back", LEFT)
-    assert stance(500, 500, PLAT, [target(560)]) == ("jump_back", RIGHT)  # a pig: as before
+    assert stance(500, 500, PLAT, [target(560)]) == ("back", LEFT, 35)  # a pig: to where a jump in place takes it
     # On a short platform (168 units, as 3, 20 and 22) with a monster about she keeps 50 from its ends: where only
     # its far end has the room she stabs it (SNAIL_FAR_END: in the simulator the snail was soon back at her there,
     # and a touch knocked her off the end).
@@ -370,8 +407,8 @@ def test_a_snail_too_close_is_never_jump_thrown_at_but_stepped_back_from_or_stab
     # Never a jump back at a snail either: its attack has to come after the turn in mid-air (85 ms).
     # JUMP_THROW_SNAILS brings back the jump throw at one, cornered or not.
     monkeypatch.setattr(stance_mod, "JUMP_THROW_SNAILS", True)
-    assert stance(60, 500, PLAT, [target(110, kind="snail")]) == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(560, kind="snail")]) == ("jump_throw", RIGHT)
+    assert stance(60, 500, PLAT, [target(110, kind="snail")])[:2] == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(560, kind="snail")], facing=RIGHT) == ("jump_throw", RIGHT)
     # The kinds' sizes can come from the map's game data instead of the tables.
     assert stance(60, 500, PLAT, [target(110, kind="snail")], tops={"snail": 5.0}) == ("throw", RIGHT)
 

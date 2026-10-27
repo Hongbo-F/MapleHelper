@@ -522,9 +522,12 @@ def _jump_throw(w, gap: float = 0.1):
     w.advance(1.0)
 
 
-def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model):
+def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model, monkeypatch):
     # The attack picks its target when it starts, JUMP_LAG after its key as a jump lifts off: 100 ms after the
-    # jump key she's 46 units up, and the area it picks from starts 19 below her feet, over a snail.
+    # jump key she's 46 units up, and the area it picks from starts 19 below her feet, over a snail. (The area's world,
+    # AIR_PICK 'widening', as until 2026-10-27; by the star's search alone none of these is picked 30 off:
+    # test_clearance.)
+    monkeypatch.setattr(world_mod, "AIR_PICK", "widening")
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))
     _jump_throw(w)
@@ -538,12 +541,14 @@ def test_a_jump_throw_attack_starts_too_high_for_a_snail_but_not_for_a_pig(model
     assert not w.monsters[0].alive and w.kills == {"snail": 1}
 
 
-def test_an_arrow_turning_her_in_the_air_at_the_step_of_the_attacks_key_turns_her_too_late_for_it(model):
+def test_an_arrow_turning_her_in_the_air_at_the_step_of_the_attacks_key_turns_her_too_late_for_it(model, monkeypatch):
     """world.AIR_TURN_SAME_STEP: facing left, she jumps and taps right in the air (physics.AIR_TURN_MS after the jump
     key), the attack after it: 25 ms after (as until 2026-10-26: 10 of 28 such turns threw the wrong way live) the arrow
     and the key are acted on at the same step for some of the step's phases, and that attack goes left at nothing, the
-    pig on her right alive; 60 after (physics.AIR_TURN_LEAD_MS) never."""
+    pig on her right alive; 60 after (physics.AIR_TURN_LEAD_MS) never. (In the area's world, AIR_PICK 'widening', which
+    picks the pig 60 off: by the star's search alone none is, there.)"""
     from gamelab.motion.physics import AIR_TURN_LEAD_MS, AIR_TURN_MS
+    monkeypatch.setattr(world_mod, "AIR_PICK", "widening")
     c = plat(model, 500, 400)
     for gap, wrong in ((25, True), (AIR_TURN_LEAD_MS, False)):
         missed = 0
@@ -560,11 +565,12 @@ def test_an_arrow_turning_her_in_the_air_at_the_step_of_the_attacks_key_turns_he
         assert (missed > 0) is wrong and missed <= len(PHASES) // 3, (gap, missed)
 
 
-def test_noise_can_have_a_jump_throw_miss_a_snail_close_by_as_in_game(model):
+def test_noise_can_have_a_jump_throw_miss_a_snail_close_by_as_in_game(model, monkeypatch):
     # Noise.air_snail (near, take): the area's pick of a snail under `near` ahead takes it with chance `take`, else
     # the star hits nothing (live, 6 of 29 jump throws at a snail under 46 off hurt it). Farther, and other kinds,
-    # as before.
+    # as before. (The area's pick: AIR_PICK 'widening'; with the star's search alone, Noise.air_short has it.)
     from gamelab.sim.world import Noise
+    monkeypatch.setattr(world_mod, "AIR_PICK", "widening")
     c = plat(model, 500, 400)
     never = Noise(air_snail=(46.0, 0.0))
     w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right", noise=never))
@@ -633,8 +639,10 @@ def test_the_ground_attack_swipes_what_the_claw_reaches(model):
         assert w.monsters[0].hp == pytest.approx(3 - (world_mod.CLAW if swiped else 1)), x
 
 
-def test_a_flinching_snail_is_tall_enough_for_a_jump_throw(model):
-    # Hit, a snail flinches for 0.6 s, 33 units tall: the jump-throw right after a claw swipe gets it.
+def test_a_flinching_snail_is_tall_enough_for_a_jump_throw(model, monkeypatch):
+    # Hit, a snail flinches for 0.6 s, 33 units tall: the jump-throw right after a claw swipe gets it. (The area's
+    # world, AIR_PICK 'widening': by the star's search alone a snail 30 off is short of its first band.)
+    monkeypatch.setattr(world_mod, "AIR_PICK", "widening")
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 300.0, monsters=[("Snail", c.id, 330.0)], facing="right"))
     w.invulnerable_ms = 10_000

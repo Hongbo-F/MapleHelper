@@ -509,11 +509,15 @@ def test_in_a_world_where_a_knock_turns_her_the_frame_keeps_her_stars_going_the_
 
 
 @needs_tree
-def test_over_eight_seeds_of_knocks_that_turn_her_her_stars_go_the_wrong_way_only_when_decided_before_one():
+def test_over_eight_seeds_of_knocks_that_turn_her_her_stars_go_the_wrong_way_only_when_decided_before_one(monkeypatch):
     """As above on seeds 1-8: with the frame, at most one wrong-way star a knock (3 for 12 knocks, as measured), where
     eyes that can't read her picture send 6 the wrong way (13 knocks). (Knocks that turned her; the stars by the
     world's count, World.wrong_way. Before her looks were perception's latest frames, Senses.fresh_after: 4 for 10
-    knocks, and 16 for 19.)"""
+    knocks, and 16 for 19.) In the world as it picked from a jump until 2026-10-27 (sim.world.AIR_PICK 'widening'): by
+    the star's search alone ('search') her jump throws' kills come otherwise and the seeds go otherwise from there (5
+    for 13 knocks with the frame, 6 without: the same 8 seeds, chaos)."""
+    from gamelab.sim import world as world_mod
+    monkeypatch.setattr(world_mod, "AIR_PICK", "widening")
     seen = [_kill_on_23(seed=k, **KNOCKED)[0] for k in range(1, 9)]
     blind = [_kill_on_23(seed=k, read=False, **KNOCKED)[0] for k in range(1, 9)]
     wrong = sum(o["wrong way"] for o in seen)

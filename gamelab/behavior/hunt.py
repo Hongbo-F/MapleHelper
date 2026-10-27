@@ -92,7 +92,8 @@ from .. import telemetry
 from ..attack import reach, ropes, spots
 from ..attack.ropes import Refuge
 from ..attack.spots import GROUND_MARGIN, Spot
-from ..attack.stance import MIN_MOVE, act_text, close_to, drop_limits, jump_hits, open_above, overhead, stance
+from ..attack.stance import (MIN_MOVE, act_text, close_to, drop_limits, jump_hits, open_above, overhead, stance,
+                             too_close)
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
@@ -856,11 +857,13 @@ class Hunt:
     # --- shooting -----------------------------------------------------------------------------------
 
     def _close_quarters(self, s: Scene, monsters) -> bool:
-        """Rule 1: one of `monsters` on her platform is as close as stance's own threshold (close_to: the
-        claw would swipe it, by its size; or nearer than its danger warrants: Danger.keep_off)."""
-        x, d = s.where.x, self.danger
-        return any(m.platform == s.platform.id and (close_to(m, x, self._halves)
-                                                     or (d is not None and abs(m.x - x) < d.keep_off(m.kind)))
+        """Rule 1: one of `monsters` on her platform is as close as stance's own threshold, where it will be when her
+        next attack starts (too_close, fight.pace_of: the claw would swipe it, by its size; or nearer than its danger
+        warrants: Danger.keep_off)."""
+        x, pace = s.where.x, fight.pace_of(self.h, s)
+        facing = getattr(getattr(self.h, "actions", None), "facing", None)
+        return any(m.platform == s.platform.id
+                   and too_close(m, x, self._halves, self.danger, pace, s.platform, (m.x > x) != (facing == RIGHT))
                    for m in monsters)
 
     def _owed(self, s: Scene, around: list[Monster]) -> list[Monster] | None:
@@ -906,7 +909,7 @@ class Hunt:
         return stance(s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
                       can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops,
                       halves=self._halves, around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward,
-                      goal=goal, edges=edges, up=up)
+                      goal=goal, edges=edges, up=up, pace=fight.pace_of(self.h, s))
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something
@@ -978,7 +981,7 @@ class Hunt:
         here = s.platform
         act = stance(s.where.x, s.where.y, here, above, False, self.h.actions.facing,
                      can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
-                     around=s.monsters, danger=self.danger)
+                     around=s.monsters, danger=self.danger, pace=fight.pace_of(self.h, s))
         return act if act[0] == "back" and act[2] <= PASS_STEP else None
 
     def _passing_shot(self, s: Scene, targets, others, visible, hidden, now: float) -> None:

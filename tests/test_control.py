@@ -273,15 +273,20 @@ def test_climbing_a_rope_by_a_portal_the_mover_holds_up_only_once_she_is_off_the
         assert up_at == jump_at + (mover_mod.PORTAL_UP_MS if portal else 0)
 
 
-def test_a_jump_that_turns_her_in_the_air_has_its_attack_60_ms_after_the_arrow_where_the_kind_allows():
-    """reach.turn_key_ms: a Horny or Green Mushroom (51 tall) is picked by an attack AIR_TURN_ATTACK_MS (120 ms) after
-    the jump key, the turn's arrow AIR_TURN_LEAD_MS (60) before it (25 ms, as until 2026-10-26: 10 of 28 such turns
-    threw the wrong way live); a pig (38) or a slime (40) only sooner, its attack as late as it's still picked, a snail
-    by none (JUMP_BACK_ATTACK_MS: none can turn and pick it). A jump back at a pig keys its attack so (fight._turn_key,
-    from the nearest monster the way it throws)."""
+def test_a_jump_that_turns_her_in_the_air_has_its_attack_60_ms_after_the_arrow_where_the_kind_allows(monkeypatch):
+    """reach.turn_key_ms: with the star's search from her feet in the air (reach.AIR_MODEL 'search', from 2026-10-27)
+    AIR_TURN_ATTACK_MS (120 ms) after the jump key for every kind, the turn's arrow AIR_TURN_LEAD_MS (60) before it (25
+    ms, as until 2026-10-26: 10 of 28 such turns threw the wrong way live): what the search picks goes by the distance as
+    much as the height. With the area ('widening', 2026-10-25 to 27): a Horny or Green Mushroom (51 tall) is picked by
+    an attack 120 ms after the jump key; a pig (38) or a slime (40) only sooner, its attack as late as it's still
+    picked, a snail by none (JUMP_BACK_ATTACK_MS: none can turn and pick it). A jump back at a pig keys its attack so
+    (fight._turn_key, from the nearest monster the way it throws)."""
     from gamelab.attack import reach
     from gamelab.behavior.fight import _turn_key
     from gamelab.motion.physics import AIR_TURN_ATTACK_MS, JUMP_BACK_ATTACK_MS
+    assert reach.AIR_MODEL == "search"
+    assert reach.turn_key_ms(51) == reach.turn_key_ms(38) == reach.turn_key_ms(24) == AIR_TURN_ATTACK_MS == 120
+    monkeypatch.setattr(reach, "AIR_MODEL", "widening")
     assert reach.turn_key_ms(51) == AIR_TURN_ATTACK_MS == 120 and reach.air_hits(51, 145)
     assert JUMP_BACK_ATTACK_MS < reach.turn_key_ms(38) < AIR_TURN_ATTACK_MS and reach.air_hits(38, reach.turn_key_ms(38))
     assert not reach.air_hits(38, reach.turn_key_ms(38) + 5) and reach.turn_key_ms(24) == JUMP_BACK_ATTACK_MS

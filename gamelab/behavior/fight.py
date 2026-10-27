@@ -25,8 +25,8 @@ from maplehelper.game import COMBAT
 
 from .. import directions, paths, telemetry
 from ..attack import reach
-from ..attack.stance import (TOO_CLOSE, act_text, air_gap, decide, open_above, pct, pick_target, plan_of,
-                             stance)
+from ..attack.stance import (TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace, act_text, air_gap, decide, open_above, pct,
+                             pick_target, plan_of, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
@@ -376,6 +376,42 @@ def walk_on(model: MapModel) -> reach.Where:
     return where
 
 
+def pace_of(h: "Hunter", s: Scene) -> Pace:
+    """How soon her next attack picks after look `s`, and how its monsters walk meanwhile (attack.stance.Pace, the
+    stance's `pace`: clearance kept ahead of time): `lead`, what's left of her attack lock (Actions.lock_until) and the
+    look's age; a monster's walk, its track's speed (the feed's, Scene.tracks: its kind and platform, within
+    TRACK_MATCH, seen in TRACK_SEEN frames at least; one seen in fewer, or with no track, not known: the stance has it
+    walk at her), else for one the look saw where no feed follows them its pose (walking the way it faces, else where
+    it is: as before), and none for one the look didn't see (hidden under its damage numbers, or remembered: where it
+    was seen, as before; had walking at her, a fight threw at the ghosts of the dead the camps killed); speeds by the
+    map's game data."""
+    now = time.monotonic()
+    lock = getattr(getattr(h, "actions", None), "lock_until", 0.0)
+    shown = getattr(s, "t", None)  # (a test's stand-in look may have none: no age)
+    lead = max(0.0, lock - now) + (0.0 if shown is None else max(0.0, now - shown))
+    tracks = [tr for tr in (getattr(s, "tracks", None) or ()) if getattr(tr, "state", None) in ("live", "hidden")]
+    fed = bool(getattr(s, "tracks", None))
+    seen = {id(m) for m in getattr(s, "monsters", ())}
+    walking = speeds(getattr(h, "model", None))
+
+    def walk(m: Monster) -> float | None:
+        best = None
+        for tr in tracks:
+            if tr.kind == m.kind and tr.platform == m.platform and abs(tr.x - m.x) <= TRACK_MATCH:
+                if best is None or abs(tr.x - m.x) < abs(best.x - m.x):
+                    best = tr
+        if best is not None:
+            return best.vx if best.seen >= TRACK_SEEN else None
+        if id(m) not in seen:
+            return 0.0
+        if fed:
+            return None
+        if m.pose == "move" and m.facing:
+            return m.facing * walking.get(m.kind, DEFAULT_SPEED)
+        return 0.0
+    return Pace(lead, walk, walking)
+
+
 def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[Monster]):
     """What her attacks reach from where she stands in look `s` at `targets`, from the ground and from her jumps
     (attack.reach.coverage, by the map's bodies; `around`: every monster about her, each where it walks to by then:
@@ -408,7 +444,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
-                 goal=goal, edges=edges, up=up)
+                 goal=goal, edges=edges, up=up, pace=pace_of(h, s))
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
@@ -653,7 +689,7 @@ def _plain_stance(h: "Hunter", s: Scene, targets: list[Monster], around: list[Mo
     tops, halves = body_sizes(h.model)
     return stance(s.where.x, s.where.y, here, targets, approach, h.actions.facing,
                   can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves, around=around,
-                  danger=h.danger)
+                  danger=h.danger, pace=pace_of(h, s))
 
 
 def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], gains: int,
@@ -721,7 +757,8 @@ def _in_path(s: Scene, side: str, monsters: list[Monster], gap_ms: float | None 
             order = reach.ground_pick(abs(m.x - x), m.y - y, top, half)
             order = None if order is None else order[0]  # 0: the claw's; 1 + k: the search's band k
         else:
-            order = abs(m.x - x) if reach.in_area(abs(m.x - x), m.y - y, top, rise, half) else None
+            order = (abs(m.x - x) if reach.in_area(abs(m.x - x), m.y - y, top, rise, half, m.platform == s.platform.id)
+                     else None)
         if order is not None:
             keyed.append((order, m, reach.wall_to(s.platform, x, y, m, rise) is None))
     stopped = [k for k, _, clear in keyed if not clear and (gap_ms is not None or k > 0)]

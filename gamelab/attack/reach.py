@@ -40,7 +40,11 @@ window's top over her feet (44), and past it the search's own windows from where
 (`air_takes`, AIR_SEARCH): they widen with the distance, so a monster on a platform above is hit from high in the
 jump up close and from lower, or from the ground, farther off, as the user's play has it. `shots` and `Coverage` say,
 for where she stands, every jump and attack key that surely hits each monster: one query for the stance, the hunt
-loop, grinding and her trips, the throw from the ground its case with no jump.
+loop, grinding and her trips, the throw from the ground its case with no jump. From 2026-10-27 the area is gone
+(AIR_MODEL 'search'; 'widening' puts it back): from a jump the star's search alone picks, from her feet when the
+attack starts, as RustMS has it. The live hunts of 2026-10-25 and 26 on Tree Dungeon say so: jump throws in place
+at a monster on her platform hurt one under 40 ahead half as often as farther off, and from an air turn's later key,
+her feet 52-56 up, one on her level or lower a third of the time (`air_sure`: what an attack keyed so surely picks).
 
 What stops a star is checked on the attack's pick alone, as the client does it (RustMS Combat.cpp:1289-1307;
 ohmi69's reading of this game's client and meowdb's page on it say the same): the claw and the star's search
@@ -172,6 +176,27 @@ AREA_UP = SEARCH_TOP0
 # window, 74 there; over the area's 44), from 22 at 19, 133 above where she stood (D:/MapleHelper-scratch/ov-jump/
 # val_user.py). False: the area alone.
 AIR_SEARCH = True
+# How an attack starting in the air picks its target (her decisions; the simulator's world as sim.world.AIR_PICK has it):
+# 'search', from 2026-10-27, the star's search from her feet when it starts, as from the ground but with no claw and no
+# area (air_takes: band k from SEARCH_START + SEARCH_STEP k ahead, its window 12 - 5k to 44 + 5k above her feet then),
+# as RustMS's port of the v83 client has no case for the air and this client never whacks in the air (a Lucky Seven key
+# from a jump took MP on 93-97% of throws at every distance, 113 of 119 at 0-20 ahead, where from the ground under 90
+# ahead only 27% did: the claw's swipe); or 'widening', the area about her feet (AREA_DOWN below them to AREA_UP above,
+# from her middle out) and the search's windows past it, as from 2026-10-25. The live hunts of 2026-10-25 23:43 to 10-26
+# 23:47 (14 runs on Tree Dungeon, the out-of-darts spells left out) say the search: of 788 jump throws in place at a
+# monster on her platform (her feet at the attack's start by physics.pose from where the perception service had her,
+# each monster walked on by its track to then: D:/MapleHelper-scratch/clear/diag-slopes/replay.py), 'widening' picked
+# the target at 0-40 ahead (her middle to its) for 70% of the no-turn throws' hits where 50% hurt it, and from an air
+# turn's 120 ms key (her feet 52-56 up) for 72% where 34% did; the search fits them 111 log-likelihood better (-587
+# against -699: D:/MapleHelper-scratch/clear/impl/calib/fitworld.py), and its first window's floor 12 above her feet
+# fits best (8 and 16: 7 and 9 worse; diag-slopes/fit_floor.py). So from a jump nothing is picked until the body's far
+# side is past SEARCH_START (a mushroom's middle 37 ahead), 65 being where the claw's reach ends and the star's search
+# begins (RustMS PointBlank.h MAX_REACH), and a monster lower than her by her height in the jump and the slope is picked
+# only farther off: keyed 40 ms after the jump key (her feet 21-26 up) a mushroom whose feet are up to about 10 below
+# hers 65-85 ahead, 15 at 85-105; keyed 120 ms (52-56 up), one on her level only from 145 ahead. Planned jumps at
+# monsters 40+ above her, both ways alike (36% and 34% hurt among those picked: diag-slopes/fit_top.py).
+AIR_MODEL = "search"
+AIR_MODELS = ("search", "widening")
 # Whether a throw from the ground reaches monsters more than SHOT_UP above her where the star's search picks them (its
 # windows widen 5 up for every 20 ahead: 100 above her from about 270 off, 124 at most, at 385-400 ahead), as the
 # simulator's world always had it. On by the user's choice, 2026-10-25 ("Turn it on now"), asked whether to wait for
@@ -671,7 +696,7 @@ def shielded(platform: Platform | None, x: float, y: float, m: Monster, others: 
         ahead, dy = (o.x - x) * d, o.y - y
         top, half = body_of(o.kind)
         if rise:
-            return abs(ahead) if in_area(ahead, dy, top, rise, half) else None
+            return abs(ahead) if in_area(ahead, dy, top, rise, half, o.platform == platform.id) else None
         if claw_chance(ahead, dy, top, half) > 0:
             return None
         return search_band(*body_box(ahead, dy, top, half))
@@ -793,36 +818,56 @@ def reaches_into(ahead: float, dy: float, top: float, half: float, far: float, d
     return near - half <= ahead <= far + half and top - dy >= -down and -dy < up
 
 
-def air_takes(ahead: float, dy: float, top: float, half: float, margin: float = 0.0) -> bool:
+def air_takes(ahead: float, dy: float, top: float, half: float, margin: float = 0.0, model: str | None = None) -> bool:
     """Whether an attack starting with her in the air can pick a monster `ahead` units in front of her (its middle),
-    its feet `dy` below her feet then (+ below), its body `top` tall and `half` wide either side: its body reaches
-    into the area about her feet (AREA_DOWN below them to AREA_UP above, its near side within STAR_RANGE ahead), or
-    (AIR_SEARCH) overlaps its band's window of the star's search from her feet then (search_band: from SEARCH_START
-    ahead, the windows about SHOT_H over her feet one unit wider up and down for every SEARCH_SPREAD ahead), by
-    `margin` (reaching that far into either, every way: a pick that is sure). Of those, the nearest is picked."""
-    if reaches_into(ahead, dy, top, half - margin, STAR_RANGE, AREA_DOWN - margin, AREA_UP - margin):
-        return True
-    if not AIR_SEARCH:
-        return False
+    its feet `dy` below her feet then (+ below), its body `top` tall and `half` wide either side, by AIR_MODEL (or
+    `model`): 'search', its body overlaps its band's window of the star's search from her feet then (search_band: from
+    SEARCH_START ahead, the windows about SHOT_H over her feet one unit wider up and down for every SEARCH_SPREAD
+    ahead); 'widening', that (with AIR_SEARCH) or its body reaching into the area about her feet (AREA_DOWN below them
+    to AREA_UP above, its near side within STAR_RANGE ahead). By `margin`: reaching that far into it, every way (a pick
+    that is sure). Of those, the nearest band's is picked ('widening': the nearest)."""
+    if (model or AIR_MODEL) == "widening":
+        if reaches_into(ahead, dy, top, half - margin, STAR_RANGE, AREA_DOWN - margin, AREA_UP - margin):
+            return True
+        if not AIR_SEARCH:
+            return False
     near, far, bottom, roof = body_box(ahead, dy, top, half)
     return search_band(near + margin, far - margin, bottom + margin, roof - margin) is not None
 
 
-def in_area(ahead: float, dy: float, top: float, rise: float = 0.0, half: float = 0.0) -> bool:
+def in_area(ahead: float, dy: float, top: float, rise: float = 0.0, half: float = 0.0, mine: bool = False,
+            model: str | None = None) -> bool:
     """Whether an attack's star can pick a monster `ahead` units in front of her (its middle), its feet `dy`
     below hers as she stands (+ below), its body `top` tall (and `half` wide either side), when the attack
-    starts with her `rise` units up in a jump: the area about her feet then, and for one above her level (more than
-    LEVEL over her feet as she stands) the search's widening windows too (air_takes). From the ground (`rise` 0), the
-    star's search picks it (picks). What her decisions keep as in a jump throw's path (behavior.fight._in_path: what a
-    kill is matched to, and what's kept thrown at, hidden, for a while) and what shields others (shielded) go by this.
-    Below her the windows from a jump reach far monsters only (from 44 up, 104 below her feet at 385-400 ahead), which
-    take a star only with none nearer: listed, they were kept thrown at and hidden, and the step-down probe's fights on
-    2 went on to its 120 s cap on seeds 1, 5 and 9 of 1-12 (none at the base; with them left out, as here, only 4)."""
+    starts with her `rise` units up in a jump (air_takes, by AIR_MODEL or `model`), from the ground (`rise` 0) as the
+    star's search picks it (picks). 'search': on her own platform (`mine`: sloped, a monster on it can be 36 units lower
+    than her on Tree Dungeon) or on her level or above it, the search from her feet then; 'widening': the area about
+    her feet then, and for one above her level (more than LEVEL over her feet as she stands) the search's widening
+    windows too. What her decisions keep as in a jump throw's path (behavior.fight._in_path: what a kill is matched to,
+    and what's kept thrown at, hidden, for a while) and what shields others (shielded) go by this. Below her level off
+    her platform the windows from a jump reach far monsters only (from 44 up, 104 below her feet at 385-400 ahead),
+    which take a star only with none nearer: listed, they were kept thrown at and hidden, and the step-down probe's
+    fights on 2 went on to its 120 s cap on seeds 1, 5 and 9 of 1-12 (none at the base; with them left out, as here,
+    only 4)."""
     if rise == 0:
         return picks(ahead, dy, top, half)
+    if (model or AIR_MODEL) == "search":
+        return (mine or dy <= LEVEL) and air_takes(ahead, dy + rise, top, half, model="search")
     if dy < -LEVEL:
-        return air_takes(ahead, dy + rise, top, half)
+        return air_takes(ahead, dy + rise, top, half, model="widening")
     return reaches_into(ahead, dy + rise, top, half, STAR_RANGE, AREA_DOWN, AREA_UP)
+
+
+def air_sure(ahead: float, dy: float, top: float, half: float, gap_ms: float, margin: float = AIR_MARGIN) -> bool:
+    """Whether an attack keyed `gap_ms` after the jump key of a jump in place surely picks a monster `ahead` units in
+    front of where she jumped from (its middle where it will be then), its feet `dy` below hers as she stood (+ below:
+    the slope, platform.y_at at its x less hers), `top` tall and `half` wide either side: air_takes `margin` into it from
+    her feet at both ends of the attack's start (JUMP_LAG after its key, or ATTACK_DECIDE_LAG_MS later: physics). Keyed
+    40 ms after the jump key (her feet 21-26 up) a Green or Horny Mushroom (51 tall, 28 wide either side) on her level
+    or above it from 44 ahead, 10 below her takeoff from 64, 15 below from 84, 20 below from 104; keyed 120 ms (52-56
+    up), on her level from 144, 10 above her from 104, 5 below from 164."""
+    early, late = physics.jump_rise(gap_ms + physics.JUMP_LAG * 1000), air_rise(gap_ms)
+    return all(air_takes(ahead, dy + rise, top, half, margin) for rise in (early, late))
 
 
 def air_rise(gap_ms: float) -> float:
@@ -840,9 +885,14 @@ def air_floor(gap_ms: float) -> float:
 
 def turn_key_ms(top: float) -> int:
     """The attack key of a jump that turns her in the air, at a monster on her platform at least `top` tall (ms after
-    the jump key): physics.AIR_TURN_ATTACK_MS, the turn's arrow physics.AIR_TURN_LEAD_MS before it, where its attack
-    still picks such a monster (air_hits); else the latest one from physics.JUMP_BACK_ATTACK_MS on that does (a pig:
-    105, its arrow 45 ms before), or that if none does."""
+    the jump key): physics.AIR_TURN_ATTACK_MS, the turn's arrow physics.AIR_TURN_LEAD_MS before it. With AIR_MODEL
+    'widening', where its attack still picks such a monster (air_hits), else the latest one from
+    physics.JUMP_BACK_ATTACK_MS on that does (a pig: 105, its arrow 45 ms before), or that if none does. With 'search'
+    always AIR_TURN_ATTACK_MS: what the search picks goes by how far off a monster is as much as how tall, and keyed
+    sooner after the arrow the turn goes the wrong way more often (36% at 25 ms after it, live on 2026-10-25), with her
+    feet still 44 up, over a level mushroom's top for the search's first five bands."""
+    if AIR_MODEL == "search":
+        return physics.AIR_TURN_ATTACK_MS
     for k in range(physics.AIR_TURN_ATTACK_MS, physics.JUMP_BACK_ATTACK_MS, -5):
         if air_hits(top, k):
             return k
@@ -850,10 +900,15 @@ def turn_key_ms(top: float) -> int:
 
 
 def air_hits(top: float, gap_ms: float) -> bool:
-    """Whether an attack keyed `gap_ms` after the jump key surely picks a monster on her platform that is
-    at least `top` tall (localization.monsters.MONSTER_TOP): its body reaches AIR_MARGIN into the area.
-    A snail (24) stays under the area of a jump throw (its floor 30 up) and of a jump back (25); keyed
-    40 ms after the jump (7), the attack picks every kind."""
+    """Whether an attack keyed `gap_ms` after the jump key surely picks a monster on her level that is at least `top`
+    tall (localization.monsters.MONSTER_TOP), somewhere up close. 'widening' (AIR_MODEL): its body reaches AIR_MARGIN
+    into the area (a snail, 24, stays under the area of a jump throw keyed 100 ms after the jump, its floor 30 up, and
+    of a jump back, 25; keyed 40 ms after it, 7, the attack picks every kind). 'search': its top AIR_MARGIN over the
+    first band's window's floor (SEARCH_FLOOR0) above her feet then (air_rise), as in the band from SEARCH_START ahead:
+    keyed 40 ms after the jump (her feet 26 up) a Green or Horny Mushroom (51), not a pig (38) or a slime (40), by 6 and
+    4 units, nor a snail (24); keyed 60 ms an Orange Mushroom (55) too; keyed 85 ms or later none."""
+    if AIR_MODEL == "search":
+        return top - air_rise(gap_ms) >= SEARCH_FLOOR0 + AIR_MARGIN
     return top >= air_floor(gap_ms) + AIR_MARGIN
 
 

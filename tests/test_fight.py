@@ -137,11 +137,12 @@ def test_she_stands_on_each_pile_pressing_pick_up(monkeypatch):
 
 def test_a_kill_after_she_moved_on_to_the_next_target_still_gets_its_drops(monkeypatch):
     # She threw at a pig on the right, then turned to one on the left; the right one's death (EXP up)
-    # comes in after that, when the last throw aimed only left.
+    # comes in after that, when the last throw aimed only left. (The left one 120 off, past its claw's edge: 50 off, as
+    # until 2026-10-27, she'd step to where a jump in place surely takes it: stance._from_here.)
     def kill_at(h, t):
         if abs(t - 1.2) < 1e-6:
             h.report.exp_kills += 1
-    looks = [[target(700)], [target(450)], [target(450)], [target(450)], [target(450)]]
+    looks = [[target(700)], [target(380)], [target(380)], [target(380)], [target(380)]]
     h, throws = _fighter(monkeypatch, looks, on_look=kill_at)
     swept = []
     h.looter.sweep_after = lambda deaths: swept.extend(d.x for d in deaths)
@@ -365,12 +366,25 @@ def test_a_kill_is_matched_to_the_first_monster_in_the_star_path(monkeypatch):
     assert h.report.kills == {"snail": 1}
 
 
-def test_a_jump_throw_aims_at_the_platform_above_and_over_a_snail_beside_her():
-    # She's on PLAT (y 500) at x 500; a platform 60 above runs to her left. A jump throw's attack picks
-    # its target ~49 units up: the slimes up there are in its area at any distance a star reaches (on
-    # the ground, one 60 above needs 117 sideways), and the snail 30 away on her own platform is under it.
+def test_a_jump_throw_aims_at_the_platform_above_and_over_a_snail_beside_her(monkeypatch):
+    # She's on PLAT (y 500) at x 500; a platform 60 above runs to her left. By the star's search from her feet in the
+    # air (reach.AIR_MODEL 'search', from 2026-10-27): keyed 100 ms after the jump (49 up) or 40 ms (26 up), the slimes
+    # up there are in its first band's window at any distance a star reaches (on the ground, one 60 above needs 117
+    # sideways), and neither the snail nor a pig 30 away on her own platform is picked: their far sides are short of
+    # the first band, 65 ahead.
     from gamelab.behavior.fight import _in_path
     from gamelab.motion.physics import JUMP_ATTACK_MS
+    s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT)
+    snail, pig = target(470, kind="snail"), target(470)
+    near_slime, far_slime = target(400, y=440, platform=5, kind="slime"), target(300, y=440, platform=5, kind="slime")
+    too_far = target(30, y=440, platform=5, kind="slime")
+    seen = [snail, near_slime, far_slime, too_far]
+    for gap in (100, JUMP_ATTACK_MS):
+        assert _in_path(s, LEFT, seen, gap) == [near_slime, far_slime]
+        assert _in_path(s, LEFT, [pig, near_slime], gap) == [near_slime]
+    assert _in_path(s, LEFT, seen) == [snail, far_slime]  # a throw from the ground: as before
+    # By the area about her feet ('widening', 2026-10-25 to 27):
+    monkeypatch.setattr(reach, "AIR_MODEL", "widening")
     late = 100  # the attack keyed 100 ms after the jump (now JUMP_ATTACK_MS is 40: see the end)
     s = SimpleNamespace(where=SimpleNamespace(x=500, y=500), platform=PLAT)
     snail = target(470, kind="snail")

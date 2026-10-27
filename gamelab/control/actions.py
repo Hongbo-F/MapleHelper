@@ -27,7 +27,7 @@ from maplehelper.game import COMBAT, MOVEMENT
 
 from .. import directions
 from ..motion.physics import (AIR_TURN_ATTACK_MS, AIR_TURN_MS, BLIND_ENDS_MS, FORWARD_JUMP_MS, JUMP_ATTACK_MS,
-                              JUMP_BACK_ATTACK_MS,
+                              JUMP_BACK_ATTACK_MS, JUMP_THROW_TURN_MS,
                               KICK_JUMPS, hold_ms)
 from ..screen import STRETCHED_CLIENT
 from . import client
@@ -107,7 +107,7 @@ JB_THROW_MS = JB_RUN_MS + AIR_TURN_ATTACK_MS  # the attack key physics.AIR_TURN_
 # lags spread). Taps that short are bimodal in game (two of three 50 ms taps didn't move her at all), so
 # half of these waits may be for nothing: an in-game look at jump-throws that turn decides (0 puts back the
 # jump TURN_SETTLE_MS after the tap).
-JUMP_THROW_TURN_MS = 205
+# (physics.JUMP_THROW_TURN_MS, 205, imported above)
 # ... which is now only for an attack that has to come too soon in the jump for her to turn in the air first (an attack
 # keyed under physics.AIR_TURN_ATTACK_MS after the jump key: the stance asks for it only at a monster too short for
 # a later one to pick, reach.air_hits). Every other jump throw that turns her jumps at once and taps the arrow in the

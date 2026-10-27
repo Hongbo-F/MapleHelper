@@ -307,6 +307,11 @@ AIR_TURN_MS = 60
 # late as it still picks them (reach.turn_key_ms), sooner than this after the arrow.
 AIR_TURN_LEAD_MS = 60
 AIR_TURN_ATTACK_MS = AIR_TURN_MS + AIR_TURN_LEAD_MS
+# A jump throw that taps the arrow to turn her on the ground first (control.actions.Actions.jump_throw with its air
+# turn off) jumps this long after the tap, once the tap's walk has stopped (control.actions has why; attack.stance times
+# the attack's start by it: a tap first keeps the attack's key 40 ms after the jump key, where an air turn's comes 120 ms
+# after it, her feet 30 units higher).
+JUMP_THROW_TURN_MS = 205
 
 
 def rise_after(t: float) -> float:

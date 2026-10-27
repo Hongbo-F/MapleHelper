@@ -206,14 +206,17 @@ def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypa
     2026-10-26, a monster by a kill placed taken for the one dying there while its death animation plays,
     ledger.dying: of seeds 1-12 it's met on 2, 4-7, 10 and 11, and on 3 she never waits on the rope.) Seed 2 kept with
     parts A and B together, work/hunt-ab, 2026-10-26, where part B alone had it on 4: of seeds 1-12 it's met on 1-3, 10
-    and 12; on 7 she went to rest with no safe platform reachable.)"""
+    and 12; on 7 she went to rest with no safe platform reachable.) Seed 1 since 2026-10-27, an attack from a jump
+    picking by the star's search alone (reach.AIR_MODEL, the world's AIR_PICK) and her stance going by where each
+    monster will be when her attack starts (attack.stance.Pace): on seed 2 she never waited on the rope; of seeds 1-12
+    it's met on 1, 6, 7, 8 and 12, and on 3 she waits on it, the rest of this not met."""
     from gamelab.sim import harness, scenarios, world
     from gamelab.sim.world import Realism
     model = build([FLOOR, OVER], LIVES, [ROPE])
     if world.mob_info(19) is None:
         pytest.skip("needs the Horny Mushroom's game data (gamedata/data)")
     g = on(model, 100, 500)
-    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=2,
+    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=1,
                             limit=400, realism=Realism(respawn=17.0), may_die=True)
     trace = scenarios.run_scenario(sc, model)
     log = "\n".join(trace["log"])

@@ -59,11 +59,15 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   whose body overlaps one of its bands, the first band's, one of those drawn at random, seeded, as the
   client's order there, by when each entered the map, can't be seen), so off her level a star needs room
   sideways, by the monster's body (right under or over her, none is hit).
-  In the air, the nearest whose body reaches into the attack's area (its near side within
-  reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is
-  then) or into its band's window of the star's search from her feet then (AIR_PICK 'widening', the
-  default: reach.air_takes) takes a star (with 'area', the area alone; with 'v83', the claw and the search
-  as from the ground, from where she is then). For all of these, bodies are their kind's half width either side and as tall as
+  In the air, the star's search from her feet then (AIR_PICK 'search', the default from 2026-10-27, as
+  reach.AIR_MODEL: no claw and no area; with Noise.air_short and air_under a monster on her platform short of
+  the first band or under its window takes it now and then, and with air_turn_lost an arrow in the air may
+  not turn her: TREE_AIR on Tree Dungeon), or the nearest whose body reaches into the attack's area (its near
+  side within reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she
+  is then) or into its band's window of the star's search from her feet then ('widening': reach.air_takes as
+  it was) takes a star (with 'area', the area alone; with 'v83', the claw and the search as from the ground,
+  from where she is then). From the ground the Lucky Seven key swipes with the claw as the attack key does, no
+  cast's MP taken (Her.claw). For all of these, bodies are their kind's half width either side and as tall as
   their kind walking (monster_data.MONSTER_HEIGHT), taller while they flinch after a hit
   (monster_data.FLINCH_S, flinch tops from the game data); not their frames (World.top says why). So a
   jump throw's attack, starting 46 units up, passes over a snail. All of these pick by the bodies alone,
@@ -315,7 +319,14 @@ PUSH_BY_DAMAGE = True
 # from her feet then (reach.air_takes, as her decisions have it): the windows widen with the distance, so a monster on
 # a platform above is picked from low in the jump far off and only near its top up close, as the user's play of
 # 2026-10-24 has it (reach.AIR_SEARCH). Up close on her own platform it's the area, as before.
-AIR_PICK = "widening"
+# 'search', the default from 2026-10-27, as her decisions have it (reach.AIR_MODEL): the star's search from her feet
+# then, with no claw and no area (World.air_search). 'widening' picked the target of 70% of the live in-place jump
+# throws at 0-40 ahead and of 72% of those that turned in the air where 50% and 34% hurt it (788 throws of 2026-10-25
+# and 26 on Tree Dungeon), so the harness counted those throws as hits and could never show what keeping clear of a
+# monster gains. With the noise that stands for what the live positions don't tell (Noise.air_short, air_under,
+# air_turn_lost: TREE_AIR), the world comes within about 10 points of the live hit rates cell by cell (README,
+# Clearance and slopes).
+AIR_PICK = "search"
 # In the air, an arrow the game acts on at the same step (STEP_MS) as an attack's key turns her too late for that
 # attack: it goes the way she faced before (the turn shows, the star doesn't follow). Live on 2026-10-25 (the hunt of
 # 23:43) 10 of 28 jumps that turned her in the air threw the wrong way, the attack 25 ms after the arrow, and none of 68
@@ -325,6 +336,7 @@ AIR_PICK = "widening"
 # the wrong way in the harness (master's hunt loop on Tree Dungeon, 8 seeds of 10 minutes). False: as before.
 AIR_TURN_SAME_STEP = True
 DROP_DELAY = 2.0
+CLOSE_DX = 60.0          # (World.close_ms) a monster this near her, middle to middle: the live diagnosis's close episodes
 # s from a kill until the monster is back at its spawn point (a guess; Realism.respawn). Not the game's, by its live
 # telemetry of 2026-10-19 to 21 (analysis.respawn: README, Respawns and drop life): there a platform she emptied,
 # watched with no gap over 2 s, had a monster again within 12.56 s on an estimated 20% (95% interval 12-33%; 12 of 77
@@ -498,6 +510,18 @@ TAP_LOST_MS = 50         # an arrow tap this short (as sent) can be lost (Noise.
 # in all, 64-75% and 71% without those, 70%: the preset's detect_miss (10%) found 89% of them.
 NEAR_SEEN = ((25.0, 0.0), (50.0, 0.07), (100.0, 0.34), (150.0, 0.55), (float("inf"), 0.6))
 OFF_SEEN = 0.7
+# The air pick's noise on Tree Dungeon (Noise.air_short, air_under, air_turn_lost), fitted by likelihood to the 788 live
+# jump throws in place at a monster on her platform of 2026-10-25 23:43 to 10-26 23:47 (positions at the attack's start
+# as D:/MapleHelper-scratch/clear/diag-slopes/replay.py put them), by their kills (an EXP gain of the target's kind
+# 0.10-0.95 s after the key, her own beyond doubt: D:/MapleHelper-scratch/clear/impl/calib/fitkill.py, a picked
+# target's kill and a kill put on it wrongly fitted with it, 0.5 and 0.06): a target short of the first band or under
+# its window takes the star 30% of the time each (0-0.5 tried in tenths), an air turn lost 26% of the time (0, 0.13 and
+# 0.26 tried: 0.26 the live share that faced away after one). Log-likelihood -456.6 against -506.5 for the search alone;
+# a ramp for the short ones (all of them at the band's edge, max(F, 1 - s / R) s units short) fits no better (-459.1 at
+# R 15, F 0.2). By their bar drops instead (which other players' hits drop too: fitworld.py) 40% each, -491.6 against
+# -587.2 for the search alone and -698.6 for 'widening'; her pick jittered instead (25 units sideways and 16 up and
+# down, normal, the best of a grid) -534.8: the edges blur, but throws well inside the windows hurt more often than that.
+TREE_AIR = {"air_short": 0.3, "air_under": 0.3, "air_turn_lost": 0.26}
 
 
 @dataclass(frozen=True)
@@ -549,6 +573,16 @@ class Noise:
                                  # detect_miss has it. NEAR_SEEN: as live; () off
     off_seen: float | None = None  # ... and one on another platform with this chance (OFF_SEEN: as live); None: as
                                    # detect_miss has it
+    air_short: float = 0.0       # chance a monster on the platform she last stood on whose body is short of the star's
+                                 # search's first band (point-blank: its far side within reach.SEARCH_START ahead of her)
+                                 # takes the star of an attack from a jump all the same, nearer than the search's pick
+                                 # (AIR_PICK 'search'; drawn per attack and monster, the nearest first) ...
+    air_under: float = 0.0       # ... and one in a band's reach sideways but under its window (too low for her height
+                                 # then): what the live positions (the tracks' error, the monster's walk and her drift
+                                 # to the attack's start) don't tell. TREE_AIR: fitted to the live close-up jump throws
+    air_turn_lost: float = 0.0   # chance an arrow the game acts on in the air doesn't turn her (the attack goes the way
+                                 # she faced, and her frame shows her so): live 63 of 246 jump throws that turned her in
+                                 # the air faced away from the target after them (26%), the attack 60 ms after the arrow
     heading_wrong: tuple = ()    # (share, score, margin, runs): that share of frames read her facing the wrong way,
                                  # matching `score`, `margin` ahead; `runs` True: drawn per pose of hers for each
                                  # HEADING_SPELL_S (a pose her pictures don't know), False: per frame. Of the frames
@@ -607,6 +641,8 @@ class Realism:
     bars_empty: bool = False     # a hurt monster's HP bar read empty, whatever it has left (sim.fakes.FakeEyes.bar): as
                                  # the stack read them at 1366x768 until 2026-10-25 (perception.hud.hp_bar: 83 of 87
                                  # bars seen in a run read 0; harness `--world bars-empty`)
+    air_pick: str | None = None  # how an attack from a jump picks (AIR_PICK's names; None: AIR_PICK): a scenario of what
+                                 # an earlier picture had (probe_air: the area's) keeps to it
     damage_ms: int | None = None  # ms after an attack's key that its damage is applied (None: the server's,
                                   # actions.DAMAGE_SHOWS_MS; actions.STAR_DELAY_MS: at the star's release, as the
                                   # world had it until 2026-10-26 and the probes' scenarios still do: their scorer,
@@ -653,6 +689,12 @@ class Her:
                                                # SKILL_STARS of the regular star)
     cast_mp: float = CAST_MP     # MP a Lucky Seven cast takes
     mp_potion: float = MP_POTION  # MP an MP potion her pet drinks gives
+    claw: tuple[int, int] | None = None  # with `spread`, a claw swipe's damage before defence (None: CLAW_DAMAGE). With
+                                 # `skill`, the Lucky Seven key swipes up close as the attack key does, its cast's MP
+                                 # and stars not taken (World._uncast): live, a Lucky Seven press with the target 20-90
+                                 # ahead on her platform took MP 54 times in 200 (27%; 76% at 100-120, where the claw's
+                                 # boxes end), and by eye on the recordings of 2026-10-26 every press at one on or under
+                                 # her was a swipe of 15-24 or a MISS, no MP
 
 
 LEVEL_19 = Her()
@@ -682,7 +724,7 @@ LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=60
 # (harness.ATTACK_HER), her Lucky Seven at level 16 (14 MP), her pet's MP potions Blue Potions (100) and its HP
 # potions as above.
 LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=623.0, pet_mp=PET_MP, potion=HP_POTION,
-               star=(20, 140), skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0)
+               star=(20, 140), skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0, claw=(15, 24))
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -1086,6 +1128,23 @@ class World:
         self.step_arrow = 0             # the arrow the game moved her with at its last step on the ground
         self.facing = facing
         self._air_turn: tuple[int, str] | None = None  # the step an arrow last turned her in the air at, her way before
+        self.air_turn_ms = -10_000      # the tick an arrow toward her back was last acted on in the air (turned or
+                                        # not) ...
+        self.air_turns_lost = 0         # ... and those that didn't turn her (Noise.air_turn_lost)
+        self.lift_ms = -10_000          # the tick she last lifted off (a jump, off a rope)
+        self.swiped_casts = 0           # Lucky Seven keys the claw's swipe took (World._uncast: no cast)
+        # Up close (the clearance harness counts, sim.harness: `claw_s`, `close_s`): ticks she stood or flew with a
+        # live monster on the platform she last stood on within the claw's reach of her (reach.CLAW_FAR plus half its
+        # width, middle to middle: a mushroom 93), and within CLOSE_DX
+        self.claw_ms = 0
+        self.close_ms = 0
+        # Every attack's pick (_aim), with what came of it (_attack): (key s, plan, "ground" or "air", turned in the air
+        # in this flight before it, the attack key's ms after her lift-off, the nearest live monster on the platform she
+        # last stood on ahead of her then the way the stack threw it (`meant`; her facing where no throw listener
+        # tells): how far ahead (middle to middle) and how much lower its feet were than the floor under her (+ lower:
+        # the slope) or None, whether it was the pick, whether it was a Lucky Seven cast (not one the claw's swipe took:
+        # _uncast), the outcome as attack_log's)
+        self.pick_log: list[tuple] = []
         self.seen: dict[str, int] = {}  # the arrows the game sees held -> the order it saw them pressed in
         self._seen_count = 0
         self._seen_due: dict[str, int] = {}  # each arrow's latest change the game is yet to see (its tick)
@@ -1253,6 +1312,7 @@ class World:
         if "up" in self.held:
             self._through_portal()
         self._touch()
+        self._closeness()
         if self.character.mp > 0 and self.mp < 1.0:
             self.mp = min(1.0, self.mp + MP_REGEN * dt / self.character.mp)
         self.ms += TICK_MS
@@ -1392,6 +1452,11 @@ class World:
         side = LEFT if action == "left" else RIGHT
         if self.mode == "air" and side != self.facing:
             self._air_turn = (self.ms, self.facing)
+            self.air_turn_ms = self.ms
+            if self.noise.air_turn_lost and self.chance("air_turn_lost") < self.noise.air_turn_lost:
+                self.air_turns_lost += 1  # (Noise.air_turn_lost: held all the same, for her steering)
+                self.note(f"the arrow {side} in the air doesn't turn her: she faces {self.facing}")
+                return
         self.facing = side
 
     def turn(self, side: str, why: str = "turned from outside") -> None:
@@ -1545,6 +1610,7 @@ class World:
         happens after this tick's motion)."""
         y = self.y if self.mode != "ground" else self.plat.y_at(self.x)
         d = self._steer()
+        self.lift_ms = from_ms
         self._fly(self._flight(self.x, y, vx, vy, d), from_ms, d)
 
     def _fly(self, f: body.Flight, from_ms: int, arrow: int, skip: Platform | None = None) -> None:
@@ -1671,6 +1737,20 @@ class World:
 
     # --- monsters and her -------------------------------------------------------------------------------
 
+    def _closeness(self) -> None:
+        """The ticks a live monster on the platform she last stood on is within the claw's reach of her (claw_ms) and
+        within CLOSE_DX (close_ms), middle to middle."""
+        if self.mode == "rope" or self.dead:
+            return
+        t, x, claw, close = self.t, self.x, False, False
+        for m in self.by_platform.get(self.last_plat.id, ()):
+            if m.alive:
+                dx = abs(m.at(t) - x)
+                claw = claw or dx < reach.CLAW_FAR + m.half
+                close = close or dx < CLOSE_DX
+        self.claw_ms += TICK_MS * claw
+        self.close_ms += TICK_MS * close
+
     def _touch(self) -> None:
         if self.ms < self.invulnerable_ms or not self.monsters or self.dead:
             return
@@ -1793,18 +1873,62 @@ class World:
     def air_pick(self, facing: str) -> SimMonster | None:
         """The live monster an attack starting with her in the air picks on her `facing` side (AIR_PICK 'widening'):
         the nearest her whose body reaches into the area about her feet or into its band's window of the star's
-        search from her feet now (reach.air_takes), whatever the terrain (_aim checks the line to it)."""
+        search from her feet now (reach.air_takes' 'widening', whatever reach.AIR_MODEL is), whatever the terrain (_aim
+        checks the line to it)."""
         t, d, best = self.t, directions.sign(facing), None
         for m in self.monsters:
             if not m.alive:
                 continue
             mx = m.at(t)
             ahead, dy = (mx - self.x) * d, m.y(mx) - self.y
-            if not reach.air_takes(ahead, dy, self.top(m), m.half):
+            if not reach.air_takes(ahead, dy, self.top(m), m.half, model="widening"):
                 continue
             if best is None or abs(ahead) < best[0]:
                 best = (abs(ahead), m)
         return None if best is None else best[1]
+
+    def air_search(self, facing: str, key_ms: int) -> SimMonster | None:
+        """The live monster an attack starting with her in the air picks on her `facing` side (AIR_PICK 'search'): the
+        star's search from her feet now (search_pick), no claw, no area, as reach.AIR_MODEL has it. With the noise
+        (Noise.air_short, air_under), a monster on the platform she last stood on that the search doesn't pick, in front
+        of her and nearer than its pick, takes the star with that chance (drawn per attack and monster, the nearest
+        first): its body short of the first band (point-blank), or in a band's reach sideways but under its window."""
+        pick = self.search_pick(facing)
+        qs, qu = self.noise.air_short, self.noise.air_under
+        if not (qs or qu):
+            return pick
+        t, d = self.t, directions.sign(facing)
+        limit = math.inf if pick is None else (pick.at(t) - self.x) * d
+        near = []
+        for m in self.monsters:
+            if not m.alive or m is pick or m.platform.id != self.last_plat.id:
+                continue
+            mx = m.at(t)
+            ahead = (mx - self.x) * d
+            lo, hi, bottom, top = reach.body_box(ahead, m.y(mx) - self.y, self.top(m), m.half)
+            if hi <= 0 or ahead >= limit or reach.search_band(lo, hi, bottom, top) is not None:
+                continue
+            near.append((ahead, m, qs if hi <= reach.SEARCH_START else qu))
+        for _, m, q in sorted(near, key=lambda c: c[0]):
+            if q and self.chance(f"air_near:{m.idx}", key_ms) < q:
+                return m
+        return pick
+
+    def _uncast(self) -> None:
+        """A Lucky Seven key that swiped with the claw (on the ground, a monster in the stance's box): its cast's MP and
+        stars, taken at its key (_cast), given back, as the game takes none (Her.claw). Her pet's drink at that cast, if
+        any, stays drunk."""
+        her = self.character
+        if her.mp > 0 and self._mp_unshown and self.casts > 0:
+            ms, d = self._mp_unshown.pop()
+            self.mp = min(1.0, self.mp + her.cast_mp / her.mp)
+            self.casts -= 1
+            self.mp_used -= her.cast_mp
+            if abs(d + her.cast_mp / her.mp) > 1e-9:  # (the pet's drink with it: shown as it would have been)
+                self._mp_unshown.append((ms, d + her.cast_mp / her.mp))
+        if self.darts_left is not None:
+            self.darts_left += SKILL_STARS
+        self.swiped_casts += 1
 
     def swiped(self, facing: str, stance: str) -> SimMonster | None:
         """The live monster the claw's `stance` swipes on her `facing` side: the nearest her (by distance,
@@ -1869,6 +1993,7 @@ class World:
             facing = self._air_turn[1] or facing
             self.note(f"turned {self.facing} at the step of the attack's key: it goes {facing}")
         due = [way for when, way in self.meant if when <= self.attack_key_at + 1e-6]
+        meant = due[-1] if due else facing  # (the way the stack threw it: pick_log's nearest is that way)
         if due:  # (the latest meant by then: one whose key the game didn't take is passed over)
             self.meant = [(when, way) for when, way in self.meant if when > self.attack_key_at + 1e-6]
             self.attacks_meant += 1
@@ -1876,14 +2001,19 @@ class World:
                 self.wrong_way += 1
                 self.note(f"attack meant {due[-1]} goes {facing}")
         starless = not skill and self.darts_left is not None and self.darts_left < 1  # (Realism.darts: none left)
-        if self.mode == "ground" or (AIR_PICK == "v83" and self.mode == "air"):
+        air_pick = self.realism.air_pick or AIR_PICK
+        if self.mode == "ground" or (air_pick == "v83" and self.mode == "air"):
             stances = reach.CLAW.stances
             target = self.swiped(facing, stances[int(self.chance("stance") * len(stances))])
             swipe = target is not None
+            if swipe and skill and self.mode == "ground":
+                self._uncast()  # the Lucky Seven key swipes up close as the attack key does: no cast (Her.claw)
+                skill = False
             if target is None and not starless:
                 target = self.search_pick(facing)
         else:
-            target = (self.air_pick(facing) if AIR_PICK == "widening"
+            target = (self.air_search(facing, key_ms) if air_pick == "search"
+                      else self.air_pick(facing) if air_pick == "widening"
                       else self.nearest_in(facing, reach.STAR_RANGE, reach.AREA_DOWN, reach.AREA_UP))
             swipe = False
             if target is not None and target.kind == "snail" and self.noise.air_snail:
@@ -1902,8 +2032,13 @@ class World:
         rise = self.last_plat.y_at(self.last_plat.clamp(self.x)) - self.y  # her height above where she last stood
         picked = target if stop is None else stop[0]
         up = None if picked is None else self.y - picked.y(picked.at(self.t))  # its feet above hers, + above
+        near = self._nearest_ahead(meant)
+        turned = self.mode == "air" and self.air_turn_ms >= self.lift_ms
+        pick = (turned, key_ms - self.lift_ms if self.mode == "air" else None,
+                None if near is None else round(near[0], 1), None if near is None else round(near[1], 1),
+                near is not None and near[2] is picked, skill)
         how = (key_ms / 1000, tag.rsplit("_", 1)[0], self.mode, round(rise, 1),
-               None if picked is None else picked.kind, None if up is None else round(up, 1))
+               None if picked is None else picked.kind, None if up is None else round(up, 1), pick)
         damage = DAMAGE_SHOWS_MS if self.realism.damage_ms is None else self.realism.damage_ms
         self._push(key_ms + damage, "star", (facing, target, swipe, stop, skill, how, key_ms))
 
@@ -1965,17 +2100,31 @@ class World:
 
     def _logged(self, how: tuple | None, outcome: str) -> None:
         """An attack's outcome into attack_log (`how`: _aim's (key time, plan, ground or air, her rise, the kind picked,
-        how far above her feet it was))."""
+        how far above her feet it was, what pick_log keeps of it)), and pick_log."""
         if how is not None:
-            t, plan, mode, rise, kind, up = how
+            t, plan, mode, rise, kind, up, pick = how
             self.attack_log.append((round(t, 3), plan, mode, rise, kind, outcome, up))
+            self.pick_log.append((round(t, 3), plan, mode, *pick, outcome))
+
+    def _nearest_ahead(self, facing: str) -> tuple[float, float, "SimMonster"] | None:
+        """The nearest live monster on the platform she last stood on ahead of her (its middle in front of hers): how far
+        ahead, how much lower its feet are than the floor under her (+ lower), and it; None with none (pick_log)."""
+        t, d, p, best = self.t, directions.sign(facing), self.last_plat, None
+        floor = p.y_at(p.clamp(self.x))
+        for m in self.by_platform.get(p.id, ()):
+            if m.alive:
+                mx = m.at(t)
+                ahead = (mx - self.x) * d
+                if ahead >= 0 and (best is None or ahead < best[0]):
+                    best = (ahead, m.y(mx) - floor, m)
+        return best
 
     def _damage(self, stars: float, swipe: bool) -> float:
         """An attack's damage drawn (Her.spread), in average stars (STAR_MEAN): a claw swipe's (CLAW_DAMAGE), one star's
         (STAR_DAMAGE), or SKILL_STARS stars of `stars` / SKILL_STARS of one each; every star a whole number from its
         least to its most, as likely each, seeded by the tick."""
         her = self.character
-        lo, hi = CLAW_DAMAGE if swipe else (her.star or STAR_DAMAGE)
+        lo, hi = (her.claw or CLAW_DAMAGE) if swipe else (her.star or STAR_DAMAGE)
         n, each = (1, 1.0) if swipe or stars == 1.0 else (SKILL_STARS, stars / SKILL_STARS)
         if not swipe and stars != 1.0 and her.skill_star is not None:
             (lo, hi), each = her.skill_star, 1.0

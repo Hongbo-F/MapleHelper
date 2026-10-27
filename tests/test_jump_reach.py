@@ -163,19 +163,28 @@ def test_too_high_for_the_widest_window_and_the_jump_is_out_of_reach():
 
 def test_a_turning_jumps_attack_at_one_on_her_platform_starts_at_its_kinds_turn_key(monkeypatch):
     """reach.shots' jumps that turn her in the air ('up' turning, 'back') start at reach.turn_key_ms of the target's
-    kind: a pig (38 tall at least) at 105 ms, the latest that still picks it, its arrow 45 ms before; never sooner than
-    that for any kind. With 120 for every kind (from 2026-10-26 to the review of that day, TURN_KEY_MS), a pig on her
-    platform had no turning shot until her way down, 430 ms in."""
+    kind. By the star's search from her feet in the air (reach.AIR_MODEL 'search', from 2026-10-27) every kind's is
+    120 ms, and a pig on her level 40 or 100 off is picked by no turning jump in place until her way down (450 ms in
+    and later: her feet 55 up at 120 ms, the pig's top 17 under them); a jump back at one 150 off picks it at 120. By the
+    area ('widening'): a pig (38 tall at least) at 105 ms, the latest that still picks it, its arrow 45 ms before; never
+    sooner than that for any kind. With 120 for every kind (from 2026-10-26 to the review of that day, TURN_KEY_MS), a
+    pig on her platform had no turning shot until her way down, 430 ms in."""
     from gamelab.localization.monsters import MONSTER_TOP
     p = plat(LEDGE, 500, 200)
+    for dx in (40, 100):
+        turning = [s for s in reach.shots(LEDGE, p, 200.0, 500.0, [pig(200.0 + dx, 500.0, p.id)]) if s.turn]
+        assert all(s.key_ms >= 435 for s in turning), dx
+    assert any(s.kind == "back" and s.key_ms == 120 for s in reach.shots(LEDGE, p, 200.0, 500.0,
+                                                                         [pig(350.0, 500.0, p.id)]))
+    monkeypatch.setattr(reach, "AIR_MODEL", "widening")
     for dx in (40, 100):
         target = pig(200.0 + dx, 500.0, p.id)
         turning = [s for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn]
         assert turning and min(s.key_ms for s in turning) == reach.turn_key_ms(MONSTER_TOP["pig"]) == 105, dx
         assert all(s.key_ms >= 105 for s in turning)
-        monkeypatch.setattr(reach, "turn_key_ms", lambda top: 120)
-        assert min(s.key_ms for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn) > 400, dx
-        monkeypatch.undo()
+        with monkeypatch.context() as mp:
+            mp.setattr(reach, "turn_key_ms", lambda top: 120)
+            assert min(s.key_ms for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn) > 400, dx
 
 
 def test_a_jump_forward_reaches_one_past_a_gap():
@@ -351,8 +360,8 @@ def test_the_stance_never_jumps_up_into_a_monster_overhead(dx):
     m = pig(400 + dx, 400, up.id)
     c = cover(LEDGE, floor, 400, [m])
     ups = [s for s in c.of(m) if s.kind == "up"]
-    if dx >= 30:
-        assert ups  # (right overhead, at 0, the search's bands from her feet don't have it)
+    if dx >= 50:
+        assert ups  # (right overhead, at 0 or 30, its far side short of the search's first band from her feet then)
     assert all(stance_mod._arc_meets(400, 500, floor, s, [m], None) for s in ups)
     act = stance_mod.stance(400, 500, floor, [m], facing=RIGHT, jumps=lambda: c)
     plan = stance_mod.plan_of(act)

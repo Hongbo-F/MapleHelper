@@ -108,8 +108,8 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
-from .world import (DROP_LIFE, HER_BOX_CLIENT, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, Camp,
-                    Noise, Realism)
+from .world import (DROP_LIFE, HER_BOX_CLIENT, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, TREE_AIR,
+                    Camp, Noise, Realism)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -163,7 +163,10 @@ TREE_CAMPS = (Camp(28, 250.0, (29, 30), (GREEN,)), Camp(21, 90.0, (21, 22), (GRE
 # roaming rival, and respawns at MeowDB's mean, 8.8 s ("crowd"), at 17 s ("crowd-17": the live median on 23 after her
 # last kill there, 1.7-57 s, telemetry of 2026-10-24: README, Positioning), or 30 s ("crowd-slow": the first map's slow
 # refill, README: Respawns and drop life). Only on that map (PRESET_MAPS).
-_CROWD_NOISE = dataclasses.replace(_GAME_NOISE, dot_under=56.0)
+# From 2026-10-27, with the air pick's noise as fitted to the live jump throws there (world.TREE_AIR: a point-blank
+# target or one under its window taking the star 30% of the time, an air turn lost 26%), the world picking from a jump by
+# the star's search (world.AIR_PICK 'search'), so that its jump throws hit and miss where live ones did.
+_CROWD_NOISE = dataclasses.replace(_GAME_NOISE, dot_under=56.0, **TREE_AIR)
 PRESETS["crowd"] = (_CROWD_NOISE, Realism(respawn=8.8, camps=TREE_CAMPS, potions=60, lock_arrows=True))
 PRESETS["crowd-17"] = (_CROWD_NOISE, Realism(respawn=17.0, camps=TREE_CAMPS, potions=60, lock_arrows=True))
 PRESETS["crowd-slow"] = (_CROWD_NOISE, Realism(respawn=30.0, camps=TREE_CAMPS, potions=60, lock_arrows=True))
@@ -547,8 +550,43 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         # (a rope's top: the game refusing her presses, a move her dot never moved on, her climb on after a touch)
         "rope_top": {k: sum(1 for r in events if r.get("kind") == k) for k in ("refused", "rope_top", "climb_on")},
         "refused": getattr(world, "refused", 0),  # her attacks refused on a rope (world.ROPE_REFUSAL)
+        # (up close: from 2026-10-27, clearance and slopes)
+        "claw_s": round(getattr(world, "claw_ms", 0) / 1000, 1),
+        "close_s": round(getattr(world, "close_ms", 0) / 1000, 1),
+        "swiped_casts": getattr(world, "swiped_casts", 0),
+        "air_turns_lost": getattr(world, "air_turns_lost", 0),
+        "picks": picks(world),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
+
+
+PICK_BINS = ((0.0, 40.0), (40.0, 60.0), (60.0, 130.0), (130.0, float("inf")))  # (picks) how far ahead, middle to middle
+
+
+def picks(world) -> dict:
+    """Her attacks by how far ahead the nearest monster on her platform in front of her was when each started, and what
+    each did to it (world.World.pick_log): by kind ('ground'; from a jump 'straight' or 'turned', the latter an arrow
+    toward her back acted on in the air before it; a jump back's 'back') and how far ahead (PICK_BINS, 'none' with
+    nothing in front), [attacks, those that hurt that nearest monster (a hit, a swipe or a kill of it), those that hurt
+    any, those that were Lucky Seven casts (not the claw's swipe)]; and from a jump 'straight' 40-130 ahead by the slope:
+    its feet over 5 lower than the floor under her ('down'), over 5 higher ('up'), else 'level'."""
+    out: dict = {}
+    for t, plan, mode, turned, gap_ms, ahead, drop, nearest, cast, outcome in getattr(world, "pick_log", []):
+        kind = ("ground" if mode == "ground" else "back" if plan == "jump_back"
+                else "turned" if turned else "straight")
+        if ahead is None:
+            where = "none"
+        else:
+            where = next(f"{lo:.0f}-{hi:.0f}" for lo, hi in PICK_BINS if lo <= ahead < hi)
+        hurt, any_hit = nearest and outcome in ("hit", "kill", "swipe"), outcome in ("hit", "kill", "swipe")
+        for key in ((kind, where),) + (((kind, "slope " + ("down" if drop > 5 else "up" if drop < -5 else "level")),)
+                                         if kind == "straight" and ahead is not None and 40 <= ahead < 130 else ()):
+            c = out.setdefault(key[0], {}).setdefault(key[1], [0, 0, 0, 0])
+            c[0] += 1
+            c[1] += hurt
+            c[2] += any_hit
+            c[3] += bool(cast)
+    return out
 
 
 DEAD_BEFORE_S = 2.5  # (_at_dead) an attack decided this soon after a death where its target was seen ...
