@@ -359,6 +359,42 @@ def test_her_health_check_reads_the_bar_at_3_presses_and_gets_her_off_the_rope_i
     assert h.offs == [] and h.logged == [] and h.darts.shown == READ_FIRST and h.darts.chat_read == READ_FIRST
 
 
+def test_the_regular_attack_s_presses_at_a_rope_s_top_have_the_bar_read_and_get_her_off_the_rope():
+    """From 2026-10-27: the simulator's tour_tree_run (the scenarios throw the regular attack) hung 31.9 s on the rope at
+    x 146 under 30, placed on 30 at its top, 37 presses refused and none heard (DartWatch watched Lucky Seven's alone).
+    Her regular presses keyed with her look placed at a rope's top (DartWatch.at_top), 3 in a row with no kill, have the
+    bar read; elsewhere, or after a kill, they start again; none of out of darts' presses."""
+    h = _hunter(ChatLine(ROPE, np.ones((24, 540), bool), 5.0))
+    s = SimpleNamespace(t=4.0, hp=1.0, where=None)
+    h.darts.at_top = True
+    for k in range(READ_FIRST - 1):
+        h.darts.regular(0.9 * (k + 1))
+    h.health_check(s)
+    assert h.offs == [] and h.darts.top_presses == READ_FIRST - 1
+    h.darts.kill(2.0)  # (a kill of hers: they did something)
+    for k in range(READ_FIRST):
+        h.darts.regular(2.0 + 0.9 * (k + 1))
+    assert h.darts.keys == [] and h.darts.shown == 0  # (no press of the stretch: out of darts never counts them)
+    h.health_check(s)
+    assert h.offs == [(s, False)] and h.darts.top_presses == 0
+    assert h.logged == [f"  the game refused her presses: \"{ROPE}\" (3 in a row at a rope's top, the regular attack's or the claw's)"]
+    # The claw's swipes there (no press of out of darts' either: DartWatch.cast's `swipe`) are watched so too: with them
+    # left out, loop_tree_rope_top_15 hung 14.8 s at the rope at x 111's top, its presses at a Green Mushroom 73 off.
+    h = _hunter(ChatLine(ROPE, np.ones((24, 540), bool), 5.0))
+    h.darts.at_top = True
+    for k in range(READ_FIRST):
+        h.darts.cast(0.9 * (k + 1), swipe=True)
+    h.health_check(s)
+    assert h.offs == [(s, False)] and h.darts.keys == [] and h.darts.swiped_presses == READ_FIRST
+    # Keyed away from a rope's top: they start again, and no read.
+    h = _hunter(ChatLine(ROPE, np.ones((24, 540), bool), 5.0))
+    for k in range(2 * READ_FIRST):
+        h.darts.at_top = k % 2 == 0
+        h.darts.regular(0.9 * (k + 1))
+    h.health_check(s)
+    assert h.offs == [] and h.logged == [] and h.darts.top_presses == 0
+
+
 def test_her_dot_where_it_was_at_the_refusal_has_her_got_off_again_down_the_rope_the_second_time():
     """The review's: the one try up didn't free her (her dot where it was at the refusal, the line still up the same
     px): the stretch starts again and she's got off again, down the rope (Mover.off_rope's `down`), then up again. Her

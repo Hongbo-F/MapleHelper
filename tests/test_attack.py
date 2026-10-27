@@ -371,7 +371,7 @@ def test_with_the_attack_keyed_late_a_cornered_snail_is_shot_from_the_ground(mon
     act = stance(500, 500, PLAT, [target(560, kind="snail")])
     assert act == ("back", LEFT, 45) and 560 - (500 - act[2]) >= reach.star_sure(monsters.MONSTER_HALF["snail"])
     assert stance(500 - act[2], 500, PLAT, [target(560, kind="snail")]) == ("throw", RIGHT)
-    pace = stance_mod.Pace(0.3, lambda m: None, {"snail": monsters.MONSTER_SPEED["snail"]})
+    pace = stance_mod.Pace(0.3, lambda m: -monsters.MONSTER_SPEED["snail"], {"snail": monsters.MONSTER_SPEED["snail"]})
     walked = stance(500, 500, PLAT, [target(560, kind="snail")], pace=pace)
     assert walked[:2] == ("back", LEFT) and walked[2] > act[2]
     # Another monster behind her: no step back either.

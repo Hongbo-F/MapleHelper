@@ -259,11 +259,14 @@ def test_her_casts_and_her_bar_reach_the_watch_through_her_attack_choice():
     from gamelab.behavior.attacks import Attacks
     a = object.__new__(Attacks)
     a.darts, a._cast, a.mp, a._casts, a._read, a._warned = DartWatch(), 0.02, 0.5, [], None, False
-    a.counts, a._keyed = Counter(), None  # (no throw at a target chosen: Attacks.on_throw's pending time)
+    a.counts, a._keyed, a._swipe = Counter(), None, False  # (no throw at a target chosen: on_throw's pending time)
     a.on_throw(1.0, "left")
     assert a.darts.keys == [1.0]
     a.on_throw(2.0, "left")  # the regular attack (no cast chosen): not a press of Lucky Seven
     assert a.darts.keys == [1.0]
+    a._cast, a._swipe = 0.02, True  # from the ground at a monster the claw reaches: no MP whatever her darts
+    a.on_throw(2.5, "left")
+    assert a.darts.keys == [1.0] and a.darts.swiped_presses == 1
     a.glance(3.0, 0.4)
     assert a.darts.read_at == 3.0 and a.darts.top == round(0.4 * MP_STEPS)
 
@@ -310,3 +313,23 @@ def test_a_hunting_command_stopped_by_it_exits_with_its_own_code(monkeypatch, ca
     assert cli.main(["tour", "--loop"]) == EXIT
     out = capsys.readouterr().out
     assert out.startswith("OUT OF DARTS: 32 Lucky Seven presses over 28 s") and "Give her throwing stars" in out
+
+
+def test_a_press_from_the_ground_at_a_monster_the_claw_reaches_is_no_press_for_out_of_darts():
+    # Up close the Lucky Seven key swipes as the attack key does (no MP whatever her darts): the attack choice tells
+    # the watch so (Attacks._clawed, from where she stood in the last look; Actions.keyed_ground), and a Horny Mushroom
+    # pinning her at a wall's end (21 swipes from whole) no longer stops the hunt with her stars in her bag.
+    from gamelab.behavior.attacks import Attacks
+    from gamelab.localization.monsters import Monster
+    from gamelab.perception.mobs import Mob
+    a = object.__new__(Attacks)
+    a._last = SimpleNamespace(where=SimpleNamespace(x=500.0, y=500.0))
+    on_her, far = (Monster(Mob("horny-mushroom", 0, 0, 30, 30, 0.9), x, 500.0, 0) for x in (530.0, 700.0))
+    a.from_ground = lambda: True
+    assert a._clawed(on_her) and not a._clawed(far)
+    a.from_ground = lambda: False  # a jump throw's: its star is a cast's, MP and all
+    assert not a._clawed(on_her)
+    watch = DartWatch()
+    for i in range(PRESSES + 5):
+        watch.cast(float(i), swipe=True)
+    assert watch.keys == [] and watch.swiped_presses == PRESSES + 5 and "the claw reaches: not counted" in watch.summary()

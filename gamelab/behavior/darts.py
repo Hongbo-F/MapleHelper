@@ -17,10 +17,10 @@ never more (D:/MapleHelper-scratch/norest/darts/count.py). Two of those runs are
 recordings kept (lab/lie_detector/20261026-002509/before, 00:23:19-28, and 20261026-010145/before, 00:58:19-26): a Green
 Mushroom (and a Snail) standing on her at platform 24's right end, which the looks didn't find, and every press a swipe
 of her claw at it, 18-24 damage or MISS over it, her MP 172-175/623 on the HUD unchanged for 10 s, the green dead after
-9 presses on it. So up close the Lucky Seven key swipes as the attack key does, and takes no MP (sim.world still has it
-cast there). Of the 14, 9 ended in such a kill (7 greens, 233 HP: 8-9 presses; 2 Horny Mushrooms, wounded before), the
-others in her casts taking MP again (the monster gone, or she stepped away) or her MP read under her pet's warning. A
-Horny Mushroom standing on her whole would take longer: 403 HP, defence 10.
+9 presses on it. So up close the Lucky Seven key swipes as the attack key does, and takes no MP (sim.world has it so too
+from 2026-10-27: World._uncast). Of the 14, 9 ended in such a kill (7 greens, 233 HP: 8-9 presses; 2 Horny Mushrooms,
+wounded before), the others in her casts taking MP again (the monster gone, or she stepped away) or her MP read under
+her pet's warning. A Horny Mushroom standing on her whole would take longer: 403 HP, defence 10.
 
 So a stretch: her Lucky Seven presses (Attacks.on_throw's keys) since her bar last showed a cast's MP (FALL_STEPS under
 its highest read since), a drink of her pet's (DRINK_STEPS over it), a read too low to tell by (LOW_STEPS) or a kill of
@@ -39,11 +39,11 @@ live (the two the stretches had were wounded). On a map whose toughest monster t
 Mushroom, PRESSES that many times more (West Rocky Mountain II's Axe Stump: 22). Out of darts in the simulator
 (loop_tree_out_of_darts) it stops 18.7 s after her last star (on seeds 2 and 3, 19 and 27 s).
 
-Not watched: the regular attack's presses (`--attack regular`, and `probe run`, which throws the regular attack
-always): they take no MP with her darts too, so nothing tells. With the attack choice its regular presses (to finish a
-monster whose bar or her throws make low, or her MP under a cast) aren't counted: a stretch stands still while she
-throws them. And a read under LOW_STEPS starts it again at every look: out of darts with her MP that low and her pet's
-MP potions gone too, it waits for her regen to pass LOW_STEPS (a step every 18 s or so: up to 90 s).
+Not watched: the regular attack's presses (`--attack regular`, and `probe run`, which throws the regular attack always):
+they take no MP with her darts too, so nothing tells (but at a rope's top, below). With the attack choice its regular
+presses (to finish a monster whose bar or her throws make low, or her MP under a cast) aren't counted: a stretch stands
+still while she throws them. And a read under LOW_STEPS starts it again at every look: out of darts with her MP that low
+and her pet's MP potions gone too, it waits for her regen to pass LOW_STEPS (a step every 18 s or so: up to 90 s).
 
 The game's own word, if it has one: a stretch READ_EVERY presses long (and each as many more) has the pickup log read
 (Eyes.messages: OCR of where the game says what she got, and that her inventory is full), and if it says she has no
@@ -70,7 +70,26 @@ down the rope every second time (a hang at the same rope's top at 21:48:50, befo
 in 38 s). "You don't have enough MP to use this skill." (36 reads on 10-25 at 00:53) is a refusal too; no other line
 is (the game's line for no stars isn't known, and may say "cannot be used"), and a line that says she has no stars
 (says_no_darts) has the stop come at READ_EVERY presses, as the pickup log's does. And no press keyed while her look
-has her on a rope counts (`roped`). The stop's line has the bar's text."""
+has her on a rope counts (`roped`). The stop's line has the bar's text.
+
+The presses out of darts doesn't count (the regular attack's, and the claw's swipes: below) keyed with her look placed
+at a rope's top (within ROPE_TOP_X of the top of a rope hanging from her platform: control.navigator.rope_at_top,
+`at_top`), READ_FIRST in a row with no kill of hers and each CHAT_EVERY more (`regular`, `top_presses`), have the message
+bar read too, and the rope's refusal on it has the hunter get her off the rope as for her Lucky Seven presses: nothing
+else is watched of them. From 2026-10-27, when the simulator's tour_tree_run (the scenarios throw the regular attack)
+hung 31.9 s on the rope at x 146 under platform 30 after a touch cut her climb, placed on 30 at x 146, 37 of its presses
+refused and none heard, and loop_tree_grind 86 s on the rope at x -8 (the reviews': 84 refused); and with the swipes
+left out of the stretch, loop_tree_rope_top_15 hung 14.8 s at the top of the rope at x 111 (31 presses at a Green
+Mushroom 73 off, the claw's reach from where she was placed), where 3.5 s with them in. Whether the game says so for the
+regular attack too, as the simulator does (sim.world.ROPE_REFUSAL), isn't known: the refusals of 2026-10-26 were Lucky
+Seven's.
+
+Nor, from 2026-10-27, a press from the ground at a monster within the claw's reach of where she stood in the last look
+(behavior.attacks.Attacks._clawed, reach.claw_chance: `swipe`): the Lucky Seven key swipes it as the attack key does,
+no MP taken whatever her darts. Up close the stance claws one on her (attack.stance.CLAW_ONLY), and a whole Horny
+Mushroom pinning her at a platform's wall end (Tree Dungeon's 6, 7, 13, 15, 19, 20 and 31, where a touch's knock doesn't
+move her off: its 403 HP 21.1 swipes, `swipes`) would have stopped the hunt with her darts in her bag (review of
+2026-10-27: the branch clawed one standing on her in 222 of Tree Dungeon's stand placements, master in 18)."""
 
 import math
 from dataclasses import dataclass, field
@@ -184,17 +203,37 @@ class DartWatch:
     refused_presses: int = 0
     roped: bool = False             # her latest look has her on a rope: presses keyed now don't count
     roped_presses: int = 0
+    swiped_presses: int = 0         # presses from the ground at a monster within the claw's reach (not counted)
+    at_top: bool = False            # her latest look has her placed at a rope's top (control.navigator.rope_at_top) ...
+    top_presses: int = 0            # ... the presses not counted keyed so in a row, no kill since (`regular`, swipes) ...
+    top_read: int = 0               # ... and as many when the message bar was last read for them (`asks_chat`)
 
-    def cast(self, t: float) -> None:
-        """A Lucky Seven press, its key at `t` (not counted while she's on a rope, `roped`: the game refuses it)."""
+    def cast(self, t: float, swipe: bool = False) -> None:
+        """A Lucky Seven press, its key at `t` (not counted while she's on a rope, `roped`: the game refuses it; nor one
+        from the ground at a monster within the claw's reach, `swipe`: the claw swipes it, no MP taken whatever her
+        darts)."""
         if self.roped:
             self.roped_presses += 1
             return
+        if swipe:
+            self.swiped_presses += 1
+            self.regular(t)  # (watched at a rope's top all the same: the game refuses those there too)
+            return
         self.keys.append(t)
+
+    def regular(self, t: float) -> None:
+        """A press none of the stretch's (the regular attack's, or the claw's swipe: `cast`), its key at `t`: keyed with
+        her look placed at a rope's top (`at_top`), one more of `top_presses`, which have the message bar read as a
+        stretch does (`asks_chat`), the rope's refusal on it getting her off; keyed elsewhere, they start again."""
+        if self.at_top:
+            self.top_presses += 1
+        else:
+            self.top_presses = self.top_read = 0
 
     def kill(self, t: float) -> None:
         """A kill of hers (her EXP told of it) at `t`: her presses before it did something."""
         self._restart(t)
+        self.top_presses = self.top_read = 0
 
     def see(self, t: float, share: float | None) -> None:
         """Her MP bar's `share` off a frame shown at `t` (None: not read)."""
@@ -232,10 +271,12 @@ class DartWatch:
 
     def asks_chat(self) -> bool:
         """Whether the message bar is to be read now (`hear_chat` what it says): a stretch READ_FIRST presses long, each
-        CHAT_EVERY more, and the stop's (`presses`), until the stop."""
-        n = self.shown
-        return not self.fired and n >= READ_FIRST and (n >= self.chat_read + CHAT_EVERY
-                                                       or n >= self.presses > self.chat_read)
+        CHAT_EVERY more, and the stop's (`presses`), until the stop; or as many of the presses it doesn't count keyed at
+        a rope's top (`top_presses`: the regular attack's, the claw's swipes)."""
+        n, m = self.shown, self.top_presses
+        return not self.fired and ((n >= READ_FIRST and (n >= self.chat_read + CHAT_EVERY
+                                                         or n >= self.presses > self.chat_read))
+                                   or (m >= READ_FIRST and m >= self.top_read + CHAT_EVERY))
 
     def hear_chat(self, line: ChatLine, t: float, still: bool = False) -> str | None:
         """The message bar as read at `t` (`asks_chat`): a refusal of the game's on it (perception.messages.refusal),
@@ -245,7 +286,7 @@ class DartWatch:
         that says she has no stars (perception.loot.says_no_darts, as the pickup log's: the game's own word for it
         isn't known) has the stop due as the log's does (`told`: at READ_EVERY presses). Returns why ('rope': she's on
         a rope or a ladder; 'refused': too little MP; 'darts': the game says she has no stars), or None."""
-        self.chat_read, self.bar = self.shown, line
+        self.chat_read, self.top_read, self.bar = self.shown, self.top_presses, line
         why = line.refusal
         if why is None:
             self.other = self.other or self.refusal is not None and not line.same(self.refusal)
@@ -257,8 +298,9 @@ class DartWatch:
             return None
         self.refusal, self.other = line, False
         self.refused += 1
-        self.refused_presses += self.shown
+        self.refused_presses += self.shown + self.top_presses
         self._restart(t)
+        self.top_presses = self.top_read = 0
         return why
 
     def due(self, now: float = 0.0) -> OutOfDarts | None:
@@ -279,6 +321,9 @@ class DartWatch:
             said += ("; " if said else "her Lucky Seven presses: ") + (
                 f"{self.refused} stretches ({self.refused_presses} presses) the game refused, "
                 f"{self.roped_presses} pressed on a rope: not counted")
+        if self.swiped_presses:
+            said += ("; " if said else "her Lucky Seven presses: ") + (
+                f"{self.swiped_presses} from the ground at a monster the claw reaches: not counted")
         return said
 
     def _restart(self, after: float) -> None:

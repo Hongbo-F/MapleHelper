@@ -63,7 +63,7 @@ from dataclasses import dataclass, field
 from maplehelper.engine import RIGHT
 
 from .. import telemetry
-from ..attack import choice
+from ..attack import choice, reach
 from ..attack.choice import Attack, Left
 from ..localization.mapdata import MapModel
 from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, bodies, seen_again
@@ -193,6 +193,11 @@ class Attacks:
         self.unseen: Callable[[Scene], list[Monster]] | None = None
         # Out of darts' watch (behavior.darts.DartWatch: the Hunter's), told of her MP bar's every read and every cast
         self.darts = None
+        # Whether the throw whose key is being chosen is one from the ground (the Hunter's: Actions.keyed_ground), and
+        # whether the cast `key` just chose is at a monster the claw reaches from there (`_swipe`: no MP whatever her
+        # darts, so out of darts doesn't count it: DartWatch.cast)
+        self.from_ground: Callable[[], bool] | None = None
+        self._swipe = False
 
     # --- after every look ------------------------------------------------------------------------
 
@@ -290,6 +295,7 @@ class Attacks:
         what = None if target is None else float("inf") if left is None else left if DEAD_CHOICE else alive
         attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
+        self._swipe = self._cast is not None and target is not None and self._clawed(target)
         self._keyed = None
         if target is not None and target.kind in self.stats and not self._dying(target, now, seen):
             mk = self._mark_of(target)
@@ -317,13 +323,15 @@ class Attacks:
                 mk.last = at
                 self._shows = at + (KILL_SHOWN_S or 0.0)
         if self._cast is None:
+            if self.darts is not None:
+                self.darts.regular(at)  # (the regular attack's: watched at a rope's top only, DartWatch.regular)
             return
         if self.mp is not None:
             self.mp = max(0.0, self.mp - self._cast)
         self._casts.append((at, self._cast))
         self._cast = None
         if self.darts is not None:
-            self.darts.cast(at)
+            self.darts.cast(at, swipe=self._swipe)
 
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look (and those
@@ -345,6 +353,18 @@ class Attacks:
             if recent:  # (as the path: one not likely dead first, the likeliest if all are)
                 return max(alive or recent, key=lambda mk: mk.thrown).m
         return None
+
+    def _clawed(self, m: Monster) -> bool:
+        """Whether the throw whose key is being chosen is one from the ground (`from_ground`) at monster `m` within the
+        claw's reach of where she stood in the last look (reach.claw_chance, by its kind's body): the Lucky Seven key
+        swipes it as the attack key does, taking no MP whatever her darts (behavior.darts: a swipe says nothing of
+        them). Live a Lucky Seven press from the ground at one 20-90 ahead on her platform took MP 54 times in 200."""
+        s = self._last
+        if self.from_ground is None or not self.from_ground() or s is None or s.where is None:
+            return False
+        ahead = abs(m.x - s.where.x)
+        top, half = reach.body_of(m.kind)  # (as ledger.in_path, the throw's path)
+        return reach.claw_chance(ahead, m.y - s.where.y, top, half) > 0
 
     def in_way(self, side: str, kinds: set) -> str | None:
         """The kind of a monster a throw that way would take (`aimed`, its target, its path in the last look) that

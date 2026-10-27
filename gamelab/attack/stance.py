@@ -195,12 +195,24 @@ CLAW_ONLY = 15.0     # units, middle to middle: nearer than this (on her), with 
                      # service's tracks at the pick her casts in place killed one 0-10 ahead 1 time in 31 (3%), 10-20 2
                      # in 25, 20-30 5 in 32 (16%), 30-40 16 in 43 (37%, as at 40-130): a cast 20-30 ahead does about
                      # twice a swipe's damage on average, 0-10 about as much for its 14 MP. In the harness (Tree, crowd,
-                     # 8 seeds of 5 minutes) 30 made 361.1 EXP a minute on the hunt loop where 15 made 370.6, 358.3
-                     # grinding where 347.8: the same within the seeds' noise
+                     # 8 seeds of 5 minutes, the world as first fitted) 30 made 361.1 EXP a minute on the hunt loop
+                     # where 15 made 370.6, 358.3 grinding where 347.8: the same within the seeds' noise
 STEP_SETTLE_S = 0.25  # s after a step's walk before her next keys: the slide (STOP_RUN) and the look after it
-WALK_AT = True       # a monster whose walk nothing tells (no track, or one seen too briefly) walks at her, at its
-                     # kind's speed (Pace.speeds: the game data's, 100 units/s for the mushrooms; live a median 95): the
-                     # worst case
+# A monster walking at her stops where its body meets hers (its half and HER_HALF from her x), on the side of her it was
+# seen on: it touches her there, and the touch's knock (about 58 units) leaves it on that side. Until the reviews of
+# 2026-10-27 it walked on through her, and right after a throw (her lock still 0.7-0.8 s) a walker within about 85 in
+# front had her tap round and throw at her empty back (86 such throws in its Tree goldens, none in master's). Replayed
+# on the 839 live close-up decisions whose target's track at the pick is known (D:/MapleHelper-scratch/clear/fin/live/
+# pace_stop.py, walks matched to the service's tracks record nearest the look as pace_of does), the 217 walking at her
+# that reach her by the pick were a median 49 from her middle then, 207 on the side the look saw them: stopped so, 19.8
+# off on average (walked through her 32.6, stopped at her x 29.5, where they were seen 27.1; all 839: 15.5, 18.8, 18.0,
+# 20.1). False: as before.
+PACE_STOP = True
+# A monster whose walk nothing tells (no track, or one seen too briefly) stays where it was seen; True walks it at her at
+# its kind's speed (Pace.speeds: the game data's, 100 units/s for the mushrooms; live a median 95), the worst case, as
+# until the reviews of 2026-10-27: of the same decisions those 46 were 20.8 off on average where they were seen, 42.8
+# walked at her, 28.2 walked at her and stopped where they meet her (fin/live/walk_at.py).
+WALK_AT = False
 TRACK_MATCH = 25.0   # units: a look's monster is its track's (Scene.tracks) within this of the track's x, its kind and
                      # platform the same (behavior.fight.pace_of)
 TRACK_SEEN = 3       # ... and that track's speed counts once it was seen in this many frames (its speed is filtered)
@@ -211,15 +223,18 @@ class Pace:
     """How soon her next attack picks its target, and how the monsters walk meanwhile (clearance kept ahead of time):
     `lead`, s from the look's frame to when her next keys can go (what's left of her attack lock, and the look's age);
     `walk`, a monster's speed along its platform (units/s, + right) as its track has it, or None where nothing tells
-    (WALK_AT: it walks at her, at `speeds` of its kind, DEFAULT_SPEED for one it lacks). Without `walk` the monsters
-    stay where they were seen, as before."""
+    (it stays where it was seen; with WALK_AT it walks at her, at `speeds` of its kind, DEFAULT_SPEED for one it
+    lacks); `halves`, half each kind's width (where one walking at her meets her: PACE_STOP). Without `walk` the
+    monsters stay where they were seen, as before."""
     lead: float = 0.0
     walk: Callable[[Monster], float | None] | None = None
     speeds: dict[str, float] | None = None
+    halves: dict[str, float] | None = None
 
     def at(self, m: Monster, x: float, t: float, platform: Platform | None = None) -> float:
         """Where monster `m` will be (map x) `t` s after the look, her at map x `x`: as its walk has it, within
-        `platform`'s ends if it's on it."""
+        `platform`'s ends if it's on it; one walking at her stops where its body meets hers (PACE_STOP), on the side
+        of her it was seen on."""
         if self.walk is None:
             return m.x
         v = self.walk(m)
@@ -228,9 +243,18 @@ class Pace:
                 return m.x
             v = (self.speeds or {}).get(m.kind, DEFAULT_SPEED) * (1.0 if m.x < x else -1.0)
         px = m.x + v * t
+        if PACE_STOP and v and (m.x - x) * v < 0:  # walking at her: no nearer than where it meets her, if not yet
+            s = 1.0 if m.x > x else -1.0
+            px = x + s * max((px - x) * s, min((m.x - x) * s, half_of(m.kind, self.halves) + HER_HALF))
         if platform is not None and m.platform == platform.id:
             px = min(max(px, platform.left), platform.right)
         return px
+
+    def meets(self, m: Monster, x: float, t: float, platform: Platform | None = None, half: float | None = None) -> bool:
+        """Whether monster `m`'s body (`half` its width either side; by default its kind's, `halves`) meets hers at map
+        x `x` `t` s after the look (where `at` has it): a touch, unless she's still invulnerable from the last."""
+        half = half_of(m.kind, self.halves) if half is None else half
+        return abs(self.at(m, x, t, platform) - x) <= half + HER_HALF + 1e-6
 
 
 NO_PACE = Pace()
@@ -753,12 +777,16 @@ def _clear_step(x: float, y: float, m: Monster, away: str, room: float, top: flo
             return None
         done = pace.lead + physics.hold_ms(step) / 1000 + STEP_SETTLE_S
         star_t = done + TAP_S + GROUND_PICK_S
-        if (gx - pace.at(m, x, star_t, platform)) * d >= reach.star_sure(half):
+        if pace.meets(m, gx, star_t, platform, half):
+            continue  # (on her there when her throw starts: a touch, no clearance)
+        if (gx - pace.at(m, gx, star_t, platform)) * d >= reach.star_sure(half):
             return step
         if can_jump is not None and not can_jump(gx, gx):
             continue
         jump_t = done + physics.JUMP_THROW_TURN_MS / 1000 + jump_pick_s(physics.JUMP_ATTACK_MS)
-        mx = pace.at(m, x, jump_t, platform)
+        if pace.meets(m, gx, jump_t, platform, half):
+            continue
+        mx = pace.at(m, gx, jump_t, platform)
         dy = (m.y - y if platform is None or m.platform != platform.id
               else platform.y_at(min(max(mx, platform.left), platform.right))
               - platform.y_at(min(max(gx, platform.left), platform.right)))

@@ -144,6 +144,7 @@ class Actions:
         # hunter's choice of attack a throw (behavior.attacks: Lucky Seven, or the regular attack to finish a monster
         # and while her MP is under a cast)
         self.choose: Callable[[str], str] | None = None
+        self.keyed_ground = False  # whether the attack key last chosen (_attack_key) is a throw's from the ground
         # Whether a throw that way still goes (the way -> False to drop it), asked once her lock has been waited out,
         # before its keys: the hunter's last look before the key (behavior.hunter: a kill shown since the look it was
         # decided on drops it). None: every throw goes.
@@ -344,7 +345,7 @@ class Actions:
         if not self._still(direction):
             return False
         events, t = self._turn(direction)
-        key = self._attack_key(direction)  # (chosen first, as jump_throw's: its cast's MP goes with its own key)
+        key = self._attack_key(direction, ground=True)  # (chosen first, as jump_throw's: its MP goes with its own key)
         self._thrown(t, direction)
         self.play(events + tap(t, key), "throw")
         self._turned(events, direction, t)
@@ -438,9 +439,10 @@ class Actions:
         for listener in self.throw_listeners:
             listener(when, direction)
 
-    def _attack_key(self, direction: str) -> str:
+    def _attack_key(self, direction: str, ground: bool = False) -> str:
         """The attack key of a throw that way: the regular attack's; with `skill` (and a Lucky Seven key), Lucky Seven's,
-        or whichever `choose` picks."""
+        or whichever `choose` picks (`keyed_ground` says whether it's a throw from the ground: Attacks.key)."""
+        self.keyed_ground = ground
         if self.skill and self.keys.lucky_seven:
             return self.choose(direction) if self.choose is not None else self.keys.lucky_seven.name
         return self.keys.attack.name

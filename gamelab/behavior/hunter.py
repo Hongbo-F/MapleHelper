@@ -156,6 +156,7 @@ class Hunter:
                                kills=lambda: self.ledger.kills)
         if mode != "regular":
             self.actions.choose = self.attacks.key
+            self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
             self.senses.shows = self.attacks.shown_by  # (the look a throw is decided on has the last one's kill)
         # Out of darts (behavior.darts): her Lucky Seven presses and MP bar (the attack choice's), her kills (_gained)
         self.darts = DartWatch(presses_for(model.mob_hp, getattr(model, "mob_pdd", {})))
@@ -236,7 +237,7 @@ class Hunter:
         rope's last (`refused_dot`, STILL: she hangs there yet) has it, still up, start the stretch again and her got
         off again (`off_tries`: down the rope every second time, up the first). A line that says she has no stars:
         logged ('no_darts_said'), the stop to come at READ_EVERY presses."""
-        n = self.darts.shown
+        n, top = self.darts.shown, self.darts.top_presses
         if (line := self._chat_line()) is None:
             return
         dot, was = None if s is None or s.where is None else s.where.dot, self.refused_dot
@@ -250,8 +251,10 @@ class Hunter:
             return
         self.off_tries = self.off_tries + 1 if still and why == "rope" else 0
         self.refused_dot = dot if why == "rope" else None
-        text = (f"the game refused her presses: \"{line.text}\" ({n} in a row that took no MP: not counted)"
-                + (f"; her dot where it was then: try {self.off_tries + 1}" if self.off_tries else ""))
+        text = (f"the game refused her presses: \"{line.text}\" ("
+                + (f"{n} in a row that took no MP: not counted" if n or not top
+                   else f"{top} in a row at a rope's top, the regular attack's or the claw's")
+                + ")" + (f"; her dot where it was then: try {self.off_tries + 1}" if self.off_tries else ""))
         self.log(f"  {text}")
         telemetry.emit("event", kind="refused", text=text)
         if why == "rope":
@@ -408,6 +411,8 @@ class Hunter:
         self._doubt_hp(s)
         self.hp_watch.see(s.t, s.hp)
         self.darts.roped = self.on_rope(s)  # (presses keyed on a rope, which the game refuses, aren't counted)
+        self.darts.at_top = (s.where is not None and s.where.platform is not None  # (her regular presses there watched)
+                             and rope_at_top(self.model, s.where) is not None)
         if s.events is None:
             reads = []
             changed = exp_changed(self._exp, s.exp)

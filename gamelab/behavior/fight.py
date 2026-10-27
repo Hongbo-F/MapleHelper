@@ -380,11 +380,11 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
     """How soon her next attack picks after look `s`, and how its monsters walk meanwhile (attack.stance.Pace, the
     stance's `pace`: clearance kept ahead of time): `lead`, what's left of her attack lock (Actions.lock_until) and the
     look's age; a monster's walk, its track's speed (the feed's, Scene.tracks: its kind and platform, within
-    TRACK_MATCH, seen in TRACK_SEEN frames at least; one seen in fewer, or with no track, not known: the stance has it
-    walk at her), else for one the look saw where no feed follows them its pose (walking the way it faces, else where
-    it is: as before), and none for one the look didn't see (hidden under its damage numbers, or remembered: where it
-    was seen, as before; had walking at her, a fight threw at the ghosts of the dead the camps killed); speeds by the
-    map's game data."""
+    TRACK_MATCH, seen in TRACK_SEEN frames at least; one seen in fewer, or with no track, not known: where it was seen,
+    or with stance.WALK_AT walking at her), else for one the look saw where no feed follows them its pose (walking the
+    way it faces, else where it is: as before), and none for one the look didn't see (hidden under its damage numbers,
+    or remembered: where it was seen, as before; had walking at her, a fight threw at the ghosts of the dead the camps
+    killed); speeds and widths (where one walking at her meets her: stance.PACE_STOP) by the map's game data."""
     now = time.monotonic()
     lock = getattr(getattr(h, "actions", None), "lock_until", 0.0)
     shown = getattr(s, "t", None)  # (a test's stand-in look may have none: no age)
@@ -392,7 +392,8 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
     tracks = [tr for tr in (getattr(s, "tracks", None) or ()) if getattr(tr, "state", None) in ("live", "hidden")]
     fed = bool(getattr(s, "tracks", None))
     seen = {id(m) for m in getattr(s, "monsters", ())}
-    walking = speeds(getattr(h, "model", None))
+    model = getattr(h, "model", None)
+    walking = speeds(model)
 
     def walk(m: Monster) -> float | None:
         best = None
@@ -409,7 +410,7 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
         if m.pose == "move" and m.facing:
             return m.facing * walking.get(m.kind, DEFAULT_SPEED)
         return 0.0
-    return Pace(lead, walk, walking)
+    return Pace(lead, walk, walking, body_sizes(model)[1] if model is not None else None)
 
 
 def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[Monster]):

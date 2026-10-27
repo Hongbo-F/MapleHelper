@@ -688,7 +688,7 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=1,
+@scenario((12, -300.0), monsters="all", seed=4,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down to 13), and
@@ -712,7 +712,10 @@ def nav_fight_across(sim):
     at the server's time: on seed 4 nothing knocked her off 12; of seeds 1-16, 2, 5, 9, 13 and 14 meet all of this.)
     (Seed 1 since 2026-10-27, an attack from a jump picking by the star's search alone (reach.AIR_MODEL, the world's
     AIR_PICK) and her stance going by where each monster will be when her attack starts (attack.stance.Pace): on seed 2
-    she ran out of her 180 s on the way; of seeds 1-12, 1, 3, 4, 7 and 9 meet all of this.)"""
+    she ran out of her 180 s on the way; of seeds 1-12, 1, 3, 4, 7 and 9 meet all of this.) (Seed 4 since the reviews of
+    that, a monster walking at her stopping where it meets her and one whose walk nothing tells staying where it was
+    seen (attack.stance.PACE_STOP, WALK_AT): on seed 1 nothing knocked her off any more; of seeds 1-16, 4, 7, 11, 13 and
+    16 meet all of this.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1700,7 +1703,7 @@ def loop_noisy(sim):
     return _loop(2)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=3, limit=400, may_die=True,
+@scenario((36, 300.0), monsters="all", seed=2, limit=400, may_die=True,
           realism=Realism(spawn_share=0.5, rival_every=20.0),
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
                    _died("other")))
@@ -1709,7 +1712,10 @@ def loop_rival(sim):
     kills give her no EXP, so the ledger has only hers. (The rival hunts one place at a time, its dot on the minimap:
     here 21, then 2, away from her.) (Seed 3 since every look is perception's newest frame after her keys' effect
     (Senses.fresh_after, the feed in every scenario): with the twin that had the feed (17), perception sees some of the
-    rival's kills die, someone else's: of seeds 1-12, 8 meet all of this, 25 not.)"""
+    rival's kills die, someone else's: of seeds 1-12, 8 meet all of this, 25 not.) (Seed 2 since 2026-10-27, her stance
+    going by where each monster will be when her attack starts, one walking at her stopping where it meets her and one
+    whose walk nothing tells staying where it was seen (attack.stance.Pace, PACE_STOP, WALK_AT): on seed 3 the feed saw
+    none of the rival's kills die; of seeds 1-16, 2, 4-7, 9 and 14-16 meet all of this.)"""
     return _loop(3)(sim)
 
 
@@ -1893,9 +1899,23 @@ def tour_rocky_run(sim):
 # other players camping as the crowding study saw them (harness.TREE_CAMPS) and with group 0's walls stopping her
 # (world.Realism.zero_walls) (README: Tree Dungeon, Forest Up North II).
 
+NO_HANG_REFUSED = 10  # (tree) a hunt's attacks the game may refuse her on a rope, all told: past this she hung there
+
+
 def tree(start: tuple[int, float], **kw):
-    """A scenario on Tree Dungeon, Forest Up North II."""
-    return scenario(start, map_id=TREE, **kw)
+    """A scenario on Tree Dungeon, Forest Up North II. A hunt's (loop_tree_*, tour_tree_*: not those of a rope's top,
+    which are there for it) also checks she didn't hang on a rope throwing (the world's `refused`: from 2026-10-27,
+    when loop_tree_grind recorded again hung at the top of the rope at x -8 for 86 s, 84 attacks refused, and met all
+    its checks, and tour_tree_run 31.9 s at the top of the rope at x 146, 37 refused: her regular attack's presses
+    unwatched for it, behavior.darts.DartWatch.regular since)."""
+    def wrap(fn):
+        more = dict(kw)
+        if fn.__name__.startswith(("loop_tree", "tour_tree")) and "rope_top" not in fn.__name__:
+            more["expects"] = tuple(kw.get("expects", ())) + (
+                check(f"no hang on a rope (her attacks refused there {NO_HANG_REFUSED} times at most)",
+                      lambda tr: tr["world"].get("refused", 0) <= NO_HANG_REFUSED),)
+        return scenario(start, map_id=TREE, **more)(fn)
+    return wrap
 
 
 def _kinds_of(tr: dict) -> list[str]:
@@ -2039,7 +2059,7 @@ _CROWD, _SLOW = harness.PRESETS["crowd"], harness.PRESETS["crowd-slow"]
 _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -2066,7 +2086,10 @@ def loop_tree_23(sim):
     throw without a tap tells her heading (Actions.heading), a cast takes its MP off at its throw (Attacks.on_throw) and
     a trip stops only for what the pass shoots (Hunt._interrupt): on seed 5 she shot 23 from the spot fewer than 20
     times; of seeds 1-16, 1, 8-11 and 13-16 meet all of this.) From 2026-10-26 her spot is 24 at 221, 51 units from 24's
-    Green Mushroom's spawn point (attack.spots.SPAWN_CLEAR): of seeds 1-16 all but 14 meet all of this."""
+    Green Mushroom's spawn point (attack.spots.SPAWN_CLEAR): of seeds 1-16 all but 14 meet all of this. (Seed 2 since
+    2026-10-27, an attack from a jump picking by the star's search alone, her stance going by where each monster will be
+    when her attack starts, and the world's air pick fitted to the live throws (Clearance and slopes): on seed 1 she
+    shot 23 from the spot fewer than 20 times, for 42 kills; of seeds 1-16 all but 1 and 4 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 

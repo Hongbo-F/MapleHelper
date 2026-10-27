@@ -34,24 +34,29 @@ def mon(x, y=500.0, platform=0, kind=GREEN):
     return Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, y, platform)
 
 
-def walking(vx):
-    return st.Pace(0.0, lambda m: vx, {GREEN: 100.0})
+def walking(vx, lead=0.0):
+    return st.Pace(lead, lambda m: vx, {GREEN: 100.0}, HALVES)
 
 
 def stance(x, ms, p=FLAT, facing=RIGHT, pace=st.NO_PACE, **kw):
     return st.stance(x, p.y_at(x), p, ms, False, facing, tops=TOPS, halves=HALVES, pace=pace, **kw)
 
 
-def test_who_is_too_close_goes_by_where_it_will_be_when_her_attack_starts():
+def test_who_is_too_close_goes_by_where_it_will_be_when_her_attack_starts(monkeypatch):
     # A Green 150 off walking at her at 95 units/s, her keys free in 0.6 s (her lock and the look's age): when a throw
     # from the ground would start (0.67 s on) it's 86 off, inside its claw's edge (105): too close; standing, not.
     green = mon(650)
     assert not st.too_close(green, 500, HALVES)
     assert st.too_close(green, 500, HALVES, pace=st.Pace(0.6, lambda m: -95.0))
     assert not st.too_close(green, 500, HALVES, pace=st.Pace(0.6, lambda m: 0.0))
-    # Walking away it's further off by then; its walk not known, it walks at her at its kind's speed (WALK_AT).
+    # Walking away it's further off by then; its walk not known, it stays where it was seen (with WALK_AT, as until the
+    # review of 2026-10-27, it walked at her at its kind's speed: live 43 off at the pick on average, where it was seen
+    # 21).
     assert not st.too_close(mon(600), 500, HALVES, pace=st.Pace(0.6, lambda m: 95.0))
+    assert not st.too_close(green, 500, HALVES, pace=st.Pace(0.6, lambda m: None, {GREEN: 100.0}))
+    monkeypatch.setattr(st, "WALK_AT", True)
     assert st.too_close(green, 500, HALVES, pace=st.Pace(0.6, lambda m: None, {GREEN: 100.0}))
+    monkeypatch.setattr(st, "WALK_AT", False)
     # So the stance: from the ground it would be a claw swipe, but a jump in place keyed 40 ms after the jump key
     # surely takes it (83 off at that attack's start): the jump, not the throw it was decided as live.
     assert stance(500, [green], pace=st.Pace(0.6, lambda m: -95.0)) == ("jump_throw", RIGHT)
@@ -75,6 +80,23 @@ def test_up_close_the_throw_is_one_whose_attack_surely_takes_it():
     # ahead, 37% 30-40).
     assert stance(60, [mon(70)]) == ("throw", RIGHT)
     assert stance(60, [mon(80)]) == ("jump_throw", RIGHT)
+
+
+def test_a_monster_walking_at_her_stops_where_it_meets_her_on_its_side(monkeypatch):
+    # Its body meets hers 50 off (its half 28 and hers 22: PACE_STOP); walked on through her, right after a throw (her
+    # lock 0.79 s yet) a Green 45 in front walking at her was "behind" her by her next attack's start, and she tapped
+    # round to throw at her empty back (review of 2026-10-27: live 49 of 57 such targets were still in front at the pick).
+    assert walking(-95.0).at(mon(700), 500, 1.0) == 605.0 and walking(-95.0).at(mon(600), 500, 1.0) == 550.0
+    assert walking(-95.0).at(mon(545), 500, 1.0) == 545.0  # already within 50 of her: where it is
+    assert walking(95.0).at(mon(600), 500, 1.0) == 695.0  # walking away: on as before
+    assert walking(95.0).at(mon(400), 500, 1.0) == 450.0  # at her from her left: stopped on her left
+    green, pace = mon(545), walking(-95.0, lead=0.79)
+    assert stance(500, [green], pace=pace)[1] == RIGHT  # (a jump back: no step clears it, and there's room behind)
+    monkeypatch.setattr(st, "PACE_STOP", False)
+    assert stance(500, [green], pace=pace)[1] == LEFT  # (as it was: at her empty back)
+    monkeypatch.setattr(st, "PACE_STOP", True)
+    # Whether it meets her by then: a step that leaves it on her before her throw clears nothing (_clear_step).
+    assert walking(-95.0).meets(mon(600), 500, 1.0) and not walking(-95.0).meets(mon(600), 500, 0.3)
 
 
 def test_against_one_walking_at_her_no_step_clears_it():
@@ -148,6 +170,26 @@ def test_from_a_jump_the_world_picks_by_the_star_search_alone(model, monkeypatch
         _jump_throw(w, 0.04)
         hits += w.monsters[0].hp < w.monsters[0].hp_max
     assert 6 <= hits <= 20
+
+
+def test_from_a_jump_the_world_picks_a_body_the_likelier_the_farther_its_top_reaches_into_the_window(model):  # noqa: F811
+    # Noise.air_squash 1.0 (TREE_AIR): each monster's top drawn uniform over its height for the pick, so a pig on her
+    # level keyed 40 ms into the jump, its top a little into the second band's window 100 off, is picked about 60% of
+    # the time, and the farther off (the windows reach lower) the more often: all of the time with a hard edge. Live the
+    # straight throws whose target's top reached 0-10 into the deepest window of its bands hurt it 60% of the time,
+    # 30 or more 90% (D:/MapleHelper-scratch/clear/fix/live/overlap.py).
+    c = plat(model, 500, 400)
+
+    def picked(dx, squash):
+        hits = 0
+        for seed in range(40):
+            w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 300.0 + dx)], facing="right", seed=seed,
+                            noise=Noise(air_squash=squash)))
+            _jump_throw(w, 0.04)
+            hits += w.monsters[0].hp < w.monsters[0].hp_max
+        return hits
+    assert picked(100, 0.0) == picked(180, 0.0) == 40
+    assert 16 <= picked(100, 1.0) < picked(140, 1.0) <= picked(180, 1.0) and picked(180, 1.0) >= 36
 
 
 def test_an_arrow_in_the_air_may_not_turn_her(model):  # noqa: F811

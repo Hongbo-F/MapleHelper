@@ -60,11 +60,11 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   client's order there, by when each entered the map, can't be seen), so off her level a star needs room
   sideways, by the monster's body (right under or over her, none is hit).
   In the air, the star's search from her feet then (AIR_PICK 'search', the default from 2026-10-27, as
-  reach.AIR_MODEL: no claw and no area; with Noise.air_short and air_under a monster on her platform short of
-  the first band or under its window takes it now and then, and with air_turn_lost an arrow in the air may
-  not turn her: TREE_AIR on Tree Dungeon), or the nearest whose body reaches into the attack's area (its near
-  side within reach.STAR_RANGE ahead, from reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she
-  is then) or into its band's window of the star's search from her feet then ('widening': reach.air_takes as
+  reach.AIR_MODEL: no claw and no area; with Noise.air_squash a body's top is drawn lower for it, with
+  air_short and air_under a monster on her platform short of the first band or under its window takes it now
+  and then, and with air_turn_lost an arrow in the air may not turn her: TREE_AIR on Tree Dungeon), or the
+  nearest whose body reaches into the attack's area (its near side within reach.STAR_RANGE ahead, from
+  reach.AREA_DOWN below to reach.AREA_UP above her feet, wherever she is then) or into its band's window of the star's search from her feet then ('widening': reach.air_takes as
   it was) takes a star (with 'area', the area alone; with 'v83', the claw and the search as from the ground,
   from where she is then). From the ground the Lucky Seven key swipes with the claw as the attack key does, no
   cast's MP taken (Her.claw). For all of these, bodies are their kind's half width either side and as tall as
@@ -109,6 +109,7 @@ import json
 import math
 import os
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -323,9 +324,9 @@ PUSH_BY_DAMAGE = True
 # then, with no claw and no area (World.air_search). 'widening' picked the target of 70% of the live in-place jump
 # throws at 0-40 ahead and of 72% of those that turned in the air where 50% and 34% hurt it (788 throws of 2026-10-25
 # and 26 on Tree Dungeon), so the harness counted those throws as hits and could never show what keeping clear of a
-# monster gains. With the noise that stands for what the live positions don't tell (Noise.air_short, air_under,
-# air_turn_lost: TREE_AIR), the world comes within about 10 points of the live hit rates cell by cell (README,
-# Clearance and slopes).
+# monster gains. With the noise that stands for what the live positions don't tell (Noise.air_squash, air_short,
+# air_under, air_turn_lost: TREE_AIR), the world on the live throws' geometry gives their kills by distance and by the
+# slope within about 8 points of live's (README, Clearance and slopes).
 AIR_PICK = "search"
 # In the air, an arrow the game acts on at the same step (STEP_MS) as an attack's key turns her too late for that
 # attack: it goes the way she faced before (the turn shows, the star doesn't follow). Live on 2026-10-25 (the hunt of
@@ -510,18 +511,25 @@ TAP_LOST_MS = 50         # an arrow tap this short (as sent) can be lost (Noise.
 # in all, 64-75% and 71% without those, 70%: the preset's detect_miss (10%) found 89% of them.
 NEAR_SEEN = ((25.0, 0.0), (50.0, 0.07), (100.0, 0.34), (150.0, 0.55), (float("inf"), 0.6))
 OFF_SEEN = 0.7
-# The air pick's noise on Tree Dungeon (Noise.air_short, air_under, air_turn_lost), fitted by likelihood to the 788 live
-# jump throws in place at a monster on her platform of 2026-10-25 23:43 to 10-26 23:47 (positions at the attack's start
-# as D:/MapleHelper-scratch/clear/diag-slopes/replay.py put them), by their kills (an EXP gain of the target's kind
-# 0.10-0.95 s after the key, her own beyond doubt: D:/MapleHelper-scratch/clear/impl/calib/fitkill.py, a picked
-# target's kill and a kill put on it wrongly fitted with it, 0.5 and 0.06): a target short of the first band or under
-# its window takes the star 30% of the time each (0-0.5 tried in tenths), an air turn lost 26% of the time (0, 0.13 and
-# 0.26 tried: 0.26 the live share that faced away after one). Log-likelihood -456.6 against -506.5 for the search alone;
-# a ramp for the short ones (all of them at the band's edge, max(F, 1 - s / R) s units short) fits no better (-459.1 at
-# R 15, F 0.2). By their bar drops instead (which other players' hits drop too: fitworld.py) 40% each, -491.6 against
-# -587.2 for the search alone and -698.6 for 'widening'; her pick jittered instead (25 units sideways and 16 up and
-# down, normal, the best of a grid) -534.8: the edges blur, but throws well inside the windows hurt more often than that.
-TREE_AIR = {"air_short": 0.3, "air_under": 0.3, "air_turn_lost": 0.26}
+# The air pick's noise on Tree Dungeon (Noise.air_squash, air_short, air_short_ramp, air_under, air_turn_lost), fitted by
+# likelihood to the live jump throws in place at a monster on her platform of 2026-10-25 23:43 to 10-26 23:47, all 838 of
+# them with the target's track at the pick and ahead of her middle (530 straight, 308 turning in the air; every track of
+# her platform there: D:/MapleHelper-scratch/clear/diag-clearance/attacks.jsonl, the review's full set), by their kills
+# (an EXP gain of the target's kind, hers alone: P = picked * K + B, K by kind) and by their bar drops (which other
+# players' hits drop too: P = picked * H + B): D:/MapleHelper-scratch/clear/fix/live/fitsoft.py, fitramp.py. Each
+# monster's top drawn uniform over its height (air_squash 1.0: the search picks one the likelier the farther its top
+# reaches into a window, which a hard edge at the kind's height doesn't give: live the straight throws whose target's top
+# reached 0-10 into the deepest window of its bands hurt it 60% of the time, 10-20 71%, 20-30 82%, 30 or more 90%,
+# overlap.py), a target short of the first band taking the star 0.3 * max(0, 1 - short / 25), one under a window 0.3
+# (by key the same: 0.3 at 40 ms and at 120 by kills), an air turn lost 26% (the live share facing away after one).
+# Log-likelihood by kills -449.2 against -466.6 for TREE_AIR as it was from 2026-10-27 (flat 0.3 and 0.3: fitted on the
+# 788 of diag-slopes' replay, which left out the throws whose target its frames didn't show) and -478.6 for the search
+# alone; by the bar drops -353.1 against -370.0 and -380.4. With it the world on the live geometry gives the straight
+# throws' slope (40-130 ahead, the target's feet over 5 lower than hers, level, over 5 higher) kills 32/38/50% against
+# live 31/38/58 (TREE_AIR as it was: 34/36/38), hurt 62/66/80 against 66/74/89 (bins2.py), and 0-10, 10-20, 20-30, 30-40
+# ahead kills 7/9/18/27% against live 3/8/16/37 (as it was 17/16/18/23). Picked, a cast's target was hurt 75% of the time
+# by the fit (H; the world's 1 - Noise.miss 72.5%: Noise.miss stays) and killed K 0.7 (Green), 0.45 (Horny Mushroom).
+TREE_AIR = {"air_squash": 1.0, "air_short": 0.3, "air_short_ramp": 25.0, "air_under": 0.3, "air_turn_lost": 0.26}
 
 
 @dataclass(frozen=True)
@@ -580,6 +588,11 @@ class Noise:
     air_under: float = 0.0       # ... and one in a band's reach sideways but under its window (too low for her height
                                  # then): what the live positions (the tracks' error, the monster's walk and her drift
                                  # to the attack's start) don't tell. TREE_AIR: fitted to the live close-up jump throws
+    air_short_ramp: float | None = None  # with it, air_short falls off with how far short of the first band the body
+                                 # is: air_short * max(0, 1 - short / air_short_ramp)
+    air_squash: float = 0.0      # an attack from a jump (AIR_PICK 'search') takes each monster's top up to this share
+                                 # of its height lower (drawn per attack and monster, uniform): the likelier picked the
+                                 # farther its top reaches into the search's window. TREE_AIR: 1.0, fitted
     air_turn_lost: float = 0.0   # chance an arrow the game acts on in the air doesn't turn her (the attack goes the way
                                  # she faced, and her frame shows her so): live 63 of 246 jump throws that turned her in
                                  # the air faced away from the target after them (26%), the attack 60 ms after the arrow
@@ -1892,9 +1905,16 @@ class World:
         star's search from her feet now (search_pick), no claw, no area, as reach.AIR_MODEL has it. With the noise
         (Noise.air_short, air_under), a monster on the platform she last stood on that the search doesn't pick, in front
         of her and nearer than its pick, takes the star with that chance (drawn per attack and monster, the nearest
-        first): its body short of the first band (point-blank), or in a band's reach sideways but under its window."""
-        pick = self.search_pick(facing)
-        qs, qu = self.noise.air_short, self.noise.air_under
+        first): its body short of the first band (point-blank; with Noise.air_short_ramp, the less the farther short
+        it is), or in a band's reach sideways but under its window. With Noise.air_squash each monster's top is that
+        share of its height lower at most for it (drawn per attack and monster, uniform): the search picks one the
+        likelier the farther its top reaches into a window."""
+        top_of = self.top
+        if (squash := self.noise.air_squash):
+            def top_of(m: SimMonster) -> float:
+                return self.top(m) * (1.0 - squash * self.chance(f"air_squash:{m.idx}", key_ms))
+        pick = self.search_pick(facing, top_of)
+        qs, qu, ramp = self.noise.air_short, self.noise.air_under, self.noise.air_short_ramp
         if not (qs or qu):
             return pick
         t, d = self.t, directions.sign(facing)
@@ -1905,10 +1925,11 @@ class World:
                 continue
             mx = m.at(t)
             ahead = (mx - self.x) * d
-            lo, hi, bottom, top = reach.body_box(ahead, m.y(mx) - self.y, self.top(m), m.half)
+            lo, hi, bottom, top = reach.body_box(ahead, m.y(mx) - self.y, top_of(m), m.half)
             if hi <= 0 or ahead >= limit or reach.search_band(lo, hi, bottom, top) is not None:
                 continue
-            near.append((ahead, m, qs if hi <= reach.SEARCH_START else qu))
+            short = reach.SEARCH_START - hi
+            near.append((ahead, m, qu if short < 0 else qs * max(0.0, 1.0 - short / ramp) if ramp else qs))
         for _, m, q in sorted(near, key=lambda c: c[0]):
             if q and self.chance(f"air_near:{m.idx}", key_ms) < q:
                 return m
@@ -1946,18 +1967,20 @@ class World:
                 best = (math.hypot(ahead, dy), m)
         return None if best is None else best[1]
 
-    def search_pick(self, facing: str) -> SimMonster | None:
+    def search_pick(self, facing: str, top: Callable[[SimMonster], float] | None = None) -> SimMonster | None:
         """The live monster the star's search from the ground picks on her `facing` side, whatever the
         terrain (_aim checks the line to it): of those whose body overlaps one of its bands
         (reach.search_band), the first band's; of those, one drawn at random (seeded, per attack), as the
-        client takes the one that entered the map first, which nothing tells."""
+        client takes the one that entered the map first, which nothing tells. `top`: how tall each is for it
+        (World.top by default)."""
         t, d, band, first = self.t, directions.sign(facing), None, []
+        top = top or self.top
         for m in self.monsters:
             if not m.alive:
                 continue
             mx = m.at(t)
             ahead = (mx - self.x) * d
-            k = reach.search_band(*reach.body_box(ahead, m.y(mx) - self.y, self.top(m), m.half))
+            k = reach.search_band(*reach.body_box(ahead, m.y(mx) - self.y, top(m), m.half))
             if k is None:
                 continue
             if band is None or k < band:
@@ -2347,6 +2370,7 @@ class World:
                 **({"pet_potions": self.pet_potions} if self.pet_potions else {}),
                 **({"casts": self.casts, "mp_potions": self.mp_potions} if self.casts else {}),
                 **({"darts": self.darts_left, "no_darts": self.no_darts} if self.darts_left is not None else {}),
+                **({"refused": self.refused} if self.refused else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
 
