@@ -10,9 +10,9 @@
     python -m gamelab.sim.harness spot RUN [--seeds 3,9]        a saved run's seeds again here: the same to the digit?
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
 
-`--cache` reads the seeds this checkout's commit has already run with the same arguments from the baseline cache
-(sim.baseline: D:/MapleHelper-scratch/baselines/harness/<sha>/<key>/seed-NNN.json) and runs only the others, keeping
-them; a checkout whose code isn't as committed, or a run with `--think`, runs them all and keeps none. `cached` reads a
+`--cache` reads the seeds this checkout's code (its commit's) has already run with the same arguments from the baseline
+cache (sim.baseline: D:/MapleHelper-scratch/baselines/harness/<code>/<key>/seed-NNN.json) and runs only the others,
+keeping them; a checkout whose code isn't as committed, or a run with `--think`, runs them all and keeps none. `cached` reads a
 commit's (master's) without running anything, and saves them as a run for `compare`, which also takes a cache's folder.
 `ab` runs this checkout against a base commit's cached seeds, 12, then 24 and 48 only while a headline difference (EXP
 a minute, touches, deaths, falls out of the map, stops, and each --metric) is within 2 standard errors and not zero
@@ -831,19 +831,20 @@ def run_seeds(policy: str, seeds: list[int], preset: str, minutes: float, jobs: 
 
 def cache_of(policy: str, preset: str, minutes: float, think: float = 0.0, costs: str = "coded",
              ways: int | None = None, map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (),
-             attack: str | None = None, sha: str | None = None):
-    """The baseline cache of a run's arguments on commit `sha` (None: this checkout's, while its code is as committed),
-    or (None, why there's none)."""
+             attack: str | None = None, code: str | None = None, commit: str | None = None):
+    """The baseline cache of a run's arguments on code `code` (baseline.code_id: a commit's; None: this checkout's,
+    while its code is as committed), or (None, why there's none). `commit`: the commit, for its meta.json."""
     from . import baseline
     p = baseline.params(run_one, (policy, 0, preset, minutes, think, costs, ways, map_id, tuple(world),
                                   tuple(grounds), attack))
     if why := baseline.uncacheable(p):
         return None, why
-    if sha is None:
-        sha, why = baseline.identity(REPO)
-        if sha is None:
+    if code is None:
+        code, why = baseline.identity(REPO)
+        if code is None:
             return None, why
-    return baseline.Cache(sha, p, REPO), ""
+        commit = baseline.head(REPO)
+    return baseline.Cache(code, p, REPO, commit=commit), ""
 
 
 def cached_run(policy: str, seeds: list[int], preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
@@ -866,7 +867,7 @@ def cached_run(policy: str, seeds: list[int], preset: str, minutes: float, jobs:
     lost = []
 
     def keep(seed: int, result: dict) -> None:
-        if baseline.identity(REPO)[0] == cache.sha:
+        if baseline.identity(REPO)[0] == cache.code:
             cache.put(seed, result)
         else:
             lost.append(seed)
@@ -1133,7 +1134,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="read the seeds this commit has run with these arguments from the baseline cache and run only "
                         "the others, keeping them (sim.baseline; only while the checkout's code is as committed)")
     k = _run_options(sub.add_parser("cached", help="a commit's cached seeds, read: nothing run"))
-    k.add_argument("--sha", default="HEAD", help="the commit whose cache to read (default HEAD; master, a SHA)")
+    k.add_argument("--sha", default="HEAD", help="the commit whose cache to read (default HEAD; master, a SHA): its "
+                                                 "code's (baseline.code_id)")
     a = _run_options(sub.add_parser("ab", help="this checkout against a base commit's cached baseline, seeds added "
                                                "while a headline difference isn't told from nothing"))
     a.set_defaults(seeds=AB_SEEDS[0])
@@ -1264,16 +1266,18 @@ def _cached(args) -> int:
     from . import baseline
     try:
         sha = baseline.rev(args.sha, REPO)
+        code = baseline.code_id(sha, REPO)
     except ValueError as e:
         print(e)
         return 2
-    cache, why = cache_of(args.policy, *_run_args(args), sha=sha)
+    cache, why = cache_of(args.policy, *_run_args(args), code=code, commit=sha)
     if cache is None:
         print(f"nothing cached: {why}")
         return 2
     seeds = list(range(1, args.seeds + 1))
     missing = [k for k in seeds if cache.get(k) is None]
-    print(f"{cache.folder}: {len(seeds) - len(missing)} of {len(seeds)} seed(s) cached (commit {sha[:12]})")
+    print(f"{cache.folder}: {len(seeds) - len(missing)} of {len(seeds)} seed(s) cached (commit {sha[:12]}, code "
+          f"{code[:12]})")
     if missing:
         print(f"missing: seed(s) {_seed_span(missing)}; fill them with the base's filler (README, Checking a change):\n"
               f"   python {_filler(os.environ.get('GAMELAB_BASE_FILL'))} --ref {sha} -- "
@@ -1342,10 +1346,11 @@ def ab(args) -> int:
     from . import baseline
     try:
         base_sha = baseline.rev(args.base, REPO)
+        base_code = baseline.code_id(base_sha, REPO)
     except ValueError as e:
         print(e)
         return 2
-    cache, why = cache_of(args.policy, *_run_args(args), sha=base_sha)
+    cache, why = cache_of(args.policy, *_run_args(args), code=base_code, commit=base_sha)
     if cache is None:
         print(f"no baseline: {why}")
         return 2
@@ -1355,8 +1360,8 @@ def ab(args) -> int:
     names = list(HEADLINE) + [m for m in args.metric if m not in HEADLINE]
     me, mine_why = baseline.identity(REPO)
     print(f"ab: {' '.join(_command_line(args)[1:])}\n"
-          f"   candidate {REPO} ({me[:12] + ', as committed' if me else mine_why + ': not cached'})\n"
-          f"   base {args.base} {base_sha[:12]}: {cache.folder}")
+          f"   candidate {REPO} ({'code ' + me[:12] + ', as committed' if me else mine_why + ': not cached'})\n"
+          f"   base {args.base} {base_sha[:12]} (code {base_code[:12]}): {cache.folder}")
     base: list[dict] = []
     cand: list[dict] = []
     n = 0

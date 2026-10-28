@@ -72,7 +72,7 @@ def test_think_isnt_cached():
     assert baseline.uncacheable(baseline.params(harness.run_one, RUN)) is None
     thinking = RUN[:4] + (1.0,) + RUN[5:]
     assert "think" in baseline.uncacheable(baseline.params(harness.run_one, thinking))
-    cache, why = harness.cache_of("loop", "crowd", 5.0, 1.0, sha="f" * 40)
+    cache, why = harness.cache_of("loop", "crowd", 5.0, 1.0, code="f" * 40)
     assert cache is None and "think" in why
 
 
@@ -80,7 +80,7 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def test_the_codes_identity_is_its_commit_only_while_its_as_committed(tmp_path):
+def test_the_codes_identity_is_its_commits_code_only_while_its_as_committed(tmp_path):
     repo = tmp_path / "repo"
     for rel in ("gamelab/a.py", "gamelab/README.md", "config.toml", "tests/test_a.py", "maplehelper/b.py"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -90,12 +90,13 @@ def test_the_codes_identity_is_its_commit_only_while_its_as_committed(tmp_path):
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c")
     sha = _git(repo, "rev-parse", "HEAD")
-    assert baseline.identity(repo) == (sha, "")
+    code = baseline.code_id(sha, repo)
+    assert baseline.identity(repo) == (code, "") and len(code) == 40
     (repo / "gamelab" / "README.md").write_text("more\n")  # Markdown: nothing runs it
     (repo / "tests" / "test_a.py").write_text("x = 2\n")  # tests don't matter
     (repo / "gamelab" / "lab").mkdir()
     (repo / "gamelab" / "lab" / "run.json").write_text("{}")  # ignored
-    assert baseline.identity(repo) == (sha, "")
+    assert baseline.identity(repo) == (code, "")
     for rel, text in (("gamelab/a.py", "x = 2\n"), ("config.toml", "y = 1\n"), ("gamelab/new.py", "\n"),
                       ("maplehelper/b.py", "x = 3\n")):
         path = repo / rel
@@ -104,21 +105,32 @@ def test_the_codes_identity_is_its_commit_only_while_its_as_committed(tmp_path):
         got, why = baseline.identity(repo)
         assert got is None and rel in why
         path.write_text(old) if old is not None else path.unlink()
-    assert baseline.identity(repo) == (sha, "")
+    assert baseline.identity(repo) == (code, "")
     _git(repo, "add", "gamelab/a.py")
-    assert baseline.identity(repo)[0] == sha  # (as committed again: the index the same as HEAD)
+    assert baseline.identity(repo)[0] == code  # (as committed again: the index the same as HEAD)
+
+    def commit(*rels: str) -> str:
+        _git(repo, "add", *rels)
+        _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c")
+        return _git(repo, "rev-parse", "HEAD")
+    readme_only = commit("gamelab/README.md", "tests/test_a.py")  # a README's and a test's commit: the same code
+    assert readme_only != sha and baseline.code_id(readme_only, repo) == code == baseline.identity(repo)[0]
+    (repo / "gamelab" / "a.py").write_text("x = 5\n")
+    changed = commit("gamelab/a.py")
+    assert baseline.code_id(changed, repo) != code == baseline.code_id(sha, repo)
 
 
 def test_a_cache_keeps_a_seed_a_file_and_a_folder_of_them_loads_as_a_run(tmp_path):
     p = baseline.params(harness.run_one, RUN)
-    cache = baseline.Cache("a" * 40, p, root=tmp_path)
+    cache = baseline.Cache("a" * 40, p, root=tmp_path, commit="e" * 40)
     assert cache.seeds() == [] and cache.get(1) is None
     cache.put(2, {"seed": 2, "exp_per_min": 1.5, "t": (1, 2)})
     cache.put(1, {"seed": 1, "exp_per_min": 2.5})
     assert cache.seeds() == [1, 2] and cache.get(2) == {"seed": 2, "exp_per_min": 1.5, "t": [1, 2]}
     assert cache.folder == tmp_path / "harness" / ("a" * 40) / cache.key
     meta = json.loads((cache.folder / "meta.json").read_text())
-    assert meta["params"] == p and meta["sha"] == "a" * 40 and meta["format"] == baseline.FORMAT
+    assert meta["params"] == p and meta["code"] == "a" * 40 and meta["commit"] == "e" * 40
+    assert meta["format"] == baseline.FORMAT
     assert [r["seed"] for r in harness.load(str(cache.folder))] == [1, 2]
     assert not list(cache.folder.glob("*.tmp"))
 
@@ -210,10 +222,11 @@ def test_ab_reads_the_base_from_its_cache_and_says_the_seeds_it_used_and_why_it_
     rng = random.Random(3)
     monkeypatch.setattr(baseline, "ROOT", tmp_path)
     monkeypatch.setattr(baseline, "rev", lambda ref, repo=None: "b" * 40)
+    monkeypatch.setattr(baseline, "code_id", lambda commit, repo=None: commit)
     monkeypatch.setattr(harness, "FOLDER", tmp_path / "runs")
     monkeypatch.setattr(baseline, "identity", lambda repo=None: (None, "changes"))
     base = _runs([100.0 + rng.gauss(0, 10) for _ in range(48)], hurt=[5] * 48)
-    cache, _ = harness.cache_of("loop", *harness._run_args(_ab_args()), sha="b" * 40)
+    cache, _ = harness.cache_of("loop", *harness._run_args(_ab_args()), code="b" * 40)
     for r in base:
         cache.put(r["seed"], r)
     asked = []
@@ -243,10 +256,11 @@ def test_ab_reads_the_base_from_its_cache_and_says_the_seeds_it_used_and_why_it_
 def test_ab_has_the_filler_run_the_bases_missing_seeds(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(baseline, "ROOT", tmp_path)
     monkeypatch.setattr(baseline, "rev", lambda ref, repo=None: "b" * 40)
+    monkeypatch.setattr(baseline, "code_id", lambda commit, repo=None: commit)
     monkeypatch.setattr(harness, "FOLDER", tmp_path / "runs")
     monkeypatch.setattr(baseline, "identity", lambda repo=None: (None, "changes"))
     base = _runs([100.0] * 12)
-    cache, _ = harness.cache_of("loop", *harness._run_args(_ab_args()), sha="b" * 40)
+    cache, _ = harness.cache_of("loop", *harness._run_args(_ab_args()), code="b" * 40)
     filler = tmp_path / "fill.py"
     filler.write_text("")
     commands = []
@@ -290,9 +304,10 @@ def test_a_spot_check_runs_a_saved_runs_seeds_again_with_their_own_arguments(mon
 def test_cached_reads_a_commits_seeds_and_says_how_to_fill_the_missing_ones(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(baseline, "ROOT", tmp_path)
     monkeypatch.setattr(baseline, "rev", lambda ref, repo=None: "d" * 40)
+    monkeypatch.setattr(baseline, "code_id", lambda commit, repo=None: commit)
     monkeypatch.setattr(harness, "FOLDER", tmp_path / "runs")
     args = _ab_args(seeds=3, sha="master", save=None)
-    cache, _ = harness.cache_of("loop", *harness._run_args(args), sha="d" * 40)
+    cache, _ = harness.cache_of("loop", *harness._run_args(args), code="d" * 40)
     for r in _runs([100.0, 101.0]):
         cache.put(r["seed"], r)
     assert harness._cached(args) == 1
