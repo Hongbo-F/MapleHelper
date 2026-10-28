@@ -130,6 +130,15 @@ TRACKS_S = 0.5
 EVENTS = ("died", "exp_gain", "victim", "let_go")
 
 
+def pace(wide_s: float) -> None:
+    """The whole screen searched every `wide_s` s without being asked, whoever is attached (both schedules: `perceive
+    --wide-every`). Not by default: with the search's step 1 in C a crowd's whole screen costs about what her band did
+    (README, A cheaper whole screen), but what a faster pace does to the hunt (the tracks, her memory, the EXP) isn't
+    measured yet, and every state changes with it."""
+    global SCHEDULE, HUNTING
+    SCHEDULE, HUNTING = replace(SCHEDULE, wide_s=wide_s), replace(HUNTING, wide_s=wide_s)
+
+
 def saved(which: str | None = None) -> bool:
     """Whether the service meant is the one on saved frames (`perceive --frames`): `which`, by default GAMELAB_PERCEIVE's."""
     return (os.environ.get(WHICH, "") if which is None else which) == "saved"

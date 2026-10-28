@@ -456,6 +456,37 @@ def test_perceive_on_saved_frames_has_a_pipe_mutex_and_info_file_of_its_own(tmp_
     assert (c.address, c.info.name) == (service.ADDRESS, "perceive.json")
 
 
+def test_perceive_can_search_the_whole_screen_more_often_but_doesnt_by_default(tmp_path, monkeypatch):
+    # (`perceive --wide-every S`: both schedules' whole screen, whoever is attached; without it, as built)
+    from PIL import Image
+
+    from gamelab import __main__ as cli
+    from gamelab.localization import worldstate
+    Image.fromarray(np.zeros((768, 1366, 3), np.uint8)).save(tmp_path / "a.png")
+    monkeypatch.setattr(service, "only_one", lambda name=service.MUTEX: 1)
+    monkeypatch.setattr(service, "settle", lambda: None)
+    monkeypatch.setattr(service, "SCHEDULE", service.SCHEDULE)
+    monkeypatch.setattr(service, "HUNTING", service.HUNTING)
+    seen = []
+
+    class Made:
+        def __init__(self, make, map_id, where, **kw):
+            seen.append((service.SCHEDULE, service.HUNTING))
+
+        def serve(self, until=None):
+            pass
+
+        def status(self):
+            return {}
+    monkeypatch.setattr(service, "Service", Made)
+    assert cli.main(["perceive", "--frames", str(tmp_path), "--minutes", "0.01"]) == 0
+    assert seen[-1] == (worldstate.WATCH, worldstate.Schedule()) and worldstate.Schedule().wide_s == 1.0
+    assert cli.main(["perceive", "--frames", str(tmp_path), "--minutes", "0.01", "--wide-every", "0.2"]) == 0
+    watch, hunting = seen[-1]
+    assert (watch.wide_s, hunting.wide_s) == (0.2, 0.2)
+    assert (watch.loot_s, hunting.band_s) == (worldstate.WATCH.loot_s, worldstate.BAND_EVERY_S)  # the rest as built
+
+
 def test_a_looks_frame_gone_from_the_ring_comes_out_black_and_is_counted():
     """A look's frame is copied out of the service's ring as its state is taken: one overwritten since (by the frame
     RING_SLOTS later) comes out black, counted (`lost`, said as the command ends); her heading never learns from it
