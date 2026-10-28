@@ -248,14 +248,21 @@ class Recorder:
 
     def close(self, timeout: float = 5.0) -> None:
         """What's waiting written (`timeout` s at most: a disk that takes no writes doesn't hold the run's end up for
-        longer), then the file closed."""
+        longer), then the file closed. On a full disk the close's own flush fails too (the lines the failed write left
+        in the file's buffer): the file is closed all the same and the error kept, not raised (it was said where the
+        write failed): `stop` is how emit lets a failed recorder go, so a raise here stopped the run (the perception
+        service on 2026-10-28 11:41-11:42, D: full: telemetry.emit -> stop -> close, OSError out of the frame loop)."""
         if self._thread is not None:
             with self._cond:
                 self._closing = True
                 self._cond.notify_all()
             self._thread.join(timeout)
         with self._lock:
-            self._file.close()
+            try:
+                self._file.close()
+            except OSError as e:
+                if self.error is None:
+                    self.error = f"{type(e).__name__}: {e}"
 
 
 def record_to(name: str = "run", folder: Path = FOLDER, max_bytes: int | None = MAX_BYTES,

@@ -4,9 +4,12 @@ nothing lost or reordered otherwise; a full disk stops it, said once), the servi
 Python's garbage collections timed (gcstats). Temp folders only."""
 
 import gc
+import io
 import sys
 import threading
 import time
+
+import pytest
 
 from gamelab import gcstats, telemetry
 
@@ -87,6 +90,44 @@ def test_a_write_that_fails_stops_the_recording_saying_so_once(tmp_path, capsys)
         time.sleep(0.01)
     telemetry.emit("log", text="two")  # (the recorder stopped: emit lets it go, quietly)
     assert not telemetry.recording() and sink.error and "No space left" in sink.error
+    assert capsys.readouterr().err.count("telemetry stopped") == 1
+
+
+class _FullDisk(io.RawIOBase):
+    """A disk with no room left: every write fails, as D: did on 2026-10-28 at 11:41."""
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        raise OSError(28, "No space left on device")
+
+
+@pytest.mark.parametrize("background", [True, False])
+@pytest.mark.parametrize("ends", ["emit", "stop"])
+def test_a_full_disk_stops_the_recording_not_the_run(tmp_path, capsys, background, ends):
+    """A text file on a full disk fails its close too (the close flushes what the failed write left in its buffer),
+    unlike the stand-in above: emit's stop of the failed recorder raised that OSError out of the perception service's
+    frame loop (Publisher.state's emit of a scene: the service died, its rolling recording with it). Now the run goes on,
+    the failure said once, the file closed; and a run's own stop on a full disk doesn't raise either."""
+    telemetry.record_to("perceive", folder=tmp_path, background=background)
+    sink = telemetry._sink
+    sink._file.close()
+    sink._file = io.TextIOWrapper(io.BufferedWriter(_FullDisk()), encoding="utf-8")
+    try:
+        if ends == "stop":
+            telemetry.emit("scene", i=1)
+            telemetry.stop()  # (the run's end: what's waiting written, which fails, then the file closed)
+        else:
+            telemetry.emit("scene", i=1)  # (in the caller: its flush fails; else its writer's does, a moment later)
+            deadline = time.monotonic() + 5
+            while background and sink.error is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            for i in range(2, 5):
+                telemetry.emit("scene", i=i)  # (the recorder stopped: emit lets it go, quietly)
+    finally:
+        telemetry.stop()
+    assert not telemetry.recording() and sink._file.closed
     assert capsys.readouterr().err.count("telemetry stopped") == 1
 
 
