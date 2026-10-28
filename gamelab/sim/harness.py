@@ -3,9 +3,20 @@
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
                                              [--costs coded|measured|measured-1366] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
-                                             [--attack choice|skill|regular]
+                                             [--attack choice|skill|regular] [--cache]
+    python -m gamelab.sim.harness cached POLICY [run's options] [--sha master]   a commit's cached seeds, read
+    python -m gamelab.sim.harness ab POLICY [run's options] [--base master] [--metric KEY ...] [--max-seeds 48]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE    two saved runs, seed by seed, against the bar
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
+
+`--cache` reads the seeds this checkout's commit has already run with the same arguments from the baseline cache
+(sim.baseline: D:/MapleHelper-scratch/baselines/harness/<sha>/<key>/seed-NNN.json) and runs only the others, keeping
+them; a checkout whose code isn't as committed, or a run with `--think`, runs them all and keeps none. `cached` reads a
+commit's (master's) without running anything, and saves them as a run for `compare`, which also takes a cache's folder.
+`ab` runs this checkout against a base commit's cached seeds, 12, then 24 and 48 only while a headline difference (EXP
+a minute, touches, deaths, falls out of the map, stops, and each --metric) is within 2 standard errors and not zero
+(the base's missing seeds run in its own checkout by D:/MapleHelper-scratch/baselines/base.py). README: Checking a
+change.
 
 A run hunts for a fixed time (the horizon) from one of its map's START_AT, on a world seed, with the policy's own
 random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ. On the first
@@ -106,6 +117,7 @@ PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden trac
 import argparse
 import dataclasses
 import json
+import math
 import os
 import random
 import re
@@ -782,13 +794,84 @@ def _waits(records: list[dict]) -> list[tuple[float, float]]:
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
              costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
              world: tuple = (), grounds: tuple = (), attack: str | None = None) -> list[dict]:
+    return run_seeds(policy, list(range(1, seeds + 1)), preset, minutes, jobs, think, costs, ways, map_id, world,
+                     grounds, attack)
+
+
+def run_seeds(policy: str, seeds: list[int], preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
+              costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP, world: tuple = (),
+              grounds: tuple = (), attack: str | None = None,
+              done: Callable[[int, dict], None] | None = None) -> list[dict]:
+    """run_many on the seeds named, their results in that order; `done(seed, result)` as each run ends (in the order
+    they end, with `jobs` processes)."""
     args = [(policy, k, preset, minutes, think, costs, ways, map_id, tuple(world), tuple(grounds), attack)
-            for k in range(1, seeds + 1)]
-    if jobs <= 1:
-        return [run_one(*a) for a in args]
+            for k in seeds]
+    if jobs <= 1 or not args:
+        out = []
+        for a in args:
+            out.append(run_one(*a))
+            if done:
+                done(a[1], out[-1])
+        return out
+    from concurrent.futures import as_completed
     from gamelab.sim import harness  # by its module name, so worker processes can find it (not __main__)
-    with ProcessPoolExecutor(max_workers=jobs, initializer=harness._worker) as pool:
-        return list(pool.map(harness._run_one_args, args))
+    with ProcessPoolExecutor(max_workers=min(jobs, len(args)), initializer=harness._worker) as pool:
+        futures = {pool.submit(harness._run_one_args, a): a[1] for a in args}
+        got = {}
+        for f in as_completed(futures):
+            got[futures[f]] = f.result()
+            if done:
+                done(futures[f], got[futures[f]])
+    return [got[k] for k in seeds]
+
+
+# --- the baseline cache (sim.baseline) -------------------------------------------------------------------
+
+def cache_of(policy: str, preset: str, minutes: float, think: float = 0.0, costs: str = "coded",
+             ways: int | None = None, map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (),
+             attack: str | None = None, sha: str | None = None):
+    """The baseline cache of a run's arguments on commit `sha` (None: this checkout's, while its code is as committed),
+    or (None, why there's none)."""
+    from . import baseline
+    p = baseline.params(run_one, (policy, 0, preset, minutes, think, costs, ways, map_id, tuple(world),
+                                  tuple(grounds), attack))
+    if why := baseline.uncacheable(p):
+        return None, why
+    if sha is None:
+        sha, why = baseline.identity(REPO)
+        if sha is None:
+            return None, why
+    return baseline.Cache(sha, p, REPO), ""
+
+
+def cached_run(policy: str, seeds: list[int], preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
+               costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP, world: tuple = (),
+               grounds: tuple = (), attack: str | None = None, say: Callable[[str], None] = print) -> list[dict]:
+    """run_seeds through the baseline cache: the seeds this checkout's commit has cached for these arguments read, the
+    others run and kept (each as it ends, while the checkout's code is still as committed); all of them as read back
+    from their files. A checkout with changes, or a run that isn't deterministic (`think`), runs them all and keeps
+    none, and `say`s why."""
+    from . import baseline
+    cache, why = cache_of(policy, preset, minutes, think, costs, ways, map_id, world, grounds, attack)
+    run = (policy, preset, minutes, jobs, think, costs, ways, map_id, world, grounds, attack)
+    if cache is None:
+        say(f"cache: not used: {why}")
+        return [baseline.plain(r) for r in run_seeds(policy, seeds, *run[1:])]
+    have = {k: r for k in seeds if (r := cache.get(k)) is not None}
+    todo = [k for k in seeds if k not in have]
+    say(f"cache: {len(have)} of {len(seeds)} seed(s) read from {cache.folder}" + (f", {len(todo)} to run" if todo
+                                                                                  else ""))
+    lost = []
+
+    def keep(seed: int, result: dict) -> None:
+        if baseline.identity(REPO)[0] == cache.sha:
+            cache.put(seed, result)
+        else:
+            lost.append(seed)
+    ran = dict(zip(todo, run_seeds(policy, todo, *run[1:], done=keep))) if todo else {}
+    if lost:
+        say(f"cache: the checkout's code changed while it ran: seed(s) {', '.join(map(str, sorted(lost)))} not kept")
+    return [have[k] if k in have else baseline.plain(ran[k]) for k in seeds]
 
 
 def _worker() -> None:
@@ -909,7 +992,91 @@ def save(name: str, results: list[dict]) -> None:
 
 
 def load(name: str) -> list[dict]:
+    """A saved run: by its name (gamelab/lab/harness/NAME.json), a .json file's path, or a baseline cache's folder
+    (sim.baseline: its seed-NNN.json, in seed order)."""
+    from pathlib import Path
+    path = Path(name)
+    if path.is_dir():
+        return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(path.glob("seed-*.json"))]
+    if path.suffix == ".json" and path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
     return json.loads((FOLDER / f"{name}.json").read_text(encoding="utf-8"))
+
+
+# --- a candidate against master's cached baseline (`ab`) -------------------------------------------------
+
+AB_SEEDS = (12, 24, 48)  # the seeds `ab` takes, more only while a headline difference isn't told from nothing
+# The headline metrics, a seed's value each: EXP a minute, touches, and the runs that died, fell out of the map (or
+# went through a portal) or stopped (the safety stop, out of darts), as the bar counts them (compare).
+HEADLINE = {
+    "exp_per_min": lambda r: r.get("exp_per_min"),
+    "touches": lambda r: r.get("touches"),
+    "deaths": lambda r: int(r.get("died_at") is not None),
+    "falls": lambda r: int(r.get("fell_out_at") is not None or r.get("left_map_at") is not None),
+    "stops": lambda r: int(bool(r.get("safety_stops") or r.get("darts_stops"))),
+}
+
+
+def metric(result: dict, name: str) -> float | None:
+    """A seed's value of a metric: HEADLINE's, or a key of its result (dots for nested ones: `nav.misses`,
+    `landings.trip.near`; a count that's absent 0); None where it has none (mp_per_kill without a kill)."""
+    if name in HEADLINE:
+        return HEADLINE[name](result)
+    value, parts = result, name.split(".")
+    for part in parts:
+        if not isinstance(value, dict):
+            return None
+        if part not in value:
+            return 0 if len(parts) > 1 else None
+        value = value[part]
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def difference(base: list[dict], cand: list[dict], name: str) -> dict:
+    """Metric `name` seed by seed (the seeds both have, and a value in both): n, the means, the mean difference
+    (candidate - base) and its standard error (of the paired differences), t, and whether it's 'zero' (the same to
+    the digit), 'beyond 2 se' or 'within 2 se'."""
+    base, cand = _paired(base, cand)
+    pairs = [(a, b) for a, b in ((metric(x, name), metric(y, name)) for x, y in zip(base, cand))
+             if a is not None and b is not None]
+    n = len(pairs)
+    d = [b - a for a, b in pairs]
+    mean = math.fsum(d) / n if n else 0.0
+    se = statistics.stdev(d) / math.sqrt(n) if n > 1 else 0.0
+    verdict = "zero" if abs(mean) < 1e-12 else "beyond 2 se" if abs(mean) > 2 * se else "within 2 se"
+    return {"metric": name, "n": n, "base": math.fsum(a for a, _ in pairs) / n if n else None,
+            "cand": math.fsum(b for _, b in pairs) / n if n else None, "diff": mean, "se": se,
+            "t": mean / se if se else None, "verdict": verdict}
+
+
+def ab_next(rows: list[dict], seeds: int, steps: tuple[int, ...] = AB_SEEDS) -> tuple[int | None, str]:
+    """`ab`'s rule: after `seeds` seeds, the next count of seeds to take (None: stop) and why. More only while a headline
+    difference is within 2 standard errors and not zero, up to the last of `steps`."""
+    open_ = [r["metric"] for r in rows if r["verdict"] == "within 2 se"]
+    if not open_:
+        return None, f"every headline difference is beyond 2 se or zero at {seeds} seeds"
+    more = next((s for s in steps if s > seeds), None)
+    if more is None:
+        return None, f"{seeds} seeds, the most (--max-seeds); still within 2 se: {', '.join(open_)}"
+    return more, f"within 2 se and not zero at {seeds} seeds: {', '.join(open_)}"
+
+
+def ab_table(rows: list[dict]) -> str:
+    out = [f"{'metric':>22} {'n':>3} {'base':>10} {'cand':>10} {'diff':>9} {'diff %':>7} {'se':>8} {'t':>6}  verdict"]
+    for r in rows:
+        rel = f"{r['diff'] / r['base']:+.1%}" if r["base"] else "-"
+        t = f"{r['t']:+.2f}" if r["t"] is not None else "-"
+        out.append(f"{r['metric']:>22} {r['n']:>3} {_num(r['base']):>10} {_num(r['cand']):>10} "
+                   f"{r['diff']:>+9.3f} {rel:>7} {r['se']:>8.3f} {t:>6}  {r['verdict']}")
+    return "\n".join(out)
+
+
+def _num(v) -> str:
+    return "-" if v is None else f"{v:.3f}"
+
+
+def _seed_span(seeds: list[int]) -> str:
+    return f"{seeds[0]}-{seeds[-1]}" if seeds == list(range(seeds[0], seeds[-1] + 1)) else ",".join(map(str, seeds))
 
 
 # --- checking the bookkeeping ----------------------------------------------------------------------------
@@ -959,7 +1126,61 @@ def main(argv: list[str] | None = None) -> int:
                                cwd=str(REPO))
     p = argparse.ArgumentParser(prog="python -m gamelab.sim.harness")
     sub = p.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run")
+    r = _run_options(sub.add_parser("run"))
+    r.add_argument("--cache", action="store_true",
+                   help="read the seeds this commit has run with these arguments from the baseline cache and run only "
+                        "the others, keeping them (sim.baseline; only while the checkout's code is as committed)")
+    k = _run_options(sub.add_parser("cached", help="a commit's cached seeds, read: nothing run"))
+    k.add_argument("--sha", default="HEAD", help="the commit whose cache to read (default HEAD; master, a SHA)")
+    a = _run_options(sub.add_parser("ab", help="this checkout against a base commit's cached baseline, seeds added "
+                                               "while a headline difference isn't told from nothing"))
+    a.set_defaults(seeds=AB_SEEDS[0])
+    a.add_argument("--base", default="master", help="the base commit (default master)")
+    a.add_argument("--metric", action="append", default=[],
+                   help="a metric the change targets, beside the headline ones (a result's key: hurt, close_s, "
+                        "nav.misses, landings.trip.near; again for another)")
+    a.add_argument("--max-seeds", type=int, default=AB_SEEDS[-1], help=f"the most seeds (default {AB_SEEDS[-1]})")
+    a.add_argument("--fill", default=os.environ.get("GAMELAB_BASE_FILL"),
+                   help="the script that runs the base's missing seeds in its own checkout and caches them (default "
+                        "GAMELAB_BASE_FILL, else <baselines>/base.py)")
+    c = sub.add_parser("compare")
+    c.add_argument("baseline", help="a saved run's name, a .json file, or a baseline cache's folder")
+    c.add_argument("candidate")
+    sub.add_parser("check")
+    args = p.parse_args(argv)
+    from . import scenarios
+    map_id = getattr(args, "map", FIRST_MAP)
+    if not scenarios.available(map_id):
+        print(f"map {map_id} isn't available on this computer (gamedata/data): nothing to run")
+        return 2
+    if args.cmd == "check":
+        return check()
+    if args.cmd == "compare":
+        ok, lines = compare(load(args.baseline), load(args.candidate))
+        print("\n".join(lines))
+        return 0 if ok else 1
+    if args.map not in PRESET_MAPS.get(args.preset, (args.map,)):
+        print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
+        return 2
+    if args.cmd == "cached":
+        return _cached(args)
+    if args.cmd == "ab":
+        return ab(args)
+    if args.cache:
+        results = cached_run(args.policy, list(range(1, args.seeds + 1)), args.preset, args.minutes, args.jobs,
+                             args.think, args.costs, args.ways, args.map, tuple(args.world), args.grounds, args.attack)
+    else:
+        results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.costs,
+                           args.ways, args.map, tuple(args.world), args.grounds, args.attack)
+    print(table(results))
+    name = args.save or _name(args)
+    save(name, results)
+    print(f"saved {FOLDER / (name + '.json')}")
+    return 0
+
+
+def _run_options(r: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """A run's options (run, cached, ab)."""
     r.add_argument("policy", choices=sorted(POLICIES))
     r.add_argument("--seeds", type=int, default=10)
     r.add_argument("--minutes", type=float, default=20.0)
@@ -985,37 +1206,140 @@ def main(argv: list[str] | None = None) -> int:
                         "(ATTACK_HER): choice, Lucky Seven but the regular attack to finish a monster and while her MP "
                         "is under a cast (live's default); skill, Lucky Seven while she has the MP; regular, the "
                         "regular attack (default: the regular attack, her as the map has her)")
-    c = sub.add_parser("compare")
-    c.add_argument("baseline")
-    c.add_argument("candidate")
-    sub.add_parser("check")
-    args = p.parse_args(argv)
-    from . import scenarios
-    map_id = getattr(args, "map", FIRST_MAP)
-    if not scenarios.available(map_id):
-        print(f"map {map_id} isn't available on this computer (gamedata/data): nothing to run")
+    return r
+
+
+def _name(args) -> str:
+    """A run's default name to save it under."""
+    return (f"{args.policy}-{args.preset}"
+            + (f"-{args.costs}" if args.costs != "coded" else "")
+            + (f"-ways{args.ways}" if args.ways is not None else "")
+            + (f"-{args.map}" if args.map != FIRST_MAP else "")
+            + "".join(f"-{w}" for w in args.world)
+            + (f"-g{'-'.join(map(str, args.grounds))}" if args.grounds else "")
+            + (f"-attack-{args.attack}" if args.attack else ""))
+
+
+def _command_line(args) -> list[str]:
+    """`run`'s command line for a run's options, but --seeds, --jobs and --save (what `ab` hands the base's filler)."""
+    out = ["run", args.policy, "--preset", args.preset, "--minutes", repr(args.minutes), "--costs", args.costs,
+           "--map", str(args.map)]
+    if args.think:
+        out += ["--think", repr(args.think)]
+    if args.ways is not None:
+        out += ["--ways", str(args.ways)]
+    for w in args.world:
+        out += ["--world", w]
+    if args.grounds:
+        out += ["--grounds", ",".join(map(str, args.grounds))]
+    if args.attack:
+        out += ["--attack", args.attack]
+    return out
+
+
+def _run_args(args) -> tuple:
+    """A run's arguments after the policy and seeds (cache_of's)."""
+    return (args.preset, args.minutes, args.think, args.costs, args.ways, args.map, tuple(args.world), args.grounds,
+            args.attack)
+
+
+def _cached(args) -> int:
+    """`cached`: seeds 1 to --seeds of commit --sha's cache for these arguments, read (nothing is run), as a table, and
+    saved as a run (--save; default the run's name and @SHA) for `compare`. Exit code 1 if seeds are missing."""
+    from . import baseline
+    try:
+        sha = baseline.rev(args.sha, REPO)
+    except ValueError as e:
+        print(e)
         return 2
-    if args.cmd == "check":
-        return check()
-    if args.cmd == "compare":
-        ok, lines = compare(load(args.baseline), load(args.candidate))
-        print("\n".join(lines))
-        return 0 if ok else 1
-    if args.map not in PRESET_MAPS.get(args.preset, (args.map,)):
-        print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
+    cache, why = cache_of(args.policy, *_run_args(args), sha=sha)
+    if cache is None:
+        print(f"nothing cached: {why}")
         return 2
-    results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.costs,
-                       args.ways, args.map, tuple(args.world), args.grounds, args.attack)
+    seeds = list(range(1, args.seeds + 1))
+    missing = [k for k in seeds if cache.get(k) is None]
+    print(f"{cache.folder}: {len(seeds) - len(missing)} of {len(seeds)} seed(s) cached (commit {sha[:12]})")
+    if missing:
+        print(f"missing: seed(s) {_seed_span(missing)}; fill them with the base's filler (README, Checking a change):\n"
+              f"   python {_filler(args.fill)} --ref {sha} -- {' '.join(_command_line(args))} --seeds {args.seeds}")
+        return 1
+    results = [cache.get(k) for k in seeds]
     print(table(results))
-    name = args.save or (f"{args.policy}-{args.preset}"
-                         + (f"-{args.costs}" if args.costs != "coded" else "")
-                         + (f"-ways{args.ways}" if args.ways is not None else "")
-                         + (f"-{args.map}" if args.map != FIRST_MAP else "")
-                         + "".join(f"-{w}" for w in args.world)
-                         + (f"-g{'-'.join(map(str, args.grounds))}" if args.grounds else "")
-                         + (f"-attack-{args.attack}" if args.attack else ""))
+    name = args.save or f"{_name(args)}@{sha[:7]}"
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
+    return 0
+
+
+def _filler(fill: str | None) -> str:
+    from . import baseline
+    return fill or str(baseline.ROOT / "base.py")
+
+
+def ab(args) -> int:
+    """`ab`: this checkout (the candidate) against commit --base's cached baseline, paired seed by seed, from --seeds
+    (12) seeds; 24, then 48 (--max-seeds) only while a headline difference (HEADLINE, and each --metric) is within 2
+    standard errors and not zero (ab_next). The base's missing seeds are run in its own checkout by the filler (--fill)
+    and cached there; the candidate's are run here (and cached, while its code is as committed). Says the seeds it
+    used and why it stopped; both sides saved (--save NAME: NAME and NAME-base; default the run's name and -ab)."""
+    from . import baseline
+    try:
+        base_sha = baseline.rev(args.base, REPO)
+    except ValueError as e:
+        print(e)
+        return 2
+    cache, why = cache_of(args.policy, *_run_args(args), sha=base_sha)
+    if cache is None:
+        print(f"no baseline: {why}")
+        return 2
+    steps = tuple(s for s in AB_SEEDS if args.seeds <= s <= args.max_seeds) or (args.seeds,)
+    if steps[0] != args.seeds:
+        steps = (args.seeds, *steps)
+    names = list(HEADLINE) + [m for m in args.metric if m not in HEADLINE]
+    me, mine_why = baseline.identity(REPO)
+    print(f"ab: {' '.join(_command_line(args)[1:])}\n"
+          f"   candidate {REPO} ({me[:12] + ', as committed' if me else mine_why + ': not cached'})\n"
+          f"   base {args.base} {base_sha[:12]}: {cache.folder}")
+    base: list[dict] = []
+    cand: list[dict] = []
+    n = 0
+    while True:
+        target = next(s for s in steps if s > n)
+        seeds = list(range(n + 1, target + 1))
+        missing = [k for k in seeds if cache.get(k) is None]
+        if missing:
+            filler = _filler(args.fill)
+            command = [sys.executable, filler, "--ref", base_sha, "--", *_command_line(args), "--seeds", str(target),
+                       "--jobs", str(args.jobs)]
+            if not os.path.exists(filler):
+                print(f"the base's seeds {_seed_span(missing)} aren't cached and there's no filler ({filler}): run "
+                      f"them in a checkout of {base_sha[:12]} with `run ... --cache`, or give --fill")
+                return 2
+            print(f"base: seed(s) {_seed_span(missing)} not cached: {' '.join(command[1:])}", flush=True)
+            done = subprocess.run(command, stdin=subprocess.DEVNULL)
+            missing = [k for k in seeds if cache.get(k) is None]
+            if done.returncode != 0 or missing:
+                print(f"the base's filler failed (exit {done.returncode}); seed(s) still missing: "
+                      f"{_seed_span(missing) if missing else 'none'}")
+                return 2
+        base += [cache.get(k) for k in seeds]
+        cand += cached_run(args.policy, seeds, args.preset, args.minutes, args.jobs, args.think, args.costs,
+                           args.ways, args.map, tuple(args.world), args.grounds, args.attack,
+                           say=lambda line: print("candidate " + line, flush=True))
+        n = target
+        rows = [difference(base, cand, m) for m in names]
+        print(f"\nseeds {_seed_span(list(range(1, n + 1)))}:\n{ab_table(rows)}", flush=True)
+        more, why = ab_next(rows, n, steps)
+        if more is None:
+            print(f"stopped at {n} seeds (1-{n}): {why}")
+            break
+        print(f"-> {more} seeds: {why}", flush=True)
+    ok, lines = compare(base, cand)
+    print("the bar (shown only): " + "; ".join(lines))
+    name = args.save or f"{_name(args)}-ab"
+    save(name, cand)
+    save(f"{name}-base", base)
+    print(f"saved {FOLDER / (name + '.json')} and {name}-base.json")
     return 0
 
 
