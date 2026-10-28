@@ -507,3 +507,58 @@ def test_a_boxs_copy_off_the_card_is_waited_for_on_a_fence_and_its_pixels_are_th
             assert np.array_equal(rgb, want[0][:, :, 2::-1])
         assert d._fenced == (6 if fence else 0)
         d.close()
+
+
+def test_the_fence_is_read_once_and_every_duplication_made_with_it(monkeypatch):
+    # (a duplication made again mid-run, after a lost one, has the grabber's fence: config.toml isn't read again, so an
+    # edit of it can't change a running perception service's capture halfway, nor a bad value stop its frame loop at a
+    # duplication made again; the status line's part says whether it's in use and how many of its waits ran out)
+    clock = Clock()
+    reads, made = [], []
+    monkeypatch.setattr(capture, "configured_fence", lambda path=None: reads.append(1) or True)
+    scripts = [first_frames(100_500) + [(DXGI_ERROR_ACCESS_LOST, 0, None)], first_frames(101_200, 80)]
+
+    def dxgi(point, fence=None):
+        made.append(fence)
+        com = FakeDxgi(clock, scripts.pop(0))
+        com._fence, com.fence_waited_out = ("context4", "fence"), 0
+        return com
+    monkeypatch.setattr(capture, "Dxgi", dxgi)
+    g = Grabber("dxgi", clock=clock, sleep=clock.sleep)
+    g._mss = FakeMss()
+    assert g.fence and g.fence_line() == ""  # (nothing open yet)
+    g.shot(AREA)
+    clock.now = 101.1
+    assert (g.shot(AREA).crop(0, 0, 4, 4) == 80).all()
+    assert reads == [1] and made == [True, True] and g.counts["duplicated again"] == 1
+    assert g.fence_line() == "the capture's copies waited for on a fence"
+    assert g.summary().startswith("capture dxgi (copies on a fence): dxgi 2")
+    g.dup.com.fence_waited_out = 3
+    assert g.fence_line() == "the capture's copies waited for on a fence (3 waits ran out)"
+    g.dup.com._fence = None  # (no ID3D11Fence: Windows before 10 1703)
+    assert g.fence_line() == "the capture's fence asked for, not in use (no ID3D11Fence here: Map's wait)"
+    g.failed(capture.CaptureError("test"))
+    g.shot(AREA)  # (mss for RETRY_S)
+    assert g.fence_line() == "the capture's fence asked for (no duplication open: mss now)"
+    off = Grabber("dxgi", fence=False, opener=Opener(clock, first_frames(100_500)), clock=clock, sleep=clock.sleep)
+    off.shot(AREA)
+    assert off.fence_line() == "" and off.summary().startswith("capture dxgi: ") and reads == [1]
+
+
+def test_the_services_status_line_says_the_fence_only_while_its_asked_for():
+    from types import SimpleNamespace
+
+    from gamelab import gcstats
+    from gamelab.localization import service as service_module
+
+    def line(fence_line):
+        said = []
+        grabber = SimpleNamespace(fence_line=lambda: fence_line)
+        frames = SimpleNamespace(grabber=grabber, holds=lambda: (0, 0.0))
+        me = SimpleNamespace(_status=-1e9, _frames_since=30, attached=lambda: [], rate=lambda: 30, publish=None,
+                             recording=None, runner=SimpleNamespace(frames=frames), log=said.append)
+        service_module.Service._say(me)
+        return said[0].removesuffix("; " + gcstats.STATS.line("status"))
+    assert line("").endswith("attached: nobody")
+    assert line("the capture's copies waited for on a fence").endswith(
+        "attached: nobody; the capture's copies waited for on a fence")

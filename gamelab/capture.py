@@ -26,6 +26,7 @@ import tomllib
 import uuid
 import weakref
 from collections.abc import Callable
+from functools import partial
 from ctypes import POINTER, byref, c_int64, c_uint, c_uint64, c_ulong, c_void_p, wintypes
 
 import mss
@@ -176,10 +177,15 @@ class Grabber:
     fakes), `clock` and `sleep` are time.monotonic's and time.sleep's stand-ins."""
 
     def __init__(self, method: str | None = None, opener: Callable | None = None,
-                 clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep):
+                 clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
+                 fence: bool | None = None):
         self.method = method or configured_method()
         if self.method not in METHODS:
             raise ValueError(f"capture method must be one of {METHODS}, got {self.method!r}")
+        # Whether its duplications' copies off the card are waited for on a fence (`[capture] fence`): read once, here,
+        # as `method` is (a bad value refused at the start), so a duplication made again mid-run (a UAC prompt, a
+        # frame that failed its checks) neither reads config.toml again nor does otherwise than the first.
+        self.fence = configured_fence() if fence is None else fence
         self.opener, self.clock, self.sleep = opener, clock, sleep
         self.dup: Duplicator | None = None
         self._mss = None
@@ -222,7 +228,7 @@ class Grabber:
         centre = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
         if self.dup is None or not self.dup.shows(centre):
             self.close_dxgi()
-            self.dup = Duplicator(centre, self.opener, self.clock)
+            self.dup = Duplicator(centre, self.opener or partial(Dxgi, fence=self.fence), self.clock)
         return self.dup if self.dup.covers(box) else None
 
     def failed(self, e: CaptureError) -> None:
@@ -262,9 +268,25 @@ class Grabber:
                 self._mss.close()
                 self._mss = None
 
+    def fence_line(self) -> str:
+        """The fence's part of the perception service's status line (`[capture] fence`): "" while it isn't asked for;
+        else whether the duplication held waits on it (or why not: no D3D11.4 here, mss now) and how many of its waits
+        ran out (COPY_WAIT_MS: Map's wait after it)."""
+        if not self.fence or self.method != "dxgi":
+            return ""
+        with self.lock:
+            com = None if self.dup is None else self.dup.com
+            if com is None:
+                return "the capture's fence asked for (no duplication open: mss now)" if self.counts["mss"] else ""
+            if getattr(com, "_fence", None) is None:
+                return "the capture's fence asked for, not in use (no ID3D11Fence here: Map's wait)"
+            out = getattr(com, "fence_waited_out", 0)
+            return "the capture's copies waited for on a fence" + (f" ({out} waits ran out)" if out else "")
+
     def summary(self) -> str:
         """Shots by method and what went wrong, for a report."""
-        text = f"capture {self.method}: " + ", ".join(f"{k} {v}" for k, v in self.counts.items())
+        text = f"capture {self.method}" + (" (copies on a fence)" if self.fence and self.method == "dxgi" else "")
+        text += ": " + ", ".join(f"{k} {v}" for k, v in self.counts.items())
         text += f", reopened {self.reopened}" if self.reopened else ""
         return text + (f"; DXGI failed last with: {self.error}" if self.error else "")
 
@@ -461,14 +483,14 @@ def _release_all(held: list[c_void_p]) -> None:
 _kernel = None
 
 
-def _wait_for(event: int, ms: int) -> None:
-    """WaitForSingleObject on `event`, `ms` at most (Python's lock let go meanwhile)."""
+def _wait_for(event: int, ms: int) -> int:
+    """WaitForSingleObject on `event`, `ms` at most (Python's lock let go meanwhile): 0 if it was set."""
     global _kernel
     if _kernel is None:
         _kernel = ctypes.WinDLL("kernel32")
         _kernel.WaitForSingleObject.restype = wintypes.DWORD
         _kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-    _kernel.WaitForSingleObject(event, ms)
+    return _kernel.WaitForSingleObject(event, ms)
 
 
 def qpc() -> int:
@@ -498,7 +520,12 @@ class Dxgi:
     the graphics card as it's taken (DXGI's own is handed back at once), and boxes of it are copied off
     the card through a staging texture. Raises CaptureError if the monitor can't be duplicated."""
 
-    def __init__(self, point: tuple[int, int]):
+    fence_waited_out = 0  # its copies' waits on the fence that ran out (COPY_WAIT_MS; Map waited after)
+
+    def __init__(self, point: tuple[int, int], fence: bool | None = None):
+        """`fence`: whether its copies off the card are waited for on a fence (None: config.toml's `[capture] fence`;
+        the Grabber passes its own, read once)."""
+        self._want_fence = configured_fence() if fence is None else fence
         self._held: list[c_void_p] = []  # every COM pointer this holds, released in reverse
         self._finalizer = weakref.finalize(self, _release_all, self._held)
         self._format_checked = False
@@ -540,7 +567,7 @@ class Dxgi:
         self._device, self._context, self._dupl = device, context, dupl
         self._last = self._texture(USAGE_DEFAULT, 0)
         self._staging = self._texture(USAGE_STAGING, CPU_ACCESS_READ)
-        self._fence = self._fence_of(device, context) if configured_fence() else None
+        self._fence = self._fence_of(device, context) if self._want_fence else None
         self._freq = qpc_frequency()
         self._offset = qpc_offset(self._freq)
 
@@ -618,7 +645,8 @@ class Dxgi:
         if _call(ctx4, CONTEXT4_SIGNAL, fence, c_uint64(self._fenced), argtypes=(c_void_p, c_uint64)) & MASK:
             return
         _call(self._context, CONTEXT_FLUSH, restype=None)
-        _wait_for(self._event, COPY_WAIT_MS)
+        if _wait_for(self._event, COPY_WAIT_MS) != 0:  # (WAIT_TIMEOUT: Map waits as it would)
+            self.fence_waited_out += 1
 
     def _texture(self, usage: int, cpu_access: int) -> c_void_p:
         """A texture the monitor's size, as its frames are."""

@@ -834,6 +834,9 @@ class Service:
             held, longest = self.runner.frames.holds()  # (frames.HELD_COUNT_S: how often the capture holds a frame)
             if held:
                 line += f"; {held} frames held 50-500 ms (the longest {1000 * longest:.0f} ms), stamped as now"
+        grabber = getattr(getattr(self.runner, "frames", None), "grabber", None)
+        if grabber is not None and hasattr(grabber, "fence_line") and (fenced := grabber.fence_line()):
+            line += f"; {fenced}"  # (only with `[capture] fence` on: capture.Grabber.fence_line)
         self.log(line + "; " + gcstats.STATS.line("status"))
 
     def close(self) -> None:
