@@ -34,6 +34,8 @@ OLD_SHOT_LOG = LAB / "shots.jsonl"  # ... as logged until 2026-10-20: a kill mad
 PROBE_LOG = LAB / "probe_geometry.jsonl"  # the in-game probes' throws (behavior.probe): every monster in front,
                                            # where at the pick, and what each showed after the star was due
 HIT_LOG = LAB / "hits.jsonl"     # hits taken standing still: how far each pushed her
+TOUCHES = LAB / "touches.jsonl"  # her touches as her HP number measured them, exactly (behavior.safety: the safety
+                                # stop's touch sizes)
 PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)
@@ -46,7 +48,7 @@ WINDOW_TRIES = LAB / "window_tries.json"  # when Alt+Enter was tried on the clie
 CHARACTERS = "characters"
 MINE = {"calibration": "CALIBRATION", "tag_template": "TAG_TEMPLATE", "tag_full": "TAG_FULL", "heading": "HEADING",
         "heading_seed": "HEADING_SEED", "heading_shots": "HEADING_SHOTS", "shot_log": "SHOT_LOG",
-        "probe_log": "PROBE_LOG", "hit_log": "HIT_LOG", "pet": "PET", "grounds": "GROUNDS"}
+        "probe_log": "PROBE_LOG", "hit_log": "HIT_LOG", "touches": "TOUCHES", "pet": "PET", "grounds": "GROUNDS"}
 
 
 class Files:

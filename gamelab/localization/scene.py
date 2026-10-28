@@ -136,6 +136,7 @@ class Scene(Observation):
             view = [round(self.map_x(0)), round(self.map_y(0)), round(self.map_x(w)),
                     round(self.map_y(h * self.geo.hud_top))]
         return {"her": her, "hp": round(self.hp, 3), "mp": round(self.mp, 3),
+                **({"hp_of": list(self.hp_of)} if self.hp_of is not None else {}),
                 "monsters": [_monster_record(m) for m in self.monsters],
                 **({"swept": [_monster_record(m) for m in self.swept]} if self.swept else {}),
                 "rows": [[round(lo), round(hi)] for lo, hi in self.rows],

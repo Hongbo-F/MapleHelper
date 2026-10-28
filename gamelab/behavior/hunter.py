@@ -31,6 +31,7 @@ import numpy as np
 
 from maplehelper.config import GameKeys
 
+from .. import character as profiles
 from .. import paths, telemetry
 from ..attack import danger
 from ..attack.reach import LOOK_DOWN, LOOK_UP
@@ -47,7 +48,7 @@ from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..localization.worldstate import reading_of
 from ..motion import physics
-from ..perception import drops, exp_number
+from ..perception import drops, exp_number, hp_number
 from ..perception.eyes import Eyes
 from ..perception.heading import Reading
 from ..perception.hud import exp_changed
@@ -59,7 +60,7 @@ from .keycheck import KeyCheck, KeyDoubt, RegularWatch, regular_reach, unquiet
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
-from .safety import HpWatch, threshold
+from .safety import MEASURED_N, HpWatch, TooStrong, Touches, kind_of_touch, reserve_of
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
@@ -70,6 +71,8 @@ PET_CLEAR = 250  # map units
 HP_ZERO = 0.02        # an HP read this low ...
 HP_DOUBT_AFTER = 0.3  # ... right after one this high isn't believed at once (_doubt_hp)
 HP_ZERO_SHOTS = 5     # frames of such looks saved, to find out why
+HIT_EXACT_S = 1.0     # s: a hit's text has her HP number's touch if it read one this soon before (touches came 1.38 s
+                      # apart at the least: behavior.safety)
 # s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
 # (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
 # from a look in that time comes while she's in the air (and is lost) or still sliding, from where she no longer is.
@@ -115,22 +118,37 @@ class Hunter:
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
                  low_hp: float | None = None, potion_hp: float = 0.5, skill: bool = False, feed=None,
                  her: danger.Her | None = None, attack: str | None = None):
-        """`low_hp`: the safety stop's threshold (behavior.safety: her HP under it for SAFETY_S ends the hunt; None:
-        safety.threshold's, SAFETY_HP under her pet's warning, under `potion_hp` with a potion key of her own);
-        `potion_hp`: her potion key's (drink_if_low; none bound, her pet drinks them). `feed`: what her
-        looks and glances come from (localization.feed.Feed: the perception service's client live,
+        """`low_hp`: the safety stop's threshold (behavior.safety: her HP under it ends the hunt; 1 or under a share of
+        her max HP, over 1 HP; None: her reserve, her profile's hits of the map's largest touch, under `potion_hp`'s with
+        a potion key of her own); `potion_hp`: her potion key's (drink_if_low; none bound, her pet drinks them). `feed`:
+        what her looks and glances come from (localization.feed.Feed: the perception service's client live,
         localization.service; SyncFeed in the simulator; None: the step on the eyes' own frames, feed.InlineFeed), told
-        of her throws. `her`: her HP and level, what a touch is measured against (attack.danger; config.toml [character]
-        by default). `attack`: which attack each throw is (behavior.attacks.MODES: 'choice', Lucky Seven but
+        of her throws. `her`: her HP, level and DEF, what a touch is measured against (attack.danger, the safety stop's
+        reserve; her profile's stats by default, config.toml [character]'s for the thief: her HP her max HP until the
+        HUD's number is read). `attack`: which attack each throw is (behavior.attacks.MODES: 'choice', Lucky Seven but
         to finish a monster and while her MP is under a cast; 'skill', Lucky Seven while she has the MP; 'regular';
         None: 'skill' with `skill`, else 'regular'), with her MP and Lucky Seven's level from config.toml
         [character]."""
         self.model, self.log = model, log
         c = physics.CHARACTER
-        self.danger = danger.of_map(model, her or danger.Her(c.hp, c.level))  # where touches would cost her
+        self.her = her or danger.Her(c.hp, c.level, c.defence)
+        self.danger = danger.of_map(model, self.her)  # where touches would cost her
         self.potion_hp = potion_hp
+        # The safety stop (behavior.safety): her reserve on this map, her profile's hits of its largest touch at her DEF
+        # and level (the level her EXP number says, once read: _level_check), her own touches as her HP number measured
+        # them kept (`touches`, her file); every look's HP watched against it (`hp_watch`), in HP: her HP number's, else
+        # her bar's at her max HP (the HUD's number's, else her profile's: `max_hp`).
+        profile = profiles.active()
+        self.safety_hits, self.pet_warning, self.guard = profile.safety_hits, profile.pet.hp_warning, profile.magic_guard
+        self.max_mp = c.mp
+        self.level = self.her.level      # her level as last known (her profile's, then her EXP number's)
+        self.max_hp_read: int | None = None  # her max HP as the HUD's number says it (None: not read yet)
+        self.hp_follow = hp_number.Follow()  # her HP number off her own looks (without a feed: the feed's step reads it)
+        self.touches = Touches(paths.of().touches)  # (hers)
+        self._last_touch: tuple[float, int, int] | None = None  # her HP number's last touch: when, HP before, after
         own = potion_hp if keys.hp_potion is not None else None  # (her own potion key's: under it, the stop's lower)
-        self.hp_watch = HpWatch(threshold(own) if low_hp is None else low_hp)  # the safety stop's: every look's HP
+        self.hp_watch = HpWatch(self._reserve(model), potion_hp=own, low_hp=low_hp, max_hp=self.max_hp)
+        log(f"safety stop: {self.hp_watch.describe()}")
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
         mode = attack or ("skill" if skill else "regular")
@@ -234,11 +252,34 @@ class Hunter:
         saw her HP drop."""
         return self.hit_at is not None and 0 <= s.t - self.hit_at < KNOCK_S
 
+    @property
+    def max_hp(self) -> float:
+        """Her max HP: the HUD's number's, once read; her profile's until then (`her`)."""
+        return float(self.max_hp_read) if self.max_hp_read is not None else float(self.her.hp)
+
+    def _reserve(self, model: MapModel | None = None):
+        """Her safety stop's reserve on the map (behavior.safety.reserve_of) at her level as last known."""
+        return reserve_of(model or self.model, self.safety_hits, self.her.defence, self.level, self.touches.rows,
+                          self.guard)
+
+    def too_strong(self) -> TooStrong | None:
+        """Whether the map's monsters are too strong for her (behavior.safety.TooStrong): with no `--low-hp`, her
+        reserve at her max HP (her MP full) at or over her pet's warning there, where her pet keeps her HP: the stop would
+        end the hunt at once. A command that hunts raises it before it hunts (gamelab.__main__)."""
+        w, m = self.hp_watch, self.max_hp
+        if w.low_hp is not None:
+            return None
+        th = w.threshold(m, self.max_mp)
+        if th < self.pet_warning * m:
+            return None
+        return TooStrong(th, m, self.pet_warning, w.words(m, self.max_mp))
+
     def health_check(self, s: Scene) -> None:
         """Asked at every look of a fight, a trip and a pass of the hunt loop: her potions and her pet's food
-        (drink_if_low), and the safety stop: her HP under its threshold SAFETY_S over SAFETY_LOOKS looks (`hp_watch`,
-        which every look feeds) raises behavior.safety.SafetyStop, once. Until 2026-10-26 under `low_hp` (30% in a tour)
-        it stopped the fight at once, "HP low", and the tour or the hunt loop sent her to rest on the chair. Then out of
+        (drink_if_low), and the safety stop: her HP under her reserve on two looks DEBOUNCE_S apart, or under one touch
+        two looks in a row (`hp_watch`, which every look feeds) raises behavior.safety.SafetyStop, once. Until 2026-10-26
+        under `low_hp` (30% in a tour) it stopped the fight at once, "HP low", and the tour or the hunt loop sent her to
+        rest on the chair; until 2026-10-28 the stop was 65% for 2 s over 3 looks. Then out of
         darts (behavior.darts: `darts`, which her attack choice feeds): her Lucky Seven presses taking no MP and
         killing nothing for long raise OutOfDarts, once, with what the pickup log says then; a stretch of them long
         enough has the log read (DartWatch.asks: if the game says she's out, the stop comes sooner). A stretch of 3
@@ -510,7 +551,10 @@ class Hunter:
         key was pressed). With a feed, from what it saw frame by frame (s.events, with the number as read then): two
         gains between two looks are two gains, and the HP lost is every drop's, a potion drunk between them or not."""
         self._doubt_hp(s)
-        self.hp_watch.see(s.t, s.hp)
+        exact = self._hp_number(s)
+        mp = getattr(s, "mp", None)
+        self.hp_watch.see(s.t, s.hp, self.max_hp, None if exact is None else exact[0],
+                          None if mp is None else mp * self.max_mp)
         self.darts.roped = self.on_rope(s)  # (presses keyed on a rope, which the game refuses, aren't counted)
         self.darts.at_top = (s.where is not None and s.where.platform is not None  # (her regular presses there watched)
                              and rope_at_top(self.model, s.where) is not None)
@@ -540,14 +584,85 @@ class Hunter:
         self.meter.notes.clear()
         self.exp_events = [e for e in self.exp_events if s.t - e[0] < EXP_MEMORY]
         self._exp = s.exp
+        self._level_check()
         if lost > 0 and self._last_hp is not None:
             self.report.damage_taken += lost
             self.hit_at = s.t
             if (watch := getattr(self.attacks, "watch", None)) is not None:
                 watch.touched(s.t)  # (her regular presses about it aren't judged: behavior.keycheck)
-            telemetry.emit("event", kind="hit", text=f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
+            touch = self._last_touch
+            text = (f"hit: HP {touch[1]} -> {touch[2]} (-{touch[1] - touch[2]})"
+                    if touch is not None and 0 <= s.t - touch[0] < HIT_EXACT_S
+                    else f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
+            telemetry.emit("event", kind="hit", text=text)
             self._log_hit(s)
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False
+
+    def _hp_number(self, s: Scene) -> tuple[int, int] | None:
+        """Her HP number at look `s`: (cur, max) if it was read at its last change (with a feed, the state's: Scene.hp_of,
+        its step reading it at every change; without, read here off the look's box when it changed: `hp_follow`), else
+        None. Each read since the last look says her max HP (_max_hp_seen), and each drop from the read before with
+        nothing unread between is a touch, exactly (_touched)."""
+        reads = []  # (t, cur, max, HP the read before said: None, not known)
+        events, box = getattr(s, "events", None), getattr(s, "hp_box", None)
+        if events is not None:
+            reads = [(e.t, e.data["cur"], e.data["max"], e.data.get("before")) for e in events
+                     if e.kind == "hp_read" and "cur" in e.data]
+            exact = getattr(s, "hp_of", None)
+        elif box is not None:
+            seen = self.hp_follow.see(box, s.geo)
+            if seen is not None and seen[0].cur is not None:
+                reads.append((s.t, seen[0].cur, seen[0].max, seen[1]))
+            exact = self.hp_follow.of
+        else:
+            exact = getattr(s, "hp_of", None)
+        for t, cur, most, before in reads:
+            self._max_hp_seen(most)
+            if before is not None and cur < before:
+                self._touched(t, before, cur, most)
+        if exact is not None:
+            self._max_hp_seen(exact[1])
+        return exact
+
+    def _max_hp_seen(self, most: int) -> None:
+        """Her HP number said her max HP is `most`: hers from now on (said when it's new, and once if her profile says
+        otherwise: config.toml [character] hp for the thief)."""
+        if most <= 0 or most == self.max_hp_read:
+            return
+        was, self.max_hp_read = self.max_hp_read, most
+        if was is not None:
+            self.log(f"  her max HP {most} by the HUD's number (was {was})")
+        elif most != self.her.hp:
+            self.log(f"  her max HP {most} by the HUD's number; her profile's (config.toml [character] hp) is "
+                     f"{self.her.hp:g}: stale")
+
+    def _touched(self, t: float, before: int, cur: int, most: int) -> None:
+        """Her HP number dropped from `before` to `cur` at t: a touch of that size, its kind told by its size
+        (behavior.safety.kind_of_touch), kept in her touches (`touches`: the safety stop's measured touches from the
+        next start or level-up). One over the reserve's touch is said."""
+        size = before - cur
+        self._last_touch = (t, before, cur)
+        kind = kind_of_touch(size, self.model, self.her.defence, self.level)
+        self.touches.add({"t": round(time.time(), 3), "map": self.model.id, "level": int(self.level), "hp": size,
+                          "kind": kind, "max": most})
+        top = self.hp_watch.reserve.touch
+        if top is not None and size > top.hp:
+            of = f", a {kind}'s" if kind else ""
+            text = (f"a touch of {size} HP ({before} -> {cur}{of}) is over the safety stop's {top.said} touch of "
+                    f"{top.hp}: kept, counted from the next start or level-up ({MEASURED_N} at her level needed)")
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="touch", text=text)
+
+    def _level_check(self) -> None:
+        """Her EXP number says another level than the one her reserve is for: the reserve made again at it (her
+        touches measured at that level, the formula at it), and said."""
+        level = None if self.meter.at is None else self.meter.at[0]
+        if level is None or level == self.level:
+            return
+        was, self.level = self.level, level
+        self.hp_watch.reserve = self._reserve()
+        self.log(f"  her level {level:g} by her EXP number (was {was:g}): the safety stop now "
+                 f"{self.hp_watch.describe(self.max_hp)}")
 
     def _heading(self, s: Scene) -> None:
         """Which way her look's frame shows her facing (Eyes.heading; not asked on a rope), for her keys (Actions.see:

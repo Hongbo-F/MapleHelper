@@ -502,7 +502,8 @@ def test_a_hunter_on_tree_dungeon_and_its_hunt_go_by_the_maps_worth():
     assert h.worth.coins["bronze"] == pytest.approx(33.4, abs=0.05) and h.drops.value is h.worth
     hunting = Hunt(SimpleNamespace(h=h, nav=SimpleNamespace(model=model), rng=random.Random(1), worth=None),
                    log=said.append)
-    assert hunting.valuable == h.worth.valuable == pytest.approx(66.8, abs=0.1) and said == []
+    assert hunting.valuable == h.worth.valuable == pytest.approx(66.8, abs=0.1)
+    assert [line for line in said if not line.startswith("safety stop: ")] == []  # (her reserve, said at her start)
 
 
 def test_a_hunter_on_a_map_whose_monsters_drops_are_not_known_says_so_once():
@@ -511,6 +512,7 @@ def test_a_hunter_on_a_map_whose_monsters_drops_are_not_known_says_so_once():
     from gamelab.behavior.hunter import Hunter
     said = []
     Hunter(SimpleNamespace(), KEYS, mapdata.parse(1, tree(), "Test Map", {}, {"2": "Snail"}, {"2": 2}), log=said.append)
+    said = [line for line in said if not line.startswith("safety stop: ")]  # (her reserve, said at her start)
     assert len(said) == 1 and said[0].startswith("drops not known for Snail ")
 
 

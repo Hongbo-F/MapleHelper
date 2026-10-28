@@ -341,6 +341,16 @@ def test_the_magicians_skill_tables_are_the_game_datas():
     assert set(column("2001003", "mobCount")) == {magician.CAST.mob_count}
 
 
+def test_the_safety_stops_hits_are_hers_the_thief_2_the_magician_3():
+    """The user, 2026-10-28: "Well for thief with high evasion this should be 2 hits, 3 for magician" (behavior.safety:
+    her reserve is that many of the map's largest touch); `gamelab character` says it."""
+    from gamelab.behavior import safety
+    assert (character.load("thief").safety_hits, character.load("magician").safety_hits) == (2, 3) == (
+        safety.HITS, 3)
+    assert "  safety stop: under 3 of the map's largest touches (behavior.safety)" in character.describe(
+        character.load("magician"))
+
+
 
 # --- the command line and physics (S0b) -------------------------------------------------------------------------
 

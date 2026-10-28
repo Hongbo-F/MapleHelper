@@ -132,6 +132,10 @@ PET = Pet(hp_warning=0.70, mp_warning=0.05, hp_heal=250.0, mp_heal=185.0)  # PLA
 PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=100.0, ground_danger=2.0, hp_exp=250.0,
                 seen_share=0.3, threat_s=1.7, keep_danger=0.08, meet_s=8.0)  # PLACEHOLDER (the thief's): re-tuned in
                                           # the simulator with her HP and DEF (S7), then her live kill times (L2)
+# The safety stop's reserve: three of the map's largest touches (behavior.safety). The user, 2026-10-28: "Well for thief
+# with high evasion this should be 2 hits, 3 for magician". With her placeholder 400 HP that's over her pet's 70% on Tree
+# Dungeon (3 Horny Mushroom touches of 131: 393 against 280): a command that hunts refuses the map (TooStrong).
+SAFETY_HITS = 3
 PLACEHOLDERS = ("stats", "skill levels", "keys", "name", "lock and delays", "damage", "miss", "the wand", "pet",
                 "MP policy", "priors")
 
@@ -154,7 +158,7 @@ def profile(cid: str = "magician") -> Character:
                                            attack_score=0.4,         # widened if her swing leaves it; refit on her
                                            attack_margin=0.2,        # cast frames (L1)
                                            hit_effect=(83, 94, 570)),  # Magic Claw's hit [data]
-                     placeholders=PLACEHOLDERS)
+                     placeholders=PLACEHOLDERS, safety_hits=SAFETY_HITS)
 
 
 def configured(c: Character, table: config.CharacterConfig) -> Character:

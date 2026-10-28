@@ -593,7 +593,10 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     the eyes have no calibration at its size (_fit_start: it waits START_WAIT_S at most, where it stopped), and on its
     looks later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client
     before the eyes are made (the pet's: PetWait). A command that hunts has the OCR's models loaded at its start, on a
-    thread of their own (perception.messages.warm: the message bar's first read comes in a fight)."""
+    thread of their own (perception.messages.warm: the message bar's first read comes in a fight). A command that
+    hunts (one that takes `--low-hp`: `hunt`, `tour`, `probe run`) on a map whose monsters are too strong for her
+    (behavior.safety.TooStrong: her safety stop's reserve at or over her pet's warning) is refused before it hunts,
+    unless `--low-hp` is given."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
     from .screen import GAME_VIEW
@@ -612,6 +615,9 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
         from .perception.messages import warm
         warm()
     hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
+    strong = getattr(hunter, "too_strong", None) if throws and not viewer and hasattr(args, "low_hp") else None
+    if strong is not None and (refused := strong()) is not None:
+        raise refused  # (the commands that hunt, which take --low-hp: `nav`'s trips have the stop as it is)
     if fix is not None and eyes.geo.client == GAME_VIEW:  # (Alt+Enter sets the game's own size, not the stretched one)
         hunter.senses.window_fix = fix
     return hunter
@@ -2259,14 +2265,16 @@ def attack_arg(s) -> None:
 
 
 def safety_arg(s) -> None:
-    """`--low-hp`: the safety stop's threshold (behavior.safety; None: its own, safety.threshold, which the command
-    line doesn't import: the elevated player builds this parser). Until 2026-10-26 `tour`'s stopped the fight and sent
-    her to rest on the chair (30%), and `hunt`'s and `probe run`'s handed back at once (35%)."""
+    """`--low-hp`: the safety stop's threshold (behavior.safety: 1 or under a share of her max HP, over 1 HP; None: her
+    reserve, which the command line doesn't import: the elevated player builds this parser). Until 2026-10-26 `tour`'s
+    stopped the fight and sent her to rest on the chair (30%), and `hunt`'s and `probe run`'s handed back at once (35%);
+    until 2026-10-28 it was a share always, 65% by default."""
     s.add_argument("--low-hp", type=float, default=None,
-                   help="the safety stop: her HP under this for 2 s ends the hunt, she goes to a safe place and you're "
-                        "paged (default: behavior.safety.SAFETY_HP, 0.65, five points under her pet's warning, 70%%; "
-                        "with an HP potion key of her own, five under --potion-hp if lower; 25%% two looks in a row "
-                        "stops it too)")
+                   help="the safety stop's threshold: her HP under it on two looks 0.6 s apart ends the hunt, she goes "
+                        "to a safe place and you're paged; 1 or under, a share of her max HP; over 1, HP (default: her "
+                        "profile's hits of the map's largest touch, in HP: the thief 2, the magician 3; with an HP "
+                        "potion key of her own, five points under --potion-hp if lower; under one touch two looks in a "
+                        "row stops it too)")
 
 
 def _attack(args) -> str:
@@ -2705,7 +2713,7 @@ def main(argv=None) -> int:
         from .behavior.safety import HuntStop
         if not isinstance(e, HuntStop):  # (the safety stop, out of darts: behavior.safety, behavior.darts)
             raise
-        print(f"{e.label}: {e}. The hunt ended; she went to a safe place (the log says where). {e.advice}")
+        print(f"{e.label}: {e}. {e.after} {e.advice}")
         return e.exit_code
     finally:
         _close_perception()

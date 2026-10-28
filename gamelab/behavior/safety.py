@@ -1,52 +1,257 @@
-"""The safety stop: her HP under SAFETY_HP for SAFETY_S (SAFETY_LOOKS looks of it at least), or under FLOOR_HP
-FLOOR_LOOKS looks in a row, ends the hunt. She goes to a safe place as she does on the Lie Detector (behavior.retreat:
-`on_alarm` around every hunting command), the log says why in capitals, and whoever is at the PC is paged as the Lie
-Detector pages them (control.alarm.page: alert sounds and a Windows notification that doesn't take focus from the game).
-No sitting and no waiting for HP: the user, 2026-10-26, after a touch stood her up from the chair and she waited out the
-rest's 120 s with her HP flat: "Just remove the sit recover hp functionality, it's no longer needed". Her pet drinks her
-potions.
+"""The safety stop: her HP, in HP, under a reserve of touches (`Reserve`: her profile's hits times the largest touch
+the map's monsters can deal her) on LOOKS looks DEBOUNCE_S apart at least, or under one touch (the floor) FLOOR_LOOKS
+looks in a row, ends the hunt. She goes to a safe place as she does on the Lie Detector (behavior.retreat: `on_alarm`
+around every hunting command), the log says why in capitals with the numbers, and whoever is at the PC is paged as the
+Lie Detector pages them (control.alarm.page: alert sounds and a Windows notification that doesn't take focus from the
+game). No sitting and no waiting for HP: the user, 2026-10-26, "Just remove the sit recover hp functionality, it's no
+longer needed". Her pet drinks her potions.
 
-Why 65% for 2 s. Her pet drinks an HP potion (an Orange Potion, 250 HP of her 774) when a touch leaves her under its
-warning, 70%: live on 2026-10-25 every reading under 0.70 was followed by a rise within 0.12-0.16 s (the perception
-service's 10 readings a second; sim.world.PET_HP). Over the five live hunts of 2026-10-25 23:43 to 2026-10-26 01:28
-(79 minutes, 10,548 looks; their telemetry's 'scene' records, D:/MapleHelper-scratch/norest/hp_live.py) her HP never
-read under 53.8%; under 65% on 8 single looks, the next look over it 0.86 s later at the most; under 70% in 19
-stretches, three looks over 0.17 s at the most. A Horny Mushroom's touch takes 111-131 HP, 15-17% of hers (meowdb's
-formula, sim.world), and after a touch she can't be touched for a moment: with the pet drinking she's back over 65%
-within tenths of a second. Under 65% for 2 s, three looks of it, means it isn't drinking: out of potions, hungry, not
-out. Five points under its warning, so a bar read at 69.x% isn't taken for it; 2 s rather than 1, so a lag of the
-game's isn't. First built at 40% (two Horny touches of margin, the 30% first thought of one): the review found it late
-once the potions ran out, in the simulator 5 deaths in 14 such runs against 2 at 65% (master, resting, 9): her looks
-pause 2-3.4 s on trips and loot runs, and on the tour's seed 2 she was at 40-47% for 10 s with no potion, three touches
-in a gap of 3.4 s, her first look under 40% read 11%, and she died before 2 s of looks under it. The floor, FLOOR_HP
-FLOOR_LOOKS looks in a row, is for such a gap: under it the 2 s aren't waited (an HP read 0 after a higher one isn't
-believed until the next look reads it too, Hunter._doubt_hp: it takes three such misreads in a row). With a potion key
-of her own drinking under `--potion-hp` (none bound since 2026-10-23; the first map's simulator binds one, no pet),
-five points under that if it's lower (`threshold`): between the two is where her key keeps her HP.
+The rule is the user's, 2026-10-28 ~12:10: "The safety stop should be tuned, it should be HP under the amount of taking
+3 hits from the monsters on the map", and at once after: "Well for thief with high evasion this should be 2 hits, 3 for
+magician". So the hits are her profile's (gamelab.character's `safety_hits`: the thief 2, the magician 3), and the
+threshold is absolute HP, per map and per character, and follows her as she levels. Before it, at ~01:20: "don't worry
+about the safety stop, it's because the hit damage (110-125) is more than the HP portion recover amount (100), the pet
+is still drinking HP potion on each hit": a stop at 64% of her HP had fired live at 01:00:55 though nothing was wrong.
+
+Why the old rule went (65% of her HP for 2 s over 3 looks, or 25% two looks in a row). It rested on her pet drinking an
+Orange Potion (250 HP of her 774) whenever a touch left her under its 70%, which put her back over 65% within tenths
+of a second. By 2026-10-28 she was level 28, her max HP 840 (the HUD's "HP [840/840]"; config.toml's [character] hp
+still 774, level 25's), and her pet's potion +100 against a Horny Mushroom's touch of 103-122 (38 read exactly; 110-125
+by the user): each touch under 70% leaves her a net 3-31 HP lower, and 65% is a place she stays with nothing wrong.
+
+The numbers (2026-10-28, offline: D:/MapleHelper-scratch/safety3/design; her HP number read exactly on all 50,193
+frames of the 17 recordings of 10-24 23:50 to 10-28 12:16, 299 changes of it, 178 touches; the perception service's
+bar about 8 a second, 1,204 drops; 52,716 hunter looks of 23 tour and nav runs since 10-25):
+- A touch (`Touch`): the formula's top (attack.danger.touch_range: meowdb's formula at her DEF and level, her profile's
+  DEF 75 and the level her EXP number says), or, once MEASURED_N of her own exact touches by that kind at her level are
+  kept (her HP number's drops: perception.hp_number, `Touches`), MARGIN over the largest of them if that's more. On Tree
+  Dungeon at level 28 a Horny Mushroom 131 (the formula's top; measured 103-122, median 111, p90 117: 129 with the
+  margin), a Green Mushroom 59 (measured 44-52), a Slime 9. At levels 24-26 the touches were bigger (Horny 113-134):
+  her DEF about 64 then, 111 now (danger.DEFENCE). MARGIN: the largest of 38 (122) against the fitted formula's top
+  (123), and a bar px. A kind is told by the touch's size (`kind_of`), not by the monster nearest her: none was seen near
+  her at 853 of 1,220 touches; on Tree Dungeon the kinds' ranges don't overlap.
+- The threshold: hits x the largest touch. Tree Dungeon at level 28 for the thief 262 HP of 840 (31%); for a magician
+  393. West Rocky Mountain II 170 (an Axe Stump's 85), Thicket Around the Beach II 26 (an Orange Mushroom's 13). A map
+  whose monsters' touches the game data doesn't give: FALLBACK_SHARE of her max HP, said so.
+- Her HP: the HUD's number when it was read at its last change (Hunter: Scene.hp_of, the perception service's world
+  step reading it on every change), else the bar less a px (BAR_SLACK: the bar's red px is ceil(104 cur / max) or one
+  more outside its animation, so less a px it's under her HP or over by under a px, 8 HP). Her max HP the number's too,
+  else her profile's (config.toml [character] hp: said once when they differ).
+- The debounce: her pet's potion lands 0.04-0.20 s after the touch it answers (61 drinks; one frame's median); the bar
+  lags the number by 0.07-0.25 s and settles within a px by 0.37 s; two touches came 1.38 s apart at the least (25 under
+  5 s; seven at 1.47-1.50 s). No misread in 240,069 looks and frames since 10-25 (the 63 one-frame dips of the bar were
+  touches its potion answered, the number says). So two looks under it DEBOUNCE_S apart (a potion and the bar's settling
+  waited for; the next touch can't have come); a look at or over it starts again; under the floor (one touch) two looks
+  in a row stop it at once, however close (a gap in her looks can't hide a fall). The looks' gaps: median 0.13 s, p90
+  0.94, p99 2.78, at most 10.7. An HP read 0 after a higher one isn't believed until the next look reads it too
+  (Hunter._doubt_hp), as before.
+- Replayed on the live looks since 10-25 (replay.py): the old rule stops once, at 10-28 01:00:55.86 (64% for 2.07 s,
+  7 looks: the live stop exactly), this one never; her lowest look 409 HP (10-26 01:07:54, level 25: 147 over 262), at
+  level 28 461 (01:00:50.9: 199 over, 1.5 touches). At 01:00:55 she was at 533-541, dipping to 461-469 a moment.
+  Three hits for the thief would be 393: no stop either, but 16 HP clear at level 25 (68 at 28).
+
+With a potion key of her own drinking under `--potion-hp` (none bound since 2026-10-23; the first map's simulator binds
+one, no pet), UNDER under that if it's lower (`HpWatch.threshold`): between the two is where her key keeps her HP.
+`--low-hp` overrides it all: 1 or under, a share of her max HP; over 1, HP. A magician's Magic Guard (her profile's
+`magic_guard`) takes its share of a touch to her MP: the touch less that while her MP pays for the hits.
 
 It's watched on every look (Hunter._vitals: whoever took it) and raised where every fight, trip and pass already asks
 after her health, every look (Hunter.health_check), once: what follows it (her way to the safe place, the stand-by) goes
-on. With `--low-hp` the threshold is another (`hunt`, `probe run`, `tour`).
+on. A reserve over her pet's warning at her max HP would stop her at once: a command that hunts refuses the map up front
+then (TooStrong: "too strong for her here"), unless `--low-hp` is given.
 
 Out of darts (behavior.darts) ends a hunt the same way: both are a HuntStop, which retreat.on_alarm, the command line
 and the simulator take as one."""
 
-from dataclasses import dataclass
+import json
+import math
+from dataclasses import dataclass, field
+from pathlib import Path
 
-SAFETY_HP = 0.65    # HP under this (UNDER under her pet's warning, 70%) ...
-SAFETY_S = 2.0      # ... for this long ...
-SAFETY_LOOKS = 3    # ... over this many looks at least, stops the hunt
-FLOOR_HP = 0.25     # ... and HP under this ...
-FLOOR_LOOKS = 2     # ... on this many looks in a row stops it then (a gap in her looks can't hide a fall)
-UNDER = 0.05        # with a potion key of her own (`--potion-hp`), this under its threshold if that's lower
-EXIT = 4            # the command's exit code after it (the Lie Detector's is 3)
+from ..attack.danger import TOP_U, touch_range, touch_taken
+from ..perception.kinds import kind_of
+
+HITS = 2              # her profile's hits by default (the thief's: gamelab.character's safety_hits)
+DEBOUNCE_S = 0.6      # s: under the threshold on two looks this far apart at least stops the hunt ...
+LOOKS = 2             # ... (this many looks)
+FLOOR_TOUCHES = 1     # ... and under this many touches ...
+FLOOR_LOOKS = 2       # ... on this many looks in a row, however close, stops it then
+MARGIN = 0.05         # over the largest of her measured touches by a kind, once ...
+MEASURED_N = 10       # ... this many are kept at her level
+FALLBACK_SHARE = 0.35  # of her max HP: the threshold on a map whose monsters' touches the game data doesn't give
+BAR_SLACK = 1 / 104   # the bar's share less this (a px at 1366x768) when her HP number isn't read
+UNDER = 0.05          # with a potion key of her own (`--potion-hp`), this under its threshold if that's lower
+KIND_DEF = (0.5, 2.0)  # a touch is a kind's if the formula gives it at her DEF times these (kind_of)
+EXIT = 4              # the command's exit code after it (the Lie Detector's is 3)
 
 
-def threshold(potion_hp: float | None = None) -> float:
-    """The safety stop's threshold: SAFETY_HP, under her pet's warning; with a potion key of her own drinking under
-    `potion_hp` (Hunter.drink_if_low; none bound since 2026-10-23), UNDER under that if it's lower: between the two her
-    HP is where her key leaves it."""
-    return SAFETY_HP if potion_hp is None else min(SAFETY_HP, round(potion_hp - UNDER, 3))
+@dataclass(frozen=True)
+class Touch:
+    """A kind's touch as the safety stop counts it: `prior`, the formula's top at her DEF and level; `measured`, the
+    largest of her exact touches by it at her level, of `n` (kept: `Touches`). `hp`: the prior, or MARGIN over the
+    measured once there are MEASURED_N, if that's more. `name`: the kind's as the game data has it ("Horny
+    Mushroom")."""
+    kind: str
+    prior: int
+    measured: int | None = None
+    n: int = 0
+    name: str = ""
+
+    @property
+    def said(self) -> str:
+        return self.name or self.kind
+
+    @property
+    def counted(self) -> bool:
+        return self.measured is not None and self.n >= MEASURED_N
+
+    @property
+    def hp(self) -> int:
+        if not self.counted:
+            return self.prior
+        return max(self.prior, math.ceil((1 + MARGIN) * self.measured))
+
+    def source(self, defence: float, level: float) -> str:
+        """Where its HP comes from, in words."""
+        prior = f"the formula's top at DEF {defence:g}, level {level:g}"
+        if self.measured is None:
+            return prior
+        mine = f"{self.n} measured at level {level:g}, the largest {self.measured}"
+        if not self.counted:
+            return f"{prior}; {mine} ({MEASURED_N} needed)"
+        return f"{mine}, {MARGIN:.0%} over it" if self.hp > self.prior else f"{prior}; {mine}"
+
+
+@dataclass(frozen=True)
+class Reserve:
+    """The safety stop's reserve on one map for her: `hits` touches of the largest one (`touches`, by kind, the
+    largest first: none if the game data gives no touch for the map's monsters, FALLBACK_SHARE of her max HP then), at
+    her `level` and `defence`; `guard`: her Magic Guard's share of a touch to her MP while it's up (0: none)."""
+    hits: int = HITS
+    touches: tuple[Touch, ...] = ()
+    level: float = 0.0
+    defence: float = 0.0
+    guard: float = 0.0
+    map_id: int | None = None
+
+    @property
+    def touch(self) -> Touch | None:
+        """The largest touch, None without game data."""
+        return self.touches[0] if self.touches else None
+
+    def touch_hp(self, mp: float | None = None) -> float | None:
+        """The largest touch's HP, less her Magic Guard's share while her MP (`mp`, in MP; None: not known) pays for
+        the hits; None without game data."""
+        t = self.touch
+        if t is None:
+            return None
+        if self.guard and mp is not None and mp >= self.guard * t.hp * self.hits:
+            return t.hp * (1 - self.guard)
+        return float(t.hp)
+
+    def hp(self, max_hp: float, mp: float | None = None) -> float:
+        """The threshold in HP at her max HP `max_hp`."""
+        touch = self.touch_hp(mp)
+        return FALLBACK_SHARE * max_hp if touch is None else self.hits * touch
+
+    def floor(self, max_hp: float, mp: float | None = None) -> float:
+        """The floor in HP: FLOOR_TOUCHES touches (without game data, as many of the fallback's hits)."""
+        touch = self.touch_hp(mp)
+        return FLOOR_TOUCHES * (FALLBACK_SHARE * max_hp / self.hits if touch is None else touch)
+
+    def words(self, max_hp: float, mp: float | None = None) -> str:
+        """The threshold in words: "2 Horny Mushroom touches of 131"."""
+        touch = self.touch_hp(mp)
+        if touch is None:
+            return f"{FALLBACK_SHARE:.0%} of her {max_hp:.0f} HP (no game data for the map's monsters' touches)"
+        return (f"{self.hits} {self.touch.said} touch{'es' if self.hits != 1 else ''} of {touch:.0f}"
+                + (f" ({self.touch.hp} less Magic Guard's {self.guard:.0%})" if touch < self.touch.hp else ""))
+
+    def floor_words(self, mp: float | None = None) -> str:
+        """The floor in words: "one Horny Mushroom touch"."""
+        n = "one" if FLOOR_TOUCHES == 1 else str(FLOOR_TOUCHES)
+        if self.touch_hp(mp) is None:
+            return f"{n} of the fallback's {self.hits} hits"
+        return f"{n} {self.touch.said} touch{'es' if FLOOR_TOUCHES != 1 else ''}"
+
+    def describe(self, max_hp: float, mp: float | None = None) -> str:
+        """The reserve as the log says it at a hunt's start: its threshold, floor, and where the touch comes from."""
+        th = self.hp(max_hp, mp)
+        out = f"under {th:.0f} HP of {max_hp:.0f} ({th / max(max_hp, 1):.0%}: {self.words(max_hp, mp)})"
+        if (t := self.touch) is not None:
+            out += f"; {t.said} {t.hp}: {t.source(self.defence, self.level)}"
+            others = ", ".join(f"{o.said} {o.hp}" for o in self.touches[1:])
+            if others:
+                out += f"; then {others}"
+        return out + f"; at once under {self.floor(max_hp, mp):.0f} two looks in a row"
+
+
+def kinds_of(model) -> dict[str, tuple[float, str]]:
+    """The map's kinds whose touch the game data gives, by kind: the largest touch damage (PADamage) of its names, and
+    that name."""
+    out: dict[str, tuple[float, str]] = {}
+    for name, pad in getattr(model, "mob_damage", {}).items():
+        if pad > 0:
+            k = kind_of(name)
+            out[k] = max(out.get(k, (0.0, "")), (float(pad), name))
+    return out
+
+
+def kind_of_touch(hp: float, model, defence: float, level: float) -> str | None:
+    """The kind of the map's a touch of `hp` was, by its size: the kinds whose touch the formula gives at her DEF
+    times KIND_DEF's span (her DEF isn't known for sure: 64 at level 24-26, 111 at 28) and level, the largest of them
+    if several; None if none (it counts for every kind of the map then: `reserve_of`)."""
+    lo_def, hi_def = defence * KIND_DEF[0], defence * KIND_DEF[1]
+    fits = [(pad, k) for k, (pad, _) in kinds_of(model).items()
+            if touch_taken(pad, hi_def, level, 0.0) <= hp <= touch_taken(pad, lo_def, level, TOP_U)]
+    return max(fits)[1] if fits else None
+
+
+def reserve_of(model, hits: int = HITS, defence: float = 75.0, level: float = 1.0, touches=(),
+               guard: float = 0.0) -> Reserve:
+    """Her reserve on `model`'s map: `hits` of the largest touch of its kinds at `defence` and `level`, each kind's
+    touch its prior or her `touches` (Touches.rows: those at her level of that kind, and those of no kind taken on this
+    map) as Touch says."""
+    level_now = int(level)
+    mine = [r for r in touches if r.get("level") == level_now and isinstance(r.get("hp"), (int, float))]
+    out = []
+    for k, (pad, name) in kinds_of(model).items():
+        sizes = [r["hp"] for r in mine if r.get("kind") == k or (r.get("kind") is None and r.get("map") == model.id)]
+        out.append(Touch(k, touch_range(pad, defence, level)[1], max(sizes) if sizes else None, len(sizes), name))
+    out.sort(key=lambda t: (-t.hp, t.kind))
+    return Reserve(hits, tuple(out), level, defence, guard, getattr(model, "id", None))
+
+
+class Touches:
+    """Her touches as her HP number measured them (a drop from one read to the next, nothing unread between: exact),
+    kept across runs in her own file (paths.of().touches), a JSON line each: t (the wall clock), map, level, hp, kind
+    (kind_of_touch; None: none fits), max (her max HP then). `path` None: kept in memory only."""
+
+    def __init__(self, path: Path | None = None):
+        self.path = path
+        self.rows: list[dict] = []
+        if path is not None:
+            try:
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict):
+                        self.rows.append(row)
+            except OSError:  # (none kept yet)
+                pass
+
+    def add(self, row: dict) -> None:
+        self.rows.append(row)
+        if self.path is None:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except OSError:
+            pass
 
 
 class HuntStop(Exception):
@@ -54,14 +259,15 @@ class HuntStop(Exception):
     of darts (behavior.darts.OutOfDarts). Around every hunting command (behavior.retreat.on_alarm) she goes to a safe
     place as on the Lie Detector, the log says why in capitals (`label`: "<label>: <the stop>. The hunt ends: <ends>"),
     a telemetry event says so (`event`), whoever is at the PC is paged (`page`: a title and a line), the rolling
-    recording's last `keep_s` s are saved (0: none), and the command exits with `exit_code`, printing `advice`
-    (gamelab.__main__). `title`: its retreat's telemetry events' word (behavior.retreat.Why)."""
+    recording's last `keep_s` s are saved (0: none), and the command exits with `exit_code`, printing `after` and
+    `advice` (gamelab.__main__). `title`: its retreat's telemetry events' word (behavior.retreat.Why)."""
     label = "STOP"
     title = "Stop"
     event = "stop"
     exit_code = 1
     keep_s = 0.0
     ends = "to a safe place"
+    after = "The hunt ended; she went to a safe place (the log says where)."
     advice = ""
     at = 0.0
 
@@ -72,9 +278,10 @@ class HuntStop(Exception):
 
 class SafetyStop(HuntStop):
     """Her HP stayed under the safety stop's threshold: the hunt ends (raised by Hunter.health_check). `hp`: her HP at
-    the look that ended it; `seconds`: how long it had been under; `looks`: the looks of it; `threshold`; `at`: that
-    look's time (time.monotonic); `floor`: the floor if it was under that which stopped it (FLOOR_LOOKS looks in a
-    row), else None."""
+    the look that ended it (HP; `exact`: her HP number's, else the bar's less a px); `seconds`: how long it had been
+    under; `looks`: the looks of it; `threshold` (HP) and `why`, it in words ("2 Horny Mushroom touches of 131");
+    `max_hp`; `at`: that look's time (time.monotonic); `floor`: the floor (HP) if it was under that which stopped it
+    (FLOOR_LOOKS looks in a row), else None, and `floor_why` in words."""
     label = "SAFETY STOP"
     title = "Safety stop"
     event = "safety_stop"
@@ -83,44 +290,127 @@ class SafetyStop(HuntStop):
     advice = "Check her HP potions and her pet (fed, out, its potions) in the game before hunting again."
 
     def __init__(self, hp: float, seconds: float, looks: int, threshold: float, at: float = 0.0,
-                 floor: float | None = None):
+                 floor: float | None = None, *, max_hp: float | None = None, why: str = "", exact: bool = True,
+                 floor_why: str = "the floor"):
         self.hp, self.seconds, self.looks, self.threshold, self.at = hp, seconds, looks, threshold, at
-        self.floor = floor
-        under = f"under {threshold:.0%} for {seconds:.1f} s ({looks} looks)"
+        self.floor, self.max_hp, self.why, self.exact, self.floor_why = floor, max_hp, why, exact, floor_why
+        under = f"under {self.limit} for {seconds:.1f} s ({looks} looks)"
         if floor is not None:
-            under += f", under {floor:.0%} on {FLOOR_LOOKS} looks in a row"
-        super().__init__(f"HP {hp:.0%}, {under}: her pet's potions aren't keeping her up (none left? the pet hungry "
-                         "or not out?)" + ("; she may be dead" if hp <= 0.02 else ""))
+            under += f", under {floor_why} ({floor:.0f}) on {FLOOR_LOOKS} looks in a row"
+        dead = hp <= (0.02 * max_hp if max_hp else 1.0)
+        super().__init__(f"{self.her_hp}, {under}: her pet's potions aren't keeping her up (none left? the pet hungry "
+                         "or not out?)" + ("; she may be dead" if dead else ""))
+
+    @property
+    def her_hp(self) -> str:
+        """"HP 352 of 840" ("about" when the bar's)."""
+        return (f"HP {'' if self.exact else 'about '}{self.hp:.0f}"
+                + (f" of {self.max_hp:.0f}" if self.max_hp else ""))
+
+    @property
+    def limit(self) -> str:
+        """"2 Horny Mushroom touches of 131 (262)"."""
+        return f"{self.why} ({self.threshold:.0f})" if self.why else f"{self.threshold:.0f}"
 
     def page(self) -> tuple[str, str]:
         """What's paged (control.alarm.page): a title and a line."""
         return ("MapleStory: her HP stayed low",
-                f"gamelab stopped the hunt: HP {self.hp:.0%}, under {self.threshold:.0%} for {self.seconds:.1f} s. "
+                f"gamelab stopped the hunt: {self.her_hp}, under {self.limit} for {self.seconds:.1f} s. "
                 "She went to a safe place. Check her potions and her pet.")
+
+
+class TooStrong(HuntStop):
+    """The map's monsters are too strong for her: her reserve at her max HP is at or over her pet's warning (where her
+    pet keeps her HP), so the safety stop would end the hunt at once. Raised before a hunting command hunts
+    (gamelab.__main__'s _hunter: Hunter.too_strong), unless `--low-hp` sets the threshold."""
+    label = "TOO STRONG"
+    title = "Too strong"
+    event = "too_strong"
+    exit_code = EXIT
+    ends = "nothing hunted"
+    after = "Nothing was hunted."
+    advice = "Hunt a map whose touches leave her pet's potions room, or give --low-hp to hunt here anyway."
+
+    def __init__(self, threshold: float, max_hp: float, warning: float, why: str):
+        self.threshold, self.max_hp, self.warning, self.why = threshold, max_hp, warning, why
+        super().__init__(f"the map's monsters are too strong for her here: {why} ({threshold:.0f} HP) is at or over "
+                         f"her pet's warning, {warning:.0%} of her {max_hp:.0f} HP ({warning * max_hp:.0f}), where her "
+                         "pet keeps her: the safety stop would end the hunt at once")
+
+    def page(self) -> tuple[str, str]:
+        return ("MapleStory: too strong for her here", str(self))
 
 
 @dataclass
 class HpWatch:
-    """The safety stop's watch over her HP, a look at a time (`see`); `due` once it's to stop, then never again."""
-    threshold: float = SAFETY_HP
-    since: float | None = None  # the first look of the stretch under the threshold (its time)
-    looks: int = 0              # ... the looks of it
-    low: int = 0                # ... the looks in a row under the floor (FLOOR_HP, or the threshold if that's lower)
-    hp: float = 1.0             # the last look's
-    at: float = 0.0             # ... and its time
+    """The safety stop's watch over her HP, a look at a time (`see`); `due` once it's to stop, then never again.
+    `reserve`: hers on the map (the threshold, the floor); `potion_hp`: her own potion key's threshold (a share; None:
+    no key of hers); `low_hp`: `--low-hp` (1 or under a share of her max HP, over 1 HP; None: the reserve's)."""
+    reserve: Reserve = field(default_factory=Reserve)
+    potion_hp: float | None = None
+    low_hp: float | None = None
+    max_hp: float = 0.0          # her max HP as of the last look (the HUD's, else her profile's)
+    mp: float | None = None      # ... and her MP (MP; None: not known), for Magic Guard's share
+    since: float | None = None   # the first look of the stretch under the threshold (its time)
+    looks: int = 0               # ... the looks of it
+    low: int = 0                 # ... the looks in a row under the floor
+    hp: float | None = None      # the last look's HP (HP)
+    share: float | None = None   # ... its bar
+    exact: bool = False          # ... whether her HP number's
+    at: float = 0.0              # ... and its time
     fired: bool = False
 
-    @property
-    def floor(self) -> float:
-        return min(FLOOR_HP, self.threshold)
+    def threshold(self, max_hp: float | None = None, mp: float | None = None) -> float:
+        """The threshold in HP at her max HP (the last look's by default)."""
+        m = self.max_hp if max_hp is None else max_hp
+        if self.low_hp is not None:
+            return self.low_hp * m if self.low_hp <= 1 else float(self.low_hp)
+        th = self.reserve.hp(m, self.mp if mp is None else mp)
+        return th if self.potion_hp is None else min(th, (self.potion_hp - UNDER) * m)
 
-    def see(self, t: float, hp: float | None) -> None:
-        """A look at time `t` read her HP `hp` (None: not read, which neither starts nor ends a stretch)."""
-        if hp is None:
+    def floor(self, max_hp: float | None = None, mp: float | None = None) -> float:
+        """The floor in HP: the reserve's, or the threshold if that's lower."""
+        m = self.max_hp if max_hp is None else max_hp
+        return min(self.reserve.floor(m, self.mp if mp is None else mp), self.threshold(m, mp))
+
+    def words(self, max_hp: float | None = None, mp: float | None = None) -> str:
+        """The threshold in words."""
+        m = self.max_hp if max_hp is None else max_hp
+        mp = self.mp if mp is None else mp
+        if self.low_hp is not None:
+            return f"--low-hp's {self.low_hp:.0%} of {m:.0f}" if self.low_hp <= 1 else "--low-hp's"
+        if self.potion_hp is not None and (self.potion_hp - UNDER) * m < self.reserve.hp(m, mp):
+            return f"her potion key's {self.potion_hp - UNDER:.0%} of {m:.0f}"
+        return self.reserve.words(m, mp)
+
+    def floor_words(self, max_hp: float | None = None, mp: float | None = None) -> str:
+        m = self.max_hp if max_hp is None else max_hp
+        mp = self.mp if mp is None else mp
+        return ("the threshold" if self.reserve.floor(m, mp) > self.threshold(m, mp)
+                else self.reserve.floor_words(mp))
+
+    def describe(self, max_hp: float | None = None, mp: float | None = None) -> str:
+        """What it stops under, as the log says it at a hunt's start."""
+        m = self.max_hp if max_hp is None else max_hp
+        th = self.threshold(m, mp)
+        if self.low_hp is not None or th < self.reserve.hp(m, self.mp if mp is None else mp):
+            return (f"under {th:.0f} HP of {m:.0f} ({self.words(m, mp)}; the reserve's "
+                    f"{self.reserve.hp(m, self.mp if mp is None else mp):.0f}); at once under "
+                    f"{self.floor(m, mp):.0f} two looks in a row")
+        return self.reserve.describe(m, self.mp if mp is None else mp)
+
+    def see(self, t: float, share: float | None, max_hp: float, exact: float | None = None, mp: float | None = None,
+            slack: float = BAR_SLACK) -> None:
+        """A look at time `t` read her HP bar's share `share` (None: not read) and, if her HP number was read at its
+        last change, `exact` (HP), with her max HP `max_hp` and her MP `mp`. Neither: it neither starts nor ends a
+        stretch."""
+        if share is None and exact is None:
             return
-        self.hp, self.at = hp, t
-        self.low = self.low + 1 if hp < self.floor else 0
-        if hp >= self.threshold:
+        self.max_hp, self.mp = max_hp, mp
+        hp = float(exact) if exact is not None else max(0.0, share - slack) * max_hp
+        self.hp, self.share, self.exact, self.at = hp, share, exact is not None, t
+        self.low = self.low + 1 if hp < self.floor() else 0
+        if hp >= self.threshold():
             self.since, self.looks = None, 0
             return
         if self.since is None:
@@ -128,13 +418,14 @@ class HpWatch:
         self.looks += 1
 
     def due(self) -> SafetyStop | None:
-        """The stop, the first time her HP has been under the threshold SAFETY_S over SAFETY_LOOKS looks, or under the
-        floor FLOOR_LOOKS looks in a row; else None."""
+        """The stop, the first time her HP has been under the threshold on LOOKS looks DEBOUNCE_S apart at least, or
+        under the floor FLOOR_LOOKS looks in a row; else None."""
         if self.fired or self.since is None:
             return None
         floor = self.low >= FLOOR_LOOKS
-        if not floor and (self.looks < SAFETY_LOOKS or self.at - self.since < SAFETY_S):
+        if not floor and (self.looks < LOOKS or self.at - self.since < DEBOUNCE_S):
             return None
         self.fired = True
-        return SafetyStop(self.hp, self.at - self.since, self.looks, self.threshold, self.at,
-                          self.floor if floor else None)
+        return SafetyStop(self.hp, self.at - self.since, self.looks, self.threshold(), self.at,
+                          self.floor() if floor else None, max_hp=self.max_hp, why=self.words(), exact=self.exact,
+                          floor_why=self.floor_words())

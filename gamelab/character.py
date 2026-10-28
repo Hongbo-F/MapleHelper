@@ -232,6 +232,9 @@ class Character:
     perception: Perception
     placeholders: tuple[str, ...] = ()  # what of her profile is a placeholder still (gamelab.classes), said by
                                         # `gamelab character`
+    safety_hits: int = 2              # the safety stop's reserve: this many of the map's largest touches (behavior.safety;
+                                      # the user, 2026-10-28: "for thief with high evasion this should be 2 hits, 3 for
+                                      # magician")
 
     @property
     def name(self) -> str | None:
@@ -396,6 +399,7 @@ def describe(c: Character) -> list[str]:
         else:
             where = f"box {g.box.near:g}..{g.box.far:g} ahead, {g.box.down:g} down to {g.box.up:g} up"
         lines.append(f"  {slot}: {a.name} ({a.key}; {where}; {a.hits} hit(s), {a.mp:g} MP, lock {a.lock_ms} ms)")
+    lines.append(f"  safety stop: under {c.safety_hits} of the map's largest touches (behavior.safety)")
     files = "lab/, as before" if not c.files else f"lab/characters/{c.files}/"
     keys = ("the flat [keys]" if c.klass == config.THIEF else "not given yet" if c.keys is None
             else f"[characters.{c.id}.keys]")

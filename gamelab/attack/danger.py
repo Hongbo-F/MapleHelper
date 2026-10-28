@@ -41,8 +41,15 @@ from ..perception.kinds import kind_of
 # Her DEF in meowdb's touch formula (touch_taken): not known; this is what makes the formula give the first map's 100
 # logged touches their 9.56 HP on average at level 19 (sim.world.DEFENCE, which the simulator's touches use). Taken as
 # hers since: on Tree Dungeon it gives a Horny Mushroom 111-131 HP of her 752, and the live hunts of 2026-10-24 took
-# 113-134 a touch (15-18% of her HP bar).
+# 113-134 a touch (15-18% of her HP bar). Her HP number read off the rolling recordings exactly (2026-10-28: 178
+# touches of 17 recordings, 10-24 23:50 to 10-28 12:16; D:/MapleHelper-scratch/safety3/design, formula.py) fits the
+# formula with DEF about 64 at levels 24-26 (a Horny Mushroom 113-134, a Green 51-61: as seen) and about 111 at level 28
+# (Horny 103-123, Green 44-53; seen 103-122 over 38 and 44-52 over 33): her DEF went up between 10-26 23:47 and 10-28
+# 00:30, new gear presumably. 75 lies between the two; it stays the stack's (config.Character.defence, her profile's),
+# and the safety stop takes the formula's top at it as a touch's size until her own touches tell more
+# (behavior.safety).
 DEFENCE = 75.0
+TOP_U = 1 - 1e-9  # the roll's top (touch_taken's u is in [0, 1))
 # A kind whose touch takes less than this share of her HP is no danger worth giving up reach, a throw or a step for:
 # her pet drinks a potion for her under 70% (live on 2026-10-25: 6 Orange Potions in 10.95 minutes, each 230-250 HP of
 # her 774, only under 0.70; sim.world.PET_HP), and the first map's golden traces were made with every kind so (by the
@@ -87,6 +94,13 @@ def touch_taken(pad: float, defence: float, level: float, u: float = 0.5) -> int
     raw = pad * (1.2 + 0.2 * u)
     taken = raw * (1 - defence / (defence + 300 + 2 * raw)) - (defence / 25 + level / 10)
     return max(1, math.trunc(taken))
+
+
+def touch_range(pad: float, defence: float, level: float) -> tuple[int, int]:
+    """The least and the most HP a touch by a monster of touch damage `pad` takes from her at `defence` and `level`:
+    touch_taken at the roll's bottom and its top (TOP_U). A Horny Mushroom (PADamage 110) 110-131 at DEF 75 and level
+    28, a Green Mushroom (54) 49-59."""
+    return touch_taken(pad, defence, level, 0.0), touch_taken(pad, defence, level, TOP_U)
 
 
 @dataclass(frozen=True)

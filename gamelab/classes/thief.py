@@ -71,6 +71,9 @@ POLICY = Policy(default_mode="choice",      # behavior.hunter's: Lucky Seven or 
                 unseen="regular",           # behavior.hunt.UNSEEN_ATTACK
                 close_quarters="claw",      # attack.stance's claw-edge rules
                 mp_floor=0.0)               # a cast whenever it's paid for (attack.choice.can_cast)
+# The safety stop's reserve: two of the map's largest touches (behavior.safety). The user, 2026-10-28: "Well for thief
+# with high evasion this should be 2 hits, 3 for magician".
+SAFETY_HITS = 2
 PET = Pet(hp_warning=0.70,                  # sim.world.PET_HP (behavior.safety: her pet at 70%)
           mp_warning=0.05,                  # sim.world.PET_MP
           hp_heal=250.0,                    # sim.world.HP_POTION
@@ -92,7 +95,8 @@ def profile(cid: str = config.THIEF) -> Character:
                      skills={"lucky_seven": int(FIXED_STATS.lucky_seven)}, keys=None, timing=None,
                      ammo="throwing stars", stops=("out_of_darts",), buffs=(), magic_guard=0.0,
                      attacks={"skill": LUCKY_SEVEN, "regular": STAR}, pet=PET, policy=POLICY, priors=PRIORS,
-                     shape=SHAPE, perception=PERCEPTION)
+                     shape=SHAPE, perception=PERCEPTION,
+                     safety_hits=SAFETY_HITS)
 
 
 def _at(table: tuple, level: float) -> float:
