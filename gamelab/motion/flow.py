@@ -1068,10 +1068,12 @@ PRICE_EVERY_MOVE = True
 # 2026-10-28): False, as first built, from where she stands or stops anywhere in the move's clear stretch, so every spot
 # gave the same move (live, 2026-10-28 00:38:36: the drop 21 -> 23 from 42 by a Horny Mushroom, where from 60, a step of
 # 18, it lands clear). In the harness (Tree, crowd, walkers; master 1cb0c3f against it, D:/MapleHelper-scratch/lshot/fix)
-# it buys nothing seen: grinding 1.2% less EXP (se 0.9%, 96 seeds), its trips 2.9% longer (t 2.1), their landings within
-# 105 of a monster 4.7% more (t 1.4); the hunt loop 0.8% more EXP (se 1.7%, 48 seeds). Kept, as the code says it does:
-# whether the landing price should search take-offs at all is the user's call.
-SPREAD_FROM_SPOT = True
+# it leans the wrong way in grinding, the default: 1.2% less EXP (se 0.9%, t -1.4; on the first 48 seeds 2.1% less,
+# t -1.9), its trips 2.9% longer (t 2.1, the only row past 2), their landings within 105 of a monster 4.7% more (t 1.4),
+# within 60 5.7% more, by one walking at her 9.3% more (t 1.6): the opposite of what it's for; the hunt loop level (0.8%
+# more EXP, se 1.7%, 48 seeds). So off (the review's, 2026-10-28), as master's, until the user decides or a live A/B
+# shows it buys something: True to try it (four Tree goldens differ then, D:/MapleHelper-scratch/lshot/mine/golden-spread).
+SPREAD_FROM_SPOT = False
 
 
 def chain_record(legs: list[Leg], why: str) -> dict:

@@ -75,6 +75,11 @@ MAX_WALK = 300     # longest walk between two looks
 MIN_MOVE = 15      # stance: a shorter step or approach isn't worth it
 CLEAR_STEP = 10    # where a star's line is stopped from where she'd go, the places along her platform tried
                    # instead, this far apart (by the v83 line a floor stops it from part of her platform only)
+SHOOT_SLACK = 6.0  # a walk's place to shoot from (_reached_from) only where her attack takes it this far either way
+                   # of it too: the walk is open loop (Actions.walk holds the key for its time), live (2026-10-28,
+                   # 86 steps) they ended a median 3 off their goal, half of them short by 1 or more, and the harness's
+                   # walk jitter is 6 either way; the nearest place in reach lay on its edge (a median 6.5 inside it on
+                   # Tree Dungeon's trip-ending legs, 11% under 3), and 5 of 24 simulated walks to it ended out of reach
 JUMP_BACK_ROOM = 110  # room she needs behind her (from her platform's end, less the margin) to jump back
 JUMP_BACK_CLEAR = 160  # ... with no monster on her platform this close on that side
 JUMP_BACK_SPAN = 95  # how far a jump back carries her (by the engine 87-97 units with the lags spread as measured,
@@ -505,37 +510,55 @@ def shooting_place(platform: Platform, x: float, y: float, t: Monster, most: flo
 def place_to_shoot(platform: Platform, x: float, y: float, t: Monster, most: float,
                    around: list[Monster]) -> tuple[float | None, str]:
     """shooting_place's place, and where there's none why not, for the log and the 'landing' event (behavior.fight.
-    FightOnTheWay.shot_place): (the place, ''), or (None, why): her attack reaches it from nowhere along `platform`
-    within where she stands to shoot, with how far under or over her (at `y`) it is (from Tree Dungeon's 21 one on 23,
-    117-122 under it, past a star's band, reach.SHOT_DOWN: live, 2026-10-28 00:38:36); only from farther than `most`
-    (the nearest such place said); only from under MIN_MOVE off; or a monster of her platform in the walk's way."""
+    FightOnTheWay.shot_place): (the place, ''), or (None, why): no throw from the ground takes it from anywhere along
+    `platform` within where she stands to shoot, with how far under or over her (at `y`) it is (from Tree Dungeon's 21
+    one on 23, 117-122 under it, past a star's band, reach.SHOT_DOWN: live, 2026-10-28 00:38:36), or only from a stretch
+    narrower than a walk's slack (SHOOT_SLACK either way); only from farther than `most` (the nearest such place said);
+    only from under MIN_MOVE off; or a monster of her platform in the walk's way. From the ground only: a jump throw
+    from where she stands is FightOnTheWay.shot_place's to ask (reach.shots there; at every place along her platform
+    it'd cost a coverage each)."""
     lo, hi = _stand_limits(platform, crowded=any(o.platform == platform.id for o in around))
     g = _reached_from(platform, x, t, max(lo, x - most), min(hi, x + most), around)
     if g is None:
         far = None if x - most <= lo and x + most >= hi else _reached_from(platform, x, t, lo, hi, around)
         if far is None:
             dy = t.y - y
-            return None, (f"her attack reaches it from nowhere on platform {platform.id} ({abs(dy):.0f} "
-                          f"{'under' if dy > 0 else 'over'} her)")
-        return None, f"her attack reaches it only from x {far:.0f} on platform {platform.id}, {abs(far - x):.0f} off"
+            where = f"it's {abs(dy):.0f} {'under' if dy > 0 else 'over'} her"
+            edge = _reached_from(platform, x, t, lo, hi, around, slack=0.0)
+            if edge is not None:
+                return None, (f"a throw from the ground takes it only from a sliver of platform {platform.id} "
+                              f"(x {edge:.0f}, under SHOOT_SLACK of a walk's end either way; {where})")
+            return None, f"no throw from the ground takes it from anywhere on platform {platform.id} ({where})"
+        return None, (f"a throw from the ground takes it only from x {far:.0f} on platform {platform.id}, "
+                      f"{abs(far - x):.0f} off")
     if abs(g - x) < MIN_MOVE:
-        return None, f"her attack reaches it from x {g:.0f}, under MIN_MOVE off"
+        return None, f"a throw from the ground takes it from x {g:.0f}, under MIN_MOVE off"
     if any(o.platform == platform.id and min(x, g) - TOO_CLOSE <= o.x <= max(x, g) + TOO_CLOSE for o in around):
         return None, f"a monster of platform {platform.id} in the walk's way to x {g:.0f}"
     return g, ""
 
 
-def _reached_from(platform: Platform, x: float, t: Monster, lo: float, hi: float,
-                  around: list[Monster]) -> float | None:
+def _reached_from(platform: Platform, x: float, t: Monster, lo: float, hi: float, around: list[Monster],
+                  slack: float | None = None) -> float | None:
     """The nearest place to map x along `platform`, from `lo` to `hi` (every CLEAR_STEP units, as _clear_from's), from
-    where her attack takes monster `t` standing there: the fights' own rule (reach.can_hit at the shot's reach, as
-    behavior.fight.FightOnTheWay.clear_for has it from there), her feet at the platform's height at that place. Not
+    where her attack takes monster `t` standing there, and `slack` (SHOOT_SLACK) either way of it too, within her
+    platform (a walk there may stop short or go on a little): the fights' own rule (reach.can_hit at the shot's reach,
+    as behavior.fight.FightOnTheWay.clear_for has it from there), her feet at the platform's height at each place. Not
     _clear_from's (her height where she is now, out to _goal_reach: a walk's goal the fights' next look decides on
     again): on 25's slope (10 lower at 140 than at 89) that had a Green on 24 at 260 in reach from 89 for her at 140,
-    where standing at 89 it isn't, so the shot first's walk ended where clear_for found no throw (from 2026-10-28)."""
+    where standing at 89 it isn't, so the shot first's walk ended where clear_for found no throw (from 2026-10-28).
+    Without the slack (as first built that day) the nearest place lay on the reach's edge, and a walk a few units short
+    ended out of it (the review's: 5 of 24 simulated walks of 138, 23 to a Green on 22)."""
+    slack = SHOOT_SLACK if slack is None else slack
+
+    def takes(g: float) -> bool:
+        return reach.can_hit(platform, g, platform.y_at(g), t, others=around)
+
+    def sure(g: float) -> bool:
+        ends = {min(max(g + d, platform.left), platform.right) for d in (-slack, slack)} if slack > 0 else set()
+        return takes(g) and all(takes(v) for v in ends - {g})
     xs = [lo + i * CLEAR_STEP for i in range(int((hi - lo) // CLEAR_STEP) + 1)] + [hi]
-    ok = [g for g in xs if reach.can_hit(platform, g, platform.y_at(g), t, others=around)]
-    return min(ok, key=lambda g: abs(g - x), default=None)
+    return next((g for g in sorted(xs, key=lambda g: abs(g - x)) if sure(g)), None)
 
 
 def _stand_limits(platform: Platform, crowded: bool) -> tuple[float, float]:

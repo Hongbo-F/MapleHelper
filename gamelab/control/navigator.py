@@ -222,7 +222,9 @@ COMING = "a monster coming into its way"  # (the cut's reason starts so: Navigat
 # sent counted; a landing she runs on from by its touch alone), and where a trip's last landing still has a price the
 # monster making it so is shot first from where she stands, else from along her platform within SHOOT_WALK
 # (LANDING_WALK), only where her attack reaches it (Escort.shot_place: from 2026-10-28, when live from 21 one on 23, past
-# a star's band, was said to be shot first and nothing was thrown), else waited out if its walk clears the landing within
+# a star's band, was said to be shot first and nothing was thrown; from where she stands from the ground or a jump, from
+# along her platform from the ground with SHOOT_SLACK either way; a try that threw nothing, Escort.throws, not a shot),
+# else waited out if its walk clears the landing within
 # WAIT_AHEAD (LAND_WAITS looks at most), else she goes (_clear_landing; not _meet's: walking to shoot first there, 25 up
 # onto 24 with a Green Mushroom by 24's middle was hurt 14 times in 8 seeds and 56 s on its trips where master's stack
 # 8 and 17 s, D:/MapleHelper-scratch/land/fix/shootfirst.py). Live (the 14 Tree Dungeon hunts of 2026-10-25 23:43 to
@@ -274,17 +276,23 @@ class Escort(Protocol):
         """Whether her chains keep clear of monsters of `kind` (a touch by one counts): they stop short of a leg one
         could touch her on, and the navigator has it shot (clear_for), goes around it, hops it or waits."""
 
-    def clear_for(self, s: Scene, m: Monster, finish: bool = True) -> int | None:
+    def clear_for(self, s: Scene, m: Monster, finish: bool = True, jump: bool = False) -> int | None:
         """Shoot monster `m`, one that could touch her on the chain ahead, if a star reaches it from where she
-        stands: the kills, or None if none does. `finish`: as clear_way's."""
+        stands (`jump`: or one from a jump, as shot_place has it): the kills, or None if none does. `finish`: as
+        clear_way's."""
+
+    def throws(self) -> int:
+        """Her throws so far: a shot first that threw tells apart from one that didn't (the kills don't: a hit isn't
+        one, and a fight's looks may not have it in reach after all)."""
 
     def shoot_from(self, s: Scene, m: Monster, most: float, finish: bool = True) -> int | None:
         """Walk along her platform, `most` units at most, to the nearest place a star reaches monster `m` from, and
         shoot it there: the kills, or None if there's no such place."""
 
     def shot_place(self, s: Scene, m: Monster, most: float) -> tuple[float | None, str]:
-        """Where her attack reaches monster `m` from (the fights' own reach): (her x, '') from where she stands
-        (clear_for's), (a place within `most` along her platform, '') shoot_from's, else (None, why not). Nothing sent."""
+        """Where her attack reaches monster `m` from (the fights' own reach): (her x, '') from where she stands, from
+        the ground or a jump (clear_for's with `jump`), (a place within `most` along her platform, '') shoot_from's,
+        else (None, why not). Nothing sent."""
 
     def landings(self, tracks: list) -> Callable[[Leg], tuple[float, MonsterTrack | None]] | None:
         """How a leg's landing is priced against `tracks` (the chain's): the price (s: 0 where her first attack there
@@ -916,13 +924,16 @@ class Navigator:
         """With an escort, a chain that ends the trip (onto its platform) landing with a price (Escort.landings: her first
         attack there not sure to take the nearest monster, or one walking into her first), the cheapest flow.chain
         found: the monster making it so is shot first where her attack reaches it (Escort.shot_place, the fights' own
-        reach): from where she stands (Escort.clear_for), else from along her platform within SHOOT_WALK (Escort.
-        shoot_from: "shooting it first from x N"), MAX_FIGHTS shots in a row at most as _meet's; where there's no such
-        shot, the log says why ("no shot first, her attack reaches it from nowhere on platform 21 (136 under her)") and
-        nothing is sent; then it's waited out if, walking as seen, it clears the landing within WAIT_AHEAD (LAND_WAITS
-        looks at most, where none can reach her meanwhile); else she goes ("landing on P by the K anyway: why"). Each a
-        'landing' event (shot first, waited, went), with why there was no shot (`shot`) and why she didn't wait (`why`).
-        True to look again."""
+        reach): from where she stands, from the ground or a jump (Escort.clear_for with `jump`), else from along her
+        platform within SHOOT_WALK (Escort.shoot_from: "shooting it first from x N"), MAX_FIGHTS tries in a row at most
+        as _meet's; a try that threw nothing (Escort.throws: the fight's or the walk's look not having it in reach after
+        all) is said so ("none thrown at the K: ..."), counted as a try, and looked at again, not as a shot; where
+        there's no such shot, the log says why ("no shot first, no throw from the ground takes it from anywhere on
+        platform 21 (it's 125 under her), nor one from a jump where she stands") and nothing is sent; then it's waited
+        out if, walking as seen, it clears the landing within WAIT_AHEAD (LAND_WAITS looks at most, where none can reach
+        her meanwhile); else she goes ("landing on P by the K anyway: why"). Each a 'landing' event (shot first, none
+        thrown, waited, went), with why there was no shot (`shot`) and why she didn't wait (`why`). True to look
+        again."""
         landings = getattr(self.escort, "landings", None)
         if not (LANDING_CLEAR and legs and why == "done" and landings is not None and monsters) \
                 or legs[-1].end.platform.id != st.dst:
@@ -953,13 +964,26 @@ class Navigator:
                 walk = abs(place - s.where.x) >= 1e-6
                 where = f" from x {place:.0f}" if walk else ""
                 self.log(f"  {seen.kind} at x {seen.x:.0f} by her landing on {q.id}: shooting it first{where}")
+                before = self.escort.throws()
                 kills = self.escort.shoot_from(s, seen, SHOOT_WALK, finish=finish) if walk \
-                    else self.escort.clear_for(s, seen, finish=finish)
+                    else self.escort.clear_for(s, seen, finish=finish, jump=True)
+                thrown = self.escort.throws() - before
                 if kills is not None:
+                    # A try either way (MAX_FIGHTS bounds them; she may have walked or stepped, and time has passed:
+                    # look again), a shot only where it threw (as first built every try was 'shot first', thrown or
+                    # not: the review's, a walk a few units short of its place, or the fight's own looks without it).
                     st.shots += 1
                     st.trip.kills += kills
-                    telemetry.emit("event", kind="landing", text=f"shot first: {seen.kind} on {q.id} by the landing"
-                                   f"{where}", price=round(price, 2), at=round(place, 1))
+                    if thrown or kills:
+                        telemetry.emit("event", kind="landing", text=f"shot first: {seen.kind} on {q.id} by the "
+                                       f"landing{where}", price=round(price, 2), at=round(place, 1), throws=thrown,
+                                       kills=kills)
+                    else:
+                        none = "the walk's look didn't have it in reach" if walk \
+                            else "the fight's looks didn't have it in reach"
+                        self.log(f"  none thrown at the {seen.kind} by her landing on {q.id}: {none}")
+                        telemetry.emit("event", kind="landing", text=f"none thrown: {seen.kind} on {q.id} by the "
+                                       f"landing{where}", price=round(price, 2), at=round(place, 1), why=none)
                     return True
                 shot = "her attack didn't reach it after all"  # (shot_place said it would: not expected)
         # Then waited out, a bounded wait (LAND_WAITS looks), where its walk as seen clears the landing within

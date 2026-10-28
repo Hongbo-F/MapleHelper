@@ -26,8 +26,8 @@ from maplehelper.game import COMBAT
 from .. import character, directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import (AWAY, FLINCH_HOLD_S, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace, act_text,
-                             air_gap, decide, first_attack_s, landing, move_limits, open_above, pct, pick_target,
-                             place_to_shoot, plan_of, shooting_place, stance)
+                             air_gap, decide, first_attack_s, jump_hits, landing, move_limits, open_above, pct,
+                             pick_target, place_to_shoot, plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
@@ -63,6 +63,17 @@ JUMP_SHOTS = True
 STEADY_WAIT_S = 0.05  # s before the next look when a jump or a step waits out a touch's knock (knocked_move)
 GUARD_SECONDS = 15  # longest spent shooting a monster out of the way while travelling
 GUARD_PATIENCE = 0.3  # s such a fight waits with nothing in reach before she travels on
+# Whether a monster that could touch her on the chain ahead (the navigator's _meet: FightOnTheWay.clear_for) is shot
+# first where only a jump throw from where she stands takes it (FightOnTheWay.jump_reaches), as the trip's last landing's
+# shot first is (shot_place, from 2026-10-28). False: from the ground alone, as before. In the harness (Tree, crowd,
+# choice, measured costs, zero walls, near misses, walkers; off against on, paired: D:/MapleHelper-scratch/lshot/mine,
+# table-meet-*.md) on, grinding (96 seeds) had its trips' landings within 105 of a monster 13.6% fewer (t -3.8), within
+# 60 15.8% (t -3.5), its trips' touches 7.4% fewer (t -2.1), EXP the same (+0.3%, se 1.3%), jump backs 34% more (t 2.2);
+# the hunt loop (48) landings within 105 19.4% fewer (t -3.4), trip touches 14.7% fewer (t -2.8), trips 8.6% shorter
+# (t -3.6), EXP 3.3% more (t 1.7); no death, fall or stop. Off for the user's call: on, 9 of the 28 Tree goldens part at a
+# jump shot first on the way (lshot/mine/golden-meet), and loop_tree_out_of_darts no longer ends her retreat on a safe
+# place (knocked off 24's drop to 25 on the way; of seeds 1-12 2 not safe on, 0 off: lshot/mine/darts_seeds.out).
+MEET_JUMP_SHOTS = False
 # The kinds her trips keep clear of (FightOnTheWay.threat) are those the danger model counts (Hunter.danger,
 # attack.danger.DANGER_MIN: a touch taking 5% of her HP or more, by meowdb's formula at her level and HP, config.toml
 # [character]): on Tree Dungeon, Forest Up North II at level 24 a Horny Mushroom (16%) and a Green Mushroom (7.2%), not
@@ -1261,13 +1272,15 @@ class FightOnTheWay:
         count."""
         return self.h.danger.share(kind) > 0
 
-    def clear_for(self, s: Scene, m: Monster, finish: bool = True) -> int | None:
+    def clear_for(self, s: Scene, m: Monster, finish: bool = True, jump: bool = False) -> int | None:
         """Shoot monster `m`, one that could touch her on the chain of moves ahead (the navigator's `in_the_way`), if a
-        star reaches it from where she stands (reach.can_hit): a short fight, as clear_way's, at its kind on its
-        platform (and any in reach elsewhere, or close on hers), never walking after it. A kill clears the way, and a
-        hit's knockback may (the navigator plans again from the next look). Returns the kills, or None if no star
-        reaches it from here. `finish`: as clear_way's."""
-        if not self.reaches(s, m):
+        star reaches it from where she stands (reach.can_hit; with `jump`, or one from a jump the stance would make
+        there: `reaches`): a short fight, as clear_way's, at its kind on its platform (and any in reach elsewhere, or
+        close on hers), never walking after it. A kill clears the way, and a hit's knockback may (the navigator plans
+        again from the next look). Returns the kills, or None if no star reaches it from here. `finish`: as clear_way's.
+        `jump`: the navigator's shot first by a trip's last landing (shot_place's); _meet's from the ground alone as
+        before, unless MEET_JUMP_SHOTS."""
+        if not self.reaches(s, m, jump=jump or MEET_JUMP_SHOTS):
             return None
         self.h.log(f"  {m.kind} on platform {m.platform} at x {m.x:.0f} could touch her on the way: shooting it first")
         before = self.h.report.exp_kills
@@ -1275,28 +1288,78 @@ class FightOnTheWay:
                      approach=False, far=True, finish_wounds=finish)
         return self.h.report.exp_kills - before
 
-    def reaches(self, s: Scene, m: Monster) -> bool:
-        """Whether her attack from where she stands in look `s` takes monster `m`: the fights' own rule (reach.can_hit,
-        what her profile's attack geometry names for the thief, character.Geometry 'star_search': a star's band under
-        and over her, reach.SHOT_DOWN and the search's windows; its line, v83's walls and floors; a monster the attack
-        takes first shielding it), clear_for's and so the shot first by a landing's (shot_place). The seam S1's aim
-        facade replaces for another character's attack, with stance.place_to_shoot's search along her platform."""
-        return s.platform is not None and s.where is not None \
-            and reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters)
+    def throws(self) -> int:
+        """Her throws so far (the hunter's report's: every throw and jump throw a fight carries out): the navigator's
+        shot first by a landing tells one that threw from one that didn't (from 2026-10-28: live at 00:44:09 clear_for's
+        fight logged "nothing in reach" three times and threw nothing, the Green missing from its own looks)."""
+        return self.h.report.throws
+
+    def reaches(self, s: Scene, m: Monster, jump: bool = False) -> bool:
+        """Whether her attack from where she stands in look `s` takes monster `m`: the fights' own rule, a throw from
+        the ground (reach.can_hit, what her profile's attack geometry names for the thief, character.Geometry
+        'star_search': a star's band under and over her, reach.SHOT_DOWN and the search's windows; its line, v83's
+        walls and floors; a monster the attack takes first shielding it), clear_for's; with `jump`, or a jump throw the
+        stance would make at it from there (jump_reaches: what the hunt loop's Hunt._jump_hits counts). The seam S1's
+        aim facade replaces for another character's attack, with stance.place_to_shoot's search along her platform."""
+        if s.platform is None or s.where is None:
+            return False
+        if reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters):
+            return True
+        return jump and self.jump_reaches(s, m)
+
+    def dying(self, s: Scene, m: Monster) -> bool:
+        """Whether monster `m` of look `s` is taken for dead or dying by the hunter's ledger (ledger.dying, by its kind's
+        death animation: as dying_seen), which no fight takes for a target. In nav_tree_landing_shot_first (from
+        2026-10-28) _meet's clear_for killed the Horny Mushroom by her landing, and its body, standing there through its
+        death, still priced the landing: two shots first at it, each "nothing in reach", 1.3 s, as first built both
+        'shot first' (the landing's price itself still counts it: a question for the chains, not changed)."""
+        ledger = getattr(self.h, "ledger", None)
+        if ledger is None:
+            return False
+        die = {k: b.die_s for k, b in bodies(getattr(self.h, "model", None)).items()}
+        seen = s.monsters if any(o is m for o in s.monsters) else [*s.monsters, m]
+        return dying(ledger.kills, m, time.monotonic(), seen, die, getattr(ledger, "dead", ()))
+
+    def jump_reaches(self, s: Scene, m: Monster) -> bool:
+        """Whether a jump throw from where she stands in look `s` surely takes monster `m` on the stance's terms
+        (stance.jump_hits over jump_cover: the jump landing her back where she keeps to however it goes, her body clear
+        of the look's monsters, the danger kept; as Hunt._jump_hits), where her attack is made from a jump at all
+        (_air: the thief's Lucky Seven, not the magician's Magic Claw) and JUMP_SHOTS. From 2026-10-28 (the review's):
+        from 25 at 140 a Green on 24 at 260 is out of reach of every throw from the ground on 25, and the fight
+        jump-throws at it in place (4 of 9 simulated tries killed it with one), where shot_place had said 'from
+        nowhere'."""
+        if not (JUMP_SHOTS and _air()) or s.platform is None or s.where is None:
+            return False
+        model = getattr(self.h, "model", None)
+        if model is None:
+            return False
+        around = s.monsters if any(o is m for o in s.monsters) else [*s.monsters, m]
+        cover = jump_cover(model, s, [m], around)
+        if cover is None or not any(sh.jump is not None for sh in cover().of(m)):
+            return False
+        actions = getattr(self.h, "actions", None)
+        return jump_hits(s.where.x, s.where.y, s.platform, m, cover(), getattr(actions, "facing", None), around,
+                         getattr(self.h, "danger", None), body_sizes(model)[1])
 
     def shot_place(self, s: Scene, m: Monster, most: float) -> tuple[float | None, str]:
         """Where on her platform her attack reaches monster `m` from (the navigator's shot first by a trip's last
-        landing): (her x, '') if from where she stands (`reaches`: clear_for's), else (the nearest place within `most`
-        units along her platform, '') where one is (stance.place_to_shoot: shoot_from's), else (None, why not). Nothing
-        is sent. Live (2026-10-28 00:38:36) the drop 21 -> 23 by a Horny Mushroom logged "shooting it first" and threw
-        nothing: 23 is 117-122 under 21, past a star's band (reach.SHOT_DOWN), so from nowhere on 21 does one reach it."""
-        if self.reaches(s, m):
+        landing): (her x, '') if from where she stands (`reaches` with jumps: clear_for's with `jump`), else (the nearest
+        place within `most` units along her platform, '') where a throw from the ground does, SHOOT_SLACK either way of
+        it too (stance.place_to_shoot: shoot_from's), else (None, why not). Nothing is sent. Live (2026-10-28 00:38:36)
+        the drop 21 -> 23 by a Horny Mushroom logged "shooting it first" and threw nothing: 23 is 117-122 under 21, past
+        a star's band (reach.SHOT_DOWN), so from nowhere on 21 does one reach it. Nor at one dying (`dying`: the fights
+        take none for a target, so a shot first at it threw nothing: nav_tree_landing_shot_first's two, 1.3 s)."""
+        if self.dying(s, m):
+            return None, "it's dying (a kill of hers on it): no target"
+        if self.reaches(s, m, jump=True):
             return s.where.x, ""
         if s.platform is None or s.where is None or m.platform is None:
             return None, "no look of her on a platform"
+        jumps = ", nor one from a jump where she stands" if JUMP_SHOTS and _air() else ""
         if most <= 0:
-            return None, "her attack doesn't reach it from where she stands (no walk to shoot it from)"
-        return place_to_shoot(s.platform, s.where.x, s.where.y, m, most, s.monsters)
+            return None, f"no throw from the ground takes it from where she stands{jumps} (no walk to shoot it from)"
+        place, why = place_to_shoot(s.platform, s.where.x, s.where.y, m, most, s.monsters)
+        return place, (why + jumps if place is None else why)
 
     # (shoot_from) a monster found again after the walk: its kind on its platform within this of where it was seen
     SHOOT_REFIND = TRACK_MATCH + DEFAULT_SPEED * 1.0  # the tracks' match and a second of its kind's walk (a guess)
@@ -1307,7 +1370,8 @@ class FightOnTheWay:
         (attack.stance.shooting_place: within where she stands to shoot with monsters about, no monster of her platform
         in the walk's way), then, if it's in reach from where the walk leaves her (the next look's, the same kind on its
         platform within SHOOT_REFIND of where it was: TRACK_MATCH and a second of its kind's walk), clear_for's fight at
-        it. The kills (0 if the walk's look doesn't find it), or None if there's no such place."""
+        it (from a jump too: clear_for's `jump`). The kills (0 if the walk's look doesn't find it or it's out of reach
+        from there, each logged), or None if there's no such place."""
         here = s.platform
         if here is None or s.where is None or m.platform is None:
             return None
@@ -1321,12 +1385,16 @@ class FightOnTheWay:
         self.h.actions.walk(side, abs(g - x))
         look = self.h.look()
         if look.where is None or look.platform is None or look.platform.id != here.id:
+            self.h.log("    the walk's look doesn't have her on her platform: no throw")
             return 0
         again = [o for o in look.monsters if o.kind == m.kind and o.platform == m.platform
                  and abs(o.x - m.x) <= self.SHOOT_REFIND]
         if not again:
+            self.h.log(f"    the walk's look doesn't find the {m.kind} again: no throw")
             return 0
-        kills = self.clear_for(look, min(again, key=lambda o: abs(o.x - m.x)), finish)
+        kills = self.clear_for(look, min(again, key=lambda o: abs(o.x - m.x)), finish, jump=True)
+        if kills is None:
+            self.h.log(f"    the {m.kind} out of her attack's reach from x {look.where.x:.0f}: no throw")
         return 0 if kills is None else kills
 
     def landings(self, tracks: list):
