@@ -52,13 +52,34 @@ def test_a_switch_a_later_commit_adds_counts_only_when_its_not_at_its_default():
     assert baseline.params(later, RUN + ("closest",))["ground_tie"] == "closest"
 
 
-def test_the_key_covers_the_environment_and_the_game_data(monkeypatch, tmp_path):
+def test_the_key_covers_the_environment_as_it_resolves_and_the_game_data(monkeypatch, tmp_path):
+    from gamelab import paths
+    for name in [k for k in baseline.os.environ if k.startswith("GAMELAB_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("GAMELAB_FIXED_STATS", "1")  # (as the harness runs)
+    monkeypatch.setattr(paths, "GPU", tmp_path / "GPU")  # (no lab/GPU file)
     before = _key()
-    monkeypatch.setenv("GAMELAB_BASELINES", "elsewhere")  # where, not what
+    assert baseline.gamelab_env() == {"character": "thief", "fixed_stats": True, "gpu": "off"}
+    for name, value in (("GAMELAB_BASELINES", "elsewhere"), ("GAMELAB_BASE_FILL", "fill.py"),  # where and who
+                        ("GAMELAB_CHARACTER", "thief"), ("GAMELAB_GPU", "0")):  # ... and what they are by default
+        monkeypatch.setenv(name, value)
+        assert _key() == before, name
+    for name, value in (("GAMELAB_GPU", "1"), ("GAMELAB_GPU", "ahead"), ("GAMELAB_CHARACTER", "magician"),
+                        ("GAMELAB_SOMETHING_NEW", "1")):  # (one no code reads yet: kept, to be safe)
+        monkeypatch.setenv(name, value)
+        assert _key() != before, (name, value)
+        monkeypatch.delenv(name)
     assert _key() == before
-    monkeypatch.setenv("GAMELAB_GPU", "1")
+    (tmp_path / "GPU").write_text("ahead")  # the checkout's lab/GPU file, with GAMELAB_GPU unset ...
+    assert baseline.gamelab_env()["gpu"] == "ahead" and _key() != before
+    monkeypatch.setenv("GAMELAB_GPU", "0")  # ... which GAMELAB_GPU wins over
+    assert _key() == before
+    real = baseline.importlib.metadata.version
+    monkeypatch.setattr(baseline.importlib.metadata, "version",  # OpenCV upgraded
+                        lambda d: "9.9.9" if d == "opencv-python" else real(d))
     assert _key() != before
-    monkeypatch.delenv("GAMELAB_GPU")
+    monkeypatch.setattr(baseline.importlib.metadata, "version", real)
+    assert _key() == before
     data = tmp_path / "gamedata" / "data" / "out" / "maps"
     data.mkdir(parents=True)
     (data / "1.json").write_text("{}")
@@ -66,6 +87,43 @@ def test_the_key_covers_the_environment_and_the_game_data(monkeypatch, tmp_path)
     assert baseline.key(baseline.params(harness.run_one, RUN), tmp_path) != before
     (data / "1.json").write_text("{ }")  # extracted again
     assert baseline.data_stamp(tmp_path) != stamp
+
+
+def test_the_bases_filler_gets_the_environment_its_key_resolved(monkeypatch, tmp_path):
+    from gamelab import paths
+    monkeypatch.setattr(paths, "GPU", tmp_path / "GPU")
+    (tmp_path / "GPU").write_text("")  # the candidate's lab/GPU: the GPU on, at rf_start
+    env = baseline.gamelab_env({"GAMELAB_FIXED_STATS": "1", "GAMELAB_BASE_FILL": "f.py", "GAMELAB_X": "y"})
+    assert env == {"character": "thief", "fixed_stats": True, "gpu": "start", "other": {"GAMELAB_X": "y"}}
+    filler = baseline.filler_env(env, {"PATH": "p", "GAMELAB_X": "y"})
+    assert filler == {"PATH": "p", "GAMELAB_X": "y", "GAMELAB_CHARACTER": "thief", "GAMELAB_GPU": "1",
+                      "GAMELAB_FIXED_STATS": "1"}
+    (tmp_path / "GPU").unlink()  # the base's checkout has none
+    assert baseline.gamelab_env(filler) == env
+
+
+def test_a_run_imports_no_installed_package_the_key_hasnt():
+    """The key has the versions of PACKAGES' distributions: a run of the standard command (Tree Dungeon, the feed's
+    measured costs) or of the first map's importing any other installed package needs it added there."""
+    if not scenarios.available(10002073) or not scenarios.available():
+        pytest.skip("needs Tree Dungeon's and the first map's data")
+    code = (
+        "import json, sys\n"
+        "before = set(sys.modules)\n"
+        "from gamelab.sim import harness\n"
+        "harness.run_one('loop-grind', 1, 'crowd', 0.1, 0.0, 'measured', None, 10002073,\n"
+        "                ('zero-walls', 'near-misses', 'walkers'), (), 'choice')\n"
+        "harness.run_one('tour', 1, 'game', 0.1)\n"
+        "new = {m.split('.')[0] for m in sys.modules} - {m.split('.')[0] for m in before}\n"
+        "site = sorted(t for t in new if 'site-packages' in (getattr(sys.modules.get(t), '__file__', '') or ''))\n"
+        "print(json.dumps(site))\n")
+    env = dict(baseline.os.environ, PYTHONHASHSEED="0", GAMELAB_FIXED_STATS="1")
+    done = subprocess.run([sys.executable, "-X", "utf8", "-c", code], cwd=str(harness.REPO), env=env,
+                          capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, done.stderr[-2000:]
+    site = json.loads(done.stdout.strip().splitlines()[-1])
+    assert "cv2" in site and "numpy" in site  # (it saw them)
+    assert set(site) <= set(baseline.PACKAGES), set(site) - set(baseline.PACKAGES)
 
 
 def test_think_isnt_cached():
@@ -191,6 +249,30 @@ def test_a_difference_is_paired_seed_by_seed_with_its_standard_error():
     assert harness.difference(base, died, "deaths")["diff"] == pytest.approx(0.25)
     noisy = _runs([100.0, 120.0, 80.0, 101.0])
     assert harness.difference(base, noisy, "exp_per_min")["verdict"] == "within 2 se"
+    one = _runs([100.0, 100.0, 100.0, 100.0], mp_per_kill=[None, None, 5.0, None])
+    other = _runs([100.0, 100.0, 100.0, 100.0], mp_per_kill=[None, None, 7.0, None])
+    row = harness.difference(one, other, "mp_per_kill")  # a value on both sides on one seed: no se to tell it by
+    assert row["n"] == 1 and row["verdict"] == "too few"
+    assert harness.difference(one, one, "mp_per_kill")["verdict"] == "zero"  # (the same, None and all)
+    gone = _runs([100.0] * 4, mp_per_kill=[None, 3.0, 5.0, None])  # seed 2 a kill here only
+    assert harness.difference(one, gone, "mp_per_kill")["verdict"] == "too few"
+    assert harness.difference(base[:0], base[:0], "touches")["verdict"] == "too few"  # (no seeds at all)
+
+
+def test_differences_that_offset_are_not_zero():
+    """Seeds that differ with a mean difference of 0 (a death moved from seed 7 to seed 3, +4 touches on one and -4 on
+    another, +30 EXP a minute and -30) are within 2 se, not 'the same to the digit': more seeds are taken."""
+    base = _runs([100.0] * 12, [10] * 12)
+    cand = [dict(r) for r in base]
+    base[6]["died_at"], cand[2]["died_at"] = 120.0, 200.0
+    cand[0]["touches"], cand[1]["touches"] = 14, 6
+    cand[4]["exp_per_min"], cand[5]["exp_per_min"] = 130.0, 70.0
+    rows = [harness.difference(base, cand, m) for m in ("deaths", "touches", "exp_per_min", "falls", "stops")]
+    assert [r["diff"] for r in rows] == [0.0] * 5
+    assert [r["verdict"] for r in rows] == ["within 2 se", "within 2 se", "within 2 se", "zero", "zero"]
+    assert rows[0]["se"] > 0 and rows[1]["se"] > 0
+    more, why = harness.ab_next(rows, 12)
+    assert more == 24 and "deaths, touches, exp_per_min" in why
     assert harness.metric({"landings": {"trip": {"near": 3}}}, "landings.trip.near") == 3
     assert harness.metric({"landings": {}}, "landings.trip.near") == 0  # (a count that's absent)
     assert harness.metric({"mp_per_kill": None}, "mp_per_kill") is None
@@ -204,8 +286,14 @@ def test_ab_adds_seeds_only_while_a_headline_difference_is_within_2_se_and_not_z
     assert more == 24 and "touches" in why
     assert harness.ab_next(open_, 24)[0] == 48
     more, why = harness.ab_next(open_, 48)
-    assert more is None and "the most" in why and "touches" in why
+    assert more is None and "the most" in why and "still unsettled: within 2 se and not zero: touches" in why
     assert harness.ab_next(open_, 24, (12, 24))[0] is None  # (--max-seeds 24)
+    few = clear + [{"metric": "mp_per_kill", "verdict": "too few"}]  # too few to tell: more seeds, said so
+    more, why = harness.ab_next(few, 12)
+    assert more == 24 and why == "at 12 seeds too few seeds with a value on both sides: mp_per_kill"
+    more, why = harness.ab_next(few + open_[2:], 48)
+    assert more is None and why.endswith("still unsettled: within 2 se and not zero: touches; too few seeds with a "
+                                         "value on both sides: mp_per_kill")
 
 
 def _ab_args(**kw) -> Namespace:
@@ -239,8 +327,9 @@ def test_ab_reads_the_base_from_its_cache_and_says_the_seeds_it_used_and_why_it_
     assert harness.ab(_ab_args()) == 0
     out = capsys.readouterr().out
     assert asked == [list(range(1, 13)), list(range(13, 25)), list(range(25, 49))]
-    assert "-> 24 seeds: within 2 se and not zero at 12 seeds: exp_per_min" in out
-    assert "stopped at 48 seeds (1-48): 48 seeds, the most (--max-seeds); still within 2 se: exp_per_min" in out
+    assert "-> 24 seeds: at 12 seeds within 2 se and not zero: exp_per_min" in out
+    assert "stopped at 48 seeds (1-48): 48 seeds, the most (--max-seeds); still unsettled: within 2 se and not zero: " \
+           "exp_per_min" in out
     assert "hurt" in out  # (the targeted metric beside the headline ones)
     assert len(harness.load("abtest")) == 48 and harness.load("abtest-base") == base
 
@@ -254,12 +343,15 @@ def test_ab_reads_the_base_from_its_cache_and_says_the_seeds_it_used_and_why_it_
 
 
 def test_ab_has_the_filler_run_the_bases_missing_seeds(monkeypatch, tmp_path, capsys):
+    from gamelab import paths
+    monkeypatch.setattr(paths, "GPU", tmp_path / "GPU")  # (no lab/GPU file here)
+    monkeypatch.delenv("GAMELAB_GPU", raising=False)
     monkeypatch.setattr(baseline, "ROOT", tmp_path)
     monkeypatch.setattr(baseline, "rev", lambda ref, repo=None: "b" * 40)
     monkeypatch.setattr(baseline, "code_id", lambda commit, repo=None: commit)
     monkeypatch.setattr(harness, "FOLDER", tmp_path / "runs")
     monkeypatch.setattr(baseline, "identity", lambda repo=None: (None, "changes"))
-    base = _runs([100.0] * 12)
+    base = _runs([100.0] * 12, hurt=[1] * 12)
     cache, _ = harness.cache_of("loop", *harness._run_args(_ab_args()), code="b" * 40)
     filler = tmp_path / "fill.py"
     filler.write_text("")
@@ -267,6 +359,9 @@ def test_ab_has_the_filler_run_the_bases_missing_seeds(monkeypatch, tmp_path, ca
 
     def fill(command, **k):
         commands.append(command)
+        env = k["env"]  # the environment the base's key resolved, said outright
+        assert env["GAMELAB_CHARACTER"] == "thief" and env["GAMELAB_GPU"] == "0"
+        assert baseline.gamelab_env(env) == cache.meta["env"]["gamelab"]
         for r in base:
             cache.put(r["seed"], r)
         return subprocess.CompletedProcess(command, 0)
@@ -277,6 +372,33 @@ def test_ab_has_the_filler_run_the_bases_missing_seeds(monkeypatch, tmp_path, ca
                          "--minutes", "5.0", "--costs", "measured", "--map", "10002073", "--world", "walkers",
                          "--attack", "choice", "--seeds", "12", "--jobs", "2"]]
     assert "base: seed(s) 1-12 not cached" in capsys.readouterr().out
+
+
+def test_ab_refuses_a_metric_no_seed_has(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(baseline, "ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "rev", lambda ref, repo=None: "b" * 40)
+    monkeypatch.setattr(baseline, "code_id", lambda commit, repo=None: commit)
+    monkeypatch.setattr(harness, "FOLDER", tmp_path / "runs")
+    monkeypatch.setattr(baseline, "identity", lambda repo=None: (None, "changes"))
+    base = _runs([100.0] * 48, landings=[{"trip": {"near": 1}}] * 48)
+    cache, _ = harness.cache_of("loop", *harness._run_args(_ab_args()), code="b" * 40)
+    for r in base:
+        cache.put(r["seed"], r)
+    monkeypatch.setattr(harness.subprocess, "run", lambda *a, **k: pytest.fail("the base's seeds are all cached"))
+    asked = []
+    new_key = [dict(r, fresh={"n": r["seed"] % 2}) for r in base]  # a metric the candidate's change adds
+    monkeypatch.setattr(harness, "cached_run", lambda policy, seeds, *a, say=print, **k:
+                        asked.append(list(seeds)) or [new_key[s - 1] for s in seeds])
+    assert harness.ab(_ab_args(metric=["landings.trip.neer"])) == 2
+    out = capsys.readouterr().out
+    assert "--metric landings.trip.neer: in none of the base's results" in out
+    assert "--metric landings.trip.neer: no seed's result has it, on either side (a typo?); did you mean " \
+           "landings.trip.near" in out
+    assert asked == [list(range(1, 13))] and "seeds 1-12" not in out  # (refused before any table)
+    assert harness.ab(_ab_args(metric=["hurts"])) == 2 and "--metric hurts: no seed's result" in capsys.readouterr().out
+    assert harness.ab(_ab_args(metric=["fresh.n", "landings.trip.near"], save="fresh")) == 0
+    out = capsys.readouterr().out
+    assert "--metric fresh.n: in none of the base's results" in out and "fresh.n" in out.split("seeds 1-12:")[1]
 
 
 def test_a_spot_check_runs_a_saved_runs_seeds_again_with_their_own_arguments(monkeypatch):

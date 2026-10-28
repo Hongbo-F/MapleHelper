@@ -16,7 +16,9 @@ keeping them; a checkout whose code isn't as committed, or a run with `--think`,
 commit's (master's) without running anything, and saves them as a run for `compare`, which also takes a cache's folder.
 `ab` runs this checkout against a base commit's cached seeds, 12, then 24 and 48 only while a headline difference (EXP
 a minute, touches, deaths, falls out of the map, stops, and each --metric) is within 2 standard errors and not zero
-(the base's missing seeds run in its own checkout by D:/MapleHelper-scratch/baselines/base.py). `spot` is a reviewer's
+(seeds that differ with a mean difference of 0 among them), or has under 2 seeds with a value on both sides; a
+--metric no seed's result has is refused (the base's missing seeds run in its own checkout by
+D:/MapleHelper-scratch/baselines/base.py, with the environment its key resolved). `spot` is a reviewer's
 check of a saved run (or a cache's folder): a seed or two run again with the arguments each result records, the same
 to the digit or the keys that differ, instead of the whole table again. README: Checking a change.
 
@@ -118,6 +120,7 @@ PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden trac
 
 import argparse
 import dataclasses
+import difflib
 import json
 import math
 import os
@@ -1022,7 +1025,8 @@ HEADLINE = {
 
 def metric(result: dict, name: str) -> float | None:
     """A seed's value of a metric: HEADLINE's, or a key of its result (dots for nested ones: `nav.misses`,
-    `landings.trip.near`; a count that's absent 0); None where it has none (mp_per_kill without a kill)."""
+    `landings.trip.near`; a count that's absent 0); None where it has none (mp_per_kill without a kill). A name no
+    seed's result has at all reads 0 or None everywhere: `ab` refuses those first (has_metric)."""
     if name in HEADLINE:
         return HEADLINE[name](result)
     value, parts = result, name.split(".")
@@ -1035,33 +1039,71 @@ def metric(result: dict, name: str) -> float | None:
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
+def has_metric(result: dict, name: str) -> bool:
+    """Whether a seed's result has metric `name` at all: HEADLINE's always, else every part of its dotted path (a
+    value of None counts: mp_per_kill without a kill)."""
+    if name in HEADLINE:
+        return True
+    value = result
+    for part in name.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return False
+        value = value[part]
+    return True
+
+
+def _paths(result: dict, prefix: str = "") -> list[str]:
+    """Every dotted path to a number in a result (for a mistyped metric's suggestions)."""
+    out = []
+    for k, v in result.items():
+        if isinstance(v, dict):
+            out += _paths(v, f"{prefix}{k}.")
+        elif isinstance(v, (int, float)) and not isinstance(v, bool) or v is None:
+            out.append(f"{prefix}{k}")
+    return out
+
+
 def difference(base: list[dict], cand: list[dict], name: str) -> dict:
-    """Metric `name` seed by seed (the seeds both have, and a value in both): n, the means, the mean difference
-    (candidate - base) and its standard error (of the paired differences), t, and whether it's 'zero' (the same to
-    the digit), 'beyond 2 se' or 'within 2 se'."""
+    """Metric `name` seed by seed (the seeds both have; the differences of those with a value in both): n, the means,
+    the mean difference (candidate - base) and its standard error (of the paired differences), t, and whether it's
+    'zero' (every seed the same to the digit, its value or its having none), 'too few' (not, but under 2 seeds with a
+    value in both: no standard error to tell it by), 'beyond 2 se' or 'within 2 se' (a mean of 0 whose seeds differ,
+    +4 touches on one and -4 on another, among them)."""
     base, cand = _paired(base, cand)
-    pairs = [(a, b) for a, b in ((metric(x, name), metric(y, name)) for x, y in zip(base, cand))
-             if a is not None and b is not None]
+    values = [(metric(x, name), metric(y, name)) for x, y in zip(base, cand)]
+    pairs = [(a, b) for a, b in values if a is not None and b is not None]
     n = len(pairs)
     d = [b - a for a, b in pairs]
     mean = math.fsum(d) / n if n else 0.0
     se = statistics.stdev(d) / math.sqrt(n) if n > 1 else 0.0
-    verdict = "zero" if abs(mean) < 1e-12 else "beyond 2 se" if abs(mean) > 2 * se else "within 2 se"
+    if values and all(a == b for a, b in values):
+        verdict = "zero"
+    elif n < 2:
+        verdict = "too few"
+    else:
+        verdict = "beyond 2 se" if abs(mean) > 2 * se else "within 2 se"
     return {"metric": name, "n": n, "base": math.fsum(a for a, _ in pairs) / n if n else None,
             "cand": math.fsum(b for _, b in pairs) / n if n else None, "diff": mean, "se": se,
             "t": mean / se if se else None, "verdict": verdict}
 
 
+OPEN = ("within 2 se", "too few")  # the verdicts that leave a difference unsettled: `ab` takes more seeds
+
+
 def ab_next(rows: list[dict], seeds: int, steps: tuple[int, ...] = AB_SEEDS) -> tuple[int | None, str]:
     """`ab`'s rule: after `seeds` seeds, the next count of seeds to take (None: stop) and why. More only while a
-    headline difference is within 2 standard errors and not zero, up to the last of `steps`."""
-    open_ = [r["metric"] for r in rows if r["verdict"] == "within 2 se"]
-    if not open_:
+    headline difference is within 2 standard errors and not zero, or has too few seeds with a value on both sides
+    to tell (OPEN), up to the last of `steps`; stopped there, those are said to be unsettled still."""
+    within = [r["metric"] for r in rows if r["verdict"] == "within 2 se"]
+    few = [r["metric"] for r in rows if r["verdict"] == "too few"]
+    if not within and not few:
         return None, f"every headline difference is beyond 2 se or zero at {seeds} seeds"
+    parts = ([f"within 2 se and not zero: {', '.join(within)}"] if within else []) \
+        + ([f"too few seeds with a value on both sides: {', '.join(few)}"] if few else [])
     more = next((s for s in steps if s > seeds), None)
     if more is None:
-        return None, f"{seeds} seeds, the most (--max-seeds); still within 2 se: {', '.join(open_)}"
-    return more, f"within 2 se and not zero at {seeds} seeds: {', '.join(open_)}"
+        return None, f"{seeds} seeds, the most (--max-seeds); still unsettled: {'; '.join(parts)}"
+    return more, f"at {seeds} seeds {'; '.join(parts)}"
 
 
 def ab_table(rows: list[dict]) -> str:
@@ -1340,9 +1382,11 @@ def _filler(fill: str | None) -> str:
 def ab(args) -> int:
     """`ab`: this checkout (the candidate) against commit --base's cached baseline, paired seed by seed, from --seeds
     (12) seeds; 24, then 48 (--max-seeds) only while a headline difference (HEADLINE, and each --metric) is within 2
-    standard errors and not zero (ab_next). The base's missing seeds are run in its own checkout by the filler (--fill)
-    and cached there; the candidate's are run here (and cached, while its code is as committed). Says the seeds it
-    used and why it stopped; both sides saved (--save NAME: NAME and NAME-base; default the run's name and -ab)."""
+    standard errors and not zero, or has too few seeds to tell (ab_next, OPEN). A --metric that no seed's result has,
+    on either side, is refused after the first seeds (exit 2; the names nearest it said). The base's missing seeds are
+    run in its own checkout by the filler (--fill) with the environment its key resolved (baseline.filler_env) and
+    cached there; the candidate's are run here (and cached, while its code is as committed). Says the seeds it used
+    and why it stopped; both sides saved (--save NAME: NAME and NAME-base; default the run's name and -ab)."""
     from . import baseline
     try:
         base_sha = baseline.rev(args.base, REPO)
@@ -1378,16 +1422,29 @@ def ab(args) -> int:
                       f"them in a checkout of {base_sha[:12]} with `run ... --cache`, or give --fill")
                 return 2
             print(f"base: seed(s) {_seed_span(missing)} not cached: {' '.join(command[1:])}", flush=True)
-            done = subprocess.run(command, stdin=subprocess.DEVNULL)
+            # (its environment the one this key resolved: its runs' keys the same, whatever lab/GPU there says)
+            done = subprocess.run(command, stdin=subprocess.DEVNULL,
+                                  env=baseline.filler_env(cache.meta["env"]["gamelab"]))
             missing = [k for k in seeds if cache.get(k) is None]
             if done.returncode != 0 or missing:
                 print(f"the base's filler failed (exit {done.returncode}); seed(s) still missing: "
                       f"{_seed_span(missing) if missing else 'none'}")
                 return 2
         base += [cache.get(k) for k in seeds]
+        extra = [m for m in names if m not in HEADLINE]
+        if n == 0 and (absent := [m for m in extra if not any(has_metric(r, m) for r in base)]):
+            print(f"--metric {', '.join(absent)}: in none of the base's results; the candidate's are looked at "
+                  f"after its seeds", flush=True)
         cand += cached_run(args.policy, seeds, args.preset, args.minutes, args.jobs, args.think, args.costs,
                            args.ways, args.map, tuple(args.world), args.grounds, args.attack,
                            say=lambda line: print("candidate " + line, flush=True))
+        if n == 0 and (unknown := [m for m in extra if not any(has_metric(r, m) for r in base + cand)]):
+            known = sorted({k for r in base + cand for k in _paths(r)})
+            for m in unknown:
+                near = difflib.get_close_matches(m, known, n=3)
+                print(f"--metric {m}: no seed's result has it, on either side (a typo?)"
+                      + (f"; did you mean {', '.join(near)}?" if near else ""))
+            return 2
         n = target
         rows = [difference(base, cand, m) for m in names]
         print(f"\nseeds {_seed_span(list(range(1, n + 1)))}:\n{ab_table(rows)}", flush=True)

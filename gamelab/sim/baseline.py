@@ -26,8 +26,17 @@ The key (`key`: 16 hex of a SHA-256) is of:
     it was (and a base and a candidate whose only difference is a new switch, off, pair up);
   - the game data, which isn't in git (`data_stamp`: every file under gamedata/data by its path, size and mtime: a file
     extracted again changes the key, and nothing is read from a stamp that can't be made);
-  - Python's and numpy's versions, and the GAMELAB_* environment (GAMELAB_BASELINES aside: where, not what);
+  - Python's version and the installed packages' a run imports (`packages`: numpy, OpenCV, Pillow, mss; every one of
+    the distributions that could give its module, so two OpenCV wheels side by side are both in it; tests/
+    test_baseline.py checks that a run imports no other);
+  - the GAMELAB_* environment as what it resolves to (`gamelab_env`): the character played (character.active_id) and
+    whether her stats are fixed, the GPU mode (native.gpu_mode: GAMELAB_GPU, else lab/GPU), and any other GAMELAB_*
+    variable as it is (none changes a run today, so one set splits the cache rather than risk it); where the cache is
+    and who fills it (NOT_KEYED: GAMELAB_BASELINES, GAMELAB_BASE_FILL) aside;
   - FORMAT, this scheme's version.
+`ab` hands the base's filler the environment its key resolved (`filler_env`), so the base's seeds land where it reads.
+The DLLs' compiler isn't in it: they're built with /fp:precise to give Python's answers to the bit (native.FLAGS), and
+the tests check that they do.
 A seed's file is written whole (a temporary file, then renamed), so a run cut short leaves the seeds it finished.
 """
 
@@ -40,13 +49,21 @@ import platform
 import subprocess
 from pathlib import Path
 
-FORMAT = 1
+FORMAT = 2  # 2: the installed packages' versions and the GAMELAB_* environment as resolved (1: numpy's, as set)
 ROOT = Path(os.environ.get("GAMELAB_BASELINES", "D:/MapleHelper-scratch/baselines"))
 REPO = Path(__file__).resolve().parents[2]
 CODE = ("gamelab", "gamedata", "maplehelper", "config.toml")  # what identity() requires as committed
 NOT_CODE = (":(exclude,glob)**/*.md",)                      # ... but these (nothing runs them)
 CORE = ("policy", "preset", "minutes", "think", "costs", "ways", "map_id", "world", "grounds", "attack")
 UNCACHED = {"think": 0.0}  # arguments whose other values aren't deterministic, and so not cached
+# The installed packages a run imports, by module, and the distributions that could give each (OpenCV's four wheels:
+# this env has two, opencv-python and opencv-python-headless, either one's files cv2's).
+PACKAGES = {"numpy": ("numpy",),
+            "cv2": ("opencv-python", "opencv-python-headless", "opencv-contrib-python",
+                    "opencv-contrib-python-headless"),
+            "PIL": ("pillow",), "mss": ("mss",)}
+NOT_KEYED = ("GAMELAB_BASELINES", "GAMELAB_BASE_FILL")  # where the cache is and who fills it, not what a run does
+RESOLVED = ("GAMELAB_CHARACTER", "GAMELAB_FIXED_STATS", "GAMELAB_GPU")  # keyed as what they resolve to (gamelab_env)
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -120,14 +137,47 @@ def data_stamp(repo: Path = REPO) -> str:
     return h.hexdigest()[:16]
 
 
+def packages() -> dict:
+    """The versions of the distributions that could give the modules a run imports (PACKAGES), None if not installed."""
+    out = {}
+    for dists in PACKAGES.values():
+        for dist in dists:
+            try:
+                out[dist] = importlib.metadata.version(dist)
+            except importlib.metadata.PackageNotFoundError:
+                out[dist] = None
+    return out
+
+
+def gamelab_env(environ=None) -> dict:
+    """The GAMELAB_* environment as it bears on a run: the character played and whether her stats are fixed
+    (character.active_id: GAMELAB_CHARACTER, under GAMELAB_FIXED_STATS the thief by default), the GPU mode
+    (native.gpu_mode: GAMELAB_GPU, else the checkout's lab/GPU), and any other GAMELAB_* variable as set (NOT_KEYED
+    aside). An unset GAMELAB_CHARACTER and one naming the thief, or GAMELAB_GPU unset and 0, are one key. (Absolute
+    imports: lib/baseline.py, a copy of this file, runs it inside an older checkout's gamelab.)"""
+    from gamelab import character, native
+    environ = os.environ if environ is None else environ
+    other = {k: v for k, v in sorted(environ.items())
+             if k.startswith("GAMELAB_") and k not in NOT_KEYED and k not in RESOLVED}
+    return {"character": character.active_id(environ), "fixed_stats": bool(environ.get(character.FIXED_STATS)),
+            "gpu": native.gpu_mode(environ), **({"other": other} if other else {})}
+
+
+def filler_env(env: dict, environ=None) -> dict:
+    """The environment for the base's filler (base.py, in the base's checkout) whose runs' keys resolve to `env`
+    (gamelab_env's, as `ab` keyed the base): the character and the GPU mode said outright, so a lab/GPU file or a
+    character the candidate's process resolved some other way gives the base's key the same."""
+    environ = dict(os.environ if environ is None else environ)
+    environ["GAMELAB_CHARACTER"] = env["character"]
+    environ["GAMELAB_GPU"] = {"off": "0", "start": "1", "ahead": "ahead"}[env["gpu"]]
+    if env["fixed_stats"]:
+        environ["GAMELAB_FIXED_STATS"] = "1"
+    return environ
+
+
 def environment() -> dict:
-    """Python's and numpy's versions and the GAMELAB_* environment (but GAMELAB_BASELINES)."""
-    try:
-        numpy = importlib.metadata.version("numpy")
-    except importlib.metadata.PackageNotFoundError:
-        numpy = None
-    gamelab = {k: v for k, v in sorted(os.environ.items()) if k.startswith("GAMELAB_") and k != "GAMELAB_BASELINES"}
-    return {"python": platform.python_version(), "numpy": numpy, "gamelab": gamelab}
+    """Python's version, the installed packages' (packages) and the GAMELAB_* environment as resolved (gamelab_env)."""
+    return {"python": platform.python_version(), "packages": packages(), "gamelab": gamelab_env()}
 
 
 def covered(p: dict, repo: Path = REPO) -> dict:
