@@ -282,12 +282,14 @@ class FakeDetector:
         return min(found, key=lambda m: (m.x - cx) ** 2 + (m.y - cy) ** 2)
 
     def detect_wide(self, frame: np.ndarray, rows: tuple[int, int], band: int = 120, step: int = 90) -> list[Mob]:
+        """Every monster drawn wholly inside `rows`. The real one goes band by band (`band` rows every `step`), its bands
+        overlapping by its tallest picture and then some (MobDetector.overlap), so a monster wholly inside the rows is
+        wholly inside a band. As the bands were drawn here until 2026-10-28, 30 rows apart, one taller than 30 rows
+        across a band's edge was missed (an Orange Mushroom 60 above her in fight_step_wall): unseen while her band's
+        own search found it, but with the whole screen 10 times a second her band is searched with it."""
         if self.clock is not None:
             self.clock.sleep(DETECT_WIDE_S)
-        hits = []
-        for y0 in range(rows[0], max(rows[0] + 1, rows[1] - band + step), step):
-            hits += self._find(frame, (y0, min(rows[1], y0 + band)))
-        return suppress_overlaps(hits)
+        return self._find(frame, rows)
 
 
 class FakeLoot:

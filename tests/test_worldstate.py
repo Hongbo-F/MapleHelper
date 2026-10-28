@@ -1,5 +1,6 @@
-"""The continuous feed's step (localization.worldstate) on made-up frames: what it searches when (her band every
-few frames, the whole screen once a second, what's asked on the next frame), the freshness stamps, the
+"""The continuous feed's step (localization.worldstate) on made-up frames: what it searches when (the whole screen 10
+times a second, her band with it, or at the old pace her band every few frames and the whole screen once a second; what's
+asked on the next frame; the whole screen held back while its searches take the thread), the freshness stamps, the
 monsters re-found every frame, her EXP gains and hits as events, and the Scene a look would have given. And
 the searches off the frame loop: an answer back frames after its own, merged as of its frame (one track, re-found
 from the next frame on, a new one's appearance at its own frame), a look's ask owed while one is out."""
@@ -75,9 +76,11 @@ def pig(x: float, y: float = 500.0, facing: int = 1) -> Mob:
 
 @pytest.fixture
 def step():
+    """At the pace these timings were written for, the whole screen once a second (`perceive --wide-every 1`); the
+    default's in test_the_whole_screen_10_times_a_second_her_band_with_it."""
     model = small_map()
     eyes = Drawn(model)
-    return WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule())
+    return WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(wide_s=1.0))
 
 
 def frames(step: WorldStep, n: int, start: float = 100.0, asks=None, each=None, late=None) -> list:
@@ -118,7 +121,7 @@ class Held(Searches):
         return out
 
 
-def test_her_band_5_times_a_second_the_whole_screen_once_a_second(step):
+def test_at_a_whole_screen_a_second_her_band_5_times_a_second(step):
     late = []
     states = frames(step, 3 * FPS, late=late)
     assert step.counts["frames"] == 90 and step.counts["placed"] == 90
@@ -127,7 +130,7 @@ def test_her_band_5_times_a_second_the_whole_screen_once_a_second(step):
     band = [s.seq for s in late if s.work["band"]]
     assert wide == [1, 31, 61]  # the first frame, then every 1 s
     assert band == [k for k in range(7, 91, 6) if k not in wide]  # 0.2 s after the last search of it
-    slow = WorldStep(Senses(step.eyes, step.model, band=(100, 100)))
+    slow = WorldStep(Senses(step.eyes, step.model, band=(100, 100)), schedule=Schedule(wide_s=1.0))
     tenth = []
     for t in (100 + k / 10 for k in range(20)):
         slow.step(lambda ropes, t=t: step.eyes.frame(t, ropes), t)
@@ -138,6 +141,103 @@ def test_her_band_5_times_a_second_the_whole_screen_once_a_second(step):
     for s in states:  # each frame's state says when her band and the screen were last searched (merged by then)
         assert s.band_at == max((states[k - 1].t for k in wide + band if k < s.seq), default=None)
         assert s.wide_at == max((states[k - 1].t for k in wide if k < s.seq), default=None)
+
+
+def test_the_whole_screen_10_times_a_second_her_band_with_it():
+    """The default (worldstate.WIDE_EVERY_S; the user, 2026-10-28: "Let's change whole screen search to 10FPS"): every
+    third frame at 30 a second, her band never alone (a whole screen's search counts as hers). Each due a period after
+    the last was due: with frames stamped a hair early or late (the capture's), still 10 a second, where counting from
+    the last one's frame waited for a fourth frame each time three came a hair under 0.1 s apart."""
+    model = small_map()
+    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
+    assert step.schedule.wide_s == worldstate.WIDE_EVERY_S == 0.1
+    late = []
+    states = frames(step, 3 * FPS, late=late)
+    assert [s.seq for s in late if s.work["wide"]] == list(range(1, 91, 3)) and not any(s.work["band"] for s in late)
+    assert all(s.t - s.band_at <= 0.1 + 1e-9 and s.band_at == s.wide_at for s in states[1:])
+    rng = np.random.default_rng(3)
+    for wide_s, least, most in ((0.1, 29, 31), (1.0, 3, 3)):  # (3 s of frames, 30 a second, each +-1 ms)
+        jitter = WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(wide_s=wide_s))
+        late = []
+        for k in range(3 * FPS):
+            t = 100 + k / FPS + rng.uniform(-0.001, 0.001)
+            jitter.step(lambda ropes, t=t: jitter.eyes.frame(t, ropes), t)
+            late += jitter.came_back()
+        assert least <= sum(s.work["wide"] for s in late) <= most
+    # (counted from the last one's frame instead, as until 2026-10-28: 25 of 30 on these frames)
+
+
+class Paced(Searches):
+    """Searches on a thread of their own as far as the schedule knows (`paced`), each answer in at once, having taken
+    `took` s (its Found.took, as the feed's SearchThread times it)."""
+
+    def __init__(self, senses, took):
+        self.senses, self.took, self._box = senses, took, None
+
+    def free(self):
+        return self._box is None
+
+    def submit(self, job):
+        self._box = search(self.senses, job)
+        self._box.took = self.took
+
+    def take(self, by=None):
+        out, self._box = self._box, None
+        return out
+
+
+def test_the_whole_screen_waits_while_its_searches_take_more_than_half_the_thread():
+    """worldstate.WIDE_SHARE: the schedule's next whole screen waits until the last one's search took at most half the
+    time since its frame (on Tree Dungeon at 1366x768 a crowd's takes 14-17 ms there: 10 a second; where one takes
+    80 ms, about 6 a second, the thread left free half the time for what's asked). A look's ask doesn't wait."""
+    model = small_map()
+    for took, every in ((0.015, 3), (0.08, 5)):
+        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), searches=None)
+        step.searches = Paced(step.senses, took)
+        late = []
+        frames(step, 3 * FPS, late=late)
+        wide = [s.seq for s in late if s.work["wide"]]
+        assert all(b - a >= every for a, b in zip(wide, wide[1:])) and len(wide) >= 3 * FPS // (every + 1)
+        assert (step.counts["wide put off"] > 0) == (took > 0.05)
+    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
+    step.searches = Paced(step.senses, 0.08)
+    late = []
+    frames(step, 3, asks={1: Asks(wide=True)}, late=late)  # (asked on the frame after one: done there all the same)
+    assert [s.seq for s in late if s.work["wide"]] == [1, 2]
+    worldstate_share = worldstate.WIDE_SHARE
+    try:
+        worldstate.WIDE_SHARE = None  # (none: as often as the schedule says, whatever it takes)
+        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
+        step.searches = Paced(step.senses, 0.08)
+        late = []
+        frames(step, 30, late=late)
+        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 3))
+    finally:
+        worldstate.WIDE_SHARE = worldstate_share
+
+
+def test_drops_asked_for_go_first_alone_the_schedules_searches_on_the_next_free_frame():
+    """worldstate.ASKS_FIRST: a look's drops searched on its frame alone, the whole screen the schedule had due then
+    (and her band) on the next frame the searches are free, a period after the last as ever; asked with them, the whole
+    screen goes along. Off: the schedule's due ones ride with the drops, as until 2026-10-28."""
+    model = small_map()
+    for first in (True, False):
+        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
+        late = []
+        old = worldstate.ASKS_FIRST
+        try:
+            worldstate.ASKS_FIRST = first
+            frames(step, 12, asks={3: Asks(loot=True), 7: Asks(loot_wide=True), 9: Asks(wide=True, loot=True)},
+                   late=late)
+        finally:
+            worldstate.ASKS_FIRST = old
+        jobs = {s.seq: (bool(s.work["wide"]), s.loot is not None) for s in late}
+        if first:  # (the screen due on 4: on 5, the next frame; on 10 asked with the drops, as due then)
+            assert jobs == {1: (True, False), 4: (False, True), 5: (True, False), 7: (True, False), 8: (False, True),
+                            10: (True, True)}
+        else:
+            assert jobs == {1: (True, False), 4: (True, True), 7: (True, False), 8: (False, True), 10: (True, True)}
+        assert step.wide_due == pytest.approx(100.4) and not any(s.work["band"] for s in late)
 
 
 def test_what_is_asked_is_done_on_the_next_frame(step):
@@ -176,7 +276,7 @@ def test_a_scene_from_a_state_is_the_look_it_stands_for(step):
     step.eyes.mobs = [pig(1100), above]
     step.eyes.drops = [Item("mesos", 480 + round(50 / U), 300 - 6, 13, 13, 0.9)]
     late = []
-    frames(step, 1, asks={0: Asks(loot=True)}, late=late)
+    frames(step, 1, asks={0: Asks(wide=True, loot=True)}, late=late)  # (drops asked go alone: the screen asked too)
     (s,) = late  # the frame searched, with what was found in it
     model = step.model
     band = to_scene(s, model, (100, 100))

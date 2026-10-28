@@ -523,7 +523,8 @@ def test_the_feeds_costs_as_measured_at_1366x768_are_the_runs_alone(monkeypatch)
         harness.run_one("loop", 1, "game", minutes=0.5, costs="measured-1366")
     assert seen == [(feed.COSTS_1366, harness.COSTS["measured"]["LOOK_S"])]
     assert feed.COSTS is coded and fakes.LOOK_S == look
-    assert feed.COSTS_1366.refind == feed.COSTS.refind and feed.COSTS_1366.wide < feed.COSTS.wide
+    # (fitted again with the search's step 1 in C, 2026-10-28: a re-find 0.27 ms where 0.66 then, a whole screen 13)
+    assert feed.COSTS_1366.refind < feed.COSTS.refind and feed.COSTS_1366.wide < feed.COSTS.wide / 5
     made = feed.SyncFeed.__new__(feed.SyncFeed)
     monkeypatch.setattr(feed, "COSTS", feed.COSTS_1366)
     made.__init__(type("Step", (), {"senses": None})(), lambda ropes: None)

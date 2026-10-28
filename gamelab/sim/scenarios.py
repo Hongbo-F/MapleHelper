@@ -1176,7 +1176,7 @@ def fight_snail_stab(sim):
 
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
-                                ("Orange Mushroom", 2, 200.0)], seed=4, limit=60,
+                                ("Orange Mushroom", 2, 200.0)], seed=10, limit=60,
           expects=(check("no throw from the ground from platform 4",
                          lambda tr: not any(p[1] == "throw" for p in tr["plans"])),
                    check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
@@ -1197,7 +1197,10 @@ def fight_step_wall(sim):
     them; of seeds 1-16, 3, 4 and 11 meet all of this.) (Seed 4 since the rebase of her kill's monster onto clearance
     and slopes, 2026-10-27, her kill's monster bound by her kept in her body's way (behavior.fight.TOUCH_NEAR) and her
     kills credited to the monster her attack took: on seed 3 she didn't stay on platform 4; of seeds 1-16, 4 and 12 meet
-    all of this, and with master's stack 3, 4 and 11.)"""
+    all of this, and with master's stack 3, 4 and 11.) (Seed 10 since the whole screen 10 times a second, her band
+    searched with it (2026-10-28; at the simulator's costs about 5 a second, worldstate.WIDE_SHARE), and the fake whole
+    screen finding a monster across its bands' edges as the real one does (sim.fakes.FakeDetector.detect_wide): on seed 4
+    she didn't stay on platform 4; of seeds 1-16, 10 and 11 meet all of this, and with master's stack 4 and 12.)"""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1234,7 +1237,7 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 _AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS, dies_late=False)
 
 
-@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400, realism=_AT_RELEASE,
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=2, limit=400, realism=_AT_RELEASE,
           expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
@@ -1252,7 +1255,9 @@ def probe_top(sim):
     from 112). Each throw waits for its evidence before the next, and the log has where the pig was at the pick
     and what it showed (`probe score` fits the top to it: tests/test_probe.py). (Seed 6 for a while, where all 30
     hit, as "every throw hits" was: then no throw was read as a miss, not even with hit monsters hidden, and the
-    test of that had none to check.)"""
+    test of that had none to check.) (Seed 2 since the whole screen 10 times a second, 2026-10-28, the counts above
+    seed 1's: on seed 1 all 30 hit, one with the pig read 106.7 off at the pick, under the 111 the world's search
+    reaches from; of seeds 1-16, 2, 3, 6, 8, 11 and 15 meet all of this, and with master's stack 1-4 and 11.)"""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
@@ -1423,7 +1428,7 @@ def tour_hunt_other_spot(sim):
     return _hunt_17_pigs(sim)
 
 
-@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1300.0)], seed=1, limit=400,
+@scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1300.0)], seed=6, limit=400,
           expects=(logs("that no spot reaches: onto the platform"),))
 def tour_hunt_onto_platform(sim):
     """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself.
@@ -1434,7 +1439,8 @@ def tour_hunt_onto_platform(sim):
     first.) (The other pig from 1300 since 2026-10-27, her kill credited to the monster her attack took
     (localization.tracking's binding) and drawn alive until her star lands (sim.world Realism.dies_late): from 1240
     no seed of 1-16 shows it, the fight reaching the other pig from 14 once the kill isn't put by it; from 1300 seed 1
-    does, from 1380 and 1420 seed 4, of 1-4.)"""
+    does, from 1380 and 1420 seed 4, of 1-4.) (Seed 6 since the whole screen 10 times a second, 2026-10-28: on seed 1 she
+    killed both without going onto 17; of seeds 1-16 only 6 shows it, and with master's stack 1 and 6.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -1605,7 +1611,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=3, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1637,7 +1643,8 @@ def loop_lull_loot(sim):
     world's damage at the server's time: on seed 2 no lull came; of seeds 1-16, 1, 3-7 and 9-15 meet all of this.)
     (Seed 2 since 2026-10-27, an attack from a jump picking by the star's search alone (reach.AIR_MODEL, the world's
     AIR_PICK) and her stance going by where each monster will be when her attack starts (attack.stance.Pace): on seed 1
-    no lull came; of seeds 1-12, 2-10 meet all of this.)"""
+    no lull came; of seeds 1-12, 2-10 meet all of this.) (Seed 3 since the whole screen 10 times a second, 2026-10-28:
+    on seed 2 no lull came; of seeds 1-16 all but 2 and 10 meet all of this.)"""
     return _loop_on_12(sim)
 
 

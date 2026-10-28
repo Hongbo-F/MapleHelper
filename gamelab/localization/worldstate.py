@@ -12,8 +12,10 @@ one call in C, ONE_CALL: Eyes.refind_all), each sighting with its track's id (Mo
 or lost lately looked at for their death (DEATHS: perception.deaths, the game data's die1 frames where each was).
 
 The searches run off that frame loop (`Searches`: in the feed, a thread of its own, `SearchThread`), one at a
-time, on the newest frame placed when one is due: monsters not tracked yet in her band every BAND_EVERY_S,
-the whole screen every WIDE_EVERY_S; the drops only when asked (or, for `watch`, on a schedule of their own).
+time, on the newest frame placed when one is due: the whole screen every WIDE_EVERY_S, and monsters not tracked yet
+in her band BAND_EVERY_S after the last search for monsters (a whole screen's counts: with one every 0.1 s her band
+isn't searched on its own unless asked or the whole screen falls behind); the drops only when asked (or, for
+`watch`, on a schedule of their own).
 A consumer can ask for any of those on the next frame (`Asks`); asked while a search is out, they're owed and
 handed over as soon as it's back, on the newest frame. What a search found comes back to a mailbox the
 frame loop empties (`came_back`, and in each step after placing her, before the re-finds, so what it found
@@ -61,8 +63,31 @@ ROPES_EVERY = 1
 # s between searches of her band for monsters not followed yet, 5 a second. By time, not frames: counted every 6th
 # frame, a feed slower than 30 frames a second (on the saved frames, 18 with the searches) searched it less often
 # than a look's freshness needs (feed.MOBS_FRESH_S), so every look asked for one, and half the frames searched it.
+# Counted from the last search for monsters, a whole screen's too (its band holds hers): with the whole screen every
+# WIDE_EVERY_S (0.1) her band is searched on its own only when asked or when the whole screen is 0.2 s late.
 BAND_EVERY_S = 0.2
-WIDE_EVERY_S = 1.0    # s between searches of the whole screen (122 ms each, bench-look)
+# s between searches of the whole screen, 10 a second whoever is attached (the user, 2026-10-28: "Let's change whole
+# screen search to 10FPS"; once a second until then, from when it took 55-69 ms on its thread in a crowd: README, A
+# cheaper whole screen). With the search's step 1 in C a crowd's whole screen takes 16 ms on its thread, so on the
+# crowd's replays of the service's frame loop it costs 0.26-0.30 of a core more held 3x (live's motion; 0.37-0.43 as
+# saved), the frames a second as before, and a monster off her band is known to a client a median 0.054 s after it shows
+# (p90 0.088) where it was 0.44 (0.99), on six live recordings (README, The whole screen 10 times a second).
+WIDE_EVERY_S = 0.1
+# The schedule's whole screens take at most this share of the searches' thread: the next waits until the last one's
+# search (with what was searched with it) took at most WIDE_SHARE of the time since its frame (on a thread of their own,
+# Searches.paced; inline nothing waits on it). On Tree Dungeon at 1366x768 a crowd's whole screen takes 14-17 ms there,
+# so it never waits and it's 10 a second; at 1920x1080 on the first map's 17 bench frames it took 78 ms inline
+# (bench-look, 2026-10-28, under load; the simulator's feed.COSTS 100 on the thread), where 10 a second would leave the
+# thread nothing else and an ask for the drops would wait out a whole screen every time: there it's about 5 a second.
+# None: as often as WIDE_EVERY_S says, whatever it takes.
+WIDE_SHARE = 0.5
+# Drops asked for (a look's: the hunt's, a pile just picked up) are searched on the frame alone, what the schedule has
+# due (the whole screen, her band) on the next frame the searches are free: with the whole screen every 0.1 s it was
+# due on a third of those frames, and the look waited for it besides (on the crowd's replays her drops' looks 24 ms
+# (median) with the whole screen once a second, 29 at 10 a second with it, 23-26 alone; those with every platform's
+# drops 98 then 118, 98-112 alone; README, The whole screen 10 times a second). A look asks for her band or the whole
+# screen only when they're stale (feed.ASK_ONLY_STALE): those go with the drops.
+ASKS_FIRST = True
 LOOT_EVERY_S = 0.5    # `watch`: s between searches for the drops on her platform ...
 LOOT_WIDE_EVERY_S = 2.0  # ... and on every platform in view
 HP_DROP = 0.004       # HP lost from one frame to the next that counts as a hit (control.navigator.HIT)
@@ -311,8 +336,10 @@ class Searches:
     """Where a frame's searches run while the frame loop goes on: one job at a time, its answer left in a mailbox
     that holds one. The frame loop hands over the next only once it has taken the last (`free`), so an answer is
     never overwritten unread; the frames in between are the frame loop's alone. `wake`, if set, is called once an
-    answer is in (the frame loop may be waiting for asks or for its next frame)."""
+    answer is in (the frame loop may be waiting for asks or for its next frame). `paced`: on a thread of their own,
+    whose time the schedule's whole screens share (WIDE_SHARE); not inline."""
     wake: Callable[[], None] | None = None
+    paced = True
 
     def free(self) -> bool:
         raise NotImplementedError
@@ -331,6 +358,7 @@ class Searches:
 
 class InlineSearches(Searches):
     """On the caller's thread, at once: the answer is in as soon as the job is handed over (tests, bench-look)."""
+    paced = False
 
     def __init__(self, senses: Senses):
         self.senses, self._box = senses, None
@@ -453,6 +481,8 @@ class WorldStep:
         self.seq = 0
         self.band_at: float | None = None
         self.wide_at: float | None = None
+        self.wide_due: float | None = None  # when the schedule's next whole screen is due (None: on the next frame)
+        self.wide_took: float | None = None  # s the last whole screen's search took (with what came with it; paced)
         self.loot_at: float | None = None
         self.loot_wide_at: float | None = None
         self.mesos_only = False
@@ -480,7 +510,7 @@ class WorldStep:
         self._ahead: int | None = None   # this frame's token, if its re-finds were sent ahead
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "fallbacks": 0,
                        "band": 0, "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "exp read": 0, "hits": 0,
-                       "searches": 0, "touches": 0, "misses": 0, "touches by HP": 0}
+                       "searches": 0, "touches": 0, "misses": 0, "touches by HP": 0, "wide put off": 0}
 
     def throw(self, t: float, side: str, attack: str | None = None) -> None:
         """She threw toward `side` at t (with `attack`: its id, if told)."""
@@ -665,15 +695,24 @@ class WorldStep:
 
     def _hand_over(self) -> None:
         """The searches due (asked, or by the schedule), handed to the worker on the newest frame placed, if it's
-        free: what's asked only on a frame shown at the time asked for or later."""
+        free: what's asked only on a frame shown at the time asked for or later. The whole screen by the schedule
+        `wide_s` apart on average (`wide_due`: each due a period after the one before was, on the first frame shown
+        then or later; a period after this one if it came a period or more late), so 10 a second at 0.1 s where the
+        time since the last one, at 30 frames a second, waited for a fourth frame whenever three came 0.1 s less a
+        hair apart (8.6 a second on the replays); and not while the last one's search took more
+        than WIDE_SHARE of the time since its frame (`_resting`). The rest by the time since their last. Drops asked
+        for go first, alone (ASKS_FIRST): what the schedule has due waits for the next frame the searches are free."""
         job = self._last
         if job is None or not self.searches.free():
             return
         t, sch = job.t, self.schedule
         owed = self.owed if self.owed is not None and t >= self.owed.after - 1e-9 else None
         asked = owed or Asks()
-        wide = asked.wide or (sch.wide_s is not None and (self.wide_at is None or t - self.wide_at >= sch.wide_s))
-        band = asked.band or (sch.band_s is not None and (
+        first = ASKS_FIRST and (asked.loot or asked.loot_wide)  # (the schedule's searches wait for the next free frame)
+        on_time = sch.wide_s is not None and (self.wide_due is None or t >= self.wide_due - 1e-9)
+        due = on_time and not first and not (not asked.wide and self._resting(t))
+        wide = asked.wide or due
+        band = asked.band or (not first and sch.band_s is not None and (
             self.band_at is None or t - self.band_at >= sch.band_s - 1e-6))
         loot_wide = asked.loot_wide or (sch.loot_wide_s is not None and (
             self.loot_wide_at is None or t - self.loot_wide_at >= sch.loot_wide_s))
@@ -681,6 +720,9 @@ class WorldStep:
             self.loot_at is None or t - self.loot_at >= sch.loot_s))
         if not (wide or band or loot):
             return
+        if wide and on_time:  # (asked when it was due: the schedule's too)
+            late = self.wide_due is None or t - self.wide_due >= sch.wide_s
+            self.wide_due = t + sch.wide_s if late else self.wide_due + sch.wide_s
         if owed is not None:
             if owed.loot or owed.loot_wide:
                 self.mesos_only = owed.mesos_only
@@ -691,6 +733,16 @@ class WorldStep:
         if job.band:  # (a search for the drops alone can't see a monster: hidden tracks don't wait for it)
             self.tracker.searching = job.t
         self.searches.submit(job)
+
+    def _resting(self, t: float) -> bool:
+        """Whether the schedule's whole screen waits on the frame shown at t (WIDE_SHARE): the last one's search took
+        more than WIDE_SHARE of the time since its frame. Each frame it waits is counted ('wide put off')."""
+        if WIDE_SHARE is None or self.wide_took is None or self.wide_at is None:
+            return False
+        if t - self.wide_at >= self.wide_took / WIDE_SHARE - 1e-9:
+            return False
+        self.counts["wide put off"] += 1
+        return True
 
     def _merge(self, found: Found | None) -> None:
         """What a frame's searches found, merged into the tracker as of that frame (tracking.merge, with the
@@ -714,6 +766,7 @@ class WorldStep:
             self.counts["wide" if job.wide else "band"] += 1
             if job.wide:
                 self.wide_at = wide_at = job.t if self.wide_at is None else max(self.wide_at, job.t)
+                self.wide_took = found.took if self.searches.paced else None
         if found.loot is not None:
             self.loot_at = job.t
             self.counts["loot"] += 1

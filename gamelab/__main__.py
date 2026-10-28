@@ -2944,7 +2944,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-record", action="store_true", help="without the rolling recording (`gamelab recorder` keeps "
                                                             "it then)")
     s.add_argument("--wide-every", type=float, metavar="S", help="the whole screen searched every S s without being "
-                   "asked (default 1); faster changes what the hunt sees when, not measured on its EXP yet")
+                   "asked (default 0.1: worldstate.WIDE_EVERY_S), to try another pace")
     s.set_defaults(func=cmd_perceive)
 
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "

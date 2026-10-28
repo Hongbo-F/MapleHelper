@@ -8,8 +8,9 @@ of their own, localization.worldstate) on the screen (perception.frames.ScreenFr
 duplication: capture.shared). It never sends a key and never brings the game forward; it waits for the game window
 when there's none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoever is attached (the
 user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is running as a
-constant thing and hunt is only a consumer of it"): HZ frames a second, her band searched every 0.2 s and the whole
-screen every second (SCHEDULE); what a command asks is searched on the next frame besides, and changes neither. The
+constant thing and hunt is only a consumer of it"): HZ frames a second, the whole screen searched 10 times a second
+(her band with it; on its own every 0.2 s only if the whole screen falls behind: SCHEDULE, worldstate.WIDE_EVERY_S);
+what a command asks is searched on the next frame besides, and changes neither. The
 drops are searched at `watch`'s rates while no command that hunts is attached (a hunt asks for those it wants on its
 frames: HUNTING). Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
 `watch`'s was (a scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl.
@@ -93,8 +94,10 @@ FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a lo
 # replay.py, no client): 10 a second with `watch`'s searches took 1.00 core; 30 with the hunt's, 1.42 cores, the frame
 # loop saturated at 14.5 a second (README, Perception at one pace).
 HZ = 30.0
-# What's searched without being asked: her band every 0.2 s and the whole screen every second whoever is attached (the
-# hunt's schedule, until 2026-10-26 only while a command that hunts was), and the drops at `watch`'s rates (her
+# What's searched without being asked: the whole screen every 0.1 s whoever is attached, her band with it (its own
+# search every 0.2 s only when no search for monsters came in that long: worldstate.BAND_EVERY_S, WIDE_EVERY_S; once a
+# second and her band every 0.2 s until 2026-10-28; the hunt's schedule, until 2026-10-26 only while a command that hunts
+# was), and the drops at `watch`'s rates (her
 # platform's every 0.5 s, every platform in view every 2 s: SCHEDULE) for the mini-map while none hunts. While one does,
 # the drops only when asked (HUNTING): the hunt asks for those it wants on the frames it takes (55% of the tours' looks),
 # published as any. Searched on schedule beside them (worldstate.WATCH whoever is attached, as first built), the
@@ -102,7 +105,7 @@ HZ = 30.0
 # 146; her band's 11 longer): the crowd's saved frames with a hunting client, 3 runs of each alternated, the machine
 # 73-89% busy (D:/MapleHelper-scratch/pconst/build1/replay, pooled.py; README, Perception at one pace).
 SCHEDULE = WATCH
-HUNTING = Schedule()  # the hunt's: her band every 0.2 s, the whole screen every second, the drops when asked
+HUNTING = Schedule()  # the hunt's: the whole screen every 0.1 s (her band with it), the drops when asked
 QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at HZ): older ones are dropped, a gap said
 KEEP = 8              # states a client keeps (feed.KEEP)
 EVENTS_KEPT = 10_000  # events a client keeps for its next drain at most
@@ -135,9 +138,8 @@ EVENTS = ("died", "exp_gain", "victim", "let_go", "hp_read", "lv_read", "touch")
 
 def pace(wide_s: float) -> None:
     """The whole screen searched every `wide_s` s without being asked, whoever is attached (both schedules: `perceive
-    --wide-every`). Not by default: with the search's step 1 in C a crowd's whole screen costs about what her band did
-    (README, A cheaper whole screen), but what a faster pace does to the hunt (the tracks, her memory, the EXP) isn't
-    measured yet, and every state changes with it."""
+    --wide-every`, to try another pace than worldstate.WIDE_EVERY_S's 0.1 s; README, The whole screen 10 times a
+    second)."""
     global SCHEDULE, HUNTING
     SCHEDULE, HUNTING = replace(SCHEDULE, wide_s=wide_s), replace(HUNTING, wide_s=wide_s)
 
@@ -894,14 +896,18 @@ class Publisher:
         self.model = None
         self.w = {"scene": -1e9, "tracks": -1e9, "visible": None, "loot": [], "looked": []}
         self.native, self.slow = "", False  # native.state() as the run started, and whether the C's not all in use
+        self._searched: tuple | None = None  # (when, the step, its searches' counts then) at the last console line
 
     def started(self, runner: Runner, map_id: int) -> None:
         from .. import native  # (whether its C is in use: a DLL that couldn't be built shows only as fewer frames)
         self.runner, self.model = runner, runner.step.model
         self.native = f"{native.state()}; the monster search's step 1 {native.search_state()}"
         self.slow = not native.masked_in_c() or native.search_lib() is None
-        telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native)
-        self.log(f"perception: gamelab's C pieces {self.native}")
+        sch = runner.step.schedule
+        telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native,
+                       schedule={"wide_s": sch.wide_s, "band_s": sch.band_s, "hz": HZ})
+        self.log(f"perception: gamelab's C pieces {self.native}; the whole screen searched every "
+                 f"{'(only when asked)' if sch.wide_s is None else f'{sch.wide_s:g} s'}")
 
     def state(self, st: WorldState) -> None:
         if self.runner is None:
@@ -959,7 +965,8 @@ class Publisher:
                                total=meter.total, per_minute=None if rate is None else round(rate, 1))
 
     def status(self, now: float) -> str:
-        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute; gamelab's C pieces
+        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute, the searches a second
+        (`_searches`); gamelab's C pieces
         while they're not all in use (native.state: perception slower); if it ever happens, the monster search's noise
         bound broken (MobDetector.noise_over: a peak where OpenCV's score lay outside mobs.NOISE_K's bound of the exact
         one, at a shape worked out as master does; measured, not proven: README, A cheaper whole screen); and the
@@ -983,9 +990,22 @@ class Publisher:
         touched = f"; touches {n['touches']} ({n['misses']} MISS" + (
             f", {n['touches by HP']} by her HP bar alone)" if n["touches by HP"] else ")")
         return (f"; {len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'"
-                f"{exp}{touched}" + (f"; gamelab's C pieces {self.native}" if self.slow else "")
+                f"{exp}{touched}" + self._searches(now) + (f"; gamelab's C pieces {self.native}" if self.slow else "")
                 + (f"; the monster search's noise bound broken {over} times" if over else "")
                 + (f"; {gpu}" if gpu else ""))
+
+    def _searches(self, now: float) -> str:
+        """The searches a second since the last console line (the whole screen's, her band's alone, the drops'): with
+        the whole screen every 0.1 s (worldstate.WIDE_EVERY_S) it's 10 a second while it keeps up; '' at a run's
+        first line."""
+        step = self.runner.step
+        c = step.counts
+        was, self._searched = self._searched, (now, step, c["wide"], c["band"], c["loot"])
+        if was is None or was[1] is not step or now - was[0] <= 0:
+            return ""
+        dt = now - was[0]
+        return (f"; searched a second: the whole screen {(c['wide'] - was[2]) / dt:.1f}, her band alone "
+                f"{(c['band'] - was[3]) / dt:.1f}, the drops {(c['loot'] - was[4]) / dt:.1f}")
 
     def close(self) -> None:
         telemetry.stop()

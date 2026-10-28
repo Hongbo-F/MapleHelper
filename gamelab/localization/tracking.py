@@ -3,7 +3,7 @@ an id while it walks and turns, flinches out of sight under damage numbers, or l
 back, and what happens to it comes out as events.
 
 A frame's sightings come two ways: monsters re-found where their track says they should be (Eyes.refind,
-every frame), and monsters a search found (her band 5 times a second, the whole screen once a second), which
+every frame), and monsters a search found (the whole screen 10 times a second, her band with it), which
 are matched to tracks not re-found: same kind, same platform, and where its track would be by then within
 10 + 1.3 x its speed x the time since + 25 units (knockback). Greedy, nearest first: there are only a few at a
 time. One no track explains is new: `entered` at the screen's edge (the camera moved, or it walked in),

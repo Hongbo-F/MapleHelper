@@ -52,10 +52,12 @@ HZ = 30.0            # frames a second the feed looks at (the game shows 60; a f
 RING_SLOTS = 4       # look frames a Ring keeps by default (the service's: service.RING_SLOTS)
 FRAME_SHAPE = (540, 960, 3)  # ... each of this shape at 1920x1080 (frame_shape)
 MOBS_FRESH_S = 0.3   # a look's monsters: her band searched at most this long before its frame. It's searched every
-                     # 0.2 s (worldstate.BAND_EVERY_S), and the frame after that and the search itself take about 0.1 s
-                     # more: with 0.25, on the saved frames a third of the frames searched it, every look asking.
-                     # (Without ASK_ONLY_STALE a look asks for it on a frame of its own.)
-WIDE_FRESH_S = 0.5   # ... the whole screen (it's searched every second; tracked monsters are re-found every frame)
+                     # 0.2 s at the most (worldstate.BAND_EVERY_S; with the whole screen, every 0.1 s since
+                     # 2026-10-28), and the frame after that and the search itself take about 0.1 s more: with 0.25,
+                     # on the saved frames a third of the frames searched it, every look asking. (Without
+                     # ASK_ONLY_STALE a look asks for it on a frame of its own.)
+WIDE_FRESH_S = 0.5   # ... the whole screen (searched every 0.1 s, worldstate.WIDE_EVERY_S, so a look asks for it only
+                     # if that falls 0.4 s behind; tracked monsters are re-found every frame)
 FEED_WAIT_S = 0.6    # s a look waits for the feed's state before it asks again (the whole screen with every drop in
                      # view takes ~0.25 s; Senses.look stands still after senses.LOST_S of none)
 GLANCE_WAIT_S = 0.25  # s a glance waits for a frame from the feed (none: no dot, Senses.glance)
@@ -496,7 +498,15 @@ COSTS = Costs()
 # 100.8, a strip 11.3 (its frame loop out of CPU at 11-12 frames a second in the crowd). Not COSTS: every scenario's
 # feed takes COSTS, and with these 4 scenarios no longer show what they're there for on their seeds, 2 tests' timings
 # go otherwise and all 22 of Tree Dungeon's golden traces change; the harness takes them with `--costs measured-1366`.
-COSTS_1366 = Costs(look=0.008, refind=0.0007, fallback=0.0019, beside=0.0064, band=0.024, wide=0.070, loot_strip=0.0085)
+# Fitted again on 2026-10-28 with the monster search's step 1 in C (README, A cheaper whole screen; the re-finds'
+# fallbacks go through it too): the service's frame loop replayed as above on master 301e78e and on work/wide-10
+# (D:/MapleHelper-scratch/wide10/build, tools/replay/costs_fit.py; 3 runs of 60 s of each, the crowd and the quiet
+# start, the fake tour attached, the machine 5-20% busy), the same fit: her place and the step but its re-finds 5.0-5.1
+# ms, a re-find 0.26-0.27, a fallback 0.55-0.62 more, beside 1.5-2.3; on their thread her band 7.4 (1,428 searches), the
+# whole screen 12.4-13.0 (354 and 3,721), a strip of drops 5.9-6.4. Until then the costs above: with them a whole screen
+# 10 times a second (worldstate.WIDE_EVERY_S) would have taken 70% of the simulated thread (WIDE_SHARE holding it to
+# half: 7 a second), where it takes 13% live.
+COSTS_1366 = Costs(look=0.005, refind=0.0003, fallback=0.0006, beside=0.002, band=0.0075, wide=0.013, loot_strip=0.006)
 GAME_HZ = 60.0  # frames a second the game shows
 
 
@@ -533,6 +543,7 @@ class TimedSearches(Searches):
         if ready is None or (by is not None and ready > by + 1e-9):
             return None
         out, self._found, self.began = self._found, None, None
+        out.took = self.costs.search(out.work)  # (what it took on the simulator's clock, as the thread's would live)
         return out
 
 
