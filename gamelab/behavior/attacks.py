@@ -55,6 +55,12 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
 
 Each choice is logged with its numbers, and sent as a telemetry 'attack' record; `counts` keeps them for the run's
 report.
+
+Her regular presses are watched for the doubt that its key isn't the game's (behavior.keycheck.RegularWatch, the
+Hunter's: `watch`): each one keyed at a target (`key`, or with the regular attack alone her Actions' own key, its target
+taken as a throw that way would: `on_throw`), her Lucky Seven casts at one, her kills placed and her EXP's gains, and
+every look judges them. Held (a doubt waiting for its check, or after one: RegularWatch.holds), a throw that would be
+the regular attack is Lucky Seven while she has the MP for a cast, else no throw (`key` says None).
 """
 
 import time
@@ -158,6 +164,13 @@ class Attacks:
     'regular'), with MP `max_mp` when full and Lucky Seven at skill `level` (None if she has no Lucky Seven key).
     `kills`: her kills so far (the ledger's), which end the marks they're placed on; `dead`: the feed's tracks taken for
     dead (Ledger.dead), whose marks end too."""
+    # (the doubt's: see __init__; here too for an Attacks made without it, as the tests' stand-ins are)
+    watch = None
+    roped = None
+    forced = None
+    _target = None
+    _regular = False
+    _asked = False
 
     def __init__(self, model: MapModel, keys, mode: str = "choice", max_mp: float = 623.0, level: float = 16.0,
                  log: Callable[[str], None] = print, kills: Callable[[], list] | None = None,
@@ -203,6 +216,17 @@ class Attacks:
         # darts, so out of darts doesn't count it: DartWatch.cast)
         self.from_ground: Callable[[], bool] | None = None
         self._swipe = False
+        # The doubt that her regular attack's key isn't the game's (behavior.keycheck.RegularWatch: the Hunter's), her
+        # look having her on a rope or at its top (the Hunter's: those presses aren't judged), an attack forced for the
+        # throw `key` is asked next ("lucky_seven": her stars' test, behavior.keycheck), and what `key` chose for its
+        # throw: its target, whether it's the regular attack, and whether `key` was asked at all (with the regular attack
+        # alone her Actions key it themselves)
+        self.watch = None
+        self.roped: Callable[[], bool] | None = None
+        self.forced: str | None = None
+        self._target: Monster | None = None
+        self._regular = False
+        self._asked = False
 
     # --- after every look ------------------------------------------------------------------------
 
@@ -215,6 +239,10 @@ class Attacks:
         kills = self._kills()
         for k in kills[self._killed:]:
             if getattr(k, "placed", False):
+                if self.watch is not None:
+                    gained = getattr(k, "gained", None)
+                    self.watch.killed(k.t if gained is None else gained, k.kind, k.platform, k.x,
+                                      getattr(k, "track", None))
                 self.marks = [mk for mk in self.marks if not is_kill(mk.m, k)]
                 if (gained := getattr(k, "gained", None)) is not None:  # its gain was that monster's: no other's kill
                     for g in [g for g in self._gains if abs(g - gained) < GAIN_SAME_S][:1]:
@@ -242,6 +270,8 @@ class Attacks:
             if again.bar is not None and mk.whole and not any(t <= s.t - SHOWS_S for t, _ in mk.pending):
                 mk.left = mk.left.hit() or mk.left  # her damage shows: not all of her throws reckoned in it missed
         self.marks = [mk for mk in self.marks if s.t - mk.seen < LOST_S and s.t - mk.thrown < FORGET_S]
+        if self.watch is not None:
+            self.watch.look(s.t, s.monsters, s)  # (her regular presses judged: the doubt)
 
     def glance(self, t: float, mp: float | None) -> None:
         """Her MP bar's share `mp` off a frame shown at `t` newer than the latest look (None: not read), as on_look
@@ -264,6 +294,8 @@ class Attacks:
         self._gains = {g: k for g, k in self._gains.items() if t - g < GAINS_KEPT_S}
         self._gains.update((g, k) for g, k in gains if t - g < GAINS_KEPT_S)  # (a look's after a glance's: its meter's)
         self._heard = max(self._heard, t)
+        if self.watch is not None:
+            self.watch.heard(gains)
 
     def shown_by(self) -> float:
         """When a frame shows what her last throw at a target did to it, if it killed it: KILL_SHOWN_S after its key
@@ -285,9 +317,10 @@ class Attacks:
 
     # --- at every throw --------------------------------------------------------------------------
 
-    def key(self, side: str) -> str:
+    def key(self, side: str) -> str | None:
         """The attack key a throw that way goes out with now (Actions' attack key asks this): its choice logged. Its
-        target: `aimed`, if set (and then cleared), else what a throw that way takes (target)."""
+        target: `aimed`, if set (and then cleared), else what a throw that way takes (target). The regular attack held
+        (`watch`: behavior.keycheck), Lucky Seven while she has the MP for a cast, else None: no throw."""
         now = time.monotonic()
         aimed, self.aimed = self.aimed, None
         seen = [] if self._last is None else self._last.monsters
@@ -300,6 +333,19 @@ class Attacks:
         # for little. Until 2026-10-26 by the latter, the dead chance then mostly stale (KILL_SHOWN_S).
         what = None if target is None else float("inf") if left is None else left if DEAD_CHOICE else alive
         attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
+        if self.forced == "lucky_seven" and self.skill is not None:
+            attack, why = self.skill, "her stars' test"
+        elif attack is self.regular and self.watch is not None and self.watch.holds(target):
+            if self.skill is not None and (self.mp is None or choice.can_cast(self.mp, self.max_mp, self.skill.mp)):
+                attack, why = self.skill, "held"
+            else:  # (no Lucky Seven to throw instead: no throw)
+                self._cast, self._keyed, self._regular, self._target, self._asked = None, None, False, None, False
+                self.counts["held: none thrown"] += 1
+                if self.counts["held: none thrown"] in (1, 10, 100):
+                    self.log("    no throw: the regular attack is held (its key doubted) and there's no Lucky Seven "
+                             "to throw instead" + ("" if self.skill is None else " (her MP under a cast)"))
+                return None
+        self._target, self._regular, self._asked = target, attack is self.regular, True
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
         self._swipe = self._cast is not None and target is not None and self._clawed(target)
         self._keyed = None
@@ -320,7 +366,16 @@ class Attacks:
         """A throw (Actions.throw_listeners), its attack key going down at `at`: the throw `key` chose for a target is
         pending at its key's time (a jump throw's attack key goes 40-460 ms after `key` is asked: KILL_SHOWN_S and
         LANDS_S count from it), and the look the next is decided on waits for its kill to show (`shown_by`); a cast
-        `key` chose takes its MP off now (looks shown before it could show still read it: on_look)."""
+        `key` chose takes its MP off now (looks shown before it could show still read it: on_look). Its regular
+        attack's press, or its cast at a target, told to the doubt's watch (`watch`)."""
+        if self.watch is not None:
+            if not self._asked:  # (the regular attack alone: her Actions keyed it, its target as a throw that way takes)
+                self._watch_regular(at, self.target(side))
+            elif self._regular:
+                self._watch_regular(at, self._target)
+            else:
+                self.watch.cast(at, self._target)
+        self._asked, self._regular = False, False
         if self._keyed is not None:
             mk, i = self._keyed
             self._keyed = None
@@ -338,6 +393,18 @@ class Attacks:
         self._cast = None
         if self.darts is not None:
             self.darts.cast(at, swipe=self._swipe)
+
+    def _watch_regular(self, at: float, m: Monster | None) -> None:
+        """A regular press keyed at `at` at `m` told to the doubt's watch, with what decides whether it's judged: its
+        kind's HP known, it not dying, a throw from the ground (`from_ground`), her not on a rope (`roped`), it in her
+        regular attack's reach from where the last look had her (the watch's reach_ok)."""
+        s, w = self._last, self.watch
+        ground = self.from_ground() if self.from_ground is not None else True
+        roped = self.roped() if self.roped is not None else False
+        seen = [] if s is None else s.monsters
+        ok = m is not None and s is not None and (w.reach_ok is None or w.reach_ok(s, m))
+        w.pressed(at, m, known=m is not None and m.kind in self.stats,
+                  dying=m is not None and self._dying(m, at, seen), ground=ground, roped=roped, reach_ok=ok)
 
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look (and those
@@ -480,7 +547,7 @@ class Attacks:
                                                                    if left.dead >= 0.05 else "")
         reason = {"MP": f"MP {mp:.0f} < a cast's {self.skill.mp:.0f}" if self.skill is not None and mp is not None
                   else "MP", "finish": "finishing it", "damage": "", "skill": "", "regular": "",
-                  "nothing in its way": ""}.get(why, why)
+                  "nothing in its way": "", "held": "the regular attack held (its key doubted)"}.get(why, why)
         self.log(f"    {attack.name}: {what}" + (f"; {reason}" if reason else "")
                  + ("" if mp is None or why == "MP" else f" (MP {mp:.0f})"))
         if telemetry.recording():  # (where its target was seen too: sim.harness counts the throws at the dead)

@@ -104,9 +104,20 @@ MESSAGES_S = 0.4
 # The message bar (Eyes.chat_line): a frame from the feed and its pink px (a frame's wait, about), and the OCR of a line
 # not read before (perception.messages: 0.28 s CPU a read live)
 CHAT_S, CHAT_OCR_S = 0.035, 0.28
+CAPTURE_S = 0.035         # the client's whole picture (Eyes._capture: the perception service's next frame)
 EXP_START = (LEVEL_19.level, LEVEL_19.exp)  # her level and EXP when a run starts on the first map (World.character's)
 START_LATENCY = 0.01      # a plan starts this long after it's handed over (the player polls its inbox)
 RESULT_LATENCY = 0.01     # ... and its result is seen this long after it ends
+
+
+_PLAIN: list = []
+
+
+def _plain_client() -> np.ndarray:
+    """A plain 1366x768 picture of the client (no window open on it), made once."""
+    if not _PLAIN:
+        _PLAIN.append(np.full((768, 1366, 3), (90, 140, 70), np.uint8))
+    return _PLAIN[0].copy()
 
 
 class FakePetCare(PetCare):
@@ -509,6 +520,19 @@ class FakeEyes(Eyes):
         text = "\n".join(self.world.recent_messages())
         self.clock.sleep(MESSAGES_S)
         return text
+
+    def _capture(self) -> np.ndarray:
+        """The client's whole picture at 1366x768 (RGB) as far as the simulator draws it (the key check's,
+        behavior.keycheck): a plain scene, and the KEY BINDINGS window over it while the world has it open
+        (World.key_window), its keys' functions as World.binding_view has them, drawn from the game's pictures
+        (perception.keybindings.compose) and read as in game."""
+        from ..perception import keybindings
+        self._now()
+        self.counts["captures"] = self.counts.get("captures", 0) + 1
+        frame = (keybindings.compose(self.world.binding_view(), preset=1) if self.world.key_window
+                 else _plain_client())
+        self.clock.sleep(CAPTURE_S)
+        return frame
 
     # --- drawing ------------------------------------------------------------------------------------
 

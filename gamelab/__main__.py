@@ -681,6 +681,134 @@ def _fit_start(title: str, fix) -> None:
         time.sleep(START_POLL_S)
 
 
+def cmd_keys(args) -> int:
+    """The game's KEY BINDINGS window read (perception.keybindings: which key the game has Attack, her regular attack,
+    on, the preset in use, what each key does): off saved frames (--frame, nothing sent), or live (--read, the player
+    running): the mouse moved off where the window opens, the backslash, a frame read, Esc only with the window seen
+    open (with nothing open Esc opens the game's MENU), and a frame that says it closed, as the hunt's check does after a
+    doubt (behavior.keycheck.KeyCheck). With --record the backslash's and Esc's plans record the client (RECORD_FPS
+    for OPEN_MS and CLOSE_MS) to time the window's opening and closing, saved with a report under
+    lab/shots/keybindings-<time>. Nothing else is sent: no attack, no move, no click; with the Lie Detector alarm up,
+    nothing."""
+    from .perception import keybindings as kb
+    reader = kb.Reader()
+    if args.frame:
+        for path in args.frame:
+            frame = np.asarray(Image.open(path).convert("RGB"))
+            r = reader.read(frame)
+            print(f"{path}: {r.text()}")
+            if r.read:
+                print(f"  {kb.functions_text(reader.functions(frame, r))}")
+        return 0
+    if not args.read:
+        print("keys: --read (live: opens the KEY BINDINGS window with the backslash, reads it, closes it) or --frame "
+              "PNG (a saved frame, nothing sent)")
+        return 2
+    if client.alarm_up():
+        print("the Lie Detector alarm is up: nothing sent")
+        return 3
+    _record("keys", args.map)
+    hunter = _hunter(args, throws=False)
+    if not _to_game():
+        return 1
+    configured = hunter.actions.keys.attack.name
+    if args.record:
+        return _keys_recorded(hunter, reader, configured)
+    from .behavior.keycheck import KeyCheck
+    check = KeyCheck(hunter, reader, log=_log)
+    r = check._window()
+    if r is None or not r.read:
+        print(f"the key bindings: {'no frame' if r is None else r.text()}")
+        return 1
+    fn = reader.functions(check._frame_read, r) if check._frame_read is not None else {}
+    _say_keys(r, fn, configured)
+    return 0
+
+
+RECORD_FPS = 15      # keys --record: frames a second recorded after the backslash and after Esc ...
+OPEN_MS = 1500       # ... for this long after the backslash ...
+CLOSE_MS = 1200      # ... and after Esc
+
+
+def _say_keys(r, fn: dict, configured: str) -> None:
+    """A KEY BINDINGS reading said: where the game has Attack against her configured key, and the whole map."""
+    from .perception import keybindings as kb
+    print(f"the key bindings: {r.text()}")
+    if any(kb.same_key(k, configured) for k in r.attack):
+        print(f"  Attack is on {configured.upper()}, as config.toml [keys] attack has it")
+    else:
+        print(f"  ATTACK IS NOT ON {configured.upper()} (config.toml [keys] attack): the game has it "
+              + (", ".join(k.upper() for k in r.attack) if r.attack else "on no key"))
+    if fn:
+        print(f"  {kb.functions_text(fn)}")
+
+
+def _keys_recorded(hunter, reader, configured: str) -> int:
+    """keys --read --record: the window opened and closed with each plan recording the client (RECORD_FPS), every
+    frame read, the frames kept and a report (lab/shots/keybindings-<time>/report.json): when it showed open after the
+    backslash, when closed after Esc. Esc only with it seen open, once more only if it's still seen open."""
+    import json
+    from .behavior.keycheck import MOUSE_AT
+    out = SHOTS / f"keybindings-{time.strftime('%Y%m%d-%H%M%S')}"
+    out.mkdir(parents=True, exist_ok=True)
+    report: dict = {"configured": configured}
+
+    def keep(name, frame):
+        Image.fromarray(np.asarray(frame)).save(out / f"{name}.png")
+
+    before = hunter.senses.eyes._capture()
+    keep("before", before)
+    h, w = before.shape[:2]
+    report["client"] = [w, h]
+    r = reader.read(before)
+    if r.open:
+        print("the KEY BINDINGS window is open already: read as it is, nothing sent")
+        _say_keys(r, reader.functions(before, r) if r.read else {}, configured)
+        report["reading"] = r.record()
+        (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+        return 0
+    if (w, h) != (1366, 768):
+        print(f"the client is {w}x{h}, not 1366x768: nothing sent (the window is read at 1366x768)")
+        return 2
+    mouse = [0, "mouse", *MOUSE_AT]
+    res = client.submit([mouse, [150, "\\", "down"], [190, "\\", "up"]], fps=RECORD_FPS, duration_ms=OPEN_MS,
+                        scale=1, lead_ms=0, name="keybindings_open")
+    frames, times = res.get("frames") or [], res.get("times")
+    reads = [reader.read(np.asarray(f)) for f in frames]
+    report["open_frames"] = [[None if times is None else float(times[i]), bool(x.open), round(x.title, 4)]
+                             for i, x in enumerate(reads)]
+    if not reads or not reads[-1].open:
+        if frames:
+            keep("after_backslash", frames[-1])
+        report["result"] = "the window didn't open (or closed again): no Esc sent"
+        print(report["result"])
+        (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+        return 1
+    first = next(i for i, x in enumerate(reads) if x.open)
+    keep("open_first", frames[first])
+    keep("open", frames[-1])
+    last = reads[-1]
+    report["reading"] = last.record()
+    _say_keys(last, reader.functions(np.asarray(frames[-1]), last) if last.read else {}, configured)
+    for go in (1, 2):
+        res = client.submit([[0, "esc", "down"], [40, "esc", "up"]], fps=RECORD_FPS, duration_ms=CLOSE_MS, scale=1,
+                            lead_ms=0, name=f"keybindings_close{go}")
+        frames, times = res.get("frames") or [], res.get("times")
+        reads = [reader.read(np.asarray(f)) for f in frames]
+        report[f"close{go}_frames"] = [[None if times is None else float(times[i]), bool(x.open)]
+                                       for i, x in enumerate(reads)]
+        if frames:
+            keep(f"closed{go}", frames[-1])
+        if reads and not reads[-1].open:
+            report["result"] = f"read and closed (Esc x{go})"
+            break
+    else:
+        report["result"] = "STILL OPEN after two Esc: close it yourself (Esc or CANCEL)"
+    print(report["result"], f"(frames and report: {out})")
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    return 0 if report["result"].startswith("read") else 1
+
+
 def cmd_pet(args) -> int:
     """Her pet kept fed (behavior.pet): its fullness followed in time and a food given when it's low, read once off her
     Character Info to start from (or now, with --read); with --every, followed every that many minutes until stopped,
@@ -2285,6 +2413,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --loop --camp: of the grounds within this share of the best's score, the one she left "
                         "longest ago goes next (hunt.GROUND_TIE; default 0: the best; README: Route diversity)")
     s.set_defaults(func=cmd_tour)
+
+    s = sub.add_parser("keys", help="the game's KEY BINDINGS window read: which key Attack (her regular attack) is on; "
+                                    "--frame PNG reads a saved frame (nothing sent), --read opens it live with the "
+                                    "backslash and closes it with Esc (nothing else sent)")
+    s.add_argument("--map", type=int, default=DEFAULT_MAP)
+    s.add_argument("--read", action="store_true", help="live: open the window (\\), read it, close it (Esc)")
+    s.add_argument("--record", action="store_true", help="with --read: record its opening and closing (15 frames a "
+                                                          "second) into lab/shots/keybindings-<time>")
+    s.add_argument("--frame", nargs="+", help="saved frames (PNG, 1366x768) to read instead: nothing sent")
+    s.set_defaults(func=cmd_keys)
 
     s = sub.add_parser("pet", help="keep her pet fed: its fullness followed in time (read once off her Character Info) "
                                    "and a food when it's low; --every N: every N minutes")

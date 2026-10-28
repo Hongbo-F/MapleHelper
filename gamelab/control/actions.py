@@ -143,7 +143,10 @@ class Actions:
         # ... or, with `skill`, the attack key each throw is asked of this (the way it's thrown -> a key name): the
         # hunter's choice of attack a throw (behavior.attacks: Lucky Seven, or the regular attack to finish a monster
         # and while her MP is under a cast)
-        self.choose: Callable[[str], str] | None = None
+        self.choose: Callable[[str], str | None] | None = None
+        # Every throw's key asked of `choose`, a Lucky Seven key or not: her regular attack held at some targets or for
+        # the run (behavior.keycheck), which only her attack choice knows; its answer None sends no throw
+        self.routed = False
         self.keyed_ground = False  # whether the attack key last chosen (_attack_key) is a throw's from the ground
         # Whether a throw that way still goes (the way -> False to drop it), asked once her lock has been waited out,
         # before its keys: the hunter's last look before the key (behavior.hunter: a kill shown since the look it was
@@ -340,12 +343,15 @@ class Actions:
         frame), then throw (regular attack; with `skill`, Lucky Seven or as `choose` says, a throw at a time).
         Turning taps the arrow, which also walks her a few units: tapping before every throw walked
         her off the end of a platform after nine throws the same way. False: dropped once her lock was waited out
-        (`still`), no key sent."""
+        (`still`), or no attack to throw (her regular attack held and no Lucky Seven to throw instead: `choose`
+        says None), no key sent."""
         self.wait_lock()
         if not self._still(direction):
             return False
         events, t = self._turn(direction)
         key = self._attack_key(direction, ground=True)  # (chosen first, as jump_throw's: its MP goes with its own key)
+        if key is None:
+            return False
         self._thrown(t, direction)
         self.play(events + tap(t, key), "throw")
         self._turned(events, direction, t)
@@ -366,12 +372,14 @@ class Actions:
         must come sooner, at a monster too short for a later one), the tap goes first and the jump waits for its walk to
         stop (JUMP_THROW_TURN_MS). `way` +1/-1 jumps forward that way (the arrow held: FORWARD_JUMP_MS before the jump,
         let go FORWARD_HOLD_MS after it), which faces her that way: a throw that way. False: dropped once her lock was
-        waited out (`still`), no key sent."""
+        waited out (`still`), or no attack to throw (`throw`'s), no key sent."""
         self.wait_lock()
         if not self._still(direction):
             return False
         key_ms = JUMP_ATTACK_MS if key_ms is None else key_ms
         key, jump = self._attack_key(direction), self.keys.jump.name
+        if key is None:
+            return False
         turn, added = [], 0  # the arrow that turns her, and how much later it has her attack come
         if way:
             arrow = self.arrow(RIGHT if way > 0 else LEFT)
@@ -407,7 +415,8 @@ class Actions:
         key goes in right after lift-off: pressed later, the star left after she had landed. The caller
         makes sure there's room behind her. `key_ms`: the attack key that long after the jump key
         (AIR_TURN_ATTACK_MS, 120, by default: AIR_TURN_LEAD_MS after the turn's arrow; sooner for a monster too short
-        to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; later, for a monster higher up)."""
+        to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; later, for a monster higher up). With no
+        attack to throw (`throw`'s), the jump away alone, turning toward it in the air."""
         self.wait_lock()
         key = self._attack_key(direction)
         away = self.arrow(directions.opposite(direction))
@@ -415,8 +424,9 @@ class Actions:
         throw_ms = JB_THROW_MS if key_ms is None else JB_RUN_MS + max(key_ms, JUMP_BACK_ATTACK_MS)
         events = [[0, away, "down"], *tap(JB_RUN_MS, jump),
                   [JB_TURN_MS, away, "up"], *tap(JB_TURN_MS, toward),
-                  *tap(throw_ms, key)]
-        self._thrown(throw_ms, direction)
+                  *([] if key is None else tap(throw_ms, key))]
+        if key is not None:
+            self._thrown(throw_ms, direction)
         self.play(sorted(events, key=lambda e: e[0]), "jump_back")  # the player wants them in time order
         self.facing = direction
         # Locked until the attack's lock ends, which is after she lands: counted, as a jump throw's, from when the plan
@@ -439,13 +449,22 @@ class Actions:
         for listener in self.throw_listeners:
             listener(when, direction)
 
-    def _attack_key(self, direction: str, ground: bool = False) -> str:
+    def _attack_key(self, direction: str, ground: bool = False) -> str | None:
         """The attack key of a throw that way: the regular attack's; with `skill` (and a Lucky Seven key), Lucky Seven's,
-        or whichever `choose` picks (`keyed_ground` says whether it's a throw from the ground: Attacks.key)."""
+        or whichever `choose` picks (`keyed_ground` says whether it's a throw from the ground: Attacks.key); `routed`,
+        whichever `choose` picks whatever her keys (None: no throw)."""
         self.keyed_ground = ground
+        if self.choose is not None and (self.routed or (self.skill and self.keys.lucky_seven)):
+            return self.choose(direction)
         if self.skill and self.keys.lucky_seven:
-            return self.choose(direction) if self.choose is not None else self.keys.lucky_seven.name
+            return self.keys.lucky_seven.name
         return self.keys.attack.name
+
+    def rekey(self, attack: str) -> None:
+        """Her regular attack on key `attack` (config.toml's name) from now on (behavior.keycheck: the game has it
+        there): these actions' keys with it (her moves' copies made from them later too: moves_only)."""
+        from maplehelper.keys import parse
+        self.keys = dataclasses.replace(self.keys, attack=parse(attack))
 
     def faces(self, direction: str) -> bool:
         """Whether she faces `direction` surely enough for a throw that way to go without the tap that turns her: her

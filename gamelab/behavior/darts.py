@@ -207,6 +207,8 @@ class DartWatch:
     at_top: bool = False            # her latest look has her placed at a rope's top (control.navigator.rope_at_top) ...
     top_presses: int = 0            # ... the presses not counted keyed so in a row, no kill since (`regular`, swipes) ...
     top_read: int = 0               # ... and as many when the message bar was last read for them (`asks_chat`)
+    mp_shown_at: float | None = None  # the last read that showed a cast's MP (FALL_STEPS under the stretch's highest):
+                                      # she has her stars then (behavior.keycheck's doubt asks)
 
     def cast(self, t: float, swipe: bool = False) -> None:
         """A Lucky Seven press, its key at `t` (not counted while she's on a rope, `roped`: the game refuses it; nor one
@@ -249,6 +251,8 @@ class DartWatch:
             return
         if self.top is None or px <= self.top - FALL_STEPS or px >= self.top + DRINK_STEPS:
             # (the first read, a cast's MP shown, a drink: a stretch from here; presses it can't show yet go into it)
+            if self.top is not None and px <= self.top - FALL_STEPS:
+                self.mp_shown_at = t
             self._restart(t - MP_FIRST_S)
             self.top = px
             return

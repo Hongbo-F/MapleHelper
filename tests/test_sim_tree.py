@@ -481,3 +481,38 @@ def test_on_tree_dungeon_23s_left_end_is_a_long_drop_its_left_part_is_under_22_a
     sp = spots.best_spot(m, 23, {"horny-mushroom", "green-mushroom"}, d)
     assert sp.platform == 24 and abs(sp.x - 272) >= spots.SPAWN_CLEAR and sp.coverage >= 0.95, sp
     assert spots.best_spot(m, 7, {"horny-mushroom", "green-mushroom"}, d) == spots.Spot(8, 147.0, 1.0, False, 0.182)
+
+
+# --- the game's key bindings (behavior.keycheck) -----------------------------------------------------------------
+
+def test_the_game_s_attack_on_another_key_her_configured_one_does_nothing_and_the_window_opens_and_closes():
+    """Realism.game_keys: the game's Attack on A (as live on 2026-10-28 00:30, moved by the user's own play): her
+    configured attack key (the test keys' F) does nothing, A attacks. The backslash opens the KEY BINDINGS window, Esc
+    closes it; Esc with nothing open opens the MENU (counted); keys pressed while it's open do nothing (counted); the
+    window shows what each key does (binding_view: A ATTACK, F nothing). In the default world nothing of it shows in
+    the trace's summary."""
+    from gamelab.perception import keybindings as kb
+    m = tower()
+    plain = world(m, 3, 300.0)
+    assert plain.actions["f"] == "attack" and plain.actions["\\"] == "set_key" and plain.actions["esc"] == "esc"
+    assert "key_windows" not in plain.summary()
+    w = world(m, 3, 300.0, realism=Realism(game_keys=(("attack", "a"),)))
+    assert w.actions.get("f") is None and w.actions["a"] == "attack"
+    view = w.binding_view()
+    assert view["a"] == 52 and "f" not in view and view["\\"] == 9 and view["esc"] == 46 and view["alt"] == 53
+    t = w.origin
+    tap(w, t + 0.1, "esc", 0.04)  # nothing open: the MENU
+    tap(w, t + 0.3, "\\", 0.04)
+    tap(w, t + 0.6, "a", 0.04)    # with the window open: nothing
+    w.advance(t + 0.8)
+    assert w.key_window and w.menu_opened == 1 and w.keys_in_window == 1 and w.attacks == 0
+    tap(w, t + 1.0, "esc", 0.04)
+    tap(w, t + 1.5, "a", 0.04)
+    w.advance(t + 2.0)
+    assert not w.key_window and w.attacks == 1
+    s = w.summary()
+    assert (s["key_windows"], s["keys_in_window"], s["menu_opened"], s["key_window_open"]) == (1, 1, 1, False)
+    none = world(m, 3, 300.0, realism=Realism(game_keys=(("attack", None),)))
+    assert "attack" not in none.actions.values() and 52 not in none.binding_view().values()
+    r = kb.Reader().read(kb.compose(w.binding_view(), 1))  # (as the simulator's eyes draw it: FakeEyes._capture)
+    assert r.read and r.attack == ("a",) and r.preset == 1

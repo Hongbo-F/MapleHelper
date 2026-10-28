@@ -2629,6 +2629,138 @@ def loop_tree_out_of_darts(sim):
     return darts_stop(5)(sim)
 
 
+# --- her regular attack's key: doubted after 5 presses without effect, her stars, the game's key bindings read ------
+# (behavior.keycheck). The user, 2026-10-28, after the hunt of 00:30 pressed a regular attack the game had on another key:
+# "1. Throw 5 times before doubting the key error 2. Check if star has run out 3. Open keyboard config (\\) to check
+# the key configuration and see if attack button is different, and fix things." Realism.game_keys moves the game's
+# Attack (her configured Ctrl does nothing then); the backslash opens the KEY BINDINGS window, drawn from the game's
+# pictures with the world's keys (sim.fakes.FakeEyes._capture) and read as in game.
+
+def key_check_run(minutes: float = 4, grind: bool = True):
+    """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; `grind`, grinding, the default), the game's
+    key bindings as the scenario's Realism.game_keys has them. The result: the doubts and the check's lines said in
+    capitals (`said`: [s, line]), the window's key plans ([s, name, keys]), what was paged, how the hunt ended
+    (`stopped`: a HuntStop's text, else None), the kills of hers after the check's outcome (`kills_after`), her regular
+    attack's keys pressed after it (`attack_keys_after`: key -> presses), and the world's window counts."""
+    def run(sim):
+        from ..behavior.grind import Grind
+        from ..behavior.hunt import Hunt
+        from ..behavior.retreat import on_alarm
+        from ..behavior.safety import HuntStop
+        tour = sim.tour_stack()
+        stopped = None
+        try:
+            with on_alarm(tour.h, rng=random.Random(sim.scenario.seed)):
+                (Grind if grind else Hunt)(tour, log=sim.log).run(minutes=minutes)
+        except HuntStop as e:
+            stopped = f"{e.label}: {e}"
+        sim.world.advance(sim.clock.now)
+        said = [[float(line.split()[0]), line.split(None, 1)[1].strip()] for line in sim.trace.log
+                if "THE REGULAR ATTACK TOOK NO EFFECT" in line or "ATTACK KEY:" in line or "her stars:" in line
+                or "the key bindings" in line or "KEY CHECK" in line]
+        outcome = next((t for t, line in said if line.startswith("ATTACK KEY:")), None)
+        attack = {sim.keys.attack.name, *(k for _, k in sim.world.realism.game_keys if k is not None)}
+        after: dict[str, int] = {}
+        for t, name, events, _ in sim.trace.plans:
+            for e in events:
+                if outcome is not None and t > outcome and len(e) == 3 and e[2] == "down" and e[1] in attack:
+                    after[e[1]] = after.get(e[1], 0) + 1
+        window = [[t, name, [e[1] for e in events if len(e) == 3 and e[2] == "down"]] for t, name, events, _
+                  in sim.trace.plans if name.startswith("key_bindings")]
+        kills = [k for k in sim.world.kill_log if k[3] == "her" and outcome is not None and k[0] > outcome]
+        return {"said": said, "window": window, "pages": sim.player.pages, "stopped": stopped,
+                "kills_after": len(kills), "attack_keys_after": dict(sorted(after.items())), "outcome_at": outcome}
+    return run
+
+
+def _window_ok(tr: dict) -> bool:
+    """The window's keys: the backslash before any Esc, Esc twice at the most, nothing else pressed in it (the world's
+    count), the game's MENU never opened (Esc with nothing open), the window closed at the end."""
+    plans = tr["result"]["window"]
+    keys = [k for _, _, ks in plans for k in ks]
+    w = tr["world"]
+    return (keys[:1] == ["\\"] and keys.count("esc") <= 2 and "esc" in keys and w.get("keys_in_window", 0) == 0
+            and w.get("menu_opened", 0) == 0 and not w.get("key_window_open", False))
+
+
+def _said(tr: dict, text: str) -> bool:
+    return any(text in line for _, line in tr["result"]["said"])
+
+
+KEY_EXPECTS = (
+    logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"),
+    check("the backslash first, then Esc with the window open, nothing else in it, no MENU", _window_ok))
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),))),
+      expects=KEY_EXPECTS + (
+          check("her stars told: she has them", lambda tr: _said(tr, "her stars: ") and _said(tr, "she has them")),
+          logs("ATTACK KEY: THE GAME HAS ATTACK ON A, NOT CTRL"),
+          check("paged once, about the attack key", lambda tr: len(tr["result"]["pages"]) == 1
+                and "attack key" in tr["result"]["pages"][0][1]),
+          check("A pressed after it, Ctrl never", lambda tr: tr["result"]["attack_keys_after"].get("a", 0) >= 1
+                and "ctrl" not in tr["result"]["attack_keys_after"]),
+          check("kills after it", lambda tr: tr["result"]["kills_after"] >= 3)))
+def loop_tree_grind_attack_key(sim):
+    """`tour --loop --grind --map 10002073` (the feed, the attack choice) with the game's Attack on A, not on her Ctrl
+    (as live on 2026-10-28 00:30, the user's own play having moved it): her Lucky Seven casts hurt, her regular presses
+    to finish a monster do nothing; 5 of them in a row judged without effect, the doubt (on seed 1 at 37.1 s: a Green
+    Mushroom at 4%, its 9/233 HP, pressed at from 32.3 s); no cast since the first of them, so her stars' test (its 2nd
+    cast took MP: the 1st swiped a Horny Mushroom that had walked onto her, a touch at 37.2 s, not counted); a Horny
+    Mushroom near, so away to 25 (1.1 s); the backslash, the window read (ATTACK on A, preset 1), Esc, closed (40.0-41.4
+    s); her regular attack A for the rest of the run, paged once; kills with it after."""
+    return key_check_run(2)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", None),))),
+      expects=KEY_EXPECTS + (
+          logs("ATTACK KEY: THE GAME HAS ATTACK ON NO KEY"),
+          check("paged once, about the attack key", lambda tr: len(tr["result"]["pages"]) == 1
+                and "attack key" in tr["result"]["pages"][0][1]),
+          check("no regular attack after it", lambda tr: not tr["result"]["attack_keys_after"]),
+          logs("the regular attack held (its key doubted)")))
+def loop_tree_attack_unbound(sim):
+    """As loop_tree_grind_attack_key, the game's Attack on no key: the same doubt and check, the window read with
+    ATTACK on none (no key of the keyboard carries it), so no more regular attacks this run: Lucky Seven only (her
+    throws that would have been the regular attack are "held"), paged once."""
+    return key_check_run(2)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      **dict(_LIVE, noise=Noise(regular_miss=1.0)),
+      expects=KEY_EXPECTS + (
+          logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
+          check("nobody paged", lambda tr: not tr["result"]["pages"]),
+          check("the hunt went on: kills after it", lambda tr: tr["result"]["kills_after"] >= 3),
+          check("no stop", lambda tr: tr["result"]["stopped"] is None)))
+def loop_tree_attack_misses(sim):
+    """Her keys right, every regular star missing (Noise.regular_miss): 5 presses without effect, the doubt (the same
+    Green Mushroom at 37.1 s), the window read with ATTACK on Ctrl as configured: the misses were something else; that
+    target gets no more regular attacks, the hunt goes on (Ctrl pressed at others after), nobody paged. A doubt within
+    300 s of it would hold the regular attack at its targets, with no check."""
+    return key_check_run(2)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True, attack="regular",
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40),
+      expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"),
+               logs("Lucky Seven casts took no MP"), logs("OUT OF DARTS: "),
+               check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
+               check("the key bindings never opened", lambda tr: not tr["result"]["window"]),
+               check("paged once, about her darts", lambda tr: len(tr["result"]["pages"]) == 1
+                     and "out of darts" in tr["result"]["pages"][0][1])))
+def loop_tree_attack_no_darts(sim):
+    """`tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts Lucky Seven's presses, so
+    it never fires) with 40 throwing stars: gone at about 50 s, her regular presses only swing the claw, nothing at
+    range; 5 in a row without effect at a Green and a Horny Mushroom she had hurt (91%, 96%), the doubt at 66.5 s; no
+    cast of hers took MP, so her stars' test: Lucky Seven presses at one in reach (waiting while one is up close), which
+    take no MP with no stars (the world's), 5 of them, and out of darts' stop (her retreat, paged, the recording kept)
+    at 79.5 s; the window never opened."""
+    return key_check_run(4)(sim)
+
+
 # --- the top of a rope: hanging just under a platform, her dot snapped onto it -------------------------------------
 # Live on 2026-10-26 (Tree Dungeon, 22:58, 23:11, 23:12) a touch cut her climb up the rope at x 111 near its top; the
 # game keeps her on a rope when touched (world.Realism.rope_knocks: off since), so she hung about 30 under platform 18, and

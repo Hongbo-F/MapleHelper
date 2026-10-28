@@ -106,6 +106,7 @@ from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from . import fight
+from .keycheck import KeyDoubt
 from .fight import THROWS, FightState, Report, kills_text
 from .ledger import DROP_LANDS, Pile
 from .looting import DROPS_LAST, SETTLE, DropSpot
@@ -469,6 +470,9 @@ class Hunt:
         meter = self.h.meter
         read = meter.total if meter.since is not None else None  # her EXP as read at the start (counted from there)
         regains = self.h.senses.regains
+        raises = getattr(self.h, "doubts_raise", None)
+        if raises is not None:  # (her regular attack's key doubted: the check runs here, behavior.keycheck)
+            self.h.doubts_raise = True
         try:
             # Her first look waits for the window fix's first try at a client it mends (Senses._fixing) as any
             # command's does, and stops the hunt if that didn't set it right; from there on, her looks failing stand
@@ -488,12 +492,25 @@ class Hunt:
                     self._paused(time.monotonic() - paused)
                     if back is None:
                         break
+                except KeyDoubt as doubt:  # her regular attack took no effect 5 times in a row: the check, then on
+                    paused, back = time.monotonic(), True
+                    try:
+                        self.h.check_keys(doubt.doubt)
+                    except LookLost as lost:  # (a look of the check's failed its checks: stand still, as above)
+                        back = self.h.senses.regain(lost, end)
+                    self._paused(time.monotonic() - paused)
+                    if back is None:
+                        break
+            if raises is not None:  # (her way off the ground and to stand by: a doubt there holds, as elsewhere)
+                self.h.doubts_raise = raises
             self._leave_ground()
         finally:
             looter.yield_to, looter.unseen = yield_to, about
             if attacks is not None:
                 attacks.unseen = None
             self.h.senses.regains = regains
+            if raises is not None:
+                self.h.doubts_raise = raises
         self.report.seconds = time.monotonic() - start
         self._log_memory()
         if meter.since is not None:
@@ -739,6 +756,9 @@ class Hunt:
             self.log(f"  attacks: {said}")
         if (darts := getattr(self.h, "darts", None)) is not None and (said := darts.summary()):
             self.log(f"  {said}")  # her presses that took no MP, the most in a row (behavior.darts)
+        watch = getattr(getattr(self.h, "attacks", None), "watch", None)
+        if watch is not None and (said := watch.summary()):
+            self.log(f"  {said}")  # her regular presses judged, after a doubt (behavior.keycheck)
 
     def _remembered(self, s: Scene, platform: int | None) -> list[Monster]:
         """The wanted monsters her memory has on `platform` (None: anywhere) as of look `s`, sure enough to count

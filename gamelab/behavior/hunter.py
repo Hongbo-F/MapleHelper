@@ -55,6 +55,7 @@ from . import fight
 from .attacks import Attacks
 from .darts import DartWatch, presses_for
 from .fight import Report
+from .keycheck import KeyCheck, KeyDoubt, RegularWatch, regular_reach
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
@@ -133,6 +134,7 @@ class Hunter:
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
         mode = attack or ("skill" if skill else "regular")
+        self._attack_mode = mode
         self.actions = Actions(keys, skill=mode != "regular")
         self.senses.keyed = lambda: self.actions.last_key  # a look sees what came of her keys (Senses.fresh_after)
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
@@ -169,13 +171,21 @@ class Hunter:
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'.
         self.attacks = Attacks(model, keys, mode, max_mp=c.mp, level=c.lucky_seven, log=log,
                                kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead)
+        self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
         if mode != "regular":
             self.actions.choose = self.attacks.key
-            self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
             self.senses.shows = self.attacks.shown_by  # (the look a throw is decided on has the last one's kill)
         # Out of darts (behavior.darts): her Lucky Seven presses and MP bar (the attack choice's), her kills (_gained)
         self.darts = DartWatch(presses_for(model.mob_hp, getattr(model, "mob_pdd", {})))
         self.attacks.darts = self.darts
+        # The doubt that her regular attack's key isn't the game's (behavior.keycheck): her regular presses judged by
+        # what her looks see of their targets, every mode's (the attack choice's, and the regular attack's alone); on
+        # a rope or at its top not judged. In the hunt loop (`doubts_raise`, Hunt.run) a doubt raises KeyDoubt there
+        # and the loop runs the check (check_keys); elsewhere her regular presses are held (`hold_regular`).
+        self.attacks.watch = RegularWatch(reach_ok=regular_reach)
+        self.attacks.roped = lambda: self.darts.roped or self.darts.at_top
+        self.doubts_raise = False
+        self.key_check: KeyCheck | None = None  # (made at the first check)
         self.refused_dot = None  # her dot (minimap px) at the game's last refusal of her presses on a rope ...
         self.off_tries = 0       # ... and the tries since to get her off it with her dot there
         if LAST_LOOK:
@@ -248,6 +258,67 @@ class Hunter:
             if stop.said is None:
                 stop.heard(self._messages())
             raise stop
+        watch = getattr(getattr(self, "attacks", None), "watch", None)  # (her regular attack's key: behavior.keycheck)
+        if watch is not None and (doubt := watch.due()) is not None:
+            self._doubted(doubt)
+
+    # --- her regular attack's key (behavior.keycheck) --------------------------------------------------------------
+
+    def _doubted(self, doubt) -> None:
+        """Her regular attack took no effect DOUBT_PRESSES times in a row (keycheck.RegularWatch.due): said in capitals
+        and sent as a telemetry event 'key_doubt'; her regular presses held; in the hunt loop (`doubts_raise`) KeyDoubt
+        raised for it to run the check (check_keys), elsewhere whoever is at the PC paged to run `gamelab keys --read`."""
+        text = doubt.text() + ": checking her stars, then the game's key bindings"
+        self.log(text)
+        telemetry.emit("event", kind="key_doubt", text=text, presses=len(doubt.presses), number=doubt.number)
+        self.hold_regular()
+        if self.doubts_raise:
+            raise KeyDoubt(doubt)
+        self.log("  (not in the hunt loop: no check here; her regular presses held, Lucky Seven only, for the rest of "
+                 "this run)")
+        from ..control import alarm
+        alarm.page("MapleStory: the attack key", f"gamelab: {doubt.text().lower()}. Its regular presses are held. "
+                   "Check the game's Key Bindings (\\), or run `python -m gamelab keys --read`.")
+
+    def check_keys(self, doubt):
+        """The check after a doubt (keycheck.KeyCheck.run: her stars, a place, the game's key bindings, what then); its
+        outcome. Raises OutOfDarts (her stars' test) and client.LieDetectorAlarm as any of her plans."""
+        if self.key_check is None:
+            self.key_check = KeyCheck(self)
+        return self.key_check.run(doubt)
+
+    def hold_regular(self, on: bool = True) -> None:
+        """Her regular presses held (keycheck.RegularWatch.held), or let go again (`on` False); every throw's key asked
+        of her attack choice from now on (Actions.routed: with the regular attack alone, or no Lucky Seven key, her
+        Actions keyed it themselves), which throws Lucky Seven instead, or nothing."""
+        self.attacks.watch.held = on
+        self._route()
+
+    def regular_off(self, why: str) -> None:
+        """No more regular attacks this run (keycheck: the game has Attack on no key, or the window wasn't read):
+        Lucky Seven only, or nothing."""
+        self.attacks.watch.off = why
+        self.attacks.watch.held = False
+        self._route()
+
+    def rekey(self, key: str) -> None:
+        """Her regular attack on `key` (config.toml's name) for the rest of the run (keycheck: the game has Attack
+        there): her Actions' keys (shared by the navigator, the mover and her pet's care; her retreat's moves are made
+        from them as they're needed) and her attack choice's; her regular presses let go again."""
+        self.actions.rekey(key)
+        self.attacks.keys = self.actions.keys
+        self.attacks.watch.held = False
+        self._route()
+
+    def _route(self) -> None:
+        """Every throw's key asked of her attack choice once anything holds her regular attack (Actions.routed)."""
+        w = self.attacks.watch
+        holds = bool(w.held or w.off is not None or w.no_regular_at)
+        self.actions.routed = holds
+        if holds:
+            self.actions.choose = self.attacks.key
+        elif self._attack_mode == "regular":  # (as it was: her Actions key the regular attack themselves)
+            self.actions.choose = None
 
     def _hear_chat(self, s: Scene) -> None:
         """The message bar read for out of darts (DartWatch.asks_chat): the game's refusal of her presses on it starts
@@ -461,6 +532,8 @@ class Hunter:
         if lost > 0 and self._last_hp is not None:
             self.report.damage_taken += lost
             self.hit_at = s.t
+            if (watch := getattr(self.attacks, "watch", None)) is not None:
+                watch.touched(s.t)  # (her regular presses about it aren't judged: behavior.keycheck)
             telemetry.emit("event", kind="hit", text=f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
             self._log_hit(s)
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False

@@ -320,3 +320,54 @@ def test_a_jump_backs_path_and_a_planned_turning_shot_go_by_the_attack_key_as_pr
     _throw(acts, ("jump_throw", RIGHT, plan), plan, AIR_TURN_ATTACK_MS)
     _throw(acts, ("jump_throw", RIGHT, unplanned), unplanned, AIR_TURN_ATTACK_MS)
     assert sent == [((105, 0, True), {"turn_key": 105}), ((60, 0, True), {})]
+
+
+def _her_actions(sent: list) -> Actions:
+    """Actions with her keys as config.toml has them (a GameKeys: rekey replaces its attack)."""
+    from maplehelper.config import GameKeys
+    from maplehelper.keys import parse
+    keys = GameKeys(left=parse("left"), right=parse("right"), jump=parse("alt"), attack=parse("ctrl"),
+                    lucky_seven=parse("shift"), up=parse("up"), down=parse("down"), pick_up=parse("z"),
+                    pet_food=parse("u"))
+    a = Actions(keys)
+    a.play = lambda events, name, **kw: sent.append((name, events))
+    return a
+
+
+def test_rekeyed_her_regular_attack_goes_on_the_game_s_key_and_her_moves_copies_have_it():
+    """behavior.keycheck: the game has Attack on A, not Ctrl: her throws, jump throws and jump backs press A from then
+    on, her attack lock counts A (hold_back), and her retreat's moves (moves_only) are made with it."""
+    sent = []
+    a = _her_actions(sent)
+    a.rekey("a")
+    assert a.keys.attack.name == "a" and a.keys.lucky_seven.name == "shift"
+    a.throw(RIGHT), a.jump_throw(RIGHT), a.jump_back(RIGHT)
+    pressed = {e[1] for _, events in sent for e in events if len(e) == 3}
+    assert "a" in pressed and "ctrl" not in pressed
+    assert a.moves_only().keys.attack.name == "a"
+    a.lock_until, a.arrow_until = 10 ** 9, 0.0  # (her lock: a plan pressing A waits for it, her arrows' don't)
+    import time as _time
+    waited = []
+    _sleep, _time.sleep = _time.sleep, waited.append
+    try:
+        a.hold_back([[0, "a", "down"]])
+        a.hold_back([[0, "left", "down"]])
+    finally:
+        _time.sleep = _sleep
+    assert len(waited) == 1
+
+
+def test_routed_with_no_attack_to_throw_no_throw_goes_and_a_jump_back_only_jumps():
+    """Her regular attack held and nothing to throw instead (her attack choice says None): throw and jump_throw send
+    nothing and say so (False); a jump back still jumps her away, its attack key left out."""
+    sent = []
+    a = _her_actions(sent)
+    a.routed, a.choose = True, lambda side: None
+    assert a.throw(RIGHT) is False and a.jump_throw(RIGHT) is False and not sent
+    told = []
+    a.throw_listeners.append(lambda when, side: told.append(side))
+    assert a.jump_back(RIGHT) is True
+    (name, events), = sent
+    assert name == "jump_back" and {e[1] for e in events} == {"left", "right", "alt"} and not told
+    a.choose = lambda side: "shift"  # (Lucky Seven instead: routed, whatever `skill` says)
+    assert a.throw(RIGHT) is True and sent[-1][1][-2][1] == "shift"

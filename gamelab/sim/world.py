@@ -595,6 +595,7 @@ class Noise:
     run is still the same every time, and a change that only adds or drops a look changes nothing here
     (detect_miss is drawn per look, so with it on, an extra look does change what later looks see)."""
     miss: float = 0.0            # chance a star that would hit misses (lab/shots.jsonl: 72.5% of 204 hit)
+    regular_miss: float = 0.0    # ... and a regular attack's star, on top of it (behavior.keycheck's doubt with her keys right)
     walk_jitter: float = 0.0     # units: letting go of an arrow stops her up to this much early or late
     lag_sd: float = 0.0          # the lags' spread around their medians, times the measured one (body.Lags:
                                  # sd 7.7 ms of when the game sees each key, which the wait for its next
@@ -723,6 +724,13 @@ class Realism:
     chase: tuple = ()            # (range, whole, hurt): monsters on her platform walking at her (CHASE_TREE: as live); ()
                                  # they walk as with nobody there, as before
     invulnerable: float = INVULNERABLE  # s a touch leaves her invulnerable (INVULNERABLE_LIVE: as live)
+    # The game's own key bindings where they aren't her keys' (behavior.keycheck): (her GameKeys field, the key the game
+    # has it on, None: on no key), e.g. (("attack", "a"),): her configured attack key then does nothing (as live on
+    # 2026-10-28 00:30, the user's own play having moved it), A attacks. The backslash opens the KEY BINDINGS window
+    # (World.key_window: what the simulator's eyes draw, sim.fakes.FakeEyes._capture) and Esc closes it; Esc with it
+    # closed opens the game's MENU (counted: World.menu_opened); keys pressed while it's open do nothing (counted: an
+    # assumption about the game, not seen).
+    game_keys: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -1235,7 +1243,13 @@ class World:
         # back up (sim.harness: `knock_falls`).
         self.knock_log: list[tuple[float, int, int | None, float]] = []
         self._knocked_from: tuple[float, int, float] | None = None  # the touch's (t, platform, her y) while it flies
-        self.actions = _actions(keys)
+        self.actions = _actions(keys, self.realism.game_keys)
+        self.actions.setdefault("\\", "set_key")  # (the KEY BINDINGS window's keys: _key_window)
+        self.actions.setdefault("esc", "esc")
+        self.key_window = False   # the KEY BINDINGS window open (Realism.game_keys) ...
+        self.key_windows = 0      # ... how often it was opened, the keys pressed while it was (doing nothing) and Esc
+        self.keys_in_window = 0   # pressed with it closed (the game's MENU opens)
+        self.menu_opened = 0
         self.held: dict[str, float] = {}  # action -> the clock time it went down (as sent)
         self._events: list[tuple[int, int, Event]] = []
         self._seq = 0
@@ -1485,6 +1499,13 @@ class World:
             action = self.actions.get(e.data)
             if action is None or self.dead:
                 return
+            if e.kind == "down" and action in ("set_key", "esc"):
+                self._key_window(action)
+                return
+            if e.kind == "down" and self.key_window and action not in self.held:
+                self.keys_in_window += 1  # (the window open: the key does nothing)
+                self.note(f"{e.data} pressed with the KEY BINDINGS window open: nothing")
+                return
             if e.kind == "down":
                 if action not in self.held:
                     self.held[action] = self._sent(e)
@@ -1553,6 +1574,28 @@ class World:
             for d in e.data:
                 if not d.gone:
                     d.gone, d.taken_at, d.taken_by = True, self.t, "rival"
+
+    def _key_window(self, action: str) -> None:
+        """The backslash (`set_key`) or Esc pressed: the KEY BINDINGS window opened or closed (Esc with it closed: the
+        game's MENU)."""
+        if action == "set_key":
+            self.key_window = not self.key_window
+            self.key_windows += self.key_window
+            self.note("the KEY BINDINGS window " + ("opens" if self.key_window else "closes (the backslash)"))
+        elif self.key_window:
+            self.key_window = False
+            self.note("the KEY BINDINGS window closes (Esc), nothing changed")
+        else:
+            self.menu_opened += 1
+            self.note("Esc with no window open: the game's MENU opens")
+
+    def binding_view(self) -> dict[str, int | str]:
+        """The keys' functions as the KEY BINDINGS window draws them (perception.keybindings: key name -> its function
+        picture's id, or PICTURE for an item's or a skill's), from what each key does in this world."""
+        from ..perception import keybindings as kb
+        icons = {"attack": 52, "jump": 53, "pick": 50, "left": 300, "right": 301, "up": 302, "down": 303,
+                 "set_key": 9, "esc": 46, "skill": kb.PICTURE, "pet_food": kb.PICTURE, "potion": kb.PICTURE}
+        return {key: icons[action] for key, action in self.actions.items() if action in icons}
 
     def _sent(self, e: Event) -> float:
         """The clock time key event `e` went out: when it was sent for (its lags count from then, not from
@@ -2258,7 +2301,8 @@ class World:
         mx = m.at(self.t)
         dx = mx - self.x
         what = "claw swipe" if swipe else "star"
-        if not swipe and self.noise.miss and self.chance("miss") < self.noise.miss:
+        if not swipe and (self.noise.miss and self.chance("miss") < self.noise.miss or not skill and self.noise.regular_miss
+                          and self.chance("regular_miss") < self.noise.regular_miss):
             self.note(f"star misses {m.kind} #{m.idx} at {dx:+.0f}")
             self._logged(how, "miss")
             return
@@ -2578,6 +2622,9 @@ class World:
                 **({"casts": self.casts, "mp_potions": self.mp_potions} if self.casts else {}),
                 **({"darts": self.darts_left, "no_darts": self.no_darts} if self.darts_left is not None else {}),
                 **({"refused": self.refused} if self.refused else {}),
+                **({"key_windows": self.key_windows, "keys_in_window": self.keys_in_window,
+                    "menu_opened": self.menu_opened, "key_window_open": self.key_window}
+                   if self.key_windows or self.menu_opened else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
 
@@ -2593,16 +2640,26 @@ def _body_of(kind: str, b, info: MobInfo | None) -> tuple[float, float]:
     return half, info.move[0].top if info is not None and info.move else 46.0
 
 
-def _actions(keys: GameKeys) -> dict[str, str]:
-    """Key name -> what it does."""
+ACTIONS = (("left", "left"), ("right", "right"), ("up", "up"), ("down", "down"), ("jump", "jump"),
+           ("attack", "attack"), ("lucky_seven", "skill"), ("pick_up", "pick"), ("hp_potion", "potion"),
+           ("pet_food", "pet_food"))
+
+
+def _actions(keys: GameKeys, game: tuple = ()) -> dict[str, str]:
+    """Key name -> what it does: her keys', but where the game has one of them on another key (Realism.game_keys: her
+    GameKeys field, the key, None for none). (The World adds the backslash, the KEY BINDINGS window's 'set_key', and
+    Esc.)"""
     out = {}
-    for field_name, action in (("left", "left"), ("right", "right"), ("up", "up"), ("down", "down"),
-                               ("jump", "jump"), ("attack", "attack"), ("lucky_seven", "skill"),
-                               ("pick_up", "pick"), ("hp_potion", "potion"),
-                               ("pet_food", "pet_food")):
+    for field_name, action in ACTIONS:
         k = getattr(keys, field_name, None)
         if k is not None:
             out[k.name] = action
+    named = dict(ACTIONS)
+    for field_name, key in game:
+        action = named[field_name]
+        out = {k: a for k, a in out.items() if a != action}
+        if key is not None:
+            out[key] = action
     return out
 
 

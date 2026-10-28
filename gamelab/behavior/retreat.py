@@ -137,6 +137,9 @@ class Why:
 
 LIE_DETECTOR = Why("LIE DETECTOR", "Lie Detector", "after it was seen")
 SAFETY = Why(SafetyStop.label, SafetyStop.title, "after the stop")
+# Before the key check that follows a doubt of her regular attack's key (behavior.keycheck: a monster near her, the game's
+# KEY BINDINGS window is opened from a safe place)
+KEY_CHECK = Why("KEY CHECK", "Key check", "after the doubt")
 
 
 def why_of(stop: HuntStop) -> Why:
