@@ -1,4 +1,4 @@
-"""golden's runs on a pool of processes (`--jobs`): the same traces to the byte and the same output as in one process."""
+"""golden's runs on a pool of processes (`--jobs`): the same traces to the byte, the same output as in one process."""
 
 import json
 import subprocess

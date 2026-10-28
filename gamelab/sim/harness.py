@@ -1052,8 +1052,8 @@ def difference(base: list[dict], cand: list[dict], name: str) -> dict:
 
 
 def ab_next(rows: list[dict], seeds: int, steps: tuple[int, ...] = AB_SEEDS) -> tuple[int | None, str]:
-    """`ab`'s rule: after `seeds` seeds, the next count of seeds to take (None: stop) and why. More only while a headline
-    difference is within 2 standard errors and not zero, up to the last of `steps`."""
+    """`ab`'s rule: after `seeds` seeds, the next count of seeds to take (None: stop) and why. More only while a
+    headline difference is within 2 standard errors and not zero, up to the last of `steps`."""
     open_ = [r["metric"] for r in rows if r["verdict"] == "within 2 se"]
     if not open_:
         return None, f"every headline difference is beyond 2 se or zero at {seeds} seeds"
@@ -1276,7 +1276,8 @@ def _cached(args) -> int:
     print(f"{cache.folder}: {len(seeds) - len(missing)} of {len(seeds)} seed(s) cached (commit {sha[:12]})")
     if missing:
         print(f"missing: seed(s) {_seed_span(missing)}; fill them with the base's filler (README, Checking a change):\n"
-              f"   python {_filler(args.fill)} --ref {sha} -- {' '.join(_command_line(args))} --seeds {args.seeds}")
+              f"   python {_filler(os.environ.get('GAMELAB_BASE_FILL'))} --ref {sha} -- "
+              f"{' '.join(_command_line(args))} --seeds {args.seeds}")
         return 1
     results = [cache.get(k) for k in seeds]
     print(table(results))
@@ -1305,8 +1306,8 @@ def spot(results: list[dict], seeds: list[int], jobs: int = 1, say: Callable[[st
     same = True
     for _, ks in groups.items():
         r = by_seed[ks[0]]
-        again = run_seeds(r["policy"], ks, r["preset"], r["minutes"], jobs, r.get("think", 0.0), r.get("costs", "coded"),
-                          r.get("ways"), r.get("map", FIRST_MAP), tuple(r.get("world", ())),
+        again = run_seeds(r["policy"], ks, r["preset"], r["minutes"], jobs, r.get("think", 0.0),
+                          r.get("costs", "coded"), r.get("ways"), r.get("map", FIRST_MAP), tuple(r.get("world", ())),
                           tuple(r.get("grounds", ())), r.get("attack"))
         for k, got in zip(ks, again):
             got, want = baseline.plain(got), by_seed[k]
@@ -1315,7 +1316,8 @@ def spot(results: list[dict], seeds: list[int], jobs: int = 1, say: Callable[[st
                 continue
             same = False
             keys = sorted(key for key in set(got) | set(want) if got.get(key) != want.get(key))
-            say(f"seed {k}: DIFFERS in {', '.join(keys[:12])}" + (f" and {len(keys) - 12} more" if len(keys) > 12 else "")
+            say(f"seed {k}: DIFFERS in {', '.join(keys[:12])}"
+                + (f" and {len(keys) - 12} more" if len(keys) > 12 else "")
                 + "".join(f"\n   {key}: saved {_short_value(want.get(key))}, now {_short_value(got.get(key))}"
                           for key in keys[:4]))
     return same

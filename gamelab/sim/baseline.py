@@ -10,9 +10,9 @@ the same code with the same arguments on the same seed gives the same dict to th
 PYTHONHASHSEED=0, her stats fixed, the world and the policy seeded); `think` charges this computer's own computing to
 the clock (fakes.Clock), so a run with it isn't cached. Timing benches never are: what they measure is the computer.
 
-The code's identity (`identity`) is the checkout's commit SHA, and only while its code is as committed: no change, staged
-or not, and no untracked file under gamelab/, gamedata/ or maplehelper/, nor in config.toml (git status; files git
-ignores aside, such as gamelab/lab, gamelab/build and gamedata/data, and the Markdown, which nothing runs). Otherwise
+The code's identity (`identity`) is the checkout's commit SHA, and only while its code is as committed: no change,
+staged or not, and no untracked file under gamelab/, gamedata/ or maplehelper/, nor in config.toml (git status; files
+git ignores aside, such as gamelab/lab, gamelab/build and gamedata/data, and the Markdown, which nothing runs). Otherwise
 nothing is read or kept (a checkout being worked on runs everything): a content hash of the working tree could key
 those too, but they change with every edit, so it would keep many runs nobody reads again, and a SHA is what's
 asked for when a comparison names its base ("master"). The DLLs (gamelab/build, ignored) are built from native.c and

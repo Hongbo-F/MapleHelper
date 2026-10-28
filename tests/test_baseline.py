@@ -162,6 +162,7 @@ def _runs(exp: list[float], touches: list[int] | None = None, **more) -> list[di
     touches = touches or [10] * len(exp)
     return [{"seed": k + 1, "map": 10002073, "exp_per_min": e, "touches": t, "died_at": None, "fell_out_at": None,
              "left_map_at": None, "safety_stops": 0, "darts_stops": 0, "drops_share": 0.5, "hp_lost": 10.0,
+             "backstops": {},
              **{name: v[k] for name, v in more.items()}}
             for k, (e, t) in enumerate(zip(exp, touches))]
 
@@ -284,3 +285,18 @@ def test_a_spot_check_runs_a_saved_runs_seeds_again_with_their_own_arguments(mon
     assert not harness.spot(saved, [3], say=said.append)
     assert said[0].startswith("seed 3: DIFFERS in touches") and "saved 10, now 11" in said[0]
     assert not harness.spot(saved, [7], say=said.append) and "no seed 7" in said[-1]
+
+
+def test_cached_reads_a_commits_seeds_and_says_how_to_fill_the_missing_ones(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(baseline, "ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "rev", lambda ref, repo=None: "d" * 40)
+    monkeypatch.setattr(harness, "FOLDER", tmp_path / "runs")
+    args = _ab_args(seeds=3, sha="master", save=None)
+    cache, _ = harness.cache_of("loop", *harness._run_args(args), sha="d" * 40)
+    for r in _runs([100.0, 101.0]):
+        cache.put(r["seed"], r)
+    assert harness._cached(args) == 1
+    out = capsys.readouterr().out
+    assert "2 of 3 seed(s) cached" in out and "missing: seed(s) 3" in out and "--ref " + "d" * 40 in out
+    assert harness._cached(_ab_args(seeds=2, sha="master", save=None)) == 0
+    assert [r["seed"] for r in harness.load(f"{harness._name(args)}@ddddddd")] == [1, 2]
