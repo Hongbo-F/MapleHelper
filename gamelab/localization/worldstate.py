@@ -77,6 +77,13 @@ BAR_EVERY = 5
 BAR_SHOWN_S = 0.25
 BAR_UNSEEN_S = 0.15
 HIT_MERGE_S = 0.2     # a drop this soon after the last is the same hit, if the bar takes a few frames to go down
+# Her HP number's `before` (an `hp_read` event's: the HP it said at the change before, a drop from it a touch, exactly) is
+# known only over frames all read: a frame not read (not visible, failing its checks) or a stretch over HP_GAP_S between
+# two frames read has the number forgotten (hp_number.Follow.see(None)), the next read's `before` None. Two touches can't
+# both come within it (live none within 1.25 s of the one before: sim.world.INVULNERABLE_LIVE); a potion between makes
+# a drop smaller, never larger. Without it a drop over 60 unread frames was kept as one touch of their two (the review of
+# 2026-10-28: D:/MapleHelper-scratch/safety3/review-evidence/demo/gap_demo.py).
+HP_GAP_S = 1.0
 # A frame's re-finds run at once on a pool of this many threads (the real monster detector's: its masked matches, in C
 # or OpenCV, let go of Python's lock; a lone re-find on the frame loop's thread, the hand-off costing more), each with
 # its HP bar's read if that's due, and the frame loop places them in turn: the states are one thread's. In a crowd
@@ -421,7 +428,8 @@ class WorldStep:
         self.gains: deque[Gain] = deque(maxlen=64)  # ... the newest of them, as told (for watch's 'exp' records)
         self._hp: float | None = None
         self._hit_at = -1e9
-        self.hp_number = hp_number.Follow()  # her HP number, read whenever its pixels change (_vitals)
+        self.hp_number = hp_number.Follow()  # her HP number, read whenever its pixels change (_vitals) ...
+        self._hp_number_t: float | None = None  # ... and the last frame it was seen on (HP_GAP_S)
         if real and (geo := getattr(self.eyes, "geo", None)) is not None:
             hp_number.warm(geo)  # (its cells made now: 190 ms, not at the first frame)
         self._cam: tuple | None = None   # the last frame placed's camera (her tag x, feet y, map x, y): AHEAD's
@@ -449,6 +457,7 @@ class WorldStep:
         if not visible:
             self.counts["not visible"] += 1
             self.owed = None  # whoever asked takes the look itself
+            self.hp_number.see(None)  # (what her HP number did meanwhile isn't known: HP_GAP_S)
             return WorldState(self.seq, t, False, why=why, bad=bad or Problem("window", why or "not visible"))
         if asks is not None and (asks.band or asks.wide or asks.loot or asks.loot_wide):
             self.owed = asks if self.owed is None else self.owed.merge(asks)
@@ -458,6 +467,8 @@ class WorldStep:
         s = self.senses.place(obs)
         events = self._vitals(s, t) if s.bad is None else []  # (a frame that failed its checks: its EXP and HP aren't
                                                                # the game's, and the next good frame's are compared)
+        if s.bad is not None:
+            self.hp_number.see(None)  # (her HP number's isn't known across it: HP_GAP_S)
         placed = s.tag is not None and s.where is not None
         view = self._view(s) if placed else None
         if placed:
@@ -693,6 +704,9 @@ class WorldStep:
             self._hit_at = t
             self.counts["hits"] += new
         self._hp = s.hp
+        if self._hp_number_t is not None and t - self._hp_number_t > HP_GAP_S:
+            self.hp_number.see(None)  # (a stretch with no frame: what it did meanwhile isn't known)
+        self._hp_number_t = t
         seen = self.hp_number.see(getattr(s, "hp_box", None), s.geo)
         if seen is not None and seen[0].cur is not None:
             out.append(Event("hp_read", t, data={"cur": seen[0].cur, "max": seen[0].max, "before": seen[1]}))

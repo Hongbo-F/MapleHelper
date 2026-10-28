@@ -2270,8 +2270,9 @@ def safety_arg(s) -> None:
     stopped the fight and sent her to rest on the chair (30%), and `hunt`'s and `probe run`'s handed back at once (35%);
     until 2026-10-28 it was a share always, 65% by default."""
     s.add_argument("--low-hp", type=float, default=None,
-                   help="the safety stop's threshold: her HP under it on two looks 0.6 s apart ends the hunt, she goes "
-                        "to a safe place and you're paged; 1 or under, a share of her max HP; over 1, HP (default: her "
+                   help="the safety stop's threshold: her HP under it on two looks 0.25 s apart by her HP number "
+                        "(0.6 s by her bar) ends the hunt, she goes to a safe place and you're paged; 1 or under, a "
+                        "share of her max HP; over 1, HP (default: her "
                         "profile's hits of the map's largest touch, in HP: the thief 2, the magician 3; with an HP "
                         "potion key of her own, five points under --potion-hp if lower; under one touch two looks in a "
                         "row stops it too)")

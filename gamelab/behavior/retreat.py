@@ -193,7 +193,19 @@ def away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
     the Lie Detector's sighting, or the safety stop): where to (`choose`), then there; and again from wherever she ends
     up if that wasn't it (a touch knocked her back, the rope missed), TRIES goes at most while RETREAT_S has time for
     one, all within the player's window (the Lie Detector's RETREAT_WINDOW_S: the safety stop's trips are cut there
-    too). `why`: what it's for, in its log lines and events. Returns how it went (also logged)."""
+    too). `why`: what it's for, in its log lines and events. Returns how it went (also logged). Meanwhile the hunter's
+    safety stop isn't raised at her looks (Hunter.retreating): the Lie Detector's way isn't cut short by it."""
+    was = getattr(h, "retreating", False)
+    h.retreating = True
+    try:
+        return _away(h, seen, why, log, rng)
+    finally:
+        h.retreating = was
+
+
+def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
+          rng: random.Random | None = None) -> Retreat:
+    """away's retreat."""
     log = log or h.log
     out = Retreat(time.monotonic() - seen)
     if out.began >= RETREAT_S:

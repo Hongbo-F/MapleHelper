@@ -162,3 +162,54 @@ def test_the_feeds_step_reads_it_at_every_change_and_says_so():
     assert states[22].hp_of is None and states[29].hp_of == (700, 840)
     assert to_scene(states[29], model, (100, 100)).hp_of == (700, 840)
     assert to_scene(states[29], model, (100, 100)).record()["hp_of"] == [700, 840]
+
+
+def test_a_drop_over_frames_the_step_didnt_read_isnt_a_touch():
+    """The review of 2026-10-28 (D:/MapleHelper-scratch/safety3/review-evidence/demo/gap_demo.py): 60 frames not read
+    (the game not in front) while the number went 840 -> 723 -> 606 made one `hp_read` of 606 'before' 840, a touch of
+    234 kept, which fits no kind and counted for every kind of the map, her reserve 59% of her HP. Now a frame not
+    visible, one failing its checks, or a stretch of over HP_GAP_S with no frame has the number forgotten: the next
+    read's `before` is None (not known), and only a drop over frames all read is a touch."""
+    from test_worldstate import Drawn, small_map
+
+    from gamelab.localization.senses import Senses
+    from gamelab.localization.worldstate import HP_GAP_S, Schedule, WorldStep
+    from gamelab.perception.framecheck import Problem
+
+    class WithNumber(Drawn):
+        text, bad = shown(840, 840), False
+
+        def frame(self, t, ropes):
+            obs = super().frame(t, ropes)
+            obs.hp_box = hp_number.draw(self.text, STRETCHED)
+            if self.bad:
+                obs.bad = Problem("window", "the window moved")
+            return obs
+    model = small_map()
+    eyes = WithNumber(model)
+    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule())
+    clock, reads = [100.0], []
+
+    def frame(cur, visible=True, bad=False, dt=1 / 30):
+        clock[0] += dt
+        t = clock[0]
+        eyes.text, eyes.bad = shown(cur, 840), bad
+        st = step.step(lambda ropes, t=t: eyes.frame(t, ropes), t, visible=visible,
+                       why="" if visible else "the game isn't in front")
+        step.came_back()
+        reads.extend(e.data for e in st.events if e.kind == "hp_read")
+        return st
+    for _ in range(10):
+        frame(840)
+    for cur in [723] * 30 + [606] * 30:  # not visible
+        frame(cur, visible=False)
+    assert frame(606).hp_of == (606, 840) and reads[-1] == {"cur": 606, "max": 840, "before": None}
+    for _ in range(5):
+        frame(489, bad=True)  # failing their checks: none read, nor the HP of either
+    st = frame(489)
+    assert st.hp_of == (489, 840) and reads[-1] == {"cur": 489, "max": 840, "before": None}
+    frame(372, dt=HP_GAP_S + 0.1)  # a stretch with no frame
+    assert reads[-1] == {"cur": 372, "max": 840, "before": None}
+    frame(255)  # every frame read: a touch
+    assert reads[-1] == {"cur": 255, "max": 840, "before": 372}
+    assert [r["before"] for r in reads] == [None, None, None, None, 372]

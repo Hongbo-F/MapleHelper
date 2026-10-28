@@ -67,8 +67,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
   safety_stops     the safety stop (behavior.safety: her HP under her reserve, 2 of the map's largest touches in HP, on
-                   two looks 0.6 s apart, or under one touch two looks in a row; until 2026-10-28 65% for 2 s, or 25%
-                   two looks in a row: her pet's potions not keeping her up): 1 if it ended the run (her retreat to a safe place, then nothing: the
+                   two looks or glances 0.6 s apart by her bar, the simulator's, or under one touch two in a row; until
+                   2026-10-28 65% for 2 s, or 25% two looks in a row: her pet's potions not keeping her up): 1 if it
+                   ended the run (her retreat to a safe place, then nothing: the
                    hunt ends, as live; the run's time ends with her retreat, alive_s and the idle stretches with it,
                    and it counts against the bar as a death does), and
                    safety_at, when (s; the 'safety_stop' event). Until 2026-10-26 the runs counted her rests on the

@@ -46,7 +46,7 @@ from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..localization.senses import Senses
-from ..localization.worldstate import reading_of
+from ..localization.worldstate import HP_GAP_S, reading_of
 from ..motion import physics
 from ..perception import drops, exp_number, hp_number
 from ..perception.eyes import Eyes
@@ -60,7 +60,7 @@ from .keycheck import KeyCheck, KeyDoubt, RegularWatch, regular_reach, unquiet
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
-from .safety import MEASURED_N, HpWatch, TooStrong, Touches, kind_of_touch, reserve_of
+from .safety import HpWatch, TooStrong, Touches, kind_of_touch, reserve_of
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
 POTION_EVERY = 3    # s at least between two potions
@@ -73,6 +73,19 @@ HP_DOUBT_AFTER = 0.3  # ... right after one this high isn't believed at once (_d
 HP_ZERO_SHOTS = 5     # frames of such looks saved, to find out why
 HIT_EXACT_S = 1.0     # s: a hit's text has her HP number's touch if it read one this soon before (touches came 1.38 s
                       # apart at the least: behavior.safety)
+HP_NUMBER_WAIT_S = 10.0  # s of looks with her HP number never read: said once (the safety stop on her bar then, at her
+                         # profile's max HP: the perception service not restarted since 2026-10-28, a client it can't
+                         # read at, such as the stretched 1920x1080, where it reads none)
+# The safety stop raised at the look or glance it's due at, whoever took it (Senses.checks and glance_checks:
+# Hunter._stop_now, _glanced), not only at the next health_check: a mover's settle, a throw's looks and a chain's
+# glances ask none, and in the simulator (the review of 2026-10-28: D:/MapleHelper-scratch/safety3/review-safety,
+# stops2.py) it came up to 1.4 s late that way, a touch landing in that time in 3 of 42 runs with her pet out of potions
+# (one from 183 HP to 61, dead 0.3 s into her retreat). Now 0 s late in all 82 runs of the review's two sets
+# (D:/MapleHelper-scratch/safety3/fix/stops3.py); deaths on her way out after it about as many (18 and 7, against 17 and
+# 9): what she has left at the stop is what tells (behavior.safety). From her first health_check (a hunt asking after
+# her health: `asked`), and not while she retreats (`retreating`: the Lie Detector's way to a safe place isn't cut short
+# by it). False: at health_check only, as until then.
+STOP_ON_LOOK = True
 # s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
 # (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
 # from a look in that time comes while she's in the air (and is lost) or still sliding, from where she no longer is.
@@ -139,18 +152,28 @@ class Hunter:
         # them kept (`touches`, her file); every look's HP watched against it (`hp_watch`), in HP: her HP number's, else
         # her bar's at her max HP (the HUD's number's, else her profile's: `max_hp`).
         profile = profiles.active()
-        self.safety_hits, self.pet_warning, self.guard = profile.safety_hits, profile.pet.hp_warning, profile.magic_guard
+        self.safety_hits, self.pet_warning = profile.safety_hits, profile.pet.hp_warning
+        # Her Magic Guard's share of a touch (profile.magic_guard) isn't taken off the reserve: it's a toggle, and
+        # nothing reads whether it's up (a cast lost, a press that put it off), so a touch may take all of itself.
+        self.guard = 0.0
         self.max_mp = c.mp
         self.level = self.her.level      # her level as last known (her profile's, then her EXP number's)
         self.max_hp_read: int | None = None  # her max HP as the HUD's number says it (None: not read yet)
         self.hp_follow = hp_number.Follow()  # her HP number off her own looks (without a feed: the feed's step reads it)
+        self._hp_box_t: float | None = None  # ... the last look it was seen on
         self.touches = Touches(paths.of().touches)  # (hers)
         self._last_touch: tuple[float, int, int] | None = None  # her HP number's last touch: when, HP before, after
+        self._first_look: float | None = None  # her first look's time, and whether her HP number not read since ...
+        self._unread_said = False              # ... HP_NUMBER_WAIT_S has been said
+        self.asked = False       # a hunt has asked after her health (health_check): the stop raised at any look since
+        self.retreating = False  # ... but not while she retreats (behavior.retreat.away)
         own = potion_hp if keys.hp_potion is not None else None  # (her own potion key's: under it, the stop's lower)
         self.hp_watch = HpWatch(self._reserve(model), potion_hp=own, low_hp=low_hp, max_hp=self.max_hp)
         log(f"safety stop: {self.hp_watch.describe()}")
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
+        self.senses.checks.append(self._stop_now)  # (the safety stop at the look it's due at: STOP_ON_LOOK) ...
+        self.senses.glance_checks.append(self._glanced)  # ... and at a glance (a chain's watch: no look for seconds)
         mode = attack or ("skill" if skill else "regular")
         self._attack_mode = mode
         self.actions = Actions(keys, skill=mode != "regular")
@@ -284,7 +307,9 @@ class Hunter:
         killing nothing for long raise OutOfDarts, once, with what the pickup log says then; a stretch of them long
         enough has the log read (DartWatch.asks: if the game says she's out, the stop comes sooner). A stretch of 3
         and more has the message bar read (DartWatch.asks_chat), and the game's refusal there starts it again
-        (_hear_chat): on a rope, she's got off it."""
+        (_hear_chat): on a rope, she's got off it. From the first, the safety stop is raised at any look it's due at
+        too (`_stop_now`)."""
+        self.asked = True
         self.drink_if_low(s)
         if (stop := self.hp_watch.due()) is not None:
             raise stop
@@ -371,6 +396,31 @@ class Hunter:
             self.actions.choose = self.attacks.key
         elif self._attack_mode == "regular":  # (as it was: her Actions key the regular attack themselves)
             self.actions.choose = None
+
+    def _stop_now(self, s: Scene) -> None:
+        """After every look's listeners (Senses.checks; STOP_ON_LOOK): the safety stop raised there if it's due (the
+        watch saw the look already: _vitals), once a hunt has asked after her health (`asked`) and not while she
+        retreats (`retreating`)."""
+        if STOP_ON_LOOK and self.asked and not self.retreating and (stop := self.hp_watch.due()) is not None:
+            raise stop
+
+    def _glanced(self, st) -> None:
+        """A glance's state (Senses.glance_checks: a chain's watch, glancing at her every 30 ms or so, where no look
+        comes for up to seconds: the review of 2026-10-28 had a stop's first look under her reserve come after a
+        second touch): her HP to the safety stop's watch as a look's (her HP number's as the state has it, else its
+        bar's), and the stop raised there if it's due (`_stop_now`). An HP of HP_ZERO or less right after one of
+        HP_DOUBT_AFTER or more isn't taken from a glance (_doubt_hp has the next look tell)."""
+        hp, exact = getattr(st, "hp", None), getattr(st, "hp_of", None)
+        if hp is None:
+            return
+        if exact is None and hp <= HP_ZERO and (self.hp_watch.share or 0.0) >= HP_DOUBT_AFTER:
+            return
+        if exact is not None:
+            self._max_hp_seen(exact[1])
+        mp = getattr(st, "mp", None)
+        self.hp_watch.see(st.t, hp, self.max_hp, None if exact is None else exact[0],
+                          None if mp is None else mp * self.max_mp)
+        self._stop_now(st)
 
     def _hear_chat(self, s: Scene) -> None:
         """The message bar read for out of darts (DartWatch.asks_chat): the game's refusal of her presses on it starts
@@ -552,6 +602,7 @@ class Hunter:
         gains between two looks are two gains, and the HP lost is every drop's, a potion drunk between them or not."""
         self._doubt_hp(s)
         exact = self._hp_number(s)
+        self._unread(s, exact)
         mp = getattr(s, "mp", None)
         self.hp_watch.see(s.t, s.hp, self.max_hp, None if exact is None else exact[0],
                           None if mp is None else mp * self.max_mp)
@@ -610,6 +661,9 @@ class Hunter:
                      if e.kind == "hp_read" and "cur" in e.data]
             exact = getattr(s, "hp_of", None)
         elif box is not None:
+            if self._hp_box_t is not None and s.t - self._hp_box_t > HP_GAP_S:
+                self.hp_follow.see(None)  # (her looks' gap: what it did meanwhile isn't known, as the feed's step has it)
+            self._hp_box_t = s.t
             seen = self.hp_follow.see(box, s.geo)
             if seen is not None and seen[0].cur is not None:
                 reads.append((s.t, seen[0].cur, seen[0].max, seen[1]))
@@ -623,6 +677,23 @@ class Hunter:
         if exact is not None:
             self._max_hp_seen(exact[1])
         return exact
+
+    def _unread(self, s: Scene, exact: tuple[int, int] | None) -> None:
+        """Her HP number not read on any look for HP_NUMBER_WAIT_S since her first: said once (the safety stop goes by
+        her bar at her max HP as known then)."""
+        if self._unread_said:
+            return
+        if exact is not None or self.max_hp_read is not None:
+            self._unread_said = True  # (read: nothing to say, ever)
+            return
+        if self._first_look is None:
+            self._first_look = s.t
+        if s.t - self._first_look < HP_NUMBER_WAIT_S:
+            return
+        self._unread_said = True
+        self.log(f"  her HP number not read in {HP_NUMBER_WAIT_S:g} s of looks (the perception service not restarted "
+                 f"since it reads it? a client size it reads none at?): the safety stop goes by her HP bar at her "
+                 f"max HP {self.max_hp:g}")
 
     def _max_hp_seen(self, most: int) -> None:
         """Her HP number said her max HP is `most`: hers from now on (said when it's new, and once if her profile says
@@ -638,20 +709,33 @@ class Hunter:
 
     def _touched(self, t: float, before: int, cur: int, most: int) -> None:
         """Her HP number dropped from `before` to `cur` at t: a touch of that size, its kind told by its size
-        (behavior.safety.kind_of_touch), kept in her touches (`touches`: the safety stop's measured touches from the
-        next start or level-up). One over the reserve's touch is said."""
+        (behavior.safety.kind_of_touch), kept in her touches (`touches`) at her level as her EXP number says it (None
+        until it's read: counted at none). One that raises its kind's touch in her reserve (MARGIN over it: one is
+        enough, as a measured touch only ever raises it) has the reserve made again at once, said; one that fits no
+        kind of the map's is said too (counted for none)."""
         size = before - cur
         self._last_touch = (t, before, cur)
+        level = None if self.meter.at is None else self.meter.at[0]
         kind = kind_of_touch(size, self.model, self.her.defence, self.level)
-        self.touches.add({"t": round(time.time(), 3), "map": self.model.id, "level": int(self.level), "hp": size,
-                          "kind": kind, "max": most})
-        top = self.hp_watch.reserve.touch
-        if top is not None and size > top.hp:
-            of = f", a {kind}'s" if kind else ""
-            text = (f"a touch of {size} HP ({before} -> {cur}{of}) is over the safety stop's {top.said} touch of "
-                    f"{top.hp}: kept, counted from the next start or level-up ({MEASURED_N} at her level needed)")
-            self.log(f"  {text}")
-            telemetry.emit("event", kind="touch", text=text)
+        self.touches.add({"t": round(time.time(), 3), "map": self.model.id,
+                          "level": None if level is None else int(level), "hp": size, "kind": kind, "max": most})
+        was = self.hp_watch.reserve
+        if kind is None:
+            if was.touch is None:  # (a map whose monsters' touches the game data doesn't give: none fits any)
+                return
+            text = (f"a touch of {size} HP ({before} -> {cur}) fits no kind of the map's: kept, counted for none (the "
+                    f"safety stop's {was.touch.said} touch {was.touch.hp})")
+        elif level is None or int(level) != int(self.level):
+            return
+        else:
+            now = self._reserve()
+            if now.hp(self.max_hp) <= was.hp(self.max_hp):
+                return
+            self.hp_watch.reserve = now
+            text = (f"a touch of {size} HP ({before} -> {cur}, a {kind}'s) raises the safety stop: now "
+                    f"{self.hp_watch.describe(self.max_hp)}")
+        self.log(f"  {text}")
+        telemetry.emit("event", kind="touch", text=text)
 
     def _level_check(self) -> None:
         """Her EXP number says another level than the one her reserve is for: the reserve made again at it (her

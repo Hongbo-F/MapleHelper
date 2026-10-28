@@ -4,7 +4,9 @@ is on screen when her name tag is hidden (the camera), where the monsters and dr
 players are (their minimap dots, followed from look to look: localization.players).
 
 Every look anyone takes goes through `Senses.look`, and the listeners run after each one, in order:
-the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there.
+the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there. Then its checks, which
+may raise out of the look, wherever it was taken (the hunter's safety stop: Hunter._stop_now); and a glance's state
+goes to its glance checks the same way (Hunter._glanced: her HP in a chain's watch, where no look is taken).
 
 Every look and glance is the latest of what perception, looking at the game all the time, has seen (a
 localization.feed.Feed: for a command the perception service, localization.service, whose world step runs on every
@@ -136,6 +138,9 @@ class Senses:
         # the feed's
         self.players = Players(self.localizer, 1 if feed is None else LOCAL_IDS)
         self.listeners: list[Callable[[Scene], None]] = []
+        self.checks: list[Callable[[Scene], None]] = []  # after the listeners, every look: each may raise (the safety
+                                                          # stop, behavior.safety: Hunter._stop_now)
+        self.glance_checks: list[Callable] = []  # ... and every glance with a state (worldstate.WorldState): the same
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
         eyes.drop_names = items_for(model)  # the drops looked for: the map's monsters' (perception.drops)
@@ -210,6 +215,8 @@ class Senses:
         s.events = self.feed.drain_events(s.t)
         for listener in self.listeners:
             listener(s)
+        for check in self.checks:
+            check(s)
         return s
 
     def fresh_after(self, keys: bool | None = None) -> float:
@@ -291,6 +298,8 @@ class Senses:
             self._glanced = self.glanced_at = st.t
             self.glanced, self._usable, self._hp = st, time.monotonic(), st.hp
             self.counts["glances"] += 1
+            for check in self.glance_checks:
+                check(st)
             return st.dot, st.hp
         self.glanced, self.glanced_at = None, time.monotonic()
         self.counts["glances without a state"] += 1

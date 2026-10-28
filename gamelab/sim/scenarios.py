@@ -2507,10 +2507,11 @@ def loop_tree_lie_detector_grind(sim):
 # --- the safety stop: her HP stays low, the hunt ends, she goes to a safe place, whoever is at the PC is paged --------
 # (behavior.safety). The user, 2026-10-26: "Just remove the sit recover hp functionality, it's no longer needed". Her
 # pet drinks her potions; with none left (Realism.potions 0) every touch leaves her lower, until she's under her reserve:
-# the thief's 2 of the map's largest touches, 262 HP (2 Horny Mushroom touches of 131 at DEF 75, level 25), 33.9% of
-# the simulator's 774 (the user, 2026-10-28: "it should be HP under the amount of taking 3 hits from the monsters on the
-# map ... for thief with high evasion this should be 2 hits, 3 for magician"). The simulator draws no HP number: her HP
-# is the bar's less a px (behavior.safety.BAR_SLACK), her max HP her profile's.
+# the thief's 2 of the map's largest touches, 268 HP (2 Horny Mushroom touches of 134: the formula's top at DEF 64,
+# level 25), 34.6% of the simulator's 774 (the user, 2026-10-28: "it should be HP under the amount of taking 3 hits from
+# the monsters on the map ... for thief with high evasion this should be 2 hits, 3 for magician"). The simulator draws no
+# HP number: her HP is the bar's less a px (behavior.safety.BAR_SLACK), her max HP her profile's, the debounce the bar's
+# (DEBOUNCE_S).
 
 def safety_stop(minutes: float = 5, grind: bool = False):
     """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; with `grind`, grinding, as `tour --loop
@@ -2541,15 +2542,15 @@ def safety_stop(minutes: float = 5, grind: bool = False):
 
 
 SAFETY_EXPECTS = (
-    check("the hunt stopped for her HP under 2 Horny Mushroom touches (262 HP of 774)",
-          lambda tr: "under 2 Horny Mushroom touches of 131 (262)" in (tr["result"]["stopped"] or {}).get("text", "")),
-    check("under it on two looks 0.6 s apart at least, or under one touch two looks in a row",
+    check("the hunt stopped for her HP under 2 Horny Mushroom touches (268 HP of 774)",
+          lambda tr: "under 2 Horny Mushroom touches of 134 (268)" in (tr["result"]["stopped"] or {}).get("text", "")),
+    check("under it on two looks 0.6 s apart at least (her bar's), or under one touch two looks in a row",
           lambda tr: tr["result"]["stopped"]["seconds"] >= 0.6 and tr["result"]["stopped"]["looks"] >= 2
           or "on 2 looks in a row" in tr["result"]["stopped"]["text"]),
-    check("its numbers in HP: under 262 of 774", lambda tr: tr["result"]["stopped"]["hp"] < 262
+    check("its numbers in HP: under 268 of 774", lambda tr: tr["result"]["stopped"]["hp"] < 268
           and "of 774" in tr["result"]["stopped"]["text"]),
     check("alive at the end", lambda tr: tr["result"]["hp"] > 0),
-    logs("safety stop: under 262 HP of 774"), logs("SAFETY STOP: HP"), logs("SAFETY STOP: retreat"),
+    logs("safety stop: under 268 HP of 774"), logs("SAFETY STOP: HP"), logs("SAFETY STOP: retreat"),
     check("on a safe place once her retreat is over", lambda tr: tr["result"]["safe"]),
     check("paged once, about her HP", lambda tr: len(tr["result"]["pages"]) == 1
           and "HP stayed low" in tr["result"]["pages"][0][1]),
@@ -2562,7 +2563,7 @@ SAFETY_EXPECTS = (
 def loop_tree_safety_stop(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 at 80% HP, her pet with
     no potion left to drink: every touch leaves her lower; under her reserve (behavior.safety: the thief's 2 Horny
-    Mushroom touches of 131, 262 HP of the simulator's 774, her HP the bar's less a px) on two looks 0.6 s apart the hunt
+    Mushroom touches of 134, 268 HP of the simulator's 774, her HP the bar's less a px) on two looks 0.6 s apart the hunt
     stops, she goes to a safe place as on the Lie Detector, her moves alone (behavior.retreat), and whoever is at the PC
     is paged; no chair, no waiting for her HP; alive at the end. (Seed 2 since 2026-10-27, an attack from a jump picking
     by the star's search alone (reach.AIR_MODEL, the world's AIR_PICK) and her stance going by where each monster will be
