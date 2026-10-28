@@ -216,6 +216,37 @@ def test_the_whole_screen_waits_while_its_searches_take_more_than_half_the_threa
         worldstate.WIDE_SHARE = worldstate_share
 
 
+def test_a_slow_whole_screen_doesnt_stand_in_for_her_bands_own_search():
+    """worldstate.BAND_STAND_IN_S: a whole screen back within 0.05 s of its frame is her band's search too (at 1366x768
+    a crowd's takes 14-20 ms: her band never searched alone); a slower one (1920x1080's 78-100 ms, the simulator's
+    feed.COSTS), held to about 6 a second by WIDE_SHARE, covers her band in its state but her band's own search goes on
+    every 0.2 s between, as before 10 a second (the review, 2026-10-28: standing in, her band's monsters were known later
+    than with her band's own search where the whole screen takes 100 ms). Inline, any whole screen stands in."""
+    model = small_map()
+    # (at 0.08 s, every 0.2 s from her band's last own search, or on the frame after a whole screen due with it)
+    for took, alone in ((0.015, []), (0.05, []), (0.08, [2, 8, 14, 20, 27, 33, 39, 45, 52, 58, 64, 70, 77, 83, 89])):
+        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
+        step.searches = Paced(step.senses, took)
+        late = []
+        states = frames(step, 3 * FPS, late=late)
+        assert [s.seq for s in late if s.work["band"]] == alone, took
+        wide = [s.seq for s in late if s.work["wide"]]
+        assert all(b - a == (3 if took <= 0.05 else 5) for a, b in zip(wide, wide[1:]))  # (WIDE_SHARE's as ever)
+        # (her band searched, alone or with the screen, at most 3 or 5 frames before each frame's state)
+        assert max(s.t - s.band_at for s in states[1:]) == pytest.approx(0.1 if took <= 0.05 else 5 / FPS)
+    worldstate_share = worldstate.WIDE_SHARE
+    try:  # (inline, 0.08 s on the real clock: the step waited for it, its answer in the frame's own step)
+        worldstate.WIDE_SHARE = None
+        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
+        step.searches = Paced(step.senses, 0.08)
+        step.searches.paced = False
+        late = []
+        frames(step, 30, late=late)
+        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 3)) and not any(s.work["band"] for s in late)
+    finally:
+        worldstate.WIDE_SHARE = worldstate_share
+
+
 def test_drops_asked_for_go_first_alone_the_schedules_searches_on_the_next_free_frame():
     """worldstate.ASKS_FIRST: a look's drops searched on its frame alone, the whole screen the schedule had due then
     (and her band) on the next frame the searches are free, a period after the last as ever; asked with them, the whole

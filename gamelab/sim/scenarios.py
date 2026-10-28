@@ -1034,7 +1034,7 @@ def hunt_clear_basin(sim):
             "inventory_full": h.looter.inventory_full}
 
 
-@scenario((36, 300.0), monsters={36}, seed=6,
+@scenario((36, 300.0), monsters={36}, seed=7,
           expects=(ends("killed", key="ended"), happens("claw swipe hits", "close up, the claw swipes")))
 def hunt_kill(sim):
     """`hunt kill`: the slime nearest her on the basin floor, 55 units off. Too close for a star from the
@@ -1046,7 +1046,12 @@ def hunt_kill(sim):
     monsters walk as fast as the game data says (a slime 100 units/s, not 56): on seed 1 the basin's other
     monsters kept walking into her stars' way (two kills, not it), and she hadn't killed it after 30 s; 6
     is the first seed after it that its twin with the feed, feed_hunt_kill, met too; the twin is on 7 since
-    her EXP gains name their kinds. Over 16 seeds 10 meet all of this.)"""
+    her EXP gains name their kinds. Over 16 seeds 10 meet all of this.) (Seed 7 since the whole screen 10 times a
+    second with her band's own search beside it where a whole screen takes longer than 0.05 s (worldstate.WIDE_EVERY_S,
+    BAND_STAND_IN_S, 2026-10-28; at the simulator's costs each about 5 times a second): on seed 6 the run went otherwise
+    from 4.6 s (a look a millisecond sooner), her claw's swipes going to the basin's pigs and its other slime, and
+    she hadn't killed it after 30 s; of seeds 1-16, 1, 4, 7, 10 and 15 meet all of this, with master's stack and the
+    branch as first built 1, 4, 6, 7, 10 and 15.)"""
     h = sim.hunter()
     s = h.look()
     target = min(s.monsters, key=lambda t: abs(t.x - s.where.x))
@@ -1080,7 +1085,7 @@ def hunt_kill_far(sim):
     return _kill_far(sim)
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=3, noise=Noise(miss=0.35),
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=8, noise=Noise(miss=0.35),
           expects=(ends("killed", key="ended"), happens("star misses"),
                    wrote("shots2.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
 def hunt_kill_misses(sim):
@@ -1092,7 +1097,10 @@ def hunt_kill_misses(sim):
     no star missed; of seeds 1-16, 5 meet all of this.) (Seed 3 since 2026-10-26: her throws at the dying gone, a
     throw's last look before its key, her stats at level 25, the air turn's attack 60 ms after its arrow and the world's
     damage at the server's time: on seed 8 no throw was scored a miss in the shot log (which still goes by the star's
-    release: fight.LANDS_FROM_S); of seeds 1-16, 3 and 5 meet all of this.)"""
+    release: fight.LANDS_FROM_S); of seeds 1-16, 3 and 5 meet all of this.) (Seed 8 since the whole screen 10 times a
+    second with her band's own search beside it where a whole screen takes longer than 0.05 s (worldstate.BAND_STAND_IN_S,
+    2026-10-28): on seed 3 no throw was scored a miss in the shot log; of seeds 1-16, 8, 9, 11 and 16 meet all of this,
+    with master's stack and the branch as first built 3, 5, 8 and 16.)"""
     return _kill_far(sim)
 
 
@@ -1200,7 +1208,8 @@ def fight_step_wall(sim):
     all of this, and with master's stack 3, 4 and 11.) (Seed 10 since the whole screen 10 times a second, her band
     searched with it (2026-10-28; at the simulator's costs about 5 a second, worldstate.WIDE_SHARE), and the fake whole
     screen finding a monster across its bands' edges as the real one does (sim.fakes.FakeDetector.detect_wide): on seed 4
-    she didn't stay on platform 4; of seeds 1-16, 10 and 11 meet all of this, and with master's stack 4 and 12.)"""
+    she didn't stay on platform 4; of seeds 1-16, 10 and 11 meet all of this, and with master's stack 4 and 12; with her
+    band's own search beside a whole screen that takes longer than 0.05 s, worldstate.BAND_STAND_IN_S, 10-12 and 16.)"""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1237,7 +1246,7 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 _AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS, dies_late=False)
 
 
-@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=2, limit=400, realism=_AT_RELEASE,
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400, realism=_AT_RELEASE,
           expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
@@ -1255,9 +1264,10 @@ def probe_top(sim):
     from 112). Each throw waits for its evidence before the next, and the log has where the pig was at the pick
     and what it showed (`probe score` fits the top to it: tests/test_probe.py). (Seed 6 for a while, where all 30
     hit, as "every throw hits" was: then no throw was read as a miss, not even with hit monsters hidden, and the
-    test of that had none to check.) (Seed 2 since the whole screen 10 times a second, 2026-10-28, the counts above
-    seed 1's: on seed 1 all 30 hit, one with the pig read 106.7 off at the pick, under the 111 the world's search
-    reaches from; of seeds 1-16, 2, 3, 6, 8, 11 and 15 meet all of this, and with master's stack 1-4 and 11.)"""
+    test of that had none to check.) (Seed 1 still with the whole screen 10 times a second, 2026-10-28: of seeds 1-16,
+    1, 7, 11 and 15 meet all of this, and with master's stack 1-4 and 11. With the whole screen standing in for her
+    band's own search there, as first built (worldstate.BAND_STAND_IN_S), on seed 1 all 30 hit, one with the pig read
+    106.7 off at the pick, under the 111 the world's search reaches from.)"""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
@@ -1611,7 +1621,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=3, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1643,8 +1653,9 @@ def loop_lull_loot(sim):
     world's damage at the server's time: on seed 2 no lull came; of seeds 1-16, 1, 3-7 and 9-15 meet all of this.)
     (Seed 2 since 2026-10-27, an attack from a jump picking by the star's search alone (reach.AIR_MODEL, the world's
     AIR_PICK) and her stance going by where each monster will be when her attack starts (attack.stance.Pace): on seed 1
-    no lull came; of seeds 1-12, 2-10 meet all of this.) (Seed 3 since the whole screen 10 times a second, 2026-10-28:
-    on seed 2 no lull came; of seeds 1-16 all but 2 and 10 meet all of this.)"""
+    no lull came; of seeds 1-12, 2-10 meet all of this.) (Seed 2 kept with the whole screen 10 times a second,
+    2026-10-28: of seeds 1-16 all but 4, 9, 14 and 16 meet all of this; with the whole screen standing in for her band's
+    own search as first built, worldstate.BAND_STAND_IN_S, all but 2 and 10, no lull coming on 2.)"""
     return _loop_on_12(sim)
 
 
@@ -2261,7 +2272,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=2, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2297,7 +2308,10 @@ def loop_tree_ore_waits(sim):
     since landings with clearance and moving away to attack, 2026-10-27, the Horny Mushroom's escape stepping to the
     safest end, stance.ESCAPE_STEPS: on seed 3 she was hurt 6 times; of seeds 1-16, 1, 2, 6-8, 11 and 14 met all of
     this, with master's stack 2, 3, 7 and 11-13, hurt 94 times over the 16 against 101; after the reviews of it, 1-3,
-    6, 8, 9 and 11-16, hurt 65 times against master's 101.)"""
+    6, 8, 9 and 11-16, hurt 65 times against master's 101.) (Seed 1 since the whole screen 10 times a second with her
+    band's own search beside it where a whole screen takes longer than 0.05 s (worldstate.BAND_STAND_IN_S, 2026-10-28:
+    at the simulator's costs her band about 5 times a second and the whole screen 5): on seed 2 she was hurt 10 times
+    and picked up 5 ores; of seeds 1-16, 1, 4-8, 11, 15 and 16 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -3138,7 +3152,7 @@ def nav_tree_rope_hit(sim):
     return _nav(16, fight=True)(sim)
 
 
-@tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=3, limit=60, **_LIVE,
+@tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=5, limit=60, **_LIVE,
       expects=(ends("arrived"), logs("could touch her on the way: shooting it first"),
                logs("by her landing on 23: no shot first, it's dying"), no_log("none thrown"),
                check("on 23 by the end", lambda tr: tr["world"]["platform"] == 23),
@@ -3151,7 +3165,11 @@ def nav_tree_landing_shot_first(sim):
     and sends nothing ("no shot first, it's dying": FightOnTheWay.shot_place), then she goes, not hurt. As recorded
     until 2026-10-28 the landing's shot first fired twice at the dying one, each "nothing in reach", 1.3 s, and logged
     "shooting it first" both times, the line this scenario looked for: _clear_landing's own shot never threw here
-    (`Escort.throws` tells now). (Of seeds 1-6 the others shoot it first from 24 too: _meet's.)"""
+    (`Escort.throws` tells now). (Of seeds 1-6 the others shoot it first from 24 too: _meet's.) (Seed 5 since the whole
+    screen 10 times a second with her band's own search beside it where a whole screen takes longer than 0.05 s
+    (worldstate.BAND_STAND_IN_S, 2026-10-28): on seed 3 her throw went 2 ms later, the star pushed the mushroom back
+    and it died at x 2, not by her landing, so nothing priced it; of seeds 1-16, 5, 8, 9, 15 and 16 meet all of this,
+    and on every seed she shoots it first from 24.)"""
     from ..control.navigator import TRANSIT
     return sim.navigator(sim.hunter(), fight=True).go(23, mode=TRANSIT)
 

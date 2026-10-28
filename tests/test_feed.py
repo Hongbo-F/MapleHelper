@@ -150,7 +150,7 @@ def test_the_sync_feed_hands_a_look_the_frame_after_it_asked_its_cost_later(sync
         st = f.latest(Asks(asked, band=True))
         # (a frame shown when asked counts, to 1e-9 s: the clock's 100.49999999999997 is 100.5's frame)
         assert st is not None and st.t >= asked - 1e-9 and fresh(st, Asks(asked, band=True))
-        assert st.band_at >= asked  # her band searched on a frame shown after the look asked: its own search
+        assert st.band_at >= asked - 1e-9  # her band searched on a frame shown after the look asked: its own search
         # ready only once worked out: the searched frame's step, then the search on its thread
         assert clock.now >= st.band_at + c.capture + c.look + c.band - 1e-9
         assert clock.now - asked < 0.25  # (at worst a search of the whole screen was out, 0.11 s)
@@ -186,6 +186,7 @@ def test_the_sync_feeds_searches_come_back_their_cost_later_merged_as_of_their_f
     f, clock, eyes = sync
     clock.sleep(0.5)  # (the first frame's search of the whole screen is back)
     eyes.mobs = [pig(1100)]
+    clock.sleep(0.001)  # (asked after the frame shown at 100.5, drawn before the pig was there)
     asked = clock.now
     st = f.latest(Asks(asked, band=True))
     c = feed.COSTS
@@ -198,9 +199,10 @@ def test_the_sync_feeds_searches_come_back_their_cost_later_merged_as_of_their_f
     assert [m.kind for m in late.monsters] == ["pig"] and [e.kind for e in late.events] == ["appeared"]
     assert clock.now == pytest.approx(ready) and st.band_at == late.t  # the look had waited for it
     clock.sleep(0.1)
-    # The frames stepped while it was out don't have the pig; the first after it does, re-found
-    between = [s for r, s in f.states if not s.late and late.t < s.t and r < ready - 1e-9]
-    after = [s for r, s in f.states if not s.late and s.t > late.t and r >= ready - 1e-9]
+    # The frames stepped while it was out don't have the pig; the first after it does, re-found. (A frame whose step
+    # ended as it came back was stepped while it was out: its answers are looked for once she's placed, before that.)
+    between = [s for r, s in f.states if not s.late and late.t < s.t and r <= ready + 1e-9]
+    after = [s for r, s in f.states if not s.late and s.t > late.t and r > ready + 1e-9]
     assert all(s.monsters == [] and (s.band_at or 0) < late.t for s in between)
     assert after and [m.kind for m in after[0].monsters] == ["pig"] and after[0].band_at == late.t
     (tr,) = f.step.tracker.tracks.values()

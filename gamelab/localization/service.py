@@ -9,7 +9,8 @@ duplication: capture.shared). It never sends a key and never brings the game for
 when there's none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoever is attached (the
 user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is running as a
 constant thing and hunt is only a consumer of it"): HZ frames a second, the whole screen searched 10 times a second
-(her band with it; on its own every 0.2 s only if the whole screen falls behind: SCHEDULE, worldstate.WIDE_EVERY_S);
+(her band with it; on its own every 0.2 s only if the whole screen falls behind or takes longer than 0.05 s, as at
+1920x1080: SCHEDULE, worldstate.WIDE_EVERY_S, BAND_STAND_IN_S);
 what a command asks is searched on the next frame besides, and changes neither. The
 drops are searched at `watch`'s rates while no command that hunts is attached (a hunt asks for those it wants on its
 frames: HUNTING). Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
@@ -95,7 +96,8 @@ FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a lo
 # loop saturated at 14.5 a second (README, Perception at one pace).
 HZ = 30.0
 # What's searched without being asked: the whole screen every 0.1 s whoever is attached, her band with it (its own
-# search every 0.2 s only when no search for monsters came in that long: worldstate.BAND_EVERY_S, WIDE_EVERY_S; once a
+# search every 0.2 s only when no search for monsters came in that long, a whole screen's counting if it took 0.05 s at
+# most: worldstate.BAND_EVERY_S, WIDE_EVERY_S, BAND_STAND_IN_S; once a
 # second and her band every 0.2 s until 2026-10-28; the hunt's schedule, until 2026-10-26 only while a command that hunts
 # was), and the drops at `watch`'s rates (her
 # platform's every 0.5 s, every platform in view every 2 s: SCHEDULE) for the mini-map while none hunts. While one does,
