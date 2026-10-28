@@ -11,7 +11,9 @@
 // of the float32 score at every place (N and B exact, then about five float roundings: at most 1.8e-7 at the 42.7 M
 // places of the crowd's call set, D:/MapleHelper-scratch/gpu/tools/approx_check.py), so the places that can be the best
 // are those within `band` = 2 EPS of the highest s~; their sums come back (at most `kcand`, GM_CAND, a region), the CPU
-// scores them as score_at and takes the first highest row by row.
+// scores them as score_at and takes the first highest row by row. A frame sent ahead (`ahead`: gpumatch.c's rf_ahead,
+// the windows to be asked not known yet) has no choose pass: match writes only each place's key (`keys`), which alone
+// comes back, and the CPU works out the candidates' sums itself from the frame (gpumatch.c's gm_ahead_best).
 //
 // Three passes a frame, one dispatch each, in one submission:
 //   prep:   each window's rows as packed pixels (its bytes as the CPU copied them, a word at a time) and uint4 prefix
@@ -32,7 +34,8 @@ cbuffer Frame : register(b0)
 {
     uint ntask, nwin, cn, kcand;
     float band;
-    uint3 unused;
+    uint ahead;  // (1: a frame sent ahead: match writes the keys alone)
+    uint2 unused;
 };
 
 struct Pic { uint th, tw, nruns, run_off, px_off, n, st0, st1, st2; float af; uint u0, u1; };
@@ -55,6 +58,7 @@ RWStructuredBuffer<uint4> sums : register(u2);   // a place's STI, S1_0, S1_1, S
 RWStructuredBuffer<uint2> sc : register(u3);     // a place's S2, the key of its s~
 RWByteAddressBuffer rec : register(u4);          // a task's: highest key (all, near), candidates (all, near)
 RWStructuredBuffer<uint> cand : register(u5);    // a task's candidates: [2][kcand] of (place, STI, S1_0..2, S2)
+RWStructuredBuffer<uint> keys : register(u6);    // a frame sent ahead's: each place's key alone (4 bytes, not 24)
 
 uint raw_byte(uint at) { return (raw.Load(at & ~3u) >> ((at & 3u) * 8u)) & 255u; }
 
@@ -201,8 +205,12 @@ void match(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)
                 kall = max(kall, k);
                 if (px >= t.nx0 && px < t.nx1 && py >= t.ny0 && py < t.ny1)
                     knear = max(knear, k);
-                sums[t.place_off + p] = uint4(sti[i], u.x, u.y, u.z);
-                sc[t.place_off + p] = uint2(u.w, k);
+                if (ahead != 0) {
+                    keys[t.place_off + p] = k;
+                } else {
+                    sums[t.place_off + p] = uint4(sti[i], u.x, u.y, u.z);
+                    sc[t.place_off + p] = uint2(u.w, k);
+                }
             }
         }
     }

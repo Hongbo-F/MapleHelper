@@ -323,7 +323,7 @@ def gpu(on: bool | None = None) -> bool:
 GPU_STATS = ("calls", "answered", "late", "busy", "full", "pairs", "cpu_pairs", "wait_us", "wait_max_us", "tasks",
              "places", "why", "gpu_us", "gpu_max_us", "many", "none", "prep_us", "match_us", "choose_us",
              "copy_us", "memo", "woke", "priority", "ahead", "ahead_sent", "ahead_in", "ahead_late", "ahead_jobs",
-             "ahead_covered", "ahead_wait_us")  # gpumatch.c's GS_* (rf_gpu's stats)
+             "ahead_covered", "ahead_wait_us", "ahead_cands")  # gpumatch.c's GS_* (rf_gpu's stats)
 GPU_WHY = {1: "no hardware adapter", 2: "no device", 3: "no fence", 4: "its shader didn't compile",
            5: "its buffers couldn't be made", 6: "no Direct3D 11 here, or the DLL built without its headers",
            7: "the device removed: a driver reset?", 8: "an error sending a call"}  # gpumatch.c's gm_off
@@ -345,8 +345,8 @@ def gpu_line() -> str:
         if st.get("ahead"):  # (AHEAD: the frames' re-finds sent ahead of their calls, rf_ahead)
             did = (f"{st['ahead_sent']:,} of {st['ahead']:,} frames' re-finds sent ahead, {st['ahead_in']:,} in for "
                    f"their calls ({st['ahead_late']:,} late), {st['ahead_covered']:,} of {st['ahead_jobs']:,} windows "
-                   f"inside the ones sent" + (f", the wait {st['ahead_wait_us'] / st['ahead_in'] / 1000:.2f} ms a call"
-                                              if st["ahead_in"] else ""))
+                   f"inside the ones sent, {st['pairs']:,} of {st['pairs'] + st['cpu_pairs']:,} pairs the GPU's" +
+                   (f", the wait {st['ahead_wait_us'] / st['ahead_in'] / 1000:.2f} ms a call" if st["ahead_in"] else ""))
         else:
             did = (f"{st['answered']:,} of {st['calls']:,} calls answered, {st['late']} late, {st['busy']:,} the CPU's "
                    f"after a late one, {st['memo']:,} windows the memo's" + (

@@ -4,9 +4,11 @@ one, the memo, the stages) against the CPU's context's, every field of every ans
 window (gm_bests) against mm_best's, among them those the GPU hands back to the CPU (a flat window: every place a
 candidate; a flat picture; one past 128 px); ties; the approximate scores within the band's half. A late answer, a
 device lost (as a driver reset: between calls, or while a call is on it), an error sending a call and a device that
-can't be made (rf_gpu_fault): the CPU's answers at once, that very call. Windows the memo answers not sent; pairs left
-to the CPU on the pool's threads; rf_close never waiting for the device; the switch (GAMELAB_GPU, lab/GPU) and the
-status line's part. Skipped without a Direct3D 11 hardware device (never WARP: that's the CPU again)."""
+can't be made (rf_gpu_fault): the CPU's answers at once, that very call; the same with a frame sent ahead (a device
+lost while it's on the GPU, an error sending it). Windows the memo answers not sent; pairs left to the CPU on the
+pool's threads; rf_close never waiting for the device; a frame's re-finds sent ahead (every field the CPU's, whether
+their answers are in or not); the switch (GAMELAB_GPU, lab/GPU) and the status line's part. Skipped without a
+Direct3D 11 hardware device (never WARP: that's the CPU again)."""
 
 import ctypes
 import time
@@ -448,6 +450,50 @@ def test_a_call_never_waits_for_what_was_sent_ahead_and_its_answers_are_the_cpus
     after = on_gpu.gpu_state()[1]
     assert after["ahead_in"] + after["ahead_late"] - before["ahead_in"] - before["ahead_late"] == 30
     cpu.close()
+
+
+@pytest.mark.parametrize("fault, why", [
+    (4, 7),  # lost while the frame sent ahead is on the GPU (as a driver reset: its fence reads UINT64_MAX at once)
+    (5, 8),  # an error sending it (the upload's Map, on the thread-pool callback)
+])
+def test_a_device_lost_or_an_error_with_a_frame_sent_ahead_leaves_its_call_to_the_cpu(detector, fault, why):  # noqa: F811
+    # (the thread that would map the answers sees the device removed and turns the GPU off, as gm_wait does: every
+    # pair of that call the CPU's, and of the calls after it)
+    rf = gpu_refinds(ready_of(detector))
+    need(rf)
+    cpu = native.Refinds(ready_of(detector), 4)
+    lists = [detector._lists_of("pig", t, -1) for t in ("pig_move0", "pig_move1", "")]
+    flat = detector._rf_lists
+    rng = np.random.default_rng(17)
+    only = native.lib().gm_ahead(1, -1)
+    try:
+        for step in range(3):
+            frame_, box = scene(("pig_move0", "pig_move1")[step % 2], 600 + step, 300)
+            jobs = jobs_of(frame_, box, rng, 10, lambda i: lists[i % 3])
+            a = cpu.run(frame_, jobs, flat, 0.6, 0.9, False, 0.95)
+            if step == 0 and fault == 5:
+                rf._lib.rf_gpu_fault(rf.ctx, 5)
+            assert rf.ahead(frame_, ahead_of(jobs, frame_, 4), flat, 3000 + step) == (step == 0)  # (then off)
+            if step == 0:
+                time.sleep(0.05)  # (on the GPU and done by now: only the fault keeps its answers from being taken)
+                if fault == 4:
+                    rf._lib.rf_gpu_fault(rf.ctx, 4)
+            outs = rf.start(frame_, jobs, flat, 0.6, 0.9, False, 0.95, ahead=3000 + step)
+            try:
+                while rf.next() >= 0:
+                    pass
+            finally:
+                rf.end()
+            assert all(bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(outs)[64 * i:64 * i + OUT_FIELDS]
+                       for i in range(len(jobs))), step
+        st, stats = rf.gpu_state()
+        assert st == "off" and stats["why"] == why
+        assert stats["ahead_in"] == 0 and stats["pairs"] == 0 and stats["ahead_sent"] == (fault == 4)
+    finally:
+        native.lib().gm_ahead(only, -1)
+        rf._lib.rf_gpu_fault(rf.ctx, 0)
+        rf.close()
+        cpu.close()
 
 
 def test_the_switchs_mode(tmp_path):

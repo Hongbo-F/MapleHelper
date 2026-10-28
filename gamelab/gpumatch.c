@@ -28,9 +28,10 @@
  * DLL as before. Measured where the service runs (an RTX 3080, which idles at P8 between the frame loop's calls): off
  * by default (native.GPU). As first built a crowd's frame of matches took it 5 ms there against 2.1 on the C's 4
  * threads, and the step waited for them (D:/MapleHelper-scratch/gpu; README, The re-finds' matches on the GPU); twice
- * as fast since, its device at the lowest priority and a frame's matches sent ahead of its look (rf_ahead, below), it
- * takes about 0.1 cores off the frame loop with the step no longer, but not everything no worse yet (gsmooth/hide;
- * README, The re-finds' GPU, twice as fast). */
+ * as fast since, its device at the lowest priority and a frame's matches sent ahead of its look (rf_ahead, below: the
+ * keys alone coming back, no Map on the step's thread). What that takes off the frame loop, and what it costs the
+ * step, the looks and a game's frames on the same GPU: README, The re-finds' GPU, twice as fast (gsmooth/hide,
+ * gsmooth/review, gsmooth/finish). */
 
 #if defined(_WIN32) && !defined(GM_NO_D3D) && defined(__has_include)
 #if __has_include(<d3d11_4.h>) && __has_include(<dxgi1_2.h>) && __has_include(<d3dcompiler.h>)
@@ -80,7 +81,7 @@ enum { GM_STARTING = 0, GM_READY = 1, GM_OFF = 2 };
 typedef struct { unsigned th, tw, nruns, run_off, px_off, n, st0, st1, st2; float af; unsigned u0, u1; } GmPic;
 typedef struct { unsigned ww, wh, raw_off, px_off, pre_off, rowa, u1, u2; } GmWinGpu;
 typedef struct { unsigned win, pic, rw, rh, nx0, ny0, nx1, ny1, place_off, u0, u1, u2; } GmTaskGpu;
-typedef struct { unsigned ntask, nwin, cn, kcand; float band; unsigned u[3]; } GmFrame;
+typedef struct { unsigned ntask, nwin, cn, kcand; float band; unsigned ahead, u[2]; } GmFrame;
 
 typedef struct { const unsigned char *at; long long row; int ww, wh; } GmWin;  /* a window's pixels, CPU side */
 
@@ -88,7 +89,7 @@ typedef struct { const unsigned char *at; long long row; int ww, wh; } GmWin;  /
 enum { GS_CALLS, GS_GPU, GS_LATE, GS_BUSY, GS_FULL, GS_PAIRS, GS_CPU_PAIRS, GS_WAIT_US, GS_WAIT_MAX_US, GS_TASKS,
        GS_PLACES, GS_WHY, GS_GPU_US, GS_GPU_MAX_US, GS_MANY, GS_NONE, GS_PASS_US, GS_MEMO = GS_PASS_US + 4, GS_WOKE,
        GS_PRIO, GS_AHEAD, GS_AHEAD_SENT, GS_AHEAD_IN, GS_AHEAD_LATE, GS_AHEAD_JOBS, GS_AHEAD_COVERED,
-       GS_AHEAD_WAIT_US, GS_N };
+       GS_AHEAD_WAIT_US, GS_AHEAD_CANDS, GS_N };
 
 typedef struct GmCtx {
     volatile LONG state;
@@ -119,9 +120,10 @@ typedef struct GmCtx {
     ID3D11Query *q_disjoint, *q_t[5];  /* the GPU's own time of a call's passes: before prep, after each, the copies */
     ID3D11Buffer *pics, *runs, *tpx, *raw, *wins, *tasks, *groups, *frame;
     ID3D11Buffer *pxf, *pre, *sums, *sc, *rec, *cand, *s_rec, *s_cand;
-    ID3D11Buffer *s_sums, *s_sc;   /* (the places' sums and keys of a call sent ahead, copied back whole) */
+    ID3D11Buffer *keys, *s_keys;   /* a frame sent ahead's: each place's key alone, and its copy back (4 bytes a
+                                    * place, not the 24 of its sums and key: rf_ahead) */
     ID3D11ShaderResourceView *srv[9];   /* (7 and 8: pxf and pre read in match, after prep wrote them) */
-    ID3D11UnorderedAccessView *uav[6];
+    ID3D11UnorderedAccessView *uav[7];  /* (6: keys) */
 #endif
     /* the call's */
     GmWin win[GM_MAX_WINS];
@@ -140,7 +142,11 @@ typedef struct GmCtx {
     struct { long long id, key; int w[4]; int at, n; } ahead_job[RF_MAX_JOBS];
     UINT64 ahead_fv;
     double ahead_sent;
-    const unsigned *got_sums, *got_sc;
+    const unsigned *got_keys;             /* (s_keys mapped: the call's) */
+    unsigned char *host;                  /* a frame sent ahead's windows' bytes, laid out as for the upload buffer:
+                                           * copied on the step's thread (the frame is the caller's), uploaded on the
+                                           * callback (gm_put), so the step's thread makes no Direct3D call */
+    size_t host_n;
     int job_ahead[RF_MAX_JOBS];           /* rf's: each job's ahead job (covering its full window), or -1 */
     double rest_until;                    /* (gm_now_us) the calls the CPU's till then: one came back late */
     unsigned last_rec[4 * GM_MAX_TASKS];  /* (the tests': the last call's records) */
@@ -228,6 +234,54 @@ static float gm_score(const Masked *p, unsigned dot, const unsigned *s1, unsigne
     return den > 0 ? (float)((double)N / sqrt(den)) : -1.0f;
 }
 
+/* The float32 score of the place whose window pixels start at `at` (rows `row` bytes apart; the picture's top-left
+ * there), its sums worked out here over the picture's mask runs (STI, S1_c, S2: the same integers as the GPU's and as
+ * the CPU path's prefix sums give), then as gm_score. For a frame sent ahead, whose places' keys alone come back
+ * (gm_ahead_best): a few candidates a pair, a picture's mask pixels each. */
+static float gm_score_here(const Masked *p, const unsigned char *at, long long row)
+{
+    const int *runs = masked_runs(p);
+    const short *T = masked_rows(p);
+    int cn = p->cn;
+    long long dot = 0, s2 = 0, s1[3] = {0, 0, 0};
+    for (int q = 0; q < p->nruns; q++) {  /* (a run at most 128 px: its sums each under 2^32) */
+        int ry = runs[3 * q], a = runs[3 * q + 1], e = runs[3 * q + 2];
+        const unsigned char *v = at + (long long)ry * row + (long long)a * cn;
+        const short *tp = T + (long long)ry * p->tpad + (long long)a * cn;
+        unsigned d = 0, q2 = 0, u0 = 0, u1 = 0, u2 = 0;
+        int k = (e - a) * cn;
+        if (cn == 3) {
+            for (int i = 0; i < k; i += 3) {
+                unsigned v0 = v[i], v1 = v[i + 1], v2 = v[i + 2];
+                d += (unsigned)tp[i] * v0 + (unsigned)tp[i + 1] * v1 + (unsigned)tp[i + 2] * v2;
+                u0 += v0;
+                u1 += v1;
+                u2 += v2;
+                q2 += v0 * v0 + v1 * v1 + v2 * v2;
+            }
+        } else {
+            for (int i = 0; i < k; i++) {
+                unsigned v0 = v[i];
+                d += (unsigned)tp[i] * v0;
+                u0 += v0;
+                q2 += v0 * v0;
+            }
+        }
+        dot += d;
+        s2 += q2;
+        s1[0] += u0;
+        s1[1] += u1;
+        s1[2] += u2;
+    }
+    long long N = p->n * dot, B = p->n * s2;
+    for (int c = 0; c < cn; c++) {
+        N -= p->ST[c] * s1[c];
+        B -= s1[c] * s1[c];
+    }
+    double den = (double)p->A * (double)B;
+    return den > 0 ? (float)((double)N / sqrt(den)) : -1.0f;
+}
+
 /* Whether the GPU takes picture p: up to 128 x 128 (its sums under 2^32, its runs' ends in a byte), not flat. */
 static int gm_takes(const Masked *p) { return p->th <= 128 && p->tw <= 128 && p->A > 0 && p->cn <= 3; }
 
@@ -253,6 +307,15 @@ static void gm_count(GmCtx *g, int k)
     InterlockedIncrement64((volatile LONG64 *)&g->stats[k]);
 #else
     g->stats[k]++;
+#endif
+}
+
+static void gm_add(GmCtx *g, int k, long long v)  /* (gm_count's, v more) */
+{
+#ifdef _WIN32
+    InterlockedExchangeAdd64((volatile LONG64 *)&g->stats[k], v);
+#else
+    g->stats[k] += v;
 #endif
 }
 
@@ -329,11 +392,11 @@ static void gm_free_device(GmCtx *g)
 {
     for (int i = 0; i < 9; i++)
         GM_RELEASE(g->srv[i]);
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 7; i++)
         GM_RELEASE(g->uav[i]);
     ID3D11Buffer **bs[] = {&g->pics, &g->runs, &g->tpx, &g->raw, &g->wins, &g->tasks, &g->groups, &g->frame, &g->pxf,
-                           &g->pre, &g->sums, &g->sc, &g->rec, &g->cand, &g->s_rec, &g->s_cand, &g->s_sums,
-                           &g->s_sc};
+                           &g->pre, &g->sums, &g->sc, &g->rec, &g->cand, &g->s_rec, &g->s_cand, &g->keys,
+                           &g->s_keys};
     for (size_t i = 0; i < sizeof(bs) / sizeof(bs[0]); i++)
         GM_RELEASE(*bs[i]);
     for (int i = 0; i < 3; i++)
@@ -522,6 +585,7 @@ static int gm_make(GmCtx *g)
     g->sums = gm_structured(g, GM_MAX_PLACES, 16, D3D11_USAGE_DEFAULT, rw, 0, 0, &g->uav[2]);
     g->sc = gm_structured(g, GM_MAX_PLACES, 8, D3D11_USAGE_DEFAULT, rw, 0, 0, &g->uav[3]);
     g->cand = gm_structured(g, (size_t)GM_MAX_TASKS * 2 * GM_CAND * 6, 4, D3D11_USAGE_DEFAULT, rw, 0, 0, &g->uav[5]);
+    g->keys = gm_structured(g, GM_MAX_PLACES, 4, D3D11_USAGE_DEFAULT, rw, 0, 0, &g->uav[6]);
     g->rec = gm_buffer(g, (size_t)GM_MAX_TASKS * 16, 0, rw, D3D11_USAGE_DEFAULT, 0,
                        D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS, 0);
     if (g->rec) {
@@ -539,15 +603,14 @@ static int gm_make(GmCtx *g)
     for (int i = 0; i < 9; i++)
         if (!g->srv[i])
             return gm_off(g, 5);
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 7; i++)
         if (!g->uav[i])
             return gm_off(g, 5);
-    g->s_sums = gm_buffer(g, (size_t)GM_MAX_PLACES * 16, 0, 0, D3D11_USAGE_STAGING, D3D11_CPU_ACCESS_READ, 0, 0);
-    g->s_sc = gm_buffer(g, (size_t)GM_MAX_PLACES * 8, 0, 0, D3D11_USAGE_STAGING, D3D11_CPU_ACCESS_READ, 0, 0);
-    if (!g->frame || !g->s_rec || !g->s_cand || !g->s_sums || !g->s_sc)
+    g->s_keys = gm_buffer(g, (size_t)GM_MAX_PLACES * 4, 0, 0, D3D11_USAGE_STAGING, D3D11_CPU_ACCESS_READ, 0, 0);
+    if (!g->frame || !g->s_rec || !g->s_cand || !g->s_keys)
         return gm_off(g, 5);
     ID3D11DeviceContext_CSSetShaderResources(g->ctx, 0, 7, g->srv);
-    ID3D11DeviceContext_CSSetUnorderedAccessViews(g->ctx, 0, 6, g->uav, 0);
+    ID3D11DeviceContext_CSSetUnorderedAccessViews(g->ctx, 0, 7, g->uav, 0);
     ID3D11DeviceContext_CSSetConstantBuffers(g->ctx, 0, 1, &g->frame);
     InterlockedExchange(&g->state, GM_READY);
     return 0;
@@ -565,10 +628,8 @@ static void gm_free(GmCtx *g)
         ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_rec, 0);
         ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_cand, 0);
     }
-    if (g->ahead_state == 3 && g->ctx) {
-        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_sums, 0);
-        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_sc, 0);
-    }
+    if (g->ahead_state == 3 && g->ctx)
+        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_keys, 0);
     gm_free_device(g);
     if (g->done)
         CloseHandle(g->done);
@@ -583,6 +644,7 @@ static void gm_free(GmCtx *g)
 #endif
     gm_unpack(g);
     free(g->takes);
+    free(g->host);
     free(g);
 }
 
@@ -629,6 +691,7 @@ static GmCtx *gm_open(const Masked **tpls, int n, int fault)
     g->tick_us = 1e6 / (double)f.QuadPart;
 #endif
 #ifdef GM_D3D
+    g->host = (unsigned char *)malloc(GM_MAX_RAW);  /* (without it nothing is sent ahead: rf_ahead's -1) */
     gm_pack(g);  /* (without memory nothing packed: the starter turns it off, why 5) */
     g->refs = 2;
     g->starter = CreateThread(0, 0, gm_starter, g, 0, 0);
@@ -719,15 +782,13 @@ static int gm_send(GmCtx *g, int ahead)
     return gm_upload(g) == 0 ? gm_submit(g, ahead) : -1;
 }
 
-/* gm_send's first half, on the caller's thread (the windows' bytes are the caller's): the groups, and the windows'
- * bytes into the upload buffer. 0, or -1 (nothing sent). */
-static int gm_upload(GmCtx *g)
+/* The call's thread groups (each task's thread slots: ceil(rw / GM_RUN) a row): 0, or -1 past the limits. */
+static int gm_groups(GmCtx *g)
 {
-#ifdef GM_D3D
     if (g->ntask == 0)
         return -1;
     g->ngroup = 0;
-    for (int k = 0; k < g->ntask; k++) {  /* a task's thread slots: ceil(rw / GM_RUN) a row */
+    for (int k = 0; k < g->ntask; k++) {
         unsigned slots = (g->task[k].rw + GM_RUN - 1) / GM_RUN * g->task[k].rh;
         for (unsigned first = 0; first < slots; first += GM_GROUP) {
             if (g->ngroup >= GM_MAX_GROUPS)
@@ -737,16 +798,18 @@ static int gm_upload(GmCtx *g)
             g->ngroup++;
         }
     }
-    ID3D11DeviceContext *x = g->ctx;
-    D3D11_MAPPED_SUBRESOURCE m;
-    if (g->fault == 5 || FAILED(ID3D11DeviceContext_Map(x, (ID3D11Resource *)g->raw, 0, D3D11_MAP_WRITE_DISCARD, 0,
-                                                        &m)))  /* (5: the tests') */
-        return gm_off(g, 8);
+    return 0;
+}
+
+/* The windows' bytes into `to`, as the upload buffer has them (each window's rows side by side, a row at a word: prep's
+ * loads), their places in it into the windows' table; the bytes laid out. */
+static size_t gm_lay(GmCtx *g, unsigned char *to)
+{
     GmWinGpu *ws = g->wgpu;
     unsigned raw = 0, px = 0, pre = 0;
-    for (int i = 0; i < g->nwin; i++) {  /* each window's rows, side by side */
+    for (int i = 0; i < g->nwin; i++) {
         const GmWin *w = g->win + i;
-        size_t rowb = (size_t)w->ww * g->cn, rowa = (rowb + 3) / 4 * 4;  /* (each row at a word: prep's loads) */
+        size_t rowb = (size_t)w->ww * g->cn, rowa = (rowb + 3) / 4 * 4;
         ws[i].ww = (unsigned)w->ww;
         ws[i].wh = (unsigned)w->wh;
         ws[i].raw_off = raw;
@@ -754,12 +817,45 @@ static int gm_upload(GmCtx *g)
         ws[i].pre_off = pre;
         ws[i].rowa = (unsigned)rowa;
         for (int y = 0; y < w->wh; y++)
-            memcpy((unsigned char *)m.pData + raw + rowa * y, w->at + w->row * y, rowb);
+            memcpy(to + raw + rowa * y, w->at + w->row * y, rowb);
         raw += (unsigned)(rowa * w->wh);
         px += (unsigned)(gm_row(w->ww) * w->wh);
         pre += (unsigned)(gm_row(w->ww) * w->wh);
     }
-    ID3D11DeviceContext_Unmap(x, (ID3D11Resource *)g->raw, 0);
+    return raw;
+}
+
+/* gm_send's first half, on the caller's thread (the windows' bytes are the caller's): the groups, and the windows'
+ * bytes into the upload buffer. 0, or -1 (nothing sent). */
+static int gm_upload(GmCtx *g)
+{
+#ifdef GM_D3D
+    if (gm_groups(g) != 0)
+        return -1;
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (g->fault == 5 || FAILED(ID3D11DeviceContext_Map(g->ctx, (ID3D11Resource *)g->raw, 0, D3D11_MAP_WRITE_DISCARD,
+                                                        0, &m)))  /* (5: the tests') */
+        return gm_off(g, 8);
+    gm_lay(g, (unsigned char *)m.pData);
+    ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->raw, 0);
+    return 0;
+#else
+    (void)g;
+    return -1;
+#endif
+}
+
+/* A frame sent ahead's windows' bytes (laid out in `host` on the step's thread) into the upload buffer: on rf_ahead's
+ * callback, before gm_submit. 0, or -1 (nothing sent). */
+static int gm_put(GmCtx *g)
+{
+#ifdef GM_D3D
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (g->fault == 5 || FAILED(ID3D11DeviceContext_Map(g->ctx, (ID3D11Resource *)g->raw, 0, D3D11_MAP_WRITE_DISCARD,
+                                                        0, &m)))  /* (5: the tests') */
+        return gm_off(g, 8);
+    memcpy(m.pData, g->host, g->host_n);
+    ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->raw, 0);
     return 0;
 #else
     (void)g;
@@ -786,6 +882,7 @@ static int gm_submit(GmCtx *g, int ahead)
     fr.cn = (unsigned)g->cn;
     fr.kcand = GM_CAND;
     fr.band = 2 * GM_EPS;
+    fr.ahead = (unsigned)(ahead != 0);
     up[3].src = &fr;
     for (int i = 0; i < 4; i++) {
         if (FAILED(ID3D11DeviceContext_Map(x, (ID3D11Resource *)up[i].b, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
@@ -820,13 +917,10 @@ static int gm_submit(GmCtx *g, int ahead)
     }
     if (timed)
         ID3D11DeviceContext_End(x, (ID3D11Asynchronous *)g->q_t[3]);
-    if (ahead) {
-        D3D11_BOX box = {0, 0, 0, (UINT)(16 * g->nplace), 1, 1};
-        ID3D11DeviceContext_CopySubresourceRegion(x, (ID3D11Resource *)g->s_sums, 0, 0, 0, 0,
-                                                  (ID3D11Resource *)g->sums, 0, &box);
-        box.right = (UINT)(8 * g->nplace);
-        ID3D11DeviceContext_CopySubresourceRegion(x, (ID3D11Resource *)g->s_sc, 0, 0, 0, 0, (ID3D11Resource *)g->sc,
-                                                  0, &box);
+    if (ahead) {  /* (the keys alone: 4 bytes a place, where its sums and key were 24, 2.1-2.3 MB a crowd's frame) */
+        D3D11_BOX box = {0, 0, 0, (UINT)(4 * g->nplace), 1, 1};
+        ID3D11DeviceContext_CopySubresourceRegion(x, (ID3D11Resource *)g->s_keys, 0, 0, 0, 0,
+                                                  (ID3D11Resource *)g->keys, 0, &box);
     } else {
         D3D11_BOX box = {0, 0, 0, (UINT)(16 * g->ntask), 1, 1};
         ID3D11DeviceContext_CopySubresourceRegion(x, (ID3D11Resource *)g->s_rec, 0, 0, 0, 0, (ID3D11Resource *)g->rec,
@@ -1200,7 +1294,7 @@ static void CALLBACK gm_submitter(PTP_CALLBACK_INSTANCE inst, void *arg)
     (void)inst;
     GmCtx *g = (GmCtx *)arg;
     if (!g->closing && g->state == GM_READY)
-        gm_submitted(g, gm_submit(g, 1));
+        gm_submitted(g, gm_put(g) == 0 ? gm_submit(g, 1) : -1);
     else
         InterlockedExchange(&g->ahead_state, 0);
     if (InterlockedDecrement(&g->refs) == 0)  /* (closed meanwhile: it's this thread's to let go) */
@@ -1210,9 +1304,10 @@ static void CALLBACK gm_submitter(PTP_CALLBACK_INSTANCE inst, void *arg)
 
 /* The frame's re-finds sent ahead, the same arguments as rf_start's but for `token` (the caller's number for the
  * frame, given again to rf_ahead_use before its rf_start): each job's full window (`wfull`: where the step should look,
- * padded; no near window) with every picture of its lists that fits it and the GPU takes, its places' sums and keys to
- * come back whole. 0: sent; -1: not (no GPU in use, a call running, the GPU still on the last one, past its limits:
- * the frame's call then the CPU's). Never waits. */
+ * padded; no near window) with every picture of its lists that fits it and the GPU takes, its places' keys to come
+ * back whole. On the caller's thread the windows' bytes copied (`host`); their upload and the submission on a
+ * thread-pool callback. 0: sent; -1: not (no GPU in use, a call running, the GPU still on the last one, past its
+ * limits: the frame's call then the CPU's). Never waits. */
 EXPORT int rf_ahead(void *ctx, const unsigned char *frame, int fh, int fw, long long frow, int cn, const RfJob *jobs,
                     int njobs, const int *lists, long long token)
 {
@@ -1263,15 +1358,18 @@ EXPORT int rf_ahead(void *ctx, const unsigned char *frame, int fh, int fw, long 
             g->ahead_job[a].n = g->ntask - at;
         }
     }
-    if (g->ntask == 0 || gm_upload(g) != 0)
+    if (!g->host || gm_groups(g) != 0)
         return -1;
+    g->host_n = gm_lay(g, g->host);  /* (the frame's bytes copied here, the callback may run once the caller's frame
+                                      * is gone: so no Map on the step's thread, where rf_ahead with the upload's Map
+                                      * took 1.8-10.5 ms now and then: gsmooth/review/fallback, gsmooth/finish/fb) */
     g->ahead_token = token;
 #ifdef GM_D3D
     InterlockedExchange(&g->ahead_state, 4);
     InterlockedIncrement(&g->refs);  /* (the callback's: it lets the context go if it's the last) */
     if (!TrySubmitThreadpoolCallback(gm_submitter, g, 0)) {
         InterlockedDecrement(&g->refs);
-        gm_submitted(g, gm_submit(g, 1));
+        gm_submitted(g, gm_put(g) == 0 ? gm_submit(g, 1) : -1);
     }
     return 0;
 #else
@@ -1288,28 +1386,33 @@ EXPORT void rf_ahead_use(void *ctx, long long token)
 }
 
 /* The answers sent ahead mapped, if the GPU is done with them (the first of the call's threads to see it maps them, the
- * others take the CPU's way meanwhile): whether they're in. */
+ * others take the CPU's way meanwhile): whether they're in. A device removed (a driver reset) while they were on it:
+ * its fence reads UINT64_MAX at once, as reached; the thread that wins the mapping sees it and turns the GPU off
+ * (why 7, as gm_wait does), the call's pairs the CPU's. */
 static int gm_ahead_take(GmCtx *g)
 {
     if (g->ahead_state == 3)
         return 1;
 #ifdef GM_D3D
-    if (g->ahead_state != 1 || ID3D11Fence_GetCompletedValue(g->fence) < g->ahead_fv)
+    if (g->ahead_state != 1)
+        return 0;
+    UINT64 done = g->fault == 4 ? (UINT64)-1 : ID3D11Fence_GetCompletedValue(g->fence);  /* (4: the tests', removed
+                                                                                         * while it was on the GPU) */
+    if (done < g->ahead_fv)
         return 0;
     if (InterlockedCompareExchange(&g->ahead_state, 2, 1) != 1)  /* (another thread maps them) */
         return g->ahead_state == 3;
-    D3D11_MAPPED_SUBRESOURCE a, s;  /* (the context is the call's alone: no other thread on it meanwhile) */
-    if (FAILED(ID3D11DeviceContext_Map(g->ctx, (ID3D11Resource *)g->s_sums, 0, D3D11_MAP_READ, 0, &a))) {
+    if (done == (UINT64)-1 || ID3D11Device_GetDeviceRemovedReason(g->dev) != S_OK) {
+        gm_off(g, 7);
         InterlockedExchange(&g->ahead_state, 0);
         return 0;
     }
-    if (FAILED(ID3D11DeviceContext_Map(g->ctx, (ID3D11Resource *)g->s_sc, 0, D3D11_MAP_READ, 0, &s))) {
-        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_sums, 0);
+    D3D11_MAPPED_SUBRESOURCE a;  /* (the context is the call's alone: no other thread on it meanwhile) */
+    if (FAILED(ID3D11DeviceContext_Map(g->ctx, (ID3D11Resource *)g->s_keys, 0, D3D11_MAP_READ, 0, &a))) {
         InterlockedExchange(&g->ahead_state, 0);
         return 0;
     }
-    g->got_sums = (const unsigned *)a.pData;
-    g->got_sc = (const unsigned *)s.pData;
+    g->got_keys = (const unsigned *)a.pData;
     gm_count(g, GS_AHEAD_IN);
     gm_count(g, GS_GPU);
     InterlockedExchange(&g->ahead_state, 3);  /* (a full barrier: the pointers are seen before the state) */
@@ -1365,8 +1468,10 @@ static int gm_rf_ahead_in(GmCtx *g, const RfBatch *b)
 }
 
 /* Picture `pic`'s best over job i's window `side` (0 near, 1 full; x, y in that window) as rf_best gives it, from the
- * places' sums sent ahead: 1, or 0 where they haven't it (the window not inside the one sent, the picture not sent,
- * more candidates than GM_CAND: the caller matches it itself). The pool's threads' too (read only). */
+ * places' keys sent ahead: the candidates (within 2 GM_EPS of the highest s~ of the window asked), each scored from its
+ * sums worked out here from the call's frame (gm_score_here: the same integers as the GPU's); 1, or 0 where they
+ * haven't it (the window not inside the one sent, the picture not sent, more candidates than GM_CAND: the caller
+ * matches it itself). The pool's threads' too (read only). */
 static int gm_ahead_best(GmCtx *g, const RfBatch *b, int i, int side, int pic, float *score, int *x, int *y)
 {
     int k = g->job_ahead[i];
@@ -1391,26 +1496,26 @@ static int gm_ahead_best(GmCtx *g, const RfBatch *b, int i, int side, int pic, f
     }
     unsigned top = 0;  /* the highest s~ of the window's places (their keys: s~ ordered as uints) */
     for (int yy = 0; yy < rh; yy++) {
-        const unsigned *row = g->got_sc + 2 * ((size_t)t->place_off + (size_t)(oy + yy) * t->rw + ox);
+        const unsigned *row = g->got_keys + (size_t)t->place_off + (size_t)(oy + yy) * t->rw + ox;
         for (int xx = 0; xx < rw; xx++)
-            if (row[2 * xx + 1] > top)
-                top = row[2 * xx + 1];
+            if (row[xx] > top)
+                top = row[xx];
     }
     unsigned lim = gm_key_of(gm_of_key(top) - 2 * GM_EPS);  /* (s~ at least the highest less 2 GM_EPS, as keys) */
     float best = 0.0f;
     int n = 0, bx = 0, by = 0;
+    const unsigned char *at0 = b->frame + (long long)w[1] * b->frow + (long long)w[0] * b->cn;
     for (int yy = 0; yy < rh; yy++) {  /* the candidates, row by row: the first highest score */
-        size_t at = (size_t)t->place_off + (size_t)(oy + yy) * t->rw + ox;
-        for (int xx = 0; xx < rw; xx++, at++) {
-            if (g->got_sc[2 * at + 1] < lim)
+        const unsigned *row = g->got_keys + (size_t)t->place_off + (size_t)(oy + yy) * t->rw + ox;
+        for (int xx = 0; xx < rw; xx++) {
+            if (row[xx] < lim)
                 continue;
             if (++n > GM_CAND) {
                 gm_count(g, GS_CPU_PAIRS);
                 gm_count(g, GS_MANY);
                 return 0;
             }
-            const unsigned *u = g->got_sums + 4 * at;
-            float s = gm_score(p, u[0], u + 1, g->got_sc[2 * at]);
+            float s = gm_score_here(p, at0 + (long long)yy * b->frow + (long long)xx * b->cn, b->frow);
             if (n == 1 || s > best) {
                 best = s;
                 bx = xx;
@@ -1422,6 +1527,7 @@ static int gm_ahead_best(GmCtx *g, const RfBatch *b, int i, int side, int pic, f
     *x = bx;
     *y = by;
     gm_count(g, GS_PAIRS);
+    gm_add(g, GS_AHEAD_CANDS, n);
     return 1;
 }
 
@@ -1430,15 +1536,14 @@ static void gm_ahead_done(GmCtx *g)
 {
 #ifdef GM_D3D
     if (g->ahead_state == 3) {
-        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_sums, 0);
-        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_sc, 0);
+        ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)g->s_keys, 0);
     } else {
         g->stats[GS_AHEAD_LATE]++;
     }
     InterlockedCompareExchange(&g->ahead_state, 0, 3);  /* (sent and never taken: 1, none; still being submitted: */
     InterlockedCompareExchange(&g->ahead_state, 0, 1);  /*  4, the callback's, which leaves it 1 or 0) */
 #endif
-    g->got_sums = g->got_sc = 0;
+    g->got_keys = 0;
 }
 
 /* --- what rf_* and the tests see of it */
@@ -1448,7 +1553,8 @@ static void gm_ahead_done(GmCtx *g)
  * or lost: stats[GS_WHY] says why); `stats` (its first n of GS_N long longs, or NULL): calls asked, sent and
  * answered by it, late (past GM_WAIT_US: the CPU's), busy (one before still on it), past its limits, pairs answered,
  * pairs the CPU matched, the waits' total and longest us, tasks and places sent, why it's off, the GPU's own time (all,
- * longest, each pass), windows left to the memo (not sent), calls answered whose pairs left to the CPU woke the pool.
+ * longest, each pass), windows left to the memo (not sent), calls answered whose pairs left to the CPU woke the pool,
+ * ...; sent ahead: the candidates whose sums the CPU worked out (gm_ahead_best).
  * (n: a caller's array of an older GS_N is never written past.) */
 EXPORT int rf_gpu(void *ctx, long long *stats, int n)
 {
