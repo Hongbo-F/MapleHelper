@@ -14,59 +14,86 @@ keyboard config (\\) to check the key configuration and see if attack button is 
    that should show what it did: at a target (its kind's HP known, not dying), from the ground or a jump (JUMPS_JUDGED:
    as designed a jump's was left out), not on a rope or at its top (the game refuses those), no touch on her
    from KNOCK_S before its key to its look, the target's bar believable before it (between empty and full: hurt, not
-   dying) and the target in her regular attack's reach (`regular_reach`: the star's, REACH_IN inside reach.STAR_RANGE;
-   a wand's box) at its key's look and at the judging one. It took **no effect** when that monster is seen again alive
-   with a believable bar as high as before (BAR_STEP/2 under it at the most), no kill of hers placed on it and no EXP
-   gain naming its kind since SHOWS_S after the key; an **effect** when its bar is lower, a kill of hers is placed on
-   it or a gain names its kind (a party share names none: it isn't one). An effect a Lucky Seven cast at it keyed after
-   the press could have made (keyed SHOWS_S before the effect or earlier) is the cast's: the press is passed over, as
-   every press not judged is (neither counted nor ending a run). DOUBT_PRESSES no-effects in a row are the doubt.
-2. **Her stars** (the thief's: her profile's ammo, "throwing stars"; a magician's regular attack is her wand, nothing
+   dying) or none up (unhurt: UNHURT_JUDGED; a monster shows its bar once it's hit; a bar a look missed is the one seen
+   on it BAR_MEMORY_S before) and the target in her regular attack's reach (`regular_reach`: the star's, REACH_IN
+   inside reach.STAR_RANGE, with no other monster nearer that way that her star or claw takes first, the look's or one
+   seen lately and hidden, HIDDEN_S; a wand's box) at its key's look and at the judging one. It took **no effect** when that monster is seen again alive with a believable bar as high as before
+   (BAR_STEP/2 under it at the most), or still with no bar up if it had none, no kill of hers placed on it and no EXP
+   gain naming its kind since SHOWS_S after the key; an **effect** when its bar is lower (or one is up where there was
+   none), a kill of hers is placed on it or a gain names its kind (a party share names none: it isn't one). An effect
+   a Lucky Seven cast at it keyed after the press could have made (keyed SHOWS_S before the effect or earlier) is the
+   cast's: the press is passed over, as every press not judged is (neither counted nor ending a run). DOUBT_PRESSES
+   no-effects in a row are the doubt.
+2. **A place to do it**: no monster within PLACE_CLEAR of her in a look, she stays; else away to a safe place as on
+   the Lie Detector (behavior.retreat.away: her moves alone, 10 s at most), and a look after it: one still near puts the
+   check off (below).
+3. **Her stars** (the thief's: her profile's ammo, "throwing stars"; a magician's regular attack is her wand, nothing
    to run out of): a Lucky Seven cast that took MP since the doubt's first press (behavior.darts.DartWatch.mp_shown_at)
-   says she has them; else, with the MP for a cast and a step, the Lucky Seven key and a monster in reach with none on
-   that side within the claw's reach and CLAW_SLACK (up close the key swipes, no MP whatever her stars), up to
-   STAR_CASTS casts, each judged by her MP bar MP_SHOWS_S after its key: one that takes MP says she has them, STAR_CASTS
-   that take none (her bar over darts.LOW_STEPS; not one after which a look saw her touched within KNOCK_S of its key:
-   a monster on her the key swiped) are out of darts, behavior.darts.OutOfDarts (the stop as it is: her retreat, the
-   page, the recording kept). Without the MP it isn't known; with no monster to cast at it's tried again from the place
-   she checks at (3.), then not known; and the check goes on.
-3. **A place to do it**: no monster within PLACE_CLEAR of her, she stays; else away to a safe place as on the Lie
-   Detector (behavior.retreat.away: her moves alone, 10 s at most).
-4. **The window** (`KeyCheck._window`; perception.keybindings reads it): the mouse moved off where it opens (MOUSE_AT:
-   a pointer over a cell hides it, and over a preset page draws that page as "checked"), a frame (open already: read,
-   no backslash), the backslash tapped, a frame SETTLE_S later, one more AGAIN_S on if it isn't open yet (still not:
-   not read, and no Esc: with nothing open Esc opens the game's MENU, the key bindings have ESC on MENU); its frame
-   saved (lab/shots/keybindings_<time>.png); Esc only with it seen open, a frame CLOSE_S later, Esc once more if it's
-   still seen open, else it's said and paged that it didn't close. Only the backslash, Esc and one mouse move are sent;
-   with the Lie Detector alarm up the player refuses them (the alarm goes on as ever; a window left open then is said
-   and paged: "close it with Esc or CANCEL").
-5. **What then** (`KeyCheck._act`, said in capitals; a telemetry event 'attack_key'):
+   says she has them; else, with the MP for a cast and a step, the Lucky Seven key and a monster in reach with none
+   within the claw's reach and CLAW_SLACK of her either way (up close the key swipes, no MP whatever her stars), her on
+   a platform, not on a rope nor at its top, untouched, up to STAR_CASTS casts within STAR_TEST_MAX_S: one that takes
+   MP (her bar MP_SHOWS_S after its key) or lowers its target's bar says she has them; a touch on her ends the test (not
+   known); STAR_CASTS that took no MP and hurt nothing say her stars **may be out**, which isn't the stop: live her casts
+   take no MP with her stars in her bag 5-9 in a row (behavior.darts: a monster on her unseen, the key swiping it), 7-8
+   in a row with the test's own conditions (the review's count of 2026-10-26), so out of darts stays its own watch's
+   (DartWatch: presses_for, 20 on Tree Dungeon, the test's casts counted in its stretch): the test raises OutOfDarts
+   only if that's due; else, ATTACK found on her key (5.), no more regular attacks this run. Without the MP it isn't
+   known; with no monster to cast at, not known.
+4. **The window** (`KeyCheck._window`; perception.keybindings reads it), from a quiet moment (`unquiet`: on a platform,
+   not on a rope nor at its top, untouched for KNOCK_S, no monster within PLACE_CLEAR, two looks QUIET_LOOK_S apart
+   with her still; one more retreat if a monster's near; none in QUIET_S: put off): a frame first (the client not at
+   1366x768: not opened, nothing sent), the mouse moved off where it opens (MOUSE_AT: a pointer over a cell hides it,
+   and over a preset page draws that page as "checked"), a frame (open already: read, no backslash), the backslash
+   tapped, frames SETTLE_S, AGAIN_S and LATE_S after one another until it's seen open (its whole title, or its name
+   alone with the rest off the frame). Not seen: the frame against the one before the backslash where it opens
+   (CHANGED_SHARE of the px changed by CHANGE_LEVEL: the live window changed 97% there, 2 s of her moving 70% at the
+   most), unchanged it didn't open (no Esc: with nothing open Esc opens the game's MENU, the key bindings have ESC on
+   MENU), else it may be open. Seen: its frame saved (lab/shots/keybindings_<time>.png); Esc, frames CLOSE_S and
+   CLOSE_AGAIN_S later, Esc once more only if both still show it open, and so once more; still open, it may be open.
+   It **may be open** (not seen closed after the backslash, or no frame to tell): the hunt stops (`KeyCheckStop`: her
+   retreat, the page "close it with Esc or CANCEL"; what keys do in the game with it open isn't known). Only the
+   backslash, Esc and one mouse move are sent; with the Lie Detector alarm up the player refuses them (the alarm goes
+   on as ever; a window that may be open then is said and paged).
+5. **What then** (`KeyCheck._act`, said in capitals; a telemetry event 'attack_key'). The window read, her moves'
+   keys first: her jump on a key showing JUMP and her arrows on MOVE LEFT/RIGHT/UP/DOWN, else the hunt stops
+   (KeyCheckStop: they aren't followed to where the window shows them, as her trips' chains take their keys at the
+   navigator's start, control.flow, and the player takes only config.toml's moves for her retreat under the Lie
+   Detector), then:
    - ATTACK on another key the player can press (every key the window binds is one of config.toml's names, and the
      player takes them all): her regular attack is that key for the rest of the run (Hunter.rekey: her Actions' and
-     her attack choice's keys; config.toml unchanged), and whoever is at the PC is paged;
+     her attack choice's keys; config.toml unchanged), and whoever is at the PC is paged; that key her pick-up's too,
+     said (her pick-ups attack then, no loot picked up); her Lucky Seven's or her pet food's (pictures: where they
+     went can't be told), the hunt stops (KeyCheckStop);
    - ATTACK on no key (in the tray, or on none), on a key not to press (Esc, the backslash, maplehelper's hotkeys F1-F4
      and F12: NOT_ATTACK), or the window not read: no more regular attacks this run (Lucky Seven only; her configured
      key may do something else now), paged;
    - ATTACK on her configured key after all: the misses were something else ("misses? out of reach?"): no more
-     regular attacks at the doubt's targets (`RegularWatch.no_regular_at`), the hunt goes on, logged only.
+     regular attacks at the doubt's targets (`RegularWatch.no_regular_at`, every attack mode's: Hunter.hold_at), the
+     hunt goes on, logged only; with her stars maybe out (3.), no more regular attacks this run, paged.
    At most CHECKS_MAX checks a run and none within CHECK_GAP_S of the last: a doubt in that time holds the regular
    attack at its targets only; once CHECKS_MAX have run, the next doubt turns it off for the run (paged).
 
 In the hunt loop (`tour --loop`, `--grind`: Hunt.run) the doubt raises KeyDoubt where her health is asked after
 (Hunter.health_check), and the hunt loop runs the check (Hunter.check_keys) as it stands still for a look that failed
-its checks: its clocks paused over it, the next pass from where she is. Elsewhere (`hunt kill`, `hunt clear`, `nav`, a
-plain `tour`, `probe run`) her regular presses are held (Lucky Seven only) and whoever is at the PC is paged to run
-`gamelab keys --read`.
+its checks: its clocks paused over it, the next pass from where she is. Every look of the check asks the safety stop
+(the HP watch's due), as health_check would. A check **put off** (a monster near after the retreat, or not quiet in
+QUIET_S) holds her regular presses, and health_check raises its doubt again at the first look DEFER_GAP_S or more later
+that `unquiet` passes; after DEFERS_MAX of them, no more regular attacks this run (paged). Elsewhere (`hunt kill`,
+`hunt clear`, `nav`, a plain `tour`, `probe run`) her regular presses are held (Lucky Seven only) and whoever is at the
+PC is paged to run `gamelab keys --read`.
 
 On the live data (gamelab README: The regular attack's key checked; tests/test_keycheck.py replays the runs of
 2026-10-25 to 28 through `RegularWatch`, tests/fixtures/regular_live_2026-10-28.json): at 00:31 the doubt at the look
-of 00:31:19.8, its 5th press keyed at 00:31:18.4, 13 s before her last useless press; with her keys right (the other
-15 runs, 245 minutes, 595 regular presses) never, 60 judged, 5 without effect, 2 in a row at the most."""
+of 00:31:20.9, its 5th press keyed at 00:31:19.3, 12 s before her last useless press (as built 00:31:19.7); with her
+keys right (the other 15 runs, 245 minutes, 595 regular presses) never: 66 judged, 4 without effect, 2 in a row at the
+most (as built 60, 5 and 2)."""
 
 import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+import numpy as np
 
 from maplehelper.engine import LEFT, RIGHT
 
@@ -76,6 +103,7 @@ from ..control import alarm, client
 from ..localization.monsters import TRACK_SLACK, Monster, seen_again
 from ..perception import keybindings
 from ..perception.framecheck import BadLook
+from .safety import HuntStop
 
 DOUBT_PRESSES = 5      # regular presses in a row that took no effect: the doubt (the user's "5 times")
 JUDGE_FROM_S = 0.6     # a press judged at the first look this long after its key (attacks.LANDS_S) ...
@@ -90,26 +118,53 @@ REACH_IN = 50.0        # the target this far inside reach.STAR_RANGE at the key'
 # (each 110-250 regular presses that did nothing, 70-80% of them jump throws at a monster she couldn't finish); the
 # live runs judged with them have 4 more effects and no more presses without one (D:/MapleHelper-scratch/akey/build).
 JUMPS_JUDGED = True
+# Whether a press at a monster with no bar up (unhurt: its bar shows once it's hit) is judged too: a bar up by its look
+# an effect, still none no effect. Left out (as built), with the regular attack alone (`--attack regular`, a profile
+# without Lucky Seven) and its key wrong no monster is ever hurt, so no press was ever judged: the review's simulator
+# runs, 283 and 258 useless presses and no doubt. Live, judged, the runs with her keys right have 10 more presses
+# judged (66 against 56) and none more without effect (4), 2 in a row at the most (D:/MapleHelper-scratch/akey/fix).
+UNHURT_JUDGED = True
+BAR_MEMORY_S = 3.0     # a monster seen with its bar up this recently is hurt still when a look misses its bar (one of
+                       # 00:31:14.7's: the Horny Mushroom at 9% read with no bar, between two reads of it at 9%; taken
+                       # for unhurt, its bar back at 9% was an effect, and the doubt came 2.4 s later, at 00:31:23.3)
+UNHURT_AGAIN_S = 0.3   # an unhurt target's no effect: two looks this far apart with still no bar up (a bar missed once)
+HIDDEN_S = 1.8         # a monster seen this recently that a look didn't find is about still (fight.HIDDEN_FOR: hit, under
+                       # its damage numbers): one nearer a press's target takes its attack (loop_tree_ore_waits)
 WALK_S = 120.0         # units a second a target unseen for a while may have walked (a Horny Mushroom's 100 or so)
 KEPT_S = 8.0           # s her casts, touches, gains and kills are kept for the presses waiting
-STAR_CASTS = 5         # Lucky Seven casts that took no MP: out of darts (her stars' test)
+STAR_CASTS = 5         # Lucky Seven test casts that took no MP and hurt nothing: her stars may be out (not the stop)
 MP_SHOWS_S = 0.55      # a test cast judged by her MP bar this long after its key (attacks.MP_SHOWS_S) ...
-STAR_TEST_S = 1.5      # ... looked at for this long at the most
-STAR_TEST_MAX_S = 8.0  # the test's casts within this long (a cast's way waited for while a monster is up close)
-CLAW_SLACK = 50.0      # a test cast's way has no monster within this past the claw's reach (reach.CLAW_FAR): it walks
+STAR_TEST_S = 1.3      # ... and its target's bar, looked at for this long at the most
+STAR_TEST_MAX_S = 10.0  # the test's casts within this long (a cast's way waited for while a monster is up close)
+CLAW_SLACK = 50.0      # a test cast has no monster within this past the claw's reach (reach.CLAW_FAR) of her, either way
 CHECKS_MAX = 3         # checks a run at the most ...
 CHECK_GAP_S = 300.0    # ... none within this of the last
 SETTLE_S = 0.6         # s after the backslash before the window's frame (her pet's window's: behavior.pet.SETTLE_S) ...
-AGAIN_S = 0.4          # ... and one more this long after, if it isn't open yet
-CLOSE_S = 0.6          # s after Esc before the frame that says it closed
+AGAIN_S = 0.4          # ... one more this long after, if it isn't open yet ...
+LATE_S = 1.0           # ... and one more this long after that (2 s after the backslash: its opening isn't measured live)
+CHANGE_LEVEL = 48      # a px changed (any channel) by more than this ...
+CHANGED_SHARE = 0.85   # ... over this share of where the window opens (OPEN_AT): something opened there (the live
+                       # window 0.97; 2 s apart in the Lie Detector recordings of her hunting, 0.70 at the most)
+CLOSE_S = 0.6          # s after Esc before the frame that says it closed ...
+CLOSE_AGAIN_S = 0.4    # ... and one more this long after before Esc again (a window slow to close: no second Esc)
 MOUSE_AT = (1100, 300)  # client px at 1366x768 the pointer goes to first: the scene right of where it opens
 PLACE_CLEAR = (250.0, 120.0)  # no monster this near (x, y) in a look: she checks where she is (hunter.PET_CLEAR)
+QUIET_LOOK_S = 0.3     # her still over two looks this far apart before the backslash ...
+QUIET_S = 3.0          # ... within this long (from a retreat's end), else the check is put off
+DEFER_GAP_S = 5.0      # a check put off is tried again at a quiet look this long after at the soonest ...
+DEFERS_MAX = 3         # ... this many times, then no more regular attacks this run
 # Keys the regular attack isn't switched to: Esc (maplehelper's abort, and the game's MENU), the backslash (SET KEY: what
 # opens the window), maplehelper's hotkeys (config.toml [hotkeys] and [control]: hidden from the game while it runs)
 NOT_ATTACK = ("esc", "\\", "f1", "f2", "f3", "f4", "f12")
 KEPT_PRESSES = 12      # a doubt's presses kept for its report (the run's last)
-# Her keys besides the regular attack's, for a clash with the key the game has ATTACK on (said and paged)
+# Her keys besides the regular attack's, for a clash with the key the game has ATTACK on
 OTHER_KEYS = ("jump", "lucky_seven", "pick_up", "pet_food", "up", "down", "left", "right", "chair", "sit")
+# Her moves' keys and the function the window names on each (perception.keybindings.FUNCTIONS): one not showing it, the
+# hunt stops (not followed: her trips' chains take their keys at the navigator's start, control.flow, and the player
+# takes only config.toml's moves for her retreat under the Lie Detector, control.player)
+MOVES = {"jump": "JUMP", "left": "MOVE LEFT", "right": "MOVE RIGHT", "up": "MOVE UP", "down": "MOVE DOWN"}
+UNUSED = ("chair", "sit")  # (no sitting since 2026-10-26: a clash with them is said, nothing else)
+EXIT = 6               # the command's exit code after KeyCheckStop (the safety stop's 4, out of darts' 5)
 
 
 def _believable(bar: float | None) -> bool:
@@ -119,7 +174,13 @@ def _believable(bar: float | None) -> bool:
 def regular_reach(s, m: Monster) -> bool:
     """Whether her regular attack reaches monster `m` from where look `s` has her: her profile's (character.active):
     a wand's box (Geometry "melee": its near to far ahead, her body's half aside, its down to up), else the star's
-    (reach.can_hit, REACH_IN inside reach.STAR_RANGE: walls and floors stop it)."""
+    (reach.can_hit, REACH_IN inside reach.STAR_RANGE: walls and floors stop it). Monsters above her as far as the
+    search reaches them too: live 8 of 8 presses at one 67-89 above her and 131-269 ahead took effect (the simulator's
+    world took a star at none 90 above and 232 ahead, the review's doubt there with her keys right: its own geometry).
+    Not with another monster of the look nearer that way that her star or her claw reaches (`_in_front`: the attack
+    takes the first, so this one's bar doesn't move with her keys right; loop_tree_ore_waits doubted so, its stars
+    taking a Horny Mushroom hidden under its damage numbers: Attacks counts those the watch saw lately in the look,
+    RegularWatch.hidden). Live it passes over 6 presses with her keys right, 2 of them without effect."""
     if s is None or s.where is None or s.platform is None:
         return False
     from .. import character
@@ -128,14 +189,64 @@ def regular_reach(s, m: Monster) -> bool:
         b, (_, half) = geo.box, reach.body_of(m.kind)
         ahead, dy = abs(m.x - s.where.x), s.where.y - m.y
         return b.near - half <= ahead <= b.far + half and -b.down <= dy <= b.up
-    return reach.can_hit(s.platform, s.where.x, s.where.y, m, reach=reach.STAR_RANGE - REACH_IN)
+    x, y, p = s.where.x, s.where.y, s.platform
+    far = reach.STAR_RANGE - REACH_IN
+    return reach.can_hit(p, x, y, m, reach=far) and _in_front(s, m, far) is None
+
+
+def _in_front(s, m: Monster, far: float) -> Monster | None:
+    """A monster of look `s` other than `m` on its side of her and nearer, that her star reaches (reach.can_hit) or her
+    claw (reach.claw_chance: up close the key swipes it): the attack takes it first. None if there's none."""
+    x, y, p = s.where.x, s.where.y, s.platform
+    side = 1 if m.x >= x else -1
+    for o in getattr(s, "monsters", ()):
+        if o is m or (o.kind == m.kind and abs(o.x - m.x) < 1.0 and abs(o.y - m.y) < 1.0):
+            continue
+        ahead = (o.x - x) * side
+        if not -reach.body_of(o.kind)[1] < ahead < abs(m.x - x):
+            continue
+        top, half = reach.body_of(o.kind)
+        if reach.claw_chance(ahead, o.y - y, top, half) > 0 or reach.can_hit(p, x, y, o, reach=far):
+            return o
+    return None
+
+
+def near_her(s) -> list[Monster]:
+    """The monsters look `s` has within PLACE_CLEAR of her."""
+    if s is None or s.where is None:
+        return []
+    return [m for m in s.monsters if abs(m.x - s.where.x) < PLACE_CLEAR[0] and abs(m.y - s.where.y) < PLACE_CLEAR[1]]
+
+
+def unquiet(h, s) -> str | None:
+    """Why look `s` isn't a moment for hunter `h` to open the KEY BINDINGS window in (None: it is): not placed, not on a
+    platform (a rope, the air), at a rope's top (out of darts' watch: `at_top`, `roped`), touched within KNOCK_S, or a
+    monster within PLACE_CLEAR of her."""
+    if s is None or s.where is None:
+        return "not placed"
+    if s.platform is None or h.on_rope(s):
+        return "not on a platform"
+    darts = getattr(h, "darts", None)
+    if darts is not None and (darts.roped or darts.at_top):
+        return "at a rope's top"
+    if h.knocked(s):
+        return "touched just now"
+    if near := near_her(s):
+        return f"{', '.join(sorted({m.kind for m in near}))} within {PLACE_CLEAR[0]:.0f} of her"
+    return None
+
+
+def _still(a, b) -> bool:
+    """Whether two looks have her where she was: the same platform, within 4 units either way."""
+    return (a.platform is not None and b.platform is not None and a.platform.id == b.platform.id
+            and abs(a.where.x - b.where.x) <= 4 and abs(a.where.y - b.where.y) <= 4)
 
 
 @dataclass
 class Press:
-    """A regular press being judged: its key's time, its target (followed look to look) and that one's bar before it,
-    and what came of it (`verdict`: "effect", "none" or "passed", and why; `at`: the look it was judged at, or its
-    effect's time; `after`: the target's bar then)."""
+    """A regular press being judged: its key's time, its target (followed look to look) and that one's bar before it
+    (1.0 for one with no bar up: `unhurt`), and what came of it (`verdict`: "effect", "none" or "passed", and why; `at`:
+    the look it was judged at, or its effect's time; `after`: the target's bar then, None with still no bar up)."""
     t: float
     m: Monster
     bar: float
@@ -144,10 +255,16 @@ class Press:
     why: str = ""
     at: float | None = None
     after: float | None = None
+    unhurt: bool = False
+    bare: float | None = None  # an unhurt target's first judging look with still no bar up
 
     @property
     def kind(self) -> str:
         return self.m.kind
+
+    def bar_text(self) -> str:
+        b = self.after if self.after is not None else None if self.unhurt else self.bar
+        return "no bar" if b is None else f"{round(b * 100)}%"
 
 
 def _clock(t: float) -> str:
@@ -179,8 +296,8 @@ class Doubt:
 
     def text(self) -> str:
         kinds = ", ".join(sorted({p.kind for p in self.presses}))
-        bars = "/".join(f"{b}%" for b in sorted({round((p.after if p.after is not None else p.bar) * 100)
-                                                  for p in self.presses}))
+        bars = "/".join(sorted({p.bar_text() for p in self.presses},
+                               key=lambda b: (b == "no bar", float(b[:-1]) if b != "no bar" else 0.0)))
         judged = sorted(p.at - p.t for p in self.presses if p.at is not None)
         each = f", each judged {judged[len(judged) // 2]:.1f} s after its key" if judged else ""
         return (f"THE REGULAR ATTACK TOOK NO EFFECT {len(self.presses)} TIMES IN A ROW ({kinds}, its bar {bars} "
@@ -188,12 +305,35 @@ class Doubt:
 
 
 class KeyDoubt(Exception):
-    """Raised by Hunter.health_check in the hunt loop on a doubt (RegularWatch.due): the hunt loop runs the check
-    (Hunter.check_keys) and goes on. Not a HuntStop: the hunt doesn't end."""
+    """Raised by Hunter.health_check in the hunt loop on a doubt (RegularWatch.due), or a check put off coming due
+    again: the hunt loop runs the check (Hunter.check_keys) and goes on. Not a HuntStop: the hunt doesn't end."""
 
     def __init__(self, doubt: Doubt):
         self.doubt = doubt
         super().__init__(doubt.text())
+
+
+class KeyCheckStop(HuntStop):
+    """What the key check can't put right ends the hunt (raised by KeyCheck.run, in the hunt loop): the KEY BINDINGS
+    window may be open in the game (not seen closed after the backslash: what her keys do with it open isn't known), or
+    the window shows her moves' or her other keys where she can't follow them (her jump or arrows on nothing she can
+    press, the game's ATTACK on her Lucky Seven's or pet food's key). As every HuntStop: her retreat, said in capitals,
+    paged, the command's own exit code. `window`: whether it's for the window."""
+    label = "KEY CHECK"
+    title = "Key check"
+    event = "key_check_stop"
+    exit_code = EXIT
+    ends = "to a safe place (no more throws)"
+    advice = ("Close the KEY BINDINGS window in the game if it's open (Esc or CANCEL), and put her keys back as config.toml "
+              "[keys] has them (or set config.toml) before hunting again.")
+
+    def __init__(self, text: str, window: bool = False, at: float = 0.0):
+        self.window, self.at = window, at
+        super().__init__(text)
+
+    def page(self) -> tuple[str, str]:
+        return (("MapleStory: the key bindings window" if self.window else "MapleStory: her keys"),
+                f"gamelab stopped the hunt: {self}.")
 
 
 @dataclass
@@ -210,6 +350,8 @@ class RegularWatch:
     touches: list[float] = field(default_factory=list)   # the looks that saw her touched, the last KEPT_S
     gains: list[tuple[float, frozenset | None]] = field(default_factory=list)  # her EXP's gains: (frame, kinds)
     kills: list[tuple] = field(default_factory=list)     # her kills placed: (when, kind, platform, x, track)
+    bars: list[tuple] = field(default_factory=list)      # monsters seen with a bar up, BAR_MEMORY_S: (t, monster)
+    recent: list[tuple] = field(default_factory=list)    # every monster seen, HIDDEN_S: (t, monster)
     counts: Counter = field(default_factory=Counter)     # presses by what came of them (and why passed over)
     longest: int = 0                                     # the longest run of no-effects
     held: bool = False                                   # regular presses held (a doubt waiting for its check)
@@ -217,6 +359,9 @@ class RegularWatch:
     no_regular_at: list[Monster] = field(default_factory=list)  # targets it skips (a check found the key right)
     doubts: list[Doubt] = field(default_factory=list)
     checks: list[float] = field(default_factory=list)    # when each check ran
+    deferred: Doubt | None = None                        # a check put off (KeyCheck: not quiet) ...
+    deferred_at: float = 0.0                             # ... when ...
+    defers: int = 0                                      # ... and how many times since the last check
     _due: Doubt | None = None
 
     # --- fed ------------------------------------------------------------------------------------------------------
@@ -226,13 +371,32 @@ class RegularWatch:
         """A regular press keyed at `t` at target `m` (None: nothing seen in its way), with what decides whether it's
         judged: its kind's HP `known`, it not `dying`, from the `ground`, her not `roped` (on a rope or at its top),
         her reach of it at the key's look (`reach_ok`)."""
+        bar = None if m is None else m.bar if m.bar is not None else self._bar_seen(m, t)
+        unhurt = m is not None and bar is None and UNHURT_JUDGED
         why = ("nothing in its way" if m is None else "its HP not known" if not known else "dying" if dying else
                "a jump's" if not ground and not JUMPS_JUDGED else "on a rope" if roped else
-               "no bar to judge by" if not _believable(m.bar) else "out of reach" if not reach_ok else "")
+               "no bar to judge by" if not _believable(bar) and not unhurt else "out of reach" if not reach_ok else "")
         if why:
             self.counts[f"passed: {why}"] += 1
             return
-        self.pending.append(Press(t, m, float(m.bar), t))
+        self.pending.append(Press(t, m, 1.0 if unhurt else float(bar), t, unhurt=unhurt))
+
+    def _bar_seen(self, m: Monster, t: float) -> float | None:
+        """The bar a monster seen with none up had in a look BAR_MEMORY_S or less before `t` (its track, or of its
+        kind on its platform where it can have walked since), or None: unhurt as far as her looks know."""
+        seen = [(bt, o) for bt, o in self.bars if t - bt <= BAR_MEMORY_S and o.kind == m.kind
+                and ((track := getattr(m, "track", None)) is not None and getattr(o, "track", None) == track
+                     or o.platform == m.platform and abs(o.x - m.x) < TRACK_SLACK + WALK_S * (t - bt))]
+        return float(max(seen, key=lambda x: x[0])[1].bar) if seen else None
+
+    def hidden(self, t: float, monsters: list[Monster]) -> list[Monster]:
+        """The monsters looks saw within HIDDEN_S before `t` that `monsters` (a look's) doesn't have: about still,
+        under their damage numbers (each once, as last seen)."""
+        out: list[Monster] = []
+        for seen_at, m in sorted(self.recent, key=lambda r: -r[0]):
+            if t - seen_at <= HIDDEN_S and seen_again(m, monsters) is None and seen_again(m, out) is None:
+                out.append(m)
+        return out
 
     def cast(self, t: float, m: Monster | None) -> None:
         """A Lucky Seven cast keyed at `t` at `m`: an effect after it could be its."""
@@ -260,6 +424,8 @@ class RegularWatch:
         self.touches = [h for h in self.touches if h > horizon]
         self.gains = [g for g in self.gains if g[0] > horizon]
         self.kills = [k for k in self.kills if k[0] > horizon]
+        self.bars = [b for b in self.bars if b[0] > t - BAR_MEMORY_S] + [(t, m) for m in monsters if _believable(m.bar)]
+        self.recent = [r for r in self.recent if r[0] > t - HIDDEN_S] + [(t, m) for m in monsters]
         for p in self.pending:
             if p.verdict is None:
                 self._judge(p, t, monsters, s)
@@ -294,12 +460,20 @@ class RegularWatch:
         if t - p.t > JUDGE_BY_S:
             p.verdict, p.why = "passed", "not judged in time"
             return
-        if again is None or not _believable(again.bar) or again.bar > p.bar + BAR_STEP:
-            return  # (not seen, no bar to go by, or one higher than its own was: another monster's)
+        if again is None:
+            return
+        if p.unhurt:
+            if again.bar is not None:  # (a bar up not lower than full, or none to go by: not told yet)
+                return
+            if p.bare is None or t - p.bare < UNHURT_AGAIN_S:  # (once more: a bar missed once isn't none)
+                p.bare = p.bare if p.bare is not None else t
+                return
+        elif not _believable(again.bar) or again.bar > p.bar + BAR_STEP:
+            return  # (no bar to go by, or one higher than its own was: another monster's)
         if self.reach_ok is not None and s is not None and not self.reach_ok(s, again):
             p.verdict, p.why = "passed", "out of reach at its look"
             return
-        p.verdict, p.at, p.after = "none", t, float(again.bar)
+        p.verdict, p.at, p.after = "none", t, None if again.bar is None else float(again.bar)
 
     def _follow(self, p: Press, t: float, monsters: list[Monster]) -> Monster | None:
         """Press `p`'s target in a look at `t`: seen again (localization.monsters.seen_again: its track, or of its kind
@@ -313,8 +487,8 @@ class RegularWatch:
         return near[0] if len(near) == 1 else None
 
     def _effect(self, p: Press, t: float, again: Monster | None) -> float | None:
-        """When an effect of press `p` (or of a cast after it) shows by `t`: its target's bar lower, a kill of hers
-        placed on it, a gain naming its kind; None."""
+        """When an effect of press `p` (or of a cast after it) shows by `t`: its target's bar lower (one up where none
+        was: under full), a kill of hers placed on it, a gain naming its kind; None."""
         times = []
         if again is not None and _believable(again.bar) and again.bar < p.bar - BAR_STEP / 2 and t >= p.t + SHOWS_S:
             times.append(t)
@@ -336,6 +510,14 @@ class RegularWatch:
             self.run = []
         return d
 
+    def again(self, t: float) -> Doubt | None:
+        """A check put off whose doubt is due again at `t` (DEFER_GAP_S since): taken (the caller raises it), else
+        None. The caller asks only at a quiet look (`unquiet`)."""
+        if self.deferred is None or t - self.deferred_at < DEFER_GAP_S or self.off is not None:
+            return None
+        d, self.deferred = self.deferred, None
+        return d
+
     def holds(self, m: Monster | None) -> bool:
         """Whether a regular press at `m` is held: a doubt waiting for its check, the regular attack off for the run,
         or `m` one of the targets a check found the key right at."""
@@ -344,9 +526,9 @@ class RegularWatch:
         return m is not None and any(seen_again(h, [m]) is m for h in self.no_regular_at)
 
     def checked(self, t: float) -> None:
-        """A check ran at `t`: the presses waiting and the run start again."""
+        """A check ran at `t` (the window opened): the presses waiting and the run start again."""
         self.checks.append(t)
-        self.run, self.pending, self.held = [], [], False
+        self.run, self.pending, self.deferred, self.defers = [], [], None, 0
 
     def may_check(self, t: float) -> str | None:
         """Why a doubt at `t` gets no check (None: it does): CHECKS_MAX done, or the last within CHECK_GAP_S."""
@@ -364,8 +546,9 @@ class RegularWatch:
             return ""
         out = (f"her regular presses: {c['effect'] + c['none']} judged, {c['none']} took no effect, {self.longest} in a "
                f"row at the most (the doubt at {self.presses})")
-        if self.doubts:
-            out += f"; {len(self.doubts)} doubt(s), {len(self.checks)} check(s)"
+        out += f"; {len(self.doubts)} doubt(s), {len(self.checks)} check(s)"
+        if self.deferred is not None:
+            out += f"; a check put off {self.defers} time(s), not run (her regular presses held)"
         if self.off:
             out += f"; the regular attack off: {self.off}"
         return out
@@ -375,10 +558,11 @@ class RegularWatch:
 
 @dataclass
 class Outcome:
-    """What a check found and did: `what` "switched", "off", "as configured" or "held" (no check: CHECKS_MAX, the gap),
-    the key the game has ATTACK on (`key`), the window's reading, what was said in capitals, how her stars were told
-    (`stars`: "shown", a cast's MP since the doubt's first press; "test", a test cast took MP; "not known", "no target"
-    (no monster to cast at, where she was and where she checked); "no stars", a magician), and how long it took."""
+    """What a check found and did: `what` "switched", "off", "as configured", "held" (no check: CHECKS_MAX, the gap) or
+    "put off" (not quiet: tried again later), the key the game has ATTACK on (`key`), the window's reading, what was
+    said in capitals, how her stars were told (`stars`: "shown", a cast's MP since the doubt's first press; "test", a
+    test cast took MP or hurt its target; "maybe out", STAR_CASTS test casts didn't; "not known", "no target" (no
+    monster to cast at); "no stars", a magician), and how long it took."""
     what: str
     text: str
     key: str | None = None
@@ -390,7 +574,9 @@ class Outcome:
 class KeyCheck:
     """The check after a doubt (see the module's doc) by hunter `h`: its senses, actions, attack choice, out of darts'
     watch and its log. `reader`: the window's (perception.keybindings.Reader; made when first needed). The simulator's
-    eyes draw the window from the world's bindings (sim.fakes.FakeEyes._capture)."""
+    eyes draw the window from the world's bindings (sim.fakes.FakeEyes._capture). `window_state` after `_window`:
+    "not opened" (nothing sent, or the backslash and nothing changed), "closed" (seen open, then closed), "may be open";
+    `sent`: whether the backslash went out."""
 
     def __init__(self, h, reader: keybindings.Reader | None = None, log: Callable[[str], None] | None = None):
         self.h = h
@@ -398,6 +584,9 @@ class KeyCheck:
         self._reader = reader
         self.frames_kept = 0
         self._frame_read = None  # the frame the window was last read on
+        self._last = None        # the last frame taken
+        self.sent = False
+        self.window_state = "not opened"
 
     @property
     def reader(self) -> keybindings.Reader:
@@ -406,34 +595,72 @@ class KeyCheck:
         return self._reader
 
     def run(self, doubt: Doubt) -> Outcome:
-        """The check: her stars, a place, the window, what then (each said). Raises OutOfDarts (her stars' test) and
-        client.LieDetectorAlarm (the player refuses its keys then)."""
+        """The check: a place, her stars, a quiet moment, the window, what then (each said). Raises OutOfDarts (out of
+        darts' own watch due after her stars' test), SafetyStop (the HP watch, at every look), KeyCheckStop (the window
+        may be open; her keys where she can't follow them) and client.LieDetectorAlarm (the player refuses its keys
+        then)."""
         start = time.monotonic()
         watch = self.h.attacks.watch
         if (why := watch.may_check(start)) is not None:
             return self._hold(doubt, why)
-        watch.checked(start)
-        self.h.hold_regular(False)  # (the doubt's hold let go: what the check finds decides)
-        stars = self._stars(doubt)
-        self._place()
-        if stars == "no target":  # (from the place she checks at, once more)
-            if (stars := self._stars(doubt)) == "no target":
-                self.log("  her stars: not known (no monster to cast at from here either)")
-        reading = self._window()
-        out = self._act(doubt, reading)
+        self.h.hold_regular()  # (held through it: what it finds lets go)
+        stars = ""
+        if (why := self._place()) is None:
+            stars = self._stars(doubt)
+            why = self._quiet()
+        if why is not None:
+            out = self._defer(doubt, why)
+        else:
+            watch.checked(time.monotonic())
+            reading = self._window()
+            if self.window_state == "may be open":
+                text = ("the KEY BINDINGS window may be open in the game (the backslash sent, it wasn't seen closed): "
+                        "close it with Esc or CANCEL" + ("" if reading is None or not reading.read
+                                                          else f"; it read {reading.text()}"))
+                telemetry.emit("event", kind="attack_key", text=text, what="stopped", stars=stars,
+                               seconds=round(time.monotonic() - start, 2),
+                               **({"reading": reading.record()} if reading is not None else {}))
+                raise KeyCheckStop(text, window=True, at=time.monotonic())
+            out = self._act(doubt, reading, stars)
         out.stars, out.seconds = stars, time.monotonic() - start
         telemetry.emit("event", kind="attack_key", text=out.text, what=out.what, key=out.key, stars=stars,
-                       seconds=round(out.seconds, 2), **({"reading": reading.record()} if reading is not None else {}))
+                       seconds=round(out.seconds, 2),
+                       **({"reading": out.reading.record()} if out.reading is not None else {}))
         return out
 
-    # --- 1. her stars ----------------------------------------------------------------------------------------------
+    def _look(self):
+        """A look of the check's: the safety stop asked of it as Hunter.health_check would (her HP watch's due)."""
+        s = self.h.look()
+        hp = getattr(self.h, "hp_watch", None)
+        if hp is not None and (stop := hp.due()) is not None:
+            raise stop
+        return s
+
+    # --- 1. a place ------------------------------------------------------------------------------------------------
+
+    def _place(self) -> str | None:
+        """No monster within PLACE_CLEAR of her in a look: she stays; else away to a safe place (behavior.retreat) and
+        a look after it. Why the check is put off (one still near), or None."""
+        from .retreat import KEY_CHECK, away
+        near = near_her(self._look())
+        if not near:
+            self.log(f"  the key check where she is: no monster within {PLACE_CLEAR[0]:.0f} of her")
+            return None
+        self.log(f"  the key check: {', '.join(m.kind for m in near)} near her: to a safe place first")
+        r = away(self.h, time.monotonic(), KEY_CHECK, self.log)
+        if near := near_her(self._look()):
+            return (f"{', '.join(sorted({m.kind for m in near}))} near her still after the retreat "
+                    f"({getattr(r, 'result', '?')})")
+        return None
+
+    # --- 2. her stars ----------------------------------------------------------------------------------------------
 
     def _stars(self, doubt: Doubt) -> str:
-        """Whether she has her stars (the thief's: see the module's doc); raises OutOfDarts when STAR_CASTS test casts
-        took no MP. Returns what told it."""
+        """Whether she has her stars (the thief's: see the module's doc). Returns what told it; raises OutOfDarts only
+        when out of darts' own watch is due after the test's casts."""
         from .. import character
         from ..attack import choice
-        from .darts import LOW_STEPS, OutOfDarts
+        from .darts import LOW_STEPS
         if character.active().ammo != "throwing stars":
             self.log("  her stars: none to run out of (her regular attack isn't a throw)")
             return "no stars"
@@ -446,61 +673,76 @@ class KeyCheck:
             self.log("  her stars: not known (no Lucky Seven key)")
             return "not known"
         took = casts = 0
-        end = time.monotonic() + STAR_TEST_MAX_S
+        t0 = time.monotonic()
+        end = t0 + STAR_TEST_MAX_S
+        waited = ""
         while casts < STAR_CASTS and time.monotonic() < end:
-            s = self.h.look()
+            s = self._look()
+            if (hit := self.h.hit_at) is not None and hit > t0:
+                self.log(f"  her stars: not known (touched during the test, after {casts} cast(s))")
+                return "not known"
             mp = a.mp
             if mp is None or not choice.can_cast(mp, a.max_mp, a.skill.mp + a.max_mp / choice.MP_STEPS):
                 have = "not read" if mp is None else f"{max(0.0, choice.mp_points(mp, a.max_mp)):.0f}"
                 self.log(f"  her stars: not known (MP {have} < a cast's {a.skill.mp:.0f} and a step)")
                 return "not known"
-            side = self._cast_side(s, doubt)
-            if side is None:
-                if not casts:
-                    self.log("  her stars: not known yet (no monster in reach to cast at, out of the claw's)")
+            aim = self._cast_side(s, doubt)
+            if isinstance(aim, str):
+                if not casts and aim == "no monster in reach":
+                    self.log("  her stars: not known (no monster in reach to cast at, out of the claw's)")
                     return "no target"
-                time.sleep(0.2)  # (the monsters walk: another look)
+                waited = aim
+                time.sleep(0.2)  # (the monsters walk, a knock ends: another look)
                 continue
+            side, target = aim
             if not self._cast(side):
                 time.sleep(0.2)
                 continue
             casts += 1
             key = self.h.actions.attack_at
-            if self._mp_shown(key):
-                self.log(f"  her stars: the test's cast {casts} took MP: she has them")
+            if (shown := self._evidence(key, target)) is not None:
+                self.log(f"  her stars: the test's cast {casts} {shown}: she has them")
                 return "test"
-            if (hit := self.h.hit_at) is not None and hit >= key - KNOCK_S:  # (one on her: the key may have swiped it)
-                continue
+            if (hit := self.h.hit_at) is not None and hit > t0:
+                self.log(f"  her stars: not known (touched during the test, after {casts} cast(s))")
+                return "not known"
             took += 1
             if darts.share * choice.MP_STEPS < LOW_STEPS:
                 self.log("  her stars: not known (her MP too low to tell)")
                 return "not known"
         if took < STAR_CASTS:
-            self.log(f"  her stars: not known ({casts} test casts in {STAR_TEST_MAX_S:.0f} s, {took} of them took no MP "
-                     f"untouched; {STAR_CASTS} needed)")
+            self.log(f"  her stars: not known ({casts} test casts in {STAR_TEST_MAX_S:.0f} s, {took} of them took no MP; "
+                     f"{STAR_CASTS} needed" + (f"; waited: {waited}" if waited else "") + ")")
             return "not known"
-        stop = OutOfDarts(took, time.monotonic() - doubt.first, darts.share, at=time.monotonic())
-        stop.args = (f"the regular attack took no effect {len(doubt.presses)} times in a row; then {took} Lucky Seven "
-                     f"casts took no MP (her MP {darts.share:.0%}): she's out of throwing stars",)
-        raise stop
+        if (stop := darts.due(time.monotonic())) is not None:  # (out of darts' own stretch long enough with them)
+            if stop.said is None and hasattr(self.h, "_messages"):
+                stop.heard(self.h._messages())
+            raise stop
+        self.log(f"  her stars: MAYBE OUT ({took} test casts took no MP and hurt nothing; with her stars a monster on "
+                 f"her unseen does that too): out of darts' own watch stops the hunt at {darts.presses} Lucky Seven "
+                 "presses in a row without MP")
+        return "maybe out"
 
-    def _cast_side(self, s, doubt: Doubt) -> str | None:
-        """Which way a test cast goes: at a monster in reach from where she is in look `s`, out of the claw's (up close
-        the key swipes, no MP), she on a platform, not on a rope; the doubt's last target's way first. None if
-        there's none."""
-        a = self.h.attacks
-        if s is None or s.where is None or s.platform is None or self.h.on_rope(s):
-            return None
+    def _cast_side(self, s, doubt: Doubt):
+        """Which way a test cast goes, and at what: a monster in reach from where she is in look `s`, none within the
+        claw's reach and CLAW_SLACK of her either way (up close the key swipes, no MP), she on a platform, not on a rope
+        nor at its top, untouched; the doubt's last target's way first. Else why not (a str)."""
+        a, darts = self.h.attacks, self.h.darts
+        if (s is None or s.where is None or s.platform is None or self.h.on_rope(s) or darts.roped
+                or darts.at_top):
+            return "not on a platform"
+        if self.h.knocked(s):
+            return "touched just now"
         x, y = s.where.x, s.where.y
+        claw = reach.CLAW_FAR + CLAW_SLACK
+        if any(abs(m.x - x) < claw and abs(m.y - y) < 60 for m in s.monsters):
+            return "a monster up close"
         first = RIGHT if doubt.presses[-1].m.x > x else LEFT
         for side in (first, LEFT if first == RIGHT else RIGHT):
-            if any((m.x > x) == (side == RIGHT) and abs(m.x - x) < reach.CLAW_FAR + CLAW_SLACK and abs(m.y - y) < 60
-                   for m in s.monsters):  # (one that near: the key may swipe it, no MP whatever her stars)
-                continue
             m = a.target(side)
-            if m is not None and reach.can_hit(s.platform, x, y, m):
-                return side
-        return None
+            if m is not None and abs(m.x - x) >= claw and reach.can_hit(s.platform, x, y, m):
+                return side, m
+        return "no monster in reach"
 
     def _cast(self, side: str) -> bool:
         """One Lucky Seven press that way, forced (Attacks.forced: chosen, logged and its MP reckoned as any cast)."""
@@ -512,82 +754,130 @@ class KeyCheck:
         finally:
             act.skill, act.choose, a.forced = saved[0], saved[1], None
 
-    def _mp_shown(self, key: float) -> bool:
-        """Looks after a cast keyed at `key`, STAR_TEST_S at the most: whether her bar showed its MP by MP_SHOWS_S
-        after it (DartWatch.mp_shown_at after the key)."""
-        darts = self.h.darts
+    def _evidence(self, key: float, target: Monster) -> str | None:
+        """Looks after a test cast keyed at `key` at `target`, STAR_TEST_S at the most: what showed it took effect (its
+        MP on her bar, DartWatch.mp_shown_at after the key; its target's bar lower, or one up where none was), or None
+        (her bar read MP_SHOWS_S after it without, and the time up)."""
+        darts, before = self.h.darts, target.bar
         while time.monotonic() < key + STAR_TEST_S:
-            self.h.look()
+            s = self._look()
             if darts.mp_shown_at is not None and darts.mp_shown_at > key:
-                return True
-            if darts.read_at is not None and darts.read_at >= key + MP_SHOWS_S:
-                return False
-        return False
+                return "took MP"
+            again = seen_again(target, s.monsters) if s is not None else None
+            if (again is not None and _believable(again.bar) and s.t >= key + SHOWS_S
+                    and (not _believable(before) or again.bar < before - BAR_STEP / 2)):
+                return "lowered its target's bar"
+        return None
 
-    # --- 2. a place ------------------------------------------------------------------------------------------------
+    # --- 3. a quiet moment -----------------------------------------------------------------------------------------
 
-    def _place(self) -> None:
-        """No monster within PLACE_CLEAR of her in a look: she stays; else away to a safe place (behavior.retreat)."""
+    def _quiet(self) -> str | None:
+        """A quiet moment for the window (`unquiet`, her still over two looks QUIET_LOOK_S apart) within QUIET_S, one
+        more retreat if a monster's near. Why the check is put off, or None."""
         from .retreat import KEY_CHECK, away
-        s = self.h.look()
-        near = [] if s.where is None else [m for m in s.monsters if abs(m.x - s.where.x) < PLACE_CLEAR[0]
-                                           and abs(m.y - s.where.y) < PLACE_CLEAR[1]]
-        if not near:
-            self.log(f"  the key check where she is: no monster within {PLACE_CLEAR[0]:.0f} of her")
-            return
-        self.log(f"  the key check: {', '.join(m.kind for m in near)} near her: to a safe place first")
-        away(self.h, time.monotonic(), KEY_CHECK, self.log)
+        retreated, last, why = False, None, "not looked"
+        end = time.monotonic() + QUIET_S
+        while True:
+            s = self._look()
+            why = unquiet(self.h, s)
+            if why is None and last is not None and _still(last, s):
+                return None
+            if why is not None and near_her(s) and not retreated:
+                self.log(f"  the key check: {why}: to a safe place first")
+                away(self.h, time.monotonic(), KEY_CHECK, self.log)
+                retreated, last, end = True, None, time.monotonic() + QUIET_S
+                continue
+            if time.monotonic() >= end:
+                return why or "not standing still"
+            last = s if why is None else None
+            time.sleep(QUIET_LOOK_S)
 
-    # --- 3. the window ---------------------------------------------------------------------------------------------
+    def _defer(self, doubt: Doubt, why: str) -> Outcome:
+        """The check put off (`why`): her regular presses held, its doubt raised again at a quiet look (RegularWatch.
+        again); past DEFERS_MAX, no more regular attacks this run."""
+        w = self.h.attacks.watch
+        w.defers += 1
+        if w.defers > DEFERS_MAX:
+            w.deferred = None
+            return self._off(f"ATTACK KEY: NO QUIET MOMENT FOR THE KEY CHECK ({DEFERS_MAX} TIMES PUT OFF; {why}): no more "
+                             "regular attacks this run (Lucky Seven only)", f"no quiet moment for the key check ({why})")
+        w.deferred, w.deferred_at = doubt, time.monotonic()
+        text = (f"ATTACK KEY: the key check put off ({why}): her regular presses held; again at a quiet moment "
+                f"({w.defers} of {DEFERS_MAX})")
+        self.log(text)
+        return Outcome("put off", text)
+
+    # --- 4. the window ---------------------------------------------------------------------------------------------
 
     def _window(self) -> keybindings.Reading | None:
-        """The KEY BINDINGS window opened, read and closed (see the module's doc): its reading (None: no frame)."""
+        """The KEY BINDINGS window opened, read and closed (see the module's doc): its reading (None: no frame);
+        `window_state` and `sent` say how it was left."""
         client.check_alarm()
         act = self.h.actions
-        seen_open = False
+        self.sent, self.window_state = False, "not opened"
         try:
-            frame = self._frame()
-            if frame is None:
+            before = self._frame()
+            if before is None:
                 self.log("  the key bindings: no frame of the game to read them on: not opened")
                 return None
-            mouse = (round(MOUSE_AT[0] * frame.shape[1] / keybindings.FRAME[0]),
-                     round(MOUSE_AT[1] * frame.shape[0] / keybindings.FRAME[1]))
-            act.play([[0, "mouse", *mouse]], "key_bindings_mouse")
+            fh, fw = before.shape[:2]
+            if (fw, fh) != keybindings.FRAME:
+                self.log(f"  the key bindings: the client is {fw}x{fh}, not {keybindings.FRAME[0]}x"
+                         f"{keybindings.FRAME[1]}: not opened (the window is read at that size)")
+                return keybindings.Reading(False, f"the frame is {fw}x{fh}, not {keybindings.FRAME[0]}x"
+                                                  f"{keybindings.FRAME[1]}")
+            act.play([[0, "mouse", *MOUSE_AT]], "key_bindings_mouse")
             reading = self._read()
-            already = reading is not None and reading.open
-            if not already:
+            if reading is None:
+                self.log("  the key bindings: no frame after the mouse moved: not opened")
+                return None
+            already = reading.open
+            if already:
+                self.window_state = "may be open"
+            else:
+                behind = self._last
                 act.play([[0, "\\", "down"], [40, "\\", "up"]], "key_bindings")
-                time.sleep(SETTLE_S)
-                reading = self._read()
-                if reading is None or not reading.open:
-                    time.sleep(AGAIN_S)
+                self.sent, self.window_state = True, "may be open"
+                for wait in (SETTLE_S, AGAIN_S, LATE_S):
+                    time.sleep(wait)
                     reading = self._read()
-            seen_open = reading is not None and reading.open
-            if not seen_open:
-                self.log("  the key bindings: the window didn't open after the backslash"
-                         + ("" if reading is None else f" ({reading.text()})") + ": not read, no Esc")
-                return reading
+                    if reading is not None and reading.open:
+                        break
+                if reading is None or not reading.open:
+                    if reading is not None and not self._changed(behind, self._last):
+                        self.window_state = "not opened"
+                        self.log(f"  the key bindings: the window didn't open after the backslash (nothing changed "
+                                 f"where it opens; {reading.text()}): not read, no Esc")
+                    else:
+                        self.log("  the key bindings: NOT SEEN after the backslash, "
+                                 + ("no frame to tell by" if reading is None else "though the frame changed where it "
+                                    "opens") + ": it may be open")
+                    return reading
             if reading.read and reading.unsure and not reading.attack:  # (a second frame, then not ATTACK)
                 second = self._read()
                 if second is not None and second.read:
                     reading = second
             self.log("  the key bindings" + (" (open already)" if already else "") + f": {reading.text()}")
             self._keep(self._frame_read)
-            seen_open = not self._close()
+            if self._close():
+                self.window_state = "closed"
             return reading
-        finally:
-            if seen_open:
+        except BaseException:
+            if self.window_state == "may be open":  # (the Lie Detector halfway, ...: said before it goes on)
                 text = "the KEY BINDINGS window may still be open in the game: close it with Esc or CANCEL"
                 self.log(f"KEY CHECK: {text}")
                 alarm.page("MapleStory: the key bindings window", text)
+            raise
 
     def _frame(self):
         """The game window's whole client area now (RGB, as the screen shows it after now: Eyes._capture), or None."""
         try:
-            return self.h.senses.eyes._capture()
+            frame = self.h.senses.eyes._capture()
         except (BadLook, RuntimeError) as e:
             self.log(f"  the key bindings: no frame ({getattr(e, 'why', e)})")
             return None
+        self._last = frame
+        return frame
 
     def _read(self) -> keybindings.Reading | None:
         """A frame now, read (None: no frame)."""
@@ -599,19 +889,34 @@ class KeyCheck:
             self._frame_read = frame
         return reading
 
+    @staticmethod
+    def _changed(before, after) -> bool:
+        """Whether `after` differs from `before` where the window opens (OPEN_AT): CHANGED_SHARE of its px by more
+        than CHANGE_LEVEL in a channel. Not told (a frame missing, another size): changed."""
+        if before is None or after is None or before.shape != after.shape:
+            return True
+        (x, y), (w, h) = keybindings.OPEN_AT, keybindings.WINDOW
+        a = before[y:y + h, x:x + w, :3].astype(np.int16)
+        b = after[y:y + h, x:x + w, :3].astype(np.int16)
+        return a.size > 0 and float((np.abs(a - b).max(axis=2) > CHANGE_LEVEL).mean()) >= CHANGED_SHARE
+
     def _close(self) -> bool:
-        """Esc (the window seen open), a frame CLOSE_S later; Esc once more if it's still seen open. Whether it's seen
-        closed (said)."""
+        """Esc (the window seen open), frames CLOSE_S and CLOSE_AGAIN_S later; Esc once more only if both still show it
+        open, and so once more. Whether it's seen closed (said)."""
         act = self.h.actions
         for go in (1, 2):
             act.play([[0, "esc", "down"], [40, "esc", "up"]], "key_bindings_close")
-            time.sleep(CLOSE_S)
-            after = self._read()
-            if after is None:
-                return False
-            if not after.open:
-                self.log(f"  the key bindings: closed (Esc x{go}), nothing changed")
-                return True
+            for wait in (CLOSE_S, CLOSE_AGAIN_S):
+                time.sleep(wait)
+                after = self._read()
+                if after is None:
+                    self.log(f"  the key bindings: no frame after Esc x{go}: not known whether it closed")
+                    return False
+                if not after.open:
+                    self.log(f"  the key bindings: closed (Esc x{go}" + (", the first didn't close it" if go == 2
+                                                                          else "") + "), nothing saved")
+                    return True
+        self.log("  the key bindings: STILL OPEN after Esc twice")
         return False
 
     def _keep(self, frame) -> None:
@@ -626,20 +931,29 @@ class KeyCheck:
         except Exception:
             pass
 
-    # --- 4. what then ----------------------------------------------------------------------------------------------
+    # --- 5. what then ----------------------------------------------------------------------------------------------
 
-    def _act(self, doubt: Doubt, reading: keybindings.Reading | None) -> Outcome:
+    def _act(self, doubt: Doubt, reading: keybindings.Reading | None, stars: str = "") -> Outcome:
         h = self.h
         configured = h.actions.keys.attack.name
         cfg = configured.upper()
         if reading is None or not reading.read:
             why = "no frame" if reading is None else reading.why
+            sent = (" (the backslash went out and nothing changed where the window opens: if it's open in the game, "
+                    "close it with Esc or CANCEL)" if self.sent else "")
             return self._off(f"ATTACK KEY: THE KEY BINDINGS NOT READ ({why}): no more regular attacks this run "
-                             f"(Lucky Seven only)", f"the key bindings not read ({why})", reading)
+                             f"(Lucky Seven only){sent}", f"the key bindings not read ({why})", reading)
         preset = f"Key Bindings, preset {reading.preset}" if reading.preset else "Key Bindings"
+        fn = self._functions(reading)
+        self._her_moves(fn)  # (raises KeyCheckStop: her moves' keys not as she has them)
+        said: list[str] = []
         if any(keybindings.same_key(k, configured) for k in reading.attack):
+            if stars == "maybe out":
+                return self._off(f"ATTACK KEY: ATTACK IS ON {cfg} AS CONFIGURED ({preset}), AND HER STARS MAY BE OUT: "
+                                 "no more regular attacks this run (Lucky Seven only: out of darts' own watch stops the "
+                                 "hunt if her casts keep taking no MP)", "her stars may be out", reading)
             targets = doubt.targets
-            h.attacks.watch.no_regular_at.extend(targets)
+            h.hold_at(targets)
             text = (f"ATTACK KEY: ATTACK IS ON {cfg} AS CONFIGURED ({preset}): the misses were something else (misses? "
                     f"out of reach?); no more regular attacks at that {', '.join(m.kind for m in targets)}")
             self.log(text)
@@ -650,27 +964,73 @@ class KeyCheck:
                      f"on {', '.join(k.upper() for k in reading.attack)} (not a key to press)")
             return self._off(f"ATTACK KEY: THE GAME HAS ATTACK {where.upper()} ({preset}): no more regular attacks "
                              f"this run (Lucky Seven only)", f"ATTACK {where}", reading)
-        key = on[0]
-        now_on = self._what_on(reading, configured)
-        clash = [f for f in OTHER_KEYS if (k := getattr(h.actions.keys, f, None)) is not None
-                 and keybindings.same_key(k.name, key)]
+        clashes = {k: self._clash(k) for k in on}
+        key = min(on, key=lambda k: len(clashes[k]))  # (one that's none of her keys first)
+        now_on = self._what_on(fn, configured)
+        for f in clashes[key]:
+            if f in UNUSED:
+                said.append(f"{key.upper()} is her {f} key too (not used)")
+            elif f == "pick_up":  # (her pick-up presses attack then: no loot picked up, nothing worse)
+                where = self._where(fn, "PICK UP", key)
+                said.append(f"{key.upper()} IS HER PICK-UP KEY TOO: HER PICK-UPS ATTACK, NO LOOT PICKED UP (PICK UP IS "
+                            + (f"ON {where.upper()} IN THE GAME)" if where else "ON NO KEY IN THE GAME)"))
+            else:  # (her Lucky Seven's, her pet food's: pictures, where they went can't be told off the window)
+                text = (f"the game has ATTACK on {key.upper()}, not {cfg} ({preset}), and {key.upper()} is her "
+                        f"{f.replace('_', ' ')} key: her {f.replace('_', ' ')} presses would attack")
+                self.log(f"ATTACK KEY: {text.upper()}")
+                raise KeyCheckStop(text, at=time.monotonic())
         h.rekey(key)
         text = (f"ATTACK KEY: THE GAME HAS ATTACK ON {key.upper()}, NOT {cfg} ({preset}): her regular attack is "
                 f"{key.upper()} for the rest of this run (config.toml unchanged); {cfg} {now_on}"
-                + (f"; {key.upper()} is her {', '.join(clash)} key too" if clash else ""))
+                + "".join(f"; {x}" for x in said))
         self.log(text)
         alarm.page("MapleStory: the attack key",
                    f"gamelab found the game's Attack on {key.upper()}, not {cfg}: the hunt uses {key.upper()} for the "
                    f"regular attack this run. Put Attack back on {cfg} in the Key Bindings (\\), or set config.toml."
-                   + (f" {key.upper()} is her {', '.join(clash)} key too." if clash else ""))
+                   + "".join(f" {x}." for x in said))
         return Outcome("switched", text, key, reading)
 
-    def _what_on(self, reading: keybindings.Reading, key: str) -> str:
-        """What the window read shows on `key` now, in words ("does nothing now", "is JUMP now")."""
+    def _functions(self, reading: keybindings.Reading) -> dict[str, str | None]:
+        """What each key does as the window read shows it (perception.keybindings.Reader.functions), {} if not told."""
         try:
-            fn = {} if self._frame_read is None else self.reader.functions(self._frame_read, reading)
+            return {} if self._frame_read is None else self.reader.functions(self._frame_read, reading)
         except Exception:
-            fn = {}
+            return {}
+
+    def _clash(self, key: str) -> list[str]:
+        """Her keys (OTHER_KEYS) on `key`, as she has them now."""
+        keys = self.h.actions.keys
+        return [f for f in OTHER_KEYS if (k := getattr(keys, f, None)) is not None and keybindings.same_key(k.name, key)]
+
+    @staticmethod
+    def _where(fn: dict, name: str, but: str | None = None) -> str | None:
+        """The key the window shows function `name` on (one she can press, not `but`), or None."""
+        found = [k for k, v in fn.items() if v == name and k not in NOT_ATTACK and not keybindings.same_key(k, but)]
+        return found[0] if found else None
+
+    def _her_moves(self, fn: dict) -> None:
+        """Her jump and arrows as the window shows them (`fn`; {} not told: nothing done): one on a key without its
+        function (JUMP, MOVE LEFT/RIGHT/UP/DOWN) stops the hunt (KeyCheckStop), saying where the window has it."""
+        if not fn:
+            return
+        keys = self.h.actions.keys
+        for f, name in MOVES.items():
+            k = getattr(keys, f, None)
+            if k is None:
+                continue
+            on = fn.get(keybindings.SAME_KEY.get(k.name, k.name), "?")
+            if on == name or on == "?":  # ('?': a key the window doesn't draw: not told)
+                continue
+            to = self._where(fn, name)
+            text = (f"her {f} key {k.name.upper()} shows {'nothing' if on is None else on} in the game's Key Bindings ("
+                    + (f"{name} is on {to.upper()}" if to else f"{name} is on no key she can press")
+                    + "): her moves' keys aren't followed")
+            self.log(f"ATTACK KEY: {text.upper()}")
+            raise KeyCheckStop(text, at=time.monotonic())
+
+    @staticmethod
+    def _what_on(fn: dict, key: str) -> str:
+        """What the window read shows on `key` now, in words ("does nothing now", "is JUMP now")."""
         what = fn.get(keybindings.SAME_KEY.get(key, key), "?") if fn else "?"
         return "not read" if what == "?" else "does nothing now" if what is None else f"is {what} now"
 
@@ -689,8 +1049,7 @@ class KeyCheck:
         if len(watch.checks) >= CHECKS_MAX:
             return self._off(f"ATTACK KEY: ANOTHER DOUBT, {why}: no more regular attacks this run (Lucky Seven only)",
                              why)
-        watch.no_regular_at.extend(doubt.targets)
-        self.h.hold_regular(False)  # (held at its targets only)
+        self.h.hold_at(doubt.targets)
         text = (f"ATTACK KEY: no check ({why}): no more regular attacks at that "
                 f"{', '.join(m.kind for m in doubt.targets)}")
         self.log(text)

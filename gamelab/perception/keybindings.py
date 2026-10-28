@@ -16,7 +16,9 @@ drawn as they are: on the live frame every one of the 43 function pictures on a 
 How it's read (`Reader.read`, 20-25 ms for a frame; the whole map of what each key does, `Reader.functions`, about
 0.5 s more, for the log):
 1. the window: its title strip (backgrnd's top TITLE_ROWS rows, 636 wide) matched over the frame, TM_SQDIFF_NORMED
-   TITLE_OK at most (0.0076 open live, 0.38 on the frame after Esc), and the whole of it in the frame;
+   TITLE_OK at most (0.0076 open live, 0.38 on the frame after Esc), and the whole of it in the frame; else the strip's
+   left TITLE_PART px (its name, "KEY BINDINGS") PART_OK at most: the window dragged off the frame's right or bottom
+   edge, open but not read (so the check closes it all the same);
 2. that it's the Keyboard/Mouse tab (its picture selected at TAB_AT), and the keyboard's own pixels between the key cells
    as its picture has them (GAPS_OK of them: another window or the Controller tab over it, and nothing is read);
 3. the preset, the page button drawn "checked" (the pointer over one draws the same picture as "mouseOver": the check
@@ -27,7 +29,11 @@ How it's read (`Reader.read`, 20-25 ms for a frame; the whole map of what each k
    its bottom ICON_ROWS rows (the key's name is drawn over the top) matched within SLACK px, the alpha the mask, scored
    by the rms of the difference less its mean (a frame dimmed by 30% scores 20.4, an exact draw 0.0-2.4, the best other
    cell 57.6): ATTACK_OK at most is ATTACK, over ATTACK_UNSURE not, between unsure (`unsure`);
-5. the tray: ATTACK's picture in one of its TRAY_COLS x TRAY_ROWS slots means the game has it on no key.
+5. the tray: ATTACK's picture in one of its TRAY_COLS x TRAY_ROWS slots means the game has it on no key;
+6. every cell's key name (key/<code>, drawn over whatever it's bound to) drawn as it is (LABEL_OK of its px): a key
+   none of whose cells shows its name is `illegible` (a popup or a pointer over it), and with ATTACK found on no key
+   and not in the tray that's not read ("covered"), not "on no key" (on the live frames every name 1.0; the pointer
+   dragging her pet food over U on 2026-10-24, 0.89; a box over both Ctrl cells, 0.0).
 
 The frame is RGB, the client's at its own 1366x768, where the game draws its pictures as they are; a frame of
 another size isn't read (the client stretched: the frame of 2026-10-18 at 1920x1080, lab/keyconfig.png, brought down
@@ -54,6 +60,10 @@ OPEN_AT = (177, 174)       # where it opened live (the window can be dragged: it
 TITLE_ROWS = 20            # the title strip ("KEY BINDINGS") matched to find it ...
 TITLE_OK = 0.06            # ... TM_SQDIFF_NORMED at most (0.0076-0.0077 on the 13 live frames with it; 0.036 those 15%
                            # dimmer; 0.35-0.39 on the 13 frames without it of lab/shots at 1366x768)
+TITLE_PART = 100           # the strip's left px, its name: found alone, the window's open but partly off the frame ...
+PART_OK = 0.02             # ... at this at most (the 12 frames of lab/shots and akey/live with the window 0.0057 at most;
+                           # the 22 without 0.084 at the least: the minimap's own title, "MINI MAP", at (0, 0))
+LABEL_OK = 0.75            # share of a key name's px drawn as they are: its cell legible (live 1.0; a pointer over U 0.89)
 GAPS_OK = 0.9              # share of the keyboard's own px between the cells as its picture has them (within GAP_LEVELS)
 GAP_LEVELS = 16           # (the difference's mean taken out: a frame 15% dimmer reads)
 DRAWN_LEVELS = 16          # a picture's px drawn as they are: within this of it, the difference's mean taken out
@@ -145,7 +155,8 @@ class Reading:
     title strip's score; `preset`: the page drawn checked (None: not told); `attack`: the keys carrying ATTACK (config.toml
     names, in the keyboard's order, a key once: both Ctrls are 'ctrl'); `in_tray`: ATTACK in the tray (on no key);
     `unsure`: keys whose cells scored between ATTACK_OK and ATTACK_UNSURE; `scores`: each bound key's best ATTACK score;
-    `gaps`: the keyboard's px between its cells as its picture has them (share)."""
+    `gaps`: the keyboard's px between its cells as its picture has them (share); `illegible`: keys none of whose cells
+    shows its name as drawn (covered: what's on it isn't known)."""
     open: bool
     why: str
     at: tuple[int, int] | None = None
@@ -156,6 +167,7 @@ class Reading:
     unsure: tuple[str, ...] = ()
     scores: dict[str, float] = field(default_factory=dict)
     gaps: float = 0.0
+    illegible: tuple[str, ...] = ()
 
     @property
     def read(self) -> bool:
@@ -168,12 +180,14 @@ class Reading:
         where = ("on no key (in the tray)" if self.in_tray else "on no key" if not self.attack else
                  "on " + ", ".join(k.upper() for k in self.attack))
         return (f"ATTACK {where}" + (f" (unsure: {', '.join(k.upper() for k in self.unsure)})" if self.unsure else "")
+                + (f" (not legible: {', '.join(k.upper() for k in self.illegible)})" if self.illegible else "")
                 + f"; preset {self.preset or '?'}; the window at {self.at}")
 
     def record(self) -> dict:
         return {"open": self.open, "why": self.why, "at": None if self.at is None else list(self.at),
                 "title": round(self.title, 4), "preset": self.preset, "attack": list(self.attack),
-                "in_tray": self.in_tray, "unsure": list(self.unsure), "gaps": round(self.gaps, 3)}
+                "in_tray": self.in_tray, "unsure": list(self.unsure), "gaps": round(self.gaps, 3),
+                "illegible": list(self.illegible)}
 
 
 def _rgba(path: Path) -> np.ndarray:
@@ -194,6 +208,7 @@ class Reader:
         self.bg = _rgba(self.folder / "backgrnd.png")
         self.kb = _rgba(self.folder / "backgrnd_keyboard.png")
         self.strip = np.ascontiguousarray(self.bg[:TITLE_ROWS, :, :3])
+        self._part = np.ascontiguousarray(self.strip[:, :TITLE_PART])
         self._strip_px = self.bg[:TITLE_ROWS, :, 3] > 250  # (its opaque px: the levels' fit)
         self.tabs = {(state, k): _rgba(self.folder / f"tab_{state}_{k}.png") for state in ("selected", "normal")
                      for k in (0, 1)}
@@ -225,6 +240,15 @@ class Reader:
         mn, _, loc, _ = cv2.minMaxLoc(r)
         return (loc if mn <= TITLE_OK else None), float(mn)
 
+    def find_part(self, frame: np.ndarray) -> tuple[tuple[int, int] | None, float]:
+        """The window's top-left in `frame` (RGB) by its title's left TITLE_PART px alone (its name), and that score, or
+        (None, score): the window dragged partly off the frame's right or bottom edge."""
+        if frame.shape[0] < TITLE_ROWS or frame.shape[1] < TITLE_PART:
+            return None, 1.0
+        r = cv2.matchTemplate(np.ascontiguousarray(frame[:, :, :3]), self._part, cv2.TM_SQDIFF_NORMED)
+        mn, _, loc, _ = cv2.minMaxLoc(r)
+        return (loc if mn <= PART_OK else None), float(mn)
+
     def read(self, frame: np.ndarray) -> Reading:
         """What `frame` (the client, RGB) shows of the window: see the module's doc."""
         h, w = frame.shape[:2]
@@ -232,6 +256,9 @@ class Reader:
             return Reading(False, f"the frame is {w}x{h}, not {FRAME[0]}x{FRAME[1]}")
         at, score = self.find(frame)
         if at is None:
+            part, part_score = self.find_part(frame)
+            if part is not None:  # (its name found: the rest of its title off the frame)
+                return Reading(True, "partly off the frame", part, part_score)
             return Reading(False, "not open", title=score)
         ox, oy = at
         if ox + WINDOW[0] > w or oy + WINDOW[1] > h:
@@ -256,8 +283,17 @@ class Reader:
             scores[c.key] = min(s, scores.get(c.key, float("inf")))
         attack = tuple(k for k in KEYS if scores[k] <= ATTACK_OK)
         unsure = tuple(k for k in KEYS if ATTACK_OK < scores[k] <= ATTACK_UNSURE)
-        return Reading(True, "read", at, score, preset, attack, self._in_tray(win), unsure,
-                       {k: round(v, 1) for k, v in scores.items()}, gaps)
+        legible: dict[str, bool] = {}
+        for c in BOUND:  # (a key's name is drawn over whatever it's bound to: one of its cells showing it is enough)
+            ok = self._drawn(win, self.labels[c.code], (kx + c.x + c.label_dx, ky + c.y + 1)) >= LABEL_OK
+            legible[c.key] = legible.get(c.key, False) or ok
+        illegible = tuple(k for k in KEYS if not legible[k])
+        in_tray = self._in_tray(win)
+        if not attack and not in_tray and illegible:  # (it may be on one of those: not "on no key")
+            return Reading(True, f"covered (not legible: {', '.join(k.upper() for k in illegible)})", at, score,
+                           preset, gaps=gaps, illegible=illegible)
+        return Reading(True, "read", at, score, preset, attack, in_tray, unsure,
+                       {k: round(v, 1) for k, v in scores.items()}, gaps, illegible)
 
     def _levels(self, win: np.ndarray) -> np.ndarray:
         """The window's crop with the frame's levels brought back to the pictures': its title strip fitted to the

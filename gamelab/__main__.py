@@ -717,23 +717,30 @@ def cmd_keys(args) -> int:
     from .behavior.keycheck import KeyCheck
     check = KeyCheck(hunter, reader, log=_log)
     r = check._window()
+    if check.window_state == "may be open":
+        print("THE KEY BINDINGS WINDOW MAY BE OPEN IN THE GAME: close it with Esc or CANCEL")
     if r is None or not r.read:
         print(f"the key bindings: {'no frame' if r is None else r.text()}")
         return 1
     fn = reader.functions(check._frame_read, r) if check._frame_read is not None else {}
     _say_keys(r, fn, configured)
-    return 0
+    return 0 if check.window_state == "closed" else 1
 
 
 RECORD_FPS = 15      # keys --record: frames a second recorded after the backslash and after Esc ...
 OPEN_MS = 1500       # ... for this long after the backslash ...
 CLOSE_MS = 1200      # ... and after Esc
+LATE_S = 1.0         # ... and one frame this long after the backslash's recording if it showed the window not open
 
 
 def _say_keys(r, fn: dict, configured: str) -> None:
-    """A KEY BINDINGS reading said: where the game has Attack against her configured key, and the whole map."""
+    """A KEY BINDINGS reading said: where the game has Attack against her configured key, and the whole map; a window
+    not read, only why (nothing said of where Attack is)."""
     from .perception import keybindings as kb
     print(f"the key bindings: {r.text()}")
+    if not r.read:
+        print("  where Attack is isn't known: the window wasn't read")
+        return
     if any(kb.same_key(k, configured) for k in r.attack):
         print(f"  Attack is on {configured.upper()}, as config.toml [keys] attack has it")
     else:
@@ -777,10 +784,19 @@ def _keys_recorded(hunter, reader, configured: str) -> int:
     reads = [reader.read(np.asarray(f)) for f in frames]
     report["open_frames"] = [[None if times is None else float(times[i]), bool(x.open), round(x.title, 4)]
                              for i, x in enumerate(reads)]
+    if not reads or not reads[-1].open:  # (one more frame a second later: its opening isn't measured yet)
+        time.sleep(LATE_S)
+        late = hunter.senses.eyes._capture()
+        keep("late", late)
+        r_late = reader.read(late)
+        report["late_frame"] = [LATE_S, bool(r_late.open), round(r_late.title, 4)]
+        if r_late.open:
+            frames, reads = [*frames, late], [*reads, r_late]
     if not reads or not reads[-1].open:
         if frames:
             keep("after_backslash", frames[-1])
-        report["result"] = "the window didn't open (or closed again): no Esc sent"
+        report["result"] = ("the window wasn't seen open (nor in a frame a second later): no Esc sent. If it's open in "
+                            "the game, close it with Esc or CANCEL")
         print(report["result"])
         (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
         return 1
@@ -799,8 +815,15 @@ def _keys_recorded(hunter, reader, configured: str) -> int:
                                        for i, x in enumerate(reads)]
         if frames:
             keep(f"closed{go}", frames[-1])
-        if reads and not reads[-1].open:
+        if not reads:  # (no frame after it: not known, and no Esc sent unseen, the MENU's)
+            report["result"] = (f"not known whether it closed (no frames after Esc x{go}): look at the game, close it "
+                                "with Esc or CANCEL if it's open")
+            break
+        if not reads[-1].open:
             report["result"] = f"read and closed (Esc x{go})"
+            break
+        if len(reads) < 2 or not reads[-2].open:  # (Esc again only with two frames at its end still showing it)
+            report["result"] = "not known whether it closed (open in one frame at the end): look at the game"
             break
     else:
         report["result"] = "STILL OPEN after two Esc: close it yourself (Esc or CANCEL)"

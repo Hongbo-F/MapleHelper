@@ -67,6 +67,7 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 from maplehelper.engine import RIGHT
 
@@ -336,14 +337,19 @@ class Attacks:
         if self.forced == "lucky_seven" and self.skill is not None:
             attack, why = self.skill, "her stars' test"
         elif attack is self.regular and self.watch is not None and self.watch.holds(target):
-            if self.skill is not None and (self.mp is None or choice.can_cast(self.mp, self.max_mp, self.skill.mp)):
-                attack, why = self.skill, "held"
-            else:  # (no Lucky Seven to throw instead: no throw)
+            if target is not None and self.skill is not None and (self.mp is None or choice.can_cast(
+                    self.mp, self.max_mp, self.skill.mp)):
+                attack, why = self.skill, "off" if self.watch.off is not None else "held"
+            else:  # (nothing in its way: no cast spent at nothing; no Lucky Seven to throw instead: no throw)
                 self._cast, self._keyed, self._regular, self._target, self._asked = None, None, False, None, False
-                self.counts["held: none thrown"] += 1
-                if self.counts["held: none thrown"] in (1, 10, 100):
-                    self.log("    no throw: the regular attack is held (its key doubted) and there's no Lucky Seven "
-                             "to throw instead" + ("" if self.skill is None else " (her MP under a cast)"))
+                said = "held: nothing in its way" if target is None else "held: none thrown"
+                self.counts[said] += 1
+                if self.counts[said] in (1, 10, 100):
+                    self.log("    no throw: the regular attack is " + ("off this run" if self.watch.off is not None
+                                                                   else "held (its key doubted)") + " and "
+                             + ("nothing is in its way (no Lucky Seven cast at nothing)" if target is None else
+                                "there's no Lucky Seven to throw instead"
+                                + ("" if self.skill is None else " (her MP under a cast)")))
                 return None
         self._target, self._regular, self._asked = target, attack is self.regular, True
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
@@ -397,12 +403,19 @@ class Attacks:
     def _watch_regular(self, at: float, m: Monster | None) -> None:
         """A regular press keyed at `at` at `m` told to the doubt's watch, with what decides whether it's judged: its
         kind's HP known, it not dying, a throw from the ground (`from_ground`), her not on a rope (`roped`), it in her
-        regular attack's reach from where the last look had her (the watch's reach_ok)."""
+        regular attack's reach from where the last look had her (the watch's reach_ok), the monsters about that the look
+        didn't find (`unseen`, and those the watch saw lately: RegularWatch.hidden) counted with its own (one of them
+        nearer that way takes the attack: keycheck._in_front)."""
         s, w = self._last, self.watch
         ground = self.from_ground() if self.from_ground is not None else True
         roped = self.roped() if self.roped is not None else False
         seen = [] if s is None else s.monsters
-        ok = m is not None and s is not None and (w.reach_ok is None or w.reach_ok(s, m))
+        about = s
+        if s is not None:
+            more = ([] if self.unseen is None else list(self.unseen(s))) + w.hidden(at, s.monsters)
+            if more:
+                about = SimpleNamespace(where=s.where, platform=s.platform, monsters=s.monsters + more)
+        ok = m is not None and s is not None and (w.reach_ok is None or w.reach_ok(about, m))
         w.pressed(at, m, known=m is not None and m.kind in self.stats,
                   dying=m is not None and self._dying(m, at, seen), ground=ground, roped=roped, reach_ok=ok)
 
@@ -547,7 +560,8 @@ class Attacks:
                                                                    if left.dead >= 0.05 else "")
         reason = {"MP": f"MP {mp:.0f} < a cast's {self.skill.mp:.0f}" if self.skill is not None and mp is not None
                   else "MP", "finish": "finishing it", "damage": "", "skill": "", "regular": "",
-                  "nothing in its way": "", "held": "the regular attack held (its key doubted)"}.get(why, why)
+                  "nothing in its way": "", "held": "the regular attack held (its key doubted)",
+                  "off": "the regular attack off this run"}.get(why, why)
         self.log(f"    {attack.name}: {what}" + (f"; {reason}" if reason else "")
                  + ("" if mp is None or why == "MP" else f" (MP {mp:.0f})"))
         if telemetry.recording():  # (where its target was seen too: sim.harness counts the throws at the dead)

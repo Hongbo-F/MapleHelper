@@ -195,3 +195,24 @@ def test_the_pictures_are_the_copy_s(tmp_path):
         a = np.asarray(Image.open(kb.FOLDER / rel).convert("RGBA"))
         b = np.asarray(Image.open(tmp_path / rel).convert("RGBA"))
         assert a.shape == b.shape and (a == b).all(), rel
+
+
+def test_attack_s_cells_covered_isn_t_on_no_key(reader, live):
+    """The review's probe: a box over both Ctrl cells (the keyboard's px between the cells still 0.99 as drawn) read
+    "ATTACK on no key". Their key names aren't drawn there either: covered, not read."""
+    f = live.copy()
+    for c in kb.BOUND:
+        if c.key == "ctrl":
+            x, y = AT[0] + kb.KEYBOARD_AT[0] + c.x, AT[1] + kb.KEYBOARD_AT[1] + c.y
+            f[y - 2:y + 28, x:x + 40] = (240, 230, 200)
+    r = reader.read(f)
+    assert r.open and not r.read and r.why.startswith("covered (not legible: CTRL") and r.illegible == ("ctrl",)
+    assert reader.read(live).illegible == ()
+
+
+def test_the_window_dragged_past_the_frame_s_right_edge_is_open_not_read(reader):
+    """The review's case: at x 900 its whole title isn't in the frame (it was "not open", so nothing closed it); its
+    name, the title's left TITLE_PART px, is: open, partly off the frame, not read."""
+    r = reader.read(kb.compose(kb.LIVE, 2, at=(900, 174), frame=_frame()))
+    assert r.open and not r.read and r.why == "partly off the frame" and r.at == (900, 174)
+    assert not reader.read(_frame()).open  # (the minimap's title, "MINI MAP", isn't its name)

@@ -2706,10 +2706,12 @@ def loop_tree_grind_attack_key(sim):
     """`tour --loop --grind --map 10002073` (the feed, the attack choice) with the game's Attack on A, not on her Ctrl
     (as live on 2026-10-28 00:30, the user's own play having moved it): her Lucky Seven casts hurt, her regular presses
     to finish a monster do nothing; 5 of them in a row judged without effect, the doubt (on seed 1 at 37.1 s: a Green
-    Mushroom at 4%, its 9/233 HP, pressed at from 32.3 s); no cast since the first of them, so her stars' test (its 2nd
-    cast took MP: the 1st swiped a Horny Mushroom that had walked onto her, a touch at 37.2 s, not counted); a Horny
-    Mushroom near, so away to 25 (1.1 s); the backslash, the window read (ATTACK on A, preset 1), Esc, closed (40.0-41.4
-    s); her regular attack A for the rest of the run, paged once; kills with it after."""
+    Mushroom at 4%, its 9/233 HP, pressed at from 32.3 s); a monster near, so away to 25 (2.2 s), a Green Mushroom
+    within 250 of her there still: the check put off (her regular presses held, Lucky Seven at it); at the first quiet
+    look 5 s on (45.0 s) the check again: her stars told by a cast's MP since the doubt's first press; the backslash, the
+    window read (ATTACK on A, preset 1), Esc, closed (45.1-46.9 s); her regular attack A for the rest of the run, paged
+    once; kills with it after. (Until the review of 2026-10-28 the window opened at 40.0 s with that Green Mushroom near:
+    nothing looked again after the retreat.)"""
     return key_check_run(2)(sim)
 
 
@@ -2720,11 +2722,11 @@ def loop_tree_grind_attack_key(sim):
           check("paged once, about the attack key", lambda tr: len(tr["result"]["pages"]) == 1
                 and "attack key" in tr["result"]["pages"][0][1]),
           check("no regular attack after it", lambda tr: not tr["result"]["attack_keys_after"]),
-          logs("the regular attack held (its key doubted)")))
+          logs("the regular attack off this run")))
 def loop_tree_attack_unbound(sim):
-    """As loop_tree_grind_attack_key, the game's Attack on no key: the same doubt and check, the window read with
-    ATTACK on none (no key of the keyboard carries it), so no more regular attacks this run: Lucky Seven only (her
-    throws that would have been the regular attack are "held"), paged once."""
+    """As loop_tree_grind_attack_key, the game's Attack on no key: the same doubt, put off and check, the window read
+    with ATTACK on none (no key of the keyboard carries it), so no more regular attacks this run: Lucky Seven only (her
+    throws that would have been the regular attack: "the regular attack off this run"), paged once."""
     return key_check_run(2)(sim)
 
 
@@ -2745,19 +2747,21 @@ def loop_tree_attack_misses(sim):
 
 @tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40),
-      expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"),
-               logs("Lucky Seven casts took no MP"), logs("OUT OF DARTS: "),
+      expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
-               check("the key bindings never opened", lambda tr: not tr["result"]["window"]),
+               check("by out of darts' own watch, not the stars' test", lambda tr: "Lucky Seven presses over" in (
+                   tr["result"]["stopped"] or "") and "regular attack took no effect" not in tr["result"]["stopped"]),
                check("paged once, about her darts", lambda tr: len(tr["result"]["pages"]) == 1
                      and "out of darts" in tr["result"]["pages"][0][1])))
 def loop_tree_attack_no_darts(sim):
     """`tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts Lucky Seven's presses, so
-    it never fires) with 40 throwing stars: gone at about 50 s, her regular presses only swing the claw, nothing at
-    range; 5 in a row without effect at a Green and a Horny Mushroom she had hurt (91%, 96%), the doubt at 66.5 s; no
-    cast of hers took MP, so her stars' test: Lucky Seven presses at one in reach (waiting while one is up close), which
-    take no MP with no stars (the world's), 5 of them, and out of darts' stop (her retreat, paged, the recording kept)
-    at 79.5 s; the window never opened."""
+    it doesn't fire while she throws it) with 40 throwing stars: gone at about 50 s, her regular presses only swing the
+    claw, nothing at range; 5 in a row without effect at a Green Mushroom she had hurt (91%), the doubt at 81.4 s; a
+    Green Mushroom near after her retreat to 25: the check put off, her regular presses held, so Lucky Seven at them,
+    which takes no MP with no stars (the world's); put off once more (a Green Mushroom within 250 at the quiet look's
+    check, after her stars "not known": nothing in reach to cast at); out of darts' own stop at 20 such presses (121.3 s:
+    her retreat, paged, the recording kept). Until the review of 2026-10-28 her stars' test stopped it at 5 casts
+    without MP (79.5 s), which live, with her stars in her bag, 7-8 in a row had (behavior.keycheck)."""
     return key_check_run(4)(sim)
 
 

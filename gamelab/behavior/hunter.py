@@ -55,7 +55,7 @@ from . import fight
 from .attacks import Attacks
 from .darts import DartWatch, presses_for
 from .fight import Report
-from .keycheck import KeyCheck, KeyDoubt, RegularWatch, regular_reach
+from .keycheck import KeyCheck, KeyDoubt, RegularWatch, regular_reach, unquiet
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
@@ -261,6 +261,10 @@ class Hunter:
         watch = getattr(getattr(self, "attacks", None), "watch", None)  # (her regular attack's key: behavior.keycheck)
         if watch is not None and (doubt := watch.due()) is not None:
             self._doubted(doubt)
+        if (watch is not None and watch.deferred is not None and self.doubts_raise and unquiet(self, s) is None
+                and (doubt := watch.again(time.monotonic())) is not None):
+            self.log("  the key check put off: a quiet moment now")
+            raise KeyDoubt(doubt)  # (a check put off: tried again at a quiet look, keycheck.KeyCheck._defer)
 
     # --- her regular attack's key (behavior.keycheck) --------------------------------------------------------------
 
@@ -292,6 +296,13 @@ class Hunter:
         of her attack choice from now on (Actions.routed: with the regular attack alone, or no Lucky Seven key, her
         Actions keyed it themselves), which throws Lucky Seven instead, or nothing."""
         self.attacks.watch.held = on
+        self._route()
+
+    def hold_at(self, targets) -> None:
+        """No more regular attacks at `targets` (keycheck: a check found the key right, or none ran), in every attack
+        mode (her attack choice asked at every throw: _route); her regular presses let go elsewhere."""
+        self.attacks.watch.no_regular_at.extend(targets)
+        self.attacks.watch.held = False
         self._route()
 
     def regular_off(self, why: str) -> None:
