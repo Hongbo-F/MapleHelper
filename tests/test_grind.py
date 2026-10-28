@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from gamelab.attack import reach
+from gamelab.attack.danger import Her
 from gamelab.behavior import grind, patrol
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.grind import Grind
@@ -242,7 +243,7 @@ def test_the_danger_hook_is_a_cost_and_learns_from_her_hp():
     assert weak.danger(a[0], 150.0) == 0.0  # a kind whose touch takes little: no danger
     # Tree Dungeon's from the game data (its touch damage), where it's on this computer.
     if scenarios.available(10002073):
-        shares = patrol.touch_shares(mapdata.load(10002073))
+        shares = patrol.touch_shares(mapdata.load(10002073), Her(752.0, 24.0))  # (her HUD's at level 24)
         assert shares["horny-mushroom"] == pytest.approx(0.164, abs=0.01) and shares["slime"] < patrol.DANGER_MIN
     before = p.rate([p.stop_on(i) for i in a], 0.0)
     # She has seen a bar of HP go a minute on the first (as in the simulator): that area's rounds are worth less, a

@@ -156,6 +156,24 @@ def status_numbers(copy: Path = COPY) -> dict[str, np.ndarray]:
     return out
 
 
+def level_numbers(copy: Path = COPY) -> dict[str, np.ndarray]:
+    """The status bar's level digits (UI StatusBar.img lvNumber: "0" to "9" and "blank", each an orange box 11 x 13 px
+    with its digit in white, opaque but for its four corners), RGBA. The data image holds 1x1 placeholders whose
+    `_outlink`s name the pictures (UI/_Canvas/Basic.img/LevelNo/<digit>)."""
+    tree = Package(copy / "UI" / "UI_000.wz").image("StatusBar.img")
+    return {name: pixels(source(picture, tree, copy)) for name, picture in tree["lvNumber"].items()
+            if isinstance(picture, Canvas)}
+
+
+def status_panel(copy: Path = COPY) -> tuple[np.ndarray, tuple[int, int]]:
+    """The status bar's panel behind her level, job and name (UI StatusBar.img canvas:backgrnd1: 570 x 64 px, RGBA, its
+    "LV." label in it), and its origin: drawn at the bar's top left less it ((-7, -9): 7 right and 9 down of it)."""
+    tree = Package(copy / "UI" / "UI_000.wz").image("StatusBar.img")
+    picture = tree["canvas:backgrnd1"]
+    origin = _point(picture.props.get("origin")) or (0, 0)
+    return pixels(source(picture, tree, copy)), origin
+
+
 def minimap_markers(copy: Path = COPY) -> dict[str, tuple[np.ndarray, tuple[int, int] | None]]:
     """The minimap's markers (Map/MapHelper.img/minimap: user, another, party, partymaster, guild, guildmaster,
     friend, npc, portal, ...): each one's picture (RGBA) and its origin, the point drawn at the place it marks

@@ -17,7 +17,7 @@ NAMES = [c.name for c in COMBOS]
 MAGE = {"class": "magician", "name": "MageBaby", "job": "Magician",
         "keys": {"left": "left", "right": "right", "jump": "alt", "attack": "ctrl", "magic_claw": "shift",
                  "magic_guard": "a", "pick_up": "z", "pet_food": "u"},
-        "stats": {"hp": 380, "mp": 610, "level": 26, "speed": 105},
+        "stats": {"mp": 610, "speed": 105},
         "skills": {"magic_claw": 16, "energy_bolt": 1, "magic_guard": 5},
         "pet": {"mp_warning": 0.3},
         "buffs": {"magic_guard": True, "magic_armor": True}}
@@ -45,7 +45,7 @@ def test_a_magicians_tables(config_data):
     m = cfg.characters["magician"]
     assert cfg.default_character == "magician" and m.klass == "magician" and (m.name, m.job) == ("MageBaby", "Magician")
     assert m.keys.magic_claw.name == "shift" and m.keys.lucky_seven is None and m.keys.magic_guard.name == "a"
-    assert m.stats == {"hp": 380.0, "mp": 610.0, "level": 26.0, "speed": 105.0} and m.skills["magic_claw"] == 16
+    assert m.stats == {"mp": 610.0, "speed": 105.0} and m.skills["magic_claw"] == 16
     assert m.pet == {"mp_warning": 0.3} and m.buffs == {"magic_guard": True, "magic_armor": True}
     assert cfg.characters["thief"].name == "BugBaby" and cfg.characters["thief"].keys is None
     assert cfg.keys.lucky_seven.name == "shift"  # the flat [keys] are the thief's still
@@ -87,7 +87,12 @@ def test_bad_characters_are_explained(config_data, mutate, message):
     (lambda d: d["characters"]["magician"].update(level=3), "magician", "unknown setting(s) ['level']"),
     (lambda d: d["characters"]["magician"]["stats"].update(luk=4), "magician", "unknown stat(s) ['luk']"),
     (lambda d: d["characters"]["magician"]["stats"].update(lucky_seven=4), "magician", "unknown stat(s) ['lucky_seven']"),
-    (lambda d: d["characters"]["magician"]["stats"].update(hp=0), "magician", "characters.magician.stats.hp must be"),
+    (lambda d: d["characters"]["magician"]["stats"].update(mp=0), "magician", "characters.magician.stats.mp must be"),
+    # Her HP, level and DEF are perception's (behavior.bootstrap): a table giving one is refused, saying so.
+    (lambda d: d["characters"]["magician"]["stats"].update(hp=380), "magician",
+     "has ['hp']: her HP, level and DEF aren't read from config.toml"),
+    (lambda d: d["characters"]["magician"]["stats"].update(level=26, defence=60), "magician",
+     "has ['level', 'defence']: her HP, level and DEF aren't read from config.toml"),
     (lambda d: d["characters"]["magician"]["skills"].update(magic_claw=31), "magician", "must be her skill's level"),
     (lambda d: d["characters"]["magician"]["skills"].update(lucky_seven=3), "magician", "unknown skill(s) ['lucky_seven']"),
     (lambda d: d["characters"]["magician"]["pet"].update(hp_warning=70), "magician", "a share of her bar"),
@@ -218,9 +223,9 @@ def test_under_fixed_stats_config_toml_isnt_read(tmp_path):
 
 
 def test_a_magicians_stats_hers_over_her_class(tmp_path):
-    path = _toml(tmp_path, "[characters.magician]\n[characters.magician.stats]\nhp = 380\nspeed = 105\n")
+    path = _toml(tmp_path, "[characters.magician]\n[characters.magician.stats]\nmp = 380\nspeed = 105\n")
     s = character.stats(path, {character.ENV: "magician"})
-    assert (s.hp, s.speed, s.jump, s.mp) == (380.0, 105.0, 100.0, magician.FIXED_STATS.mp)
+    assert (s.mp, s.speed, s.jump) == (380.0, 105.0, 100.0)
     # FIXED_STATS: her class's copy, whatever the file says (her goldens don't hang on it)
     assert character.stats(path, {character.ENV: "magician", character.FIXED_STATS: "1"}) == magician.FIXED_STATS
     assert character.stats(tmp_path / "nope.toml", {character.ENV: "magician"}) == magician.FIXED_STATS
@@ -319,7 +324,9 @@ def test_the_thiefs_profile_is_todays_constants():
     assert (r.ground_danger, r.hp_exp, r.seen_share) == (hunt.GROUND_DANGER, hunt.HP_EXP, tour.SEEN_SHARE)
     assert (r.threat_s, r.keep_danger, r.meet_s) == (danger.THREAT_S, danger.KEEP_DANGER, navigator.MEET_S)
     c = config.Character()
-    assert (c.defence, c.avoid, c.mp_regen) == (danger.DEFENCE, world.EVADE_ACC, world.MP_REGEN)
+    assert (c.avoid, c.mp_regen) == (world.EVADE_ACC, world.MP_REGEN)
+    # Her HP, level and DEF aren't the profile's (nor config.toml's): perception's (behavior.bootstrap).
+    assert not {"hp", "level", "defence"} & {f.name for f in __import__("dataclasses").fields(c)}
     from gamelab.motion import physics
     assert c.climb_speed == physics.CLIMB_SPEED and t.fixed_stats == c
 
@@ -341,12 +348,17 @@ def test_the_magicians_skill_tables_are_the_game_datas():
     assert set(column("2001003", "mobCount")) == {magician.CAST.mob_count}
 
 
-def test_the_safety_stops_hits_are_hers_the_thief_2_the_magician_3():
+def test_the_safety_stops_hits_are_hers_the_thief_3_for_now_the_magician_3():
     """The user, 2026-10-28: "Well for thief with high evasion this should be 2 hits, 3 for magician" (behavior.safety:
-    her reserve is that many of the map's largest touch); `gamelab character` says it."""
+    her reserve is that many of the map's largest touch), and at ~15:30 "3 hits for now" for the thief, until her retreat
+    dodges (gamelab.classes.thief.SAFETY_HITS says why and when it goes back to 2); `gamelab character` says it."""
     from gamelab.behavior import safety
-    assert (character.load("thief").safety_hits, character.load("magician").safety_hits) == (2, 3) == (
-        safety.HITS, 3)
+    from gamelab.classes import thief
+    assert (character.load("thief").safety_hits, character.load("magician").safety_hits) == (3, 3) == (
+        thief.SAFETY_HITS, magician.SAFETY_HITS) and safety.HITS == 3
+    import inspect
+    said = inspect.getsource(thief).split("SAFETY_HITS = 3")[0].rsplit("\n\n", 1)[-1]
+    assert "3 hits for now" in said and "Back to 2 once her retreat dodges" in said
     assert "  safety stop: under 3 of the map's largest touches (behavior.safety)" in character.describe(
         character.load("magician"))
 
@@ -356,12 +368,12 @@ def test_the_safety_stops_hits_are_hers_the_thief_2_the_magician_3():
 
 def test_physics_takes_the_stats_of_who_plays(tmp_path):
     from gamelab.motion import physics
-    path = _toml(tmp_path, "[character]\nspeed = 125\njump = 110\n[characters.magician.stats]\nhp = 380\n")
+    path = _toml(tmp_path, "[character]\nspeed = 125\njump = 110\n[characters.magician.stats]\nmp = 380\n")
     assert physics.CHARACTER == config.Character()  # the tests: FIXED_STATS, the thief
     assert physics.stats(path, environ={}) == config.Character(speed=125, jump=110)  # the thief's [character], as before
     assert physics.stats(path, environ={physics.FIXED_STATS: "1"}) == config.Character()
     mage = physics.stats(path, environ={character.ENV: "magician"})
-    assert (mage.hp, mage.speed) == (380.0, magician.FIXED_STATS.speed)
+    assert (mage.mp, mage.speed) == (380.0, magician.FIXED_STATS.speed)
     assert physics.stats(path, environ={character.ENV: "magician", physics.FIXED_STATS: "1"}) == magician.FIXED_STATS
 
 
@@ -374,9 +386,9 @@ def test_the_character_flag_plays_her_in_the_process_and_its_children():
                          capture_output=True, text=True, timeout=120)
     assert out.returncode == 0 and out.stdout.startswith("plays: magician (by GAMELAB_CHARACTER"), out.stdout
     code = ("import os, sys; from gamelab.__main__ import main; main(['--character', 'magician', 'character']); "
-            "from gamelab.motion import physics; print(os.environ['GAMELAB_CHARACTER'], physics.CHARACTER.hp)")
+            "from gamelab.motion import physics; print(os.environ['GAMELAB_CHARACTER'], physics.CHARACTER.mp)")
     out = subprocess.run([sys.executable, "-c", code], cwd=root, env=env, capture_output=True, text=True, timeout=120)
-    assert out.stdout.splitlines()[-1] == f"magician {magician.FIXED_STATS.hp}", out.stdout + out.stderr
+    assert out.stdout.splitlines()[-1] == f"magician {magician.FIXED_STATS.mp}", out.stdout + out.stderr
 
 
 def test_the_flag_checks_who_and_when(monkeypatch):

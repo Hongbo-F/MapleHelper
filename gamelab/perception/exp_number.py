@@ -52,17 +52,23 @@ BLANK = " "             # a blank game column: the cells after the number (and a
 
 @dataclass(frozen=True)
 class Layout:
-    """A number in the bottom bar drawn with the status bar's glyphs (gamedata.canvas.status_numbers), as the reader
-    (`read_text`) and `draw_text` model it: where its first glyph has its top left (game px), the game x its cells end
-    before, the characters it can hold (each the picture of its own name, but those `pictures` renames: '/' is
-    'slash'), and the game x before which the box's screen columns are taken for the background (`masked_to`: another
-    label's outline reaching into the box; None: none). Her EXP number (EXP) and her HP number (perception.hp_number)
-    are two."""
+    """A number in the bottom bar drawn with the status bar's glyphs, as the reader (`read_text`) and `draw_text` model
+    it: where its first glyph has its top left (game px), the game x its cells end before, the characters it can hold
+    (each the picture of its own name, but those `pictures` renames: '/' is 'slash'), and the game x before which the
+    box's screen columns are taken for the background (`masked_to`: another label's outline reaching into the box;
+    None: none). `glyph_set`: the pictures, "number" (gauge/number: gamedata.canvas.status_numbers, GLYPH_ROWS tall) or
+    "lv" (lvNumber, her level's orange boxes: level_numbers, 13 tall), `rows` their height; `panel`: the box's
+    background is the status bar's panel picture where it's drawn (gamedata.canvas.status_panel: known exactly, as the
+    glyphs are), not taken from the box's darkest columns. Her EXP number (EXP), her HP number (perception.hp_number)
+    and her level (perception.lv_number) are three."""
     at: tuple[int, int]
     end: int
     glyphs: str
     pictures: tuple[tuple[str, str], ...] = ()
     masked_to: float | None = None
+    glyph_set: str = "number"
+    rows: int = GLYPH_ROWS
+    panel: bool = False
 
     def picture(self, char: str) -> str:
         return dict(self.pictures).get(char, char)
@@ -79,7 +85,7 @@ def box_of(layout: Layout, geo: Geometry) -> tuple[int, int, int, int]:
     x0 = math.ceil((layout.at[0] - 0.5) * sx - 0.5)               # the first column sampling game x at - 1 or past
     x1 = math.ceil((layout.end - 0.5) * sx - 0.5)                 # ... past the last sampling before end - 1
     first = math.floor((layout.at[1] - 0.5) * sy - 0.5) + 1      # the first row sampling past game y at - 1
-    last = math.ceil((layout.at[1] + GLYPH_ROWS + 0.5) * sy - 0.5) - 1  # the last sampling before at + 7
+    last = math.ceil((layout.at[1] + layout.rows + 0.5) * sy - 0.5) - 1  # the last sampling before at + rows
     return x0, first - 2, x1, last + 1 + 3
 
 
@@ -168,8 +174,7 @@ class _Cells:
 def cells_of(layout: Layout, geo: Geometry) -> _Cells:
     """The cells of a layout in a frame of this geometry (from the game data's pictures: 30 ms, and 150 to draw them
     all, once a layout and geometry)."""
-    from gamedata.canvas import status_numbers
-    pictures = status_numbers()
+    pictures = _pictures(layout.glyph_set)
     x0, y0, x1, y1 = box_of(layout, geo)
     width = x1 - x0
     across = sample_at(np.arange(width), geo.stretch_x, x0)
@@ -177,7 +182,8 @@ def cells_of(layout: Layout, geo: Geometry) -> _Cells:
     chars, xs, advances, c0, c1, cell, pixel, row, a, c = [], [], [], [], [], [], [], [], [], []
     first, end = layout.at[0], layout.end
     for char in layout.glyphs + BLANK:
-        rgba = pictures[layout.picture(char)].astype(float) / 255 if char != BLANK else np.zeros((7, 0, 4))
+        rgba = (pictures[layout.picture(char)].astype(float) / 255 if char != BLANK
+                else np.zeros((layout.rows, 0, 4)))
         h, w = rgba.shape[:2]
         alpha, colour = rgba[..., 3], rgba[..., :3] * 255 * rgba[..., 3:]  # colour in levels, premultiplied
         wy = weights(down, layout.at[1], h)
@@ -202,6 +208,33 @@ def cells_of(layout: Layout, geo: Geometry) -> _Cells:
                   {(ch, int(x)): i for i, (ch, x) in enumerate(zip(chars, xs))}, masked)
 
 
+@lru_cache(maxsize=2)
+def _pictures(glyph_set: str) -> dict[str, np.ndarray]:
+    """The status bar's glyphs of a Layout's `glyph_set` (from the game data, once)."""
+    from gamedata.canvas import level_numbers, status_numbers
+    return status_numbers() if glyph_set == "number" else level_numbers()
+
+
+BAR_AT = (279, 695)  # game px: the status bar's top left at 1366x768 (its backgrnd2, 808 x 73, centred on the bottom)
+
+
+@lru_cache(maxsize=8)
+def panel_of(layout: Layout, geo: Geometry) -> np.ndarray:
+    """The status bar's panel picture (gamedata.canvas.status_panel, drawn at BAR_AT less its origin) as a frame of
+    geometry `geo` shows it over a layout's box (box_of): (rows, columns, 3) levels, each screen px the bilinear mix of
+    the game px its sample falls between (the picture's own px at 1366x768). Read-only."""
+    from gamedata.canvas import status_panel
+    picture, origin = status_panel()
+    rgb = picture[..., :3].astype(np.float32)
+    left, top = BAR_AT[0] - origin[0], BAR_AT[1] - origin[1]
+    x0, y0, x1, y1 = box_of(layout, geo)
+    wx = weights(sample_at(np.arange(x1 - x0), geo.stretch_x, x0), left, rgb.shape[1])  # (columns, its width)
+    wy = weights(sample_at(np.arange(y1 - y0), geo.stretch, y0), top, rgb.shape[0])
+    out = np.einsum("yr,rcz,xc->yxz", wy, rgb, wx).astype(np.float32)
+    out.flags.writeable = False
+    return out
+
+
 def _cells(geo: Geometry = STRETCHED) -> _Cells:
     """Her EXP number's cells in a frame of this geometry (cells_of)."""
     return cells_of(EXP, geo)
@@ -213,14 +246,20 @@ def read_text(layout: Layout, box: np.ndarray, geo: Geometry) -> tuple[str, floa
     cells = cells_of(layout, geo)
     s = box.astype(np.float32)
     rows = s.shape[0]
-    bg = np.percentile(s, BG_SHARE, axis=1).astype(np.float32)  # (rows, 3)
-    over = s - bg[:, None, :]  # what's on the background
+    if layout.panel:  # (the panel's own picture behind it, px by px)
+        bg = panel_of(layout, geo)
+        over = s - bg
+        under = bg.reshape(-1, 3)[cells.pixel]
+    else:
+        bg = np.percentile(s, BG_SHARE, axis=1).astype(np.float32)  # (rows, 3)
+        over = s - bg[:, None, :]  # what's on the background
+        under = bg[cells.row]
     if cells.masked:
         over[:, :cells.masked] = 0.0  # (another label's outline: the background's)
     # Each cell's squared difference from the screen: as if blank over its columns, then where its glyph shows.
     upto = np.concatenate([[0.0], np.cumsum((over ** 2).sum(axis=(0, 2)))])
     flat = over.reshape(-1, 3)[cells.pixel]
-    off = flat - cells.c + bg[cells.row] * cells.a[:, None]
+    off = flat - cells.c + under * cells.a[:, None]
     cost = upto[cells.c1] - upto[cells.c0] + np.bincount(cells.cell, ((off ** 2) - (flat ** 2)).sum(axis=1),
                                                          minlength=len(cells.x))
     values = (cells.c1 - cells.c0) * rows * 3
@@ -332,9 +371,12 @@ def draw(text: str, under: np.ndarray | None = None, geo: Geometry = STRETCHED) 
 
 def draw_text(layout: Layout, text: str, under: np.ndarray | None, geo: Geometry) -> np.ndarray:
     """`text` drawn over a layout's box (box_of) as the game draws its glyphs, over the box `under` (RGB; None: the
-    bar's own, BAR, the same behind every number on its rows). Glyphs past the layout's end are left out."""
+    bar's own, BAR, the same behind every number on its rows; a `panel` layout's, the panel's picture). Glyphs past the
+    layout's end are left out."""
     cells = cells_of(layout, geo)
     x0, y0, x1, y1 = box_of(layout, geo)
+    if under is None and layout.panel:
+        under = panel_of(layout, geo)
     out = (np.broadcast_to(bar_rows(geo)[:, None, :], (y1 - y0, x1 - x0, 3)) if under is None
            else under.astype(np.float32)).reshape(-1, 3).copy()
     x = layout.at[0]

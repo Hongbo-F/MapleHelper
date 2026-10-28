@@ -232,9 +232,9 @@ class Character:
     perception: Perception
     placeholders: tuple[str, ...] = ()  # what of her profile is a placeholder still (gamelab.classes), said by
                                         # `gamelab character`
-    safety_hits: int = 2              # the safety stop's reserve: this many of the map's largest touches (behavior.safety;
+    safety_hits: int = 3              # the safety stop's reserve: this many of the map's largest touches (behavior.safety;
                                       # the user, 2026-10-28: "for thief with high evasion this should be 2 hits, 3 for
-                                      # magician")
+                                      # magician"; the thief's 3 for now: gamelab.classes.thief.SAFETY_HITS)
 
     @property
     def name(self) -> str | None:
@@ -385,8 +385,8 @@ def choose(which: str, chosen: Path | None = None, path=CONFIG) -> Path:
 def describe(c: Character) -> list[str]:
     """A character's profile in a few lines (`gamelab character`)."""
     s = c.stats
-    lines = [f"{c.id} ({c.klass}): {c.job or '?'} {c.name or '(name not given)'}; level {s.level:g}, HP {s.hp:g}, "
-             f"MP {s.mp:g}, SPEED {s.speed:g}, JUMP {s.jump:g}"]
+    lines = [f"{c.id} ({c.klass}): {c.job or '?'} {c.name or '(name not given)'}; MP {s.mp:g}, SPEED {s.speed:g}, "
+             f"JUMP {s.jump:g} (her max HP, level and DEF: perception's, behavior.bootstrap)"]
     for slot, a in c.attacks.items():
         g, s = a.geometry, a.geometry.search
         if g.kind == "star_search":

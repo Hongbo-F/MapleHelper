@@ -8,7 +8,9 @@
   drops are drawn into the frame as data its fake detectors read (Eyes.monsters, monsters_wide, items),
   and hurt monsters' HP bars as pixels, as the game draws them (Eyes.bar reads those); her EXP number as the bar shows
   it (perception.exp_number draws it with the game's glyphs: her level and EXP at the start, World.character, and what
-  she has gained), read as in game.
+  she has gained), her HP number ("HP [cur/max]": perception.hp_number, her world HP of the character's max HP) and
+  her level's digits after "LV." (perception.lv_number, the level her EXP has reached), read as in game: what the
+  hunter knows of her max HP and level is what it reads there (behavior.bootstrap), as live.
   world.Noise can round the dot to whole pixels and hide her tag, her dot or her EXP number for a while.
 - `FakePlayer`: what gamelab.control.client offers (submit, send, done, wait, cancel), running each plan's keys
   on the world: plans run one after another, `end_ms` makes one last longer, every key still held is let
@@ -47,7 +49,7 @@ from ..localization.monsters import FLINCH_S
 from ..localization.pose import GRASS_OVERHANG
 from ..localization.pose import CAMERA_OFFSET, Camera, Localizer
 from ..paths import LAB
-from ..perception import exp_number
+from ..perception import exp_number, hp_number, lv_number
 from ..perception.eyes import Eyes, Observation
 from ..perception.heading import Reading
 from ..perception.hud import bar_box, draw_hp_bar
@@ -347,6 +349,8 @@ class FakeEyes(Eyes):
         self.counts = {"looks": 0, "glances": 0, "tag hidden": 0, "dot hidden": 0}  # for the trace
         self.frame_counts = {"frames": 0, "tag hidden": 0, "dot hidden": 0}  # the feed's frames (observe)
         self._exp_drawn: tuple[int, np.ndarray] | None = None  # her EXP number's box, for the EXP she has gained
+        self._hp_drawn: tuple[tuple[int, int], np.ndarray] | None = None  # her HP number's box, for her HP
+        self._lv_drawn: tuple[int, np.ndarray] | None = None  # her level's box, for her level
         self._bars: dict[tuple, float | None] = {}  # what a bar's box read (`bar`), by its px
         self.deaths = FakeDeaths(world)  # the death watch on the world (perception.deaths' stand-in)
 
@@ -435,6 +439,43 @@ class FakeEyes(Eyes):
             box[:, 20:50] = 255
         return box
 
+    def shown_hp(self) -> tuple[int, int]:
+        """Her HP number as the bar shows it: her world HP of the character's max HP, in whole HP."""
+        most = int(round(self.world.character.max_hp))
+        return max(0, min(most, int(round(self.world.hp * most)))), most
+
+    def shown_level(self) -> int:
+        """Her level as the bar's digits show it: the character's at the start and the levels her EXP has gained."""
+        return shown_exp((self.world.character.level, self.world.character.exp), self.world.exp)[0]
+
+    def _hp_box(self) -> np.ndarray:
+        """Her HP number's box as the bar shows it (hp_number.draw: the reader's own model of the game's glyphs; drawn
+        again only when it changes)."""
+        cur = self.shown_hp()
+        if self._hp_drawn is None or self._hp_drawn[0] != cur:
+            box = hp_number.draw(hp_number.shown(*cur), STRETCHED)
+            box.flags.writeable = False
+            self._hp_drawn = (cur, box)
+        return self._hp_drawn[1]
+
+    def _lv_box(self) -> np.ndarray:
+        """Her level's box as the bar shows it (lv_number.draw over the status bar's panel; drawn again only when it
+        changes)."""
+        level = self.shown_level()
+        if self._lv_drawn is None or self._lv_drawn[0] != level:
+            box = lv_number.draw(level, STRETCHED)
+            box.flags.writeable = False
+            self._lv_drawn = (level, box)
+        return self._lv_drawn[1]
+
+    def hud_now(self) -> tuple[tuple[int, int] | None, int | None]:
+        """Her HUD's HP number and level as the perception service, looking at the game before a command starts, has
+        them (its newest state's hp_of and level_of, which a hunter starts from: Hunter._given): the boxes drawn now,
+        read by the real readers (hp_number, lv_number), with no look's time (the service's own frames)."""
+        hp = hp_number.read(self._hp_box(), STRETCHED)
+        lv = lv_number.read(self._lv_box(), STRETCHED)
+        return hp.of, lv.level
+
     def bar(self, obs: Observation, mob: Mob) -> float | None:
         """Eyes.bar, off the bar drawn over it as the game draws it (perception.hud.draw_hp_bar); with
         Realism.bars_empty a bar up reads empty, as the stack read them live at 1366x768 until 2026-10-25 (hud.hp_bar
@@ -481,6 +522,7 @@ class FakeEyes(Eyes):
                         ground=self._ground(her) if seen else None, dot=self._dot(counts), others=self._others(),
                         ropes=found)
         s.exp, s.exp_box = exp_pixels(w.exp), self._exp_box()
+        s.hp_box, s.lv_box = self._hp_box(), self._lv_box()
         if Noise.during(self.noise.exp_hidden, w.t):  # the cursor over the number changes its pixels as it comes
             s.exp = s.exp.copy()                       # and goes, as in game (and a kill under it the rest)
             s.exp[:, 20:50] = True
@@ -907,6 +949,10 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
                     put(fn, "__defaults__", tuple(moved(v) for v in fn.__defaults__))
                 if fn.__kwdefaults__ and any(moved(v) is not v for v in fn.__kwdefaults__.values()):
                     put(fn, "__kwdefaults__", {k: moved(v) for k, v in fn.__kwdefaults__.items()})
+        from .. import paths
+        for name, file in (("TOUCHES", "touches.jsonl"), ("STATS", "her_stats.json")):
+            if getattr(paths, name).parent != folder:  # (her touches and her stats: the run's own, wherever a test
+                put(paths, name, folder / file)       # pointed them, so no run starts from another's)
         for obj, name, value in _write_guards(LAB):
             put(obj, name, value)
         from maplehelper import win32

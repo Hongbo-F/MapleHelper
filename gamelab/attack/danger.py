@@ -1,7 +1,8 @@
 """How badly she can be touched at a place: the danger of standing on a platform at an x over the next moments, from
 the monsters she sees and from the map's spawn points. The hunt loop chooses where to shoot a ground from and where to
 wait for respawns by it (attack.spots, behavior.hunt), and a fight how near it lets a monster on her platform come
-(attack.stance, `keep_off`). Pure, from the map's game data (localization.mapdata) and her HP and level (`Her`).
+(attack.stance, `keep_off`). Pure, from the map's game data (localization.mapdata) and her max HP, level and DEF
+(`Her`: perception's, behavior.bootstrap).
 
 A monster counts by
 - what a touch by its kind takes (`Threat.share`): its touch damage (PADamage, game data) as meowdb's formula has it
@@ -45,9 +46,11 @@ from ..perception.kinds import kind_of
 # touches of 17 recordings, 10-24 23:50 to 10-28 12:16; D:/MapleHelper-scratch/safety3/design, formula.py) fits the
 # formula with DEF about 64 at levels 24-26 (a Horny Mushroom 113-134, a Green 51-61: as seen) and about 111 at level 28
 # (Horny 103-123, Green 44-53; seen 103-122 over 38 and 44-52 over 33): her DEF went up between 10-26 23:47 and 10-28
-# 00:30, new gear presumably. 75 lies between the two; it stays the stack's (config.Character.defence, her profile's),
-# and the safety stop takes the formula's top at it as a touch's size until her own touches tell more
-# (behavior.safety).
+# 00:30, new gear presumably. Her DEF is perception's since (behavior.bootstrap: her stat window's W.DEF when it's
+# read, else fitted to her touches); 75 is the positioning model's prior until one says otherwise, kept while her
+# touches don't contradict it (bootstrap.PLAN_DEF), and the simulator's DEF (sim.world: its touches). The safety stop
+# takes none of it on trust: until her DEF is read or fitted it takes a touch at DEF 0, the most one can take
+# (bootstrap.PRIOR_DEF).
 DEFENCE = 75.0
 TOP_U = 1 - 1e-9  # the roll's top (touch_taken's u is in [0, 1))
 # A kind whose touch takes less than this share of her HP is no danger worth giving up reach, a throw or a step for:
@@ -79,18 +82,27 @@ KEEP_DANGER = 0.08
 
 @dataclass(frozen=True)
 class Her:
-    """What a touch is measured against: her HP and level (config.toml [character], hp and level), and her DEF."""
-    hp: float = 752.0
-    level: float = 24.0
+    """What a touch is measured against: her max HP and level as perception read them (the HUD's HP number and "LV."
+    digits: behavior.bootstrap, Hunter.her), and her DEF as estimated (her stat window's, else fitted to her touches,
+    else DEFENCE). No defaults: none is hers but what was read (tests give theirs)."""
+    hp: float
+    level: float
     defence: float = DEFENCE
 
 
 def touch_taken(pad: float, defence: float, level: float, u: float = 0.5) -> int:
-    """The HP a touch by a monster of touch damage `pad` (PADamage) takes from her at `defence` and `level`, as
-    meowdb's page on this game's formulas has it (meowdb.com/msclassic/formulas/damage-taken, read 2026-10-24): raw =
+    """The HP a touch by a monster of touch damage `pad` (PADamage, the game data's: a touch is a regular attack at its
+    AttackRatio 100) takes from her at `defence` (her W.DEF) and `level`, as this game's client works it out: raw =
     PADamage x (1.2 + 0.2 u), taken = raw x (1 - DEF / (DEF + 300 + 2 raw)) - (DEF / 25 + level / 10), cut to whole
-    HP, at least 1; `u` in [0, 1) places it in the roll (0.5: its middle). The simulator's touches are these
-    (sim.world.touch_damage)."""
+    HP, at least 1; `u` in [0, 1) places it in the roll (0.5: its middle). Two readings of the current client agree on
+    it to the term: meowdb's damage-taken page (meowdb.com/msclassic/formulas/damage-taken, read 2026-10-24; saved
+    2026-10-28 in D:/MapleHelper-scratch/touch/mech/web: "EffectiveMobAttack = trunc(MobAttack x AttackRatio / 100)",
+    "FinalTaken = trunc(clamp(Taken, 1, 50,000,000))") and the osms datamine's (D:/MapleHelper-scratch/touch/mech/
+    src_keep, ohmi69_tabs_formulas.js: "Re-derived from all three regular damage-taken paths in the current version";
+    the older 1.1 + 0.4 u roll and DEF / (5 level + 200 + 1.2 raw) scale were the client before). Her 178 exact touches
+    of 2026-10-24 to 28 fit it at one DEF a gear (behavior.bootstrap: 64 at levels 24-26, 111 at 28). The v83 client's
+    (RustMS MobDamage.h: W.DEF against a job's standard) isn't this game's. No miss or guard here: what a touch takes
+    when it lands. The simulator's touches are these (sim.world.touch_damage)."""
     raw = pad * (1.2 + 0.2 * u)
     taken = raw * (1 - defence / (defence + 300 + 2 * raw)) - (defence / 25 + level / 10)
     return max(1, math.trunc(taken))
@@ -126,8 +138,8 @@ def soon(t: float) -> float:
 class Danger:
     """The danger of places on one map, for her (`Her`): `at` a place, `keep_off` a kind on her platform."""
 
-    def __init__(self, model: MapModel, her: Her | None = None):
-        self.model, self.her = model, her or Her()
+    def __init__(self, model: MapModel, her: Her):
+        self.model, self.her = model, her
         body, speed = bodies(model), speeds(model)
         self.threats: dict[str, Threat] = {}
         for name, pad in model.mob_damage.items():
@@ -290,9 +302,8 @@ _KEPT: dict[tuple[int, Her], tuple[MapModel, Danger]] = {}
 MODELS_KEPT = 8
 
 
-def of_map(model: MapModel, her: Her | None = None) -> Danger:
+def of_map(model: MapModel, her: Her) -> Danger:
     """The map's Danger for her (made once per map and her)."""
-    her = her or Her()
     kept = _KEPT.get((id(model), her))
     if kept is None or kept[0] is not model:
         if len(_KEPT) >= MODELS_KEPT:

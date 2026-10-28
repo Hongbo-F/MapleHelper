@@ -1,0 +1,267 @@
+{
+ "_": "her level boxes (perception.lv_number.read_box at 1366x768) cut from the 40 lossless 1366x768 frames saved under gamelab/lab and lab/shots, by frame name; each with her HP number as hp_number reads that frame and the level its max says (the thief: 752 at 24, 774 at 25, 796 at 26, 840 at 28); null: a frame of garbage (hp0_*: her HP read 0, the HUD not the game's)",
+ "frames": {
+  "hp0_135315": {
+   "level_by_hp": 24,
+   "hp": [
+    633,
+    752
+   ]
+  },
+  "hp0_135320": {
+   "level_by_hp": 24,
+   "hp": [
+    667,
+    752
+   ]
+  },
+  "hp0_135323": {
+   "level_by_hp": 24,
+   "hp": [
+    696,
+    752
+   ]
+  },
+  "hp0_135329": {
+   "level_by_hp": 24,
+   "hp": [
+    613,
+    752
+   ]
+  },
+  "hp0_135339": {
+   "level_by_hp": 24,
+   "hp": [
+    710,
+    752
+   ]
+  },
+  "hp0_164845": null,
+  "hp0_164847": null,
+  "hp0_165533": null,
+  "hunt_look": {
+   "level_by_hp": 25,
+   "hp": [
+    774,
+    774
+   ]
+  },
+  "keyconfig-closed": {
+   "level_by_hp": 28,
+   "hp": [
+    840,
+    840
+   ]
+  },
+  "keyconfig": {
+   "level_by_hp": 28,
+   "hp": [
+    840,
+    840
+   ]
+  },
+  "nm_confirm": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_drag": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_drag2": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_drag3": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_drop": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_drop2": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_equip": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_inv1": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_inv2": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_keys": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_keys2": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_menu_btn": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_pet1": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_pet2": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_pet3": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_pet4": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_pet6": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_pet7": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_pick": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_tab": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "nm_verify": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "calibrate_1366x768": {
+   "level_by_hp": 24,
+   "hp": [
+    752,
+    752
+   ]
+  },
+  "lie_detector_002508": {
+   "level_by_hp": 25,
+   "hp": [
+    681,
+    774
+   ]
+  },
+  "lie_detector_004925": {
+   "level_by_hp": 28,
+   "hp": [
+    626,
+    840
+   ]
+  },
+  "lie_detector_005510": {
+   "level_by_hp": 25,
+   "hp": [
+    609,
+    774
+   ]
+  },
+  "lie_detector_010144": {
+   "level_by_hp": 25,
+   "hp": [
+    676,
+    774
+   ]
+  },
+  "lie_detector_210200": {
+   "level_by_hp": 24,
+   "hp": [
+    654,
+    752
+   ]
+  },
+  "lie_detector_231459": {
+   "level_by_hp": 26,
+   "hp": [
+    686,
+    796
+   ]
+  },
+  "lie_detector_235129": {
+   "level_by_hp": 24,
+   "hp": [
+    659,
+    752
+   ]
+  }
+ }
+}

@@ -79,7 +79,6 @@ from ..localization.mapdata import SPAWN_REACH, MapModel
 from ..localization.memory import MEMORY_S, SURE
 from ..localization.monsters import Monster
 from ..localization.players import Player, near_rival
-from ..motion import physics
 from ..motion.physics import WALK_SPEED
 from ..perception.kinds import kind_of
 
@@ -326,13 +325,11 @@ def refill_mean(n: int = 1, scale: float = 1.0) -> float:
     return (REFILL_D0 + max(1, n) * REFILL_TAU) * scale
 
 
-def touch_shares(model: MapModel, her: danger_model.Her | None = None) -> dict[str, float]:
+def touch_shares(model: MapModel, her: danger_model.Her) -> dict[str, float]:
     """Kind -> the share of her HP a touch by it takes, as the positioning model has it (attack.danger.Danger.share:
-    the map's touch damage, MapModel.mob_damage, by meowdb's formula at her level, over her HP; 0 under DANGER_MIN), for
-    `her` (None: config.toml [character], as Hunter.danger's). {} on a map whose touch damage wasn't read: no danger."""
-    if her is None:
-        c = physics.CHARACTER
-        her = danger_model.Her(c.hp, c.level)
+    the map's touch damage, MapModel.mob_damage, by the game's formula at her level and DEF, over her max HP; 0 under
+    DANGER_MIN), for `her` (attack.danger.Her: as perception read her, Hunter.her). {} on a map whose touch damage
+    wasn't read: no danger."""
     return {k: t.share for k, t in danger_model.of_map(model, her).threats.items()}
 
 
@@ -501,14 +498,14 @@ class Patrol:
     """The map's points and stops, the belief, the loop she follows and the choice of her next stop (see the top).
     `travel(platform, x, platform, x)`: s by the planner's routes (None: no way); `danger(platform, x)`: the hook, the
     danger of fighting there in the positioning model's unit (None: default_danger, with `touch`: kind -> the share of
-    her HP a touch takes, None: touch_shares)."""
+    her HP a touch takes, None: none, no danger: a hunter's hook is her positioning model's, Hunter.danger)."""
 
     def __init__(self, model: MapModel, kinds: set[str] | None, exp: dict[str, float],
                  travel: Callable[[int, float, int, float], float | None],
                  danger: Callable[[int, float], float] | None = None, touch: dict[str, float] | None = None):
         self.model = model
         self.points = points_of(model, kinds, exp)
-        self.danger = danger or default_danger(model, self.points, touch_shares(model) if touch is None else touch)
+        self.danger = danger or default_danger(model, self.points, {} if touch is None else touch)
         self.stops = stops_of(model, self.points, self.danger)
         self.belief = Belief(model, self.points)
         self.travel = travel

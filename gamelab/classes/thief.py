@@ -1,4 +1,5 @@
-"""The thief: BugBaby, a Rogue, level 25 (2026-10-25), with Lucky Seven and her claw's throwing stars.
+"""The thief: BugBaby, a Rogue, with Lucky Seven and her claw's throwing stars (her HP, level and DEF are
+perception's: behavior.bootstrap).
 
 Every value here is a module constant of the stack's, the place it's measured and used: her code reads it there, as it
 did before profiles. Here it describes her, and tests/test_character.py checks each against the constant named beside
@@ -71,9 +72,13 @@ POLICY = Policy(default_mode="choice",      # behavior.hunter's: Lucky Seven or 
                 unseen="regular",           # behavior.hunt.UNSEEN_ATTACK
                 close_quarters="claw",      # attack.stance's claw-edge rules
                 mp_floor=0.0)               # a cast whenever it's paid for (attack.choice.can_cast)
-# The safety stop's reserve: two of the map's largest touches (behavior.safety). The user, 2026-10-28: "Well for thief
-# with high evasion this should be 2 hits, 3 for magician".
-SAFETY_HITS = 2
+# The safety stop's reserve: this many of the map's largest touches (behavior.safety: worked out live, at her level and
+# DEF as perception reads them, over the map's kinds). The user's rule, 2026-10-28: "Well for thief with high evasion
+# this should be 2 hits, 3 for magician". Three for now, the user's decision of 2026-10-28 ~15:30 ("3 hits for now"):
+# her retreat after a stop doesn't dodge yet (her way to a safe place keeps clear of monsters only by waiting them out:
+# the simulator with her pet out of potions lost her on it in 7-8 of 40 runs as live at 2 hits, 2-5 at 3; behavior.
+# safety). Back to 2 once her retreat dodges (another workflow's).
+SAFETY_HITS = 3
 PET = Pet(hp_warning=0.70,                  # sim.world.PET_HP (behavior.safety: her pet at 70%)
           mp_warning=0.05,                  # sim.world.PET_MP
           hp_heal=250.0,                    # sim.world.HP_POTION

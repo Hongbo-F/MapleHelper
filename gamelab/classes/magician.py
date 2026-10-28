@@ -36,12 +36,9 @@ ALERT_MS = 600  # a buff's cast plays alert2, 600 ms of frames [data: actions.js
 FIXED_STATS = config.Character(
     speed=100.0,        # PLACEHOLDER (the game's 100, no gear or Haste): her SPEED -- her stat window; L0's walk
     jump=100.0,         # PLACEHOLDER: her JUMP -- her stat window; L0's jump (77 units at 100)
-    hp=400.0,           # PLACEHOLDER: her HP when full -- her HP bar's number
-    level=25.0,         # PLACEHOLDER (design.md 4.7's example): her level -- the user's answer
     mp=500.0,           # PLACEHOLDER: her MP when full -- her MP bar's number
     lucky_seven=0.0,    # (not hers: a thief's skill)
-    defence=75.0,       # PLACEHOLDER (the thief's fit, attack.danger.DEFENCE): her W.DEF -- her stat window, or a fit
-                        # from her touches (L1, L2)
+                        # (her HP, level and W.DEF: perception's, as the thief's: behavior.bootstrap)
     avoid=27.0,         # PLACEHOLDER (the thief's fit, sim.world.EVADE_ACC): her AVOID -- her stat window
     climb_speed=117.0,  # PLACEHOLDER (the thief's, physics.CLIMB_SPEED): one climb in L0
     mp_regen=0.32)      # PLACEHOLDER (the thief's, sim.world.MP_REGEN): her idle MP bar in L0, or L1's quiet stretches
@@ -132,9 +129,10 @@ PET = Pet(hp_warning=0.70, mp_warning=0.05, hp_heal=250.0, mp_heal=185.0)  # PLA
 PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=100.0, ground_danger=2.0, hp_exp=250.0,
                 seen_share=0.3, threat_s=1.7, keep_danger=0.08, meet_s=8.0)  # PLACEHOLDER (the thief's): re-tuned in
                                           # the simulator with her HP and DEF (S7), then her live kill times (L2)
-# The safety stop's reserve: three of the map's largest touches (behavior.safety). The user, 2026-10-28: "Well for thief
-# with high evasion this should be 2 hits, 3 for magician". With her placeholder 400 HP that's over her pet's 70% on Tree
-# Dungeon (3 Horny Mushroom touches of 131: 393 against 280): a command that hunts refuses the map (TooStrong).
+# The safety stop's reserve: three of the map's largest touches (behavior.safety: worked out live, at her level and DEF as
+# perception reads them, over the map's kinds). The user, 2026-10-28: "Well for thief with high evasion this should be 2
+# hits, 3 for magician". Where that's at or over her pet's warning at her max HP (her HUD's), a command that hunts
+# refuses the map (TooStrong).
 SAFETY_HITS = 3
 PLACEHOLDERS = ("stats", "skill levels", "keys", "name", "lock and delays", "damage", "miss", "the wand", "pet",
                 "MP policy", "priors")

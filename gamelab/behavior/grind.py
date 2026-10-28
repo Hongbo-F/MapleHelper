@@ -69,10 +69,12 @@ class Grind(Hunt):
 
     def __init__(self, tour, log=print, rng=None, patrol: Patrol | None = None):
         super().__init__(tour, log=log, rng=rng)
-        danger = getattr(self.h, "danger", None)  # the positioning model's Danger (its `at` is in the hook's unit)
+        h = self.h  # the positioning model's Danger (its `at` is in the hook's unit), as of each call: her stats as
+        # perception reads them (Hunter.danger: behavior.bootstrap)
         self.patrol = patrol or Patrol(self.model, self.kinds, tour.exp,
                                        travel=lambda a, x, b, bx: self.nav.planner.arrive(a, x, b, bx),
-                                       danger=None if danger is None else (lambda pid, x: danger.at(pid, x)))
+                                       danger=None if getattr(h, "danger", None) is None
+                                       else (lambda pid, x: h.danger.at(pid, x)))
         self.stop: int | None = None              # the stop she's at or going to (patrol.stops)
         self.credit: dict[int, list] = {}         # platform -> [kills, EXP] of her kills that died there
         self.stays: list[float] = []              # s at each stop she got to

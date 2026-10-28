@@ -2,7 +2,7 @@
 
 Status: steps 0-5 and 7 built in the simulator on 2026-10-19 (see "As built" below); step 6, the game trials, is still to do. It starts from commit 1e6ae23.
 
-Since 2026-10-26 she doesn't rest (the user: "Just remove the sit recover hp functionality, it's no longer needed"; README: No resting: the safety stop): her pet drinks her potions, and her HP under 65% for 2 s (or 25% two looks in a row; since 2026-10-28 under her profile's hits of the map's largest touch, in HP: README, The safety stop in HP) ends the hunt, she goes to a safe place as on the Lie Detector, and whoever is at the PC is paged. What below is about resting (the trip to rest, `--rest-below`, `--low-hp`'s switch to transit, the chair, potions running out, step 7's `--rest-avoid` and `transit-avoid`) is the design as it was; transit is the hunt loop's trips and the stand-by.
+Since 2026-10-26 she doesn't rest (the user: "Just remove the sit recover hp functionality, it's no longer needed"; README: No resting: the safety stop): her pet drinks her potions, and her HP under 65% for 2 s (or 25% two looks in a row; since 2026-10-28 under her profile's hits of the map's largest touch, in HP, worked out live from her stats as perception reads them: README, The safety stop in HP) ends the hunt, she goes to a safe place as on the Lie Detector, and whoever is at the PC is paged. What below is about resting (the trip to rest, `--rest-below`, `--low-hp`'s switch to transit, the chair, potions running out, step 7's `--rest-avoid` and `transit-avoid`) is the design as it was; transit is the hunt loop's trips and the stand-by.
 
 ## In short
 

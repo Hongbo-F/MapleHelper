@@ -79,23 +79,25 @@ class Character:
     """Her stats that set how the game moves her, in % as the stat window shows them. The game walks her
     at 125 units/s x SPEED/100 and jumps her at 555 units/s x JUMP/100 (its Physics.img), counting
     SPEED from 80 to 140 and JUMP from 80 to 123. Gear and Haste raise them. gamelab plans her moves
-    with them (gamelab.motion.physics). And her HP and level, which what a monster's touch takes is
-    measured against (gamelab.attack.danger: where she stands and how near she lets monsters come), and her MP
-    and her Lucky Seven's skill level, which what a cast costs and how many she has left come from
-    (gamelab.attack.choice: Lucky Seven or the regular attack)."""
+    with them (gamelab.motion.physics). And her MP and her Lucky Seven's skill level, which what a cast costs
+    and how many she has left come from (gamelab.attack.choice: Lucky Seven or the regular attack).
+
+    Not here: her HP, her level and her DEF (W.DEF), what a monster's touch takes is measured against. They change
+    as she plays (a level, new gear), and a number written here went stale (config.toml's hp = 774 at level 25 while
+    the HUD said 840 at level 28, 2026-10-28), so perception reads them (gamelab.behavior.bootstrap: her max HP off the
+    HUD's HP number, her level off its "LV." digits, her DEF off her stat window when it's read, else fitted to her
+    touches). The user, 2026-10-28: "I thought hp and level will come from perception, please remove them completely
+    from config.toml". A table that gives them is refused (PERCEIVED), so none lingers there unread."""
     speed: float = 119.2    # measured: she walks 148-151 units/s (149 = 125 x 1.192)
     jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
-    hp: float = 774.0       # her HP when full (her HP bar's number, level 25, 2026-10-25; 752 at level 24)
-    level: float = 25.0
     mp: float = 623.0       # her MP when full (her MP bar's number, level 25, 2026-10-25; 601 at level 24)
     lucky_seven: float = 16.0  # her Lucky Seven's skill level: 14 MP a cast in the game data (at 16 and 17); her MP
                                # bar fell 2.345 px of 104 a cast (+- 0.03) over 364 one-cast stretches of the live hunts
                                # of 2026-10-25 23:43 to 01:03, 14.05 MP at 623 (13 at 14 and 15 would be 2.17 px, 15 at
                                # 18 and 19 2.50: D:/MapleHelper-scratch/hunt-ab/a/scripts/castcost_all.py); 11 at level
                                # 10, 11.4 measured on 2026-10-24
-    # What a touch and her bars are reckoned with, as the stack has them for her (nothing reads these four yet: each
-    # module has its own copy, the thief's, until her profile is read there: gamelab README, Characters).
-    defence: float = 75.0      # attack.danger.DEFENCE: fit to the first map's touches at level 19 (her W.DEF unknown)
+    # What her bars are reckoned with, as the stack has them for her (nothing reads these three yet: each module has
+    # its own copy, the thief's, until her profile is read there: gamelab README, Characters).
     avoid: float = 27.0        # sim.world.EVADE_ACC: fit to 13 touches hopping over monsters (not her stat window's)
     climb_speed: float = 117.0  # motion.physics.CLIMB_SPEED: units/s on a rope, measured
     mp_regen: float = 0.32     # sim.world.MP_REGEN: MP a second, idle
@@ -299,7 +301,19 @@ def _character_table(cid: str, sub) -> CharacterConfig:
         buffs=_buffs(tables["buffs"], CLASS_BUFFS[klass], f"{where}.buffs"))
 
 
+# Her stats perception reads, never config.toml's (Character's docstring): a table giving one is refused, saying so.
+PERCEIVED = ("hp", "level", "defence")
+
+
+def _perceived(table: dict, where: str) -> None:
+    if given := [name for name in PERCEIVED if name in table]:
+        raise ConfigError(f"[{where}] has {given}: her HP, level and DEF aren't read from config.toml (perception reads "
+                          "her max HP and level off her HUD, her DEF off her stat window or her touches: "
+                          "gamelab.behavior.bootstrap); delete the line(s)")
+
+
 def _stats(table: dict, where: str) -> dict[str, float]:
+    _perceived(table, where)
     known = {f.name for f in fields(Character)} - {"lucky_seven"}  # (a skill level: the thief's, in [character])
     if unknown := set(table) - known:
         raise ConfigError(f"[{where}] has unknown stat(s) {sorted(unknown)}; known: {sorted(known)}")
@@ -348,6 +362,7 @@ def _timing(table: dict) -> Timing:
 
 
 def _character(table: dict) -> Character:
+    _perceived(table, "character")
     known = {f.name for f in fields(Character)}
     if unknown := set(table) - known:
         raise ConfigError(f"[character] has unknown stat(s) {sorted(unknown)}; known: {sorted(known)}")

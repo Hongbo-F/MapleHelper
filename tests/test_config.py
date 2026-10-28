@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from maplehelper import config
@@ -62,6 +64,23 @@ def test_her_stats_default_to_the_measured_ones(config_data, tmp_path):
     path.write_text("[character]\nspeed = 130\njump = 110\n")
     assert config.character(path) == config.Character(130, 110)
     assert config.character(tmp_path / "nope.toml") == config.Character()
+
+
+@pytest.mark.parametrize("given", ["hp = 774", "level = 25", "defence = 75", "hp = 774\nlevel = 25"])
+def test_her_hp_level_and_def_arent_config_tomls(config_data, tmp_path, given):
+    """The user, 2026-10-28: "I thought hp and level will come from perception, please remove them completely from
+    config.toml": perception reads them (behavior.bootstrap); a [character] table that gives one is refused, saying
+    so, so no stale number lingers there unread. The shipped config.toml has none."""
+    path = tmp_path / "config.toml"
+    path.write_text(f"[character]\nspeed = 119.2\n{given}\n")
+    with pytest.raises(config.ConfigError, match=r"her HP, level and DEF aren't read from config.toml .* delete the "
+                                                 r"line"):
+        config.character(path)
+    import tomllib
+    shipped = tomllib.loads((Path(__file__).resolve().parents[1] / "config.toml").read_text(encoding="utf-8"))
+    assert not {"hp", "level", "defence"} & set(shipped["character"])
+    assert not any({"hp", "level", "defence"} & set(t.get("stats", {})) for t in shipped.get("characters", {}).values()
+                   if isinstance(t, dict))
 
 
 def test_missing_file_is_explained(tmp_path):

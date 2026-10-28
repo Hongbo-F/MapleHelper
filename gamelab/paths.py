@@ -36,6 +36,8 @@ PROBE_LOG = LAB / "probe_geometry.jsonl"  # the in-game probes' throws (behavior
 HIT_LOG = LAB / "hits.jsonl"     # hits taken standing still: how far each pushed her
 TOUCHES = LAB / "touches.jsonl"  # her touches as her HP number measured them, exactly (behavior.safety: the safety
                                 # stop's touch sizes)
+STATS = LAB / "her_stats.json"  # her DEF as her stat window read it or her touches fit it, and her max HP and level as
+                                # last read (behavior.bootstrap: perception's, not config.toml's)
 PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)
@@ -48,7 +50,8 @@ WINDOW_TRIES = LAB / "window_tries.json"  # when Alt+Enter was tried on the clie
 CHARACTERS = "characters"
 MINE = {"calibration": "CALIBRATION", "tag_template": "TAG_TEMPLATE", "tag_full": "TAG_FULL", "heading": "HEADING",
         "heading_seed": "HEADING_SEED", "heading_shots": "HEADING_SHOTS", "shot_log": "SHOT_LOG",
-        "probe_log": "PROBE_LOG", "hit_log": "HIT_LOG", "touches": "TOUCHES", "pet": "PET", "grounds": "GROUNDS"}
+        "probe_log": "PROBE_LOG", "hit_log": "HIT_LOG", "touches": "TOUCHES", "stats": "STATS", "pet": "PET",
+        "grounds": "GROUNDS"}
 
 
 class Files:

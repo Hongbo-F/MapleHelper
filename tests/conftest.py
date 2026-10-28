@@ -101,6 +101,8 @@ def offline(monkeypatch, tmp_path):
     # Nor her touches as her HP number measured them live (lab/touches.jsonl: the safety stop's reserve rises with them):
     # a test's hunter has none but its own.
     monkeypatch.setattr(paths, "TOUCHES", tmp_path / "touches.jsonl")
+    # ... nor her stats as perception read them (lab/her_stats.json: her DEF kept), behavior.bootstrap.
+    monkeypatch.setattr(paths, "STATS", tmp_path / "her_stats.json")
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 

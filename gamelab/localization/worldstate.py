@@ -37,7 +37,7 @@ import numpy as np
 
 from .. import native
 from ..character import THIEF_SHAPE
-from ..perception import deaths, exp_number, hp_number
+from ..perception import deaths, exp_number, hp_number, lv_number
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
@@ -201,6 +201,9 @@ class WorldState:
     hp_of: tuple | None = None     # her HP number as read at its last change, if it read: (HP, max HP); None: not
                                    # known (perception.hp_number: read at every change of its pixels, an `hp_read`
                                    # event each)
+    level_of: int | None = None    # her level as the bottom bar's "LV." digits said at their last change, if they read
+                                   # (perception.lv_number: read at every change of their pixels, an `lv_read` event
+                                   # each); None: not known
 
     @property
     def placed(self) -> bool:
@@ -430,8 +433,10 @@ class WorldStep:
         self._hit_at = -1e9
         self.hp_number = hp_number.Follow()  # her HP number, read whenever its pixels change (_vitals) ...
         self._hp_number_t: float | None = None  # ... and the last frame it was seen on (HP_GAP_S)
+        self.lv_number = lv_number.Follow()  # her level's digits, read whenever their pixels change (_vitals)
         if real and (geo := getattr(self.eyes, "geo", None)) is not None:
             hp_number.warm(geo)  # (its cells made now: 190 ms, not at the first frame)
+            lv_number.warm(geo)  # (... and theirs: 600 ms)
         self._cam: tuple | None = None   # the last frame placed's camera (her tag x, feet y, map x, y): AHEAD's
         self._ahead: int | None = None   # this frame's token, if its re-finds were sent ahead
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "fallbacks": 0,
@@ -526,7 +531,8 @@ class WorldStep:
             exp_shape=exp.shape if s.exp is not None else (), where=where, how=s.how, monsters=seen,
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
             tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame, geo=s.geo,
-            bad=s.bad, hp_of=self.hp_number.of if s.bad is None else None)
+            bad=s.bad, hp_of=self.hp_number.of if s.bad is None else None,
+            level_of=self.lv_number.level if s.bad is None else None)
         if job is not None:  # (its answer is merged only after this) the re-finds the tracker took, as inline
             job.known.update({tid: m for tid, m in refound.items() if tid in self.tracker.refound_seen})
             job.state = st
@@ -685,7 +691,7 @@ class WorldStep:
         to the tracker, which puts each on a monster), or was read unchanged (`exp_read`: to start from, or to confirm a
         jump: ExpMeter.wants_reading); her HP dropped (a hit); her HP number changed and read (`hp_read`: her HP and
         max HP, and the HP it said at the change before if that read too, `before`: a drop between the two is a touch,
-        exactly; None: not known)."""
+        exactly; None: not known); her level's digits changed and read (`lv_read`: her level)."""
         out = []
         changed = exp_changed(self._exp, s.exp)
         if changed or self.meter.wants_reading(t):
@@ -710,6 +716,9 @@ class WorldStep:
         seen = self.hp_number.see(getattr(s, "hp_box", None), s.geo)
         if seen is not None and seen[0].cur is not None:
             out.append(Event("hp_read", t, data={"cur": seen[0].cur, "max": seen[0].max, "before": seen[1]}))
+        level = self.lv_number.see(getattr(s, "lv_box", None), s.geo)
+        if level is not None and level.level is not None:
+            out.append(Event("lv_read", t, data={"level": level.level}))
         return out
 
     def _told(self, gains: list[Gain]) -> None:
@@ -818,7 +827,7 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
     s = Scene(t=st.t, frame=st.frame if frame is None else frame, tag=st.tag, hp=st.hp, mp=st.mp, ground=st.ground,
               dot=st.dot, others=list(st.others), ropes=list(st.ropes), exp=st.exp_pixels(), where=where, how=st.how,
               tag_seen=st.tag_seen, players=list(st.players), geo=st.geo, tracks=list(st.tracks),
-              hp_of=getattr(st, "hp_of", None))
+              hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None))
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

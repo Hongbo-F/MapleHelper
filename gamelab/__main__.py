@@ -157,6 +157,45 @@ def cmd_clear_alarm(args) -> int:
     return 0
 
 
+def cmd_stats(args) -> int:
+    """Her stats as perception has them (behavior.bootstrap): her stats file (her DEF, kept: her stat window's W.DEF if
+    read, else the last fit to her touches; her max HP and level as last read) and her DEF fitted to her kept touches
+    now; with `--frame`, her W.DEF read off a saved frame with her stat window's Detail panel open
+    (perception.stat_window), kept as hers from then on. Offline: no game, no keys."""
+    import json as _json
+
+    from PIL import Image
+
+    from .behavior.bootstrap import HerStats, fit_defence
+    from .behavior.safety import Touches
+    from .perception import stat_window
+    files = paths.of()
+    touches = Touches(files.touches)
+    stats = HerStats(files.stats, touches.rows)
+    if args.frame:
+        frame = np.asarray(Image.open(args.frame).convert("RGB"))
+        got = stat_window.read_wdef(frame)
+        if got.wdef is None:
+            print(f"{args.frame}: W.DEF not read: {got.why}")
+            return 1
+        print(f"{args.frame}: W.DEF {got.wdef} (the stat window's Detail panel at {got.at}; read {got.text!r})")
+        if (note := stats.see_window(got.wdef, rows=touches.rows)) is not None:
+            print(f"  {note}")
+    try:
+        kept = _json.loads(files.stats.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        kept = None
+    print(f"her stats file: {files.stats}" + ("" if kept else " (none kept yet)"))
+    if kept:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(kept.get("at", 0)))
+        print(f"  as last read ({when}): max HP {kept.get('max_hp')}, level {kept.get('level')} (her HUD's: a hunt "
+              "reads them again at its start, these aren't used for it)")
+    print(f"  her {stats.defence.words()}")
+    fit = fit_defence(touches.rows)
+    print(f"  her kept touches ({len(touches.rows)}, {files.touches}) fit {fit.words()}")
+    return 0
+
+
 def cmd_character(args) -> int:
     """Who plays (gamelab.character): her profiles, the one a command plays and why; `use <id>`: the one played when
     neither --character nor GAMELAB_CHARACTER names one (lab/character.json); `check`: what the game's bottom bar shows,
@@ -2186,6 +2225,38 @@ def cmd_memory(args) -> int:
     return 0
 
 
+def _her_offline(records: list[dict], args):
+    """Her stats for an offline command's positioning model (attack.danger.Her), and where they came from in words:
+    the recorded run's own (its 'scene' records' hp_of and level_of: her HUD's numbers as perception read them then),
+    else `--hp` and `--level`, else her stats file's as last read (behavior.bootstrap: said so, with when); her DEF her
+    stats file's, else the prior. (None, why) if neither her max HP nor her level is known."""
+    import json as _json
+    from .attack import danger
+    from .behavior import bootstrap
+    hp = level = None
+    for r in records:
+        if r.get("topic") == "scene":
+            hp = (r.get("hp_of") or [None, hp])[1]
+            level = r.get("level_of", level)
+    source = "the run's own (her HUD's, as perception read it then)"
+    if hp is None or level is None:
+        hp, level, source = getattr(args, "hp", None) or hp, getattr(args, "level", None) or level, "--hp / --level"
+    kept, defence = {}, bootstrap.PLAN_DEF
+    try:
+        kept = _json.loads(paths.of().stats.read_text(encoding="utf-8"))
+        defence = float(kept.get("defence", {}).get("best", defence))
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    if hp is None or level is None:
+        hp, level = hp or kept.get("max_hp"), level or kept.get("level")
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(kept["at"])) if kept.get("at") else "?"
+        source = f"her stats file's, as last read ({when}: {paths.of().stats})"
+    if hp is None or level is None:
+        return None, ("her max HP and level aren't known (no 'scene' record of the run has them, no --hp and --level, "
+                      "none kept): give --hp and --level as her HUD shows them")
+    return danger.Her(float(hp), float(level), defence), f"her max HP {hp}, level {level} ({source}), DEF {defence:g}"
+
+
 def cmd_patrol(args) -> int:
     """Grinding's view of a map (behavior.patrol): its stops, the loop it would take and camping's best, before she has
     seen anything; with a recorded run (`file`), its looks run through her memory and the belief, and every `--every` s
@@ -2197,7 +2268,6 @@ def cmd_patrol(args) -> int:
     from .localization.players import Player
     from .motion.route import Planner
     from .attack import danger, reach
-    from .motion import physics
     from .perception.kinds import kind_of
     records = telemetry.read(Path(args.file)) if args.file else []
     session = next((r for r in records if r.get("topic") == "session"), {})
@@ -2206,8 +2276,12 @@ def cmd_patrol(args) -> int:
     best = max(exp.values(), default=0)
     kinds = {k for k, e in exp.items() if e >= 0.25 * best} or None  # tour.WORTH's cut
     planner = Planner(model)
-    c = physics.CHARACTER  # the danger hook as grinding's (Hunter.danger: config.toml [character])
-    d = danger.of_map(model, danger.Her(c.hp, c.level))
+    her, said = _her_offline(records, args)  # the danger hook as grinding's (Hunter.danger: her stats as read)
+    if her is None:
+        print(said)
+        return 2
+    print(said)
+    d = danger.of_map(model, her)
     p = patrol.Patrol(model, kinds, exp, travel=planner.arrive, danger=lambda pid, x: d.at(pid, x))
     print(f"{model.name}: {len(p.points)} spawn points of {sorted(kinds or ())}, {len(p.stops)} stops")
     for st in p.stops:
@@ -2303,6 +2377,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", nargs="?", choices=["use", "check"])
     s.add_argument("id", nargs="?", help="with `use`: the character (thief, magician, or a [characters.<id>]'s)")
     s.set_defaults(func=cmd_character)
+    s = sub.add_parser("stats", help="her stats as perception has them (behavior.bootstrap): her DEF (her stat "
+                                     "window's, else fitted to her touches) and her max HP and level as last read; "
+                                     "--frame reads her W.DEF off a saved frame with her stat window's DETAIL open. "
+                                     "Offline: no game, no keys")
+    s.add_argument("--frame", help="a saved frame (PNG, 1366x768) with her stat window's Detail panel open")
+    s.set_defaults(func=cmd_stats)
     s = sub.add_parser("spot", help="check the game (or an image) for the Lie Detector; sends no keys")
     s.add_argument("--image", help="check this screenshot instead of the game")
     s.set_defaults(func=cmd_spot)
@@ -2679,6 +2759,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("file", nargs="?", help="a telemetry file (.jsonl) to run through her memory and the belief")
     s.add_argument("--every", type=float, default=5.0, help="s between the choices printed along the run")
     s.add_argument("--map", type=int, help="the map (default: the run's, else the first)")
+    s.add_argument("--hp", type=int, help="her max HP, as her HUD shows it (default: the run's, else as last read)")
+    s.add_argument("--level", type=int, help="her level, as her HUD shows it (default: the run's, else as last read)")
     s.set_defaults(func=cmd_patrol)
     return p
 

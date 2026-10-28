@@ -49,6 +49,10 @@ def tree_map():
     return mapdata.load(TREE)
 
 
+HER = danger_mod.Her(752.0, 24.0)  # what a touch is measured against: her max HP and level as her HUD read them at level
+                                   # 24 (752), her DEF the stack's prior (perception's live: behavior.bootstrap)
+
+
 def mon(x, platform=0, kind=GREEN, y=500.0, bar=None):
     return Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, y, platform, bar=bar)
 
@@ -81,7 +85,7 @@ def test_a_landing_is_priced_by_what_her_first_attack_there_surely_takes(tree_ma
     assert walker.meets and walker.price_s == st.LANDING_PRICE_S + st.MEET_PRICE_S
     assert st.landing(FLAT, 500, [(GREEN, 560, 440)], HALVES, TOPS).meets
     # A kind that hits hard: only from its keep-off (a Horny Mushroom 169 on Tree Dungeon), where she'd escape it.
-    d = danger_mod.of_map(tree_map)
+    d = danger_mod.of_map(tree_map, HER)
     assert d.keep_off(HORNY) == pytest.approx(169, abs=1)
     assert st.landing(FLAT, 500, [(HORNY, 650, 650)], HALVES, TOPS).sure
     assert not st.landing(FLAT, 500, [(HORNY, 650, 650)], HALVES, TOPS, danger=d).sure
@@ -111,7 +115,7 @@ def test_her_moves_away_keep_to_a_wall_end_more_closely(tree_map):
     assert fight.moved_away(new) and not fight.moved_away(new[:3])  # (a step out from under one above isn't counted)
     # At most MAX_MOVES moves away in a row without a throw, where something counts as a danger: then she throws from
     # where she is. On the first map (no danger) the count is nothing to the stance: as it was.
-    d = danger_mod.of_map(tree_map)
+    d = danger_mod.of_map(tree_map, HER)
     assert st.stance(x, p24.y_at(x), p24, [green], False, LEFT, limits=st.move_limits(tree_map, p24), danger=d,
                      moves=st.MAX_MOVES, **kw)[0] in fight.THROWS
     assert st.stance(x, p24.y_at(x), p24, [green], False, LEFT, limits=st.move_limits(tree_map, p24),
@@ -129,7 +133,7 @@ def test_a_step_never_ends_on_a_spawn_point_nobody_accounts_for(tree_map):
     assert later is None or abs(500 - later - gx) > 28 + st.HER_HALF
     # Danger.free_points: the spawn points of a platform the look's monsters don't account for (24's Green's, at 272,
     # free with no Green seen on 24, taken by one seen anywhere on it).
-    d = danger_mod.of_map(tree_map)
+    d = danger_mod.of_map(tree_map, HER)
     assert [round(x) for x, _ in d.free_points(24, [])] == [272]
     assert d.free_points(24, [mon(200, 24)]) == []
 
@@ -183,7 +187,7 @@ def test_her_running_attack_stands_its_target_a_while():
 
 def _judge(tree_map, tracks):
     """FightOnTheWay.landings' price, from a hunter with Tree Dungeon's danger."""
-    h = SimpleNamespace(danger=danger_mod.of_map(tree_map), model=tree_map)
+    h = SimpleNamespace(danger=danger_mod.of_map(tree_map, HER), model=tree_map)
     return fight.FightOnTheWay(h).landings(tracks)
 
 
@@ -221,7 +225,7 @@ def test_a_trips_last_move_lands_where_her_first_attack_is_sure(tree_map):
 def test_grind_stops_stand_clear_of_their_platforms_spawn_points(tree_map, monkeypatch):
     kinds, exp = {GREEN, HORNY}, {GREEN: 26.0, HORNY: 41.0}
     points = patrol.points_of(tree_map, kinds, exp)
-    d = danger_mod.of_map(tree_map)
+    d = danger_mod.of_map(tree_map, HER)
 
     def stops():
         return {s.platform: s.x for s in patrol.stops_of(tree_map, points, lambda pid, x: d.at(pid, x))}
@@ -503,7 +507,7 @@ def test_shooting_it_first_from_along_her_platform(tree_map):
 def test_her_escape_and_jump_back_keep_off_spawn_points_nobody_accounts_for(tree_map):
     # From a Horny Mushroom 18 off on 23 her escape jumps back; with the jump back's landing on a free spawn point a step
     # of 40, and with every step's end on one the throw from where she stands (the spawn rule, as _clear_step's).
-    d = danger_mod.of_map(tree_map)
+    d = danger_mod.of_map(tree_map, HER)
     p23 = tree_map.platform(23)
     horny = mon(78.0, 23, kind=HORNY, y=p23.y_at(78.0))
     here = st.Here(("throw", RIGHT), False, 18.0)
@@ -558,7 +562,7 @@ def test_the_horny_escape_takes_the_safest_end_of_a_step(tree_map, monkeypatch):
     # stance._escape with ESCAPE_STEPS: of the steps every ESCAPE_STEP from STEP_ROOM up to the room there is, the one
     # whose end is the least danger (here 100 of 120: on 23 at 23, a Horny Mushroom 18 off on her right, another at -187);
     # without, the room there is (STEP_AWAY at most), as before.
-    d = danger_mod.of_map(tree_map)
+    d = danger_mod.of_map(tree_map, HER)
     p23 = tree_map.platform(23)
     near, far = mon(41.0, 23, kind=HORNY, y=p23.y_at(41.0)), mon(-187.0, 23, kind=HORNY, y=p23.y_at(-187.0))
     here = st.Here(("throw", RIGHT), False, 18.0)
@@ -612,7 +616,7 @@ def _live_pass(tree_map, monkeypatch, at=36.878, age=0.075):
     monkeypatch.setattr(nav_mod.time, "sleep", lambda s: None)
     from gamelab.localization.monsters import Tracker
     fights, walks = [], []
-    h = SimpleNamespace(danger=danger_mod.of_map(tree_map), model=tree_map, log=lambda text: None,
+    h = SimpleNamespace(danger=danger_mod.of_map(tree_map, HER), model=tree_map, log=lambda text: None,
                         clear=lambda *a, **kw: fights.append(kw), report=SimpleNamespace(exp_kills=0),
                         actions=SimpleNamespace(walk=lambda side, units: walks.append(units)))
     esc, tracker, flow = fight.FightOnTheWay(h), Tracker(tree_map), Flow(tree_map, KEYS)
@@ -665,7 +669,7 @@ def test_shot_place_is_where_the_fights_reach_has_her_attack_take_it(tree_map):
     # stance.place_to_shoot along her platform within `most` (shoot_from's), else why not. From 21 nothing on 23: from
     # no x of 21 does a star reach the live walker, 23 lying more than reach.SHOT_DOWN under it everywhere.
     p21, p23 = tree_map.platform(21), tree_map.platform(23)
-    esc = fight.FightOnTheWay(SimpleNamespace(danger=danger_mod.of_map(tree_map), model=tree_map))
+    esc = fight.FightOnTheWay(SimpleNamespace(danger=danger_mod.of_map(tree_map, HER), model=tree_map))
     for seen in _live_looks().values():
         s = SimpleNamespace(where=Where(42.3, p21.y_at(42.3), p21, (0.0, 0.0)), platform=p21, monsters=seen)
         place, why = esc.shot_place(s, seen[-1], nav_mod.SHOOT_WALK)
@@ -701,7 +705,7 @@ def test_shot_place_takes_a_jump_throw_from_where_she_stands_as_the_fights_do(tr
     # clear_for as before, from the ground alone. Not where her attack isn't made from a jump (the magician's Magic
     # Claw: fight._air), nor from 25 at 140 with it at 260 (no jump's attack surely picks it there).
     p25, p24 = tree_map.platform(25), tree_map.platform(24)
-    esc = fight.FightOnTheWay(SimpleNamespace(danger=danger_mod.of_map(tree_map), model=tree_map,
+    esc = fight.FightOnTheWay(SimpleNamespace(danger=danger_mod.of_map(tree_map, HER), model=tree_map,
                                               actions=SimpleNamespace(facing=None)))
 
     def at(x, gx):
@@ -732,7 +736,7 @@ def test_no_shot_first_at_one_dying(tree_map):
     p24, p23 = tree_map.platform(24), tree_map.platform(23)
     horny = Monster(Mob(HORNY, 0, 0, 30, 30, 0.9), 21.0, p23.y_at(21.0), 23, track=7)
     s = SimpleNamespace(where=Where(224.0, p24.y_at(224.0), p24, (0.0, 0.0)), platform=p24, monsters=[horny])
-    h = SimpleNamespace(danger=danger_mod.of_map(tree_map), model=tree_map, actions=SimpleNamespace(facing=None),
+    h = SimpleNamespace(danger=danger_mod.of_map(tree_map, HER), model=tree_map, actions=SimpleNamespace(facing=None),
                         ledger=SimpleNamespace(kills=[], dead=set()))
     esc = fight.FightOnTheWay(h)
     assert esc.shot_place(s, horny, nav_mod.SHOOT_WALK) == (224.0, "")  # (a star from 24 reaches it)

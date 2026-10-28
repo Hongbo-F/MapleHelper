@@ -127,8 +127,9 @@ SCENE_S = 0.1
 TRACKS_S = 0.5
 # tracker events published as telemetry 'event' records (and hits, new ones): deaths, gains, and her kills' monsters as
 # the tracker binds them to her gains and lets them go (tracking: 'victim', 'let_go'); and her HP number read at each
-# change of it ('hp_read': cur, max, before; perception.hp_number), from 2026-10-28
-EVENTS =("died", "exp_gain", "victim", "let_go", "hp_read")
+# change of it ('hp_read': cur, max, before; perception.hp_number), and her level's digits at each change of theirs
+# ('lv_read': level; perception.lv_number), from 2026-10-28
+EVENTS = ("died", "exp_gain", "victim", "let_go", "hp_read", "lv_read")
 
 
 def pace(wide_s: float) -> None:

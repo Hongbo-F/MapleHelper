@@ -36,6 +36,7 @@ from ..screen import STRETCHED, Geometry
 from . import framecheck
 from .exp_number import read_box
 from .hp_number import read_box as hp_read_box
+from .lv_number import read_box as lv_read_box
 from .framecheck import BadLook, Problem
 from .heading import Heading, Reading, her_box
 from .hud import BAR_ROW, HP_BAR, bars, exp_number_box, hp_bar, hp_fill
@@ -111,6 +112,10 @@ class Observation:
                                              # read (hp_number.Follow) only when its pixels change
     hp_of: tuple[int, int] | None = None     # her HP number as read at its last change, if it read: (HP, max HP)
                                              # (the feed's step reads it: WorldState.hp_of; None: not known)
+    lv_box: np.ndarray | None = None         # the box her level's digits are read from (lv_number.read_box, full size,
+                                             # RGB): read (lv_number.Follow) only when its pixels change
+    level_of: int | None = None              # her level as its digits said at their last change, if they read (the
+                                             # feed's step reads it: WorldState.level_of; None: not known)
     geo: Geometry = STRETCHED                # the game window's client size and the look's scale (the simulator's
                                              # frames are the 1920x1080 window's)
     bad: Problem | None = None               # why this look isn't of the game as expected (framecheck; Senses: her
@@ -222,11 +227,13 @@ class Eyes:
         x0, y0, x1, y1 = exp_number_box(geo)
         bx0, by0, bx1, by1 = read_box(geo)
         hx0, hy0, hx1, hy1 = hp_read_box(geo)
+        lx0, ly0, lx1, ly1 = lv_read_box(geo)
         self._hp, self._mp = hp, mp
         return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=tag, hp=hp, mp=mp,
                            ground=ground, dot=dot, others=others, ropes=found,
                            exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy(),
-                           hp_box=full[hy0:hy1, hx0:hx1].copy(), geo=geo, picture=picture)
+                           hp_box=full[hy0:hy1, hx0:hx1].copy(), lv_box=full[ly0:ly1, lx0:lx1].copy(), geo=geo,
+                           picture=picture)
 
     def _refused(self, t: float | None, frame: np.ndarray, bad: Problem) -> Observation:
         """A look that failed its checks: nothing read from it, its HP and MP the last good frame's (the bars of a frame

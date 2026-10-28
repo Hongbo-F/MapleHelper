@@ -21,6 +21,7 @@ import importlib
 import json
 import pkgutil
 import random
+import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -251,8 +252,8 @@ class Sim:
     # The stack, as gamelab/__main__.py builds it.
     def hunter(self, **kw) -> Hunter:
         self.guard()
-        c = self.world.character  # what a touch is measured against: her as the world plays her
-        kw.setdefault("her", danger.Her(c.max_hp, c.level))
+        # (her max HP, level and DEF: what the hunter reads off the fake HUD and fits to her touches, as live:
+        # behavior.bootstrap; the world's character is the world's, not hers to know)
         if self.scenario.attack is not None:  # Lucky Seven or the regular attack a throw (behavior.attacks)
             kw.setdefault("attack", self.scenario.attack)
         h = Hunter(self.eyes, self.keys, self.model, log=self.log, feed=self.feed, **kw)
@@ -2507,11 +2508,12 @@ def loop_tree_lie_detector_grind(sim):
 # --- the safety stop: her HP stays low, the hunt ends, she goes to a safe place, whoever is at the PC is paged --------
 # (behavior.safety). The user, 2026-10-26: "Just remove the sit recover hp functionality, it's no longer needed". Her
 # pet drinks her potions; with none left (Realism.potions 0) every touch leaves her lower, until she's under her reserve:
-# the thief's 2 of the map's largest touches, 268 HP (2 Horny Mushroom touches of 134: the formula's top at DEF 64,
-# level 25), 34.6% of the simulator's 774 (the user, 2026-10-28: "it should be HP under the amount of taking 3 hits from
-# the monsters on the map ... for thief with high evasion this should be 2 hits, 3 for magician"). The simulator draws no
-# HP number: her HP is the bar's less a px (behavior.safety.BAR_SLACK), her max HP her profile's, the debounce the bar's
-# (DEBOUNCE_S).
+# her profile's hits (the thief's 3 for now) of the map's largest touch (the user, 2026-10-28: "it should be HP under the
+# amount of taking 3 hits from the monsters on the map ... for thief with high evasion this should be 2 hits, 3 for
+# magician"), worked out by the hunter from what it reads of her as live (behavior.bootstrap): her max HP off the HP
+# number the simulator draws (the world's character's), her level off the LV. digits, her DEF fitted to her touches
+# (none known at the start: a touch at DEF 0 until enough are kept). `_reserve_checks` checks the stop's numbers against
+# the game's formula at the world's own DEF and level, not against any number written here.
 
 def safety_stop(minutes: float = 5, grind: bool = False):
     """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; with `grind`, grinding, as `tour --loop
@@ -2541,16 +2543,46 @@ def safety_stop(minutes: float = 5, grind: bool = False):
     return run
 
 
+STOP_NUMBERS = re.compile(r"under (\d+) (.+?) touch(?:es)? of (\d+) \((\d+)\)")
+
+
+def _stop_numbers(tr) -> tuple[int, str, int, int] | None:
+    """The safety stop's reserve as its text says it: (hits, the kind, its touch, the threshold), None if it isn't one."""
+    m = STOP_NUMBERS.search((tr["result"].get("stopped") or {}).get("text", "") if isinstance(tr["result"], dict)
+                            else "")
+    return None if m is None else (int(m.group(1)), m.group(2), int(m.group(3)), int(m.group(4)))
+
+
+def _reserve_holds(tr, her: Her = LEVEL_25) -> bool:
+    """The stop's reserve is her profile's hits of the map's largest touch, worked out as the game would deal it to the
+    world's character (her DEF and level as the simulator plays her; the hunter knew neither but by reading and fitting
+    them), at least the formula's top there, and its threshold hits x that touch."""
+    from ..classes.thief import SAFETY_HITS
+    from ..behavior.safety import kinds_of
+    got = _stop_numbers(tr)
+    if got is None:
+        return False
+    hits, name, touch, threshold = got
+    pad, top = max(kinds_of(real_map(TREE)).values())
+    return (hits == SAFETY_HITS and name == top and threshold == hits * touch
+            and touch >= danger.touch_range(pad, her.defence, her.level)[1])
+
+
 SAFETY_EXPECTS = (
-    check("the hunt stopped for her HP under 2 Horny Mushroom touches (268 HP of 774)",
-          lambda tr: "under 2 Horny Mushroom touches of 134 (268)" in (tr["result"]["stopped"] or {}).get("text", "")),
+    check("the hunt stopped for her HP under her profile's hits of the map's largest touch, as the game deals it to her",
+          _reserve_holds),
     check("under it on two looks 0.6 s apart at least (her bar's), or under one touch two looks in a row",
           lambda tr: tr["result"]["stopped"]["seconds"] >= 0.6 and tr["result"]["stopped"]["looks"] >= 2
           or "on 2 looks in a row" in tr["result"]["stopped"]["text"]),
-    check("its numbers in HP: under 268 of 774", lambda tr: tr["result"]["stopped"]["hp"] < 268
-          and "of 774" in tr["result"]["stopped"]["text"]),
+    check("its numbers in HP: under the threshold, of her max HP as her HUD's number says it",
+          lambda tr: _stop_numbers(tr) is not None and tr["result"]["stopped"]["hp"] < _stop_numbers(tr)[3]
+          and f"of {LEVEL_25.max_hp:.0f}" in tr["result"]["stopped"]["text"]),
     check("alive at the end", lambda tr: tr["result"]["hp"] > 0),
-    logs("safety stop: under 268 HP of 774"), logs("SAFETY STOP: HP"), logs("SAFETY STOP: retreat"),
+    logs("safety stop: under"),
+    logs(f"her max HP {LEVEL_25.max_hp:.0f} (her HUD's HP number); level {LEVEL_25.level:.0f} (her HUD's LV. digits)",
+         "the start line says her max HP and level as her HUD shows them (read before the hunt, as the perception "
+         "service has them live)"), logs("SAFETY STOP: HP"),
+    logs("SAFETY STOP: retreat"),
     check("on a safe place once her retreat is over", lambda tr: tr["result"]["safe"]),
     check("paged once, about her HP", lambda tr: len(tr["result"]["pages"]) == 1
           and "HP stayed low" in tr["result"]["pages"][0][1]),
@@ -2562,14 +2594,14 @@ SAFETY_EXPECTS = (
       expects=SAFETY_EXPECTS)
 def loop_tree_safety_stop(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 at 80% HP, her pet with
-    no potion left to drink: every touch leaves her lower; under her reserve (behavior.safety: the thief's 2 Horny
-    Mushroom touches of 134, 268 HP of the simulator's 774, her HP the bar's less a px) on two looks 0.6 s apart the hunt
-    stops, she goes to a safe place as on the Lie Detector, her moves alone (behavior.retreat), and whoever is at the PC
-    is paged; no chair, no waiting for her HP; alive at the end. (Seed 2 since 2026-10-27, an attack from a jump picking
-    by the star's search alone (reach.AIR_MODEL, the world's AIR_PICK) and her stance going by where each monster will be
-    when her attack starts (attack.stance.Pace). Until 2026-10-28 the stop was at 65% for 2 s: here at 48% 2.9 s in,
-    and her retreat took her to 1.1%; now it's 17.5 s in at 261 HP (33.7%), and she's on 25 at 34.9%. Seeds 1-12 under
-    both rules: README, The safety stop in HP.)"""
+    no potion left to drink: every touch leaves her lower; under her reserve (behavior.safety: her profile's hits of
+    the map's largest touch, worked out from what the hunter reads of her off the simulator's HUD and fits to her
+    touches: behavior.bootstrap; her HP her HP number's) on two looks 0.25 s apart the hunt stops, she goes to a safe
+    place as on the Lie Detector, her moves alone (behavior.retreat), and whoever is at the PC is paged; no chair, no
+    waiting for her HP; alive at the end. (Seed 2 since 2026-10-27, an attack from a jump picking by the star's search
+    alone (reach.AIR_MODEL, the world's AIR_PICK) and her stance going by where each monster will be when her attack
+    starts (attack.stance.Pace). Until 2026-10-28 the stop was at 65% for 2 s: here at 48% 2.9 s in, and her retreat
+    took her to 1.1%. Seeds 1-12 under each rule: README, The safety stop in HP.)"""
     return safety_stop(5)(sim)
 
 
