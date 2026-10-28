@@ -360,7 +360,7 @@ def test_a_bad_method_in_config_is_refused(tmp_path):
 
 def test_the_repos_config_says_dxgi():
     assert capture.configured_method() == "dxgi"
-    assert not capture.configured_fence()  # (off till it's tried live: capture.COPY_WAIT_MS)
+    assert capture.configured_fence()  # (on since its live trial of 2026-10-28: README, the capture's fence)
 
 
 @pytest.mark.parametrize("text,fence", [("", False), ("[capture]\n", False), ("[capture]\nfence = false\n", False),
