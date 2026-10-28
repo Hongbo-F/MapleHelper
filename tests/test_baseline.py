@@ -262,3 +262,25 @@ def test_ab_has_the_filler_run_the_bases_missing_seeds(monkeypatch, tmp_path, ca
                          "--minutes", "5.0", "--costs", "measured", "--map", "10002073", "--world", "walkers",
                          "--attack", "choice", "--seeds", "12", "--jobs", "2"]]
     assert "base: seed(s) 1-12 not cached" in capsys.readouterr().out
+
+
+def test_a_spot_check_runs_a_saved_runs_seeds_again_with_their_own_arguments(monkeypatch):
+    saved = [{"seed": k, "policy": "loop", "preset": "crowd", "minutes": 5.0, "think": 0.0, "costs": "measured",
+              "ways": 1, "map": 10002073, "world": ["walkers"], "attack": "choice", "exp_per_min": 100.0 + k,
+              "touches": 10, "nav": {"misses": 2}} for k in (1, 2, 3)]
+    calls = []
+
+    def again(policy, seeds, preset, minutes, jobs, think, costs, ways, map_id, world, grounds, attack):
+        calls.append((policy, list(seeds), preset, minutes, think, costs, ways, map_id, world, grounds, attack))
+        return [dict(saved[k - 1], nav={"misses": 2}, t=(1,)) if k != 3 else dict(saved[2], touches=11, t=(1,))
+                for k in seeds]
+    monkeypatch.setattr(harness, "run_seeds", again)
+    said = []
+    saved = [dict(r, t=[1]) for r in saved]
+    assert harness.spot(saved, [1, 2], say=said.append)
+    assert calls == [("loop", [1, 2], "crowd", 5.0, 0.0, "measured", 1, 10002073, ("walkers",), (), "choice")]
+    assert said[0].startswith("seed 1: the same to the digit")
+    said.clear()
+    assert not harness.spot(saved, [3], say=said.append)
+    assert said[0].startswith("seed 3: DIFFERS in touches") and "saved 10, now 11" in said[0]
+    assert not harness.spot(saved, [7], say=said.append) and "no seed 7" in said[-1]

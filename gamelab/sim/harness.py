@@ -7,6 +7,7 @@
     python -m gamelab.sim.harness cached POLICY [run's options] [--sha master]   a commit's cached seeds, read
     python -m gamelab.sim.harness ab POLICY [run's options] [--base master] [--metric KEY ...] [--max-seeds 48]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE    two saved runs, seed by seed, against the bar
+    python -m gamelab.sim.harness spot RUN [--seeds 3,9]        a saved run's seeds again here: the same to the digit?
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
 
 `--cache` reads the seeds this checkout's commit has already run with the same arguments from the baseline cache
@@ -15,8 +16,9 @@ them; a checkout whose code isn't as committed, or a run with `--think`, runs th
 commit's (master's) without running anything, and saves them as a run for `compare`, which also takes a cache's folder.
 `ab` runs this checkout against a base commit's cached seeds, 12, then 24 and 48 only while a headline difference (EXP
 a minute, touches, deaths, falls out of the map, stops, and each --metric) is within 2 standard errors and not zero
-(the base's missing seeds run in its own checkout by D:/MapleHelper-scratch/baselines/base.py). README: Checking a
-change.
+(the base's missing seeds run in its own checkout by D:/MapleHelper-scratch/baselines/base.py). `spot` is a reviewer's
+check of a saved run (or a cache's folder): a seed or two run again with the arguments each result records, the same
+to the digit or the keys that differ, instead of the whole table again. README: Checking a change.
 
 A run hunts for a fixed time (the horizon) from one of its map's START_AT, on a world seed, with the policy's own
 random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ. On the first
@@ -1146,9 +1148,22 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("compare")
     c.add_argument("baseline", help="a saved run's name, a .json file, or a baseline cache's folder")
     c.add_argument("candidate")
+    s = sub.add_parser("spot", help="a saved run's seeds run again here, each the same to the digit or not")
+    s.add_argument("run", help="a saved run's name, a .json file, or a baseline cache's folder")
+    s.add_argument("--seeds", type=lambda v: [int(k) for k in v.split(",")],
+                   help="the seeds to run again, e.g. 3,9 (default: its first and its last)")
+    s.add_argument("--jobs", type=int, default=1)
     sub.add_parser("check")
     args = p.parse_args(argv)
     from . import scenarios
+    if args.cmd == "spot":
+        results = load(args.run)
+        seeds = args.seeds or sorted({min(r["seed"] for r in results), max(r["seed"] for r in results)})
+        map_id = results[0].get("map", FIRST_MAP) if results else FIRST_MAP
+        if not scenarios.available(map_id):
+            print(f"map {map_id} isn't available on this computer (gamedata/data): nothing to run")
+            return 2
+        return 0 if spot(results, seeds, args.jobs) else 1
     map_id = getattr(args, "map", FIRST_MAP)
     if not scenarios.available(map_id):
         print(f"map {map_id} isn't available on this computer (gamedata/data): nothing to run")
@@ -1269,6 +1284,46 @@ def _cached(args) -> int:
     save(name, results)
     print(f"saved {FOLDER / (name + '.json')}")
     return 0
+
+
+SPOT_KEYS = ("policy", "preset", "minutes", "think", "costs", "ways", "map", "world", "grounds", "attack")
+
+
+def spot(results: list[dict], seeds: list[int], jobs: int = 1, say: Callable[[str], None] = print) -> bool:
+    """A reviewer's spot check of a saved run: its `seeds` run again here with the arguments each result records
+    (SPOT_KEYS), and each the same to the digit as saved, or the keys that differ. Whether all were."""
+    from . import baseline
+    by_seed = {r["seed"]: r for r in results}
+    unknown = [k for k in seeds if k not in by_seed]
+    if unknown:
+        say(f"the run has no seed {_seed_span(unknown)} (it has {_seed_span(sorted(by_seed))})")
+        return False
+    groups: dict[tuple, list[int]] = {}
+    for k in seeds:
+        r = by_seed[k]
+        groups.setdefault(tuple(json.dumps(r.get(key)) for key in SPOT_KEYS), []).append(k)
+    same = True
+    for _, ks in groups.items():
+        r = by_seed[ks[0]]
+        again = run_seeds(r["policy"], ks, r["preset"], r["minutes"], jobs, r.get("think", 0.0), r.get("costs", "coded"),
+                          r.get("ways"), r.get("map", FIRST_MAP), tuple(r.get("world", ())),
+                          tuple(r.get("grounds", ())), r.get("attack"))
+        for k, got in zip(ks, again):
+            got, want = baseline.plain(got), by_seed[k]
+            if got == want:
+                say(f"seed {k}: the same to the digit (exp_per_min {got['exp_per_min']}, touches {got['touches']})")
+                continue
+            same = False
+            keys = sorted(key for key in set(got) | set(want) if got.get(key) != want.get(key))
+            say(f"seed {k}: DIFFERS in {', '.join(keys[:12])}" + (f" and {len(keys) - 12} more" if len(keys) > 12 else "")
+                + "".join(f"\n   {key}: saved {_short_value(want.get(key))}, now {_short_value(got.get(key))}"
+                          for key in keys[:4]))
+    return same
+
+
+def _short_value(v, limit: int = 160) -> str:
+    text = json.dumps(v)
+    return text if len(text) <= limit else text[:limit] + " ..."
 
 
 def _filler(fill: str | None) -> str:
