@@ -90,12 +90,14 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    her last arrow (the hunter's 'heading' events): `--world knock-turns` has a knock turn her,
                    `heading-wrong` and `heading-wrong-sure` her frames read the wrong way
   landings         her landings that moved her (onto another platform, or LANDING_MOVED along hers: World.land_log),
-                   by cause ('trip': her trips' legs and falls, 'knock', 'fight': an attack played in the flight), and
+                   by cause ('trip': her trips' legs and falls, 'knock', 'knock-fall': a fall off an end right after a
+                   knock's landing, 'fight': an attack played in the flight), and
                    of them those with a live monster on the platform she landed on within 105 and 60 of her, middle to
                    middle ('near', 'close'), and within 105 walking at her ('at'): the live diagnosis's count; and
                    landing_events, her trips' last landings with a price (control.navigator._clear_landing: the monster
-                   'shot first', 'waited' out, or 'went' past); moves_away, her stances up close that moved her away
-                   ('back': a step, 'jump_back'), once a run of looks deciding it
+                   'shot first', 'waited' out, or 'went' past); moves_away, her stances that moved her away ('back': a
+                   step, 'jump_back'; 'away': the steps from a close monster of the 'back', a stack's fights that tell),
+                   once a run of looks deciding it
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -581,8 +583,10 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
 
 
 def _moves_away(records: list[dict], end: float) -> dict:
-    """Her stances up close that move her away (the fights' 'stance' records: a step away, 'back', and a jump back),
-    each counted once a run of looks deciding it (a look's record repeats the last one's while it's carried out)."""
+    """Her stances that move her away (the fights' 'stance' records: a step, 'back', and a jump back), each counted once
+    a run of looks deciding it (a look's record repeats the last one's while it's carried out); 'away', the steps from a
+    close monster of them (the record's `away`: behavior.fight.moved_away; a stack without it has every step counted
+    'back' alone, steps out from under a monster above too)."""
     start = next((r["t"] for r in records if r.get("topic") == "session"), None)
     out, last = Counter(), None
     for r in records:
@@ -593,6 +597,7 @@ def _moves_away(records: list[dict], end: float) -> dict:
         act = r.get("act")
         if act in ("back", "jump_back") and act != last:
             out[act] += 1
+            out["away"] += act == "back" and bool(r.get("away"))
         last = act
     return dict(out)
 

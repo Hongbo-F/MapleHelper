@@ -92,8 +92,8 @@ from .. import telemetry
 from ..attack import reach, ropes, spots
 from ..attack.ropes import Refuge
 from ..attack.spots import GROUND_MARGIN, Spot
-from ..attack.stance import (MIN_MOVE, act_text, close_to, drop_limits, jump_hits, move_limits, open_above, overhead,
-                             stance, too_close)
+from ..attack.stance import (MIN_MOVE, act_text, close_to, drop_limits, jump_hits, open_above, overhead, stance,
+                             too_close)
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import TRANSIT, Choice, TripState
 from ..localization.monsters import Monster, Tracker, tracks_record
@@ -218,10 +218,6 @@ PICK_S = 0.6           # s standing on a pile (4 presses)
 # touches and 0.81 bars, 0.61 bars a minute, against 0.24 a minute on the 61 let through, for 20% of the piles' worth
 # (D:/MapleHelper-scratch/hunt-ab/B/fix/b1_replay2.py; with ghosts and due-back 0.34 against 0.31: review of 2026-10-26).
 PILE_CLEAR = 100.0
-# Up close her moves away keep to move_limits (attack.stance: WALL_ROOM from a wall end, EDGE_MARGIN from a short drop,
-# DROP_ROOM from a long one), where they kept 50 from every end (and DROP_ROOM from a long drop): from 2026-10-27, where
-# something counts as a danger (as `edges`). False: as before.
-MOVE_LIMITS = True
 # A spawn point's monster is due back from DUE_FROM to DUE_TO s after a kill of hers of its kind on its platform (the
 # point of that kind nearest where it died). A spawn point's cooldown is 5 s by MeowDB (and its 7.56 s tick); live on
 # 2026-10-25 a monster new to her memory was back on Tree Dungeon's 23 (two Horny Mushroom points) a median 7.2 s after
@@ -906,7 +902,7 @@ class Hunt:
         jumps = self._cover(s, targets, visible + hidden)
         toward = 0 if goal is None else (1 if goal > s.where.x else -1)
         edges, up = self._edges(s)
-        limits = None if edges is None or not MOVE_LIMITS else move_limits(self.model, s.platform)
+        limits = fight.move_room(self.h, s)  # (where something counts as a danger, as `edges`: fight.MOVE_LIMITS)
         if log:
             return fight._take_stance(self.h, self.fs, s, targets, visible, hidden, approach, toward=toward,
                                       jumps=jumps, goal=goal, edges=edges, up=up, limits=limits)
@@ -943,7 +939,7 @@ class Hunt:
                 self.visit.throws += 1
             self._idle_since = None
         elif act[0] in ("back", "approach"):
-            self.fs.moves += act[0] == "back"
+            self.fs.moves += fight.moved_away(act)
             self.h.actions.walk(act[1], min(act[2], 300.0))
             self._idle_since = None
         return None

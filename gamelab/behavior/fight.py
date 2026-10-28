@@ -23,15 +23,15 @@ from typing import TYPE_CHECKING
 from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT
 
-from .. import directions, paths, telemetry
+from .. import character, directions, paths, telemetry
 from ..attack import reach
-from ..attack.stance import (FLINCH_HOLD_S, GROUND_PICK_S, LANDING_SETTLE_S, MIN_MOVE, TOO_CLOSE, TRACK_MATCH,
-                             TRACK_SEEN, Pace,
-                             _clear_from, _stand_limits, act_text, air_gap, decide, landing, open_above, pct,
-                             pick_target, plan_of, stance)
+from ..attack.stance import (AWAY, FLINCH_HOLD_S, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace, act_text,
+                             air_gap, decide, first_attack_s, landing, move_limits, open_above, pct, pick_target,
+                             plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
+from ..localization.memory import FADE_S
 from ..localization.monsters import (DEFAULT_SPEED, MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster,
                                      MonsterTrack, bodies, dead_one, seen_again, speeds)
 from .ledger import dying
@@ -275,7 +275,7 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
         owing = finish_act(h, s, wounds, visible + hidden) is not None
         if owing and ((enough and not finish) or _plain_stance(h, s, fight, visible + hidden, closing)[0] == "wait"):
             targets, closing = finish_targets(s, wounds, visible + hidden), True  # finish hers (finish_act)
-        act = _take_stance(h, st, s, targets, visible, hidden, closing)
+        act = _take_stance(h, st, s, targets, visible, hidden, closing, limits=move_room(h, s))
         if knocked_move(h, s, act):
             continue
         if (step := _carry_out(h, st, s, act, fight, now, patience, enough)) == _OVER:
@@ -422,17 +422,27 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
     model = getattr(h, "model", None)
     walking = speeds(model)
 
-    aim = getattr(h, "aim", None)  # her running attack's target: (its key, kind, platform, x, walk), throw_act's
+    aim = getattr(h, "aim", None)  # her running attack's target (Aim: throw_act's, _note_aim)
     key = getattr(getattr(h, "actions", None), "attack_at", None)
     hold = None
     counts = getattr(getattr(h, "danger", None), "any", False)  # (where something counts as a danger: not the first map)
-    if FLINCH and counts and aim is not None and key is not None and abs(aim[0] - key) < 1e-6 and shown is not None \
+    if FLINCH and counts and aim is not None and key is not None and abs(aim.key - key) < 1e-6 and shown is not None \
             and shown - key < FLINCH_HOLD_S:
+        shows = key + actions_mod.DAMAGE_SHOWS_MS / 1000  # (her hit's damage shows from then: the bar too)
+
         def hold(m: Monster) -> tuple[float, float] | None:
-            _, kind, pid, ax, av = aim
-            if m.kind != kind or m.platform != pid or abs(ax + av * max(0.0, shown - key) - m.x) > TRACK_MATCH + 20:
+            if m.kind != aim.kind or m.platform != aim.platform:
                 return None
-            return key + actions_mod.DAMAGE_SHOWS_MS / 1000 - shown, key + FLINCH_HOLD_S - shown
+            # where the hold has it now: walking as its track had it from the decision's look until her hit shows
+            if abs(aim.x + aim.walk * max(0.0, min(shown, shows) - aim.seen) - m.x) > HOLD_MATCH:
+                return None
+            if not HOLD_HIT_SHOWN:
+                return shows - shown, key + FLINCH_HOLD_S - shown
+            if shown >= shows:  # a look that can show her hit: held only if its bar is lower than at the decision
+                if m.bar is None or (aim.bar is not None and m.bar >= aim.bar - 1e-6):
+                    return None
+                return shows - shown, key + FLINCH_HOLD_S - shown
+            return shows - shown, shows + (key + FLINCH_HOLD_S - shows) / 2 - shown  # (till then, half the window)
 
     def walk(m: Monster) -> float | None:
         best = None
@@ -450,6 +460,30 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
             return m.facing * walking.get(m.kind, DEFAULT_SPEED)
         return 0.0
     return Pace(lead, walk, walking, body_sizes(model)[1] if model is not None else None, hold)
+
+
+# The navigator's price of a landing (FightOnTheWay.landings) by what the looks don't have now: a track not seen within
+# STALE_S (a death's fade, localization.memory.FADE_S: after it a remembered or hidden one is as likely a ghost) and the
+# spawn points of the platform none of its tracks accounts for (a monster there the looks missed, or a respawn: in the
+# simulator's crowd a look misses one on another platform 30% of the time, sim.world.OFF_SEEN), each priced UNSEEN_PRICE
+# of one seen. By eye on the live recordings (the reviews of 2026-10-27, D:/MapleHelper-scratch/land/review-numbers/eye),
+# 2 of the 9 landings within 105 of a monster by hidden tracks alone had one there (the rest cap drops, another player's
+# kill dying, nothing), and 2 of 5 with none near a respawn fading in 80-130 off: a prior, 0.25. In the harness (Tree,
+# crowd, the `walkers` world, 48 seeds of 5 minutes, against master's stack: D:/MapleHelper-scratch/land/fix, tree c2)
+# grinding (the default) was within 60 of a monster 12% less of the time with it (t -3.7), within 105 at its landings
+# 12% less (t -3.3), its EXP a minute 2.6% less (se 2.1%); with 0 (24 seeds, tree c2u) within 60 6% less (t -0.9) and
+# 7.7% less EXP (se 3.0%). 0: the tracks seen within STALE_S alone (an older one left out).
+STALE_S = FADE_S
+UNSEEN_PRICE = 0.25
+MID_MEETS = True  # a landing she runs on from priced by its touch alone; False: as the route's last's
+
+
+def _air() -> bool:
+    """Whether her attack is made from a jump too (her profile's attack: character.AttackSpec.air; the thief's Lucky
+    Seven yes, the magician's Magic Claw no)."""
+    attacks = character.active().attacks
+    spec = attacks.get("skill") or next(iter(attacks.values()), None)
+    return True if spec is None else bool(spec.air)
 
 
 def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[Monster]):
@@ -499,7 +533,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
         st.aimed = _in_path(at, act[1], around, attack_gap(h.actions, act, _turn_key(h, s, act)), body,
                             st.flinching)
     if telemetry.recording():
-        telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden),
+        telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden), away=moved_away(act),
                        aimed=[{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1)} for m in st.aimed]
                        if throwing else [])
     return act
@@ -585,17 +619,39 @@ def throw_act(h: "Hunter", s: Scene, act: tuple) -> bool:
 # Her running attack's target stands a while in her decisions' pace (pace_of: attack.stance.Pace.hold, FLINCH_HOLD_S): the
 # nearest monster of her platform the way she threw (a jump's own target, where its plan has one), as the look saw it and
 # walking as its track had it (h.aim); where something counts as a danger (Hunter.danger.any: not on the first map, whose
-# decisions are as they were). Off, as before.
+# decisions are as they were). Held only for a hit: a look from when her hit's damage shows (DAMAGE_SHOWS_MS) holds it
+# only if its bar is lower than at the decision, and until such a look half the window. Live (D:/MapleHelper-scratch/land/
+# diag-move-away/flinch.out: her throws at walkers 120-300 off that didn't kill) the 28 hurt at +0.3 s came on 17 units by
+# 0.6 s and 19 by 0.9, the 38 not hurt 36 and 43, the 24 not read 52 and 69: held whatever, two thirds of the holds had
+# it come on 10-45 units less than it did (the reviews of 2026-10-27). Not for a jump back's throw, which rarely takes
+# anything. Off, as before.
 FLINCH = True
+HOLD_HIT_SHOWN = True  # False: every throw's target held the whole window, a jump back's too (as first built)
+HOLD_MATCH = TRACK_MATCH + 20  # units: a look's monster is the held one within this of where the hold has it (a guess:
+                               # the tracks' match and her hit's push, the simulator's 18 units)
+
+
+@dataclass(frozen=True)
+class Aim:
+    """Her running attack's target (_note_aim, pace_of's hold): her attack key's time, its kind, platform, map x and walk
+    (units/s) as the decision's look had them, that look's time (`seen`), and its bar then (None: unhurt)."""
+    key: float
+    kind: str
+    platform: int
+    x: float
+    walk: float
+    seen: float
+    bar: float | None
 
 
 def _note_aim(h: "Hunter", s: Scene, act: tuple, plan) -> None:
-    """Throw `act` keyed from look `s`: its target kept for pace_of's hold (h.aim: the key, its kind, platform, map x,
-    walk), or none."""
+    """Throw `act` keyed from look `s`: its target kept for pace_of's hold (h.aim, an Aim), or none (a jump back's)."""
     if s.where is None or s.platform is None:
         return
     key = getattr(h.actions, "attack_at", None)
-    if plan is not None and plan.shot is not None:
+    if act[0] == "jump_back" and HOLD_HIT_SHOWN:
+        t = None
+    elif plan is not None and plan.shot is not None:
         t = plan.shot.target
     else:
         x, here = s.where.x, s.platform.id
@@ -605,7 +661,8 @@ def _note_aim(h: "Hunter", s: Scene, act: tuple, plan) -> None:
         h.aim = None
         return
     v = pace_of(h, s).walk
-    h.aim = (key, t.kind, t.platform, t.x, (v(t) if v is not None else 0.0) or 0.0)
+    h.aim = Aim(key, t.kind, t.platform, t.x, (v(t) if v is not None else 0.0) or 0.0,
+                getattr(s, "t", key), t.bar)
 
 
 def _throw(actions, act: tuple, plan, turn: int = physics.AIR_TURN_ATTACK_MS) -> bool | None:
@@ -678,10 +735,35 @@ def _carry_out(h: "Hunter", st: FightState, s: Scene, act: tuple, fight: list[Mo
         return None
     if act[0] in ("back", "approach"):
         st.calm_since = None
-        st.moves += act[0] == "back"
+        st.moves += moved_away(act)
         h.actions.walk(act[1], act[2])
         return None
     return _idle(h, st, s, fight, patience, enough)
+
+
+def moved_away(act: tuple) -> bool:
+    """Whether stance `act` moves her away from a close monster (a step of attack.stance's close quarters or escape,
+    ('back', side, units, AWAY)): what FightState.moves counts toward MAX_MOVES; a step out from under one above
+    doesn't."""
+    return act[0] == "back" and (act[3:4] == (AWAY,) or not AWAY_ONLY)
+
+
+AWAY_ONLY = True  # False: every step counted toward MAX_MOVES, out from under a monster above too (as first built)
+
+
+# Up close her moves away keep to move_limits (attack.stance: WALL_ROOM from a wall end, EDGE_MARGIN from a short drop,
+# DROP_ROOM from a long one), where they kept 50 from every end (and DROP_ROOM from a long drop): from 2026-10-27, where
+# something counts as a danger, in the hunt loop's fights and the tours' and the escort's (clear). False: as before.
+MOVE_LIMITS = True
+
+
+def move_room(h: "Hunter", s: Scene) -> tuple[float, float] | None:
+    """The stance's `limits` for her in look `s`: move_limits where something counts as a danger (MOVE_LIMITS), else
+    None (as it was)."""
+    d, model = getattr(h, "danger", None), getattr(h, "model", None)
+    if not MOVE_LIMITS or d is None or not d.any or s.platform is None or model is None:
+        return None
+    return move_limits(model, s.platform)
 
 
 def _idle(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], patience: float,
@@ -1193,23 +1275,23 @@ class FightOnTheWay:
                      approach=False, far=True, finish_wounds=finish)
         return self.h.report.exp_kills - before
 
+    # (shoot_from) a monster found again after the walk: its kind on its platform within this of where it was seen
+    SHOOT_REFIND = TRACK_MATCH + DEFAULT_SPEED * 1.0  # the tracks' match and a second of its kind's walk (a guess)
+
     def shoot_from(self, s: Scene, m: Monster, most: float, finish: bool = True) -> int | None:
         """Monster `m` shot from along her platform (the navigator's, landings with clearance: one by where her trip's
-        last move lands her): a walk of `most` units at most to the nearest place a star reaches it from (attack.stance's
-        _clear_from, within where she stands to shoot with monsters about, and on her way there no monster of her
-        platform: her body's way), then, if it's in reach from where the walk leaves her (the next look's, the same kind
-        on its platform within TRACK_MATCH and its walk), clear_for's fight at it. The kills, or None if there's no such
-        place."""
+        last move lands her): a walk of `most` units at most to the nearest place a star reaches it from
+        (attack.stance.shooting_place: within where she stands to shoot with monsters about, no monster of her platform
+        in the walk's way), then, if it's in reach from where the walk leaves her (the next look's, the same kind on its
+        platform within SHOOT_REFIND of where it was: TRACK_MATCH and a second of its kind's walk), clear_for's fight at
+        it. The kills (0 if the walk's look doesn't find it), or None if there's no such place."""
         here = s.platform
         if here is None or s.where is None or m.platform is None:
             return None
         x = s.where.x
-        lo, hi = _stand_limits(here, crowded=any(o.platform == here.id for o in s.monsters))
-        g = _clear_from(here, x, s.where.y, m, max(lo, x - most), min(hi, x + most), s.monsters)
-        if g is None or abs(g - x) < MIN_MOVE:
+        g = shooting_place(here, x, s.where.y, m, most, s.monsters)
+        if g is None:
             return None
-        if any(o.platform == here.id and min(x, g) - TOO_CLOSE <= o.x <= max(x, g) + TOO_CLOSE for o in s.monsters):
-            return None  # (one of her platform in the way of the walk: its fights' to deal with, not this one's)
         side = RIGHT if g > x else LEFT
         self.h.log(f"  {m.kind} on platform {m.platform} at x {m.x:.0f} by where she'd land: walking {side} "
                    f"{abs(g - x):.0f} to shoot it first")
@@ -1218,7 +1300,7 @@ class FightOnTheWay:
         if look.where is None or look.platform is None or look.platform.id != here.id:
             return 0
         again = [o for o in look.monsters if o.kind == m.kind and o.platform == m.platform
-                 and abs(o.x - m.x) <= TRACK_MATCH + DEFAULT_SPEED * 1.0]
+                 and abs(o.x - m.x) <= self.SHOOT_REFIND]
         if not again:
             return 0
         kills = self.clear_for(look, min(again, key=lambda o: abs(o.x - m.x)), finish)
@@ -1226,26 +1308,43 @@ class FightOnTheWay:
 
     def landings(self, tracks: list):
         """The navigator's price of a leg's landing against `tracks` (its chain's, MonsterTrack in the plan's time), as
-        (s, the track making it so): attack.stance.landing, each track on the platform she lands on where it is then
-        and when her first attack there starts (LANDING_SETTLE_S and GROUND_PICK_S on, walking as followed), by the
-        map's bodies, her danger's keep-off, and no jump in place under a platform overhead (open_above). None where no
+        (s, the track making it so, or None): attack.stance.landing, each track on the platform she lands on where it
+        is then and when her first attack there starts (attack.stance.first_attack_s, walking as followed), by the map's
+        bodies, her danger's keep-off, no jump in place under a platform overhead (open_above) nor for an attack she
+        can't make from a jump (her profile's: character.AttackSpec.air). The tracks seen within STALE_S, and with
+        nothing priced among those, the older ones and the platform's spawn points none of them accounts for
+        (Danger.free_points: a monster there the looks missed, or a respawn), each priced UNSEEN_PRICE of a seen one's,
+        with no track making it so (nothing to shoot first or wait out); a landing she runs on from (`last` False: a leg
+        before a chain's last) by a seen one walking into her there alone (MEET_PRICE_S, with MID_MEETS). None where no
         kind counts as a danger (the first map: as before)."""
         h = self.h
         danger, model = getattr(h, "danger", None), getattr(h, "model", None)
         if danger is None or not danger.any or model is None:
             return None
         tops, halves = body_sizes(model)
+        air = _air()
 
-        def judge(leg):
+        def judge(leg, last: bool = True):
             q, x = leg.end.platform, leg.end.x
             mine = [mo for mo in tracks if mo.platform == q.id]
-            if not mine:
-                return 0.0, None
             t0 = leg.end.t
-            t1 = t0 + LANDING_SETTLE_S + GROUND_PICK_S
-            near = [(mo.kind or "pig", mo.at(t0, q), mo.at(t1, q)) for mo in mine]
-            got = landing(q, x, near, halves, tops, danger, lambda a, b: open_above(model, q, a, b))
-            if got.price_s <= 0:
+            t1 = first_attack_s(t0)
+            jump = (lambda a, b: open_above(model, q, a, b))
+            fresh = [mo for mo in mine if mo.seen_at >= -STALE_S]
+            if fresh:
+                near = [(mo.kind or "pig", mo.at(t0, q), mo.at(t1, q)) for mo in fresh]
+                got = landing(q, x, near, halves, tops, danger, jump, air)
+                if not last and MID_MEETS:  # (a landing she runs on from: its touch alone)
+                    return (MEET_PRICE_S, None) if got.meets else (0.0, None)
+                if got.price_s > 0:
+                    return got.price_s, min(fresh, key=lambda mo: abs(mo.at(t1, q) - x))
+            if not last and MID_MEETS:
                 return 0.0, None
-            return got.price_s, min(mine, key=lambda mo: abs(mo.at(t1, q) - x))
+            unseen = [(mo.kind or "pig", mo.at(t0, q), mo.at(t1, q)) for mo in mine if mo.seen_at < -STALE_S] \
+                + ([(kind, sx, sx) for sx, kind in danger.free_points(q.id, mine)] if UNSEEN_PRICE > 0 else [])
+            if unseen and UNSEEN_PRICE > 0:
+                got = landing(q, x, unseen, halves, tops, danger, jump, air)
+                if got.price_s > 0:
+                    return UNSEEN_PRICE * got.price_s, None
+            return 0.0, None
         return judge

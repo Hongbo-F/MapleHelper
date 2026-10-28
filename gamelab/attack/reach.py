@@ -468,23 +468,28 @@ def claw_edge(half: float) -> float:
     return CLAW_FAR + half + CLAW_MARGIN
 
 
-def star_sure(half: float) -> float:
-    """How far off she steps back to for a star from the ground at a monster on her level `half` wide either
-    side: 3 past claw_edge, so a step that comes up a little short still clears it."""
-    return claw_edge(half) + 3
-
-
-STAR_SURE = star_sure(MONSTER_HALF["snail"])  # 99: a snail's (124 with the swings taken as 90 ahead)
-
-
 def ground_sure(half: float) -> tuple[float, float]:
     """The nearest and farthest ahead of her (middle to middle) her attack from the ground surely takes a monster on her
     level `half` wide either side, where it will be when the attack starts: as a star, not the claw's swipe, from its
-    claw's edge (claw_edge: a Green or Horny Mushroom 105) to SHOT_RANGE (410). What a landing's clearance and a move
-    away up close go by (attack.stance: landing, _clear_spot): the thief's. The magician's Magic Claw takes one from its
-    search's first band less half the body to its last band's end and half the body (classes.magician.SEARCH: 50 - half
-    to 300 + half, nothing nearer, never behind her), which the aim facade gives in her place (S1)."""
+    claw's edge (claw_edge: a Green or Horny Mushroom 105) to SHOT_RANGE (410). The one near and far limit the stance's
+    decisions about the ground go by (attack.stance: too_close, close_to, _from_here, _clear_step through star_sure, a
+    landing's clearance), and the seam S1's aim facade replaces: the thief's here. The magician's Magic Claw takes one
+    from its search's first band less half the body to its last band's end and half the body (classes.magician.SEARCH:
+    50 - half to 300 + half, nothing nearer, never behind her)."""
     return claw_edge(half), float(SHOT_RANGE)
+
+
+STAR_SURE_MARGIN = 3.0  # units past ground_sure's nearest a step away goes to, so one a little short still clears it
+
+
+def star_sure(half: float) -> float:
+    """How far off she steps back to for a star from the ground at a monster on her level `half` wide either
+    side: STAR_SURE_MARGIN past ground_sure's nearest (the claw's edge), so a step that comes up a little short still
+    clears it."""
+    return ground_sure(half)[0] + STAR_SURE_MARGIN
+
+
+STAR_SURE = star_sure(MONSTER_HALF["snail"])  # 99: a snail's (124 with the swings taken as 90 ahead)
 
 
 # --- what an attack from the ground takes ------------------------------------------------------------------

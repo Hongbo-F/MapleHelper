@@ -217,19 +217,31 @@ REACT_ROOM = 50.0    # units of platform ahead of her run she needs to stop on (
 COMING = "a monster coming into its way"  # (the cut's reason starts so: Navigator._watch, _carry_out_chain)
 # Landings with clearance (from 2026-10-27; the user: "the character should actively try to move away from the mob to
 # attack it"). With an escort that prices landings (Escort.landings: attack.stance.landing, what her first attack where a
-# leg lands surely takes, the monsters walked on to then), a trip's last move is chained where it lands the cheapest
-# (flow.chain's `price`: its other takeoffs, the route's other moves onto the same platform, the walk on to where she's
-# sent counted), and where that still has a price the monster making it so is shot first from where she stands, else
-# from along her platform within SHOOT_WALK, else waited out if its walk clears the landing within WAIT_AHEAD
-# (LAND_WAITS looks at most), else she goes. Live (the 14 Tree Dungeon hunts of 2026-10-25 23:43 to 10-26 23:47:
+# leg lands surely takes, the monsters walked on to then), a chain's moves are done where they land the cheapest
+# (flow.chain's `price`: their other takeoffs, the route's other moves onto the same platform, the walk on to where she's
+# sent counted; a landing she runs on from by its touch alone), and where a trip's last landing still has a price the
+# monster making it so is shot first from where she stands, else from along her platform within SHOOT_WALK
+# (LANDING_WALK), else waited out if its walk clears the landing within WAIT_AHEAD (LAND_WAITS looks at most), else she
+# goes (_clear_landing; not _meet's: walking to shoot first there, 25 up onto 24 with a Green Mushroom by 24's middle was
+# hurt 14 times in 8 seeds and 56 s on its trips where master's stack 8 and 17 s, D:/MapleHelper-scratch/land/fix/
+# shootfirst.py). Live (the 14 Tree Dungeon hunts of 2026-10-25 23:43 to 10-26 23:47:
 # D:/MapleHelper-scratch/land/diag-landings/trips.py) 520 of her trips' landings came within 105 of a monster on the
 # platform she landed on; at 50% of them _meet had planned the chain as if it weren't there (NO_WAIT 243 times,
 # WAIT_LOOKS 17), at 42% she had waited for it, at 4% shot it first; 43% of the not-sure ones could have landed sure by
 # the same kind of move from another takeoff (a median 49 units over), 12% by a star from her takeoff, 20% by one from
 # along her platform (a median 53 units' walk), 6% by waiting up to 3 s. False: as before.
 LANDING_CLEAR = True
-SHOOT_WALK = 150.0   # units: the longest walk along her platform to shoot the monster by a landing first (1.0 s)
-LAND_WAITS = 4       # looks spent in a row waiting for one to clear a landing (WAIT_S apart), before going anyway
+LANDING_WALK = True  # ... from along her platform, where no star reaches it from where she stands; False: not walked to
+SHOOT_WALK = 150.0   # units: the longest walk along her platform to shoot the monster by a landing first (1.0 s: a
+                     # guess; live a median 53 units' walk would have done, diag-landings)
+LAND_WAITS = 4       # guess: looks spent in a row waiting for one to clear a landing (WAIT_S apart), before going anyway
+# A chain planned on the move (_queue_next) prices its moves' landings by their own ways and the route's other moves
+# between the same platforms only, not wider takeoffs (flow.chain's `spread`): it must be planned before the running
+# plan ends (SEND_S), and with them a priced chain took a median 5.7 ms more, 20 at the most, 48 with the suite running
+# alongside (the reviews of 2026-10-27, review-behaviour/chaintime.py), against SEND_S's 30; without them 0.7 ms, 3 at
+# p90, 3.9 at the most, with the harness running alongside (D:/MapleHelper-scratch/land/fix/chaintime.py, SPREAD=0, where
+# with them 10, 45 and 62). True: wider takeoffs too.
+QUEUE_SPREAD = False
 
 # How a trip treats monsters (Navigator.go's `mode`).
 AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
@@ -878,11 +890,11 @@ class Navigator:
         return legs, keys, why
 
     def _pricing(self, st: TripState, monsters: list) -> tuple:
-        """What flow.chain prices a trip's last landing by (LANDING_CLEAR, with an escort that prices them: Escort.
-        landings): the price of a leg's landing against `monsters` (s), the route's other moves between the same
-        platforms (Planner.moves), and where she's sent on the trip's platform ((platform, x), or None); all None
-        without."""
-        landings = getattr(self.escort, "landings", None) if LANDING_CLEAR and self.fight and monsters else None
+        """What flow.chain prices a chain's landings by (LANDING_CLEAR, with an escort that prices them: Escort.
+        landings): the price of a leg's landing against `monsters` (s; with none, the spawn points the escort's judge
+        prices too), the route's other moves between the same platforms (Planner.moves), and where she's sent on the
+        trip's platform ((platform, x), or None); all None without."""
+        landings = getattr(self.escort, "landings", None) if LANDING_CLEAR and self.fight else None
         judge = landings(list(monsters)) if landings is not None else None
         if judge is None:
             return None, None, None
@@ -890,7 +902,7 @@ class Navigator:
             self._siblings = {}
             for m in self.planner.moves:
                 self._siblings.setdefault((m.src, m.dst), []).append(m)
-        return ((lambda leg: judge(leg)[0]), (lambda m: self._siblings.get((m.src, m.dst), [])),
+        return ((lambda leg, last=True: judge(leg, last)[0]), (lambda m: self._siblings.get((m.src, m.dst), [])),
                 None if st.x is None else (st.dst, st.x))
 
     def _clear_landing(self, st: TripState, s: Scene, path: list[Move], monsters: list, legs: list[Leg],
@@ -915,8 +927,9 @@ class Navigator:
         seen = next((m for t, m in st.sighted if t is mo), None)
         if seen is not None and st.shots < MAX_FIGHTS:
             finish = st.mode != TRANSIT
+            self.log(f"  {seen.kind} at x {seen.x:.0f} by her landing on {q.id}: shooting it first")
             kills = self.escort.clear_for(s, seen, finish=finish)
-            if kills is None:
+            if kills is None and LANDING_WALK:
                 kills = self.escort.shoot_from(s, seen, SHOOT_WALK, finish=finish)
             if kills is not None:
                 st.shots += 1
@@ -924,10 +937,11 @@ class Navigator:
                 telemetry.emit("event", kind="landing", text=f"shot first: {seen.kind} on {q.id} by the landing")
                 return True
         if st.land_waits < LAND_WAITS and self._safe_to_stand(s.where.x, s.where.platform, path[0], monsters):
-            delay = WAIT_S
+            delay, last = WAIT_S, legs[-1]
             while delay <= WAIT_AHEAD + 1e-9:
-                later = landings([replace(t, seen_at=t.seen_at - delay) for t in monsters])
-                if later is not None and later(legs[-1])[0] <= 0:
+                # (the same landing `delay` later: the monsters walked on, their sightings as old as they are; no
+                # monster seen making it priced then, what the looks don't have aside)
+                if judge(replace(last, end=replace(last.end, t=last.end.t + delay)))[1] is None:
                     st.land_waits += 1
                     st.trip.waits += 1
                     self.log(f"  waiting for the {mo.kind or 'monster'} by her landing on {q.id} to move off "
@@ -1672,7 +1686,8 @@ class Navigator:
         tracks = [replace(m, seen_at=m.seen_at - (start - starts)) for m in ahead.tracks]
         price, alts, goal = self._pricing(st, tracks)
         legs, keys, why = self.flow.chain(path, Body(0.0, x, p, end.run, False, QUEUE_SLACK), tracks,
-                                          keep_going=True, hops=not self.fight, price=price, alts=alts, goal=goal)
+                                          keep_going=True, hops=not self.fight, price=price, alts=alts, goal=goal,
+                                          spread=QUEUE_SPREAD)
         if not legs:
             return None  # (a monster whose touch counts in the way of the next move: the next pass meets it, _meet)
         # With an escort, chains keep clear only of the monsters whose touch counts (it fights the others instead, at

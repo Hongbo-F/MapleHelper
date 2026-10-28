@@ -2270,8 +2270,9 @@ def loop_tree_ore_waits(sim):
     (behavior.fight.TOUCH_NEAR) and her kills credited to the monster her attack took: on seed 1 she was hurt more than
     five times; of seeds 1-16, 2, 3, 7 and 11-13 meet all of this, and with master's stack 1, 3-6 and 13-16.) (Seed 2
     since landings with clearance and moving away to attack, 2026-10-27, the Horny Mushroom's escape stepping to the
-    safest end, stance.ESCAPE_STEPS: on seed 3 she was hurt 6 times; of seeds 1-16, 1, 2, 6-8, 11 and 14 meet all of
-    this, with master's stack 2, 3, 7 and 11-13; hurt 88 times over the 16 against 107.)"""
+    safest end, stance.ESCAPE_STEPS: on seed 3 she was hurt 6 times; of seeds 1-16, 1, 2, 6-8, 11 and 14 met all of
+    this, with master's stack 2, 3, 7 and 11-13, hurt 94 times over the 16 against 101; after the reviews of it, 1-3,
+    6, 8, 9 and 11-16, hurt 65 times against master's 101.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2325,6 +2326,9 @@ def safe_there(sim) -> bool:
     return sim.model.safe(w.plat.id) or d.at(w.plat.id, w.x, None) <= SAFE_DANGER
 
 
+PLAYED_ROUND_S = 1e-4  # (lie_detector) what fakes.FakePlayer rounds the times it played its keys at to
+
+
 def lie_detector(after: float, minutes: float = 5, grind: bool = False):
     """The hunt loop as `tour --loop` runs it (in behavior.retreat.on_alarm; with `grind`, grinding, behavior.grind, as
     `tour --loop --grind` does), the player seeing the Lie Detector `after` s into the run. The result: how the hunt
@@ -2353,8 +2357,12 @@ def lie_detector(after: float, minutes: float = 5, grind: bool = False):
             stopped = str(e)
         sim.clock.sleep(max(0.0, seen + RETREAT_S + 0.1 - sim.clock.now))  # (past the tick `look` is called at)
         sim.world.advance(sim.clock.now)
+        # (the player's played times are rounded to 0.1 ms, fakes.FakePlayer._schedule: one played at the sighting's
+        # instant but a float's error before it reads as at it, where nothing but a retreat's plays from it on.
+        # loop_tree_lie_detector_23 on seed 5, seen at 150 s, had a walk's pick-up tap 2 ns before it counted after it:
+        # tests/test_retreat.py under --slow, 2026-10-27.)
         played = sorted([round(t - seen, 3), kind, *event] for kind, events in sim.player.played.values()
-                        for t, *event in events if t >= seen)
+                        for t, *event in events if t >= seen + PLAYED_ROUND_S / 2)
         sim.clock.sleep(max(0.0, seen + RETREAT_WINDOW_S + 0.5 - sim.clock.now))
         try:
             client.submit([[0, sim.keys.left.name, "down"], [40, sim.keys.left.name, "up"]], lead_ms=0, name="late",
@@ -2684,3 +2692,17 @@ def nav_tree_rope_hit(sim):
     live, where the trip went past it regardless): it touches her on the rope, which cuts the chain and lets go of
     up; the game keeps her on the rope, and up goes down again at once (navigator.CLIMB_ON), onto 18 and on."""
     return _nav(16, fight=True)(sim)
+
+
+@tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=3, limit=60, **_LIVE,
+      expects=(ends("arrived"), logs("by her landing on 23: shooting it first"),
+               check("on 23 by the end", lambda tr: tr["world"]["platform"] == 23),
+               check("not hurt", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] == 0)))
+def nav_tree_landing_shot_first(sim):
+    """From 24 down onto 23 in transit, a Horny Mushroom on 23 that the jump lands her 100-140 from: no touch on the
+    way, but inside its keep-off (attack.danger: 169), so no attack of hers from there is sure (attack.stance.landing),
+    and no other way down lands clear of it: a star from 24 reaches it, so she shoots it first from where she stands
+    (control.navigator._clear_landing; the 'landing' event 'shot first'), then goes. (Of seeds 1-6 the others shoot it
+    first from 24 too, the chain stopped short of a touch on its way: _meet's.)"""
+    from ..control.navigator import TRANSIT
+    return sim.navigator(sim.hunter(), fight=True).go(23, mode=TRANSIT)

@@ -70,7 +70,7 @@ def test_up_close_the_throw_is_one_whose_attack_surely_takes_it():
     assert stance(500, [mon(615)]) == ("throw", RIGHT)
     assert stance(500, [mon(560)]) == ("jump_throw", RIGHT)
     assert stance(500, [mon(554)]) == ("jump_throw", RIGHT) and stance(500, [mon(553)])[:2] == ("back", LEFT)
-    assert stance(500, [mon(520)]) == ("back", LEFT, 35)
+    assert stance(500, [mon(520)])[:3] == ("back", LEFT, 35)
     # Facing away: an air turn's attack (120 ms into the jump, her feet 52-56 up) picks one on her level only from 144,
     # so she taps the arrow on the ground first and jumps keyed 40 ms after the jump key (JumpPlan air_turn False).
     tap_first = ("jump_throw", RIGHT, st.JumpPlan(physics.JUMP_ATTACK_MS, 0, False, "tap first"))
@@ -105,7 +105,7 @@ def test_against_one_walking_at_her_no_step_clears_it():
     # room) where there's room, else the jump in place.
     green = mon(530)
     assert stance(500, [green], pace=walking(-95.0)) == ("jump_back", RIGHT)
-    assert stance(500, [green], pace=walking(0.0)) == ("back", LEFT, 25)
+    assert stance(500, [green], pace=walking(0.0))[:3] == ("back", LEFT, 25)
     assert st._clear_step(500, 500, green, LEFT, 400, 51, 28, FLAT, [green], HALVES, walking(-95.0)) is None
 
 
