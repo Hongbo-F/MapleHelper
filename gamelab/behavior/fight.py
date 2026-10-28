@@ -27,7 +27,7 @@ from .. import character, directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import (AWAY, FLINCH_HOLD_S, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace, act_text,
                              air_gap, decide, first_attack_s, landing, move_limits, open_above, pct, pick_target,
-                             plan_of, shooting_place, stance)
+                             place_to_shoot, plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
@@ -1267,13 +1267,36 @@ class FightOnTheWay:
         platform (and any in reach elsewhere, or close on hers), never walking after it. A kill clears the way, and a
         hit's knockback may (the navigator plans again from the next look). Returns the kills, or None if no star
         reaches it from here. `finish`: as clear_way's."""
-        if s.platform is None or not reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters):
+        if not self.reaches(s, m):
             return None
         self.h.log(f"  {m.kind} on platform {m.platform} at x {m.x:.0f} could touch her on the way: shooting it first")
         before = self.h.report.exp_kills
         self.h.clear({m.kind}, ground={m.platform}, max_kills=1, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE,
                      approach=False, far=True, finish_wounds=finish)
         return self.h.report.exp_kills - before
+
+    def reaches(self, s: Scene, m: Monster) -> bool:
+        """Whether her attack from where she stands in look `s` takes monster `m`: the fights' own rule (reach.can_hit,
+        what her profile's attack geometry names for the thief, character.Geometry 'star_search': a star's band under
+        and over her, reach.SHOT_DOWN and the search's windows; its line, v83's walls and floors; a monster the attack
+        takes first shielding it), clear_for's and so the shot first by a landing's (shot_place). The seam S1's aim
+        facade replaces for another character's attack, with stance.place_to_shoot's search along her platform."""
+        return s.platform is not None and s.where is not None \
+            and reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters)
+
+    def shot_place(self, s: Scene, m: Monster, most: float) -> tuple[float | None, str]:
+        """Where on her platform her attack reaches monster `m` from (the navigator's shot first by a trip's last
+        landing): (her x, '') if from where she stands (`reaches`: clear_for's), else (the nearest place within `most`
+        units along her platform, '') where one is (stance.place_to_shoot: shoot_from's), else (None, why not). Nothing
+        is sent. Live (2026-10-28 00:38:36) the drop 21 -> 23 by a Horny Mushroom logged "shooting it first" and threw
+        nothing: 23 is 117-122 under 21, past a star's band (reach.SHOT_DOWN), so from nowhere on 21 does one reach it."""
+        if self.reaches(s, m):
+            return s.where.x, ""
+        if s.platform is None or s.where is None or m.platform is None:
+            return None, "no look of her on a platform"
+        if most <= 0:
+            return None, "her attack doesn't reach it from where she stands (no walk to shoot it from)"
+        return place_to_shoot(s.platform, s.where.x, s.where.y, m, most, s.monsters)
 
     # (shoot_from) a monster found again after the walk: its kind on its platform within this of where it was seen
     SHOOT_REFIND = TRACK_MATCH + DEFAULT_SPEED * 1.0  # the tracks' match and a second of its kind's walk (a guess)

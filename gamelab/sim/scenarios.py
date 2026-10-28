@@ -2706,3 +2706,19 @@ def nav_tree_landing_shot_first(sim):
     first from 24 too, the chain stopped short of a touch on its way: _meet's.)"""
     from ..control.navigator import TRANSIT
     return sim.navigator(sim.hunter(), fight=True).go(23, mode=TRANSIT)
+
+
+@tree((21, 42.0), monsters=[("Horny Mushroom", 23, 24.0), ("Horny Mushroom", 23, -132.0)], seed=2, limit=60, **_LIVE,
+      expects=(ends("arrived"), no_log("by her landing on 23: shooting it first"), no_log("no shot first"),
+               check("on 23 by the end", lambda tr: tr["world"]["platform"] == 23),
+               check("not hurt", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] == 0)))
+def nav_tree_landing_no_shot(sim):
+    """From 21 at x 42 down onto 23 (the grind's stop 23 at x 8, a hunt trip), Horny Mushrooms on 23 at 24 and -132, as
+    live at 00:38:36 on 2026-10-28 (grind-1028-0030.log), where the drop from where she stood landed inside the walker's
+    keep-off and the log said "horny-mushroom at x 24 by her landing on 23: shooting it first" with nothing thrown: from
+    nowhere on 21 does a star reach 23 (117-122 under it, past reach.SHOT_DOWN). Here as there before the fix ("... at x
+    -130 ...: shooting it first" at 0.84 s, then the drop at once from 42); now the drop's other takeoffs are tried from
+    their own spots (flow._spread: _drop's `at`), it drops from another, clear of both, and there's no shot first to say
+    (FightOnTheWay.shot_place: none where her attack reaches nothing; the log would say so: 'no shot first')."""
+    from ..control.navigator import HUNT
+    return sim.navigator(sim.hunter(), fight=True).go(23, x=8.0, mode=HUNT)

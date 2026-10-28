@@ -221,10 +221,12 @@ COMING = "a monster coming into its way"  # (the cut's reason starts so: Navigat
 # (flow.chain's `price`: their other takeoffs, the route's other moves onto the same platform, the walk on to where she's
 # sent counted; a landing she runs on from by its touch alone), and where a trip's last landing still has a price the
 # monster making it so is shot first from where she stands, else from along her platform within SHOOT_WALK
-# (LANDING_WALK), else waited out if its walk clears the landing within WAIT_AHEAD (LAND_WAITS looks at most), else she
-# goes (_clear_landing; not _meet's: walking to shoot first there, 25 up onto 24 with a Green Mushroom by 24's middle was
-# hurt 14 times in 8 seeds and 56 s on its trips where master's stack 8 and 17 s, D:/MapleHelper-scratch/land/fix/
-# shootfirst.py). Live (the 14 Tree Dungeon hunts of 2026-10-25 23:43 to 10-26 23:47:
+# (LANDING_WALK), only where her attack reaches it (Escort.shot_place: from 2026-10-28, when live from 21 one on 23, past
+# a star's band, was said to be shot first and nothing was thrown), else waited out if its walk clears the landing within
+# WAIT_AHEAD (LAND_WAITS looks at most), else she goes (_clear_landing; not _meet's: walking to shoot first there, 25 up
+# onto 24 with a Green Mushroom by 24's middle was hurt 14 times in 8 seeds and 56 s on its trips where master's stack
+# 8 and 17 s, D:/MapleHelper-scratch/land/fix/shootfirst.py). Live (the 14 Tree Dungeon hunts of 2026-10-25 23:43 to
+# 10-26 23:47:
 # D:/MapleHelper-scratch/land/diag-landings/trips.py) 520 of her trips' landings came within 105 of a monster on the
 # platform she landed on; at 50% of them _meet had planned the chain as if it weren't there (NO_WAIT 243 times,
 # WAIT_LOOKS 17), at 42% she had waited for it, at 4% shot it first; 43% of the not-sure ones could have landed sure by
@@ -279,6 +281,10 @@ class Escort(Protocol):
     def shoot_from(self, s: Scene, m: Monster, most: float, finish: bool = True) -> int | None:
         """Walk along her platform, `most` units at most, to the nearest place a star reaches monster `m` from, and
         shoot it there: the kills, or None if there's no such place."""
+
+    def shot_place(self, s: Scene, m: Monster, most: float) -> tuple[float | None, str]:
+        """Where her attack reaches monster `m` from (the fights' own reach): (her x, '') from where she stands
+        (clear_for's), (a place within `most` along her platform, '') shoot_from's, else (None, why not). Nothing sent."""
 
     def landings(self, tracks: list) -> Callable[[Leg], tuple[float, MonsterTrack | None]] | None:
         """How a leg's landing is priced against `tracks` (the chain's): the price (s: 0 where her first attack there
@@ -909,10 +915,14 @@ class Navigator:
                        why: str) -> bool:
         """With an escort, a chain that ends the trip (onto its platform) landing with a price (Escort.landings: her first
         attack there not sure to take the nearest monster, or one walking into her first), the cheapest flow.chain
-        found: the monster making it so is shot first from where she stands if a star reaches it (Escort.clear_for),
-        else from along her platform within SHOOT_WALK (Escort.shoot_from), MAX_FIGHTS shots in a row at most as _meet's;
-        else waited out if, walking as seen, it clears the landing within WAIT_AHEAD (LAND_WAITS looks at most, where
-        none can reach her meanwhile); else she goes. True to look again."""
+        found: the monster making it so is shot first where her attack reaches it (Escort.shot_place, the fights' own
+        reach): from where she stands (Escort.clear_for), else from along her platform within SHOOT_WALK (Escort.
+        shoot_from: "shooting it first from x N"), MAX_FIGHTS shots in a row at most as _meet's; where there's no such
+        shot, the log says why ("no shot first, her attack reaches it from nowhere on platform 21 (136 under her)") and
+        nothing is sent; then it's waited out if, walking as seen, it clears the landing within WAIT_AHEAD (LAND_WAITS
+        looks at most, where none can reach her meanwhile); else she goes ("landing on P by the K anyway: why"). Each a
+        'landing' event (shot first, waited, went), with why there was no shot (`shot`) and why she didn't wait (`why`).
+        True to look again."""
         landings = getattr(self.escort, "landings", None)
         if not (LANDING_CLEAR and legs and why == "done" and landings is not None and monsters) \
                 or legs[-1].end.platform.id != st.dst:
@@ -924,19 +934,42 @@ class Navigator:
         if price <= 0 or mo is None:
             return False
         q = legs[-1].end.platform
+        kind = mo.kind or "monster"
         seen = next((m for t, m in st.sighted if t is mo), None)
-        if seen is not None and st.shots < MAX_FIGHTS:
-            finish = st.mode != TRANSIT
-            self.log(f"  {seen.kind} at x {seen.x:.0f} by her landing on {q.id}: shooting it first")
-            kills = self.escort.clear_for(s, seen, finish=finish)
-            if kills is None and LANDING_WALK:
-                kills = self.escort.shoot_from(s, seen, SHOOT_WALK, finish=finish)
-            if kills is not None:
-                st.shots += 1
-                st.trip.kills += kills
-                telemetry.emit("event", kind="landing", text=f"shot first: {seen.kind} on {q.id} by the landing")
-                return True
-        if st.land_waits < LAND_WAITS and self._safe_to_stand(s.where.x, s.where.platform, path[0], monsters):
+        # The shot first: only one her attack can make (Escort.shot_place, the fights' own reach), from where she stands
+        # or from along her platform. Live on 2026-10-28 at 00:38:36 the drop 21 -> 23 (117 down, past a star's band)
+        # logged "shooting it first" with nothing to throw: the line came before clear_for and shoot_from, which both
+        # found no throw. `shot`: why there's none (the log's and the events').
+        if seen is None:
+            shot = "not in this look"  # (a quick look's, or a track the look didn't have: nothing to aim at)
+        elif st.shots >= MAX_FIGHTS:
+            shot = f"{st.shots} shots in a row already (MAX_FIGHTS)"
+        else:
+            place, shot = self.escort.shot_place(s, seen, SHOOT_WALK if LANDING_WALK else 0.0)
+            if place is None:
+                self.log(f"  {seen.kind} at x {seen.x:.0f} by her landing on {q.id}: no shot first, {shot}")
+            else:
+                finish = st.mode != TRANSIT
+                walk = abs(place - s.where.x) >= 1e-6
+                where = f" from x {place:.0f}" if walk else ""
+                self.log(f"  {seen.kind} at x {seen.x:.0f} by her landing on {q.id}: shooting it first{where}")
+                kills = self.escort.shoot_from(s, seen, SHOOT_WALK, finish=finish) if walk \
+                    else self.escort.clear_for(s, seen, finish=finish)
+                if kills is not None:
+                    st.shots += 1
+                    st.trip.kills += kills
+                    telemetry.emit("event", kind="landing", text=f"shot first: {seen.kind} on {q.id} by the landing"
+                                   f"{where}", price=round(price, 2), at=round(place, 1))
+                    return True
+                shot = "her attack didn't reach it after all"  # (shot_place said it would: not expected)
+        # Then waited out, a bounded wait (LAND_WAITS looks), where its walk as seen clears the landing within
+        # WAIT_AHEAD and none can reach her meanwhile; else she goes, priced.
+        if st.land_waits >= LAND_WAITS:
+            why = f"waited {st.land_waits} looks for it already (LAND_WAITS)"
+        elif not self._safe_to_stand(s.where.x, s.where.platform, path[0], monsters):
+            why = "not safe to stand and wait here"
+        else:
+            why = f"its walk as seen doesn't clear the landing within {WAIT_AHEAD:.1f} s"
             delay, last = WAIT_S, legs[-1]
             while delay <= WAIT_AHEAD + 1e-9:
                 # (the same landing `delay` later: the monsters walked on, their sightings as old as they are; no
@@ -944,15 +977,15 @@ class Navigator:
                 if judge(replace(last, end=replace(last.end, t=last.end.t + delay)))[1] is None:
                     st.land_waits += 1
                     st.trip.waits += 1
-                    self.log(f"  waiting for the {mo.kind or 'monster'} by her landing on {q.id} to move off "
-                             f"({st.land_waits})")
-                    telemetry.emit("event", kind="landing", text=f"waited: {mo.kind} on {q.id} by the landing")
+                    self.log(f"  waiting for the {kind} by her landing on {q.id} to move off ({st.land_waits})")
+                    telemetry.emit("event", kind="landing", text=f"waited: {mo.kind} on {q.id} by the landing",
+                                   shot=shot, price=round(price, 2), clears_s=round(delay, 2))
                     time.sleep(WAIT_S)
                     return True
                 delay += WAIT_S
-        if telemetry.recording():
-            telemetry.emit("event", kind="landing", text=f"went: {mo.kind} on {q.id} by the landing "
-                                                         f"(price {price:.1f} s)")
+        self.log(f"  landing on {q.id} by the {kind} anyway (price {price:.1f} s): {why}")
+        telemetry.emit("event", kind="landing", text=f"went: {mo.kind} on {q.id} by the landing (price {price:.1f} s)",
+                       shot=shot, why=why, price=round(price, 2))
         return False
 
     def _meet(self, st: TripState, s: Scene, path: list[Move], monsters: list, legs: list[Leg], why: str,

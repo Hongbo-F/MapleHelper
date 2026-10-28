@@ -493,18 +493,49 @@ def _clear_from(platform: Platform, x: float, y: float, t: Monster, lo: float, h
 
 def shooting_place(platform: Platform, x: float, y: float, t: Monster, most: float,
                    around: list[Monster]) -> float | None:
-    """Where along `platform` within `most` units of map x a star from the ground reaches monster `t` (_clear_from, within
-    where she stands to shoot with monsters about: _stand_limits), the nearest, with no monster of her platform within
-    TOO_CLOSE of the walk there (her body's way: those are the fights' to deal with); None if there's none, or it's under
-    MIN_MOVE off (shooting from where she stands is the caller's). The navigator's shot first at a monster by a landing
-    (behavior.fight.FightOnTheWay.shoot_from)."""
+    """Where along `platform` within `most` units of map x her attack from the ground takes monster `t` standing there
+    (_reached_from: the fights' own rule at that place's height, within where she stands to shoot with monsters about:
+    _stand_limits), the nearest, with no monster of her platform within TOO_CLOSE of the walk there (her body's way:
+    those are the fights' to deal with); None if there's none, or it's under MIN_MOVE off (shooting from where she
+    stands is the caller's). The navigator's shot first at a monster by a landing (behavior.fight.FightOnTheWay.
+    shoot_from, shot_place)."""
+    return place_to_shoot(platform, x, y, t, most, around)[0]
+
+
+def place_to_shoot(platform: Platform, x: float, y: float, t: Monster, most: float,
+                   around: list[Monster]) -> tuple[float | None, str]:
+    """shooting_place's place, and where there's none why not, for the log and the 'landing' event (behavior.fight.
+    FightOnTheWay.shot_place): (the place, ''), or (None, why): her attack reaches it from nowhere along `platform`
+    within where she stands to shoot, with how far under or over her (at `y`) it is (from Tree Dungeon's 21 one on 23,
+    117-122 under it, past a star's band, reach.SHOT_DOWN: live, 2026-10-28 00:38:36); only from farther than `most`
+    (the nearest such place said); only from under MIN_MOVE off; or a monster of her platform in the walk's way."""
     lo, hi = _stand_limits(platform, crowded=any(o.platform == platform.id for o in around))
-    g = _clear_from(platform, x, y, t, max(lo, x - most), min(hi, x + most), around)
-    if g is None or abs(g - x) < MIN_MOVE:
-        return None
+    g = _reached_from(platform, x, t, max(lo, x - most), min(hi, x + most), around)
+    if g is None:
+        far = None if x - most <= lo and x + most >= hi else _reached_from(platform, x, t, lo, hi, around)
+        if far is None:
+            dy = t.y - y
+            return None, (f"her attack reaches it from nowhere on platform {platform.id} ({abs(dy):.0f} "
+                          f"{'under' if dy > 0 else 'over'} her)")
+        return None, f"her attack reaches it only from x {far:.0f} on platform {platform.id}, {abs(far - x):.0f} off"
+    if abs(g - x) < MIN_MOVE:
+        return None, f"her attack reaches it from x {g:.0f}, under MIN_MOVE off"
     if any(o.platform == platform.id and min(x, g) - TOO_CLOSE <= o.x <= max(x, g) + TOO_CLOSE for o in around):
-        return None
-    return g
+        return None, f"a monster of platform {platform.id} in the walk's way to x {g:.0f}"
+    return g, ""
+
+
+def _reached_from(platform: Platform, x: float, t: Monster, lo: float, hi: float,
+                  around: list[Monster]) -> float | None:
+    """The nearest place to map x along `platform`, from `lo` to `hi` (every CLEAR_STEP units, as _clear_from's), from
+    where her attack takes monster `t` standing there: the fights' own rule (reach.can_hit at the shot's reach, as
+    behavior.fight.FightOnTheWay.clear_for has it from there), her feet at the platform's height at that place. Not
+    _clear_from's (her height where she is now, out to _goal_reach: a walk's goal the fights' next look decides on
+    again): on 25's slope (10 lower at 140 than at 89) that had a Green on 24 at 260 in reach from 89 for her at 140,
+    where standing at 89 it isn't, so the shot first's walk ended where clear_for found no throw (from 2026-10-28)."""
+    xs = [lo + i * CLEAR_STEP for i in range(int((hi - lo) // CLEAR_STEP) + 1)] + [hi]
+    ok = [g for g in xs if reach.can_hit(platform, g, platform.y_at(g), t, others=around)]
+    return min(ok, key=lambda g: abs(g - x), default=None)
 
 
 def _stand_limits(platform: Platform, crowded: bool) -> tuple[float, float]:

@@ -1,11 +1,14 @@
 """Landings with clearance, and moving away to attack (from 2026-10-27): a landing priced by what her first attack there
 surely takes (attack.stance.landing), a chain's moves done where they land the cheapest (motion.flow.chain's `price`:
 behavior.fight.FightOnTheWay.landings, what the looks don't have priced less), the monster by a trip's last landing shot
-first, walked to and shot, or waited out (control.navigator._clear_landing, FightOnTheWay.shoot_from), the grind's stops
-clear of their platforms' spawn points (behavior.patrol), up close her moves away nearer a wall end (stance.move_limits),
-never onto a spawn point nobody accounts for, at most stance.MAX_MOVES in a row where something counts, her running
-attack's target standing a while in her pace once her hit shows (Pace.hold), and the simulator's monsters walking at her
-(sim.world: Realism.chase, invulnerable; the harness's `walkers` and `landings`)."""
+first, walked to and shot, or waited out (control.navigator._clear_landing, FightOnTheWay.shoot_from), the shot only
+where her attack reaches it from where she'll stand, else said why not (FightOnTheWay.shot_place, stance.place_to_shoot:
+from 2026-10-28, the live shoot-first that threw nothing), a drop's and a jump straight up's other takeoffs from their own
+spots (flow._drop, _jump_up), the grind's stops clear of their platforms' spawn points (behavior.patrol), up close her
+moves away nearer a wall end (stance.move_limits), never onto a spawn point nobody accounts for, at most stance.MAX_MOVES
+in a row where something counts, her running attack's target standing a while in her pace once her hit shows
+(Pace.hold), and the simulator's monsters walking at her (sim.world: Realism.chase, invulnerable; the harness's
+`walkers` and `landings`)."""
 
 import random
 from dataclasses import replace
@@ -328,13 +331,21 @@ def test_a_chains_moves_land_where_they_cost_least_what_the_looks_miss_priced_le
 
 
 class _Escort:
-    """A stand-in escort for _clear_landing: its judge, and what its shots give."""
+    """A stand-in escort for _clear_landing: its judge, and what its shots give (`clear`: from where she stands;
+    `walked`: from along her platform, 51 off; neither: her attack reaches it from nowhere, shot_place's None)."""
 
     def __init__(self, judge, clear=None, walked=None):
         self.judge, self.clear, self.walked, self.calls = judge, clear, walked, []
 
     def landings(self, tracks):
         return self.judge
+
+    def shot_place(self, s, m, most):
+        if self.clear is not None:
+            return s.where.x, ""
+        if self.walked is not None and most > 0:
+            return s.where.x - 51.0, ""
+        return None, "her attack reaches it from nowhere on platform 25 (stand-in)"
 
     def clear_for(self, s, m, finish=True):
         self.calls.append(("clear_for", m))
@@ -347,9 +358,11 @@ class _Escort:
 
 def test_the_monster_by_a_trips_last_landing_is_shot_first_walked_to_or_waited_out(tree_map, monkeypatch):
     # Navigator._clear_landing, the trip's last landing still priced by a monster the look saw: shot from where she
-    # stands if a star reaches it, else walked to along her platform (SHOOT_WALK at most) and shot, MAX_FIGHTS in a row
-    # at most; else waited out where it clears the landing within WAIT_AHEAD (LAND_WAITS looks, only where none can reach
-    # her meanwhile); else she goes. Each a 'landing' event.
+    # stands if her attack reaches it there, else walked to along her platform (SHOOT_WALK at most) and shot where it
+    # does (Escort.shot_place), MAX_FIGHTS in a row at most; where it reaches it from nowhere, the log says so and why
+    # and nothing is sent (from 2026-10-28: live it said "shooting it first" and threw nothing); then waited out where it
+    # clears the landing within WAIT_AHEAD (LAND_WAITS looks, only where none can reach her meanwhile); else she goes,
+    # the log saying why. One 'landing' event a decision, with why there was no shot and why she went.
     monkeypatch.setattr(nav_mod.time, "sleep", lambda s: None)
     p25 = tree_map.platform(25)
     up = [m for m in Planner(tree_map).moves if (m.kind, m.src, m.dst) == ("jump_up", 25, 24)]
@@ -359,6 +372,8 @@ def test_the_monster_by_a_trips_last_landing_is_shot_first_walked_to_or_waited_o
     s = SimpleNamespace(where=Where(140.0, p25.y_at(140.0), p25, (0.0, 0.0)), platform=p25, monsters=[seen])
     landed = legs[-1].end.t
 
+    records = []
+
     def run(judge, clear=None, walked=None, safe=True, shots=0, waits=0):
         st_ = nav_mod.TripState(dst=24, mode=nav_mod.HUNT)
         st_.sighted, st_.shots, st_.land_waits = [(track, seen)], shots, waits
@@ -366,32 +381,45 @@ def test_the_monster_by_a_trips_last_landing_is_shot_first_walked_to_or_waited_o
         me = SimpleNamespace(escort=esc, log=logs.append, _safe_to_stand=lambda *a: safe)
         with telemetry.captured() as rec:
             got = nav_mod.Navigator._clear_landing(me, st_, s, up, [track], legs, "done")
-        return got, st_, esc, logs, [r["text"].split(":")[0] for r in rec if r.get("kind") == "landing"]
+        records[:] = [r for r in rec if r.get("kind") == "landing"]
+        return got, st_, esc, logs, [r["text"].split(":")[0] for r in records]
 
     def always(leg):
         return st.LANDING_PRICE_S, track
 
     def clears(leg):  # (it walks off the landing within WAIT_AHEAD)
         return (0.0, None) if leg.end.t > landed + 0.5 else (st.LANDING_PRICE_S, track)
-    got, st_, esc, _, ev = run(always, clear=1)
+    got, st_, esc, logs, ev = run(always, clear=1)
     assert got and st_.shots == 1 and st_.trip.kills == 1 and esc.calls == [("clear_for", seen)] and ev == ["shot first"]
-    got, st_, esc, _, ev = run(always, walked=0)
-    assert got and st_.shots == 1 and [c[0] for c in esc.calls] == ["clear_for", "shoot_from"]
-    assert esc.calls[1][2] == nav_mod.SHOOT_WALK and ev == ["shot first"]
-    got, st_, esc, logs, ev = run(clears)
-    assert got and st_.land_waits == 1 and st_.trip.waits == 1 and ev == ["waited"] and "move off" in logs[-1]
-    assert "by her landing on 24: shooting it first" in logs[0]
+    assert logs == ["  green-mushroom at x 250 by her landing on 24: shooting it first"]
+    got, st_, esc, logs, ev = run(always, walked=0)  # (walked to and shot: shoot_from alone, from x 89)
+    assert got and st_.shots == 1 and [c[0] for c in esc.calls] == ["shoot_from"]
+    assert esc.calls[0][2] == nav_mod.SHOOT_WALK and ev == ["shot first"] and records[0]["at"] == 89.0
+    assert logs == ["  green-mushroom at x 250 by her landing on 24: shooting it first from x 89"]
+    got, st_, esc, logs, ev = run(clears)  # (no shot: said so and why, nothing sent; waited out)
+    assert got and st_.land_waits == 1 and st_.trip.waits == 1 and ev == ["waited"] and esc.calls == []
+    assert logs[0].endswith("by her landing on 24: no shot first, her attack reaches it from nowhere on platform 25 "
+                            "(stand-in)") and "move off (1)" in logs[-1] and len(logs) == 2
+    assert records[0]["shot"].startswith("her attack reaches it from nowhere") and records[0]["clears_s"] > 0
     nav_mod.LANDING_WALK = False  # (not walked to: only shot from where she stands)
     try:
-        got, _, esc, _, _ = run(always, walked=0)
+        got, _, esc, _, ev = run(always, walked=0)
+        assert not got and esc.calls == [] and ev == ["went"]
+        got, _, esc, _, _ = run(always, clear=1)
         assert [c[0] for c in esc.calls] == ["clear_for"]
     finally:
         nav_mod.LANDING_WALK = True
-    assert not run(clears, safe=False)[0] and not run(clears, waits=nav_mod.LAND_WAITS)[0]
-    got, _, _, _, ev = run(always)  # (standing on: nothing for it but to go)
-    assert not got and ev == ["went"]
-    got, _, esc, _, _ = run(always, clear=1, shots=nav_mod.MAX_FIGHTS)  # (shot at MAX_FIGHTS times already)
-    assert not got and esc.calls == []
+    got, _, _, logs, ev = run(clears, safe=False)
+    assert not got and ev == ["went"] and records[0]["why"] == "not safe to stand and wait here"
+    got, _, _, logs, ev = run(clears, waits=nav_mod.LAND_WAITS)
+    assert not got and ev == ["went"] and "(LAND_WAITS)" in records[0]["why"] and "(LAND_WAITS)" in logs[-1]
+    got, _, esc, logs, ev = run(always)  # (standing on: nothing for it but to go)
+    assert not got and ev == ["went"] and esc.calls == []
+    assert logs[-1] == (f"  landing on 24 by the green-mushroom anyway (price 1.2 s): its walk as seen doesn't clear "
+                        f"the landing within {nav_mod.WAIT_AHEAD:.1f} s")
+    assert records[0]["price"] == st.LANDING_PRICE_S and "nowhere" in records[0]["shot"]
+    got, _, esc, _, ev = run(always, clear=1, shots=nav_mod.MAX_FIGHTS)  # (shot at MAX_FIGHTS times already)
+    assert not got and esc.calls == [] and "(MAX_FIGHTS)" in records[0]["shot"]
     assert not run(lambda leg: (0.3, None))[0]  # (priced by what the looks don't have: nothing to shoot or wait out)
     # Not a chain ending the trip (onto another platform, or cut short): as before.
     me = SimpleNamespace(escort=_Escort(always, clear=1), log=print, _safe_to_stand=lambda *a: True)
@@ -402,26 +430,44 @@ def test_the_monster_by_a_trips_last_landing_is_shot_first_walked_to_or_waited_o
 
 
 def test_shooting_it_first_from_along_her_platform(tree_map):
-    # FightOnTheWay.shoot_from: from 25 at 140, a Green on 24 at 260 by her landing is in a star's reach from 89
-    # (attack.stance.shooting_place): she walks left 51, looks, finds it again, and shoots it there (clear_for). Not
-    # past `most`, nor with a monster of her platform in the walk's way; 0 if the walk's look doesn't find it.
-    p25 = tree_map.platform(25)
-    g = mon(260.0, 24, y=tree_map.platform(24).y_at(260.0))
-    assert st.shooting_place(p25, 140.0, p25.y_at(140.0), g, 150.0, [g]) == pytest.approx(89)
-    assert st.shooting_place(p25, 140.0, p25.y_at(140.0), g, 40.0, [g]) is None
-    assert st.shooting_place(p25, 140.0, p25.y_at(140.0), g, 150.0, [g, mon(110.0, 25, y=p25.y_at(110.0))]) is None
+    # FightOnTheWay.shoot_from: from 21 at 42.3, a Green on 19 at 195 by her landing (78 over her) is out of her attack's
+    # reach from there and in it from 17 standing there (attack.stance.shooting_place: the fights' own rule at that
+    # place's height): she walks left 25, looks, finds it again, and shoots it there (clear_for). Not past `most`, nor
+    # with a monster of her platform in the walk's way; 0 if the walk's look doesn't find it.
+    p21, p19 = tree_map.platform(21), tree_map.platform(19)
+    g = mon(195.0, 19, y=p19.y_at(195.0))
+    assert not reach.can_hit(p21, 42.3, p21.y_at(42.3), g, others=[g])
+    assert st.shooting_place(p21, 42.3, p21.y_at(42.3), g, 150.0, [g]) == pytest.approx(17)
+    assert reach.can_hit(p21, 17.0, p21.y_at(17.0), g, others=[g])
+    assert st.shooting_place(p21, 42.3, p21.y_at(42.3), g, 15.0, [g]) is None
+    assert st.shooting_place(p21, 42.3, p21.y_at(42.3), g, 150.0, [g, mon(30.0, 21, y=p21.y_at(30.0))]) is None
     walks, shot = [], []
-    after = SimpleNamespace(where=Where(89.0, p25.y_at(89.0), p25, (0.0, 0.0)), platform=p25,
-                            monsters=[mon(265.0, 24, y=tree_map.platform(24).y_at(265.0))])
+    after = SimpleNamespace(where=Where(17.0, p21.y_at(17.0), p21, (0.0, 0.0)), platform=p21,
+                            monsters=[mon(200.0, 19, y=p19.y_at(200.0))])
     h = SimpleNamespace(actions=SimpleNamespace(walk=lambda side, units: walks.append((side, units))),
                         look=lambda: after, log=lambda m: None)
     esc = fight.FightOnTheWay(h)
     esc.clear_for = lambda s, m, finish=True: shot.append(m) or 1
-    s = SimpleNamespace(where=Where(140.0, p25.y_at(140.0), p25, (0.0, 0.0)), platform=p25, monsters=[g])
-    assert esc.shoot_from(s, g, 150.0) == 1 and walks == [(LEFT, pytest.approx(51))] and shot == [after.monsters[0]]
+    s = SimpleNamespace(where=Where(42.3, p21.y_at(42.3), p21, (0.0, 0.0)), platform=p21, monsters=[g])
+    assert esc.shoot_from(s, g, 150.0) == 1 and walks == [(LEFT, pytest.approx(25.3))] and shot == [after.monsters[0]]
     after.monsters = []
     assert esc.shoot_from(s, g, 150.0) == 0
-    assert esc.shoot_from(s, g, 40.0) is None
+    assert esc.shoot_from(s, g, 15.0) is None
+    # Where she'll stand, not where she is: on 25's slope (10 higher at 89 than at 140) the place was judged from her
+    # height at 140, out to _goal_reach, and from 140 a Green on 24 at 260 was "in reach from 89", where standing at 89
+    # it isn't (as first built the walk ended where clear_for found no throw); from nowhere on 25 is it, standing there.
+    p25, p24 = tree_map.platform(25), tree_map.platform(24)
+    g24 = mon(260.0, 24, y=p24.y_at(260.0))
+    assert st._clear_from(p25, 140.0, p25.y_at(140.0), g24, 69.0, 251.0, [g24]) == pytest.approx(89)
+    assert not reach.can_hit(p25, 89.0, p25.y_at(89.0), g24, others=[g24])
+    assert st.shooting_place(p25, 140.0, p25.y_at(140.0), g24, 150.0, [g24]) is None
+    walks.clear()
+    at89 = SimpleNamespace(where=Where(89.0, p25.y_at(89.0), p25, (0.0, 0.0)), platform=p25, monsters=[g24])
+    real = fight.FightOnTheWay(SimpleNamespace(actions=h.actions, look=lambda: at89, log=lambda m: None))
+    s25 = SimpleNamespace(where=Where(140.0, p25.y_at(140.0), p25, (0.0, 0.0)), platform=p25, monsters=[g24])
+    assert real.shoot_from(s25, g24, 150.0) is None and walks == []  # (as first built: walked 51, then no throw, 0)
+    assert st.place_to_shoot(p25, 140.0, p25.y_at(140.0), g24, 150.0, [g24]) == \
+        (None, "her attack reaches it from nowhere on platform 25 (76 over her)")
 
 
 def test_her_escape_and_jump_back_keep_off_spawn_points_nobody_accounts_for(tree_map):
@@ -510,3 +556,126 @@ def test_her_moves_away_are_counted_and_a_throw_starts_the_count_again(monkeypat
     monkeypatch.setattr(fight, "throw_act", lambda h, s, act: True)
     fight._carry_out(h, state, SimpleNamespace(), ("throw", RIGHT), [], 0.0, 1.5, False)
     assert state.moves == 0 and h.report.throws == 1
+
+
+# --- the live shoot-first that threw nothing (2026-10-28 00:38:36, from 2026-10-28) ------------------------------------
+
+def _live_looks() -> dict:
+    """The live looks' monsters on the route's platforms (grind-1028-0030.log 1061-1078; the scenes' sweeps), by when they
+    were taken: on Tree Dungeon's 21 at x 42.3, a hunt trip to stop 23 (x 8) by the drop 21 -> 23; a Horny Mushroom on 23
+    walking left (64.3, 24.3, -12.7: the third by its own clock 0.370 s after the second, the live track's vx -100, the
+    tracker's clamp at the kind's speed), another standing at -131.7, Greens on 19 and 24."""
+    def m(kind, x, y, pid, facing):
+        return Monster(Mob(kind, 0, 0, 30, 30, 0.9, facing=facing), x, y, pid)
+
+    def at(x, y):
+        return [m(GREEN, 208.3, -644.3, 19, -1), m(HORNY, -131.7, -442.9, 23, 1), m(GREEN, 261.3, -423.1, 24, -1),
+                m(HORNY, x, y, 23, -1)]
+    return {36.499: at(64.3, -454.0), 36.878: at(24.3, -450.5), 37.248: at(-12.7, -446.3)}
+
+
+def _live_pass(tree_map, monkeypatch, at=36.878, age=0.075):
+    """The live trip's pass planned from look `at` (`age` s old then: the telemetry's scene record and the plan's log
+    line), as the navigator plans and prices it (flow.chain with FightOnTheWay.landings, the route's other moves), through
+    Navigator._clear_landing with the real FightOnTheWay on a hunter that records its fights and walks (none done): (what
+    it returned, its log, its 'landing' events, the fights and walks sent, the chain's legs, the last leg's price)."""
+    monkeypatch.setattr(nav_mod.time, "sleep", lambda s: None)
+    from gamelab.localization.monsters import Tracker
+    fights, walks = [], []
+    h = SimpleNamespace(danger=danger_mod.of_map(tree_map), model=tree_map, log=lambda text: None,
+                        clear=lambda *a, **kw: fights.append(kw), report=SimpleNamespace(exp_kills=0),
+                        actions=SimpleNamespace(walk=lambda side, units: walks.append(units)))
+    esc, tracker, flow = fight.FightOnTheWay(h), Tracker(tree_map), Flow(tree_map, KEYS)
+    moves = Planner(tree_map).moves
+    path = [min((m for m in moves if (m.kind, m.src, m.dst) == ("drop", 21, 23)), key=lambda m: abs(m.x - 86.0))]
+    pairs = {}
+    for m in moves:
+        pairs.setdefault((m.src, m.dst), []).append(m)
+    p21 = tree_map.platform(21)
+    for t, seen in _live_looks().items():
+        tracks = tracker.update(t, seen, seen_at=-age)
+        if t == at:
+            break
+    threats = [mo for mo in tracks if esc.threat(mo.kind)]
+    judge = esc.landings(list(threats))
+    legs, _, why = flow.chain(path, Body(0.0, 42.3, p21), threats, keep_going=True, hops=False,
+                              price=lambda leg, last=True: judge(leg, last)[0],
+                              alts=lambda mm: pairs.get((mm.src, mm.dst), []), goal=(23, 8.0))
+    trip = nav_mod.TripState(dst=23, x=8.0, mode=nav_mod.HUNT)
+    trip.sighted = list(zip(tracks, seen))
+    s = SimpleNamespace(where=Where(42.3, p21.y_at(42.3), p21, (0.0, 0.0)), platform=p21, monsters=seen)
+    logs = []
+    me = SimpleNamespace(escort=esc, log=logs.append, _safe_to_stand=lambda *a: True)
+    with telemetry.captured() as rec:
+        got = nav_mod.Navigator._clear_landing(me, trip, s, path, threats, legs, why)
+    return (got, logs, [r for r in rec if r.get("kind") == "landing"], fights, walks, legs,
+            judge(legs[-1]) if legs else None)
+
+
+def test_no_shot_first_is_said_where_no_attack_of_hers_reaches_it(tree_map, monkeypatch):
+    # The live case: the drop 21 -> 23 from where she stood (42.3; the drop's other takeoffs left out, as 1cb0c3f's chain
+    # had none: flow._spread's), its landing priced by the walker (24.3 walking left at its 100 a second: 129 off by her
+    # first attack, inside its keep-off of 169). 23 is 117-122 under 21, past a star's band (reach.SHOT_DOWN), so her
+    # attack reaches it from nowhere on 21. 1cb0c3f logged "shooting it first" there and sent nothing (clear_for and
+    # shoot_from both found no throw); now the log says there's no shot and why, nothing is sent, and the walk as seen
+    # clears the landing within WAIT_AHEAD, so she waits a look (its 'landing' event says why there was no shot).
+    monkeypatch.setattr(flow_mod.Flow, "_spread", lambda self, *a: [])
+    got, logs, ev, fights, walks, legs, price = _live_pass(tree_map, monkeypatch)
+    assert legs[-1].end.x == pytest.approx(42.3) and price[0] == st.LANDING_PRICE_S
+    assert not any("shooting it first" in line for line in logs)
+    assert got and fights == [] and walks == [] and [r["text"].split(":")[0] for r in ev] == ["waited"]
+    assert "horny-mushroom at x 24 by her landing on 23: no shot first, her attack reaches it from nowhere on " \
+           "platform 21 (" in logs[0] and "under her)" in logs[0] and "to move off (1)" in logs[1]
+    assert ev[0]["shot"].startswith("her attack reaches it from nowhere on platform 21")
+
+
+def test_shot_place_is_where_the_fights_reach_has_her_attack_take_it(tree_map):
+    # FightOnTheWay.shot_place, by the fights' own rule (reaches: reach.can_hit, clear_for's) from where she stands, else
+    # stance.place_to_shoot along her platform within `most` (shoot_from's), else why not. From 21 nothing on 23: from
+    # no x of 21 does a star reach the live walker, 23 lying more than reach.SHOT_DOWN under it everywhere.
+    p21, p23 = tree_map.platform(21), tree_map.platform(23)
+    esc = fight.FightOnTheWay(SimpleNamespace(danger=danger_mod.of_map(tree_map), model=tree_map))
+    for seen in _live_looks().values():
+        s = SimpleNamespace(where=Where(42.3, p21.y_at(42.3), p21, (0.0, 0.0)), platform=p21, monsters=seen)
+        place, why = esc.shot_place(s, seen[-1], nav_mod.SHOOT_WALK)
+        assert place is None and not esc.reaches(s, seen[-1]) and "from nowhere on platform 21" in why
+        assert not any(reach.can_hit(p21, x, p21.y_at(x), seen[-1], others=seen)
+                       for x in range(int(p21.left), int(p21.right) + 1))
+    assert min(p23.y_at(x) - p21.y_at(x) for x in range(int(p21.left), int(p21.right) + 1)) > reach.SHOT_DOWN
+    # From 23 at -137 (a Horny Mushroom at 176 on it: within where she stands to shoot with monsters about) a Green on 22
+    # at -200: from -67 along it, not within 40 (the nearest place said), nor walked to at all with `most` 0; from -67
+    # itself, from where she stands; with another on 23 at -100, in the walk's way.
+    p22 = tree_map.platform(22)
+    g, crowd = mon(-200.0, 22, y=p22.y_at(-200.0)), mon(176.0, 23, kind=HORNY, y=p23.y_at(176.0))
+
+    def at(x, others=()):
+        return SimpleNamespace(where=Where(x, p23.y_at(x), p23, (0.0, 0.0)), platform=p23,
+                               monsters=[g, crowd, *others])
+    assert esc.shot_place(at(-137.0), g, 150.0) == (pytest.approx(-67), "")
+    assert esc.shot_place(at(-137.0), g, 40.0) == (None, "her attack reaches it only from x -67 on platform 23, 70 off")
+    assert esc.shot_place(at(-137.0), g, 0.0)[0] is None and esc.shot_place(at(-67.0), g, 0.0) == (-67.0, "")
+    assert esc.shot_place(at(-137.0, [mon(-100.0, 23, y=p23.y_at(-100.0))]), g, 150.0) == \
+        (None, "a monster of platform 23 in the walk's way to x -67")
+
+
+def test_a_drops_and_a_jump_ups_other_takeoffs_are_tried_from_their_own_spots(tree_map, monkeypatch):
+    # flow._spread's drops from other spots over the platform below and jumps straight up from other spots under the one
+    # above: as first built `at` was only where she'd rather stop (_drop, _jump_up), and standing anywhere in the clear
+    # stretch she went from where she stood, so every spot gave the same move. From each spot itself now. The live pass
+    # (2026-10-28 00:38:36) then drops from 60, a step of 18 right, and lands clear: by her first attack the walker 181
+    # off, the standing one 192 (cost 1.41 s against 2.15 from 42.3), so nothing to shoot first or wait out: she goes.
+    from gamelab.motion.flow import Keys
+    flow = Flow(tree_map, KEYS)
+    drop = [m for m in Planner(tree_map).moves if (m.kind, m.src, m.dst) == ("drop", 21, 23)][0]
+    drops = flow._spread(drop, Body(0.0, 42.3, tree_map.platform(21)), Keys(flow.key_names), "run")
+    assert len({round(leg.spans[-1].x1) for leg, _ in drops}) > 5  # (within a tap's step of her: from where she is)
+    monkeypatch.setattr(flow_mod, "SPREAD_FROM_SPOT", False)  # (as first built: every spot from where she stood)
+    assert {round(leg.spans[-1].x1, 1) for leg, _ in flow._spread(drop, Body(0.0, 42.3, tree_map.platform(21)),
+                                                                   Keys(flow.key_names), "run")} == {42.3}
+    monkeypatch.setattr(flow_mod, "SPREAD_FROM_SPOT", True)
+    up = [m for m in Planner(tree_map).moves if (m.kind, m.src, m.dst) == ("jump_up", 25, 24)][0]
+    ups = flow._spread(up, Body(0.0, 230.0, tree_map.platform(25)), Keys(flow.key_names), "stand")
+    assert len({round(leg.end.x) for leg, _ in ups}) > 5  # (under 24, their overlap 176-276)
+    got, logs, ev, fights, walks, legs, price = _live_pass(tree_map, monkeypatch)
+    assert legs[-1].end.x == pytest.approx(60.1, abs=1.0) and legs[-1].spans[-1].x1 == pytest.approx(60.0, abs=1.0)
+    assert price == (0.0, None) and not got and ev == [] and logs == [] and fights == [] and walks == []

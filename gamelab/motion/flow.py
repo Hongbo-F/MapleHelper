@@ -545,6 +545,10 @@ class Flow:
         # With rng, from the nearest spot under it towards the far end of the overlap; else the planner's (or `at`:
         # where a landing with clearance is, _spread).
         prefer = at if at is not None else self.pick(near, hi if near - lo < hi - near else lo) if self.rng else m.x
+        if at is not None and SPREAD_FROM_SPOT:
+            # (_spread's: from that spot itself. As first built `at` was only where she'd rather stop, and standing or
+            # sliding to a stop anywhere under the platform she jumped from there: every spot gave the same jump.)
+            lo = hi = min(max(at, lo), hi)
         stop = self._stop_within(b, lo, hi, prefer, k)
         if stop is None:
             return None
@@ -571,12 +575,15 @@ class Flow:
             far = max(clear, key=lambda x: abs(x - b.x))
             # (pick draws again for every spot, around the nearest one)
             prefer = min(clear, key=lambda x: abs(x - self.pick(prefer, far)))
-        # She may stop anywhere in the clear stretch around that spot.
+        # She may stop anywhere in the clear stretch around that spot; with `at` (_spread's), at that spot itself. (As
+        # first built at any of _spread's spots standing anywhere in the stretch she dropped from where she stood: live on
+        # 2026-10-28 at 00:38:36 the drop 21 -> 23 from 42, by a Horny Mushroom, every spot from 42, where from 60, a
+        # step of 18, it landed clear of it.)
         spots = set(clear)
         run_lo = run_hi = prefer
-        while run_lo - DROP_STEP in spots:
+        while not (at is not None and SPREAD_FROM_SPOT) and run_lo - DROP_STEP in spots:
             run_lo -= DROP_STEP
-        while run_hi + DROP_STEP in spots:
+        while not (at is not None and SPREAD_FROM_SPOT) and run_hi + DROP_STEP in spots:
             run_hi += DROP_STEP
         stop = self._stop_within(b, run_lo, run_hi, prefer, k)
         if stop is not None and not drop_clear(self.model, a, stop[1], below):
@@ -1056,6 +1063,15 @@ def _at_rest(leg: Leg) -> Leg:
 # Every move of a chain priced where it lands (flow.chain's `price`), not only the route's last: False, the route's last
 # alone (as first built, 2026-10-27).
 PRICE_EVERY_MOVE = True
+
+# _spread's drops and jumps straight up from other spots (_drop's, _jump_up's `at`) taken from that spot itself (from
+# 2026-10-28): False, as first built, from where she stands or stops anywhere in the move's clear stretch, so every spot
+# gave the same move (live, 2026-10-28 00:38:36: the drop 21 -> 23 from 42 by a Horny Mushroom, where from 60, a step of
+# 18, it lands clear). In the harness (Tree, crowd, walkers; master 1cb0c3f against it, D:/MapleHelper-scratch/lshot/fix)
+# it buys nothing seen: grinding 1.2% less EXP (se 0.9%, 96 seeds), its trips 2.9% longer (t 2.1), their landings within
+# 105 of a monster 4.7% more (t 1.4); the hunt loop 0.8% more EXP (se 1.7%, 48 seeds). Kept, as the code says it does:
+# whether the landing price should search take-offs at all is the user's call.
+SPREAD_FROM_SPOT = True
 
 
 def chain_record(legs: list[Leg], why: str) -> dict:
