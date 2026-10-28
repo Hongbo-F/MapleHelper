@@ -504,3 +504,32 @@ def test_the_switchs_mode(tmp_path):
     on.write_text("ahead\n")
     assert native.gpu_mode({}, on) == "ahead" and native.gpu_switch({}, on)
     assert native.gpu_mode({"GAMELAB_GPU": "1"}, on) == "start"
+
+
+def test_the_searchs_own_matches_stay_on_the_cpu_with_the_gpu_switched_on(detector):  # noqa: F811
+    # (master's step 1 in C opens a pair of re-find contexts a search thread for its fine gate's and step 2's matches,
+    # MobDetector._contexts: each would have made a device of its own while the GPU is switched on, ~35 MB of video
+    # memory and 127-156 MB of the process's, its calls sent to the GPU and waited for: rf_open_as keeps them the CPU's)
+    if native.search_lib() is None:
+        pytest.skip(f"the search's C isn't in use: {native.search_why}")
+    frame_, _ = scene("pig_move0")
+    before = set(native._open)
+    plain = detector.detect(frame_)
+    was = native.gpu()
+    native.gpu(True)
+    try:
+        detector._c_local = type(detector._c_local)()  # (its contexts made again, with the GPU switched on)
+        detector._rf.clear()
+        assert detector.detect(frame_) == plain and plain
+        refind = detector._in_c(4)
+    finally:
+        native.gpu(was)
+    made = set(native._open) - before - {refind}
+    assert made and all(rf.gpu_state()[0] == "none" for rf in made)
+    t0 = time.monotonic()
+    while refind.gpu_state()[0] == "starting" and time.monotonic() - t0 < 20:
+        time.sleep(0.01)
+    assert refind.gpu_state()[0] in ("on", "off")  # (the re-finds' own: the GPU's, where there's a device)
+    refind.close()
+    for rf in made:
+        rf.close()

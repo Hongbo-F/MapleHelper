@@ -1002,8 +1002,8 @@ class MobDetector:
             full = [match.prepared(t.rgb, t.mask3) for t in table]
             small = [match.prepared(*t.step1) for t in table] if self.search != 1 else []
             if table and all(p is not None for p in full) and all(p is not None for p in small):
-                cf = native.Refinds(full, 1)
-                cs = native.Refinds(small, 1) if small else None
+                cf = native.Refinds(full, 1, gpu=False)  # (the CPU's whatever native.gpu says: rf_open_as)
+                cs = native.Refinds(small, 1, gpu=False) if small else None
                 if cf.ctx is not None and (cs is None or cs.ctx is not None):
                     got = (cs, cf, np.arange(len(table), dtype=np.int32))
             self._c_local.rf = got

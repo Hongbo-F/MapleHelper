@@ -1560,7 +1560,10 @@ EXPORT void rf_close(void *ctx)
     free(c);
 }
 
-EXPORT void *rf_open(const void *const *tpls, int n, int threads)
+/* rf_open, the GPU's backend only where `gpu` is on as well as gm_on (rf_open: 1): the monster search's own matches'
+ * contexts (mobs.MobDetector._contexts, a pair a search thread) are the CPU's whatever gm_on says, a device each being
+ * ~35 MB of video memory and 127-156 MB of the process's, for calls it was never measured on. */
+EXPORT void *rf_open_as(const void *const *tpls, int n, int threads, int gpu)
 {
     if (n <= 0 || threads <= 0)
         return 0;
@@ -1578,7 +1581,7 @@ EXPORT void *rf_open(const void *const *tpls, int n, int threads)
         c->tpls[i] = (const Masked *)tpls[i];
     c->ntpl = n;
     c->threads = threads;
-    if (gm_use)
+    if (gm_use && gpu)
         c->gpu = gm_open(c->tpls, n, gm_fault_open);
 #ifdef _WIN32
     LARGE_INTEGER f;
@@ -1604,6 +1607,11 @@ EXPORT void *rf_open(const void *const *tpls, int n, int threads)
     }
 #endif
     return c;
+}
+
+EXPORT void *rf_open(const void *const *tpls, int n, int threads)
+{
+    return rf_open_as(tpls, n, threads, 1);
 }
 
 /* Job id's memo entry (made if it has none); NULL without memory. */

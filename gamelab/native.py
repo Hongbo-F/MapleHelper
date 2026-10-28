@@ -103,6 +103,7 @@ SIGNATURES = {  # each function's (return type, argument types)
     "mm_ntt": (_L, [_L]),
     "mm_transformed": (_I, [_P]),
     "rf_open": (_P, [_P, _I, _I]),
+    "rf_open_as": (_P, [_P, _I, _I, _I]),
     "rf_run": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _D, _I, _P]),
     "rf_start": (_I, [_P, _P, _I, _I, _L, _I, _P, _I, _P, _D, _D, _D, _I, _P]),
     "rf_next": (_I, [_P]),
@@ -473,7 +474,9 @@ class Refinds:
     there): a detector's prepared pictures (`Masked`, kept with it), its threads (the caller's among them, a pool made
     once), the memos of the windows it looked at. One call at a time (a lock, held from `start` to `end`)."""
 
-    def __init__(self, pictures: list[Masked], threads: int):
+    def __init__(self, pictures: list[Masked], threads: int, gpu: bool = True):
+        """`gpu`: whether it may have the GPU backend while that's switched on (`gpu`; rf_open_as): False for the
+        monster search's own matches (mobs.MobDetector._contexts), the CPU's always."""
         self._lib = lib()
         self.pictures = list(pictures)  # (their bytes stay while the C holds their addresses)
         self.threads = threads
@@ -483,7 +486,8 @@ class Refinds:
         self.ctx = None
         if self._lib is not None and self.pictures:
             n = len(self.pictures)
-            self.ctx = self._lib.rf_open((ctypes.c_void_p * n)(*[p.address for p in self.pictures]), n, threads) or None
+            self.ctx = self._lib.rf_open_as((ctypes.c_void_p * n)(*[p.address for p in self.pictures]), n, threads,
+                                            int(gpu)) or None
         if self.ctx is not None:
             with _open_lock:
                 _open.add(self)
