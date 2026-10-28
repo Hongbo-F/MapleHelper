@@ -43,11 +43,13 @@ and a twin kind's check side by side keeps what its pictures alone give (`_pick_
 (README, One call for the re-finds).
 
 A search's step 1 is in C where it's built (gamelab/search.c, SEARCH_C: `_InC`): the band shrunk, the colour tests, each
-kind's coarse picture and integrals, each silhouette scored only where the cover test keeps a window and its score can
-reach SILHOUETTE_THRESHOLD, exactly (integer sums, where OpenCV's float32 differ by up to 1.1e-6), the peaks and the
-places, in two calls a band; the fine gate's and step 2's matches in a few calls to native.c's re-finds (`_matches`).
-The places are master's but where two silhouette scores tie exactly or one is within OpenCV's noise of the threshold;
-the search's answers were master's on every saved frame compared (README, A cheaper whole screen).
+kind's coarse picture and integrals, each silhouette scored only where the cover test keeps a window and OpenCV's score
+could reach SILHOUETTE_THRESHOLD, exactly (integer sums, where OpenCV's float32 differ by up to 1.1e-6 on the saved
+frames), the peaks and the places, in two calls a band; the fine gate's and step 2's matches in a few calls to native.c's
+re-finds (`_matches`). Where OpenCV's noise could make a unit's peaks or their order other than the exact scores' (two
+neighbours' scores, a score and the threshold, or two of its spots within NOISE_K's bound of each other), those shapes
+are matched as master matches them (`_InC._master`): the answers are master's by construction, not only on the frames
+compared (README, A cheaper whole screen).
 """
 
 import ctypes
@@ -110,15 +112,31 @@ THREADS = 6                  # matches run at once: the band 70 -> 32 ms, the wh
 # (Her band's on 3, tried on 2026-10-26: in the service at 30 frames a second it came 6-7 ms later, median 29 ms against
 # 22-23, for 0.02-0.03 cores: D:/MapleHelper-scratch/cpu/fix/out/hunt-*.txt.)
 # Step 1 of a band in C (gamelab/search.c, native.search_lib: the band shrunk, every kind's colour test, its coarse
-# picture and integrals, each silhouette scored only where the cover test keeps a window and its score can reach
+# picture and integrals, each silhouette scored only where the cover test keeps a window and OpenCV's score could reach
 # SILHOUETTE_THRESHOLD, worked out exactly, the peaks, the places), and the fine gate's and step 2's masked matches of
 # a band in a few calls to native.c's re-finds (rf_run, one picture over its own window a job, its best whatever it
-# scores: `_matches`), where each was a call through Python: `_InC`. The places checked are master's but where two
-# silhouette scores tie exactly or one lies within OpenCV's float32 noise (1.1e-6) of the threshold (README, A cheaper
-# whole screen: no answer of the search another on the saved frames); every state the same. False: numpy, OpenCV and
-# Python as before.
+# scores: `_matches`), where each was a call through Python: `_InC`. Where OpenCV's float32 noise could decide master's
+# peaks or their order (NOISE_K), those shapes are matched as master matches them (`_InC._master`): master's answers
+# (README, A cheaper whole screen). False: numpy, OpenCV and Python as before.
 SEARCH_C = True
-# With step 1 in C a whole screen's bands go on this many threads at once (`detect_wide`), her band on the caller's (two
+# How far OpenCV's step 1 score (cv2.matchTemplate's TM_CCOEFF_NORMED of the float32 coarse picture) can be from the
+# exact one at a window: NOISE_K n sqrt(S_II S_TT) / sqrt(A B) + NOISE_ABS (search.c's bound: the window's colour and
+# the silhouette's energy over the score's normalisation, n its cells). Measured (2026-10-28, D:/MapleHelper-scratch/
+# sfast/finish/probe/noise2.py: every window OpenCV puts at 0.30 or more and its 8 neighbours, the exact scores from
+# the integer sums; 5.40 M on 354 saved frames of 01:01's crowd and 00:25's and 23:15's before/, the whole screen's
+# bands and her band, and 0.56 M on the review's inputs of West Rocky Mountain II's detector over them, its sprites
+# blended in): |OpenCV - exact| at most 1.10e-6 on the saved frames and 1.05e-5 on those; NOISE_ABS and 4.0 x 2^-24 of
+# the energy term cover every one on the saved frames, 7.5 x 2^-24 on those (S_IT for the energy took 5.2 and 11.4: no
+# one constant). So the bound is 4x the worst seen. Where a peak by master's rule, or the order of two of a unit's
+# spots, depends on which side of its bound OpenCV's score falls, master's answer is OpenCV's noise's, and those shapes
+# are worked out as master does (`_InC._master`); MobDetector.noise_over counts, there, any peak where OpenCV's lay
+# outside. A crowd's whole screen 22.6 ms of CPU on one thread without the check, 24.4 with it, 26.4 with twice the
+# bound (sfast/finish/runs/cost_crowd_s.json, 200 frames, Idle); on the frame loop, hunting in a crowd, 0.01-0.03 of a
+# core more, a whole screen out 1.7-3.5 ms later and her band's search 1.5-1.9 (sfast/finish/runs/report_replay.md).
+NOISE_K = 32 * 2.0 ** -24
+NOISE_ABS = 2.5e-7
+# With step 1 in C a whole screen's bands go on this many threads at once (`detect_wide`: a pool of their own, beside
+# the THREADS one master's way uses; each makes its threads only as it needs them), her band on the caller's (two
 # C calls and a few rf_run calls, nothing for a pool). A crowd's whole screen (2026-10-27, D:/MapleHelper-scratch/sfast/
 # adopt/runs/timing: 300 frames of 01:01's crowd, medians, CPUs 12-23 56-63% busy with other work): on 1 thread 20.0 ms
 # of CPU, on 2 12.8 ms wall (23.2 of CPU), on 3 10.1 (23.7), on 6 8.5 (24.6); master's on its 6 42.8 (157), on 1 115.
@@ -373,7 +391,7 @@ class MobDetector:
     screen size. gamelab/assets/mobs has cut-outs from screenshots; sprites.py makes them from the game data.
     What the folders say about their templates (INDEX, CUTOUTS) comes along, and `meta` (by file name) on top.
     `threads`: how many matches run at once (1: all on the caller's thread; with step 1 in C, SEARCH_THREADS at most:
-    a whole screen's bands, one a thread). `frame_scale`: the frames' px per game px
+    a whole screen's bands, one a thread, on a pool of their own). `frame_scale`: the frames' px per game px
     (screen.Geometry.frame_scale; by default the 1920x1080 window's at half size), which each folder's pictures are
     brought to from theirs (`picture_scale`): a folder drawn at the frames' own scale is used as it is.
     `search_scale`: step 1's frame, px per game px (SEARCH_SCALE; a frame no finer than it is searched as it is).
@@ -465,15 +483,20 @@ class MobDetector:
                         for a in self.templates[k] for o in others for b in self.templates[o]
                         if a.frame and a.frame == b.frame and a.facing == b.facing and a.origin and b.origin}
         self.apart = {k: others for k, v in self.twins.items() if (others := tuple(t for t in v if t not in unit[k]))}
-        # (with step 1 in C, SEARCH_THREADS at most: a whole screen's bands, one a thread)
-        pool = min(threads, SEARCH_THREADS) if SEARCH_C and native.search_lib() is not None else threads
-        self._pool = ThreadPoolExecutor(pool, "monster-search", _one_opencv_thread) if pool > 1 else None
+        # Master's matches on `threads`; with step 1 in C a whole screen's bands on SEARCH_THREADS of their own (each
+        # pool makes its threads as its jobs come: the one not in use has none). Which one a search takes is asked each
+        # time (`detect_wide`), so SEARCH_C turned off, or a plan search.c doesn't take, has master's threads.
+        self._pool = ThreadPoolExecutor(threads, "monster-search", _one_opencv_thread) if threads > 1 else None
+        bands = min(threads, SEARCH_THREADS)
+        self._bands = ThreadPoolExecutor(bands, "monster-search-bands", _one_opencv_thread) if bands > 1 else None
         self._c: dict = {}         # `only` -> its step 1 in C (_InC), None where the C can't
         self._c_tables: dict = {}  # id(template) -> (it, its silhouette made ready for the C, or None: `_tables`)
         self._c_local = threading.local()  # each thread's re-find contexts for the gate's and checks' matches
         self._c_making = threading.Lock()
         self.fallbacks = 0  # re-finds that went on to the kind's whole set (refind) ...
         self.recalled = 0   # ... and windows whose answer was the last one's (refind's `memo`) ...
+        self.redone = 0     # ... step 1's shapes worked out as master does, its noise able to decide (_InC._master) ...
+        self.noise_over = 0  # ... of their peaks, those where OpenCV's score lay further than NOISE_K's bound: none yet
         self._counting = threading.Lock()  # ... counted by re-finds on several threads at once (worldstate's pool)
         native.lib()  # built (the first time, a few seconds) and loaded now, not in the first look
         for t in (t for ts in self.templates.values() for t in ts):  # made ready for the C's masked match now too
@@ -498,13 +521,19 @@ class MobDetector:
     def detect_wide(self, frame: np.ndarray, rows: tuple[int, int]) -> list[Mob]:
         """Monsters over a tall stretch of the frame, band by band. Over the whole screen, green
         foliage took all of the slime candidate spots and three slimes in plain view were missed;
-        each band gets its own best spots. The bands are searched at once, each on one thread (the pool's: THREADS, or
+        each band gets its own best spots. The bands are searched at once, each on one thread (THREADS of them, or
         SEARCH_THREADS with step 1 in C)."""
         # A band starts every WIDE_STEP rows until one reaches rows[1] (it's cut short there); always one.
         band, step = round(WIDE_BAND * self.px), round(WIDE_STEP * self.px)
         band = step + max(band - step, self.overlap)
         starts = range(rows[0], max(rows[0] + 1, rows[1] - band + step), step)
-        bands = self._map(lambda y0: self._detect(frame, (y0, min(rows[1], y0 + band)), _serial), starts)
+        in_c = SEARCH_C and native.search_lib() is not None and self._step1_in_c(None) is not None
+        pool = self._bands if in_c and self._pool is not None else self._pool
+
+        def one(y0):
+            return self._detect(frame, (y0, min(rows[1], y0 + band)), _serial)
+
+        bands = list(pool.map(one, starts)) if pool is not None else [one(y0) for y0 in starts]
         return self._picked(frame, rows, suppress_overlaps([hit for band in bands for hit in band]))
 
     def refind(self, frame: np.ndarray, box: tuple[int, int, int, int], kind: str, template: str = "",
@@ -844,12 +873,13 @@ class MobDetector:
         slack = round(CHECK_SLACK * self.spx)
         c = self._step1_in_c(only) if SEARCH_C and native.search_lib() is not None else None
         # Step 1, every template of every kind (one a shape: `units`); then the spots each kind checks (kinds that
-        # share a body, together); then step 2, all at once, every template of each shape picked.
-        places = c.places(small, slack) if c is not None and self.search != 1 else None
+        # share a body, together); then step 2, all at once, every template of each shape picked. In C the places
+        # come from it (sr_places), or its units where master's noise could decide one of them (`_InC.step1`).
+        got = c.step1(small, slack if self.search != 1 else None) if c is not None else None
+        places, units = got if got is not None else (None, None)
         checks = []
         if places is None:
             places = []
-            units = c.spots(small) if c is not None and self.search == 1 else None
             for kinds, members, shapes, found in (units if units is not None else self._step1(small, run, only)):
                 spots = sorted((s for f in found for s in f), reverse=True)
                 learned = kinds[0] in self.learned
@@ -858,9 +888,7 @@ class MobDetector:
                               else [spot for place in _places(spots, slack, PER_PLACE) for spot in place])
                     checks += [(*members[j], cx, cy) for cx, cy, i in picked for j in shapes[i]]
                 else:
-                    places += [(learned, [(*members[shapes[i][0]], cx, cy) for cx, cy, i in place],
-                                [(*members[j], cx, cy) for cx, cy, i in place for j in shapes[i]])
-                               for place in _places(spots, slack)]
+                    places += _unit_places(learned, members, shapes, spots, slack)
         rf = self._contexts() if SEARCH_C and native.lib() is not None else None  # (the gate's, the checks')
         at = self._rf_at
         if self.search == 1:
@@ -968,6 +996,7 @@ class _Tables(NamedTuple):
     kmin: int          # the least colour (quarters of a cell) a window needs to pass the cover test
     st: int            # S_T, in T_int (T x 2^shift)
     A: float           # n S_TT - S_T^2 in T_int^2, rounded once
+    rtt: float         # sqrt(S_TT), T_int units (the noise bound's: NOISE_K)
     shift: int
     rows: np.ndarray   # T, th rows of tw4 doubles (zeros past tw)
     ub: np.ndarray     # [th, 4 tw + 1] int64: a row's most S_I4T with s4 quarters of colour in it
@@ -1020,7 +1049,8 @@ def _tables(silhouette: np.ndarray) -> _Tables | None:
         return np.ascontiguousarray(4 * pre[:, q] + rem * padded[:, q])
 
     order = np.lexsort((np.arange(th), -ti.sum(axis=1))).astype(np.int32)
-    return _Tables(th, tw, kmin, st, float(A), shift, rows, bounds(ti), bounds(ti.T), order)
+    rtt = math.sqrt(sum(a * a for a in flat))
+    return _Tables(th, tw, kmin, st, float(A), rtt, shift, rows, bounds(ti), bounds(ti.T), order)
 
 
 def _ceil_scaled(v: np.ndarray, shift: int, k: int) -> np.ndarray:
@@ -1078,7 +1108,8 @@ class _InC:
         self.shapes = (native.SrShape * max(1, self.n))()
         for k, tb in enumerate(tables):
             self.shapes[k] = native.SrShape(tb.th, tb.tw, tb.rows.shape[1], tb.kmin, tb.st, tb.A, 2.0 ** tb.shift,
-                                            tb.rows.ctypes.data, tb.ub.ctypes.data, tb.order.ctypes.data, CHECK_ROWS, 0)
+                                            tb.rows.ctypes.data, tb.ub.ctypes.data, tb.order.ctypes.data, CHECK_ROWS, 0,
+                                            tb.rtt)
         groups, cunits, self.held, first = [], [], [], 0
         self.first = []  # each unit's first shape
         for kinds, members, shapes in units:
@@ -1117,55 +1148,151 @@ class _InC:
 
     def peaks(self, small: np.ndarray) -> tuple | None:
         """sr_step1 over step 1's frame (its size a multiple of COARSE): (each shape's peaks' count, -1 for a unit not
-        looked for; their rows, columns and scores, shape after shape), or None where the C declines."""
+        looked for; each shape's flag (search.c's SR_UNSURE: master's peaks there OpenCV's noise's);
+        their rows, columns, scores and noise bounds, shape after shape; each unit's I4, (h / COARSE, w / COARSE) a
+        unit, None for a band without pixels), or None where the C declines."""
         h, w = small.shape[:2]
         out_n = np.zeros(max(1, self.n), np.int32)
+        flags = np.zeros(max(1, self.n), np.int32)
         ys, xs = np.empty(STEP1_PEAKS, np.int64), np.empty(STEP1_PEAKS, np.int64)
-        vs = np.empty(STEP1_PEAKS, np.float32)
+        vs, es = np.empty(STEP1_PEAKS, np.float32), np.empty(STEP1_PEAKS, np.float32)
         if not h or not w:  # (no pixels: none of any colour, every unit under MIN_BODY_PIXELS)
             out_n[:] = -1
-            return out_n, ys[:0], xs[:0], vs[:0]
+            return out_n, flags, ys[:0], xs[:0], vs[:0], es[:0], None
         if small.dtype != np.uint8 or small.ndim != 3 or small.shape[2] != 3:
             return None
         if small.strides[1] != 3 or small.strides[2] != 1 or small.strides[0] <= 0:
             small = np.ascontiguousarray(small)
+        i4 = np.empty((max(1, self.nu), h // COARSE, w // COARSE), np.uint8)
         total = native.search_lib().sr_step1(
             small.ctypes.data, h, w, small.strides[0], self.lut.ctypes.data, self.cunits, self.nu, self.shapes, self.n,
-            self.groups, SILHOUETTE_THRESHOLD, out_n.ctypes.data, ys.ctypes.data, xs.ctypes.data, vs.ctypes.data,
-            STEP1_PEAKS, None)
+            self.groups, SILHOUETTE_THRESHOLD, NOISE_K, NOISE_ABS, out_n.ctypes.data, flags.ctypes.data,
+            ys.ctypes.data, xs.ctypes.data, vs.ctypes.data, es.ctypes.data, STEP1_PEAKS, i4.ctypes.data, None)
         if total < 0:
             return None
-        return out_n, ys[:total], xs[:total], vs[:total]
+        return out_n, flags, ys[:total], xs[:total], vs[:total], es[:total], i4
+
+    def step1(self, small: np.ndarray, slack: int | None) -> tuple | None:
+        """Step 1 of a band from the C's peaks, master's answer. With `slack` (a frame finer than step 1's): (its places
+        as `_detect` makes them, each `_places` of a unit looked for as (learned, the gate's (kind, template, cx, cy),
+        every template's), None), by sr_places, but for a unit whose spots master's float32 noise could make other than
+        the exact scores' (`_unsure`): its spots worked out as master does (`_master`), placed as master places them.
+        Without: (None, its units as `MobDetector._step1` gives them, (kinds, members, shapes, each shape's spots as
+        `_spots` makes them, to the type), an unsure one's as master makes them). None where the C declines."""
+        got = self.peaks(small)
+        if got is None:
+            return None
+        out_n, flags, ys, xs, vs, es, i4 = got
+        looked, unsure = self._unsure(out_n, flags, vs, es, ys, xs)
+        if slack is not None:
+            by_unit = self._sr_places(out_n, ys, xs, vs, slack)
+            if by_unit is not None:
+                for u, these in unsure.items():
+                    kinds, members, shapes = self.units[u]
+                    spots = self._master(u, self._spots_of(u, looked[u], out_n, ys, xs, vs, es), these, i4)
+                    by_unit[u] = _unit_places(kinds[0] in self.det.learned, members, shapes,
+                                              sorted((s for f in spots for s in f), reverse=True), slack)
+                return [p for u in looked for p in by_unit[u]], None
+        units = []
+        for u, at in looked.items():
+            kinds, members, shapes = self.units[u]
+            spots = self._spots_of(u, at, out_n, ys, xs, vs, es)
+            units.append((kinds, members, shapes, self._master(u, spots, unsure[u], i4) if u in unsure
+                          else [[s[:4] for s in f] for f in spots]))
+        return None, units
 
     def spots(self, small: np.ndarray) -> list[tuple] | None:
-        """`MobDetector._step1`'s answer from the C's peaks: each unit looked for, as (kinds, members, shapes, each
-        shape's spots as `_spots` makes them, to the type); None where the C declines."""
-        got = self.peaks(small)
-        if got is None:
-            return None
-        out_n, ys, xs, vs = got
-        out, at = [], 0
-        for (kinds, members, shapes), first in zip(self.units, self.first):
-            if out_n[first] < 0:
-                continue
-            found = []
-            for i, shape in enumerate(shapes):
-                c = int(out_n[first + i])
-                silhouette = members[shape[0]][1].silhouette
-                found.append([(float(v), COARSE * x + COARSE * silhouette.shape[1] // 2,
-                               COARSE * y + COARSE * silhouette.shape[0] // 2, i)
-                              for y, x, v in zip(ys[at:at + c], xs[at:at + c], vs[at:at + c])])
-                at += c
-            out.append((kinds, members, shapes, found))
-        return out
+        """`MobDetector._step1`'s answer (`step1`'s units); None where the C declines."""
+        got = self.step1(small, None)
+        return None if got is None else got[1]
 
     def places(self, small: np.ndarray, slack: int) -> list[tuple] | None:
-        """`_detect`'s places on a frame finer than step 1's (each `_places` of a unit looked for, as (learned, the
-        gate's (kind, template, cx, cy), every template's)), from the C's peaks by sr_places; None where it declines."""
-        got = self.peaks(small)
+        """`_detect`'s places on a frame finer than step 1's (`step1`'s); None where the C declines."""
+        got = self.step1(small, slack)
         if got is None:
             return None
-        out_n, ys, xs, vs = got
+        places, units = got
+        if places is None:  # (sr_places declined: its answer's room)
+            places = [p for kinds, members, shapes, found in units for p in _unit_places(
+                kinds[0] in self.det.learned, members, shapes, sorted((s for f in found for s in f), reverse=True),
+                slack)]
+        return places
+
+    def _unsure(self, out_n, flags, vs, es, ys, xs) -> tuple[dict, dict]:
+        """({each unit looked for: its first peak's index}, {each unit whose spots master's float32 noise could make
+        other than the exact scores': those shapes}): search.c's flags (a shape's peaks), and the two shapes of any two
+        of a unit's spots, as `_places` sorts them, whose scores lie within their bounds of each other (their order)."""
+        looked, unsure, at = {}, {}, 0
+        for u, ((kinds, members, shapes), first) in enumerate(zip(self.units, self.first)):
+            if out_n[first] < 0:
+                continue
+            looked[u] = at
+            k = len(shapes)
+            counts = out_n[first:first + k]
+            these = set(np.flatnonzero(flags[first:first + k]).tolist())
+            total = int(counts.sum())
+            if total > 1:
+                i = np.repeat(np.arange(k), counts)
+                cx = COARSE * xs[at:at + total] + COARSE * self.sw[first + i] // 2
+                cy = COARSE * ys[at:at + total] + COARSE * self.sh[first + i] // 2
+                v, e = vs[at:at + total].astype(np.float64), es[at:at + total].astype(np.float64)
+                o = np.lexsort((i, cy, cx, v))[::-1]  # (sorted(reverse=True) of the (score, cx, cy, i) tuples)
+                close = v[o[:-1]] - v[o[1:]] <= e[o[:-1]] + e[o[1:]]
+                if close.any():
+                    these.update(i[o[:-1][close]].tolist())
+                    these.update(i[o[1:][close]].tolist())
+            if these:
+                unsure[u] = these
+            at += total
+        return looked, unsure
+
+    def _spots_of(self, u: int, at: int, out_n, ys, xs, vs, es) -> list[list[tuple]]:
+        """A unit's shapes' spots as `_spots` makes them (to the type), each with its noise bound fifth; `at`: its first
+        peak's index."""
+        kinds, members, shapes = self.units[u]
+        first, spots = self.first[u], []
+        for i, shape in enumerate(shapes):
+            c = int(out_n[first + i])
+            silhouette = members[shape[0]][1].silhouette
+            spots.append([(float(v), COARSE * x + COARSE * silhouette.shape[1] // 2,
+                           COARSE * y + COARSE * silhouette.shape[0] // 2, i, float(e))
+                          for y, x, v, e in zip(ys[at:at + c], xs[at:at + c], vs[at:at + c], es[at:at + c])])
+            at += c
+        return spots
+
+    def _master(self, u: int, spots: list[list[tuple]], unsure: set, i4: np.ndarray) -> list[list[tuple]]:
+        """A unit's spots where master's float32 noise could make some other (`_unsure`'s shapes): those shapes matched
+        as master's step 1 matches them (`_spots`, on the unit's coarse picture: I4 / COARSE^2, what cv2.resize's
+        INTER_AREA makes of its colour, to the bit); then any other shape with a spot whose exact score lies within its
+        bound of one of theirs (master's now) as `_places` sorts them, until none: every two spots are then in master's
+        order, each shape's peaks master's. Counted (MobDetector.redone), and where master's score at a peak both have
+        lies further from the exact one than its bound (MobDetector.noise_over: the bound's check on live frames)."""
+        kinds, members, shapes = self.units[u]
+        coarse = i4[u].astype(np.float32) / np.float32(COARSE * COARSE)
+        cover = Cover(coarse)
+        done: dict[int, list] = {}
+        todo, over = set(unsure), 0
+        while todo:
+            for i in todo:
+                done[i] = _spots(coarse, cover, members[shapes[i][0]][1], i)
+                exact = {(s[1], s[2]): s for s in spots[i]}
+                for s in done[i]:
+                    c = exact.get((s[1], s[2]))
+                    over += c is not None and abs(s[0] - c[0]) > c[4]
+            every = sorted([s + (0.0,) for i in done for s in done[i]] +
+                           [s for i, f in enumerate(spots) if i not in done for s in f], reverse=True)
+            todo = set()
+            for p, q in zip(every, every[1:]):
+                if (p[4] or q[4]) and p[0] - q[0] <= p[4] + q[4]:
+                    todo.update(i for i in (p[3], q[3]) if i not in done)
+        with self.det._counting:
+            self.det.redone += len(done)
+            self.det.noise_over += over
+        return [done[i] if i in done else [s[:4] for s in f] for i, f in enumerate(spots)]
+
+    def _sr_places(self, out_n, ys, xs, vs, slack: int) -> dict | None:
+        """Each unit looked for's places by sr_places (as `_places` makes them from the C's spots), by the unit's index;
+        None where it declines."""
         ufirst = self.ufirst.copy()
         for u in range(self.nu):
             if out_n[ufirst[u]] < 0:
@@ -1177,19 +1304,20 @@ class _InC:
                                           out.ctypes.data, _PLACES_ROOM)
         if n < 0:
             return None
-        o, k, places = out[:n].tolist(), 0, []
+        o, k, by_unit = out[:n].tolist(), 0, {}
         for u, (kinds, members, shapes) in enumerate(self.units):
             if ufirst[u] < 0:
                 continue
             learned = kinds[0] in self.det.learned
             count, k = o[k], k + 1
+            places = by_unit[u] = []
             for _ in range(count):
                 ne, k = o[k], k + 1
                 place = [(o[k + 3 * e], o[k + 3 * e + 1], o[k + 3 * e + 2]) for e in range(ne)]
                 k += 3 * ne
                 places.append((learned, [(*members[shapes[i][0]], cx, cy) for cx, cy, i in place],
                                [(*members[j], cx, cy) for cx, cy, i in place for j in shapes[i]]))
-        return places
+        return by_unit
 
 
 _RF_JOBS = 1024  # native.c's RF_MAX_JOBS: a call's jobs at most
@@ -1692,6 +1820,13 @@ def _places(spots: list[tuple[float, int, int, int]], slack: int,
             if all(i != j for _, _, j in place):
                 place.append((cx, cy, i))
     return places
+
+
+def _unit_places(learned: bool, members: list, shapes: list, spots: list, slack: int) -> list[tuple]:
+    """A unit's places as `_detect` checks them on a frame finer than step 1's: each of `_places` of its spots (sorted,
+    best first) as (learned, the gate's (kind, template, cx, cy), every template's)."""
+    return [(learned, [(*members[shapes[i][0]], cx, cy) for cx, cy, i in place],
+             [(*members[j], cx, cy) for cx, cy, i in place for j in shapes[i]]) for place in _places(spots, slack)]
 
 
 def _gate(small: np.ndarray, place: list[tuple[str, MobTemplate, int, int]], slack: int, tries: int = 1):

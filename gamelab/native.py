@@ -142,7 +142,7 @@ SEARCH_SIGNATURES = {  # search.c's functions: (return type, argument types)
     "sr_ready": (_I, []),
     "sr_shrink": (_I, [_P, _I, _I, _L, _P, _I, _I, _L]),
     "sr_colours": (_I, [_P, _I, _I, _L, _P, _P, _I, _P, _P]),
-    "sr_step1": (_I, [_P, _I, _I, _L, _P, _P, _I, _P, _I, _P, _F, _P, _P, _P, _P, _I, _P]),
+    "sr_step1": (_I, [_P, _I, _I, _L, _P, _P, _I, _P, _I, _P, _F, _D, _D, _P, _P, _P, _P, _P, _P, _I, _P, _P]),
     "sr_places": (_I, [_P, _P, _P, _P, _P, _P, _P, _P, _I, _L, _I, _I, _P, _I]),
 }
 
@@ -185,7 +185,7 @@ class SrShape(ctypes.Structure):
     _fields_ = [("th", ctypes.c_int), ("tw", ctypes.c_int), ("tw4", ctypes.c_int), ("kmin", ctypes.c_int),
                 ("st", ctypes.c_longlong), ("A", ctypes.c_double), ("scale", ctypes.c_double),
                 ("rows", ctypes.c_void_p), ("ub", ctypes.c_void_p), ("order", ctypes.c_void_p),
-                ("check", ctypes.c_int), ("unused", ctypes.c_int)]
+                ("check", ctypes.c_int), ("unused", ctypes.c_int), ("rtt", ctypes.c_double)]
 
 
 SR_GROUP = 16  # a group's shapes at most (search.c's GL)

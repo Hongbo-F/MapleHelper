@@ -1,9 +1,12 @@
 """The monster search's step 1 in C (gamelab/search.c, through perception.mobs._InC and native.search_lib): the band's
 shrink the same bytes as cv2.resize; the colour tests mobs.PALETTES' and the learned gates' on every colour; each
-silhouette's scores the exact ones (N / sqrt(A B) from integer sums, within 2e-6 of OpenCV's float32) and the peaks
-master's rule on them, wherever the cover test keeps a window; the places mobs._places'; and a search's answers (every
-field, to the type) the same with it as without it (mobs.SEARCH_C), with the fine gate's and step 2's matches in rf_run
-calls, on the made-up kinds, the first map's cut-outs at 1920x1080 half size and Tree Dungeon's sprites."""
+silhouette's scores the exact ones (N / sqrt(A B) from integer sums, OpenCV's float32 within the noise bound of them,
+mobs.NOISE_K) and the peaks master's rule on them, wherever the cover test keeps a window; where the bounds leave
+master's peaks or their order to OpenCV's noise, those shapes worked out as master does (mobs._InC._master), so a unit's
+spots come in master's order; the places mobs._places'; and a search's answers (every field, to the type) the same with
+it as without it (mobs.SEARCH_C), with the fine gate's and step 2's matches in rf_run calls, on the made-up kinds, the
+first map's cut-outs at 1920x1080 half size, Tree Dungeon's sprites, and the saved inputs where OpenCV's noise decided
+(tests/fixtures/search)."""
 
 import dataclasses
 from pathlib import Path
@@ -17,7 +20,7 @@ from gamelab import native
 from gamelab.analysis import pasted
 from gamelab.perception import gates, mobs
 from gamelab.perception.mobs import COARSE, SILHOUETTE_THRESHOLD, MobDetector
-from gamelab.screen import NATIVE
+from gamelab.screen import NATIVE, STRETCHED
 
 from test_gates import body, detector as learned_detector
 from test_pasted import FRAMES, frame, game_folder, pig
@@ -28,6 +31,7 @@ pytestmark = pytest.mark.skipif(native.search_lib() is None or native.lib() is N
 
 SEARCH = NATIVE.frame_scale / mobs.SEARCH_SCALE  # a 1366x768 look frame's px per step 1's
 TREE_DUNGEON = Path("D:/MapleHelper-scratch/map3/native")  # 10002073 at 1366x768 (test_gates': labelled)
+NOISY = Path(__file__).parent / "fixtures" / "search"  # where OpenCV's noise decided (its README)
 
 
 def both(monkeypatch, search) -> tuple:
@@ -119,9 +123,10 @@ def test_the_learned_gates_lookup_is_gates_own_and_a_ragged_row_end_too():
 
 # --- the silhouettes' scores and the peaks --------------------------------------------------------------------------
 
-def exact_scores(I4: np.ndarray, tables: "mobs._Tables", silhouette: np.ndarray) -> np.ndarray:
+def exact_scores(I4: np.ndarray, tables: "mobs._Tables", silhouette: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Every window's score as search.c works it out (N / sqrt(A B) from the exact integer sums, rounded to float32), 0
-    where the cover test drops it or its colour is flat: numpy's, window by window in int64."""
+    where the cover test drops it or its colour is flat: numpy's, window by window in int64; and its noise bound
+    (NOISE_K n sqrt(S_II S_TT) / sqrt(A B) + NOISE_ABS)."""
     th, tw = silhouette.shape
     n = th * tw
     ti = (silhouette.astype(np.float64) * 2.0 ** tables.shift).astype(np.int64)
@@ -138,8 +143,11 @@ def exact_scores(I4: np.ndarray, tables: "mobs._Tables", silhouette: np.ndarray)
     B = n * sii - si * si
     keep = (si >= tables.kmin) & (B > 0)
     with np.errstate(invalid="ignore", divide="ignore"):
-        v = (N.astype(np.float64) / np.sqrt(tables.A * B.astype(np.float64))).astype(np.float32)
-    return np.where(keep, v, np.float32(0))
+        root = np.sqrt(tables.A * B.astype(np.float64))
+        v = (N.astype(np.float64) / root).astype(np.float32)
+        e = (mobs.NOISE_K * n * np.sqrt(sii.astype(np.float64)) * tables.rtt / root + mobs.NOISE_ABS).astype(
+            np.float32)
+    return np.where(keep, v, np.float32(0)), np.where(keep, e, np.float32(0))
 
 
 def peaks_of(res: np.ndarray, thr: float) -> set[tuple[int, int, float]]:
@@ -165,29 +173,36 @@ def blobs(h: int, w: int, colour, seed: int) -> np.ndarray:
     return out
 
 
+def unit_order(units: list) -> list:
+    """Each unit's spots as `_places` takes them (sorted, best first): their places and shapes, to the type."""
+    return [(u[0], typed(s[1:] for s in sorted((s for f in u[3] for s in f), reverse=True))) for u in units]
+
+
 def test_the_scores_are_the_exact_ones_and_the_peaks_master_rule_on_them(tmp_path):
     det = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), threads=1, frame_scale=NATIVE.frame_scale)
     c = det._step1_in_c(None)
     assert c is not None and c.n == 2  # (the picture, both ways)
     pig_colour = (230, 150, 120)
-    compared, scored, opencv_peaks, same = 0, 0, 0, 0
+    compared, scored, opencv_peaks, same, flagged = 0, 0, 0, 0, 0
     for seed in range(6):
         small = blobs(136, 400, pig_colour, seed)
-        out_n, ys, xs, vs = c.peaks(small)
+        out_n, flags, ys, xs, vs, es, i4 = c.peaks(small)
         colour = mobs.palette("pig", small)
         I4 = cells(colour)
+        assert np.array_equal(i4[0], I4)  # (the unit's I4, for a shape worked out as master does)
         coarse = cv2.resize(colour.astype(np.float32), (200, 68), interpolation=cv2.INTER_AREA)
         assert np.array_equal(coarse * 4, I4.astype(np.float32))  # (the coarse picture is I4 / 4 to the bit)
         at = 0
         for k, (_, t) in enumerate(c.units[0][1]):
-            got = {(int(y), int(x), float(v)) for y, x, v in zip(ys[at:at + out_n[k]], xs[at:at + out_n[k]],
-                                                                  vs[at:at + out_n[k]])}
-            at += out_n[k]
-            exact = exact_scores(I4, c.tables[k], t.silhouette)
+            at, here = at + out_n[k], slice(at, at + out_n[k])
+            got = {(int(y), int(x), float(v)) for y, x, v in zip(ys[here], xs[here], vs[here])}
+            exact, bound = exact_scores(I4, c.tables[k], t.silhouette)
             assert got == peaks_of(exact, SILHOUETTE_THRESHOLD), (seed, k)  # bit for bit
+            assert {(int(y), int(x)): float(e) for y, x, e in zip(ys[here], xs[here], es[here])} == pytest.approx(
+                {(y, x): float(bound[y, x]) for y, x, _ in got}, rel=1e-6)
             res = cv2.matchTemplate(coarse, t.silhouette, cv2.TM_CCOEFF_NORMED)
             kept = exact != 0
-            assert np.abs(res[kept] - exact[kept]).max() < 2e-6  # OpenCV's float32 noise
+            assert np.all(np.abs(res[kept].astype(np.float64) - exact[kept]) <= bound[kept])  # OpenCV's float32 noise
             sums = cv2.integral(coarse, sdepth=cv2.CV_64F)
             th, tw = t.silhouette.shape
             window = sums[th:, tw:] - sums[:-th, tw:] - sums[th:, :-tw] + sums[:-th, :-tw]
@@ -195,11 +210,16 @@ def test_the_scores_are_the_exact_ones_and_the_peaks_master_rule_on_them(tmp_pat
             assert np.all(res[passes & ~kept] == 0)  # OpenCV's flat windows score 0 as well
             master = mobs._spots(coarse, mobs.Cover(coarse), t, k)
             opencv_peaks += len(master)
-            same += len(got) == len(master) and {(y, x) for y, x, _ in got} == {
+            here_same = {(y, x) for y, x, _ in got} == {
                 ((cy - COARSE * th // 2) // COARSE, (cx - COARSE * tw // 2) // COARSE) for _, cx, cy, _ in master}
+            assert here_same or flags[k], (seed, k)  # (OpenCV's noise can decide master's peaks only where flagged)
+            same += here_same
+            flagged += bool(flags[k])
             compared += 1
             scored += len(got)
-    assert scored > 30 and opencv_peaks > 30 and same >= compared - 2  # (a tie or two: OpenCV's noise picks one)
+        # The units' spots as step 1 hands them over: master's, in master's order (the places are made from that)
+        assert unit_order(c.spots(small)) == unit_order(det._step1(small, mobs._serial)), seed
+    assert scored > 30 and opencv_peaks > 30 and same >= compared - 2 and flagged >= compared - same
 
 
 def test_a_band_past_the_peaks_room_goes_on_without_the_c_and_leaves_it_clean(tmp_path, monkeypatch):
@@ -220,6 +240,61 @@ def test_a_band_past_the_peaks_room_goes_on_without_the_c_and_leaves_it_clean(tm
     assert a == b
 
 
+def test_tied_scores_are_left_to_opencvs_noise_as_master_leaves_them(tmp_path, monkeypatch):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    stripes = np.zeros((48, 64, 4), np.uint8)  # a kind whose picture is stripes of its colour, the same along x
+    stripes[..., 3] = 255
+    stripes[..., :3] = 60
+    for r in range(0, 48, 12):
+        stripes[r:r + 6, :, :3] = (230, 150, 120)
+    det = MobDetector(game_folder(tmp_path / "a", {"pig_move0": stripes}), threads=1, frame_scale=NATIVE.frame_scale)
+    c = det._step1_in_c(None)
+    small = np.full((136, 400, 3), 60, np.uint8)
+    wide = cv2.resize(np.tile(stripes[..., :3], (2, 5, 1))[:, :300], None, fx=1 / SEARCH, fy=1 / SEARCH,
+                      interpolation=cv2.INTER_NEAREST)
+    small[20:20 + wide.shape[0], 40:40 + wide.shape[1]] = wide  # (a stretch of them: every window inside ties)
+    out_n, flags, *_ = c.peaks(small)
+    assert flags[:2].all() and out_n[:2].min() > 100  # (a run of tied neighbours, every one of them a peak by the rule)
+    before = det.redone
+    assert unit_order(c.spots(small)) == unit_order(det._step1(small, mobs._serial))  # (OpenCV's noise's peaks)
+    assert det.redone > before and det.noise_over == 0
+    scene = cv2.resize(small, None, fx=SEARCH, fy=SEARCH, interpolation=cv2.INTER_NEAREST)
+    a, b = both(monkeypatch, lambda: det.detect(scene))
+    assert a == b
+    # The same picture twice on an even background: two spots of one exact score, in the order OpenCV's noise gives
+    det = MobDetector(game_folder(tmp_path / "b", {"pig_move0": pig()}), threads=1, frame_scale=NATIVE.frame_scale)
+    c = det._step1_in_c(None)
+    small = np.full((136, 400, 3), 90, np.uint8)
+    picture = cv2.resize(pig(), None, fx=1 / SEARCH, fy=1 / SEARCH, interpolation=cv2.INTER_AREA)
+    for left in (20, 220):
+        pasted.paste(small, picture, left, 40)
+    assert not c.peaks(small)[1][:2].any()
+    assert unit_order(c.spots(small)) == unit_order(det._step1(small, mobs._serial))
+    assert det.redone == 1 and det.noise_over == 0  # (the shape of the two worked out as master does)
+
+
+@pytest.mark.parametrize("name, map_id, geo, only", [
+    ("thicket_plateau_a.png", 10004021, NATIVE, None), ("thicket_plateau_b.png", 10004021, NATIVE, None),
+    ("thicket_window.png", 10004021, NATIVE, ("red-snail",)), ("thicket_half.png", 10004021, STRETCHED, None),
+    ("tree_half_order.png", 10002073, STRETCHED, None)])
+def test_where_opencvs_noise_decided_the_answer_is_masters(monkeypatch, name, map_id, geo, only):
+    from gamedata.paths import COPY
+    if not (COPY / "Packs" / "Mob_00000.ms").is_file():
+        pytest.skip("needs the game data copy")
+    from gamelab.localization import mapdata
+    from gamelab.perception import sprites
+    det = sprites.detector_for(mapdata.load(map_id), geo)
+    assert det._step1_in_c(only) is not None
+    scene = np.asarray(Image.open(NOISY / name).convert("RGB"))
+    search = (lambda: det.detect(scene)) if only is None else (lambda: det._detect(scene, None, mobs._serial, only))
+    a, b = both(monkeypatch, search)
+    assert a == b and a
+    # As first built (the exact scores' peaks and order taken as they are), the C answered otherwise here
+    monkeypatch.setattr(mobs._InC, "_master", lambda self, u, spots, unsure, i4: [[s[:4] for s in f] for f in spots])
+    assert typed(dataclasses.astuple(m) for m in search()) != b
+
+
 def test_silhouettes_the_c_doesnt_take_are_searched_as_before(tmp_path, monkeypatch):
     sil = np.zeros((65, 10), np.float32)
     sil[5:20, 2:8] = 1
@@ -237,6 +312,25 @@ def test_silhouettes_the_c_doesnt_take_are_searched_as_before(tmp_path, monkeypa
     pasted.paste(scene, pig(), 500, 300)
     a, b = both(monkeypatch, lambda: det.detect_wide(scene, (0, 700)))
     assert a == b and len(a) >= 1
+
+
+def test_masters_way_has_masters_threads_whenever_it_runs(tmp_path, monkeypatch):
+    det = MobDetector(game_folder(tmp_path, {"pig_move0": pig()}), frame_scale=NATIVE.frame_scale)
+    assert det._pool._max_workers == mobs.THREADS and det._bands._max_workers == mobs.SEARCH_THREADS
+    scene = frame()
+    pasted.paste(scene, pig(), 500, 300)
+    used = []
+
+    def counted(pool, its_map):
+        return lambda fn, items: used.append(pool) or its_map(fn, items)
+
+    for pool in (det._pool, det._bands):
+        monkeypatch.setattr(pool, "map", counted(pool, pool.map))
+    det.detect_wide(scene, (0, 700))
+    assert used == [det._bands]  # (step 1 in C: the bands on SEARCH_THREADS)
+    monkeypatch.setattr(mobs, "SEARCH_C", False)  # (turned off with the detector made: master's way, on its THREADS)
+    det.detect_wide(scene, (0, 700))
+    assert used[1] is det._pool
 
 
 # --- the places ---------------------------------------------------------------------------------------------------

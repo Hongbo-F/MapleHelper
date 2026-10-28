@@ -5,9 +5,8 @@
  * screen of a crowd on one thread, 82 of it OpenCV's matchTemplate over every window (the profile of 2026-10-27,
  * D:/MapleHelper-scratch/sfast/profile: 4.07 M windows scored a screen, 3.6% of them kept by the cover test, the
  * others' scores zeroed before the peaks); here the whole search takes 20 (README, A cheaper whole screen). Built
- * apart from native.c (its own
- * DLL: native.py's `search_lib`), with the same compiler and flags; AVX2's intrinsics, only where the CPU has it
- * (sr_ready: native.py asks first).
+ * apart from native.c (its own DLL: native.py's `search_lib`), with the same compiler and flags; AVX2's intrinsics,
+ * only where the CPU has it (sr_ready: native.py asks first).
  *
  * What each gives:
  *   sr_shrink: OpenCV's INTER_AREA shrink (cv2.resize of a uint8 RGB picture to a smaller non-integer size: the band
@@ -20,17 +19,19 @@
  *     every one a multiple of 2^-shift) as integers T_int = T x 2^shift; a window's TM_CCOEFF_NORMED score is then
  *     N / sqrt(A B) with N = n S_I4T - S_I4 S_T, A = n S_TT - S_T^2, B = n S_I4I4 - S_I4^2 (n its cells), every sum an
  *     exact integer (the products in doubles: each under 2^53, which the caller checks a silhouette's bits for), A
- *     rounded once to a double, the score rounded to float32. OpenCV's scores differ from these by at most 1.1e-6 (its
- *     DFT's roundings), so a peak can come and go where two neighbours' exact scores tie (OpenCV's noise picks one) or
- *     where one is within that of the threshold: on 589,478 silhouette matches of the saved frames 465 had another peak
- *     set, nearly all a tie's second peak, and no answer of the search was another (README). A window is scored only
- *     where the cover test keeps it (master zeroes the others' scores: MIN_COVER), never where its colour is flat (B 0:
- *     OpenCV's score is 0 there, its `diff2` test), and left out where its score can't reach thr: bounded from the
- *     window's colour by rows, then by columns, then by its exact products a few rows at a time (the rows of most
- *     template mass first), each bound an upper bound of N, the window left out where it falls under (thr - 1e-6)
- *     sqrt(A B), a margin far over every rounding (float32's spacing at 0.35 is 3e-8, the doubles' 1e-16): such a
- *     window scores under thr, so it's no peak and stops no neighbour scoring thr or more from being one. The peaks:
- *     master's rule (native.c's silhouette_peaks): at least thr and no less than any of the 8 neighbours.
+ *     rounded once to a double, the score rounded to float32. OpenCV's own are float32 (its correlation's roundings):
+ *     each comes with the bound of how far it can be from the exact one, nk n sqrt(S_I4I4 S_TT) / sqrt(A B) + n0
+ *     (mobs.NOISE_K and NOISE_ABS: measured on the saved frames and other maps' sprites, 4x over the worst seen). A
+ *     window is scored only where the cover test keeps it (master zeroes the others' scores: MIN_COVER), never where
+ *     its colour is flat (B 0: OpenCV's score is 0 there, its `diff2` test), and left out where OpenCV's can't reach
+ *     thr: bounded from the window's colour by rows, then by columns, then by its exact products a few rows at a time
+ *     (the rows of most template mass first), each bound an upper bound of N, the window left out where it plus the
+ *     noise bound falls under (thr - n0) sqrt(A B): OpenCV's scores it under thr too, so it's no peak in either and
+ *     stops no neighbour scoring thr or more from being one. The peaks: master's rule (native.c's silhouette_peaks): at
+ *     least thr and no less than any of the 8 neighbours; and each shape flagged where a window's standing by that rule
+ *     on OpenCV's scores can't be told from the exact ones (a run of tied windows, two neighbours within their bounds,
+ *     a score within its bound of thr: shape_peaks), for the caller to work out as master does (mobs._InC._master),
+ *     with each peak's bound for the order of a unit's spots.
  *   sr_places: master's mobs._places of a unit's spots (Python's sort of the (score, cx, cy, i) tuples, _to_check,
  *     _places), its places' spots one after another.
  * Scratch memory is the calling thread's own, kept from call to call (freed as the thread ends: DllMain). */
@@ -66,7 +67,8 @@ typedef struct {
     size_t room;
 } Room;
 
-static __declspec(thread) Room bands_mem, planes_mem, hots_mem, peaks_mem, values_mem, start_mem, spots_mem, shrink_mem;
+static __declspec(thread) Room bands_mem, planes_mem, hots_mem, peaks_mem, values_mem, errs_mem, start_mem, spots_mem,
+    shrink_mem;
 
 /* At least `need` bytes of `r`'s (its contents not kept); NULL without memory. `zero`: made zeroed (calloc), for the
  * score planes, which are kept zero between calls (sr_step1 clears what it wrote). */
@@ -115,6 +117,7 @@ int __stdcall DllMain(void *instance, unsigned long reason, void *reserved)
         forget(&hots_mem);
         forget(&peaks_mem);
         forget(&values_mem);
+        forget(&errs_mem);
         forget(&start_mem);
         forget(&spots_mem);
         forget(&shrink_mem);
@@ -595,6 +598,7 @@ typedef struct {
     const int *order;     /* the rows, most of T's mass first */
     int check;            /* rows multiplied between the early tests */
     int unused;
+    double rtt;           /* sqrt(S_TT), T_int units: the noise bound's (group_scores) */
 } SrShape;
 
 #define GL 16  /* a group's shapes: one int16 lane each */
@@ -617,10 +621,13 @@ static __forceinline int cut(double L, double m2AB)
 
 /* A group's shapes' scores over a unit's I4 picture (its doubles `pd`, integral `ii`, integral of squares `sq`, each
  * row's running sums `rpt` (by column, then row), each column's `cp`): each window kept by the cover test whose score
- * can reach thr scored into its shape's plane (rh x rw, zero elsewhere), its place in `hots`. */
+ * OpenCV's could put at thr or more scored into its shape's plane (rh x rw, zero elsewhere), with how far OpenCV's can
+ * be from it in its noise plane (nk n sqrt(S_I4I4 S_TT) / sqrt(A B) + n0, the window's colour and the silhouette's
+ * energy over the score's normalisation: never 0 where scored, 0 elsewhere), its place in `hots`. A window is left out
+ * only where an upper bound of its score plus that noise bound falls under thr. */
 static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw, const double *pd, const int *ii,
-                         const int *sq, const int *rpt, const int *cp, float thr, float *planes, int *hots, int *nhot,
-                         long long *stats)
+                         const int *sq, const int *rpt, const int *cp, float thr, double nk, double n0, float *planes,
+                         float *noise, int *hots, int *nhot, long long *stats)
 {
     const int ng = G->ng;
     const SrShape *g[GL];
@@ -635,7 +642,7 @@ static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw
             kmin = g[j]->kmin;
     }
     long long tested = 0, kept = 0, rowcut = 0, colcut = 0, early = 0, scored = 0, flat = 0;
-    const double margin = (double)thr - 1e-6, m2 = margin * margin;
+    const double margin = (double)thr - n0, m2 = margin * margin;
     const long long ugw = (4LL * tw + 1) * GL, vgw = (4LL * th + 1) * GL;
     const __m256i vk = _mm256_set1_epi32(kmin - 1);
     int rs[MAX_TH + 8], cs[MAX_TH * 4 + 8];
@@ -676,6 +683,7 @@ static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw
                     flat++;
                     continue;
                 }
+                const double wn = nk * (double)n * sqrt((double)sii);  /* the noise bound's numerator over sqrt(S_TT) */
                 {   /* the window's row sums and column sums of I4 */
                     const int *a0 = rpt + (long long)xx * (ch + 1) + y, *a1 = rpt + (long long)(xx + tw) * (ch + 1) + y;
                     int r = 0;
@@ -721,7 +729,8 @@ static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw
                         continue;
                     kept++;
                     const double m2AB = m2 * t->A * (double)B;
-                    const double sist = (double)si * (double)t->st;
+                    const double E = wn * t->rtt;
+                    const double sist = (double)si * (double)t->st - E;
                     if (cut((double)n * ((double)au[j] * G->su[j]) - sist, m2AB)) {
                         rowcut++;
                         continue;
@@ -769,7 +778,7 @@ static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw
                         _mm256_storeu_pd(lanes, _mm256_add_pd(a0, a1));
                         sit += (long long)(((lanes[0] + lanes[1]) + (lanes[2] + lanes[3])) * scale);  /* (exact) */
                         done = upto;
-                        if (done < th && cut((double)((long long)n * (sit + rest) - si * t->st), m2AB)) {
+                        if (done < th && cut((double)((long long)n * (sit + rest) - si * t->st) + E, m2AB)) {
                             out = 1;
                             break;
                         }
@@ -781,7 +790,9 @@ static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw
                     scored++;
                     const long long N = (long long)n * sit - si * t->st;
                     const int at = y * rw + xx;
-                    planes[j * plane + at] = (float)((double)N / sqrt(t->A * (double)B));
+                    const double root = sqrt(t->A * (double)B);
+                    planes[j * plane + at] = (float)((double)N / root);
+                    noise[j * plane + at] = (float)(E / root + n0);
                     hots[j * plane + nhot[j]++] = at;
                 }
             }
@@ -799,24 +810,47 @@ static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw
 }
 
 /* A shape's peaks in its plane (its scored windows `hot`, row by row): at least thr and no less than any of the 8
- * neighbours (native.c's silhouette_peaks), into pyx (row, column) and pv, at most `cap`; the plane zeroed again where
- * it was written. Their count, or -1 past cap. */
-static int shape_peaks(float *res, const int *hot, int nhot, int rh, int rw, float thr, long long *pyx, float *pv,
-                       int cap)
+ * neighbours (native.c's silhouette_peaks), into pyx (row, column), pv and pe (its noise bound), at most `cap`; the
+ * planes zeroed again where they were written. Their count, or -1 past cap. `flag`: SR_UNSURE where a window's standing
+ * in master's peaks (its rule on OpenCV's scores) can't be told from the exact scores: one whose score and bound reach
+ * thr (OpenCV's could make it a peak), no scored neighbour surely above it (by more than both bounds), and not surely a
+ * peak (at least thr by its bound, above every scored neighbour by more than both bounds). There OpenCV's float32 noise
+ * decides, and the caller works the shape out as master does (mobs._InC). A neighbour not scored decides nothing either
+ * way: its score and bound fall under thr, or it's the cover test's or a flat window's 0, OpenCV's too. Where no window
+ * is unsure, master's peaks are these. */
+#define SR_UNSURE 1
+
+static int shape_peaks(float *res, float *noise, const int *hot, int nhot, int rh, int rw, float thr, long long *pyx,
+                       float *pv, float *pe, int cap, int *flag)
 {
-    int found = 0;
+    int found = 0, unsure = 0;
     for (int h = 0; h < nhot && found >= 0; h++) {
         int at = hot[h], y = at / rw, x = at % rw;
-        float v = res[at];
-        if (!(v >= thr))
-            continue;
-        const float *row = res + (long long)y * rw;
+        const float v = res[at];
+        const double vd = v, ed = noise[at];
+        const float *row = res + (long long)y * rw, *nrow = noise + (long long)y * rw;
         const float *up = y > 0 ? row - rw : 0, *down = y + 1 < rh ? row + rw : 0;
-        int x0 = x > 0 ? x - 1 : x, x1 = x + 1 < rw ? x + 1 : x, peak = 1;
-        for (int i = x0; i <= x1 && peak; i++) {
-            if (row[i] > v || (up && up[i] > v) || (down && down[i] > v))
-                peak = 0;
+        int x0 = x > 0 ? x - 1 : x, x1 = x + 1 < rw ? x + 1 : x, peak = v >= thr, above = 0, close = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+            if ((dy < 0 && !up) || (dy > 0 && !down))
+                continue;
+            const float *r = row + (long long)dy * rw, *q = nrow + (long long)dy * rw;
+            for (int i = x0; i <= x1; i++) {
+                if (!dy && i == x)
+                    continue;
+                if (r[i] > v)
+                    peak = 0;
+                if (q[i] > 0.0f) {  /* (scored) */
+                    const double d = vd - r[i], b = ed + q[i];
+                    if (-d > b)
+                        above = 1;
+                    else if (d <= b)
+                        close = 1;
+                }
+            }
         }
+        if (vd + ed >= thr && !above && (close || vd - ed < thr))
+            unsure = SR_UNSURE;
         if (!peak)
             continue;
         if (found >= cap) {
@@ -826,10 +860,12 @@ static int shape_peaks(float *res, const int *hot, int nhot, int rh, int rw, flo
         pyx[2 * found] = y;
         pyx[2 * found + 1] = x;
         pv[found] = v;
+        pe[found] = (float)ed;
         found++;
     }
     for (int h = 0; h < nhot; h++)
-        res[hot[h]] = 0.0f;
+        res[hot[h]] = noise[hot[h]] = 0.0f;
+    *flag = unsure;
     return found;
 }
 
@@ -837,16 +873,21 @@ static int shape_peaks(float *res, const int *hot, int nhot, int rh, int rw, flo
  * matched, the cover test, the peaks), on step 1's frame (uint8 RGB, h x w both even; pixel (y, x) at rgb[y * row +
  * 3 x]). `lut`: the learned gates' table as uint32 (bits of at most 15 kinds); `units` (nu), `shapes` (nshapes) and
  * `groups` as above, each unit's shapes in its groups. For each shape (by index), out_n its peaks' count (-1: its
- * unit's colour too little to be looked for, MIN_BODY_PIXELS), its peaks in ys, xs (row and column of the window's
- * top-left, in cells) and vs (the score), shape after shape, row by row. Returns the peaks in all, -1 past `cap`, -2
- * where it can't (too many units, a silhouette too big, no memory): the caller then does it its own way. `stats`
- * (NULL: none): adds windows tested, kept by the cover test (a shape's), left out by rows, by columns, early,
- * scored, flat. */
+ * unit's colour too little to be looked for, MIN_BODY_PIXELS) and `flags` (shape_peaks': where OpenCV's float32 noise
+ * can decide master's peaks), its peaks in ys, xs (row and column of the window's top-left, in cells), vs (the score)
+ * and es (how far OpenCV's score can be from it: nk n sqrt(S_I4I4 S_TT) / sqrt(A B) + n0, `nk` and `n0` the caller's,
+ * mobs.NOISE_K and NOISE_ABS), shape after shape, row by row. `i4` (NULL: not wanted): each unit's I4 picture, (h / 2)
+ * x (w / 2) bytes a unit one after another (the caller works a flagged shape out from it as master does). Returns the
+ * peaks in all, -1 past `cap`, -2 where it can't (too many units, a silhouette too big, no memory, a noise bound that
+ * isn't one): the caller then does it its own way. `stats` (NULL: none): adds windows tested, kept by the cover test (a
+ * shape's), left out by rows, by columns, early, scored, flat. */
 EXPORT int sr_step1(const unsigned char *rgb, int h, int w, long long row, const unsigned *lut, const SrUnit *units,
-                    int nu, const SrShape *shapes, int nshapes, const SrGroup *groups, float thr, int *out_n,
-                    long long *ys, long long *xs, float *vs, int cap, long long *stats)
+                    int nu, const SrShape *shapes, int nshapes, const SrGroup *groups, float thr, double nk, double n0,
+                    int *out_n, int *flags, long long *ys, long long *xs, float *vs, float *es, int cap,
+                    unsigned char *i4, long long *stats)
 {
-    if (nu > MAX_UNITS || nu < 0 || h < 0 || w < 0 || (h & 1) || (w & 1))
+    if (nu > MAX_UNITS || nu < 0 || h < 0 || w < 0 || (h & 1) || (w & 1) || !(nk >= 0.0) || !(n0 > 0.0)
+        || !(nk < 1e-3) || !(n0 < 1e-3))
         return -2;
     for (int u = 0; u < nu; u++) {
         if (units[u].first < 0 || units[u].n < 0 || units[u].first + units[u].n > nshapes)
@@ -872,7 +913,8 @@ EXPORT int sr_step1(const unsigned char *rgb, int h, int w, long long row, const
     unsigned char *mem = (unsigned char *)room(&bands_mem, per * (nu ? nu : 1) + 64, 0);
     long long *pyx = (long long *)room(&peaks_mem, 2 * sizeof(long long) * ((size_t)cap + 1), 0);
     float *pv = (float *)room(&values_mem, sizeof(float) * ((size_t)cap + 1), 0);
-    if (!mem || !pyx || !pv)
+    float *pe = (float *)room(&errs_mem, sizeof(float) * ((size_t)cap + 1), 0);
+    if (!mem || !pyx || !pv || !pe)
         return -2;
     unsigned char *I4[MAX_UNITS];
     int *II[MAX_UNITS], *SQ[MAX_UNITS], *RPT[MAX_UNITS], *CP[MAX_UNITS];
@@ -896,8 +938,11 @@ EXPORT int sr_step1(const unsigned char *rgb, int h, int w, long long row, const
         return -2;
     long long count[MAX_UNITS];
     colours(rgb, h, w, row, lut, units, nu, I4, count);
+    if (i4)
+        for (int u = 0; u < nu; u++)
+            memcpy(i4 + plane * u, I4[u], plane);
     for (int k = 0; k < nshapes; k++)
-        out_n[k] = start[k] = 0;
+        out_n[k] = start[k] = flags[k] = 0;
     int total = 0;
     for (int u = 0; u < nu; u++) {
         if ((double)count[u] < units[u].least) {
@@ -941,22 +986,25 @@ EXPORT int sr_step1(const unsigned char *rgb, int h, int w, long long row, const
             if (rh <= 0 || rw <= 0)
                 continue;  /* (the band smaller than the shape: no peaks) */
             size_t pl = (size_t)rh * rw;
-            float *planes = (float *)room(&planes_mem, sizeof(float) * pl * G->ng, 1);
+            float *planes = (float *)room(&planes_mem, sizeof(float) * pl * G->ng * 2, 1);  /* scores, then noise */
             int *hots = (int *)room(&hots_mem, sizeof(int) * pl * G->ng, 0);
             if (!planes || !hots)
                 return -2;
+            float *noise = planes + pl * G->ng;
             int nhot[GL];
-            group_scores(G, shapes, ch, cw, pd, ii, sq, rpt, cp, thr, planes, hots, nhot, stats);
+            group_scores(G, shapes, ch, cw, pd, ii, sq, rpt, cp, thr, nk, n0, planes, noise, hots, nhot, stats);
             int over = 0;
             for (int q = 0; q < G->ng; q++) {  /* (every plane zeroed again, even past cap) */
-                int k = shape_peaks(planes + q * pl, hots + q * pl, nhot[q], rh, rw, thr, pyx + 2 * total, pv + total,
-                                    over ? 0 : cap - total);
+                int unsure = 0;
+                int k = shape_peaks(planes + q * pl, noise + q * pl, hots + q * pl, nhot[q], rh, rw, thr,
+                                    pyx + 2 * total, pv + total, pe + total, over ? 0 : cap - total, &unsure);
                 if (k < 0 || over) {
                     over = 1;
                     continue;
                 }
                 start[G->idx[q]] = total;
                 out_n[G->idx[q]] = k;
+                flags[G->idx[q]] = unsure;
                 total += k;
             }
             if (over)
@@ -969,6 +1017,7 @@ EXPORT int sr_step1(const unsigned char *rgb, int h, int w, long long row, const
             ys[at + q] = pyx[2 * (start[k] + q)];
             xs[at + q] = pyx[2 * (start[k] + q) + 1];
             vs[at + q] = pv[start[k] + q];
+            es[at + q] = pe[start[k] + q];
         }
         at += out_n[k] > 0 ? out_n[k] : 0;
     }

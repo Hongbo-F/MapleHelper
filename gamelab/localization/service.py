@@ -947,11 +947,14 @@ class Publisher:
                                total=meter.total, per_minute=None if rate is None else round(rate, 1))
 
     def status(self, now: float) -> str:
-        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute; and gamelab's C
-        pieces while they're not all in use (native.state: perception slower)."""
+        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute; gamelab's C pieces
+        while they're not all in use (native.state: perception slower); and, if it ever happens, the monster search's
+        noise bound broken (MobDetector.noise_over: a peak where OpenCV's score lay outside mobs.NOISE_K's bound of the
+        exact one, at a shape worked out as master does; measured, not proven: README, A cheaper whole screen)."""
         if self.runner is None:
             return ""
         step = self.runner.step
+        over = getattr(getattr(getattr(step, "eyes", None), "detector", None), "noise_over", 0)
         c, meter = step.tracker.counts, step.meter
         for note in meter.notes:
             self.log(f"  {note}")
@@ -961,7 +964,8 @@ class Publisher:
         exp = "" if meter.at is None else f"; EXP {meter.at[1]:,}" + (
             "" if per_minute is None else f", {per_minute:.0f} a minute")
         return (f"; {len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'"
-                f"{exp}" + (f"; gamelab's C pieces {self.native}" if self.slow else ""))
+                f"{exp}" + (f"; gamelab's C pieces {self.native}" if self.slow else "")
+                + (f"; the monster search's noise bound broken {over} times" if over else ""))
 
     def close(self) -> None:
         telemetry.stop()
