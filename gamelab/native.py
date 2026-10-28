@@ -11,11 +11,16 @@ the two; OpenCV's masked scores were within 1e-6 of the C's in colour and 3e-5 o
 little more where a window is about flat: native.c). The masked match is the C's only where the CPU has AVX2: without
 it, its plain C took 3.4-3.7 times OpenCV's time over the frame loop's masked matches (`prepare_masked`).
 
-The DLL is built from native.c with MSVC 2022 (the Build Tools) the first time it's needed, into build/ next to
-this file (git-ignored), named for the source's hash: an edited source gets a DLL of its own, and a DLL another
-process has loaded is never written over. Without a compiler, or with USE off, `lib` is None.
+The monster search's step 1 is a DLL of its own (search.c, `search_lib`: the band's shrink, its colour tests, the
+silhouettes' scores where the cover test keeps a window, the peaks and the places, in a few calls a band), built the
+same way, loaded only where the CPU has AVX2 (its intrinsics); without it the search's step 1 is numpy's and OpenCV's
+as before (perception.mobs).
 
-    python -m gamelab.native    builds it now, and says where it is or why it couldn't
+The DLLs are built from their sources with MSVC 2022 (the Build Tools) the first time they're needed, into build/
+next to this file (git-ignored), each named for its source's hash: an edited source gets a DLL of its own, and a DLL
+another process has loaded is never written over. Without a compiler, or with USE off, `lib` and `search_lib` are None.
+
+    python -m gamelab.native    builds them now, and says where they are or why they couldn't be
 """
 
 import ctypes
@@ -31,6 +36,7 @@ import numpy as np
 
 USE = True  # False: Python only, as before
 SOURCE = Path(__file__).with_name("native.c")
+SEARCH_SOURCE = Path(__file__).with_name("search.c")  # the monster search's step 1 (`search_lib`)
 BUILD = Path(__file__).with_name("build")
 VCVARS = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / \
     "Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat"
@@ -42,6 +48,9 @@ _lib: ctypes.CDLL | None = None
 _tried = False
 _lock = threading.Lock()  # the monster search's threads all ask at once
 why = ""  # why the DLL isn't in use, if it isn't
+_search: ctypes.CDLL | None = None
+_search_tried = False
+search_why = ""  # why the search's DLL isn't in use, if it isn't
 
 _P, _I, _D, _F, _L = ctypes.c_void_p, ctypes.c_int, ctypes.c_double, ctypes.c_float, ctypes.c_longlong
 SIGNATURES = {  # each function's (return type, argument types)
@@ -64,16 +73,18 @@ SIGNATURES = {  # each function's (return type, argument types)
 }
 
 
-def dll_path() -> Path:
-    """Where the DLL built from the current source is."""
-    digest = hashlib.sha1(SOURCE.read_bytes() + " ".join(FLAGS).encode()).hexdigest()[:12]
-    return BUILD / f"native-{digest}.dll"
+def dll_path(source: Path | None = None) -> Path:
+    """Where the DLL built from the current source (native.c, or `source`) is."""
+    source = source or SOURCE
+    digest = hashlib.sha1(source.read_bytes() + " ".join(FLAGS).encode()).hexdigest()[:12]
+    return BUILD / f"{source.stem}-{digest}.dll"
 
 
-def build() -> Path:
-    """Build the DLL from native.c (MSVC 2022 Build Tools), unless it's built already; its path. Raises
+def build(source: Path | None = None) -> Path:
+    """Build the DLL from native.c (or `source`; MSVC 2022 Build Tools), unless it's built already; its path. Raises
     RuntimeError with the compiler's output if it can't."""
-    out = dll_path()
+    source = source or SOURCE
+    out = dll_path(source)
     if out.exists():
         return out
     if sys.platform != "win32":
@@ -83,7 +94,7 @@ def build() -> Path:
     BUILD.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="native-", dir=BUILD) as tmp:
         dll = Path(tmp) / out.name
-        command = f'call "{VCVARS}" >nul && cl {" ".join(FLAGS)} "{SOURCE}" /Fe:"{dll}" /Fo:native.obj'
+        command = f'call "{VCVARS}" >nul && cl {" ".join(FLAGS)} "{source}" /Fe:"{dll}" /Fo:{source.stem}.obj'
         # One string, as cmd reads it (/s: the outer quotes go, the rest as written); a list would escape the
         # quotes in it the C runtime's way, which cmd doesn't read.
         done = subprocess.run(f'cmd /d /s /c "{command}"', capture_output=True, text=True, cwd=tmp,
@@ -95,7 +106,7 @@ def build() -> Path:
         except OSError:  # another process built and loaded it meanwhile
             if not out.exists():
                 raise
-    for old in BUILD.glob("native-*.dll"):  # earlier sources' builds (about 100 KB each); a loaded one stays
+    for old in BUILD.glob(f"{source.stem}-*.dll"):  # earlier sources' builds (about 100 KB each); a loaded one stays
         if old != out:
             try:
                 old.unlink()
@@ -125,6 +136,80 @@ def lib() -> ctypes.CDLL | None:
             why = str(e).splitlines()[0] if str(e) else type(e).__name__
         _tried = True
     return _lib
+
+
+SEARCH_SIGNATURES = {  # search.c's functions: (return type, argument types)
+    "sr_ready": (_I, []),
+    "sr_shrink": (_I, [_P, _I, _I, _L, _P, _I, _I, _L]),
+    "sr_colours": (_I, [_P, _I, _I, _L, _P, _P, _I, _P, _P]),
+    "sr_step1": (_I, [_P, _I, _I, _L, _P, _P, _I, _P, _I, _P, _F, _P, _P, _P, _P, _I, _P]),
+    "sr_places": (_I, [_P, _P, _P, _P, _P, _P, _P, _P, _I, _L, _I, _I, _P, _I]),
+}
+
+
+def search_lib() -> ctypes.CDLL | None:
+    """The monster search's DLL (search.c), built and loaded on first use; None if it can't be (`search_why` says why),
+    on a CPU without AVX2 (sr_ready: asked before anything else of it runs), or with USE off."""
+    global _search, _search_tried, search_why
+    if not USE:
+        search_why = "turned off (native.USE)"
+        return None
+    if _search_tried:
+        return _search
+    with _lock:
+        if _search_tried:
+            return _search
+        try:
+            dll = ctypes.CDLL(str(build(SEARCH_SOURCE)))
+            for name, (restype, argtypes) in SEARCH_SIGNATURES.items():
+                f = getattr(dll, name)
+                f.restype, f.argtypes = restype, argtypes
+            if dll.sr_ready():
+                _search, search_why = dll, ""
+            else:
+                search_why = "no AVX2 on this CPU"
+        except (OSError, RuntimeError, subprocess.SubprocessError, AttributeError) as e:
+            search_why = str(e).splitlines()[0] if str(e) else type(e).__name__
+        _search_tried = True
+    return _search
+
+
+class SrUnit(ctypes.Structure):
+    """A unit of the search (mobs.MobDetector.units, as a band's search filters them) for sr_step1 (search.c's)."""
+    _fields_ = [("test", ctypes.c_int), ("bits", ctypes.c_uint), ("least", ctypes.c_double), ("first", ctypes.c_int),
+                ("n", ctypes.c_int), ("gfirst", ctypes.c_int), ("gn", ctypes.c_int)]
+
+
+class SrShape(ctypes.Structure):
+    """A shape's silhouette made ready for sr_step1 (search.c's SrShape; its arrays kept by the caller)."""
+    _fields_ = [("th", ctypes.c_int), ("tw", ctypes.c_int), ("tw4", ctypes.c_int), ("kmin", ctypes.c_int),
+                ("st", ctypes.c_longlong), ("A", ctypes.c_double), ("scale", ctypes.c_double),
+                ("rows", ctypes.c_void_p), ("ub", ctypes.c_void_p), ("order", ctypes.c_void_p),
+                ("check", ctypes.c_int), ("unused", ctypes.c_int)]
+
+
+SR_GROUP = 16  # a group's shapes at most (search.c's GL)
+
+
+class SrGroup(ctypes.Structure):
+    """A unit's shapes of one size, their bounds' tables side by side (search.c's SrGroup)."""
+    _fields_ = [("ng", ctypes.c_int), ("idx", ctypes.c_int * SR_GROUP), ("ug", ctypes.c_void_p),
+                ("vg", ctypes.c_void_p), ("su", ctypes.c_double * SR_GROUP), ("sv", ctypes.c_double * SR_GROUP)]
+
+
+def shrink_area(frame: np.ndarray, dw: int, dh: int) -> np.ndarray | None:
+    """cv2.resize(frame, (dw, dh), interpolation=cv2.INTER_AREA) of a uint8 RGB picture whose pixels lie side by side
+    (a band of a look frame), in C (search.c's sr_shrink: the same bytes); None where the C declines (not built, another
+    picture, a scale it doesn't take: 1.75 or more, or none, either way)."""
+    f = search_lib()
+    if f is None or frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8 or frame.strides[1] != 3 \
+            or frame.strides[2] != 1 or frame.strides[0] <= 0:
+        return None
+    h, w = frame.shape[:2]
+    out = np.empty((dh, dw, 3), np.uint8)
+    if f.sr_shrink(frame.ctypes.data, h, w, frame.strides[0], out.ctypes.data, dh, dw, out.strides[0]) != 0:
+        return None
+    return out
 
 
 def peaks(res: np.ndarray, integral: np.ndarray, th: int, tw: int, cover: float,
@@ -396,13 +481,21 @@ def fly(m: Map, w: Walls, x: float, y: float, vx: float, vy: float, arrow: int, 
     return q, out[0], out[1], out[2], bool(same & 1), bool(same & 2)
 
 
+def search_state() -> str:
+    """Whether the monster search's step 1 is in C (search.c), for the consoles."""
+    if search_lib() is not None:
+        return "in use"
+    return f"off ({search_why or 'not built'}): numpy and OpenCV instead, slower"
+
+
 def main() -> int:
     try:
         print(f"built: {build()}")
+        print(f"built: {build(SEARCH_SOURCE)}")
     except RuntimeError as e:
         print(f"couldn't build gamelab's native pieces: {e}")
         return 1
-    print(f"gamelab's C pieces: {state()}")
+    print(f"gamelab's C pieces: {state()}; the monster search's step 1: {search_state()}")
     return 0
 
 

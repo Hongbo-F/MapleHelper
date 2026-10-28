@@ -14,7 +14,7 @@ import pytest
 
 from gamelab import native
 from gamelab.analysis import pasted
-from gamelab.perception import loot, match, sprites
+from gamelab.perception import loot, match, mobs, sprites
 from gamelab.screen import NATIVE, STRETCHED
 
 from test_native_search import first_map, needs_game_data  # noqa: F401 (a fixture)
@@ -30,9 +30,11 @@ def opencv(image, template, mask):
 
 class Recorder:
     """Every masked match the C is asked for (native.masked_match, native.best_matches), with the pictures each
-    prepared template was made from (native.prepare_masked)."""
+    prepared template was made from (native.prepare_masked). The monster search's matches one call each, as before step 1
+    went to C (mobs.SEARCH_C off: its gate's and checks' matches in rf_run then, the same matcher: test_search_c)."""
 
     def __init__(self, monkeypatch):
+        monkeypatch.setattr(mobs, "SEARCH_C", False)
         self.pictures, self.calls = {}, []
         prepare, one, best = native.prepare_masked, native.masked_match, native.best_matches
 

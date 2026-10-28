@@ -883,7 +883,8 @@ class Publisher:
     def started(self, runner: Runner, map_id: int) -> None:
         from .. import native  # (whether its C is in use: a DLL that couldn't be built shows only as fewer frames)
         self.runner, self.model = runner, runner.step.model
-        self.native, self.slow = native.state(), not native.masked_in_c()
+        self.native = f"{native.state()}; the monster search's step 1 {native.search_state()}"
+        self.slow = not native.masked_in_c() or native.search_lib() is None
         telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native)
         self.log(f"perception: gamelab's C pieces {self.native}")
 

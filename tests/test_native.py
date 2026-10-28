@@ -4,6 +4,8 @@ What each piece computes is compared with the Python it stands in for where that
 
 import subprocess
 
+import numpy as np
+
 from gamelab import native
 
 
@@ -32,6 +34,25 @@ def test_a_build_is_named_for_its_source_and_replaces_older_ones(monkeypatch, tm
     assert [p.name for p in (tmp_path / "build").iterdir() if p.is_dir()] == []  # no temp folder left
 
 
+def test_the_searchs_dll_is_named_for_its_own_source_and_leaves_the_other_ones_builds(monkeypatch, tmp_path):
+    monkeypatch.setattr(native, "BUILD", tmp_path / "build")
+    monkeypatch.setattr(native, "VCVARS", tmp_path / "vcvars64.bat")
+    (tmp_path / "vcvars64.bat").write_text("")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "native-000000000000.dll").write_bytes(b"native.c's")
+    (tmp_path / "build" / "search-000000000000.dll").write_bytes(b"an earlier search.c's")
+
+    def compile_(command, cwd, **kw):
+        dll = command.split('/Fe:"')[1].split('"')[0]
+        open(dll, "wb").write(b"built")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(native.subprocess, "run", compile_)
+    out = native.build(native.SEARCH_SOURCE)
+    assert out == native.dll_path(native.SEARCH_SOURCE) and out.name.startswith("search-") and out != native.dll_path()
+    assert sorted(p.name for p in (tmp_path / "build").iterdir()) == ["native-000000000000.dll", out.name]
+
+
 def test_a_failed_build_says_why(monkeypatch, tmp_path):
     monkeypatch.setattr(native, "BUILD", tmp_path / "build")
     monkeypatch.setattr(native, "VCVARS", tmp_path / "vcvars64.bat")
@@ -48,3 +69,4 @@ def test_turned_off_it_answers_nothing(monkeypatch):
     assert native.lib() is None and "USE" in native.why
     assert native.fly(None, None, 0.0, 0.0, 0.0, 0.0, 0, 0.005, 4.0, None, -1) is None
     assert native.peaks(None, None, 1, 1, 0.1, 0.35) is None
+    assert native.search_lib() is None and native.shrink_area(np.zeros((4, 6, 3), np.uint8), 4, 3) is None

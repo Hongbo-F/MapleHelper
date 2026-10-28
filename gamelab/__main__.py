@@ -1451,7 +1451,8 @@ def cmd_bench_look(args) -> int:
           f"OpenCV {cv2.__version__}, {cv2.getNumThreads()} threads"
           + ("" if frames is None else "; the grab itself (16.7 ms with mss, about 2 with DXGI) isn't included"))
     print("the C pieces (gamelab/native.c): " + ("in use" if native.lib() is not None
-                                                  else f"not in use ({native.why}): numpy instead"))
+                                                  else f"not in use ({native.why}): numpy instead")
+          + f"; the monster search's step 1 (gamelab/search.c): {native.search_state()}")
     print("\n".join(timer.table()))
     if frames is None:
         print(eyes.screen.summary())

@@ -480,14 +480,16 @@ def test_a_looks_frame_gone_from_the_ring_comes_out_black_and_is_counted():
 
 def test_the_service_says_whether_gamelabs_c_is_in_use():
     """A DLL that couldn't be built leaves perception to Python and OpenCV, slower: the service's console says which
-    as each run starts (and the session record has it), and every 10 s line while the C isn't all in use."""
+    as each run starts (and the session record has it), and every 10 s line while the C isn't all in use (native.c's,
+    the masked match on AVX2, and the monster search's step 1, search.c's)."""
     from gamelab import native
     said = []
     pub = service.Publisher((100, 100), log=said.append)
     runner = drawn_runner()
     pub.started(runner, 1)
-    assert said == [f"perception: gamelab's C pieces {native.state()}"] and ("C pieces" in pub.status(0.0)) == pub.slow
-    assert pub.slow == (native.lib() is None or not native.masked_in_c())
+    assert said == [f"perception: gamelab's C pieces {native.state()}; the monster search's step 1 "
+                    f"{native.search_state()}"] and ("C pieces" in pub.status(0.0)) == pub.slow
+    assert pub.slow == (native.lib() is None or not native.masked_in_c() or native.search_lib() is None)
     runner.step.close()
 
 
