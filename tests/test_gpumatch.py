@@ -380,6 +380,8 @@ def test_a_call_sent_ahead_gives_every_field_of_the_cpus_answers(detector, on_gp
     lists = [detector._lists_of("pig", t, -1) for t in ("pig_move0", "pig_move1", "")]
     rng = np.random.default_rng(9)
     flat = detector._rf_lists
+    native.lib().gm_ahead(-1, 2_000_000)  # (each call waits till they're in: the counts below exact)
+    only = native.lib().gm_ahead(-1, -1)
     before = on_gpu.gpu_state()[1]
     for step in range(6):
         frame_, box = scene(("pig_move0", "pig_move1")[step % 2], 600 + 3 * step, 300 - step)
@@ -415,6 +417,36 @@ def test_a_call_sent_ahead_gives_every_field_of_the_cpus_answers(detector, on_gp
         on_gpu.end()
     assert all(bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(outs)[64 * i:64 * i + OUT_FIELDS] for i in range(6))
     assert on_gpu.gpu_state()[1]["ahead_in"] == after["ahead_in"]
+    native.lib().gm_ahead(only, 0)  # (back to the call never waiting)
+    cpu.close()
+
+
+def test_a_call_never_waits_for_what_was_sent_ahead_and_its_answers_are_the_cpus(detector, on_gpu):  # noqa: F811
+    # (GM_AHEAD_WAIT_US 0: the call at once after rf_ahead, the pool's threads on it; each pair the CPU's until the
+    # GPU's are in, then theirs, whichever thread maps them first: every field the same whichever way each went)
+    cpu = native.Refinds(ready_of(detector), 4)
+    lists = [detector._lists_of("pig", t, -1) for t in ("pig_move0", "pig_move1", "")]
+    rng = np.random.default_rng(11)
+    flat = detector._rf_lists
+    native.lib().gm_ahead(-1, 0)
+    before = on_gpu.gpu_state()[1]
+    for step in range(30):
+        frame_, box = scene(("pig_move0", "pig_move1")[step % 2], 600 + step, 300)
+        jobs = jobs_of(frame_, box, rng, 12, lambda i: lists[i % 3])
+        a = cpu.run(frame_, jobs, flat, 0.6, 0.9, False, 0.95)
+        assert on_gpu.ahead(frame_, ahead_of(jobs, frame_, 4), flat, 2000 + step)
+        if step % 3 == 1:
+            time.sleep(0.002 * (step % 5))  # (now and then the GPU's answers in partway through the call)
+        outs = on_gpu.start(frame_, jobs, flat, 0.6, 0.9, False, 0.95, ahead=2000 + step)
+        try:
+            while on_gpu.next() >= 0:
+                pass
+        finally:
+            on_gpu.end()
+        assert all(bytes(a)[64 * i:64 * i + OUT_FIELDS] == bytes(outs)[64 * i:64 * i + OUT_FIELDS]
+                   for i in range(len(jobs))), step
+    after = on_gpu.gpu_state()[1]
+    assert after["ahead_in"] + after["ahead_late"] - before["ahead_in"] - before["ahead_late"] == 30
     cpu.close()
 
 

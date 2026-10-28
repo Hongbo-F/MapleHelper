@@ -55,8 +55,8 @@ RETRY_S = 10.0  # after DXGI failed: mss for this long, then DXGI again
 # texture holding a saved frame, nothing captured (D:/MapleHelper-scratch/gsmooth/cap/copybench.py: Dxgi.read of the
 # 1366x768 box of a 3840x2160 "monitor" a 1/30 s, four rounds alternated): the process's CPU 4.96-5.17 ms a frame with
 # Map's wait, 1.04-1.07 on the event (0.12 cores fewer at 30 a second), read() 0.15-0.2 ms later at the median, the
-# pixels the same (scope/probe/copyoff2.c, the same calls in C: 4.6-5.6 against 0.6-1.75). `[capture] fence = false`
-# in config.toml leaves it to Map, as before.
+# pixels the same (scope/probe/copyoff2.c, the same calls in C: 4.6-5.6 against 0.6-1.75). Off by default (`[capture]
+# fence` in config.toml: false, Map's wait as before): a frame 0.15-0.2 ms later at the median, and not tried live yet.
 COPY_WAIT_MS = 100
 
 # HRESULTs (as unsigned 32-bit numbers)
@@ -90,13 +90,13 @@ def configured_method(path=CONFIG) -> str:
 
 def configured_fence(path=CONFIG) -> bool:
     """config.toml's `[capture] fence`: whether a box's copy off the graphics card is waited for on a fence's event
-    (true, the default) or by Map (false, as before 2026-10-27)."""
+    (true) or by Map (false, the default: as before 2026-10-27)."""
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
     except FileNotFoundError:
-        return True
-    fence = data.get("capture", {}).get("fence", True)
+        return False
+    fence = data.get("capture", {}).get("fence", False)
     if not isinstance(fence, bool):
         raise ValueError(f"{path}: [capture] fence must be true or false, got {fence!r}")
     return fence
