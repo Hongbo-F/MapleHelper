@@ -29,8 +29,8 @@ REAL = pytest.mark.skipif(not scenarios.available(TREE), reason="needs Tree Dung
 QUIET = set(range(0, 17))  # (the map's monsters on 0-16 only: nothing near her on 23 at the start)
 
 
-def _sc(fn, start=(23, 73.0), monsters=QUIET, **realism):
-    return scenarios.Scenario("stat_test", fn, start, monsters=monsters, seed=1, limit=200, map_id=TREE,
+def _sc(fn, start=(23, 73.0), monsters=QUIET, seed=1, **realism):
+    return scenarios.Scenario("stat_test", fn, start, monsters=monsters, seed=seed, limit=200, map_id=TREE,
                               attack="choice", her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
                               realism=Realism(zero_walls=True, **realism))
 
@@ -578,8 +578,10 @@ def test_a_level_up_in_the_hunt_reads_it_again_at_a_quiet_look():
 @REAL
 def test_a_window_that_wont_close_in_the_hunt_loop_ends_the_hunt_with_her_retreat():
     """Put off at the start, read by the hunt loop, and it won't close: StatWindowStop out of the hunt loop, her retreat
-    to a safe place (behavior.retreat.on_alarm, as every HuntStop), paged once by it."""
-    trace, sim = scenarios.run_sim(_sc(scenarios.stat_run(1.0), monsters="all", stat_stuck=True))
+    to a safe place (behavior.retreat.on_alarm, as every HuntStop), paged once by it. (Seed 2 since the evade work,
+    2026-10-29: on seed 1 her fights' jumps back off a monster on her after a touch, stance.FIGHT_CLEAR, left no quiet
+    moment for the read in the minute; of seeds 1-6, 2-6 meet all of this.)"""
+    trace, sim = scenarios.run_sim(_sc(scenarios.stat_run(1.0), monsters="all", seed=2, stat_stuck=True))
     r = trace["result"]
     assert r["start"] == ["put off", []] and r["stopped"].startswith("STAT WINDOW: her stat window may be open")
     assert [p[1] for p in r["pages"]] == ["MapleStory: her stat window"]

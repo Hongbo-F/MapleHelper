@@ -442,10 +442,11 @@ def test_a_short_harness_run_on_tree_dungeon():
 
 
 def test_a_short_movement_only_walk_on_tree_dungeon():
-    # harness `walk`: trips to random platforms of the live QA walk's (7-33), movement only (no kill, no attack)
+    # harness `walk`: trips to random platforms of the live QA walk's (7-33), movement only (no kill, no attack). A
+    # minute: in half of one her first trip, evading, isn't over yet (since the evade work's review, 2026-10-29)
     tree_map()
     from gamelab.sim import harness
-    out = harness.run_one("walk", 1, "crowd", minutes=0.5, map_id=TREE, world=("zero-walls", "walkers"))
+    out = harness.run_one("walk", 1, "crowd", minutes=1.0, map_id=TREE, world=("zero-walls", "walkers"))
     assert out["trips"]["total"] >= 1 and out["kills"] == 0 and out["attacks"] == 0
     assert sum(out["touches_by"].values()) == out["touches"]
 

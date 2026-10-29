@@ -44,7 +44,12 @@ def _choose(m, pid, x, left=9.5, monsters=(), her=danger.Her(752, 24)):
 
 def test_on_a_safe_platform_or_a_place_no_monster_reaches_she_stays():
     m = tree_map()
-    assert _choose(m, 25, 150.0) == Place(25, 150.0, "here: a safe platform", 0.0)
+    assert _choose(m, 26, 150.0) == Place(26, 150.0, "here: a safe platform", 0.0)
+    # 25 is MapModel.safe, but 24's Green Mushroom reaches her head over its right part (retreat.OVERHEAD): there by its
+    # places' danger, safe enough at 150, not under 24 at 250 (the nearest place safe enough within PLACE_SLACK: 199)
+    assert m.safe(25) and not retreat.wholly_safe(m, 25) and retreat.wholly_safe(m, 26)
+    assert _choose(m, 25, 150.0) == Place(25, 150.0, "here: safe enough", 0.0, 0.0)
+    assert (_choose(m, 25, 250.0).x, _choose(m, 25, 250.0).why) == (199.0, "safe enough")
     assert not m.safe(28)  # 28 isn't MapModel.safe, but no monster reaches it by the danger model
     stay = _choose(m, 28, 207.0)
     assert stay.why == "here: safe enough" and stay.seconds == 0 and stay.danger <= retreat.SAFE_DANGER
@@ -53,7 +58,11 @@ def test_on_a_safe_platform_or_a_place_no_monster_reaches_she_stays():
 def test_she_goes_to_the_nearest_safe_platform_when_it_is_near():
     m = tree_map()
     p = _choose(m, 24, 231.0)  # shooting 23 from 24, as live: down onto 25, under her
-    assert (p.platform, p.x, p.why) == (25, None, "a safe platform") and trip_s(p.seconds) <= retreat.NEAR_S
+    assert (p.platform, p.x, p.why) == (25, 199.0, "safe enough") and trip_s(p.seconds) <= retreat.NEAR_S
+    with pytest.MonkeyPatch.context() as mp:  # (as before OVERHEAD: 25 a safe platform, anywhere on it)
+        mp.setattr(retreat, "OVERHEAD", False)
+        p = _choose(m, 24, 231.0)
+        assert (p.platform, p.x, p.why) == (25, None, "a safe platform")
 
 
 def test_from_the_floor_no_safe_platform_is_near_and_a_rope_as_safe_comes_first():

@@ -749,7 +749,8 @@ class Flow:
         ends), and when: her box (motion.bodies) wherever her feet are (path), against each monster's box wherever
         it can be by then (MonsterTrack.reach: along its own platform, whichever that is). None if none could.
         `after`: only from that plan time on (the leg's rest, for a plan running: Navigator._coming); and none before
-        `immune` (her invulnerability after a touch: a leg may pass a monster while it lasts)."""
+        `immune` (her invulnerability after a touch: a leg may pass a monster while it lasts); nor, for a monster with
+        `counts_from` (MonsterTrack's: a pass's, control.navigator.PASS_WINDOW), before that."""
         if not monsters:
             return None
         path = self.path(leg, linger)
@@ -770,6 +771,8 @@ class Flow:
                 near.append((mo, q))
         for t, x, y in path:
             for mo, q in near:
+                if mo.counts_from and t < mo.counts_from:
+                    continue
                 lo, hi = mo.reach(t, q)
                 if bodies.touches(x, y, lo, hi, mo.half, q.y_at(min(max(x, lo), hi)), mo.tall):
                     return mo, t

@@ -120,7 +120,8 @@ def test_with_no_refuge_she_goes_past_the_monster_in_the_way_as_a_watched_chain_
     backstops = [kw["text"] for t, kw in events if t == "event" and kw.get("kind") == "backstop"]
     assert backstops and backstops[0].startswith("NO_REFUGE") and "past the snail" in backstops[0]
     assert any(kw.get("step") == "pass" for t, kw in events if t == "event")
-    assert st.evade_since is None and st.passed == (s.where.platform.id, NOW)  # (the evade step starts again)
+    assert st.refuge is None and st.passed == (s.where.platform.id, NOW)
+    assert st.evade_key is None and st.evade_since is None  # (made: its budget gone with it, BLOCK_MEMORY's _made)
 
 
 def test_her_budget_spent_she_goes_past_without_another_refuge(model, monkeypatch):
@@ -437,6 +438,15 @@ def test_a_jump_that_never_moved_her_dot_by_a_ropes_top_means_she_is_on_the_rope
     st = SimpleNamespace(fresh=None)
     assert nav._rope_top(st, s, s) is s
     assert nav._rope_top(st, s, s, jumped=True) == "off"
+    # ROPE_CUT: a chain from there cut short for her dot standing where it runs her (0.12 s in, short of STUCK_S): the
+    # rope too, the evade step on or off (on the rope under 30's top, 112 chains "ended on platform 30 instead": the
+    # harness's walk, seed 9)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(nv, "EVADE", False)
+        nav.cut_still = False
+        assert nav._rope_top(st, s, s, jumped=True) is s
+        nav.cut_still = True
+        assert nav._rope_top(st, s, s, jumped=True) == "off"
 
 
 # --- R7: her retreat's dodge -------------------------------------------------------------------------------------------
@@ -565,3 +575,214 @@ def test_a_walk_goes_on_random_trips_to_the_platforms_of_the_qa_walk_saving_the_
     assert [p.id for p in walk.places(other)] == [2]
     from gamelab import __main__ as cli
     assert cli.cmd_nav(SimpleNamespace(walk=None, platform=None)) == 2
+
+
+# --- after the review of 2026-10-29 (D:/MapleHelper-scratch/evade/review) ---------------------------------------------
+
+def test_the_walk_on_arrival_is_refused_only_where_standing_where_she_is_is_clear(model, monkeypatch):
+    # ARRIVE_STAND, for a trip whose x is what it's for (her retreat's place: go's arrive_waits, TripState.hold_x): on the
+    # trip's platform (C), sent on to x 520. A snail by x 560: the walk meets it, standing at 300 doesn't: she stays,
+    # the trip short of its x (Trip.short), said. A snail on her at 310: the walk meets it at once, and so does
+    # standing: she walks on (refused, she "arrived" where it went on touching her: the review's LD-28, seed 9). For
+    # another trip (any x on the platform does: the walk's), and as before (ARRIVE_STAND off), refused either way.
+    c = by_y(model, 500, 400)
+    monkeypatch.setattr(nv.time, "sleep", lambda s: None)
+    monkeypatch.setattr(nv.time, "monotonic", lambda: NOW)
+
+    def arrival(snail_x, hold=True):
+        nav = _navigator(model)
+        st = nav.begin(c.id, x=520.0)
+        st.hold_x = hold
+        s = Scene(t=NOW, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0,
+                  where=Where(300, 500, c, (0, 0)), searched=True, wide=True,
+                  monsters=[walker(snail_x, kind="snail", pose="stand", platform=c.id)])
+        return nav, st, s
+    nav, st, s = arrival(560.0)
+    said = []
+    nav.log = said.append
+    assert nav._arrival_clear(st, s) is False and "not walked on to x 520" in st.trip.short
+    assert any("not walked on" in line for line in said)
+    nav, st, s = arrival(310.0)
+    assert nav._arrival_clear(st, s) is True and st.trip.short == ""
+    nav, st, s = arrival(310.0, hold=False)
+    assert nav._arrival_clear(st, s) is False
+    monkeypatch.setattr(nv, "ARRIVE_STAND", False)
+    nav, st, s = arrival(310.0)
+    assert nav._arrival_clear(st, s) is False
+
+
+def test_a_pass_leaves_the_monster_in_the_way_out_only_within_the_window_its_touch_opens(model, monkeypatch):
+    # PASS_WINDOW (_within_window): a pass's chain that never meets the monster it left out is kept as it is; one clear
+    # of it once the window its first touch opens is over (that touch's plan time, INVULNERABLE_S on less
+    # IMMUNE_MARGIN_S) is kept too, said from when; one that stays in its box past that is planned again with the monster
+    # counting from then (MonsterTrack.counts_from: flow's danger), its own first touch checked; nothing chains so: the
+    # monster left out wholly, as before. (Left out for the whole chain, her retreat after a stop was planned lying on 15
+    # for a drop, a Horny Mushroom walking at her, past each window: the review's tour seed 7.)
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.route import Move
+    c = by_y(model, 500, 400)
+    nav = _navigator(model)
+    w = nv.INVULNERABLE_S - nv.IMMUNE_MARGIN_S
+
+    def stand(x, t0, t1):
+        return Leg(Move("walk", c.id, c.id, x, x, ""), Body(t0, x, c), Body(t1, x, c), [Span(c.id, t0, t1, x, x)])
+    mo = MonsterTrack(c.id, 300.0, speed=0.0, half=20.0, vx=0.0, kind="snail")
+    assert nav.flow.danger(stand(300.0, 0.0, 3.0), [replace(mo, counts_from=1.0)])[1] >= 1.0  # (flow: from then on)
+    assert nav._within_window(None, None, [], [stand(600.0, 0.0, 3.0)], [], mo, NOW, []) is None  # (never meets it)
+    short = [stand(300.0, 0.0, 0.2), stand(600.0, 0.2, 1.0)]  # (in its box at first, then away: within its window)
+    assert nav._within_window(None, None, [], short, [], mo, NOW, []) == (None, pytest.approx(w))
+    planned = []
+
+    def chain(st, s, path, monsters, looked, priced=None):
+        planned.append(monsters)
+        return [stand(300.0, 0.0, 0.5)], "keys", "done"
+    nav._chain = chain
+    long = [stand(300.0, 0.0, 3.0)]  # (in its box 3 s: past the window)
+    got, until = nav._within_window(None, None, [], long, [], mo, NOW, [])
+    assert got[0] == [stand(300.0, 0.0, 0.5)] and until == pytest.approx(w)
+    assert planned[0][-1].counts_from == pytest.approx(w) and planned[0][-1].x == mo.x
+    nav._chain = lambda *a, **k: ([], None, "monster")
+    assert nav._within_window(None, None, [], long, [], mo, NOW, []) is None  # (nothing chains so: as before)
+
+
+def test_a_blocked_moves_budget_is_kept_over_a_touched_pass_and_the_next_block_goes_past_at_once(model, monkeypatch):
+    # BLOCK_MEMORY and PASS_AVOID (off as committed: measured, the walk's touches up or her trips' arrivals down; the
+    # switches' comment): the way up blocked by a snail standing by the rope's top on D, her spot safe. Its budget spent
+    # (EVADE_S since the move's first block): past it at once, no wait nor way around; the pass touched and her knocked
+    # back onto C (the move not made): the move dearer (st.avoid), its budget kept, and the next block of it goes past at
+    # once too (the review's walk 19: a refuge, 3.5 s waited and a pass into it 4 times in one trip). Once she makes the
+    # move its budget goes; BLOCK_FORGET_S without a block of it, and it's forgotten; another move's budget is its own.
+    d = by_y(model, 300, 700)
+    monkeypatch.setattr(nv, "BLOCK_MEMORY", True)
+    monkeypatch.setattr(nv, "PASS_AVOID", True)
+    events = _events(monkeypatch)
+    nav, st, s, path, monsters, carried = _trip(model, monkeypatch, [], on=[(d.id, 700.0)])
+    legs, keys, why = nav._chain(st, s, path, monsters, NOW)
+    assert legs == [] and why == "monster" and nav._safe_to_stand(300.0, s.where.platform, path[0], monsters)
+    k = nv._key(path[0])
+    st.evade_key, st.evade_since, st.blocked_at = k, NOW - nv.EVADE_S - 0.1, NOW - 0.2
+
+    def knocked(st_, s_, path_, legs_, keys_, why_, dst, mons=()):  # (touched on the way, back where she was)
+        carried.append((legs_, why_))
+        return [leg.move for leg in legs_], d, s_
+    nav._carry_out_chain = knocked
+    nav._touch_since = lambda since: {"kind": "MISS", "at": NOW}
+    said = []
+    nav.log = said.append
+    assert nav._wait_for_monster(st, s, path, monsters, legs, why, NOW, NOW) is True
+    assert len(carried) == 1 and not any("waiting" in line or "way around" in line for line in said)
+    assert st.avoid.get(k) == NOW and st.evade_key == k and st.evade_since == NOW - nv.EVADE_S - 0.1
+    assert nav._wait_for_monster(st, s, path, monsters, legs, why, NOW, NOW) is True
+    assert len(carried) == 2 and not any("waiting" in line for line in said)
+    passes = [kw["text"] for t, kw in events if t == "event" and kw.get("kind") == "backstop"]
+    assert len(passes) == 2 and all(p.startswith("EVADE_S") for p in passes)
+    nav._made(st, [path[0]], True)  # (made: its budget gone)
+    assert st.evade_key is None and st.evade_since is None and k not in st.blocks
+    other = replace(path[0], x=path[0].x + 1.0)  # (another move: its own budget, this one's kept by)
+    st.evade_key, st.evade_since, st.refuges, st.blocked_at = k, NOW - 1.0, 2, NOW
+    nav._evade_for(st, other)
+    assert (st.evade_since, st.refuges) == (None, 0) and st.blocks[k][:2] == (NOW - 1.0, 2)
+    nav._evade_for(st, path[0])
+    assert (st.evade_since, st.refuges) == (NOW - 1.0, 2)
+    monkeypatch.setattr(nv.time, "monotonic", lambda: NOW + nv.BLOCK_FORGET_S + 1.0)
+    nav._evade_for(st, path[0])
+    assert (st.evade_since, st.refuges) == (None, 0)  # (forgotten)
+
+
+def test_with_toucher_all_every_trip_keeps_clear_of_the_monster_that_touched_her(model, monkeypatch):
+    # TOUCHER_ALL (off: measured worse in the walk): a plain trip (no `toucher`: not a retreat) keeps clear of R7's
+    # stand-in at her x after a touch where the look has none by her, standing there (TOUCHER_STAND); off (as
+    # committed), her retreat's alone.
+    m = mapdata.parse(1, tree(), "Test Map", {}, {"2": "Horny Mushroom"}, mob_damage={"Horny Mushroom": 110.0})
+    c, d = by_y(m, 500, 400), by_y(m, 300, 700)
+    nav = _navigator(m)
+    monkeypatch.setattr(nv.time, "monotonic", lambda: NOW)
+    monkeypatch.setattr(nv, "TOUCHER_ALL", True)
+    nav.senses = SimpleNamespace(touch={"at": NOW - 0.5, "told": NOW - 0.45, "kind": "MISS"},
+                                 invulnerable_until=lambda: NOW + 0.95)
+    s = Scene(t=NOW, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0,
+              where=Where(300, 500, c, (0, 0)), searched=True, wide=True, monsters=[])
+    path = Planner(m).plan(c.id, 300, d.id)
+    monsters, _ = nav._chain_monsters(nav.begin(d.id), s, path)
+    assert any(t.x == 300 and t.kind == "horny-mushroom" and t.vx == 0.0 for t in monsters)  # (standing: TOUCHER_STAND)
+    monkeypatch.setattr(nv, "TOUCHER_ALL", False)
+    monsters, _ = nav._chain_monsters(nav.begin(d.id), s, path)
+    assert not any(t.x == 300 for t in monsters)
+
+
+def test_a_safe_platform_a_monsters_platform_lies_over_within_her_height_is_weighed_by_its_places():
+    # retreat.wholly_safe (OVERHEAD): P (0..400 at y 500) has no spawn and none under it (MapModel.safe), but Q (200..400
+    # at y 450, a monster's) lies 50 over its right half, within her height: not wholly safe (Tree Dungeon's 25 under
+    # 24). Off, as MapModel.safe.
+    from test_navigation import seg
+
+    from gamelab.behavior import retreat as rv
+    data = {"info": {"VRLeft": -100, "VRTop": 0, "VRRight": 600, "VRBottom": 700},
+            "foothold": {"1": {"1": dict([seg(1, 1, 1, 0, 500, 400, 500)]),
+                               "2": dict([seg(1, 2, 2, 200, 450, 400, 450)]),
+                               "3": dict([seg(1, 3, 3, 0, 300, 100, 300)])}},
+            "ladderRope": {}, "portal": {},
+            "life": {"0": {"type": "m", "id": "0000002", "x": 300, "y": 450, "cy": 450, "rx0": 200, "rx1": 400}},
+            "miniMap": {"width": 700, "height": 700, "centerX": 100, "centerY": 0, "mag": 4}}
+    m = mapdata.parse(2, data, "Over", {})
+    p, top = by_y(m, 500, 100), by_y(m, 300, 50)
+    assert m.safe(p.id) and not rv.wholly_safe(m, p.id) and rv.wholly_safe(m, top.id)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(rv, "OVERHEAD", False)
+        assert rv.wholly_safe(m, p.id)
+
+
+def test_a_drop_with_no_spot_clear_of_a_ropes_top_goes_from_the_moves_own_spot(monkeypatch):
+    # Mover._drop (DROP_AT_SPOT): Tree Dungeon's drop from 18 onto 19 at x 128, no spot over 19 clear of the rope's top
+    # at 111 (route.drop_spots none): from 110, within 20 of it, she walked nowhere and dropped by the rope's top, onto
+    # the rope (11 times in a minute: the review's loop seed 18); now to 128 first. Off: as before.
+    from gamelab.control import mover as mv
+    from gamelab.motion.route import drop_spots
+    from gamelab.sim import scenarios
+    m = scenarios.real_map(scenarios.TREE)
+    if m is None:
+        pytest.skip("needs Tree Dungeon's game data (gamedata/data)")
+    drop = next(mm for mm in Planner(m).moves if mm.kind == "drop" and (mm.src, mm.dst) == (18, 19))
+    assert drop_spots(m, m.platform(18), m.platform(19)) == []
+    keys = SimpleNamespace(down=SimpleNamespace(name="down"), jump=SimpleNamespace(name="alt"))
+    sent = []
+    actions = SimpleNamespace(keys=keys, arrow=lambda d: d, pickups=lambda ms: [])
+    mover = mv.Mover(None, actions, m, log=lambda *a: None)
+    mover._send = lambda events, name: sent.append(events)
+    monkeypatch.setattr(mv.time, "sleep", lambda s: None)
+    at = SimpleNamespace(where=Where(110.0, -901, m.platform(18), (0, 0)))
+    mover._drop(drop, at)
+    assert sent[-1][0][1:] == ["right", "down"]  # (a walk right first)
+    monkeypatch.setattr(mv, "DROP_AT_SPOT", False)
+    mover._drop(drop, at)
+    assert sent[-1][0][1:] == ["down", "down"]  # (as before: down at once)
+
+
+def test_a_drop_that_ended_on_a_rope_is_another_way_for_the_rest_of_the_trip(model, monkeypatch):
+    # ROPE_DROP: a drop onto C that ended on no platform (a rope by its top: the hunt loop's seed 10, 28 onto 30 by the
+    # rope at 146, 12 times in 57 s) costs CANNOT_S for the rest of the trip (st.cannot), said, and isn't a chain's other
+    # way between the same platforms either (_pricing's alternatives); off, as before.
+    from gamelab.motion.route import Move
+    c, a = by_y(model, 500, 400), by_y(model, 300, 100)
+    nav = _navigator(model)
+    st = nav.begin(c.id)
+    said = []
+    nav.log = said.append
+    drop = Move("drop", a.id, c.id, 100.0, 100.0)
+    on_rope = SimpleNamespace(where=SimpleNamespace(platform=None))
+    nav._rope_drop(st, [drop], c, on_rope)
+    assert nv._key(drop) in st.cannot and any("ended on a rope" in line for line in said)
+    landed = SimpleNamespace(where=SimpleNamespace(platform=c))
+    st2 = nav.begin(c.id)
+    nav._rope_drop(st2, [drop], c, landed)
+    assert not st2.cannot
+    nav._siblings = {(a.id, c.id): [drop, Move("walk_off", a.id, c.id, 200.0, 210.0)]}
+    nav.escort = SimpleNamespace(landings=lambda monsters: (lambda leg, last=True: (0.0,)))
+    monkeypatch.setattr(nv, "LANDING_CLEAR", True)
+    monkeypatch.setattr(Navigator, "fight", property(lambda self: True))
+    _, alts, _ = nav._pricing(st, [])
+    assert [m.kind for m in alts(drop)] == ["walk_off"]
+    monkeypatch.setattr(nv, "ROPE_DROP", False)
+    st3 = nav.begin(c.id)
+    nav._rope_drop(st3, [drop], c, on_rope)
+    assert not st3.cannot

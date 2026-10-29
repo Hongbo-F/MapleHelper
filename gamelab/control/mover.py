@@ -58,6 +58,12 @@ ON_ROPE_X = 25
 ROPE_JUMP_KEY_MS = 40
 STILL = 0.6               # minimap px: her dot within this of where a move began, on both axes, hasn't moved
                           # (control.navigator.STILL's)
+# A drop where she stands isn't clear (within route.ROPE_CLEAR of a rope's top: down there climbs onto it) and no spot of
+# her platform over the one below is (route.drop_spots none): from the move's own spot, walked to exactly (DROP_AT_SPOT,
+# from the evade work's review, 2026-10-29), not from where she stands within 20 of it. (Tree Dungeon's drop from 18 onto
+# 19 at x 128, 17 off the rope at 111: from x 104-110 she grabbed the rope 11 times in a minute, the hunt loop's seed 18,
+# 20 touches and 71 s without a kill.) False: as before.
+DROP_AT_SPOT = True
 
 
 class MoveCut(Exception):
@@ -280,6 +286,11 @@ class Mover:
             spots = drop_spots(self.model, a, below)
             if spots:
                 dx, tolerance = min(spots, key=lambda x: abs(x - here)) - here, 0
+            elif DROP_AT_SPOT and abs(dx) >= 1:
+                tolerance = 0
+        elif DROP_AT_SPOT and abs(dx) > tolerance and not drop_clear(self.model, a, m.x - math.copysign(tolerance, dx),
+                                                                     below):
+            tolerance = 0  # (where a walk within 20 of the spot would stop isn't clear: to the spot itself)
         if abs(dx) > tolerance and (why := self._clear(here, here + dx)):
             raise MoveRefused(why)
         events, t = self.walk_events(dx, tolerance)

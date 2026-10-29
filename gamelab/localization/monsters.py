@@ -239,6 +239,8 @@ class MonsterTrack:
     facing: int = 0       # which way it faced, seen walking (1 right, -1 left; 0: not known, or standing)
     kind: str = ""        # its kind ("": not known)
     top: float | None = None  # its box's top for touches (touch_box: walking or flinching), if not `height`
+    counts_from: float = 0.0  # plan time before which its touch doesn't count (motion.flow's danger): a pass's monster
+                              # in the way left out within her invulnerability alone (control.navigator.PASS_WINDOW)
 
     @property
     def tall(self) -> float:

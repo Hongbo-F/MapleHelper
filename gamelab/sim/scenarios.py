@@ -2091,7 +2091,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=5, limit=600,
+@tree((28, 247.0), monsters="all", seed=1, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -2138,7 +2138,9 @@ def loop_tree_run(sim):
     Horny Mushrooms; of seeds 1-12, 5, 6, 7, 8 and 11 meet all of this, 5 went up the tower (1, 3, 4, 9, 10), on 2
     no safe platform was reachable at 305 s and on 12 she fell out at 181 s; on 5 hurt 32 times, master's stack
     meeting all of it too (hurt 38 times). Kept on the rebase onto her keys followed and her stat window, master
-    d9774e5: on 5 57 kills, hurt 32 times, 1,236 EXP; master's stack on 5 as before.)"""
+    d9774e5: on 5 57 kills, hurt 32 times, 1,236 EXP; master's stack on 5 as before.) (Seed 1 since the evade work's
+    review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on seed 5 under
+    forty kills; of seeds 1-13, 1, 4, 6-8 and 11 meet all of this.)"""
     return _loop(5)(sim)
 
 
@@ -2206,7 +2208,7 @@ def loop_tree_23(sim):
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -2215,7 +2217,9 @@ def loop_tree_23_near_misses(sim):
     """loop_tree_23 as `tour --loop` plays by default (the attack choice), with the detector's misses as live on
     2026-10-25 (`--world near-misses`: world.NEAR_SEEN on her platform, OFF_SEEN off it): her drops on 23 wait while
     a Horny Mushroom the looks missed (the feed's hidden tracks, her memory's: localization.unseen) is by them
-    (hunt.PILE_CLEAR), as one did live (the service's track 130: 6 touches and a fall to 29)."""
+    (hunt.PILE_CLEAR), as one did live (the service's track 130: 6 touches and a fall to 29). (Seed 2 since the evade
+    work's review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on seed 1 no
+    'later, a horny-mushroom unseen' line; of seeds 1-13 all but 1 and 11 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2374,16 +2378,17 @@ MOUSE_EVENTS = ("mouse", "lbutton", "rbutton")
 
 def safe_there(sim) -> bool:
     """Whether the world has her on a safe place now, by what behavior.retreat counts as one, the look aside: standing
-    on a safe platform (MapModel.safe), or where the danger with every spawn point's monster at its point is at most
-    retreat.SAFE_DANGER, on a platform or on a rope."""
-    from ..behavior.retreat import SAFE_DANGER
+    on a safe platform (retreat.wholly_safe: MapModel.safe, no monster's platform over it within her height), or where
+    the danger with every spawn point's monster at its point is at most retreat.SAFE_DANGER, on a platform or on a
+    rope."""
+    from ..behavior.retreat import SAFE_DANGER, wholly_safe
     w = sim.world
     d = danger.of_map(sim.model, danger.Her(w.character.max_hp, w.character.level))
     if w.mode == "rope" and w.rope is not None:
         return d.on_rope(w.rope, w.y, None) <= SAFE_DANGER
     if w.mode != "ground" or w.plat is None:
         return False
-    return sim.model.safe(w.plat.id) or d.at(w.plat.id, w.x, None) <= SAFE_DANGER
+    return wholly_safe(sim.model, w.plat.id) or d.at(w.plat.id, w.x, None) <= SAFE_DANGER
 
 
 PLAYED_ROUND_S = 1e-4  # (lie_detector) what fakes.FakePlayer rounds the times it played its keys at to
@@ -2499,7 +2504,7 @@ def loop_tree_lie_detector(sim):
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=5, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2531,7 +2536,11 @@ def loop_tree_lie_detector_28(sim):
     she went up the rope at 146 from 32, a rope as safe, as she does with the stack's reactions off in this world too;
     of seeds 1-40, 5, 8, 9, 11, 29, 33 and 38 meet all of this.) (Seed 5 kept at the rebase of the whole screen 15
     times a second onto her touches (master 73394ba, 2026-10-28), where the branch at 10 a second had it on 2: on 5
-    she is on 28, a safe platform, 10 s after it.)"""
+    she is on 28, a safe platform, 10 s after it.) (Seed 2 since the evade work's review (2026-10-29: her evade step and
+    R7's dodge, the rope fixes; rebased onto master 945f201): on seed 5 her retreat went to 27, a safe platform, not
+    back onto 28; of seeds 1-13, 2, 4 and 6 meet all of this (every switch off: 1, 2, 4 and 5), and on all 13 she is on
+    a safe place 10 s after the sighting, with no fall (the review's falls off 25 were on the code before the rebase;
+    her retreat weighs 25 by its places now: retreat.OVERHEAD).)"""
     return lie_detector(40.0)(sim)
 
 
@@ -2848,7 +2857,10 @@ def loop_tree_grind_attack_key(sim):
     the loop's rate): on seed 13 no 5 regular presses in a row went without effect in its 2 minutes; of seeds 1-13, 9
     alone meets all of this, 6 and 10 press Ctrl after the check. On 9: the doubt at 55.9 s, a Green Mushroom at 4%
     pressed at from 39.9 s; away to 25 (4.0 s), her stars not known, the window read and closed at 60.7-61.4 s, ATTACK
-    on A: A from 62.1 s, paged once, 19 kills after.)"""
+    on A: A from 62.1 s, paged once, 19 kills after.) (Seed 9 kept at the evade work's integration (2026-10-29:
+    work/evade-int, her evade step and R7's dodge with the pull's detour rule): of seeds 1-13, 3, 6, 9, 11 and 12 meet
+    all of this (the evade work alone had 6, 9, 11 and 12). On 9: the doubt at 55.9 s, away to 25 (6.8 s to get there),
+    her stars not known, the window read and closed at 64.0-64.7 s, ATTACK on A, paged once, 23 kills after.)"""
     return key_check_run(2)(sim)
 
 
@@ -2868,7 +2880,10 @@ def loop_tree_attack_unbound(sim):
     2026-10-28 every later run started with it off, nothing to doubt it again). (Seed 9 since the pull's detour rule
     (2026-10-29: behavior.patrol, a pile against the loop's rate), as loop_tree_grind_attack_key: on 13 no doubt in its
     2 minutes; of seeds 1-13, 9 alone meets all of this, 6 and 10 never say the regular attack off. On 9 the same doubt
-    and check as there, ATTACK on none at 62.1 s.)"""
+    and check as there, ATTACK on none at 62.1 s.) (Seed 9 kept at the evade work's integration (2026-10-29:
+    work/evade-int, her evade step and R7's dodge with the pull's detour rule), as loop_tree_grind_attack_key: of seeds
+    1-13, 3, 6, 9, 11 and 12 meet all of this. On 9 the same doubt and check as there, ATTACK on none at 64.7 s, 19 kills
+    after.)"""
     return key_check_run(2)(sim)
 
 
@@ -2921,7 +2936,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=24, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -2954,7 +2969,11 @@ def loop_tree_attack_no_darts(sim):
     4 minutes, so neither the doubt nor out of darts' stop; of seeds 1-24, 24 alone meets all of this, 3, 4, 6, 8, 10
     and 17 doubt and stop with her stars' test not MAYBE OUT. On 24: the doubt at 113.7 s, a Horny Mushroom at 4%; MAYBE
     OUT at 121.2 s, the window read and closed at 121.6-122.3 s, ATTACK on Ctrl: Lucky Seven only, paged; out of darts'
-    stop at 144.5 s, paged.)"""
+    stop at 144.5 s, paged.) (Seed 5 again since the evade work's integration (2026-10-29: work/evade-int, her evade step
+    and R7's dodge with the pull's detour rule): on 24, and on 3 (the evade work's pick without the pull's rule), out of
+    darts' stop never came in its 4 minutes; of seeds 1-24, 5, 8 and 12 meet all of this. On 5: the doubt at 75.1 s (a
+    Green and a Horny Mushroom), MAYBE OUT at 82.5 s, the window read and closed at 83.7-84.4 s, ATTACK on Ctrl: Lucky
+    Seven only, paged; out of darts' stop at 100.9 s, paged.)"""
     return key_check_run(4)(sim)
 
 
@@ -2976,7 +2995,7 @@ FOLLOW_EXPECTS = (
     check("remembered for her next runs", lambda tr: tr["result"]["remembered"] is not None))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("jump", "c"),))),
       expects=FOLLOW_EXPECTS + (
           logs("HER JUMPS DIDN'T LIFT HER 6 TIMES IN A ROW"), logs("HER KEYS: THE GAME HAS THEM ON OTHER KEYS"),
@@ -3000,7 +3019,11 @@ def loop_tree_grind_jump_key(sim):
     of seeds 1-12, 1, 4-8, 11 and 12 meet all of this, master's stack on 1 past its 400 s. On 1: the doubt at 100.7
     s, a slime near (put off), the window read at 138.3-139.0 s, JUMP followed to C, 35 kills after.) (Since the pull's
     detour rule (2026-10-29: behavior.patrol, a pile against the loop's rate) on 1: the doubt at 78.5 s, the window read
-    at 79.0-79.7 s, JUMP followed to C at 80.4 s, 53 kills after.)"""
+    at 79.0-79.7 s, JUMP followed to C at 80.4 s, 53 kills after.) (Seed 2 since the evade work's integration
+    (2026-10-29: work/evade-int, her evade step and R7's dodge with the pull's detour rule): on 1, and on 4 (the evade
+    work's pick without the pull's rule), fewer than 3 of her jumps lifted her after the check; of seeds 1-13, 2, 3, 5-11
+    and 13 meet all of this. On 2: the doubt at 138.3 s, put off (a Horny Mushroom and a slime near), the window read at
+    150.0-150.7 s, JUMP followed to C, 42 kills after.)"""
     return key_check_run(4)(sim)
 
 

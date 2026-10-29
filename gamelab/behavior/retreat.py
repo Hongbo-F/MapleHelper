@@ -60,6 +60,7 @@ from ..control import navigator as navigation
 from ..control.navigator import AVOID, Navigator
 from ..localization.mapdata import Rope
 from ..localization.scene import Scene
+from ..motion.bodies import HER_TALL
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
 from .safety import HuntStop, SafetyStop
@@ -92,6 +93,27 @@ ROPE_STILL_S = 1.0    # ... looked for this long at most
 DODGE = True
 WAY_NEAR = 60.0
 WAY_BLOCKED_S = 2.0
+# A safe platform with a platform monsters spawn on over it within her height (OVERHEAD; from the evade work's review,
+# 2026-10-29): MapModel.safe counts Tree Dungeon's 25 safe, though a Green Mushroom on 24, 50-74 over it from x 176 on,
+# reaches her head there (loop_tree_lie_detector_28: her retreat's drop onto 25 landed her under it, and its touches
+# knocked her off 25's end and out of the map on 2 seeds of 13). `choose` weighs such a platform as any other, by its
+# places' danger (attack.danger counts a monster over her within her height: Danger.walk), not as safe anywhere on it
+# (wholly_safe). False: as before.
+OVERHEAD = True
+# Her retreat's trips wait on the place's platform (Navigator.go's arrive_waits, a look every WAIT_S, within the go's
+# time) where the walk on to its x isn't clear of a monster and standing where she is is (control.navigator's
+# ARRIVE_STAND), then end short of it (Retreat.result says "short"), the next go from there.
+ARRIVE_WAITS = 30
+# After a stop (the safety stop, out of darts), her retreat's evade step has the time to the player's window, refuge moves
+# without a bound and no pass for the trip's deadline (STOP_REFUGES, as built); False: as the Lie Detector's, which in the
+# paired runs after the stop (master's hunt to it, her pet out of potions: D:/MapleHelper-scratch/evade/fix/stops, R*
+# against Q*) died 12 of 144 times at 3 hits against 11, its touches that hurt 129 against 122.
+STOP_REFUGES = True
+# A place on a platform (`choose`'s "safe enough", "the safest within reach") weighed by its danger within PLACE_SLACK of
+# its x either way, the worst (OVERHEAD's review too): her walk there stops within the navigator's ARRIVE_TOLERANCE of it
+# (from the side she comes from), and the place nearest her was the one at the edge of a monster's reach (on 25, from 24
+# at 231: x 219, its danger 0 there and 0.071 at 224). 0: at its x alone, as before.
+PLACE_SLACK = 20.0
 
 
 @dataclass(frozen=True)
@@ -272,13 +294,17 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
             deadline = seen + RETREAT_WINDOW_S
             seconds = min(deadline - time.monotonic(), trip_s(p.seconds) + GO_SLACK_S)  # longer: from where she is
             dodge = {}
+            linger = stop and STOP_REFUGES
             if DODGE:  # (the evade step's budget: the time the retreat has left; after a stop, refuges to the end)
-                dodge = dict(toucher=True, evade_s=max(0.0, deadline - time.monotonic()) if stop else
+                dodge = dict(toucher=True, evade_s=max(0.0, deadline - time.monotonic()) if linger else
                              min(navigation.EVADE_S, max(0.0, RETREAT_S - (time.monotonic() - seen))),
-                             refuge_s=math.inf if stop else navigation.EVADE_MOVE_S, deadline_pass=not stop)
+                             refuge_s=math.inf if linger else navigation.EVADE_MOVE_S, deadline_pass=not linger,
+                             arrive_waits=ARRIVE_WAITS)  # (short of its x where standing is clear: waits there)
             trip = nav.go(p.platform, x=p.rope.x if p.rope else p.x, seconds=max(0.1, seconds), mode=AVOID, scene=s,
                           vary=False, stand_until=deadline, **dodge)
             out.result = trip.result
+            if getattr(trip, "short", ""):  # (ARRIVE_STAND: on the place's platform where standing is clear, not at its x)
+                out.result = f"{trip.result} short: {trip.short}"
             if p.rope is not None and trip.result == "arrived":
                 s = nav.mover.locate(tries=LOCATE_TRIES)
                 if s.where.platform is not None and s.where.platform.id == p.platform:
@@ -361,7 +387,7 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
     def in_time(t: float | None) -> bool:
         return t is not None and trip_s(t) <= left
 
-    if model.safe(here.id):
+    if wholly_safe(model, here.id):
         return Place(here.id, x, "here: a safe platform", 0.0)
     now = risk(here.id, x)
     if counts and now <= SAFE_DANGER:
@@ -373,7 +399,7 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
         t = 0.0 if p.id == here.id else times.get(p.id)
         if t is None or not in_time(t):
             continue
-        if p.id != here.id and model.safe(p.id):
+        if p.id != here.id and wholly_safe(model, p.id):
             safe.append(Place(p.id, None, "a safe platform", t, way=way(p.id)))
             continue
         if not counts:
@@ -383,7 +409,7 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
             tt = nav.planner.arrive(here.id, x, p.id, gx)
             if not in_time(tt):
                 continue
-            r = risk(p.id, gx)
+            r = max(risk(p.id, min(max(gx + dx, p.left), p.right)) for dx in (-PLACE_SLACK, 0.0, PLACE_SLACK))                 if PLACE_SLACK else risk(p.id, gx)
             (safe if r <= SAFE_DANGER else safest).append(
                 Place(p.id, gx, "safe enough" if r <= SAFE_DANGER else "the safest within reach", tt, r, way=way(p.id)))
         for r in ropes.refuges(model, d, p.id, None):  # at its safest height with every spawn filled; the look too
@@ -402,6 +428,22 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
     if safe or hangs:
         return min(safe + hangs, key=lambda c: (round(c.seconds + c.way, 3), c.rope is not None, c.x is not None))
     return min(safest, key=lambda c: (round(c.danger, 4), c.seconds))
+
+
+def wholly_safe(model, pid: int) -> bool:
+    """Whether no monster can touch her anywhere on platform `pid`: a safe platform (MapModel.safe) with, OVERHEAD, no
+    platform monsters spawn on over it within her height (HER_TALL) where they overlap (its ends and middle)."""
+    if not model.safe(pid):
+        return False
+    if not OVERHEAD:
+        return True
+    p = model.platform(model.place_of(pid))
+    for q in model.spawn_platforms:
+        o = model.platform(q)
+        lo, hi = max(p.left, o.left), min(p.right, o.right)
+        if lo < hi and any(0 < p.y_at(gx) - o.y_at(gx) <= HER_TALL for gx in (lo, (lo + hi) / 2, hi)):
+            return False
+    return True
 
 
 def _way_cost(nav: Navigator, src: int, x: float, seen) -> Callable[[int], float]:
