@@ -127,7 +127,12 @@ _VIEWER = r"""<!doctype html>
 <title>__NAME__</title>
 <style>
 :root { --bg:#101214; --fg:#e8e8e8; --dim:#9aa0a6; --btn:#23272b; --acc:#4fc3f7; }
-body { margin:0; background:var(--bg); color:var(--fg); font:15px system-ui, sans-serif; }
+/* No double-tap zoom anywhere (two quick taps on a button stepped and zoomed the page, the user, 2026-10-29: "Fix
+   the buttons, double tap on phone zooms in"); pinch zoom and scrolling stay. */
+html, body, button, select, input, #imgbox, #img { touch-action: manipulation; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent; }
+button { user-select:none; -webkit-user-select:none; }
 header { position:sticky; top:0; background:var(--bg); padding:6px 8px; z-index:2; border-bottom:1px solid #222; }
 #title { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
 #title b { font-size:15px; } #pos { color:var(--acc); font-variant-numeric:tabular-nums; }
