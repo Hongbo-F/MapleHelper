@@ -11,14 +11,16 @@ from tests.test_lie_recording import Screen, make_dog, play
 
 def pusher(every_s=30.0):
     sent = []
-    return Pusher(lambda title, text, priority: sent.append((title, priority, text)), every_s=every_s,
-                  clock=lambda fmt: "01:35:32"), sent
+    return Pusher(lambda title, text, priority, text_too=False: sent.append((title, priority, text) + (("text",)
+                                                                                                    if text_too else ())),
+                  every_s=every_s, clock=lambda fmt: "01:35:32"), sent
 
 
 def test_a_cycle_pushes_at_its_first_sight_again_every_30_s_while_it_can_be_answered_and_once_at_its_end():
     p, sent = pusher()
     p.seen(0.0, "mini-game notice")
-    assert sent == [("Lie Detector up", "urgent", "mini-game notice seen at 01:35:32: answer it in the game now")]
+    assert sent == [("Lie Detector up", "urgent", "mini-game notice seen at 01:35:32: answer it in the game now",
+                     "text")]
     for t in (0.25, 10.0, 29.9):
         p.seen(t, "mini-game")
     assert len(sent) == 1
@@ -27,6 +29,7 @@ def test_a_cycle_pushes_at_its_first_sight_again_every_30_s_while_it_can_be_answ
     p.seen(60.0, "quiz")
     assert [s[:2] for s in sent[1:]] == [("Lie Detector still up", "urgent")] * 2
     assert sent[1][2] == "mini-game, up 30 s: answer it in the game now"
+    assert all(len(s) == 3 for s in sent[1:])  # (the repeats: no text)
     p.ended(75.0)
     assert sent[-1] == ("Lie Detector gone", "default", "off the screen at 01:35:32 after 75 s")
     p.ended(80.0)  # (once)
@@ -41,11 +44,13 @@ def test_the_truth_booth_is_pushed_once_as_missed_and_not_repeated():
     for t in range(201, 500, 10):
         p.seen(float(t), "truth booth")
     assert [s[:2] for s in sent] == [("Lie Detector up", "urgent"), ("Lie Detector missed", "high")]
+    assert [s[3:] for s in sent] == [("text",), ("text",)]  # (a text each: the first sight, the Truth Booth)
     assert sent[1][2] == "the Truth Booth at 01:35:32, 200 s after it was first seen"
     q, sent = pusher()
     q.seen(0.0, "truth booth")  # first seen there (the player started with her in it)
     q.seen(40.0, "truth booth")
-    assert sent == [("Lie Detector missed", "urgent", "truth booth seen at 01:35:32: she's in the Truth Booth")]
+    assert sent == [("Lie Detector missed", "urgent", "truth booth seen at 01:35:32: she's in the Truth Booth",
+                     "text")]
 
 
 def test_the_topic_lives_in_the_labs_file_made_once_with_a_long_random_topic(tmp_path):
@@ -116,3 +121,61 @@ def test_a_watchdog_without_a_pusher_pushes_nothing_and_a_pusher_that_raises_is_
     dog, flag, said, alarms = make_dog(tmp_path / "b", screen, pusher=Broken())
     play(dog, screen, [1, 1, 0, 0, 0, 0, 0])
     assert flag.is_set() and dog.cycle_t0 is None and dog.troubles.get("the phone push failed", 0) >= 2
+
+
+def test_a_text_is_mailed_through_the_labs_account_at_a_cycles_first_sight_only_once_its_login_is_filled_in(
+        tmp_path, monkeypatch):
+    """The user, 2026-10-29: "Send lie detector alert to <their email-to-text address> also"; asked how, "My email via
+    SMTP": lab/smtp.json made with the address and the login left for them; read at each push; mailed on its own
+    thread; a failure said, never raised."""
+    sent, logins = [], []
+
+    class SMTP:
+        def __init__(self, host, port, timeout):
+            self.host, self.port = host, port
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            logins.append("tls")
+
+        def login(self, user, password):
+            logins.append((user, password))
+
+        def send_message(self, msg):
+            sent.append((self.host, self.port, msg["To"], msg["Subject"], msg.get_content().strip()))
+    monkeypatch.setattr(notify.smtplib, "SMTP", SMTP)
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)  # (the push: not here)
+    path = tmp_path / "smtp.json"
+    cfg, ready = notify.setup_mail("5550001111@sms.example", path)
+    assert not ready and cfg["to"] == ["5550001111@sms.example"] and cfg["user"] == cfg["password"] == ""
+    assert notify.load_mail(path) is None  # (no login yet: nothing goes)
+    said = []
+    p = Pusher.from_lab(log=said.append, path=tmp_path / "ntfy.json", mail_path=path)
+    p.seen(0.0, "countdown")
+    p.ended(10.0)
+    cfg.update(user="me@example.com", password="app-password")
+    path.write_text(json.dumps(cfg), encoding="utf-8")
+    assert notify.setup_mail("5550001111@sms.example", path)[1]  # (kept, not doubled)
+    p.seen(20.0, "mini-game notice")
+    p.seen(60.0, "mini-game")  # a repeat: no text
+    import time
+    for _ in range(200):
+        if sent:
+            break
+        time.sleep(0.01)
+    time.sleep(0.05)
+    assert sent == [("smtp.gmail.com", 587, "5550001111@sms.example", "Lie Detector up",
+                     "mini-game notice seen at " + sent[0][4].split("seen at ")[1])]
+    assert logins == ["tls", ("me@example.com", "app-password")] and said == []
+
+    def refused(*a, **k):
+        raise OSError("refused")
+    monkeypatch.setattr(notify, "send_mail", refused)
+    t = notify.mail(notify.load_mail(path), "t", "x", log=said.append)
+    t.join(timeout=5)
+    assert said == ["the text's mail failed: OSError: refused"]

@@ -136,6 +136,26 @@ def cmd_stop(args) -> int:
 def cmd_notify(args) -> int:
     """The phone's pushes (control.notify): set up, say where they go, send a test."""
     from .control import notify
+    if args.setup_sms or args.test_sms:
+        if args.setup_sms:
+            got, ready = notify.setup_mail(args.setup_sms)
+            print(f"texts go to {', '.join(got['to'])} through {got['host']}:{got['port']} ({notify.MAIL_CONFIG})"
+                  + ("" if ready else ": fill in its \"user\" (your email address) and \"password\" yourself (for "
+                                      "Gmail an app password: Google Account, Security, 2-Step Verification, App "
+                                      "passwords), then `python -m gamelab notify --test-sms`"))
+        if args.test_sms:
+            mcfg = notify.load_mail()
+            if mcfg is None:
+                print(f"no text set up: {notify.MAIL_CONFIG} missing or its user, password or addresses empty")
+                return 1
+            try:
+                notify.send_mail(mcfg, "gamelab test", f"a test text at {time.strftime('%H:%M:%S')}: a Lie "
+                                                       "Detector comes like this")
+            except Exception as e:
+                print(f"the test text failed: {type(e).__name__}: {e}")
+                return 1
+            print(f"test text sent to {', '.join(mcfg['to'])}")
+        return 0
     cfg = notify.setup() if args.setup else notify.load()
     if cfg is None:
         print(f"no phone push set up ({notify.CONFIG} missing): `python -m gamelab notify --setup`")
@@ -2791,6 +2811,10 @@ def build_parser() -> argparse.ArgumentParser:
                                       "one push")
     s.add_argument("--setup", action="store_true")
     s.add_argument("--test", action="store_true")
+    s.add_argument("--setup-sms", metavar="ADDRESS", help="a text to ADDRESS (a carrier's email-to-text address) at a "
+                                                           "Lie Detector's first sight and the Truth Booth's, mailed "
+                                                           "through your account in lab/smtp.json (you fill its login)")
+    s.add_argument("--test-sms", action="store_true", help="send one text through lab/smtp.json")
     s.set_defaults(func=cmd_notify)
     s = sub.add_parser("character", help="who plays: her profiles, the one a command plays and why; `use ID` plays ID "
                                          "when nothing names another (lab/character.json); `check`: her bottom bar "
