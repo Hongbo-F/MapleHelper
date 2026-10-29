@@ -21,6 +21,7 @@ import importlib
 import json
 import pkgutil
 import random
+import time
 import re
 import tempfile
 from collections.abc import Callable
@@ -2969,6 +2970,100 @@ def loop_tree_remembered_keys(sim):
     (lab/keybindings-thief.json): her hunter starts with C for her jump (control.keymap.at_start, said in the log), her
     jumps lift her from the start, no doubt, no window."""
     return key_check_run(2)(sim)
+
+
+# --- her stat window: her W.DEF read at a hunt's start (behavior.statcheck) -------------------------------------------
+# The user, 2026-10-28 ~18:20, on her DEF not known at a first run (the safety stop's reserve at DEF 0 until 8 touches
+# are kept): "You can open character stats panel to check the defense". The world draws her stat window from the game
+# data's pictures with her stats (Realism.stat_key: S toggles it; its DETAIL panel by a click on its button; Esc closes
+# it), found as in game, its text read by the simulator's stand-in for the OCR (FakeEyes.stat_ocr). A hunt opens it
+# only with the reader calibrated by a live capture (`gamelab stats --read --record`): seeded here as one would leave it
+# on a client drawing the game data's pictures (`_stat_calibrated`).
+
+def _stat_calibrated(sim) -> None:
+    """The stat window's reader calibrated as `gamelab stats --read --record` would leave it on a client that draws the
+    game data's pictures where the simulator does (lab/stat_window.json, the run's own)."""
+    from ..perception import stat_window as sw
+    sw.Calibration("copy", {k: {"at": list(v), "size": list(sw.templates()[k].size)} for k, v in sw.DRAW_AT.items()},
+                   at=time.time()).save()
+
+
+def stat_run(minutes: float = 1.5, grind: bool = True, calibrated: bool = True):
+    """A hunt's start as gamelab.__main__'s _hunter has it (her stat window read if it's due: Hunter.read_stats), then
+    the hunt loop as `tour --loop --grind` runs it (in behavior.retreat.on_alarm; `grind` False, the hunt loop alone).
+    The result: the start's outcome (`start`: what, and what was sent), the lines that speak of her stat window
+    (`said`: [s, line]), its plans ([s, name, keys and buttons down]), how the hunt ended (`stopped`: a HuntStop's text,
+    else None), what was paged, her DEF at the end (`defence`: where from, its low end) and her reserve then."""
+    def run(sim):
+        from ..behavior.grind import Grind
+        from ..behavior.hunt import Hunt
+        from ..behavior.retreat import on_alarm
+        from ..behavior.safety import HuntStop
+        if calibrated:
+            _stat_calibrated(sim)
+        tour = sim.tour_stack()
+        stopped, start = None, None
+        try:
+            start = tour.h.read_stats(at_start=True)
+            if minutes > 0:
+                with on_alarm(tour.h, rng=random.Random(sim.scenario.seed)):
+                    (Grind if grind else Hunt)(tour, log=sim.log).run(minutes=minutes)
+        except HuntStop as e:
+            stopped = f"{e.label}: {e}"
+        sim.world.advance(sim.clock.now)
+        said = [[float(line.split()[0]), line.split(None, 1)[1].strip()] for line in sim.trace.log
+                if "stat window" in line or "STAT WINDOW" in line]
+        window = [[t, name, [e[1] for e in events if len(e) == 3 and e[2] == "down"]] for t, name, events, _
+                  in sim.trace.plans if name.startswith("stat_window")]
+        d = tour.h.stats.defence
+        return {"start": None if start is None else [start.what, list(start.sent)], "said": said, "window": window,
+                "stopped": stopped, "pages": sim.player.pages, "defence": [d.source, d.low],
+                "reserve": tour.h.hp_watch.reserve.limit(tour.h.max_hp)}
+    return run
+
+
+def _stat_keys_ok(tr: dict) -> bool:
+    """Her stat window's keys: S to open it, a click on DETAIL, S to close it, no Esc (nothing open after it, so none
+    needed), nothing else; the game's MENU never opened, the window closed at the end, opened once."""
+    keys = [k for _, _, ks in tr["result"]["window"] for k in ks]
+    w = tr["world"]
+    return (keys == ["s", "lbutton", "s"] and w.get("menu_opened", 0) == 0 and not w.get("stat_window_open", True)
+            and w.get("stat_windows") == 1)
+
+
+STAT_EXPECTS = (
+    logs("her stat window: W.DEF 75, level 25, HP "),
+    logs("her DEF 75 (her stat window's W.DEF, read "),
+    check("her DEF her stat window's at the end (75)", lambda tr: tr["result"]["defence"] == ["stat window", 75.0]),
+    check("S, a click on DETAIL, S; no Esc, no MENU, closed", _stat_keys_ok),
+    check("nobody paged, no stop", lambda tr: not tr["result"]["pages"] and tr["result"]["stopped"] is None))
+
+
+@tree((23, 73.0), monsters=set(range(0, 17)), seed=1, limit=400, attack="choice",
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True),
+      expects=STAT_EXPECTS + (
+          check("read at the start", lambda tr: tr["result"]["start"][0] == "read"),
+          logs("the safety stop now under 393 HP of 774 (51%: 3 Horny Mushroom touches of 131) (was 453 HP of 774")))
+def loop_tree_stat_window(sim):
+    """`tour --loop --grind --map 10002073` (the feed, the attack choice) from 23 with nothing near her (the map's
+    monsters on 0-16 only), the stat window's reader calibrated: at the start, a quiet moment (two looks 0.3 s apart),
+    S, the window seen (0.6 s), a click on DETAIL, its panel seen, read (W.DEF 75: the world's DEF, level 25, HP 774/774,
+    MP 623/623), S, closed (about 2.5 s in all); her DEF 75 from then on, the reserve 393 HP of 774 (3 Horny Mushroom
+    touches of 131) where it was 453 (DEF 0) until 8 touches were kept; then the hunt."""
+    return stat_run(1.5)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, attack="choice",
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True),
+      expects=STAT_EXPECTS + (
+          check("put off at the start", lambda tr: tr["result"]["start"][0] == "put off"),
+          logs("her stat window put off (green-mushroom, horny-mushroom within 250 of her)"),
+          logs("her stat window put off: a quiet moment now")))
+def loop_tree_stat_window_put_off(sim):
+    """As loop_tree_stat_window with every spawn point filled: a Green and a Horny Mushroom within 250 of her at the
+    start, so the read is put off at once (nothing moves her for it), the hunt goes on, and the hunt loop reads it at
+    its first quiet look 5 s or more later (StatsDue from health_check), as at the start: S, DETAIL, S."""
+    return stat_run(1.5)(sim)
 
 
 # --- the top of a rope: hanging just under a platform, her dot snapped onto it -------------------------------------

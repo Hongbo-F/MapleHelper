@@ -40,6 +40,10 @@ TOUCHES = LAB / "touches.jsonl"  # her touches as her HP number measured them, e
                                 # stop's touch sizes)
 STATS = LAB / "her_stats.json"  # her DEF as her stat window read it or her touches fit it, and her max HP and level as
                                 # last read (behavior.bootstrap: perception's, not config.toml's)
+STAT_WINDOW = LAB / "stat_window.json"  # what a live capture of her stat window found (perception.stat_window.
+                                         # Calibration: whose pictures, where each panel opened): a hunt opens it only
+                                         # with this (behavior.statcheck); the client's, not a character's
+STAT_TEMPLATES = LAB / "stat_window"    # ... and the panels cut from the live frame where the game data's didn't match
 PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)

@@ -755,6 +755,14 @@ class Realism:
     # closed opens the game's MENU (counted: World.menu_opened); keys pressed while it's open do nothing (counted: an
     # assumption about the game, not seen).
     game_keys: tuple = ()
+    # Her stat window (behavior.statcheck): her stats key (`stat_key`: S, ABILITY as live; None: on no key) toggles it,
+    # drawn from the game data's pictures with her stats (sim.fakes.FakeEyes._capture: perception.stat_window.compose,
+    # at its DRAW_AT), its DETAIL panel opened by a click on its button (`stat_detail`: open with the window from the
+    # first, as a game that remembers it would), closed by Esc as the KEY BINDINGS window is; `stat_stuck`: neither her
+    # stats key nor Esc closes it (a test's: the window may be open). Keys work as ever with it open (it isn't modal).
+    stat_key: str | None = "s"
+    stat_detail: bool = False
+    stat_stuck: bool = False
 
 
 @dataclass(frozen=True)
@@ -1294,6 +1302,12 @@ class World:
                        and k.name not in self.actions}
         self.actions.setdefault("\\", "set_key")  # (the KEY BINDINGS window's keys: _key_window)
         self.actions.setdefault("esc", "esc")
+        if self.realism.stat_key is not None:
+            self.actions.setdefault(self.realism.stat_key, "stat")  # (her stat window's key: _stat_window)
+        self.stat_window = False  # her stat window open (Realism.stat_key) ...
+        self.stat_detail = False  # ... its DETAIL panel with it ...
+        self.stat_windows = 0     # ... how often it was opened, and the clicks on its DETAIL button
+        self.stat_clicks = 0
         self.key_window = False   # the KEY BINDINGS window open (Realism.game_keys) ...
         self.key_windows = 0      # ... how often it was opened, the keys pressed while it was (doing nothing) and Esc
         self.keys_in_window = 0   # pressed with it closed (the game's MENU opens)
@@ -1505,7 +1519,8 @@ class World:
 
     def withdraw(self, tag: str) -> None:
         """Forget the key events of plan `tag` the world hasn't taken yet."""
-        self._events = [v for v in self._events if not (v[2].tag == tag and v[2].kind in ("down", "up", "release"))]
+        self._events = [v for v in self._events if not (v[2].tag == tag and v[2].kind in ("down", "up", "release",
+                                                                                        "click"))]
 
     # --- one tick ---------------------------------------------------------------------------------------
 
@@ -1556,6 +1571,10 @@ class World:
                 self.keys_in_window += 1  # (the window open: the key does nothing)
                 self.note(f"{e.data} pressed with the KEY BINDINGS window open: nothing")
                 return
+            if action == "stat":
+                if e.kind == "down":
+                    self._stat_window()
+                return
             if e.kind == "down":
                 if action not in self.held:
                     self.held[action] = self._sent(e)
@@ -1576,6 +1595,8 @@ class World:
                 self._seen(action, True)
         elif e.kind == "call":
             e.data(self)
+        elif e.kind == "click":
+            self._click(*e.data)
         elif e.kind == "turned":
             self.turn(e.data)
         elif e.kind == "liftoff":
@@ -1635,9 +1656,47 @@ class World:
         elif self.key_window:
             self.key_window = False
             self.note("the KEY BINDINGS window closes (Esc), nothing changed")
+        elif self.stat_window:
+            if self.realism.stat_stuck:
+                self.note("Esc: her stat window stays open (stuck)")
+            else:
+                self.stat_window = self.stat_detail = False
+                self.note("her stat window closes (Esc)")
         else:
             self.menu_opened += 1
             self.note("Esc with no window open: the game's MENU opens")
+
+    def _stat_window(self) -> None:
+        """Her stats key pressed: her stat window opened (its DETAIL panel with it as Realism.stat_detail has it) or
+        closed (not with Realism.stat_stuck)."""
+        if self.stat_window:
+            if self.realism.stat_stuck:
+                self.note("her stats key: her stat window stays open (stuck)")
+                return
+            self.stat_window = self.stat_detail = False
+            self.note("her stat window closes (her stats key)")
+            return
+        self.stat_window, self.stat_detail = True, self.realism.stat_detail
+        self.stat_windows += 1
+        self.note("her stat window opens" + (" with its DETAIL panel" if self.stat_detail else ""))
+
+    def click(self, clock_t: float, x: int, y: int, tag: str = "") -> None:
+        """A left click at client px (x, y) at clock time `clock_t` (sim.fakes.FakePlayer: the pointer where the
+        plan's last mouse move put it)."""
+        self._push(self.ms_of(clock_t), "click", (x, y), tag, clock_t)
+
+    def _click(self, x: int, y: int) -> None:
+        """A left click: on her stat window's DETAIL button (where perception.stat_window.compose draws it) the DETAIL
+        panel opens or closes; anywhere else nothing (counted with it)."""
+        from ..perception import stat_window as sw
+        self.stat_clicks += 1
+        mx, my = sw.DRAW_AT["main"]
+        bx, by, bw, bh = sw.DETAIL_BUTTON
+        if self.stat_window and mx + bx <= x < mx + bx + bw and my + by <= y < my + by + bh:
+            self.stat_detail = not self.stat_detail
+            self.note(f"a click on DETAIL: its panel {'opens' if self.stat_detail else 'closes'}")
+        else:
+            self.note(f"a click at ({x}, {y}): nothing")
 
     def binding_view(self) -> dict[str, int | str]:
         """The keys' functions as the KEY BINDINGS window draws them (perception.keybindings: key name -> its function
@@ -1645,7 +1704,7 @@ class World:
         from what each key does in this world."""
         from ..perception import keybindings as kb
         icons = {"attack": 52, "jump": 53, "pick": 50, "left": 300, "right": 301, "up": 302, "down": 303,
-                 "set_key": 9, "esc": 46, "skill": "lucky_seven", "pet_food": "pet_food", "potion": kb.PICTURE,
+                 "set_key": 9, "esc": 46, "stat": 2, "skill": "lucky_seven", "pet_food": "pet_food", "potion": kb.PICTURE,
                  "chair": "chair", "sit": 51}
         shown = {key: icons[what] for key, what in self.unused.items()}
         return {**shown, **{key: icons[action] for key, action in self.actions.items() if action in icons}}
@@ -2682,6 +2741,8 @@ class World:
                 **({"key_windows": self.key_windows, "keys_in_window": self.keys_in_window,
                     "menu_opened": self.menu_opened, "key_window_open": self.key_window}
                    if self.key_windows or self.menu_opened else {}),
+                **({"stat_windows": self.stat_windows, "stat_clicks": self.stat_clicks,
+                    "stat_window_open": self.stat_window} if self.stat_windows or self.stat_clicks else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
 

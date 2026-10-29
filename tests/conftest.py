@@ -103,6 +103,10 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "TOUCHES", tmp_path / "touches.jsonl")
     # ... nor her stats as perception read them (lab/her_stats.json: her DEF kept), behavior.bootstrap.
     monkeypatch.setattr(paths, "STATS", tmp_path / "her_stats.json")
+    # ... nor the stat window's live calibration (lab/stat_window.json: a hunt opens the window only with one),
+    # behavior.statcheck, nor a remembered key binding's stats key
+    monkeypatch.setattr(paths, "STAT_WINDOW", tmp_path / "stat_window.json")
+    monkeypatch.setattr(paths, "STAT_TEMPLATES", tmp_path / "stat_window")
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 

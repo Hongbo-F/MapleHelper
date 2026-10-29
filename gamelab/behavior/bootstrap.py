@@ -18,8 +18,11 @@ character's defense, to estimate the hit damage?". So, in `HerStats`:
   puts its number at a level), the moment one reads; the digits' over the EXP number's while they read, the EXP
   number's once they haven't for LV_UNREAD_S. Until then a touch is worked out at UNREAD_LEVEL (a touch loses level /
   10: at level 1 it takes the most). Said.
-- Her DEF (her stat window's W.DEF): what the window says when it's read (perception.stat_window: prepared, not read
-  live yet), kept in her stats file (paths.of().stats) and checked against her touches; else fitted to her own exact
+- Her DEF (her stat window's W.DEF): what the window says when it's read (perception.stat_window, opened, read and
+  closed at a hunt's start by behavior.statcheck: the user, 2026-10-28 ~18:20, "You can open character stats panel to
+  check the defense"), kept in her stats file (paths.of().stats) with the level and the session it was read in, and
+  checked against her touches (`window_due`: read again at another level, in another session, or once her newest
+  touches since don't fit it); else fitted to her own exact
   touches (`fit_defence`: attack.danger.touch_taken, the game's formula, at the level each was taken at, over the
   PADamage of the map's monsters then: the DEF most of her last FIT_N fit, once FIT_MIN are kept, refitted at every
   touch); else none known: the safety stop takes a touch at PRIOR_DEF (0, the most a touch can take), the positioning
@@ -61,6 +64,14 @@ DEF_STEP = 0.25       # the DEFs tried (0 to DEF_TOP)
 DEF_TOP = 400.0
 LV_UNREAD_S = 2.0     # s: her LV. digits not read this long (the box covered, frames failing their checks), her EXP
                       # number's level is taken over what they last said (`HerStats.see_level`)
+SESSION_S = 3 * 3600.0  # s: her stat window's read is this session's for this long at the most (`window_due`; a session
+                        # of the perception service's another's at once): she's played by hand between the bot's runs
+                        # (new gear on 10-26 to 10-28), so an evening's read isn't the next one's
+# What her stat window shows besides her W.DEF, kept with it in her stats file (`see_window`'s `read`): her level, max HP
+# and MP, ATTACK, ACCURACY and EVASION (her MISS chance and a touch's: not modelled from them yet), MAGIC, MAGIC DEF., her
+# four stats, SPEED and JUMP (config.toml's speed and jump plan her moves: said where they differ)
+WINDOW_KEEPS = ("level", "hp", "mp", "attack", "acc", "eva", "magic", "mdef", "str", "dex", "int", "luk", "speed",
+                "jump")
 
 
 @dataclass(frozen=True)
@@ -188,6 +199,7 @@ class HerStats:
     HP_FROM = "her HUD's HP number"
     LV_FROM = "her HUD's LV. digits"
     EXP_FROM = "her EXP number"
+    WINDOW_FROM = "her stat window"
 
     def __init__(self, path: Path | None = None, rows=()):
         self.path = path
@@ -200,6 +212,7 @@ class HerStats:
         self._lv_unread: float | None = None  # her LV. digits not read since (see_level's t), once they had read
         self._lv_gone = False                 # ... and not read since they last did
         self.window: Defence | None = self._kept_window()
+        self.window_read: dict = self._kept_read()  # what else the window showed (WINDOW_KEEPS), its level and session
         self.defence: Defence = PRIOR
         self.refit(rows)
 
@@ -221,6 +234,13 @@ class HerStats:
         except (ValueError, TypeError, KeyError, AttributeError):
             return None
 
+    def _kept_read(self) -> dict:
+        """The rest of her stat window's read as kept (its level, session and WINDOW_KEEPS' values), {} if none."""
+        kept = self._kept.get("window")
+        if self.window is None or not isinstance(kept, dict):
+            return {}
+        return {k: kept[k] for k in ("level", "session", "read") if k in kept}
+
     def _save(self) -> None:
         """Her stats file: her DEF as known now (and her stat window's, if read), and her max HP and level as last read,
         each with when: this run's once it has read it, else as the file had it (a run that reads neither, or ends
@@ -239,7 +259,7 @@ class HerStats:
             out["level_from"] = self._kept["level_from"]
         out["at"] = round(time.time(), 3)
         if self.window is not None:
-            out["window"] = {"low": self.window.low, "at": self.window.at}
+            out["window"] = {"low": self.window.low, "at": self.window.at, **self.window_read}
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(out, indent=1) + "\n", encoding="utf-8")
@@ -251,13 +271,15 @@ class HerStats:
         """Her level for a touch: hers as read, else UNREAD_LEVEL."""
         return UNREAD_LEVEL if self.level is None else self.level
 
-    def see_max_hp(self, most: int | None) -> str | None:
+    def see_max_hp(self, most: int | None, source: str | None = None) -> str | None:
+        """Her max HP as `source` read it (HP_FROM by default; WINDOW_FROM: her stat window's, taken only while her
+        HUD's number hasn't read)."""
         if most is None or most <= 0 or most == self.max_hp:
             return None
         was, self.max_hp = self.max_hp, int(most)
         self._read["max_hp"] = time.time()
         self._save()
-        return f"her max HP {most} by {self.HP_FROM}" + ("" if was is None else f" (was {was})")
+        return f"her max HP {most} by {source or self.HP_FROM}" + ("" if was is None else f" (was {was})")
 
     def see_level(self, level: int | float | None, source: str, t: float | None = None) -> str | None:
         """Her level as `source` read it (LV_FROM or EXP_FROM) at time `t` (a look's or glance's; None: not timed):
@@ -296,11 +318,50 @@ class HerStats:
         self._save()
         return f"her level {level} by {source}" + ("" if was is None else f" (was {was})")
 
-    def see_window(self, wdef: float, at: float | None = None, rows=()) -> str | None:
-        """Her stat window read her W.DEF `wdef` (perception.stat_window): hers from now on, kept, checked against her
-        touches (said if they don't fit it: her measured touches raise her reserve past it anyway)."""
-        self.window = Defence(float(wdef), float(wdef), float(wdef), "stat window", at=time.time() if at is None else at)
-        return self.refit(rows)
+    def see_window(self, wdef: float, at: float | None = None, rows=(), level: int | None = None,
+                   session: str | None = None, read: dict | None = None) -> str | None:
+        """Her stat window read her W.DEF `wdef` (perception.stat_window; behavior.statcheck opens it): hers from now
+        on, kept with her level then (`level`: the window's own, else hers as read; None: not known), the session it was
+        read in (`session`: the perception service's run; None: none) and what else it showed (`read`: WINDOW_KEEPS'),
+        checked against her touches (said if they don't fit it: her measured touches raise her reserve past it anyway).
+        What changed, in words; None if her DEF is as it was (a read again: kept with its new time)."""
+        when = time.time() if at is None else at
+        self.window = Defence(float(wdef), float(wdef), float(wdef), "stat window", at=when)
+        level = level if level is not None else self.level
+        self.window_read = {"level": level, "session": session,
+                            "read": {k: (list(v) if isinstance(v, tuple) else v) for k, v in (read or {}).items()
+                                     if k in WINDOW_KEEPS and v is not None}}
+        note = self.refit(rows)
+        if note is None:
+            self._save()  # (the same DEF read again: when, at what level, kept)
+        return note
+
+    def window_due(self, level: int | None = None, session: str | None = None, rows=(),
+                   now: float | None = None) -> str | None:
+        """Why her stat window should be read now (None: her DEF is known from it this session): none read; read at
+        another level than `level` (hers now); in another session (`session`, the perception service's run, against
+        the read's) or over SESSION_S ago; or her newest FIT_MIN touches since the read not fitting it (FIT_AGREE of
+        them at least: her gear changed?)."""
+        if self.window is None:
+            return "no stat window read yet"
+        read_level = self.window_read.get("level")
+        if level is not None and read_level is not None and int(read_level) != int(level):
+            return f"her W.DEF {self.window.low:g} read at level {read_level}; she's level {level} now"
+        at = self.window.at
+        now = time.time() if now is None else now
+        kept = self.window_read.get("session")
+        if session is not None and kept is not None and str(kept) != str(session):
+            return f"her W.DEF {self.window.low:g} read in another session (the perception service's {kept}; now {session})"
+        if at is None or now - at > SESSION_S:
+            ago = "?" if at is None else f"{(now - at) / 3600:.1f} h"
+            return f"her W.DEF {self.window.low:g} read {ago} ago (over {SESSION_S / 3600:g} h)"
+        since = [r for r in rows if usable(r) and isinstance(r.get("t"), (int, float)) and r["t"] >= at]
+        if len(since) >= FIT_MIN:
+            ok, n = agreeing(self.window.low, since[-FIT_MIN:])
+            if ok < FIT_AGREE * n:
+                return (f"only {ok} of her newest {n} touches since it was read fit her W.DEF {self.window.low:g} (her "
+                        "gear changed?)")
+        return None
 
     def refit(self, rows) -> str | None:
         """Her DEF again: her stat window's if read, else fitted to her touches (`rows`), else the prior. What changed,

@@ -383,6 +383,7 @@ class FakeEyes(Eyes):
         self._exp_drawn: tuple[int, np.ndarray] | None = None  # her EXP number's box, for the EXP she has gained
         self._hp_drawn: tuple[tuple[int, int], np.ndarray] | None = None  # her HP number's box, for her HP
         self._lv_drawn: tuple[int, np.ndarray] | None = None  # her level's box, for her level
+        self._stat_drawn: list = []  # her stat window as last drawn (perception.stat_window.Drawn: `stat_ocr`'s)
         self._bars: dict[tuple, float | None] = {}  # what a bar's box read (`bar`), by its px
         self.deaths = FakeDeaths(world)  # the death watch on the world (perception.deaths' stand-in)
         self.touches = FakeTouches()     # ... and the touch watch (perception.touches')
@@ -614,16 +615,48 @@ class FakeEyes(Eyes):
 
     def _capture(self) -> np.ndarray:
         """The client's whole picture at 1366x768 (RGB) as far as the simulator draws it (the key check's,
-        behavior.keycheck): a plain scene, and the KEY BINDINGS window over it while the world has it open
-        (World.key_window), its keys' functions as World.binding_view has them, drawn from the game's pictures
-        (perception.keybindings.compose) and read as in game."""
+        behavior.keycheck, and her stat window's, behavior.statcheck): a plain scene, the KEY BINDINGS window over it
+        while the world has it open (World.key_window), its keys' functions as World.binding_view has them, drawn from
+        the game's pictures (perception.keybindings.compose) and read as in game; her stat window over it while that's
+        open (World.stat_window, its DETAIL panel with World.stat_detail), her stats drawn in its cells
+        (`stat_values`, perception.stat_window.compose), found as in game and its text read by `stat_ocr`."""
         from ..perception import keybindings
+        from ..perception import stat_window
         self._now()
         self.counts["captures"] = self.counts.get("captures", 0) + 1
         frame = (keybindings.compose(self.world.binding_view(), preset=1) if self.world.key_window
                  else _plain_client())
+        if self.world.stat_window:
+            drawn = stat_window.compose(self.stat_values(), base=frame, detail=self.world.stat_detail)
+            frame = drawn.frame
+            self._stat_drawn = [drawn, *self._stat_drawn[:3]]
         self.clock.sleep(CAPTURE_S)
         return frame
+
+    def stat_values(self) -> dict:
+        """Her stats as her stat window shows them in this world: her level and HP as her HUD shows them (shown_level,
+        shown_hp), her MP of the character's (its `mp`, else config.toml's 623), her W.DEF the character's DEF
+        (World's DEFENCE where it has none), her AVOID its evasion (EVADE_ACC where none), and the rest the thief's of
+        2026-10-28 as near as known (not read live yet: the simulator decides nothing by them)."""
+        from ..motion import physics
+        from .world import DEFENCE, EVADE_ACC
+        c = self.world.character
+        mp = int(round(c.mp)) if c.mp else int(round(physics.CHARACTER.mp))
+        return {"name": "BugBaby", "job": "Rogue", "level": self.shown_level(), "hp": self.shown_hp(),
+                "mp": (int(round(self.world.mp * mp)), mp), "str": 4, "dex": 25, "int": 4, "luk": 120,
+                "attack": (60, 75), "wdef": int(round(c.defence if c.defence is not None else DEFENCE)),
+                "magic": 10, "mdef": 50, "acc": 85, "eva": int(round(c.evade or EVADE_ACC)),
+                "speed": int(round(physics.CHARACTER.speed)), "jump": int(round(physics.CHARACTER.jump))}
+
+    def stat_ocr(self, crop: np.ndarray, box) -> list:
+        """The OCR's rows off a crop of a frame of her stat window (perception.stat_window.read's): the texts drawn in
+        it, if the crop is of a frame drawn lately (`_stat_drawn`); else none. The real OCR's reading of the game's
+        text is tested apart (tests/test_stat_window.py, --slow)."""
+        for drawn in self._stat_drawn:
+            rows = drawn.ocr(crop, box)
+            if rows:
+                return rows
+        return []
 
     # --- drawing ------------------------------------------------------------------------------------
 
@@ -804,6 +837,7 @@ class FakePlayer:
         self.fed: dict[str, float] = {}     # pet food plans it took with the alarm up -> when they started
         self.played: dict[str, tuple] = {}  # plan id -> (its kind, its key and mouse events at clock times) as played
         self.pages: list[list] = []          # whoever is at the PC paged (control.alarm.page): [s, title, text]
+        self.pointer = (683, 384)            # where the plans' mouse moves left the pointer (client px): a click's place
         self.kept: list[list] = []           # the recording's saves asked (control.alarm.keep_recent): [s, s, name]
 
     # --- the Lie Detector (client.check_alarm, alarm_up, alarm_age) -------------------------------------------------
@@ -923,7 +957,12 @@ class FakePlayer:
             at = start + p.lead + e[0] / 1000
             if at >= cutoff:  # stopped by the alarm (or her retreat's window): nothing after
                 continue
-            if len(e) == 3 and e[2] in ("down", "up"):
+            if len(e) == 4 and e[1] == "mouse":
+                self.pointer = (int(e[2]), int(e[3]))
+            elif len(e) == 3 and e[1] == "lbutton":
+                if e[2] == "down":
+                    self.world.click(at, *self.pointer, p.id)
+            elif len(e) == 3 and e[2] in ("down", "up"):
                 self.world.key(at, e[1], e[2] == "down", p.id)
             played.append([round(at, 4), *e[1:]])
         p.end = min(p.end, cutoff)

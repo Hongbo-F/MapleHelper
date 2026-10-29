@@ -107,6 +107,7 @@ from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from . import fight
 from .keycheck import Doubt, KeyDoubt
+from .statcheck import StatsDue
 from .fight import THROWS, FightState, Report, kills_text
 from .ledger import DROP_LANDS, Pile
 from .looting import DROPS_LAST, SETTLE, DropSpot
@@ -506,6 +507,15 @@ class Hunt:
                         if doubt.doubt.kind == "stall" and getattr(out, "what", None) in ("followed", "switched"):
                             self._progress = time.monotonic()  # (her keys put right: the stretch starts again)
                     except LookLost as lost:  # (a look of the check's failed its checks: stand still, as above)
+                        back = self.h.senses.regain(lost, end)
+                    self._paused(time.monotonic() - paused)
+                    if back is None:
+                        break
+                except StatsDue:  # her stat window's read put off at the start: a quiet moment now (behavior.statcheck)
+                    paused, back = time.monotonic(), True
+                    try:
+                        self.h.read_stats()
+                    except LookLost as lost:  # (a look of the read's failed its checks: stand still, as above)
                         back = self.h.senses.regain(lost, end)
                     self._paused(time.monotonic() - paused)
                     if back is None:

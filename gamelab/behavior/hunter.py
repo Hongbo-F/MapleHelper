@@ -65,6 +65,7 @@ from .looting import Looter, worth_for
 from .pet import PetCare
 from .bootstrap import Defence, HerStats
 from .safety import HP_WAIT_S, HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
+from .statcheck import StatCheck, StatsDue
 from .safety import kinds_of as map_kinds
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
@@ -284,6 +285,9 @@ class Hunter:
         self.pet.on_doubt = self._pet_doubted
         self.doubts_raise = False
         self.key_check: KeyCheck | None = None  # (made at the first check)
+        # Her stat window (behavior.statcheck): opened, read and closed at a hunt's start (read_stats, from gamelab.
+        # __main__'s _hunter) for her W.DEF; put off there (not quiet), raised again in the hunt loop (StatsDue)
+        self.stat_check: StatCheck | None = None
         self.refused_dot = None  # her dot (minimap px) at the game's last refusal of her presses on a rope ...
         self.off_tries = 0       # ... and the tries since to get her off it with her dot there
         if LAST_LOOK:
@@ -567,6 +571,66 @@ class Hunter:
                 and (doubt := watch.again(time.monotonic())) is not None):
             self.log("  the key check put off: a quiet moment now")
             raise KeyDoubt(doubt)  # (a check put off: tried again at a quiet look, keycheck.KeyCheck._defer)
+        sc = getattr(self, "stat_check", None)  # (her stat window's read put off: behavior.statcheck)
+        if (sc is not None and sc.pending and self.doubts_raise and sc.again(time.monotonic())
+                and unquiet(self, s) is None):
+            self.log("  her stat window put off: a quiet moment now")
+            raise StatsDue()  # (the hunt loop reads it: read_stats)
+
+    # --- her stat window (behavior.statcheck) ----------------------------------------------------------------------
+
+    def read_stats(self, at_start: bool = False, quiet: bool = True):
+        """Her stat window opened, read and closed if it's due (statcheck.StatCheck.run): at a hunt's start
+        (`at_start`: gamelab.__main__'s _hunter), and in the hunt loop when a read put off there comes due (StatsDue);
+        `quiet` False: no quiet moment waited for (`gamelab stats --read`). Its outcome. Raises StatWindowStop (the
+        window may be open), SafetyStop (at every look of it) and client.LieDetectorAlarm."""
+        if self.stat_check is None:
+            self.stat_check = StatCheck(self)
+        return self.stat_check.run(at_start=at_start, quiet=quiet)
+
+    def _stats_read(self, reading, out) -> None:
+        """What her stat window read (statcheck.StatCheck.run, `reading`: perception.stat_window.StatReading) to her
+        stats (behavior.bootstrap): her W.DEF hers (HerStats.see_window: the reserve and the positioning model take it,
+        her touches check it), kept with her level and this session; her max HP if her HUD's number hasn't read (a
+        disagreement said); her level if nothing has read it (else a disagreement said); her max MP her casts are
+        reckoned at (config.toml's until now; said); her SPEED and JUMP said where config.toml's, which plan her moves,
+        differ. Her reserve made again (_reserve_check: what changed said with it)."""
+        from ..motion import physics
+        from .bootstrap import HerStats as Stats
+        st, notes = self.stats, []
+        level, most = reading.level, reading.max_hp
+        if level is not None:
+            if st.level is None:
+                if (note := st.see_level(level, Stats.WINDOW_FROM)) is not None:
+                    notes.append(note)
+            elif level != st.level:
+                notes.append(f"her stat window says level {level}, {st.level_from} {st.level} (theirs taken)")
+        if most is not None:
+            if st.max_hp is None:
+                if (note := st.see_max_hp(most, Stats.WINDOW_FROM)) is not None:
+                    notes.append(note)
+            elif most != st.max_hp:
+                notes.append(f"her stat window says max HP {most}, {Stats.HP_FROM} {st.max_hp} (its taken)")
+        mp = reading.max_mp
+        if mp is not None and mp > 0 and float(mp) != float(self.max_mp):
+            notes.append(f"her max MP {mp} by her stat window (was {self.max_mp:g}, config.toml [character] mp): her "
+                         "casts reckoned at it")
+            self.max_mp = float(mp)
+            self.attacks.max_mp = float(mp)
+        c = physics.CHARACTER
+        for name, mine in (("speed", c.speed), ("jump", c.jump)):
+            v = reading.get(name)
+            if v is not None and abs(float(v) - float(mine)) >= 1.0:
+                notes.append(f"her {name.upper()} {v}% by her stat window, config.toml [character] {name} {mine:g}: "
+                             "her moves planned by config.toml's")
+        if reading.wdef is not None:
+            session = self.stat_check._session() if self.stat_check is not None else None
+            note = st.see_window(reading.wdef, rows=self.touches.rows, level=level if level is not None else st.level,
+                                 session=session, read=reading.values)
+            if note is not None:
+                notes.append(note)
+        self._notes.extend(notes)
+        self._reserve_check()
 
     # --- her regular attack's key (behavior.keycheck) --------------------------------------------------------------
 
@@ -1091,6 +1155,8 @@ class Hunter:
         while they read)."""
         if (note := self.stats.see_level(level, source, t)) is not None:
             self._notes.append(note)
+            if (sc := getattr(self, "stat_check", None)) is not None and self.stats.level is not None:
+                sc.level_up(self.stats.level)  # (her W.DEF read at another level: read again, behavior.statcheck)
 
     def _level_number(self, s: Scene) -> None:
         """Her level's digits at look `s` (perception.lv_number): with a feed, the state's (Scene.level_of, its step

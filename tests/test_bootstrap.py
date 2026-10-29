@@ -99,7 +99,8 @@ def test_her_stat_window_is_over_her_touches_and_kept(tmp_path):
     assert again.defence.source == "stat window" and again.defence.low == 111.0
     assert again.defence.agree < FIT_AGREE * again.defence.n
     kept = json.loads(path.read_text(encoding="utf-8"))
-    assert kept["window"] == {"low": 111.0, "at": 1000.0} and kept["defence"]["source"] == "stat window"
+    assert {k: kept["window"][k] for k in ("low", "at")} == {"low": 111.0, "at": 1000.0}
+    assert kept["defence"]["source"] == "stat window"
     note = HerStats(path).see_window(64, rows=[r for r in _rows() if r["level"] == 28])
     assert "of her last 40 touches fit it (her measured touches raise her reserve past it)" in note
 
