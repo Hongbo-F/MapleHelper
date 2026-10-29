@@ -361,7 +361,7 @@ class StatCheck:
             why = unquiet(self.h, s)
             if why is None and last is not None and _still(last, s):
                 return None
-            if why is not None and near_her(s):
+            if why is not None and near_her(s, self.h.model):
                 return why
             if time.monotonic() >= end:
                 return why or "not standing still"
