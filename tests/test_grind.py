@@ -167,6 +167,7 @@ def test_a_pile_seen_off_the_loop_pulls_her_when_it_pays_for_its_detour():
     _seen(model, p, three)
     nxt, info = p.choose(1.0, left[0], 150.0, current=p.stop_on(left[0]))
     assert p.platform_of(nxt) == right and info["why"] == "pulled" and info["detour"] == pytest.approx(13.6, abs=0.3)
+    assert info["ahead"] == info["instead_of"]["stop"]
     # One Green Mushroom alone, 6 s off, isn't worth leaving the loop for.
     model, left, right, p = _beside(6.0)
     _seen(model, p, [(GREEN, 1200, -200)])
@@ -496,11 +497,70 @@ def test_far_from_the_loop_a_pile_by_her_pays_only_for_its_detour():
     assert info["instead_of"]["stop"] in top
 
 
+def test_after_a_pile_the_loop_goes_on_from_the_stop_its_detour_went_on_to():
+    # Round the left (the loop), the right 3 s off. Leaving the first stop for the loop's next ...
+    model, left, right, p = _beside(3.0)
+    here = p.stop_on(left[0])
+    nxt, info = p.choose(0.5, left[0], 150.0, current=here)
+    assert info["why"] == "the loop"
+    # ... three seen on the right on the way there: pulled, the detour costed on to that loop stop ...
+    _seen(model, p, [(HORNY, 1100, -200), (HORNY, 1290, -200), (GREEN, 1200, -200)])
+    j, info = p.choose(1.0, left[0], 160.0, heading=nxt)
+    assert p.platform_of(j) == right and info["why"] == "pulled" and info["ahead"] == p.platform_of(nxt)
+    # ... and from the pile on to it (until 2026-10-29 the loop went on from the stop after it: a pull on a trip had
+    # her miss the stop she'd been heading to for a round).
+    p.belief.empty_since.update({q.id: 2.0 for q in p.points if q.platform == right})
+    after, info = p.choose(8.0, right, 1200.0, current=j)
+    assert after == nxt and info["why"] == "the loop"
+
+
+def test_on_her_way_to_a_pile_another_must_beat_it_with_the_margin():
+    # Her on a ledge (H), two ledges near her with two Horny Mushroom points each (P 2 s off, Q 2.3, 0.5 s apart, both
+    # on her way up: 23 and 22.7 s on), the loop's three platforms 25 s up (its rate Tree Dungeon's live, 7.45 EXP/s).
+    # Three Horny Mushrooms seen on each.
+    from dataclasses import replace
+    model = _map([(0, 300, -2000), (0, 300, -1800), (0, 300, -1600), (0, 300, 0), (1000, 1300, 0), (2000, 2300, 0)],
+                 [(100, -2000, "h"), (200, -2000, "h"), (100, -1800, "h"), (200, -1800, "h"), (100, -1600, "h"),
+                  (200, -1600, "h"), (1100, 0, "h"), (1200, 0, "h"), (2100, 0, "h"), (2200, 0, "h")])
+    top = [_pid(model, 150, y) for y in (-2000, -1800, -1600)]
+    H, P, Q = (_pid(model, x, 0) for x in (150, 1150, 2150))
+    near = {frozenset((H, P)): 2.0, frozenset((H, Q)): 2.3, frozenset((P, Q)): 0.5}
+
+    def seconds(a, b):
+        if a in top and b in top:
+            return 1.5 * abs(top.index(a) - top.index(b))
+        if a in top or b in top:
+            return {P: 23.0, Q: 22.7}.get(a if b in top else b, 25.0)
+        return near[frozenset((a, b))]
+    p = _patrol(model, seconds)
+    p.belief.update(0.0, Memory(model))
+    p._take(p.rate([p.stop_on(i) for i in top], 0.0), 0.0, "test")
+    p.plan = replace(p.plan, rate=447 / 60)
+    _seen(model, p, [(HORNY, 1100 + 50 * k, 0) for k in range(3)] + [(HORNY, 2100 + 50 * k, 0) for k in range(3)])
+    sp, sq = p.stop_on(P), p.stop_on(Q)
+    (fp, ep), (fq, eq) = [(f, p.expect(s, 1.0 + f)[0]) for s, f in ((sp, 2.0), (sq, 2.3))]
+    assert ep == pytest.approx(3 * 41, rel=0.1) and eq == pytest.approx(3 * 41, rel=0.1)
+    rate = p.plan.rate
+    # Each, measured against going to the other (the rule's first build), paid for its detour: she turned from one to
+    # the other at every look (loop_tree_grind_jump_key, 30 ms apart).
+    assert patrol.pays(eq, patrol.detour_s(eq, p.kill_s, fq, 0.5, fp), rate)
+    assert patrol.pays(ep, patrol.detour_s(ep, p.kill_s, fp, 0.5, fq), rate)
+    # Now each is costed to the loop's next stop, and on her way to one the other must leave more with the margin:
+    # on her way to either, she keeps to it.
+    for going in (sp, sq):
+        nxt, info = p.choose(1.0, H, 150.0, heading=going, peek=True)
+        assert nxt == going and info["why"] == "on her way"
+    # Not on her way to either: the better of them.
+    nxt, info = p.choose(1.0, H, 150.0, peek=True)
+    assert nxt == sp and info["why"] == "pulled" and info["ahead"] in top
+
+
 # Her live pulls of 2026-10-29 01:11-01:18 (mage-1029-0111.log's 'next:' lines, the telemetry's 'grind' records):
 # (the stop pulled to, the stop pulled from, the EXP expected there, her kill time then (s a point of EXP, from the
 # record's EXP a second), s to it, s from it on to the other (the planner's route), s to the other from where she was
 # (the planner's, from her latest look), the loop's EXP a second, the pile's EXP a second with its travel and kills and
-# the other's: D:/MapleHelper-scratch/pull/replay_live.py).
+# the other's: D:/MapleHelper-scratch/pull/replay_live.py). The other is the loop's next stop in 25 of them; in 3 (from
+# 32, 28 and 20) a pile she was on her way to, which by this rule she wouldn't have been (none of the others pays).
 LIVE_PULLS = [
     (30, 13, 45.7, 0.0854, 5.8, 20.2, 25.5, 7.452, 4.27, 1.04), (29, 10, 31.5, 0.0796, 3.7, 22.8, 26.2, 7.452, 4.37, 1.34),
     (31, 10, 13.2, 0.0899, 1.5, 26.0, 23.2, 7.452, 3.58, 1.48), (29, 10, 70.2, 0.0938, 3.7, 22.8, 26.3, 7.452, 6.22, 1.32),

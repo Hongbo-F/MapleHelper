@@ -2104,8 +2104,11 @@ or on a trip the stop she's on her way to; and a stop whose monsters she has see
 guesses; from one monster at even odds) pulls her there when it pays for its detour against the loop: what it's
 expected to give 1.25 times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second
 (`Plan.rate`, by the same belief); the detour (`Patrol.detour`) is its kills, 1 s a stop, and the travel there and on
-to the stop she'd have gone to beyond going to that one straight (none for a stop on her way); of those that pay, the
-one that leaves her the most EXP over the loop's. Her time is worth the loop's rate wherever she is (the marginal value
+to the loop's next stop beyond going to that one straight (none for a stop on her way); of those that pay, the one that
+leaves her the most EXP over the loop's. On her way to a pile another takes her only when it leaves more with the
+margin than the pile she's going to does without (each costed to the loop's next stop: two piles each worth a detour
+from the other had her turn between them at every look), and after a pile the loop goes on from the stop its detour
+was costed to (before, from the stop after it when a pull came on a trip, missing it for a round). Her time is worth the loop's rate wherever she is (the marginal value
 theorem's bar, as at a stop, below), so a pile pays for the time it takes and the travel it adds, not for being nearer
 than the loop. Until 2026-10-29 a pile pulled at 1.5 times the EXP a second of the next stop, its travel counted: far
 from the loop every pile round her beat the climb. Live on Tree Dungeon (the magician, 2026-10-29 01:11), left at the
@@ -2163,8 +2166,8 @@ failing from 20 to 35 s of `loop_tree_grind`, no plan sent in the pause, no stop
 
 **What it says** (the log, and telemetry 'grind'): each loop taken up ("loop: [10, 7]: 463 EXP a minute (a round 22 s:
 5 s of travel, 15 of shooting; 8 spawn points, 181 EXP) (the first; camping at 7 would give 403)"), each next stop
-("next: stop 23 at x 8, 1.6 s away: 77 EXP expected (77 seen), 6.8 EXP/s with its kills; pulled (a 7.5 s detour on the
-way to stop 7, the loop's 7.7 EXP/s giving 58 EXP meanwhile)",
+("next: stop 23 at x 8, 1.6 s away: 77 EXP expected (77 seen), 6.8 EXP/s with its kills; pulled (not stop 7: a 7.5 s detour on
+the way to stop 7, the loop's 7.7 EXP/s giving 58 EXP meanwhile)",
 with the stops skipped and when each is due), each stop left ("leaving stop 24: nothing left in reach (16.0 s there,
 108 EXP)", or "... 4.1 EXP/s here, going on gives 7.7"), every 60 s and at the end what it did and learned: loops, stops, stays, pulls, skips, the refill scale,
 her kill time, what others take, HP a minute by platform, kills by platform. `python -m gamelab patrol FILE` runs a

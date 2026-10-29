@@ -51,8 +51,14 @@ more, PULL_MIN) pulls her off it when it pays for its detour against the loop: w
 expect: the monsters seen, and the belief's stock at its other points, her share) PULL_GAIN times what the loop gives
 in the time the detour costs her, at the loop's long-run EXP a second (Plan.rate, by the same belief: the spawn points'
 refill clocks, others' share). The detour (Patrol.detour) is its kills (her kill time), STOP_S, and the travel there
-and on from there to the stop she'd have gone to, beyond going to that one straight (none for a stop on her way). Of
-the stops that pay, the one that leaves her the most EXP over the loop's. The marginal value theorem's bar, as at a
+and on from there to the loop's next stop, beyond going to that one straight (none for a stop on her way). Of the
+stops that pay, the one that leaves her the most EXP over the loop's; on her way to a pile, another takes her there
+only when it leaves more over the loop's with the margin (PULL_GAIN times the loop's over its detour) than the pile
+she's going to does without (detoured to the loop's next stop alike: two piles each worth the other's detour had her
+turn from one to the other at every look, 30 ms apart, in loop_tree_grind_jump_key). After a pile the loop goes on
+from its next stop, the one the detour was costed to (its place in the loop moved back to it: until 2026-10-29 she
+went round from the stop a pull took her to, and after a pull on a trip from the stop after the one she was heading
+to, which the round then missed). The marginal value theorem's bar, as at a
 stop (behavior.grind): her time is worth the loop's rate wherever she is, so a pile near her pays for the time it takes
 and the travel it adds, not for being nearer than the loop: what's standing in a region of poor spawns doesn't hold her
 there, the region's spawns being why the loop isn't there. Until 2026-10-29 a pile pulled at 1.5 times the next stop's
@@ -64,9 +70,9 @@ minute: she never got up the tower, and her kills made 185 EXP a minute (the use
 which has worse spawn rate"). By this rule none of the 28 pulls (the most, 70 EXP 3.7 s off on her way up from 31 to
 29, 1.21 times what the loop gives over its 7.8 s detour; with no margin about a third, each on her way up): she
 climbs, shooting in passing what's in reach on the way (tests/test_grind.py, LIVE_PULLS; with PULL_GAIN 5 on the old
-rule, live at 01:26, she went up at once and made 349 EXP a minute over 8.5 minutes). A stop of the loop ahead counts
-the same (going there first and on back to the next): the loop's order holds unless a pile pays for leaving it; she
-goes round from it after.
+rule, live at 01:26, she went up at once and made 349 EXP a minute over 8.5 minutes). A stop of the loop further on
+counts the same (going there first and on back to the loop's next): the loop's order holds unless a pile pays for
+leaving it.
 What a stop is expected to give (Patrol.expect) counts a monster her memory has only where she gets at it from there
 (on the stop's platform, or in a star's reach from somewhere along it: `gets`), and not one she left the stop with
 nothing in reach since (`left_at`: she'd been there to see it); a point her memory has none at, by the share of it a
@@ -792,31 +798,41 @@ class Patrol:
         if not order:
             return None, {"why": "no stop to get to"}
         nxt, skipped = None, []
+        for j in order:
+            if options[j][1] >= SKIP_FULL * options[j][4] and options[j][4] > 0:
+                nxt = j
+                break
+            skipped.append(j)
+        why = "the loop"
+        if nxt is None:
+            nxt, skipped, why = order[0], [], "the loop, nothing due ahead"
+        ahead = nxt  # the loop's next stop: where a pile's detour goes on to
         if heading in options:
-            nxt, why = heading, "on her way"
-        else:
-            for j in order:
-                if options[j][1] >= SKIP_FULL * options[j][4] and options[j][4] > 0:
-                    nxt = j
-                    break
-                skipped.append(j)
-            why = "the loop"
-            if nxt is None:
-                nxt, skipped, why = order[0], [], "the loop, nothing due ahead"
-        rate, far_next = max(0.0, self.plan.rate), options[nxt][0]
+            nxt, skipped, why = heading, [], "on her way"
+            if heading in loop:
+                ahead = heading
+        rate, far_ahead = max(0.0, self.plan.rate), options[ahead][0]
+        keep = 0.0  # on her way to a pile: what it leaves her over the loop's, which another must beat (with its margin)
+        if nxt != ahead and (d := self.detour(nxt, ahead, options[nxt][0], far_ahead, options[nxt][1])) is not None:
+            keep = options[nxt][1] - rate * d
         best = None  # (EXP over what the loop gives meanwhile, the stop, its detour's s)
         for j, (far, exp, seen, _, _) in options.items():
-            if j == nxt or seen < PULL_MIN * self.min_exp:
+            if j in (nxt, ahead) or seen < PULL_MIN * self.min_exp:
                 continue
-            d = self.detour(j, nxt, far, far_next, exp)
-            if d is not None and pays(exp, d, rate) and (best is None or exp - rate * d > best[0]):
+            d = self.detour(j, ahead, far, far_ahead, exp)
+            if d is None or not pays(exp, d, rate) or (nxt != ahead and exp - PULL_GAIN * rate * d <= keep):
+                continue
+            if best is None or exp - rate * d > best[0]:
                 best = (exp - rate * d, j, d)
         if best is not None:
             pulled_from, nxt, why = nxt, best[1], "pulled"
         else:
             pulled_from = None
-        if nxt in loop and not peek:
-            self.at_loop = loop.index(nxt)
+        if not peek:  # the loop goes on from its next stop after a pile (the detour's cost), else from the stop chosen
+            if pulled_from is not None and ahead in loop:
+                self.at_loop = (loop.index(ahead) - 1) % len(loop)
+            elif pulled_from is None and nxt in loop:
+                self.at_loop = loop.index(nxt)
         far, exp, seen, gain, _ = options[nxt]
         info = {"why": why, "stop": self.stops[nxt].platform, "x": self.stops[nxt].x, "travel": round(far, 1),
                 "expected": round(exp, 1), "seen": round(seen, 1), "gain": round(gain, 2),
@@ -825,6 +841,7 @@ class Patrol:
         if pulled_from is not None:
             info["instead_of"] = {"stop": self.stops[pulled_from].platform, "gain": round(options[pulled_from][3], 2)}
             info["detour"], info["loop_rate"] = round(best[2], 1), round(rate, 2)
+            info["ahead"] = self.stops[ahead].platform
         return nxt, info
 
 
@@ -834,8 +851,8 @@ def choice_text(info: dict) -> str:
            f"expected ({info['seen']:.0f} seen), {info['gain']:.1f} EXP/s with its kills; {info['why']}")
     if "instead_of" in info:
         o = info["instead_of"]
-        out += (f" (a {info['detour']:.1f} s detour on the way to stop {o['stop']}, the loop's {info['loop_rate']:.1f} "
-                f"EXP/s giving {info['detour'] * info['loop_rate']:.0f} EXP meanwhile)")
+        out += (f" (not stop {o['stop']}: a {info['detour']:.1f} s detour on the way to stop {info['ahead']}, the loop's "
+                f"{info['loop_rate']:.1f} EXP/s giving {info['detour'] * info['loop_rate']:.0f} EXP meanwhile)")
     if info.get("skipped"):
         out += "; skipped " + ", ".join(f"{s['stop']} ({s['expected']:.0f} EXP"
                                          + ("" if s["due"] is None else f", due in {s['due']:.0f} s") + ")"
