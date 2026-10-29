@@ -293,7 +293,7 @@ def _stats_recorded(hunter, key: str, where: str, click: bool = True) -> int:
     def recorded(events, ms, name, use):
         res = client.submit(events, fps=STAT_RECORD_FPS, duration_ms=ms, scale=1, lead_ms=0, name=name)
         report["sent"].append(name)
-        frames, times = [np.asarray(f) for f in res.get("frames") or []], res.get("times")
+        frames, times = [np.asarray(f) for f in _frames_of(res)], res.get("times")  # (a numpy array of them, live)
         found = [sw.find_all(f, use) for f in frames]
         report[f"{name}_frames"] = [[None if times is None else float(times[i]),
                                      {k: (None if v[0] is None else list(v[0])) for k, v in x.items()},
@@ -303,126 +303,154 @@ def _stats_recorded(hunter, key: str, where: str, click: bool = True) -> int:
     def seen(found) -> bool:
         return any(v[0] is not None for v in found.values())
 
-    frames, found = recorded([[0, "mouse", *MOUSE_AT], [150, key, "down"], [190, key, "up"]], STAT_OPEN_MS,
-                             "stat_window_open", old)
-    if not found or not seen(found[-1]):
-        time.sleep(STAT_LATE_S)
-        late = np.asarray(hunter.senses.eyes._capture())
-        keep("late", late)
-        frames, found = [*frames, late], [*found, sw.find_all(late, old)]
-    if not frames:
-        report["result"] = ("no frame after her stats key: not known whether it opened. Look at the game; close it with "
-                            f"{key.upper()} or Esc if it's open")
-        print(report["result"])
-        return done(1)
-    last = frames[-1]
-    keep("open", last)
-    # Whose templates find it: a calibration's from before (its own cut ones, if live), else the game data's (None);
-    # `known`: found by them (else a window cut from the frame by `calibrate`, or one not told: the frame against the
-    # one before says whether it's still open)
-    use, cal, known = old, None, True
-    if seen(found[-1]):
-        first = next(i for i, x in enumerate(found) if seen(x))
-        rows = report["stat_window_open_frames"]
-        when = rows[first][0] if first < len(rows) else None
-        print("seen open by the " + ("game data's" if old is None or old.source == "copy" else "calibration's")
-              + " pictures" + ("" if when is None else f", {when:.2f} s into the plan") + ": "
-              + ", ".join(f"{k} at {tuple(v[0])} (fit {v[1]:.1f})" for k, v in found[-1].items() if v[0] is not None))
-    else:
-        boxes = sw.changed_boxes(before, last)
-        report["changed"] = [list(b) for b in boxes]
-        if not boxes:
-            report["result"] = (f"nothing opened after {key.upper()} (no window where the frame changed): {key.upper()} "
-                                "may not be ABILITY in her key bindings (`gamelab keys --read`); nothing more sent")
+    state = {"window": "not sent"}  # (how her stat window was left: what an error halfway says)
+    try:
+        state["window"] = "may be open"  # (before her stats key goes out: a plan stopped halfway may have sent it)
+        frames, found = recorded([[0, "mouse", *MOUSE_AT], [150, key, "down"], [190, key, "up"]], STAT_OPEN_MS,
+                                 "stat_window_open", old)
+        if not found or not seen(found[-1]):
+            time.sleep(STAT_LATE_S)
+            late = np.asarray(hunter.senses.eyes._capture())
+            keep("late", late)
+            frames, found = [*frames, late], [*found, sw.find_all(late, old)]
+        if not frames:
+            report["result"] = ("no frame after her stats key: not known whether it opened. Look at the game; close it "
+                                f"with {key.upper()} or Esc if it's open")
             print(report["result"])
             return done(1)
-        print(f"a window opened at {', '.join(str(tuple(b)) for b in boxes)} that the game data's pictures don't "
-              "match: calibrating from its labels (the OCR)")
-        cal, said = sw.calibrate(last, before)
-        report["calibrate"] = said
-        print(f"  {said}")
-        use, known = cal, cal is not None
-    place = sw.find_all(last, use) if known else {}
-    with_main = place.get("detail", (None,))[0] is not None
-    if (place.get("main", (None,))[0] is not None and sw.wants_detail({k: v[0] for k, v in place.items()}, use)
-            and sw.can_click(use)):
-        if click:
-            x, y = sw.detail_button(place["main"][0], use)
-            frames2, _ = recorded([[0, "mouse", x, y], [80, "lbutton", "down"], [140, "lbutton", "up"],
-                                   [200, "mouse", *MOUSE_AT]], STAT_CLICK_MS, "stat_window_detail", use)
-            if frames2:
-                was, last = last, frames2[-1]
-                keep("detail", last)
-                if use is not None and use.source == "live" and "detail" not in use.panels:
-                    boxes = sw.changed_boxes(was, last)
-                    if boxes:  # (the DETAIL panel cut too: what opened since the click)
-                        more, said = sw.calibrate(last, was, boxes=boxes[:1])
-                        print(f"  the DETAIL panel: {said}")
-                        if more is not None and more.source == "live":
-                            for k, v in more.panels.items():
-                                use.panels["detail" if "wdef" in v.get("cells", {}) else k] = v
-                            sw._live_template.cache_clear()
+        last = frames[-1]
+        keep("open", last)
+        # Whose templates find it: a calibration's from before (its own cut ones, if live), else the game data's (None);
+        # `known`: found by them (else a window cut from the frame by `calibrate`, or one not told: the frame against the
+        # one before says whether it's still open)
+        use, cal, known = old, None, True
+        if seen(found[-1]):
+            first = next(i for i, x in enumerate(found) if seen(x))
+            rows = report["stat_window_open_frames"]
+            when = rows[first][0] if first < len(rows) else None
+            print("seen open by the " + ("game data's" if old is None or old.source == "copy" else "calibration's")
+                  + " pictures" + ("" if when is None else f", {when:.2f} s into the plan") + ": "
+                  + ", ".join(f"{k} at {tuple(v[0])} (fit {v[1]:.1f})" for k, v in found[-1].items() if v[0] is not None))
         else:
-            print("  the DETAIL panel isn't open and --no-click: her W.DEF isn't read")
-    reading = sw.read(last, None, use) if known else sw.StatReading(why="not found by any pictures")
-    report["reading"] = reading.record()
-    print(f"her stat window: {reading.text()}")
+            boxes = sw.changed_boxes(before, last)
+            report["changed"] = [list(b) for b in boxes]
+            if not boxes:
+                state["window"] = "not opened"
+                report["result"] = (f"nothing opened after {key.upper()} (no window where the frame changed): "
+                                    f"{key.upper()} may not be ABILITY in her key bindings (`gamelab keys --read`); "
+                                    "nothing more sent")
+                print(report["result"])
+                return done(1)
+            print(f"a window opened at {', '.join(str(tuple(b)) for b in boxes)} that the game data's pictures don't "
+                  "match: calibrating from its labels (the OCR)")
+            cal, said = sw.calibrate(last, before)
+            report["calibrate"] = said
+            print(f"  {said}")
+            use, known = cal, cal is not None
+        place = sw.find_all(last, use) if known else {}
+        with_main = place.get("detail", (None,))[0] is not None
+        if (place.get("main", (None,))[0] is not None and sw.wants_detail({k: v[0] for k, v in place.items()}, use)
+                and sw.can_click(use)):
+            if click:
+                x, y = sw.detail_button(place["main"][0], use)
+                frames2, _ = recorded([[0, "mouse", x, y], [80, "lbutton", "down"], [140, "lbutton", "up"],
+                                       [200, "mouse", *MOUSE_AT]], STAT_CLICK_MS, "stat_window_detail", use)
+                if frames2:
+                    was, last = last, frames2[-1]
+                    keep("detail", last)
+                    if use is not None and use.source == "live" and "detail" not in use.panels:
+                        boxes = sw.changed_boxes(was, last)
+                        if boxes:  # (the DETAIL panel cut too: what opened since the click)
+                            more, said = sw.calibrate(last, was, boxes=boxes[:1])
+                            print(f"  the DETAIL panel: {said}")
+                            if more is not None and more.source == "live":
+                                for k, v in more.panels.items():
+                                    use.panels["detail" if "wdef" in v.get("cells", {}) else k] = v
+                                sw._live_template.cache_clear()
+            else:
+                print("  the DETAIL panel isn't open and --no-click: her W.DEF isn't read")
+        reading = sw.read(last, None, use) if known else sw.StatReading(why="not found by any pictures")
+        report["reading"] = reading.record()
+        print(f"her stat window: {reading.text()}")
 
-    def shown(frame) -> bool:
-        if known:
-            return seen(sw.find_all(frame, use))
-        return bool(sw.changed_boxes(before, frame))
+        def shown(frame) -> bool:
+            if known:
+                return seen(sw.find_all(frame, use))
+            return bool(sw.changed_boxes(before, frame))
 
-    for go, k in ((1, key), (2, "esc"), (3, "esc")):
-        frames3, _ = recorded([[0, k, "down"], [40, k, "up"]], STAT_CLOSE_MS, f"stat_window_close{go}", use)
-        if frames3:
-            keep(f"closed{go}", frames3[-1])
-        if not frames3:  # (no frame after it: not known, and no Esc sent unseen, the MENU's)
-            report["result"] = (f"not known whether it closed (no frames after {k.upper()}): look at the game, close it "
-                                f"with {key.upper()} or Esc if it's open")
-            break
-        if not shown(frames3[-1]):
-            report["result"] = f"read and closed ({k.upper()})"
-            break
-        if len(frames3) < 2 or not shown(frames3[-2]):  # (Esc only with two frames at its end still showing it)
-            report["result"] = "not known whether it closed (open in one frame at the end): look at the game"
-            break
-    else:
-        report["result"] = f"STILL OPEN after {key.upper()} and Esc twice: close it yourself ({key.upper()} or Esc)"
-    print(report["result"])
-    closed = report["result"].startswith("read and closed")
-    if not closed:
-        print("  not calibrated: it wasn't seen closed")
-        return done(1)
-    if not known or not reading.open:
-        print("  not calibrated: run `python -m gamelab stats --calibrate "
-              f"{out / 'open.png'} --before {out / 'before.png'}` (or with --box x0,y0,x1,y1 for each panel) once the "
-              "frames are looked at")
-        return done(1)
-    if cal is None:  # (found by the pictures it had: where they are now)
-        at = {k: list(v) for k, v in reading.at.items() if v is not None}
-        if old is not None and old.source == "live":
-            cal = old
-            for k, v in at.items():
-                cal.panels.setdefault(k, {})["at"] = v
+        for go, k in ((1, key), (2, "esc"), (3, "esc")):
+            frames3, _ = recorded([[0, k, "down"], [40, k, "up"]], STAT_CLOSE_MS, f"stat_window_close{go}", use)
+            if frames3:
+                keep(f"closed{go}", frames3[-1])
+            if not frames3:  # (no frame after it: not known, and no Esc sent unseen, the MENU's)
+                report["result"] = (f"not known whether it closed (no frames after {k.upper()}): look at the game, "
+                                    f"close it with {key.upper()} or Esc if it's open")
+                break
+            if not shown(frames3[-1]):
+                report["result"] = f"read and closed ({k.upper()})"
+                break
+            if len(frames3) < 2 or not shown(frames3[-2]):  # (Esc only with two frames at its end still showing it)
+                report["result"] = "not known whether it closed (open in one frame at the end): look at the game"
+                break
         else:
-            cal = sw.Calibration("copy", {k: {"at": v, "size": list(sw.templates()[k].size)} for k, v in at.items()})
-    cal.detail_with_main, cal.key, cal.frames, cal.client, cal.at = with_main, key, str(out), (w, h), time.time()
-    path = cal.save()
-    report["calibration"] = str(path)
-    print(f"calibrated: {cal.words()} -> {path}: a hunt's start reads it from now on")
-    if reading.wdef is not None:
-        from .behavior.bootstrap import HerStats
-        from .behavior.statcheck import session_of
-        files = paths.of()
-        stats = HerStats(files.stats, hunter.touches.rows)
-        note = stats.see_window(reading.wdef, rows=hunter.touches.rows,
-                                level=reading.level if reading.level is not None else hunter.stats.level,
-                                session=session_of(hunter), read=reading.values)
-        print(f"  her W.DEF {reading.wdef} kept as hers ({files.stats})" + (f": {note}" if note else ""))
-    else:
-        print(f"  her W.DEF not read ({reading.why}): run `gamelab stats --read` once it can be")
-    return done(0 if reading.wdef is not None else 1)
+            report["result"] = f"STILL OPEN after {key.upper()} and Esc twice: close it yourself ({key.upper()} or Esc)"
+        print(report["result"])
+        closed = report["result"].startswith("read and closed")
+        if not closed:
+            print("  not calibrated: it wasn't seen closed")
+            return done(1)
+        state["window"] = "closed"
+        to_calibrate = ("run `python -m gamelab stats --calibrate "
+                        f"{out / 'open.png'} --before {out / 'before.png'}` (or with --box x0,y0,x1,y1 for each panel) "
+                        "once the frames are looked at")
+        if not known or not reading.open:
+            print(f"  not calibrated: {to_calibrate}")
+            return done(1)
+        from .behavior.statcheck import disagreement
+        if (off := disagreement(reading, hunter.stats)) is not None:  # (its cells or the OCR off: a hunt would refuse it)
+            report["disagreement"] = off
+            print(f"  not calibrated: its read says {off}, her HUD's being the game's own (a misread: look at open.png "
+                  f"and detail.png, then {to_calibrate})")
+            return done(1)
+        if cal is None:  # (found by the pictures it had: where they are now)
+            at = {k: list(v) for k, v in reading.at.items() if v is not None}
+            if old is not None and old.source == "live":
+                cal = old
+                for k, v in at.items():
+                    cal.panels.setdefault(k, {})["at"] = v
+            else:
+                cal = sw.Calibration("copy", {k: {"at": v, "size": list(sw.templates()[k].size)} for k, v in at.items()})
+        cal.detail_with_main, cal.key, cal.frames, cal.client, cal.at = with_main, key, str(out), (w, h), time.time()
+        path = cal.save()
+        report["calibration"] = str(path)
+        print(f"calibrated: {cal.words()} -> {path}: a hunt's start reads it from now on")
+        if reading.wdef is not None:
+            from .behavior.bootstrap import HerStats
+            from .behavior.statcheck import session_of
+            files = paths.of()
+            stats = HerStats(files.stats, hunter.touches.rows, session=session_of(hunter))
+            note = stats.see_window(reading.wdef, rows=hunter.touches.rows,
+                                    level=reading.level if reading.level is not None else hunter.stats.level,
+                                    session=session_of(hunter), read=reading.values)
+            kept = stats.window is not None and stats.window.low == float(reading.wdef)
+            print(f"  her W.DEF {reading.wdef} " + (f"kept in her stats file ({files.stats})" if kept else "not kept")
+                  + (f": {note}" if note else "") + (f"; her {stats.defence.words()}" if kept and note is None else ""))
+        else:
+            print(f"  her W.DEF not read ({reading.why}): run `gamelab stats --read` once it can be")
+        return done(0 if reading.wdef is not None else 1)
+    except BaseException as e:  # (the review of 2026-10-28: a crash after S left the window open, nothing said)
+        import traceback
+        report["error"] = f"{type(e).__name__}: {e}"
+        report["traceback"] = traceback.format_exc()
+        if state["window"] == "may be open":
+            report["result"] = (f"stopped halfway ({type(e).__name__}: {e}): HER STAT WINDOW MAY BE OPEN IN THE GAME: "
+                                f"close it with {key.upper()} or Esc")
+            print(report["result"])
+        try:
+            done(1)
+        except Exception:  # (the report not written: the error goes on all the same)
+            pass
+        raise
 
 
 def _stats_calibrate(args) -> int:

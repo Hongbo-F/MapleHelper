@@ -104,6 +104,13 @@ class Defence:
 PRIOR = Defence(PLAN_DEF, PRIOR_DEF, None, "prior")
 
 
+def session_of_feed(feed) -> str | None:
+    """The perception service's run a feed's looks come from (its welcome's pid: a session of the game's, as near as
+    it's known), None without one (the simulator, a test's feed, no feed)."""
+    w = getattr(feed, "welcome", None)
+    return None if not isinstance(w, dict) or w.get("pid") is None else str(w["pid"])
+
+
 def _taken(pad: float, d: np.ndarray, level: float, u: float) -> np.ndarray:
     """attack.danger.touch_taken over DEFs `d` at once (the same truncation and floor of 1)."""
     raw = pad * (1.2 + 0.2 * u)
@@ -201,11 +208,17 @@ class HerStats:
     EXP_FROM = "her EXP number"
     WINDOW_FROM = "her stat window"
 
-    def __init__(self, path: Path | None = None, rows=()):
+    def __init__(self, path: Path | None = None, rows=(), session: str | None = None):
         self.path = path
         self.max_hp: int | None = None
         self.level: int | None = None
         self.level_from = ""
+        # This run, for judging a W.DEF kept from before it (`window_doubt`): when it started, the perception service's
+        # session it looks through (`session`: its pid, session_of_feed; None: not known), her first level read in it
+        self.run_start = time.time()
+        self.session = None if session is None else str(session)
+        self.first_level: int | None = None
+        self._rows = rows
         self._read: dict[str, float] = {}  # when this run read her max HP and her level (time.time), by key
         self._kept = self._kept_file()     # her stats file as this run found it
         self._disagree: tuple | None = None  # (the EXP number's level, the digits') last said to disagree
@@ -233,6 +246,12 @@ class HerStats:
                            at=kept.get("at"))
         except (ValueError, TypeError, KeyError, AttributeError):
             return None
+
+    @property
+    def kept_max_hp(self) -> int | None:
+        """Her max HP as her stats file kept it (her HUD's number, last read in a run before this one), None if none."""
+        v = self._kept.get("max_hp")
+        return int(v) if isinstance(v, (int, float)) and v > 0 else None
 
     def _kept_read(self) -> dict:
         """The rest of her stat window's read as kept (its level, session and WINDOW_KEEPS' values), {} if none."""
@@ -285,7 +304,18 @@ class HerStats:
         """Her level as `source` read it (LV_FROM or EXP_FROM) at time `t` (a look's or glance's; None: not timed):
         the digits' over the EXP number's while they read; once they haven't for LV_UNREAD_S (a None from LV_FROM
         says they didn't: untimed, at once), the EXP number's, said, until they read again. A disagreement between the
-        two is said once for each pair of levels."""
+        two is said once for each pair of levels. Her first level this run judges a W.DEF kept from before it
+        (`window_doubt`: read at another level, not hers): her DEF made again then, said with it."""
+        note = self._see_level(level, source, t)
+        if self.first_level is None and self.level is not None:
+            self.first_level = self.level
+            if self.window is not None and self._before_run(self.window):
+                more = self.refit(self._rows)
+                if more is not None:
+                    note = more if note is None else f"{note}; {more}"
+        return note
+
+    def _see_level(self, level: int | float | None, source: str, t: float | None = None) -> str | None:
         if source == self.LV_FROM:
             if level is None or level <= 0:
                 if self.level_from == self.LV_FROM and not self._lv_gone:
@@ -318,60 +348,114 @@ class HerStats:
         self._save()
         return f"her level {level} by {source}" + ("" if was is None else f" (was {was})")
 
-    def see_window(self, wdef: float, at: float | None = None, rows=(), level: int | None = None,
+    def see_window(self, wdef: float, at: float | None = None, rows=None, level: int | None = None,
                    session: str | None = None, read: dict | None = None) -> str | None:
         """Her stat window read her W.DEF `wdef` (perception.stat_window; behavior.statcheck opens it): hers from now
         on, kept with her level then (`level`: the window's own, else hers as read; None: not known), the session it was
         read in (`session`: the perception service's run; None: none) and what else it showed (`read`: WINDOW_KEEPS'),
         checked against her touches (said if they don't fit it: her measured touches raise her reserve past it anyway).
-        What changed, in words; None if her DEF is as it was (a read again: kept with its new time)."""
+        What changed, in words; None if her DEF is as it was (a read again: kept with its new time). A W.DEF outside 0 to
+        DEF_TOP is no read (a misread: the review of 2026-10-28, an OCR's "711" for 111 put her reserve at 117 HP of
+        840): not kept, her DEF as it was, said. One her touches don't bear out isn't her DEF either (`window_doubt`)."""
+        if not 0 <= float(wdef) <= DEF_TOP:
+            return (f"her stat window's W.DEF {wdef:g} not taken: outside 0-{DEF_TOP:g} (a misread?); her DEF as it "
+                    f"was, {self.defence.words()}")
         when = time.time() if at is None else at
         self.window = Defence(float(wdef), float(wdef), float(wdef), "stat window", at=when)
         level = level if level is not None else self.level
         self.window_read = {"level": level, "session": session,
                             "read": {k: (list(v) if isinstance(v, tuple) else v) for k, v in (read or {}).items()
                                      if k in WINDOW_KEEPS and v is not None}}
+        rows = self._rows if rows is None else rows  # (her touches as last refitted: the hunter's)
         note = self.refit(rows)
         if note is None:
             self._save()  # (the same DEF read again: when, at what level, kept)
+            if self.defence.source != "stat window":  # (not borne out by her touches: her DEF as it was, said)
+                note = f"her stat window's W.DEF {wdef:g} not taken ({self.window_doubt(rows)}): her DEF as it was"
         return note
 
-    def window_due(self, level: int | None = None, session: str | None = None, rows=(),
+    def window_due(self, level: int | None = None, session: str | None = None, rows=None,
                    now: float | None = None) -> str | None:
-        """Why her stat window should be read now (None: her DEF is known from it this session): none read; read at
-        another level than `level` (hers now); in another session (`session`, the perception service's run, against
-        the read's) or over SESSION_S ago; or her newest FIT_MIN touches since the read not fitting it (FIT_AGREE of
-        them at least: her gear changed?)."""
+        """Why her stat window should be read now (None: her DEF is known from it this session): none read; a doubt of
+        the read kept (`window_doubt`, with `session` and `level` for this run's and `now` for its start: read in
+        another session, at another level, over SESSION_S before, her newest touches since not fitting it, over what
+        her touches fit); or read at another level than `level` (hers now: after a level-up in the hunt, read again,
+        her DEF kept meanwhile)."""
         if self.window is None:
             return "no stat window read yet"
+        if (why := self.window_doubt(rows, session=session, level=level, now=now)) is not None:
+            return why
         read_level = self.window_read.get("level")
         if level is not None and read_level is not None and int(read_level) != int(level):
             return f"her W.DEF {self.window.low:g} read at level {read_level}; she's level {level} now"
-        at = self.window.at
-        now = time.time() if now is None else now
-        kept = self.window_read.get("session")
-        if session is not None and kept is not None and str(kept) != str(session):
-            return f"her W.DEF {self.window.low:g} read in another session (the perception service's {kept}; now {session})"
-        if at is None or now - at > SESSION_S:
-            ago = "?" if at is None else f"{(now - at) / 3600:.1f} h"
-            return f"her W.DEF {self.window.low:g} read {ago} ago (over {SESSION_S / 3600:g} h)"
-        since = [r for r in rows if usable(r) and isinstance(r.get("t"), (int, float)) and r["t"] >= at]
+        return None
+
+    def _before_run(self, w: Defence, now: float | None = None) -> bool:
+        """Whether W.DEF `w` was read before this run (`now`: its start, run_start, by default)."""
+        return w.at is None or w.at < (self.run_start if now is None else now)
+
+    def window_doubt(self, rows=None, session: str | None = None, level: int | None = None,
+                     now: float | None = None) -> str | None:
+        """Why her W.DEF as read isn't her DEF now (None: it is; `refit`). A read from before this run (the review of
+        2026-10-28: a stale read kept governing whenever the read again didn't happen: a hunt put off at its start, six
+        put-offs, no calibration, her stats key opening nothing): read in another session of the perception service
+        than this run's (`session`, else `self.session`), at another level than her first this run (`level`, else
+        `first_level`), or over SESSION_S before it started (`now`, else `run_start`): she plays by hand between runs.
+        Any read: her newest FIT_MIN touches since it not fitting it (under FIT_AGREE: her gear changed, or a misread);
+        or, with fewer than FIT_MIN since to bear it out, over the DEF her last FIT_N touches fit (`fit_defence`'s span,
+        FIT_AGREE of them not fitting it: a misread, or new gear her touches since will show). A W.DEF under what her
+        touches fit isn't doubted: the lower is the safe side (a touch takes more of her), and gear taken off shows so."""
+        w = self.window
+        if w is None:
+            return None
+        rows = self._rows if rows is None else rows
+        if self._before_run(w, now):
+            read_level, lv = self.window_read.get("level"), self.first_level if level is None else level
+            if lv is not None and read_level is not None and int(read_level) != int(lv):
+                return f"her W.DEF {w.low:g} read at level {read_level}; she's level {lv} now"
+            kept, session = self.window_read.get("session"), self.session if session is None else session
+            if session is not None and kept is not None and str(kept) != str(session):
+                return (f"her W.DEF {w.low:g} read in another session (the perception service's {kept}; now "
+                        f"{session})")
+            start = self.run_start if now is None else now
+            if w.at is None or start - w.at > SESSION_S:
+                ago = "?" if w.at is None else f"{(start - w.at) / 3600:.1f} h"
+                return f"her W.DEF {w.low:g} read {ago} ago (over {SESSION_S / 3600:g} h)"
+        since = [r for r in rows if usable(r) and isinstance(r.get("t"), (int, float)) and r["t"] >= (w.at or 0.0)]
         if len(since) >= FIT_MIN:
-            ok, n = agreeing(self.window.low, since[-FIT_MIN:])
+            ok, n = agreeing(w.low, since[-FIT_MIN:])
             if ok < FIT_AGREE * n:
-                return (f"only {ok} of her newest {n} touches since it was read fit her W.DEF {self.window.low:g} (her "
-                        "gear changed?)")
+                return (f"only {ok} of her newest {n} touches since it was read fit her W.DEF {w.low:g} (her gear "
+                        "changed?)")
+            return None
+        fit = fit_defence(rows)
+        if fit.source == "touches" and fit.high is not None and w.low > fit.high:
+            ok, n = agreeing(w.low, rows)
+            if ok < FIT_AGREE * n:
+                span = f"{fit.low:g}-{fit.high:g}" if fit.high > fit.low else f"{fit.low:g}"
+                return (f"her W.DEF {w.low:g} over the DEF her last {n} touches fit ({span}; {ok} of them fit "
+                        f"{w.low:g}), {len(since)} of the {FIT_MIN} touches since the read to bear it out (a misread, "
+                        "or new gear?)")
         return None
 
     def refit(self, rows) -> str | None:
-        """Her DEF again: her stat window's if read, else fitted to her touches (`rows`), else the prior. What changed,
-        in words (None: nothing)."""
+        """Her DEF again: her stat window's if read and not doubted (`window_doubt`), else fitted to her touches
+        (`rows`), else the prior (a doubted W.DEF said in its `why`). What changed, in words (None: nothing)."""
         was = self.defence
-        if self.window is not None:
+        self._rows = rows
+        doubt = self.window_doubt(rows) if self.window is not None else None
+        if self.window is not None and doubt is None:
             ok, n = agreeing(self.window.low, rows)
             now = Defence(self.window.low, self.window.low, self.window.low, "stat window", n, ok, self.window.at)
         else:
             now = fit_defence(rows)
+            if doubt is not None:
+                if now.source == "touches":
+                    why = f"her stat window's not taken: {doubt}" + (f"; {now.why}" if now.why else "")
+                else:
+                    why = (f"her stat window's not taken: {doubt}; "
+                           + (now.why.replace(", no stat window read", "") if now.why else "no touches fitted"))
+                now = Defence(now.best, now.low, now.high, now.source, now.n, now.agree, now.at, why)
         self.defence = now
         if (now.best, now.low, now.high, now.source) == (was.best, was.low, was.high, was.source):
             return None

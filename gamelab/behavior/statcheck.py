@@ -41,12 +41,15 @@ in a hunt, the page "close it with S or Esc", exit code 7; at a hunt's start not
 alarm up the player refuses its keys (client.LieDetectorAlarm, as every plan's; a window that may be open then is said
 and paged). Only her stats key, one click and Esc go out: nothing that attacks or moves her.
 
-**What then** (Hunter._stats_read): her W.DEF hers (bootstrap.HerStats.see_window: the reserve and the positioning
-model take it, her touches only check it), kept with her level and the session; her max HP if her HUD's number hasn't
-read (else a disagreement said); her level said where it isn't her HUD's; her max MP her casts are reckoned at
-(Hunter.max_mp, Attacks.max_mp: config.toml [character] mp until then, said); ATTACK, ACCURACY, EVASION, MAGIC, MAGIC
-DEF., her four stats, SPEED and JUMP kept in her stats file (not modelled from yet: said where SPEED and JUMP differ from
-config.toml's, which plan her moves)."""
+**What then** (Hunter._stats_read), each checked before it's taken (the review of 2026-10-28: a misread was taken as
+read): its level or max HP not her HUD's where both are read (`disagreement`), none of it. Else her W.DEF hers
+(bootstrap.HerStats.see_window: the reserve and the positioning model take it, her touches only check it; not one
+outside 0 to DEF_TOP, nor one her touches don't bear out: HerStats.window_doubt), kept with her level and the session;
+her max HP if her HUD's number hasn't read, where her HUD's as her stats file last kept it or her HP bar bears it out
+(`borne`); her level where nothing has read it; her max MP her casts are reckoned at (Hunter.max_mp, Attacks.max_mp:
+config.toml [character] mp until then, said), where her MP bar bears it out or it's within MP_SPAN of theirs; ATTACK,
+ACCURACY, EVASION, MAGIC, MAGIC DEF., her four stats, SPEED and JUMP kept in her stats file (not modelled from yet:
+said where SPEED and JUMP differ from config.toml's, which plan her moves)."""
 
 import json
 import time
@@ -59,6 +62,7 @@ from .. import paths, telemetry
 from ..control import alarm, client
 from ..perception import stat_window as sw
 from ..perception.framecheck import BadLook
+from .bootstrap import session_of_feed
 from .keycheck import NOT_ATTACK, QUIET_LOOK_S, QUIET_S, _still, near_her, unquiet
 from .safety import HuntStop
 
@@ -79,6 +83,13 @@ DEFER_GAP_S = 5.0      # a read put off is tried again at a quiet look this long
 DEFERS_MAX = 6         # ... this many times, then not this run
 EXIT = 7               # the command's exit code after StatWindowStop (the key check's 6)
 SHOTS_MAX = READS_MAX  # the window's frames kept a run
+# What a read is checked by before it's taken (the review of 2026-10-28: a misread W.DEF, max HP or max MP was taken as
+# read): its level and max HP her HUD's where both are read (`disagreement`: else none of it is taken); its max HP, taken
+# only while her HUD's number hasn't read, her HUD's as her stats file last kept it or borne out by her HP bar (`borne`);
+# its max MP borne out by her MP bar, or within MP_SPAN of what her casts are reckoned at
+BAR_TOL = 0.05         # her bar's share against the window's cur / max: this far apart at the most
+MP_SPAN = 1.25         # the window's max MP within this factor (either way) of her casts' max MP
+VALUE_TOP = 30000      # the game's cap on max HP and MP: a number over it is a misread
 
 
 class StatWindowStop(HuntStop):
@@ -169,11 +180,46 @@ def stats_key(keys, character: str | None = None) -> tuple[str | None, str]:
     return key, source
 
 
+def disagreement(reading: sw.StatReading, stats) -> str | None:
+    """Where her stat window's read disagrees with her HUD's as `stats` (bootstrap.HerStats) has them: its level and her
+    level, its max HP and her HUD's HP number's, each where both are read; in words, None if nowhere. The two show the
+    same numbers in game, so a disagreement says the read is off (the panel's cells, the OCR): none of it is taken."""
+    off = []
+    level, most = getattr(stats, "level", None), getattr(stats, "max_hp", None)
+    if reading.level is not None and level is not None and int(reading.level) != int(level):
+        off.append(f"level {reading.level}, {getattr(stats, 'level_from', '') or 'her level as read'} {level}")
+    if reading.max_hp is not None and most is not None and int(reading.max_hp) != int(most):
+        off.append(f"max HP {reading.max_hp}, {getattr(stats, 'HP_FROM', 'her HUD')} {most}")
+    return " and ".join(off) or None
+
+
+def borne(pair, share: float | None, kept: float | None = None, span: float | None = None) -> str | None:
+    """Why the window's cur / max `pair` (HP or MP) isn't taken (None: it is): not a cur / max (both read, 0 <= cur <=
+    max <= VALUE_TOP); else borne out by `kept` (the same max as known otherwise: her HUD's as last kept, with `span`
+    None) or within `span` of it (either way), or by her bar's `share` (cur under max, the window's share within BAR_TOL
+    of it: at full her bar can't tell a misread max); else not borne out."""
+    if not isinstance(pair, (tuple, list)) or len(pair) != 2 or None in pair:
+        return f"{pair} isn't a cur / max read"
+    cur, most = float(pair[0]), float(pair[1])
+    if not 0 <= cur <= most or not 0 < most <= VALUE_TOP:
+        return f"{pair[0]} / {pair[1]} isn't a cur / max (0 <= cur <= max <= {VALUE_TOP})"
+    if kept is not None and kept > 0:
+        if (most == float(kept)) if span is None else (1 / span <= most / float(kept) <= span):
+            return None
+    if share is not None and cur < most and abs(cur / most - float(share)) <= BAR_TOL:
+        return None
+    bar = ("her bar not read" if share is None else
+           "at full her bar can't tell a misread max" if cur >= most else
+           f"her bar at {float(share):.0%} against its {cur / most:.0%}")
+    known = ("" if kept is None else f"not {kept:g} as known" if span is None
+             else f"not within x{span:g} of {kept:g} as known")
+    return ", ".join(x for x in (known, bar) if x) + ": not borne out"
+
+
 def session_of(h) -> str | None:
     """The perception service's run hunter `h`'s looks come from (its pid: a session of the game's, as near as it's
     known), None without one (the simulator, a test's hunter)."""
-    w = getattr(getattr(getattr(h, "senses", None), "feed", None), "welcome", None)
-    return None if not isinstance(w, dict) or w.get("pid") is None else str(w["pid"])
+    return session_of_feed(getattr(getattr(h, "senses", None), "feed", None))
 
 
 class StatCheck:
@@ -194,6 +240,7 @@ class StatCheck:
         self.window_state = "not opened"
         self.sent: list[str] = []
         self.last: Outcome | None = None
+        self.scene = None         # the read's last look (its bars: what the window's HP and MP are checked by)
         self._last_frame = None
         self._near: dict = {}
 
@@ -297,6 +344,7 @@ class StatCheck:
     def _look(self):
         """A look of the read's: the safety stop asked of it as Hunter.health_check would (her HP watch's due)."""
         s = self.h.look()
+        self.scene = s  # (her bars as of the read's last look: `borne`, Hunter._stats_read)
         hp = getattr(self.h, "hp_watch", None)
         if hp is not None and (stop := hp.due()) is not None:
             raise stop
@@ -426,8 +474,10 @@ class StatCheck:
                 self.window_state = "may be open"
             else:
                 behind = shown
-                self._tap(self.key, "stat_window")
+                # (before the plan: one the Lie Detector stops halfway may have sent her stats key, and the player's
+                # refusal raises out of it: the review of 2026-10-28, a window open through the test with nobody told)
                 self.window_state = "may be open"
+                self._tap(self.key, "stat_window")
                 for wait in (SETTLE_S, AGAIN_S, LATE_S):
                     time.sleep(wait)
                     shown = self._frame()

@@ -1074,8 +1074,10 @@ class KeyCheck:
                 self.window_state = "may be open"
             else:
                 behind = self._last
-                act.play([[0, "\\", "down"], [40, "\\", "up"]], "key_bindings")
+                # (before the plan: one the Lie Detector stops halfway may have sent the backslash, and the player's
+                # refusal raises out of it; the stat window's review of 2026-10-28)
                 self.sent, self.window_state = True, "may be open"
+                act.play([[0, "\\", "down"], [40, "\\", "up"]], "key_bindings")
                 for wait in (SETTLE_S, AGAIN_S, LATE_S):
                     time.sleep(wait)
                     reading = self._read()

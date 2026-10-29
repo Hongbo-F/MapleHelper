@@ -688,6 +688,24 @@ def test_the_lie_detector_with_the_window_open_says_so_and_goes_on(quiet):
     assert g.open and any("close it with Esc or CANCEL" in t for _, t in quiet)
 
 
+def test_the_lie_detector_during_the_backslash_says_it_may_be_open(quiet):
+    """The stat window's review of 2026-10-28: the player stops a plan at the Lie Detector and answers it with its
+    error, so a backslash that went down before the alarm raised out of its plan before the check knew it had gone out:
+    an open window went unsaid. Now it may be open from before the plan: said and paged."""
+    g = Game()
+    real = g.play
+
+    def play(events, name, **kw):
+        real(events, name, **kw)
+        if name == "key_bindings":  # (the backslash down and up, then the player's error)
+            raise client.LieDetectorAlarm("Lie Detector seen")
+    g.play = play
+    h = Hunter(g, mp_shown_at=1001.0)
+    with pytest.raises(client.LieDetectorAlarm):
+        KeyCheck(h).run(_doubt())
+    assert g.open and any("close it with Esc or CANCEL" in t for _, t in quiet)
+
+
 def test_a_monster_near_after_the_retreat_puts_it_off_then_a_quiet_look_raises_it_again(quiet, monkeypatch):
     """The review's case: the window opened with a monster on her (nothing looked again after the retreat). A monster
     still within 250 after it: no backslash, put off, her regular presses held; Hunter.health_check raises its doubt

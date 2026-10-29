@@ -23,6 +23,7 @@ from gamelab.behavior.safety import MARGIN, Touches, mob_touch
 from gamelab.localization import mapdata
 from gamelab.localization.tracking import Event
 from gamelab.perception import hp_number, lv_number
+from gamelab.perception import stat_window as sw
 from gamelab.perception.eyes import Observation
 from gamelab.screen import STRETCHED
 
@@ -91,18 +92,117 @@ def test_her_stat_window_is_over_her_touches_and_kept(tmp_path):
     rows = [r for r in _rows() if r["level"] == 28]
     st = HerStats(path, rows)
     assert st.defence.source == "touches" and st.defence.low == 106.5
-    note = st.see_window(111, at=1000.0, rows=rows)
-    assert st.defence == Defence(111.0, 111.0, 111.0, "stat window", 40, 40, 1000.0)
+    note = st.see_window(111, rows=rows)
+    at = st.window.at
+    assert st.defence == Defence(111.0, 111.0, 111.0, "stat window", 40, 40, at)
     assert note.startswith("her DEF 111 (her stat window's W.DEF, read ")
-    # Kept: the next run's starts from it, checked against her touches (most of DEF 64's don't fit it: said).
-    again = HerStats(path, [r for r in _rows() if r["level"] == 25])
-    assert again.defence.source == "stat window" and again.defence.low == 111.0
-    assert again.defence.agree < FIT_AGREE * again.defence.n
     kept = json.loads(path.read_text(encoding="utf-8"))
-    assert {k: kept["window"][k] for k in ("low", "at")} == {"low": 111.0, "at": 1000.0}
+    assert {k: kept["window"][k] for k in ("low", "at")} == {"low": 111.0, "at": at}
     assert kept["defence"]["source"] == "stat window"
-    note = HerStats(path).see_window(64, rows=[r for r in _rows() if r["level"] == 28])
+    # Kept: the next run's starts from it where her touches bear it out (her level-28 touches) ...
+    assert HerStats(path, rows).defence.source == "stat window"
+    # ... not over what they fit with none since to bear it out (her DEF-64 touches of level 25: a misread, or new gear;
+    # the review of 2026-10-28): her touches' fit, said.
+    again = HerStats(path, [r for r in _rows() if r["level"] == 25])
+    assert again.defence.source == "touches" and again.defence.low == 59.75
+    assert ("her stat window's not taken: her W.DEF 111 over the DEF her last 40 touches fit (59.75-64.75; 16 of them "
+            "fit 111), 0 of the 8 touches since the read to bear it out (a misread, or new gear?)") in again.defence.why
+    # Under what they fit it's hers (the lower: a touch takes more of her), said.
+    note = HerStats(path).see_window(64, rows=rows)
     assert "of her last 40 touches fit it (her measured touches raise her reserve past it)" in note
+
+
+def _wdef_reserve(st, max_hp=840):
+    """Her reserve on Tree Dungeon (Horny 110, Green 54) at her DEF as `st` has it, her level 28, 3 touches."""
+    from gamelab.behavior.safety import Touches, reserve_of
+    t = Touches(None)
+    t.rows = list(st._rows)
+    kinds = {"horny-mushroom": (110.0, "Horny Mushroom"), "green-mushroom": (54.0, "Green Mushroom")}
+    return reserve_of(kinds, 3, st.defence.low, 28, t.measured(28)).limit(max_hp)
+
+
+def test_a_misread_wdef_is_not_her_def(tmp_path):
+    """The review of 2026-10-28 (D:/MapleHelper-scratch/statwin/review/misread.py): the OCR's "711" or "1111" for her
+    111 put her reserve at 117 or 21 HP of 840 with no touches kept, and the positioning model's DEF at 711 with her 40
+    level-28 touches kept. Now a W.DEF outside 0-DEF_TOP is no read (not kept, her DEF as it was, said); one inside it
+    over what her touches fit, with too few since the read to bear it out, is a check, not her DEF (her touches' fit:
+    the reserve and the positioning model theirs)."""
+    rows = [r for r in _rows() if r["level"] == 28]
+    for text, have in (("711", []), ("1111", []), ("711", rows)):
+        st = HerStats(tmp_path / f"s{text}{len(have)}.json", have)
+        st.see_level(28, HerStats.LV_FROM)
+        was = st.defence
+        note = st.see_window(sw.parse("wdef", text), rows=have, level=28)
+        assert st.window is None and st.defence == was and note.startswith(
+            f"her stat window's W.DEF {text} not taken: outside 0-400 (a misread?)")
+        assert st.window_due(28) == "no stat window read yet"
+    assert _wdef_reserve(st).startswith("under 387 HP of 840")  # (her touches' fit, as before the read)
+    st = HerStats(tmp_path / "s171.json", rows)  # (171 for 111: inside the range, over her touches' 106.5-115.25)
+    st.see_level(28, HerStats.LV_FROM)
+    note = st.see_window(171, rows=rows, level=28)
+    assert st.defence.source == "touches" and st.defence.low == 106.5 and st.defence.best <= 115.25
+    assert note.startswith("her stat window's W.DEF 171 not taken (her W.DEF 171 over the DEF her last 40 touches fit "
+                           "(106.5-115.25") and note.endswith("): her DEF as it was")
+    assert st.window_due(28).startswith("her W.DEF 171 over the DEF her last 40 touches fit")  # (read again next time)
+    assert _wdef_reserve(st).startswith("under 387 HP of 840")
+    # With no touches kept there's nothing to check it by: the window's (the user's first run: 453 -> 366 at 111)
+    st = HerStats(tmp_path / "s111.json")
+    st.see_level(28, HerStats.LV_FROM)
+    assert _wdef_reserve(st).startswith("under 453 HP of 840")
+    st.see_window(111, level=28)
+    assert st.defence.source == "stat window" and _wdef_reserve(st).startswith("under 366 HP of 840")
+
+
+def test_touches_since_the_read_that_dont_fit_it_take_it_back(tmp_path):
+    """A read this run that her touches since don't bear out (FIT_MIN of them, under FIT_AGREE fitting it: a misread, or
+    her gear changed): her DEF their fit again (else the prior), said; read again next time (window_due)."""
+    st = HerStats(tmp_path / "s.json")
+    st.see_level(28, HerStats.LV_FROM)
+    st.see_window(111, level=28)
+    t = st.window.at
+    rows = [{"t": t + 1 + i, "hp": 150, "level": 28, "pads": [110.0]} for i in range(7)]  # (DEF 0's touches)
+    assert st.refit(rows) is None and st.defence.source == "stat window"  # (7: not yet)
+    rows.append({"t": t + 8, "hp": 150, "level": 28, "pads": [110.0]})
+    note = st.refit(rows)
+    assert st.defence.source == "touches" and st.defence.low < 111
+    assert "her stat window's not taken: only 0 of her newest 8 touches since it was read fit her W.DEF 111" in note
+    assert st.window_due(28).startswith("only 0 of her newest 8 touches since it was read fit her W.DEF 111")
+
+
+def test_a_stale_wdef_is_a_check_not_her_def(tmp_path):
+    """The review of 2026-10-28 (D:/MapleHelper-scratch/statwin/review/stale.py): a W.DEF kept from two days before, her
+    touches since fitting 59.75-64.75 at level 25, stayed her DEF (111) whenever it wasn't read again (a hunt put off at
+    its start, six put-offs, no calibration, S opening nothing). Now one read before this run in another session, at
+    another level than hers or over SESSION_S before it isn't her DEF: her touches' fit, or the prior, said in the start
+    line; one this run kept over a level-up in it (the same gear), read again."""
+    import time as _time
+    path = tmp_path / "her_stats.json"
+    lv25 = [r for r in _rows() if r["level"] == 25]
+    for r in lv25:
+        r["t"] = _time.time() - 2 * 86400 - 60  # (touches before the read: no "since")
+
+    def kept(at, level=28, session="1111"):
+        path.write_text(json.dumps({"window": {"low": 111.0, "at": at, "level": level, "session": session,
+                                               "read": {}}}), encoding="utf-8")
+    kept(_time.time() - 2 * 86400, session="2222")
+    st = HerStats(path, lv25, session="2222")
+    assert st.defence.source == "touches" and st.defence.low == 59.75 and "read 48.0 h ago (over 3 h)" in st.defence.why
+    assert "her stat window's not taken: her W.DEF 111 read 48.0 h ago" in st.describe()
+    kept(_time.time() - 600)  # (10 minutes before, another session)
+    st = HerStats(path, [], session="2222")
+    assert st.defence.source == "prior" and st.defence.low == 0.0
+    assert "read in another session (the perception service's 1111; now 2222)" in st.defence.why
+    kept(_time.time() - 600, session="2222")  # (the same session: hers, until her level says otherwise)
+    st = HerStats(path, [], session="2222")
+    assert st.defence.source == "stat window"
+    note = st.see_level(25, HerStats.LV_FROM)
+    assert st.defence.source == "prior" and "read at level 28; she's level 25 now" in note
+    # Read this run at 25: a level-up in the run keeps it (the same gear), and asks for it again.
+    st.see_window(64, level=25, session="2222")
+    assert st.defence.source == "stat window"
+    assert st.see_level(26, HerStats.LV_FROM) == "her level 26 by her HUD's LV. digits (was 25)"
+    assert st.defence.source == "stat window" and st.defence.low == 64.0
+    assert st.window_due(26, "2222") == "her W.DEF 64 read at level 25; she's level 26 now"
 
 
 def test_her_level_is_her_digits_else_her_exp_numbers():

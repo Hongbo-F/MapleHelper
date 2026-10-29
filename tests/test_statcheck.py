@@ -164,6 +164,28 @@ def test_the_lie_detector_halfway_says_it_may_be_open():
 
 
 @REAL
+def test_the_lie_detector_during_her_stats_key_says_it_may_be_open():
+    """The review of 2026-10-28: the player stops a plan at the Lie Detector and answers it with its error, so a stats
+    key that went down before the alarm raised out of its plan before the read knew it had gone out: an open window
+    went unsaid through the test. Now it may be open from before the plan: said and paged."""
+    def alarm_in_s(sim, h):
+        real = h.actions.play
+
+        def play(events, name, *a, **kw):
+            out = real(events, name, *a, **kw)
+            if name == "stat_window":  # (S down and up, then the player's error)
+                raise client.LieDetectorAlarm("Lie Detector seen")
+            return out
+        h.actions.play = play
+    got = _start(before=alarm_in_s)
+    assert isinstance(got["raised"], client.LieDetectorAlarm) and got["keys"] == ["s"]
+    assert got["world"]["stat_window_open"]
+    assert any("STAT WINDOW: her stat window may still be open in the game: close it with S or Esc" in line
+               for line in got["log"])
+    assert got["pages"] and got["pages"][-1][1] == "MapleStory: her stat window"
+
+
+@REAL
 def test_the_safety_stop_at_every_look_of_it():
     """Her HP under her reserve at the start (no potion left): the safety stop at the read's own looks, nothing
     sent."""
@@ -205,47 +227,91 @@ def test_her_def_known_this_session_or_read_again(tmp_path):
     """bootstrap.HerStats.window_due: none read; read at her level this session (the perception service's run, under
     SESSION_S): not again; at another level, in another session, over SESSION_S ago, or her newest 8 touches since not
     fitting it: again."""
-    st = HerStats(tmp_path / "s.json")
+    st = HerStats(tmp_path / "s.json", session="1")
     assert st.window_due(28, "1") == "no stat window read yet"
-    st.see_window(111, at=1000.0, level=28, session="1")
-    assert st.window_due(28, "1", now=1000.0 + 60) is None
-    assert st.window_due(29, "1", now=1060.0) == "her W.DEF 111 read at level 28; she's level 29 now"
-    assert st.window_due(28, "2", now=1060.0).startswith("her W.DEF 111 read in another session")
-    assert st.window_due(28, None, now=1000.0 + SESSION_S + 1).startswith("her W.DEF 111 read 3.0 h ago")
-    rows = [{"t": 1100.0 + i, "hp": 150, "level": 28, "pads": [110.0]} for i in range(8)]  # (DEF 0's touches)
+    t0 = st.run_start - 1000.0  # (read 1000 s before this run; `now` the time it's judged at)
+    st.see_window(111, at=t0, level=28, session="1")
+    assert st.window_due(28, "1", now=t0 + 60) is None
+    assert st.window_due(29, "1", now=t0 + 60) == "her W.DEF 111 read at level 28; she's level 29 now"
+    assert st.window_due(28, "2", now=t0 + 60).startswith("her W.DEF 111 read in another session")
+    assert st.window_due(28, None, now=t0 + SESSION_S + 1).startswith("her W.DEF 111 read 3.0 h ago")
+    rows = [{"t": t0 + 100 + i, "hp": 150, "level": 28, "pads": [110.0]} for i in range(8)]  # (DEF 0's touches)
     assert "of her newest 8 touches since it was read fit her W.DEF 111 (her gear changed?)" in st.window_due(
-        28, "1", rows, now=1200.0)
-    again = HerStats(tmp_path / "s.json")  # (kept: the next run knows it)
-    assert again.window_due(28, "1", now=1060.0) is None and again.defence.low == 111
+        28, "1", rows, now=t0 + 200)
+    again = HerStats(tmp_path / "s.json", session="1")  # (kept: the next run in the same session knows it)
+    again.see_level(28, HerStats.LV_FROM)
+    assert again.window_due(28, "1") is None and again.defence.low == 111
 
 
-@REAL
-def test_what_the_read_gives_her_stats():
-    """Her max HP from the window while her HUD's number hasn't read; her max MP her casts are reckoned at (config.toml's
-    623 until then: said); a disagreement with her HUD said, her HUD's taken; SPEED and JUMP said where they differ
-    from config.toml's."""
+def _read_into(values, hud_max_hp=None, bars=(800 / 840, 100 / 679)):
+    """Hunter._stats_read of a read of `values` in the simulator's hunter (its HUD: level 25, max HP `hud_max_hp`, None:
+    not read), her bars as the read's last look had them (`bars`: HP, MP; None: no look): the hunter, what was said."""
     got = {}
 
     def fn(sim):
         h = sim.tour_stack().h
-        got["h"] = h
         said = []
         h.log = said.append
-        h.stats.max_hp = None
-        reading = sw.StatReading(at={"main": (0, 0), "detail": (0, 0)},
-                                 values={"wdef": 111, "level": 26, "hp": (800, 840), "mp": (100, 679), "speed": 130,
-                                         "jump": 100})
-        h._stats_read(reading, None)
-        got["said"] = said
+        h.stats.max_hp = hud_max_hp
+        h.stat_check = SimpleNamespace(scene=None if bars is None else SimpleNamespace(hp=bars[0], mp=bars[1]),
+                                       _session=lambda: None)
+        h._stats_read(sw.StatReading(at={"main": (0, 0), "detail": (0, 0)}, values=values), None)
+        got["h"], got["said"] = h, " / ".join(said)
         return {}
     scenarios.run_sim(_sc(fn))
-    h, said = got["h"], " / ".join(got["said"])
+    return got["h"], got["said"]
+
+
+@REAL
+def test_what_the_read_gives_her_stats():
+    """Her max HP from the window while her HUD's number hasn't read, her HP bar bearing it out; her max MP her casts
+    are reckoned at (config.toml's 623 until then: said); SPEED and JUMP said where they differ from config.toml's."""
+    h, said = _read_into({"wdef": 111, "level": 25, "hp": (800, 840), "mp": (100, 679), "speed": 130, "jump": 100})
     assert h.max_hp == 840.0 and h.max_mp == 679.0 and h.attacks.max_mp == 679.0
     assert "her max HP 840 by her stat window" in said
     assert "her max MP 679 by her stat window (was 623, config.toml [character] mp): her casts reckoned at it" in said
-    assert "her stat window says level 26, her HUD's LV. digits 25 (theirs taken)" in said
     assert "her SPEED 130% by her stat window, config.toml [character] speed 119.2" in said
-    assert h.stats.defence.low == 111.0 and h.level == 25
+    assert h.stats.defence.low == 111.0 and h.stats.defence.source == "stat window" and h.level == 25
+
+
+@REAL
+def test_a_read_her_hud_disagrees_with_is_not_taken():
+    """The review of 2026-10-28 (a misread taken as read): the window's level or max HP not her HUD's (the game shows
+    the same numbers in both: the panel's cells or the OCR off), none of it taken, said; her DEF, max HP and casts as
+    they were."""
+    h, said = _read_into({"wdef": 111, "level": 26, "hp": (840, 840), "mp": (100, 679)}, hud_max_hp=840)
+    assert h.stats.defence.source == "prior" and h.max_mp == 623.0
+    assert ("her stat window's read not taken: it says level 26, her HUD's LV. digits 25 (a misread?); her DEF as it "
+            "was, DEF not known") in said
+    h, said = _read_into({"wdef": 111, "level": 25, "hp": (8840, 8840)}, hud_max_hp=840)
+    assert h.stats.defence.source == "prior" and "it says max HP 8840, her HUD's HP number 840 (a misread?)" in said
+
+
+@REAL
+def test_its_max_hp_and_mp_only_where_something_bears_them_out():
+    """Her HUD's number not read: the window's max HP only where her HP bar bears it out (at full it can't tell a
+    misread max: 8840 / 8840 isn't taken) or her stats file has it from her HUD as last read; its max MP where her MP
+    bar bears it out or within MP_SPAN of what her casts are reckoned at (6790 / 6790 isn't). Her W.DEF taken all the
+    same (her HUD read nothing to check it by)."""
+    h, said = _read_into({"wdef": 111, "level": 25, "hp": (8840, 8840), "mp": (6790, 6790)}, bars=(1.0, 1.0))
+    assert h.max_hp is None and h.max_mp == 623.0 and h.stats.defence.low == 111.0
+    assert "her stat window's max HP 8840 not taken (at full her bar can't tell a misread max: not borne out)" in said
+    assert ("her stat window's max MP 6790 not taken (not within x1.25 of 623 as known, at full her bar can't tell a "
+            "misread max: not borne out): her casts reckoned at 623 as before") in said
+    h, said = _read_into({"wdef": 111, "level": 25, "hp": (800, 840), "mp": (100, 679)}, bars=(0.5, 0.5))
+    assert h.max_hp is None and "her bar at 50% against its 95%: not borne out" in said
+    assert h.max_mp == 679.0  # (within x1.25 of 623)
+    assert statcheck.borne((840, 840), None, 840) is None and statcheck.borne((900, 840), 1.0, 840) is not None
+
+
+def test_the_kept_max_hp_bears_out_the_windows(tmp_path):
+    """HerStats.kept_max_hp: her stats file's max HP (her HUD's, as last read) is what bears the window's out at full
+    HP."""
+    path = tmp_path / "her_stats.json"
+    st = HerStats(path)
+    st.see_max_hp(840)
+    assert HerStats(path).kept_max_hp == 840 and HerStats(tmp_path / "none.json").kept_max_hp is None
+    assert statcheck.borne((840, 840), 1.0, HerStats(path).kept_max_hp) is None
 
 
 def test_a_hunting_commands_start_reads_it_after_her_max_hp(monkeypatch):
@@ -372,18 +438,19 @@ class StatGame:
                     self.detail = True
 
 
-def _record(monkeypatch, tmp_path, capsys, game, click=True):
+def _record(monkeypatch, tmp_path, capsys, game, click=True, level=28, max_hp=840):
     import gamelab.__main__ as cli
     monkeypatch.setattr(cli, "SHOTS", tmp_path / "shots")
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     monkeypatch.setattr(sw, "_shared_rows", game.ocr)
 
-    def submit(events, fps=0, duration_ms=0, name="", **kw):
+    def submit(events, fps=0, duration_ms=0, name="", **kw):  # (as client.wait answers: one numpy array of them)
         game.play(events, name)
-        return {"frames": [game.capture() for _ in range(int(duration_ms / 1000 * fps))], "times": None}
+        frames = [game.capture() for _ in range(int(duration_ms / 1000 * fps))]
+        return {"frames": np.stack(frames), "times": np.arange(len(frames)) * 1000.0 / fps} if frames else {}
     monkeypatch.setattr(cli.client, "submit", submit)
     hunter = SimpleNamespace(senses=SimpleNamespace(eyes=SimpleNamespace(_capture=game.capture), feed=None),
-                             touches=SimpleNamespace(rows=[]), stats=SimpleNamespace(level=28))
+                             touches=SimpleNamespace(rows=[]), stats=SimpleNamespace(level=level, max_hp=max_hp))
     code = cli._stats_recorded(hunter, "s", "S, ABILITY's", click=click)
     return code, capsys.readouterr().out, [k for _, keys in game.plans for k in keys]
 
@@ -430,6 +497,33 @@ def test_record_calibrates_a_newer_window_off_its_labels(monkeypatch, tmp_path, 
     assert cal is not None and cal.source == "live" and "read and closed (S)" in out
     assert "her stat window: W.DEF 111, level 28" in out and code == 0
     assert (paths.STAT_TEMPLATES / "main.png").is_file()
+
+
+def test_record_stopped_halfway_says_the_window_may_be_open(monkeypatch, tmp_path, capsys):
+    """The review of 2026-10-28: a crash after her stats key (its frames' truth, as keys --record's in 4c4bfa0) left the
+    window open with nothing said. Anything raised after it went out: "MAY BE OPEN" said, the report written with the
+    error, the error raised on; nothing more sent (no Esc unseen)."""
+    def broken(*a, **kw):
+        raise ValueError("the OCR fell over")
+    monkeypatch.setattr(sw, "read", broken)
+    g = StatGame()
+    with pytest.raises(ValueError):
+        _record(monkeypatch, tmp_path, capsys, g)
+    out = capsys.readouterr().out
+    assert "HER STAT WINDOW MAY BE OPEN IN THE GAME: close it with S or Esc" in out and g.open
+    assert [k for _, keys in g.plans for k in keys] == ["s", "lbutton"] and g.menu == 0
+    report = json.loads(next((tmp_path / "shots").iterdir()).joinpath("report.json").read_text(encoding="utf-8"))
+    assert report["error"] == "ValueError: the OCR fell over" and "MAY BE OPEN" in report["result"]
+    assert sw.Calibration.load() is None
+
+
+def test_record_a_read_her_hud_disagrees_with_calibrates_nothing(monkeypatch, tmp_path, capsys):
+    """Its level or max HP not her HUD's: read and closed, but not calibrated (a hunt would refuse every read), her
+    W.DEF not kept; what to send said."""
+    code, out, keys = _record(monkeypatch, tmp_path, capsys, StatGame(), level=27)
+    assert code == 1 and keys == ["s", "lbutton", "s"] and "read and closed (S)" in out
+    assert "not calibrated: its read says level 28, her level as read 27" in out and "stats --calibrate" in out
+    assert sw.Calibration.load() is None and not paths.STATS.is_file()
 
 
 def test_record_with_the_window_open_already_sends_nothing(monkeypatch, tmp_path, capsys):

@@ -63,7 +63,7 @@ from .keycheck import CAST_DOUBT, Doubt, KeyCheck, KeyDoubt, MoveWatch, RegularW
 from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
-from .bootstrap import Defence, HerStats
+from .bootstrap import Defence, HerStats, session_of_feed
 from .safety import HP_WAIT_S, HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
 from .statcheck import StatCheck, StatsDue
 from .safety import kinds_of as map_kinds
@@ -184,7 +184,9 @@ class Hunter:
         self.guard = 0.0
         self.max_mp = c.mp
         self.touches = Touches(paths.of().touches)  # (hers)
-        self.stats = HerStats(paths.of().stats, self.touches.rows)  # her max HP, level and DEF, and where from
+        # her max HP, level and DEF, and where from (a W.DEF kept from before this run judged against the perception
+        # service's session it looks through: bootstrap.HerStats.window_doubt)
+        self.stats = HerStats(paths.of().stats, self.touches.rows, session=session_of_feed(feed))
         self._notes: list[str] = []      # what changed of them since the reserve was last made (_reserve_check)
         self._given(her, feed, eyes)
         self.kinds_seen: dict[str, tuple[float, str]] = {}  # kinds a look saw that the map's spawn list hasn't
@@ -381,7 +383,7 @@ class Hunter:
         if her is not None:
             self.stats.see_max_hp(int(her.hp))
             self.stats.see_level(her.level, "given")
-            self.stats.window = Defence(her.defence, her.defence, her.defence, "stat window")
+            self.stats.window = Defence(her.defence, her.defence, her.defence, "stat window", at=time.time())
             self.stats.refit(self.touches.rows)
             return
         hp_of, level, _ = self._hud_state(feed, eyes)
@@ -590,33 +592,48 @@ class Hunter:
 
     def _stats_read(self, reading, out) -> None:
         """What her stat window read (statcheck.StatCheck.run, `reading`: perception.stat_window.StatReading) to her
-        stats (behavior.bootstrap): her W.DEF hers (HerStats.see_window: the reserve and the positioning model take it,
-        her touches check it), kept with her level and this session; her max HP if her HUD's number hasn't read (a
-        disagreement said); her level if nothing has read it (else a disagreement said); her max MP her casts are
-        reckoned at (config.toml's until now; said); her SPEED and JUMP said where config.toml's, which plan her moves,
-        differ. Her reserve made again (_reserve_check: what changed said with it)."""
+        stats (behavior.bootstrap), each checked first (the review of 2026-10-28: a misread was taken as read): its
+        level and max HP not her HUD's where both are read (statcheck.disagreement), none of it is taken, said. Else
+        her W.DEF hers (HerStats.see_window: the reserve and the positioning model take it, unless it's outside 0 to
+        DEF_TOP or her touches don't bear it out: HerStats.window_doubt), kept with her level and this session; her max
+        HP if her HUD's number hasn't read, where her HUD's as her stats file last kept it or her HP bar bears it out
+        (statcheck.borne); her level if nothing has read it; her max MP her casts are reckoned at (config.toml's until
+        now; said), where her MP bar bears it out or it's within statcheck.MP_SPAN of theirs; her SPEED and JUMP said
+        where config.toml's, which plan her moves, differ. Her reserve made again (_reserve_check: what changed said
+        with it)."""
         from ..motion import physics
         from .bootstrap import HerStats as Stats
+        from .statcheck import MP_SPAN, borne, disagreement
         st, notes = self.stats, []
         level, most = reading.level, reading.max_hp
-        if level is not None:
-            if st.level is None:
-                if (note := st.see_level(level, Stats.WINDOW_FROM)) is not None:
-                    notes.append(note)
-            elif level != st.level:
-                notes.append(f"her stat window says level {level}, {st.level_from} {st.level} (theirs taken)")
-        if most is not None:
-            if st.max_hp is None:
+        scene = getattr(self.stat_check, "scene", None)
+        if (off := disagreement(reading, st)) is not None:
+            notes.append(f"her stat window's read not taken: it says {off} (a misread?); her DEF as it was, "
+                         f"{st.defence.words()}")
+            self._notes.extend(notes)
+            self._reserve_check()
+            return
+        if level is not None and st.level is None:
+            if (note := st.see_level(level, Stats.WINDOW_FROM)) is not None:
+                notes.append(note)
+        if most is not None and st.max_hp is None:
+            why = borne(reading.get("hp"), getattr(scene, "hp", None), st.kept_max_hp)
+            if why is None:
                 if (note := st.see_max_hp(most, Stats.WINDOW_FROM)) is not None:
                     notes.append(note)
-            elif most != st.max_hp:
-                notes.append(f"her stat window says max HP {most}, {Stats.HP_FROM} {st.max_hp} (its taken)")
+            else:
+                notes.append(f"her stat window's max HP {most} not taken ({why})")
         mp = reading.max_mp
         if mp is not None and mp > 0 and float(mp) != float(self.max_mp):
-            notes.append(f"her max MP {mp} by her stat window (was {self.max_mp:g}, config.toml [character] mp): her "
-                         "casts reckoned at it")
-            self.max_mp = float(mp)
-            self.attacks.max_mp = float(mp)
+            why = borne(reading.get("mp"), getattr(scene, "mp", None), self.max_mp, MP_SPAN)
+            if why is None:
+                notes.append(f"her max MP {mp} by her stat window (was {self.max_mp:g}, config.toml [character] mp): "
+                             "her casts reckoned at it")
+                self.max_mp = float(mp)
+                self.attacks.max_mp = float(mp)
+            else:
+                notes.append(f"her stat window's max MP {mp} not taken ({why}): her casts reckoned at "
+                             f"{self.max_mp:g} as before")
         c = physics.CHARACTER
         for name, mine in (("speed", c.speed), ("jump", c.jump)):
             v = reading.get(name)

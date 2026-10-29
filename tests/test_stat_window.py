@@ -278,9 +278,9 @@ def test_what_it_reads_is_her_def_kept_over_her_touches(tmp_path):
     st = HerStats(tmp_path / "her_stats.json")
     drawn = sw.compose(VALUES, base=_base())
     got = sw.read(drawn.frame, drawn.ocr)
-    note = st.see_window(got.wdef, at=0.0, level=got.level, session="1234", read=got.values)
+    note = st.see_window(got.wdef, level=got.level, session="1234", read=got.values)
     assert note.startswith("her DEF 111 (her stat window's W.DEF, read ")
-    again = HerStats(tmp_path / "her_stats.json")
+    again = HerStats(tmp_path / "her_stats.json", session="1234")  # (the next run, the same session: hers)
     assert again.defence.source == "stat window" and again.defence.low == 111
     assert again.window_read["level"] == 28 and again.window_read["session"] == "1234"
     assert again.window_read["read"]["hp"] == [840, 840] and again.window_read["read"]["acc"] == 85
