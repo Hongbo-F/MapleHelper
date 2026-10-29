@@ -663,10 +663,7 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
         from .perception.messages import warm
         warm()
     hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
-    hunter.config_keys = cfg.keys
-    if start.attack_off and not viewer:
-        _log(f"  the remembered key bindings have {start.attack_off}: no regular attacks this run (Lucky Seven only)")
-        hunter.regular_off(f"the remembered key bindings: {start.attack_off}")
+    hunter.config_keys = cfg.keys  # (the game's Attack on no key when last read: said, the regular attack tried again)
     if not viewer and hasattr(hunter, "actions") and not keymap.publish(keys, why=f"`{args.cmd}` at its start"):
         _log("  her keys for the Lie Detector's allowance not written (the player keeps the ones it has)")
     hunts = throws and not viewer and hasattr(args, "low_hp")  # (`nav`'s trips have the stop as it is)

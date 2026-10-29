@@ -276,6 +276,12 @@ class Hunter:
         self.moves = MoveWatch()
         self._misses_said: list[tuple[float, float, float]] = []  # her attack's MISS popups said lately: (t, x, y)
         self.config_keys = keys  # (config.toml's [keys] as the command has them: remembered beside a read, keymap)
+        self.keys_read_at: float | None = None  # when a check's read of the game's window last had her keys (this run)
+        self._keys_suspected = False  # the remembered binding marked doubted by this run (keys_doubted)
+        self._doubts_paged: set[str] = set()  # the doubts' kinds paged outside the hunt loop (once a run each)
+        self._pet_doubt = None  # her pet food doubted (PetCare.on_doubt), for health_check to raise in the hunt loop
+        self.pet.trusted = self._pet_key_trusted
+        self.pet.on_doubt = self._pet_doubted
         self.doubts_raise = False
         self.key_check: KeyCheck | None = None  # (made at the first check)
         self.refused_dot = None  # her dot (minimap px) at the game's last refusal of her presses on a rope ...
@@ -547,10 +553,14 @@ class Hunter:
         moves = getattr(self, "moves", None)  # (her moves' keys: behavior.keycheck.MoveWatch)
         if moves is not None and (doubt := moves.due()) is not None:
             self._doubted(doubt)
+        if (doubt := getattr(self, "_pet_doubt", None)) is not None:  # (her pet food's: PetCare.on_doubt)
+            self._pet_doubt = None
+            self._doubted(doubt)
         if (watch is not None and getattr(watch, "deferred", None) is not None and watch.deferred.kind == "stars"
                 and time.monotonic() - watch.deferred.known > STARS_WAIT_S):  # (out of darts' stop waits no longer)
             stop, watch.deferred, watch.skill_held = watch.deferred.stop, None, False
             self.log(f"  the key check put off for {STARS_WAIT_S:.0f} s: out of darts' stop")
+            self.keys_doubted("stars", f"the key check put off for {STARS_WAIT_S:.0f} s")
             stop.at = time.monotonic()
             raise stop
         if (watch is not None and watch.deferred is not None and self.doubts_raise and unquiet(self, s) is None
@@ -565,7 +575,8 @@ class Hunter:
         her casts CAST_DOUBT times, the casts' watch; her jumps or runs didn't move her, MoveWatch.due): said in capitals
         and sent as a telemetry event 'key_doubt'; a regular doubt's presses held; in the hunt loop (`doubts_raise`)
         KeyDoubt raised for it to run the check (check_keys), elsewhere whoever is at the PC paged to run `gamelab keys
-        --read`."""
+        --read` (once a run for each kind of doubt) and the remembered binding marked if it's the doubt's
+        (keys_doubted)."""
         regular = doubt.kind == "regular"
         text = doubt.text() + (": checking her stars, then the game's key bindings" if regular
                                else ": checking the game's key bindings")
@@ -576,17 +587,69 @@ class Hunter:
             self.hold_regular()
         if self.doubts_raise:
             raise KeyDoubt(doubt)
+        self.keys_doubted(doubt.kind, "not in the hunt loop: no check")
         if not regular:
-            self.log("  (not in the hunt loop: no check here)")
-            from ..control import alarm
-            alarm.page("MapleStory: her keys", f"gamelab: {doubt.text().lower()}. Check the game's Key Bindings (\\), "
-                       "or run `python -m gamelab keys --read`.")
+            # (paged once a run for each kind: the review of 2026-10-28 had a casts doubt page 8 times in 2.5 minutes,
+            # its 3 beeps on the hunter's own thread each time; the regular doubt's hold makes it once already)
+            kinds = self.__dict__.setdefault("_doubts_paged", set())
+            paged = doubt.kind in kinds
+            self.log("  (not in the hunt loop: no check here" + ("; paged already this run)" if paged else ")"))
+            if not paged:
+                kinds.add(doubt.kind)
+                from ..control import alarm
+                alarm.page("MapleStory: her keys", f"gamelab: {doubt.text().lower()}. Check the game's Key Bindings "
+                           "(\\), or run `python -m gamelab keys --read`.")
             return
         self.log("  (not in the hunt loop: no check here; her regular presses held, Lucky Seven only, for the rest of "
                  "this run)")
         from ..control import alarm
         alarm.page("MapleStory: the attack key", f"gamelab: {doubt.text().lower()}. Its regular presses are held. "
                    "Check the game's Key Bindings (\\), or run `python -m gamelab keys --read`.")
+
+    # Each doubt's kind and her keys it's about (keys_doubted): the remembered binding is marked only for a doubt about
+    # one it has otherwise than config.toml (None: any of them)
+    DOUBTED_KEYS = {"regular": ("attack",), "casts": ("lucky_seven", "left", "right"), "stars": ("lucky_seven",),
+                    "moves": ("left", "right", "jump", "up", "down"), "pet": ("pet_food",), "stall": None}
+
+    def keys_doubted(self, kind: str, why: str) -> None:
+        """Her keys doubted (a doubt of `kind`) and not checked (`why`: outside the hunt loop, no quiet moment, the
+        window not read, none within a check's gap): if her keys in use are a remembered binding's otherwise than
+        config.toml's for what the doubt is about (DOUBTED_KEYS; control.keymap.at_start) and no read of the game's
+        window this run had them (`keys_read_at`), that binding is marked so (keymap.suspect): the next command starts
+        with config.toml's [keys], said (the review of 2026-10-28: a stale MOVE RIGHT remembered on E, never checked in
+        12 runs, came back at every start). Once a run."""
+        from ..control import keymap
+        cfg, actions = getattr(self, "config_keys", None), getattr(self, "actions", None)
+        if (getattr(self, "_keys_suspected", False) or getattr(self, "keys_read_at", None) is not None or cfg is None
+                or actions is None):
+            return
+        about = self.DOUBTED_KEYS.get(kind)
+        diff = [d for d in keymap.changes(cfg, actions.keys) if about is None or d[0] in about]
+        if not diff:
+            return
+        if keymap.suspect(f"a {kind} doubt not checked ({why}): {keymap.changes_text(diff)}"):
+            self._keys_suspected = True
+            self.log(f"  her keys are the remembered binding's ({keymap.changes_text(diff)}), not read this run: it's "
+                     "marked doubted, and the next command starts with config.toml's [keys] (`gamelab keys --read` "
+                     "reads the game's)")
+
+    def _pet_key_trusted(self) -> bool:
+        """Whether her pet food key in use is config.toml's, or one a read of the game's window had this run (her pet's
+        care feeds by it blind; else it reads her pet's fullness after each food: PetCare.trusted)."""
+        cfg = getattr(self, "config_keys", None)
+        if cfg is None or getattr(self, "keys_read_at", None) is not None:
+            return True
+        return getattr(self.actions.keys.pet_food, "name", None) == getattr(cfg.pet_food, "name", None)
+
+    def _pet_doubted(self, text: str) -> None:
+        """Her pet food taps took no effect (PetCare.check: her pet's fullness, read after each, didn't rise; paged
+        there): in the hunt loop a "pet" doubt for health_check to raise (KeyDoubt: the window read, PET FOOD followed
+        where the game has it; a check that doesn't run marks a remembered key itself), elsewhere a remembered key not
+        read this run marked (keys_doubted)."""
+        if self.doubts_raise:
+            self._pet_doubt = Doubt.pet(text, time.monotonic())
+        else:
+            self.keys_doubted("pet", "her pet food taps took no effect, not in the hunt loop: no check")
 
     def check_keys(self, doubt):
         """The check after a doubt (keycheck.KeyCheck.run: her stars, a place, the game's key bindings, what then); its

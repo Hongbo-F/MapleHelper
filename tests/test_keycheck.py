@@ -802,6 +802,34 @@ def test_her_stars_a_cast_that_took_mp_or_hurt_its_target_says_she_has_them(quie
     assert check.run(_doubt()).stars == "test"
 
 
+def test_her_stars_test_takes_no_bar_for_lowered_once_another_of_its_kind_crossed_it(quiet, monkeypatch):
+    """Found after the rebase onto her touches (loop_tree_attack_no_darts, 2026-10-28): her stars gone, her test cast
+    at a Horny Mushroom at 35% did nothing, but another at 3.5% walked over it and the looks' tracks swapped them: its
+    bar "lowered", "she has them". Once another of its kind has come within BAR_NEAR of it since the key, its bar tells
+    nothing; without that, a lower bar does."""
+    now = [100.0]
+
+    def clock():
+        now[0] += 0.05
+        return now[0]
+    monkeypatch.setattr(keycheck.time, "monotonic", clock)
+    h = _stars_hunter()
+    check = KeyCheck(h)
+
+    def looks(seq):
+        it = iter(seq + [seq[-1]] * 100)
+        return lambda: SimpleNamespace(t=now[0], where=SimpleNamespace(x=0.0, y=0.0), monsters=next(it),
+                                       platform=h.place)
+    target = mon(x=-120.0, bar=0.35, track=14)
+    h.look = looks([[mon(x=-120.0, bar=0.35, track=14), mon(x=-40.0, bar=0.035, track=11)],
+                    [mon(x=-90.0, bar=0.35, track=14), mon(x=-70.0, bar=0.035, track=11)],
+                    [mon(x=-82.0, bar=0.035, track=14), mon(x=-120.0, bar=0.35, track=11)]])
+    assert check._evidence(now[0], target) is None
+    h.look = looks([[mon(x=-120.0, bar=0.35, track=14), mon(x=-40.0, bar=0.035, track=11)],
+                    [mon(x=-120.0, bar=0.2, track=14), mon(x=-40.0, bar=0.035, track=11)]])
+    assert check._evidence(now[0], target) == "lowered its target's bar"
+
+
 def test_her_stars_test_ends_at_a_touch(quiet, monkeypatch):
     """The review's case: a monster on her back swiped at every cast for 8 s. A touch since the test began ends it
     (not known)."""
@@ -1070,3 +1098,174 @@ def test_a_stall_reads_the_key_bindings_first_once_then_stands_by(monkeypatch):
     assert h._stuck() is True and h.report.stop == "stuck"
     h.h.doubts_raise, h._stall_at = False, None
     assert h._stuck() is True
+
+# --- after the review of 2026-10-28 ---------------------------------------------------------------------------------
+
+def _any_doubt(kind: str) -> keycheck.Doubt:
+    if kind == "regular":
+        return _doubt()
+    if kind == "stall":
+        return keycheck.Doubt.stall("NO KILL, PICK-UP OR NEW GROUND FOR 120 S (...)", 1000.0)
+    if kind == "pet":
+        return keycheck.Doubt.pet("HER PET FOOD TOOK NO EFFECT 2 TIMES IN A ROW (...)", 1000.0)
+    return _kind_doubt(kind)
+
+
+@pytest.mark.parametrize("kind", ["regular", "moves", "casts", "stall"])
+@pytest.mark.parametrize("bindings, field", [({"z": 8, "q": None}, "pick_up"), ({"d": 3, "k": None}, "chair"),
+                                             ({"x": 54, "space": None}, "sit")])
+def test_a_key_taken_off_with_nothing_else_moved_is_pressed_no_more(quiet, kind, bindings, field):
+    """The review's probe: the game showing QUEST on Z and PICK UP on no key (her chair's D SKILL, her sit's X NPC
+    CHAT), nothing else moved: under every doubt she presses it no more this run (Hunter.follow called; until the
+    review only when something moved, so Z went on, 174-786 times a 4-minute run, onto whatever Z is now), remembered
+    and said."""
+    h = Hunter(Game({**kb.LIVE, **bindings}), mp_shown_at=1001.0)
+    KeyCheck(h).run(_any_doubt(kind))
+    assert getattr(h.actions.keys, field) is None and len(h.followed) == 1
+    assert any(f"{field.replace('_', ' ')} on no key: not pressed any more" in line for line in h.lines)
+    from gamelab import paths
+    assert json.loads((paths.LAB / "keybindings-thief.json").read_text())["keys"][field] is None
+
+
+@pytest.mark.parametrize("bindings, what", [({"ctrl": None, "a": 52}, "switched"), ({"ctrl": None}, "off")])
+def test_out_of_darts_doubted_attack_moved_or_off_and_lucky_seven_as_configured_still_the_stop(quiet, bindings, what):
+    """The review's probe: out of darts' stop due, the window read first, ATTACK on A (or on no key) with her Lucky
+    Seven where configured: her regular attack followed (or off), paged, and the stop raised all the same (until the
+    review it was dropped there, DartWatch's `fired` kept: it never came due again that run)."""
+    stop = OutOfDarts(20, 24.0, 1.0, at=1.0)
+    h = Hunter(Game({**kb.LIVE, **bindings}), mp_shown_at=None)
+    h.darts.fired = True
+    with pytest.raises(OutOfDarts) as e:
+        KeyCheck(h).run(_kind_doubt("stars", stop))
+    assert e.value is stop and h.darts.fired
+    assert (h.rekeyed == "a") if what == "switched" else (h.off is not None)
+    assert len(quiet) == 1 and quiet[0][0] == "MapleStory: the attack key"
+    assert any("LUCKY SEVEN ON SHIFT AS CONFIGURED" in line and "out of darts' stop" in line for line in h.lines)
+
+
+def test_out_of_darts_doubted_attack_and_lucky_seven_moved_both_followed_the_stretch_starts_again(quiet):
+    h = Hunter(Game({**kb.LIVE, "ctrl": None, "a": 52, "shift": None, "q": "lucky_seven"}), mp_shown_at=None)
+    h.darts.fired, h.darts.keys = True, [1.0, 2.0]
+    out = KeyCheck(h).run(_kind_doubt("stars", OutOfDarts(20, 24.0, 1.0)))
+    assert out.what == "switched" and (h.actions.keys.attack.name, h.actions.keys.lucky_seven.name) == ("a", "q")
+    assert not h.darts.fired and h.darts.keys == []
+
+
+def test_her_pet_food_doubted_followed_where_the_game_has_it_or_as_configured(quiet):
+    """A "pet" doubt (behavior.pet: her pet food taps took no effect; Hunter._pet_doubted in the hunt loop): the window
+    read, PET FOOD followed to where the game has it (paged as her keys), or on her key as configured: out of Pet
+    Food? (her pet's care paged that already)."""
+    h = Hunter(Game({**kb.LIVE, "u": None, "i": "pet_food"}), mp_shown_at=None)
+    out = KeyCheck(h).run(_any_doubt("pet"))
+    assert out.what == "followed" and h.actions.keys.pet_food.name == "i" and quiet[-1][0] == "MapleStory: her keys"
+    h = Hunter(Game(), mp_shown_at=None)
+    out = KeyCheck(h).run(_any_doubt("pet"))
+    assert out.what == "as configured" and "PET FOOD ON U AS CONFIGURED" in out.text and "out of Pet Food?" in out.text
+    assert not h.followed and out.stars == ""
+
+
+def test_a_retreat_for_the_check_that_timed_out_has_later_checks_wait_where_she_is(quiet, monkeypatch):
+    """The review's run (a stale MOVE RIGHT on E): a casts doubt's retreat timed out and the check was put off twice.
+    A retreat for a check that times out: the next check (this run's KeyCheck) waits for a quiet moment where she is,
+    as for her moves doubted."""
+    from gamelab.behavior import retreat
+
+    def stuck(h, seen, why, log=None, rng=None):
+        h.retreats += 1
+        return SimpleNamespace(result="timeout")
+    monkeypatch.setattr(retreat, "away", stuck)
+    h = Hunter(Game(), mp_shown_at=None)
+    h.monsters = [mon(x=50.0, y=0.0)]
+    check = KeyCheck(h)
+    assert check.run(_any_doubt("casts")).what == "put off" and check.no_retreat and h.retreats == 1
+    assert any("her retreat for the key check timed out" in line for line in h.lines)
+    assert check.run(_any_doubt("casts")).what == "put off" and h.retreats == 1  # (no retreat now)
+
+
+@pytest.mark.parametrize("how", ["held", "put off", "not read"])
+def test_a_doubt_not_checked_tells_her_hunter(quiet, monkeypatch, how):
+    """Every way a doubt gets no check (none within the gap, no quiet moment DEFERS_MAX times, the window not read)
+    tells her hunter (Hunter.keys_doubted: a remembered binding not read this run is marked doubted)."""
+    told = []
+    h = Hunter(Game(opens=how != "not read"), mp_shown_at=None)
+    h.keys_doubted = lambda kind, why: told.append((kind, why))
+    check = KeyCheck(h)
+    if how == "held":
+        h.attacks.watch.checks = [time.monotonic()]
+        check.run(_any_doubt("casts"))
+    elif how == "put off":
+        h.monsters, h.clear_after_retreat = [mon(x=50.0, y=0.0)], False
+        for _ in range(DEFERS_MAX + 1):
+            check.run(_any_doubt("casts"))
+    else:
+        check.run(_any_doubt("casts"))
+    assert told and told[-1][0] == "casts", told
+
+
+def _doubting_hunter(remembered: dict | None = None, doubts_raise: bool = False):
+    """A Hunter (behavior.hunter) as far as its doubts go, her keys config.toml's with `remembered`'s over them."""
+    import dataclasses
+    from gamelab.behavior.hunter import Hunter as RealHunter
+    from maplehelper.config import GameKeys
+    h = object.__new__(RealHunter)
+    cfg = GameKeys(attack=K("ctrl"), lucky_seven=K("shift"), jump=K("alt"), pick_up=K("z"), pet_food=K("u"),
+                   up=K("up"), down=K("down"), left=K("left"), right=K("right"))
+    h.config_keys = cfg
+    h.actions = SimpleNamespace(keys=dataclasses.replace(cfg, **{k: K(v) for k, v in (remembered or {}).items()}))
+    h.attacks = SimpleNamespace(watch=RegularWatch(), casts=None)
+    h.doubts_raise, h.lines = doubts_raise, []
+    h.log = h.lines.append
+    return h
+
+
+def test_a_doubt_outside_the_hunt_loop_pages_once_a_run_for_each_kind(quiet, monkeypatch):
+    """The review's stale-arrow run paged 'MapleStory: her keys' 8 times in 2.5 minutes for its casts doubt, 3 beeps on
+    the hunter's own thread each time: once a run for each kind now (said every time)."""
+    monkeypatch.setattr(keycheck.telemetry, "emit", lambda *a, **k: None)
+    h = _doubting_hunter()
+    for _ in range(3):
+        h._doubted(_any_doubt("casts"))
+    h._doubted(_any_doubt("moves"))
+    assert [p[0] for p in quiet] == ["MapleStory: her keys", "MapleStory: her keys"]
+    assert sum("paged already this run" in line for line in h.lines) == 2
+
+
+def test_a_remembered_key_doubted_and_not_checked_is_marked_for_the_next_start(quiet):
+    """Hunter.keys_doubted: her keys the remembered binding's (MOVE RIGHT on E) and a moves doubt outside the hunt loop:
+    the binding marked, the next start config.toml's; a doubt about keys it has as config.toml (her Lucky Seven's,
+    for a stars doubt) or a read of the window this run: not marked."""
+    from gamelab.control import keymap
+    remembered = {"right": "e"}
+    for kind, read, marked in (("stars", None, False), ("moves", 5.0, False), ("moves", None, True)):
+        h = _doubting_hunter(remembered)
+        keymap.remember(h.actions.keys, "thief", config_keys=h.config_keys)
+        h.keys_read_at = read
+        h.keys_doubted(kind, "not in the hunt loop: no check")
+        start = keymap.at_start(h.config_keys, "thief")
+        assert (start.keys.right.name == "right") == marked, kind
+    assert any("marked doubted" in line for line in h.lines)
+
+
+def test_her_pet_food_doubted_in_the_hunt_loop_is_raised_for_its_check(quiet, monkeypatch):
+    """PetCare.on_doubt (Hunter._pet_doubted): in the hunt loop a "pet" doubt that health_check raises (KeyDoubt: the
+    window read, PET FOOD followed; nothing marked before it runs); elsewhere a remembered pet food key not read this
+    run marked."""
+    from gamelab.behavior.darts import DartWatch
+    from gamelab.behavior.keycheck import MoveWatch
+    from gamelab.control import keymap
+    monkeypatch.setattr(keycheck.telemetry, "emit", lambda *a, **k: None)
+    h = _doubting_hunter({"pet_food": "i"}, doubts_raise=True)
+    keymap.remember(h.actions.keys, "thief", config_keys=h.config_keys)
+    h.hp_watch, h.darts, h.moves = SimpleNamespace(due=lambda: None), DartWatch(), MoveWatch()
+    h.drink_if_low, h._messages, h._hear_chat = (lambda s: None), (lambda: ""), (lambda s: None)
+    h.keys_read_at, h._pet_doubt = None, None
+    assert not h._pet_key_trusted()
+    h._pet_doubted("HER PET FOOD TOOK NO EFFECT 2 TIMES IN A ROW (...)")
+    with pytest.raises(KeyDoubt) as e:
+        h.health_check(SimpleNamespace(t=10.0, hp=1.0, where=None))
+    assert e.value.doubt.kind == "pet" and keymap.at_start(h.config_keys, "thief").keys.pet_food.name == "i"
+    h.doubts_raise = False
+    h._pet_doubted("HER PET FOOD TOOK NO EFFECT 2 TIMES IN A ROW (...)")
+    assert h._pet_doubt is None and keymap.at_start(h.config_keys, "thief").keys.pet_food.name == "u"
+    h.keys_read_at = 1.0
+    assert h._pet_key_trusted()

@@ -666,3 +666,88 @@ def test_the_pet_waits_while_another_command_is_setting_the_client_right(monkeyp
     finally:
         window_size._unlock(held)
     assert m._pet_unfit("MapleStory", None, (1366, 768)) is None
+
+
+# --- her pet food doubted (the review of 2026-10-28: a remembered pet food key the game no longer had) ---------------
+
+class _DeadKey(_Actions):
+    """Her pet food key tapping something else in the game: the fullness doesn't move."""
+
+    def feed_pet(self):
+        self.game.plans.append("pet_food")
+        return True
+
+
+@pytest.fixture
+def pages(monkeypatch):
+    from gamelab.control import alarm
+    got = []
+    monkeypatch.setattr(alarm, "page", lambda title, text: got.append((title, text)))
+    return got
+
+
+def test_two_foods_in_a_row_that_don_t_raise_its_fullness_are_a_doubt_no_more_taps(state, pages):
+    """At a check her pet's fullness is read after each food: FOOD_DOUBT in a row that didn't raise it are the doubt
+    (out of Pet Food, or the key another in the game): no third tap, said, paged, `on_doubt` told; not counted fed."""
+    game, told = _Game(40), []
+    care = PetCare(_DeadKey(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: 1000.0)
+    care.on_doubt = told.append
+    assert care.check() == 40
+    assert game.plans == ["pet_info", "pet_food", "pet_food", "pet_close"]
+    saved = json.loads(state.read_text())
+    assert saved["food_doubt"]["key"] == "u" and "fed" not in saved and saved["level"] == 40.0
+    assert len(pages) == 1 and pages[0][0] == "MapleStory: her pet food" and "out of pet food" in pages[0][1]
+    assert len(told) == 1 and told[0].startswith("HER PET FOOD TOOK NO EFFECT 2 TIMES IN A ROW (its key U; her pet's "
+                                                 "fullness 40 -> 40 -> 40")
+
+
+def test_a_doubted_key_isn_t_tapped_for_a_while_then_its_food_is_checked_by_a_read(state, pages):
+    """After the doubt the key isn't tapped for FOOD_DOUBT_WAIT_S (said once); then a food due is a check, not one by
+    blind: a food that raises its fullness clears the doubt."""
+    game, logs = _Game(40), []
+    now = [1000.0]
+    actions = _DeadKey(game)
+    care = PetCare(actions, _Eyes(), ocr=game, log=logs.append, clock=lambda: now[0])
+    care.check()
+    game.plans.clear()
+    now[0] += 60
+    assert care.tend() == pytest.approx(40 - 60 / pet.TICK_S) and game.plans == []
+    assert care.tend() is not None and game.plans == []
+    assert sum("not fed: her pet food on U took no effect" in line for line in logs) == 1
+    now[0] += pet.FOOD_DOUBT_WAIT_S
+    care.actions = _Actions(game)  # (Pet Food bought again, or the key put right)
+    level = care.tend()
+    assert game.plans[0] == "pet_info" and "pet_food" in game.plans and level >= pet.FEED_TO
+    assert "food_doubt" not in json.loads(state.read_text())
+
+
+def test_a_key_not_trusted_is_fed_by_a_check_and_waits_for_a_moment_to_read(state, pages):
+    """A pet food key not config.toml's nor read off the game's window this run (`trusted` False: a remembered one)
+    isn't fed by blind once read: a food due is a check (her pet's fullness read after each); with no read to be made
+    now (`read_ok` False) it waits while the fullness followed is BLIND_BELOW or more, and goes by blind under it. A
+    check that saw its food take lets it go by blind for VERIFIED_S (the babysitter beside the user's own play), then
+    a check again."""
+    game = _Game(85)
+    now = [10_000.0]
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: now[0])
+    care.trusted = lambda: False
+    assert care.tend() == 85
+    game.plans.clear()
+    now[0] += 30 * pet.TICK_S  # 55: a food due
+    game.fullness = 55
+    assert care.tend(read_ok=False) == pytest.approx(55) and game.plans == []  # (waited for a moment to read)
+    assert care.tend() >= pet.FEED_TO and game.plans[0] == "pet_info" and "pet_food" in game.plans
+    game.plans.clear()
+    state.write_text(json.dumps({**json.loads(state.read_text()), "level": 50.0, "at": now[0]}))
+    assert care.tend() == pytest.approx(80.0) and game.plans == ["pet_food"]  # (its food seen to take: blind a while)
+    game.plans.clear()
+    now[0] += pet.VERIFIED_S
+    state.write_text(json.dumps({**json.loads(state.read_text()), "level": 50.0, "at": now[0]}))
+    game.fullness = 50
+    care.tend()
+    assert game.plans[0] == "pet_info"  # (a check again)
+    fresh = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: now[0])
+    fresh.trusted = lambda: False
+    game.plans.clear()
+    state.write_text(json.dumps({**json.loads(state.read_text()), "level": pet.BLIND_BELOW - 5.0, "at": now[0]}))
+    assert fresh.tend(read_ok=False) == pytest.approx(pet.BLIND_BELOW - 5.0 + pet.FOOD) and game.plans == ["pet_food"]

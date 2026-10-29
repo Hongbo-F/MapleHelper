@@ -38,8 +38,19 @@ key) is the one the player takes then, a few a minute. Nothing is read until the
 double-clicks her, and whoever is at the PC may be answering the Lie Detector with the mouse. Never read yet, she gets
 a food once FALLBACK_S have passed since the last, as when the panel can't be read.
 
-Keys: pet food (config.toml [keys] pet_food), Esc, two left clicks on her and one on her window's SHOW PET INFO; and,
-while the game's client is unfit, at most one Alt+Enter-twice try every TRY_EVERY_S (PetWait). Nothing else.
+Keys: pet food (config.toml [keys] pet_food, or where a read of the game's KEY BINDINGS window followed it:
+control.keymap), Esc, two left clicks on her and one on her window's SHOW PET INFO; and, while the game's client is
+unfit, at most one Alt+Enter-twice try every TRY_EVERY_S (PetWait). Nothing else.
+
+Her pet food doubted (since the review of 2026-10-28: a remembered pet food key the game no longer had fed nothing, and
+the fullness followed rose by 30 a food all the same). At a check, FOOD_DOUBT taps in a row after which the panel's
+fullness, read after each, didn't rise are the doubt (out of Pet Food, or the key another in the game): no more taps
+then, said in capitals, paged, `on_doubt` told (the hunter marks a remembered key and, in the hunt loop, reads the
+game's key bindings), and that key not tapped again for FOOD_DOUBT_WAIT_S. A key not `trusted` (neither config.toml's
+nor one a read of the game's window had this run: Hunter._pet_key_trusted; nor one whose food a check saw take in the
+last VERIFIED_S), or one doubted before, isn't fed by blind: a food due is a check (read, fed while low, each food read
+again), waited for while a read can't be made now and the fullness followed is BLIND_BELOW or more; by blind only under
+it, with the alarm up, or if the check can't read.
 
 While the game's client isn't fit to read (`pet --every`, PetWait; since 2026-10-26): another size, not calibrated at
 its size, or the game drawing its picture off it (perception.framecheck.FIX_KINDS). At 23:21 on 2026-10-25 the game was
@@ -78,6 +89,12 @@ FEED_BELOW = 70        # read fullness under which she feeds it ...
 FEED_TO = 80           # ... and fed until at least this (a food gives 30: 50 -> 80, 40 -> 70 -> 100)
 MAX_FEEDS = 3          # Pet Food at most in one check (9 -> 99 took three)
 CHECK_EVERY_S = 20 * 60  # s between checks; the pet lost about 90 fullness over a night and a morning summoned
+FOOD_DOUBT = 2         # pet food taps in a row her pet's fullness, read after each, didn't rise for: the doubt (a food
+                       # gives 30, live 9 -> 39 -> 69 -> 99; one not read isn't counted)
+FOOD_DOUBT_WAIT_S = 30 * 60  # s that key isn't tapped again after its doubt (a food is due every 37 min at most)
+BLIND_BELOW = 20       # followed fullness under which a food due on a key not trusted goes by blind when no read can
+                       # be made now (over it, a moment to read is waited for: 40 points are 50 minutes or so)
+VERIFIED_S = 2 * 60 * 60  # s a key not trusted goes by blind after a check saw its food take (then a check again)
 FALLBACK_S = 2 * 60 * 60  # s since the last feed after which a check that can't read the panel feeds it anyway
 BODY_ABOVE_TAG = 42    # game px from her name tag's middle up to her body's middle (tag at y 540, body 495-500 at 1366x768)
 CLICK_GAP_MS = 90      # between the two clicks of a double-click
@@ -167,6 +184,9 @@ class PetCare:
     def __init__(self, actions, eyes, ocr=None, log: Callable[[str], None] = print, clock=time.time):
         self.actions, self.eyes, self.log, self.clock = actions, eyes, log, clock
         self._ocr = ocr
+        self.trusted: Callable[[], bool] = lambda: True  # whether her pet food key may be fed by blind (see the top)
+        self._verified: tuple[str, float] | None = None  # a key not trusted whose food took at a check, and when
+        self.on_doubt: Callable[[str], None] | None = None  # told of a doubt of her pet food (its words)
 
     @property
     def ocr(self):
@@ -205,6 +225,26 @@ class PetCare:
             _save(state)
             return self.check() if present and read_ok else None
         if present and state["level"] < FOLLOW_FEED_BELOW:
+            if (doubted := self._doubted(state, now)) is not None:  # (no tap on a key that took no effect lately)
+                if not state.get("doubt_said"):
+                    self.log(f"pet: fullness about {state['level']:.0f}, not fed: {doubted}")
+                    state["doubt_said"] = True
+                _save(state)
+                return state["level"]
+            if (not self._may_go_blind(now) or "food_doubt" in state) and not client.alarm_up():  # (a check)
+                if not read_ok and state["level"] >= BLIND_BELOW:
+                    _save(state)  # (a moment to read waited for)
+                    return state["level"]
+                if read_ok:
+                    _save(state)
+                    if (got := self.check()) is not None:
+                        return got
+                    fed = state.get("fed")
+                    state = _state()  # (as the check left it: it couldn't read the panel; a food by blind, as ever)
+                    follow(state, now, present)
+                    if "level" not in state or state.get("fed") != fed or self._doubted(state, now) is not None:
+                        _save(state)
+                        return state.get("level")
             self._feed()
             before = state["level"]
             state["level"], state["fed"] = min(100.0, before + FOOD), now
@@ -238,7 +278,7 @@ class PetCare:
             _save(state)
             return None
         if fullness is None:
-            if self.clock() - state.get("fed", 0.0) >= FALLBACK_S:
+            if self.clock() - state.get("fed", 0.0) >= FALLBACK_S and self._doubted(state, self.clock()) is None:
                 self._feed()
                 state["fed"] = self.clock()
                 self.log(f"pet: its fullness couldn't be read; fed it anyway ({FALLBACK_S // 3600} h since a feed)")
@@ -248,22 +288,81 @@ class PetCare:
             state["retry_at"] = self.clock() + RETRY_S
             _save(state)
             return None
-        start, feeds = fullness, 0
-        while fullness < FEED_TO and (feeds > 0 or fullness < FEED_BELOW) and feeds < MAX_FEEDS:
+        start, feeds, took, none, reads = fullness, 0, 0, 0, [fullness]
+        blocked = self._doubted(state, self.clock())  # (no tap on a key that took no effect lately: read only)
+        while (blocked is None and fullness < FEED_TO and (feeds > 0 or fullness < FEED_BELOW) and feeds < MAX_FEEDS
+               and none < FOOD_DOUBT):
+            before = fullness
             self._feed()
             feeds += 1
             time.sleep(SETTLE_S)
             seen = self._read()
+            if seen is not None and seen <= before:
+                none += 1
+            else:
+                none, took = 0, took + 1
             fullness = seen if seen is not None else min(100, fullness + 30)
+            reads.append(fullness)
         self._close()
-        if feeds:
+        if took:
             state["fed"] = self.clock()
+        if none < FOOD_DOUBT and took:
+            state.pop("food_doubt", None)  # (a food took: its key works)
+            self._verified = (getattr(self.actions.keys.pet_food, "name", None), self.clock())
+            state.pop("doubt_said", None)
         state["fullness"] = fullness
         state["level"], state["at"], state["read_at"] = float(fullness), self.clock(), self.clock()  # followed from here
+        if none >= FOOD_DOUBT:
+            self._food_doubt(state, reads)
         _save(state)
-        self.log(f"pet: fullness {start}" + (f", fed {feeds} -> {fullness}" if feeds else ""))
+        self.log(f"pet: fullness {start}" + (f", fed {feeds} -> {fullness}" if feeds else "")
+                 + (f" (not fed: {blocked})" if blocked is not None and start < FEED_BELOW else ""))
         telemetry.emit("event", kind="pet", text=f"pet fullness {start}" + (f", fed {feeds} -> {fullness}" if feeds else ""))
+        if none >= FOOD_DOUBT and self.on_doubt is not None:
+            self.on_doubt(state["food_doubt"]["text"])
         return fullness
+
+    def _may_go_blind(self, now: float) -> bool:
+        """Whether a food due may go by blind (the fullness followed): her pet food key `trusted`, or one a check saw a
+        food of take within VERIFIED_S (the babysitter beside the user's own play: a read every food would double-click
+        her every 37 minutes or so)."""
+        if self.trusted():
+            return True
+        key = getattr(self.actions.keys.pet_food, "name", None)
+        return self._verified is not None and self._verified[0] == key and now - self._verified[1] < VERIFIED_S
+
+    def _doubted(self, state: dict, now: float) -> str | None:
+        """Why her pet food key isn't tapped now (its doubt FOOD_DOUBT_WAIT_S ago at the most, on this key), or None;
+        a doubt of another key (followed since) forgotten."""
+        doubt = state.get("food_doubt")
+        if not isinstance(doubt, dict):
+            return None
+        key = getattr(self.actions.keys.pet_food, "name", None)
+        if doubt.get("key") != key:
+            state.pop("food_doubt", None)
+            state.pop("doubt_said", None)
+            return None
+        if now - doubt.get("at", 0.0) >= FOOD_DOUBT_WAIT_S:
+            return None
+        return (f"her pet food on {key.upper()} took no effect {(now - doubt['at']) / 60:.0f} min ago (tried again "
+                f"{FOOD_DOUBT_WAIT_S / 60:.0f} min after it)")
+
+    def _food_doubt(self, state: dict, reads: list) -> None:
+        """FOOD_DOUBT taps in a row that didn't raise her pet's fullness (`reads`: the panel's before and after each):
+        said, sent as a telemetry event 'pet_doubt', paged (once in FOOD_DOUBT_WAIT_S a key at the most: no tap on it
+        meanwhile); that key not tapped again for FOOD_DOUBT_WAIT_S. `on_doubt` is told once the window is closed."""
+        key = getattr(self.actions.keys.pet_food, "name", "?")
+        text = (f"HER PET FOOD TOOK NO EFFECT {FOOD_DOUBT} TIMES IN A ROW (its key {key.upper()}; her pet's fullness "
+                f"{' -> '.join(str(r) for r in reads)}, read after each): out of Pet Food, or her pet food key another "
+                "in the game's Key Bindings?")
+        state["food_doubt"] = {"key": key, "at": self.clock(), "fullness": reads[-1], "text": text}
+        state.pop("doubt_said", None)
+        self.log(f"pet: {text}")
+        telemetry.emit("event", kind="pet_doubt", text=text, key=key)
+        from ..control import alarm
+        alarm.page("MapleStory: her pet food", f"gamelab: {text[0] + text[1:].lower()} Her pet isn't fed by "
+                   f"{key.upper()} for {FOOD_DOUBT_WAIT_S / 60:.0f} minutes. Check her Pet Food and the game's Key "
+                   "Bindings (\\), or run `python -m gamelab keys --read`.")
 
     def _feed(self) -> None:
         self.actions.feed_pet()

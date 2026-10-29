@@ -155,10 +155,64 @@ def test_a_remembered_binding_not_as_keys_can_be_is_left_out(lab, change, why):
     assert start.keys == _keys() and why in start.source and "left out" in start.source
 
 
-def test_attack_on_no_key_remembered_starts_the_regular_attack_off(lab):
+def test_attack_on_no_key_remembered_is_said_at_the_next_start_and_the_regular_attack_tried_again(lab):
+    """The game's Attack on no key when the binding was read: said at the next start, not kept (the review of
+    2026-10-28: kept, every later run started with the regular attack off, and nothing could doubt it again); her
+    regular attack is tried there on its key (5 presses without effect doubt it, as ever: __main__._hunter turns
+    nothing off)."""
     keymap.remember(_keys(), "thief", attack_off="ATTACK in the tray (on no key)")
     start = keymap.at_start(_keys(), "thief")
     assert start.attack_off == "ATTACK in the tray (on no key)" and start.keys.attack.name == "ctrl"
+    assert "the game had ATTACK in the tray (on no key) then: her regular attack is tried again on CTRL" in start.source
+    import inspect
+    import gamelab.__main__ as cli
+    assert "regular_off" not in inspect.getsource(cli._hunter)
+
+
+def test_a_binding_doubted_and_not_checked_starts_the_next_command_with_config_toml_s(lab):
+    """keymap.suspect (Hunter.keys_doubted: a run's doubt of a key the remembered binding has otherwise couldn't be
+    checked): the next start takes config.toml's [keys], said with why and when; maplehelper's app too; a read of the
+    window writes the binding again, unmarked."""
+    from maplehelper import config
+    from maplehelper.combos import COMBOS
+    keymap.remember(dataclasses.replace(_keys(), right=K("e")), "thief", config_keys=_keys())
+    assert keymap.at_start(_keys(), "thief").keys.right.name == "e"
+    assert keymap.suspect("a moves doubt not checked (not in the hunt loop: no check): RIGHT RIGHT -> E", "thief")
+    start = keymap.at_start(_keys(), "thief")
+    assert start.keys == _keys() and "left out: doubted at" in start.source and "a moves doubt not checked" in start.source
+    cfg = config.load(paths.CONFIG, (c.name for c in COMBOS))
+    out, note = config.followed(cfg, lab / "keybindings-thief.json")
+    assert out is cfg and "doubted at" in note
+    keymap.remember(dataclasses.replace(_keys(), right=K("e")), "thief", config_keys=_keys())
+    assert keymap.at_start(_keys(), "thief").keys.right.name == "e"
+    assert not keymap.suspect("x", "magician")  # (none remembered: nothing marked)
+
+
+def test_the_player_lets_none_of_the_file_s_keys_through_on_one_config_toml_has_for_another_of_hers(lab):
+    """The review's probe (2026-10-28): a check followed the game's swap (ATTACK CTRL -> U, PET FOOD U -> CTRL), the user
+    swapped it back in the game without `keys --forget`, and the next start published pet_food ctrl: the player let a
+    'pet food' tap of Ctrl (the game's ATTACK) through with the alarm up. A key of the file's that config.toml has for
+    another of hers not let through with the alarm up (her attack, Lucky Seven, potions, pick-up, chair, sit) goes on no
+    key then: neither Ctrl nor config.toml's U is a pet food tap; her moves as the file has them."""
+    from gamelab.control.alarm import AlarmKeys
+    from gamelab.control.player import alarm_refusal
+    lines = []
+    assert keymap.publish(dataclasses.replace(_keys(), pet_food=K("ctrl"), attack=K("u"), jump=K("c")))
+    allowance = AlarmKeys(_keys(), paths.ALARM_KEYS, log=lines.append)
+    keys = allowance.current()
+    assert keys.pet_food is None and keys.jump.name == "c" and allowance.clashed == {"pet_food": "attack"}
+    assert any("pet_food 'ctrl' is config.toml's attack: not let through with the alarm up" in x for x in lines)
+    for key in ("ctrl", "u"):
+        plan = {"kind": "pet_food", "events": [[0, key, "down"], [40, key, "up"]], "capture": {}}
+        assert alarm_refusal(plan, keys, 1.0, [], 100.0) == "no pet food key is bound"
+    assert keymap.publish(dataclasses.replace(_keys(), jump=K("shift"), lucky_seven=K("a")))  # (a move on Lucky Seven's)
+    keys = allowance.current()
+    assert keys.jump is None and allowance.clashed == {"jump": "lucky_seven"} and keys.left.name == "left"
+    retreat = {"kind": "retreat", "events": [[0, "shift", "down"], [40, "shift", "up"]], "capture": {}}
+    assert "isn't one of her moves' keys" in alarm_refusal(retreat, keys, 1.0, [], 100.0)
+    assert keymap.publish(dataclasses.replace(_keys(), jump=K("c"), pet_food=K("i")))  # (none of config.toml's others)
+    keys = allowance.current()
+    assert (keys.jump.name, keys.pet_food.name) == ("c", "i") and allowance.clashed == {}
 
 
 def test_published_for_the_player_only_her_moves_and_pet_food(lab):

@@ -140,7 +140,8 @@ def followed(cfg: Config, path: str | Path) -> tuple[Config, str | None]:
     """`cfg` with her keys as gamelab last read them off the game's KEY BINDINGS window (its file for the thief,
     gamelab/lab/keybindings-thief.json: gamelab.control.keymap, the user's "Remember it" of 2026-10-28), where there is
     one with keys as they can be (a key name for each of her actions, her arrows, jump and attack bound, none on a
-    combo's button, abort or slow mode); and a line saying which keys are in use (None: config.toml's, no file)."""
+    combo's button, abort or slow mode) and not marked doubted (a gamelab run whose doubt of them it couldn't check:
+    gamelab.control.keymap.suspect); and a line saying which keys are in use (None: config.toml's, no file)."""
     import json
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -150,6 +151,9 @@ def followed(cfg: Config, path: str | Path) -> tuple[Config, str | None]:
         return cfg, f"her keys: config.toml's ({Path(path).name} not read: {type(e).__name__})"
     table = data.get("keys") if isinstance(data, dict) else None
     known = {f.name for f in fields(GameKeys)}
+    if isinstance(data, dict) and isinstance(data.get("suspect"), dict):
+        return cfg, (f"her keys: config.toml's ({Path(path).name} left out: doubted at "
+                     f"{data['suspect'].get('at', '?')} and not checked)")
     try:
         if not isinstance(table, dict) or set(table) - known:
             raise ConfigError("not her keys")

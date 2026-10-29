@@ -91,7 +91,12 @@ class AlarmKeys:
     (alarm_keys_problem: each a key config.toml can name, none of `unsafe`, her five moves on five keys, her pet food on
     none of those) is left out: config.toml's then, said once a change of it (`log`). What it holds can only move which
     keys her moves and pet food are on: the player lets through with the alarm up what it always did, a tap of her pet
-    food (PET_FOOD_PER_MIN) and her retreat's moves (RETREAT_WINDOW_S), by these keys."""
+    food (PET_FOOD_PER_MIN) and her retreat's moves (RETREAT_WINDOW_S), by these keys. One the file has on a key
+    config.toml has for anything else of hers (her attack, Lucky Seven, potions, pick-up, chair, sit: what isn't let
+    through with the alarm up) goes on no key with the alarm up, said (`clashed`): neither that key nor config.toml's
+    own for it, as the game may have either on something else (the review of 2026-10-28: a remembered binding put back
+    in the game without `keys --forget`, published again at a command's start, had her pet food on Ctrl, which the game
+    had on ATTACK again)."""
 
     def __init__(self, base, path=None, unsafe=ALARM_UNSAFE, log=None):
         from ..paths import ALARM_KEYS
@@ -101,6 +106,7 @@ class AlarmKeys:
         self._keys = base
         self.why: str | None = None   # why the file was left out (None: used, or not there)
         self.used: dict | None = None  # the file's keys in use (None: config.toml's)
+        self.clashed: dict = {}        # the file's fields on a key config.toml has for another of hers: -> which
 
     def current(self):
         """Her keys as the alarm's allowance takes them now (a GameKeys; `base` if None)."""
@@ -116,7 +122,7 @@ class AlarmKeys:
         if stamp == self._stamp:
             return self._keys
         self._stamp = stamp
-        keys, why, used = self.base, None, None
+        keys, why, used, clashed = self.base, None, None, {}
         if stamp is not None:
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -127,16 +133,31 @@ class AlarmKeys:
                     merged.update(names)
                     why = alarm_keys_problem(merged, self.unsafe)
                 if why is None:
-                    keys, used = self._over(names), merged
+                    clashed = self._clashes(merged)
+                    used = {**merged, **{f: None for f in clashed}}
+                    keys = self._over({**names, **{f: None for f in clashed}})
             except (OSError, ValueError) as e:
                 why = f"not read ({type(e).__name__})"
         if why is not None:
             self.log(f"her keys for the alarm: {self.path.name} left out ({why}): config.toml's")
-        elif used is not None and used != self.used:
+        elif used is not None and (used != self.used or clashed != self.clashed):
             self.log(f"her keys for the alarm from {self.path.name}: " + ", ".join(
-                f"{f} {used.get(f) or '-'}" for f in ALARM_FIELDS))
-        self._keys, self.why, self.used = keys, why, used
+                f"{f} {used.get(f) or '-'}" for f in ALARM_FIELDS) + "".join(
+                f"; {f} {merged[f]!r} is config.toml's {other}: not let through with the alarm up"
+                for f, other in clashed.items()))
+        self._keys, self.why, self.used, self.clashed = keys, why, used, clashed
         return keys
+
+    def _clashes(self, merged: dict) -> dict:
+        """The fields of `merged` (her alarm fields' keys) on a key `base` (config.toml's) has for another of hers that
+        isn't one of ALARM_FIELDS: field -> that other's name."""
+        import dataclasses
+        others = {}
+        for f in dataclasses.fields(self.base):
+            k = getattr(self.base, f.name, None)
+            if f.name not in ALARM_FIELDS and k is not None:
+                others.setdefault(k.name, f.name)
+        return {f: others[k] for f, k in merged.items() if k is not None and k in others}
 
     def _over(self, names: dict):
         """`base` with the file's keys in place of its own (a field it doesn't give: `base`'s)."""

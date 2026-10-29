@@ -19,6 +19,11 @@ stopping the hunt for a moved jump or arrow.
   (lab/keybindings-<character>.json, paths.KEYBINDINGS) at every read of the window, and a command's keys at its start
   (control.timeline.her_setup) are those, not config.toml's [keys] (which stay the first default only; a remembered
   file that doesn't hold keys as they can be is left out, said; `gamelab keys --forget` drops it); the log says which.
+  A run whose doubt about a key it has otherwise than config.toml couldn't be checked marks it (`suspect`, from
+  behavior.hunter.Hunter.keys_doubted): the next start takes config.toml's [keys], said, until a read writes it again
+  (the review of 2026-10-28: a stale MOVE RIGHT on E came back at every start, its doubt never checked). The game's
+  Attack on no key when it was read is said at the next start, not kept: the regular attack is tried again there (5
+  presses without effect doubt it, as ever).
 - `publish`: her moves' and pet food's keys in use written for the player (paths.ALARM_KEYS, control.alarm.AlarmKeys):
   at a command's start and whenever the hunt follows them, so what goes with the Lie Detector's alarm up is her moves
   and her pet food by the keys they're on now, without the player started again (its UAC click).
@@ -193,8 +198,9 @@ def remember(keys: GameKeys, character: str | None = None, *, config_keys: GameK
              why: str = "") -> object:
     """Her keys as the window was read (`keys`, followed), saved for her next runs: when, the frame it was read off
     (`frame`: its saved file), the preset, the whole map (`functions`), config.toml's keys then, and whether the game
-    had Attack on no key (`attack_off`: why; the next run starts with the regular attack off). Written whole (a file
-    beside it, then replaced). Returns its path; None if it couldn't be written (said by the caller's log)."""
+    had Attack on no key (`attack_off`: why; said at the next start, which tries the regular attack again). Written
+    whole (a file beside it, then replaced). Returns its path; None if it couldn't be written (said by the caller's
+    log)."""
     path = path_of(character)
     data = {"character": character or _who(), "read_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "frame": None if frame is None else _in_lab(frame), "preset": preset, "why": why,
@@ -218,6 +224,23 @@ def _in_lab(frame) -> str:
         return Path(frame).resolve().relative_to(Path(paths.LAB).resolve()).as_posix()
     except (ValueError, OSError):
         return str(frame)
+
+
+def suspect(why: str, character: str | None = None) -> bool:
+    """The remembered binding marked doubted and not checked (`why`): the next start takes config.toml's [keys]
+    (`at_start`, said) until a read of the window writes it again (`remember`). Whether one was marked."""
+    path = path_of(character)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return False
+        data["suspect"] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "why": why}
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def problem(table: dict, never_keys: tuple[str, ...] | None = None) -> str | None:
@@ -265,6 +288,10 @@ def at_start(config_keys: GameKeys, character: str | None = None) -> Start:
     table = data.get("keys") if isinstance(data, dict) else None
     if (why := problem(table)) is not None:
         return Start(config_keys, f"{SOURCE_CONFIG} ({path.name} left out: {why})")
+    if isinstance(doubted := data.get("suspect"), dict):
+        return Start(config_keys, f"{SOURCE_CONFIG} ({path.name}, read at {data.get('read_at', '?')}, left out: "
+                                  f"doubted at {doubted.get('at', '?')} and not checked, {doubted.get('why', '?')}; "
+                                  "`gamelab keys --read` reads the game's)")
     keys = keys_of(table, config_keys)
     source = (f"the key bindings read off the game's window at {data.get('read_at', '?')} ({path.name}"
               + (f", from {os.path.basename(str(data['frame']))}" if data.get("frame") else "") + ")")
@@ -275,6 +302,9 @@ def at_start(config_keys: GameKeys, character: str | None = None) -> Start:
         source += ("; config.toml [keys] changed since it was read (its keys are the first default only: "
                    "`gamelab keys --forget` goes back to them)")
     off = data.get("attack_off")
+    if isinstance(off, str) and off:  # (said, not kept: the regular attack tried again; the review of 2026-10-28)
+        source += (f"; the game had {off} then: her regular attack is tried again on "
+                   f"{keys.attack.name.upper()} (5 presses without effect doubt it)")
     return Start(keys, source, off if isinstance(off, str) and off else None, data)
 
 

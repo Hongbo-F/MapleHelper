@@ -85,7 +85,7 @@ def _look(w: RegularWatch, t: float, m: Monster, miss=None) -> None:
 
 
 def test_a_press_with_her_miss_over_its_target_resets_the_run():
-    """Four presses without effect, then one whose look 0.5 s after its key has her MISS over its target (60 over its
+    """Four presses without effect, then one whose look 0.7 s after its key has her MISS over its target (60 over its
     feet): 'missed', the run starts again; five more without effect: the doubt (counted from there)."""
     w = RegularWatch()
     t = 0.0
@@ -96,7 +96,7 @@ def test_a_press_with_her_miss_over_its_target_resets_the_run():
         t += 1.5
     assert len(w.run) == DOUBT_PRESSES - 1
     w.pressed(t, mon())
-    _look(w, t + 0.5, mon(), miss=(105.0, -510.0))
+    _look(w, t + 0.7, mon(), miss=(105.0, -510.0))
     assert w.counts["missed"] == 1 and w.run == [] and w.due() is None
     t += 1.5
     for _ in range(DOUBT_PRESSES):
@@ -120,17 +120,70 @@ def test_a_miss_elsewhere_isn_t_hers_at_it(miss, why):
 
 
 def test_too_soon_or_late_or_a_cast_s_isn_t_the_press_s():
-    """A MISS before MISS_FROM_S after the key, or past MISS_BY_S: not the press's; one a Lucky Seven cast at it keyed
-    after the press could have made: passed over."""
-    w = RegularWatch()
-    w.pressed(0.0, mon())
-    _look(w, 0.1, mon(), miss=(100.0, -510.0))
-    _look(w, 1.0, mon())
-    assert w.counts["none"] == 1
+    """A MISS first seen before MISS_FROM_S after the key (the star leaves 0.52 s after it: control.actions
+    .STAR_DELAY_MS), or past MISS_BY_S: not the press's; one a Lucky Seven cast at it keyed after the press could have
+    made: left out, the press judged by its target's bar (no effect)."""
+    from gamelab.control.actions import STAR_DELAY_MS
+    assert keycheck.MISS_FROM_S <= STAR_DELAY_MS / 1000 < keycheck.MISS_BY_S
+    for seen in (0.3, 1.8):
+        w = RegularWatch()
+        w.pressed(0.0, mon())
+        _look(w, seen, mon(), miss=(100.0, -510.0))
+        _look(w, 1.0 if seen < 1.0 else 1.9, mon())
+        assert w.counts["none"] == 1 and w.counts["missed"] == 0, seen
     w = RegularWatch()
     m = mon()
     w.pressed(0.0, m)
     w.cast(0.3, m)
-    _look(w, 0.6, mon(), miss=(100.0, -510.0))
-    assert w.counts["passed: a cast's MISS maybe"] == 1 and w.counts["missed"] == 0
-    assert keycheck.MISS_FROM_S < 0.6 < keycheck.MISS_BY_S
+    _look(w, 0.9, mon(), miss=(100.0, -510.0))
+    _look(w, 1.2, mon())
+    assert w.counts["missed"] == 0 and w.counts["none"] == 1
+
+
+def test_a_cast_s_miss_before_the_press_isn_t_the_press_s():
+    """The review's probe (2026-10-28): her regular key doing nothing, a Lucky Seven cast at the same monster 0.85 s
+    before each regular press missing, its MISS still up at a look 0.25 s after the press (and again 0.6 s after): not
+    the press's (the cast keyed MISS_FROM_S to MISS_BY_S before it was first seen could have made it), so each press is
+    judged by its target's bar: no effect, and the doubt comes, as with no MISS on screen. Until then all 8 were
+    "missed" and no doubt came."""
+    w = RegularWatch()
+    t = 0.0
+    for _ in range(DOUBT_PRESSES + 3):
+        m = mon()
+        w.cast(t, m)
+        w.pressed(t + 0.85, m)
+        _look(w, t + 1.10, mon(), miss=(100.0, -510.0))
+        _look(w, t + 1.45, mon(), miss=(100.0, -518.0))  # (the same popup, risen)
+        _look(w, t + 2.0, mon())
+        t += 3.0
+    assert w.counts["missed"] == 0 and w.counts["none"] >= DOUBT_PRESSES and w.due() is not None
+
+
+def test_a_popup_first_seen_before_the_press_could_show_one_isn_t_its():
+    """One popup seen at 0.3 s and again at 0.7 s after the press's key (MISS_SEEN_GAP_S apart at the most, where it
+    was): first seen before the press's star could have landed, so another's (an earlier press's of hers, or another
+    player's); its own popup, first seen at 0.7 s, is."""
+    w = RegularWatch()
+    w.pressed(0.0, mon())
+    _look(w, 0.3, mon(), miss=(100.0, -505.0))
+    _look(w, 0.7, mon(), miss=(100.0, -512.0))
+    _look(w, 1.0, mon())
+    assert w.counts["missed"] == 0 and w.counts["none"] == 1
+    w = RegularWatch()
+    w.pressed(0.0, mon())
+    _look(w, 0.3, mon())
+    _look(w, 0.7, mon(), miss=(100.0, -512.0))
+    assert w.counts["missed"] == 1
+
+
+def test_her_regular_presses_in_a_row_each_take_their_own_or_the_one_before_s():
+    """Regular presses 0.85 s apart at one monster, each missing (its popup first seen 0.6 s after its key): every one
+    'missed' (a MISS the press before could have made is the same key's: it works either way)."""
+    w = RegularWatch()
+    m = mon()
+    for i in range(DOUBT_PRESSES + 1):
+        w.pressed(0.85 * i, m)
+    for i in range(DOUBT_PRESSES + 1):
+        _look(w, 0.85 * i + 0.6, mon(), miss=(100.0, -510.0))
+    _look(w, 0.85 * (DOUBT_PRESSES + 1) + 1.0, mon())
+    assert w.counts["missed"] == DOUBT_PRESSES + 1 and w.due() is None
