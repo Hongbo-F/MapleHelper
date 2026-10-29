@@ -2121,6 +2121,10 @@ a run's choices so). A pile pays at most 1 / (her kill time x the loop's rate) t
 the thief: on her way, from about 54 EXP (a Horny and a Green Mushroom), a second off it about 107. On the user's play
 (every 5 s) 31 of 50 choices pull, 30 by the old rule but only 6 to the same stop, each to a pile on her way or 1.6 s
 off it at most; 5 of 49 are where the user went next, 13 by the old rule (they roamed the piles round them on 19-24).
+In the harness (the thief: `ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world
+zero-walls --world near-misses --world walkers --minutes 5`, seeds 1-48, against master 945f201) 319.8 EXP a minute
+against 310.3 (+3.1%, se 2.4%) and 70.5 touches against 67.6 (+4.3%, se 3.3%), neither beyond 2 se; no deaths, falls
+or stops either side; 26 of its 48 seeds better.
 With two kills' worth asked, before one monster was enough, 18 of 45 moments of the 14:01 hunt with two monsters or
 more on another platform, and 22 of 34 of the user's play, went elsewhere. What a stop is expected to give (`Patrol.expect`) counts a
 remembered monster only where she gets at it from there (on its platform, or in a star's reach from somewhere along it:
