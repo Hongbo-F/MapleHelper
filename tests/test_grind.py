@@ -113,34 +113,64 @@ def test_the_next_stop_goes_round_the_loop_and_skips_what_she_has_just_emptied()
     assert info["skipped"][0]["due"] == pytest.approx(1.5 + patrol.refill_median(1) - 2.0, abs=0.1)
 
 
-def test_a_pile_seen_off_the_loop_pulls_the_route():
-    # Two areas side by side: the loop's on the left (three platforms of one Horny Mushroom each), a fourth platform
-    # off to the right with two Horny Mushroom points and a Green's.
+def _beside(off: float):
+    """Two areas side by side: the loop's on the left (three platforms of one Horny Mushroom each, 2 s apart), a fourth
+    platform `off` s to the right with two Horny Mushroom points and a Green's; the loop taken up, her at its first
+    stop."""
     model = _map([(0, 300, 0), (0, 300, -200), (0, 300, -400), (1000, 1400, -200)],
                  [(150, 0, "h"), (150, -200, "h"), (150, -400, "h"), (1100, -200, "h"), (1300, -200, "h"),
                   (1200, -200, "g")])
     left = [_pid(model, 150, y) for y in (0, -200, -400)]
     right = _pid(model, 1200, -200)
-    p = _patrol(model, lambda a, b: 6.0 if right in (a, b) else 2.0 * abs(left.index(a) - left.index(b)))
-    m = Memory(model)
-    p.belief.update(0.0, m)
+    p = _patrol(model, lambda a, b: off if right in (a, b) else 2.0 * abs(left.index(a) - left.index(b)))
+    p.belief.update(0.0, Memory(model))
     p._take(p.rate([p.stop_on(i) for i in left], 0.0), 0.0, "test")
+    return model, left, right, p
+
+
+def _seen(model, p, sights, t=1.0):
+    """The belief afresh, from a memory that saw `sights` ((kind, x, y)) at `t`."""
+    m = Memory(model)
+    m.update(t, [_sight(model, k, x, y) for k, x, y in sights], None)
+    p.belief = patrol.Belief(model, p.points)
+    p.belief.update(t, m)
+
+
+def test_a_pile_seen_off_the_loop_pulls_her_when_it_pays_for_its_detour():
+    model, left, right, p = _beside(6.0)
     here = p.stop_on(left[0])
     nxt, info = p.choose(0.5, left[0], 150.0, current=here)
     assert p.platform_of(nxt) in left and info["why"] == "the loop"
-    # Three monsters seen on the right: worth the trip off the loop.
-    pile = [_sight(model, HORNY, 1100, -200), _sight(model, HORNY, 1290, -200), _sight(model, GREEN, 1200, -200)]
-    m.update(1.0, pile, None)
-    p.belief.update(1.0, m)
+    rate = p.plan.rate  # the loop's long-run EXP a second (4.5: its points not all back each round)
+    assert 4.0 < rate < 5.0
+    # Three monsters seen on the right, 6 s off (95 EXP expected there): going there, shooting them and on back to the
+    # loop's next stop, 2 s from her, is a 20 s detour, in which the loop gives about as much: not PULL_GAIN times, so
+    # the loop goes on (until 2026-10-29 a pile pulled at 1.5 times the next stop's own EXP a second, and these did).
+    three = [(HORNY, 1100, -200), (HORNY, 1290, -200), (GREEN, 1200, -200)]
+    _seen(model, p, three)
+    r, after = p.stop_on(right), nxt
+    exp = p.expect(r, 7.0)[0]
+    straight = p.travel(left[0], 150.0, p.platform_of(after), p.stops[after].x)
+    d = p.detour(r, after, 6.0, straight, exp)
+    assert exp > 90 and straight == 2.0 and d == pytest.approx(exp * p.kill_s + patrol.STOP_S + 6.0 + 6.0 - 2.0)
+    assert 1.0 < exp / (rate * d) < patrol.PULL_GAIN
     nxt, info = p.choose(1.0, left[0], 150.0, current=here)
-    assert p.platform_of(nxt) == right and info["why"] == "pulled" and info["seen"] > 90
-    assert info["instead_of"]["stop"] in left
-    # One Green Mushroom alone, 6 s off, isn't worth leaving the loop for: the loop goes on.
-    m2 = Memory(model)
-    m2.update(1.0, [_sight(model, GREEN, 1200, -200)], None)
-    p.belief = patrol.Belief(model, p.points)
-    p.belief.update(1.0, m2)
+    assert nxt == after and info["why"] == "the loop"
+    # Five there: they pay for theirs.
+    _seen(model, p, three + [(HORNY, 1150, -200), (HORNY, 1250, -200)])
     nxt, info = p.choose(1.0, left[0], 150.0, current=here)
+    assert p.platform_of(nxt) == right and info["why"] == "pulled" and info["seen"] > 150
+    assert info["instead_of"]["stop"] == p.platform_of(after) and info["loop_rate"] == round(rate, 2)
+    assert info["expected"] >= patrol.PULL_GAIN * rate * info["detour"] and 20 < info["detour"] < 30
+    # The three, with the right 3 s off: a 13.6 s detour, worth it.
+    model, left, right, p = _beside(3.0)
+    _seen(model, p, three)
+    nxt, info = p.choose(1.0, left[0], 150.0, current=p.stop_on(left[0]))
+    assert p.platform_of(nxt) == right and info["why"] == "pulled" and info["detour"] == pytest.approx(13.6, abs=0.3)
+    # One Green Mushroom alone, 6 s off, isn't worth leaving the loop for.
+    model, left, right, p = _beside(6.0)
+    _seen(model, p, [(GREEN, 1200, -200)])
+    nxt, info = p.choose(1.0, left[0], 150.0, current=p.stop_on(left[0]))
     assert p.platform_of(nxt) in left and info["why"] == "the loop"
 
 
@@ -404,6 +434,102 @@ def test_one_monster_seen_close_by_pulls_her_from_a_loop_stop_far_off():
     p.belief.update(1.0, Memory(model))
     nxt, info = p.choose(1.0, ids[0], 150.0, heading=p.stop_on(far), peek=True)
     assert nxt == p.stop_on(far) and info["why"] == "on her way"
+
+
+def _tower():
+    """A tower: the loop's three platforms at the top (two Horny Mushroom points each, 1.5 s apart), a shelf on the way
+    up (one Horny Mushroom point) 12 s from the bottom and 13 from the top, and the bottom's three platforms far apart
+    (one Green Mushroom point each, 2 s apart), 25 s from the top. The loop round the top taken up, its rate as
+    Tree Dungeon's live (447 EXP a minute, 7.45 EXP/s: the magician's of 2026-10-29)."""
+    from dataclasses import replace
+    model = _map([(0, 300, -2000), (0, 300, -1800), (0, 300, -1600), (0, 300, -800), (0, 300, 0), (1000, 1300, 0),
+                  (2000, 2300, 0)],
+                 [(100, -2000, "h"), (200, -2000, "h"), (100, -1800, "h"), (200, -1800, "h"), (100, -1600, "h"),
+                  (200, -1600, "h"), (150, -800, "h"), (150, 0, "g"), (1150, 0, "g"), (2150, 0, "g")])
+    top = [_pid(model, 150, y) for y in (-2000, -1800, -1600)]
+    shelf = _pid(model, 150, -800)
+    bottom = [_pid(model, x, 0) for x in (150, 1150, 2150)]
+
+    def seconds(a, b):
+        for group, step in ((top, 1.5), (bottom, 2.0)):
+            if a in group and b in group:
+                return step * abs(group.index(a) - group.index(b))
+        return {frozenset("tb"): 25.0, frozenset("sb"): 12.0, frozenset("ts"): 13.0}[
+            frozenset("t" if a in top else "s" if a == shelf else "b") | frozenset("t" if b in top else "s" if b == shelf
+                                                                                    else "b")]
+    p = _patrol(model, seconds)
+    p.belief.update(0.0, Memory(model))
+    p._take(p.rate([p.stop_on(i) for i in top], 0.0), 0.0, "test")
+    p.plan = replace(p.plan, rate=447 / 60)
+    return model, top, shelf, bottom, p
+
+
+def test_far_from_the_loop_a_pile_by_her_pays_only_for_its_detour():
+    # The magician live on Tree Dungeon (2026-10-29, mage-1029-0111.log): left at the bottom by a Lie Detector's
+    # retreat, every pile seen at the bottom pulled her, at 1.5 times the EXP a second of the loop's next stop with its
+    # 27 s climb counted, and she never climbed. Here: at the bottom, the loop's next stop 25 s up.
+    model, top, shelf, bottom, p = _tower()
+    here = p.stop_on(bottom[0])
+    nxt, info = p.choose(1.0, bottom[0], 150.0, current=here, peek=True)
+    assert p.platform_of(nxt) in top and info["why"] == "the loop" and info["travel"] == 25.0
+    climb = info["gain"]  # the next stop's own EXP a second, its climb counted (1.0)
+    assert climb < 1.5
+    # Two Green Mushrooms seen on the next platform along the bottom, 2 s off (50 EXP expected at even odds or better):
+    # 6.9 EXP a second there, its travel and kills counted, 7 times the climb's; but going there and on up adds 2 s to
+    # the climb, a 7.2 s detour, in which the loop gives 54 EXP: not worth it. Nor are three (75 EXP, 9.3 s, 1.07 times
+    # the loop's 70).
+    for n in (2, 3):
+        _seen(model, p, [(GREEN, 1150 + 20 * k, 0) for k in range(n)])
+        nxt, info = p.choose(1.0, bottom[0], 150.0, current=here, peek=True)
+        assert p.platform_of(nxt) in top and info["why"] == "the loop", n
+        b1 = p.stop_on(bottom[1])
+        far, (exp, seen, shoot, _) = 2.0, p.expect(b1, 3.0)
+        assert seen == pytest.approx(26 * n, rel=0.05) and exp / (far + shoot + patrol.STOP_S) > 4 * climb
+        assert exp < patrol.PULL_GAIN * p.plan.rate * p.detour(b1, nxt, far, 25.0, exp)
+    # Two Horny Mushrooms seen on the shelf, on her way up (12 s, and 13 on: no longer than the climb; 63 EXP expected
+    # by the time she's there): its detour is their kills and a stop, 6.3 s, which they pay for 1.34 times: she goes
+    # up by the shelf.
+    _seen(model, p, [(HORNY, 120, -800), (HORNY, 180, -800)])
+    nxt, info = p.choose(1.0, bottom[0], 150.0, current=here, peek=True)
+    assert p.platform_of(nxt) == shelf and info["why"] == "pulled"
+    assert info["detour"] == pytest.approx(info["expected"] * p.kill_s + patrol.STOP_S, abs=0.1)
+    assert info["instead_of"]["stop"] in top
+
+
+# Her live pulls of 2026-10-29 01:11-01:18 (mage-1029-0111.log's 'next:' lines, the telemetry's 'grind' records):
+# (the stop pulled to, the stop pulled from, the EXP expected there, her kill time then (s a point of EXP, from the
+# record's EXP a second), s to it, s from it on to the other (the planner's route), s to the other from where she was
+# (the planner's, from her latest look), the loop's EXP a second, the pile's EXP a second with its travel and kills and
+# the other's: D:/MapleHelper-scratch/pull/replay_live.py).
+LIVE_PULLS = [
+    (30, 13, 45.7, 0.0854, 5.8, 20.2, 25.5, 7.452, 4.27, 1.04), (29, 10, 31.5, 0.0796, 3.7, 22.8, 26.2, 7.452, 4.37, 1.34),
+    (31, 10, 13.2, 0.0899, 1.5, 26.0, 23.2, 7.452, 3.58, 1.48), (29, 10, 70.2, 0.0938, 3.7, 22.8, 26.3, 7.452, 6.22, 1.32),
+    (30, 10, 48.7, 0.1018, 2.8, 24.0, 26.7, 7.452, 5.56, 1.3), (32, 10, 45.2, 0.0956, 1.2, 26.8, 23.9, 7.452, 6.93, 1.43),
+    (30, 32, 35.9, 0.0938, 4.2, 1.3, 1.8, 7.452, 4.19, 2.1), (33, 10, 15.0, 0.0924, 1.5, 27.7, 24.3, 7.452, 3.86, 1.42),
+    (32, 10, 15.9, 0.0952, 1.3, 26.8, 26.6, 7.452, 4.17, 1.3), (30, 8, 34.3, 0.1024, 3.3, 26.0, 29.2, 7.452, 4.39, 1.68),
+    (28, 8, 46.8, 0.1009, 4.7, 26.9, 29.9, 7.452, 4.49, 1.65), (31, 8, 47.6, 0.1002, 1.1, 28.1, 24.9, 7.452, 6.93, 1.91),
+    (29, 6, 47.8, 0.1037, 3.7, 26.2, 29.7, 7.452, 4.95, 1.12), (30, 6, 27.3, 0.1024, 2.1, 27.4, 26.2, 7.452, 4.63, 1.26),
+    (32, 6, 24.3, 0.0996, 1.2, 30.2, 27.3, 7.452, 5.26, 1.22), (30, 6, 48.6, 0.1067, 3.0, 27.4, 30.2, 7.452, 5.29, 1.11),
+    (28, 6, 47.0, 0.1073, 4.4, 28.2, 31.0, 7.452, 4.5, 1.08), (30, 28, 48.9, 0.1092, 2.7, 1.0, 3.2, 7.452, 5.41, 3.51),
+    (24, 6, 26.0, 0.1059, 7.6, 20.7, 27.6, 7.452, 2.29, 1.2), (23, 14, 16.0, 0.1063, 1.3, 11.0, 12.2, 7.452, 4.0, 0.68),
+    (20, 14, 16.6, 0.106, 3.6, 7.9, 10.9, 7.452, 2.61, 0.76), (23, 20, 28.4, 0.1065, 1.5, 3.8, 2.4, 7.452, 5.14, 3.19),
+    (29, 9, 72.9, 0.0987, 2.8, 23.8, 26.5, 7.355, 6.63, 1.62), (30, 7, 34.7, 0.101, 4.0, 27.0, 30.8, 7.355, 4.08, 1.54),
+    (32, 7, 48.8, 0.1116, 1.3, 29.9, 27.0, 7.355, 6.3, 1.68), (23, 7, 72.4, 0.1134, 11.3, 19.0, 29.8, 7.355, 3.53, 1.55),
+    (24, 7, 65.2, 0.1125, 1.1, 20.3, 21.0, 7.355, 6.91, 2.03), (23, 7, 100.6, 0.1124, 3.1, 19.0, 21.9, 7.355, 6.53, 1.97),
+]
+
+
+def test_none_of_her_live_pulls_at_the_bottom_pays_for_its_detour():
+    # Each pulled her by the old rule (1.5 times the other's EXP a second); by the detour's, none: the most, 70 EXP 3.7 s
+    # off on her way up from 31 to 29, 1.21 times what the loop gave over its 7.8 s; with no margin (PULL_GAIN 1) about
+    # a third would, each on her way up (1.0-1.2 times).
+    ratios = []
+    for _, _, exp, kill_s, far, on, far_next, rate, gain, other in LIVE_PULLS:
+        assert gain >= 1.5 * other
+        d = patrol.detour_s(exp, kill_s, far, on, far_next)
+        assert not patrol.pays(exp, d, rate)
+        ratios.append(exp / (rate * d))
+    assert max(ratios) == pytest.approx(1.21, abs=0.01) and 8 <= sum(r >= 1.0 for r in ratios) <= 12
 
 
 def test_a_stop_counts_only_the_monsters_she_gets_at_from_it():

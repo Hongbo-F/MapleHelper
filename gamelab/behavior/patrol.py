@@ -46,12 +46,31 @@ she sees decides (the next stop, below).
 
 The next stop (Patrol.choose): along the loop from the last loop stop she was at, the first expected to hold SKIP_FULL
 of what it holds full when she gets there (an emptied stretch is skipped until it's due), or on a trip the stop she's
-on her way to; and a stop whose monsters she has seen (her memory, not the belief's guesses) pulls her off it when they
-give PULL_GAIN times its EXP a second (travel and kills included), any pile of one monster or more (PULL_MIN). What a
-stop is expected to give (Patrol.expect) counts a monster her memory has only where she gets at it from there (on the
-stop's platform, or in a star's reach from somewhere along it: `gets`), and not one she left the stop with nothing in
-reach since (`left_at`: she'd been there to see it); a point her memory has none at, by the share of it a star reaches
-from the stop.
+on her way to; and a stop whose monsters she has seen (her memory, not the belief's guesses: a pile of one monster or
+more, PULL_MIN) pulls her off it when it pays for its detour against the loop: what it's expected to give (Patrol.
+expect: the monsters seen, and the belief's stock at its other points, her share) PULL_GAIN times what the loop gives
+in the time the detour costs her, at the loop's long-run EXP a second (Plan.rate, by the same belief: the spawn points'
+refill clocks, others' share). The detour (Patrol.detour) is its kills (her kill time), STOP_S, and the travel there
+and on from there to the stop she'd have gone to, beyond going to that one straight (none for a stop on her way). Of
+the stops that pay, the one that leaves her the most EXP over the loop's. The marginal value theorem's bar, as at a
+stop (behavior.grind): her time is worth the loop's rate wherever she is, so a pile near her pays for the time it takes
+and the travel it adds, not for being nearer than the loop: what's standing in a region of poor spawns doesn't hold her
+there, the region's spawns being why the loop isn't there. Until 2026-10-29 a pile pulled at 1.5 times the next stop's
+own EXP a second, its travel counted: far from the loop every pile around her beat the climb to it. Live on Tree
+Dungeon (the magician, 2026-10-29 01:11, mage-1029-0111.log), a Lie Detector's retreat having left her at the bottom,
+28 pulls in 7 minutes, 21 to its stops 28-33 and 7 to 20-24 (13-101 EXP expected 1-11 s off, 2.3-6.9 EXP/s), 25 of
+them from the loop's next stop up the tower (0.7-2.0 EXP/s, 11-31 s away), her loop 14, 13, 10, 8, 6 at 447 EXP a
+minute: she never got up the tower, and her kills made 185 EXP a minute (the user: "keeps patrolling the bottom region
+which has worse spawn rate"). By this rule none of the 28 pulls (the most, 70 EXP 3.7 s off on her way up from 31 to
+29, 1.21 times what the loop gives over its 7.8 s detour; with no margin about a third, each on her way up): she
+climbs, shooting in passing what's in reach on the way (tests/test_grind.py, LIVE_PULLS; with PULL_GAIN 5 on the old
+rule, live at 01:26, she went up at once and made 349 EXP a minute over 8.5 minutes). A stop of the loop ahead counts
+the same (going there first and on back to the next): the loop's order holds unless a pile pays for leaving it; she
+goes round from it after.
+What a stop is expected to give (Patrol.expect) counts a monster her memory has only where she gets at it from there
+(on the stop's platform, or in a star's reach from somewhere along it: `gets`), and not one she left the stop with
+nothing in reach since (`left_at`: she'd been there to see it); a point her memory has none at, by the share of it a
+star reaches from the stop.
 
 The danger hook (`Patrol.danger(platform, x)`): how badly she can be touched fighting at a place, in the positioning
 model's unit (attack.danger.Danger.at: the share of her HP touches would take there, each monster or spawn point weighed
@@ -164,12 +183,23 @@ REPLAN_S = 20.0        # guess: s between two looks for a better round
 # (an emptied stretch, until it's due): under Q_UNKNOWN, so a stop never seen is never skipped.
 SKIP_FULL = 0.25       # guess
 # A stop pulls her off the loop (or a trip) when the monsters she has seen there are worth PULL_MIN of a monster of the
-# cheapest kind (memory.SURE: one at even odds), and give PULL_GAIN times the EXP a second of the stop she'd go to
-# otherwise. With two kills' worth at least (a guess), 18 of 45 moments of the 14:01 hunt with two monsters or more on
-# another platform went elsewhere, 22 of 34 on the user's play: on 22 at 197 s, two seen on 19 2.6 s away (7.1 EXP/s)
-# lost to 10, 15 s up the tower and never seen (2.2 EXP/s).
+# cheapest kind (memory.SURE: one at even odds), and what it's expected to give is PULL_GAIN times the loop's long-run
+# EXP a second over its detour (see the top). A pile's EXP comes at her kill rate (1 / kill_s, 11.8 EXP/s for Lucky
+# Seven), the loop's with its travel (Tree Dungeon's 7.4-7.7), so a pile pays at most 1 / (kill_s x the loop's rate)
+# times the loop's (1.5 there), for one big and on her way: at 1.25 a pile on her way pays from about 54 EXP (a Horny
+# and a Green Mushroom), one a second off it from about 107. Until 2026-10-29 PULL_GAIN was 1.5 times the next stop's
+# own EXP a second, its travel counted: with two kills' worth at least asked (a guess), 18 of 45 moments of the 14:01
+# hunt with two monsters or more on another platform went elsewhere, 22 of 34 on the user's play: on 22 at 197 s, two
+# seen on 19 2.6 s away (7.1 EXP/s) lost to 10, 15 s up the tower and never seen (2.2 EXP/s); one monster has been
+# enough since. By this rule (the user's play replayed every 0.5 s, `python -m gamelab patrol`: the moment like it now
+# at 205 s, on 22, two seen on 19 2.3 s off, 46 EXP expected, 10 14.2 s up) 19 is on her way up to 10 (12.1 s on from
+# it), so its detour is its kills and a stop, 5.0 s, in which the loop (7.4 EXP/s) gives 37 EXP: they pay, just (by
+# PULL_GAIN), and she takes them on her way up. Replayed so every 5 s, 31 of the 50 choices pull (30 by the old rule,
+# 6 of them to the same stop), each to a pile on her way or at most 1.6 s off it; and 5 of the 49 are where the user
+# went next (the next platform they stood on within 15 s), 13 by the old rule: the user roamed the piles round them on
+# 19-24 (D:/MapleHelper-scratch/pull/userplay_agree.py).
 PULL_MIN = SURE
-PULL_GAIN = 1.5        # guess
+PULL_GAIN = 1.25       # guess: a quarter over the loop's (the pile seen may be gone or taken, the detour longer)
 REACH_ROUND = 5.0      # units: a remembered monster's x to this for whether a stop gets at it (Patrol.gets, kept; a
                        # resolution)
 DUE_S = 2.0            # guess: s of a wait at a stop for the respawns in reach (Patrol.wait_gain)
@@ -323,6 +353,19 @@ def refill_median(n: int = 1, scale: float = 1.0) -> float:
 def refill_mean(n: int = 1, scale: float = 1.0) -> float:
     """s a point emptied takes to be back on average (not_back's mean)."""
     return (REFILL_D0 + max(1, n) * REFILL_TAU) * scale
+
+
+def detour_s(exp: float, kill_s: float, far: float, on: float, far_next: float) -> float:
+    """s a pile's detour costs her (see the top): shooting its `exp` EXP (`kill_s` s a point), STOP_S, and the travel to
+    it (`far` s) and on from it to the stop she was going to (`on` s) beyond going there straight (`far_next` s): none
+    for a pile on her way."""
+    return exp * kill_s + STOP_S + max(0.0, far + on - far_next)
+
+
+def pays(exp: float, detour: float, rate: float) -> bool:
+    """Whether a pile expected to give `exp` EXP pays for its `detour` s against the loop's `rate` EXP a second: PULL_GAIN
+    times what the loop gives meanwhile."""
+    return exp >= PULL_GAIN * rate * detour
 
 
 def touch_shares(model: MapModel, her: danger_model.Her) -> dict[str, float]:
@@ -709,6 +752,12 @@ class Patrol:
         due = [d for q, c in self.stops[i].cover if c > 0 and (d := self.belief.due(q, t)) is not None]
         return min(due) if due else None
 
+    def detour(self, j: int, nxt: int, far: float, far_next: float, exp: float) -> float | None:
+        """s a detour to stop j `far` s away costs her on her way to stop `nxt` `far_next` s away, with `exp` EXP to
+        shoot there (detour_s, her kill time; the route time on from j to `nxt`); None if there's no way on."""
+        on = self.leg(j, nxt)
+        return None if on is None else detour_s(exp, self.kill_s, far, on, far_next)
+
     def choose(self, t: float, here: int | None, x: float | None, current: int | None = None,
                skip: Iterable[int] = (), heading: int | None = None, peek: bool = False) -> tuple[int | None, dict]:
         """The next stop from (platform `here`, map x `x`), having been at stop `current`, never one on a platform in
@@ -754,10 +803,16 @@ class Patrol:
             why = "the loop"
             if nxt is None:
                 nxt, skipped, why = order[0], [], "the loop, nothing due ahead"
-        best = max((j for j in options if j != nxt and options[j][2] >= PULL_MIN * self.min_exp),
-                   key=lambda j: options[j][3], default=None)
-        if best is not None and options[best][3] >= PULL_GAIN * options[nxt][3]:
-            pulled_from, nxt, why = nxt, best, "pulled"
+        rate, far_next = max(0.0, self.plan.rate), options[nxt][0]
+        best = None  # (EXP over what the loop gives meanwhile, the stop, its detour's s)
+        for j, (far, exp, seen, _, _) in options.items():
+            if j == nxt or seen < PULL_MIN * self.min_exp:
+                continue
+            d = self.detour(j, nxt, far, far_next, exp)
+            if d is not None and pays(exp, d, rate) and (best is None or exp - rate * d > best[0]):
+                best = (exp - rate * d, j, d)
+        if best is not None:
+            pulled_from, nxt, why = nxt, best[1], "pulled"
         else:
             pulled_from = None
         if nxt in loop and not peek:
@@ -769,6 +824,7 @@ class Patrol:
                              "due": None if (d := self.due(j, t)) is None else round(d, 1)} for j in skipped]}
         if pulled_from is not None:
             info["instead_of"] = {"stop": self.stops[pulled_from].platform, "gain": round(options[pulled_from][3], 2)}
+            info["detour"], info["loop_rate"] = round(best[2], 1), round(rate, 2)
         return nxt, info
 
 
@@ -778,7 +834,8 @@ def choice_text(info: dict) -> str:
            f"expected ({info['seen']:.0f} seen), {info['gain']:.1f} EXP/s with its kills; {info['why']}")
     if "instead_of" in info:
         o = info["instead_of"]
-        out += f" (stop {o['stop']}'s {o['gain']:.1f} EXP/s)"
+        out += (f" (a {info['detour']:.1f} s detour on the way to stop {o['stop']}, the loop's {info['loop_rate']:.1f} "
+                f"EXP/s giving {info['detour'] * info['loop_rate']:.0f} EXP meanwhile)")
     if info.get("skipped"):
         out += "; skipped " + ", ".join(f"{s['stop']} ({s['expected']:.0f} EXP"
                                          + ("" if s["due"] is None else f", due in {s['due']:.0f} s") + ")"

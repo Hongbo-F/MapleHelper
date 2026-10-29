@@ -2101,10 +2101,25 @@ at her next-stop decisions: no flip-flopping. On Tree Dungeon before she has see
 last loop stop she was at, the first expected to hold a quarter of what it holds full by the time she gets there
 (`SKIP_FULL`, under the 0.35 of a point never seen: an emptied stretch is skipped until it's due, an unseen one never),
 or on a trip the stop she's on her way to; and a stop whose monsters she has seen (her memory's, not the belief's
-guesses) pulls her there when they give 1.5 times the EXP a second of that one (each counting its travel and kills),
-from one monster at even odds (with two kills' worth asked, 18 of 45 moments of the 14:01 hunt with two monsters or
-more on another platform, and 22 of 34 of the user's play, went elsewhere: on 22, two seen on 19 2.6 s away at 7.1
-EXP/s lost to 10, 15 s up the tower and never seen, at 2.2). What a stop is expected to give (`Patrol.expect`) counts a
+guesses; from one monster at even odds) pulls her there when it pays for its detour against the loop: what it's
+expected to give 1.25 times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second
+(`Plan.rate`, by the same belief); the detour (`Patrol.detour`) is its kills, 1 s a stop, and the travel there and on
+to the stop she'd have gone to beyond going to that one straight (none for a stop on her way); of those that pay, the
+one that leaves her the most EXP over the loop's. Her time is worth the loop's rate wherever she is (the marginal value
+theorem's bar, as at a stop, below), so a pile pays for the time it takes and the travel it adds, not for being nearer
+than the loop. Until 2026-10-29 a pile pulled at 1.5 times the EXP a second of the next stop, its travel counted: far
+from the loop every pile round her beat the climb. Live on Tree Dungeon (the magician, 2026-10-29 01:11), left at the
+bottom by a Lie Detector's retreat, 28 pulls in 7 minutes kept her on 28-33 and 20-24 (2.3-6.9 EXP/s each, against the
+loop's next stop up the tower at 0.7-2.0, 11-31 s away; her loop 14, 13, 10, 8, 6 at 447 EXP a minute), her kills 185
+EXP a minute (the user: "keeps patrolling the bottom region which has worse spawn rate"): by the detour none of the 28
+pulls (the most, 70 EXP 3.7 s off on her way up, 1.21 times what the loop gives over its 7.8 s), she climbs, shooting
+in passing what's in reach (`tests/test_grind.py`'s `LIVE_PULLS`; `D:/MapleHelper-scratch/pull/replay_live.py` replays
+a run's choices so). A pile pays at most 1 / (her kill time x the loop's rate) times the loop's, 1.5 on Tree Dungeon for
+the thief: on her way, from about 54 EXP (a Horny and a Green Mushroom), a second off it about 107. On the user's play
+(every 5 s) 31 of 50 choices pull, 30 by the old rule but only 6 to the same stop, each to a pile on her way or 1.6 s
+off it at most; 5 of 49 are where the user went next, 13 by the old rule (they roamed the piles round them on 19-24).
+With two kills' worth asked, before one monster was enough, 18 of 45 moments of the 14:01 hunt with two monsters or
+more on another platform, and 22 of 34 of the user's play, went elsewhere. What a stop is expected to give (`Patrol.expect`) counts a
 remembered monster only where she gets at it from there (on its platform, or in a star's reach from somewhere along it:
 `Patrol.gets`), and not one she left that stop with nothing in reach since (`left_at`): a pile on the part of a platform
 no star reached had pulled her to a stop that couldn't hit it, and she bounced between the two.
@@ -2123,7 +2138,8 @@ reach is due within 2 s) had no lower bound: a respawn late by the model held he
 spot (rule 7), no lull loot (8), no waiting for respawns (9 only for those 0.3 s), no rate rule, no trip back for the
 piles of a stop she leaves (10). On the legs the hunt loop's rule 4 shoots what a star reaches on any platform (15 s a
 platform), rule 4b finishes what she hurt, 5 and 5b pick up the piles on her platform and on the way, and every second
-a pile seen elsewhere worth 1.5 times the stop she's heading to takes her there instead. (After a rest the next stop
+a pile seen elsewhere that pays for its detour (the stop she's heading to standing in for the loop's next) takes her
+there instead. (After a rest the next stop
 was chosen from where she rested, until the rests went on 2026-10-26.) Kills are credited to the platform they died on (the end of the log: "kills by
 platform"); the value map (`lab/grounds.json`) isn't written: its EXP a visit credits a ground with its neighbours'
 kills (48% of 23's live), and a stop's visit is a few seconds.
@@ -2147,14 +2163,16 @@ failing from 20 to 35 s of `loop_tree_grind`, no plan sent in the pause, no stop
 
 **What it says** (the log, and telemetry 'grind'): each loop taken up ("loop: [10, 7]: 463 EXP a minute (a round 22 s:
 5 s of travel, 15 of shooting; 8 spawn points, 181 EXP) (the first; camping at 7 would give 403)"), each next stop
-("next: stop 23 at x 8, 1.6 s away: 77 EXP expected (77 seen), 6.8 EXP/s with its kills; pulled (stop 7's 2.5 EXP/s)",
+("next: stop 23 at x 8, 1.6 s away: 77 EXP expected (77 seen), 6.8 EXP/s with its kills; pulled (a 7.5 s detour on the
+way to stop 7, the loop's 7.7 EXP/s giving 58 EXP meanwhile)",
 with the stops skipped and when each is due), each stop left ("leaving stop 24: nothing left in reach (16.0 s there,
 108 EXP)", or "... 4.1 EXP/s here, going on gives 7.7"), every 60 s and at the end what it did and learned: loops, stops, stays, pulls, skips, the refill scale,
 her kill time, what others take, HP a minute by platform, kills by platform. `python -m gamelab patrol FILE` runs a
 recorded run through her memory and the belief and prints, every few seconds, the next stop grinding would have taken
 from where she was (a look, not a choice: her place in the loop doesn't move; it had rotated the loop by itself every 5 s,
-10, 8, 12, 14, read as choices). On the user's recording 43 of 50 choices pull her to the monsters in view (19-24, 15
-and 16 on the way down), 7 go by the loop (to 7 and 13).
+10, 8, 12, 14, read as choices). On the user's recording 43 of 50 choices pulled her to the monsters in view when this
+was written (19-24, 15 and 16 on the way down), 7 by the loop (to 7 and 13); 30 by master's code of 2026-10-29 before
+the detour's rule, 31 with it (above).
 
 **What the harness says** (Tree Dungeon, `--world zero-walls,lucky-seven`: the hunt loop as `tour --loop --skill`
 throws, 10 seeds of 20 minutes, the policies `loop` at bc036b9 (base), `loop` here (the memory, half (V)), `loop-grind`
