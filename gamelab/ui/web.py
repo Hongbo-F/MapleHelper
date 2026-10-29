@@ -45,6 +45,7 @@ from ..attack import reach
 from ..attack.reach import SHOT_DOWN, SHOT_H, SHOT_UP, STAR_REACH, shot_dx
 from .render import JUMP_ARC, KIND, PLAYERS, REACH_ALPHA, REMEMBER_FADE_S, REMEMBER_FAINT, STYLE, MapView
 from .state import LATEST, TRAIL, State
+from . import review
 
 POLL_S = 0.025          # how often the telemetry is read: on average a record waits half of it (at 0.1 s,
                         # records reached the page 58 ms after they were written; at 0.025 s, 21 ms)
@@ -489,6 +490,8 @@ class _Handler(BaseHTTPRequestHandler):
             with feed.lock:
                 now, rate = feed.clock()
             self._send(200, _json({"now": now, "rate": rate}), "application/json")
+        elif review.handle(self, url.path):  # overlaid recordings, frame by frame (ui.review)
+            pass
         else:
             self._send(404, b"not found", "text/plain")
 
