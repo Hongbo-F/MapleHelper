@@ -84,6 +84,29 @@ def test_no_file_no_push_and_the_file_is_read_at_each_push(tmp_path, monkeypatch
     assert went == [notify.load(path)["topic"]]
 
 
+def test_the_tests_never_push_or_text_from_the_labs_own_files(tmp_path, monkeypatch):
+    # The suite in the main checkout (2026-10-29 ~05:35, the game closed) texted the user "countdown seen at 05:35:28"
+    # from the test above, its mail_path the real lab/smtp.json by default. Under conftest's GAMELAB_NO_PUSH the lab's
+    # files, wherever they are, are never read for a push; named ones still are.
+    lab_push, lab_mail = tmp_path / "ntfy.json", tmp_path / "smtp.json"
+    lab_push.write_text(json.dumps({"topic": "t"}), encoding="utf-8")
+    lab_mail.write_text(json.dumps({"host": "h", "user": "u", "password": "p", "to": ["a"]}), encoding="utf-8")
+    monkeypatch.setattr(notify, "CONFIG", lab_push)
+    monkeypatch.setattr(notify, "MAIL_CONFIG", lab_mail)
+    went = []
+    monkeypatch.setattr(notify, "push", lambda cfg, *a, **k: went.append(("push", cfg)))
+    monkeypatch.setattr(notify, "mail", lambda cfg, *a, **k: went.append(("mail", cfg)))
+    assert notify.NO_PUSH_ENV == "GAMELAB_NO_PUSH"
+    assert notify.load() is None and notify.load_mail() is None
+    Pusher.from_lab().seen(0.0, "countdown")
+    assert went == [("push", None), ("mail", None)]
+    assert notify.load(lab_push) == {"server": "https://ntfy.sh", "topic": "t"}  # (named: read)
+    monkeypatch.delenv(notify.NO_PUSH_ENV)  # the player's own: the lab's files, looked up at each push
+    went.clear()
+    Pusher.from_lab().seen(0.0, "countdown")
+    assert [w[0] for w in went] == ["push", "mail"] and went[0][1]["topic"] == "t" and went[1][1]["to"] == ["a"]
+
+
 def test_a_push_that_fails_is_said_and_never_raised():
     said = []
     t = notify.push({"server": "http://127.0.0.1:9", "topic": "x"}, "t", "x", log=said.append)

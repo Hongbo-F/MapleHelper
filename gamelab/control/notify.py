@@ -10,8 +10,11 @@ only that: the form, the time and how long it has been up. Never a screenshot, h
 
 Where to (lab/ntfy.json, git-ignored like the rest of the lab: {"server": "https://ntfy.sh", "topic": "..."}): the
 topic is the only secret (anyone who knows it can read and post), so `python -m gamelab notify --setup` makes a long
-random one, and `notify --test` sends a push to check the phone gets it. No file, no push (the tests, a checkout
-without it); the file is read at each push, so the player started before it was made pushes once it's there. Each
+random one, and `notify --test` sends a push to check the phone gets it. No file, no push (a checkout without it);
+under NO_PUSH_ENV (the tests' conftest) the lab's own files are never read for one: the suite run in the main checkout
+on 2026-10-29 ~05:35, the game closed, pushed and texted the user a Lie Detector from a test's fake screen through the
+real lab/ntfy.json and lab/smtp.json (the paths fixed as defaults, so a test's lab elsewhere didn't move them). The
+file is read at each push, so the player started before it was made pushes once it's there. Each
 push is sent on a thread of its own, SEND_TIMEOUT_S at most, and never raises: the player's looks and locks never wait
 for the network.
 
@@ -24,6 +27,7 @@ keeps about 160 characters), on a thread of its own, MAIL_TIMEOUT_S at most, nev
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import smtplib
 import threading
@@ -41,12 +45,24 @@ SERVER = "https://ntfy.sh"
 REPEAT_S = 30.0          # s between pushes while a form she can answer is still seen
 SEND_TIMEOUT_S = 10.0    # s a push may take
 MISSED = "truth booth"   # the Lie Detector's form that means it went unanswered (perception.lie_detector.FORMS)
+NO_PUSH_ENV = "GAMELAB_NO_PUSH"  # set (tests/conftest.py): no push or text from the lab's own files, ever
 
 
-def load(path: Path = CONFIG) -> dict | None:
+def _lab_file(path: Path | None, default: Path) -> Path | None:
+    """`path` if given, else the lab's file looked up now (CONFIG, MAIL_CONFIG as they are at the push), or None
+    under NO_PUSH_ENV."""
+    if path is not None:
+        return Path(path)
+    return None if os.environ.get(NO_PUSH_ENV) else default
+
+
+def load(path: Path | None = None) -> dict | None:
     """The push's server and topic ({"server", "topic"}), or None (no file, or no topic in it)."""
+    path = _lab_file(path, CONFIG)
+    if path is None:
+        return None
     try:
-        cfg = json.loads(Path(path).read_text(encoding="utf-8"))
+        cfg = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(cfg, dict) or not cfg.get("topic"):
@@ -54,8 +70,9 @@ def load(path: Path = CONFIG) -> dict | None:
     return {"server": str(cfg.get("server") or SERVER).rstrip("/"), "topic": str(cfg["topic"])}
 
 
-def setup(path: Path = CONFIG) -> dict:
+def setup(path: Path | None = None) -> dict:
     """lab/ntfy.json with a new random topic if there's none yet; returns what's in it."""
+    path = Path(path) if path is not None else CONFIG
     cfg = load(path)
     if cfg is None:
         cfg = {"server": SERVER, "topic": "gamelab-" + secrets.token_urlsafe(18).replace("_", "x").replace("-", "y")}
@@ -88,10 +105,13 @@ def push(cfg: dict | None, title: str, text: str, priority: str = "urgent", log=
     return t
 
 
-def load_mail(path: Path = MAIL_CONFIG) -> dict | None:
+def load_mail(path: Path | None = None) -> dict | None:
     """The text's mail account and addresses, or None (no file, or its host, login or addresses missing)."""
+    path = _lab_file(path, MAIL_CONFIG)
+    if path is None:
+        return None
     try:
-        cfg = json.loads(Path(path).read_text(encoding="utf-8"))
+        cfg = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(cfg, dict):
@@ -105,9 +125,10 @@ def load_mail(path: Path = MAIL_CONFIG) -> dict | None:
             "to": [str(a) for a in to]}
 
 
-def setup_mail(to: str, path: Path = MAIL_CONFIG) -> tuple[dict, bool]:
+def setup_mail(to: str, path: Path | None = None) -> tuple[dict, bool]:
     """lab/smtp.json with `to` among its addresses, the login left as it is (empty in a new one, for the user to fill
     in: Gmail's by default, with an app password); returns (what's in it, whether it can send yet)."""
+    path = Path(path) if path is not None else MAIL_CONFIG
     try:
         cfg = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -164,10 +185,10 @@ class Pusher:
         self.missed = False               # the Truth Booth's push gone
 
     @classmethod
-    def from_lab(cls, log=None, path: Path = CONFIG, mail_path: Path = MAIL_CONFIG) -> "Pusher":
+    def from_lab(cls, log=None, path: Path | None = None, mail_path: Path | None = None) -> "Pusher":
         """Pushes to lab/ntfy.json's topic and, `text_too`, a text through lab/smtp.json's account, each file read at
-        each push: none while there's none, and one set up or changed later is used without the player starting
-        again."""
+        each push: none while there's none (nor ever under NO_PUSH_ENV unless named), and one set up or changed later
+        is used without the player starting again."""
         def go(title, text, priority, text_too=False):
             push(load(path), title, text, priority, log=log)
             if text_too:
