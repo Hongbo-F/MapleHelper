@@ -348,18 +348,23 @@ def test_the_magicians_skill_tables_are_the_game_datas():
     assert set(column("2001003", "mobCount")) == {magician.CAST.mob_count}
 
 
-def test_the_safety_stops_hits_are_hers_the_thief_3_for_now_the_magician_3():
+def test_the_safety_stops_hits_are_hers_the_thief_3_for_now_the_magician_2_for_now():
     """The user, 2026-10-28: "Well for thief with high evasion this should be 2 hits, 3 for magician" (behavior.safety:
     her reserve is that many of the map's largest touch), and at ~15:30 "3 hits for now" for the thief, until her retreat
-    dodges (gamelab.classes.thief.SAFETY_HITS says why and when it goes back to 2); `gamelab character` says it."""
+    dodges (gamelab.classes.thief.SAFETY_HITS says why and when it goes back to 2); for the magician, 2026-10-29 ~00:01,
+    her pet drinking only at ~55%: "Stop at 2 touches for now", under her pet's warning (TooStrong lets the map run);
+    `gamelab character` says it."""
     from gamelab.behavior import safety
     from gamelab.classes import thief
-    assert (character.load("thief").safety_hits, character.load("magician").safety_hits) == (3, 3) == (
+    assert (character.load("thief").safety_hits, character.load("magician").safety_hits) == (3, 2) == (
         thief.SAFETY_HITS, magician.SAFETY_HITS) and safety.HITS == 3
     import inspect
     said = inspect.getsource(thief).split("SAFETY_HITS = 3")[0].rsplit("\n\n", 1)[-1]
     assert "3 hits for now" in said and "Back to 2 once her retreat dodges" in said
-    assert "  safety stop: under 3 of the map's largest touches (behavior.safety)" in character.describe(
+    said = inspect.getsource(magician).split("SAFETY_HITS = 2")[0].rsplit("\n\n", 1)[-1]
+    assert "Stop at 2 touches for now" in said
+    assert magician.PET.hp_warning == 0.55 and 2 * 137 / 628 < magician.PET.hp_warning  # (her 2 Horny touches live)
+    assert "  safety stop: under 2 of the map's largest touches (behavior.safety)" in character.describe(
         character.load("magician"))
 
 

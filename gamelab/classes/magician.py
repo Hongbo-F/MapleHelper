@@ -141,7 +141,8 @@ POLICY = Policy(default_mode="skill",     # Magic Claw whenever her MP pays for 
                 close_quarters="touch",   # no point-blank failure: one too close isn't picked (the search's first 50),
                                           # the danger's escape only (range doc 7)
                 mp_floor=0.0)             # PLACEHOLDER: the MP she keeps back, and what under it -- the user's MP policy
-PET = Pet(hp_warning=0.70, mp_warning=0.05, hp_heal=250.0, mp_heal=185.0)  # PLACEHOLDER (the thief's pet): her pet,
+PET = Pet(hp_warning=0.55, mp_warning=0.05, hp_heal=250.0, mp_heal=185.0)  # hp_warning live (2026-10-29: her pet drank
+                                          # at 359 and 335 of 628, 57% and 53%); the rest PLACEHOLDER (the thief's pet): her pet,
                                           # its auto-potion thresholds and potions -- the user's answer; `pet --read` (L0)
 PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=100.0, ground_danger=2.0, hp_exp=250.0,
                 seen_share=0.3, threat_s=1.7, keep_danger=0.08, meet_s=8.0)  # PLACEHOLDER (the thief's): re-tuned in
@@ -149,8 +150,9 @@ PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=100.0, ground
 # The safety stop's reserve: three of the map's largest touches (behavior.safety: worked out live, at her level and DEF as
 # perception reads them, over the map's kinds). The user, 2026-10-28: "Well for thief with high evasion this should be 2
 # hits, 3 for magician". Where that's at or over her pet's warning at her max HP (her HUD's), a command that hunts
-# refuses the map (TooStrong).
-SAFETY_HITS = 3
+# refuses the map (TooStrong). For now 2 (the user, 2026-10-29 ~00:01, asked whether the stop or her pet's threshold
+# should change, her pet drinking only at ~55% and 3 Horny touches 65% of her 628: "Stop at 2 touches for now").
+SAFETY_HITS = 2
 PLACEHOLDERS = ("skill levels", "lock and delays", "damage", "miss", "the wand", "pet", "priors")
 
 
