@@ -907,8 +907,12 @@ class Perf:
       without any drops searched with it);
     - how old the whole screen's result is in each frame's state as it goes out: its time then less the frame the
       newest whole screen merged was searched on (Publisher.state is called as the state is handed to the clients'
-      writers, and a look takes the first frame's state after its time asked, 0.13-0.25 ms later down the pipe; a late
-      state, of a frame gone by, isn't counted: a look waiting for the next frame takes that frame's);
+      writers, and a look takes the first frame's state after its time asked, 0.13-0.25 ms later down the pipe: her
+      band's looks);
+    - ... and in each state with the drops a look asked for (`drops_asked`: while a command that hunts is attached the
+      drops are searched only when asked, HUNTING), the late state of a frame gone by that a look wanting her drops
+      takes (55% of the tours' looks; the review, 2026-10-28: left out, the line's p90 read 87-105 ms where the looks'
+      was 146-148, those with the drops 154-190); other late states aren't counted (no look waits for them);
     - the searches' thread's time (each late state's 's': its share of the window, 'busy');
     - her band's own searches (not a whole screen's) and how long after its frame each one's state went out (what a
       look asking for her band waits past that frame);
@@ -922,11 +926,12 @@ class Perf:
         self.at, self.cpu = now, time.process_time()
         self.tracks = dict(tracker_counts) if tracker_counts is not None else None
         self.wide: list[float] = []  # s: each whole screen's search
-        self.ages: list[float] = []  # s: the whole screen's result's age in each frame's state as it went out
+        self.ages: list[float] = []  # s: the whole screen's result's age in each frame's state as it went out ...
+        self.drop_ages: list[float] = []  # ... and in each state with the drops a look asked for
         self.band: list[float] = []  # s: each of her band's own searches' state out, after its frame
         self.busy = 0.0              # s the searches' thread spent on the searches whose states went out
 
-    def state(self, st: WorldState, now: float) -> None:
+    def state(self, st: WorldState, now: float, drops_asked: bool = False) -> None:
         if st.late:
             w = st.work or {}
             self.busy += w.get("s", 0.0)
@@ -934,6 +939,8 @@ class Perf:
                 self.wide.append(w.get("mobs s", w.get("s", 0.0)))
             elif w.get("band"):
                 self.band.append(now - st.t)
+            if drops_asked and st.loot is not None and st.usable and st.wide_at is not None:
+                self.drop_ages.append(now - st.wide_at)
         elif st.usable and st.wide_at is not None:
             self.ages.append(now - st.wide_at)
 
@@ -946,6 +953,7 @@ class Perf:
                "wide_asked_a_s": None if not wide_s else round(1 / wide_s, 2),
                "wide_ms": [_ms(_q(self.wide, 0.5)), _ms(_q(self.wide, 0.9)), _ms(max(self.wide, default=None))],
                "wide_age_ms": [_ms(_q(self.ages, 0.5)), _ms(_q(self.ages, 0.9))],
+               "wide_age_drops_ms": [_ms(_q(self.drop_ages, 0.5)), _ms(_q(self.drop_ages, 0.9))],
                "busy": round(self.busy / dt, 3),
                "band_alone_a_s": round(len(self.band) / dt, 2),
                "band_alone_ms": [_ms(_q(self.band, 0.5)), _ms(_q(self.band, 0.9))]}
@@ -958,14 +966,18 @@ class Perf:
 
 def perf_line(r: dict) -> str:
     """The 10 s line's part on the searches' time, from a 'perf' record: each whole screen's on the searches' thread,
-    its result's age in each frame's state as it went out, her band's own searches' wait past their frame (when there
-    were any), the thread's busy share, the process's cores."""
+    its result's age in each frame's state as it went out and (when a look asked for drops) in the states with the
+    drops, her band's own searches' wait past their frame (when there were any), the thread's busy share, the
+    process's cores."""
     def ms(v):
         return "-" if v is None else f"{v:.0f}"
     w, age, band = r["wide_ms"], r["wide_age_ms"], r["band_alone_ms"]
+    drops = r.get("wide_age_drops_ms") or [None, None]
     out = "" if w[0] is None else (f"; a whole screen {ms(w[0])} ms on the searches' thread (p90 {ms(w[1])}, max "
                                    f"{ms(w[2])}), its result {ms(age[0])} ms old as a frame's state goes out (p90 "
-                                   f"{ms(age[1])})")
+                                   f"{ms(age[1])})" + ("" if drops[0] is None else
+                                                       f", {ms(drops[0])} as one with the drops asked for does (p90 "
+                                                       f"{ms(drops[1])})"))
     if band[0] is not None:
         out += f"; her band alone out {ms(band[0])} ms after its frame (p90 {ms(band[1])})"
     return out + f"; the searches' thread {100 * r['busy']:.0f}% busy; {r['cores']:.2f} cores"
@@ -1001,7 +1013,7 @@ class Publisher:
         if self.runner is None:
             return
         w, now = self.w, time.monotonic()
-        self.perf.state(st, now)
+        self.perf.state(st, now, self.runner.step.schedule.loot_s is None)  # (HUNTING: the drops only when asked)
         if st.late:  # a frame searched, given again with what its searches found: its drops, its events
             if st.loot is not None:
                 w["loot"], w["looked"] = st.loot, st.looked

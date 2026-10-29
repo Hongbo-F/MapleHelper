@@ -599,9 +599,11 @@ def test_the_service_says_how_many_searches_a_second_it_made():
 def test_perf():
     """service.Perf, the 10 s line's and the 'perf' record's numbers (the user, 2026-10-28): each whole screen's search
     on the searches' thread (its late state's 'mobs s', the drops searched with it left out), the whole screen's
-    result's age in each frame's state as it goes out (a late state's not counted, nor a frame not fit to act on), the
-    thread's busy share (every late state's 's'), her band's own searches and their states' wait past their frame, the
-    tracks made and flickers a minute; the window begun again at each record."""
+    result's age in each frame's state as it goes out (a late state's not counted, nor a frame not fit to act on), and
+    in each late state with the drops while they're searched only when asked (the review, 2026-10-28: a look wanting
+    her drops takes that state, older; not counted while they're searched on schedule, `watch`'s, nor a late state
+    without drops), the thread's busy share (every late state's 's'), her band's own searches and their states' wait
+    past their frame, the tracks made and flickers a minute; the window begun again at each record."""
     from gamelab.localization.worldstate import WorldState
     from gamelab.perception.framecheck import Problem
     perf = service.Perf(100.0)
@@ -616,19 +618,27 @@ def test_perf():
     perf.state(WorldState(999, 105.0, True, wide_at=90.0, bad=Problem("size", "another size")), 105.0)  # (not fit)
     for k in range(4):  # her band's own, each out 21 ms after its frame
         perf.state(WorldState(1000 + k, 101 + k, True, late=True, work={"wide": 0, "band": 1, "s": 0.007}), 101.021 + k)
+    for k in range(5):  # her drops asked: each state out 90, 100, ... 130 ms after the newest whole screen's frame
+        perf.state(WorldState(2000 + k, 102 + k, True, wide_at=102 + k - 0.06, loot=[], late=True,
+                              work={"wide": 0, "band": 0, "loot strips": 1, "s": 0.001}), 102.03 + k + 0.01 * k, True)
+    perf.state(WorldState(2010, 108, True, wide_at=107.0, loot=[], late=True,  # (drops on schedule: not counted)
+                          work={"wide": 0, "band": 0, "loot strips": 1, "s": 0.001}), 108.0, False)
     r = perf.record(110.0, 1 / 15, {"tracks": 65, "flickers": 11}, fps=30.0)
     assert (r["s"], r["fps"], r["wide_a_s"], r["wide_asked_a_s"], r["band_alone_a_s"]) == (10.0, 30.0, 15.0, 15.0, 0.4)
     assert r["wide_ms"] == [18.0, 20.0, 20.0] and r["band_alone_ms"] == [21.0, 21.0]
     assert r["wide_age_ms"] == pytest.approx([41.3, 74.7], abs=0.1)  # (1/30 and 2/30 s, and the 8 ms out)
-    assert r["busy"] == pytest.approx((15 * 0.030 + 135 * 0.016 + 4 * 0.007) / 10, abs=1e-3)
+    assert r["wide_age_drops_ms"] == pytest.approx([110.0, 130.0], abs=0.1)
+    assert r["busy"] == pytest.approx((15 * 0.030 + 135 * 0.016 + 4 * 0.007 + 6 * 0.001) / 10, abs=1e-3)
     assert (r["tracks_a_min"], r["flickers_a_min"]) == (360.0, 60.0)
     said = service.perf_line(r)
     assert said.startswith("; a whole screen 18 ms on the searches' thread (p90 20, max 20), its result 41 ms old as a "
-                           "frame's state goes out (p90 75); her band alone out 21 ms after its frame (p90 21); the "
-                           "searches' thread 26% busy; ")
+                           "frame's state goes out (p90 75), 110 as one with the drops asked for does (p90 130); her "
+                           "band alone out 21 ms after its frame (p90 21); the searches' thread 26% busy; ")
     empty = perf.record(120.0, 1 / 15, {"tracks": 65, "flickers": 11})  # (a window with no search: none said)
     assert empty["wide_ms"] == [None, None, None] and empty["wide_a_s"] == 0 and empty["tracks_a_min"] == 0
+    assert empty["wide_age_drops_ms"] == [None, None]
     assert service.perf_line(empty).startswith("; the searches' thread 0% busy; ")
+    assert "drops asked" not in service.perf_line({**r, "wide_age_drops_ms": [None, None]})  # (none asked: not said)
 
 
 def _client_process(address: str, info: str) -> None:

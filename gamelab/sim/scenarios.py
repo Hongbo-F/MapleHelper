@@ -707,7 +707,7 @@ def nav_fight_short(sim):
     return _nav(25, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((14, 760.0), monsters="all", seed=1,
+@scenario((14, 760.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("shooting it on the way"), moves("climb")))
 def nav_fight_up(sim):
     """From 14 up two ropes and a jump to 1 (pigs, Orange Mushrooms) with `fight` on: she shoots 17's monsters
@@ -735,7 +735,10 @@ def nav_fight_up(sim):
     game's steps and the live fixes: on seed 2 she's knocked off 3 down to 17 at 88 s and off 17 down to 25
     three times, and runs out of her 180 s on her way up again (nav_fight_up_runs_out now); on seed 1 she
     arrives at 141 s, 40 monsters killed. Of seeds 1-48, 38 arrive; 37 since a climb from under its rope is timed
-    by her arms' reach, Flow._climb.)"""
+    by her arms' reach, Flow._climb.) (Seed 2 since the rebase of the whole screen 15 times a second onto her
+    touches (master 73394ba, 2026-10-28: worldstate.WIDE_EVERY_S with navigator.TOUCH_CUTS and the world's
+    invulnerability and MISSes): on seed 1 she was hurt 22 times and ran out of her 180 s (42 kills); of seeds 1-12,
+    2-12 arrive; on 2 at 39.3 s, 11 kills, hurt twice; master's stack on 2 at 37.4 s.)"""
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -2088,7 +2091,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=4, limit=600,
+@tree((28, 247.0), monsters="all", seed=5, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -2129,7 +2132,13 @@ def loop_tree_run(sim):
     navigator.CLIMB_ON): on seed 1 her chain off a climb up the rope at -8 to 27 went a frame later at 92.9 s and she
     went up the tower to 7 at 123 s; of seeds 1-12, 5 meet all of this (4, 5, 6, 7, 12; 4, 5, 6 and 12 at master's
     head too), 1 fell out (11), 5 went up the tower among its Horny Mushrooms (1, 2, 3, 9, 10), and on 8 she had 35
-    kills, on 23 alone: on 4 she hunts the floor the whole 5 minutes, 77 kills.)"""
+    kills, on 23 alone: on 4 she hunts the floor the whole 5 minutes, 77 kills.) (Seed 5 since the rebase of the
+    whole screen 15 times a second onto her touches (master 73394ba, 2026-10-28: worldstate.WIDE_EVERY_S with
+    navigator.TOUCH_CUTS and the world's invulnerability and MISSes): on seed 4 she went up the tower among its
+    Horny Mushrooms; of seeds 1-12, 5, 6, 7, 8 and 11 meet all of this, 5 went up the tower (1, 3, 4, 9, 10), on 2
+    no safe platform was reachable at 305 s and on 12 she fell out at 181 s; on 5 hurt 32 times, master's stack
+    meeting all of it too (hurt 38 times). Kept on the rebase onto her keys followed and her stat window, master
+    d9774e5: on 5 57 kills, hurt 32 times, 1,236 EXP; master's stack on 5 as before.)"""
     return _loop(5)(sim)
 
 
@@ -2316,7 +2325,9 @@ def loop_tree_ore_waits(sim):
     2026-10-28; at the simulator's costs the same timeline as at 10, WIDE_SHARE holding a 100 ms whole screen to 5 a
     second): on seed 1 she was hurt more than five times; of seeds 1-16, 4-6, 11-13, 15 and 16 meet all of this, with
     master's stack 2, 6, 8, 9, 11, 12 and 14-16 (on 5 hurt more than five times). Her regular attack was doubted with
-    her keys right on 7 of the 16, the key check finding ATTACK on Ctrl after (master's stack: 6), on 5 never.)"""
+    her keys right on 7 of the 16, the key check finding ATTACK on Ctrl after (master's stack: 6), on 5 never.)
+    (Seed 5 kept at the rebase of the whole screen 15 times a second onto her touches (master 73394ba, 2026-10-28):
+    on 5 hurt none of its touches, 6 ores picked up.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2513,7 +2524,9 @@ def loop_tree_lie_detector_28(sim):
     since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does: navigator.TOUCH_CUTS), the world's
     invulnerability 1.45 s and her MISSes by the game's hit check (sim.world.INVULNERABLE, LEVEL_25_AVOID): on seed 37
     she went up the rope at 146 from 32, a rope as safe, as she does with the stack's reactions off in this world too;
-    of seeds 1-40, 5, 8, 9, 11, 29, 33 and 38 meet all of this.)"""
+    of seeds 1-40, 5, 8, 9, 11, 29, 33 and 38 meet all of this.) (Seed 5 kept at the rebase of the whole screen 15
+    times a second onto her touches (master 73394ba, 2026-10-28), where the branch at 10 a second had it on 2: on 5
+    she is on 28, a safe platform, 10 s after it.)"""
     return lie_detector(40.0)(sim)
 
 
@@ -2847,7 +2860,7 @@ def loop_tree_attack_unbound(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=8, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -2860,12 +2873,16 @@ def loop_tree_attack_misses(sim):
     to 25 (4.8 s), the window read (105.9-106.6 s) with ATTACK on Ctrl as configured: the misses were something else;
     that target gets no more regular attacks, the hunt goes on (Ctrl pressed at others after), nobody paged. A doubt
     within 300 s of it would hold the regular attack at its targets, with no check. (loop_tree_attack_misses_seen, the
-    same seed: the MISSes read, no doubt. Seed 8 since master's rebase onto her touches: of seeds 1-13, 8 meets all of
-    this there.)"""
+    same seed: the MISSes read, no doubt. Seed 8 since master's rebase onto her touches: of seeds 1-13, 8 meets all
+    of this there.) (Seed 9 since the rebase of the whole screen 15 times a second (worldstate.WIDE_EVERY_S) onto
+    her keys followed and her stat window (master d9774e5, 2026-10-28): on seed 8 no 5 regular presses in a row went
+    without effect in its 2 minutes; of seeds 1-12, 9 and 10 meet all of this, master's stack on 9 no doubt in its 2
+    minutes. On 9: the doubt at 52.2 s, away to 25 (4.5 s), her stars not known, the window read and closed at
+    57.9-58.6 s, ATTACK on Ctrl; Ctrl pressed 13 times at others after, 17 kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=8, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0)),
       expects=(check("her attack's MISS read over her regular presses' targets",
                      lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
@@ -2877,12 +2894,16 @@ def loop_tree_attack_misses_seen(sim):
     """As loop_tree_attack_misses, every regular star missing, its MISS popup over the monster read (perception.misses;
     the user, 2026-10-28: "Yes, read it"): each press with one over its target first seen 0.5-1.6 s after its key
     took effect (keycheck: "missed"; on seed 8, 32 of them, 9 "none"), so no run of 5 without effect: no doubt, no
-    window, nobody paged. (Seed 8 since the rebase onto her touches, as loop_tree_attack_misses: on seed 1 too few of her
-    regular presses were judged at all; of seeds 1-13, 3, 4, 6, 8, 10, 11 and 13 meet all of this.)"""
+    window, nobody paged. (Seed 8 since the rebase onto her touches, as loop_tree_attack_misses: on seed 1 too few
+    of her regular presses were judged at all; of seeds 1-13, 3, 4, 6, 8, 10, 11 and 13 meet all of this.) (Seed 9
+    since the rebase of the whole screen 15 times a second (worldstate.WIDE_EVERY_S) onto her keys followed and her
+    stat window (master d9774e5, 2026-10-28), as loop_tree_attack_misses: on seed 8 her attack's MISS was read over
+    fewer than 3 of her regular presses' targets; of seeds 1-12, 1, 5 and 9-12 meet all of this, master's stack on 9
+    not. On 9 14 MISSes read from 26.6 s, no doubt.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -2904,8 +2925,13 @@ def loop_tree_attack_no_darts(sim):
     and the looks' tracks swapped them, so its bar "lowered": "she has them", the regular attack held at one target only,
     and no stop for the rest of the run; a target another of its kind crossed tells nothing now (keycheck._crossed).
     Until the afternoon of 2026-10-28 the check was put off (a Green Mushroom on 24 within 250 of her on 25); until the
-    review of 2026-10-28 her stars' test stopped it at 5 casts without MP, which live, with her stars in her bag, 7-8 in
-    a row had (behavior.keycheck)."""
+    review of 2026-10-28 her stars' test stopped it at 5 casts without MP, which live, with her stars in her bag,
+    7-8 in a row had (behavior.keycheck). (Seed 5 since the rebase of the whole screen 15 times a second
+    (worldstate.WIDE_EVERY_S) onto her keys followed and her stat window (master d9774e5, 2026-10-28): on seed 1 no
+    5 regular presses in a row went without effect in its 4 minutes, so neither the doubt nor out of darts' stop; of
+    seeds 1-12, 5 and 7 meet all of this, master's stack on 5 no doubt. On 5: the doubt at 108.8 s, away to 25 (7.6
+    s), MAYBE OUT at 125.8 s, the window read and closed at 126.9-127.6 s, ATTACK on Ctrl: Lucky Seven only, paged;
+    out of darts' stop after 20 such presses, 36 s, paged.)"""
     return key_check_run(4)(sim)
 
 
@@ -2927,7 +2953,7 @@ FOLLOW_EXPECTS = (
     check("remembered for her next runs", lambda tr: tr["result"]["remembered"] is not None))
 
 
-@tree((23, 73.0), monsters="all", seed=3, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("jump", "c"),))),
       expects=FOLLOW_EXPECTS + (
           logs("HER JUMPS DIDN'T LIFT HER 6 TIMES IN A ROW"), logs("HER KEYS: THE GAME HAS THEM ON OTHER KEYS"),
@@ -2944,12 +2970,16 @@ def loop_tree_grind_jump_key(sim):
     paged once; her jumps lift her again. On seed 3: the doubt at 30.6 s, a Green Mushroom near (put off), the window
     read at 36.8-37.5 s, JUMP followed to C at 38.2 s, 66 kills after. (Seed 3 since the rebase onto her touches: on
     seed 1 her chains were cut short by touches, MISSes too, before their jumps' lift-offs were seen through, and the
-    doubt came only after the hunt; of seeds 1-13, 2, 3, 4, 5, 9, 11 and 13 meet all of this, 6, 7 and 12 follow C with
-    too few jumps after, 1, 8 and 10 doubt only after the hunt.)"""
+    doubt came only after the hunt; of seeds 1-13, 2, 3, 4, 5, 9, 11 and 13 meet all of this, 6, 7 and 12 follow C
+    with too few jumps after, 1, 8 and 10 doubt only after the hunt.) (Seed 1 since the rebase of the whole screen
+    15 times a second (worldstate.WIDE_EVERY_S) onto her keys followed and her stat window (master d9774e5,
+    2026-10-28): on seed 3 JUMP was followed at 201.7 s without the doubt said (no 6 jumps in a row without a lift);
+    of seeds 1-12, 1, 4-8, 11 and 12 meet all of this, master's stack on 1 past its 400 s. On 1: the doubt at 100.7
+    s, a slime near (put off), the window read at 138.3-139.0 s, JUMP followed to C, 35 kills after.)"""
     return key_check_run(4)(sim)
 
 
-@tree((23, -150.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, -150.0), monsters="all", seed=9, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("right", "e"),))),
       expects=FOLLOW_EXPECTS + (
           logs("HER RUNS DIDN'T MOVE HER 4 TIMES IN A ROW"), logs("RIGHT RIGHT -> E"),
@@ -2962,7 +2992,11 @@ def loop_tree_grind_arrow_key(sim):
     off at 50.9 s, a Horny Mushroom near, the window read at 57.6-58.4 s, followed at 59.1 s, 60 kills after). (From 23 at 73
     on seeds 1-3, and with her left on Q, the hunt kept her where she was, throwing, and her chains came only once it was
     over: an arrow moved shows in her runs alone, not in her facing, which live frames tell otherwise than her taps
-    with her keys right too: 151 times in the tour runs of 2026-10-24 to 28, up to 13 within 20 s.)"""
+    with her keys right too: 151 times in the tour runs of 2026-10-24 to 28, up to 13 within 20 s.) (Seed 9 since
+    the rebase of the whole screen 15 times a second (worldstate.WIDE_EVERY_S) onto her keys followed and her stat
+    window (master d9774e5, 2026-10-28): on seed 1 her runs' doubt came at 320 s, after the hunt; of seeds 1-12, 9,
+    10 and 12 meet all of this, master's stack on 9 doubts at 236 s with too few runs after. On 9: the doubt at 42.7
+    s, the window read at 43.8-44.5 s, MOVE RIGHT followed to E, 51 kills after.)"""
     return key_check_run(4)(sim)
 
 

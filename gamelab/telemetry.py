@@ -73,10 +73,11 @@ Topics (map units; producers build the records, ui.state folds them):
             frozen, seconds                                    that record telemetry: gcstats)
   perf      s, fps, cores, wide_a_s, wide_asked_a_s, wide_ms   the perception service, with its 10 s console line
             [median, p90, max], wide_age_ms [median, p90],     (service.Perf: the whole screens a second made and
-            busy, band_alone_a_s, band_alone_ms [median, p90], asked, each one's search, its result's age in each
-            tracks_a_min, flickers_a_min                       frame's state as it went out, the searches' thread
-                                                               busy, her band's own searches and their wait past
-                                                               their frame; from 2026-10-28)
+            wide_age_drops_ms [median, p90], busy,             asked, each one's search, its result's age in each
+            band_alone_a_s, band_alone_ms [median, p90],       frame's state as it went out and in each with the
+            tracks_a_min, flickers_a_min                       drops a look asked for, the searches' thread busy,
+                                                               her band's own searches and their wait past their
+                                                               frame; from 2026-10-28)
 """
 
 import atexit
