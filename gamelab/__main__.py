@@ -805,6 +805,13 @@ def _say_keys(r, fn: dict, configured: str) -> None:
         print(f"  {kb.functions_text(fn)}")
 
 
+def _frames_of(res: dict) -> list:
+    """A submit's recorded frames as a list: `res["frames"]` is a numpy array of them (its truth is ambiguous), or
+    absent."""
+    frames = res.get("frames")
+    return [] if frames is None else list(frames)
+
+
 def _keys_recorded(hunter, reader, configured: str) -> int:
     """keys --read --record: the window opened and closed with each plan recording the client (RECORD_FPS), every
     frame read, the frames kept and a report (lab/shots/keybindings-<time>/report.json): when it showed open after the
@@ -835,7 +842,7 @@ def _keys_recorded(hunter, reader, configured: str) -> int:
     mouse = [0, "mouse", *MOUSE_AT]
     res = client.submit([mouse, [150, "\\", "down"], [190, "\\", "up"]], fps=RECORD_FPS, duration_ms=OPEN_MS,
                         scale=1, lead_ms=0, name="keybindings_open")
-    frames, times = res.get("frames") or [], res.get("times")
+    frames, times = _frames_of(res), res.get("times")
     reads = [reader.read(np.asarray(f)) for f in frames]
     report["open_frames"] = [[None if times is None else float(times[i]), bool(x.open), round(x.title, 4)]
                              for i, x in enumerate(reads)]
@@ -864,7 +871,7 @@ def _keys_recorded(hunter, reader, configured: str) -> int:
     for go in (1, 2):
         res = client.submit([[0, "esc", "down"], [40, "esc", "up"]], fps=RECORD_FPS, duration_ms=CLOSE_MS, scale=1,
                             lead_ms=0, name=f"keybindings_close{go}")
-        frames, times = res.get("frames") or [], res.get("times")
+        frames, times = _frames_of(res), res.get("times")
         reads = [reader.read(np.asarray(f)) for f in frames]
         report[f"close{go}_frames"] = [[None if times is None else float(times[i]), bool(x.open)]
                                        for i, x in enumerate(reads)]
